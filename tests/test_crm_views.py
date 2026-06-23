@@ -4288,3 +4288,154 @@ class TestNoCache:
         # but 'no-cache' must not be the explicit page-response injection).
         # We check that the page_response() wrapper was NOT applied.
         assert "must-revalidate" not in cc, "HTMX partial should not carry the page-response Cache-Control header"
+
+
+# ── Phase-0 CRM Foundations: HTMX form field surfacing tests ─────────────────
+
+
+class TestCompanyPhase0FormFields:
+    """HTMX create/edit form render tests and HTMX handler persistence tests."""
+
+    # ── create form renders all Phase-0 input names ──────────────────────────
+
+    def test_create_form_renders_phase0_inputs(self, client: TestClient):
+        """GET create-form contains input[name] for every Phase-0 field."""
+        resp = client.get("/v2/partials/customers/create-form")
+        assert resp.status_code == 200
+        html = resp.text
+        for field in [
+            "legal_name",
+            "employee_size",
+            "revenue_range",
+            "phone",
+            "hq_city",
+            "hq_state",
+            "hq_country",
+            "credit_terms",
+            "tax_id",
+            "source",
+        ]:
+            assert f'name="{field}"' in html, f"create_form missing input[name={field}]"
+
+    # ── edit form renders all Phase-0 input names ────────────────────────────
+
+    def test_edit_form_renders_phase0_inputs(self, client: TestClient, db_session: Session, test_user: User):
+        """GET edit-form for an existing company contains inputs for all Phase-0
+        fields."""
+        co = Company(
+            name="EditFields Co",
+            is_active=True,
+            legal_name="EditFields Corporation",
+            employee_size="51-200",
+            revenue_range="$1M-$10M",
+            hq_city="Denver",
+            hq_state="CO",
+            hq_country="United States",
+            phone="+13035550000",
+            credit_terms="Net 30",
+            tax_id="55-1234567",
+            source="inbound",
+        )
+        db_session.add(co)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{co.id}/edit-form")
+        assert resp.status_code == 200
+        html = resp.text
+        for field in [
+            "legal_name",
+            "employee_size",
+            "revenue_range",
+            "phone",
+            "hq_city",
+            "hq_state",
+            "hq_country",
+            "credit_terms",
+            "tax_id",
+            "source",
+        ]:
+            assert f'name="{field}"' in html, f"edit_form missing input[name={field}]"
+
+    def test_edit_form_prefills_existing_values(self, client: TestClient, db_session: Session, test_user: User):
+        """Edit form pre-fills Phase-0 fields with existing DB values."""
+        co = Company(
+            name="Prefill Co",
+            is_active=True,
+            legal_name="Prefill Legal LLC",
+            hq_city="Portland",
+            credit_terms="Net 45",
+            source="referral",
+        )
+        db_session.add(co)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{co.id}/edit-form")
+        assert resp.status_code == 200
+        html = resp.text
+        assert "Prefill Legal LLC" in html
+        assert "Portland" in html
+        assert "Net 45" in html
+
+    # ── HTMX create handler persists Phase-0 fields ──────────────────────────
+
+    def test_htmx_create_persists_phase0_fields(self, client: TestClient, db_session: Session, test_user: User):
+        """POST /v2/partials/customers/create with Phase-0 fields saves them."""
+        resp = client.post(
+            "/v2/partials/customers/create",
+            data={
+                "name": "HTMXCreate P0 Co",
+                "legal_name": "HTMXCreate P0 Corporation",
+                "employee_size": "11-50",
+                "revenue_range": "$1M-$10M",
+                "hq_city": "Boulder",
+                "hq_state": "CO",
+                "hq_country": "United States",
+                "credit_terms": "Net 30",
+                "tax_id": "77-7654321",
+                "source": "outbound",
+            },
+        )
+        assert resp.status_code == 200
+        co = db_session.query(Company).filter(Company.name == "HTMXCreate P0 Co").first()
+        assert co is not None
+        assert co.legal_name == "HTMXCreate P0 Corporation"
+        assert co.employee_size == "11-50"
+        assert co.revenue_range == "$1M-$10M"
+        assert co.hq_city == "Boulder"
+        assert co.hq_state == "CO"
+        assert co.credit_terms == "Net 30"
+        assert co.tax_id == "77-7654321"
+        assert co.source == "outbound"
+
+    # ── HTMX edit handler persists Phase-0 fields ────────────────────────────
+
+    def test_htmx_edit_persists_phase0_fields(self, client: TestClient, db_session: Session, test_user: User):
+        """POST /v2/partials/customers/{id}/edit with Phase-0 fields saves them."""
+        co = Company(name="HTMXEdit P0 Co", is_active=True)
+        db_session.add(co)
+        db_session.commit()
+
+        resp = client.post(
+            f"/v2/partials/customers/{co.id}/edit",
+            data={
+                "name": "HTMXEdit P0 Co",
+                "legal_name": "HTMXEdit P0 LLC",
+                "employee_size": "201-500",
+                "revenue_range": "$50M-$200M",
+                "hq_city": "Chicago",
+                "hq_state": "IL",
+                "hq_country": "United States",
+                "credit_terms": "Net 60",
+                "tax_id": "33-9876543",
+                "source": "sfdc",
+            },
+        )
+        assert resp.status_code == 200
+        db_session.refresh(co)
+        assert co.legal_name == "HTMXEdit P0 LLC"
+        assert co.employee_size == "201-500"
+        assert co.revenue_range == "$50M-$200M"
+        assert co.hq_city == "Chicago"
+        assert co.credit_terms == "Net 60"
+        assert co.tax_id == "33-9876543"
+        assert co.source == "sfdc"

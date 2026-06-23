@@ -13,6 +13,7 @@
           data-loading-disable
           class="space-y-4">
 
+      <!-- Company Name with duplicate check -->
       <div>
         <label class="block text-sm font-medium text-gray-700 mb-1">Company Name *</label>
         <input type="text" name="name" required
@@ -34,6 +35,112 @@
         <input type="text" name="industry" placeholder="e.g. Electronic Components"
                class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
       </div>
+
+      <!-- Company Details -->
+      <fieldset class="border border-gray-200 rounded-md p-4 space-y-3">
+        <legend class="text-xs font-semibold text-gray-500 uppercase tracking-wide px-1">Company Details</legend>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Legal / Registered Name</label>
+          <input type="text" name="legal_name" placeholder="Full legal entity name"
+                 class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Employee Size</label>
+            <select name="employee_size"
+                    class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+              <option value="">— Select —</option>
+              <option value="1-10">1–10</option>
+              <option value="11-50">11–50</option>
+              <option value="51-200">51–200</option>
+              <option value="201-500">201–500</option>
+              <option value="501-1000">501–1,000</option>
+              <option value="1001-5000">1,001–5,000</option>
+              <option value="5001-10000">5,001–10,000</option>
+              <option value="10001+">10,001+</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Revenue Range</label>
+            <select name="revenue_range"
+                    class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+              <option value="">— Select —</option>
+              <option value="&lt;$1M">&lt;$1M</option>
+              <option value="$1M-$10M">$1M–$10M</option>
+              <option value="$10M-$50M">$10M–$50M</option>
+              <option value="$50M-$200M">$50M–$200M</option>
+              <option value="$200M-$1B">$200M–$1B</option>
+              <option value="&gt;$1B">&gt;$1B</option>
+            </select>
+          </div>
+        </div>
+      </fieldset>
+
+      <!-- Contact Info -->
+      <fieldset class="border border-gray-200 rounded-md p-4 space-y-3">
+        <legend class="text-xs font-semibold text-gray-500 uppercase tracking-wide px-1">Contact Info</legend>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Main Phone</label>
+          <input type="tel" name="phone" placeholder="+1 555 000 0000"
+                 class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+        </div>
+      </fieldset>
+
+      <!-- Address (HQ) -->
+      <fieldset class="border border-gray-200 rounded-md p-4 space-y-3">
+        <legend class="text-xs font-semibold text-gray-500 uppercase tracking-wide px-1">Address (HQ)</legend>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">City</label>
+            <input type="text" name="hq_city" placeholder="e.g. Austin"
+                   class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">State / Region</label>
+            <input type="text" name="hq_state" placeholder="e.g. TX"
+                   class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+          </div>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Country</label>
+          <input type="text" name="hq_country" placeholder="e.g. United States"
+                 class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+        </div>
+      </fieldset>
+
+      <!-- Commercial -->
+      <fieldset class="border border-gray-200 rounded-md p-4 space-y-3">
+        <legend class="text-xs font-semibold text-gray-500 uppercase tracking-wide px-1">Commercial</legend>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Credit Terms</label>
+            <input type="text" name="credit_terms" placeholder="e.g. Net 30"
+                   class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Tax ID (EIN / VAT)</label>
+            <input type="text" name="tax_id" placeholder="e.g. 12-3456789"
+                   class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+          </div>
+        </div>
+      </fieldset>
+
+      <!-- Source -->
+      <fieldset class="border border-gray-200 rounded-md p-4 space-y-3">
+        <legend class="text-xs font-semibold text-gray-500 uppercase tracking-wide px-1">Source</legend>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">How was this account acquired?</label>
+          <select name="source"
+                  class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+            <option value="manual" selected>Manual entry</option>
+            <option value="sfdc">Salesforce import</option>
+            <option value="referral">Referral</option>
+            <option value="inbound">Inbound inquiry</option>
+            <option value="outbound">Outbound prospecting</option>
+            <option value="enrichment">Enrichment</option>
+          </select>
+        </div>
+      </fieldset>
 
       {{ owner_select(users) }}
 

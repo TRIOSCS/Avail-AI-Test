@@ -405,6 +405,19 @@ async def create_company(
         notes=payload.notes,
         domain=clean_domain or payload.domain,
         linkedin_url=payload.linkedin_url,
+        account_type=payload.account_type,
+        phone=payload.phone,
+        credit_terms=payload.credit_terms,
+        tax_id=payload.tax_id,
+        currency=payload.currency,
+        preferred_carrier=payload.preferred_carrier,
+        legal_name=payload.legal_name,
+        employee_size=payload.employee_size,
+        revenue_range=payload.revenue_range,
+        hq_city=payload.hq_city,
+        hq_state=payload.hq_state,
+        hq_country=payload.hq_country,
+        source=payload.source or "manual",
     )
     db.add(company)
     db.flush()  # get company.id before creating site

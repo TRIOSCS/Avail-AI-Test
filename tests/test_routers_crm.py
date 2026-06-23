@@ -2726,3 +2726,70 @@ def test_pricing_history_scope_for_sales(db_session, sales_user, test_quote):
             app.dependency_overrides.pop(dep, None)
     assert resp.status_code == 200
     assert resp.json()["history"] == []
+
+
+# ── Phase-0 CRM Foundations: field persistence tests ─────────────────────────
+
+
+class TestCompanyPhase0Fields:
+    """API-level tests: create + update company with Phase-0 fields persist to DB."""
+
+    @patch("app.routers.crm.companies.get_credential_cached", return_value=None)
+    @patch("app.enrichment_service.normalize_company_input", new_callable=AsyncMock)
+    def test_create_company_with_phase0_fields(self, mock_normalize, mock_cred, client, db_session):
+        """POST /api/companies with Phase-0 fields stores them on the Company row."""
+        mock_normalize.return_value = ("FieldsTest Corp", "fieldstest.com")
+        resp = client.post(
+            "/api/companies",
+            json={
+                "name": "FieldsTest Corp",
+                "legal_name": "FieldsTest Corporation LLC",
+                "employee_size": "51-200",
+                "revenue_range": "$10M-$50M",
+                "hq_city": "Austin",
+                "hq_state": "TX",
+                "hq_country": "United States",
+                "credit_terms": "Net 30",
+                "tax_id": "12-3456789",
+                "source": "referral",
+            },
+        )
+        assert resp.status_code == 200
+        company_id = resp.json()["id"]
+        co = db_session.get(Company, company_id)
+        assert co.legal_name == "FieldsTest Corporation LLC"
+        assert co.employee_size == "51-200"
+        assert co.revenue_range == "$10M-$50M"
+        assert co.hq_city == "Austin"
+        assert co.hq_state == "TX"
+        assert co.credit_terms == "Net 30"
+        assert co.tax_id == "12-3456789"
+        assert co.source == "referral"
+
+    def test_update_company_with_phase0_fields(self, client, db_session, test_company):
+        """PUT /api/companies/{id} with Phase-0 fields stores them on the Company
+        row."""
+        resp = client.put(
+            f"/api/companies/{test_company.id}",
+            json={
+                "legal_name": "Acme Electronics Inc.",
+                "employee_size": "201-500",
+                "revenue_range": "$50M-$200M",
+                "hq_city": "San Jose",
+                "hq_state": "CA",
+                "hq_country": "US",
+                "credit_terms": "Net 60",
+                "tax_id": "98-7654321",
+                "source": "sfdc",
+            },
+        )
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
+        db_session.refresh(test_company)
+        assert test_company.legal_name == "Acme Electronics Inc."
+        assert test_company.employee_size == "201-500"
+        assert test_company.revenue_range == "$50M-$200M"
+        assert test_company.hq_city == "San Jose"
+        assert test_company.credit_terms == "Net 60"
+        assert test_company.tax_id == "98-7654321"
+        assert test_company.source == "sfdc"

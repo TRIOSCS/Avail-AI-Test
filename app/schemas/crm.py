@@ -50,6 +50,13 @@ class CompanyCreate(BaseModel):
     tax_id: str | None = None
     currency: str | None = None
     preferred_carrier: str | None = None
+    legal_name: str | None = None
+    employee_size: str | None = None
+    revenue_range: str | None = None
+    hq_city: str | None = None
+    hq_state: str | None = None
+    hq_country: str | None = None
+    source: str | None = None
 
     @field_validator("name")
     @classmethod
@@ -103,6 +110,8 @@ class CompanyUpdate(BaseModel):
     preferred_carrier: str | None = None
     is_strategic: bool | None = None
     account_owner_id: int | None = None
+    revenue_range: str | None = None
+    source: str | None = None
 
     @field_validator("hq_country")
     @classmethod

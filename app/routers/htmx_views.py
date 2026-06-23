@@ -4920,6 +4920,16 @@ async def create_company(
         industry=form.get("industry", "").strip() or None,
         notes=form.get("notes", "").strip() or None,
         is_active=True,
+        legal_name=form.get("legal_name", "").strip() or None,
+        employee_size=form.get("employee_size", "").strip() or None,
+        revenue_range=form.get("revenue_range", "").strip() or None,
+        hq_city=form.get("hq_city", "").strip() or None,
+        hq_state=form.get("hq_state", "").strip() or None,
+        hq_country=form.get("hq_country", "").strip() or None,
+        phone=form.get("phone", "").strip() or None,
+        credit_terms=form.get("credit_terms", "").strip() or None,
+        tax_id=form.get("tax_id", "").strip() or None,
+        source=form.get("source", "").strip() or "manual",
     )
     owner_id = form.get("owner_id", "")
     if owner_id and owner_id.isdigit():
@@ -6658,6 +6668,36 @@ async def edit_company(
     company.industry = industry or company.industry
     notes = form.get("notes", "").strip()
     company.notes = notes or company.notes
+
+    # Company details
+    legal_name = form.get("legal_name", "").strip()
+    company.legal_name = legal_name or None
+    employee_size = form.get("employee_size", "").strip()
+    company.employee_size = employee_size or None
+    revenue_range = form.get("revenue_range", "").strip()
+    company.revenue_range = revenue_range or None
+
+    # Contact info
+    phone = form.get("phone", "").strip()
+    company.phone = phone or None
+
+    # Address (HQ)
+    hq_city = form.get("hq_city", "").strip()
+    company.hq_city = hq_city or None
+    hq_state = form.get("hq_state", "").strip()
+    company.hq_state = hq_state or None
+    hq_country = form.get("hq_country", "").strip()
+    company.hq_country = hq_country or None
+
+    # Commercial
+    credit_terms = form.get("credit_terms", "").strip()
+    company.credit_terms = credit_terms or None
+    tax_id = form.get("tax_id", "").strip()
+    company.tax_id = tax_id or None
+
+    # Source
+    source = form.get("source", "").strip()
+    company.source = source or company.source
 
     owner_id = form.get("owner_id", "")
     if owner_id and owner_id.isdigit():
