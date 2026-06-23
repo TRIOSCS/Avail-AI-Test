@@ -248,11 +248,15 @@ class TestSubmitOutreachManualLog:
             scope="whole_list",
             channel="phone",
             send_email=False,
+            notes="left a voicemail re: surplus LM358N",
         )
         logs = db_session.query(ActivityLog).filter(ActivityLog.excess_list_id == excess_list.id).all()
         assert len(logs) == 1
         assert logs[0].vendor_card_id == buyer_card.id
         assert logs[0].direction == "outbound"
+        # Item-0 (Chunk B carry-over): the documented ``notes`` param must be written
+        # to ActivityLog.notes, never silently dropped.
+        assert logs[0].notes == "left a voicemail re: surplus LM358N"
 
     def test_company_only_buyer_backfills_card(
         self,

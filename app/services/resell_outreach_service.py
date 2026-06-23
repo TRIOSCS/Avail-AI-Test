@@ -221,11 +221,15 @@ def _log_outreach_activity(
     card: VendorCard,
     channel: str,
     sent: bool,
+    notes: str | None = None,
 ) -> None:
     """Write one outbound ActivityLog (excess_list_id scope) for an outreach touch.
 
     Reuses the shared immutable timeline + cadence clocks via the activity service's
-    cadence bump, keyed on the canonical buyer vendor card.
+    cadence bump, keyed on the canonical buyer vendor card. ``notes`` (the trader's
+    free-text on a manual-log touch — "left a voicemail", a marketplace thread url) is
+    recorded on ``ActivityLog.notes`` so it lands on the immutable timeline rather than
+    being silently dropped.
     """
     verb = "Emailed" if channel == ExcessOutreachChannel.EMAIL else f"{channel.title()} to"
     record = ActivityLog(
@@ -238,6 +242,7 @@ def _log_outreach_activity(
         vendor_card_id=card.id,
         contact_name=card.display_name,
         subject=f"{verb} {card.display_name}: excess offer ({excess_list.title})",
+        notes=notes,
         is_meaningful=True,
         auto_logged=True,
     )
@@ -277,8 +282,9 @@ def submit_outreach(
     gets one outbound ActivityLog (excess_list_id scope). Commits. Returns the rows.
 
     ``send_email`` must be False here — the email path is :func:`submit_outreach_email`
-    (it is async; this sync entry point is the log-only path). ``notes`` is recorded on
-    the activity row context. Raises HTTPException on guard / validation failure.
+    (it is async; this sync entry point is the log-only path). ``notes`` is written to
+    each touch's ``ActivityLog.notes`` (the immutable timeline). Raises HTTPException on
+    guard / validation failure.
     """
     if send_email:
         raise ValueError("submit_outreach is the manual-log path; use submit_outreach_email for email")
@@ -302,7 +308,9 @@ def submit_outreach(
             status=ExcessOutreachStatus.SENT,
         )
         all_rows.extend(rows)
-        _log_outreach_activity(db, owner=owner, excess_list=excess_list, card=card, channel=channel_value, sent=False)
+        _log_outreach_activity(
+            db, owner=owner, excess_list=excess_list, card=card, channel=channel_value, sent=False, notes=notes
+        )
 
     db.commit()
     for row in all_rows:
