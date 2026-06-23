@@ -7,7 +7,9 @@
 {% from "htmx/partials/shared/_macros.html" import req_status_badge, urgency_badge %}
 
 <div id="req-header" class="bg-white rounded-lg shadow border border-gray-200 p-4 mb-6">
-  <div class="flex items-start justify-between">
+  {# flex-wrap: the right-side action block wraps below the title on narrow screens
+     instead of overflowing the page. #}
+  <div class="flex flex-wrap items-start justify-between gap-2">
     <div class="flex-1 min-w-0">
       {# Inline-editable name #}
       <h1 id="req-name-{{ req.id }}"
