@@ -4156,3 +4156,124 @@ class TestFullWidthContactsForwardLayout:
         # The 4 stats survive the compression into a slim strip.
         assert "Sightings" in resp.text
         assert "Win Rate" in resp.text
+
+
+class TestNoCache:
+    """Stage C §6: full-page /v2/* responses carry Cache-Control: no-cache.
+
+    Browsers heuristically cache HTML pages with no Cache-Control header.  After
+    a deploy the stale shell would reference old hashed-CSS/JS bundles, forcing
+    users to hard-refresh.  The fix: page_response() sets
+    Cache-Control: no-cache, must-revalidate on every base_page render.
+
+    HTMX partials and /static/assets/* are intentionally unaffected.
+    """
+
+    def _authed_client(self, test_user, db_session):
+        """Return a TestClient that passes authentication for the full-page route.
+
+        The /v2/* full-page routes call get_user(request, db) directly (NOT the
+        require_user FastAPI dependency), so we must also patch that function to return
+        the test user.
+        """
+        from unittest.mock import patch
+
+        from app.database import get_db
+        from app.dependencies import require_admin, require_buyer, require_fresh_token, require_user
+        from app.main import app
+
+        overrides = {
+            get_db: lambda: (yield db_session),
+            require_user: lambda: test_user,
+            require_admin: lambda: test_user,
+            require_buyer: lambda: test_user,
+            require_fresh_token: lambda: "mock-token",
+        }
+
+        def _override_db():
+            yield db_session
+
+        app.dependency_overrides[get_db] = _override_db
+        app.dependency_overrides[require_user] = lambda: test_user
+        app.dependency_overrides[require_admin] = lambda: test_user
+        app.dependency_overrides[require_buyer] = lambda: test_user
+        app.dependency_overrides[require_fresh_token] = lambda: "mock-token"
+
+        with patch("app.routers.htmx_views.get_user", return_value=test_user):
+            with TestClient(app) as c:
+                yield c
+
+        for dep in overrides:
+            app.dependency_overrides.pop(dep, None)
+
+    def test_v2_crm_full_page_has_no_cache_header(self, db_session, test_user):
+        """GET /v2/crm (full-page shell) returns Cache-Control: no-cache."""
+        from unittest.mock import patch
+
+        from app.database import get_db
+        from app.dependencies import require_admin, require_buyer, require_fresh_token, require_user
+        from app.main import app
+
+        def _override_db():
+            yield db_session
+
+        app.dependency_overrides[get_db] = _override_db
+        app.dependency_overrides[require_user] = lambda: test_user
+        app.dependency_overrides[require_admin] = lambda: test_user
+        app.dependency_overrides[require_buyer] = lambda: test_user
+        app.dependency_overrides[require_fresh_token] = lambda: "mock-token"
+
+        try:
+            with patch("app.routers.htmx_views.get_user", return_value=test_user):
+                with TestClient(app) as c:
+                    resp = c.get("/v2/crm")
+            assert resp.status_code == 200
+            cc = resp.headers.get("cache-control", "")
+            assert "no-cache" in cc, f"Expected Cache-Control: no-cache on /v2/crm, got: {cc!r}"
+        finally:
+            for dep in [get_db, require_user, require_admin, require_buyer, require_fresh_token]:
+                app.dependency_overrides.pop(dep, None)
+
+    def test_v2_customers_full_page_has_no_cache_header(self, db_session, test_user):
+        """GET /v2/customers (full-page shell) returns Cache-Control: no-cache."""
+        from unittest.mock import patch
+
+        from app.database import get_db
+        from app.dependencies import require_admin, require_buyer, require_fresh_token, require_user
+        from app.main import app
+
+        def _override_db():
+            yield db_session
+
+        app.dependency_overrides[get_db] = _override_db
+        app.dependency_overrides[require_user] = lambda: test_user
+        app.dependency_overrides[require_admin] = lambda: test_user
+        app.dependency_overrides[require_buyer] = lambda: test_user
+        app.dependency_overrides[require_fresh_token] = lambda: "mock-token"
+
+        try:
+            with patch("app.routers.htmx_views.get_user", return_value=test_user):
+                with TestClient(app) as c:
+                    resp = c.get("/v2/customers")
+            assert resp.status_code == 200
+            cc = resp.headers.get("cache-control", "")
+            assert "no-cache" in cc, f"Expected Cache-Control: no-cache on /v2/customers, got: {cc!r}"
+        finally:
+            for dep in [get_db, require_user, require_admin, require_buyer, require_fresh_token]:
+                app.dependency_overrides.pop(dep, None)
+
+    def test_partial_does_not_carry_no_cache_header(self, client: TestClient, test_user):
+        """HTMX partial /v2/partials/customers does NOT carry Cache-Control: no-cache.
+
+        Only the full-page shell needs the no-cache guard.  Partials are lightweight and
+        already keyed by server state; adding no-cache would break browser back/forward
+        caching of fragments unnecessarily.
+        """
+        resp = client.get("/v2/partials/customers")
+        assert resp.status_code == 200
+        cc = resp.headers.get("cache-control", "")
+        # Partials should NOT carry the no-cache directive (either no header at
+        # all, or something like 'no-store' from the framework is acceptable,
+        # but 'no-cache' must not be the explicit page-response injection).
+        # We check that the page_response() wrapper was NOT applied.
+        assert "must-revalidate" not in cc, "HTMX partial should not carry the page-response Cache-Control header"

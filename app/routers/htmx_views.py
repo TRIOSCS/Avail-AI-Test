@@ -99,7 +99,7 @@ from ..services.prospect_priority import build_priority_snapshot, build_signal_t
 from ..services.sighting_ingest import sighting_from_row
 from ..services.status_machine import require_valid_transition
 from ..services.vendor_unavailability import apply_to_fresh_sightings, maybe_release_on_offer
-from ..template_env import template_response, templates
+from ..template_env import page_response, template_response, templates
 from ..utils.search_builder import SearchBuilder
 from ..utils.sql_helpers import escape_like
 from ._lookup_helpers import get_requisition_or_404, get_vendor_card_or_404
@@ -373,7 +373,7 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
     nav_active = _NAV_ID_ALIAS.get(current_view, current_view)
     ctx = _base_ctx(request, user, nav_active)
     ctx["partial_url"] = partial_url
-    return template_response("htmx/base_page.html", ctx)
+    return page_response(ctx)
 
 
 # ── Global search ──────────────────────────────────────────────────────
@@ -8008,7 +8008,7 @@ async def v2_sourcing_page(request: Request, requirement_id: int, db: Session = 
         )
     ctx = _base_ctx(request, user, "requisitions")
     ctx["partial_url"] = f"/v2/partials/sourcing/{requirement_id}"
-    return template_response("htmx/base_page.html", ctx)
+    return page_response(ctx)
 
 
 @router.get("/v2/sourcing/leads/{lead_id}", response_class=HTMLResponse)
@@ -8021,7 +8021,7 @@ async def v2_lead_detail_page(request: Request, lead_id: int, db: Session = Depe
         )
     ctx = _base_ctx(request, user, "requisitions")
     ctx["partial_url"] = f"/v2/partials/sourcing/leads/{lead_id}"
-    return template_response("htmx/base_page.html", ctx)
+    return page_response(ctx)
 
 
 @router.get("/v2/partials/sourcing/{requirement_id}/stream")
@@ -8435,7 +8435,7 @@ async def v2_sourcing_workspace_page(request: Request, requirement_id: int, db: 
         )
     ctx = _base_ctx(request, user, "requisitions")
     ctx["partial_url"] = f"/v2/partials/sourcing/{requirement_id}/workspace"
-    return template_response("htmx/base_page.html", ctx)
+    return page_response(ctx)
 
 
 @router.get("/v2/partials/sourcing/{requirement_id}/workspace", response_class=HTMLResponse)
