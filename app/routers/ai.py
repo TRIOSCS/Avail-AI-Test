@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..database import get_db
-from ..dependencies import get_req_for_user, require_user
+from ..dependencies import get_req_for_user, require_requisition_access, require_user
 from ..models import (
     Contact,
     CustomerSite,
@@ -459,6 +459,7 @@ async def ai_generate_description_for_requirement(
     req = db.get(Requirement, requirement_id)
     if not req:
         raise HTTPException(404, "Requirement not found")
+    require_requisition_access(db, req.requisition_id, user)
 
     result = await generate_verified_description(
         req.primary_mpn,
@@ -501,8 +502,7 @@ async def ai_parse_response(
     vr = db.query(VendorResponse).filter(VendorResponse.id == response_id).first()
     if not vr:
         raise HTTPException(404, "Vendor response not found")
-    if vr.requisition_id and not get_req_for_user(db, user, vr.requisition_id, options=[]):
-        raise HTTPException(404, "Vendor response not found")
+    require_requisition_access(db, vr.requisition_id, user, label="Vendor response")
 
     rfq_context = None
     if vr.requisition_id:

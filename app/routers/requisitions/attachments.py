@@ -190,6 +190,9 @@ async def delete_requisition_attachment(
     att = db.get(RequisitionAttachment, att_id)
     if not att:
         raise HTTPException(404, "Attachment not found")
+    # Ownership guard: SALES/TRADER may only act on requisitions they created
+    # (404s for non-owners before any OneDrive delete or db.delete).
+    get_req_for_user(db, user, att.requisition_id)
     if att.onedrive_item_id:
         from ...scheduler import get_valid_token
 
@@ -295,6 +298,12 @@ async def delete_requirement_attachment(
     att = db.get(RequirementAttachment, att_id)
     if not att:
         raise HTTPException(404, "Attachment not found")
+    # Ownership guard: follow the FK chain (attachment -> requirement -> requisition)
+    # and enforce that SALES/TRADER own the parent requisition (404 otherwise).
+    parent_requirement = db.get(Requirement, att.requirement_id)
+    if not parent_requirement:
+        raise HTTPException(404, "Attachment not found")
+    get_req_for_user(db, user, parent_requirement.requisition_id)
     if att.onedrive_item_id:
         from ...scheduler import get_valid_token
 

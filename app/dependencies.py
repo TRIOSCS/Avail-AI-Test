@@ -23,7 +23,7 @@ from fastapi import Depends, HTTPException, Request
 from loguru import logger
 from sqlalchemy.orm import Session, selectinload
 
-from .constants import UserRole
+from .constants import RESTRICTED_ROLES, UserRole
 from .database import get_db
 from .models import Quote, Requisition, User
 
@@ -114,6 +114,32 @@ def require_settings_access(request: Request, db: Session = Depends(get_db)) -> 
 BUYER_ROLES = frozenset({UserRole.BUYER, UserRole.SALES, UserRole.TRADER, UserRole.MANAGER, UserRole.ADMIN})
 
 
+def require_requisition_access(
+    db: Session,
+    req_id: int | None,
+    user: User,
+    *,
+    owner_id: int | None = None,
+    label: str = "Requisition",
+) -> None:
+    """Enforce role-scoped ownership for an action on a requisition-scoped resource.
+
+    No-op for unrestricted roles (buyer/manager/admin). For SALES/TRADER, allows the
+    action only when the user owns the requisition (created_by) or, for unscoped/scratch
+    resources where ``req_id`` is None, when ``owner_id`` matches the user. Raises
+    HTTPException(404) otherwise (404 not 403 so existence isn't leaked).
+    """
+    if getattr(user, "role", None) not in RESTRICTED_ROLES:
+        return
+    if req_id is not None:
+        req = db.get(Requisition, req_id)
+        if req is not None and req.created_by == user.id:
+            return
+    if owner_id is not None and owner_id == user.id:
+        return
+    raise HTTPException(status_code=404, detail=f"{label} not found")
+
+
 def has_buyer_role(user: User | None) -> bool:
     """True when *user* holds a buyer-tier role (require_buyer's allowed set)."""
     return user is not None and user.role in BUYER_ROLES
@@ -144,7 +170,7 @@ def get_req_for_user(db: Session, user: User, req_id: int, options=None) -> Requ
     """
     load_opts = options or [selectinload(Requisition.requirements)]
     q = db.query(Requisition).options(*load_opts).filter_by(id=req_id)
-    if user.role == UserRole.SALES:
+    if user.role in RESTRICTED_ROLES:
         q = q.filter_by(created_by=user.id)
     req = q.first()
     if not req:
@@ -161,7 +187,7 @@ def get_quote_for_user(db: Session, user: User, quote_id: int, options=None) -> 
         .join(Requisition, Quote.requisition_id == Requisition.id)
         .filter(Quote.id == quote_id)
     )
-    if user.role == UserRole.SALES:
+    if user.role in RESTRICTED_ROLES:
         q = q.filter(Requisition.created_by == user.id)
     quote = q.first()
     if not quote:
