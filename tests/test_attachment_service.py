@@ -262,6 +262,166 @@ async def test_library_put_failure_raises_502(db_session: Session, test_user: Us
 
 
 # ---------------------------------------------------------------------------
+# Honest errors — library PUT returns 201 but body is non-JSON or missing 'id'
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_library_put_non_json_body_raises_502_no_db_row(
+    db_session: Session, test_user: User, test_company: Company
+):
+    """Library PUT returns 201 but .json() raises → 502 is raised and NO DB row is
+    created."""
+    mock_response = MagicMock()
+    mock_response.status_code = 201
+    mock_response.json.side_effect = ValueError("not JSON")
+    mock_put = AsyncMock(return_value=mock_response)
+
+    with (
+        patch("app.services.attachment_service.settings") as mock_settings,
+        patch("app.services.graph_app_auth.get_app_graph_token", new_callable=AsyncMock, return_value="app-token"),
+        patch("app.http_client.http") as mock_http,
+    ):
+        mock_settings.datasheet_library_drive_id = _DRIVE_ID
+        mock_http.put = mock_put
+
+        from app.services.attachment_service import store_and_attach
+
+        file = _make_upload_file()
+        with pytest.raises(HTTPException) as exc_info:
+            await store_and_attach(
+                db_session,
+                model=CompanyAttachment,
+                fk_field="company_id",
+                entity_label="Companies",
+                entity_id=test_company.id,
+                file=file,
+                user=test_user,
+            )
+
+    assert exc_info.value.status_code == 502
+    assert "company library" in exc_info.value.detail.lower()
+    # No DB row should have been created
+    rows = db_session.query(CompanyAttachment).filter_by(company_id=test_company.id).all()
+    assert rows == []
+
+
+@pytest.mark.asyncio
+async def test_library_put_missing_id_raises_502_no_db_row(db_session: Session, test_user: User, test_company: Company):
+    """Library PUT returns 201 but body has no 'id' key → 502 is raised and NO DB row is
+    created."""
+    mock_response = MagicMock()
+    mock_response.status_code = 201
+    mock_response.json.return_value = {"webUrl": _WEB_URL}  # no 'id'
+    mock_put = AsyncMock(return_value=mock_response)
+
+    with (
+        patch("app.services.attachment_service.settings") as mock_settings,
+        patch("app.services.graph_app_auth.get_app_graph_token", new_callable=AsyncMock, return_value="app-token"),
+        patch("app.http_client.http") as mock_http,
+    ):
+        mock_settings.datasheet_library_drive_id = _DRIVE_ID
+        mock_http.put = mock_put
+
+        from app.services.attachment_service import store_and_attach
+
+        file = _make_upload_file()
+        with pytest.raises(HTTPException) as exc_info:
+            await store_and_attach(
+                db_session,
+                model=CompanyAttachment,
+                fk_field="company_id",
+                entity_label="Companies",
+                entity_id=test_company.id,
+                file=file,
+                user=test_user,
+            )
+
+    assert exc_info.value.status_code == 502
+    assert "company library" in exc_info.value.detail.lower()
+    rows = db_session.query(CompanyAttachment).filter_by(company_id=test_company.id).all()
+    assert rows == []
+
+
+@pytest.mark.asyncio
+async def test_onedrive_put_non_json_body_raises_502_no_db_row(
+    db_session: Session, test_user: User, test_company: Company
+):
+    """OneDrive PUT returns 201 but .json() raises → 502 is raised and NO DB row is
+    created."""
+    mock_response = MagicMock()
+    mock_response.status_code = 201
+    mock_response.json.side_effect = ValueError("not JSON")
+    mock_put = AsyncMock(return_value=mock_response)
+
+    with (
+        patch("app.services.attachment_service.settings") as mock_settings,
+        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="user-token"),
+        patch("app.http_client.http") as mock_http,
+    ):
+        mock_settings.datasheet_library_drive_id = ""
+        mock_http.put = mock_put
+
+        from app.services.attachment_service import store_and_attach
+
+        file = _make_upload_file()
+        with pytest.raises(HTTPException) as exc_info:
+            await store_and_attach(
+                db_session,
+                model=CompanyAttachment,
+                fk_field="company_id",
+                entity_label="Companies",
+                entity_id=test_company.id,
+                file=file,
+                user=test_user,
+            )
+
+    assert exc_info.value.status_code == 502
+    assert "onedrive" in exc_info.value.detail.lower()
+    rows = db_session.query(CompanyAttachment).filter_by(company_id=test_company.id).all()
+    assert rows == []
+
+
+@pytest.mark.asyncio
+async def test_onedrive_put_missing_id_raises_502_no_db_row(
+    db_session: Session, test_user: User, test_company: Company
+):
+    """OneDrive PUT returns 201 but body has no 'id' key → 502 is raised and NO DB row
+    is created."""
+    mock_response = MagicMock()
+    mock_response.status_code = 201
+    mock_response.json.return_value = {"webUrl": _ONEDRIVE_URL}  # no 'id'
+    mock_put = AsyncMock(return_value=mock_response)
+
+    with (
+        patch("app.services.attachment_service.settings") as mock_settings,
+        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="user-token"),
+        patch("app.http_client.http") as mock_http,
+    ):
+        mock_settings.datasheet_library_drive_id = ""
+        mock_http.put = mock_put
+
+        from app.services.attachment_service import store_and_attach
+
+        file = _make_upload_file()
+        with pytest.raises(HTTPException) as exc_info:
+            await store_and_attach(
+                db_session,
+                model=CompanyAttachment,
+                fk_field="company_id",
+                entity_label="Companies",
+                entity_id=test_company.id,
+                file=file,
+                user=test_user,
+            )
+
+    assert exc_info.value.status_code == 502
+    assert "onedrive" in exc_info.value.detail.lower()
+    rows = db_session.query(CompanyAttachment).filter_by(company_id=test_company.id).all()
+    assert rows == []
+
+
+# ---------------------------------------------------------------------------
 # Honest errors — unset drive_id + no user token → 401
 # ---------------------------------------------------------------------------
 

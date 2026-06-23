@@ -107,8 +107,16 @@ async def _store(
                 url,
             )
             raise HTTPException(502, "Couldn't save to the company library")
-        body = r.json()
-        return body.get("id"), drive_id, body.get("webUrl")
+        try:
+            body = r.json()
+        except Exception:
+            logger.error("attachment PUT returned non-JSON body url={}", url, exc_info=True)
+            raise HTTPException(502, "Couldn't save to the company library")
+        item_id = body.get("id")
+        if not item_id:
+            logger.error("attachment PUT response missing 'id' url={}", url)
+            raise HTTPException(502, "Couldn't save to the company library")
+        return item_id, drive_id, body.get("webUrl")
 
     # --- User OneDrive fallback ---
     from ..scheduler import get_valid_token
@@ -141,8 +149,16 @@ async def _store(
     if r.status_code not in (200, 201):
         logger.error("OneDrive attachment PUT failed {} {}", r.status_code, r.text[:300])
         raise HTTPException(502, "Failed to upload to OneDrive")
-    body = r.json()
-    return body.get("id"), None, body.get("webUrl")
+    try:
+        body = r.json()
+    except Exception:
+        logger.error("attachment PUT returned non-JSON body url={}", url, exc_info=True)
+        raise HTTPException(502, "Failed to upload to OneDrive")
+    item_id = body.get("id")
+    if not item_id:
+        logger.error("attachment PUT response missing 'id' url={}", url)
+        raise HTTPException(502, "Failed to upload to OneDrive")
+    return item_id, None, body.get("webUrl")
 
 
 # ---------------------------------------------------------------------------
@@ -226,6 +242,12 @@ async def open_attachment(att, user) -> StreamingResponse | RedirectResponse:
 
         data = await fetch_datasheet_bytes(att.library_drive_id, att.library_item_id)
         if data is None:
+            logger.warning(
+                "open_attachment: library fetch returned None att_id={} drive={} item={}",
+                att.id,
+                att.library_drive_id,
+                att.library_item_id,
+            )
             raise HTTPException(404, "Attachment file not found in library")
         safe = "".join(c for c in (att.file_name or "") if c.isalnum() or c in "._- ") or "file"
         return StreamingResponse(
@@ -236,6 +258,7 @@ async def open_attachment(att, user) -> StreamingResponse | RedirectResponse:
 
     # OneDrive fallback — redirect
     if not att.library_web_url:
+        logger.warning("open_attachment: attachment has no URL att_id={}", att.id)
         raise HTTPException(404, "Attachment has no URL")
     return RedirectResponse(att.library_web_url)
 
