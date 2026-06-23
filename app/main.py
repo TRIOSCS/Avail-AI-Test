@@ -567,6 +567,7 @@ from .routers.requisitions2 import router as requisitions2_router
 from .routers.sightings import router as sightings_router
 from .routers.sources import router as sources_router
 from .routers.tags import router as tags_router
+from .routers.trading import router as trading_router
 from .routers.v13_features import router as v13_router
 from .routers.vendor_contacts import router as vendor_contacts_router
 from .routers.vendors_crud import router as vendors_crud_router
@@ -591,6 +592,7 @@ app.include_router(requisitions2_router)
 app.include_router(sightings_router)
 app.include_router(sources_router)
 app.include_router(tags_router)
+app.include_router(trading_router)
 app.include_router(v13_router)
 app.include_router(vendor_contacts_router)
 app.include_router(vendors_crud_router)
