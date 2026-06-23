@@ -5266,6 +5266,114 @@ _VALID_TIERS = frozenset({"key", "core", "standard", "prospect"})
 CANONICAL_ROLES = ("specifier", "buyer_po", "ap_payer", "logistics", "exec", "other")
 _VALID_ROLES = frozenset(CANONICAL_ROLES)
 
+# ── Inline-editable field registry (WS1) ────────────────────────────────────
+# Each field maps to {label, kind, choices (for select)}. tier/disposition/owner
+# have dedicated controls and are excluded. owner inline deferred to WS2.
+
+EDITABLE_ACCOUNT_FIELDS: dict[str, dict] = {
+    "industry": {"label": "Industry", "kind": "text"},
+    "phone": {"label": "Phone", "kind": "text"},
+    "employee_size": {"label": "Employees", "kind": "text"},
+    "credit_terms": {"label": "Credit Terms", "kind": "text"},
+    "website": {"label": "Website", "kind": "text"},
+    "legal_name": {"label": "Legal Name", "kind": "text"},
+    "revenue_range": {"label": "Revenue Range", "kind": "text"},
+    "hq_city": {"label": "HQ City", "kind": "text"},
+    "hq_state": {"label": "HQ State", "kind": "text"},
+    "hq_country": {"label": "HQ Country", "kind": "text"},
+    "account_type": {
+        "label": "Account Type",
+        "kind": "select",
+        "choices": ["Customer", "Prospect", "Partner", "Competitor"],
+    },
+}
+
+EDITABLE_CONTACT_FIELDS: dict[str, dict] = {
+    "full_name": {"label": "Name", "kind": "text"},
+    "title": {"label": "Title", "kind": "text"},
+    "email": {"label": "Email", "kind": "text"},
+    "phone": {"label": "Phone", "kind": "text"},
+    "contact_role": {
+        "label": "Role",
+        "kind": "select",
+        "choices": list(CANONICAL_ROLES),
+    },
+}
+
+
+def apply_company_field(company: Company, field: str, value: str) -> None:
+    """Apply a single inline-edited account field to *company* (does NOT commit).
+
+    Validates/normalizes each field the same way edit_company does. Raises
+    HTTPException(400) for invalid values, HTTPException(404) for unknown field. Called
+    by both the inline-edit POST endpoint and edit_company (DRY).
+    """
+    if field not in EDITABLE_ACCOUNT_FIELDS:
+        raise HTTPException(404, f"Unknown editable field: {field!r}")
+    v = value.strip()
+    if field == "phone":
+        company.phone = normalize_phone_e164(v) if v else None
+    elif field == "hq_state":
+        company.hq_state = (normalize_us_state(v) or v) if v else None
+    elif field == "hq_country":
+        company.hq_country = (normalize_country(v) or v) if v else None
+    elif field == "account_type":
+        choices = EDITABLE_ACCOUNT_FIELDS["account_type"]["choices"]
+        if v and v not in choices:
+            raise HTTPException(400, f"Invalid account_type '{v}'. Valid: {choices}")
+        company.account_type = v or None
+    elif field == "industry":
+        company.industry = v or company.industry
+    elif field == "website":
+        company.website = v or company.website
+    else:
+        setattr(company, field, v or None)
+    company.updated_at = datetime.now(timezone.utc)
+
+
+def apply_contact_field(
+    contact: SiteContact,
+    field: str,
+    value: str,
+    site_id: int,
+    db: Session,
+) -> None:
+    """Apply a single inline-edited contact field to *contact* (does NOT commit).
+
+    Validates same as edit_site_contact. Raises HTTPException for invalid values. Called
+    by both the inline-edit POST endpoint and edit_site_contact (DRY).
+    """
+    if field not in EDITABLE_CONTACT_FIELDS:
+        raise HTTPException(404, f"Unknown editable contact field: {field!r}")
+    v = value.strip()
+    if field == "full_name":
+        if not v:
+            raise HTTPException(400, "full_name is required")
+        contact.full_name = v
+    elif field == "email":
+        if v and "@" not in v:
+            raise HTTPException(400, "Invalid email address")
+        if v:
+            dup = (
+                db.query(SiteContact)
+                .filter(
+                    SiteContact.customer_site_id == site_id,
+                    sqlfunc.lower(SiteContact.email) == v.lower(),
+                    SiteContact.id != contact.id,
+                )
+                .first()
+            )
+            if dup:
+                raise HTTPException(409, f"Another contact at this site already uses {v}")
+        contact.email = v or None
+    elif field == "phone":
+        contact.phone = v or None
+    elif field == "contact_role":
+        contact.contact_role = _validate_role(v)
+    else:
+        setattr(contact, field, v or None)
+    contact.updated_at = datetime.now(timezone.utc)
+
 
 def _validate_role(role_raw: str) -> str | None:
     """Validate a contact_role value: blank → None, unknown → raises HTTPException 400.
@@ -6716,53 +6824,237 @@ async def edit_company(
     name = form.get("name", "").strip()
     if name:
         company.name = name
-    website = form.get("website", "").strip()
-    if website:
-        company.website = website
-    industry = form.get("industry", "").strip()
-    company.industry = industry or company.industry
     notes = form.get("notes", "").strip()
     company.notes = notes or company.notes
-
-    # Company details
-    legal_name = form.get("legal_name", "").strip()
-    company.legal_name = legal_name or None
-    employee_size = form.get("employee_size", "").strip()
-    company.employee_size = employee_size or None
-    revenue_range = form.get("revenue_range", "").strip()
-    company.revenue_range = revenue_range or None
-
-    # Contact info
-    raw_phone = form.get("phone", "").strip() or None
-    company.phone = normalize_phone_e164(raw_phone) if raw_phone else None
-
-    # Address (HQ)
-    hq_city = form.get("hq_city", "").strip()
-    company.hq_city = hq_city or None
-    raw_hq_state = form.get("hq_state", "").strip() or None
-    company.hq_state = (normalize_us_state(raw_hq_state) or raw_hq_state) if raw_hq_state else None
-    raw_hq_country = form.get("hq_country", "").strip() or None
-    company.hq_country = (normalize_country(raw_hq_country) or raw_hq_country) if raw_hq_country else None
-
-    # Commercial
-    credit_terms = form.get("credit_terms", "").strip()
-    company.credit_terms = credit_terms or None
-    tax_id = form.get("tax_id", "").strip()
-    company.tax_id = tax_id or None
-
-    # Source
     source = form.get("source", "").strip()
     company.source = source or company.source
-
+    tax_id = form.get("tax_id", "").strip()
+    company.tax_id = tax_id or None
     owner_id = form.get("owner_id", "")
     if owner_id and owner_id.isdigit():
         company.account_owner_id = int(owner_id)
 
+    # Registry fields — DRY via apply_company_field
+    for f in EDITABLE_ACCOUNT_FIELDS:
+        raw = form.get(f)
+        if raw is not None:  # field was submitted
+            apply_company_field(company, f, raw)
+    # updated_at set inside apply_company_field; ensure it's set for non-registry writes too
     company.updated_at = datetime.now(timezone.utc)
     db.commit()
     logger.info("Company {} edited by {}", company_id, user.email)
 
     return await company_detail_partial(request=request, company_id=company_id, user=user, db=db)
+
+
+# ── Inline Field Edit — Account (WS1) ─────────────────────────────────────
+
+
+@router.get(
+    "/v2/partials/customers/{company_id}/field/edit/{field}",
+    response_class=HTMLResponse,
+)
+async def company_field_edit_form(
+    request: Request,
+    company_id: int,
+    field: str,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the inline edit widget for a single account field."""
+    if field not in EDITABLE_ACCOUNT_FIELDS:
+        raise HTTPException(404, f"Unknown editable field: {field!r}")
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+    meta = EDITABLE_ACCOUNT_FIELDS[field]
+    return template_response(
+        "htmx/partials/customers/_field_edit.html",
+        {
+            **_base_ctx(request, user),
+            "obj": company,
+            "field": field,
+            "entity": "company",
+            "meta": meta,
+            "post_url": f"/v2/partials/customers/{company_id}/field",
+            "display_url": f"/v2/partials/customers/{company_id}/field/display/{field}",
+        },
+    )
+
+
+@router.get(
+    "/v2/partials/customers/{company_id}/field/display/{field}",
+    response_class=HTMLResponse,
+)
+async def company_field_display(
+    request: Request,
+    company_id: int,
+    field: str,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the display span for a single account field (cancel path)."""
+    if field not in EDITABLE_ACCOUNT_FIELDS:
+        raise HTTPException(404, f"Unknown editable field: {field!r}")
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+    meta = EDITABLE_ACCOUNT_FIELDS[field]
+    return template_response(
+        "htmx/partials/customers/_field_display.html",
+        {
+            **_base_ctx(request, user),
+            "obj": company,
+            "field": field,
+            "entity": "company",
+            "meta": meta,
+            "edit_url": f"/v2/partials/customers/{company_id}/field/edit/{field}",
+        },
+    )
+
+
+@router.post(
+    "/v2/partials/customers/{company_id}/field",
+    response_class=HTMLResponse,
+)
+async def company_field_post(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Save a single inline-edited account field; return the display span."""
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+    is_admin = user.role == UserRole.ADMIN
+    if not is_admin and company.account_owner_id != user.id:
+        raise HTTPException(403, "Only the owner or an admin can edit this account")
+    form = await request.form()
+    field = (form.get("field") or "").strip()
+    if field not in EDITABLE_ACCOUNT_FIELDS:
+        raise HTTPException(404, f"Unknown editable field: {field!r}")
+    value = form.get("value") or ""
+    apply_company_field(company, field, value)
+    db.commit()
+    logger.info("Company {} field {} edited inline by {}", company_id, field, user.email)
+    meta = EDITABLE_ACCOUNT_FIELDS[field]
+    return template_response(
+        "htmx/partials/customers/_field_display.html",
+        {
+            **_base_ctx(request, user),
+            "obj": company,
+            "field": field,
+            "entity": "company",
+            "meta": meta,
+            "edit_url": f"/v2/partials/customers/{company_id}/field/edit/{field}",
+        },
+    )
+
+
+# ── Inline Field Edit — Contact (WS1) ──────────────────────────────────────
+
+
+@router.get(
+    "/v2/partials/customers/{company_id}/contacts/{contact_id}/field/edit/{field}",
+    response_class=HTMLResponse,
+)
+async def contact_field_edit_form(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    field: str,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the inline edit widget for a single contact field."""
+    if field not in EDITABLE_CONTACT_FIELDS:
+        raise HTTPException(404, f"Unknown editable contact field: {field!r}")
+    contact = db.get(SiteContact, contact_id)
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+    meta = EDITABLE_CONTACT_FIELDS[field]
+    return template_response(
+        "htmx/partials/customers/_field_edit.html",
+        {
+            **_base_ctx(request, user),
+            "obj": contact,
+            "field": field,
+            "entity": "contact",
+            "meta": meta,
+            "post_url": f"/v2/partials/customers/{company_id}/contacts/{contact_id}/field",
+            "display_url": f"/v2/partials/customers/{company_id}/contacts/{contact_id}/field/display/{field}",
+        },
+    )
+
+
+@router.get(
+    "/v2/partials/customers/{company_id}/contacts/{contact_id}/field/display/{field}",
+    response_class=HTMLResponse,
+)
+async def contact_field_display(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    field: str,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the display span for a single contact field (cancel path)."""
+    if field not in EDITABLE_CONTACT_FIELDS:
+        raise HTTPException(404, f"Unknown editable contact field: {field!r}")
+    contact = db.get(SiteContact, contact_id)
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+    meta = EDITABLE_CONTACT_FIELDS[field]
+    return template_response(
+        "htmx/partials/customers/_field_display.html",
+        {
+            **_base_ctx(request, user),
+            "obj": contact,
+            "field": field,
+            "entity": "contact",
+            "meta": meta,
+            "edit_url": f"/v2/partials/customers/{company_id}/contacts/{contact_id}/field/edit/{field}",
+        },
+    )
+
+
+@router.post(
+    "/v2/partials/customers/{company_id}/contacts/{contact_id}/field",
+    response_class=HTMLResponse,
+)
+async def contact_field_post(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Save a single inline-edited contact field; return the display span."""
+    contact = db.get(SiteContact, contact_id)
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+    form = await request.form()
+    field = (form.get("field") or "").strip()
+    if field not in EDITABLE_CONTACT_FIELDS:
+        raise HTTPException(404, f"Unknown editable contact field: {field!r}")
+    value = form.get("value") or ""
+    apply_contact_field(contact, field, value, contact.customer_site_id, db)
+    db.commit()
+    logger.info("Contact {} field {} edited inline by {}", contact_id, field, user.email)
+    meta = EDITABLE_CONTACT_FIELDS[field]
+    return template_response(
+        "htmx/partials/customers/_field_display.html",
+        {
+            **_base_ctx(request, user),
+            "obj": contact,
+            "field": field,
+            "entity": "contact",
+            "meta": meta,
+            "edit_url": f"/v2/partials/customers/{company_id}/contacts/{contact_id}/field/edit/{field}",
+        },
+    )
 
 
 # ── Merge Duplicate ─────────────────────────────────────────────────────────
@@ -7049,41 +7341,18 @@ async def edit_site_contact(
         raise HTTPException(404, "Site not found")
 
     form = await request.form()
-    full_name = form.get("full_name", "").strip()
-    if not full_name:
-        raise HTTPException(400, "full_name is required")
 
-    email_val = form.get("email", "").strip()
-    if email_val and "@" not in email_val:
-        raise HTTPException(400, "Invalid email address")
+    # Inline-registry fields — DRY via apply_contact_field
+    for f in EDITABLE_CONTACT_FIELDS:
+        raw = form.get(f)
+        if raw is not None:  # field was submitted
+            apply_contact_field(contact, f, raw, site_id, db)
 
-    # Per-site email uniqueness on edit
-    if email_val:
-        email_dup = (
-            db.query(SiteContact)
-            .filter(
-                SiteContact.customer_site_id == site_id,
-                sqlfunc.lower(SiteContact.email) == email_val.strip().lower(),
-                SiteContact.id != contact_id,
-            )
-            .first()
-        )
-        if email_dup:
-            raise HTTPException(409, f"Another contact at this site already uses {email_val}")
-
-    # Write all editable fields with explicit clear semantics (no OR-fallback)
-    contact.full_name = full_name
-    contact.title = form.get("title", "").strip() or None
-    contact.email = email_val or None
-    contact.phone = form.get("phone", "").strip() or None
-    contact.wechat_id = form.get("wechat_id", "").strip() or None
-    contact.notes = form.get("notes", "").strip() or None
-    # contact_role — now writable; validated via shared helper (blank→NULL, unknown→400)
-    contact.contact_role = _validate_role(form.get("contact_role") or "")
-    # is_priority — checkbox: present+non-empty = True, absent = False
-    contact.is_priority = bool(form.get("is_priority", "").strip())
-    # linkedin_url — plain string, no validation beyond length
-    contact.linkedin_url = form.get("linkedin_url", "").strip() or None
+    # Non-registry fields
+    contact.wechat_id = (form.get("wechat_id", "") or "").strip() or None
+    contact.notes = (form.get("notes", "") or "").strip() or None
+    contact.is_priority = bool((form.get("is_priority", "") or "").strip())
+    contact.linkedin_url = (form.get("linkedin_url", "") or "").strip() or None
     contact.updated_at = datetime.now(timezone.utc)
     db.commit()
     logger.info("Contact {} edited by {}", contact_id, user.email)

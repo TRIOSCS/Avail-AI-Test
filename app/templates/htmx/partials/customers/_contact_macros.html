@@ -217,9 +217,12 @@
         </div>
         {# Subtitle: title + last-touch indicator #}
         <div class="flex items-center gap-2 mt-0.5 flex-wrap">
-          {% if contact.title %}
-          <span class="text-[11px] text-gray-600">{{ contact.title }}</span>
-          {% endif %}
+          {# Title — inline-editable (WS1) #}
+          {% with obj=contact, field='title', entity='contact',
+                  meta={'label': 'Title', 'kind': 'text'},
+                  edit_url='/v2/partials/customers/' ~ company.id ~ '/contacts/' ~ contact.id ~ '/field/edit/title' %}
+            {% include 'htmx/partials/customers/_field_display.html' %}
+          {% endwith %}
           {{ _last_touch_compact(contact, now_utc, cadence) }}
           {# Active status badges (critical signals — always visible) #}
           {% if contact.do_not_contact %}

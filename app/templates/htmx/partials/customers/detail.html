@@ -61,10 +61,13 @@
             {% if company.domain %}
               <a href="https://{{ company.domain }}" target="_blank" rel="noopener noreferrer" class="text-brand-500 hover:text-brand-600">{{ company.domain }}</a>
             {% endif %}
-            {% if company.industry %}
-              {% if company.domain %}<span class="text-gray-300">·</span>{% endif %}
-              <span>{{ company.industry }}</span>
-            {% endif %}
+            {# Industry — inline-editable (WS1) #}
+            {% if company.domain %}<span class="text-gray-300">·</span>{% endif %}
+            {% with obj=company, field='industry', entity='company',
+                    meta={'label': 'Industry', 'kind': 'text'},
+                    edit_url='/v2/partials/customers/' ~ company.id ~ '/field/edit/industry' %}
+              {% include 'htmx/partials/customers/_field_display.html' %}
+            {% endwith %}
             {% if company.hq_city %}
               {% if company.domain or company.industry %}<span class="text-gray-300">·</span>{% endif %}
               <span>{{ company.hq_city }}{% if company.hq_country %}, {{ company.hq_country }}{% endif %}</span>
@@ -79,7 +82,13 @@
           {% if company.account_owner %}<span class="font-medium text-gray-700">{{ company.account_owner.name }}</span>{% else %}<span class="text-gray-400">Unassigned</span>{% endif %}
         </span>
         <span class="text-gray-300">·</span>
-        <span>Terms: <span class="font-medium text-gray-700">{{ company.credit_terms or "—" }}</span></span>
+        <span>Terms:
+          {% with obj=company, field='credit_terms', entity='company',
+                  meta={'label': 'Credit Terms', 'kind': 'text'},
+                  edit_url='/v2/partials/customers/' ~ company.id ~ '/field/edit/credit_terms' %}
+            {% include 'htmx/partials/customers/_field_display.html' %}
+          {% endwith %}
+        </span>
         <span class="text-gray-300">·</span>
         <span class="inline-flex items-center gap-1">
           <span class="w-2 h-2 rounded-full {{ cadence_dot.get(cadence_state, 'bg-gray-300') }}"
@@ -165,13 +174,11 @@
         <div class="p-3 rounded-lg bg-gray-50">
           <p class="text-xs font-medium text-gray-600 uppercase tracking-wider">Phone</p>
           <p class="mt-1 text-sm font-medium">
-            {% if company.phone %}
-              <a href="tel:{{ company.phone }}" class="text-brand-500 hover:text-brand-600"
-                 data-outreach-log data-channel="phone" data-value="{{ company.phone }}"
-                 data-company-id="{{ company.id }}" data-contact-name="{{ company.name }}">{{ company.phone }}</a>
-            {% else %}
-              <span class="text-gray-400">—</span>
-            {% endif %}
+            {% with obj=company, field='phone', entity='company',
+                    meta={'label': 'Phone', 'kind': 'text'},
+                    edit_url='/v2/partials/customers/' ~ company.id ~ '/field/edit/phone' %}
+              {% include 'htmx/partials/customers/_field_display.html' %}
+            {% endwith %}
           </p>
         </div>
         <div class="p-3 rounded-lg bg-gray-50">
