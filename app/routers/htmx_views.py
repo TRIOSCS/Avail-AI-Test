@@ -10718,7 +10718,7 @@ async def reclaim_prospect_htmx(
 @router.get("/v2/partials/settings", response_class=HTMLResponse)
 async def settings_partial(
     request: Request,
-    tab: str = "sources",
+    tab: str = "connectors",
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -11009,6 +11009,44 @@ async def connector_card_partial(
     ctx = _base_ctx(request, user, "settings")
     ctx["s"] = enriched
     return template_response("htmx/partials/settings/_connector_card_partial.html", ctx)
+
+
+@router.post("/v2/partials/settings/connectors/test-all", response_class=HTMLResponse)
+async def connectors_test_all(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Run Test for every credentialed + active source, sequentially (don't hammer
+    provider APIs), and return an OOB bundle of refreshed cards.
+
+    Sources without credentials / inactive are skipped. Per-source failures are
+    tolerated (recorded as Error) and never abort the sweep.
+    """
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(403, "Admin only")
+
+    from ..routers.sources import run_source_test
+
+    _DEAD = {"rocketreach_enrichment", "clearbit_enrichment"}
+    sources = db.query(ApiSource).order_by(ApiSource.display_name).all()
+
+    tested: list[dict] = []
+    for src in sources:
+        if src.name in _DEAD or not src.is_active:
+            continue
+        enriched = _enrich_source(src, db)
+        if not enriched["testable"]:
+            continue
+        try:
+            await run_source_test(src, db)
+        except Exception as e:  # defensive — run_source_test already swallows
+            logger.warning("Test-all probe failed for {}: {}", src.name, e)
+        tested.append(_enrich_source(src, db))
+
+    ctx = _base_ctx(request, user, "settings")
+    ctx["tested_sources"] = tested
+    return template_response("htmx/partials/settings/_connectors_testall.html", ctx)
 
 
 @router.post("/v2/partials/admin/vendor-merge", response_class=HTMLResponse)

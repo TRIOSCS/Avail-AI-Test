@@ -22,6 +22,9 @@ _BROWSER = {"icsource", "netcomponents"}
 _SCOPES = {"azure_oauth", "teams"}
 _AI = {"anthropic", "ai_live_web"}
 _MANUAL = {"stock_list"}
+# Comms providers by name (8x8/VoIP) + by category — voice/email/messaging/auth platform.
+_COMMS_NAMES = {"eight_by_eight", "email_mining"}
+_COMMS_CATEGORIES = {"email", "auth", "platform", "notifications", "voip", "comms"}
 
 
 def control_type(source) -> str:
@@ -49,7 +52,7 @@ def connector_group(source) -> str:
         return "ai"
     if cat == "enrichment":
         return "enrichment"
-    if name in _SCOPES or cat in ("email", "auth", "platform", "notifications"):
+    if name in _SCOPES or name in _COMMS_NAMES or cat in _COMMS_CATEGORIES:
         return "communications"
     return "part_sourcing"
 

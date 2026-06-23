@@ -38,6 +38,15 @@ def test_group_mapping():
     assert cs.connector_group(_src(name="stock_list")) == "manual"
 
 
+def test_eight_by_eight_in_communications_group():
+    """8x8 (VoIP) must land in the Communications group — by name and by category."""
+    assert cs.connector_group(_src(name="eight_by_eight", category="voip")) == "communications"
+    # robust even if the category drifts
+    assert cs.connector_group(_src(name="eight_by_eight", category="")) == "communications"
+    # the category alone (voip) routes there too
+    assert cs.connector_group(_src(name="some_voip", category="voip")) == "communications"
+
+
 def test_state_live():
     assert (
         cs.connector_state(

@@ -294,3 +294,95 @@ def test_connectors_admin_gated(unauthenticated_client):
     """Connectors tab is admin-only; unauthenticated gets 401/403/302/307."""
     r = unauthenticated_client.get("/v2/partials/settings/connectors", follow_redirects=False)
     assert r.status_code in (401, 403, 302, 307), f"Expected auth-gated status for connectors, got {r.status_code}"
+
+
+# ── Task 4: microcopy, a11y, button-sizing, targets, encoding ──────────
+
+
+def test_card_microcopy_and_a11y(admin_client):
+    """Reconciled state labels, toggle a11y label, .btn-md sizing, explicit targets,
+    Test all."""
+    html = admin_client.get("/v2/partials/settings/connectors").text
+    # Spec §14.4 reconciled state labels (at least one present given the seed)
+    assert "Needs setup" in html or "Live" in html
+    # microcopy verbatim from spec §14.4
+    assert "Test all" in html
+    # toggle a11y label
+    assert 'aria-label="Enable' in html
+    # buttons sized via .btn-md, never inline px-4 py-2 bg-brand
+    assert "btn-md" in html
+    assert 'class="px-4 py-2 bg-brand' not in html
+    # explicit hx-target on hx controls
+    assert "hx-target=" in html
+
+
+def test_test_all_button_wiring(admin_client):
+    """Test-all posts to the bounded endpoint and targets the connectors root."""
+    html = admin_client.get("/v2/partials/settings/connectors").text
+    assert 'hx-post="/v2/partials/settings/connectors/test-all"' in html
+    assert "#connectors-root" in html
+
+
+def test_clay_card_connect_disconnect(admin_client, monkeypatch):
+    """Disconnected → Connect Clay link; connected → Disconnect control."""
+    import app.routers.htmx_views as v
+
+    monkeypatch.setattr(v.clay_oauth, "is_connected", lambda: False)
+    monkeypatch.setattr(v.clay_oauth, "needs_reconnect", lambda: False)
+    html = admin_client.get("/v2/partials/settings/connectors").text
+    assert "Connect Clay" in html
+    assert "/auth/clay/connect" in html
+
+    monkeypatch.setattr(v.clay_oauth, "is_connected", lambda: True)
+    html2 = admin_client.get("/v2/partials/settings/connectors").text
+    assert "/auth/clay/disconnect" in html2
+    assert "Disconnect" in html2
+
+
+def test_clay_card_no_key_text_input(admin_client, monkeypatch):
+    """Clay uses the oauth_clay control — there must be no CLAY_API_KEY text input."""
+    import app.routers.htmx_views as v
+
+    monkeypatch.setattr(v.clay_oauth, "is_connected", lambda: False)
+    html = admin_client.get("/v2/partials/settings/connectors").text
+    assert "CLAY_API_KEY" not in html
+
+
+def test_dead_providers_absent(admin_client):
+    """RocketReach + Clearbit must not appear anywhere on the page."""
+    html = admin_client.get("/v2/partials/settings/connectors").text.lower()
+    assert "rocketreach" not in html
+    assert "clearbit" not in html
+
+
+def test_test_all_endpoint_returns_oob_bundle(admin_client, db_session):
+    """POST test-all returns 200 with an OOB card bundle for credentialed+active
+    sources, tolerating per-source connector failures (no real connectors in tests)."""
+    from app.models import ApiSource as AS
+
+    # A keyless source is "testable"; make it active so the sweep includes it.
+    sam = db_session.query(AS).filter_by(name="sam_gov_enrichment").first()
+    assert sam is not None
+    sam.is_active = True
+    db_session.commit()
+
+    r = admin_client.post("/v2/partials/settings/connectors/test-all")
+    assert r.status_code == 200, f"expected 200, got {r.status_code}: {r.text[:200]}"
+    assert 'hx-swap-oob="true"' in r.text
+    assert "connector-card-" in r.text
+
+
+def test_credential_save_round_trip(admin_client, db_session):
+    """PUT /api/sources/{name}/credentials stores the credential (matching the encoding
+    the Save button sends — JSON body {credentials: {ENV: val}})."""
+    from app.services.credential_service import _cred_cache, credential_is_set, get_credential
+
+    _cred_cache.clear()
+    r = admin_client.put(
+        "/api/sources/lusha_enrichment/credentials",
+        json={"credentials": {"LUSHA_API_KEY": "sk-test-roundtrip-123"}},
+    )
+    assert r.status_code == 200, f"expected 200, got {r.status_code}: {r.text}"
+    assert r.json().get("saved") is True
+    assert credential_is_set(db_session, "lusha_enrichment", "LUSHA_API_KEY")
+    assert get_credential(db_session, "lusha_enrichment", "LUSHA_API_KEY") == "sk-test-roundtrip-123"
