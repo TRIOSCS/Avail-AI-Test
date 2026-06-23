@@ -55,9 +55,14 @@
       </nav>
     </div>
 
-    {# Tab content — parts loaded inline on first load #}
+    {# Tab content — Parts is rendered inline (the default first view); a deep-linked
+       tab (e.g. ?tab=build_quote) shows a brief placeholder until its x-init click swaps in. #}
     <div id="tab-content">
+      {% if initial_tab in [none, 'parts'] %}
       {% include "htmx/partials/requisitions/tabs/parts.html" %}
+      {% else %}
+      <div class="py-10 text-center text-sm text-gray-400">Loading…</div>
+      {% endif %}
     </div>
   </div>
 </div>
