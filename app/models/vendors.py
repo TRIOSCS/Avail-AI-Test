@@ -30,6 +30,7 @@ class VendorCard(Base):
     website = Column(String(500))
     emails = Column(JSON, default=list)
     phones = Column(JSON, default=list)
+    normalized_phones = Column(JSON, default=list)  # E.164 list, derived from phones
     contacts = Column(JSON, default=list)
     alternate_names = Column(JSON, default=list)
     sighting_count = Column(Integer, default=0)
@@ -130,6 +131,18 @@ class VendorCard(Base):
             raise ValueError(f"Score {_key} must be 0-100, got {value}")
         return value
 
+    @validates("phones")
+    def _sync_normalized_phones(self, _key, value):
+        """Keep normalized_phones (list of E.164) in sync with phones on every write."""
+        from ..utils.phone import normalize_e164
+
+        if not value:
+            self.normalized_phones = []
+            return value
+        normalized = [normalize_e164(p) for p in value if p]
+        self.normalized_phones = [n for n in normalized if n is not None]
+        return value
+
     __table_args__ = (
         Index("ix_vendor_cards_created_at", "created_at"),
         Index("ix_vendor_cards_score_computed_at", "vendor_score_computed_at"),
@@ -153,6 +166,7 @@ class VendorContact(Base):
     label = Column(String(100))
     email = Column(String(255))
     phone = Column(String(100))
+    normalized_phone = Column(String(20), index=True)
     phone_mobile = Column(String(100))
     phone_type = Column(String(20))
     linkedin_url = Column(String(500))
@@ -188,6 +202,14 @@ class VendorContact(Base):
     def _validate_confidence(self, _key, value):
         if value is not None and not (0 <= value <= 100):
             raise ValueError(f"Confidence must be 0-100, got {value}")
+        return value
+
+    @validates("phone")
+    def _sync_normalized_phone(self, _key, value):
+        """Keep normalized_phone (E.164) in sync with phone on every write."""
+        from ..utils.phone import normalize_e164
+
+        self.normalized_phone = normalize_e164(value)
         return value
 
     __table_args__ = (

@@ -65,7 +65,7 @@ async def _job_monitor_worker_heartbeats():
 
     from ..config import settings
     from ..database import SessionLocal
-    from ..models import EnrichmentWorkerStatus, IcsWorkerStatus, NcWorkerStatus
+    from ..models import EnrichmentWorkerStatus, IcsWorkerStatus, NcWorkerStatus, TbfWorkerStatus
 
     now = datetime.now(timezone.utc)
     stale_cutoff = now - timedelta(minutes=settings.worker_heartbeat_stale_minutes)
@@ -74,6 +74,7 @@ async def _job_monitor_worker_heartbeats():
     checks = (
         ("ICS", IcsWorkerStatus),
         ("NetComponents", NcWorkerStatus),
+        ("The Broker Forum", TbfWorkerStatus),
         ("Enrichment", EnrichmentWorkerStatus),
     )
     db = SessionLocal()

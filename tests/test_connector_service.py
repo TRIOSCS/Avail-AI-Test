@@ -23,6 +23,7 @@ def test_control_type_classification():
     assert cs.control_type(_src(name="eight_by_eight")) == "multi_field"
     assert cs.control_type(_src(name="icsource")) == "browser_login"
     assert cs.control_type(_src(name="netcomponents")) == "browser_login"
+    assert cs.control_type(_src(name="thebrokersite")) == "browser_login"
     assert cs.control_type(_src(name="azure_oauth")) == "scopes"
     assert cs.control_type(_src(name="teams_notifications")) == "scopes"
     assert cs.control_type(_src(name="sam_gov_enrichment", env_vars=[])) == "keyless"
@@ -35,6 +36,7 @@ def test_group_mapping():
     assert cs.connector_group(_src(name="lusha_enrichment", category="enrichment")) == "enrichment"
     assert cs.connector_group(_src(name="anthropic_ai", category="platform")) == "ai"
     assert cs.connector_group(_src(name="icsource")) == "browser_workers"
+    assert cs.connector_group(_src(name="thebrokersite")) == "browser_workers"
     assert cs.connector_group(_src(name="stock_list_import")) == "manual"
 
 
@@ -149,7 +151,9 @@ def test_state_clay_connected_live():
 
 # ── Task 4b: planned roadmap state ───────────────────────────────────
 
-_PLANNED_NAMES = ["findchips", "future", "heilind", "lcsc", "rochester", "thebrokersite", "verical"]
+# thebrokersite moved from _PLANNED to _BROWSER (TBF browser worker shipped) — see
+# app/services/connector_service.py and BROWSER_WORKER_SOURCES.
+_PLANNED_NAMES = ["findchips", "future", "heilind", "lcsc", "rochester", "verical"]
 
 
 def test_control_type_planned_for_all_planned_names():

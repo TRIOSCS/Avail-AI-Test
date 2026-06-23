@@ -276,8 +276,8 @@
         "source_type": "broker",
         "description": "Independent broker marketplace with 500M+ line items from global independent distributors. Browser-automated search.",
         "signup_url": "https://www.thebrokersite.com",
-        "env_vars": [],
-        "setup_notes": "On the roadmap — connector not yet built. Requires TBF membership credentials for authenticated scraping."
+        "env_vars": ["TBF_USERNAME", "TBF_PASSWORD"],
+        "setup_notes": "Browser automation with membership login. Runs as external tbf worker systemd service. Results ingested via shared DB."
     },
     {
         "name": "verical",

@@ -18,13 +18,12 @@ from datetime import datetime, timezone
 
 import httpx
 from loguru import logger
-from sqlalchemy.orm import Session
 
 BASE_URL = "https://api.8x8.com/analytics/work/v1"
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  PHONE NORMALIZATION & REVERSE LOOKUP
+#  PHONE NORMALIZATION
 # ═══════════════════════════════════════════════════════════════════════
 
 
@@ -34,7 +33,9 @@ def normalize_phone(phone: str) -> str:
     Removes spaces, dashes, parens, dots, and leading +1.
     Returns last 10 digits (US number) or full digits if shorter.
 
-    Called by: reverse_lookup_phone(), CDR processing
+    Retained as a small digit-strip helper; CRM phone matching now goes through
+    activity_service.match_phone_to_entity() (E.164-indexed). See WS2b.
+
     Depends on: nothing
     """
     if not phone:
@@ -44,91 +45,6 @@ def normalize_phone(phone: str) -> str:
     if len(digits) == 11 and digits.startswith("1"):
         digits = digits[1:]
     return digits
-
-
-def reverse_lookup_phone(phone: str, db: Session) -> dict | None:
-    """Look up a phone number against CRM entities and return match context.
-
-    Searches SiteContact, Company, and VendorCard in priority order.
-    Returns dict with entity_type, entity_id, company_id, company_name,
-    contact_name (if applicable), or None if no match.
-
-    Called by: app/jobs/eight_by_eight_jobs.py (CDR processing)
-    Depends on: app/models (SiteContact, Company, VendorCard, CustomerSite)
-    """
-    from ..models import Company, CustomerSite, SiteContact, VendorCard
-
-    normalized = normalize_phone(phone)
-    if len(normalized) < 7:
-        return None
-
-    # 1. Check SiteContact phone field
-    contacts = (
-        db.query(SiteContact)
-        .filter(
-            SiteContact.phone.isnot(None),
-            SiteContact.is_active.is_(True),
-        )
-        .all()
-    )
-    for contact in contacts:
-        if normalize_phone(contact.phone) == normalized:
-            # Get company via customer_site
-            site = db.get(CustomerSite, contact.customer_site_id)
-            company_id = site.company_id if site else None
-            company = db.get(Company, company_id) if company_id else None
-            return {
-                "entity_type": "contact",
-                "entity_id": contact.id,
-                "company_id": company_id,
-                "company_name": company.name if company else None,
-                "contact_name": contact.full_name,
-                "site_id": site.id if site else None,
-            }
-
-    # 2. Check Company phone field
-    companies = (
-        db.query(Company)
-        .filter(
-            Company.phone.isnot(None),
-            Company.is_active.is_(True),
-        )
-        .all()
-    )
-    for company in companies:
-        if normalize_phone(company.phone) == normalized:
-            return {
-                "entity_type": "company",
-                "entity_id": company.id,
-                "company_id": company.id,
-                "company_name": company.name,
-                "contact_name": None,
-                "site_id": None,
-            }
-
-    # 3. Check VendorCard phones (JSON list)
-    vendors = (
-        db.query(VendorCard)
-        .filter(
-            VendorCard.is_blacklisted.is_(False),
-        )
-        .all()
-    )
-    for vendor in vendors:
-        vendor_phones = vendor.phones or []
-        for vp in vendor_phones:
-            if normalize_phone(str(vp)) == normalized:
-                return {
-                    "entity_type": "vendor",
-                    "entity_id": vendor.id,
-                    "company_id": None,
-                    "company_name": vendor.display_name,
-                    "contact_name": None,
-                    "vendor_card_id": vendor.id,
-                }
-
-    logger.debug(f"reverse_lookup_phone: no match for {normalized}")
-    return None
 
 
 async def get_extension_map(token: str, settings) -> dict[str, str]:

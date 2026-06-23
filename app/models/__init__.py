@@ -137,6 +137,11 @@ from .tags import EntityTag, MaterialTag, Tag, TagThresholdConfig  # noqa: F401
 # Task Board (pipeline tasks per requisition)
 from .task import RequisitionTask  # noqa: F401
 
+# The Broker Forum (TBF) Search
+from .tbf_search_log import TbfSearchLog  # noqa: F401
+from .tbf_search_queue import TbfSearchQueue  # noqa: F401
+from .tbf_worker_status import TbfWorkerStatus  # noqa: F401
+
 # Trust telemetry (durable reconcile tallies + facet-audit verdicts)
 from .telemetry import FacetAudit, ReconcileRun  # noqa: F401
 from .trouble_ticket import TroubleTicket  # noqa: F401

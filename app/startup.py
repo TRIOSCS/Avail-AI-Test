@@ -1130,9 +1130,10 @@ def seed_api_sources() -> None:
 
 
 def seed_browser_worker_sources(db) -> None:
-    """Flip icsource + netcomponents api_sources rows to live + active.
+    """Flip every BROWSER_WORKER_SOURCES api_sources row to live + active.
 
-    The browser workers (avail-ics-worker, avail-nc-worker) are queue-driven
+    (icsource + netcomponents + thebrokersite.) The browser workers
+    (avail-ics-worker, avail-nc-worker, avail-tbf-worker) are queue-driven
     so the dashboard surfaces them as 'live' rather than 'pending'/'disabled'.
     `health_monitor.run_health_checks` excludes BROWSER_WORKER_SOURCES so this
     seed survives the 15-min ping loop. Idempotent.
@@ -1186,6 +1187,25 @@ def seed_nc_worker_status_singleton(db) -> None:
     db.add(NcWorkerStatus(id=1, is_running=False))
 
 
+def seed_tbf_worker_status_singleton(db) -> None:
+    """Insert tbf_worker_status id=1 row if absent.
+
+    Same pattern as the ICS/NC singletons — the TBF worker's
+    update_worker_status() silently no-ops when the row is missing, dropping
+    every heartbeat. Migration 130 seeds the row at deploy; this is the
+    idempotent backup for fresh DBs/tests. Idempotent.
+
+    Called by: seed_browser_workers (lifespan)
+    Depends on: TbfWorkerStatus model
+    """
+    from .models import TbfWorkerStatus
+
+    existing = db.query(TbfWorkerStatus).filter_by(id=1).one_or_none()
+    if existing is not None:
+        return
+    db.add(TbfWorkerStatus(id=1, is_running=False))
+
+
 def seed_browser_workers() -> None:
     """Run all browser-worker seeds in a single SessionLocal transaction.
 
@@ -1196,6 +1216,7 @@ def seed_browser_workers() -> None:
         seed_browser_worker_sources(db)
         seed_ics_worker_status_singleton(db)
         seed_nc_worker_status_singleton(db)
+        seed_tbf_worker_status_singleton(db)
         db.commit()
     except (SQLAlchemyError, DBAPIError) as e:
         logger.warning("Browser worker seed error: {}", e)

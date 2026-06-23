@@ -1,11 +1,11 @@
 """Tests for Task 2: catalog additions + prune of dead providers.
 Task 4b: expands prune to all 9 dead names (aliexpress/arrow/avnet/partfuse/rs_components/
          siliconexpert/winsource/rocketreach_enrichment/clearbit_enrichment).
-         Also adds 7 planned roadmap connectors to the catalog (durable + testable).
+         Also adds the planned roadmap connectors to the catalog (durable + testable).
 
 Verifies:
 - api_sources.json contains ai_live_web + sam_gov_enrichment and NOT rocketreach/clearbit
-- api_sources.json contains all 7 planned roadmap connectors
+- api_sources.json contains all planned roadmap connectors
 - seed_api_sources() prunes all 9 dead rows and leaves planned + real rows intact
 - planned connectors seed into DB (NOT pruned)
 
@@ -30,14 +30,15 @@ _ALL_PRUNE_NAMES = [
     "clearbit_enrichment",
 ]
 
-# The 7 planned roadmap connectors that must exist in the catalog JSON.
+# The planned roadmap connectors that must exist in the catalog JSON.
+# (thebrokersite moved to a browser worker — it is no longer planned and now
+# declares env_vars, so it is excluded from these planned-connector assertions.)
 _PLANNED_NAMES = [
     "findchips",
     "future",
     "heilind",
     "lcsc",
     "rochester",
-    "thebrokersite",
     "verical",
 ]
 
@@ -55,8 +56,8 @@ def test_catalog_has_new_sources():
     assert "clearbit_enrichment" not in names, "clearbit_enrichment must NOT be in catalog"
 
 
-def test_catalog_has_all_7_planned_connectors():
-    """JSON catalog must include all 7 planned roadmap connectors."""
+def test_catalog_has_all_planned_connectors():
+    """JSON catalog must include every planned roadmap connector."""
     import os
 
     cat_path = os.path.join(os.path.dirname(__file__), "..", "app", "data", "api_sources.json")
@@ -75,10 +76,26 @@ def test_planned_connectors_have_empty_env_vars():
     by_name = {s["name"]: s for s in cat}
     for planned in _PLANNED_NAMES:
         if planned not in by_name:
-            continue  # covered by test_catalog_has_all_7_planned_connectors
+            continue  # covered by test_catalog_has_all_planned_connectors
         assert by_name[planned]["env_vars"] == [], (
             f"Planned connector '{planned}' must have env_vars: [] (no credentials)"
         )
+
+
+def test_thebrokersite_is_a_browser_worker_connector():
+    """Thebrokersite moved from planned → browser worker: it declares TBF creds in the
+    catalog and is a member of BROWSER_WORKER_SOURCES (so the startup seed flips it live
+    and the health monitor skips it)."""
+    import os
+
+    from app.constants import BROWSER_WORKER_SOURCES
+
+    cat_path = os.path.join(os.path.dirname(__file__), "..", "app", "data", "api_sources.json")
+    by_name = {s["name"]: s for s in json.load(open(cat_path))}
+    assert "thebrokersite" in by_name, "thebrokersite missing from api_sources.json"
+    assert by_name["thebrokersite"]["env_vars"] == ["TBF_USERNAME", "TBF_PASSWORD"]
+    assert "thebrokersite" in BROWSER_WORKER_SOURCES
+    assert "thebrokersite" not in _PLANNED_NAMES  # no longer a planned/roadmap connector
 
 
 def test_seed_prunes_dead_and_keeps_workers(db_session):
@@ -170,8 +187,8 @@ def test_seed_prunes_all_9_dead_names(db_session):
     assert "icsource" in names, "browser-worker 'icsource' must survive"
 
 
-def test_seed_seeds_all_7_planned_connectors(db_session):
-    """seed_api_sources() must seed all 7 planned connectors and NOT prune them."""
+def test_seed_seeds_all_planned_connectors(db_session):
+    """seed_api_sources() must seed every planned connector and NOT prune them."""
     with (
         patch("app.startup.SessionLocal", return_value=db_session),
         patch.object(db_session, "close"),

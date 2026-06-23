@@ -18,7 +18,7 @@ GROUP_ORDER: list[tuple[str, str]] = [
 
 _OAUTH_CLAY = {"clay_enrichment"}
 _MULTI_FIELD = {"eight_by_eight"}
-_BROWSER = {"icsource", "netcomponents"}
+_BROWSER = {"icsource", "netcomponents", "thebrokersite"}
 _SCOPES = {"azure_oauth", "teams_notifications"}
 _AI = {"anthropic_ai", "ai_live_web"}
 _MANUAL = {"stock_list_import"}
@@ -28,7 +28,7 @@ _COMMS_CATEGORIES = {"email", "auth", "platform", "notifications", "voip", "comm
 
 # Connectors on the roadmap — built-not-yet. Render as "Planned" cards with no
 # credential form, no enable toggle, and no Test button.
-_PLANNED = {"findchips", "future", "heilind", "lcsc", "rochester", "thebrokersite", "verical"}
+_PLANNED = {"findchips", "future", "heilind", "lcsc", "rochester", "verical"}
 
 
 def is_planned(source) -> bool:

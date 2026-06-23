@@ -406,9 +406,10 @@ def get_workers_status(
     state, today's counts, and queue depth.
     """
     from ...config import settings
-    from ...models import EnrichmentWorkerStatus, IcsWorkerStatus, NcWorkerStatus
+    from ...models import EnrichmentWorkerStatus, IcsWorkerStatus, NcWorkerStatus, TbfWorkerStatus
     from ...services.ics_worker.queue_manager import get_queue_stats as ics_queue_stats
     from ...services.nc_worker.queue_manager import get_queue_stats as nc_queue_stats
+    from ...services.tbf_worker.queue_manager import get_queue_stats as tbf_queue_stats
 
     now = datetime.now(timezone.utc)
     stale_secs = settings.worker_heartbeat_stale_minutes * 60
@@ -443,6 +444,7 @@ def get_workers_status(
         "workers": [
             _worker("ics", db.get(IcsWorkerStatus, 1), ics_queue_stats(db)),
             _worker("netcomponents", db.get(NcWorkerStatus, 1), nc_queue_stats(db)),
+            _worker("thebrokersite", db.get(TbfWorkerStatus, 1), tbf_queue_stats(db)),
             _worker("enrichment", db.get(EnrichmentWorkerStatus, 1)),
         ],
     }

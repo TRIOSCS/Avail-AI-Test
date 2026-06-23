@@ -19,7 +19,7 @@ def test_workers_status_endpoint(client, db_session):
     r = client.get("/api/admin/workers/status")
     assert r.status_code == 200
     data = r.json()
-    assert len(data["workers"]) == 3
+    assert len(data["workers"]) == 4
     by_name = {w["name"]: w for w in data["workers"]}
 
     ics = by_name["ics"]
@@ -32,3 +32,5 @@ def test_workers_status_endpoint(client, db_session):
     # Unseeded singletons report present=False without erroring.
     assert by_name["netcomponents"]["present"] is False
     assert by_name["enrichment"]["present"] is False
+    # The Broker Forum browser-worker is registered (unseeded → present=False).
+    assert by_name["thebrokersite"]["present"] is False
