@@ -102,7 +102,7 @@
         <span class="text-xs text-gray-400 uppercase tracking-wider">Parts:</span>
         {% if is_cross_req %}
         {% for group in requisition_parts_grouped %}
-        <div class="font-medium text-gray-500 text-[10px] uppercase mt-1">REQ-{{ group.req_id }}</div>
+        <div class="font-medium text-gray-500 text-[11px] uppercase mt-1">REQ-{{ group.req_id }}</div>
         <span class="text-xs text-gray-600 ml-1">
           {% for part in group.parts %}{{ part.mpn }} ({{ part.qty }} pcs){{ ', ' if not loop.last else '' }}{% endfor %}
         </span>
