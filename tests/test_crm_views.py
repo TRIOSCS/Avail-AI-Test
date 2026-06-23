@@ -4621,3 +4621,174 @@ class TestCustomerTabDeepLink:
         tab_content_block = re.search(r'id="company-tab-content"[^>]*>', html)
         assert tab_content_block, "company-tab-content div not found"
         assert "hx-trigger" not in tab_content_block.group(0)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TestDispositionFilter — P0-C disposition and has_open_reqs filters
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestDispositionFilter:
+    """Tests for the new disposition and has_open_reqs account-list filters.
+
+    Routes tested:
+      GET /v2/partials/customers/account-list (all filter params)
+    """
+
+    def _make_company(self, db_session: Session, name: str, **kwargs) -> Company:
+        co = Company(name=name, is_active=True, **kwargs)
+        db_session.add(co)
+        db_session.commit()
+        db_session.refresh(co)
+        return co
+
+    def test_disposition_active_excludes_bucket(self, client: TestClient, db_session: Session, test_user: User):
+        """Disposition=active returns active accounts and excludes bucketed ones."""
+        active = self._make_company(db_session, "Active Corp")
+        bucketed = self._make_company(db_session, "Bucket Corp", disposition="bucket")
+
+        html = client.get("/v2/partials/customers/account-list?disposition=active").text
+        assert "Active Corp" in html
+        assert "Bucket Corp" not in html
+
+    def test_disposition_bucket_returns_only_bucketed(self, client: TestClient, db_session: Session, test_user: User):
+        """Disposition=bucket returns only bucketed accounts."""
+        active = self._make_company(db_session, "Active Corp 2")
+        bucketed = self._make_company(db_session, "Bucket Corp 2", disposition="bucket")
+
+        html = client.get("/v2/partials/customers/account-list?disposition=bucket").text
+        assert "Bucket Corp 2" in html
+        assert "Active Corp 2" not in html
+
+    def test_disposition_default_hides_bucketed(self, client: TestClient, db_session: Session, test_user: User):
+        """Default view (no disposition param) still suppresses bucketed accounts."""
+        active = self._make_company(db_session, "Active Corp 3")
+        bucketed = self._make_company(db_session, "Bucket Corp 3", disposition="bucket")
+
+        html = client.get("/v2/partials/customers/account-list").text
+        assert "Active Corp 3" in html
+        assert "Bucket Corp 3" not in html
+
+    def test_disposition_null_treated_as_active(self, client: TestClient, db_session: Session, test_user: User):
+        """Companies with NULL disposition appear under disposition=active (NULL is
+        active)."""
+        null_disp = self._make_company(db_session, "Null Disposition Co")  # disposition=None
+
+        html = client.get("/v2/partials/customers/account-list?disposition=active").text
+        assert "Null Disposition Co" in html
+
+    def test_has_open_reqs_true_returns_only_companies_with_open_reqs(
+        self,
+        client: TestClient,
+        db_session: Session,
+        test_user: User,
+    ):
+        """has_open_reqs=1 returns only companies that have at least one open
+        requisition."""
+        from app.models.sourcing import Requisition
+
+        with_req = self._make_company(db_session, "HasReq Corp")
+        without_req = self._make_company(db_session, "NoReq Corp")
+
+        req = Requisition(
+            name="Open Req",
+            company_id=with_req.id,
+            status="active",
+        )
+        db_session.add(req)
+        db_session.commit()
+
+        html = client.get("/v2/partials/customers/account-list?has_open_reqs=1").text
+        assert "HasReq Corp" in html
+        assert "NoReq Corp" not in html
+
+    def test_has_open_reqs_excludes_terminal_requisitions(
+        self,
+        client: TestClient,
+        db_session: Session,
+        test_user: User,
+    ):
+        """A company whose only requisitions are terminal is excluded by
+        has_open_reqs=1."""
+        from app.models.sourcing import Requisition
+
+        only_terminal = self._make_company(db_session, "TerminalOnly Corp")
+        req = Requisition(
+            name="Won Req",
+            company_id=only_terminal.id,
+            status="won",
+        )
+        db_session.add(req)
+        db_session.commit()
+
+        html = client.get("/v2/partials/customers/account-list?has_open_reqs=1").text
+        assert "TerminalOnly Corp" not in html
+
+    def test_disposition_bucket_composes_with_has_open_reqs(
+        self,
+        client: TestClient,
+        db_session: Session,
+        test_user: User,
+    ):
+        """Disposition=bucket and has_open_reqs=1 compose: only bucketed companies with
+        open reqs."""
+        from app.models.sourcing import Requisition
+
+        bucketed_with_req = self._make_company(db_session, "BucketWithReq Corp", disposition="bucket")
+        bucketed_no_req = self._make_company(db_session, "BucketNoReq Corp", disposition="bucket")
+        req = Requisition(
+            name="Bucket Open Req",
+            company_id=bucketed_with_req.id,
+            status="sourcing",
+        )
+        db_session.add(req)
+        db_session.commit()
+
+        html = client.get("/v2/partials/customers/account-list?disposition=bucket&has_open_reqs=1").text
+        assert "BucketWithReq Corp" in html
+        assert "BucketNoReq Corp" not in html
+
+    def test_has_open_reqs_composes_with_my_only(
+        self,
+        client: TestClient,
+        db_session: Session,
+        test_user: User,
+    ):
+        """has_open_reqs=1 composes with my_only=1."""
+        from app.models.sourcing import Requisition
+
+        mine_with_req = self._make_company(db_session, "MyReq Corp", account_owner_id=test_user.id)
+        other_with_req = self._make_company(db_session, "OtherReq Corp")
+
+        for co in (mine_with_req, other_with_req):
+            req = Requisition(name="Req", company_id=co.id, status="active")
+            db_session.add(req)
+        db_session.commit()
+
+        html = client.get("/v2/partials/customers/account-list?has_open_reqs=1&my_only=1").text
+        assert "MyReq Corp" in html
+        assert "OtherReq Corp" not in html
+
+    def test_disposition_filter_ui_controls_rendered(self, client: TestClient, db_session: Session, test_user: User):
+        """The workspace filter bar renders the disposition select and has_open_reqs
+        checkbox."""
+        resp = client.get("/v2/partials/customers")
+        assert resp.status_code == 200
+        html = resp.text
+        assert 'name="disposition"' in html
+        assert "Bucketed only" in html
+        assert 'name="has_open_reqs"' in html
+
+    def test_disposition_select_reflects_active_state(self, client: TestClient, db_session: Session, test_user: User):
+        """Disposition=active is pre-selected in the dropdown when passed to the
+        workspace."""
+        resp = client.get("/v2/partials/customers?disposition=active")
+        assert resp.status_code == 200
+        assert 'value="active" selected' in resp.text
+
+    def test_has_open_reqs_checkbox_reflects_state(self, client: TestClient, db_session: Session, test_user: User):
+        """has_open_reqs=1 checkbox is pre-checked when passed to the workspace."""
+        resp = client.get("/v2/partials/customers?has_open_reqs=1")
+        assert resp.status_code == 200
+        assert 'name="has_open_reqs"' in resp.text
+        assert "checked" in resp.text

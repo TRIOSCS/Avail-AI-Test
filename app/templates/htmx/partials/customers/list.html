@@ -2,7 +2,7 @@
    Modeled on the requisitions2 split-screen workspace. Default sort puts the
    longest-neglected accounts at the top (call-list order).
    Receives: companies, search, staleness, account_type, my_only, sort, total,
-             limit, offset, overdue_count, account_types.
+             limit, offset, overdue_count, account_types, disposition, has_open_reqs.
    Called by: companies_list_partial route (htmx_views.py).
    Depends on: splitPanel Alpine component (htmx_app.js), _account_list.html,
                _detail_empty.html, brand palette.
@@ -74,6 +74,19 @@
       <input type="checkbox" name="my_only" value="1" {{ "checked" if my_only }}
              class="rounded border-gray-300 text-brand-500 focus:ring-brand-500">
       My accounts
+    </label>
+
+    <select name="disposition" aria-label="Filter by disposition"
+            class="px-2 py-1.5 text-sm border border-gray-200 rounded-lg">
+      <option value="">All accounts</option>
+      <option value="active" {{ "selected" if disposition == "active" }}>Active only</option>
+      <option value="bucket" {{ "selected" if disposition == "bucket" }}>Bucketed only</option>
+    </select>
+
+    <label class="inline-flex items-center gap-1.5 px-2 py-1.5 text-sm text-gray-600 cursor-pointer">
+      <input type="checkbox" name="has_open_reqs" value="1" {{ "checked" if has_open_reqs }}
+             class="rounded border-gray-300 text-brand-500 focus:ring-brand-500">
+      Has open reqs
     </label>
 
     {% if overdue_count %}
