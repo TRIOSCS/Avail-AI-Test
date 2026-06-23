@@ -2579,6 +2579,45 @@ class TestSightingsVendorModal:
         )
 
 
+class TestVendorRowLeadTime:
+    """Item 1: lead_time_days renders on EVERY vendor modal row, not just the
+    contactable non-DNC one. A VendorSightingSummary carries best_lead_time_days,
+    which flows through _coverage_ranked_vendor_rows → SuggestedVendor.lead_time_days.
+    """
+
+    def _requirement(self, db_session, mpn="LT-MPN-1"):
+        req = Requisition(name="Lead-time RFQ", status="active", customer_name="LT Co")
+        db_session.add(req)
+        db_session.flush()
+        r = Requirement(requisition_id=req.id, primary_mpn=mpn, target_qty=10, sourcing_status="open")
+        db_session.add(r)
+        db_session.flush()
+        return r
+
+    def test_lead_time_on_no_contact_row(self, client, db_session):
+        """A cardless coverage row (no VendorCard → "no contact on file") still shows
+        its lead time.
+
+        Before Item 1 the no-contact branch had NO lead_time display.
+        """
+        r = self._requirement(db_session)
+        db_session.add(
+            VendorSightingSummary(
+                requirement_id=r.id,
+                vendor_name="Cardless Lead Vendor",
+                listing_count=1,
+                score=50.0,
+                best_lead_time_days=14,
+            )
+        )
+        db_session.commit()
+        resp = client.get(f"/v2/partials/sightings/vendor-modal?requirement_ids={r.id}")
+        assert resp.status_code == 200
+        assert "Cardless Lead Vendor" in resp.text
+        assert "no contact on file" in resp.text  # confirms the no-contact branch rendered
+        assert "14d lead" in resp.text
+
+
 class TestSightingsBatchLimit:
     def test_batch_refresh_over_limit_returns_400(self, client, db_session):
         ids = list(range(1, 52))  # 51 items, over the 50 limit
