@@ -252,3 +252,52 @@ def test_submit_offer_missing_list_404(db_session: Session):
     with pytest.raises(HTTPException) as exc:
         submit_offer(db_session, list_id=999999, user=offerer, scope="take_all")
     assert exc.value.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# COLLECTING status wiring (Chunk D)
+# ---------------------------------------------------------------------------
+
+
+def test_open_list_flips_to_collecting_on_first_offer(db_session: Session):
+    """An OPEN list flips to COLLECTING when the first offer lands (take_all)."""
+    from app.constants import ExcessListStatus
+
+    company = _make_company(db_session, name="SellerCo-Collecting")
+    owner = _make_user(db_session, email="owner-coll@test.com", role="sales")
+    offerer = _make_user(db_session, email="buyer-coll@test.com", role="buyer")
+    el = _make_list_with_lines(db_session, owner, company, ["LM358N"])
+
+    # Manually flip to OPEN to simulate a published list (DRAFT → OPEN via publish endpoint).
+    el.status = ExcessListStatus.OPEN
+    db_session.commit()
+    db_session.refresh(el)
+    assert el.status == ExcessListStatus.OPEN
+
+    submit_offer(db_session, list_id=el.id, user=offerer, scope="take_all")
+
+    db_session.refresh(el)
+    assert el.status == ExcessListStatus.COLLECTING
+
+
+def test_collecting_list_stays_collecting_on_subsequent_offer(db_session: Session):
+    """A list already in COLLECTING stays in COLLECTING (idempotent flip)."""
+    from app.constants import ExcessListStatus
+
+    company = _make_company(db_session, name="SellerCo-Coll2")
+    owner = _make_user(db_session, email="owner-coll2@test.com", role="sales")
+    offerer1 = _make_user(db_session, email="buyer-coll2a@test.com", role="buyer")
+    offerer2 = _make_user(db_session, email="buyer-coll2b@test.com", role="buyer")
+    el = _make_list_with_lines(db_session, owner, company, ["MAX232"])
+
+    el.status = ExcessListStatus.OPEN
+    db_session.commit()
+
+    submit_offer(db_session, list_id=el.id, user=offerer1, scope="take_all")
+    db_session.refresh(el)
+    assert el.status == ExcessListStatus.COLLECTING
+
+    # Second offer — status stays COLLECTING (not re-flipped to something else).
+    submit_offer(db_session, list_id=el.id, user=offerer2, scope="take_all")
+    db_session.refresh(el)
+    assert el.status == ExcessListStatus.COLLECTING

@@ -54,7 +54,7 @@ _POSTED_STATUSES = (
     ExcessListStatus.AWARDED,
 )
 # Offer statuses that count as a live, unactioned offer (triage glance).
-_ACTIVE_OFFER_STATUSES = (ExcessOfferStatus.OPEN, ExcessOfferStatus.LATE)
+_UNACTIONED_OFFER_STATUSES = (ExcessOfferStatus.OPEN, ExcessOfferStatus.LATE)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -99,7 +99,7 @@ def _list_card(db: Session, el: ExcessList, *, can_see_customer: bool) -> dict:
         db.query(func.count(ExcessOffer.id))
         .filter(
             ExcessOffer.excess_list_id == el.id,
-            ExcessOffer.status.in_([s.value for s in _ACTIVE_OFFER_STATUSES]),
+            ExcessOffer.status.in_([s.value for s in _UNACTIONED_OFFER_STATUSES]),
         )
         .scalar()
         or 0
@@ -151,7 +151,7 @@ def _stat_strip(db: Session, user: User) -> dict:
         db.query(func.count(ExcessOffer.id))
         .filter(
             ExcessOffer.excess_list_id.in_(owned.select()),
-            ExcessOffer.status.in_([s.value for s in _ACTIVE_OFFER_STATUSES]),
+            ExcessOffer.status.in_([s.value for s in _UNACTIONED_OFFER_STATUSES]),
         )
         .scalar()
         or 0
@@ -161,7 +161,7 @@ def _stat_strip(db: Session, user: User) -> dict:
         .filter(
             ExcessOffer.excess_list_id.in_(owned.select()),
             ExcessOffer.scope == ExcessOfferScope.TAKE_ALL,
-            ExcessOffer.status.in_([s.value for s in _ACTIVE_OFFER_STATUSES]),
+            ExcessOffer.status.in_([s.value for s in _UNACTIONED_OFFER_STATUSES]),
         )
         .scalar()
         or 0
@@ -214,7 +214,7 @@ def _detail_context(request: Request, db: Session, el: ExcessList, user: User) -
         .filter(
             ExcessOffer.excess_list_id == el.id,
             ExcessOffer.scope == ExcessOfferScope.TAKE_ALL,
-            ExcessOffer.status.in_([s.value for s in _ACTIVE_OFFER_STATUSES]),
+            ExcessOffer.status.in_([s.value for s in _UNACTIONED_OFFER_STATUSES]),
         )
         .scalar()
         or 0
@@ -621,8 +621,11 @@ async def trading_add_line_form(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Render the add-line modal."""
-    excess_service.get_excess_list(db, list_id)
+    """Render the add-line modal (draft lists only)."""
+    el, _ = _get_list_for_user(db, list_id, user)
+    _require_owner(el, user)
+    if el.status != ExcessListStatus.DRAFT:
+        raise HTTPException(409, "Posted lists are locked; revise as a new version")
     return template_response(
         "htmx/partials/trading/add_line_modal.html",
         {"request": request, "list_id": list_id},
@@ -689,6 +692,8 @@ async def trading_add_line(
     """Add a single line, resolve its MaterialCard, re-render the Lines tab."""
     el = excess_service.get_excess_list(db, list_id)
     _require_owner(el, user)
+    if el.status != ExcessListStatus.DRAFT:
+        raise HTTPException(409, "Posted lists are locked; revise as a new version")
     if not excess_service.can_post(user):
         raise HTTPException(403, "You do not have permission to post excess lists")
     from ..utils.normalization import normalize_mpn_key
@@ -756,6 +761,8 @@ async def trading_import_confirm(
     """Confirm a previewed import, then re-render the Lines tab."""
     el = excess_service.get_excess_list(db, list_id)
     _require_owner(el, user)
+    if el.status != ExcessListStatus.DRAFT:
+        raise HTTPException(409, "Posted lists are locked; revise as a new version")
     if not excess_service.can_post(user):
         raise HTTPException(403, "You do not have permission to post excess lists")
     try:

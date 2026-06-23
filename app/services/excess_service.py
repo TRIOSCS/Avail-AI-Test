@@ -413,7 +413,7 @@ def confirm_import(db: Session, list_id: int, validated_rows: list[dict]) -> dic
 # (spec §"Offer collection").
 
 # Offer statuses whose lines count toward a line's best-price rollup (active states).
-_ACTIVE_OFFER_STATUSES = (ExcessOfferStatus.OPEN, ExcessOfferStatus.WON)
+_ROLLUP_OFFER_STATUSES = (ExcessOfferStatus.OPEN, ExcessOfferStatus.WON)
 
 
 def submit_offer(
@@ -508,6 +508,10 @@ def submit_offer(
     for line_item_id in affected_line_item_ids:
         recompute_line_rollup(db, line_item_id)
 
+    # Any first offer on an OPEN list signals active collection — flip to COLLECTING.
+    if excess_list.status == ExcessListStatus.OPEN:
+        excess_list.status = ExcessListStatus.COLLECTING
+
     _safe_commit(db, entity="excess offer")
     db.refresh(offer)
     logger.info(
@@ -541,7 +545,7 @@ def recompute_line_rollup(db: Session, excess_line_item_id: int) -> None:
         .join(ExcessOffer, ExcessOfferLine.offer_id == ExcessOffer.id)
         .filter(
             ExcessOfferLine.excess_line_item_id == excess_line_item_id,
-            ExcessOffer.status.in_([s.value for s in _ACTIVE_OFFER_STATUSES]),
+            ExcessOffer.status.in_([s.value for s in _ROLLUP_OFFER_STATUSES]),
         )
         .all()
     )

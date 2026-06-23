@@ -92,8 +92,6 @@ class ExcessLineItemResponse(BaseModel):
     date_code: str | None = None
     condition: str | None = None
     asking_price: float | None = None
-    market_price: float | None = None
-    demand_score: int | None = None
     demand_match_count: int = 0
     status: str
     notes: str | None = None

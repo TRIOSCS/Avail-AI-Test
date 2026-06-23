@@ -268,20 +268,21 @@ def test_create_list(client, db_session, trader_user, test_company):
         app.dependency_overrides.pop(require_user, None)
 
 
-def test_add_line_renders_lines(client, db_session, trader_user, posted_list):
-    """Adding a line returns the re-rendered Lines tab and persists the line."""
+def test_add_line_renders_lines(client, db_session, trader_user, draft_list):
+    """Adding a line to a DRAFT list returns the re-rendered Lines tab and persists the
+    line."""
     from app.dependencies import require_user
     from app.main import app
 
     app.dependency_overrides[require_user] = lambda: trader_user
     try:
-        before = db_session.query(ExcessLineItem).filter_by(excess_list_id=posted_list.id).count()
+        before = db_session.query(ExcessLineItem).filter_by(excess_list_id=draft_list.id).count()
         resp = client.post(
-            f"/api/trading/{posted_list.id}/lines",
+            f"/api/trading/{draft_list.id}/lines",
             data={"part_number": "LM358N", "quantity": "500", "manufacturer": "TI", "condition": "New"},
         )
         assert resp.status_code == 200
-        after = db_session.query(ExcessLineItem).filter_by(excess_list_id=posted_list.id).count()
+        after = db_session.query(ExcessLineItem).filter_by(excess_list_id=draft_list.id).count()
         assert after == before + 1
         assert "compact-table" in resp.text
     finally:
@@ -577,5 +578,63 @@ def test_close_endpoint_owner_only(client, db_session, trader_user, posted_list,
         db_session.refresh(posted_list)
         assert posted_list.status == ExcessListStatus.BID_OUT
         assert posted_list.close_at is not None
+    finally:
+        app.dependency_overrides.pop(require_user, None)
+
+
+# ── Lock-on-post guard tests (Chunk D) ───────────────────────────────
+
+
+def test_add_line_to_posted_list_returns_409(client, db_session, trader_user, posted_list):
+    """Owner POST add-line to a posted (non-DRAFT) list → 409 lock guard."""
+    from app.dependencies import require_user
+    from app.main import app
+
+    assert posted_list.status != ExcessListStatus.DRAFT  # posted_list is COLLECTING
+
+    app.dependency_overrides[require_user] = lambda: trader_user
+    try:
+        resp = client.post(
+            f"/api/trading/{posted_list.id}/lines",
+            data={"part_number": "LOCK-TEST-001", "quantity": "10"},
+        )
+        assert resp.status_code == 409
+    finally:
+        app.dependency_overrides.pop(require_user, None)
+
+
+def test_add_line_to_draft_list_works(client, db_session, trader_user, draft_list):
+    """Owner POST add-line to a DRAFT list → 200 (lock guard does not block)."""
+    from app.dependencies import require_user
+    from app.main import app
+
+    assert draft_list.status == ExcessListStatus.DRAFT
+
+    app.dependency_overrides[require_user] = lambda: trader_user
+    try:
+        before = db_session.query(ExcessLineItem).filter_by(excess_list_id=draft_list.id).count()
+        resp = client.post(
+            f"/api/trading/{draft_list.id}/lines",
+            data={"part_number": "DRAFT-ADD-002", "quantity": "5"},
+        )
+        assert resp.status_code == 200
+        after = db_session.query(ExcessLineItem).filter_by(excess_list_id=draft_list.id).count()
+        assert after == before + 1
+    finally:
+        app.dependency_overrides.pop(require_user, None)
+
+
+def test_import_confirm_to_posted_list_returns_409(client, db_session, trader_user, posted_list):
+    """Owner POST import-confirm to a posted list → 409 lock guard."""
+    from app.dependencies import require_user
+    from app.main import app
+
+    app.dependency_overrides[require_user] = lambda: trader_user
+    try:
+        resp = client.post(
+            f"/api/trading/{posted_list.id}/import-confirm",
+            data={"rows_json": json.dumps([{"part_number": "HACK-003", "quantity": 1}])},
+        )
+        assert resp.status_code == 409
     finally:
         app.dependency_overrides.pop(require_user, None)
