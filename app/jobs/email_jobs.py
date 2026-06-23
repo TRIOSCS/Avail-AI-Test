@@ -12,7 +12,6 @@ Includes:
 """
 
 import asyncio
-import re
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 
@@ -410,7 +409,6 @@ async def _scan_user_inbox(user, db):
         ("stock_scan", lambda: _scan_stock_list_attachments(user, db, is_backfill)),
         ("mine_contacts", lambda: _mine_vendor_contacts(user, db, is_backfill)),
         ("outbound_scan", lambda: _scan_outbound_rfqs(user, db, is_backfill)),
-        ("excess_bid_scan", lambda: _scan_excess_bid_responses(user, db)),
     ]
     sub_op_failures: list[str] = []
     for name, fn in sub_ops:
@@ -426,87 +424,6 @@ async def _scan_user_inbox(user, db):
     if poll_succeeded:
         user.last_inbox_scan = datetime.now(timezone.utc)
         db.commit()
-
-
-# ── Excess Bid Response Scanning ────────────────────────────────────────
-
-
-async def _scan_excess_bid_responses(user, db):
-    """Scan inbox for replies to excess bid solicitations.
-
-    Called by: _scan_user_inbox (scheduler, every 30 min)
-    Depends on: GraphClient, BidSolicitation, parse_bid_from_email
-    """
-    from ..config import settings
-    from ..models.excess import BidSolicitation
-    from ..services.excess_service import parse_bid_from_email
-    from ..utils.graph_client import GraphClient
-    from ..utils.token_manager import get_valid_token
-
-    if not settings.excess_bid_scan_enabled:
-        return
-
-    cutoff = datetime.now(timezone.utc) - timedelta(days=settings.excess_bid_parse_lookback_days)
-    pending = (
-        db.query(BidSolicitation.id)
-        .filter(
-            BidSolicitation.sent_by == user.id,
-            BidSolicitation.status == "sent",
-            BidSolicitation.sent_at >= cutoff,
-        )
-        .count()
-    )
-    if not pending:
-        return
-
-    token = await get_valid_token(user, db)
-    if not token:
-        return
-
-    gc = GraphClient(token)
-
-    try:
-        result = await gc.get_json(
-            "/me/messages",
-            params={
-                "$filter": "contains(subject, '[EXCESS-BID-')",
-                "$top": "50",
-                "$select": "subject,body,receivedDateTime",
-                "$orderby": "receivedDateTime desc",
-            },
-        )
-    except Exception as e:
-        logger.error("Graph inbox search failed for excess bids ({}): {}", user.email, e)
-        return
-
-    messages = result.get("value", [])
-    parsed_count = 0
-
-    for msg in messages:
-        subject = msg.get("subject", "")
-        match = _EXCESS_BID_RE.search(subject)
-        if not match:
-            continue
-
-        solicitation_id = int(match.group(1))
-        solicitation = db.get(BidSolicitation, solicitation_id)
-        if not solicitation or solicitation.status != "sent":
-            continue
-
-        body_content = msg.get("body", {}).get("content", "")
-        if not body_content:
-            continue
-
-        try:
-            bid = await parse_bid_from_email(db, solicitation_id, body_content)
-            if bid:
-                parsed_count += 1
-                logger.info("Auto-parsed bid for solicitation {} from inbox", solicitation_id)
-        except Exception as e:
-            logger.warning("Failed to parse bid for solicitation {}: {}", solicitation_id, e)
-
-    if parsed_count:
-        logger.info("Parsed {} excess bid responses from inbox for {}", parsed_count, user.email)
 
 
 # ── Vendor Contact Mining ───────────────────────────────────────────────
@@ -766,9 +683,6 @@ async def _sync_user_contacts(user, db):
 
 
 # ── Sent Folder Scanning ─────────────────────────────────────────────────
-
-# Regex to extract solicitation ID from [EXCESS-BID-123] tags in bid reply subjects
-_EXCESS_BID_RE = re.compile(r"\[EXCESS-BID-(\d+)\]")
 
 
 @_traced_job

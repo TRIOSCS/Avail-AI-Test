@@ -556,7 +556,6 @@ from .routers.crm import router as crm_router
 from .routers.documents import router as documents_router
 from .routers.error_reports import router as error_reports_router
 from .routers.events import router as events_router
-from .routers.excess import router as excess_router
 from .routers.htmx_views import router as htmx_views_router
 from .routers.materials import router as materials_router
 from .routers.part_dossier import router as part_dossier_router
@@ -582,7 +581,6 @@ app.include_router(activity_router)
 app.include_router(crm_router)
 app.include_router(documents_router)
 app.include_router(events_router)
-app.include_router(excess_router)
 app.include_router(error_reports_router)
 app.include_router(materials_router)
 app.include_router(part_dossier_router)
