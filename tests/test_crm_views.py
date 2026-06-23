@@ -2507,19 +2507,29 @@ class TestEditContact:
         return company, site, contact
 
     def test_get_contact_edit_form_returns_200(self, client: TestClient, db_session: Session, test_user: User):
-        """GET edit-form renders form pre-populated with contact fields."""
+        """GET edit-form renders form pre-populated with contact fields (company-scoped
+        route)."""
         company, site, contact = self._make_company_with_contact(db_session)
-        resp = client.get(f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit-form")
+        # Company-scoped route (no site_id): replaces the retired site-scoped route.
+        resp = client.get(f"/v2/partials/customers/{company.id}/contacts/{contact.id}/edit-form")
         assert resp.status_code == 200
         assert "Alice Smith" in resp.text
         assert "alice@editco.com" in resp.text
+
+    def test_get_contact_edit_form_site_scoped_route_retired(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """The site-scoped edit-form GET route is retired → 404."""
+        company, site, contact = self._make_company_with_contact(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit-form")
+        assert resp.status_code == 404
 
     def test_get_contact_edit_form_404_on_missing_contact(
         self, client: TestClient, db_session: Session, test_user: User
     ):
         """GET edit-form for nonexistent contact returns 404."""
         company, site, _ = self._make_company_with_contact(db_session)
-        resp = client.get(f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/99999/edit-form")
+        resp = client.get(f"/v2/partials/customers/{company.id}/contacts/99999/edit-form")
         assert resp.status_code == 404
 
     def test_post_contact_edit_persists_title_and_phone(self, client: TestClient, db_session: Session, test_user: User):

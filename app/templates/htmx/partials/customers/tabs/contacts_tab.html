@@ -31,7 +31,8 @@
 
 {% set _multi_site = active_sites is defined and active_sites and active_sites|length > 1 %}
 
-<div x-data="contactsView">
+<div x-data="contactsView"
+     {% if preselect_site_id is defined and preselect_site_id %}data-initial-site="{{ preselect_site_id }}"{% endif %}>
 
   {# ── Controls bar — people-search · site filter · Find / + Add Contact ──────── #}
   <div class="bg-white rounded-lg border border-gray-200 p-3">
@@ -78,8 +79,8 @@
       </div>
     </div>
     {# "No matches" hint — shown by filterContacts() when the live filter empties the list. #}
-    <p data-contacts-empty class="hidden mt-2 text-xs text-gray-600" x-cloak>
-      No people match <span class="font-medium" x-text="q ? '“' + q + '”' : 'this site'"></span>. Clear the filter to see all.
+    <p data-contacts-empty class=”hidden mt-2 text-xs text-gray-600” x-cloak>
+      No people match <span class=”font-medium” x-text=”q ? '&quot;' + q + '&quot;' : 'this site'”></span>. Clear the filter to see all.
     </p>
   </div>
 
