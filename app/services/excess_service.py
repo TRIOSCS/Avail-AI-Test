@@ -17,8 +17,14 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from ..constants import ActivityType, BidSolicitationStatus, BidStatus, ExcessLineItemStatus
-from ..models import Company, CustomerSite
+from ..constants import (
+    ActivityType,
+    BidSolicitationStatus,
+    BidStatus,
+    ExcessLineItemStatus,
+    UserRole,
+)
+from ..models import Company, CustomerSite, User
 from ..models.excess import Bid, BidSolicitation, ExcessLineItem, ExcessList
 from ..models.intelligence import ProactiveMatch
 from ..models.offers import Offer
@@ -27,6 +33,32 @@ from ..utils.normalization import normalize_mpn_key
 from .activity_service import log_activity
 
 _ACTIVE_REQ_STATUSES = {"active", "open", "sourcing"}
+
+
+# ---------------------------------------------------------------------------
+# Trading capabilities — role-derived powers (spec §"Roles & capabilities")
+# ---------------------------------------------------------------------------
+#
+# Two powers modelled as capabilities (NOT scattered ``role == 'trader'`` checks),
+# mirroring dependencies.BUYER_ROLES/has_buyer_role:
+#   can_post  = sell-side intake & posting → sales + trader (admin/manager too).
+#   can_offer = buy-side offers on a posting → buyer + trader (admin/manager too).
+# Traders are on both sides — the primary users of this module. AGENT (the
+# non-interactive service account) holds neither, matching require_buyer.
+
+_CAN_POST_ROLES = frozenset({UserRole.SALES, UserRole.TRADER, UserRole.MANAGER, UserRole.ADMIN})
+_CAN_OFFER_ROLES = frozenset({UserRole.BUYER, UserRole.TRADER, UserRole.MANAGER, UserRole.ADMIN})
+
+
+def can_post(user: User | None) -> bool:
+    """True when *user* may intake/post an excess list (sales + traders)."""
+    return user is not None and user.role in _CAN_POST_ROLES
+
+
+def can_offer(user: User | None) -> bool:
+    """True when *user* may submit an offer on a posting (buyers + traders)."""
+    return user is not None and user.role in _CAN_OFFER_ROLES
+
 
 # ---------------------------------------------------------------------------
 # Header aliases for flexible CSV/Excel import
