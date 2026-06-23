@@ -145,14 +145,12 @@ async def mine_unknown_domains(
 async def enrich_email_domains(
     domains: list[dict],
     enrich_fn=None,
-    apollo_enrich_fn=None,
 ) -> list[ProspectAccountCreate]:
-    """Enrich unknown domains with company data from Explorium or Apollo.
+    """Enrich unknown domains with company data from Explorium.
 
     Args:
         domains: list of {domain, email_count, sample_senders}
         enrich_fn: async function(domain) -> dict|None (Explorium match-business)
-        apollo_enrich_fn: async function(domain) -> dict|None (Apollo fallback)
 
     Returns list of ProspectAccountCreate schemas.
     """
@@ -162,14 +160,11 @@ async def enrich_email_domains(
         domain = d_info["domain"]
         company_data = None
 
-        # Try primary enrichment (Explorium), then fall back to Apollo.
-        for source, fn in (("Explorium", enrich_fn), ("Apollo", apollo_enrich_fn)):
-            if company_data or not fn:
-                continue
+        if enrich_fn:
             try:
-                company_data = await fn(domain)
+                company_data = await enrich_fn(domain)
             except Exception as e:
-                logger.warning("{} enrich failed for {}: {}", source, domain, e)
+                logger.warning("Explorium enrich failed for {}: {}", domain, e)
 
         if not company_data:
             logger.debug("Skip {}: no enrichment data available", domain)
@@ -221,7 +216,6 @@ async def run_email_mining_batch(
     graph_client,
     db: Session,
     enrich_fn=None,
-    apollo_enrich_fn=None,
     days_back: int = 90,
 ) -> list[ProspectAccountCreate]:
     """Full email mining pipeline: scan -> enrich -> dedup -> score.
@@ -231,7 +225,6 @@ async def run_email_mining_batch(
         graph_client: Graph API client
         db: database session
         enrich_fn: Explorium enrichment function
-        apollo_enrich_fn: Apollo enrichment fallback
         days_back: inbox lookback period
     """
     logger.info("Starting email mining batch: {}", batch_id)
@@ -244,11 +237,7 @@ async def run_email_mining_batch(
         return []
 
     # Step 2: Enrich
-    prospects = await enrich_email_domains(
-        domains,
-        enrich_fn=enrich_fn,
-        apollo_enrich_fn=apollo_enrich_fn,
-    )
+    prospects = await enrich_email_domains(domains, enrich_fn=enrich_fn)
 
     logger.info(
         "Email mining batch {}: {} domains mined, {} prospects created",

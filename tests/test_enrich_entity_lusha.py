@@ -1,6 +1,6 @@
 """Tests for enrich_entity and find_suggested_contacts under the new router+blend arch.
 
-The old fixed waterfall (Explorium→Lusha→Apollo→AI) is replaced by enrichment_router
+The old fixed waterfall (Explorium→Lusha→AI) is replaced by enrichment_router
 which handles provider selection + circuit-breaking internally.  These tests verify:
  - Lusha results blend with other providers by authority (not just gap-fill)
  - Lusha quota trips the circuit inside enrichment_router (via the module-level wrappers)
@@ -125,7 +125,6 @@ async def test_lusha_quota_inside_router_trips_circuit(monkeypatch):
     with patch("app.services.enrichment_router.get_credential_cached", return_value="lusha-key"):
         # Other providers return nothing so circuit trip is the only interesting thing
         monkeypatch.setattr(enrichment_router, "_sam_company", AsyncMock(return_value=None))
-        monkeypatch.setattr(enrichment_router, "_apollo_company", AsyncMock(return_value=None))
         monkeypatch.setattr(enrichment_router, "_clay_company", AsyncMock(return_value=None))
         monkeypatch.setattr(enrichment_router, "_explorium_company", AsyncMock(return_value=None))
         monkeypatch.setattr(enrichment_router, "_ai_company", AsyncMock(return_value=None))
@@ -146,7 +145,7 @@ async def test_lusha_disabled_router_still_runs(monkeypatch):
 
     async def recording_gather(domain, name=""):
         router_calls.append(domain)
-        return [{"source": "apollo", "industry": "Tech"}]
+        return [{"source": "explorium", "industry": "Tech"}]
 
     monkeypatch.setattr(enrichment_router, "gather_company", recording_gather)
 
@@ -221,13 +220,13 @@ async def test_explorium_disabled_by_default(monkeypatch):
     monkeypatch.setattr("app.cache.intel_cache.set_cached", lambda *a, **k: None)
 
     async def fake_gather(domain, name=""):
-        # Router should NOT include explorium when disabled
-        return [{"source": "apollo", "industry": "Tech"}]
+        # Router should NOT include explorium when disabled; clay result still blends
+        return [{"source": "clay", "industry": "Tech"}]
 
     monkeypatch.setattr(enrichment_router, "gather_company", fake_gather)
 
     out = await es.enrich_entity("acme.com", "Acme")
-    # Apollo result still blended normally
+    # Remaining-provider result still blended normally
     assert out["industry"] == "Tech"
 
 
@@ -255,7 +254,6 @@ async def test_explorium_quota_trips_circuit_via_router(monkeypatch):
 
     with patch("app.services.enrichment_router.get_credential_cached", return_value="exp-key"):
         monkeypatch.setattr(enrichment_router, "_sam_company", AsyncMock(return_value=None))
-        monkeypatch.setattr(enrichment_router, "_apollo_company", AsyncMock(return_value=None))
         monkeypatch.setattr(enrichment_router, "_clay_company", AsyncMock(return_value=None))
         monkeypatch.setattr(enrichment_router, "_ai_company", AsyncMock(return_value=None))
 

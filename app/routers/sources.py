@@ -122,7 +122,6 @@ def _get_connector_for_source(name: str, db: Session = None):
     test_connector = {
         "anthropic_ai": _AnthropicTestConnector,
         "teams_notifications": _TeamsTestConnector,
-        "apollo_enrichment": _ApolloTestConnector,
         "lusha_enrichment": _LushaTestConnector,
         "explorium_enrichment": _ExploriumTestConnector,
         "azure_oauth": _AzureOAuthTestConnector,
@@ -196,27 +195,6 @@ class _TeamsTestConnector:
         if resp.status_code not in (200, 202):
             raise ValueError(f"Teams webhook returned {resp.status_code}: {resp.text[:200]}")
         return [{"vendor_name": "Teams", "mpn_matched": "Message posted", "status": "ok"}]
-
-
-class _ApolloTestConnector:
-    """Test Apollo API key with a search query."""
-
-    async def search(self, mpn: str) -> list[dict]:
-        from ..http_client import http
-
-        api_key = get_credential_cached("apollo_enrichment", "APOLLO_API_KEY")
-        if not api_key:
-            raise ValueError("APOLLO_API_KEY not configured")
-        resp = await http.post(
-            "https://api.apollo.io/v1/mixed_people/api_search",
-            headers={"Content-Type": "application/json", "X-Api-Key": api_key},
-            json={"q_organization_domains": ["anthropic.com"], "page": 1, "per_page": 1},
-            timeout=15,
-        )
-        if resp.status_code != 200:
-            raise ValueError(f"Apollo API returned {resp.status_code}: {resp.text[:200]}")
-        count = len(resp.json().get("people", []))
-        return [{"vendor_name": "Apollo", "mpn_matched": f"Search OK — {count} result(s)", "status": "ok"}]
 
 
 class _LushaTestConnector:

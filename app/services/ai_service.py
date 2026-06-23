@@ -1,7 +1,7 @@
 """AI Service — All intelligence features live here.
 
 Definitive Spec Features:
-  1. Contact Enrichment (Apollo + Claude web search fallback)
+  1. Contact Enrichment (Claude web search)
   2. Vendor Reply → Structured Offers (delegates to response_parser)
   3. Company Intelligence Cards (Claude + web search, cached 7 days)
   4. Smart RFQ Email Drafts (personalized with vendor history)
@@ -71,7 +71,7 @@ async def enrich_contacts_websearch(
 ) -> list[dict]:
     """Find contacts at a company using Claude + web search.
 
-    Tier 2 fallback when Apollo has gaps. Lower confidence than Apollo.
+    Web-search contact discovery; lower confidence than metered providers.
 
     Returns list of {full_name, title, email, phone, linkedin_url, confidence, source}.
     """

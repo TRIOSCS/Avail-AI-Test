@@ -588,7 +588,7 @@ async def find_suggested_contacts_with_errors(
     from .services import enrichment_router as er
 
     # Metered contact providers that gather_contacts may trip on ProviderQuotaError.
-    _metered: tuple[str, ...] = ("apollo", "clay", "lusha", "explorium")
+    _metered: tuple[str, ...] = ("clay", "lusha", "explorium")
 
     # Snapshot closed circuits before the gather so we can detect newly-tripped ones.
     before: frozenset[str] = frozenset(p for p in _metered if not er.circuit_open(p))

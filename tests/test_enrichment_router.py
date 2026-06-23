@@ -1,10 +1,10 @@
 """Tests for app/services/enrichment_router.py and app/connectors/sam_gov_company.py.
 
 Verifies:
-- Free providers (SAM.gov + Apollo) always run first.
-- Metered providers (Clay, Explorium, Lusha) are skipped when free providers fill all
+- The free provider (SAM.gov) always runs first.
+- Metered providers (Clay, Explorium, Lusha) are skipped when the free provider fills all
   _GAP_FIELDS (gap-gating).
-- Metered providers run in cost order when gaps remain.
+- Metered providers run in cost order (Clay → Explorium → Lusha) when gaps remain.
 - circuit_open blocks a provider without calling it.
 - ProviderQuotaError trips the circuit and is swallowed (never propagates out of gather_*).
 - gather_contacts runs cheap providers concurrently; escalates to Lusha/Explorium when
@@ -24,10 +24,10 @@ from app.services import enrichment_router as er
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 
-def _full_apollo_result():
-    """Apollo payload that fills every _GAP_FIELDS entry."""
+def _full_company_result():
+    """Free-provider (SAM.gov) payload that fills every _GAP_FIELDS entry."""
     return {
-        "source": "apollo",
+        "source": "sam_gov",
         "legal_name": "Arrow Inc",
         "industry": "Wholesale",
         "employee_size": "10001+",
@@ -45,16 +45,12 @@ def _full_apollo_result():
 
 @pytest.mark.asyncio
 async def test_company_order_free_then_metered_and_gap_gates(monkeypatch):
-    """SAM then Apollo run; all gaps filled → Clay/Explorium/Lusha/AI skipped."""
+    """Free SAM fills all gaps → Clay/Explorium/Lusha/AI skipped (gap-gated)."""
     calls = []
 
     async def sam(d, n):
         calls.append("sam")
-        return {"source": "sam_gov", "legal_name": "Arrow Inc"}
-
-    async def apollo(d, n):
-        calls.append("apollo")
-        return _full_apollo_result()
+        return _full_company_result()
 
     async def clay(d):
         calls.append("clay")
@@ -69,7 +65,6 @@ async def test_company_order_free_then_metered_and_gap_gates(monkeypatch):
         return None
 
     monkeypatch.setattr(er, "_sam_company", sam)
-    monkeypatch.setattr(er, "_apollo_company", apollo)
     monkeypatch.setattr(er, "_clay_company", clay)
     monkeypatch.setattr(er, "_explorium_company", expl)
     monkeypatch.setattr(er, "_lusha_company", ai)  # reuse no-op
@@ -82,29 +77,26 @@ async def test_company_order_free_then_metered_and_gap_gates(monkeypatch):
 
     results = await er.gather_company("arrow.com", "Arrow")
 
+    # Free provider runs first and fills every gap
     assert calls[0] == "sam"
-    assert calls[1] == "apollo"
-    # metered providers gap-gated out
-    assert "explorium" not in calls
+    # metered providers + AI gap-gated out
     assert "clay" not in calls
-    assert "ai" not in calls
+    assert "explorium" not in calls
     assert "lusha" not in calls
-    assert len(results) == 2
+    assert "ai" not in calls
+    assert len(results) == 1
 
 
 @pytest.mark.asyncio
 async def test_company_gaps_trigger_metered_providers(monkeypatch):
-    """When SAM+Apollo leave gaps, Clay should be called."""
+    """When the free SAM provider leaves gaps, metered providers run in cost order (Clay
+    first, then Explorium while gaps remain)."""
     calls = []
 
     async def sam(d, n):
         calls.append("sam")
         # Only fills legal_name — many gaps remain
         return {"source": "sam_gov", "legal_name": "Arrow Inc"}
-
-    async def apollo(d, n):
-        calls.append("apollo")
-        return None
 
     async def clay(d):
         calls.append("clay")
@@ -123,7 +115,6 @@ async def test_company_gaps_trigger_metered_providers(monkeypatch):
         return None
 
     monkeypatch.setattr(er, "_sam_company", sam)
-    monkeypatch.setattr(er, "_apollo_company", apollo)
     monkeypatch.setattr(er, "_clay_company", clay)
     monkeypatch.setattr(er, "_explorium_company", expl)
     monkeypatch.setattr(er, "_lusha_company", lusha)
@@ -138,11 +129,14 @@ async def test_company_gaps_trigger_metered_providers(monkeypatch):
 
     results = await er.gather_company("arrow.com", "Arrow")
 
-    assert "sam" in calls
-    assert "apollo" in calls
+    # Free provider runs first
+    assert calls[0] == "sam"
+    # Clay is the first metered provider, called before Explorium (cost order)
     assert "clay" in calls
-    # Clay returned a result; still many gaps → explorium also runs
+    # Clay returned a result; still many gaps → explorium also runs (next in cost order)
     assert "explorium" in calls
+    assert calls.index("clay") < calls.index("explorium")
+    assert len(results) == 2  # sam + clay both contributed
 
 
 @pytest.mark.asyncio
@@ -154,10 +148,6 @@ async def test_company_circuit_open_skips_provider(monkeypatch):
         calls.append("sam")
         return None
 
-    async def apollo(d, n):
-        calls.append("apollo")
-        return None
-
     async def clay(d):
         calls.append("clay")
         return None
@@ -166,7 +156,6 @@ async def test_company_circuit_open_skips_provider(monkeypatch):
         return None
 
     monkeypatch.setattr(er, "_sam_company", sam)
-    monkeypatch.setattr(er, "_apollo_company", apollo)
     monkeypatch.setattr(er, "_clay_company", clay)
     monkeypatch.setattr(er, "_explorium_company", noop)
     monkeypatch.setattr(er, "_lusha_company", noop)
@@ -181,81 +170,78 @@ async def test_company_circuit_open_skips_provider(monkeypatch):
 
     await er.gather_company("example.com", "Example")
 
+    # Free SAM provider still ran, but the metered Clay provider was skipped (circuit open)
+    assert "sam" in calls
     assert "clay" not in calls
 
 
 @pytest.mark.asyncio
 async def test_company_quota_error_trips_circuit_and_is_swallowed(monkeypatch):
-    """ProviderQuotaError from a provider trips the circuit and does not propagate."""
+    """ProviderQuotaError from a metered provider trips its circuit and does not
+    propagate."""
     tripped: list[str] = []
 
     async def sam(d, n):
         return None
 
-    async def apollo_bad(d, n):
-        raise er.ProviderQuotaError("Apollo quota hit")
+    async def clay_bad(d):
+        raise er.ProviderQuotaError("Clay quota hit")
 
     async def noop(d, n):
         return None
 
-    async def noop_clay(d):
-        return None
-
     monkeypatch.setattr(er, "_sam_company", sam)
-    monkeypatch.setattr(er, "_apollo_company", apollo_bad)
-    monkeypatch.setattr(er, "_clay_company", noop_clay)
+    monkeypatch.setattr(er, "_clay_company", clay_bad)
     monkeypatch.setattr(er, "_explorium_company", noop)
     monkeypatch.setattr(er, "_lusha_company", noop)
     monkeypatch.setattr(er, "_ai_company", noop)
     monkeypatch.setattr(er, "trip_circuit", lambda p, m: tripped.append(p))
     monkeypatch.setattr(er, "circuit_open", lambda p: False)
-    monkeypatch.setattr(er.settings, "sam_gov_enrichment_enabled", False)
-    monkeypatch.setattr(er.settings, "clay_enrichment_enabled", False)
+    monkeypatch.setattr(er.settings, "sam_gov_enrichment_enabled", True)
+    monkeypatch.setattr(er.settings, "clay_enrichment_enabled", True)
     monkeypatch.setattr(er.settings, "explorium_enrichment_enabled", False)
     monkeypatch.setattr(er.settings, "lusha_enrichment_enabled", False)
 
     # Must not raise
     results = await er.gather_company("example.com", "Example")
 
-    assert "apollo" in tripped
+    assert "clay" in tripped
     assert isinstance(results, list)
 
 
 @pytest.mark.asyncio
 async def test_company_no_sam_when_feature_disabled(monkeypatch):
-    """SAM.gov is skipped when sam_gov_enrichment_enabled=False."""
+    """SAM.gov is skipped when sam_gov_enrichment_enabled=False; metered providers still
+    run."""
     calls = []
 
     async def sam(d, n):
         calls.append("sam")
         return None
 
-    async def apollo(d, n):
-        calls.append("apollo")
+    async def clay(d):
+        calls.append("clay")
         return None
 
     async def noop(d, n):
         return None
 
-    async def noop_clay(d):
-        return None
-
     monkeypatch.setattr(er, "_sam_company", sam)
-    monkeypatch.setattr(er, "_apollo_company", apollo)
-    monkeypatch.setattr(er, "_clay_company", noop_clay)
+    monkeypatch.setattr(er, "_clay_company", clay)
     monkeypatch.setattr(er, "_explorium_company", noop)
     monkeypatch.setattr(er, "_lusha_company", noop)
     monkeypatch.setattr(er, "_ai_company", noop)
     monkeypatch.setattr(er.settings, "sam_gov_enrichment_enabled", False)
-    monkeypatch.setattr(er.settings, "clay_enrichment_enabled", False)
+    monkeypatch.setattr(er.settings, "clay_enrichment_enabled", True)
     monkeypatch.setattr(er.settings, "explorium_enrichment_enabled", False)
     monkeypatch.setattr(er.settings, "lusha_enrichment_enabled", False)
     monkeypatch.setattr(er, "circuit_open", lambda p: False)
 
     await er.gather_company("example.com", "Example")
 
+    # Free SAM provider skipped (feature disabled), but the first metered provider still ran
     assert "sam" not in calls
-    assert "apollo" in calls
+    assert "clay" in calls
 
 
 # ── gather_contacts: escalation results land in output ───────────────────────
@@ -419,14 +405,12 @@ async def test_contacts_escalation_circuit_open_skips_provider(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_company_free_provider_circuit_open_not_awaited(monkeypatch):
-    """When apollo circuit is open, _apollo_company is never invoked (lazy factory)."""
-    apollo_called = []
-
-    async def apollo_stub(d, n):
-        apollo_called.append("apollo")
-        return None
+    """When the sam_gov circuit is open, _sam_company is never invoked (lazy
+    factory)."""
+    sam_called = []
 
     async def sam_stub(d, n):
+        sam_called.append("sam")
         return None
 
     async def noop(d, n):
@@ -436,21 +420,20 @@ async def test_company_free_provider_circuit_open_not_awaited(monkeypatch):
         return None
 
     monkeypatch.setattr(er, "_sam_company", sam_stub)
-    monkeypatch.setattr(er, "_apollo_company", apollo_stub)
     monkeypatch.setattr(er, "_clay_company", noop_clay)
     monkeypatch.setattr(er, "_explorium_company", noop)
     monkeypatch.setattr(er, "_lusha_company", noop)
     monkeypatch.setattr(er, "_ai_company", noop)
-    monkeypatch.setattr(er.settings, "sam_gov_enrichment_enabled", False)
+    monkeypatch.setattr(er.settings, "sam_gov_enrichment_enabled", True)
     monkeypatch.setattr(er.settings, "clay_enrichment_enabled", False)
     monkeypatch.setattr(er.settings, "explorium_enrichment_enabled", False)
     monkeypatch.setattr(er.settings, "lusha_enrichment_enabled", False)
-    # Only apollo circuit is open
-    monkeypatch.setattr(er, "circuit_open", lambda p: p == "apollo")
+    # Only the sam_gov circuit is open
+    monkeypatch.setattr(er, "circuit_open", lambda p: p == "sam_gov")
 
     await er.gather_company("example.com", "Example")
 
-    assert apollo_called == [], "apollo stub must not be called when circuit is open"
+    assert sam_called == [], "sam stub must not be called when its circuit is open"
 
 
 @pytest.mark.asyncio
@@ -465,7 +448,6 @@ async def test_cheap_contacts_quota_trips_circuit(monkeypatch):
     monkeypatch.setattr(er, "circuit_open", lambda p: False)
     monkeypatch.setattr(er.settings, "clay_enrichment_enabled", True)
     monkeypatch.setattr(er.settings, "hunter_enrichment_enabled", False)
-    monkeypatch.setattr(er.settings, "apollo_api_key", "")
 
     import app.connectors.clay_mcp as clay_mod
 
@@ -611,25 +593,6 @@ async def test_sam_company_wrapper_calls_connector(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_apollo_company_wrapper_returns_none_when_no_key(monkeypatch):
-    monkeypatch.setattr(er.settings, "apollo_api_key", "")
-    result = await er._apollo_company("co.com", "Co Inc")
-    assert result is None
-
-
-@pytest.mark.asyncio
-async def test_apollo_company_wrapper_calls_connector(monkeypatch):
-    monkeypatch.setattr(er.settings, "apollo_api_key", "KEY")
-
-    async def fake_search(domain, key):
-        return {"source": "apollo", "legal_name": "Co Inc"}
-
-    monkeypatch.setattr(er.apollo, "search_company", fake_search)
-    result = await er._apollo_company("co.com", "Co Inc")
-    assert result is not None and result["source"] == "apollo"
-
-
-@pytest.mark.asyncio
 async def test_clay_company_wrapper_calls_connector(monkeypatch):
     async def fake_enrich(domain):
         return {"source": "clay", "legal_name": "Clay Co"}
@@ -677,7 +640,6 @@ async def test_explorium_contacts_wrapper(monkeypatch):
 @pytest.mark.asyncio
 async def test_gather_cheap_contacts_with_hunter(monkeypatch):
     monkeypatch.setattr(er.settings, "hunter_enrichment_enabled", True)
-    monkeypatch.setattr(er.settings, "apollo_api_key", "")
     monkeypatch.setattr(er.settings, "clay_enrichment_enabled", False)
 
     async def fake_hunter(domain):
@@ -692,7 +654,6 @@ async def test_gather_cheap_contacts_with_hunter(monkeypatch):
 @pytest.mark.asyncio
 async def test_gather_cheap_contacts_returns_empty_when_no_providers(monkeypatch):
     monkeypatch.setattr(er.settings, "hunter_enrichment_enabled", False)
-    monkeypatch.setattr(er.settings, "apollo_api_key", "")
     monkeypatch.setattr(er.settings, "clay_enrichment_enabled", False)
 
     results = await er._gather_cheap_contacts("co.com", "", 5)
@@ -704,7 +665,6 @@ async def test_gather_cheap_contacts_hunter_quota_error_is_swallowed(monkeypatch
     from app.services.enrichment_credit_guard import ProviderQuotaError
 
     monkeypatch.setattr(er.settings, "hunter_enrichment_enabled", True)
-    monkeypatch.setattr(er.settings, "apollo_api_key", "")
     monkeypatch.setattr(er.settings, "clay_enrichment_enabled", False)
 
     async def quota_hunter(domain):
@@ -714,21 +674,6 @@ async def test_gather_cheap_contacts_hunter_quota_error_is_swallowed(monkeypatch
         results = await er._gather_cheap_contacts("co.com", "", 5)
 
     assert results == []
-
-
-@pytest.mark.asyncio
-async def test_gather_cheap_contacts_apollo_list_results(monkeypatch):
-    monkeypatch.setattr(er.settings, "hunter_enrichment_enabled", False)
-    monkeypatch.setattr(er.settings, "apollo_api_key", "KEY")
-    monkeypatch.setattr(er.settings, "clay_enrichment_enabled", False)
-
-    async def fake_apollo_contacts(domain, key, limit):
-        return [{"source": "apollo", "email": "a@co.com", "verified": True}]
-
-    monkeypatch.setattr(er.apollo, "search_contacts", fake_apollo_contacts)
-
-    results = await er._gather_cheap_contacts("co.com", "", 5)
-    assert any(c.get("source") == "apollo" for c in results)
 
 
 # ── gather_contacts: explorium escalation quota error ─────────────────────────

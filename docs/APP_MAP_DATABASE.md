@@ -305,7 +305,7 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 | employee_size | String 50 | |
 | hq_city / hq_state / hq_country | String | |
 | brand_tags / commodity_tags | JSON | |
-| enrichment_source | String 50 | explorium\|apollo\|manual |
+| enrichment_source | String 50 | explorium|lusha|clay|manual |
 | is_strategic | Boolean | |
 | sf_account_id | String 255, unique | Salesforce link |
 | last_activity_at | UTCDateTime, nullable | Bumped by `log_outreach_initiated()` on every click-to-contact event; used by the CDM account workspace `staleness` sort (oldest = longest since activity first). |
@@ -348,7 +348,7 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 | is_priority | Boolean NOT NULL (server_default false) | Migration 118. Surfaces the contact to the TOP of the roster (`company_contact_rows` order_by). Toggled via `POST .../contacts/{id}/priority` (`_priority_toggle.html`). Mirrors `do_not_contact`. |
 | is_archived | Boolean NOT NULL (server_default false) | Migration 118. Sorts the contact to the BOTTOM of the roster but keeps it visible (NOT `is_active`, which would hide it). Toggled via `POST .../contacts/{id}/archive` (`_archive_toggle.html`). |
 | email_verified | Boolean | |
-| enrichment_source | String 50 | lusha\|apollo\|hunter\|manual |
+| enrichment_source | String 50 | lusha|clay|hunter|explorium|manual |
 | **Relationships** | customer_site, attachments (`SiteContactAttachment`) | Migration 126 adds `attachments`. |
 
 **`company_attachments`** — Files attached to a CRM company (Migration 126, new table)

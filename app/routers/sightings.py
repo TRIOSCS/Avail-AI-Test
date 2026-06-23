@@ -2081,7 +2081,7 @@ def _best_contacts_by_card(db: Session, card_ids: list[int]) -> list[VendorConta
     the BEST contact per vendor.
 
     VendorContact has no is_primary flag, and a vendor can hold several contacts (an
-    rfq_manual row added inline via the composer alongside an Apollo-enriched row). An
+    rfq_manual row added inline via the composer alongside an enriched row). An
     unordered ``{c.vendor_card_id: c for c in contacts}`` lets an arbitrary (possibly
     EMPTY-email) row win, which would silently skip the vendor as "had no email". Ordering
     a usable email LAST (then verified, then higher confidence) makes the real email win.
@@ -2152,7 +2152,7 @@ async def sightings_preview_inquiry(
     card_ids = [c.id for c in cards]
     # Order worst-first so the dict's last-wins keeps the BEST contact per vendor: a
     # vendor with multiple contacts (e.g. an rfq_manual row added via the composer plus
-    # an Apollo-enriched row) must not pick a NULL-email contact over one that has the
+    # an enriched row) must not pick a NULL-email contact over one that has the
     # real email — that would silently skip the vendor as "had no email".
     contacts = _best_contacts_by_card(db, card_ids)
     contact_map = {c.vendor_card_id: c for c in contacts}

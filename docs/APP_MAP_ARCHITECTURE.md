@@ -178,7 +178,7 @@ authoritative reference. Static-analysis tests in
      Auth & Comms    Supplier APIs        AI & Intel
           │                │                    │
    Azure AD          Nexar (Octopart)     Claude API
-   Graph API         BrokerBin            Apollo API
+   Graph API         BrokerBin            Clay MCP
    Teams API         DigiKey              Explorium API
    8x8 API           Mouser
                      Element14

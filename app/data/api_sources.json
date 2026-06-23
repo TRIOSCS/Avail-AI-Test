@@ -120,16 +120,6 @@
         "setup_notes": "Teams → Channel → Connectors → Incoming Webhook → copy URL. Team/Channel IDs from Teams admin or Graph API."
     },
     {
-        "name": "apollo_enrichment",
-        "display_name": "Apollo.io",
-        "category": "enrichment",
-        "source_type": "enrichment",
-        "description": "Contact and company enrichment — finds decision-maker emails, phone numbers, titles, and company firmographics for vendor outreach.",
-        "signup_url": "https://www.apollo.io",
-        "env_vars": ["APOLLO_API_KEY"],
-        "setup_notes": "Sign up at apollo.io → Settings → API Keys → Generate. Free tier: 10K enrichments/month. Used to enrich VendorCard contacts."
-    },
-    {
         "name": "explorium_enrichment",
         "display_name": "Explorium",
         "category": "enrichment",

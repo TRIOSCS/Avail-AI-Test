@@ -1099,6 +1099,7 @@ def seed_api_sources() -> None:
             "winsource",
             "rocketreach_enrichment",
             "clearbit_enrichment",
+            "apollo_enrichment",
         )
         for dead in _PRUNE_NAMES:
             row = db.query(ApiSource).filter_by(name=dead).first()
@@ -1108,7 +1109,6 @@ def seed_api_sources() -> None:
 
         # Backfill known monthly quotas (only sets if currently NULL)
         quota_map = {
-            "apollo_enrichment": 10000,
             "hunter_enrichment": 500,
             "lusha_enrichment": 6400,
             "digikey": 1000,

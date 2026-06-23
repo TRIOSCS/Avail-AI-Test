@@ -368,25 +368,6 @@ class TestEmailEnrichment:
         assert results[0].discovery_source == "email_history"
 
     @pytest.mark.asyncio
-    async def test_enrich_fallback_to_apollo(self):
-        from app.services.prospect_discovery_email import enrich_email_domains
-
-        mock_explorium = AsyncMock(return_value=None)  # primary fails
-        mock_apollo = AsyncMock(
-            return_value={
-                "name": "Apollo Found",
-                "domain": "apollofound.com",
-                "industry": "Manufacturing",
-            }
-        )
-
-        domains = [{"domain": "apollofound.com", "email_count": 3, "sample_senders": []}]
-        results = await enrich_email_domains(domains, enrich_fn=mock_explorium, apollo_enrich_fn=mock_apollo)
-
-        assert len(results) == 1
-        assert results[0].name == "Apollo Found"
-
-    @pytest.mark.asyncio
     async def test_enrich_skip_when_no_data(self):
         from app.services.prospect_discovery_email import enrich_email_domains
 
@@ -399,21 +380,18 @@ class TestEmailEnrichment:
 
     @pytest.mark.asyncio
     async def test_enrich_explorium_exception_falls_through(self):
+        """Explorium raising is swallowed → domain is skipped gracefully (no
+        fallback)."""
         from app.services.prospect_discovery_email import enrich_email_domains
 
         mock_explorium = AsyncMock(side_effect=Exception("API timeout"))
-        mock_apollo = AsyncMock(
-            return_value={
-                "name": "Fallback Corp",
-                "domain": "fallback.com",
-            }
-        )
 
         domains = [{"domain": "fallback.com", "email_count": 4, "sample_senders": []}]
-        results = await enrich_email_domains(domains, enrich_fn=mock_explorium, apollo_enrich_fn=mock_apollo)
+        results = await enrich_email_domains(domains, enrich_fn=mock_explorium)
 
-        assert len(results) == 1
-        assert results[0].name == "Fallback Corp"
+        # Exception swallowed; no enrichment data → domain skipped, not crashed
+        assert results == []
+        mock_explorium.assert_awaited_once()
 
 
 class TestEmailMiningBatch:
