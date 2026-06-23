@@ -35,7 +35,7 @@
              maxlength="500"
              placeholder="Optional note…"
              class="flex-1 text-xs border border-zinc-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-400"
-             @keydown.enter="$store.callOutcome.note && $store.callOutcome.submit(null)"
+             @keydown.enter.prevent
              aria-label="Optional call note">
       <button type="button"
               class="text-xs text-zinc-400 hover:text-zinc-600 px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-400 rounded"

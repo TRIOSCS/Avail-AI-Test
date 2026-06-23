@@ -14,7 +14,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
 from app.config import settings
-from app.constants import ActivityType, Channel, Direction, EventType, InboxSyncHealth, OutreachChannel
+from app.constants import ActivityType, CallOutcome, Channel, Direction, EventType, InboxSyncHealth, OutreachChannel
 from app.models import ActivityLog, Company, CustomerSite, SiteContact, VendorCard, VendorContact
 from app.utils.token_manager import _utc
 from app.vendor_utils import GENERIC_EMAIL_DOMAINS as _GENERIC_DOMAINS
@@ -336,8 +336,16 @@ def log_call_activity(
     requisition_id: int | None = None,
     requirement_id: int | None = None,
     force_meaningful: bool | None = None,
+    occurred_at: datetime | None = None,
+    details: dict | None = None,
 ) -> ActivityLog | None:
-    """Log a phone call activity."""
+    """Log a phone call activity.
+
+    Pass occurred_at to stamp the true call time on the row (e.g. from 8x8 CDR). Pass
+    details to store structured metadata (e.g. call_outcome, department, source). When
+    details carries a call_outcome, is_meaningful is determined by whether the outcome
+    is CONNECTED; otherwise the existing duration >= 30s gate applies.
+    """
     direction = _normalize_direction(direction)
     if external_id:
         existing = db.query(ActivityLog).filter(ActivityLog.external_id == external_id).first()
@@ -354,6 +362,14 @@ def log_call_activity(
         target = contact_name or phone or "unknown"
         subject = f"Call {verb} {target}"
 
+    # is_meaningful logic: outcome-gate takes priority over duration-gate
+    if force_meaningful is not None:
+        is_meaningful = force_meaningful
+    elif details and details.get("call_outcome"):
+        is_meaningful = details["call_outcome"] == CallOutcome.CONNECTED
+    else:
+        is_meaningful = duration_seconds is not None and duration_seconds >= CALL_MEANINGFUL_MIN_SECONDS
+
     record = ActivityLog(
         user_id=user_id,
         activity_type=activity_type,
@@ -369,11 +385,9 @@ def log_call_activity(
         summary=subject,
         requisition_id=requisition_id,
         requirement_id=requirement_id,
-        is_meaningful=(
-            force_meaningful
-            if force_meaningful is not None
-            else (duration_seconds is not None and duration_seconds >= CALL_MEANINGFUL_MIN_SECONDS)
-        ),
+        occurred_at=occurred_at,
+        details=details,
+        is_meaningful=is_meaningful,
     )
     db.add(record)
     db.flush()

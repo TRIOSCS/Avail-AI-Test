@@ -311,7 +311,7 @@ document.body.addEventListener('click', (evt) => {
                 (labels[d.channel] || 'Outreach') + ' logged' + (d.contactName ? ' — ' + d.contactName : ''),
                 'success'
             );
-            if (payload.channel === 'phone') {
+            if (payload.channel === 'phone' && body && body.id) {
                 const store = Alpine.store('callOutcome');
                 store.activityId = body.id;
                 store.contactName = d.contactName || '';

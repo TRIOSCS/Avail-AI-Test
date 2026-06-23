@@ -591,3 +591,128 @@ class TestReverseLookupPhoneMatchCount:
         result = reverse_lookup_phone("5552003000", db_session)
         assert result is not None
         assert result["entity_type"] == "vendor"
+
+
+# ── 8x8 CDR → CallOutcome mapping (WS1) ──────────────────────────────────────
+
+
+class TestCdrOutcomeMapping:
+    """Verify that _process_cdrs maps CDR answered/missed flags to CallOutcome and
+    passes occurred_at + details to log_call_activity."""
+
+    def _make_mock_db(self, users=None):
+        db = MagicMock()
+        wm_query = MagicMock()
+        wm_query.filter.return_value.first.return_value = None
+        user_query = MagicMock()
+        user_query.filter.return_value.all.return_value = users or []
+        req_query = MagicMock()
+        req_query.join.return_value.filter.return_value.first.return_value = None
+
+        def query_router(model):
+            name = getattr(model, "__tablename__", "")
+            if name == "system_config":
+                return wm_query
+            if name == "users":
+                return user_query
+            if name == "requisitions":
+                return req_query
+            return MagicMock()
+
+        db.query.side_effect = query_router
+        return db
+
+    @staticmethod
+    def _make_user(extension="1001"):
+        user = MagicMock()
+        user.id = 1
+        user.eight_by_eight_extension = extension
+        return user
+
+    def _outgoing_cdr(self, *, answered: bool, call_id="cdr-out-001"):
+        return {
+            "callId": call_id,
+            "startTimeUTC": 1772750120000,
+            "talkTimeMS": 45000 if answered else 0,
+            "caller": "1001",
+            "callerName": "Mike",
+            "callee": "+15559876543",
+            "calleeName": "Vendor Rep",
+            "direction": "Outgoing",
+            "missed": "-" if answered else "Missed",
+            "answered": "Answered" if answered else "-",
+            "departments": ["Sales"],
+        }
+
+    @patch("app.services.eight_by_eight_service.reverse_lookup_phone")
+    @patch("app.services.activity_service.log_call_activity")
+    @patch("app.services.eight_by_eight_service.get_cdrs", new_callable=AsyncMock)
+    @patch("app.services.eight_by_eight_service.get_access_token", new_callable=AsyncMock)
+    async def test_answered_cdr_maps_connected_outcome(self, mock_auth, mock_fetch, mock_log, mock_reverse):
+        """An answered CDR → call_outcome=connected + occurred_at set."""
+        from app.jobs.eight_by_eight_jobs import _process_cdrs
+
+        mock_auth.return_value = "token"
+        mock_fetch.return_value = [self._outgoing_cdr(answered=True)]
+
+        record = MagicMock()
+        record.company_id = None
+        record.vendor_card_id = None
+        mock_log.return_value = record
+        mock_reverse.return_value = None
+
+        db = self._make_mock_db(users=[self._make_user()])
+        await _process_cdrs(db, FAKE_SETTINGS)
+
+        call_kwargs = mock_log.call_args.kwargs
+        assert call_kwargs["details"]["call_outcome"] == "connected"
+        assert call_kwargs["details"]["source"] == "8x8_cdr"
+        assert call_kwargs["occurred_at"] is not None
+
+    @patch("app.services.eight_by_eight_service.reverse_lookup_phone")
+    @patch("app.services.activity_service.log_call_activity")
+    @patch("app.services.eight_by_eight_service.get_cdrs", new_callable=AsyncMock)
+    @patch("app.services.eight_by_eight_service.get_access_token", new_callable=AsyncMock)
+    async def test_missed_cdr_maps_no_answer_not_meaningful(self, mock_auth, mock_fetch, mock_log, mock_reverse):
+        """A missed CDR → call_outcome=no_answer; is_meaningful=False (via details
+        gate)."""
+        from app.jobs.eight_by_eight_jobs import _process_cdrs
+
+        mock_auth.return_value = "token"
+        mock_fetch.return_value = [self._outgoing_cdr(answered=False, call_id="cdr-out-002")]
+
+        record = MagicMock()
+        record.company_id = None
+        record.vendor_card_id = None
+        mock_log.return_value = record
+        mock_reverse.return_value = None
+
+        db = self._make_mock_db(users=[self._make_user()])
+        await _process_cdrs(db, FAKE_SETTINGS)
+
+        call_kwargs = mock_log.call_args.kwargs
+        assert call_kwargs["details"]["call_outcome"] == "no_answer"
+        assert call_kwargs["occurred_at"] is not None
+
+    @patch("app.services.eight_by_eight_service.reverse_lookup_phone")
+    @patch("app.services.activity_service.log_call_activity")
+    @patch("app.services.eight_by_eight_service.get_cdrs", new_callable=AsyncMock)
+    @patch("app.services.eight_by_eight_service.get_access_token", new_callable=AsyncMock)
+    async def test_department_included_in_details_when_present(self, mock_auth, mock_fetch, mock_log, mock_reverse):
+        """Department from CDR is threaded into details when non-null."""
+        from app.jobs.eight_by_eight_jobs import _process_cdrs
+
+        mock_auth.return_value = "token"
+        mock_fetch.return_value = [self._outgoing_cdr(answered=True, call_id="cdr-dept-001")]
+
+        record = MagicMock()
+        record.company_id = None
+        record.vendor_card_id = None
+        mock_log.return_value = record
+        mock_reverse.return_value = None
+
+        db = self._make_mock_db(users=[self._make_user()])
+        await _process_cdrs(db, FAKE_SETTINGS)
+
+        call_kwargs = mock_log.call_args.kwargs
+        assert call_kwargs["details"]["department"] == "Sales"

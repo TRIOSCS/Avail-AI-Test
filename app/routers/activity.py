@@ -283,7 +283,10 @@ def record_call_outcome(
             raise HTTPException(404, "Activity not found")
 
         note = body.note.strip() if body.note else None
-        record.details = {**(record.details or {}), "call_outcome": body.outcome.value, "outcome_note": note or None}
+        patch = {**(record.details or {}), "call_outcome": body.outcome.value}
+        if note:
+            patch["outcome_note"] = note
+        record.details = patch
         flag_modified(record, "details")
 
         if note:

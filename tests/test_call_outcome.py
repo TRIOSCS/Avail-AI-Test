@@ -87,11 +87,30 @@ class TestCallOutcomeEndpoint:
         assert "Discussed Q3 quote" in call_log.notes
         assert call_log.details["outcome_note"] == "Discussed Q3 quote"
 
-    def test_note_none_when_omitted(self, client, db_session, call_log):
+    def test_outcome_note_absent_when_no_note_submitted(self, client, db_session, call_log):
+        """A submit with no note must NOT write outcome_note at all (key absent, not
+        null).
+
+        Regression guard: the old code wrote outcome_note: null, which would erase a
+        previously-stored note on a second submit.
+        """
         resp = self._post(client, call_log.id, "voicemail")
         assert resp.status_code == 200
         db_session.expire(call_log)
-        assert call_log.details.get("outcome_note") is None
+        assert "outcome_note" not in (call_log.details or {})
+
+    def test_resubmit_without_note_preserves_existing_note(self, client, db_session, call_log):
+        """Second outcome submit with no note must NOT erase a previously-stored
+        note."""
+        # First submit — stores note
+        self._post(client, call_log.id, "connected", note="First note")
+        db_session.expire(call_log)
+        assert call_log.details["outcome_note"] == "First note"
+
+        # Second submit — no note; outcome_note must survive
+        self._post(client, call_log.id, "no_answer")
+        db_session.expire(call_log)
+        assert call_log.details.get("outcome_note") == "First note"
 
     def test_404_for_nonexistent_id(self, client):
         resp = self._post(client, 999999, "connected")
@@ -152,3 +171,16 @@ class TestCallOutcomePromptTemplate:
         assert "$store.callOutcome.submit" in rendered
         assert "$store.callOutcome.dismiss" in rendered
         assert 'x-model="$store.callOutcome.note"' in rendered
+
+    def test_enter_key_does_not_call_submit_null(self):
+        """Enter on the note field must NOT call submit(null) — it is blocked."""
+        from jinja2 import Environment, FileSystemLoader
+
+        env = Environment(
+            loader=FileSystemLoader("app/templates"),
+            autoescape=True,
+        )
+        tmpl = env.get_template("htmx/partials/shared/call_outcome_prompt.html")
+        rendered = tmpl.render()
+        # The old dead-end pattern must not exist
+        assert "submit(null)" not in rendered

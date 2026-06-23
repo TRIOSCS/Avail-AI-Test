@@ -46,7 +46,7 @@ def bump_clocks_from_activity(db: Session, activity: ActivityLog) -> None:
         field = "last_reply_at"
     else:
         return
-    when = activity.created_at or datetime.now(timezone.utc)
+    when = activity.occurred_at or activity.created_at or datetime.now(timezone.utc)
     if when.tzinfo is None:
         when = when.replace(tzinfo=timezone.utc)
     for model, fk in _CLOCK_TARGETS:

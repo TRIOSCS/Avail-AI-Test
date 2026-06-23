@@ -20,7 +20,7 @@ from datetime import datetime, timedelta, timezone
 from apscheduler.triggers.interval import IntervalTrigger
 from loguru import logger
 
-from ..constants import RequisitionStatus
+from ..constants import CallOutcome, RequisitionStatus
 from ..scheduler import _traced_job
 
 
@@ -162,6 +162,12 @@ async def _process_cdrs(db, settings) -> dict:
         if not effective_contact_name and crm_match and crm_match.get("contact_name"):
             effective_contact_name = crm_match["contact_name"]
 
+        # Map CDR answered/missed flags to a CallOutcome
+        cdr_outcome = CallOutcome.CONNECTED if norm["is_answered"] else CallOutcome.NO_ANSWER
+        cdr_details: dict = {"call_outcome": cdr_outcome.value, "source": "8x8_cdr"}
+        if norm["department"]:
+            cdr_details["department"] = norm["department"]
+
         record = log_call_activity(
             user_id=user.id,
             direction=direction,
@@ -170,6 +176,8 @@ async def _process_cdrs(db, settings) -> dict:
             external_id=norm["external_id"],
             contact_name=effective_contact_name,
             db=db,
+            occurred_at=norm["occurred_at"],
+            details=cdr_details,
         )
 
         if record is None:

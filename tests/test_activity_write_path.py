@@ -451,3 +451,178 @@ def test_activity_tab_renders_rfq_sent_event(client, db_session, test_requisitio
     resp = client.get(f"/v2/partials/requisitions/{test_requisition.id}/tab/activity")
     assert resp.status_code == 200
     assert "RFQ sent to Acme" in resp.text
+
+
+# ── Part B tests: log_call_activity occurred_at + details (WS1) ─────────────
+
+
+def test_log_call_activity_occurred_at_stamped(db_session, test_user):
+    """occurred_at param is written to the row when provided."""
+    from datetime import datetime, timezone
+
+    when = datetime(2026, 5, 1, 10, 0, 0, tzinfo=timezone.utc)
+    rec = log_call_activity(
+        user_id=test_user.id,
+        direction="outbound",
+        phone="+15550001001",
+        duration_seconds=60,
+        external_id="oat-001",
+        contact_name="CDR Rep",
+        db=db_session,
+        occurred_at=when,
+    )
+    assert rec is not None
+    assert rec.occurred_at == when
+
+
+def test_log_call_activity_details_connected_is_meaningful(db_session, test_user):
+    """details.call_outcome=connected → is_meaningful True (outcome gate beats
+    duration)."""
+    from app.constants import CallOutcome
+
+    rec = log_call_activity(
+        user_id=test_user.id,
+        direction="outbound",
+        phone="+15550001002",
+        duration_seconds=0,
+        external_id="outcome-connected-001",
+        contact_name="CDR Rep",
+        db=db_session,
+        details={"call_outcome": CallOutcome.CONNECTED.value, "source": "8x8_cdr"},
+    )
+    assert rec is not None
+    assert rec.is_meaningful is True
+
+
+def test_log_call_activity_details_no_answer_not_meaningful_even_long(db_session, test_user):
+    """details.call_outcome=no_answer → is_meaningful False even if duration >= 30s."""
+    from app.constants import CallOutcome
+    from app.services.activity_service import CALL_MEANINGFUL_MIN_SECONDS
+
+    rec = log_call_activity(
+        user_id=test_user.id,
+        direction="outbound",
+        phone="+15550001003",
+        duration_seconds=CALL_MEANINGFUL_MIN_SECONDS + 60,
+        external_id="outcome-noanswer-001",
+        contact_name="CDR Rep",
+        db=db_session,
+        details={"call_outcome": CallOutcome.NO_ANSWER.value, "source": "8x8_cdr"},
+    )
+    assert rec is not None
+    assert rec.is_meaningful is False
+
+
+def test_log_call_activity_no_details_uses_duration_gate(db_session, test_user):
+    """Without details, duration gate unchanged: short call → not meaningful."""
+    from app.services.activity_service import CALL_MEANINGFUL_MIN_SECONDS
+
+    short = log_call_activity(
+        user_id=test_user.id,
+        direction="outbound",
+        phone="+15550001004",
+        duration_seconds=CALL_MEANINGFUL_MIN_SECONDS - 1,
+        external_id="duration-short-001",
+        contact_name="CDR Rep",
+        db=db_session,
+    )
+    assert short is not None
+    assert short.is_meaningful is False
+
+    long = log_call_activity(
+        user_id=test_user.id,
+        direction="outbound",
+        phone="+15550001005",
+        duration_seconds=CALL_MEANINGFUL_MIN_SECONDS,
+        external_id="duration-long-001",
+        contact_name="CDR Rep",
+        db=db_session,
+    )
+    assert long is not None
+    assert long.is_meaningful is True
+
+
+def test_log_call_activity_details_stored_on_row(db_session, test_user):
+    """Details dict is written to the ActivityLog.details column."""
+    rec = log_call_activity(
+        user_id=test_user.id,
+        direction="outbound",
+        phone="+15550001006",
+        duration_seconds=60,
+        external_id="details-stored-001",
+        contact_name="CDR Rep",
+        db=db_session,
+        details={"call_outcome": "connected", "department": "Sales", "source": "8x8_cdr"},
+    )
+    assert rec is not None
+    assert rec.details["source"] == "8x8_cdr"
+    assert rec.details["department"] == "Sales"
+
+
+# ── Part B tests: cadence bump uses occurred_at ───────────────────────────────
+
+
+def test_cadence_bump_uses_occurred_at_when_set(db_session):
+    """bump_clocks_from_activity uses occurred_at (true call time) over created_at."""
+    from datetime import datetime, timedelta, timezone
+
+    from app.constants import ActivityType, Channel, Direction
+    from app.models.crm import Company
+    from app.models.intelligence import ActivityLog
+    from app.services.cadence_service import bump_clocks_from_activity
+
+    real_call_time = datetime(2026, 5, 1, 9, 0, 0, tzinfo=timezone.utc)
+    insert_time = real_call_time + timedelta(minutes=29)
+
+    co = Company(name="Occurred Co")
+    db_session.add(co)
+    db_session.flush()
+
+    act = ActivityLog(
+        activity_type=ActivityType.CALL_LOGGED,
+        channel=Channel.PHONE,
+        company_id=co.id,
+        direction=Direction.OUTBOUND,
+        is_meaningful=True,
+        occurred_at=real_call_time,
+        created_at=insert_time,
+    )
+    db_session.add(act)
+    db_session.flush()
+
+    bump_clocks_from_activity(db_session, act)
+    db_session.refresh(co)
+    # Clock must reflect the real call time, not the late insert time
+    assert co.last_outbound_at == real_call_time
+
+
+def test_cadence_bump_falls_back_to_created_at_when_occurred_at_none(db_session):
+    """bump_clocks_from_activity falls back to created_at when occurred_at is None."""
+    from datetime import datetime, timezone
+
+    from app.constants import ActivityType, Channel, Direction
+    from app.models.crm import Company
+    from app.models.intelligence import ActivityLog
+    from app.services.cadence_service import bump_clocks_from_activity
+
+    insert_time = datetime(2026, 5, 1, 10, 30, 0, tzinfo=timezone.utc)
+
+    co = Company(name="Fallback Co")
+    db_session.add(co)
+    db_session.flush()
+
+    act = ActivityLog(
+        activity_type=ActivityType.CALL_LOGGED,
+        channel=Channel.PHONE,
+        company_id=co.id,
+        direction=Direction.OUTBOUND,
+        is_meaningful=True,
+        occurred_at=None,
+        created_at=insert_time,
+    )
+    db_session.add(act)
+    db_session.flush()
+
+    bump_clocks_from_activity(db_session, act)
+    db_session.refresh(co)
+    assert co.last_outbound_at == insert_time
