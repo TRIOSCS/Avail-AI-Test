@@ -70,9 +70,9 @@ def test_htmx_ajax_calls_have_indicator():
         ("app/templates/htmx/partials/parts/workspace.html", 103),
         ("app/templates/htmx/partials/parts/list.html", 11),
         ("app/templates/htmx/partials/parts/list.html", 12),
-        ("app/templates/htmx/partials/parts/list.html", 138),
-        ("app/templates/htmx/partials/parts/list.html", 277),
-        ("app/templates/htmx/partials/parts/list.html", 324),
+        ("app/templates/htmx/partials/parts/list.html", 140),
+        ("app/templates/htmx/partials/parts/list.html", 279),
+        ("app/templates/htmx/partials/parts/list.html", 326),
         ("app/templates/htmx/partials/parts/tabs/req_details.html", 209),
     }
 
