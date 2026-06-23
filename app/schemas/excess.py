@@ -211,7 +211,10 @@ class ExcessStatsResponse(BaseModel):
 
 
 class ExcessOfferLineCreate(BaseModel):
-    """One part line within a per_line offer. unit_price optional (price-TBD allowed)."""
+    """One part line within a per_line offer.
+
+    unit_price optional (price-TBD allowed).
+    """
 
     mpn_raw: str
     quantity: int = Field(ge=1)

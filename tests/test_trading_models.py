@@ -187,9 +187,7 @@ class TestExcessOfferModel:
         db_session.refresh(bare)
         assert bare.match_status == "unmatched"
 
-    def test_offer_line_unit_price_nullable(
-        self, db_session: Session, excess_list: ExcessList, offerer: User
-    ):
+    def test_offer_line_unit_price_nullable(self, db_session: Session, excess_list: ExcessList, offerer: User):
         offer = ExcessOffer(
             excess_list_id=excess_list.id,
             submitted_by=offerer.id,
@@ -217,9 +215,7 @@ class TestExcessOfferModel:
         with pytest.raises(ValueError):
             ExcessOfferLine(mpn_raw="LM358N", quantity=1, match_status="bogus")
 
-    def test_deleting_offer_cascades_lines(
-        self, db_session: Session, excess_list: ExcessList, offerer: User
-    ):
+    def test_deleting_offer_cascades_lines(self, db_session: Session, excess_list: ExcessList, offerer: User):
         offer = ExcessOffer(
             excess_list_id=excess_list.id,
             submitted_by=offerer.id,

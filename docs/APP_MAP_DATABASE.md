@@ -457,19 +457,38 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 
 ---
 
-### Excess Inventory
+### Excess Inventory / Trading (resell-brokerage)
 
-**`excess_lists`** — Customer surplus inventory batches
+> Migration 126 is ADDITIVE: it adds the inbound-offer tables + rollup columns below.
+> `bids`/`bid_solicitations` (the old outbound email-RFQ path) are still present and a
+> later cutover chunk retires them. `ExcessListStatus` gained the Trading lifecycle
+> members (open/collecting/bid_out/awarded) while keeping active/bidding for now.
+
+**`excess_lists`** — Customer surplus inventory batches (the posting)
 - company_id -> companies, owner_id -> users
-- Status: draft -> active -> bidding -> closed -> expired
+- Status: draft -> open -> collecting -> bid_out -> awarded -> closed/expired (legacy: active, bidding)
+- version (int, default 1) — lock-on-post; a revision bumps version
 
 **`excess_line_items`** — Individual parts in an excess list
 - part_number, description, manufacturer, quantity, asking_price, demand_match_count
+- material_card_id -> material_cards (SET NULL) — resolved on create for the Sighting mirror
+- best_offer_unit_price, best_offer_id (plain int, not a hard FK), offer_count — best-price rollup
 
-**`bids`** — Vendor bids on excess items
+**`excess_offers`** — Inbound broker offer to BUY a posted list (Trading replacement for `bids`)
+- excess_list_id -> excess_lists (CASCADE), submitted_by -> users
+- offerer_company_id -> companies / offerer_vendor_card_id -> vendor_cards (both SET NULL)
+- scope: per_line | take_all; take_all_total_price (lump, take_all only); valid_until
+- status: open -> won -> lost -> expired -> withdrawn (late = post-close, queued)
+
+**`excess_offer_lines`** — Per-line rows of a per_line offer (incl. the unmatched queue)
+- offer_id -> excess_offers (CASCADE), excess_line_item_id -> excess_line_items (nullable, SET NULL)
+- mpn_raw, quantity, unit_price (nullable), lead_time_days, terms_text
+- match_status: matched | unmatched | ambiguous (unmatched/ambiguous = held for manual resolution)
+
+**`bids`** — Vendor bids on excess items (legacy; retired in the cutover chunk)
 - bidder_company_id, bidder_vendor_card_id, unit_price, quantity_wanted, status
 
-**`bid_solicitations`** — Outbound emails soliciting bids
+**`bid_solicitations`** — Outbound emails soliciting bids (legacy; retired in the cutover chunk)
 - graph_message_id for email tracking
 
 ---

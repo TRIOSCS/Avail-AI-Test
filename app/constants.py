@@ -161,8 +161,11 @@ class ExcessOfferScope(StrEnum):
 
 class OfferLineMatchStatus(StrEnum):
     """Match result of an ExcessOfferLine against the posting's lines (part-number
-    only). ``unmatched`` / ``ambiguous`` rows keep ``mpn_raw`` and queue for manual
-    resolution — never dropped (a dropped offer is a lost deal)."""
+    only).
+
+    ``unmatched`` / ``ambiguous`` rows keep ``mpn_raw`` and queue for manual
+    resolution — never dropped (a dropped offer is a lost deal).
+    """
 
     MATCHED = "matched"
     UNMATCHED = "unmatched"
