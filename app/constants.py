@@ -116,13 +116,57 @@ class SourcingStatus(StrEnum):
 
 
 class ExcessListStatus(StrEnum):
-    """Status lifecycle for ExcessList records."""
+    """Status lifecycle for ExcessList records.
+
+    Trading (resell-brokerage) lifecycle: draft -> open -> collecting -> bid_out
+    -> awarded -> closed/expired. The new members are chosen to map onto existing
+    ``status_badge`` keys (open->sky, collecting/sourcing->amber, bid_out/quoted->
+    violet, awarded/won->emerald). ACTIVE / BIDDING are the pre-Trading members,
+    kept for backward-compat (additive reshape — a later cutover chunk retires them).
+    """
 
     DRAFT = "draft"
-    ACTIVE = "active"
-    BIDDING = "bidding"
+    OPEN = "open"
+    COLLECTING = "collecting"
+    BID_OUT = "bid_out"
+    AWARDED = "awarded"
     CLOSED = "closed"
     EXPIRED = "expired"
+    # --- Legacy (kept for backward-compat; retired in the cutover chunk) ---
+    ACTIVE = "active"
+    BIDDING = "bidding"
+
+
+class ExcessOfferStatus(StrEnum):
+    """Status lifecycle for inbound ExcessOffer records (a broker's offer to buy).
+
+    ``late`` flags an offer that landed after the list closed / bid went out — it is
+    accepted and queued for review, never dropped (spec §Resolved-for-v1 #3).
+    """
+
+    OPEN = "open"
+    WON = "won"
+    LOST = "lost"
+    EXPIRED = "expired"
+    WITHDRAWN = "withdrawn"
+    LATE = "late"
+
+
+class ExcessOfferScope(StrEnum):
+    """Whether an ExcessOffer binds individual lines or the whole list."""
+
+    PER_LINE = "per_line"
+    TAKE_ALL = "take_all"
+
+
+class OfferLineMatchStatus(StrEnum):
+    """Match result of an ExcessOfferLine against the posting's lines (part-number
+    only). ``unmatched`` / ``ambiguous`` rows keep ``mpn_raw`` and queue for manual
+    resolution — never dropped (a dropped offer is a lost deal)."""
+
+    MATCHED = "matched"
+    UNMATCHED = "unmatched"
+    AMBIGUOUS = "ambiguous"
 
 
 class ExcessLineItemStatus(StrEnum):

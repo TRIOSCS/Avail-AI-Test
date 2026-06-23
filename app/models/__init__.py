@@ -41,8 +41,15 @@ from .enrichment_run import EnrichmentRun  # noqa: F401
 # Enrichment Worker Status
 from .enrichment_worker_status import EnrichmentWorkerStatus  # noqa: F401
 
-# Excess Inventory & Bid Collection
-from .excess import Bid, BidSolicitation, ExcessLineItem, ExcessList  # noqa: F401
+# Excess Inventory & Bid Collection / Trading (resell-brokerage) offers
+from .excess import (  # noqa: F401
+    Bid,
+    BidSolicitation,
+    ExcessLineItem,
+    ExcessList,
+    ExcessOffer,
+    ExcessOfferLine,
+)
 
 # Faceted Search
 from .faceted_search import CommoditySpecSchema, MaterialSpecFacet  # noqa: F401
