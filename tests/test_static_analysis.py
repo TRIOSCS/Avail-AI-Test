@@ -63,7 +63,6 @@ def test_htmx_ajax_calls_have_indicator():
         ("app/templates/htmx/base.html", 56),
         ("app/templates/requisitions2/_inline_cell.html", 16),
         ("app/templates/htmx/partials/sourcing/workspace.html", 176),
-        ("app/templates/htmx/partials/excess/bid_form.html", 16),
         ("app/templates/htmx/partials/parts/cell_edit.html", 12),
         ("app/templates/htmx/partials/parts/cell_edit.html", 26),
         ("app/templates/htmx/partials/parts/cell_edit.html", 37),
@@ -509,7 +508,9 @@ def test_low_contrast_secondary_text_does_not_grow():
     Ratchet only (decorative icon grays are fine) — caps growth rather than banning
     outright.
     """
-    BASELINE = 410  # +1 for S3 DNC row vendor-name muted text in vendor_modal.html
+    BASELINE = 413  # +3 for the Trading workspace partials (lists/detail/offers muted
+    # metadata copy — the established trading look; the bid-builder itself uses the
+    # higher-contrast text-gray-600 per this rule).
     count = _tpl_substring_count("text-gray-500")
     assert count <= BASELINE, (
         f"text-gray-500 usages rose to {count} (baseline {BASELINE}). Prefer "
@@ -534,7 +535,9 @@ def test_inline_table_cell_padding_does_not_grow():
 
     Ratchet.
     """
-    BASELINE = 523
+    BASELINE = 527  # +4 for the Trading workspace email-solicitation / offer tables
+    # (inline-padded cells in the trading partials; the bid-builder + bid PDF use
+    # .compact-table / CSS cell padding, not inline px-/py-).
     count = _tpl_regex_count(r'<t[dh][^>]*class="[^"]*\bp[xy]-[0-9]')
     assert count <= BASELINE, (
         f"inline-padded <td>/<th> rose to {count} (baseline {BASELINE}). Use "
@@ -547,10 +550,8 @@ def test_inline_button_sizing_does_not_grow():
 
     Macro files are the canonical source and are excluded. Ratchet.
     """
-    BASELINE = 272  # 270 + net 2: full-width contacts-forward customer detail header —
-    # new primary "+ Add Contact" button + a kebab whose "Merge duplicate"/"Account settings"
-    # menu items mirror the existing contact-kebab menu-item pattern (px-3 py-1.5), minus the
-    # retired inline "Merge duplicate" button it replaced.
+    BASELINE = 275  # 272 + 3 for the Trading workspace scope-toggle / lens-pill buttons
+    # (inline-padded pills in the trading partials; the bid-builder buttons use .btn/.btn-sm).
     count = _tpl_regex_count(r'<button[^>]*class="[^"]*\bp[xy]-[0-9]', exclude={"_macros.html"})
     assert count <= BASELINE, (
         f"inline-sized <button> rose to {count} (baseline {BASELINE}). Use .btn-sm/md/lg or the btn_* macros."
@@ -576,8 +577,6 @@ _PAGE_FLUID_SHELLS = (
     "app/templates/htmx/partials/buy_plans/hub.html",
     "app/templates/htmx/partials/dashboard.html",
     "app/templates/htmx/partials/emails/intelligence_dashboard.html",
-    "app/templates/htmx/partials/excess/detail.html",
-    "app/templates/htmx/partials/excess/list.html",
     "app/templates/htmx/partials/follow_ups/list.html",
     "app/templates/htmx/partials/materials/detail.html",
     "app/templates/htmx/partials/proactive/list.html",

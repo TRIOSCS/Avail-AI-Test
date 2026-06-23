@@ -296,13 +296,59 @@ def _build_location(raw: dict) -> str | None:
 
 
 def _detect_region(raw: dict) -> str | None:
-    """Detect region from country code."""
+    """Detect region from a country code OR full country name.
+
+    The Explorium connector emits the human-readable ``hq_country`` name (e.g. "Germany"),
+    while the discovery search API supplies ``country_code`` — so match on both.
+    """
     cc = (raw.get("country_code") or raw.get("hq_country") or "").upper()
     if cc in ("US", "USA", "UNITED STATES"):
         return "US"
-    if cc in ("DE", "GB", "FR", "NL", "SE", "IT", "ES", "CH", "AT", "BE"):
+    _EU = (
+        "DE",
+        "GB",
+        "FR",
+        "NL",
+        "SE",
+        "IT",
+        "ES",
+        "CH",
+        "AT",
+        "BE",
+        "GERMANY",
+        "UNITED KINGDOM",
+        "FRANCE",
+        "NETHERLANDS",
+        "SWEDEN",
+        "ITALY",
+        "SPAIN",
+        "SWITZERLAND",
+        "AUSTRIA",
+        "BELGIUM",
+    )
+    _ASIA = (
+        "CN",
+        "JP",
+        "KR",
+        "TW",
+        "SG",
+        "IN",
+        "TH",
+        "VN",
+        "MY",
+        "CHINA",
+        "JAPAN",
+        "SOUTH KOREA",
+        "TAIWAN",
+        "SINGAPORE",
+        "INDIA",
+        "THAILAND",
+        "VIETNAM",
+        "MALAYSIA",
+    )
+    if cc in _EU:
         return "EU"
-    if cc in ("CN", "JP", "KR", "TW", "SG", "IN", "TH", "VN", "MY"):
+    if cc in _ASIA:
         return "Asia"
     if cc:
         return cc

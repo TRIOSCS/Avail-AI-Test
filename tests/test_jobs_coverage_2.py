@@ -1398,7 +1398,8 @@ class TestRunIntentQuery:
         req.customer_name = "Acme"
         req.status = "active"
 
-        db.query.return_value.filter.return_value.limit.return_value.all.return_value = [req]
+        # Requisition path chains TWO filters: ilike_filter + is_scratch.is_(False)
+        db.query.return_value.filter.return_value.filter.return_value.limit.return_value.all.return_value = [req]
 
         group_key, results = _run_intent_query(
             {"entity_type": "requisition", "text_query": "Test"},

@@ -51,6 +51,20 @@ def _persist_discovery_results(db: Session, batch: DiscoveryBatch, results: list
     for r in results:
         pa = ProspectAccount(**r.model_dump() if hasattr(r, "model_dump") else r)
         pa.discovery_batch_id = batch.id
+        # Score at persist (single arbitration point for every discovery source) so a
+        # freshly discovered prospect isn't surfaced at fit=0 until the monthly
+        # job_refresh_scores — otherwise the day-after signal-enrichment job, which gates
+        # on fit_score, skips it for a cycle. job_refresh_scores still re-scores later
+        # once readiness signals accumulate.
+        prospect_data = {
+            "name": pa.name,
+            "industry": pa.industry,
+            "naics_code": pa.naics_code,
+            "employee_count_range": pa.employee_count_range,
+            "region": pa.region,
+        }
+        pa.fit_score, pa.fit_reasoning = calculate_fit_score(prospect_data)
+        pa.readiness_score, _ = calculate_readiness_score(prospect_data, pa.readiness_signals or {})
         db.add(pa)
     return len(results)
 
@@ -168,11 +182,11 @@ async def job_discover_prospects() -> dict:
 
         # Email mining (always runs)
         try:
-            from app.services.prospect_discovery_email import run_email_mining_batch
+            from app.services.prospect_discovery_email import _explorium_domain_enrich, run_email_mining_batch
             from app.utils.graph_client import get_graph_client
 
             graph = get_graph_client()
-            email_results = await run_email_mining_batch(batch_id, graph, db)
+            email_results = await run_email_mining_batch(batch_id, graph, db, enrich_fn=_explorium_domain_enrich)
             email_count = _persist_discovery_results(db, batch, email_results)
             db.commit()
         except Exception as e:
