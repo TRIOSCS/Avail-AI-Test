@@ -328,10 +328,10 @@ Page-level + per-row RFQ/offer actions (the quick-source endpoints) are wired.
 **Degraded-source banner** — `search_service.get_market_source_health(db)` reuses
 `_build_connectors` to partition the live-market connectors into available / `down`
 (health_monitor flagged ERROR — auth/quota, operator must rotate credentials in Settings
-→ Sources) / `unconfigured` (no API key). `dossier_market` passes the result as
+→ Connectors) / `unconfigured` (no API key). `dossier_market` passes the result as
 `market_health`; the banner names each down source with its specific error as a hover
-tooltip and deep-links `/v2/settings`. Best-effort: a health lookup failure leaves
-`market_health=None` and never breaks the market section.
+tooltip and deep-links `/v2/settings` (→ Settings → Connectors tab). Best-effort: a
+health lookup failure leaves `market_health=None` and never breaks the market section.
 
 **Relevance guard** — `stream_search_mpn` keeps only hits whose `mpn_matched`
 `fuzzy_mpn_match`es the searched MPN (handles dash/case + ≤2-char revision suffixes,
@@ -489,7 +489,7 @@ type-specific `last_error` message:
 
 | Exception | last_error prefix | Operator action |
 |---|---|---|
-| `ConnectorAuthError` | "Auth error — rotate credentials: ..." | Rotate API key in Admin > API Sources |
+| `ConnectorAuthError` | "Auth error — rotate credentials: ..." | Rotate API key in Settings → Connectors |
 | `ConnectorRateLimitError` | "Rate limited — auto-recovers when window expires: ..." | Usually none |
 | `ConnectorQuotaError` | "Quota exhausted — upgrade plan or wait for cycle: ..." | Upgrade plan or wait |
 
@@ -1341,6 +1341,89 @@ not requisition-scoped.
 
 ---
 
+## 9a. Settings → Connectors Tab (admin only)
+
+Unified credential + health management surface. Replaces the old **Sources** tab and
+the orphaned **API Keys** tab: both legacy routes (`/v2/partials/settings/sources` and
+`/v2/partials/settings/api-keys`) 302 → `/v2/partials/settings/connectors`.
+
+```
+GET /v2/partials/settings/connectors
+    |
+    v
+htmx_views.settings_connectors_tab  (admin-only; 403 for non-admin)
+    |
+    +---> _build_connector_groups(db, request)
+    |       |
+    |       +---> db.query(ApiSource).order_by(display_name).all()
+    |       |     (9 dead rows excluded in-process: aliexpress/arrow/avnet/partfuse/
+    |       |      rs_components/siliconexpert/winsource + rocketreach/clearbit)
+    |       |
+    |       +---> per source: _enrich_source(source, db)
+    |       |       |
+    |       |       +---> connector_service.control_type(source)
+    |       |       |       → "key" | "oauth_clay" | "multi_field" | "browser_login"
+    |       |       |         | "scopes" | "keyless" | "planned"
+    |       |       |
+    |       |       +---> credential_service.credential_is_set / get_credential
+    |       |       |       (masked display only)
+    |       |       |
+    |       |       +---> clay_oauth.is_connected() / needs_reconnect()
+    |       |       |       (clay_enrichment only)
+    |       |       |
+    |       |       +---> connector_service.connector_state(source, ...)
+    |       |               → "live" | "error" | "off" | "needs_setup" | "untested"
+    |       |                 | "needs_reconnect" | "planned"
+    |       |
+    |       +---> connector_service.connector_group(source) → group key
+    |       |     Buckets emitted in GROUP_ORDER:
+    |       |       Part Sourcing / Enrichment / AI / Communications /
+    |       |       Browser Workers / Manual
+    |       |     7 planned connectors (findchips/future/heilind/lcsc/rochester/
+    |       |       thebrokersite/verical) render as read-only "Planned" cards
+    |       |       (no credential form, no toggle, no Test button)
+    |       |
+    |       v
+    |     connector_groups: [{key, label, sources: [enriched_dict]}]
+    |
+    v
+settings/connectors.html  (grouped card grid)
+```
+
+**Per-card controls (by `control_type`):**
+
+| `control_type` | UI |
+|---|---|
+| `key` | API key input (masked), Save via `hx-ext="json-enc"` |
+| `oauth_clay` | Connect / Reconnect / Disconnect buttons (Clay OAuth) |
+| `multi_field` | 4-field form (8×8: API key + username + password + PBX id) |
+| `keyless` | Enable toggle only (no credential; e.g. `ai_live_web`) |
+| `browser_login` | Status-only (ICS/NC workers — managed by browser-worker containers) |
+| `scopes` | Status-only (Azure AD / Teams — managed by Azure AD admin) |
+| `planned` | Read-only label, no controls |
+
+Every non-planned card has an **enable toggle** (`POST /api/sources/{id}/activate`) and a
+**Test** button (disabled if untestable). Both return JSON; the swap unit is a refreshed
+card partial:
+
+```
+POST /api/sources/{id}/activate          → JSON {status, is_active}
+POST /api/sources/{id}/test              → JSON {ok, error}
+GET  /v2/partials/settings/connector-card/{id}  → single card HTML (swap target)
+POST /v2/partials/settings/connectors/test-all  → OOB bundle of refreshed cards
+     (skips inactive / untestable; per-source failures tolerated, never abort)
+```
+
+Credential save uses `hx-ext="json-enc"` to POST a JSON body to the existing
+`POST /api/sources/{id}` endpoint (HTMX json-enc extension — not a standard form
+POST). On success the card re-fetches via `GET /v2/partials/settings/connector-card/{id}`.
+
+The degraded-source banner on the Part Dossier (`§ 2a-bis`) deep-links
+`/v2/settings` when live-market connectors are down — that link now routes to the
+Connectors tab (default tab is `connectors`).
+
+---
+
 ## 10. Click-to-Contact Outreach Logging (CDM Workspace)
 
 ```
@@ -1670,9 +1753,11 @@ Provenance is persisted in the new `enrichment_provenance` JSONB column on both
       store encrypted tokens → redirect to Settings.
     - `POST /auth/clay/disconnect` — clears stored credentials.
 
-  - **Settings → API Keys** — the Clay card is a **Connect / Reconnect / Disconnect**
-    card (no API-key input field). The `NEEDS_RECONNECT` marker surfaces a
-    "Reconnect" prompt when the refresh token has expired.
+  - **Settings → Connectors** — the Clay card renders as `control_type=oauth_clay`:
+    a **Connect / Reconnect / Disconnect** card (no API-key input field). The
+    `NEEDS_RECONNECT` marker surfaces a "Reconnect" prompt when the refresh token has
+    expired; `connector_state` returns `needs_reconnect` in that case. Clay OAuth
+    callbacks redirect to `/v2/partials/settings/connectors`.
 
   Mirrors the Azure AD OAuth pattern in `app/routers/auth.py`.
 - `app/connectors/sam_gov_company.py` — name→firmographics adapter wrapping the public
@@ -3544,7 +3629,7 @@ the current implementation.
 | AI | 18 | Parse email, normalize, find contacts, draft RFQ |
 | Proactive | 12 | Matches, refresh, dismiss, send, scorecard |
 | Prospects | 9 | HTMX tab only (JSON `/api/prospects/*` removed, consolidated): list, stats, add-domain, detail, claim, dismiss, release, enrich (background — spawns run_enrichment_job; pulls real contacts + firmographics via Lusha chain: enrich_entity + find_suggested_contacts, fill-only onto prospect columns; recomputes both fit_score and readiness_score; 24h gate prevents repeat paid pulls), enrich-status (poll; HTTP 286 stops) |
-| Sources | 35 | Connector config, test, stocklist, webhooks |
+| Sources | 35 | Connector config, test, stocklist, webhooks; Settings Connectors tab (`GET /v2/partials/settings/connectors`, card partial, test-all); legacy `/sources` + `/api-keys` 302 → connectors |
 | Tags | 4 | List, entity tags |
 | Activity | 14 | Log calls, timeline, dashboards |
 | Admin | 15 | Users, config, diagnostics, maintenance |
