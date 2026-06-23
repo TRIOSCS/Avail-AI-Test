@@ -4961,7 +4961,7 @@ async def create_company(
     default_site = CustomerSite(
         company_id=company.id,
         site_name="HQ",
-        site_type="headquarters",
+        site_type="hq",
         is_active=True,
     )
     db.add(default_site)
@@ -5287,6 +5287,7 @@ EDITABLE_ACCOUNT_FIELDS: dict[str, dict] = {
         "choices": ["Customer", "Prospect", "Partner", "Competitor"],
     },
     "domain": {"label": "Domain", "kind": "text"},
+    "linkedin_url": {"label": "LinkedIn URL", "kind": "text"},
     "tax_id": {"label": "Tax ID", "kind": "text"},
     "source": {"label": "Source", "kind": "text"},
     "notes": {"label": "Notes", "kind": "text"},

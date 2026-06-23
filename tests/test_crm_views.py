@@ -4983,3 +4983,144 @@ class TestKnownFieldGrid:
         resp = client.get(f"/v2/partials/customers/{co.id}")
         assert resp.status_code == 200
         assert "Add Email" in resp.text
+
+
+# ── WS4: modal edit-form coverage gaps ───────────────────────────────────────
+
+
+class TestWS4AccountModalFields:
+    """WS4: account edit modal renders domain/linkedin_url/account_type inputs and
+    persists them via apply_company_field."""
+
+    def _make_company(self, db_session: Session, **kwargs) -> Company:
+        co = Company(name="WS4 Acct Co", is_active=True, **kwargs)
+        db_session.add(co)
+        db_session.commit()
+        return co
+
+    def test_edit_form_renders_domain_input(self, client: TestClient, db_session: Session, test_user: User):
+        """GET edit-form contains input[name=domain]."""
+        co = self._make_company(db_session)
+        resp = client.get(f"/v2/partials/customers/{co.id}/edit-form")
+        assert resp.status_code == 200
+        assert 'name="domain"' in resp.text
+
+    def test_edit_form_renders_linkedin_url_input(self, client: TestClient, db_session: Session, test_user: User):
+        """GET edit-form contains input[name=linkedin_url]."""
+        co = self._make_company(db_session)
+        resp = client.get(f"/v2/partials/customers/{co.id}/edit-form")
+        assert resp.status_code == 200
+        assert 'name="linkedin_url"' in resp.text
+
+    def test_edit_form_renders_account_type_select(self, client: TestClient, db_session: Session, test_user: User):
+        """GET edit-form contains select[name=account_type] with canonical options."""
+        co = self._make_company(db_session)
+        resp = client.get(f"/v2/partials/customers/{co.id}/edit-form")
+        assert resp.status_code == 200
+        assert 'name="account_type"' in resp.text
+        for val in ["Customer", "Prospect", "Partner", "Competitor"]:
+            assert val in resp.text
+
+    def test_edit_form_prefills_domain(self, client: TestClient, db_session: Session, test_user: User):
+        """Edit form pre-fills domain with existing value."""
+        co = self._make_company(db_session, domain="prefill-domain.com")
+        resp = client.get(f"/v2/partials/customers/{co.id}/edit-form")
+        assert resp.status_code == 200
+        assert "prefill-domain.com" in resp.text
+
+    def test_modal_edit_persists_domain(self, client: TestClient, db_session: Session, test_user: User):
+        """POST edit with domain persists to DB."""
+        co = self._make_company(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{co.id}/edit",
+            data={"name": co.name, "domain": "modal-domain.com"},
+        )
+        assert resp.status_code == 200
+        db_session.refresh(co)
+        assert co.domain == "modal-domain.com"
+
+    def test_modal_edit_persists_linkedin_url(self, client: TestClient, db_session: Session, test_user: User):
+        """POST edit with linkedin_url persists to DB."""
+        co = self._make_company(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{co.id}/edit",
+            data={"name": co.name, "linkedin_url": "https://linkedin.com/company/ws4test"},
+        )
+        assert resp.status_code == 200
+        db_session.refresh(co)
+        assert co.linkedin_url == "https://linkedin.com/company/ws4test"
+
+    def test_modal_edit_persists_account_type(self, client: TestClient, db_session: Session, test_user: User):
+        """POST edit with account_type persists valid choice to DB."""
+        co = self._make_company(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{co.id}/edit",
+            data={"name": co.name, "account_type": "Partner"},
+        )
+        assert resp.status_code == 200
+        db_session.refresh(co)
+        assert co.account_type == "Partner"
+
+    def test_modal_edit_blank_account_type_clears(self, client: TestClient, db_session: Session, test_user: User):
+        """POST edit with blank account_type clears it to None."""
+        co = self._make_company(db_session, account_type="Customer")
+        resp = client.post(
+            f"/v2/partials/customers/{co.id}/edit",
+            data={"name": co.name, "account_type": ""},
+        )
+        assert resp.status_code == 200
+        db_session.refresh(co)
+        assert co.account_type is None
+
+
+class TestWS4SiteEditModal:
+    """WS4: site edit modal renders owner select and persists owner_id."""
+
+    def _make_company_with_site(self, db_session: Session):
+        from app.models.crm import CustomerSite
+
+        co = Company(name="WS4 Site Co", is_active=True)
+        db_session.add(co)
+        db_session.flush()
+        site = CustomerSite(company_id=co.id, site_name="HQ", site_type="hq", is_active=True)
+        db_session.add(site)
+        db_session.commit()
+        return co, site
+
+    def test_site_edit_modal_renders_owner_select(self, client: TestClient, db_session: Session, test_user: User):
+        """GET site edit-form contains select[name=owner_id]."""
+        co, site = self._make_company_with_site(db_session)
+        resp = client.get(f"/v2/partials/customers/{co.id}/sites/{site.id}/edit-form")
+        assert resp.status_code == 200
+        assert "name='owner_id'" in resp.text or 'name="owner_id"' in resp.text
+
+    def test_site_edit_persists_owner_id(self, client: TestClient, db_session: Session, test_user: User):
+        """POST site edit with owner_id persists it to DB."""
+
+        co, site = self._make_company_with_site(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{co.id}/sites/{site.id}/edit",
+            data={"site_name": "HQ", "owner_id": str(test_user.id)},
+        )
+        assert resp.status_code == 200
+        db_session.refresh(site)
+        assert site.owner_id == test_user.id
+
+
+class TestWS4CreateCompanySiteType:
+    """WS4: create_company produces HQ site with site_type='hq' (not 'headquarters')."""
+
+    def test_create_company_hq_site_type_is_hq(self, client: TestClient, db_session: Session, test_user: User):
+        """POST create produces default site with site_type='hq'."""
+        from app.models.crm import CustomerSite
+
+        resp = client.post(
+            "/v2/partials/customers/create",
+            data={"name": "WS4 New Co HQ"},
+        )
+        assert resp.status_code == 200
+        co = db_session.query(Company).filter(Company.name == "WS4 New Co HQ").first()
+        assert co is not None
+        site = db_session.query(CustomerSite).filter(CustomerSite.company_id == co.id).first()
+        assert site is not None
+        assert site.site_type == "hq"
