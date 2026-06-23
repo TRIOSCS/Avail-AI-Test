@@ -1,0 +1,201 @@
+{#
+  requisitions/tabs/build_quote.html — Build-Quote tab body (single-stage inline assembly).
+  The in-workspace reshape of the quote-builder modal, mirroring resell/_build_bid.html:
+  each line shows its best-cost reference + ACTIVE offers (cheapest highlighted); checking a
+  line seeds the sell-price field (last-quoted -> else best-cost × markup); live margin chip
+  + blended total + guardrail; "Assemble" -> save_quote_from_builder -> clean inline summary
+  + Download PDF / Send. NO vendor names cross into the customer doc (quote_export_context).
+  Receives: req (Requisition), lines (build_quote_tab_data), markup_pct, min_margin_pct,
+            has_customer_site, quote (Quote|None), summary (quote_export_context|None).
+  Called by: quote_builder.build_quote_tab (lazy) + build_quote_assemble (re-render).
+#}
+
+{% if not lines %}
+<div class="mx-auto max-w-xs text-center text-sm text-gray-600 py-10">
+  <svg class="mx-auto mb-3 h-10 w-10 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+  No parts to quote yet.
+</div>
+
+{% else %}
+{# The per-line reactive seed is built server-side (tab_data) and passed as ONE |tojson
+   blob inside a SINGLE-quoted x-data — tojson emits double quotes, valid only inside single
+   quotes (mirrors quote_builder/modal.html + the CLAUDE.md Alpine-quoting rule). #}
+<div class="space-y-5"
+     x-data='quoteBuilderTab({{ req.id }}, {{ has_customer_site | tojson }}, {{ min_margin_pct }}, {{ (quote is not none) | tojson }}, {{ tab_data | tojson }})'>
+
+  <div class="flex items-start justify-between gap-3">
+    <p class="text-sm text-gray-600">
+      Pick the parts to quote and set the <span class="font-medium text-gray-700">sell price</span> per line
+      (pre-filled from the last quote, else best cost + {{ "%.0f"|format(markup_pct) }}%), then assemble.
+      The customer doc shows only part / qty / condition / price — never vendor names.
+    </p>
+    {# Markup % — surfaced + adjustable; reseeds unedited lines. #}
+    <div class="flex items-end gap-2 flex-shrink-0">
+      <div>
+        <label class="block text-xs text-gray-400 uppercase tracking-wide mb-0.5">Markup %</label>
+        <input type="number" step="1" min="0" x-model.number="markupPct"
+               class="input w-20 text-right tabular-nums" aria-label="Default markup percent">
+      </div>
+      <button type="button" @click="applyMarkup()" class="btn-secondary btn-sm">Apply</button>
+    </div>
+  </div>
+
+  {% if not has_customer_site %}
+  <div class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 flex items-center gap-2">
+    <svg class="h-4 w-4 text-amber-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>
+    <span class="text-sm text-amber-800 font-medium">Link a customer to this requisition before assembling a quote.</span>
+  </div>
+  {% endif %}
+
+  {# ── Builder table ────────────────────────────────────────────── #}
+  <form hx-post="/v2/partials/requisitions/{{ req.id }}/build-quote/assemble"
+        hx-target="#tab-content"
+        hx-swap="innerHTML"
+        data-loading-disable
+        @submit="$el.querySelector('input[name=selections_json]').value = payload()">
+    <input type="hidden" name="selections_json" value="[]">
+    {% if quote %}<input type="hidden" name="quote_id" value="{{ quote.id }}">{% endif %}
+
+    <div class="rounded-lg border border-brand-200 overflow-hidden">
+      <table class="compact-table min-w-full">
+        <thead>
+          <tr>
+            <th class="text-center w-8"><span class="sr-only">Include</span></th>
+            <th class="text-left">Part</th>
+            <th class="text-right">Qty</th>
+            <th class="text-left">Condition</th>
+            <th class="text-right">Best cost</th>
+            <th class="text-right">Sell price</th>
+            <th class="text-right">Margin</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for l in lines %}
+          {% set rid = l.requirement_id %}
+          <tr>
+            <td class="text-center">
+              <input type="checkbox" x-model="data[{{ rid }}].sel"
+                     :disabled="data[{{ rid }}].cost === null"
+                     @change="if (data[{{ rid }}].sel && !data[{{ rid }}].price && data[{{ rid }}].seed !== null) data[{{ rid }}].price = data[{{ rid }}].seed.toFixed(4)"
+                     aria-label="Include {{ l.mpn }} in the quote">
+            </td>
+            <td>
+              <span class="font-mono font-medium text-gray-900">{{ l.mpn or '—' }}</span>
+              {% if l.manufacturer %}<span class="block text-xs text-gray-400">{{ l.manufacturer }}</span>{% endif %}
+              {% if l.offer_count %}<span class="block text-xs text-gray-400">{{ l.offer_count }} offer{{ 's' if l.offer_count != 1 }}</span>{% endif %}
+            </td>
+            <td class="text-right tabular-nums">{{ "{:,}".format(l.qty or 0) }}</td>
+            <td>{{ l.condition or '—' }}</td>
+            <td class="text-right tabular-nums">
+              {% if l.best_cost is not none %}
+              <span class="font-semibold text-gray-700">${{ "{:,.4f}".format(l.best_cost) }}</span>
+              {% else %}<span class="text-gray-400">no offers</span>{% endif %}
+            </td>
+            <td class="text-right">
+              <input type="number" step="0.0001" min="0"
+                     x-model="data[{{ rid }}].price"
+                     :disabled="!data[{{ rid }}].sel"
+                     class="input text-right tabular-nums"
+                     placeholder="{% if l.sell_seed is not none %}{{ '%.4f' % l.sell_seed }}{% else %}price{% endif %}"
+                     aria-label="Sell price for {{ l.mpn }}">
+            </td>
+            <td class="text-right tabular-nums">
+              <template x-if="data[{{ rid }}].sel && marginPct({{ rid }}) !== null">
+                <span class="inline-flex flex-col items-end">
+                  <span class="font-semibold" :class="marginClass({{ rid }})" x-text="marginPct({{ rid }}).toFixed(1) + '%'"></span>
+                  <span x-show="guardrail({{ rid }})" x-cloak class="text-xs text-rose-600" x-text="guardrail({{ rid }})"></span>
+                </span>
+              </template>
+              <template x-if="!data[{{ rid }}].sel || marginPct({{ rid }}) === null">
+                <span class="text-gray-300">—</span>
+              </template>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {# Live blended total + guardrail strip. #}
+    <div class="mt-3 flex items-center justify-between">
+      <div x-show="blendedWarning" x-cloak class="text-sm text-rose-600 font-medium" x-text="blendedWarning"></div>
+      <div class="ml-auto flex items-center gap-5 text-sm">
+        <span><span class="text-gray-400 uppercase tracking-wide text-xs mr-1.5">Selected</span><span class="font-semibold tabular-nums" x-text="selectedCount"></span></span>
+        <span><span class="text-gray-400 uppercase tracking-wide text-xs mr-1.5">Total</span><span class="font-semibold text-gray-900 tabular-nums" x-text="'$' + totalSell.toFixed(2)"></span></span>
+        <span><span class="text-gray-400 uppercase tracking-wide text-xs mr-1.5">Margin</span><span class="font-semibold tabular-nums" :class="blendedMarginClass" x-text="blendedMargin !== null ? blendedMargin.toFixed(1) + '%' : '—'"></span></span>
+      </div>
+    </div>
+
+    <div class="mt-4 flex justify-end">
+      <button type="submit" class="btn btn-primary" :disabled="!anySelected() || !hasCustomerSite">
+        <svg class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+        <span x-text="quoteExists ? 'Assemble revision' : 'Assemble quote'"></span>
+      </button>
+    </div>
+  </form>
+
+  {# ── Assembled-quote summary (clean export preview) ───────────── #}
+  {% if quote and summary %}
+  <div class="card">
+    <div class="flex items-start justify-between gap-3">
+      <div>
+        <p class="text-base font-semibold text-gray-900">{{ summary.quote_number }}</p>
+        <p class="text-xs text-gray-400 mt-0.5">
+          {{ summary.line_count }} line{{ 's' if summary.line_count != 1 }} · rev {{ summary.revision }} · {{ quote.status }}
+        </p>
+      </div>
+      <div class="flex items-center gap-2 flex-shrink-0">
+        <a href="/v2/partials/quote-builder/{{ req.id }}/export/pdf?quote_id={{ quote.id }}"
+           class="btn-secondary btn-sm">
+          <svg class="h-3.5 w-3.5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+          Download PDF
+        </a>
+        {% if quote.status == 'draft' %}
+        <button hx-post="/v2/partials/quotes/{{ quote.id }}/send"
+                hx-target="#main-content"
+                hx-confirm="Send this quote to the customer?"
+                data-loading-disable
+                class="btn-primary btn-sm">
+          <svg class="h-3.5 w-3.5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+          Send
+        </button>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="mt-3 rounded-lg border border-brand-200 overflow-hidden">
+      <table class="compact-table min-w-full">
+        <thead>
+          <tr>
+            <th class="text-left">Part</th>
+            <th class="text-left">Condition</th>
+            <th class="text-right">Qty</th>
+            <th class="text-right">Sell</th>
+            <th class="text-right">Extended</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for li in summary.lines %}
+          <tr>
+            <td>
+              <span class="font-mono font-medium text-gray-900">{{ li.part_number or '—' }}</span>
+              {% if li.manufacturer %}<span class="block text-xs text-gray-400">{{ li.manufacturer }}</span>{% endif %}
+            </td>
+            <td>{{ li.condition or '—' }}</td>
+            <td class="text-right tabular-nums">{{ "{:,}".format(li.quantity) }}</td>
+            <td class="text-right tabular-nums">${{ "{:,.4f}".format(li.sell) }}</td>
+            <td class="text-right tabular-nums">${{ "{:,.2f}".format(li.extended) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="mt-3 text-right text-sm">
+      <span class="text-gray-400 uppercase tracking-wide text-xs mr-2">Quote total</span>
+      <span class="font-semibold text-gray-900 tabular-nums">${{ "{:,.2f}".format(summary.subtotal) }}</span>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
