@@ -1,0 +1,183 @@
+{% macro state_badge(s) %}
+{% if s.state == 'live' %}
+  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+    <span class="w-1.5 h-1.5 rounded-full bg-green-500"></span> Live
+  </span>
+{% elif s.state == 'error' %}
+  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+    <span class="w-1.5 h-1.5 rounded-full bg-red-500"></span> Error
+  </span>
+{% elif s.state == 'off' %}
+  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+    <span class="w-1.5 h-1.5 rounded-full bg-gray-400"></span> Off
+  </span>
+{% elif s.state == 'needs_setup' %}
+  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
+    <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span> Needs setup
+  </span>
+{% elif s.state == 'needs_reconnect' %}
+  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
+    <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span> Needs reconnect
+  </span>
+{% elif s.state == 'untested' %}
+  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+    <span class="w-1.5 h-1.5 rounded-full bg-blue-500"></span> Untested
+  </span>
+{% else %}
+  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+    {{ s.state }}
+  </span>
+{% endif %}
+{% endmacro %}
+
+{% macro connector_card(s) %}
+<div id="connector-card-{{ s.id }}" class="card p-4 flex flex-col gap-3">
+  <div class="flex items-center justify-between gap-4">
+    <div class="flex items-center gap-3 min-w-0">
+      <div class="w-28 flex-shrink-0">{{ state_badge(s) }}</div>
+      <div class="min-w-0">
+        <p class="text-sm font-medium text-gray-900 truncate">{{ s.display_name }}</p>
+        {% if s.description %}
+        <p class="text-xs text-gray-500 truncate">{{ s.description }}</p>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="flex items-center gap-2 flex-shrink-0">
+      {# Enable toggle — disabled when needs_setup #}
+      <label class="flex items-center gap-1.5 cursor-pointer {% if s.state == 'needs_setup' %}opacity-50 pointer-events-none{% endif %}"
+             title="{% if s.state == 'needs_setup' %}Add credentials first — there's nothing to switch on yet.{% else %}Use this connector in searches. Turning it off keeps your credentials but stops it from running.{% endif %}">
+        <input type="checkbox" class="sr-only peer" {% if s.is_active %}checked{% endif %}
+               {% if s.state == 'needs_setup' %}disabled{% endif %}
+               hx-put="/api/sources/{{ s.id }}/activate"
+               hx-trigger="change"
+               hx-swap="none"
+               hx-on::after-request="htmx.ajax('GET','/v2/partials/settings/connector-card/{{ s.id }}',{target:'#connector-card-{{ s.id }}',swap:'outerHTML'})"
+               aria-label="Enable {{ s.display_name }}">
+        <div class="w-8 h-4 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-brand-600 relative"></div>
+      </label>
+
+      {# Test button #}
+      {% if s.testable %}
+      <button class="btn-md"
+              hx-post="/api/sources/{{ s.id }}/test"
+              hx-swap="none"
+              hx-on::after-request="htmx.ajax('GET','/v2/partials/settings/connector-card/{{ s.id }}',{target:'#connector-card-{{ s.id }}',swap:'outerHTML'})">
+        Test
+      </button>
+      {% endif %}
+    </div>
+  </div>
+
+  {# Credential / connect controls #}
+  {% if s.control_type == 'oauth_clay' %}
+    <div class="flex items-center gap-3">
+      {% if s.oauth_connected %}
+        <span class="text-sm text-green-700 font-medium">Connected</span>
+        <button class="btn-md text-red-600"
+                hx-post="/auth/clay/disconnect"
+                hx-swap="none">Disconnect</button>
+      {% elif s.needs_reconnect %}
+        <span class="text-sm text-amber-700">Connection expired — reconnect.</span>
+        <a href="/auth/clay/connect" class="btn-md">Reconnect</a>
+      {% else %}
+        <a href="/auth/clay/connect" class="btn-md">Connect Clay</a>
+      {% endif %}
+    </div>
+
+  {% elif s.control_type == 'keyless' or s.control_type == 'scopes' %}
+    {% if s.keyless_note %}
+    <p class="text-xs text-gray-500">{{ s.keyless_note }}</p>
+    {% endif %}
+
+  {% elif s.control_type == 'key' %}
+    <div x-data='{"show": false}' class="space-y-2">
+      {% for ev, field in s.creds.items() %}
+      <div class="flex items-center gap-2">
+        <label class="text-xs text-gray-600 w-48 flex-shrink-0" for="cred-{{ s.id }}-{{ ev }}">{{ ev }}</label>
+        <input id="cred-{{ s.id }}-{{ ev }}"
+               type='text'
+               name="{{ ev }}"
+               placeholder="{{ field.masked if field.is_set else 'Paste key…' }}"
+               class="input-sm flex-1 font-mono text-xs"
+               aria-label="{{ ev }}">
+      </div>
+      {% endfor %}
+      <button class="btn-md"
+              hx-put="/api/sources/{{ s.name }}/credentials"
+              hx-include="[name]"
+              hx-swap="none"
+              hx-on::before-request="
+                const creds = {};
+                this.closest('[x-data]').querySelectorAll('input[name]').forEach(i => { if(i.value) creds[i.name]=i.value; });
+                this._body = JSON.stringify({credentials: creds});
+              "
+              hx-vals='js:JSON.parse(this._body||"{}")'
+              hx-on::after-request="htmx.ajax('GET','/v2/partials/settings/connector-card/{{ s.id }}',{target:'#connector-card-{{ s.id }}',swap:'outerHTML'})">
+        Save key
+      </button>
+    </div>
+
+  {% elif s.control_type == 'browser_login' %}
+    <div x-data='{"show": false}' class="space-y-2">
+      {% for ev, field in s.creds.items() %}
+      <div class="flex items-center gap-2">
+        <label class="text-xs text-gray-600 w-48 flex-shrink-0" for="cred-{{ s.id }}-{{ ev }}">{{ ev }}</label>
+        <input id="cred-{{ s.id }}-{{ ev }}"
+               type='text'
+               name="{{ ev }}"
+               placeholder="{{ field.masked if field.is_set else 'Enter value…' }}"
+               class="input-sm flex-1 font-mono text-xs"
+               aria-label="{{ ev }}">
+      </div>
+      {% endfor %}
+      <button class="btn-md"
+              hx-put="/api/sources/{{ s.name }}/credentials"
+              hx-include="[name]"
+              hx-swap="none"
+              hx-on::before-request="
+                const creds = {};
+                this.closest('[x-data]').querySelectorAll('input[name]').forEach(i => { if(i.value) creds[i.name]=i.value; });
+                this._body = JSON.stringify({credentials: creds});
+              "
+              hx-vals='js:JSON.parse(this._body||"{}")'
+              hx-on::after-request="htmx.ajax('GET','/v2/partials/settings/connector-card/{{ s.id }}',{target:'#connector-card-{{ s.id }}',swap:'outerHTML'})">
+        Save login
+      </button>
+    </div>
+
+  {% elif s.control_type == 'multi_field' %}
+    <div x-data='{"show": false}' class="space-y-2">
+      {% for ev, field in s.creds.items() %}
+      <div class="flex items-center gap-2">
+        <label class="text-xs text-gray-600 w-48 flex-shrink-0" for="cred-{{ s.id }}-{{ ev }}">{{ ev }}</label>
+        <input id="cred-{{ s.id }}-{{ ev }}"
+               type='text'
+               name="{{ ev }}"
+               placeholder="{{ field.masked if field.is_set else 'Enter value…' }}"
+               class="input-sm flex-1 font-mono text-xs"
+               aria-label="{{ ev }}">
+      </div>
+      {% endfor %}
+      <button class="btn-md"
+              hx-put="/api/sources/{{ s.name }}/credentials"
+              hx-include="[name]"
+              hx-swap="none"
+              hx-on::before-request="
+                const creds = {};
+                this.closest('[x-data]').querySelectorAll('input[name]').forEach(i => { if(i.value) creds[i.name]=i.value; });
+                this._body = JSON.stringify({credentials: creds});
+              "
+              hx-vals='js:JSON.parse(this._body||"{}")'
+              hx-on::after-request="htmx.ajax('GET','/v2/partials/settings/connector-card/{{ s.id }}',{target:'#connector-card-{{ s.id }}',swap:'outerHTML'})">
+        Save credentials
+      </button>
+    </div>
+  {% endif %}
+
+  {# Error message #}
+  {% if s.state == 'error' and s.last_error %}
+  <p class="text-xs text-red-600">{{ s.last_error }}</p>
+  {% endif %}
+</div>
+{% endmacro %}

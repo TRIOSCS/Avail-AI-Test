@@ -21,7 +21,7 @@ from app.services import clay_oauth
 
 router = APIRouter()
 
-_SETTINGS_URL = "/v2/partials/settings/api-keys"
+_SETTINGS_URL = "/v2/partials/settings/connectors"
 _STATE_PREFIX = "clay:oauth:state:"
 _STATE_TTL_DAYS = 10 / 1440  # 10 minutes
 _EXPIRE_TTL_DAYS = 1 / 86400  # ~1 second — one-time consume (set_cached cannot store None)

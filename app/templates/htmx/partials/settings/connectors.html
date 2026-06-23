@@ -1,0 +1,20 @@
+<title hx-swap-oob="true">Connectors</title>
+{% import 'htmx/partials/settings/_connector_macros.html' as cm %}
+
+<div id="settings-connectors" class="space-y-8">
+  <div class="mb-4">
+    <h2 class="text-lg font-semibold text-gray-900">Connectors</h2>
+    <p class="text-sm text-gray-500">Your data providers — search, enrichment, AI, and comms — in one place. See what's live and fix what isn't.</p>
+  </div>
+
+  {% for group in connector_groups %}
+  <section id="connector-group-{{ group.key }}" class="space-y-3">
+    <h3 class="text-sm font-semibold text-gray-700 uppercase tracking-wide">{{ group.label }}</h3>
+    <div class="space-y-2">
+      {% for s in group.sources %}
+        {{ cm.connector_card(s) }}
+      {% endfor %}
+    </div>
+  </section>
+  {% endfor %}
+</div>

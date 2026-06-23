@@ -10735,11 +10735,10 @@ async def settings_sources_tab(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Sources tab content."""
-    sources = db.query(ApiSource).order_by(ApiSource.display_name).all()
-    ctx = _base_ctx(request, user, "settings")
-    ctx["sources"] = sources
-    return template_response("htmx/partials/settings/sources.html", ctx)
+    """Sources tab — redirects to unified Connectors tab."""
+    from fastapi.responses import RedirectResponse
+
+    return RedirectResponse("/v2/partials/settings/connectors", status_code=302)
 
 
 @router.get("/v2/partials/settings/system", response_class=HTMLResponse)
@@ -10858,44 +10857,158 @@ async def settings_api_keys_tab(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """API credentials management tab — admin only."""
+    """API keys tab — redirects to unified Connectors tab."""
+    from fastapi.responses import RedirectResponse
+
+    return RedirectResponse("/v2/partials/settings/connectors", status_code=302)
+
+
+def _build_connector_field(db, source_name: str, env_var: str) -> dict:
+    """Return {is_set, masked} for one env-var credential field."""
+    from ..services.credential_service import credential_is_set, get_credential, mask_value
+
+    is_set = credential_is_set(db, source_name, env_var)
+    masked = ""
+    if is_set:
+        plain = get_credential(db, source_name, env_var)
+        masked = mask_value(plain) if plain else "••••••••"
+    return {"is_set": is_set, "masked": masked}
+
+
+def _enrich_source(source, db) -> dict:
+    """Build the per-source context dict for the connectors tab."""
+    from ..services import connector_service
+
+    name = source.name
+    ct = connector_service.control_type(source)
+    keyless = connector_service.is_keyless(source)
+
+    # Credential fields
+    env_vars = source.env_vars or []
+    creds = {ev: _build_connector_field(db, name, ev) for ev in env_vars}
+    credential_set = any(c["is_set"] for c in creds.values())
+
+    # Clay OAuth state
+    if name == "clay_enrichment":
+        oauth_connected = clay_oauth.is_connected()
+        needs_reconnect = clay_oauth.needs_reconnect()
+    else:
+        oauth_connected = False
+        needs_reconnect = False
+
+    state = connector_service.connector_state(
+        source,
+        credential_set=credential_set,
+        oauth_connected=oauth_connected,
+        needs_reconnect=needs_reconnect,
+        keyless=keyless,
+    )
+
+    # Keyless note
+    if ct == "keyless":
+        if name == "ai_live_web":
+            keyless_note = "No key required — uses your Anthropic key."
+        else:
+            keyless_note = "No key required."
+    else:
+        keyless_note = ""
+
+    # Testable = has some form of access
+    testable = bool(credential_set or oauth_connected or keyless)
+
+    return {
+        "id": source.id,
+        "name": name,
+        "display_name": source.display_name or name,
+        "description": source.description or "",
+        "is_active": source.is_active,
+        "state": state,
+        "control_type": ct,
+        "env_vars": env_vars,
+        "creds": creds,
+        "oauth_connected": oauth_connected,
+        "needs_reconnect": needs_reconnect,
+        "status": source.status or "pending",
+        "last_error": source.last_error or "",
+        "last_success": source.last_success,
+        "error_count_24h": getattr(source, "error_count_24h", 0) or 0,
+        "keyless_note": keyless_note,
+        "testable": testable,
+    }
+
+
+def _build_connector_groups(db, request) -> list[dict]:
+    """Return connector_groups list-of-group-dicts for the connectors tab context.
+
+    Each group: {key, label, sources: [enriched source dict]}.
+    Sources are bucketed by connector_service.connector_group, emitted in GROUP_ORDER,
+    empty groups are dropped. Dead providers (rocketreach, clearbit) are excluded.
+    """
+    from ..services import connector_service
+
+    _DEAD = {"rocketreach_enrichment", "clearbit_enrichment"}
+
+    sources = db.query(ApiSource).order_by(ApiSource.display_name).all()
+
+    buckets: dict[str, list[dict]] = {key: [] for key, _ in connector_service.GROUP_ORDER}
+
+    for src in sources:
+        if src.name in _DEAD:
+            continue
+        group_key = connector_service.connector_group(src)
+        if group_key not in buckets:
+            group_key = "part_sourcing"
+        buckets[group_key].append(_enrich_source(src, db))
+
+    groups = []
+    for key, label in connector_service.GROUP_ORDER:
+        members = buckets.get(key, [])
+        if members:
+            groups.append({"key": key, "label": label, "sources": members})
+
+    return groups
+
+
+@router.get("/v2/partials/settings/connectors", response_class=HTMLResponse)
+async def settings_connectors_tab(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Unified Connectors tab — admin only.
+
+    Replaces sources + api-keys tabs.
+    """
     if user.role != UserRole.ADMIN:
         raise HTTPException(403, "Admin only")
 
-    from ..config import GRAPH_SCOPES
-    from ..services.credential_service import credential_is_set, get_credential, mask_value
-
-    def _field(source: str, env_var: str) -> dict:
-        is_set = credential_is_set(db, source, env_var)
-        masked = ""
-        if is_set:
-            plain = get_credential(db, source, env_var)
-            masked = mask_value(plain) if plain else "••••••••"
-        return {"is_set": is_set, "masked": masked}
-
-    current_scopes = set(GRAPH_SCOPES.split())
-    needed_scopes = {"Calls.Read", "Calls.Initiate", "CallRecords.Read.All"}
-
     ctx = _base_ctx(request, user, "settings")
-    ctx.update(
-        {
-            "lusha_api_key": _field("lusha_enrichment", "LUSHA_API_KEY"),
-            "explorium_api_key": _field("explorium_enrichment", "EXPLORIUM_API_KEY"),
-            "apollo_api_key": _field("apollo_enrichment", "APOLLO_API_KEY"),
-            "hunter_api_key": _field("hunter_enrichment", "HUNTER_API_KEY"),
-            "clay_connected": clay_oauth.is_connected(),
-            "clay_needs_reconnect": clay_oauth.needs_reconnect(),
-            "eight_by_eight_api_key": _field("eight_by_eight", "EIGHT_BY_EIGHT_API_KEY"),
-            "eight_by_eight_pbx_id": _field("eight_by_eight", "EIGHT_BY_EIGHT_PBX_ID"),
-            "eight_by_eight_username": _field("eight_by_eight", "EIGHT_BY_EIGHT_USERNAME"),
-            "eight_by_eight_password": _field("eight_by_eight", "EIGHT_BY_EIGHT_PASSWORD"),
-            "eight_by_eight_timezone": _field("eight_by_eight", "EIGHT_BY_EIGHT_TIMEZONE"),
-            "current_scopes": sorted(current_scopes),
-            "missing_scopes": sorted(needed_scopes - current_scopes),
-            "teams_ready": not (needed_scopes - current_scopes),
-        }
-    )
-    return template_response("htmx/partials/settings/api_keys.html", ctx)
+    ctx["connector_groups"] = _build_connector_groups(db, request)
+    return template_response("htmx/partials/settings/connectors.html", ctx)
+
+
+@router.get("/v2/partials/settings/connector-card/{source_id}", response_class=HTMLResponse)
+async def connector_card_partial(
+    source_id: int,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Single connector card partial — used as the swap unit for toggle/test/save.
+
+    Returns the rendered card macro for one source, or 404 if not found.
+    """
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(403, "Admin only")
+
+    source = db.query(ApiSource).filter(ApiSource.id == source_id).first()
+    if not source:
+        raise HTTPException(404, f"Connector {source_id!r} not found")
+
+    enriched = _enrich_source(source, db)
+    ctx = _base_ctx(request, user, "settings")
+    ctx["s"] = enriched
+    return template_response("htmx/partials/settings/_connector_card_partial.html", ctx)
 
 
 @router.post("/v2/partials/admin/vendor-merge", response_class=HTMLResponse)
