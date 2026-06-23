@@ -13,6 +13,137 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session, joinedload
 
+# Default thin-margin threshold for the Build-Quote guardrail. Matches the
+# established floor used by proactive_min_margin_pct / buyplan_min_margin_pct (10%).
+DEFAULT_MIN_MARGIN_PCT = 10.0
+
+
+def best_cost_for(db: Session, requirement_id: int) -> dict | None:
+    """Best (lowest) unit cost across a requirement's ACTIVE offers — compute-on-read.
+
+    Returns ``{"unit_cost": float, "offer_id": int}`` for the cheapest priced ACTIVE
+    offer on *requirement_id*, or ``None`` when the requirement has no priced active
+    offers. Mirrors the SHAPE of the resell ``ExcessLineItem.best_offer_unit_price``
+    rollup (``excess_service.recompute_line_rollup``: min priced unit_price + the offer
+    that provided it) but for the buyer-side ``Offer`` table, and uses the SAME
+    ``OfferStatus.ACTIVE`` filter the quote builder applies in ``get_builder_data``.
+
+    No schema/migration: this is a read-time query, not a stored column.
+    """
+    return best_costs_for(db, [requirement_id]).get(requirement_id)
+
+
+def best_costs_for(db: Session, requirement_ids: list[int]) -> dict[int, dict]:
+    """Batch best-cost rollup keyed by requirement id — one query, no N+1.
+
+    For each id in *requirement_ids* that has at least one priced ACTIVE offer, the
+    returned map carries ``{requirement_id: {"unit_cost": float, "offer_id": int}}``
+    for the cheapest such offer. Requirements with no priced active offers are simply
+    absent from the map (compute-on-read mirror of ``best_cost_for``).
+    """
+    if not requirement_ids:
+        return {}
+
+    from app.constants import OfferStatus
+    from app.models import Offer
+
+    rows = (
+        db.query(Offer.requirement_id, Offer.id, Offer.unit_price)
+        .filter(
+            Offer.requirement_id.in_(requirement_ids),
+            Offer.status == OfferStatus.ACTIVE,
+            Offer.unit_price.isnot(None),
+        )
+        .all()
+    )
+
+    best: dict[int, dict] = {}
+    for req_id, offer_id, unit_price in rows:
+        cost = float(unit_price)
+        current = best.get(req_id)
+        if current is None or cost < current["unit_cost"]:
+            best[req_id] = {"unit_cost": cost, "offer_id": offer_id}
+    return best
+
+
+def margin_guardrail(cost, sell, *, min_margin_pct: float = DEFAULT_MIN_MARGIN_PCT) -> str | None:
+    """Short warning when a quote line is underwater or thin, else ``None`` (pure).
+
+    Returns a customer-safe internal warning string when ``sell < cost`` (selling at a
+    loss) or when ``margin% < min_margin_pct`` (thin margin), otherwise ``None``. A
+    missing/zero sell price yields ``None`` — there is nothing to judge yet and we never
+    divide by zero. Mirrors the buyplan/proactive "below threshold" check.
+    """
+    if cost is None or sell is None:
+        return None
+    cost_f = float(cost)
+    sell_f = float(sell)
+    if sell_f <= 0:
+        return None
+    if sell_f < cost_f:
+        return f"Selling below cost (cost ${cost_f:,.4f} > sell ${sell_f:,.4f})"
+    margin_pct = (sell_f - cost_f) / sell_f * 100
+    if margin_pct < min_margin_pct:
+        return f"Thin margin {margin_pct:.1f}% (below {min_margin_pct:.0f}% floor)"
+    return None
+
+
+def quote_export_context(quote) -> dict:
+    """Build the CLEAN customer-facing export payload for *quote* (pure whitelist).
+
+    The returned dict's ``lines`` carry ONLY ``part_number`` / ``manufacturer`` /
+    ``quantity`` / ``condition`` / ``cost`` / ``sell`` / ``margin`` / ``extended`` — every
+    vendor / offer / source identity field on the saved line (``vendor_name``,
+    ``offer_id``, ``source``, ``material_card_id``, …) is STRIPPED here. The header carries
+    only the quote number / revision / customer / date. Cleanliness is enforced at
+    ASSEMBLY (the context explicitly enumerates the clean fields), not by hoping the
+    template omits a leaky one — mirrors ``bid_back_service.bid_back_export_context``.
+    This is the single source ``generate_quote_report_pdf`` renders ``quote_report.html``
+    from.
+    """
+    from datetime import date
+
+    lines: list[dict] = []
+    subtotal = 0.0
+    for li in quote.line_items or []:
+        qty = li.get("qty") or 0
+        cost = float(li.get("cost_price") or 0)
+        sell = float(li.get("sell_price") or 0)
+        margin_pct = li.get("margin_pct")
+        margin = float(margin_pct) if margin_pct is not None else (((sell - cost) / sell * 100) if sell else 0.0)
+        extended = round(sell * qty, 2)
+        subtotal += extended
+        # WHITELIST — explicitly enumerate the clean fields. No vendor/offer/source key
+        # on the saved line is referenced, so nothing leaky can ride along.
+        lines.append(
+            {
+                "part_number": li.get("mpn"),
+                "manufacturer": li.get("manufacturer"),
+                "quantity": qty,
+                "condition": li.get("condition"),
+                "cost": cost,
+                "sell": sell,
+                "margin": round(margin, 2),
+                "extended": extended,
+            }
+        )
+
+    customer = None
+    if quote.customer_site_id is not None:
+        site = getattr(quote, "customer_site", None)
+        if site is not None:
+            customer = getattr(site, "site_name", None)
+
+    return {
+        "quote_number": quote.quote_number,
+        "revision": quote.revision or 1,
+        "customer": customer,
+        "date": date.today().isoformat(),
+        "lines": lines,
+        "subtotal": round(subtotal, 2),
+        "line_count": len(lines),
+    }
+
 
 def get_builder_data(
     req_id: int,
