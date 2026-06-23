@@ -10909,7 +10909,7 @@ def _enrich_source(source, db) -> dict:
         if name == "ai_live_web":
             keyless_note = "No key required — uses your Anthropic key."
         else:
-            keyless_note = "No key required."
+            keyless_note = "No key required — switch it on to use it."
     else:
         keyless_note = ""
 
