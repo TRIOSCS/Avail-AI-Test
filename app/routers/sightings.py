@@ -1805,6 +1805,16 @@ async def sightings_vendor_modal(
                 {"id": ds.id, "file_name": ds.file_name, "size_bytes": ds.size_bytes} for ds in ds_rows
             ]
 
+    # Build the tagged subject shown read-only in the compose step — LOCKSTEP with the
+    # preview/send path (sightings_preview_inquiry / send_batch_rfq): one [ref:{id}] token
+    # per involved requisition, ascending requisition id, prefixed by the part count. So
+    # the buyer sees exactly what will be sent before previewing, even after a modal refresh.
+    requisition_ids_sorted = sorted({r.requisition_id for r in requirements}) if requirements else []
+    num_parts = len(parts)
+    avail_token_display = " ".join(f"[ref:{rid}]" for rid in requisition_ids_sorted)
+    raw_subject_display = f"RFQ — {num_parts} part{'s' if num_parts != 1 else ''}"
+    compose_subject = f"{raw_subject_display} {avail_token_display}" if avail_token_display else raw_subject_display
+
     ctx = {
         "request": request,
         "suggested_vendors": suggested_vendors,
@@ -1815,6 +1825,7 @@ async def sightings_vendor_modal(
         "dnc_norms": dnc_norms,
         "contactable_non_dnc": contactable_non_dnc,
         "available_datasheets": available_datasheets,
+        "compose_subject": compose_subject,
     }
     return template_response("htmx/partials/sightings/vendor_modal.html", ctx)
 

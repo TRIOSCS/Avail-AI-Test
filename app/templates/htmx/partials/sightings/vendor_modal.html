@@ -247,6 +247,12 @@
     </div>
     {% endif %}
 
+    {# Compose subject — read-only display showing exactly what will be sent #}
+    <div class="mb-3">
+      <label class="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Subject</label>
+      <p class="text-xs text-gray-600 bg-gray-50 rounded-lg px-3 py-2 font-mono">{{ compose_subject }}</p>
+    </div>
+
     {# Email compose #}
     <div class="mb-4">
       <div class="mb-1">

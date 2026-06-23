@@ -2531,6 +2531,15 @@ class TestSightingsVendorModal:
         resp = client.get("/v2/partials/sightings/vendor-modal?requirement_ids=99999")
         assert resp.status_code == 200
 
+    def test_compose_step_shows_tagged_subject(self, client, db_session):
+        """Item 2: the compose step renders the tagged subject read-only so the buyer
+        sees exactly what will send (with the [ref:{requisition_id}] token) before
+        previewing — LOCKSTEP with the preview/send subject."""
+        req, r, _ = _seed_data(db_session)
+        resp = client.get(f"/v2/partials/sightings/vendor-modal?requirement_ids={r.id}")
+        assert resp.status_code == 200
+        assert f"RFQ — 1 part [ref:{req.id}]" in resp.text
+
     def test_xdata_not_truncated_with_vendors(self, client, db_session):
         """Regression for the broken "Send RFQ" modal.
 
