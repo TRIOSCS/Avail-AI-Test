@@ -2907,6 +2907,166 @@ async def sightings_offer_edit_form(
     return template_response("htmx/partials/sightings/offer_form_modal.html", ctx)
 
 
+def _offer_for_requirement_or_404(db: Session, requirement_id: int, offer_id: int):
+    requirement = db.get(Requirement, requirement_id)
+    offer = db.get(Offer, offer_id)
+    if not requirement or not offer or offer.requirement_id != requirement_id:
+        raise HTTPException(404, "Not found")
+    return requirement, offer
+
+
+@router.get(
+    "/v2/partials/sightings/{requirement_id}/offers/{offer_id}/qualify-ai",
+    response_class=HTMLResponse,
+)
+async def sightings_qualify_ai(
+    request: Request,
+    requirement_id: int,
+    offer_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    """Qualify-with-AI modal: parse the linked vendor email, pre-fill the offer form,
+    and compute the ask-the-vendor gap checklist. Read-only; nothing is sent or saved."""
+    from ..models.offers import VendorResponse
+    from ..services.offer_qualification import compute_qual_gaps, normalize_offer_condition
+    from ..services.response_parser import extract_draft_offers, parse_vendor_response
+
+    requirement, offer = _offer_for_requirement_or_404(db, requirement_id, offer_id)
+    require_requisition_access(db, offer.requisition_id, user, owner_id=offer.entered_by_id, label="Offer")
+
+    vr = db.get(VendorResponse, offer.vendor_response_id) if offer.vendor_response_id else None
+    if not vr:
+        raise HTTPException(404, "No linked vendor email for this offer")
+
+    def _json_safe(v: object) -> object:
+        if v is None:
+            return ""
+        if isinstance(v, Decimal):
+            return str(v)
+        if isinstance(v, (date, datetime)):
+            return v.isoformat()
+        return v
+
+    fields = [
+        "vendor_name",
+        "mpn",
+        "manufacturer",
+        "qty_available",
+        "unit_price",
+        "lead_time",
+        "date_code",
+        "condition",
+        "packaging",
+        "firmware",
+        "hardware_code",
+        "moq",
+        "spq",
+        "warranty",
+        "country_of_origin",
+        "notes",
+    ]
+    prefill = {f: _json_safe(getattr(offer, f, None)) for f in fields}
+    _q = offer.qualification or {}
+    for _qk in (
+        "usage",
+        "refurbished_by",
+        "refurb_process",
+        "cert_doc",
+        "part_condition",
+        "provenance_story",
+        "terms",
+        "lead_time_reason",
+    ):
+        prefill[_qk] = _json_safe(_q.get(_qk))
+
+    rfq_context = {"mpn": requirement.primary_mpn, "qty": requirement.target_qty}
+    try:
+        parsed = await parse_vendor_response(vr.body or "", vr.subject or "", vr.vendor_name or "", rfq_context)
+    except Exception as exc:  # parse must never break the modal
+        logger.warning("qualify-ai parse failed for offer {}: {}", offer_id, exc)
+        parsed = None
+
+    confidence = None
+    ai_extract: dict = {}
+    if parsed:
+        confidence = parsed.get("confidence")
+        drafts = extract_draft_offers(parsed, vr.vendor_name or "")
+        if drafts:
+            ai_extract = next(
+                (d for d in drafts if (d.get("mpn") or "").lower() == (offer.mpn or "").lower()),
+                drafts[0],
+            )
+    # Overlay AI values onto EMPTY offer fields only — never clobber saved values.
+    for f in ("manufacturer", "qty_available", "unit_price", "lead_time", "date_code", "condition", "packaging", "moq"):
+        if prefill.get(f) in (None, "") and ai_extract.get(f) not in (None, ""):
+            prefill[f] = _json_safe(ai_extract.get(f))
+
+    condition = normalize_offer_condition(prefill.get("condition")) or prefill.get("condition")
+    gap_items = compute_qual_gaps(prefill, condition)
+
+    ctx = {
+        "request": request,
+        "requirement": requirement,
+        "offer": offer,
+        "prefill": prefill,
+        "gap_items": gap_items,
+        "confidence": confidence,
+        "vr": vr,
+    }
+    return template_response("htmx/partials/sightings/qual_request_modal.html", ctx)
+
+
+@router.post(
+    "/v2/partials/sightings/{requirement_id}/offers/{offer_id}/qualify-ai/draft-request",
+    response_class=HTMLResponse,
+)
+async def sightings_qualify_ai_draft(
+    request: Request,
+    requirement_id: int,
+    offer_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    """Draft a vendor reply asking for the chosen qualification items (AI-suggested gaps
+    the user kept, plus any custom items the user added).
+
+    Renders the editable compose box; sending goes through the existing send-reply path.
+    """
+    from ..models.offers import VendorResponse
+    from ..services.email_drafting import draft_email
+
+    requirement, offer = _offer_for_requirement_or_404(db, requirement_id, offer_id)
+    require_requisition_access(db, offer.requisition_id, user, owner_id=offer.entered_by_id, label="Offer")
+
+    vr = db.get(VendorResponse, offer.vendor_response_id) if offer.vendor_response_id else None
+    if not vr:
+        raise HTTPException(404, "No linked vendor email for this offer")
+
+    form = await request.form()
+    checked = [c.strip() for c in form.getlist("checked_items") if c and c.strip()]
+    custom = [c.strip() for c in form.getlist("custom_items") if c and c.strip()]
+    items_requested = checked + custom
+
+    result = await draft_email(
+        "qual_request",
+        {"vendor_name": vr.vendor_name, "subject": vr.subject, "mpn": offer.mpn, "items_requested": items_requested},
+    )
+
+    default_subject = vr.subject or "RFQ"
+    if not default_subject.lower().startswith("re:"):
+        default_subject = f"Re: {default_subject}"
+    ctx = {
+        "request": request,
+        "req_id": offer.requisition_id,
+        "r": vr,
+        "reply_subject": (result or {}).get("subject") or default_subject,
+        "reply_body": (result or {}).get("body") or "",
+        "ai_failed": result is None,
+    }
+    return template_response("htmx/partials/requisitions/tabs/reply_compose.html", ctx)
+
+
 @router.post("/v2/partials/sightings/{requirement_id}/offers/{offer_id}", response_class=HTMLResponse)
 async def sightings_update_offer(
     request: Request,

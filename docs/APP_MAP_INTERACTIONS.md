@@ -1275,6 +1275,28 @@ Surfaces (all human-edit-before-send; nothing auto-sends):
 Gives `rephrase_rfq` and `VendorResponse.classification` their first live consumers.
 All paths degrade gracefully when Claude is unavailable (cost_bucket="email_drafting").
 
+### Qualify-with-AI (offer pre-fill + ask-the-vendor for what's missing)
+
+```
+Offer row kebab "Qualify with AI" (shown only when offer.vendor_response_id set)
+  GET /v2/partials/sightings/{requirement_id}/offers/{offer_id}/qualify-ai
+    --> parse_vendor_response(linked email) --> extract_draft_offers
+        --> pre-fill the offer form (AI fills EMPTY fields only; saved values win)
+    --> offer_qualification.compute_qual_gaps(prefill, condition)
+        --> condition-aware checklist (genuine gaps pre-checked)
+    --> qual_request_modal.html : pre-filled offer form (same save path as edit) +
+        _qual_checklist.html (gap checkboxes + user-addable custom items via "+ Add item")
+  POST .../offers/{offer_id}/qualify-ai/draft-request
+    checked_items[] (AI gaps kept) + custom_items[] (user's own, not AI-suggested)
+    --> draft_email("qual_request") --> reply_compose.html in #qual-compose-{offer_id}
+  Send → existing send-reply path (Graph as user; TESTING bypass)
+    --> NEW: DNC hard-block in send_reply_htmx (SiteContact.do_not_contact) — never emails DNC vendors
+```
+
+Ownership-guarded via require_requisition_access (offer.requisition_id, owner_id=entered_by_id).
+Read-only pre-fill; never auto-saves or auto-sends. Loop-closes: a vendor's reply becomes a new
+linked VendorResponse, so re-opening Qualify-with-AI fills the remaining fields.
+
 ## 8. Activity Digest (AI Timeline Summary)
 
 ```

@@ -1,0 +1,42 @@
+{# qual_request_modal.html — "Qualify with AI" modal loaded into #modal-content.
+   AI-prefilled offer form (same component + save path as the edit modal) + the
+   ask-the-vendor gap checklist + a compose pane for the drafted reply.
+   Receives: requirement, offer, prefill, gap_items, confidence, vr. #}
+<div class="p-4">
+  <h3 class="text-sm font-semibold text-gray-900 mb-2">Qualify with AI — {{ offer.vendor_name }}</h3>
+
+  {% if confidence is not none %}
+  <div class="mb-3 inline-flex items-center gap-1.5 text-xs rounded bg-brand-50 border border-brand-100 px-2 py-1 text-brand-700">
+    <span class="h-1.5 w-1.5 rounded-full {{ 'bg-emerald-500' if confidence >= 0.8 else 'bg-amber-500' if confidence >= 0.5 else 'bg-gray-400' }}"></span>
+    AI-filled from "{{ vr.subject or 'vendor email' }}" — {{ (confidence * 100)|round|int }}% · review before saving
+  </div>
+  {% else %}
+  <div class="mb-3 text-xs text-gray-400">AI pre-fill unavailable — review and fill manually.</div>
+  {% endif %}
+
+  {# Pre-filled offer form — same Alpine component and save path as the edit modal #}
+  <form x-data='offerQualification({{ (prefill or {})|tojson }})'
+        hx-post="/v2/partials/sightings/{{ requirement.id }}/offers/{{ offer.id }}"
+        hx-target="#sightings-offers-panel" hx-swap="innerHTML"
+        hx-on::after-request="if(event.detail.successful) $dispatch('close-modal')"
+        data-loading-disable class="space-y-3">
+    {% set mpn_default = requirement.primary_mpn %}
+    {% include "htmx/partials/offers/_offer_form_fields.html" %}
+    <div>
+      <label class="block text-xs text-gray-500 mb-1">Notes</label>
+      <textarea name="notes" rows="2"
+                class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500"
+                placeholder="Any additional details...">{{ prefill.get('notes', '') if prefill else '' }}</textarea>
+    </div>
+    <div class="flex justify-end gap-2 pt-1">
+      <button type="button" @click="$dispatch('close-modal')" class="btn btn-ghost btn-sm">Cancel</button>
+      <button type="submit" :disabled="!essentialsMet()" class="btn btn-primary btn-sm">Save Offer</button>
+    </div>
+  </form>
+
+  {# Ask-the-vendor gap checklist (+ user-added custom items) #}
+  {% include "htmx/partials/offers/_qual_checklist.html" %}
+
+  {# Drafted reply appears here, then sends via the existing send-reply path #}
+  <div id="qual-compose-{{ offer.id }}"></div>
+</div>
