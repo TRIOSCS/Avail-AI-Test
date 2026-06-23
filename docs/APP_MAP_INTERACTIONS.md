@@ -1785,8 +1785,12 @@ Provenance is persisted in the new `enrichment_provenance` JSONB column on both
   Company: `find-and-enrich-company` (sync; `result.structuredContent.companies[domain]`).
   Contacts: `find-and-enrich-contacts-at-company` (`.contacts[]`); emails polled via
   `get-task-context` (bounded: 5 polls × 3 s). 402/429 → `ProviderQuotaError`. Protocol
-  verified live 2026-06-23. **The old Clay WEBHOOK path (`clay_service.py` +
-  `POST /api/webhooks/clay`) has been removed; Clay is now MCP-only.**
+  verified live 2026-06-23. Health: `_ClayTestConnector` (in `routers/sources.py`,
+  registered for `clay_enrichment`) probes `get-credits-available` so
+  `health_monitor.ping_source` reports Clay's true state (live/error) instead of leaving
+  it `disabled` — without it, `startup.py`'s `is_active=false WHERE status='disabled'`
+  reconciliation keeps flipping the connector card off. **The old Clay WEBHOOK path
+  (`clay_service.py` + `POST /api/webhooks/clay`) has been removed; Clay is now MCP-only.**
 
   **Clay OAuth Connect flow.** `api.clay.com/v3/mcp` is OAuth-gated
   (authorization_code + PKCE S256, scope=`mcp`; no client_credentials grant).

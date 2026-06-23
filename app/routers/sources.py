@@ -127,6 +127,7 @@ def _get_connector_for_source(name: str, db: Session = None):
         "explorium_enrichment": _ExploriumTestConnector,
         "azure_oauth": _AzureOAuthTestConnector,
         "hunter_enrichment": _HunterTestConnector,
+        "clay_enrichment": _ClayTestConnector,
     }.get(name)
     if test_connector:
         return test_connector()
@@ -254,6 +255,27 @@ class _HunterTestConnector:
         return [
             {"vendor_name": "Hunter.io", "mpn_matched": f"API key valid — {count} contact(s) found", "status": "ok"}
         ]
+
+
+class _ClayTestConnector:
+    """Test Clay MCP connectivity via a credits check (spends no enrichment credits).
+
+    Runs the full OAuth + MCP handshake through clay_mcp._mcp_call and calls the get-
+    credits-available tool. Raises (→ health status 'error') when Clay is not connected
+    or the session cannot be established, so the connectors card honestly reflects an
+    expired/disconnected Clay rather than silently going stale.
+    """
+
+    async def search(self, mpn: str) -> list[dict]:
+        from ..connectors import clay_mcp
+        from ..services import clay_oauth
+
+        if not clay_oauth.is_connected():
+            raise ValueError("Clay not connected — connect at Settings → Connectors")
+        result = await clay_mcp._mcp_call("get-credits-available", {})
+        if not result:
+            raise ValueError("Clay MCP health check failed — reconnect may be required")
+        return [{"vendor_name": "Clay", "mpn_matched": "MCP session OK — credits available", "status": "ok"}]
 
 
 class _ExploriumTestConnector:
