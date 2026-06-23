@@ -83,7 +83,7 @@ hx-on::after-request='if(event.detail.successful){htmx.ajax("GET","/v2/partials/
            data-cred="{{ s.id }}"
            placeholder="{% if field.is_set %}{{ field.masked }}{% else %}Paste key…{% endif %}"
            autocomplete="off"
-           class="input-sm flex-1 font-mono"
+           class="input-sm flex-1 min-w-0 font-mono"
            aria-label="{{ s.display_name }} — {{ ev }}">
   </div>
 {% endmacro %}
