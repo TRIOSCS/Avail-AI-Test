@@ -1361,6 +1361,7 @@ class RankedVendor(NamedTuple):
     has_contact: bool
     lead_time_days: int | None = None
     vendor_score: float | None = None
+    email_health_score: float | None = None
 
 
 class CoverageEntry(TypedDict):
@@ -1402,6 +1403,7 @@ class SuggestedVendor(NamedTuple):
     engagement_score: float | None
     vendor_score: float | None = None
     lead_time_days: int | None = None
+    email_health_score: float | None = None
 
 
 def _cards_with_resolvable_email(db: Session, card_ids: list[int]) -> set[int]:
@@ -1550,7 +1552,7 @@ def _coverage_ranked_vendor_rows(db: Session, req_id_list: list[int], excluded: 
     # has_contact: one batched VendorContact lookup over all representative card ids.
     contactable_card_ids = _cards_with_resolvable_email(db, [g["card"].id for g in groups.values() if g["card"]])
 
-    ranked: list[tuple[int, bool, float, tuple[int, object], RankedVendor]] = []
+    ranked: list[tuple[int, bool, float, float, tuple[int, object], RankedVendor]] = []
     for key, g in groups.items():
         card = g["card"]
         excl_key: object
@@ -1569,6 +1571,7 @@ def _coverage_ranked_vendor_rows(db: Session, req_id_list: list[int], excluded: 
         has_contact = card is not None and card.id in contactable_card_ids
         lead_times = g["lead_times"]
         lead_time_days = min(lead_times) if lead_times else None
+        email_health = card.email_health_score if (card is not None and card.email_health_score is not None) else None
         rv = RankedVendor(
             card=card,
             vendor_name=display,
@@ -1577,6 +1580,7 @@ def _coverage_ranked_vendor_rows(db: Session, req_id_list: list[int], excluded: 
             has_contact=has_contact,
             lead_time_days=lead_time_days,
             vendor_score=(card.vendor_score if card is not None else None),
+            email_health_score=email_health,
         )
         engagement = card.engagement_score if (card is not None and card.engagement_score is not None) else None
         # Stable, deterministic tiebreak (F-L1): carded ties keep NUMERIC card.id order
@@ -1584,19 +1588,22 @@ def _coverage_ranked_vendor_rows(db: Session, req_id_list: list[int], excluded: 
         # was lexicographic ("10" < "2"), drifting which equally-ranked vendor fell off the
         # cap-20 vs main's numeric id order.
         tiebreak: tuple[int, object] = (0, card.id) if card is not None else (1, str(key))
-        # Sort tuple: covered desc, has_contact desc, engagement desc nullslast, then tiebreak.
+        # Sort tuple: covered desc, has_contact desc, reply-health desc nullslast,
+        # engagement desc nullslast, then tiebreak. Coverage stays dominant; email
+        # health (likelihood of a useful reply) ranks vendors within a coverage tier.
         ranked.append(
             (
                 -covered,
                 not has_contact,  # False(0) sorts before True(1) → contactable first
+                -(email_health if email_health is not None else float("-inf")),
                 -(engagement if engagement is not None else float("-inf")),
                 tiebreak,
                 rv,
             )
         )
 
-    ranked.sort(key=lambda t: (t[0], t[1], t[2], t[3]))
-    return [t[4] for t in ranked[:20]]
+    ranked.sort(key=lambda t: (t[0], t[1], t[2], t[3], t[4]))
+    return [t[5] for t in ranked[:20]]
 
 
 def _find_affinity_in_thread(mpn: str) -> list[dict]:
@@ -1670,6 +1677,7 @@ async def sightings_vendor_modal(
                     engagement_score=(r.card.engagement_score if r.card is not None else None),
                     vendor_score=r.vendor_score,
                     lead_time_days=r.lead_time_days,
+                    email_health_score=r.email_health_score,
                 )
             )
             coverage[key] = CoverageEntry(
@@ -1733,6 +1741,7 @@ async def sightings_vendor_modal(
                     engagement_score=card.engagement_score,
                     vendor_score=card.vendor_score,
                     lead_time_days=None,  # preselect-only: no VSS context to compute min
+                    email_health_score=card.email_health_score,
                 )
             else:
                 # No matching card — cardless synthetic row, no contact resolvable
@@ -1747,6 +1756,7 @@ async def sightings_vendor_modal(
                     engagement_score=None,
                     vendor_score=None,
                     lead_time_days=None,
+                    email_health_score=None,
                 )
             suggested_vendors.append(sv)
             existing_norms.add(norm)

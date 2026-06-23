@@ -935,7 +935,12 @@ the `rfqVendorModal` section below) is fed from four sources:
    `''`-email contact can't win and resolve `vendor_email=''` → skip while the badge said
    contactable (the empty-email asymmetry). `card.emails` is deliberately NOT consulted
    (the send path resolves the address only from `VendorContact` rows), so the "no contact
-   on file" badge never lies.
+   on file" badge never lies. **Reply-likelihood ranking:** within a coverage tier the sort
+   now ranks by `VendorCard.email_health_score` (the nightly response-health composite from
+   `response_analytics`, previously persisted but unconsumed) — full key is `covered_count
+   desc, has_contact desc, email_health_score desc nullslast, engagement_score desc nullslast,
+   tiebreak` — and each carded row renders a "N reply health" chip. Coverage and contactability
+   stay dominant; reply health only orders vendors *within* a tier.
    Order: `covered_count` desc, then `has_contact` desc (contactable above
    equal-coverage non-contactable), then engagement desc nullslast, then a stable,
    deterministic tiebreak — `(0, card.id)` for carded (numeric id order, matching main;

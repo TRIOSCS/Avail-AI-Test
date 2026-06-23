@@ -62,6 +62,9 @@
           {% elif v.vendor_score is not none %}
           <span class="text-xs text-gray-400">Score: {{ v.vendor_score|round|int }}</span>
           {% endif %}
+          {% if v.email_health_score is not none %}
+          <span class="ml-2 inline-flex items-center px-1.5 py-0.5 text-[11px] font-medium rounded-full bg-indigo-50 text-indigo-700">{{ v.email_health_score|round|int }} reply health</span>
+          {% endif %}
         </label>
         {% elif v.has_contact and is_dnc %}
         {# DNC row — has an email but it is do-not-contact flagged. Disabled checkbox +
