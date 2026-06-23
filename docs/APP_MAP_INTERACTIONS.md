@@ -3583,7 +3583,7 @@ the current implementation.
 | Buy Plans | 10 | submit/approve, SO+PO verify, confirm-PO, flag-issue, cancel (service + line cascade), reset; ops-group admin tab |
 | Materials | 20 | CRUD, substitutes, stock levels, price history |
 | Sightings | 27 | CRUD, RFQ send, batch RFQ, inquiry (cross-requisition composer: vendor-affinity GET + composer-vendor POST), vendor+part unavailability (mark/clear/reason modal) |
-| Excess | 30 | Lists, line items, bids, solicitations, import |
+| Trading | 20 | Resell-brokerage workspace (`routers/trading.py`): lists, line items, import, inbound offers (per_line/take_all + unmatched queue), best-price rollup, build/close bid-back + PDF. Replaced the removed old-excess router (bids/solicitations gone) |
 | AI | 18 | Parse email, normalize, find contacts, draft RFQ |
 | Proactive | 12 | Matches, refresh, dismiss, send, scorecard |
 | Prospects | 9 | HTMX tab only (JSON `/api/prospects/*` removed, consolidated): list, stats, add-domain, detail, claim, dismiss, release, enrich (background — spawns run_enrichment_job; pulls real contacts + firmographics via Lusha chain: enrich_entity + find_suggested_contacts, fill-only onto prospect columns; recomputes both fit_score and readiness_score; 24h gate prevents repeat paid pulls), enrich-status (poll; HTTP 286 stops) |
@@ -3739,22 +3739,6 @@ activity + auto-advances status only for actually-sent vendors. `confirmSend` re
 headers and toasts via `$store.toast`: full success, partial (warning, distinguishing
 "N failed" from "N had no email"), or total failure (error — modal stays open to retry);
 it never infers success from the HTTP status alone.
-
-### solicitModal  (htmx_app.js, Alpine.data)
-
-Backs `excess/solicit_modal.html` — the "Solicit Bids" email composer opened from an
-excess list. Only the email **subject** (derived from the list title) is dynamic, so the
-factory takes that one argument: `x-data='solicitModal({{ (("Bid Request: " ~ list.title)
-if list else "Bid Request")|tojson }})'`. It lives in JS (not inline) for the same reason
-as `rfqVendorModal`: the title may contain `'`/`"`, and the old inline **double-quoted**
-`x-data` interpolated it with `|e` — which HTML-escapes but emits an invalid JS string
-literal, so an apostrophe/quote title broke `Alpine.init()` and left the whole modal inert
-(spinner/"AI Clean Up" never un-cloaked, submit dead). The **single-quoted** `x-data` +
-`|tojson` is immune. State: `recipientEmail`, `recipientName`, `subject`, `bundled`
-(one bundled email vs one per item), `message`, `polishing`. Method: `polishEmail()` →
-`POST /api/excess-lists/polish-email` ({text} in, {text} out) replaces the body with an
-AI-cleaned version. The form itself posts via HTMX to
-`/v2/partials/excess/{list_id}/solicit` and closes the modal on success.
 
 ---
 

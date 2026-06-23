@@ -459,17 +459,23 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 
 ### Excess Inventory / Trading (resell-brokerage)
 
-> Migration 126 is ADDITIVE: it adds the inbound-offer tables + rollup columns below.
-> `bids`/`bid_solicitations` (the old outbound email-RFQ path) are still present and a
-> later cutover chunk retires them. `ExcessListStatus` gained the Trading lifecycle
-> members (open/collecting/bid_out/awarded) while keeping active/bidding for now.
+> Migration 126 added the inbound-offer tables + rollup columns; migration 127 added the
+> bid-back tables + posting window; **migration 128 (the CUTOVER) dropped the old
+> `bids`/`bid_solicitations` tables** — the legacy outbound email-RFQ "Bid"/"BidSolicitation"
+> concept is fully replaced by `excess_offers`/`customer_bids` and is GONE (models, constants
+> `Bid*`, schemas, the `app/routers/excess.py` router + `partials/excess/*` templates, the
+> `email_service`/`email_jobs` inbox-RFQ callers, and the `create_bid`/`accept_bid`/
+> `send_bid_solicitation`/`match_excess_demand` service methods). `ExcessListStatus` keeps the
+> Trading lifecycle members (open/collecting/bid_out/awarded); the pre-Trading active/bidding
+> members remain (not in the cutover's removal scope).
 >
-> Service logic lives in `app/services/excess_service.py` (Chunk B, additive):
+> Service logic lives in `app/services/excess_service.py`:
 > `can_post`/`can_offer` (role-derived capabilities), `submit_offer` (per_line/take_all;
 > part-number-only matching via `normalize_mpn_key`; unmatched/ambiguous rows queued),
-> `recompute_line_rollup`/`withdraw_offer` (min priced active offer -> best_offer_*), and
-> `material_card_id` resolution on the import path. The old `create_bid`/`accept_bid`
-> functions remain until the cutover chunk.
+> `recompute_line_rollup`/`withdraw_offer` (min priced active offer -> best_offer_*),
+> `close_list`, `get_excess_stats` (offer counts), list/line CRUD + import, and
+> `material_card_id` resolution on the import path. The thin router is `app/routers/trading.py`
+> (templates under `app/templates/htmx/partials/trading/*`).
 >
 > Sighting live-mirror lives in `app/services/excess_mirror.py` (Chunk C, additive):
 > `sync_list_mirror`/`publish_list` are the dual-write owners — every active posted
@@ -512,7 +518,7 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 - material_card_id -> material_cards (SET NULL) — resolved on create for the Sighting mirror
 - best_offer_unit_price, best_offer_id (plain int, not a hard FK), offer_count — best-price rollup
 
-**`excess_offers`** — Inbound broker offer to BUY a posted list (Trading replacement for `bids`)
+**`excess_offers`** — Inbound broker offer to BUY a posted list (the Trading offer model; replaced the dropped `bids`)
 - excess_list_id -> excess_lists (CASCADE), submitted_by -> users
 - offerer_company_id -> companies / offerer_vendor_card_id -> vendor_cards (both SET NULL)
 - scope: per_line | take_all; take_all_total_price (lump, take_all only); valid_until
@@ -534,11 +540,10 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 - selected_offer_id -> excess_offers / selected_offer_line_id -> excess_offer_lines (SET NULL)
   — INTERNAL provenance only; NEVER exported to the customer doc
 
-**`bids`** — Vendor bids on excess items (legacy; retired in the cutover chunk)
-- bidder_company_id, bidder_vendor_card_id, unit_price, quantity_wanted, status
-
-**`bid_solicitations`** — Outbound emails soliciting bids (legacy; retired in the cutover chunk)
-- graph_message_id for email tracking
+> **Dropped in migration 128 (cutover):** `bids` (vendor bids on excess items) and
+> `bid_solicitations` (outbound bid-request emails). The Trading module's
+> `excess_offers`/`excess_offer_lines` + `customer_bids`/`customer_bid_lines` replace them;
+> the migration's downgrade recreates both tables structure-only (schema-reversible).
 
 ---
 

@@ -109,7 +109,7 @@ authoritative reference. Static-analysis tests in
 | Vendors | 16 | partials/vendors/ |
 | Customers | 14 | partials/customers/ |
 | Materials | 13 | partials/materials/ |
-| Excess | 10 | partials/excess/ |
+| Trading | 11 | partials/trading/ — resell-brokerage workspace (replaced the removed `partials/excess/`; router `routers/trading.py`) |
 | Parts | 13 | partials/parts/ |
 | Quotes | 5 | partials/quotes/ — `list.html` removed (standalone Quotes tab retired); detail/macros/line_row/preview/pricing_history remain |
 | Sightings | 7 | partials/sightings/ |
