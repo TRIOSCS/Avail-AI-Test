@@ -6,8 +6,8 @@
 #}
 {% from "htmx/partials/settings/_macros.html" import tab_button %}
 <div class="page-fluid" x-data="{ tab: '{{ active_tab }}' }">
-  {# Tab buttons #}
-  <div class="flex gap-1 mb-6 border-b border-brand-200">
+  {# Tab buttons — scroll horizontally on narrow screens instead of overflowing the page #}
+  <div class="flex gap-1 mb-6 border-b border-brand-200 overflow-x-auto">
     {{ tab_button('connectors', '/v2/partials/settings/connectors', 'Connectors', ['M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4']) }}
 
     {% if is_admin %}

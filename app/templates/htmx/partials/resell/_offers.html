@@ -1,5 +1,5 @@
 {#
-  trading/_offers.html — Offers tab body.
+  resell/_offers.html — Offers tab body.
   Owner view: take-all offers as a PINNED BANNER on top (the take-all is the
   headline; lines are its contents — spec §"Flexible detail"), then per-line
   offers stacked under each line, plus an unmatched-queue card for rows that
@@ -7,7 +7,7 @@
   Non-owner: offers are private to the owner — show only the submit-offer prompt.
   Receives: list, line_items, by_line {line_id: [{offer, line}]}, unmatched,
             take_all_offers, is_owner, can_see_customer, shape.
-  Called by: trading.trading_offers (lazy + offer-submit re-render).
+  Called by: resell.resell_offers (lazy + offer-submit re-render).
 #}
 {% set el = list %}
 
@@ -62,7 +62,7 @@
     <div class="rounded-lg border border-brand-200 overflow-hidden">
       <div class="flex items-center justify-between px-3 py-2 bg-gray-50 border-b border-brand-100">
         <span class="text-sm font-mono font-medium text-gray-900">{{ item.part_number }}</span>
-        <button hx-get="/v2/partials/trading/{{ el.id }}/lines/{{ item.id }}/offers"
+        <button hx-get="/v2/partials/resell/{{ el.id }}/lines/{{ item.id }}/offers"
                 hx-target="#modal-content"
                 @click="$dispatch('open-modal', { wide: true })"
                 class="text-xs text-brand-500 hover:text-brand-600 font-medium">Compare ▸</button>

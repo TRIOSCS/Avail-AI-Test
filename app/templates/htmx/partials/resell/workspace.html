@@ -1,15 +1,15 @@
 {#
-  trading/workspace.html — Trading workspace shell (Chunk F).
+  resell/workspace.html — Resell workspace shell (Chunk F).
   Split-panel: left = lists (lazy), right = detail. Lens pills (My Lists / Open
   to Me) + a stat-card triage strip (each card filters the list). Built entirely
   from shared components — splitPanel(), stat_card, filter_pill — so it reads
   native (spec §"The management page").
   Receives: lens ('mine'|'open'), stage, q, stats (dict), user, can_post.
-  Called by: trading.trading_workspace.
-  Depends on: shared/_macros.html, partials/trading/_lists.html, splitPanel JS.
+  Called by: resell.resell_workspace.
+  Depends on: shared/_macros.html, partials/resell/_lists.html, splitPanel JS.
 #}
 {% from "htmx/partials/shared/_macros.html" import stat_card %}
-<title hx-swap-oob="true">Trading — AvailAI</title>
+<title hx-swap-oob="true">Resell — AvailAI</title>
 
 <div class="page-fluid flex flex-col h-[calc(100vh-7.5rem)]"
      x-data="{ lens: '{{ lens }}', stage: '{{ stage }}' }">
@@ -20,8 +20,8 @@
       {% for l, label in [('mine', 'My Lists'), ('open', 'Open to Me')] %}
       {# Alpine-reactive highlight so the active pill flips before the server swap
          returns, then stays correct after the re-rendered shell re-inits x-data. #}
-      <button hx-get="/v2/partials/trading/lists?lens={{ l }}"
-              hx-target="#trading-list-body"
+      <button hx-get="/v2/partials/resell/lists?lens={{ l }}"
+              hx-target="#resell-list-body"
               hx-swap="innerHTML"
               @click="lens = '{{ l }}'; stage = ''"
               :class="lens === '{{ l }}'
@@ -34,7 +34,7 @@
     </div>
     {% if can_post %}
     <button @click="$dispatch('open-modal')"
-            hx-get="/v2/partials/trading/create-form"
+            hx-get="/v2/partials/resell/create-form"
             hx-target="#modal-content"
             class="btn-primary btn-sm">
       <svg class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -60,8 +60,8 @@
     ] %}
     {% for stage_key, label, value, sub in glance %}
     <button type="button"
-            hx-get="/v2/partials/trading/lists?lens=mine&stage={{ stage_key }}"
-            hx-target="#trading-list-body"
+            hx-get="/v2/partials/resell/lists?lens=mine&stage={{ stage_key }}"
+            hx-target="#resell-list-body"
             hx-swap="innerHTML"
             @click="stage = '{{ stage_key }}'"
             :class="stage === '{{ stage_key }}' ? 'ring-2 ring-brand-400' : ''"
@@ -73,8 +73,8 @@
 
   {# ── Split panel: lists (left) + detail (right) ─────────────────── #}
   <div class="flex flex-1 overflow-hidden min-h-0 rounded-xl border border-brand-200 bg-white"
-       id="split-trading"
-       x-data="splitPanel('trading', 38)">
+       id="split-resell"
+       x-data="splitPanel('resell', 38)">
 
     {# Left: lists — lazy-loaded so the shell paints instantly.
        LANDMINE (spec HTMX trap): hx-trigger="load" carries an EXPLICIT
@@ -82,11 +82,11 @@
        wipe the page. #}
     <div class="overflow-auto border-r border-brand-200 flex-shrink-0"
          :style="'width:' + leftWidth + '%'"
-         id="split-left-trading">
-      <div id="trading-list-body"
-           hx-get="/v2/partials/trading/lists?lens={{ lens }}&stage={{ stage }}{% if q %}&q={{ q }}{% endif %}"
+         id="split-left-resell">
+      <div id="resell-list-body"
+           hx-get="/v2/partials/resell/lists?lens={{ lens }}&stage={{ stage }}{% if q %}&q={{ q }}{% endif %}"
            hx-trigger="load"
-           hx-target="#trading-list-body"
+           hx-target="#resell-list-body"
            hx-swap="innerHTML">
         <div class="p-8 text-center text-gray-400 text-sm">Loading…</div>
       </div>
@@ -104,7 +104,7 @@
     </div>
 
     {# Right: detail — painted on row select. #}
-    <div class="overflow-y-auto flex-1 bg-brand-50" id="split-right-trading">
+    <div class="overflow-y-auto flex-1 bg-brand-50" id="split-right-resell">
       <div class="flex items-center justify-center h-full text-gray-400">
         <div class="text-center px-6">
           <svg class="mx-auto h-10 w-10 text-gray-300 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">

@@ -16,7 +16,7 @@
             :class="tab === '{{ tab }}'
               ? 'border-b-2 border-brand-500 text-brand-600 bg-brand-50'
               : 'text-gray-600 hover:text-brand-600 hover:bg-brand-50'"
-            class="px-4 py-2.5 text-sm font-medium rounded-t-lg transition-colors"
+            class="shrink-0 whitespace-nowrap px-4 py-2.5 text-sm font-medium rounded-t-lg transition-colors"
             hx-get="{{ url }}"
             hx-target="#settings-content"{{ extra_attrs|safe }}>
       <span class="flex items-center gap-1.5">

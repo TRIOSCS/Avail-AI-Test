@@ -1,4 +1,4 @@
-"""test_trading_capabilities.py — Role-derived capability checks for the Trading module.
+"""test_resell_capabilities.py — Role-derived capability checks for the Resell module.
 
 Covers ``can_post`` (sales + traders, plus admin/manager) and ``can_offer``
 (buyers + traders, plus admin/manager), derived from ``User.role`` — the spec
