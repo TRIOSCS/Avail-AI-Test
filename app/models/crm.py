@@ -72,6 +72,7 @@ class Company(Base):
     # v1.4.0: Account management fields
     account_type = Column(String(50))  # Customer, Prospect, Partner, Competitor
     phone = Column(String(100))
+    normalized_phone = Column(String(20), index=True)
     credit_terms = Column(String(100))  # Net 30, Net 60, COD, etc.
     tax_id = Column(String(100))  # EIN / VAT ID
     currency = Column(String(10), default="USD")
@@ -132,6 +133,14 @@ class Company(Base):
         self.normalized_name = normalize_vendor_name(value) or None
         return value
 
+    @validates("phone")
+    def _sync_normalized_phone(self, _key, value):
+        """Keep normalized_phone (E.164) in sync with phone on every write."""
+        from ..utils.phone import normalize_e164
+
+        self.normalized_phone = normalize_e164(value)
+        return value
+
     __table_args__ = (
         Index("ix_companies_name", "name"),
         Index("ix_companies_account_owner", "account_owner_id"),
@@ -154,6 +163,8 @@ class CustomerSite(Base):
     contact_email = Column(String(255))
     contact_phone = Column(String(100))
     contact_phone_2 = Column(String(100))
+    normalized_phone = Column(String(20), index=True)
+    normalized_phone_2 = Column(String(20), index=True)
     contact_title = Column(String(255))
     contact_linkedin = Column(String(500))
 
@@ -201,6 +212,23 @@ class CustomerSite(Base):
             raise ValueError(f"Invalid contact email: {value}")
         return value
 
+    @validates("contact_phone")
+    def _sync_normalized_phone(self, _key, value):
+        """Keep normalized_phone (E.164) in sync with contact_phone on every write."""
+        from ..utils.phone import normalize_e164
+
+        self.normalized_phone = normalize_e164(value)
+        return value
+
+    @validates("contact_phone_2")
+    def _sync_normalized_phone_2(self, _key, value):
+        """Keep normalized_phone_2 (E.164) in sync with contact_phone_2 on every
+        write."""
+        from ..utils.phone import normalize_e164
+
+        self.normalized_phone_2 = normalize_e164(value)
+        return value
+
     __table_args__ = (
         Index("ix_cs_company", "company_id"),
         Index("ix_cs_owner", "owner_id"),
@@ -217,6 +245,7 @@ class SiteContact(Base):
     title = Column(String(255))
     email = Column(String(255))
     phone = Column(String(100))
+    normalized_phone = Column(String(20), index=True)
     wechat_id = Column(String(100))
     notes = Column(Text)
     is_primary = Column(Boolean, default=False)
@@ -260,6 +289,14 @@ class SiteContact(Base):
     def _validate_email(self, _key, value):
         if value and "@" not in value:
             raise ValueError(f"Invalid email: {value}")
+        return value
+
+    @validates("phone")
+    def _sync_normalized_phone(self, _key, value):
+        """Keep normalized_phone (E.164) in sync with phone on every write."""
+        from ..utils.phone import normalize_e164
+
+        self.normalized_phone = normalize_e164(value)
         return value
 
     __table_args__ = (

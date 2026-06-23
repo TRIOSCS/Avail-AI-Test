@@ -124,6 +124,8 @@ packaging==26.2
     # via limits
 patchright==1.60.1
     # via -r requirements.in
+phonenumbers==9.0.33
+    # via -r requirements.in
 pillow==12.2.0
     # via weasyprint
 prometheus-client==0.25.0
