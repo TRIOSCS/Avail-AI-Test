@@ -1,7 +1,7 @@
 """Extend requisition_tasks for general CRM tasks (company + contact scope).
 
-Revision ID: 135_general_tasks
-Revises: 134_contact_fields
+Revision ID: 138_general_tasks
+Revises: 137_contact_fields
 Create Date: 2026-06-23
 
 Changes:
@@ -28,8 +28,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "135_general_tasks"
-down_revision: Union[str, None] = "134_contact_fields"
+revision: str = "138_general_tasks"
+down_revision: Union[str, None] = "137_contact_fields"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

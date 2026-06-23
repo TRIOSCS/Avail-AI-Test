@@ -1,4 +1,4 @@
-"""Round-trip tests for migrations 133, 134, and 135.
+"""Round-trip tests for migrations 136, 137, and 138.
 
 Tests each migration's upgrade→downgrade→upgrade cycle on a scratch SQLite engine via
 the shared hermetic harness (tests/migration_harness.run_ops).
@@ -9,13 +9,13 @@ callables (SQLAlchemy inspects signatures so MagicMock won't work). Column adds/
 and index ops are exercised portably. PG-only constraint semantics are verified on the
 live Postgres instance at deploy time.
 
-Migration 133: primary_contact_id + parent_company_id on companies.
-Migration 134: first_name, last_name, contact_owner_id on site_contacts + backfill.
-Migration 135: company_id + site_contact_id on requisition_tasks; requisition_id nullable.
+Migration 136: primary_contact_id + parent_company_id on companies.
+Migration 137: first_name, last_name, contact_owner_id on site_contacts + backfill.
+Migration 138: company_id + site_contact_id on requisition_tasks; requisition_id nullable.
 
 Called by: pytest
-Depends on: alembic/versions/133_company_links.py, 134_contact_fields.py,
-            135_general_tasks.py, tests/migration_harness.py
+Depends on: alembic/versions/136_company_links.py, 137_contact_fields.py,
+            138_general_tasks.py, tests/migration_harness.py
 """
 
 from __future__ import annotations
@@ -42,9 +42,9 @@ def _load(filename: str):
     return mod
 
 
-_mod133 = _load("133_company_links.py")
-_mod134 = _load("134_contact_fields.py")
-_mod135 = _load("135_general_tasks.py")
+_mod136 = _load("136_company_links.py")
+_mod137 = _load("137_contact_fields.py")
+_mod138 = _load("138_general_tasks.py")
 
 
 # ---------------------------------------------------------------------------
@@ -93,8 +93,8 @@ def _run(engine, fn):
 # ---------------------------------------------------------------------------
 
 
-def _engine_for_133() -> sa.engine.Engine:
-    """Scratch SQLite with only the tables 133 touches."""
+def _engine_for_136() -> sa.engine.Engine:
+    """Scratch SQLite with only the tables 136 touches."""
     engine = sa.create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     meta = sa.MetaData()
     sa.Table(
@@ -113,8 +113,8 @@ def _engine_for_133() -> sa.engine.Engine:
     return engine
 
 
-def _engine_for_134() -> sa.engine.Engine:
-    """Scratch SQLite with only the tables 134 touches."""
+def _engine_for_137() -> sa.engine.Engine:
+    """Scratch SQLite with only the tables 137 touches."""
     engine = sa.create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     meta = sa.MetaData()
     sa.Table(
@@ -132,8 +132,8 @@ def _engine_for_134() -> sa.engine.Engine:
     return engine
 
 
-def _engine_for_135() -> sa.engine.Engine:
-    """Scratch SQLite with only the tables 135 touches."""
+def _engine_for_138() -> sa.engine.Engine:
+    """Scratch SQLite with only the tables 138 touches."""
     engine = sa.create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     meta = sa.MetaData()
     sa.Table(
@@ -174,59 +174,59 @@ def _indexes(engine, table: str) -> set[str]:
 
 
 # ---------------------------------------------------------------------------
-# Migration 133 round-trip
+# Migration 136 round-trip
 # ---------------------------------------------------------------------------
 
 
-class TestMigration133:
+class TestMigration136:
     def test_upgrade_adds_columns(self):
-        engine = _engine_for_133()
-        _run(engine, _mod133.upgrade)
+        engine = _engine_for_136()
+        _run(engine, _mod136.upgrade)
         cols = _columns(engine, "companies")
         assert "primary_contact_id" in cols
         assert "parent_company_id" in cols
 
     def test_upgrade_adds_indexes(self):
-        engine = _engine_for_133()
-        _run(engine, _mod133.upgrade)
+        engine = _engine_for_136()
+        _run(engine, _mod136.upgrade)
         idxs = _indexes(engine, "companies")
         assert "ix_companies_primary_contact_id" in idxs
         assert "ix_companies_parent_company_id" in idxs
 
     def test_downgrade_removes_columns(self):
-        engine = _engine_for_133()
-        _run(engine, _mod133.upgrade)
-        _run(engine, _mod133.downgrade)
+        engine = _engine_for_136()
+        _run(engine, _mod136.upgrade)
+        _run(engine, _mod136.downgrade)
         cols = _columns(engine, "companies")
         assert "primary_contact_id" not in cols
         assert "parent_company_id" not in cols
 
     def test_upgrade_downgrade_upgrade_round_trips(self):
-        engine = _engine_for_133()
-        _run(engine, _mod133.upgrade)
-        _run(engine, _mod133.downgrade)
-        _run(engine, _mod133.upgrade)
+        engine = _engine_for_136()
+        _run(engine, _mod136.upgrade)
+        _run(engine, _mod136.downgrade)
+        _run(engine, _mod136.upgrade)
         cols = _columns(engine, "companies")
         assert "primary_contact_id" in cols
         assert "parent_company_id" in cols
 
 
 # ---------------------------------------------------------------------------
-# Migration 134 round-trip + backfill assertions
+# Migration 137 round-trip + backfill assertions
 # ---------------------------------------------------------------------------
 
 
-class TestMigration134:
+class TestMigration137:
     def test_upgrade_adds_columns(self):
-        engine = _engine_for_134()
-        _run(engine, _mod134.upgrade)
+        engine = _engine_for_137()
+        _run(engine, _mod137.upgrade)
         cols = _columns(engine, "site_contacts")
         assert "first_name" in cols
         assert "last_name" in cols
         assert "contact_owner_id" in cols
 
     def test_upgrade_backfills_name_split(self):
-        engine = _engine_for_134()
+        engine = _engine_for_137()
         # Seed contacts before upgrade
         with engine.begin() as conn:
             conn.execute(
@@ -238,7 +238,7 @@ class TestMigration134:
                     {"id": 4, "n": None},
                 ],
             )
-        _run(engine, _mod134.upgrade)
+        _run(engine, _mod137.upgrade)
         with engine.connect() as conn:
             rows = {
                 r[0]: (r[1], r[2])
@@ -256,48 +256,48 @@ class TestMigration134:
         assert rows[4] == (None, None)
 
     def test_downgrade_removes_columns(self):
-        engine = _engine_for_134()
-        _run(engine, _mod134.upgrade)
-        _run(engine, _mod134.downgrade)
+        engine = _engine_for_137()
+        _run(engine, _mod137.upgrade)
+        _run(engine, _mod137.downgrade)
         cols = _columns(engine, "site_contacts")
         assert "first_name" not in cols
         assert "last_name" not in cols
         assert "contact_owner_id" not in cols
 
     def test_upgrade_downgrade_upgrade_round_trips(self):
-        engine = _engine_for_134()
-        _run(engine, _mod134.upgrade)
-        _run(engine, _mod134.downgrade)
-        _run(engine, _mod134.upgrade)
+        engine = _engine_for_137()
+        _run(engine, _mod137.upgrade)
+        _run(engine, _mod137.downgrade)
+        _run(engine, _mod137.upgrade)
         cols = _columns(engine, "site_contacts")
         assert "first_name" in cols
         assert "last_name" in cols
 
 
 # ---------------------------------------------------------------------------
-# Migration 135 round-trip + orphan-purge assertion
+# Migration 138 round-trip + orphan-purge assertion
 # ---------------------------------------------------------------------------
 
 
-class TestMigration135:
+class TestMigration138:
     def test_upgrade_adds_columns(self):
-        engine = _engine_for_135()
-        _run(engine, _mod135.upgrade)
+        engine = _engine_for_138()
+        _run(engine, _mod138.upgrade)
         cols = _columns(engine, "requisition_tasks")
         assert "company_id" in cols
         assert "site_contact_id" in cols
 
     def test_upgrade_adds_indexes(self):
-        engine = _engine_for_135()
-        _run(engine, _mod135.upgrade)
+        engine = _engine_for_138()
+        _run(engine, _mod138.upgrade)
         idxs = _indexes(engine, "requisition_tasks")
         assert "ix_rt_company_status" in idxs
         assert "ix_rt_contact_status" in idxs
 
     def test_downgrade_removes_columns(self):
-        engine = _engine_for_135()
-        _run(engine, _mod135.upgrade)
-        _run(engine, _mod135.downgrade)
+        engine = _engine_for_138()
+        _run(engine, _mod138.upgrade)
+        _run(engine, _mod138.downgrade)
         cols = _columns(engine, "requisition_tasks")
         assert "company_id" not in cols
         assert "site_contact_id" not in cols
@@ -305,8 +305,8 @@ class TestMigration135:
     def test_downgrade_purges_company_scoped_tasks(self):
         """Downgrade must DELETE company-scoped tasks (requisition_id IS NULL) before
         restoring NOT NULL — this is the FIX A orphan-purge guard."""
-        engine = _engine_for_135()
-        _run(engine, _mod135.upgrade)
+        engine = _engine_for_138()
+        _run(engine, _mod138.upgrade)
         # Insert a company-scoped task (requisition_id NULL, company_id set)
         with engine.begin() as conn:
             conn.execute(
@@ -316,16 +316,16 @@ class TestMigration135:
                 )
             )
         # Downgrade must not raise; orphan row must be gone
-        _run(engine, _mod135.downgrade)
+        _run(engine, _mod138.downgrade)
         with engine.connect() as conn:
             count = conn.execute(text("SELECT COUNT(*) FROM requisition_tasks WHERE id = 99")).scalar()
         assert count == 0, "downgrade must purge company-scoped tasks before restoring NOT NULL"
 
     def test_upgrade_downgrade_upgrade_round_trips(self):
-        engine = _engine_for_135()
-        _run(engine, _mod135.upgrade)
-        _run(engine, _mod135.downgrade)
-        _run(engine, _mod135.upgrade)
+        engine = _engine_for_138()
+        _run(engine, _mod138.upgrade)
+        _run(engine, _mod138.downgrade)
+        _run(engine, _mod138.upgrade)
         cols = _columns(engine, "requisition_tasks")
         assert "company_id" in cols
         assert "site_contact_id" in cols

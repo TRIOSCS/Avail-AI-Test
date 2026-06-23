@@ -1,7 +1,7 @@
 """Add first_name, last_name, contact_owner_id to site_contacts.
 
-Revision ID: 134_contact_fields
-Revises: 133_company_links
+Revision ID: 137_contact_fields
+Revises: 136_company_links
 Create Date: 2026-06-23
 
 Adds to site_contacts:
@@ -24,8 +24,8 @@ from sqlalchemy import text
 
 from alembic import op
 
-revision: str = "134_contact_fields"
-down_revision: Union[str, None] = "133_company_links"
+revision: str = "137_contact_fields"
+down_revision: Union[str, None] = "136_company_links"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

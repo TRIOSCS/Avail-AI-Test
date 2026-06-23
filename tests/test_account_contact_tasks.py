@@ -1,7 +1,7 @@
-"""Tests for Step 5 — account/contact scoped tasks (migration 135).
+"""Tests for Step 5 — account/contact scoped tasks (migration 138).
 
 Covers:
-- migration 135 up→down→up clean + single head
+- migration 138 up→down→up clean + single head
 - CHECK constraint: task with no parent → IntegrityError
 - creating an account task persists with company_id set
 - contact task from another company → 404 IDOR guard (via HTTP endpoint)
