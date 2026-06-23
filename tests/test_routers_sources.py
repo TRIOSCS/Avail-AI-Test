@@ -927,6 +927,8 @@ def test_get_connector_for_keyed_source(source, connector_path, creds):
         pytest.param("apollo_enrichment", "_ApolloTestConnector", id="apollo_enrichment"),
         pytest.param("explorium_enrichment", "_ExploriumTestConnector", id="explorium_enrichment"),
         pytest.param("azure_oauth", "_AzureOAuthTestConnector", id="azure_oauth"),
+        pytest.param("hunter_enrichment", "_HunterTestConnector", id="hunter_enrichment"),
+        pytest.param("clay_enrichment", "_ClayTestConnector", id="clay_enrichment"),
     ],
 )
 def test_get_connector_for_test_only_source(source, connector_attr):
@@ -952,6 +954,48 @@ def test_get_connector_no_db_env_fallback(monkeypatch):
 # ══════════════════════════════════════════════════════════════════════
 # NEW TESTS — Test connector search methods
 # ══════════════════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+async def test_clay_test_connector_search_success(monkeypatch):
+    """_ClayTestConnector succeeds when Clay is connected and the credits check
+    returns."""
+    from app.routers.sources import _ClayTestConnector
+
+    monkeypatch.setattr("app.services.clay_oauth.is_connected", lambda: True)
+
+    async def fake_call(tool, args):
+        assert tool == "get-credits-available"
+        return {"hasWorkspaceCredits": True}
+
+    monkeypatch.setattr("app.connectors.clay_mcp._mcp_call", fake_call)
+    results = await _ClayTestConnector().search("LM358N")
+    assert results and results[0]["status"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_clay_test_connector_raises_when_not_connected(monkeypatch):
+    """_ClayTestConnector raises (→ health 'error') when Clay OAuth isn't connected."""
+    from app.routers.sources import _ClayTestConnector
+
+    monkeypatch.setattr("app.services.clay_oauth.is_connected", lambda: False)
+    with pytest.raises(ValueError, match="not connected"):
+        await _ClayTestConnector().search("LM358N")
+
+
+@pytest.mark.asyncio
+async def test_clay_test_connector_raises_when_mcp_unhealthy(monkeypatch):
+    """_ClayTestConnector raises when the MCP session/credits call returns nothing."""
+    from app.routers.sources import _ClayTestConnector
+
+    monkeypatch.setattr("app.services.clay_oauth.is_connected", lambda: True)
+
+    async def fake_call(tool, args):
+        return {}
+
+    monkeypatch.setattr("app.connectors.clay_mcp._mcp_call", fake_call)
+    with pytest.raises(ValueError, match="health check failed"):
+        await _ClayTestConnector().search("LM358N")
 
 
 @pytest.mark.asyncio
