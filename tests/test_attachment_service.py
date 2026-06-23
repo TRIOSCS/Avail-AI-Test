@@ -150,6 +150,9 @@ async def test_store_library_calls_library_not_onedrive(db_session: Session, tes
     assert drive_id == _DRIVE_ID
     assert item_id == _ITEM_ID
     mock_user_token.assert_not_called()
+    # The PUT URL must contain the structural path for the company library
+    put_url = mock_put.call_args[0][0]
+    assert f"/drives/{_DRIVE_ID}/root:/Attachments/" in put_url
 
 
 # ---------------------------------------------------------------------------
@@ -577,6 +580,12 @@ async def test_open_attachment_library_streams(db_session: Session, test_user: U
         response = await open_attachment(att, test_user)
 
     assert isinstance(response, StreamingResponse)
+    assert response.media_type == att.content_type
+    assert "Content-Disposition" in response.headers
+    assert att.file_name.split(".")[0] in response.headers["Content-Disposition"]
+    # Consume the iterator and verify the streamed body equals the mocked bytes
+    body = b"".join([chunk async for chunk in response.body_iterator])
+    assert body == b"PDF bytes"
 
 
 @pytest.mark.asyncio
