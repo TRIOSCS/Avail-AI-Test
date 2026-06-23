@@ -38,7 +38,7 @@
 {% include 'htmx/partials/shared/empty_state.html' %}
 {% endwith %}
 {% else %}
-<div class="space-y-4">
+<div class="space-y-3">
   {% for sk in site_groups.order %}
     {% set group = site_groups.data[sk] %}
     {% set grp_site = group['site'] %}
@@ -56,7 +56,8 @@
           {% if grp_site and grp_site.city %}
           <span class="text-xs text-gray-400 truncate">· {{ grp_site.city }}</span>
           {% endif %}
-          <span class="text-[11px] text-gray-400 flex-shrink-0">{{ grp_rows|length }} contact{{ "s" if grp_rows|length != 1 }}</span>
+          {%- set grp_active_count = grp_rows | rejectattr('contact.is_archived', 'equalto', True) | list | length -%}
+          <span class="text-[11px] text-gray-400 flex-shrink-0">{{ grp_active_count }} contact{{ "s" if grp_active_count != 1 }}</span>
         </div>
         {% if grp_site %}
         <button type="button"

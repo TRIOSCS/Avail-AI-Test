@@ -616,6 +616,9 @@ Alpine.data('contactsView', () => ({
   q: '',
   siteFilter: '',
   init() {
+    // Pre-select site filter when the tab was opened via a "View N contacts →" link.
+    const initialSite = this.$root.getAttribute('data-initial-site');
+    if (initialSite) this.siteFilter = initialSite;
     this.apply();
     // Re-filter after a CRUD swap replaces the inner #contacts-tab-list rows.
     this._onSettle = () => this.apply();

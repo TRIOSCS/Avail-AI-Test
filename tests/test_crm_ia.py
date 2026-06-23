@@ -281,3 +281,124 @@ class TestRetiredSurfaces:
         # "method not allowed" (405) rather than rendering a right-panel view.
         resp = client.get(f"/v2/partials/customers/{co.id}/sites/{site.id}")
         assert resp.status_code in (404, 405)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TestSiteCardNavFixes — blockers 1, 2, 3, 4, 5, 7
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestSiteCardNavFixes:
+    # Blocker 1 — dead hx-target "#detail-tab-body" fixed to "#company-tab-content"
+    def test_site_card_view_contacts_targets_company_tab_content(self, db_session: Session):
+        co = _make_company(db_session, name="SiteCardNav Co", site_count=1)
+        site = _make_site(db_session, co, site_name="HQ")
+        _make_contact(db_session, site, full_name="Alice")
+        db_session.flush()
+        # Attach minimal site_contacts attribute for the template
+        site.site_contacts = [
+            c
+            for c in db_session.query(__import__("app.models", fromlist=["SiteContact"]).SiteContact)
+            .filter_by(customer_site_id=site.id)
+            .all()
+        ]
+        from app.template_env import templates
+
+        html = templates.get_template("htmx/partials/customers/tabs/site_card.html").render(s=site, company=co)
+        # Must target the REAL tab body, not the stale "#detail-tab-body".
+        assert 'hx-target="#company-tab-content"' in html
+        assert "#detail-tab-body" not in html
+        # Must dispatch crm-switch-tab so the tab indicator follows.
+        assert "crm-switch-tab" in html
+
+    # Blocker 1 — detail.html tab wrapper listens for crm-switch-tab
+    def test_detail_html_listens_for_crm_switch_tab(self, client, db_session: Session, test_user: User):
+        co = _make_company(db_session, name="EventListenerCo", owner_id=test_user.id, site_count=1)
+        db_session.commit()
+        resp = client.get(f"/v2/partials/customers/{co.id}")
+        assert resp.status_code == 200
+        assert "@crm-switch-tab.window" in resp.text
+
+    # Blocker 2 — site-scoped edit-form GET route is retired
+    def test_site_scoped_edit_form_route_retired(self, client, db_session: Session, test_user: User):
+        co = _make_company(db_session, name="RetiredEditForm Co", owner_id=test_user.id, site_count=1)
+        site = _make_site(db_session, co, site_name="Site")
+        c = _make_contact(db_session, site, full_name="Edit Me")
+        db_session.commit()
+        resp = client.get(f"/v2/partials/customers/{co.id}/sites/{site.id}/contacts/{c.id}/edit-form")
+        # Route removed → 404 (or 405 if the path pattern still matches differently)
+        assert resp.status_code in (404, 405)
+
+    # Blocker 3 — create_site_contact POST now returns canonical grouped contacts list
+    def test_create_site_contact_post_returns_grouped_list(self, client, db_session: Session, test_user: User):
+        co = _make_company(db_session, name="CreateSiteContact Co", owner_id=test_user.id, site_count=1)
+        site = _make_site(db_session, co, site_name="Plant")
+        db_session.commit()
+
+        resp = client.post(
+            f"/v2/partials/customers/{co.id}/sites/{site.id}/contacts",
+            data={"full_name": "New Person", "email": "new@plant.com"},
+        )
+        assert resp.status_code == 200
+        # Returns the canonical grouped list fragment, not the retired site_contacts.html.
+        assert "contacts-tab-list" in resp.text
+        # The created contact appears.
+        assert "New Person" in resp.text
+
+    # Blocker 3 — no template file named site_contacts.html exists in the tree
+    def test_site_contacts_template_deleted(self):
+        from pathlib import Path
+
+        tpl = Path("app/templates/htmx/partials/customers/tabs/site_contacts.html")
+        assert not tpl.exists(), "site_contacts.html must be deleted (spec retired it)"
+
+    # Blocker 3 — no template file named contact_edit_modal.html exists in the tree
+    def test_contact_edit_modal_template_deleted(self):
+        from pathlib import Path
+
+        tpl = Path("app/templates/htmx/partials/customers/tabs/contact_edit_modal.html")
+        assert not tpl.exists(), "contact_edit_modal.html must be deleted (route retired)"
+
+    # Blocker 4 — x-text attribute in contacts_tab.html uses &quot; entities
+    def test_contacts_tab_search_hint_uses_quot_entities(self):
+        from pathlib import Path
+
+        src = Path("app/templates/htmx/partials/customers/tabs/contacts_tab.html").read_text()
+        # Must NOT contain a bare double-quote inside x-text="..." that closes the attr early.
+        # The correct form uses &quot; entities.
+        assert "&quot;" in src, "contacts_tab.html search-hint x-text must use &quot; entities"
+        # The old broken form (unescaped " inside double-quoted attr) must be gone.
+        assert """x-text="q ? '"' + q + '"'""" not in src
+
+    # Blocker 5 — company_tab contacts branch accepts site_id query param
+    def test_company_tab_contacts_preselects_site(self, client, db_session: Session, test_user: User):
+        co = _make_company(db_session, name="PreSelectSite Co", owner_id=test_user.id, site_count=2)
+        s1 = _make_site(db_session, co, site_name="Alpha")
+        s2 = _make_site(db_session, co, site_name="Beta")
+        _make_contact(db_session, s1, full_name="Alpha Person")
+        _make_contact(db_session, s2, full_name="Beta Person")
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{co.id}/tab/contacts?site_id={s1.id}")
+        assert resp.status_code == 200
+        # data-initial-site attribute carries the preselected site id.
+        assert f'data-initial-site="{s1.id}"' in resp.text
+
+    # Finding 7 — active contact count excludes archived contacts
+    def test_detail_contact_count_excludes_archived(self, client, db_session: Session, test_user: User):
+        co = _make_company(db_session, name="ArchiveCount Co", owner_id=test_user.id, site_count=1)
+        site = _make_site(db_session, co, site_name="HQ")
+        # 2 active, 1 archived
+        _make_contact(db_session, site, full_name="Active One")
+        _make_contact(db_session, site, full_name="Active Two")
+        archived = _make_contact(db_session, site, full_name="Archived Three")
+        archived.is_archived = True
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{co.id}")
+        assert resp.status_code == 200
+        # The chip strip uses contact_count (active only = 2) not len(contact_rows) = 3.
+        # The badge span renders "2" inside rounded-full bg-brand-100, so "2 contact"
+        # appears in the tab label area; "3 contact" must not be there.
+        assert "2 contact" in resp.text
+        assert "3 contact" not in resp.text

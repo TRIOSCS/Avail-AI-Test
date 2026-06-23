@@ -9,7 +9,7 @@
 #}
 <div id="site-{{ s.id }}" class="bg-white rounded-lg border border-gray-200" x-data="{ expanded: false, editing: false }">
   {# Collapsed header #}
-  <div class="px-4 py-3 flex items-center justify-between cursor-pointer" role="button" tabindex="0" @click="expanded = !expanded" @keydown.enter="expanded = !expanded" @keydown.space.prevent="expanded = !expanded" aria-expanded="expanded">
+  <div class="px-4 py-3 flex items-center justify-between cursor-pointer" role="button" tabindex="0" @click="expanded = !expanded" @keydown.enter="expanded = !expanded" @keydown.space.prevent="expanded = !expanded" :aria-expanded="expanded">
     <div class="flex items-center gap-3">
       <svg class="h-5 w-5 text-gray-400 transition-transform" :class="{ 'rotate-90': expanded }" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
@@ -56,8 +56,9 @@
       {% if active_contact_count > 0 %}
       <button type="button"
               hx-get="/v2/partials/customers/{{ company.id }}/tab/contacts?site_id={{ s.id }}"
-              hx-target="#detail-tab-body"
+              hx-target="#company-tab-content"
               hx-swap="innerHTML"
+              @click="$dispatch('crm-switch-tab', {tab: 'contacts'})"
               class="text-xs text-brand-500 hover:text-brand-600 font-medium">
         View {{ active_contact_count }} contact{{ "s" if active_contact_count != 1 }} →
       </button>

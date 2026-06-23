@@ -5536,7 +5536,7 @@ async def company_detail_partial(
             # Cadence card
             "cadence_state": _cadence,
             "next_best_touch": _nbt,
-            "contact_count": len(contact_rows),
+            "contact_count": sum(1 for r in contact_rows if not (r.get("contact") and r["contact"].is_archived)),
             "site_count": len(sites),
             # Inlined Contacts surface (default tab) needs the site filter + roles.
             "active_sites": active_sites,
@@ -5560,6 +5560,7 @@ async def company_tab(
     request: Request,
     company_id: int,
     tab: str,
+    site_id: int | None = Query(None),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -5595,6 +5596,8 @@ async def company_tab(
             .order_by(CustomerSite.site_name)
             .all()
         )
+        # IDOR-safe: only honor site_id when it belongs to this company's active sites.
+        preselect_site_id = site_id if site_id and any(s.id == site_id for s in active_sites) else None
         ctx = _base_ctx(request, user, "customers")
         ctx.update(
             {
@@ -5603,6 +5606,7 @@ async def company_tab(
                 "now_utc": datetime.now(timezone.utc),
                 "active_sites": active_sites,
                 "roles": CANONICAL_ROLES,
+                "preselect_site_id": preselect_site_id,
             }
         )
         return template_response("htmx/partials/customers/tabs/contacts_tab.html", ctx)
@@ -6191,23 +6195,19 @@ async def site_contacts_list(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Load contacts for a specific site."""
+    """Redirect site-scoped contact list to the canonical grouped contacts surface.
+
+    site_contacts.html has been retired — all contact management now lives on the
+    canonical #contacts-tab-list surface (contacts_tab.html /
+    _contacts_grouped_list.html).
+    """
     site = db.query(CustomerSite).filter(CustomerSite.id == site_id, CustomerSite.company_id == company_id).first()
     if not site:
         raise HTTPException(404, "Site not found")
-
-    contacts = (
-        db.query(SiteContact)
-        .filter(SiteContact.customer_site_id == site_id, SiteContact.is_active.is_(True))
-        .order_by(SiteContact.is_primary.desc(), SiteContact.full_name)
-        .all()
-    )
     company = db.query(Company).filter(Company.id == company_id).first()
-    ctx = _base_ctx(request, user, "customers")
-    ctx["site"] = site
-    ctx["contacts"] = contacts
-    ctx["company"] = company
-    return template_response("htmx/partials/customers/tabs/site_contacts.html", ctx)
+    if not company:
+        raise HTTPException(404, "Company not found")
+    return _render_contacts_list(request, user, company, db)
 
 
 @router.post(
@@ -6276,19 +6276,9 @@ async def create_site_contact(
         db.add(contact)
         db.commit()
 
-    # Return refreshed contacts list
-    contacts = (
-        db.query(SiteContact)
-        .filter(SiteContact.customer_site_id == site_id, SiteContact.is_active.is_(True))
-        .order_by(SiteContact.is_primary.desc(), SiteContact.full_name)
-        .all()
-    )
+    # Return canonical grouped contacts list (site_contacts.html is retired).
     company = db.query(Company).filter(Company.id == company_id).first()
-    ctx = _base_ctx(request, user, "customers")
-    ctx["site"] = site
-    ctx["contacts"] = contacts
-    ctx["company"] = company
-    return template_response("htmx/partials/customers/tabs/site_contacts.html", ctx)
+    return _render_contacts_list(request, user, company, db)
 
 
 @router.delete(
@@ -6618,34 +6608,6 @@ async def edit_site(
 
 
 @router.get(
-    "/v2/partials/customers/{company_id}/sites/{site_id}/contacts/{contact_id}/edit-form",
-    response_class=HTMLResponse,
-)
-async def contact_edit_form(
-    request: Request,
-    company_id: int,
-    site_id: int,
-    contact_id: int,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Return modal edit form for a site contact."""
-    contact = (
-        db.query(SiteContact).filter(SiteContact.id == contact_id, SiteContact.customer_site_id == site_id).first()
-    )
-    if not contact:
-        raise HTTPException(404, "Contact not found")
-    # Verify site belongs to company
-    site = db.query(CustomerSite).filter(CustomerSite.id == site_id, CustomerSite.company_id == company_id).first()
-    if not site:
-        raise HTTPException(404, "Site not found")
-    return template_response(
-        "htmx/partials/customers/tabs/contact_edit_modal.html",
-        {"request": request, "contact": contact, "site": site, "company_id": company_id},
-    )
-
-
-@router.get(
     "/v2/partials/customers/{company_id}/contacts/{contact_id}/edit-form",
     response_class=HTMLResponse,
 )
@@ -6658,15 +6620,11 @@ async def contact_edit_form_company_scoped(
 ):
     """Return the shared _contact_form.html in edit mode for the Contacts tab.
 
-    This company-scoped route (no site_id in path) is called from the Contacts-tab
-    kebab Edit button. Unlike the site-scoped GET
-    /sites/{site_id}/contacts/{contact_id}/edit-form which returns
-    contact_edit_modal.html, this returns _contact_form.html in 'edit' mode so the
-    form posts to /contacts/{contact_id}/edit and targets #contacts-tab-list — the
-    correct swap target for the Contacts tab.
-
-    WARNING: Do NOT call this endpoint via HTMX hx-get with hx-target pointing at
-    a Sites-tab element. Use the site-scoped route for the Sites-tab path.
+    This company-scoped route (no site_id in path) is called from the Contacts-tab kebab
+    Edit button. It returns _contact_form.html in 'edit' mode so the form posts to
+    /contacts/{contact_id}/edit and targets #contacts-tab-list — the canonical swap
+    target for the Contacts tab. The former site-scoped edit-form route and
+    contact_edit_modal.html have been retired.
     """
     # Validate the contact belongs to a site that belongs to this company
     contact = (

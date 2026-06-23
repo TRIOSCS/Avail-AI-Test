@@ -267,8 +267,7 @@
             {# Role editor inline in kebab #}
             <div id='role-chip-{{ contact.id }}' class='px-3 py-1' x-data='{"editing": false}'>
               <span class='text-gray-400 block mb-1'>Role</span>
-              {% if not editing %}
-              <button type='button' @click='editing = true'
+              <button type='button' x-show='!editing' x-cloak @click='editing = true'
                       class='text-brand-600 hover:underline'>
                 {% if contact.contact_role %}
                   {{ role_labels.get(contact.contact_role, contact.contact_role|replace('_', ' ')|title) }} ✎
@@ -276,7 +275,6 @@
                   + Set role
                 {% endif %}
               </button>
-              {% endif %}
               <form x-show='editing' x-cloak
                     hx-post='/v2/partials/customers/{{ company.id }}/contacts/{{ contact.id }}/role'
                     hx-target='#role-chip-{{ contact.id }}'
