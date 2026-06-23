@@ -3,7 +3,7 @@
 import re
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, Boolean, Column, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Column, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship, validates
 
@@ -285,7 +285,7 @@ class SiteContact(Base):
     wechat_id = Column(String(100))
     notes = Column(Text)
     is_primary = Column(Boolean, default=False)
-    is_active = Column(Boolean, default=True)
+    is_active = Column(Boolean, default=True, server_default=text("true"))
     contact_status = Column(String(20), default="new")
     do_not_contact = Column(Boolean, nullable=False, default=False, server_default="false")
     # Increment 1 — contact disposition. is_priority surfaces a contact to the

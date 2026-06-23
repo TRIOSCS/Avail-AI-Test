@@ -719,3 +719,91 @@ class TestCdmCompanyQuerySegmentFilter:
         names = {c.name for c in results}
         assert "ZeroSeg-Co1" in names
         assert "ZeroSeg-Co2" in names
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TestContactIsActiveNullBug  (regression guard for the NULL is_active showstopper)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestContactIsActiveNullBug:
+    """Regression guard: contacts with is_active=NULL must be treated as ACTIVE.
+
+    Root cause: SiteContact.is_active has only a Python-side default=True with no
+    DB server_default.  Raw/seed inserts bypass ORM defaults, leaving is_active=NULL.
+    The previous filter ``SiteContact.is_active.is_(True)`` silently excluded every
+    such contact (NULL is not True in SQL).
+
+    The fix uses ``SiteContact.is_active.isnot(False)`` so NULL rows pass through,
+    while explicitly-False (soft-deleted) contacts are still excluded.
+    """
+
+    def test_null_is_active_contact_is_returned_as_editable(self, db_session: Session):
+        """A contact seeded with is_active=NULL must appear in company_contact_rows with
+        legacy=False (editable), not be filtered out."""
+        from sqlalchemy import text
+
+        from app.models.crm import CustomerSite, SiteContact
+        from app.services.crm_service import company_contact_rows
+
+        co = Company(name="NullActive Co", is_active=True)
+        db_session.add(co)
+        db_session.flush()
+
+        site = CustomerSite(company_id=co.id, site_name="HQ", is_active=True)
+        db_session.add(site)
+        db_session.flush()
+
+        contact = SiteContact(
+            customer_site_id=site.id,
+            full_name="Null Active Person",
+            email="nullactive@example.com",
+        )
+        db_session.add(contact)
+        db_session.flush()
+
+        # Simulate the seed state: bypass the ORM default and set is_active=NULL.
+        db_session.execute(
+            text("UPDATE site_contacts SET is_active = NULL WHERE id = :id"),
+            {"id": contact.id},
+        )
+        db_session.expire(contact)
+        db_session.commit()
+
+        rows = company_contact_rows(db_session, co.id)
+
+        editable = [r for r in rows if not r["legacy"]]
+        assert len(editable) == 1, (
+            "Expected the NULL-is_active contact to appear as an editable row; "
+            f"got {len(editable)} editable rows and {len(rows)} total rows"
+        )
+        assert editable[0]["contact"].id == contact.id
+
+    def test_false_is_active_contact_is_excluded(self, db_session: Session):
+        """A contact with is_active=False (explicitly soft-deleted) must NOT appear."""
+        from app.models.crm import CustomerSite, SiteContact
+        from app.services.crm_service import company_contact_rows
+
+        co = Company(name="FalseActive Co", is_active=True)
+        db_session.add(co)
+        db_session.flush()
+
+        site = CustomerSite(company_id=co.id, site_name="HQ", is_active=True)
+        db_session.add(site)
+        db_session.flush()
+
+        contact = SiteContact(
+            customer_site_id=site.id,
+            full_name="Deactivated Person",
+            email="deactivated@example.com",
+            is_active=False,
+        )
+        db_session.add(contact)
+        db_session.commit()
+
+        rows = company_contact_rows(db_session, co.id)
+
+        editable = [r for r in rows if not r["legacy"]]
+        assert len(editable) == 0, (
+            f"Expected soft-deleted (is_active=False) contact to be excluded; got {len(editable)} editable rows"
+        )

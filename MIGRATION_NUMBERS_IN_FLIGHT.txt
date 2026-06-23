@@ -61,3 +61,4 @@
 136  feat/crm-steps-3456  Company.primary_contact_id (FK site_contacts) + parent_company_id (self-FK companies); RE-NUMBERED 133->136 (feat/resell-outreach took 133, merged first); RE-CHAINED onto 133_resell_outreach_schema
 137  feat/crm-steps-3456  site_contacts.first_name/last_name (split from full_name, backfilled) + contact_owner_id (FK users); RE-NUMBERED 134->137; RE-CHAINED onto 136_company_links
 138  feat/crm-steps-3456  RequisitionTask.requisition_id nullable + company_id/site_contact_id FKs + CHECK >=1 parent (general account/contact tasks); RE-NUMBERED 135->138; RE-CHAINED onto 137_contact_fields
+139  fix/contact-active-visibility  site_contacts.is_active server_default=true + NULL backfill; chains onto 138_general_tasks; single head verified via `alembic heads`
