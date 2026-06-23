@@ -315,8 +315,8 @@ async def test_contacts_no_escalation_when_verified_sufficient(monkeypatch):
     """Escalation is skipped when cheap providers already return >= limit verified
     contacts."""
     cheap_contacts = [
-        {"source": "apollo", "full_name": "Person A", "email": "a@ex.com", "verified": True},
-        {"source": "apollo", "full_name": "Person B", "email": "b@ex.com", "verified": True},
+        {"source": "hunter", "full_name": "Person A", "email": "a@ex.com", "verified": True},
+        {"source": "clay", "full_name": "Person B", "email": "b@ex.com", "verified": True},
     ]
     lusha_called = []
 
