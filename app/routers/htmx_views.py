@@ -2730,6 +2730,49 @@ async def ai_cleanup_email(
     )
 
 
+def _require_requisition_access(db: Session, req_id: int, user: User):
+    """Fetch a requisition, enforcing the role-based ownership model.
+
+    SALES/TRADER users may only act on requisitions they created; buyers, managers, and
+    admins are unrestricted. Mirrors the scoping applied in the requisition list and
+    follow-ups list. Raises 404 (not 403) so existence isn't leaked.
+    """
+    req = get_requisition_or_404(db, req_id)
+    if getattr(user, "role", None) in (UserRole.SALES, UserRole.TRADER) and req.created_by != user.id:
+        raise HTTPException(404, "Requisition not found")
+    return req
+
+
+@router.post("/v2/partials/requisitions/{req_id}/ai-rephrase-email", response_class=HTMLResponse)
+async def ai_rephrase_email(
+    request: Request,
+    req_id: int,
+    body: str = Form(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Rephrase the RFQ email so each send reads uniquely, keeping all parts intact."""
+    get_requisition_or_404(db, req_id)  # validates existence
+
+    user_text = body.strip()
+    if not user_text:
+        return HTMLResponse(
+            '<p class="text-xs text-amber-600 mt-1">Write your email first, then click AI Rephrase.</p>'
+        )
+
+    from app.services.email_drafting import draft_email
+
+    result = await draft_email("rfq_rephrase", {"body": user_text})
+    rephrased = (result or {}).get("body") or user_text
+
+    # Return a script that replaces the textarea content with the rephrased text.
+    escaped = rephrased.replace("\\", "\\\\").replace("`", "\\`").replace("$", "\\$").replace("</", "<\\/")
+    return HTMLResponse(
+        f'<script>document.getElementById("rfq-body-textarea").value = `{escaped}`;</script>'
+        '<p class="text-xs text-green-600 mt-1">Rephrased. Review and edit as needed.</p>'
+    )
+
+
 @router.post("/v2/partials/requisitions/{req_id}/rfq-send", response_class=HTMLResponse)
 async def rfq_send(
     request: Request,
@@ -2933,6 +2976,15 @@ async def send_follow_up_htmx(
     if not contact:
         raise HTTPException(404, "Contact not found")
 
+    # SALES/TRADER may only send for contacts they own or whose requisition they own.
+    if getattr(user, "role", None) in (UserRole.SALES, UserRole.TRADER):
+        owns = contact.user_id == user.id
+        if not owns and contact.requisition_id:
+            req = db.get(Requisition, contact.requisition_id)
+            owns = bool(req and req.created_by == user.id)
+        if not owns:
+            raise HTTPException(404, "Contact not found")
+
     form = await request.form()
     body = (form.get("body") or "").strip()
 
@@ -2990,6 +3042,53 @@ async def send_follow_up_htmx(
     return template_response("htmx/partials/follow_ups/sent_success.html", ctx)
 
 
+@router.post("/v2/partials/follow-ups/{contact_id}/ai-draft", response_class=HTMLResponse)
+async def ai_draft_follow_up(
+    request: Request,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Draft a contextual follow-up body and fill the compose textarea."""
+    from datetime import timezone as tz
+
+    from ..models.offers import Contact as RfqContact
+
+    contact = db.get(RfqContact, contact_id)
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+
+    # SALES/TRADER may only draft for contacts they own or whose requisition they own.
+    if getattr(user, "role", None) in (UserRole.SALES, UserRole.TRADER):
+        owns = contact.user_id == user.id
+        if not owns and contact.requisition_id:
+            req = db.get(Requisition, contact.requisition_id)
+            owns = bool(req and req.created_by == user.id)
+        if not owns:
+            raise HTTPException(404, "Contact not found")
+
+    days_waiting = (datetime.now(tz.utc) - contact.created_at).days if contact.created_at else None
+
+    from app.services.email_drafting import draft_email
+
+    result = await draft_email(
+        "follow_up",
+        {
+            "vendor_name": contact.vendor_name,
+            "parts": contact.parts_included or [],
+            "days_waiting": days_waiting,
+            "subject": contact.subject,
+        },
+    )
+    drafted = (result or {}).get("body") or ""
+
+    escaped = drafted.replace("\\", "\\\\").replace("`", "\\`").replace("$", "\\$").replace("</", "<\\/")
+    return HTMLResponse(
+        f'<script>document.getElementById("follow-up-body-{contact_id}").value = `{escaped}`;</script>'
+        '<p class="text-xs text-green-600 mt-1">Draft ready. Review and edit before sending.</p>'
+    )
+
+
 @router.post("/v2/partials/requisitions/{req_id}/responses/{response_id}/review", response_class=HTMLResponse)
 async def review_response_htmx(
     request: Request,
@@ -3003,6 +3102,8 @@ async def review_response_htmx(
     Returns updated card.
     """
     from ..models.offers import VendorResponse
+
+    _require_requisition_access(db, req_id, user)
 
     vr = (
         db.query(VendorResponse)
@@ -3023,6 +3124,143 @@ async def review_response_htmx(
     vr.status = new_status
     db.commit()
     logger.info("Response {} marked as {} by {}", response_id, new_status, user.email)
+
+    req = db.query(Requisition).filter(Requisition.id == req_id).first()
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx["r"] = vr
+    ctx["req"] = req
+    return template_response("htmx/partials/requisitions/tabs/response_card.html", ctx)
+
+
+@router.post(
+    "/v2/partials/requisitions/{req_id}/responses/{response_id}/ai-draft-reply",
+    response_class=HTMLResponse,
+)
+async def ai_draft_reply(
+    request: Request,
+    req_id: int,
+    response_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Draft an AI reply to a vendor response and render an editable compose block."""
+    from ..models.offers import VendorResponse
+
+    _require_requisition_access(db, req_id, user)
+
+    vr = (
+        db.query(VendorResponse)
+        .filter(
+            VendorResponse.id == response_id,
+            VendorResponse.requisition_id == req_id,
+        )
+        .first()
+    )
+    if not vr:
+        raise HTTPException(404, "Response not found")
+
+    parsed = vr.parsed_data or {}
+
+    from app.services.email_drafting import draft_email
+
+    result = await draft_email(
+        "vendor_reply",
+        {
+            "classification": vr.classification,
+            "vendor_name": vr.vendor_name,
+            "mpn": parsed.get("mpn"),
+            "qty": parsed.get("qty") or parsed.get("qty_available"),
+            "price": parsed.get("price") or parsed.get("unit_price"),
+            "lead_time": parsed.get("lead_time"),
+            "subject": vr.subject,
+        },
+    )
+
+    default_subject = vr.subject or "RFQ"
+    if not default_subject.lower().startswith("re:"):
+        default_subject = f"Re: {default_subject}"
+
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx["req_id"] = req_id
+    ctx["r"] = vr
+    ctx["reply_subject"] = (result or {}).get("subject") or default_subject
+    ctx["reply_body"] = (result or {}).get("body") or ""
+    ctx["ai_failed"] = result is None
+    return template_response("htmx/partials/requisitions/tabs/reply_compose.html", ctx)
+
+
+@router.post(
+    "/v2/partials/requisitions/{req_id}/responses/{response_id}/send-reply",
+    response_class=HTMLResponse,
+)
+async def send_reply_htmx(
+    request: Request,
+    req_id: int,
+    response_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Send a reply to a vendor response (as the signed-in user) and mark it
+    reviewed."""
+    import os
+
+    from ..models.offers import VendorResponse
+
+    _require_requisition_access(db, req_id, user)
+
+    vr = (
+        db.query(VendorResponse)
+        .filter(
+            VendorResponse.id == response_id,
+            VendorResponse.requisition_id == req_id,
+        )
+        .first()
+    )
+    if not vr:
+        raise HTTPException(404, "Response not found")
+
+    form = await request.form()
+    subject = (form.get("subject") or "").strip() or f"Re: {vr.subject or 'RFQ'}"
+    body = (form.get("body") or "").strip()
+    if not body:
+        raise HTTPException(400, "Reply body is required")
+
+    is_testing = os.environ.get("TESTING") == "1"
+    email_sent = False
+
+    if not is_testing and vr.vendor_email:
+        try:
+            from ..dependencies import require_fresh_token
+
+            token = await require_fresh_token(request, db)
+
+            from ..utils.graph_client import GraphClient
+
+            gc = GraphClient(token)
+            payload = {
+                "message": {
+                    "subject": subject,
+                    "body": {"contentType": "Text", "content": body},
+                    "toRecipients": [{"emailAddress": {"address": vr.vendor_email}}],
+                },
+                "saveToSentItems": "true",
+            }
+            await gc.post_json("/me/sendMail", payload)
+            email_sent = True
+        except Exception as exc:
+            logger.warning("Vendor reply send failed for response {}: {}", response_id, exc)
+
+    if email_sent or is_testing:
+        vr.status = "reviewed"
+        db.commit()
+
+    logger.info(
+        "Vendor reply {} for response {} (vendor: {}) by {}",
+        "sent" if email_sent or is_testing else "FAILED",
+        response_id,
+        vr.vendor_name,
+        user.email,
+    )
 
     req = db.query(Requisition).filter(Requisition.id == req_id).first()
     ctx = _base_ctx(request, user, "requisitions")
