@@ -8,7 +8,7 @@
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}
 
-<div class="max-w-7xl mx-auto">
+<div class="page-fluid">
 
   {# Stats KPI panel — lazy-loaded so the grid paints first; OOB-refreshed after grid actions.
      hx-target MUST be explicit: without it the div inherits #main-content's hx-target="this",
@@ -101,7 +101,7 @@
 
   {# Card grid — 3-col desktop, 2-col tablet, 1-col mobile #}
   {% if prospects %}
-  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
     {% for prospect in prospects %}
     {% include "htmx/partials/prospecting/_card.html" %}
     {% endfor %}

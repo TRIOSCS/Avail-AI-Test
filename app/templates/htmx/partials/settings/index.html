@@ -5,7 +5,7 @@
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}
 {% from "htmx/partials/settings/_macros.html" import tab_button %}
-<div class="max-w-7xl mx-auto" x-data="{ tab: '{{ active_tab }}' }">
+<div class="page-fluid" x-data="{ tab: '{{ active_tab }}' }">
   {# Tab buttons #}
   <div class="flex gap-1 mb-6 border-b border-brand-200">
     {{ tab_button('sources', '/v2/partials/settings/sources', 'Sources', ['M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4']) }}

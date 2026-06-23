@@ -26,7 +26,7 @@
 {% set show_draft_banner = bp.status == 'draft' and not bp.cancellation_reason %}
 {% set has_action_banner = show_buyer_banner or show_approval_banner or show_so_banner or show_verify_banner or show_rejected_banner or show_draft_banner %}
 
-<div class="max-w-7xl mx-auto" x-data="{ showModal: false, modalType: '', showAi: false, showNotes: false, showSo: false }">
+<div class="page-fluid" x-data="{ showModal: false, modalType: '', showAi: false, showNotes: false, showSo: false }">
 
   {# ═══ 1. COMPACT HEADER WITH INLINE STATS ═══ #}
   <div class="mb-4">
