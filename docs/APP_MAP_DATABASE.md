@@ -463,6 +463,13 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 > `bids`/`bid_solicitations` (the old outbound email-RFQ path) are still present and a
 > later cutover chunk retires them. `ExcessListStatus` gained the Trading lifecycle
 > members (open/collecting/bid_out/awarded) while keeping active/bidding for now.
+>
+> Service logic lives in `app/services/excess_service.py` (Chunk B, additive):
+> `can_post`/`can_offer` (role-derived capabilities), `submit_offer` (per_line/take_all;
+> part-number-only matching via `normalize_mpn_key`; unmatched/ambiguous rows queued),
+> `recompute_line_rollup`/`withdraw_offer` (min priced active offer -> best_offer_*), and
+> `material_card_id` resolution on the import path. The old `create_bid`/`accept_bid`
+> functions remain until the cutover chunk.
 
 **`excess_lists`** — Customer surplus inventory batches (the posting)
 - company_id -> companies, owner_id -> users
