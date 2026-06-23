@@ -329,7 +329,7 @@ class TestContactInlineEdit:
         assert contact.first_name is None
         assert contact.full_name == "Smith"
 
-    def test_inline_edit_contact_owner_id(
+    def test_inline_edit_contact_owner_id_not_available(
         self,
         client: TestClient,
         test_company: Company,
@@ -337,7 +337,10 @@ class TestContactInlineEdit:
         test_user: User,
         db_session: Session,
     ):
-        """Inline POST contact_owner_id persists the owner FK."""
+        """FIX G: contact_owner_id is NOT in EDITABLE_CONTACT_FIELDS — the inline edit
+        POST must return 404 because the inline path has no user list to populate the
+        select. Owner is set only via the contact edit form (which receives the full
+        users queryset)."""
         test_company.account_owner_id = test_user.id
         db_session.commit()
 
@@ -346,11 +349,12 @@ class TestContactInlineEdit:
             f"/v2/partials/customers/{test_company.id}/contacts/{contact.id}/field",
             data={"field": "contact_owner_id", "value": str(test_user.id)},
         )
-        assert resp.status_code == 200
-        db_session.refresh(contact)
-        assert contact.contact_owner_id == test_user.id
+        assert resp.status_code == 404, (
+            "contact_owner_id inline edit must return 404 — "
+            "owner is set via the contact form, not the inline field widget"
+        )
 
-    def test_inline_edit_contact_owner_id_clear(
+    def test_inline_edit_contact_owner_id_clear_not_available(
         self,
         client: TestClient,
         test_company: Company,
@@ -358,7 +362,10 @@ class TestContactInlineEdit:
         test_user: User,
         db_session: Session,
     ):
-        """Clearing contact_owner_id sets it to NULL."""
+        """FIX G: clearing contact_owner_id via inline edit must also return 404.
+
+        Owner is managed exclusively via the contact edit form (Step 4).
+        """
         test_company.account_owner_id = test_user.id
         db_session.commit()
 
@@ -370,9 +377,10 @@ class TestContactInlineEdit:
             f"/v2/partials/customers/{test_company.id}/contacts/{contact.id}/field",
             data={"field": "contact_owner_id", "value": ""},
         )
-        assert resp.status_code == 200
-        db_session.refresh(contact)
-        assert contact.contact_owner_id is None
+        assert resp.status_code == 404, (
+            "contact_owner_id inline clear must return 404 — "
+            "owner is managed via the contact form, not the inline field widget"
+        )
 
 
 # ── Add-form renders owner select ─────────────────────────────────────────────

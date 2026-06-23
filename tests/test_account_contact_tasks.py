@@ -50,6 +50,25 @@ def _count_activity(db: Session) -> int:
 
 
 @pytest.fixture()
+def test_company(db_session: Session, test_user) -> Company:
+    """A sample company owned by test_user — overrides conftest.test_company so that the
+    account-owner gate added by FIX F lets the default test client (authenticated as
+    test_user) create tasks without getting 403."""
+    co = Company(
+        name="Acme Electronics",
+        website="https://acme-electronics.com",
+        industry="Electronic Components",
+        is_active=True,
+        account_owner_id=test_user.id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(co)
+    db_session.commit()
+    db_session.refresh(co)
+    return co
+
+
+@pytest.fixture()
 def test_site_contact(db_session: Session, test_customer_site: CustomerSite) -> SiteContact:
     """A site contact linked to test_customer_site."""
     sc = SiteContact(
@@ -456,3 +475,76 @@ class TestContactTaskEndpoints:
         )
         assert response.status_code == 200
         assert b"Send deck to Alice" in response.content
+
+
+# ---------------------------------------------------------------------------
+# FIX D: complete_task_endpoint 403 IDOR guard
+# ---------------------------------------------------------------------------
+
+
+class TestCompleteTaskEndpointAuthz:
+    """Non-owner, non-assignee, non-creator second user gets 403 on complete."""
+
+    @pytest.fixture()
+    def second_user(self, db_session: Session):
+        from app.models import User
+
+        u = User(
+            email="other@trioscs.com",
+            name="Other User",
+            role="buyer",
+            azure_id="test-azure-id-999",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(u)
+        db_session.commit()
+        db_session.refresh(u)
+        return u
+
+    @pytest.fixture()
+    def second_client(self, db_session: Session, second_user):
+        from fastapi.testclient import TestClient
+
+        from app.database import get_db
+        from app.dependencies import require_admin, require_buyer, require_fresh_token, require_user
+        from app.main import app
+
+        def override_db():
+            yield db_session
+
+        def override_user():
+            return second_user
+
+        async def override_fresh_token():
+            return "mock-token"
+
+        overridden = [get_db, require_user, require_admin, require_buyer, require_fresh_token]
+        app.dependency_overrides[get_db] = override_db
+        app.dependency_overrides[require_user] = override_user
+        app.dependency_overrides[require_admin] = override_user
+        app.dependency_overrides[require_buyer] = override_user
+        app.dependency_overrides[require_fresh_token] = override_fresh_token
+        try:
+            with TestClient(app, raise_server_exceptions=False) as c:
+                yield c
+        finally:
+            for dep in overridden:
+                app.dependency_overrides.pop(dep, None)
+
+    def test_non_owner_non_assignee_gets_403(
+        self,
+        second_client,
+        db_session: Session,
+        test_company: Company,
+        test_user,
+    ):
+        """A user who is not the assignee, creator, or account owner must get 403."""
+        task = create_company_task(
+            db_session,
+            company_id=test_company.id,
+            title="Restricted task",
+            created_by=test_user.id,
+            assigned_to_id=test_user.id,
+        )
+        resp = second_client.post(f"/v2/partials/tasks/{task.id}/complete")
+        assert resp.status_code == 403

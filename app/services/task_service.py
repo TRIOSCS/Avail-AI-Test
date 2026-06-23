@@ -16,6 +16,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.constants import TaskStatus
+from app.models.crm import Company
 from app.models.task import RequisitionTask
 
 
@@ -354,19 +355,57 @@ def get_next_task_for_company(db: Session, company_id: int) -> RequisitionTask |
     )
 
 
+def _is_crm_task_authorized(db: Session, task: RequisitionTask, user_id: int, is_admin: bool) -> bool:
+    """Return True if user_id is allowed to mutate the given CRM task.
+
+    Allowed if any of:
+      - user is an admin
+      - user is the assignee
+      - user is the creator
+      - user is the account_owner of the task's parent company (via company_id directly,
+        or via the contact's site → company for contact-scoped tasks)
+    """
+    if is_admin:
+        return True
+    if task.assigned_to_id == user_id:
+        return True
+    if task.created_by == user_id:
+        return True
+    # Check parent company owner
+    company_id: int | None = task.company_id
+    if company_id is None and task.site_contact_id is not None:
+        # Resolve contact → site → company
+        from app.models.crm import CustomerSite, SiteContact
+
+        contact = db.get(SiteContact, task.site_contact_id)
+        if contact and contact.customer_site_id:
+            site = db.get(CustomerSite, contact.customer_site_id)
+            if site:
+                company_id = site.company_id
+    if company_id is not None:
+        company = db.get(Company, company_id)
+        if company and company.account_owner_id == user_id:
+            return True
+    return False
+
+
 def complete_crm_task(
     db: Session,
     task_id: int,
     user_id: int,
     completion_note: str = "",
+    is_admin: bool = False,
 ) -> RequisitionTask | None:
     """Complete a CRM task (account or contact scoped). No activity log is created.
 
-    Returns the updated task, or None if not found.
+    Returns the updated task, or None if not found. Raises PermissionError if the caller
+    is not the assignee, creator, parent account owner, or an admin.
     """
     task = db.get(RequisitionTask, task_id)
     if not task:
         return None
+    if not _is_crm_task_authorized(db, task, user_id, is_admin):
+        raise PermissionError("Not authorized to complete this task")
     task.status = TaskStatus.DONE
     task.completed_at = datetime.now(timezone.utc)
     task.completion_note = completion_note

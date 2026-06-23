@@ -262,3 +262,44 @@ class TestParentCompanyEndpoint:
             data={"parent_company_id": str(company_b.id)},
         )
         assert resp.status_code == 403
+
+
+class TestEditCompanyParentCycleGuard:
+    """edit_company (POST /v2/partials/customers/{id}/edit) must enforce the same cycle
+    guard as set_parent_company — both now delegate to _set_parent_company."""
+
+    def test_edit_company_setting_descendant_as_parent_rejected(
+        self,
+        owner_client: TestClient,
+        db_session: Session,
+        company_a: Company,
+        company_b: Company,
+        company_c: Company,
+    ):
+        """A → B → C; using the edit modal to set company_a's parent to company_c (which
+        is already a descendant via set_parent_company) must return 400."""
+        # Establish A → B → C hierarchy first
+        company_b.parent_company_id = company_a.id
+        company_c.parent_company_id = company_b.id
+        db_session.commit()
+
+        # Attempt to make A a child of C via the edit form (would create A→B→C→A)
+        resp = owner_client.post(
+            f"/v2/partials/customers/{company_a.id}/edit",
+            data={"parent_company_id": str(company_c.id)},
+        )
+        assert resp.status_code == 400, (
+            "edit_company must reject a parent that would create a cycle — "
+            "the inline parent field now goes through _set_parent_company"
+        )
+
+    def test_edit_company_self_parent_rejected(
+        self,
+        owner_client: TestClient,
+        company_a: Company,
+    ):
+        resp = owner_client.post(
+            f"/v2/partials/customers/{company_a.id}/edit",
+            data={"parent_company_id": str(company_a.id)},
+        )
+        assert resp.status_code == 400

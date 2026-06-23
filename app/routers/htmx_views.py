@@ -5312,7 +5312,9 @@ EDITABLE_CONTACT_FIELDS: dict[str, dict] = {
         "kind": "select",
         "choices": list(CANONICAL_ROLES),
     },
-    "contact_owner_id": {"label": "Contact Owner", "kind": "select", "choices": []},
+    # contact_owner_id is intentionally NOT listed here — the inline edit path has no
+    # user list to populate the select. Owner is set via the contact edit form which
+    # receives the full users queryset.
 }
 
 # Ordered list: (field, label, kind, choices) — used by the detail template to render the
@@ -6973,44 +6975,57 @@ async def set_parent_company(
     form = await request.form()
     raw = (form.get("parent_company_id") or "").strip()
 
-    if not raw:
-        company.parent_company_id = None
-        company.updated_at = datetime.now(timezone.utc)
-        db.commit()
-        logger.info("Company {} parent cleared by {}", company_id, user.email)
-        return await company_detail_partial(request=request, company_id=company_id, user=user, db=db)
+    _set_parent_company(db, company, raw)
+    company.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(company)
+    logger.info("Company {} parent set to {} by {}", company_id, raw or "None", user.email)
 
-    if not raw.isdigit():
+    return await company_detail_partial(request=request, company_id=company_id, user=user, db=db)
+
+
+# ── Shared helper — parent-company validation used by set_parent_company + edit_company ──
+
+
+def _set_parent_company(db: Session, company: Company, raw_parent_id: str) -> None:
+    """Validate and set company.parent_company_id from the raw form string.
+
+    ``raw_parent_id`` is the stripped string value from the submitted form:
+      - empty string → clear the parent (set to None)
+      - integer string → validate, cycle-check, then set
+
+    Raises HTTPException(400) for bad input or cycle; HTTPException(404) for missing
+    parent. Does NOT commit — caller owns the transaction.
+    """
+    if not raw_parent_id:
+        company.parent_company_id = None
+        return
+
+    if not raw_parent_id.isdigit():
         raise HTTPException(400, "parent_company_id must be an integer")
 
-    parent_id = int(raw)
-    if parent_id == company_id:
+    parent_id = int(raw_parent_id)
+    if parent_id == company.id:
         raise HTTPException(400, "A company cannot be its own parent (would create a cycle)")
 
     parent = db.get(Company, parent_id)
     if not parent:
         raise HTTPException(404, "Parent company not found")
 
-    # Cycle guard: walk ancestor chain of proposed parent; if we hit company_id, reject.
+    # Cycle guard: walk ancestor chain of proposed parent; reject if we reach company.id.
     visited: set[int] = set()
     cursor = parent
     while cursor.parent_company_id is not None:
         if cursor.parent_company_id in visited:
             break  # existing cycle in DB — stop walking
         visited.add(cursor.id)
-        if cursor.parent_company_id == company_id:
+        if cursor.parent_company_id == company.id:
             raise HTTPException(400, "Setting this parent would create a cycle in the company hierarchy")
         cursor = db.get(Company, cursor.parent_company_id)
         if cursor is None:
             break
 
     company.parent_company_id = parent_id
-    company.updated_at = datetime.now(timezone.utc)
-    db.commit()
-    db.refresh(company)
-    logger.info("Company {} parent set to {} by {}", company_id, parent_id, user.email)
-
-    return await company_detail_partial(request=request, company_id=company_id, user=user, db=db)
 
 
 # ── Sprint 4: Company CRUD (parameterized routes) ──────────────────────
@@ -7066,12 +7081,7 @@ async def edit_company(
         company.account_owner_id = int(owner_id)
 
     parent_company_id_raw = form.get("parent_company_id", "").strip()
-    if parent_company_id_raw == "":
-        company.parent_company_id = None
-    elif parent_company_id_raw.isdigit():
-        pid = int(parent_company_id_raw)
-        if pid != company_id:
-            company.parent_company_id = pid
+    _set_parent_company(db, company, parent_company_id_raw)
 
     # Registry fields — DRY via apply_company_field.
     # source/notes/tax_id are handled explicitly above with blank-sentinel "preserve
@@ -14165,6 +14175,9 @@ async def create_account_task(
     company = db.get(Company, company_id)
     if not company:
         raise HTTPException(404, "Company not found")
+    is_admin = user.role == UserRole.ADMIN
+    if not is_admin and company.account_owner_id != user.id:
+        raise HTTPException(403, "Only the account owner or an admin can create tasks for this account")
     if not title.strip():
         return HTMLResponse('<p class="text-xs text-rose-600">Title is required.</p>')
     due_dt = None
@@ -14243,6 +14256,11 @@ async def create_contact_task_endpoint(
     )
     if not contact:
         raise HTTPException(404, "Contact not found")
+    company = db.get(Company, company_id)
+    if company:
+        is_admin = user.role == UserRole.ADMIN
+        if not is_admin and company.account_owner_id != user.id:
+            raise HTTPException(403, "Only the account owner or an admin can create tasks for this account")
     if not title.strip():
         return HTMLResponse('<p class="text-xs text-rose-600">Title is required.</p>')
     due_dt = None
@@ -14292,7 +14310,10 @@ async def complete_task_endpoint(
     task = db.get(RequisitionTask, task_id)
     if not task:
         raise HTTPException(404, "Task not found")
-    complete_crm_task(db, task_id, user.id)
+    try:
+        complete_crm_task(db, task_id, user.id, is_admin=(user.role == UserRole.ADMIN))
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     # My Day context: caller handles its own row removal via outerHTML swap.
     if from_my_day:
         return HTMLResponse("")

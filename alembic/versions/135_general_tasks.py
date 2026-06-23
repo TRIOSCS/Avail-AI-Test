@@ -12,6 +12,12 @@ Changes:
   - ADD index ix_rt_company_status on (company_id, status)
   - ADD index ix_rt_contact_status on (site_contact_id, status)
   - ADD CHECK constraint ck_task_has_parent: at least one parent FK must be non-NULL
+
+Downgrade note:
+  The downgrade restores requisition_id to NOT NULL. Before doing so it DELETES all
+  tasks whose requisition_id is NULL (i.e. company-scoped and contact-scoped tasks).
+  This is an intentional data-loss step: those task types did not exist before this
+  migration and cannot survive a rollback.
 """
 
 from __future__ import annotations
@@ -90,9 +96,12 @@ def downgrade() -> None:
     op.drop_constraint("fk_rt_company", "requisition_tasks", type_="foreignkey")
     op.drop_column("requisition_tasks", "company_id")
 
+    # Purge company/contact-scoped tasks before restoring NOT NULL — these task types
+    # did not exist before this migration and cannot survive the rollback (data loss is
+    # documented in the module docstring).
+    op.execute("DELETE FROM requisition_tasks WHERE requisition_id IS NULL")
+
     # Restore requisition_id to NOT NULL.
-    # NOTE: In tests there will be no orphaned tasks, so this is safe.
-    # In production, any task without a requisition_id must be cleaned up first.
     op.alter_column(
         "requisition_tasks",
         "requisition_id",
