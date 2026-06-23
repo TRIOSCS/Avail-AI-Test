@@ -45,6 +45,8 @@ from .enrichment_worker_status import EnrichmentWorkerStatus  # noqa: F401
 from .excess import (  # noqa: F401
     Bid,
     BidSolicitation,
+    CustomerBid,
+    CustomerBidLine,
     ExcessLineItem,
     ExcessList,
     ExcessOffer,

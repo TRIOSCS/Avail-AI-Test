@@ -181,6 +181,20 @@ class ExcessLineItemStatus(StrEnum):
     WITHDRAWN = "withdrawn"
 
 
+class CustomerBidStatus(StrEnum):
+    """Status lifecycle for CustomerBid records (the outbound bid back to the seller).
+
+    The owner assembles selected inbound offers into a customer-facing bid priced from
+    the best-per-unit rollup, then sends it. ``draft`` while building, ``sent`` once the
+    clean PDF goes out, ``accepted`` / ``rejected`` on the seller's reply.
+    """
+
+    DRAFT = "draft"
+    SENT = "sent"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+
+
 class BidStatus(StrEnum):
     """Status lifecycle for Bid records."""
 

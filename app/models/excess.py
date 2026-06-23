@@ -47,6 +47,10 @@ class ExcessList(Base):
     source_filename = Column(String(255), nullable=True)
     notes = Column(Text, nullable=True)
     total_line_items = Column(Integer, default=0)
+    # Posting window: open_at stamped on publish, close_at on close_list. Both nullable —
+    # a draft has neither; close_at drives the "closes in Xd" urgency chip (spec §Data-model).
+    open_at = Column(UTCDateTime, nullable=True)
+    close_at = Column(UTCDateTime, nullable=True)
     created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc), server_default=func.now())
     updated_at = Column(UTCDateTime, onupdate=lambda: datetime.now(timezone.utc), server_default=func.now())
 
@@ -55,6 +59,7 @@ class ExcessList(Base):
     owner = relationship("User", foreign_keys=[owner_id])
     line_items = relationship("ExcessLineItem", back_populates="excess_list", cascade="all, delete-orphan")
     offers = relationship("ExcessOffer", back_populates="excess_list", cascade="all, delete-orphan")
+    customer_bids = relationship("CustomerBid", back_populates="excess_list", cascade="all, delete-orphan")
 
     # --- Validators ---
     @validates("status")
@@ -294,4 +299,83 @@ class ExcessOfferLine(Base):
     __table_args__ = (
         Index("ix_excess_offer_lines_offer", "offer_id"),
         Index("ix_excess_offer_lines_line_item", "excess_line_item_id"),
+    )
+
+
+class CustomerBid(Base):
+    """The outbound bid back — Trio's offer to BUY a customer's excess (the stock
+    holder).
+
+    The owner assembles selected inbound ExcessOffers into one customer-facing document,
+    priced per line from the best-per-unit rollup (the trader may override each price).
+    Exported as a CLEAN PDF (reuses the Quote report path) that NEVER carries broker /
+    trader / source names — cleanliness is enforced at assembly (see
+    ``bid_back_service.bid_back_export_context``), not just by template omission.
+    """
+
+    __tablename__ = "customer_bids"
+    id = Column(Integer, primary_key=True)
+    excess_list_id = Column(Integer, ForeignKey("excess_lists.id", ondelete="CASCADE"), nullable=False)
+    owner_id = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    status = Column(String(20), default="draft")  # draft, sent, accepted, rejected
+    revision = Column(Integer, nullable=False, default=1, server_default="1")
+    notes = Column(Text, nullable=True)
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc), server_default=func.now())
+    updated_at = Column(UTCDateTime, onupdate=lambda: datetime.now(timezone.utc), server_default=func.now())
+
+    excess_list = relationship("ExcessList", back_populates="customer_bids")
+    owner = relationship("User", foreign_keys=[owner_id])
+    lines = relationship("CustomerBidLine", back_populates="customer_bid", cascade="all, delete-orphan")
+
+    # --- Validators ---
+    @validates("status")
+    def _validate_status(self, _key, value):
+        from ..constants import CustomerBidStatus
+
+        valid = {e.value for e in CustomerBidStatus}
+        if value and value not in valid:
+            raise ValueError(f"Invalid CustomerBid status: {value!r}")
+        return value
+
+    __table_args__ = (
+        Index("ix_customer_bids_list", "excess_list_id"),
+        Index("ix_customer_bids_owner", "owner_id"),
+        Index("ix_customer_bids_status", "status"),
+    )
+
+
+class CustomerBidLine(Base):
+    """A single priced line within a CustomerBid.
+
+    ``customer_unit_price`` is the trader's offer to the seller for this part — seeded
+    from the line's ``best_offer_unit_price`` rollup, overridable per line. ``selected_offer_id``
+    / ``selected_offer_line_id`` record WHICH inbound offer informed the price for the
+    owner's internal audit — they are deliberately NOT exported (the customer never sees
+    which broker bid what). Both nullable: a line may be priced manually with no backing
+    offer.
+    """
+
+    __tablename__ = "customer_bid_lines"
+    id = Column(Integer, primary_key=True)
+    customer_bid_id = Column(Integer, ForeignKey("customer_bids.id", ondelete="CASCADE"), nullable=False)
+    excess_line_item_id = Column(Integer, ForeignKey("excess_line_items.id", ondelete="SET NULL"), nullable=True)
+    # Internal provenance — which inbound offer informed the price. NEVER exported.
+    selected_offer_id = Column(Integer, ForeignKey("excess_offers.id", ondelete="SET NULL"), nullable=True)
+    selected_offer_line_id = Column(Integer, ForeignKey("excess_offer_lines.id", ondelete="SET NULL"), nullable=True)
+    customer_unit_price = Column(Numeric(12, 4), nullable=True)
+    quantity = Column(Integer, nullable=False)
+
+    customer_bid = relationship("CustomerBid", back_populates="lines")
+    excess_line_item = relationship("ExcessLineItem", foreign_keys=[excess_line_item_id])
+
+    # --- Validators ---
+    @validates("quantity")
+    def _validate_quantity(self, _key, value):
+        if value is not None and value <= 0:
+            raise ValueError("Quantity must be positive")
+        return value
+
+    __table_args__ = (
+        Index("ix_customer_bid_lines_bid", "customer_bid_id"),
+        Index("ix_customer_bid_lines_line_item", "excess_line_item_id"),
     )
