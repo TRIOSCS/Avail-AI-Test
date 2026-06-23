@@ -292,8 +292,6 @@ async def quotes_list_redirect():
 @router.get("/v2/customers/{company_id:int}", response_class=HTMLResponse)
 @router.get("/v2/buy-plans", response_class=HTMLResponse)
 @router.get("/v2/buy-plans/{bp_id:int}", response_class=HTMLResponse)
-@router.get("/v2/excess", response_class=HTMLResponse)
-@router.get("/v2/excess/{list_id:int}", response_class=HTMLResponse)
 @router.get("/v2/trading", response_class=HTMLResponse)
 @router.get("/v2/trading/{list_id:int}", response_class=HTMLResponse)
 @router.get("/v2/quotes/{quote_id:int}", response_class=HTMLResponse)
@@ -322,7 +320,6 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
     _VIEW_SEGMENTS = (
         "buy-plans",
         "trading",
-        "excess",
         "quotes",
         "prospecting",
         "proactive",
@@ -366,7 +363,6 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         "customers",
         "buy-plans",
         "trading",
-        "excess",
         "quotes",
         "prospecting",
         "trouble-tickets",
