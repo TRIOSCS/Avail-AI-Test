@@ -49,9 +49,10 @@
               @change='newSite = ($el.value === "__new__")'
               class='w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500'>
         {% if sites %}
+          {# preselect_site_id (from "+ add here") wins; else first HQ / first site. #}
           {% for s in sites %}
           <option value='{{ s.id }}'
-            {% if s.site_type == 'hq' or loop.first %}selected{% endif %}>
+            {% if preselect_site_id is defined and preselect_site_id %}{% if s.id == preselect_site_id %}selected{% endif %}{% elif s.site_type == 'hq' or loop.first %}selected{% endif %}>
             {{ s.site_name }}{% if s.site_type == 'hq' %} (HQ){% endif %}
           </option>
           {% endfor %}

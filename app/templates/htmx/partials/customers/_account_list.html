@@ -24,71 +24,10 @@
 {% set dot_colors = {"new": "bg-gray-300", "on_target": "bg-emerald-400", "due": "bg-amber-400", "overdue": "bg-rose-500"} %}
 <div class="divide-y divide-gray-100">
   {% for c in companies %}
-  {% if (c.site_count or 0) > 1 %}
-  {# ── Multi-site row → accordion header. Clicking the NAME toggles expand AND
-       loads the company-header partial into #cdm-detail; the site children
-       lazy-load on first expand (intersect once) from /sites-accordion. The
-       toggle chevron and the name share the expand; the site-child links carry
-       their own hx-gets (split targets so they don't fight). No window-level
-       Alpine listeners (they leak across HTMX swaps). #}
-  <div id="cdm-row-{{ c.id }}"{{ alert_row_attrs(alert_markers, 'company-' ~ c.id) }}
-       x-data="{ expanded: false }"
-       class="border-l-2 transition-colors"
-       :class="selectedId === {{ c.id }} ? 'bg-brand-50 border-l-brand-500' : 'border-l-transparent'">
-    <div role="button" tabindex="0"
-         class="flex items-center gap-2.5 px-3 py-2.5 cursor-pointer hover:bg-gray-50 transition-colors focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-500"
-         hx-get="/v2/partials/customers/{{ c.id }}/header"
-         hx-target="#cdm-detail"
-         hx-swap="innerHTML"
-         hx-target-error="#cdm-error"
-         hx-trigger="click, keyup[key=='Enter']"
-         data-loading-class="opacity-60 pointer-events-none"
-         preload="mouseover"
-         @click="expanded = true; selectedId = {{ c.id }}; selectedSiteId = null"
-         @keyup.enter="expanded = true; selectedId = {{ c.id }}; selectedSiteId = null">
-      <button type="button"
-              class="flex-shrink-0 -ml-1 p-0.5 rounded text-gray-400 hover:text-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-500"
-              aria-label="Toggle sites for {{ c.name }}"
-              :aria-expanded="expanded"
-              @click.stop="expanded = !expanded">
-        <svg class="h-4 w-4 transition-transform" :class="{ 'rotate-90': expanded }" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/>
-        </svg>
-      </button>
-      <span class="w-2.5 h-2.5 rounded-full flex-shrink-0 {{ dot_colors.get(c.cadence_state, 'bg-gray-300') }}"
-            role="img" aria-label="{{ c.cadence_state|replace('_', ' ')|title }}"
-            title="{{ c.cadence_state|replace('_', ' ')|title }}"></span>
-      <div class="flex-1 min-w-0">
-        <p class="text-sm font-medium text-gray-900 truncate">{{ c.name }}</p>
-        <p class="text-[11px] text-gray-600 truncate">
-          {{ c.account_type or "—" }}{% if c.account_owner %} &middot; {{ c.account_owner.name }}{% endif %}
-          {% if c.tier %}<span class="ml-1 px-1 py-0.5 rounded text-xs bg-gray-100 text-gray-600">{{ c.tier }}</span>{% endif %}
-          <span class="ml-1 px-1 py-0.5 rounded text-xs bg-gray-100 text-gray-600">{{ c.site_count }} sites</span>
-        </p>
-      </div>
-      <div class="flex-shrink-0 text-right">
-        <p class="text-[11px] {% if c.cadence_state == 'overdue' %}text-rose-600 font-medium{% elif c.cadence_state == 'due' %}text-amber-600{% else %}text-gray-400{% endif %}">
-          Out {{ c.last_outbound_at|timeago if c.last_outbound_at else "never" }}
-        </p>
-        <p class="text-[11px] text-gray-400">
-          Reply {{ c.last_reply_at|timeago if c.last_reply_at else "—" }}
-        </p>
-      </div>
-    </div>
-    {# Site children — lazy-loaded on first expand (intersect once). #}
-    <div x-show="expanded" x-cloak x-transition class="bg-gray-50/50">
-      <div hx-get="/v2/partials/customers/{{ c.id }}/sites-accordion"
-           hx-trigger="intersect once"
-           hx-target="this"
-           hx-swap="innerHTML"
-           hx-target-error="#cdm-error">
-        <p class="pl-7 pr-2 py-2 text-[11px] text-gray-400">Loading sites…</p>
-      </div>
-    </div>
-  </div>
-  {% else %}
-  {# ── Single-site (or unknown) row → today's exact behavior: load the company
-       detail directly into #cdm-detail. No accordion. #}
+  {# ── Account picker row — UNIFIED: every account (single OR multi-site) loads
+       the same detail at /v2/partials/customers/{id} into #cdm-detail. Sites are
+       reached inside that detail (Sites tab + Contacts site sections), so the row
+       is a flat picker — no accordion, no per-site drill-down navigation. #}
   <div id="cdm-row-{{ c.id }}"{{ alert_row_attrs(alert_markers, 'company-' ~ c.id) }} role="button" tabindex="0"
        class="flex items-center gap-2.5 px-3 py-2.5 cursor-pointer hover:bg-gray-50 transition-colors border-l-2 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-500"
        hx-get="/v2/partials/customers/{{ c.id }}"
@@ -98,8 +37,8 @@
        hx-trigger="click, keyup[key=='Enter']"
        data-loading-class="opacity-60 pointer-events-none"
        preload="mouseover"
-       @click="selectedId = {{ c.id }}; selectedSiteId = null"
-       @keyup.enter="selectedId = {{ c.id }}; selectedSiteId = null"
+       @click="selectedId = {{ c.id }}"
+       @keyup.enter="selectedId = {{ c.id }}"
        :class="selectedId === {{ c.id }} ? 'bg-brand-50 border-l-brand-500' : 'border-l-transparent'">
     <span class="w-2.5 h-2.5 rounded-full flex-shrink-0 {{ dot_colors.get(c.cadence_state, 'bg-gray-300') }}"
           role="img" aria-label="{{ c.cadence_state|replace('_', ' ')|title }}"
@@ -109,6 +48,7 @@
       <p class="text-[11px] text-gray-600 truncate">
         {{ c.account_type or "—" }}{% if c.account_owner %} &middot; {{ c.account_owner.name }}{% endif %}
         {% if c.tier %}<span class="ml-1 px-1 py-0.5 rounded text-xs bg-gray-100 text-gray-600">{{ c.tier }}</span>{% endif %}
+        {% if (c.site_count or 0) > 1 %}<span class="ml-1 px-1 py-0.5 rounded text-xs bg-gray-100 text-gray-600">{{ c.site_count }} sites</span>{% endif %}
       </p>
     </div>
     <div class="flex-shrink-0 text-right">
@@ -120,7 +60,6 @@
       </p>
     </div>
   </div>
-  {% endif %}
   {% endfor %}
 </div>
 
