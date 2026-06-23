@@ -440,7 +440,6 @@ async def create_company(
     if domain and (
         get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY")
         or get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY")
-        or getattr(settings, "apollo_api_key", "")
         or getattr(settings, "hunter_api_key", "")
     ):
         from ...enrichment_service import apply_enrichment_to_company, enrich_entity

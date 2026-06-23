@@ -43,7 +43,7 @@ class Company(Base):
     hq_state = Column(String(100))
     hq_country = Column(String(100))
     last_enriched_at = Column(UTCDateTime)
-    enrichment_source = Column(String(50))  # "explorium", "apollo", "manual"
+    enrichment_source = Column(String(50))  # "explorium", "lusha", "clay", "manual"
 
     # Firmographic / provenance enrichment (Explorium+Clay blending)
     ticker = Column(String(20))
@@ -239,7 +239,7 @@ class SiteContact(Base):
     email_verified = Column(Boolean, default=False)
     email_verified_at = Column(UTCDateTime)
     email_verification_status = Column(String(20))  # valid, invalid, accept_all, unknown
-    enrichment_source = Column(String(50))  # lusha, apollo, hunter, manual
+    enrichment_source = Column(String(50))  # lusha, clay, hunter, explorium, manual
     contact_role = Column(String(50))  # buyer, technical, decision_maker, operations
     needs_refresh = Column(Boolean, default=False)
     last_enriched_at = Column(UTCDateTime)

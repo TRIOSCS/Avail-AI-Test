@@ -430,55 +430,6 @@ class TestLushaTestConnector:
 
 
 # ---------------------------------------------------------------------------
-# _ApolloTestConnector
-# ---------------------------------------------------------------------------
-
-
-class TestApolloTestConnector:
-    @pytest.mark.asyncio
-    async def test_apollo_success(self):
-        from app.routers.sources import _ApolloTestConnector
-
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {"people": [{"name": "John"}]}
-
-        connector = _ApolloTestConnector()
-        with (
-            patch("app.routers.sources.get_credential_cached", return_value="apollo_key"),
-            patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp),
-        ):
-            results = await connector.search("LM358N")
-        assert len(results) == 1
-        assert "1 result" in results[0]["mpn_matched"]
-
-    @pytest.mark.asyncio
-    async def test_apollo_no_key(self):
-        from app.routers.sources import _ApolloTestConnector
-
-        connector = _ApolloTestConnector()
-        with patch("app.routers.sources.get_credential_cached", return_value=None):
-            with pytest.raises(ValueError, match="APOLLO_API_KEY not configured"):
-                await connector.search("LM358N")
-
-    @pytest.mark.asyncio
-    async def test_apollo_api_error(self):
-        from app.routers.sources import _ApolloTestConnector
-
-        mock_resp = MagicMock()
-        mock_resp.status_code = 403
-        mock_resp.text = "Forbidden"
-
-        connector = _ApolloTestConnector()
-        with (
-            patch("app.routers.sources.get_credential_cached", return_value="key"),
-            patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp),
-        ):
-            with pytest.raises(ValueError, match="Apollo API returned 403"):
-                await connector.search("LM358N")
-
-
-# ---------------------------------------------------------------------------
 # _ExploriumTestConnector
 # ---------------------------------------------------------------------------
 

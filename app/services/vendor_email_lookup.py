@@ -2,7 +2,7 @@
 
 Queries all internal data sources (sightings, vendor cards, contacts, email
 intelligence, material vendor history) then enriches via external providers
-(Apollo, Hunter, RocketReach, AI) for vendors missing emails.
+(Hunter, RocketReach, AI) for vendors missing emails.
 
 Called by: routers/vendor_inquiry.py, routers/rfq.py
 Depends on: models, enrichment_service, vendor_utils

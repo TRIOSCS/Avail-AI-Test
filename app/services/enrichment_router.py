@@ -4,15 +4,15 @@ Calls providers free→metered→AI, gap-gated by remaining empty firmographic f
 guarded by the per-provider circuit breaker. Returns raw provider results; arbitration is
 performed by firmo_tiers.blend_company / blend_contacts (Task 1).
 
-Provider cost order for companies: SAM.gov (free) → Apollo (free) → Clay → Explorium →
-Lusha → AI. Metered providers are only called when free providers leave gaps in
-_GAP_FIELDS AND the provider's feature gate is enabled AND the circuit is closed.
+Provider cost order for companies: SAM.gov (free) → Clay → Explorium → Lusha → AI.
+Metered providers are only called when free providers leave gaps in _GAP_FIELDS AND the
+provider's feature gate is enabled AND the circuit is closed.
 
-Provider order for contacts: Apollo + Hunter + Clay cheaply/concurrently first; then
-escalate to Lusha → Explorium when verified-contact count is below *limit*.
+Provider order for contacts: Hunter + Clay cheaply/concurrently first; then escalate to
+Lusha → Explorium when verified-contact count is below *limit*.
 
 Called by: app/enrichment_service.py (enrich_entity, find_suggested_contacts — Task 9).
-Depends on: app/connectors/{sam_gov_company,apollo,clay_mcp,explorium,lusha,hunter},
+Depends on: app/connectors/{sam_gov_company,clay_mcp,explorium,lusha,hunter},
             app/services/enrichment_credit_guard, app/config.settings.
 """
 
@@ -22,7 +22,7 @@ import sys
 from loguru import logger
 
 from app.config import settings
-from app.connectors import apollo, clay_mcp, explorium, lusha, sam_gov_company
+from app.connectors import clay_mcp, explorium, lusha, sam_gov_company
 from app.services import enrichment_credit_guard as _cg
 from app.services.credential_service import get_credential_cached
 
@@ -68,12 +68,6 @@ def _gaps_remain(results: list[dict]) -> bool:
 
 async def _sam_company(domain: str, name: str) -> dict | None:
     return await sam_gov_company.enrich_company(domain, name)
-
-
-async def _apollo_company(domain: str, name: str) -> dict | None:
-    if not settings.apollo_api_key:
-        return None
-    return await apollo.search_company(domain, settings.apollo_api_key)
 
 
 async def _clay_company(domain: str) -> dict | None:
@@ -136,10 +130,6 @@ async def _gather_cheap_contacts(domain: str, title_filter: str, limit: int) -> 
 
         named_tasks.append((None, _hunter()))
 
-    # Apollo — cheap (API key is a flat-rate plan)
-    if settings.apollo_api_key:
-        named_tasks.append(("apollo", apollo.search_contacts(domain, settings.apollo_api_key, limit)))
-
     # Clay — not verified, but cheap credit-wise
     if settings.clay_enrichment_enabled and not _mod.circuit_open("clay"):
         named_tasks.append(("clay", clay_mcp.find_contacts(domain, title_filter, limit, want_email=False)))
@@ -157,10 +147,7 @@ async def _gather_cheap_contacts(domain: str, title_filter: str, limit: int) -> 
         elif isinstance(outcome, _cg.ProviderQuotaError):
             if provider_name is not None:
                 logger.warning("{} cheap-contacts quota/rate-limit — tripping circuit", provider_name)
-                _mod.trip_circuit(
-                    provider_name,
-                    settings.clay_cooldown_minutes if provider_name == "clay" else settings.apollo_cooldown_minutes,
-                )
+                _mod.trip_circuit(provider_name, settings.clay_cooldown_minutes)
             else:
                 logger.warning("Cheap contacts provider quota error: {}", outcome)
     return results
@@ -208,7 +195,6 @@ async def gather_company(domain: str, name: str = "") -> list[dict]:
     # preventing "coroutine was never awaited" RuntimeWarnings when the circuit is open.
     if settings.sam_gov_enrichment_enabled:
         await _guarded_lazy("sam_gov", lambda: _mod._sam_company(domain, name), 15, results)
-    await _guarded_lazy("apollo", lambda: _mod._apollo_company(domain, name), settings.apollo_cooldown_minutes, results)
 
     # METERED — gap-gated, ascending cost order
     # factory is called inside _guarded_lazy (after circuit_open check) to avoid creating
@@ -248,8 +234,8 @@ async def gather_contacts(
     """Collect raw contact dicts; escalate to paid providers when verified count <
     limit.
 
-    Phase 1 (cheap, concurrent): Hunter + Apollo + Clay. Phase 2 (escalation,
-    sequential): Lusha → Explorium when verified < limit.
+    Phase 1 (cheap, concurrent): Hunter + Clay. Phase 2 (escalation, sequential): Lusha
+    → Explorium when verified < limit.
 
     ProviderQuotaError in escalation trips the circuit and is swallowed — never
     propagates. Escalation results are extended directly into *results* (NOT via

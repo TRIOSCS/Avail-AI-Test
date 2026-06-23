@@ -1716,13 +1716,12 @@ to two new modules:
   | Tier | Provider | Cost | Notes |
   |------|----------|------|-------|
   | Free | SAM.gov | zero | `sam_gov_enrichment_enabled`; legal name + NAICS + HQ |
-  | Free | Apollo | flat-rate key | always-run when key configured |
   | Metered | Clay | per-credit | MCP-only; gap-gated; `clay_enrichment_enabled` |
   | Metered | Explorium | per-call | gap-gated; `explorium_enrichment_enabled` |
   | Metered | Lusha | per-call | gap-gated; `lusha_enrichment_enabled` |
   | Last resort | AI | Claude API | only when gaps remain after all above |
 
-  For contacts: Phase 1 runs Hunter + Apollo + Clay concurrently (cheap/free); Phase 2
+  For contacts: Phase 1 runs Hunter + Clay concurrently (cheap/free); Phase 2
   escalates sequentially to Lusha → Explorium only when the verified-contact count is
   below the requested limit.
 
@@ -1741,7 +1740,7 @@ to two new modules:
 | `naics` | SAM.gov (95) | Explorium (85) |
 | `ticker` | Explorium (90) | Clay (75) |
 | `revenue_range` | Explorium (90) | Clay (75) |
-| `employee_size` | Explorium (85) | Apollo (75) |
+| `employee_size` | Explorium (85) | Lusha (70) |
 | `linkedin_url` | Explorium (85) | Lusha (80) |
 | `hq_city/state/country` | Explorium (85) | SAM.gov (80) |
 
@@ -1750,8 +1749,8 @@ to two new modules:
 | Field | Highest tier | Runner-up |
 |-------|-------------|-----------|
 | `email` | Lusha (95) | Hunter (85) |
-| `phone` | Lusha (95) | Apollo (70) |
-| `title` | Explorium (80) | Apollo (75) |
+| `phone` | Lusha (95) | Explorium (65) |
+| `title` | Explorium (80) | Lusha (70) |
 
 **Provenance-aware apply.** `apply_enrichment_to_company` / `apply_enrichment_to_vendor`
 in `enrichment_service.py` call the shared `_apply_enrichment` function, which writes
@@ -1823,11 +1822,10 @@ Provenance is persisted in the new `enrichment_provenance` JSONB column on both
   SAM.gov entity-information API (`api.sam.gov/entity-information/v3/entities`).
 
 **Config flags** (all boolean, default `False` unless noted; set in `.env`):
-`apollo_enrichment_enabled`, `hunter_enrichment_enabled`, `sam_gov_enrichment_enabled`,
+`hunter_enrichment_enabled`, `sam_gov_enrichment_enabled`,
 `clay_enrichment_enabled`, `explorium_enrichment_enabled`, `lusha_enrichment_enabled`.
 Each metered provider also has a `*_cooldown_minutes` knob used by the circuit breaker.
-Apollo and Hunter raise `ProviderQuotaError` on 402/429 (circuit-guarded, matching the
-existing Lusha contract).
+Hunter, Clay, Explorium, and Lusha raise `ProviderQuotaError` on 402/429 (circuit-guarded).
 
 ```
 Trigger: user click ("Enrich" on CRM account / vendor) OR background prospect scan
@@ -1837,7 +1835,6 @@ enrichment_service.enrich_entity(domain, name)
     |
     +---> enrichment_router.gather_company(domain, name)
     |       +---> sam_gov_company.enrich_company()       [free, always]
-    |       +---> apollo.search_company()                [free, always]
     |       +---> clay_mcp.enrich_company()              [metered, gap-gated]
     |       +---> explorium.enrich_company()             [metered, gap-gated]
     |       +---> lusha.enrich_company()                 [metered, gap-gated]
@@ -1865,7 +1862,7 @@ Trigger: "Find Contacts" on CRM account
 enrichment_service.find_suggested_contacts(domain, name, title_filter, limit)
     |
     +---> enrichment_router.gather_contacts()
-    |       Phase 1 (concurrent): Hunter + Apollo + clay_mcp.find_contacts()
+    |       Phase 1 (concurrent): Hunter + clay_mcp.find_contacts()
     |       Phase 2 (escalation): Lusha → Explorium (only if verified < limit)
     |
     +---> firmo_tiers.blend_contacts(raw)   → deduped by email→linkedin→name,

@@ -360,7 +360,6 @@ async def run_explorium_discovery_batch(
                     "naics_code": r.get("naics_code"),
                     "employee_count_range": r.get("employee_count_range"),
                     "region": r.get("region"),
-                    "has_procurement_staff": None,  # filled by Apollo in Phase 3B
                     "uses_brokers": None,
                 }
                 fit_score, fit_reasoning = calculate_fit_score(fit_data)
