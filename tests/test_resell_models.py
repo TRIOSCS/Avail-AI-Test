@@ -1,4 +1,4 @@
-"""Tests for the additive Trading (resell-brokerage) schema foundation.
+"""Tests for the additive Resell (resell-brokerage) schema foundation.
 
 Covers the inbound-offer models (ExcessOffer / ExcessOfferLine), the
 additive columns on the kept models (ExcessLineItem rollup + material_card_id,

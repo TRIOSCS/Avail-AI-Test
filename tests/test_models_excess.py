@@ -1,4 +1,4 @@
-"""Tests for Excess Inventory (Trading) models and schemas.
+"""Tests for Excess Inventory (Resell) models and schemas.
 
 Verifies ExcessList / ExcessLineItem model creation, defaults, cascade deletes,
 and Pydantic validation.

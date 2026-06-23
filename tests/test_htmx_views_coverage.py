@@ -174,7 +174,7 @@ class TestV2PageRouting:
         [
             "/v2/crm",
             "/v2/sightings",
-            "/v2/trading/1",
+            "/v2/resell/1",
             "/v2/prospecting/1",
             "/v2/trouble-tickets/1",
         ],

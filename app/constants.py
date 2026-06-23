@@ -140,10 +140,10 @@ class SourcingStatus(StrEnum):
 class ExcessListStatus(StrEnum):
     """Status lifecycle for ExcessList records.
 
-    Trading (resell-brokerage) lifecycle: draft -> open -> collecting -> bid_out
+    Resell (resell-brokerage) lifecycle: draft -> open -> collecting -> bid_out
     -> awarded -> closed/expired. The new members are chosen to map onto existing
     ``status_badge`` keys (open->sky, collecting/sourcing->amber, bid_out/quoted->
-    violet, awarded/won->emerald). ACTIVE / BIDDING are the pre-Trading members,
+    violet, awarded/won->emerald). ACTIVE / BIDDING are the pre-Resell members,
     kept for backward-compat (additive reshape — a later cutover chunk retires them).
     """
 

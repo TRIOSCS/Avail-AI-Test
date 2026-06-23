@@ -1,10 +1,10 @@
-"""seed_trading_demo.py — Idempotent demo seed for the Trading workspace (Chunk F).
+"""seed_resell_demo.py — Idempotent demo seed for the Resell workspace (Chunk F).
 
-Run after deploy so the user can open ``/v2/trading`` on staging and judge the look
+Run after deploy so the user can open ``/v2/resell`` on staging and judge the look
 across all three deal shapes:
 
-    python -m app.management.seed_trading_demo          # seed / re-seed (idempotent)
-    python -m app.management.seed_trading_demo --reset  # delete the demo data first
+    python -m app.management.seed_resell_demo          # seed / re-seed (idempotent)
+    python -m app.management.seed_resell_demo --reset  # delete the demo data first
 
 Creates (all find-or-create by a stable key — safe to re-run; never duplicates):
   • a trader USER (the list owner) and a buyer USER (the offering broker — passes the
@@ -113,7 +113,7 @@ def _get_or_create_user(db: Session, email: str, name: str, role: str) -> User:
         user = User(email=email, name=name, role=role, created_at=_now())
         db.add(user)
         db.flush()
-        logger.info("seed-trading: created user {} ({})", email, role)
+        logger.info("seed-resell: created user {} ({})", email, role)
     return user
 
 
@@ -123,7 +123,7 @@ def _get_or_create_company(db: Session, name: str) -> Company:
         co = Company(name=name, account_type="Customer", is_active=True, created_at=_now())
         db.add(co)
         db.flush()
-        logger.info("seed-trading: created company {}", name)
+        logger.info("seed-resell: created company {}", name)
     return co
 
 
@@ -150,7 +150,7 @@ def _get_or_create_list(
         el.close_at = _now() + timedelta(days=close_in_days)
     db.add(el)
     db.flush()
-    logger.info("seed-trading: created list {!r} (status={})", title, status)
+    logger.info("seed-resell: created list {!r} (status={})", title, status)
     return el, True
 
 
@@ -250,7 +250,7 @@ def _build_collecting(db: Session, company: Company, owner: User, broker: User) 
         take_all_total_price=Decimal("48500.00"),
     )
     db.commit()
-    logger.info("seed-trading: seeded offers (per-line + unmatched + take-all) on {!r}", el.title)
+    logger.info("seed-resell: seeded offers (per-line + unmatched + take-all) on {!r}", el.title)
 
 
 def _build_oneoff(db: Session, company: Company, owner: User, broker: User) -> None:
@@ -299,7 +299,7 @@ def _build_oneoff(db: Session, company: Company, owner: User, broker: User) -> N
         ],
     )
     db.commit()
-    logger.info("seed-trading: seeded 2 offers on the one-off {!r}", el.title)
+    logger.info("seed-resell: seeded 2 offers on the one-off {!r}", el.title)
 
 
 def _build_awarded(db: Session, company: Company, owner: User) -> None:
@@ -317,7 +317,7 @@ def _build_awarded(db: Session, company: Company, owner: User) -> None:
             item.status = ExcessLineItemStatus.AWARDED
         el.total_line_items = 6
         db.commit()
-    logger.info("seed-trading: ensured awarded list {!r}", el.title)
+    logger.info("seed-resell: ensured awarded list {!r}", el.title)
 
 
 # ── reset ────────────────────────────────────────────────────────────
@@ -337,7 +337,7 @@ def _reset(db: Session) -> None:
     if co:
         db.delete(co)
     db.commit()
-    logger.info("seed-trading: reset complete ({} demo lists removed)", len(lists))
+    logger.info("seed-resell: reset complete ({} demo lists removed)", len(lists))
 
 
 # ── entry point ──────────────────────────────────────────────────────
@@ -353,7 +353,7 @@ def seed(db: Session) -> None:
     _build_collecting(db, company, trader, broker)
     _build_oneoff(db, company, trader, broker)
     _build_awarded(db, company, trader)
-    logger.info("seed-trading: done — open /v2/trading as the Demo Trader to view all three shapes.")
+    logger.info("seed-resell: done — open /v2/resell as the Demo Trader to view all three shapes.")
 
 
 def main(argv: list[str] | None = None) -> int:

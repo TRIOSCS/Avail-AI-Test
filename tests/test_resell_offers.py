@@ -1,6 +1,6 @@
-"""test_trading_offers.py — Inbound-offer submission + line MaterialCard resolve.
+"""test_resell_offers.py — Inbound-offer submission + line MaterialCard resolve.
 
-Covers the additive Trading offer-collection core (spec §"Offer collection"):
+Covers the additive Resell offer-collection core (spec §"Offer collection"):
 - ``ExcessLineItem.material_card_id`` resolved on the import/create path (reusing
   the canonical ``resolve_material_card``; nullable when the MPN won't resolve).
 - ``submit_offer`` for both scopes:
