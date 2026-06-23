@@ -20,7 +20,7 @@ from datetime import datetime, timedelta, timezone
 from apscheduler.triggers.interval import IntervalTrigger
 from loguru import logger
 
-from ..constants import CallOutcome, RequisitionStatus
+from ..constants import MEANINGFUL_CALL_OUTCOMES, CallOutcome, RequisitionStatus
 from ..scheduler import _traced_job
 
 
@@ -157,24 +157,47 @@ async def _process_cdrs(db, settings) -> dict:
         cdr_details: dict = {"call_outcome": cdr_outcome.value, "source": "8x8_cdr"}
         if norm["department"]:
             cdr_details["department"] = norm["department"]
+        if norm.get("recording_url"):
+            cdr_details["recording_url"] = norm["recording_url"]
         if match and match.get("ambiguous"):
             cdr_details["match_ambiguous"] = True
             cdr_details["candidates"] = match.get("candidates", [])
 
-        record = log_call_activity(
-            user_id=user.id if user else None,
-            direction=direction,
-            phone=external_phone,
-            duration_seconds=norm["duration_seconds"],
-            external_id=norm["external_id"],
-            contact_name=effective_contact_name,
-            db=db,
-            occurred_at=norm["occurred_at"],
-            details=cdr_details,
-            match_result=match,
-        )
+        # --- Optimistic-row reconciliation (FIX 1) ---
+        user_id_val = user.id if user else None
+        optimistic = _find_optimistic_row(db, user_id_val, direction, external_phone, norm["occurred_at"])
 
-        if record is None:  # dedup
+        if optimistic is not None:
+            # Enrich the existing click row instead of creating a second one
+            optimistic.external_id = norm["external_id"]
+            optimistic.occurred_at = norm["occurred_at"]
+            optimistic.duration_seconds = norm["duration_seconds"]
+            merged = dict(optimistic.details or {})
+            merged.update({"call_outcome": cdr_outcome.value, "source": "8x8_cdr"})
+            if norm["department"]:
+                merged["department"] = norm["department"]
+            if norm.get("recording_url"):
+                merged["recording_url"] = norm["recording_url"]
+            optimistic.details = merged
+            optimistic.is_meaningful = cdr_outcome.value in MEANINGFUL_CALL_OUTCOMES
+            db.flush()
+            record = optimistic
+            logger.info(f"CDR reconciled: enriched optimistic row id={optimistic.id} with callId={norm['external_id']}")
+        else:
+            record = log_call_activity(
+                user_id=user_id_val,
+                direction=direction,
+                phone=external_phone,
+                duration_seconds=norm["duration_seconds"],
+                external_id=norm["external_id"],
+                contact_name=effective_contact_name,
+                db=db,
+                occurred_at=norm["occurred_at"],
+                details=cdr_details,
+                match_result=match,
+            )
+
+        if record is None:  # dedup (re-poll of already-logged CDR)
             skipped += 1
             continue
 
@@ -212,6 +235,67 @@ async def _process_cdrs(db, settings) -> dict:
 
     _update_watermark(db, watermark_row, until)
     return {"processed": processed, "matched": matched, "skipped": skipped}
+
+
+def _find_optimistic_row(db, user_id, direction, external_phone, cdr_occurred_at):
+    """Find an un-reconciled optimistic click-to-call row matching this CDR.
+
+    Match key: activity_type=CALL_LOGGED, channel=PHONE, external_id IS NULL,
+    user_id matches, direction matches, phone normalizes to same E.164,
+    and occurred_at (or created_at) is within 10 minutes of cdr_occurred_at.
+
+    Returns the ActivityLog row or None. Never matches if user_id is None
+    (unmatched CDRs should not absorb click rows).
+
+    Called by: _process_cdrs
+    Depends on: app/models.ActivityLog, app/constants, app/utils/phone
+    """
+    if user_id is None:
+        return None
+
+    from datetime import timedelta, timezone
+
+    from ..constants import ActivityType, Channel
+    from ..models import ActivityLog
+    from ..utils.phone import normalize_e164
+
+    cdr_e164 = normalize_e164(external_phone)
+    if cdr_e164 is None:
+        return None
+
+    window = timedelta(minutes=10)
+    window_start = cdr_occurred_at - window
+    window_end = cdr_occurred_at + window
+
+    # Fetch candidate rows: unreconciled, matching user+direction+channel+type
+    candidates = (
+        db.query(ActivityLog)
+        .filter(
+            ActivityLog.activity_type == ActivityType.CALL_LOGGED,
+            ActivityLog.channel == Channel.PHONE,
+            ActivityLog.external_id.is_(None),
+            ActivityLog.user_id == user_id,
+            ActivityLog.direction == direction,
+        )
+        .all()
+    )
+
+    for row in candidates:
+        # Phone match: normalize both sides
+        row_e164 = normalize_e164(row.contact_phone or "")
+        if row_e164 != cdr_e164:
+            continue
+        # Time match: use occurred_at if set, else created_at
+        row_time = row.occurred_at or row.created_at
+        if row_time is None:
+            continue
+        # Make timezone-aware for comparison
+        if row_time.tzinfo is None:
+            row_time = row_time.replace(tzinfo=timezone.utc)
+        if window_start <= row_time <= window_end:
+            return row
+
+    return None
 
 
 def _update_watermark(db, watermark_row, until: datetime):

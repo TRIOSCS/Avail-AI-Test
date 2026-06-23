@@ -14,12 +14,17 @@ Depends on: app/config.py, httpx
 """
 
 import re
+import time
 from datetime import datetime, timezone
 
 import httpx
 from loguru import logger
 
 BASE_URL = "https://api.8x8.com/analytics/work/v1"
+
+# Module-level OAuth token cache.
+# _token_cache["token"] is reused until _token_cache["expires_at"] - 60s.
+_token_cache: dict = {}
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -47,55 +52,19 @@ def normalize_phone(phone: str) -> str:
     return digits
 
 
-async def get_extension_map(token: str, settings) -> dict[str, str]:
-    """Fetch 8x8 user list and build extension-to-email mapping.
-
-    Calls 8x8 user list API to map internal extensions to user emails.
-    Returns dict like {"1001": "michael@trio.com", "1002": "marcus@trio.com"}.
-
-    Async — uses httpx.AsyncClient so it never blocks the event loop.
-
-    Called by: app/jobs/eight_by_eight_jobs.py (CDR processing)
-    Depends on: 8x8 Analytics API, httpx
-    """
-    url = f"{BASE_URL}/users"
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "8x8-apikey": settings.eight_by_eight_api_key,
-    }
-
-    try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.get(url, headers=headers)
-    except httpx.HTTPError as e:
-        logger.error(f"8x8 user list fetch failed: {e}")
-        return {}
-
-    if resp.status_code != 200:
-        logger.warning(f"8x8 user list error: HTTP {resp.status_code}")
-        return {}
-
-    body = resp.json()
-    users = body.get("data", [])
-    ext_map = {}
-    for user in users:
-        ext = user.get("extension") or user.get("extensionNumber")
-        email = user.get("email") or user.get("userId")
-        if ext and email:
-            ext_map[str(ext)] = str(email).lower()
-
-    logger.info(f"8x8 extension map loaded: {len(ext_map)} extensions")
-    return ext_map
-
-
 async def get_access_token(settings) -> str:
     """Authenticate with 8x8 Analytics API and return an access token.
 
     POST /oauth/token with API key header + form-encoded credentials. Raises ValueError
-    on auth failure or missing token.
+    on auth failure or missing token. Caches the token in _token_cache until 60s before
+    expiry so successive polls within the TTL never re-auth.
 
     Async — uses httpx.AsyncClient so it never blocks the event loop.
     """
+    # Return cached token if still valid (60s safety buffer)
+    if _token_cache.get("token") and time.time() < _token_cache.get("expires_at", 0) - 60:
+        return _token_cache["token"]
+
     url = f"{BASE_URL}/oauth/token"
     headers = {
         "8x8-apikey": settings.eight_by_eight_api_key,
@@ -122,6 +91,14 @@ async def get_access_token(settings) -> str:
     if not token:
         logger.error(f"8x8 auth response missing token: {list(body.keys())}")
         raise ValueError("8x8 auth response missing access_token")
+
+    expires_in = body.get("expires_in", 3600)
+    try:
+        expires_in = int(expires_in)
+    except (TypeError, ValueError):
+        expires_in = 3600
+    _token_cache["token"] = token
+    _token_cache["expires_at"] = time.time() + expires_in
 
     logger.info("8x8 auth successful")
     return token
@@ -240,4 +217,5 @@ def normalize_cdr(cdr: dict) -> dict:
         "is_answered": cdr.get("answered") == "Answered",
         "extension": extension,
         "department": (cdr.get("departments") or [None])[0],
+        "recording_url": cdr.get("recordingUrl") or cdr.get("recording_url") or None,
     }

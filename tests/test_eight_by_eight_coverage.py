@@ -1,11 +1,11 @@
 """test_eight_by_eight_coverage.py — Coverage for 8x8 service and jobs.
 
 Targets missing branches:
-- eight_by_eight_service.py: get_extension_map, normalize_phone,
-  reverse_lookup_phone, get_cdrs (HTTP error), get_access_token (token key)
+- eight_by_eight_service.py: normalize_phone, get_cdrs (HTTP error),
+  get_access_token (token key, caching)
 - eight_by_eight_jobs.py: _process_cdrs (auth failure, empty CDRs,
-  watermark create/update, vendor match, no user match), _update_watermark,
-  _job_poll_8x8_cdrs
+  watermark create/update, vendor match, no user match, optimistic reconcile),
+  _update_watermark, _find_optimistic_row, _job_poll_8x8_cdrs
 
 Called by: pytest
 Depends on: app/services/eight_by_eight_service.py, app/jobs/eight_by_eight_jobs.py
@@ -20,9 +20,9 @@ import httpx
 import pytest
 
 from app.services.eight_by_eight_service import (
+    _token_cache,
     get_access_token,
     get_cdrs,
-    get_extension_map,
     normalize_cdr,
     normalize_phone,
 )
@@ -93,6 +93,10 @@ class TestNormalizePhone:
 
 
 class TestGetAccessToken:
+    def setup_method(self):
+        """Clear the token cache before each test."""
+        _token_cache.clear()
+
     async def test_uses_token_key_fallback(self):
         """Response uses 'token' key instead of 'access_token'."""
         mock_resp = MagicMock()
@@ -123,56 +127,37 @@ class TestGetAccessToken:
             with pytest.raises(ValueError, match="auth request failed"):
                 await get_access_token(FAKE_SETTINGS)
 
+    async def test_returns_cached_token_without_http_call(self):
+        """Cached token is returned immediately without making an HTTP request."""
+        import time as _time
 
-# ── get_extension_map ──────────────────────────────────────────────────
+        _token_cache["token"] = "cached-tok"
+        _token_cache["expires_at"] = _time.time() + 7200  # 2h TTL
 
+        factory = _mock_async_client(post=MagicMock())
+        with patch("app.services.eight_by_eight_service.httpx.AsyncClient", factory):
+            result = await get_access_token(FAKE_SETTINGS)
 
-class TestGetExtensionMap:
-    async def test_returns_ext_map(self):
+        assert result == "cached-tok"
+        factory._client.post.assert_not_awaited()
+
+    async def test_expired_cache_refetches_token(self):
+        """Expired cache causes a fresh HTTP auth call."""
+        import time as _time
+
+        _token_cache["token"] = "old-tok"
+        _token_cache["expires_at"] = _time.time() - 10  # already expired
+
         mock_resp = MagicMock()
         mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            "data": [
-                {"extension": "1001", "email": "mike@trio.com"},
-                {"extensionNumber": "1002", "userId": "marcus@trio.com"},
-            ]
-        }
-        factory = _mock_async_client(get=mock_resp)
+        mock_resp.json.return_value = {"access_token": "new-tok", "expires_in": 3600}
+        factory = _mock_async_client(post=mock_resp)
 
         with patch("app.services.eight_by_eight_service.httpx.AsyncClient", factory):
-            result = await get_extension_map("tok-123", FAKE_SETTINGS)
-        assert result["1001"] == "mike@trio.com"
-        assert result["1002"] == "marcus@trio.com"
+            result = await get_access_token(FAKE_SETTINGS)
 
-    async def test_returns_empty_on_http_error(self):
-        factory = _mock_async_client(get=httpx.HTTPError("timeout"))
-        with patch("app.services.eight_by_eight_service.httpx.AsyncClient", factory):
-            result = await get_extension_map("tok-123", FAKE_SETTINGS)
-        assert result == {}
-
-    async def test_returns_empty_on_non_200(self):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 403
-        factory = _mock_async_client(get=mock_resp)
-        with patch("app.services.eight_by_eight_service.httpx.AsyncClient", factory):
-            result = await get_extension_map("tok-123", FAKE_SETTINGS)
-        assert result == {}
-
-    async def test_skips_users_without_ext_or_email(self):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            "data": [
-                {"extension": None, "email": "nobody@test.com"},
-                {"extensionNumber": "1003", "userId": None},
-                {"extensionNumber": "1004", "email": "valid@test.com"},
-            ]
-        }
-        factory = _mock_async_client(get=mock_resp)
-        with patch("app.services.eight_by_eight_service.httpx.AsyncClient", factory):
-            result = await get_extension_map("tok", FAKE_SETTINGS)
-        assert "1004" in result
-        assert len(result) == 1
+        assert result == "new-tok"
+        assert _token_cache["token"] == "new-tok"
 
 
 # ── get_cdrs pagination and HTTP errors ───────────────────────────────
@@ -329,11 +314,12 @@ class TestProcessCdrsEdgeCases:
         result = await _process_cdrs(db, FAKE_SETTINGS)
         assert result["processed"] == 0
 
+    @patch("app.jobs.eight_by_eight_jobs._find_optimistic_row", return_value=None)
     @patch("app.services.activity_service.match_phone_to_entity")
     @patch("app.services.activity_service.log_call_activity")
     @patch("app.services.eight_by_eight_service.get_cdrs", new_callable=AsyncMock)
     @patch("app.services.eight_by_eight_service.get_access_token", new_callable=AsyncMock)
-    async def test_incoming_call_processed(self, mock_auth, mock_fetch, mock_log, mock_match):
+    async def test_incoming_call_processed(self, mock_auth, mock_fetch, mock_log, mock_match, mock_opt):
         from app.jobs.eight_by_eight_jobs import _process_cdrs
 
         mock_auth.return_value = "token"
@@ -363,11 +349,12 @@ class TestProcessCdrsEdgeCases:
         result = await _process_cdrs(db, FAKE_SETTINGS)
         assert result["processed"] == 1
 
+    @patch("app.jobs.eight_by_eight_jobs._find_optimistic_row", return_value=None)
     @patch("app.services.activity_service.match_phone_to_entity")
     @patch("app.services.activity_service.log_call_activity")
     @patch("app.services.eight_by_eight_service.get_cdrs", new_callable=AsyncMock)
     @patch("app.services.eight_by_eight_service.get_access_token", new_callable=AsyncMock)
-    async def test_cdr_skipped_when_log_returns_none(self, mock_auth, mock_fetch, mock_log, mock_match):
+    async def test_cdr_skipped_when_log_returns_none(self, mock_auth, mock_fetch, mock_log, mock_match, mock_opt):
         from app.jobs.eight_by_eight_jobs import _process_cdrs
 
         mock_auth.return_value = "token"
@@ -394,11 +381,12 @@ class TestProcessCdrsEdgeCases:
         result = await _process_cdrs(db, FAKE_SETTINGS)
         assert result["skipped"] == 1
 
+    @patch("app.jobs.eight_by_eight_jobs._find_optimistic_row", return_value=None)
     @patch("app.services.activity_service.match_phone_to_entity")
     @patch("app.services.activity_service.log_call_activity")
     @patch("app.services.eight_by_eight_service.get_cdrs", new_callable=AsyncMock)
     @patch("app.services.eight_by_eight_service.get_access_token", new_callable=AsyncMock)
-    async def test_vendor_match_sets_vendor_card_id(self, mock_auth, mock_fetch, mock_log, mock_match):
+    async def test_vendor_match_sets_vendor_card_id(self, mock_auth, mock_fetch, mock_log, mock_match, mock_opt):
         from app.jobs.eight_by_eight_jobs import _process_cdrs
 
         mock_auth.return_value = "token"
@@ -439,11 +427,12 @@ class TestProcessCdrsEdgeCases:
         result = await _process_cdrs(db, FAKE_SETTINGS)
         assert result["matched"] == 1
 
+    @patch("app.jobs.eight_by_eight_jobs._find_optimistic_row", return_value=None)
     @patch("app.services.activity_service.match_phone_to_entity")
     @patch("app.services.activity_service.log_call_activity")
     @patch("app.services.eight_by_eight_service.get_cdrs", new_callable=AsyncMock)
     @patch("app.services.eight_by_eight_service.get_access_token", new_callable=AsyncMock)
-    async def test_inbound_cdr_no_user_still_logged(self, mock_auth, mock_fetch, mock_log, mock_match):
+    async def test_inbound_cdr_no_user_still_logged(self, mock_auth, mock_fetch, mock_log, mock_match, mock_opt):
         """Inbound CDR with no matching user is logged with user_id=None (not
         skipped)."""
         from app.jobs.eight_by_eight_jobs import _process_cdrs
@@ -477,6 +466,93 @@ class TestProcessCdrsEdgeCases:
         # log_call_activity must have been called with user_id=None
         call_kwargs = mock_log.call_args.kwargs
         assert call_kwargs["user_id"] is None
+
+
+# ── _find_optimistic_row ───────────────────────────────────────────────
+
+
+class TestFindOptimisticRow:
+    """Unit tests for _find_optimistic_row dedup helper."""
+
+    def _make_row(
+        self,
+        *,
+        external_id=None,
+        direction="outbound",
+        contact_phone="+15551234567",
+        occurred_at=None,
+        created_at=None,
+        user_id=1,
+    ):
+        row = MagicMock()
+        row.external_id = external_id
+        row.direction = direction
+        row.contact_phone = contact_phone
+        row.occurred_at = occurred_at
+        row.created_at = created_at or datetime(2026, 3, 5, 14, 0, 0, tzinfo=timezone.utc)
+        row.user_id = user_id
+        return row
+
+    def _make_db(self, candidates=None):
+        db = MagicMock()
+        q = MagicMock()
+        q.filter.return_value.all.return_value = candidates or []
+        db.query.return_value = q
+        return db
+
+    def test_returns_none_when_user_id_is_none(self):
+        from app.jobs.eight_by_eight_jobs import _find_optimistic_row
+
+        db = self._make_db()
+        result = _find_optimistic_row(
+            db, None, "outbound", "+15551234567", datetime(2026, 3, 5, 14, 0, 0, tzinfo=timezone.utc)
+        )
+        assert result is None
+        db.query.assert_not_called()
+
+    def test_returns_none_when_phone_unnormalizable(self):
+        from app.jobs.eight_by_eight_jobs import _find_optimistic_row
+
+        db = self._make_db()
+        # Empty string won't normalize to E.164
+        result = _find_optimistic_row(db, 1, "outbound", "", datetime(2026, 3, 5, 14, 0, 0, tzinfo=timezone.utc))
+        assert result is None
+
+    def test_matches_row_within_window(self):
+        from app.jobs.eight_by_eight_jobs import _find_optimistic_row
+
+        cdr_time = datetime(2026, 3, 5, 14, 0, 0, tzinfo=timezone.utc)
+        row_time = datetime(2026, 3, 5, 13, 55, 0, tzinfo=timezone.utc)  # 5 min before
+        row = self._make_row(occurred_at=row_time, contact_phone="+15551234567")
+
+        db = self._make_db(candidates=[row])
+        with patch("app.utils.phone.normalize_e164", return_value="+15551234567"):
+            result = _find_optimistic_row(db, 1, "outbound", "+15551234567", cdr_time)
+        assert result is row
+
+    def test_no_match_when_outside_window(self):
+        from app.jobs.eight_by_eight_jobs import _find_optimistic_row
+
+        cdr_time = datetime(2026, 3, 5, 14, 0, 0, tzinfo=timezone.utc)
+        row_time = datetime(2026, 3, 5, 12, 0, 0, tzinfo=timezone.utc)  # 2h before, outside 10min window
+        row = self._make_row(occurred_at=row_time, contact_phone="+15551234567")
+
+        db = self._make_db(candidates=[row])
+        with patch("app.utils.phone.normalize_e164", return_value="+15551234567"):
+            result = _find_optimistic_row(db, 1, "outbound", "+15551234567", cdr_time)
+        assert result is None
+
+    def test_falls_back_to_created_at_when_occurred_at_none(self):
+        from app.jobs.eight_by_eight_jobs import _find_optimistic_row
+
+        cdr_time = datetime(2026, 3, 5, 14, 0, 0, tzinfo=timezone.utc)
+        created = datetime(2026, 3, 5, 14, 3, 0, tzinfo=timezone.utc)  # 3 min after
+        row = self._make_row(occurred_at=None, created_at=created, contact_phone="+15551234567")
+
+        db = self._make_db(candidates=[row])
+        with patch("app.utils.phone.normalize_e164", return_value="+15551234567"):
+            result = _find_optimistic_row(db, 1, "outbound", "+15551234567", cdr_time)
+        assert result is row
 
 
 # ── _update_watermark ──────────────────────────────────────────────────
@@ -609,11 +685,12 @@ class TestCdrOutcomeMapping:
             "departments": ["Sales"],
         }
 
+    @patch("app.jobs.eight_by_eight_jobs._find_optimistic_row", return_value=None)
     @patch("app.services.activity_service.match_phone_to_entity")
     @patch("app.services.activity_service.log_call_activity")
     @patch("app.services.eight_by_eight_service.get_cdrs", new_callable=AsyncMock)
     @patch("app.services.eight_by_eight_service.get_access_token", new_callable=AsyncMock)
-    async def test_answered_cdr_maps_connected_outcome(self, mock_auth, mock_fetch, mock_log, mock_match):
+    async def test_answered_cdr_maps_connected_outcome(self, mock_auth, mock_fetch, mock_log, mock_match, mock_opt):
         """An answered CDR → call_outcome=connected + occurred_at set."""
         from app.jobs.eight_by_eight_jobs import _process_cdrs
 
@@ -634,11 +711,14 @@ class TestCdrOutcomeMapping:
         assert call_kwargs["details"]["source"] == "8x8_cdr"
         assert call_kwargs["occurred_at"] is not None
 
+    @patch("app.jobs.eight_by_eight_jobs._find_optimistic_row", return_value=None)
     @patch("app.services.activity_service.match_phone_to_entity")
     @patch("app.services.activity_service.log_call_activity")
     @patch("app.services.eight_by_eight_service.get_cdrs", new_callable=AsyncMock)
     @patch("app.services.eight_by_eight_service.get_access_token", new_callable=AsyncMock)
-    async def test_missed_cdr_maps_no_answer_not_meaningful(self, mock_auth, mock_fetch, mock_log, mock_match):
+    async def test_missed_cdr_maps_no_answer_not_meaningful(
+        self, mock_auth, mock_fetch, mock_log, mock_match, mock_opt
+    ):
         """A missed CDR → call_outcome=no_answer; is_meaningful=False (via details
         gate)."""
         from app.jobs.eight_by_eight_jobs import _process_cdrs
@@ -659,11 +739,14 @@ class TestCdrOutcomeMapping:
         assert call_kwargs["details"]["call_outcome"] == "no_answer"
         assert call_kwargs["occurred_at"] is not None
 
+    @patch("app.jobs.eight_by_eight_jobs._find_optimistic_row", return_value=None)
     @patch("app.services.activity_service.match_phone_to_entity")
     @patch("app.services.activity_service.log_call_activity")
     @patch("app.services.eight_by_eight_service.get_cdrs", new_callable=AsyncMock)
     @patch("app.services.eight_by_eight_service.get_access_token", new_callable=AsyncMock)
-    async def test_department_included_in_details_when_present(self, mock_auth, mock_fetch, mock_log, mock_match):
+    async def test_department_included_in_details_when_present(
+        self, mock_auth, mock_fetch, mock_log, mock_match, mock_opt
+    ):
         """Department from CDR is threaded into details when non-null."""
         from app.jobs.eight_by_eight_jobs import _process_cdrs
 
