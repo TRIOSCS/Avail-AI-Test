@@ -310,6 +310,123 @@ def log_email_activity(
     return record
 
 
+def log_meeting_activity(
+    user_id: int | None,
+    graph_event_id: str,
+    subject: str | None,
+    start_dt: datetime,
+    end_dt: datetime,
+    organizer_email: str | None,
+    attendee_emails: list[str],
+    location: str | None,
+    db: Session,
+) -> list["ActivityLog"]:
+    """Log a calendar meeting, linking each matched external attendee.
+
+    Mirrors log_email_activity: resolves attendees via match_email_to_entity +
+    _match_entity_links, filters own-domain / generic / junk addresses, and calls
+    bump_clocks_from_activity for each linked row.
+
+    Returns the list of ActivityLog rows created (one per matched external entity).
+    Returns [] if only internal attendees or the event was already logged.
+    Dedup key: ``external_id = "calendar-{graph_event_id}"``.
+    """
+    from app.config import settings
+    from app.shared_constants import JUNK_DOMAINS, JUNK_EMAIL_PREFIXES
+
+    external_id = f"calendar-{graph_event_id}"
+
+    # Idempotent re-scan: skip if ANY row with this external_id already exists.
+    existing = db.query(ActivityLog).filter(ActivityLog.external_id == external_id).first()
+    if existing:
+        return []
+
+    own_domains: frozenset[str] = settings.own_domains
+    _all_generic = _GENERIC_DOMAINS | JUNK_DOMAINS
+
+    def _is_internal(email: str) -> bool:
+        domain = email.split("@")[-1] if "@" in email else ""
+        return domain in own_domains
+
+    def _is_junk(email: str) -> bool:
+        domain = email.split("@")[-1] if "@" in email else ""
+        local = email.split("@")[0] if "@" in email else email
+        if domain in _all_generic:
+            return True
+        for prefix in JUNK_EMAIL_PREFIXES:
+            if local.startswith(prefix):
+                return True
+        return False
+
+    organizer_lower = (organizer_email or "").strip().lower()
+    organizer_is_own = _is_internal(organizer_lower) if organizer_lower else True
+    direction = Direction.OUTBOUND if organizer_is_own else Direction.INBOUND
+    duration_seconds = max(0, int((end_dt - start_dt).total_seconds()))
+
+    from .cadence_service import bump_clocks_from_activity
+
+    rows: list[ActivityLog] = []
+    matched_entity_keys: set[str] = set()
+
+    for raw_email in attendee_emails:
+        email_lower = raw_email.strip().lower()
+        if not email_lower or "@" not in email_lower:
+            continue
+        if _is_internal(email_lower):
+            continue
+        if _is_junk(email_lower):
+            continue
+
+        match = match_email_to_entity(email_lower, db)
+        if not match:
+            continue
+
+        # Deduplicate: one row per entity per event (3-person meeting = 3 rows but same
+        # entity must not appear twice if attendee list has duplicates).
+        entity_key = f"{match['type']}:{match['id']}"
+        if entity_key in matched_entity_keys:
+            continue
+        matched_entity_keys.add(entity_key)
+
+        record = ActivityLog(
+            user_id=user_id,
+            activity_type=ActivityType.MEETING,
+            channel=Channel.CALENDAR,
+            **_match_entity_links(match),
+            subject=(subject or "")[:500] or None,
+            external_id=external_id,
+            direction=direction,
+            event_type=EventType.MEETING,
+            is_meaningful=True,
+            duration_seconds=duration_seconds,
+            occurred_at=start_dt,
+            details={
+                "attendees": attendee_emails[:20],
+                "organizer": organizer_email,
+                "location": location,
+                "subject": subject,
+                "graph_event_id": graph_event_id,
+            },
+            summary=f"Meeting: {subject or '(no subject)'}",
+        )
+        db.add(record)
+        db.flush()
+
+        bump_clocks_from_activity(db, record)
+        _update_last_activity(match, db, user_id)
+        _update_vendor_contact_stats(match, db)
+        logger.info(
+            "Meeting activity logged: {} → {} '{}' by user {}",
+            graph_event_id,
+            match["type"],
+            match["name"],
+            user_id,
+        )
+        rows.append(record)
+
+    return rows
+
+
 def _normalize_direction(direction: str | None) -> str | None:
     """Canonicalize a direction input to a stored Direction value or None.
 

@@ -505,6 +505,7 @@ class EventType(StrEnum):
     EMAIL = "email"
     CALL = "call"
     MESSAGE = "message"
+    MEETING = "meeting"
     API_SOURCE_DOWN = "api_source_down"
     API_QUOTA_WARNING = "api_quota_warning"
     API_QUOTA_CRITICAL = "api_quota_critical"

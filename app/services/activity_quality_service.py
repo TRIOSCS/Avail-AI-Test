@@ -19,7 +19,12 @@ from ..models.intelligence import ActivityLog
 # only these types are selected by score_unscored_activities().
 # TEAMS_MESSAGE is included so inbound Teams interactions feed the reply clock
 # via the score_activity → bump_clocks path (same as EMAIL_RECEIVED).
-_AI_SCORED_TYPES = (ActivityType.SIGHTING_ADDED, ActivityType.EMAIL_RECEIVED, ActivityType.TEAMS_MESSAGE)
+_AI_SCORED_TYPES = (
+    ActivityType.SIGHTING_ADDED,
+    ActivityType.EMAIL_RECEIVED,
+    ActivityType.TEAMS_MESSAGE,
+    ActivityType.MEETING,
+)
 
 QUALITY_SCHEMA = {
     "type": "object",

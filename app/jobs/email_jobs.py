@@ -333,7 +333,12 @@ async def _job_calendar_scan():
                     scan_calendar_events(token, user.id, scan_db, lookback_days=30),
                     timeout=60,
                 )
-                logger.info(f"Calendar scan [{user.email}]: {result.get('events_found', 0)} events")
+                logger.info(
+                    "Calendar scan [{}]: {} events scanned, {} activities logged",
+                    user.email,
+                    result.get("events_scanned", 0),
+                    result.get("activities_logged", 0),
+                )
             except asyncio.TimeoutError:
                 logger.warning(f"Calendar scan TIMEOUT for user {user_id}")
                 scan_db.rollback()
