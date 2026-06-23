@@ -606,6 +606,52 @@ Alpine.directive('chip-overflow', (el, _directive, { cleanup }) => {
 });
 
 /**
+ * contactsView — Alpine component for the CRM account Contacts surface
+ * (contacts_tab.html). Owns the people-search (`q`) + site filter (`siteFilter`)
+ * and filters the rendered contact rows CLIENT-SIDE by toggling a `hidden` class
+ * — no round-trip. The controls live OUTSIDE the #contacts-tab-list swap target,
+ * so a CRUD re-render replaces only the rows; re-applies on htmx:afterSettle.
+ */
+Alpine.data('contactsView', () => ({
+  q: '',
+  siteFilter: '',
+  init() {
+    this.apply();
+    // Re-filter after a CRUD swap replaces the inner #contacts-tab-list rows.
+    this._onSettle = () => this.apply();
+    this.$root.addEventListener('htmx:afterSettle', this._onSettle);
+  },
+  destroy() {
+    if (this._onSettle) this.$root.removeEventListener('htmx:afterSettle', this._onSettle);
+  },
+  apply() {
+    this.$nextTick(() => {
+      const root = this.$root;
+      const needle = this.q.trim().toLowerCase();
+      const site = this.siteFilter;
+      let visible = 0;
+      root.querySelectorAll('[data-contact-row]').forEach((row) => {
+        const nameMatch = !needle || (row.getAttribute('data-contact-search') || '').includes(needle);
+        const siteMatch = !site || row.getAttribute('data-site-id') === site;
+        const show = nameMatch && siteMatch;
+        row.classList.toggle('hidden', !show);
+        if (show) visible += 1;
+      });
+      // Hide a whole site section when none of its rows survive the filter.
+      root.querySelectorAll('[data-contacts-section]').forEach((sec) => {
+        const anyVisible = sec.querySelector('[data-contact-row]:not(.hidden)');
+        sec.classList.toggle('hidden', !anyVisible);
+      });
+      const emptyHint = root.querySelector('[data-contacts-empty]');
+      if (emptyHint) {
+        const hasRows = root.querySelector('[data-contact-row]');
+        emptyHint.classList.toggle('hidden', visible > 0 || !hasRows);
+      }
+    });
+  },
+}));
+
+/**
  * rowActionRail — Alpine component for requisitions2 <tr>.
  * CSS handles hover visibility via tr:hover; this component exposes
  * `show` state so keyboard users (Tab, Enter, Escape) have a path.

@@ -13,7 +13,7 @@
    swapped out — never add window listeners via x-init here (they leak across
    HTMX navigations). #}
 <div id="cdm-workspace" class="flex flex-col min-h-[420px]"
-     x-data="{ selectedId: null, selectedSiteId: null, fitHeight() { this.$el.style.height = Math.max(420, window.innerHeight - this.$el.getBoundingClientRect().top - 64) + 'px' }, autoSelectFirst() { if (this.selectedId !== null) return; const detail = this.$el.querySelector('#cdm-detail'); if (!detail || !detail.querySelector('[data-cdm-empty]')) return; const first = this.$el.querySelector('#cdm-list [role=\'button\'][hx-get]'); if (first) first.click() } }"
+     x-data="{ selectedId: null, fitHeight() { this.$el.style.height = Math.max(420, window.innerHeight - this.$el.getBoundingClientRect().top - 64) + 'px' }, autoSelectFirst() { if (this.selectedId !== null) return; const detail = this.$el.querySelector('#cdm-detail'); if (!detail || !detail.querySelector('[data-cdm-empty]')) return; const first = this.$el.querySelector('#cdm-list [role=\'button\'][hx-get]'); if (first) first.click() } }"
      x-init="$nextTick(() => { fitHeight(); autoSelectFirst() })"
      @resize.window.debounce.150ms="fitHeight()">
 

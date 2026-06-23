@@ -31,6 +31,18 @@
 {% endmacro %}
 
 
+{% macro site_cadence_dot(site, now_utc) %}
+{# Per-site cadence dot for the Contacts section header. A macro (not template body)
+   so cadence_state resolves to the Jinja GLOBAL callable — the detail.html ctx
+   shadows the name with a string in the included template's local scope. #}
+{% set _state = cadence_state(none, site.last_outbound_at, now_utc) if site else 'new' %}
+{% set _dot = {'new': 'bg-gray-300', 'on_target': 'bg-emerald-400', 'due': 'bg-amber-400', 'overdue': 'bg-rose-500'} %}
+<span class="w-2 h-2 rounded-full flex-shrink-0 {{ _dot.get(_state, 'bg-gray-300') }}"
+      role="img" aria-label="{{ _state|replace('_', ' ')|title }} cadence"
+      title="{{ _state|replace('_', ' ')|title }}"></span>
+{% endmacro %}
+
+
 {% macro contact_clocks(contact, now_utc) %}
 {% set out_ts = contact.last_outbound_at %}
 {% set rep_ts = contact.last_reply_at %}
@@ -79,6 +91,7 @@
         </div>
         <p class="text-[11px] text-gray-600">
           {{ site.contact_title or "—" }}
+          {% if site %}<span class="text-gray-300">·</span> <span class="text-gray-600" title="Site">{{ site.site_name }}</span>{% endif %}
         </p>
         <div class="mt-1 flex items-center gap-3 text-[11px] text-gray-600 flex-wrap">
           {% if site.contact_email %}<span class="truncate">{{ site.contact_email }}</span>{% endif %}
@@ -120,7 +133,10 @@
           {% include 'htmx/partials/customers/_archive_toggle.html' %}
           {% include 'htmx/partials/customers/_dnc_toggle.html' %}
         </div>
-        <p class="text-[11px] text-gray-600 mt-0.5">{{ contact.title or "—" }}</p>
+        <p class="text-[11px] text-gray-600 mt-0.5">
+          {{ contact.title or "—" }}
+          {% if site %}<span class="text-gray-300">·</span> <span class="text-gray-600" title="Site">{{ site.site_name }}</span>{% endif %}
+        </p>
         <div class="mt-1 flex items-center gap-3 text-[11px] text-gray-600 flex-wrap">
           {% if contact.email %}<span class="truncate">{{ contact.email }}</span>{% endif %}
           {% if contact.phone %}<span>{{ contact.phone }}</span>{% endif %}

@@ -1,23 +1,24 @@
-"""tests/test_crm_ia.py — Increment 2: left-panel company→site IA.
+"""tests/test_crm_ia.py — CRM IA redesign: one unified account workspace.
 
-TDD spec for the IA feature (docs/superpowers/specs/
-2026-06-18-crm-disposition-ia-aiorg-design.md, "Increment 2 — Left-panel IA").
+TDD spec for the IA redesign (docs/superpowers/specs/
+2026-06-23-crm-ia-redesign.md, Stage A "Unify workspace + Contacts canonical").
+
+The old single-vs-multi-site fork is GONE: every account row — regardless of
+site_count — loads the SAME unified detail at /v2/partials/customers/{id}, with
+Contacts as the default + primary right-panel surface. The header-only multi-site
+view, the left-panel sites-accordion, and the site-scoped right-panel view are
+retired as navigation.
 
 Covers:
-  * site-detail route GET /v2/partials/customers/{company_id}/sites/{site_id}
-    — 200 for a valid (company, site); 404 IDOR (site under a different
-    company); 404 for an inactive site.
-  * site-detail renders the site's contacts + an "Open requisitions at this
-    site" section (seeded Requisition.customer_site_id == site_id).
-  * company-header partial GET .../{company_id}/header — 200, contains the
-    company name, does NOT contain the per-site contacts tab markup.
-  * sites-accordion partial GET .../{company_id}/sites-accordion — 200 lists
-    the company's active sites.
-  * _account_list.html rendering — site_count > 1 renders the accordion
-    affordance; site_count <= 1 renders the direct detail hx-get. site_count
-    is SEEDED explicitly (the Postgres trigger does not fire under SQLite).
-
-Written FIRST (TDD) — fails until the production code lands.
+  * _account_list.html — single AND multi-site rows both target the unified
+    detail (/v2/partials/customers/{id}); no accordion/header/site-detail routes.
+  * unified detail (company_detail_partial) for a MULTI-site account — renders the
+    full tab strip with Contacts default, breadcrumb "Customers › {Account}", and
+    no header-only fork.
+  * Contacts canonical surface — light per-site section headers, a people-search,
+    and a site filter shown only when the account has >1 active site (single-site →
+    one section, no filter).
+  * retired routes (/header, /sites-accordion, /sites/{id}) return 404.
 
 Called by: pytest
 Depends on: app.models, app.routers.htmx_views (via the TestClient `client`
@@ -31,7 +32,7 @@ from sqlalchemy.orm import Session
 from app.models import Company, CustomerSite, SiteContact, User
 from app.models.sourcing import Requisition
 
-NOW = datetime(2026, 6, 18, 12, 0, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 6, 23, 12, 0, 0, tzinfo=timezone.utc)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -107,150 +108,176 @@ def _render_account_list(companies) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# TestSiteDetailRoute
+# TestUnifiedAccountList — every row targets the unified detail (no fork)
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-class TestSiteDetailRoute:
-    def test_valid_company_site_200(self, client, db_session: Session, test_user: User):
-        co = _make_company(db_session, name="SiteDetailCo", owner_id=test_user.id, site_count=2)
-        site = _make_site(db_session, co, site_name="Austin Plant", site_type="warehouse", city="Austin")
-        db_session.commit()
+class TestUnifiedAccountList:
+    def test_single_site_targets_unified_detail(self, db_session: Session):
+        co = _make_company(db_session, name="SingleSite Co", site_count=1)
+        db_session.flush()
+        co.cadence_state = "on_target"
+        html = _render_account_list([co])
+        assert f'hx-get="/v2/partials/customers/{co.id}"' in html
 
-        resp = client.get(f"/v2/partials/customers/{co.id}/sites/{site.id}")
-        assert resp.status_code == 200
-        assert "Austin Plant" in resp.text
-
-    def test_idor_site_under_different_company_404(self, client, db_session: Session, test_user: User):
-        co_a = _make_company(db_session, name="CoA", owner_id=test_user.id, site_count=1)
-        co_b = _make_company(db_session, name="CoB", owner_id=test_user.id, site_count=1)
-        site_b = _make_site(db_session, co_b, site_name="UnderB")
-        db_session.commit()
-
-        # Address site_b under company A's path — IDOR scope filter must 404.
-        resp = client.get(f"/v2/partials/customers/{co_a.id}/sites/{site_b.id}")
-        assert resp.status_code == 404
-
-    def test_inactive_site_404(self, client, db_session: Session, test_user: User):
-        co = _make_company(db_session, name="InactiveSiteCo", owner_id=test_user.id, site_count=1)
-        site = _make_site(db_session, co, site_name="Closed", is_active=False)
-        db_session.commit()
-
-        resp = client.get(f"/v2/partials/customers/{co.id}/sites/{site.id}")
-        assert resp.status_code == 404
-
-    def test_renders_site_contacts(self, client, db_session: Session, test_user: User):
-        co = _make_company(db_session, name="ContactsCo", owner_id=test_user.id, site_count=2)
-        site = _make_site(db_session, co, site_name="Detroit")
-        _make_contact(db_session, site, full_name="Dana Buyer")
-        db_session.commit()
-
-        resp = client.get(f"/v2/partials/customers/{co.id}/sites/{site.id}")
-        assert resp.status_code == 200
-        assert "Dana Buyer" in resp.text
-
-    def test_renders_open_requisitions_at_site(self, client, db_session: Session, test_user: User):
-        co = _make_company(db_session, name="ReqsCo", owner_id=test_user.id, site_count=2)
-        site = _make_site(db_session, co, site_name="Memphis")
-        _make_req(db_session, name="REQ-IA-001", site_id=site.id, status="active")
-        db_session.commit()
-
-        resp = client.get(f"/v2/partials/customers/{co.id}/sites/{site.id}")
-        assert resp.status_code == 200
-        assert "REQ-IA-001" in resp.text
-        # Section heading present.
-        assert "Open requisitions at this site" in resp.text
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# TestCompanyHeaderPartial
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-class TestCompanyHeaderPartial:
-    def test_header_200_contains_name(self, client, db_session: Session, test_user: User):
-        co = _make_company(db_session, name="HeaderOnly Inc", owner_id=test_user.id, site_count=3)
-        _make_site(db_session, co, site_name="One")
-        _make_site(db_session, co, site_name="Two")
-        db_session.commit()
-
-        resp = client.get(f"/v2/partials/customers/{co.id}/header")
-        assert resp.status_code == 200
-        assert "HeaderOnly Inc" in resp.text
-
-    def test_header_excludes_company_tab_strip(self, client, db_session: Session, test_user: User):
-        co = _make_company(db_session, name="NoTabsCo", owner_id=test_user.id, site_count=2)
-        db_session.commit()
-
-        resp = client.get(f"/v2/partials/customers/{co.id}/header")
-        assert resp.status_code == 200
-        # The detail.html tab strip wires per-tab hx-gets to /tab/{tab_id}; the
-        # header-only partial must NOT carry that tab navigation.
-        assert "/tab/contacts" not in resp.text
-        assert 'aria-label="Account detail sections"' not in resp.text
-
-    def test_header_missing_company_404(self, client, db_session: Session, test_user: User):
-        resp = client.get("/v2/partials/customers/999999/header")
-        assert resp.status_code == 404
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# TestSitesAccordionPartial
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-class TestSitesAccordionPartial:
-    def test_lists_active_sites(self, client, db_session: Session, test_user: User):
-        co = _make_company(db_session, name="AccordionCo", owner_id=test_user.id, site_count=3)
-        _make_site(db_session, co, site_name="North Branch")
-        _make_site(db_session, co, site_name="South Branch")
-        _make_site(db_session, co, site_name="Shuttered", is_active=False)
-        db_session.commit()
-
-        resp = client.get(f"/v2/partials/customers/{co.id}/sites-accordion")
-        assert resp.status_code == 200
-        assert "North Branch" in resp.text
-        assert "South Branch" in resp.text
-        # Inactive site must not appear.
-        assert "Shuttered" not in resp.text
-
-    def test_missing_company_404(self, client, db_session: Session, test_user: User):
-        resp = client.get("/v2/partials/customers/999999/sites-accordion")
-        assert resp.status_code == 404
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# TestAccountListBranching — site_count drives accordion vs direct detail
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-class TestAccountListBranching:
-    def test_multi_site_renders_accordion_affordance(self, db_session: Session):
+    def test_multi_site_targets_unified_detail_not_header(self, db_session: Session):
         # site_count seeded explicitly — the Postgres trigger does not run under
         # SQLite, so we must not rely on it.
         co = _make_company(db_session, name="MultiSite Corp", site_count=4)
         db_session.flush()
         co.cadence_state = "on_target"
         html = _render_account_list([co])
-        # Accordion header lazy-loads its children from the sites-accordion route.
-        assert f"/v2/partials/customers/{co.id}/sites-accordion" in html
-        # The company-header partial is the detail target for a multi-site row.
-        assert f"/v2/partials/customers/{co.id}/header" in html
-
-    def test_single_site_renders_direct_detail(self, db_session: Session):
-        co = _make_company(db_session, name="SingleSite Co", site_count=1)
-        db_session.flush()
-        co.cadence_state = "on_target"
-        html = _render_account_list([co])
-        # Direct detail hx-get (today's behavior) — no accordion / header partial.
+        # Unified detail target — the SAME as a single-site row.
         assert f'hx-get="/v2/partials/customers/{co.id}"' in html
-        assert f"/v2/partials/customers/{co.id}/sites-accordion" not in html
+        # The retired forks must be gone from the row markup.
         assert f"/v2/partials/customers/{co.id}/header" not in html
+        assert f"/v2/partials/customers/{co.id}/sites-accordion" not in html
 
-    def test_zero_site_count_behaves_as_single(self, db_session: Session):
+    def test_zero_site_count_targets_unified_detail(self, db_session: Session):
         co = _make_company(db_session, name="ZeroSite Co", site_count=0)
         db_session.flush()
         co.cadence_state = "on_target"
         html = _render_account_list([co])
         assert f'hx-get="/v2/partials/customers/{co.id}"' in html
         assert f"/v2/partials/customers/{co.id}/sites-accordion" not in html
+
+    def test_multi_site_shows_site_count_hint(self, db_session: Session):
+        co = _make_company(db_session, name="HintCo", site_count=3)
+        db_session.flush()
+        co.cadence_state = "on_target"
+        html = _render_account_list([co])
+        # The picker still tells the rep this is a multi-site account.
+        assert "3 sites" in html
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TestUnifiedDetailMultiSite — full detail for a multi-site account
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestUnifiedDetailMultiSite:
+    def test_multi_site_renders_full_unified_detail(self, client, db_session: Session, test_user: User):
+        co = _make_company(db_session, name="UnifiedMulti Co", owner_id=test_user.id, site_count=2)
+        _make_site(db_session, co, site_name="Detroit HQ", city="Detroit")
+        _make_site(db_session, co, site_name="Austin Plant", city="Austin")
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{co.id}")
+        assert resp.status_code == 200
+        # Full tab strip is present (NOT the header-only fork).
+        assert 'aria-label="Account detail sections"' in resp.text
+        assert f"/v2/partials/customers/{co.id}/tab/contacts" in resp.text
+        # Contacts is the default tab.
+        assert "activeTab: 'contacts'" in resp.text
+
+    def test_unified_detail_has_breadcrumb(self, client, db_session: Session, test_user: User):
+        co = _make_company(db_session, name="Breadcrumb Co", owner_id=test_user.id, site_count=2)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{co.id}")
+        assert resp.status_code == 200
+        # "Customers › {Account}" breadcrumb at the top of the right panel.
+        assert "Customers" in resp.text
+        assert "Breadcrumb Co" in resp.text
+        assert 'aria-label="Breadcrumb"' in resp.text
+
+    def test_unified_detail_surfaces_cadence_affordance(self, client, db_session: Session, test_user: User):
+        co = _make_company(db_session, name="CadenceVisible Co", owner_id=test_user.id, site_count=1)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{co.id}")
+        assert resp.status_code == 200
+        # Cadence/tier/disposition is reachable via a visible LABELED affordance,
+        # not buried behind a kebab-only item. ("&" renders as the &amp; entity.)
+        assert "Cadence &amp; settings" in resp.text
+        assert 'aria-controls="acct-settings-' in resp.text
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TestContactsCanonicalSurface — site sections + people-search + site filter
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestContactsCanonicalSurface:
+    def test_multi_site_contacts_show_site_sections(self, client, db_session: Session, test_user: User):
+        co = _make_company(db_session, name="SectionsCo", owner_id=test_user.id, site_count=2)
+        s1 = _make_site(db_session, co, site_name="Detroit HQ", city="Detroit")
+        s2 = _make_site(db_session, co, site_name="Austin Plant", city="Austin")
+        _make_contact(db_session, s1, full_name="Jane Smith")
+        _make_contact(db_session, s2, full_name="Carl Ek")
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{co.id}/tab/contacts")
+        assert resp.status_code == 200
+        # Light per-site section headers name the site + city.
+        assert "Detroit HQ" in resp.text
+        assert "Austin Plant" in resp.text
+        assert "Jane Smith" in resp.text
+        assert "Carl Ek" in resp.text
+
+    def test_multi_site_contacts_show_site_filter(self, client, db_session: Session, test_user: User):
+        co = _make_company(db_session, name="FilterCo", owner_id=test_user.id, site_count=2)
+        s1 = _make_site(db_session, co, site_name="North Site", city="Reno")
+        s2 = _make_site(db_session, co, site_name="South Site", city="Tucson")
+        _make_contact(db_session, s1, full_name="North Person")
+        _make_contact(db_session, s2, full_name="South Person")
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{co.id}/tab/contacts")
+        assert resp.status_code == 200
+        # Site filter present (>1 active site) — both site options selectable.
+        assert "All sites" in resp.text
+        # People-search present.
+        assert "Search people" in resp.text or "Search contacts" in resp.text
+
+    def test_single_site_contacts_no_site_filter(self, client, db_session: Session, test_user: User):
+        co = _make_company(db_session, name="LoneSite Co", owner_id=test_user.id, site_count=1)
+        s1 = _make_site(db_session, co, site_name="Only Site", city="Omaha")
+        _make_contact(db_session, s1, full_name="Solo Person")
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{co.id}/tab/contacts")
+        assert resp.status_code == 200
+        assert "Solo Person" in resp.text
+        # Single-site → no "All sites" filter clutter.
+        assert "All sites" not in resp.text
+
+    def test_contact_card_shows_site_label(self, client, db_session: Session, test_user: User):
+        co = _make_company(db_session, name="SiteLabelCo", owner_id=test_user.id, site_count=2)
+        s1 = _make_site(db_session, co, site_name="Memphis Depot", city="Memphis")
+        _make_contact(db_session, s1, full_name="Labeled Person")
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{co.id}/tab/contacts")
+        assert resp.status_code == 200
+        # The site label appears on the card AND the section header.
+        assert resp.text.count("Memphis Depot") >= 2
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TestRetiredSurfaces — old fork routes are gone
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestRetiredSurfaces:
+    def test_header_route_retired(self, client, db_session: Session, test_user: User):
+        co = _make_company(db_session, name="NoHeader Co", owner_id=test_user.id, site_count=2)
+        db_session.commit()
+        resp = client.get(f"/v2/partials/customers/{co.id}/header")
+        assert resp.status_code == 404
+
+    def test_sites_accordion_route_retired(self, client, db_session: Session, test_user: User):
+        co = _make_company(db_session, name="NoAccordion Co", owner_id=test_user.id, site_count=2)
+        db_session.commit()
+        resp = client.get(f"/v2/partials/customers/{co.id}/sites-accordion")
+        assert resp.status_code == 404
+
+    def test_site_detail_route_retired(self, client, db_session: Session, test_user: User):
+        co = _make_company(db_session, name="NoSiteDetail Co", owner_id=test_user.id, site_count=2)
+        site = _make_site(db_session, co, site_name="Gone")
+        db_session.commit()
+        # The GET site-detail view is retired. The path prefix survives only for the
+        # remaining POST/DELETE site-contact CRUD routes, so a GET now resolves to
+        # "method not allowed" (405) rather than rendering a right-panel view.
+        resp = client.get(f"/v2/partials/customers/{co.id}/sites/{site.id}")
+        assert resp.status_code in (404, 405)

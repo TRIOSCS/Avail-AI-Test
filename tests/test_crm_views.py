@@ -3004,15 +3004,16 @@ class TestCRMMacroDedup:
         assert "Last Reply" in html
         assert "Never" in html
 
-    def test_header_partial_uses_canonical_badge_and_clocks(
+    def test_multi_site_unified_detail_has_canonical_badge_and_clocks(
         self, client: TestClient, db_session: Session, test_user: User
     ):
-        """The multi-site company-header rollup (header.html) renders the canonical
-        account_type_badge + cadence_clocks (the third copy of those, now unified)."""
+        """A MULTI-site account now opens the SAME unified detail (the header-only
+        rollup is retired): the canonical account_type_badge + cadence_clocks render in
+        that one unified surface."""
         from app.models.crm import CustomerSite
 
         co = self._make_company(db_session, account_type="Prospect", last_outbound_at=None)
-        # Two active sites → multi-site accordion → header partial.
+        # Two active sites — previously routed to the header-only fork; now unified.
         db_session.add_all(
             [
                 CustomerSite(company_id=co.id, site_name="HQ", is_active=True),
@@ -3021,13 +3022,15 @@ class TestCRMMacroDedup:
         )
         db_session.commit()
 
-        resp = client.get(f"/v2/partials/customers/{co.id}/header")
+        resp = client.get(f"/v2/partials/customers/{co.id}")
         assert resp.status_code == 200
         html = resp.text
         assert "Prospect" in html
         assert "Last Out" in html
         assert "Last Reply" in html
         assert "Never" in html
+        # The unified detail carries the full tab strip (no header-only fork).
+        assert 'aria-label="Account detail sections"' in html
 
     def test_activity_tab_quote_and_rfq_badges_render(self, client: TestClient, db_session: Session, test_user: User):
         """The unified activity timeline renders quote + RFQ status via the shared
@@ -3181,13 +3184,16 @@ class TestContactsTabHome:
         assert "Add Contact" in resp.text
 
     def test_contacts_tab_shows_contact_count(self, client: TestClient, db_session: Session, test_user: User):
-        """Contacts tab header displays the total contact count."""
+        """The Contacts surface shows the per-site contact count in its section header.
+
+        (The redundant "Contacts (N)" heading was retired in the IA redesign — the
+        breadcrumb + tab strip name the surface; the section header carries the count.)
+        """
         company, _, _ = self._make_company_with_hq(db_session)
         resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
         assert resp.status_code == 200
-        assert "Contacts" in resp.text
-        # Should show the count somewhere in the header
-        assert "1" in resp.text
+        # The section header reports the count for that site.
+        assert "1 contact" in resp.text
 
     # ── POST create (contacts-tab) ────────────────────────────────────────
 
@@ -4080,14 +4086,17 @@ class TestFullWidthContactsForwardLayout:
         assert "max-w-3xl" not in resp.text
 
     def test_customer_detail_has_slim_header_actions(self, client: TestClient, db_session: Session, test_user: User):
-        """The slim header carries the primary Add Contact + the Account settings
-        collapsible trigger, and the coverage chip (N contacts · N sites)."""
+        """The slim header carries the primary Add Contact + a VISIBLE labeled "Cadence
+        & settings" trigger (no longer kebab-buried), and the coverage chip (N contacts
+        · N sites)."""
         company, _, _ = self._make_company_with_contact(db_session)
         resp = client.get(f"/v2/partials/customers/{company.id}")
         assert resp.status_code == 200
         html = resp.text
         assert "+ Add Contact" in html
-        assert "Account settings" in html
+        # Visible labeled affordance for cadence/tier/disposition (was "Account settings"
+        # kebab-only); the collapsible state var still drives the block.
+        assert "Cadence &amp; settings" in html
         assert "showAcctSettings" in html
         # Coverage chip and commercial strip survive the collapse into one line.
         assert "1 contact" in html

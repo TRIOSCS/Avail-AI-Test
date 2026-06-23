@@ -1,25 +1,24 @@
-{# _contacts_grouped_list.html — Grouped-by-site contact list, re-renderable as a
-   standalone fragment into #contacts-tab-list.
+{# _contacts_grouped_list.html — Contacts grouped under light per-site section
+   headers, re-renderable as a standalone fragment into #contacts-tab-list.
+
+   Section header = site name · city · per-site cadence dot · "+ add here".
+   A single-site account renders one section with minimal chrome. Each contact
+   row carries data-site-id + data-contact-search so the parent contactsView
+   (contacts_tab.html) can filter client-side without a round-trip.
 
    Receives: company, contact_rows ([{contact, site, legacy, cadence}]), now_utc.
    Called by:
      - {% include %} from contacts_tab.html (inside #contacts-tab-list)
      - template_response() in endpoints that branch on HX-Target=contacts-tab-list
-   Depends on: _contact_macros.html, Alpine.js, cadence_state Jinja global.
+   Depends on: _contact_macros.html, cadence_state Jinja global.
 
    Cadence sort: within each site group, overdue contacts are shown first
    (secondary sort key after is_primary/is_priority from the service).
 #}
 
-{# ── Import shared macros ──────────────────────────────────────────────────── #}
-{% from 'htmx/partials/customers/_contact_macros.html' import contact_card %}
+{% from 'htmx/partials/customers/_contact_macros.html' import contact_card, site_cadence_dot %}
 
-{# ── Group rows by site ────────────────────────────────────────────────────── #}
-{#
-   Build a site-keyed structure: site_id → {site, rows: [...]}
-   Rows with no site (edge case) fall into an "unknown" bucket.
-   Legacy rows always have a site.
-#}
+{# ── Group rows by site (preserve first-seen order; legacy rows always have a site) ── #}
 {% set site_groups = namespace(data={}, order=[]) %}
 {% for row in contact_rows %}
   {% set sk = row.site.id if row.site else 0 %}
@@ -30,57 +29,56 @@
   {% set _ = site_groups.data[sk]['rows'].append(row) %}
 {% endfor %}
 
-{# ── Render ────────────────────────────────────────────────────────────────── #}
 {% if not contact_rows %}
 {% with
-   message='No contacts on file for this company.',
+   message='No contacts on file yet.',
    action_alpine_click='$dispatch(\'open-modal\', {url: \'/v2/partials/customers/' ~ company.id ~ '/contacts/add-form\'})',
-   action_label='+ Add Contact'
+   action_label='+ Add contact'
 %}
 {% include 'htmx/partials/shared/empty_state.html' %}
 {% endwith %}
 {% else %}
-<div class="space-y-3">
+<div class="space-y-4">
   {% for sk in site_groups.order %}
     {% set group = site_groups.data[sk] %}
     {% set grp_site = group['site'] %}
     {% set grp_rows = group['rows'] %}
-    {#
-       Secondary sort within group: overdue first, then the rest.
-       cadence=='overdue' → sort key 0; anything else → sort key 1.
-       (Primary service sort: archived↓ priority↑ primary↑ name — preserved within each bucket.)
-    #}
+    {# Secondary sort within group: overdue first, then the rest. #}
     {% set overdue_rows = grp_rows | selectattr('cadence', 'eq', 'overdue') | list %}
     {% set other_rows   = grp_rows | rejectattr('cadence', 'eq', 'overdue') | list %}
     {% set sorted_rows  = overdue_rows + other_rows %}
-    {# Expand HQ / primary site by default (first group) — all others start closed #}
-    {% set is_first = loop.first %}
-    <div x-data='{"open": {{ "true" if is_first else "false" }}}' class="rounded-lg border border-gray-200">
-      {# Site accordion header #}
-      <button type='button'
-              @click='open = !open'
-              class='w-full flex items-center justify-between px-3 py-2 bg-gray-50 hover:bg-gray-100 rounded-t-lg transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-inset'
-              :aria-expanded='open'>
-        <div class='flex items-center gap-2'>
-          <svg class='h-4 w-4 text-gray-400 transition-transform' :class='{ "rotate-90": open }'
-               fill='none' viewBox='0 0 24 24' stroke='currentColor' stroke-width='2'>
-            <path stroke-linecap='round' stroke-linejoin='round' d='M9 5l7 7-7 7'/>
-          </svg>
-          <span class='text-xs font-semibold text-gray-700'>
-            {{ grp_site.site_name if grp_site else "Unknown Site" }}
-          </span>
+    <section data-contacts-section data-site-id="{{ grp_site.id if grp_site else 0 }}">
+      {# ── Light site section header — name · city · cadence dot · + add here ── #}
+      <div class="flex items-center justify-between gap-2 px-1 pb-1.5 mb-2 border-b border-gray-100">
+        <div class="flex items-center gap-2 min-w-0">
+          {{ site_cadence_dot(grp_site, now_utc) }}
+          <span class="text-xs font-semibold text-gray-700 truncate">{{ grp_site.site_name if grp_site else "Unknown site" }}</span>
+          {% if grp_site and grp_site.city %}
+          <span class="text-xs text-gray-400 truncate">· {{ grp_site.city }}</span>
+          {% endif %}
+          <span class="text-[11px] text-gray-400 flex-shrink-0">{{ grp_rows|length }} contact{{ "s" if grp_rows|length != 1 }}</span>
         </div>
-        <span class='text-[11px] text-gray-400'>
-          {{ grp_rows|length }} contact{{ "s" if grp_rows|length != 1 }}
-        </span>
-      </button>
-      {# Contacts list — responsive multi-column grid (cards are self-contained cells) #}
-      <div x-show='open' x-cloak x-transition class='grid gap-2 sm:grid-cols-2 2xl:grid-cols-3 p-2'>
+        {% if grp_site %}
+        <button type="button"
+                @click="$dispatch('open-modal', {url: '/v2/partials/customers/{{ company.id }}/contacts/add-form?site_id={{ grp_site.id }}'})"
+                class="text-[11px] font-medium text-brand-500 hover:text-brand-600 flex-shrink-0 focus:outline-none focus:ring-2 focus:ring-brand-500 rounded px-1">
+          + add here
+        </button>
+        {% endif %}
+      </div>
+      {# Responsive card grid. When the live filter hides every card the whole
+         section collapses (contactsView toggles `hidden`) and the parent surfaces
+         the "no matches" hint. #}
+      <div class="grid gap-2 sm:grid-cols-2 2xl:grid-cols-3">
         {% for row in sorted_rows %}
-          {{ contact_card(company, row.contact, row.site, row.legacy, now_utc, row.cadence if not row.legacy else 'new') }}
+          {% set _cname = (row.contact.full_name if row.contact else row.site.contact_name) or '' %}
+          <div data-contact-row data-site-id="{{ grp_site.id if grp_site else 0 }}"
+               data-contact-search="{{ _cname|lower }}">
+            {{ contact_card(company, row.contact, row.site, row.legacy, now_utc, row.cadence if not row.legacy else 'new') }}
+          </div>
         {% endfor %}
       </div>
-    </div>
+    </section>
   {% endfor %}
 </div>
 {% endif %}
