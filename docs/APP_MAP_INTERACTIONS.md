@@ -1177,6 +1177,14 @@ two-panel decision flow). The list-toolbar "Build Quote" action re-points a SING
 selected requisition to this tab via `?tab=build_quote` (the detail partial deep-links
 + auto-opens it); 2+ selections keep the cross-req bulk modal (`/quote-builder/multi`).
 
+**Per-line offer selection (Chunk B2).** Each line with 2+ ACTIVE offers shows a
+compact per-line `<select>` (progressive disclosure; default = best/cheapest) so the
+salesperson picks WHICH offer is used, not just the auto-best. The `selectOffer`
+Alpine action sets the line's `offerId` and re-points its `cost` so the live margin
+reflects the chosen offer. The choice rides the existing assemble payload
+(`offer_id`) through `save_quote_from_builder` onto `QuoteLine.offer_id`. Vendor
+identity stays internal — the customer doc/export strips it (`quote_export_context`).
+
 ## 6. Buy Plan Workflow
 
 ```
@@ -1186,6 +1194,10 @@ Quote accepted (status='won')
 buyplan_builder.py
     |
     +---> DB: INSERT buy_plans_v3 (DRAFT, linked to quote + requisition)
+    +---> _quote_chosen_offers: requirement_id -> QuoteLine.offer_id (one QuoteLine->Offer
+    |       join). Each line DEFAULTS to the offer the salesperson quoted (Chunk B2); when
+    |       that offer is stale/inactive or can't cover qty, falls back to the re-score /
+    |       auto-split path (mirrors resell CustomerBidLine.selected_offer_id provenance).
     +---> DB: INSERT buy_plan_lines (buyer assigned via ownership_service)
     +---> buyplan_scoring.py (ai_score per line)
     |
