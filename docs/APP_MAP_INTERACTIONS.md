@@ -209,6 +209,7 @@ sightings.py (router) → search_requirement(req, db)
     |
     +---> enqueue_for_ics_search(requirement_id, db)   # browser worker queue
     +---> enqueue_for_nc_search(requirement_id, db)    # browser worker queue
+    +---> enqueue_for_tbf_search(requirement_id, db)   # browser worker queue (The Broker Forum)
     |
     +---> _save_sightings + scoring + material card upsert
     |
@@ -521,8 +522,9 @@ eliminate; it has been removed.
 
 ### Browser-worker carve-out
 
-`icsource` and `netcomponents` are queue-driven via `avail-ics-worker` /
-`avail-nc-worker` rather than request/response connectors. They have no
+`icsource`, `netcomponents`, and `thebrokersite` are queue-driven via
+`avail-ics-worker` / `avail-nc-worker` / `avail-tbf-worker` rather than
+request/response connectors. They have no
 entry in `_get_connector_for_source`, so the 15-min ping loop would flip
 them to DISABLED on every run. `app.constants.BROWSER_WORKER_SOURCES`
 holds this set, and `run_health_checks` excludes those names from the
@@ -775,6 +777,7 @@ policy behavior for free — in its OWN session, right where the rows are create
    follows the connector-aware delete (inside search's separate write session).
 2. `app/services/ics_worker/sighting_writer.py` — async ICS browser-worker save loop.
 3. `app/services/nc_worker/sighting_writer.py` — same, NetComponents worker.
+   `app/services/tbf_worker/sighting_writer.py` — same, The Broker Forum worker (ships dormant until Phase-2 selectors land).
 4. `app/routers/sources.py` — email-attachment import (ALSO the HUMAN_DIRECT/O3
    release path: a buyer-routed attachment with qty > 0 releases instead of
    stamping). A RE-SENT attachment that hits the dedup key refreshes the
@@ -3745,7 +3748,7 @@ the current implementation.
 | Category | Count | Key Modules |
 |----------|-------|-------------|
 | AI & NLP | 9 | ai_service, ai_email_parser, ai_offer_service, tagging_ai |
-| Search & Prospecting | 30+ | search_worker_base/, ics_worker/, nc_worker/, sourcing_leads |
+| Search & Prospecting | 30+ | search_worker_base/, ics_worker/, nc_worker/, tbf_worker/, sourcing_leads |
 | Email & Communication | 10 | email_threads, contact_intelligence, signature_parser |
 | Scoring & Matching | 10+ | unified_score, avail_score, multiplier_score, proactive_matching |
 | CRM & Data | 20+ | company_merge, vendor_merge, auto_dedup, enrichment |
@@ -3771,25 +3774,25 @@ deploy.sh
     |       +---> Scan templates for Tailwind color classes
     |       +---> Grep CSS bundle for each class
     |       +---> Warn on any MISSING classes (safelist gap)
-    +---> Step 6b: Host worker venv refresh + restart (nc/ics)
+    +---> Step 6b: Host worker venv refresh + restart (nc/ics/tbf)
     |       +---> pip install -r requirements.txt into /root/availai/.venv
-    |       +---> systemctl restart avail-nc-worker avail-ics-worker
+    |       +---> systemctl restart avail-nc-worker avail-ics-worker avail-tbf-worker
     |       +---> WARN (re-surfaced after logs) if venv/restart fails
     +---> Step 7: Tail logs for errors
 ```
 
 **Host worker dependencies (pinned-lockfile venv).** The `avail-nc-worker`
-/ `avail-ics-worker` systemd units run on the HOST (outside docker, from
+/ `avail-ics-worker` / `avail-tbf-worker` systemd units run on the HOST (outside docker, from
 `/root/availai`, `User=root`) and execute
-`/root/availai/.venv/bin/python -m app.services.{nc,ics}_worker.worker`.
+`/root/availai/.venv/bin/python -m app.services.{nc,ics,tbf}_worker.worker`.
 That venv is built from the SAME pinned `requirements.txt` as the docker
 app/enrichment images (not ad-hoc `pip install patchright beautifulsoup4`),
 so the host workers carry identical pinned deps — notably `patchright`,
 which they use to drive **system Google Chrome** via `channel="chrome"`
 (the bundled Chromium is unused). `deploy.sh` Step 6b refreshes the venv
-from the lockfile and restarts both units on every deploy;
-`scripts/setup_nc_worker.sh` bootstraps the venv on a fresh host. The
-unit files live in `deploy/avail-{nc,ics}-worker.service`.
+from the lockfile and restarts all three units on every deploy;
+`scripts/setup_nc_worker.sh` / `scripts/setup_tbf_worker.sh` bootstrap the venv on a fresh host. The
+unit files live in `deploy/avail-{nc,ics,tbf}-worker.service`.
 
 ---
 

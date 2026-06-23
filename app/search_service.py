@@ -52,6 +52,7 @@ from .services.ics_worker.queue_manager import enqueue_for_ics_search
 from .services.nc_worker.queue_manager import enqueue_for_nc_search
 from .services.price_snapshot_service import record_price_snapshot
 from .services.sourcing_leads import sync_leads_for_sightings
+from .services.tbf_worker.queue_manager import enqueue_for_tbf_search
 from .services.vendor_affinity_service import find_vendor_affinity
 from .services.vendor_unavailability import apply_to_fresh_sightings
 from .utils.async_helpers import safe_background_task
@@ -648,6 +649,20 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
                                 mpn,
                                 exc_info=True,
                             )
+                        try:
+                            enqueue_for_tbf_search(
+                                req_id,
+                                write_db,
+                                override_mpn=mpn,
+                                resolved_via_spec_code=spec_code_tag,
+                            )
+                        except Exception:
+                            logger.warning(
+                                "spec_resolver: TBF AVL enqueue failed for req {} mpn {}",
+                                req_id,
+                                mpn,
+                                exc_info=True,
+                            )
 
                     # Record this requirement on the pending row so the admin
                     # UI can show which requirements consumed each speculative
@@ -715,6 +730,10 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
             enqueue_for_nc_search(req_id, write_db)
         except Exception:
             logger.warning("NC enqueue failed for requirement {}", req_id, exc_info=True)
+        try:
+            enqueue_for_tbf_search(req_id, write_db)
+        except Exception:
+            logger.warning("TBF enqueue failed for requirement {}", req_id, exc_info=True)
 
         # Expunge sightings so they remain usable after session close
         for s in sightings:

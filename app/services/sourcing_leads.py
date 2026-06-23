@@ -90,7 +90,7 @@ def _source_reliability(source_type: str, evidence_tier: str | None) -> float:
     source_type = (source_type or "").lower()
     if source_type in {"digikey", "mouser", "farnell", "element14", "nexar", "octopart"}:
         base = 90
-    elif source_type in {"netcomponents", "icsource", "brokerbin", "sourcengine"}:
+    elif source_type in {"netcomponents", "icsource", "thebrokersite", "brokerbin", "sourcengine"}:
         base = 72
     elif source_type in {"salesforce", "avail_history"}:
         base = 85
@@ -281,7 +281,7 @@ def _source_category(source_type: str) -> str:
     st = (source_type or "").lower()
     if st in {"digikey", "mouser", "element14", "farnell", "nexar", "octopart"}:
         return "api"
-    if st in {"brokerbin", "sourcengine", "oemsecrets", "ebay", "netcomponents", "icsource"}:
+    if st in {"brokerbin", "sourcengine", "oemsecrets", "ebay", "netcomponents", "icsource", "thebrokersite"}:
         return "marketplace"
     if st in {"salesforce", "salesforce_history"}:
         return "salesforce_history"
@@ -318,6 +318,7 @@ def _signal_type_for_source(source_type: str) -> str:
         "ebay",
         "netcomponents",
         "icsource",
+        "thebrokersite",
     }:
         return "stock_listing"
     if st in {"salesforce", "salesforce_history"}:
