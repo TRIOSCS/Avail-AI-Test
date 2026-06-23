@@ -102,6 +102,7 @@ from ..services.sighting_ingest import sighting_from_row
 from ..services.status_machine import require_valid_transition
 from ..services.vendor_unavailability import apply_to_fresh_sightings, maybe_release_on_offer
 from ..template_env import page_response, template_response, templates
+from ..utils.normalization_helpers import normalize_country, normalize_phone_e164, normalize_us_state
 from ..utils.search_builder import SearchBuilder
 from ..utils.sql_helpers import escape_like
 from ._lookup_helpers import get_requisition_or_404, get_vendor_card_or_404
@@ -4914,6 +4915,9 @@ async def create_company(
     if existing:
         raise HTTPException(409, f"Company '{existing.name}' already exists (ID {existing.id})")
 
+    raw_phone = form.get("phone", "").strip() or None
+    raw_hq_state = form.get("hq_state", "").strip() or None
+    raw_hq_country = form.get("hq_country", "").strip() or None
     company = Company(
         name=name,
         website=form.get("website", "").strip() or None,
@@ -4924,9 +4928,9 @@ async def create_company(
         employee_size=form.get("employee_size", "").strip() or None,
         revenue_range=form.get("revenue_range", "").strip() or None,
         hq_city=form.get("hq_city", "").strip() or None,
-        hq_state=form.get("hq_state", "").strip() or None,
-        hq_country=form.get("hq_country", "").strip() or None,
-        phone=form.get("phone", "").strip() or None,
+        hq_state=(normalize_us_state(raw_hq_state) or raw_hq_state) if raw_hq_state else None,
+        hq_country=(normalize_country(raw_hq_country) or raw_hq_country) if raw_hq_country else None,
+        phone=normalize_phone_e164(raw_phone) if raw_phone else None,
         credit_terms=form.get("credit_terms", "").strip() or None,
         tax_id=form.get("tax_id", "").strip() or None,
         source=form.get("source", "").strip() or "manual",
@@ -6678,16 +6682,16 @@ async def edit_company(
     company.revenue_range = revenue_range or None
 
     # Contact info
-    phone = form.get("phone", "").strip()
-    company.phone = phone or None
+    raw_phone = form.get("phone", "").strip() or None
+    company.phone = normalize_phone_e164(raw_phone) if raw_phone else None
 
     # Address (HQ)
     hq_city = form.get("hq_city", "").strip()
     company.hq_city = hq_city or None
-    hq_state = form.get("hq_state", "").strip()
-    company.hq_state = hq_state or None
-    hq_country = form.get("hq_country", "").strip()
-    company.hq_country = hq_country or None
+    raw_hq_state = form.get("hq_state", "").strip() or None
+    company.hq_state = (normalize_us_state(raw_hq_state) or raw_hq_state) if raw_hq_state else None
+    raw_hq_country = form.get("hq_country", "").strip() or None
+    company.hq_country = (normalize_country(raw_hq_country) or raw_hq_country) if raw_hq_country else None
 
     # Commercial
     credit_terms = form.get("credit_terms", "").strip()

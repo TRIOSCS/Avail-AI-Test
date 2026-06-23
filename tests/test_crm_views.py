@@ -4403,6 +4403,7 @@ class TestCompanyPhase0FormFields:
         assert co.revenue_range == "$1M-$10M"
         assert co.hq_city == "Boulder"
         assert co.hq_state == "CO"
+        assert co.hq_country == "US"
         assert co.credit_terms == "Net 30"
         assert co.tax_id == "77-7654321"
         assert co.source == "outbound"
@@ -4436,6 +4437,95 @@ class TestCompanyPhase0FormFields:
         assert co.employee_size == "201-500"
         assert co.revenue_range == "$50M-$200M"
         assert co.hq_city == "Chicago"
+        assert co.hq_country == "US"
         assert co.credit_terms == "Net 60"
         assert co.tax_id == "33-9876543"
         assert co.source == "sfdc"
+
+    # ── Normalization: phone E.164 via HTMX path ─────────────────────────────
+
+    def test_htmx_create_normalizes_phone_e164(self, client: TestClient, db_session: Session, test_user: User):
+        """HTMX create handler stores phone in E.164 format."""
+        resp = client.post(
+            "/v2/partials/customers/create",
+            data={
+                "name": "PhoneNorm Create Co",
+                "phone": "555-000-0001",
+            },
+        )
+        assert resp.status_code == 200
+        co = db_session.query(Company).filter(Company.name == "PhoneNorm Create Co").first()
+        assert co is not None
+        assert co.phone is not None
+        assert co.phone.startswith("+"), f"Expected E.164 (leading +), got {co.phone!r}"
+
+    def test_htmx_edit_normalizes_phone_e164(self, client: TestClient, db_session: Session, test_user: User):
+        """HTMX edit handler normalizes phone to E.164."""
+        co = Company(name="PhoneNorm Edit Co", is_active=True)
+        db_session.add(co)
+        db_session.commit()
+
+        resp = client.post(
+            f"/v2/partials/customers/{co.id}/edit",
+            data={
+                "name": "PhoneNorm Edit Co",
+                "phone": "555-000-0002",
+            },
+        )
+        assert resp.status_code == 200
+        db_session.refresh(co)
+        assert co.phone is not None
+        assert co.phone.startswith("+"), f"Expected E.164 (leading +), got {co.phone!r}"
+
+    # ── Normalization: hq_country via HTMX path ──────────────────────────────
+
+    def test_htmx_create_normalizes_hq_country(self, client: TestClient, db_session: Session, test_user: User):
+        """HTMX create normalizes 'United States' → 'US'."""
+        resp = client.post(
+            "/v2/partials/customers/create",
+            data={
+                "name": "CountryNorm Create Co",
+                "hq_country": "United States",
+            },
+        )
+        assert resp.status_code == 200
+        co = db_session.query(Company).filter(Company.name == "CountryNorm Create Co").first()
+        assert co is not None
+        assert co.hq_country == "US"
+
+    def test_htmx_edit_normalizes_hq_country(self, client: TestClient, db_session: Session, test_user: User):
+        """HTMX edit normalizes 'United States' → 'US'."""
+        co = Company(name="CountryNorm Edit Co", is_active=True)
+        db_session.add(co)
+        db_session.commit()
+
+        resp = client.post(
+            f"/v2/partials/customers/{co.id}/edit",
+            data={
+                "name": "CountryNorm Edit Co",
+                "hq_country": "United States",
+            },
+        )
+        assert resp.status_code == 200
+        db_session.refresh(co)
+        assert co.hq_country == "US"
+
+    # ── Source: out-of-list value is preserved on blank submit ───────────────
+
+    def test_htmx_edit_preserves_out_of_list_source(self, client: TestClient, db_session: Session, test_user: User):
+        """Submitting source='' (blank sentinel) keeps the current enrichment source."""
+        co = Company(name="SourcePreserve Co", is_active=True, source="apollo")
+        db_session.add(co)
+        db_session.commit()
+
+        # Submit with blank source — simulates the blank sentinel option being selected
+        resp = client.post(
+            f"/v2/partials/customers/{co.id}/edit",
+            data={
+                "name": "SourcePreserve Co",
+                "source": "",
+            },
+        )
+        assert resp.status_code == 200
+        db_session.refresh(co)
+        assert co.source == "apollo", f"Expected source 'apollo' preserved, got {co.source!r}"
