@@ -1,12 +1,12 @@
-"""Tests for migration 128 (cutover: drop bids + bid_solicitations).
+"""Tests for migration 129 (cutover: drop bids + bid_solicitations).
 
-What: revision metadata (id <= 32 vs PG VARCHAR(32), chains onto 127) plus an
+What: revision metadata (id <= 32 vs PG VARCHAR(32), chains onto 128) plus an
       executable upgrade -> downgrade -> upgrade pass on a scratch in-memory SQLite
       engine. The upgrade drops both tables; the downgrade recreates them structure-
       only (schema-reversible, no data restore). Portable DDL runs on SQLite via the
       migration harness.
 Called by: pytest
-Depends on: alembic/versions/128_drop_bid_tables.py, tests/migration_harness.run_ops
+Depends on: alembic/versions/129_drop_bid_tables.py, tests/migration_harness.run_ops
 """
 
 import importlib.util
@@ -17,22 +17,22 @@ from sqlalchemy.pool import StaticPool
 
 from tests.migration_harness import run_ops
 
-_MIGRATION_PATH = os.path.join(os.path.dirname(__file__), "..", "alembic", "versions", "128_drop_bid_tables.py")
-_spec = importlib.util.spec_from_file_location("migration_128", _MIGRATION_PATH)
+_MIGRATION_PATH = os.path.join(os.path.dirname(__file__), "..", "alembic", "versions", "129_drop_bid_tables.py")
+_spec = importlib.util.spec_from_file_location("migration_129", _MIGRATION_PATH)
 _mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_mod)
 
 
 class TestRevisionMetadata:
     def test_revision_id(self):
-        assert _mod.revision == "128_drop_bid_tables"
+        assert _mod.revision == "129_drop_bid_tables"
 
     def test_revision_id_within_pg_version_num_limit(self):
         # alembic_version.version_num is VARCHAR(32) on Postgres; SQLite ignores length.
         assert len(_mod.revision) <= 32
 
     def test_down_revision(self):
-        assert _mod.down_revision == "127_bid_back_schema"
+        assert _mod.down_revision == "128_bid_back_schema"
 
 
 class TestExecution:
