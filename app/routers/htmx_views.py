@@ -5943,6 +5943,7 @@ async def company_tab(
         from sqlalchemy import or_ as or_clause
 
         from ..models.intelligence import ActivityLog
+        from ..models.offers import Contact as RfqContact
 
         # Find all requisition IDs linked to this company (via FK or name match)
         req_ids = [
@@ -5957,13 +5958,33 @@ async def company_tab(
             .all()
         ]
 
-        # Direct activity logs on this company + its requisitions (newest-first)
+        # RFQ contacts across company's requisitions (canonical RFQ source)
+        rfq_contacts: list = []
+        req_map: dict = {}
+        if req_ids:
+            rfq_contacts = (
+                db.query(RfqContact)
+                .filter(RfqContact.requisition_id.in_(req_ids))
+                .order_by(RfqContact.created_at.desc())
+                .limit(30)
+                .all()
+            )
+            if rfq_contacts:
+                linked_req_ids = {c.requisition_id for c in rfq_contacts}
+                for r in db.query(Requisition).filter(Requisition.id.in_(linked_req_ids)).all():
+                    req_map[r.id] = r
+
+        # Direct activity logs on this company + its requisitions (newest-first).
+        # Exclude rfq_sent: RfqContact rows are the canonical source; showing both
+        # would double-show the same RFQ.
+        _RFQ_SENT = ActivityType.RFQ_SENT
         activity_filters = [ActivityLog.company_id == company.id]
         if req_ids:
             activity_filters.append(ActivityLog.requisition_id.in_(req_ids))
         activities = (
             db.query(ActivityLog)
             .filter(or_clause(*activity_filters))
+            .filter(ActivityLog.activity_type != _RFQ_SENT)
             .order_by(ActivityLog.created_at.desc())
             .limit(50)
             .all()
@@ -5971,13 +5992,20 @@ async def company_tab(
 
         activities_truncated = len(activities) >= 50
 
-        # Bucket activities into type-sections (template renders by section)
+        # Bucket activities into type-sections (template renders by section).
+        # Emails section also carries RFQ contact items (tagged with _is_rfq=True);
+        # they are merged and sorted newest-first in the template.
         _CALLS = frozenset({ActivityType.CALL_LOGGED})
-        _EMAILS = frozenset({ActivityType.EMAIL_SENT, ActivityType.EMAIL_RECEIVED, ActivityType.RFQ_SENT})
+        _EMAILS = frozenset({ActivityType.EMAIL_SENT, ActivityType.EMAIL_RECEIVED})
         _MEETINGS = frozenset({ActivityType.TEAMS_MESSAGE, ActivityType.WECHAT_MESSAGE, ActivityType.MEETING})
         _NOTES = frozenset({ActivityType.NOTE, ActivityType.SALES_NOTE, ActivityType.CONTACT_NOTE})
 
         sections: dict[str, list] = {"Calls": [], "Emails": [], "Meetings": [], "Notes": [], "Other": []}
+
+        # Wrap RFQ contacts as tagged dicts so the template can branch on _is_rfq
+        for c in rfq_contacts:
+            sections["Emails"].append({"_is_rfq": True, "raw": c, "req": req_map.get(c.requisition_id)})
+
         for a in activities:
             at = a.activity_type
             if at in _CALLS:
@@ -5991,6 +6019,22 @@ async def company_tab(
             else:
                 sections["Other"].append(a)
 
+        # Sort Emails section: RFQ dicts use raw.created_at; ActivityLog uses created_at
+        import datetime as _dt_mod
+
+        _epoch = _dt_mod.datetime(1970, 1, 1, tzinfo=_dt_mod.timezone.utc)
+
+        def _email_ts(item):
+            if isinstance(item, dict):
+                c = item["raw"]
+                return c.created_at or _epoch
+            return item.created_at or _epoch
+
+        sections["Emails"].sort(key=_email_ts, reverse=True)
+
+        # has_any_activity: drives empty-state vs. sections in the template
+        has_any_activity = bool(activities) or any(sections.values())
+
         ctx = _base_ctx(request, user, "customers")
         ctx.update(
             {
@@ -5998,6 +6042,8 @@ async def company_tab(
                 "activities": activities,
                 "sections": sections,
                 "activities_truncated": activities_truncated,
+                "req_map": req_map,
+                "has_any_activity": has_any_activity,
             }
         )
         return template_response("htmx/partials/customers/tabs/activity_tab.html", ctx)

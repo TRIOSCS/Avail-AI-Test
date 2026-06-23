@@ -1258,7 +1258,8 @@ class TestUnifiedActivityTimeline:
     def test_activity_log_events_appear_in_sections(self, client: TestClient, db_session: Session, test_user: User):
         """Activity tab shows ActivityLog entries in their type sections.
 
-        Quotes and RFQ contacts are NOT shown — they belong to their own tabs.
+        RFQ contacts appear in the Emails section (canonical RFQ source). Quotes are NOT
+        shown — they belong in the Quotes tab.
         """
         from decimal import Decimal
 
@@ -1269,7 +1270,7 @@ class TestUnifiedActivityTimeline:
         co = self._make_company(db_session, "MergeTest Co")
         req = self._make_requisition(db_session, co)
 
-        # RFQ contact and quote created — should NOT appear in activity tab
+        # RFQ contact — should appear in Emails section (canonical RFQ source)
         rfq = RfqContact(
             requisition_id=req.id,
             user_id=test_user.id,
@@ -1280,6 +1281,7 @@ class TestUnifiedActivityTimeline:
         )
         db_session.add(rfq)
 
+        # Quote — should NOT appear (own tab)
         q = Quote(
             requisition_id=req.id,
             quote_number="QT-2026-001",
@@ -1311,9 +1313,10 @@ class TestUnifiedActivityTimeline:
 
         # Activity log entry rendered in Emails section
         assert "Email Received" in html, "ActivityLog entry missing from timeline"
-        # Quote and RFQ are intentionally absent from this tab
+        # RFQ contact appears in Emails section (canonical source)
+        assert "Acme Vendor" in html, "RFQ contact must appear in Emails section"
+        # Quote is absent from this tab
         assert "QT-2026-001" not in html, "Quote must not appear in activity tab"
-        assert "Acme Vendor" not in html, "RFQ contact must not appear in activity tab"
 
     def test_quotes_absent_from_activity_tab(self, client: TestClient, db_session: Session, test_user: User):
         """Quotes are absent from the activity tab — they belong in the Quotes tab.
@@ -2972,7 +2975,7 @@ class TestCRMMacroDedup:
     ):
         """The activity tab renders ActivityLog rows via canonical activity_icon macro.
 
-        Quotes and RFQ contacts are absent — only ActivityLog entries appear.
+        RFQ contacts appear in the Emails section; Quotes are absent.
         """
         from decimal import Decimal
 
@@ -3021,8 +3024,8 @@ class TestCRMMacroDedup:
         assert "Email Received" in html
         # Canonical activity_icon emits the h-8 w-8 rounded icon circle.
         assert "h-8 w-8" in html
-        # Quotes and RFQ contacts not in activity tab
-        assert "Badge Vendor" not in html, "RFQ contact must not appear in activity tab"
+        # RFQ contact appears in Emails section; Quote is absent (own tab)
+        assert "Badge Vendor" in html, "RFQ contact must appear in Emails section"
         assert "QT-MD-AT" not in html, "Quote must not appear in activity tab"
 
 
