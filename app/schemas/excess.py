@@ -207,6 +207,73 @@ class ExcessStatsResponse(BaseModel):
     awarded_items: int = 0
 
 
+# ── ExcessOffer (inbound broker offers — Trading module) ─────────────
+
+
+class ExcessOfferLineCreate(BaseModel):
+    """One part line within a per_line offer. unit_price optional (price-TBD allowed)."""
+
+    mpn_raw: str
+    quantity: int = Field(ge=1)
+    unit_price: float | None = Field(default=None, ge=0)
+    lead_time_days: int | None = Field(default=None, ge=0)
+    terms_text: str | None = None
+    excess_line_item_id: int | None = None
+
+    @field_validator("mpn_raw")
+    @classmethod
+    def mpn_not_blank(cls, v: str) -> str:
+        return _strip_not_blank(v, "mpn_raw")
+
+
+class ExcessOfferLineResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    offer_id: int
+    excess_line_item_id: int | None = None
+    mpn_raw: str
+    quantity: int
+    unit_price: float | None = None
+    lead_time_days: int | None = None
+    terms_text: str | None = None
+    match_status: str
+
+
+class ExcessOfferCreate(BaseModel):
+    """Request body for submitting an inbound offer — excess_list_id from URL path.
+
+    scope='per_line' carries `lines`; scope='take_all' carries an optional lump
+    `take_all_total_price` and no lines.
+    """
+
+    scope: Literal["per_line", "take_all"] = "per_line"
+    take_all_total_price: float | None = Field(default=None, ge=0)
+    valid_until: datetime | None = None
+    notes: str | None = None
+    offerer_company_id: int | None = None
+    offerer_vendor_card_id: int | None = None
+    lines: list[ExcessOfferLineCreate] = Field(default_factory=list)
+
+
+class ExcessOfferResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    excess_list_id: int
+    submitted_by: int
+    offerer_company_id: int | None = None
+    offerer_vendor_card_id: int | None = None
+    scope: str
+    take_all_total_price: float | None = None
+    valid_until: datetime | None = None
+    status: str
+    notes: str | None = None
+    lines: list[ExcessOfferLineResponse] = Field(default_factory=list)
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
 # ── Email Solicitation Request ──────────────────────────────────────
 
 
