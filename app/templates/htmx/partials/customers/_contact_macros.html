@@ -425,6 +425,21 @@
     </div>
     {# Per-contact cadence clocks — honest empty states for NULL timestamps #}
     {{ contact_clocks(contact, now_utc) }}
+
+    {# Additional details — custom key:value fields (WS3), compact inline #}
+    {% if contact.custom_fields %}
+    <div class='mt-2 pt-2 border-t border-gray-100'>
+      <p class='text-xs font-medium text-gray-400 uppercase tracking-wide mb-1'>Additional details</p>
+      <dl class='space-y-0.5'>
+        {% for lbl, val in contact.custom_fields.items() %}
+        <div class='flex items-start gap-2'>
+          <dt class='text-xs font-medium text-gray-700 flex-shrink-0 w-24 truncate' title='{{ lbl }}'>{{ lbl }}</dt>
+          <dd class='text-xs text-gray-600 min-w-0 break-words'>{{ val }}</dd>
+        </div>
+        {% endfor %}
+      </dl>
+    </div>
+    {% endif %}
   </div>
 {% endif %}
 {% endmacro %}

@@ -7102,6 +7102,154 @@ async def contact_field_post(
     )
 
 
+# ── Custom Fields — Account + Contact (WS3) ────────────────────────────────
+
+
+def _render_custom_fields(request: Request, entity: str, obj, company_id: int):
+    """Render the _custom_fields.html partial for a company or contact."""
+    return template_response(
+        "htmx/partials/customers/_custom_fields.html",
+        {"request": request, "entity": entity, "obj": obj, "company_id": company_id},
+    )
+
+
+@router.post("/v2/partials/customers/{company_id}/custom-fields", response_class=HTMLResponse)
+async def company_add_custom_field(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Add or overwrite a label:value pair in company.custom_fields."""
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+    is_admin = user.role == UserRole.ADMIN
+    if not is_admin and company.account_owner_id != user.id:
+        raise HTTPException(403, "Only the owner or an admin can edit this account")
+    form = await request.form()
+    label = (form.get("label") or "").strip()
+    value = (form.get("value") or "").strip()
+    if not label:
+        raise HTTPException(400, "label is required")
+    existing = company.custom_fields or {}
+    updated = {**existing, label: value}
+    company.custom_fields = updated
+    from sqlalchemy.orm.attributes import flag_modified
+
+    flag_modified(company, "custom_fields")
+    db.commit()
+    db.refresh(company)
+    logger.info("Company {} custom field '{}' set by {}", company_id, label, user.email)
+    return _render_custom_fields(request, "company", company, company_id)
+
+
+@router.delete(
+    "/v2/partials/customers/{company_id}/custom-fields/{label:path}",
+    response_class=HTMLResponse,
+)
+async def company_delete_custom_field(
+    request: Request,
+    company_id: int,
+    label: str,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Remove a label from company.custom_fields."""
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+    is_admin = user.role == UserRole.ADMIN
+    if not is_admin and company.account_owner_id != user.id:
+        raise HTTPException(403, "Only the owner or an admin can edit this account")
+    existing = dict(company.custom_fields or {})
+    existing.pop(label, None)
+    company.custom_fields = existing
+    from sqlalchemy.orm.attributes import flag_modified
+
+    flag_modified(company, "custom_fields")
+    db.commit()
+    db.refresh(company)
+    logger.info("Company {} custom field '{}' removed by {}", company_id, label, user.email)
+    return _render_custom_fields(request, "company", company, company_id)
+
+
+@router.post(
+    "/v2/partials/customers/{company_id}/contacts/{contact_id}/custom-fields",
+    response_class=HTMLResponse,
+)
+async def contact_add_custom_field(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Add or overwrite a label:value pair in contact.custom_fields.
+
+    IDOR-safe: verifies the contact belongs to a site under the path company.
+    """
+    contact = (
+        db.query(SiteContact)
+        .join(CustomerSite)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+    form = await request.form()
+    label = (form.get("label") or "").strip()
+    value = (form.get("value") or "").strip()
+    if not label:
+        raise HTTPException(400, "label is required")
+    existing = contact.custom_fields or {}
+    updated = {**existing, label: value}
+    contact.custom_fields = updated
+    from sqlalchemy.orm.attributes import flag_modified
+
+    flag_modified(contact, "custom_fields")
+    db.commit()
+    db.refresh(contact)
+    logger.info("Contact {} custom field '{}' set by {}", contact_id, label, user.email)
+    return _render_custom_fields(request, "contact", contact, company_id)
+
+
+@router.delete(
+    "/v2/partials/customers/{company_id}/contacts/{contact_id}/custom-fields/{label:path}",
+    response_class=HTMLResponse,
+)
+async def contact_delete_custom_field(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    label: str,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Remove a label from contact.custom_fields.
+
+    IDOR-safe: verifies the contact belongs to a site under the path company.
+    """
+    contact = (
+        db.query(SiteContact)
+        .join(CustomerSite)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+    existing = dict(contact.custom_fields or {})
+    existing.pop(label, None)
+    contact.custom_fields = existing
+    from sqlalchemy.orm.attributes import flag_modified
+
+    flag_modified(contact, "custom_fields")
+    db.commit()
+    db.refresh(contact)
+    logger.info("Contact {} custom field '{}' removed by {}", contact_id, label, user.email)
+    return _render_custom_fields(request, "contact", contact, company_id)
+
+
 # ── Merge Duplicate ─────────────────────────────────────────────────────────
 
 

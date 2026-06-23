@@ -56,3 +56,4 @@
 129 worktree-resell-trading-module CUTOVER (Chunk D): DROP bids + bid_solicitations (old excess concept fully replaced by ExcessOffer/CustomerBid); downgrade recreates both tables structure-only (schema-reversible, no data restore); RE-CHAINED onto 128_bid_back_schema
 130 feat/crm-phone-matching normalized_phone (E.164) columns + indexes on Company.phone / SiteContact.phone / CustomerSite.contact_phone(_2) / VendorContact.phone + normalized_phones JSON on VendorCard.phones; backfill via phonenumbers
 131 feat/tbf-browser-worker tbf_search_queue + tbf_search_log + tbf_worker_status (singleton id=1 seeded); RE-NUMBERED 130->131 (feat/crm-phone-matching took 130, landed on main first); RE-CHAINED onto 130_phone_normalization; single head verified via `alembic heads`
+132 feat/crm-editability custom_fields JSONB on companies + site_contacts
