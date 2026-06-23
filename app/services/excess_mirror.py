@@ -109,12 +109,16 @@ def ensure_virtual_requirement(db: Session, excess_list: ExcessList) -> Requirem
     return requirement
 
 
-def _find_mirror(db: Session, source_company_id: int | None, material_card_id: int) -> Sighting | None:
+def _find_mirror(
+    db: Session, source_company_id: int | None, material_card_id: int, requirement_id: int
+) -> Sighting | None:
     """Find the existing mirrored Sighting for the upsert key.
 
-    Upsert key is ``(source_company_id, material_card_id)`` scoped to
+    Upsert key is ``(source_company_id, material_card_id, requirement_id)`` scoped to
     ``source_type='customer_excess'`` — the explicit key that sidesteps the connector-
-    aware delete-by-(requirement_id, source_type) dedup trap.
+    aware delete-by-(requirement_id, source_type) dedup trap. Including ``requirement_id``
+    (one per list's virtual requirement) ensures two lists for the same company+part
+    each keep their own distinct Sighting rather than collapsing into one row.
     """
     return (
         db.query(Sighting)
@@ -122,6 +126,7 @@ def _find_mirror(db: Session, source_company_id: int | None, material_card_id: i
             Sighting.source_type == "customer_excess",
             Sighting.source_company_id == source_company_id,
             Sighting.material_card_id == material_card_id,
+            Sighting.requirement_id == requirement_id,
         )
         .order_by(Sighting.id.asc())
         .first()
@@ -177,7 +182,7 @@ def mirror_line(db: Session, line: ExcessLineItem) -> Sighting | None:
         "date_code": line.date_code,
     }
 
-    existing = _find_mirror(db, excess_list.company_id, line.material_card_id)
+    existing = _find_mirror(db, excess_list.company_id, line.material_card_id, requirement.id)
     if existing is None:
         sighting = sighting_from_row(requirement.id, row)
     else:
@@ -216,11 +221,12 @@ def retire_line(db: Session, line: ExcessLineItem) -> None:
     """
     if line.material_card_id is None:
         return
-    company_id = line.excess_list.company_id if line.excess_list else None
-    if company_id is None:
-        excess_list = db.get(ExcessList, line.excess_list_id)
-        company_id = excess_list.company_id if excess_list else None
-    existing = _find_mirror(db, company_id, line.material_card_id)
+    excess_list = line.excess_list or db.get(ExcessList, line.excess_list_id)
+    if excess_list is None:
+        return
+    company_id = excess_list.company_id
+    requirement = ensure_virtual_requirement(db, excess_list)
+    existing = _find_mirror(db, company_id, line.material_card_id, requirement.id)
     if existing is not None:
         db.delete(existing)
         db.flush()

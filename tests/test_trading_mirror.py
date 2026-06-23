@@ -231,6 +231,39 @@ def test_same_company_two_lists_distinct_material_cards_coexist(db_session: Sess
     assert len(cards) == 2
 
 
+def test_same_company_same_part_two_lists_no_collapse(db_session: Session):
+    """SAME company, SAME part on TWO different published lists → TWO distinct
+    Sightings.
+
+    Fix: upsert key now includes requirement_id (one per list's virtual requirement)
+    so a second list with the same (company, material_card) does NOT overwrite or
+    collapse the first list's Sighting. Each list's qty is preserved independently.
+    """
+    company = _make_company(db_session)
+    owner = _make_user(db_session)
+    # Two lists for the SAME company with the SAME part number.
+    el1 = _make_list_with_lines(db_session, owner, company, ["LM358N"])
+    el2 = _make_list_with_lines(db_session, owner, company, ["LM358N"])
+
+    # Give them different quantities so we can tell them apart.
+    _lines(db_session, el1)[0].quantity = 50
+    _lines(db_session, el2)[0].quantity = 75
+    db_session.commit()
+
+    sync_list_mirror(db_session, el1)
+    sync_list_mirror(db_session, el2)
+    db_session.commit()
+
+    rows = _customer_excess_sightings(db_session, company.id)
+    # Must be TWO rows — one per list's virtual requirement — not one collapsed row.
+    assert len(rows) == 2, f"Expected 2 sightings (one per list), got {len(rows)}"
+    qtys = {r.qty_available for r in rows}
+    assert qtys == {50, 75}, f"Expected qtys {{50, 75}}, got {qtys}"
+    # Each row must be on a DIFFERENT virtual requirement.
+    req_ids = {r.requirement_id for r in rows}
+    assert len(req_ids) == 2, "Both sightings share the same requirement_id — upsert key is still too broad"
+
+
 # ---------------------------------------------------------------------------
 # retire_line — award / withdraw / qty→0
 # ---------------------------------------------------------------------------
