@@ -52,3 +52,4 @@
 125 worktree-enrichment-blending-explorium-clay companies+vendor_cards: ticker/naics/revenue_range/enrichment_provenance; chains onto 124_offer_status_constraint
 126 worktree-resell-trading-module ADDITIVE trading schema: create excess_offers + excess_offer_lines, add excess_line_items.{material_card_id,best_offer_unit_price,best_offer_id,offer_count} + excess_lists.version; NO drops (Bid/BidSolicitation retired in a later cutover chunk); chains onto 125_enrichment_provenance
 127 worktree-resell-trading-module ADDITIVE bid-back schema (Chunk E): create customer_bids + customer_bid_lines, add excess_lists.{open_at,close_at}; NO drops; chains onto 126_trading_additive_schema
+128 worktree-resell-trading-module CUTOVER (Chunk D): DROP bids + bid_solicitations (old excess concept fully replaced by ExcessOffer/CustomerBid); downgrade recreates both tables structure-only (schema-reversible, no data restore); chains onto 127_bid_back_schema
