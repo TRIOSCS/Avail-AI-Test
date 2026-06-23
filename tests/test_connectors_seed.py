@@ -1,8 +1,10 @@
 """Tests for Task 2: catalog additions + prune of dead providers.
+Task 4b: expands prune to all 9 dead names (aliexpress/arrow/avnet/partfuse/rs_components/
+         siliconexpert/winsource/rocketreach_enrichment/clearbit_enrichment).
 
 Verifies:
 - api_sources.json contains ai_live_web + sam_gov_enrichment and NOT rocketreach/clearbit
-- seed_api_sources() prunes dead rows and leaves browser-worker rows intact
+- seed_api_sources() prunes all 9 dead rows and leaves planned + real rows intact
 
 Called by: pytest
 Depends on: app/data/api_sources.json, app.startup.seed_api_sources, app.models.ApiSource
@@ -12,6 +14,18 @@ import json
 from unittest.mock import patch
 
 from app.models import ApiSource
+
+_ALL_PRUNE_NAMES = [
+    "aliexpress",
+    "arrow",
+    "avnet",
+    "partfuse",
+    "rs_components",
+    "siliconexpert",
+    "winsource",
+    "rocketreach_enrichment",
+    "clearbit_enrichment",
+]
 
 
 def test_catalog_has_new_sources():
@@ -65,3 +79,52 @@ def test_seed_prunes_dead_and_keeps_workers(db_session):
     assert "icsource" in names, "icsource (browser worker) must survive"
     assert "ai_live_web" in names, "ai_live_web must be seeded"
     assert "sam_gov_enrichment" in names, "sam_gov_enrichment must be seeded"
+
+
+def test_seed_prunes_all_9_dead_names(db_session):
+    """seed_api_sources() must delete all 9 dead rows; planned+real rows survive."""
+    # Pre-seed all 9 dead rows
+    for dead_name in _ALL_PRUNE_NAMES:
+        db_session.add(
+            ApiSource(
+                name=dead_name,
+                display_name=dead_name.replace("_", " ").title(),
+                category="enrichment",
+                source_type="enrichment",
+                credentials={},
+            )
+        )
+    # Also pre-seed a planned row and a real row that must survive
+    db_session.add(
+        ApiSource(
+            name="future",
+            display_name="Future Electronics",
+            category="api",
+            source_type="broker",
+            credentials={},
+        )
+    )
+    db_session.add(
+        ApiSource(
+            name="icsource",
+            display_name="IC Source",
+            category="scraper",
+            source_type="broker",
+            credentials={},
+        )
+    )
+    db_session.commit()
+
+    with (
+        patch("app.startup.SessionLocal", return_value=db_session),
+        patch.object(db_session, "close"),
+    ):
+        from app.startup import seed_api_sources
+
+        seed_api_sources()
+
+    names = {s.name for s in db_session.query(ApiSource).all()}
+    for dead in _ALL_PRUNE_NAMES:
+        assert dead not in names, f"Dead source {dead!r} should have been pruned"
+    assert "future" in names, "planned source 'future' must survive"
+    assert "icsource" in names, "browser-worker 'icsource' must survive"

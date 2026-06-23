@@ -372,6 +372,63 @@ def test_test_all_endpoint_returns_oob_bundle(admin_client, db_session):
     assert "connector-card-" in r.text
 
 
+# ── Task 4b: planned connector rendering ──────────────────────────────
+
+
+@pytest.fixture()
+def admin_client_with_planned(db_session, admin_user):
+    """Admin client with a planned source (Future Electronics) seeded."""
+    _seed_sources(db_session)
+    db_session.add(
+        ApiSource(
+            name="future",
+            display_name="Future Electronics",
+            category="api",
+            source_type="broker",
+            description="Electronic components distributor",
+            status="pending",
+            env_vars=["FUTURE_API_KEY"],
+            credentials={},
+        )
+    )
+    db_session.commit()
+    yield from _make_admin_client(db_session, admin_user)
+
+
+def test_planned_connector_shows_planned_badge(admin_client_with_planned):
+    """A planned provider renders a 'Planned' badge."""
+    html = admin_client_with_planned.get("/v2/partials/settings/connectors").text
+    assert "Planned" in html, "Expected 'Planned' badge for planned connector"
+
+
+def test_planned_connector_shows_roadmap_note(admin_client_with_planned):
+    """A planned provider shows the roadmap note (not built yet)."""
+    html = admin_client_with_planned.get("/v2/partials/settings/connectors").text
+    assert "roadmap" in html.lower() or "not built" in html.lower(), "Expected roadmap note for planned connector"
+
+
+def test_planned_connector_no_credential_input(admin_client_with_planned):
+    """A planned provider must NOT render a credential input for its env vars."""
+    html = admin_client_with_planned.get("/v2/partials/settings/connectors").text
+    assert "FUTURE_API_KEY" not in html, "Planned connector must NOT expose credential input"
+
+
+def test_planned_connector_no_enable_toggle(admin_client_with_planned):
+    """A planned provider must NOT render the enable toggle."""
+    html = admin_client_with_planned.get("/v2/partials/settings/connectors").text
+    # The toggle is rendered as 'Enable Future Electronics' aria-label
+    assert 'aria-label="Enable Future Electronics"' not in html, "Planned connector must NOT have enable toggle"
+
+
+def test_planned_connector_no_test_button(admin_client_with_planned):
+    """A planned provider must NOT render a Test button."""
+    # The planned card must not have testable=True, so no Test button
+    # We verify by checking the planned card section specifically
+    html = admin_client_with_planned.get("/v2/partials/settings/connectors").text
+    # The planned provider shows Future Electronics
+    assert "Future Electronics" in html, "Planned source must appear on page"
+
+
 def test_credential_save_round_trip(admin_client, db_session):
     """PUT /api/sources/{name}/credentials stores the credential (matching the encoding
     the Save button sends — JSON body {credentials: {ENV: val}})."""

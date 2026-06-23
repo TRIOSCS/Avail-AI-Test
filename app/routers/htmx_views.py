@@ -10913,8 +10913,12 @@ def _enrich_source(source, db) -> dict:
     else:
         keyless_note = ""
 
-    # Testable = has some form of access
-    testable = bool(credential_set or oauth_connected or keyless)
+    # Planned connectors are never testable — they have no implementation yet.
+    if ct == "planned":
+        testable = False
+    else:
+        # Testable = has some form of access
+        testable = bool(credential_set or oauth_connected or keyless)
 
     return {
         "id": source.id,

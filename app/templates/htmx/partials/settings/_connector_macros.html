@@ -3,7 +3,9 @@
   Connectors settings tab. Imported by connectors.html, _connector_card_partial.html
   and the Test-all OOB bundle so every render path shares one card shape.
 
-  Branches on s.control_type ∈ {key, oauth_clay, multi_field, keyless, browser_login, scopes}.
+  Branches on s.control_type ∈ {key, oauth_clay, multi_field, keyless, browser_login, scopes, planned}.
+  Planned connectors (control_type == 'planned') render a muted read-only card with no
+  credential form, no enable toggle, and no Test button.
   Microcopy strings are verbatim from spec §14.4. Buttons size via .btn-md (never inline
   px/py — see test_inline_button_sizing_does_not_grow). Alpine attrs are single-quoted.
   Every hx-* control sets an explicit hx-target. Credential saves send a nested JSON body
@@ -13,12 +15,13 @@
 {# ── Status pill ─────────────────────────────────────────────────────── #}
 {% macro state_badge(s) %}
 {%- set _states = {
-  'live':           ('bg-green-100 text-green-800', 'bg-green-500', 'Live'),
-  'error':          ('bg-red-100 text-red-800',     'bg-red-500',   'Error'),
-  'off':            ('bg-gray-100 text-gray-600',   'bg-gray-400',  'Off'),
-  'needs_setup':    ('bg-amber-100 text-amber-800', 'bg-amber-500', 'Needs setup'),
-  'needs_reconnect':('bg-amber-100 text-amber-800', 'bg-amber-500', 'Needs reconnect'),
-  'untested':       ('bg-blue-100 text-blue-800',   'bg-blue-500',  'Untested'),
+  'live':           ('bg-green-100 text-green-800', 'bg-green-500',   'Live'),
+  'error':          ('bg-red-100 text-red-800',     'bg-red-500',     'Error'),
+  'off':            ('bg-gray-100 text-gray-600',   'bg-gray-400',    'Off'),
+  'needs_setup':    ('bg-amber-100 text-amber-800', 'bg-amber-500',   'Needs setup'),
+  'needs_reconnect':('bg-amber-100 text-amber-800', 'bg-amber-500',   'Needs reconnect'),
+  'untested':       ('bg-blue-100 text-blue-800',   'bg-blue-500',    'Untested'),
+  'planned':        ('bg-slate-100 text-slate-600', 'bg-slate-400',   'Planned'),
 } -%}
 {%- set _pill = _states.get(s.state, ('bg-gray-100 text-gray-600', 'bg-gray-400', s.state)) -%}
   <span class="inline-flex items-center gap-1.5 w-28 justify-center px-2 py-0.5 rounded-full text-xs font-medium {{ _pill[0] }}"
@@ -34,6 +37,7 @@
 {%- elif state == 'needs_setup' -%}Add credentials to turn this on
 {%- elif state == 'needs_reconnect' -%}Connection expired — reconnect
 {%- elif state == 'error' -%}Last check failed
+{%- elif state == 'planned' -%}Connector on the roadmap — not built yet
 {%- endif -%}
 {%- endmacro %}
 
@@ -108,6 +112,22 @@ hx-on::after-request='if(event.detail.successful){htmx.ajax("GET","/v2/partials/
 {# `oob=True` marks the root for an out-of-band swap (used by the Test-all bundle). #}
 {% macro connector_card(s, oob=False) %}
 <div id="connector-card-{{ s.id }}" class="card p-4 flex flex-col gap-3"{% if oob %} hx-swap-oob="true"{% endif %}>
+
+  {# ── Planned card: read-only, no controls ─────────────────────────── #}
+  {% if s.control_type == 'planned' %}
+  <div class="flex items-center gap-3 min-w-0">
+    {{ state_badge(s) }}
+    <div class="min-w-0">
+      <p class="text-sm font-medium text-gray-700 truncate">{{ s.display_name }}</p>
+      {% if s.description %}
+      <p class="text-xs text-gray-400 truncate">{{ s.description }}</p>
+      {% endif %}
+    </div>
+  </div>
+  <p class="text-xs text-slate-400">Connector on the roadmap — not built yet.</p>
+
+  {% else %}
+  {# ── Active card: toggle + test + credential controls ──────────────── #}
   <div class="flex items-center justify-between gap-4">
     <div class="flex items-center gap-3 min-w-0">
       {{ state_badge(s) }}
@@ -208,5 +228,6 @@ hx-on::after-request='if(event.detail.successful){htmx.ajax("GET","/v2/partials/
   {% if s.state == 'error' and s.last_error %}
   <p class="text-xs text-red-600">{{ s.last_error }}</p>
   {% endif %}
+  {% endif %}{# end planned/active branch #}
 </div>
 {% endmacro %}

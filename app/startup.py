@@ -1088,8 +1088,19 @@ def seed_api_sources() -> None:
             db.delete(old_newark)
             logger.info("Removed duplicate 'newark' source (merged into 'element14')")
 
-        # Prune dead providers no longer in the catalog
-        for dead in ("rocketreach_enrichment", "clearbit_enrichment"):
+        # Prune dead providers no longer in the catalog (idempotent — safe to re-run)
+        _PRUNE_NAMES = (
+            "aliexpress",
+            "arrow",
+            "avnet",
+            "partfuse",
+            "rs_components",
+            "siliconexpert",
+            "winsource",
+            "rocketreach_enrichment",
+            "clearbit_enrichment",
+        )
+        for dead in _PRUNE_NAMES:
             row = db.query(ApiSource).filter_by(name=dead).first()
             if row:
                 db.delete(row)

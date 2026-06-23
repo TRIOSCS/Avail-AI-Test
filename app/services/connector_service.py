@@ -26,9 +26,21 @@ _MANUAL = {"stock_list"}
 _COMMS_NAMES = {"eight_by_eight", "email_mining"}
 _COMMS_CATEGORIES = {"email", "auth", "platform", "notifications", "voip", "comms"}
 
+# Connectors on the roadmap — built-not-yet. Render as "Planned" cards with no
+# credential form, no enable toggle, and no Test button.
+_PLANNED = {"findchips", "future", "heilind", "lcsc", "rochester", "thebrokersite", "verical"}
+
+
+def is_planned(source) -> bool:
+    """Return True when the source is a roadmap connector (not yet built)."""
+    return source.name in _PLANNED
+
 
 def control_type(source) -> str:
     name = source.name
+    # Planned check first — must take priority over key/keyless logic.
+    if name in _PLANNED:
+        return "planned"
     if name in _OAUTH_CLAY:
         return "oauth_clay"
     if name in _MULTI_FIELD:
@@ -64,6 +76,9 @@ def is_keyless(source) -> bool:
 def connector_state(
     source, *, credential_set: bool, oauth_connected: bool, needs_reconnect: bool, keyless: bool
 ) -> str:
+    # Planned connectors surface as a distinct "planned" state — no other checks apply.
+    if control_type(source) == "planned":
+        return "planned"
     if needs_reconnect:
         return "needs_reconnect"
     has_access = credential_set or oauth_connected or keyless

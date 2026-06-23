@@ -145,3 +145,56 @@ def test_state_clay_connected_live():
         )
         == "live"
     )
+
+
+# ── Task 4b: planned roadmap state ───────────────────────────────────
+
+_PLANNED_NAMES = ["findchips", "future", "heilind", "lcsc", "rochester", "thebrokersite", "verical"]
+
+
+def test_control_type_planned_for_all_planned_names():
+    """control_type() returns 'planned' for every name in _PLANNED."""
+    for name in _PLANNED_NAMES:
+        result = cs.control_type(_src(name=name, env_vars=["SOME_KEY"]))
+        assert result == "planned", f"Expected 'planned' for {name!r}, got {result!r}"
+
+
+def test_control_type_planned_takes_priority_over_key():
+    """Planned check must fire BEFORE keyless/key logic, even when env_vars is set."""
+    for name in _PLANNED_NAMES:
+        result = cs.control_type(_src(name=name, env_vars=["FUTURE_API_KEY"]))
+        assert result == "planned"
+
+
+def test_control_type_planned_no_env_vars():
+    """Planned check fires even when env_vars is empty."""
+    for name in _PLANNED_NAMES:
+        result = cs.control_type(_src(name=name, env_vars=[]))
+        assert result == "planned"
+
+
+def test_connector_state_planned():
+    """connector_state() returns 'planned' when control_type is 'planned'."""
+    for name in _PLANNED_NAMES:
+        src = _src(name=name, env_vars=[], is_active=False, status="pending")
+        result = cs.connector_state(
+            src,
+            credential_set=False,
+            oauth_connected=False,
+            needs_reconnect=False,
+            keyless=False,
+        )
+        assert result == "planned", f"Expected 'planned' for {name!r}, got {result!r}"
+
+
+def test_connector_state_planned_ignores_active_flag():
+    """Planned state must win even if is_active=True."""
+    src = _src(name="future", env_vars=[], is_active=True, status="live")
+    result = cs.connector_state(
+        src,
+        credential_set=True,
+        oauth_connected=False,
+        needs_reconnect=False,
+        keyless=False,
+    )
+    assert result == "planned"
