@@ -295,7 +295,159 @@ def test_offer_compare_renders(client, db_session, trader_user, posted_list, tes
         f"/api/trading/{posted_list.id}/offers",
         data={"scope": "per_line", "mpn_raw": line.part_number, "quantity": "40", "unit_price": "9.99"},
     )
-    resp = client.get(f"/v2/partials/trading/{posted_list.id}/lines/{line.id}/offers")
+    # Owner (trader_user) can access the comparison.
+    from app.dependencies import require_user
+    from app.main import app
+
+    app.dependency_overrides[require_user] = lambda: trader_user
+    try:
+        resp = client.get(f"/v2/partials/trading/{posted_list.id}/lines/{line.id}/offers")
+        assert resp.status_code == 200
+        assert line.part_number in resp.text
+        assert "Best" in resp.text
+    finally:
+        app.dependency_overrides.pop(require_user, None)
+
+
+# ── Security / authorization tests ───────────────────────────────────
+
+
+@pytest.fixture()
+def draft_list(db_session: Session, trader_user: User, test_company: Company) -> ExcessList:
+    """A DRAFT list owned by trader_user — must NOT be visible to anyone else."""
+    el = ExcessList(
+        title="Private draft",
+        company_id=test_company.id,
+        owner_id=trader_user.id,
+        status="draft",
+        total_line_items=1,
+        created_at=__import__("datetime").datetime.now(__import__("datetime").timezone.utc),
+    )
+    db_session.add(el)
+    db_session.flush()
+    db_session.add(
+        ExcessLineItem(
+            excess_list_id=el.id,
+            part_number="DRAFT-PART-001",
+            quantity=10,
+        )
+    )
+    db_session.commit()
+    db_session.refresh(el)
+    return el
+
+
+def test_non_owner_draft_detail_404(client, draft_list, test_user):
+    """Non-owner GET on a DRAFT list → 404 (existence not revealed)."""
+    # The default client user (test_user, a buyer) is NOT the owner.
+    resp = client.get(f"/v2/partials/trading/{draft_list.id}")
+    assert resp.status_code == 404
+
+
+def test_non_owner_draft_lines_404(client, draft_list, test_user):
+    """Non-owner GET on draft list's lines tab → 404."""
+    resp = client.get(f"/v2/partials/trading/{draft_list.id}/lines")
+    assert resp.status_code == 404
+
+
+def test_non_owner_draft_offers_404(client, draft_list, test_user):
+    """Non-owner GET on draft list's offers tab → 404."""
+    resp = client.get(f"/v2/partials/trading/{draft_list.id}/offers")
+    assert resp.status_code == 404
+
+
+def test_non_owner_posted_list_200_no_offers_no_customer(client, db_session, posted_list, trader_user, test_user):
+    """Non-owner GET on a posted (collecting) list → 200, no offer data, no customer
+    name.
+
+    The default client user is test_user (buyer, NOT the owner). The list is in
+    COLLECTING status so it is visible, but offers and customer name are withheld.
+    """
+    # Confirm the default client user is NOT the owner.
+    assert test_user.id != trader_user.id
+
+    # Detail is visible (not 404/403).
+    resp = client.get(f"/v2/partials/trading/{posted_list.id}")
     assert resp.status_code == 200
-    assert line.part_number in resp.text
-    assert "Best" in resp.text
+    # Customer name must not leak to non-owner.
+    assert "Acme Electronics" not in resp.text
+
+    # Offers tab: 200 but no offer payloads.
+    resp = client.get(f"/v2/partials/trading/{posted_list.id}/offers")
+    assert resp.status_code == 200
+    # The is_owner=False path renders an empty offers view — no offer rows.
+    # The _offers.html template does not render offer rows when is_owner is False.
+    assert "Acme Electronics" not in resp.text
+
+
+def test_non_owner_add_line_403(client, posted_list, test_user):
+    """Non-owner POST add-line → 403."""
+    resp = client.post(
+        f"/api/trading/{posted_list.id}/lines",
+        data={"part_number": "HACK-001", "quantity": "1"},
+    )
+    assert resp.status_code == 403
+
+
+def test_non_owner_import_confirm_403(client, posted_list, test_user):
+    """Non-owner POST import-confirm → 403."""
+    import json
+
+    resp = client.post(
+        f"/api/trading/{posted_list.id}/import-confirm",
+        data={"rows_json": json.dumps([{"part_number": "HACK-002", "quantity": 1}])},
+    )
+    assert resp.status_code == 403
+
+
+def test_non_owner_line_offer_compare_403(client, db_session, posted_list, test_user):
+    """Non-owner GET line-offer-compare → 403 (comparison is owner-only)."""
+    line = db_session.query(ExcessLineItem).filter_by(excess_list_id=posted_list.id).first()
+    resp = client.get(f"/v2/partials/trading/{posted_list.id}/lines/{line.id}/offers")
+    assert resp.status_code == 403
+
+
+def test_owner_draft_detail_200(client, db_session, draft_list, trader_user):
+    """Owner GET on their own DRAFT list → 200 (owner always passes)."""
+    from app.dependencies import require_user
+    from app.main import app
+
+    app.dependency_overrides[require_user] = lambda: trader_user
+    try:
+        resp = client.get(f"/v2/partials/trading/{draft_list.id}")
+        assert resp.status_code == 200
+        assert "Private draft" in resp.text
+    finally:
+        app.dependency_overrides.pop(require_user, None)
+
+
+def test_owner_offers_tab_full_data(client, db_session, posted_list, trader_user, test_user):
+    """Owner GET on offers tab → 200 with full offer stack visible (regression guard).
+
+    The owner sees the per-line offer table with unit prices and broker labels. Non-
+    owners see only the "offers are private" message — the owner view must render the
+    actual offer rows, not that message.
+    """
+    from app.dependencies import require_user
+    from app.main import app
+
+    line = db_session.query(ExcessLineItem).filter_by(excess_list_id=posted_list.id).first()
+    # Submit an offer as the buyer (non-owner client).
+    client.post(
+        f"/api/trading/{posted_list.id}/offers",
+        data={"scope": "per_line", "mpn_raw": line.part_number, "quantity": "10", "unit_price": "5.00"},
+    )
+
+    # Now view the offers tab AS THE OWNER.
+    app.dependency_overrides[require_user] = lambda: trader_user
+    try:
+        resp = client.get(f"/v2/partials/trading/{posted_list.id}/offers")
+        assert resp.status_code == 200
+        body = resp.text
+        # Owner sees the offer table — the "offers are private" banner must NOT appear.
+        assert "Offers are private to the list owner" not in body
+        assert "offers are private" not in body.lower()
+        # The submitted part number should appear in the per-line offer table.
+        assert line.part_number in body
+    finally:
+        app.dependency_overrides.pop(require_user, None)

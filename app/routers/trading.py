@@ -45,11 +45,13 @@ router = APIRouter(tags=["trading"])
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
 ALLOWED_EXTENSIONS = {".csv", ".tsv", ".xlsx", ".xls"}
 
-# List statuses whose Sighting mirror is live (the deal is collecting offers).
+# List statuses whose Sighting mirror is live OR completed (deal visible to non-owners).
+# Drafts are excluded — only the owner may see a draft list; 404 for anyone else.
 _POSTED_STATUSES = (
     ExcessListStatus.OPEN,
     ExcessListStatus.COLLECTING,
     ExcessListStatus.BID_OUT,
+    ExcessListStatus.AWARDED,
 )
 # Offer statuses that count as a live, unactioned offer (triage glance).
 _ACTIVE_OFFER_STATUSES = (ExcessOfferStatus.OPEN, ExcessOfferStatus.LATE)
@@ -176,11 +178,25 @@ def _stat_strip(db: Session, user: User) -> dict:
 def _get_list_for_user(db: Session, list_id: int, user: User) -> tuple[ExcessList, bool]:
     """Fetch a list and decide whether *user* may see the seller's identity.
 
-    The owner always sees the real customer; everyone else gets the anonymized offerer-
-    facing view (spec §"Customer identity hiding").
+    The owner always sees the real customer; non-owners may only see the list when it is
+    in a posted status (open/collecting/bid_out/awarded) — drafts are private to the
+    owner (404, not 403, to avoid revealing the list's existence).
     """
     el = excess_service.get_excess_list(db, list_id)
-    return el, (el.owner_id == user.id)
+    is_owner = el.owner_id == user.id
+    if not is_owner and el.status not in {s.value for s in _POSTED_STATUSES}:
+        raise HTTPException(404, "List not found")
+    return el, is_owner
+
+
+def _require_owner(el: ExcessList, user: User) -> None:
+    """Raise 403 if *user* is not the list owner.
+
+    Used by mutation endpoints that only the owner may call (add-line, import-preview,
+    import-confirm). Mirrors the guard in trading_publish.
+    """
+    if el.owner_id != user.id:
+        raise HTTPException(403, "Only the list owner can edit it")
 
 
 def _detail_context(request: Request, db: Session, el: ExcessList, user: User) -> dict:
@@ -336,9 +352,33 @@ async def trading_offers(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Lazy Offers tab body — per-line offer stacks + pinned take-all banner."""
+    """Lazy Offers tab body — per-line offer stacks + pinned take-all banner.
+
+    Offers are the owner's private view — non-owners must not see other brokers' quotes.
+    If the requester is not the owner, render the "offers are private" state without
+    querying or passing any offer data.
+    """
     el, can_see_customer = _get_list_for_user(db, list_id, user)
+    is_owner = el.owner_id == user.id
     items = db.query(ExcessLineItem).filter_by(excess_list_id=el.id).order_by(ExcessLineItem.id).all()
+
+    if not is_owner:
+        # Non-owner: render an empty offers view — no offer data in the response.
+        return template_response(
+            "htmx/partials/trading/_offers.html",
+            {
+                "request": request,
+                "user": user,
+                "list": el,
+                "line_items": items,
+                "by_line": {it.id: [] for it in items},
+                "unmatched": [],
+                "take_all_offers": [],
+                "can_see_customer": False,
+                "is_owner": False,
+                "shape": "single" if len(items) == 1 else "table",
+            },
+        )
 
     take_all_offers = (
         db.query(ExcessOffer)
@@ -381,7 +421,7 @@ async def trading_offers(
             "unmatched": unmatched,
             "take_all_offers": take_all_offers,
             "can_see_customer": can_see_customer,
-            "is_owner": el.owner_id == user.id,
+            "is_owner": True,
             "shape": "single" if len(items) == 1 else "table",
         },
     )
@@ -397,10 +437,15 @@ async def trading_line_offer_compare(
 ):
     """Per-line offer comparison table (best highlighted + price-spread bar).
 
+    Owner-only: the comparison reveals all competing brokers' prices, so non-owners
+    receive 403 (not 404) to make the permission boundary explicit.
+
     Cloned from the quote-builder modal. NO auto-select — the trader eyeballs terms /
     lead before picking (spec §Offer-collection).
     """
-    el, _ = _get_list_for_user(db, list_id, user)
+    el, is_owner = _get_list_for_user(db, list_id, user)
+    if not is_owner:
+        raise HTTPException(403, "Offer comparison is only visible to the list owner")
     item = db.get(ExcessLineItem, line_id)
     if not item or item.excess_list_id != el.id:
         raise HTTPException(404, f"Line item {line_id} not found in list {list_id}")
@@ -521,6 +566,9 @@ async def trading_add_line(
 ):
     """Add a single line, resolve its MaterialCard, re-render the Lines tab."""
     el = excess_service.get_excess_list(db, list_id)
+    _require_owner(el, user)
+    if not excess_service.can_post(user):
+        raise HTTPException(403, "You do not have permission to post excess lists")
     from ..utils.normalization import normalize_mpn_key
 
     item = ExcessLineItem(
@@ -549,7 +597,10 @@ async def trading_import_preview(
     db: Session = Depends(get_db),
 ):
     """Parse an uploaded file and render the shared import preview grid."""
-    excess_service.get_excess_list(db, list_id)
+    el = excess_service.get_excess_list(db, list_id)
+    _require_owner(el, user)
+    if not excess_service.can_post(user):
+        raise HTTPException(403, "You do not have permission to post excess lists")
     filename = file.filename or ""
     if _file_extension(filename) not in ALLOWED_EXTENSIONS:
         raise HTTPException(400, f"Unsupported file type '{_file_extension(filename)}'")
@@ -581,6 +632,10 @@ async def trading_import_confirm(
     db: Session = Depends(get_db),
 ):
     """Confirm a previewed import, then re-render the Lines tab."""
+    el = excess_service.get_excess_list(db, list_id)
+    _require_owner(el, user)
+    if not excess_service.can_post(user):
+        raise HTTPException(403, "You do not have permission to post excess lists")
     try:
         rows = json.loads(rows_json)
     except (json.JSONDecodeError, ValueError) as exc:
