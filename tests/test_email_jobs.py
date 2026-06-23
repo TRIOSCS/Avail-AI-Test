@@ -82,8 +82,11 @@ class TestRegisterEmailJobs:
         scheduler = MagicMock()
         settings = _make_settings()
         register_email_jobs(scheduler, settings)
-        # Always registered: contact_status_compute, email_health, calendar_scan, sent_folder_scan
-        assert scheduler.add_job.call_count >= 4
+        # Always registered: contact_status_compute, email_health, scan_sent_folders
+        # calendar_scan is gated behind activity_tracking_enabled (FIX 3a)
+        assert scheduler.add_job.call_count >= 3
+        job_ids = [call.kwargs.get("id") for call in scheduler.add_job.call_args_list]
+        assert "calendar_scan" not in job_ids
 
     def test_register_activity_without_ownership(self):
         from app.jobs.email_jobs import register_email_jobs

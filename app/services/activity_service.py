@@ -94,6 +94,14 @@ def match_email_to_entity(email_addr: str, db: Session) -> dict | None:
     Returns {"type": "company"|"vendor", "id": int, "name": str} or None. Checks
     customer sites first, then vendor contacts, then vendor card email lists.
 
+    Resolution order (most-specific wins):
+      1. Exact SiteContact.email match (highest-confidence — personal address)
+      2. Exact CustomerSite.contact_email match
+      3. Exact VendorContact.email match
+      4. Domain → Company match; on multi-match fuzzy-scores against the email
+         local-part via fuzzy_score_vendor and picks the best-scoring entity.
+      5. Domain → VendorCard match; same fuzzy tie-break on multi-match.
+
     For customer-side matches also resolves the SiteContact whose email equals the
     address and includes site_contact_id in the result (None when no contact found).
     """
@@ -101,8 +109,31 @@ def match_email_to_entity(email_addr: str, db: Session) -> dict | None:
         return None
     email_lower = email_addr.strip().lower()
     domain = email_lower.split("@")[-1] if "@" in email_lower else None
+    local_part = email_lower.split("@")[0] if "@" in email_lower else email_lower
 
-    # 1. Check customer_sites.contact_email (exact match)
+    # 1. Exact SiteContact.email match — resolves directly to company without
+    #    needing an intermediate CustomerSite lookup.
+    sc_exact = (
+        db.query(SiteContact)
+        .join(CustomerSite, SiteContact.customer_site_id == CustomerSite.id)
+        .filter(
+            func.lower(SiteContact.email) == email_lower,
+            CustomerSite.is_active.is_(True),
+        )
+        .first()
+    )
+    if sc_exact:
+        site = db.get(CustomerSite, sc_exact.customer_site_id)
+        if site:
+            return {
+                "type": "company",
+                "id": site.company_id,
+                "name": site.site_name,
+                "site_id": site.id,
+                "site_contact_id": sc_exact.id,
+            }
+
+    # 2. Exact CustomerSite.contact_email match
     site = (
         db.query(CustomerSite)
         .filter(
@@ -121,32 +152,41 @@ def match_email_to_entity(email_addr: str, db: Session) -> dict | None:
             "site_contact_id": sc_id,
         }
 
-    # 2. Check vendor_contacts table (exact match)
+    # 3. Exact VendorContact.email match
     vc = db.query(VendorContact).filter(func.lower(VendorContact.email) == email_lower).first()
     if vc:
         card = db.get(VendorCard, vc.vendor_card_id)
         if card:
             return {"type": "vendor", "id": card.id, "name": card.display_name, "vendor_contact_id": vc.id}
 
-    # 3. Domain match against companies
-    if domain and domain not in _GENERIC_DOMAINS:
-        company = db.query(Company).filter(func.lower(Company.domain) == domain, Company.is_active.is_(True)).first()
-        if company:
-            sc_id = _resolve_site_contact(email_lower, company.id, None, db)
-            return {"type": "company", "id": company.id, "name": company.name, "site_contact_id": sc_id}
+    if not domain or domain in _GENERIC_DOMAINS:
+        return None
 
-    # 4. Domain match against vendor_cards
-    if domain and domain not in _GENERIC_DOMAINS:
-        vendor = (
-            db.query(VendorCard)
-            .filter(
-                func.lower(VendorCard.domain) == domain,
-                VendorCard.is_blacklisted.is_(False),
-            )
-            .first()
+    # 4. Domain match against companies — fuzzy tie-break when multiple match.
+    companies = db.query(Company).filter(func.lower(Company.domain) == domain, Company.is_active.is_(True)).all()
+    if companies:
+        from app.vendor_utils import fuzzy_score_vendor
+
+        best = max(companies, key=lambda c: fuzzy_score_vendor(local_part, c.name))
+        sc_id = _resolve_site_contact(email_lower, best.id, None, db)
+        return {"type": "company", "id": best.id, "name": best.name, "site_contact_id": sc_id}
+
+    # 5. Domain match against vendor_cards — fuzzy tie-break when multiple match.
+    vendors = (
+        db.query(VendorCard)
+        .filter(
+            func.lower(VendorCard.domain) == domain,
+            VendorCard.is_blacklisted.is_(False),
         )
-        if vendor:
-            return {"type": "vendor", "id": vendor.id, "name": vendor.display_name}
+        .all()
+    )
+    if vendors:
+        if len(vendors) == 1:
+            return {"type": "vendor", "id": vendors[0].id, "name": vendors[0].display_name}
+        from app.vendor_utils import fuzzy_score_vendor
+
+        best = max(vendors, key=lambda v: fuzzy_score_vendor(local_part, v.display_name))
+        return {"type": "vendor", "id": best.id, "name": best.display_name}
 
     return None
 
