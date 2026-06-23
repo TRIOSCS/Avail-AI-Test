@@ -31,13 +31,19 @@ from fastapi.responses import HTMLResponse, Response
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from ..constants import ExcessListStatus, ExcessOfferScope, ExcessOfferStatus
+from ..constants import (
+    ExcessListStatus,
+    ExcessOfferScope,
+    ExcessOfferStatus,
+    ExcessOutreachChannel,
+    ExcessOutreachStatus,
+)
 from ..database import get_db
-from ..dependencies import require_user
+from ..dependencies import require_fresh_token, require_user
 from ..file_utils import parse_tabular_file
-from ..models import Company, User
-from ..models.excess import CustomerBid, ExcessLineItem, ExcessList, ExcessOffer
-from ..services import bid_back_service, excess_mirror, excess_service
+from ..models import Company, User, VendorCard
+from ..models.excess import CustomerBid, ExcessLineItem, ExcessList, ExcessOffer, ExcessOfferLine, ExcessOutreach
+from ..services import bid_back_service, buyer_affinity_service, excess_mirror, excess_service, resell_outreach_service
 from ..template_env import template_response
 
 router = APIRouter(tags=["resell"])
@@ -854,6 +860,258 @@ async def resell_submit_offer(
 
     el = excess_service.get_excess_list(db, list_id)
     return await resell_offers(request, list_id=el.id, user=user, db=db)
+
+
+# ── Outreach: offer-to-buyers panel + tracker + don't-forget strip ───
+#
+# The trader→buyer half of Resell (the inverse of sourcing's RFQ). Offering excess OUT
+# is the list OWNER's action, so every endpoint here is owner-gated via _require_owner;
+# the buyer panel + tracker reveal the buyer "who" and the team's outreach board, both
+# the owner's private view. Logic lives in resell_outreach_service (send/log/reply) and
+# buyer_affinity_service (rank/overlap/nudge); this layer only resolves request →
+# context → template.
+
+# Outreach statuses that count as a buyer ENGAGED at all (the tracker "responded" tally).
+_RESPONDED_OUTREACH = (
+    ExcessOutreachStatus.OPENED,
+    ExcessOutreachStatus.RESPONDED,
+    ExcessOutreachStatus.BID,
+    ExcessOutreachStatus.DECLINED,
+)
+
+
+def _suggestion_rows(db: Session, el: ExcessList, owner: User, line_ids: list[int] | None) -> list[dict]:
+    """Ranked, offerable buyer suggestions for the panel, each with its advisory overlap
+    flag.
+
+    Wraps ``buyer_affinity_service.rank_buyers_for`` (already bounded + reachable-only)
+    and decorates each row with ``overlap_warning`` (advisory — never blocks). Scoped to
+    the selected lines when given, else the whole list.
+    """
+    ranked = buyer_affinity_service.rank_buyers_for(
+        db,
+        excess_list_id=el.id if not line_ids else None,
+        line_item_ids=line_ids or None,
+    )
+    rows: list[dict] = []
+    for rb in ranked:
+        overlap = buyer_affinity_service.overlap_warning(
+            db,
+            excess_list_id=el.id,
+            target_vendor_card_id=rb.vendor_card_id,
+            owner_id=owner.id,
+        )
+        rows.append({"buyer": rb, "overlap": overlap})
+    return rows
+
+
+def _no_contact_buyers(db: Session, el: ExcessList, suggested_ids: set[int]) -> list[dict]:
+    """Buyers with offer history on this list's lines but NO resolvable contact email.
+
+    rank_buyers_for filters unreachable buyers out (it only returns offerable ones), but
+    a buyer the owner has bought-from before may have lost their contact email — the
+    panel still lists them (manual-log only) with a clear "no contact on file" badge so
+    they're never silently dropped (mirrors the RFQ modal's no-email treatment). Returns
+    [{card, last_bid}] for the history buyers absent from the reachable suggestions.
+    """
+    line_ids = [li.id for li in db.query(ExcessLineItem.id).filter_by(excess_list_id=el.id).all()]
+    # History buyers: won an offer on one of this list's lines (the strongest "we've
+    # dealt with them" signal — the ones worth surfacing even when unreachable).
+    history_ids = {
+        cid
+        for (cid,) in db.query(ExcessOffer.offerer_vendor_card_id)
+        .join(ExcessOfferLine, ExcessOfferLine.offer_id == ExcessOffer.id)
+        .filter(
+            ExcessOffer.status == ExcessOfferStatus.WON,
+            ExcessOffer.offerer_vendor_card_id.isnot(None),
+            ExcessOfferLine.excess_line_item_id.in_(line_ids) if line_ids else False,
+        )
+        .distinct()
+        .all()
+    }
+    missing = history_ids - suggested_ids
+    if not missing:
+        return []
+    cards = db.query(VendorCard).filter(VendorCard.id.in_(list(missing))).all()
+    return [{"card": c} for c in cards]
+
+
+def _buyer_panel_context(
+    request: Request, db: Session, el: ExcessList, owner: User, line_ids: list[int] | None
+) -> dict:
+    """Context for the offer-to-buyers panel: ranked suggestions + no-contact buyers +
+    scope."""
+    suggestions = _suggestion_rows(db, el, owner, line_ids)
+    suggested_ids = {row["buyer"].vendor_card_id for row in suggestions}
+    scope_lines = db.query(ExcessLineItem).filter(ExcessLineItem.id.in_(line_ids)).all() if line_ids else None
+    return {
+        "request": request,
+        "user": owner,
+        "list": el,
+        "suggestions": suggestions,
+        "no_contact_buyers": _no_contact_buyers(db, el, suggested_ids),
+        "channels": [c.value for c in ExcessOutreachChannel],
+        "line_ids": line_ids or [],
+        "scope_lines": scope_lines,
+    }
+
+
+def _outreach_tracker_context(request: Request, db: Session, el: ExcessList, user: User) -> dict:
+    """Context for the unified Outreach tracker: rows (newest first) + the glance
+    summary."""
+    rows = (
+        db.query(ExcessOutreach)
+        .filter(ExcessOutreach.excess_list_id == el.id)
+        .order_by(ExcessOutreach.created_at.desc(), ExcessOutreach.id.desc())
+        .all()
+    )
+    # Distinct-buyer counts so "offered N · M responded · K bid" reads per buyer, not per
+    # (buyer × line) row — a 3-line per-line campaign is one buyer offered, not three.
+    offered = {r.target_vendor_card_id for r in rows if r.target_vendor_card_id is not None}
+    responded = {
+        r.target_vendor_card_id for r in rows if r.target_vendor_card_id is not None and r.status in _RESPONDED_OUTREACH
+    }
+    bid = {
+        r.target_vendor_card_id
+        for r in rows
+        if r.target_vendor_card_id is not None and r.status == ExcessOutreachStatus.BID
+    }
+    return {
+        "request": request,
+        "user": user,
+        "list": el,
+        "rows": rows,
+        "summary": {"offered": len(offered), "responded": len(responded), "bid": len(bid)},
+    }
+
+
+@router.get("/v2/partials/resell/{list_id}/offer-buyers-form", response_class=HTMLResponse)
+async def resell_offer_buyers_form(
+    request: Request,
+    list_id: int,
+    line_ids: str = Query(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render the offer-to-buyers panel (owner-only): ranked suggestions + manual add +
+    scope + channel.
+
+    ``line_ids`` (comma-separated) scopes the campaign to specific lines; omitted = the
+    whole list. The panel reveals the buyer "who" + scorecard facts, so it is the owner's
+    private view (403 for a non-owner).
+    """
+    el = excess_service.get_excess_list(db, list_id)
+    _require_owner(el, user)
+    parsed = [lid for lid in (_to_int(x) for x in line_ids.split(",")) if lid is not None] if line_ids else None
+    return template_response(
+        "htmx/partials/resell/offer_buyers_modal.html",
+        _buyer_panel_context(request, db, el, user, parsed),
+    )
+
+
+@router.get("/v2/partials/resell/{list_id}/outreach", response_class=HTMLResponse)
+async def resell_outreach_tracker(
+    request: Request,
+    list_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Lazy Outreach tab body — the unified tracker (owner-only).
+
+    One row per buyer×line touch reading buyer · when · by-whom · channel · status,
+    above the "offered N · M responded · K bid" glance. Owner's private board (403
+    otherwise).
+    """
+    el = excess_service.get_excess_list(db, list_id)
+    _require_owner(el, user)
+    return template_response("htmx/partials/resell/_outreach.html", _outreach_tracker_context(request, db, el, user))
+
+
+@router.get("/v2/partials/resell/{list_id}/not-yet-strip", response_class=HTMLResponse)
+async def resell_not_yet_strip(
+    request: Request,
+    list_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """The "usually offered, not yet this round" nudge strip (owner-only).
+
+    Wired into the EXISTING detail nudge surface (NOT a new My-Day). Surfaces buyers
+    historically active in this list's commodities with no outreach on THIS list yet.
+    """
+    el = excess_service.get_excess_list(db, list_id)
+    _require_owner(el, user)
+    buyers = buyer_affinity_service.not_yet_offered_strip(db, excess_list_id=el.id)
+    return template_response(
+        "htmx/partials/resell/_not_yet_strip.html",
+        {"request": request, "user": user, "list": el, "buyers": buyers},
+    )
+
+
+@router.post("/api/resell/{list_id}/outreach", response_class=HTMLResponse)
+async def resell_submit_outreach(
+    request: Request,
+    list_id: int,
+    vendor_card_ids: str = Form(""),
+    company_ids: str = Form(""),
+    scope: str = Form("whole_list"),
+    channel: str = Form(ExcessOutreachChannel.EMAIL),
+    line_ids: str = Form(""),
+    notes: str = Form(""),
+    subject: str = Form(""),
+    body: str = Form(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+    token: str = Depends(require_fresh_token),
+):
+    """Submit an outreach campaign (owner-only), then re-render the tracker.
+
+    Buyers arrive as ``vendor_card_ids`` (ranked picks) and/or ``company_ids`` (a
+    manual-add company with no card yet — the service backfills a card). ``channel`` ==
+    ``email`` routes through :func:`resell_outreach_service.submit_outreach_email` (the
+    RFQ send engine, DNC-at-send + save-to-sent for free); any other channel is a
+    manual log via :func:`submit_outreach`. ``scope`` is ``per_line`` (scoped to
+    ``line_ids``) or ``whole_list``. The service enforces the owner + can_post guards.
+    """
+    el = excess_service.get_excess_list(db, list_id)
+    _require_owner(el, user)
+
+    buyers: list[dict] = [{"vendor_card_id": cid} for cid in (_to_int(x) for x in vendor_card_ids.split(",")) if cid]
+    buyers += [{"company_id": cid} for cid in (_to_int(x) for x in company_ids.split(",")) if cid]
+    if not buyers:
+        raise HTTPException(400, "Select at least one buyer to offer")
+
+    parsed_lines = [lid for lid in (_to_int(x) for x in line_ids.split(",")) if lid is not None] if line_ids else None
+    scope_value = scope if scope in ("per_line", "whole_list") else "whole_list"
+
+    if channel == ExcessOutreachChannel.EMAIL:
+        if not subject.strip() or not body.strip():
+            raise HTTPException(400, "An email outreach needs a subject and a message")
+        await resell_outreach_service.submit_outreach_email(
+            db,
+            list_id=list_id,
+            owner=user,
+            buyers=buyers,
+            scope=scope_value,
+            token=token,
+            subject=subject.strip(),
+            body=body.strip(),
+            line_item_ids=parsed_lines,
+        )
+    else:
+        resell_outreach_service.submit_outreach(
+            db,
+            list_id=list_id,
+            owner=user,
+            buyers=buyers,
+            scope=scope_value,
+            channel=channel,
+            line_item_ids=parsed_lines,
+            notes=notes or None,
+        )
+
+    el = excess_service.get_excess_list(db, list_id)
+    return template_response("htmx/partials/resell/_outreach.html", _outreach_tracker_context(request, db, el, user))
 
 
 # ── tiny parse helpers (forms send strings) ──────────────────────────
