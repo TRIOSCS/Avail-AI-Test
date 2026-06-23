@@ -372,6 +372,12 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         parts = path.split(f"/{current_view}/")
         if len(parts) > 1 and parts[1].isdigit():
             partial_url = f"/v2/partials/{current_view}/{parts[1]}"
+            # Thread ?tab= through for customer deep-links so the partial lands on
+            # the correct tab when the full page is (re)loaded from a pushed URL.
+            if current_view == "customers":
+                _tab_qs = request.query_params.get("tab", "").strip()
+                if _tab_qs:
+                    partial_url = f"{partial_url}?tab={quote(_tab_qs)}"
 
     nav_active = _NAV_ID_ALIAS.get(current_view, current_view)
     ctx = _base_ctx(request, user, nav_active)
@@ -5701,14 +5707,23 @@ async def company_apply_name(
     return HTMLResponse("")
 
 
+_VALID_CUSTOMER_TABS = frozenset({"contacts", "sites", "requisitions", "activity", "quotes", "buy_plans", "files"})
+
+
 @router.get("/v2/partials/customers/{company_id}", response_class=HTMLResponse)
 async def company_detail_partial(
     request: Request,
     company_id: int,
+    tab: str = Query("contacts"),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Return company detail as HTML partial with tabs."""
+    """Return company detail as HTML partial with tabs.
+
+    ``tab`` deep-links to the specified tab on first load (default: contacts).
+    Invalid tab values silently fall back to contacts.
+    """
+    active_tab = tab if tab in _VALID_CUSTOMER_TABS else "contacts"
     company = (
         db.query(Company)
         .options(joinedload(Company.account_owner), joinedload(Company.sites))
@@ -5791,6 +5806,8 @@ async def company_detail_partial(
             # Segment tags
             "segment_tags": segment_tags,
             "all_segment_tags": all_segment_tags,
+            # Deep-link: which tab to activate on first render (validated above).
+            "active_tab": active_tab,
         }
     )
     return template_response("htmx/partials/customers/detail.html", ctx)

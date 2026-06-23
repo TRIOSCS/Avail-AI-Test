@@ -4529,3 +4529,95 @@ class TestCompanyPhase0FormFields:
         assert resp.status_code == 200
         db_session.refresh(co)
         assert co.source == "apollo", f"Expected source 'apollo' preserved, got {co.source!r}"
+
+
+class TestCustomerTabDeepLink:
+    """Phase-0 Task B: account-detail tabs are deep-linkable via ?tab= param.
+
+    Verifies that the server honours the tab query param, renders the correct
+    active tab in the Alpine state initialiser, and emits the push-URL on tab
+    buttons so round-tripping a shared URL lands on the right tab.
+    """
+
+    def _make_company(self, db_session: Session) -> "Company":
+        from app.models.crm import CustomerSite
+
+        co = Company(name="DeepLink Co", is_active=True)
+        db_session.add(co)
+        db_session.flush()
+        site = CustomerSite(company_id=co.id, site_name="HQ", is_active=True)
+        db_session.add(site)
+        db_session.commit()
+        return co
+
+    def test_default_tab_is_contacts(self, client: TestClient, db_session: Session, test_user: User):
+        """No ?tab param → contacts tab is active (Alpine x-data shows contacts)."""
+        co = self._make_company(db_session)
+        resp = client.get(f"/v2/partials/customers/{co.id}")
+        assert resp.status_code == 200
+        assert "activeTab: 'contacts'" in resp.text
+
+    def test_tab_contacts_explicit(self, client: TestClient, db_session: Session, test_user: User):
+        """?tab=contacts explicitly → same as default."""
+        co = self._make_company(db_session)
+        resp = client.get(f"/v2/partials/customers/{co.id}?tab=contacts")
+        assert resp.status_code == 200
+        assert "activeTab: 'contacts'" in resp.text
+
+    def test_tab_sites_activates_sites(self, client: TestClient, db_session: Session, test_user: User):
+        """?tab=sites → activeTab is 'sites'; sites tab lazy-loads via hx-
+        trigger=load."""
+        co = self._make_company(db_session)
+        resp = client.get(f"/v2/partials/customers/{co.id}?tab=sites")
+        assert resp.status_code == 200
+        html = resp.text
+        assert "activeTab: 'sites'" in html
+        # The tab content div uses a lazy hx-get for non-contacts initial tab.
+        assert f"/v2/partials/customers/{co.id}/tab/sites" in html
+        assert 'hx-trigger="load"' in html
+
+    def test_tab_files_activates_files(self, client: TestClient, db_session: Session, test_user: User):
+        """?tab=files → activeTab is 'files'; files tab lazy-loads."""
+        co = self._make_company(db_session)
+        resp = client.get(f"/v2/partials/customers/{co.id}?tab=files")
+        assert resp.status_code == 200
+        html = resp.text
+        assert "activeTab: 'files'" in html
+        assert f"/v2/partials/customers/{co.id}/tab/files" in html
+        assert 'hx-trigger="load"' in html
+
+    def test_invalid_tab_falls_back_to_contacts(self, client: TestClient, db_session: Session, test_user: User):
+        """?tab=bogus → falls back to contacts silently (no 422/500)."""
+        co = self._make_company(db_session)
+        resp = client.get(f"/v2/partials/customers/{co.id}?tab=bogus")
+        assert resp.status_code == 200
+        assert "activeTab: 'contacts'" in resp.text
+
+    def test_tab_buttons_emit_push_url(self, client: TestClient, db_session: Session, test_user: User):
+        """Every tab button carries hx-push-url so the browser URL updates on click."""
+        co = self._make_company(db_session)
+        resp = client.get(f"/v2/partials/customers/{co.id}")
+        assert resp.status_code == 200
+        html = resp.text
+        # Check a sample of tabs.
+        assert f'hx-push-url="/v2/customers/{co.id}?tab=contacts"' in html
+        assert f'hx-push-url="/v2/customers/{co.id}?tab=sites"' in html
+        assert f'hx-push-url="/v2/customers/{co.id}?tab=activity"' in html
+
+    def test_contacts_tab_inlines_content(self, client: TestClient, db_session: Session, test_user: User):
+        """Contacts tab (default) inlines the contacts partial immediately — no lazy
+        load."""
+        co = self._make_company(db_session)
+        resp = client.get(f"/v2/partials/customers/{co.id}")
+        assert resp.status_code == 200
+        html = resp.text
+        # The contacts_tab.html includes the people-search input.
+        assert "contacts_tab" not in html or "hx-trigger" not in html.split("company-tab-content")[1][:200]
+        # No load trigger on the tab content container (contacts are inlined).
+        # The dup-suggestion + name-suggestion divs DO have hx-trigger=load; we check
+        # the company-tab-content div specifically has no load trigger on itself.
+        import re
+
+        tab_content_block = re.search(r'id="company-tab-content"[^>]*>', html)
+        assert tab_content_block, "company-tab-content div not found"
+        assert "hx-trigger" not in tab_content_block.group(0)

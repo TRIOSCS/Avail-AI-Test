@@ -197,7 +197,7 @@
   </div>
 
   {# ── Tabs — Contacts first + inlined (front-and-center call-list workflow) ── #}
-  <div x-data="{ activeTab: 'contacts' }" @crm-switch-tab.window="activeTab = $event.detail.tab">
+  <div x-data="{ activeTab: '{{ active_tab }}' }" @crm-switch-tab.window="activeTab = $event.detail.tab">
     <div class="border-b border-gray-200">
       <nav class="flex gap-6 -mb-px" role="tablist" aria-label="Account detail sections"
            @keydown.arrow-right.prevent="const tabs=$el.querySelectorAll('[role=tab]');const i=[...tabs].indexOf(document.activeElement);tabs[(i+1)%tabs.length].focus();tabs[(i+1)%tabs.length].click()"
@@ -219,6 +219,7 @@
                 hx-get="/v2/partials/customers/{{ company.id }}/tab/{{ tab_id }}"
                 hx-target="#company-tab-content"
                 hx-swap="innerHTML"
+                hx-push-url="/v2/customers/{{ company.id }}?tab={{ tab_id }}"
                 :class="activeTab === '{{ tab_id }}' ? 'border-brand-500 text-brand-600 font-semibold' : 'border-transparent text-gray-600 hover:text-gray-700 hover:border-gray-300'"
                 class="py-3 px-1 text-sm font-medium border-b-2 transition-colors inline-flex items-center gap-1.5">
           {{ tab_label }}
@@ -230,10 +231,23 @@
       </nav>
     </div>
 
-    {# Tab content — contacts loaded inline on first load (click-to-contact panel) #}
+    {# Tab content — contacts inlined on first load for fast call-list workflows;
+       other deep-linked tabs lazy-load via hx-trigger="load" with explicit
+       hx-target="this" (prevents inheriting #main-content hx-target). #}
+    {% if active_tab == 'contacts' %}
     <div id="company-tab-content" class="mt-4" role="tabpanel" :aria-labelledby="'tab-' + activeTab">
       {% include "htmx/partials/customers/tabs/contacts_tab.html" %}
     </div>
+    {% else %}
+    <div id="company-tab-content"
+         class="mt-4"
+         role="tabpanel"
+         :aria-labelledby="'tab-' + activeTab"
+         hx-get="/v2/partials/customers/{{ company.id }}/tab/{{ active_tab }}"
+         hx-trigger="load"
+         hx-target="this"
+         hx-swap="innerHTML"></div>
+    {% endif %}
   </div>
 
   {# Enrich results placeholder #}
