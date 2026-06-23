@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import os
 from io import BytesIO
+from typing import TYPE_CHECKING
 
 from fastapi import HTTPException, UploadFile
 from fastapi.responses import RedirectResponse, StreamingResponse
@@ -29,6 +30,10 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..constants import ALLOWED_ATTACHMENT_EXTENSIONS, MAX_ATTACHMENT_BYTES
+
+if TYPE_CHECKING:
+    from starlette.requests import Request
+    from starlette.responses import Response
 
 _GRAPH = "https://graph.microsoft.com/v1.0"
 
@@ -226,7 +231,9 @@ _DELETE_BASE: dict[str, str] = {
 }
 
 
-def attachment_list_response(request, *, kind: str, entity_id: int, rows: list):
+def attachment_list_response(
+    request: "Request | None", *, kind: str, entity_id: int, rows: list
+) -> "Response | list[dict]":
     """Return the attachment list as HTML (HTMX) or JSON (back-compat).
 
     When the request carries `HX-Request`, render the shared list partial so the

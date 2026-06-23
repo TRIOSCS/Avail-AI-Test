@@ -70,7 +70,7 @@
     {% endif %}
     {# Attachments — lazy-loaded only when the card is expanded (keeps the gallery light) #}
     <div class="mt-3 pt-3 border-t border-gray-100">
-      <p class="mb-2 text-xs font-medium text-gray-500">Files</p>
+      <p class="mb-2 text-xs font-medium text-gray-600">Files</p>
       <template x-if="expanded">
         <div>{{ attachments_panel('offer', offer.id) }}</div>
       </template>
