@@ -1,9 +1,9 @@
 {#
-  trading/import_preview.html — Preview of a parsed import (reuses the excess grid).
-  Confirm → /api/trading/{id}/import-confirm (re-renders the Lines tab).
+  resell/import_preview.html — Preview of a parsed import (reuses the excess grid).
+  Confirm → /api/resell/{id}/import-confirm (re-renders the Lines tab).
   Receives: list_id, filename, valid_count, error_count, errors, preview_rows,
             all_valid_rows_json.
-  Called by: trading.trading_import_preview.
+  Called by: resell.resell_import_preview.
 #}
 <div class="space-y-3" id="import-area">
   <div class="flex items-center gap-3 text-sm">
@@ -53,7 +53,7 @@
   {% endif %}
 
   {% if valid_count %}
-  <form hx-post="/api/trading/{{ list_id }}/import-confirm"
+  <form hx-post="/api/resell/{{ list_id }}/import-confirm"
         hx-target="#tab-lines-{{ list_id }}"
         hx-swap="innerHTML"
         data-loading-disable

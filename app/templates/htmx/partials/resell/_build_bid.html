@@ -1,5 +1,5 @@
 {#
-  trading/_build_bid.html — Build Bid tab body (owner-only bid-back builder).
+  resell/_build_bid.html — Build Bid tab body (owner-only bid-back builder).
   Each line shows its best collected unit price as a PLANNING REFERENCE and an
   editable "our offer" input pre-filled from it; checked lines are assembled into a
   CustomerBid (priced from the inputs / best-offer seed). Once assembled, the clean
@@ -7,7 +7,7 @@
   identity-clean; spec §"Customer Bid").
   Receives: list, line_items, line_count, bid (CustomerBid|None),
             summary (bid_back_export_context|None), user.
-  Called by: trading.trading_build_bid (lazy) + trading_assemble_bid (re-render).
+  Called by: resell.resell_build_bid (lazy) + resell_assemble_bid (re-render).
 #}
 {% set el = list %}
 
@@ -41,7 +41,7 @@
   </p>
 
   {# ── Builder table ────────────────────────────────────────────── #}
-  <form hx-post="/api/trading/{{ el.id }}/bid"
+  <form hx-post="/api/resell/{{ el.id }}/bid"
         hx-target="#tab-build-{{ el.id }}"
         hx-swap="innerHTML"
         data-loading-disable
@@ -110,7 +110,7 @@
         <p class="text-base font-semibold text-gray-900">{{ summary.bid_number }}</p>
         <p class="text-xs text-gray-400 mt-0.5">{{ summary.line_count }} line{{ 's' if summary.line_count != 1 }} · rev {{ summary.revision }} · {{ summary.status }}</p>
       </div>
-      <a href="/api/trading/{{ el.id }}/bid/{{ bid.id }}/pdf"
+      <a href="/api/resell/{{ el.id }}/bid/{{ bid.id }}/pdf"
          class="btn-secondary btn-sm">
         <svg class="h-3.5 w-3.5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
         Download PDF

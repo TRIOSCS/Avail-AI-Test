@@ -1,11 +1,11 @@
 {#
-  trading/detail.html — Right detail panel: slim header + breadcrumb + chips + lazy tabs.
+  resell/detail.html — Right detail panel: slim header + breadcrumb + chips + lazy tabs.
   One adaptive surface for all three deal shapes — the tab bodies reshape, the
   panel never branches to a new page (spec §"Flexible detail").
   Receives: list, line_items, line_count, offer_count, take_all_count,
             can_see_customer, can_post, can_offer, shape, hours_until, is_posted, user.
-  Called by: trading.trading_detail (+ publish re-render).
-  Depends on: shared/_macros.html, partials/trading/_lines.html, _offers.html.
+  Called by: resell.resell_detail (+ publish re-render).
+  Depends on: shared/_macros.html, partials/resell/_lines.html, _offers.html.
 #}
 {% from "htmx/partials/shared/_macros.html" import status_badge, time_text %}
 {% set el = list %}
@@ -17,9 +17,9 @@
   <div class="px-5 py-3 border-b border-brand-200 bg-white flex-shrink-0">
     {# Breadcrumb #}
     <nav class="text-xs text-gray-400 mb-1" aria-label="Breadcrumb">
-      <a hx-get="/v2/partials/trading/workspace?lens=mine"
-         hx-target="#main-content" hx-push-url="/v2/trading"
-         class="hover:text-brand-500">Trading</a>
+      <a hx-get="/v2/partials/resell/workspace?lens=mine"
+         hx-target="#main-content" hx-push-url="/v2/resell"
+         class="hover:text-brand-500">Resell</a>
       <span class="mx-1">›</span>
       <span class="text-gray-600">{{ el.title }}</span>
     </nav>
@@ -58,8 +58,8 @@
       {# Owner / offerer actions #}
       <div class="flex items-center gap-2 flex-shrink-0">
         {% if can_see_customer and el.status == 'draft' and line_count > 0 %}
-        <button hx-post="/api/trading/{{ el.id }}/publish"
-                hx-target="#split-right-trading"
+        <button hx-post="/api/resell/{{ el.id }}/publish"
+                hx-target="#split-right-resell"
                 hx-swap="innerHTML"
                 hx-confirm="Post this list? Lines lock and become visible to brokers."
                 data-loading-disable
@@ -69,8 +69,8 @@
         </button>
         {% endif %}
         {% if can_see_customer and el.status in ['open', 'collecting'] %}
-        <button hx-post="/api/trading/{{ el.id }}/close"
-                hx-target="#split-right-trading"
+        <button hx-post="/api/resell/{{ el.id }}/close"
+                hx-target="#split-right-resell"
                 hx-swap="innerHTML"
                 hx-confirm="Close this list? The posting window ends and the bid goes out."
                 data-loading-disable
@@ -80,7 +80,7 @@
         {% endif %}
         {% if can_offer %}
         <button @click="$dispatch('open-modal')"
-                hx-get="/v2/partials/trading/{{ el.id }}/offer-form"
+                hx-get="/v2/partials/resell/{{ el.id }}/offer-form"
                 hx-target="#modal-content"
                 class="btn-primary btn-sm">
           <svg class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
@@ -109,14 +109,14 @@
 
     {# Lines — loads immediately (default tab). #}
     <div x-show="tab === 'lines'" id="tab-lines-{{ el.id }}">
-      {% include "htmx/partials/trading/_lines.html" %}
+      {% include "htmx/partials/resell/_lines.html" %}
     </div>
 
     {# Offers — lazy. LANDMINE: intersect/load MUST carry an explicit hx-target
        or it inherits #main-content's hx-target="this" and wipes the page. #}
     <div x-show="tab === 'offers'" x-cloak>
       <div id="tab-offers-{{ el.id }}"
-           hx-get="/v2/partials/trading/{{ el.id }}/offers"
+           hx-get="/v2/partials/resell/{{ el.id }}/offers"
            hx-trigger="intersect once"
            hx-target="#tab-offers-{{ el.id }}"
            hx-swap="innerHTML">
@@ -130,7 +130,7 @@
     <div x-show="tab === 'build'" x-cloak>
       {% if can_see_customer %}
       <div id="tab-build-{{ el.id }}"
-           hx-get="/v2/partials/trading/{{ el.id }}/build-bid"
+           hx-get="/v2/partials/resell/{{ el.id }}/build-bid"
            hx-trigger="intersect once"
            hx-target="#tab-build-{{ el.id }}"
            hx-swap="innerHTML">
