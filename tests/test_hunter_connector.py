@@ -251,3 +251,101 @@ class TestHunterWaterfallIntegration:
         assert c["source"] == "hunter"
         assert "full_name" in c
         assert "title" in c
+
+
+class TestHunterEmailFinderEdgeCases:
+    @pytest.mark.asyncio
+    async def test_network_error_returns_none(self):
+        from app.connectors.hunter import HunterConnector
+
+        with patch("app.connectors.hunter.http") as mock_http:
+            mock_http.get = AsyncMock(side_effect=Exception("timeout"))
+            result = await HunterConnector("key").email_finder("ex.com", "Alice", "Smith")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_401_raises_auth_error(self):
+        from app.connectors.errors import ConnectorAuthError
+        from app.connectors.hunter import HunterConnector
+
+        mock_resp = _mock_response(401, {})
+        with patch("app.connectors.hunter.http") as mock_http:
+            mock_http.get = AsyncMock(return_value=mock_resp)
+            with pytest.raises(ConnectorAuthError):
+                await HunterConnector("key").email_finder("ex.com", "Alice", "Smith")
+
+    @pytest.mark.asyncio
+    async def test_non_200_returns_none(self):
+        from app.connectors.hunter import HunterConnector
+
+        mock_resp = _mock_response(500, {})
+        with patch("app.connectors.hunter.http") as mock_http:
+            mock_http.get = AsyncMock(return_value=mock_resp)
+            result = await HunterConnector("key").email_finder("ex.com", "Alice", "Smith")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_200_no_email_returns_none(self):
+        from app.connectors.hunter import HunterConnector
+
+        mock_resp = _mock_response(200, {"data": {"email": "", "score": 0}})
+        with patch("app.connectors.hunter.http") as mock_http:
+            mock_http.get = AsyncMock(return_value=mock_resp)
+            result = await HunterConnector("key").email_finder("ex.com", "Alice", "Smith")
+        assert result is None
+
+
+class TestHunterVerifyEdgeCases:
+    @pytest.mark.asyncio
+    async def test_empty_key_returns_unknown(self):
+        from app.connectors.hunter import HunterConnector
+
+        result = await HunterConnector("").verify("alice@ex.com")
+        assert result == {"result": "unknown", "score": 0}
+
+    @pytest.mark.asyncio
+    async def test_empty_email_returns_unknown(self):
+        from app.connectors.hunter import HunterConnector
+
+        result = await HunterConnector("key").verify("")
+        assert result == {"result": "unknown", "score": 0}
+
+    @pytest.mark.asyncio
+    async def test_network_error_returns_unknown(self):
+        from app.connectors.hunter import HunterConnector
+
+        with patch("app.connectors.hunter.http") as mock_http:
+            mock_http.get = AsyncMock(side_effect=Exception("timeout"))
+            result = await HunterConnector("key").verify("alice@ex.com")
+        assert result == {"result": "unknown", "score": 0}
+
+    @pytest.mark.asyncio
+    async def test_401_raises_auth_error(self):
+        from app.connectors.errors import ConnectorAuthError
+        from app.connectors.hunter import HunterConnector
+
+        mock_resp = _mock_response(401, {})
+        with patch("app.connectors.hunter.http") as mock_http:
+            mock_http.get = AsyncMock(return_value=mock_resp)
+            with pytest.raises(ConnectorAuthError):
+                await HunterConnector("key").verify("alice@ex.com")
+
+    @pytest.mark.asyncio
+    async def test_non_200_returns_unknown(self):
+        from app.connectors.hunter import HunterConnector
+
+        mock_resp = _mock_response(500, {})
+        with patch("app.connectors.hunter.http") as mock_http:
+            mock_http.get = AsyncMock(return_value=mock_resp)
+            result = await HunterConnector("key").verify("alice@ex.com")
+        assert result == {"result": "unknown", "score": 0}
+
+    @pytest.mark.asyncio
+    async def test_200_success(self):
+        from app.connectors.hunter import HunterConnector
+
+        mock_resp = _mock_response(200, {"data": {"result": "deliverable", "score": 95}})
+        with patch("app.connectors.hunter.http") as mock_http:
+            mock_http.get = AsyncMock(return_value=mock_resp)
+            result = await HunterConnector("key").verify("alice@ex.com")
+        assert result == {"result": "deliverable", "score": 95}

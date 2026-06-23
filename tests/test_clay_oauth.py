@@ -163,3 +163,98 @@ def test_disconnect_clears(monkeypatch):
     store.update({"CLAY_OAUTH_ACCESS_TOKEN": "AT", "CLAY_OAUTH_REFRESH_TOKEN": "RT"})
     co.disconnect()
     assert "CLAY_OAUTH_ACCESS_TOKEN" not in store and "CLAY_OAUTH_REFRESH_TOKEN" not in store
+
+
+# ── _persist_tokens: early return when no access_token ───────────────────────
+
+
+def test_persist_tokens_skips_when_no_access_token(monkeypatch):
+    """_persist_tokens does nothing if access_token is absent."""
+    store = _seed_store(monkeypatch)
+    co._persist_tokens({})  # no access_token key
+    assert "CLAY_OAUTH_ACCESS_TOKEN" not in store
+    assert "CLAY_OAUTH_EXPIRES_AT" not in store
+
+
+def test_persist_tokens_skips_null_access_token(monkeypatch):
+    store = _seed_store(monkeypatch)
+    co._persist_tokens({"access_token": "", "expires_in": 3600})
+    assert "CLAY_OAUTH_ACCESS_TOKEN" not in store
+
+
+# ── register_client failures ──────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_register_client_raises_on_dcr_http_error(monkeypatch):
+    _seed_store(monkeypatch)
+
+    async def fake_post(url, **k):
+        return Resp(500, {})
+
+    monkeypatch.setattr(co.http, "post", fake_post, raising=False)
+    with pytest.raises(RuntimeError, match="Clay client registration failed"):
+        await co.register_client()
+
+
+@pytest.mark.asyncio
+async def test_register_client_raises_on_missing_client_id(monkeypatch):
+    _seed_store(monkeypatch)
+
+    async def fake_post(url, **k):
+        return Resp(201, {})  # 201 but no client_id
+
+    monkeypatch.setattr(co.http, "post", fake_post, raising=False)
+    with pytest.raises(RuntimeError, match="missing client_id"):
+        await co.register_client()
+
+
+# ── exchange_code failure ─────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_exchange_code_returns_false_on_failure(monkeypatch):
+    _seed_store(monkeypatch)
+
+    async def fake_post(url, **k):
+        return Resp(400, {"error": "invalid_code"})
+
+    monkeypatch.setattr(co.http, "post", fake_post, raising=False)
+    ok = await co.exchange_code("bad-code", "verifier", "cid")
+    assert ok is False
+
+
+# ── refresh: no rt or cid ─────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_refresh_returns_none_when_no_refresh_token(monkeypatch):
+    _seed_store(monkeypatch)  # empty store — no refresh token
+    assert await co.refresh() is None
+
+
+@pytest.mark.asyncio
+async def test_refresh_returns_none_when_no_client_id(monkeypatch):
+    store = _seed_store(monkeypatch)
+    store["CLAY_OAUTH_REFRESH_TOKEN"] = "RT"
+    # no CLIENT_ID
+    assert await co.refresh() is None
+
+
+# ── get_access_token: invalid expiry string ───────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_get_access_token_refreshes_on_bad_expiry_string(monkeypatch):
+    store = _seed_store(monkeypatch)
+    store["CLAY_OAUTH_ACCESS_TOKEN"] = "OLD"
+    store["CLAY_OAUTH_REFRESH_TOKEN"] = "RT"
+    store["CLAY_OAUTH_CLIENT_ID"] = "cid"
+    store["CLAY_OAUTH_EXPIRES_AT"] = "not-a-date"
+
+    async def fake_post(url, **k):
+        return Resp(200, {"access_token": "REFRESHED", "expires_in": 3600})
+
+    monkeypatch.setattr(co.http, "post", fake_post, raising=False)
+    result = await co.get_access_token()
+    assert result == "REFRESHED"

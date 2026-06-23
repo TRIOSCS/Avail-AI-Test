@@ -76,3 +76,53 @@ def test_sanitize_blocks_traversal_and_specials():
     assert _sanitize("...") == "_unknown"
     assert _sanitize("LM317-datasheet.pdf") == "LM317-datasheet.pdf"
     assert len(_sanitize("x" * 500)) <= 128
+
+
+async def test_upload_returns_none_when_no_token():
+    with (
+        patch.object(dl.settings, "datasheet_library_drive_id", "DRV"),
+        patch("app.services.datasheet_library.get_app_graph_token", AsyncMock(return_value=None)),
+    ):
+        assert await dl.upload_datasheet_to_library("x.pdf", b"x", "application/pdf") is None
+
+
+async def test_fetch_returns_none_when_no_drive_id():
+    assert await dl.fetch_datasheet_bytes("", "ITEM") is None
+
+
+async def test_fetch_returns_none_when_no_item_id():
+    assert await dl.fetch_datasheet_bytes("DRV", "") is None
+
+
+async def test_fetch_returns_none_when_no_token():
+    with patch("app.services.datasheet_library.get_app_graph_token", AsyncMock(return_value=None)):
+        assert await dl.fetch_datasheet_bytes("DRV", "ITEM") is None
+
+
+async def test_fetch_returns_none_on_exception():
+    with (
+        patch("app.services.datasheet_library.get_app_graph_token", AsyncMock(return_value="T")),
+        patch("app.services.datasheet_library.http_redirect") as httpr,
+    ):
+        httpr.get = AsyncMock(side_effect=RuntimeError("network error"))
+        assert await dl.fetch_datasheet_bytes("DRV", "ITEM") is None
+
+
+async def test_fetch_returns_none_on_non_200():
+    resp = MagicMock(status_code=404, content=b"")
+    with (
+        patch("app.services.datasheet_library.get_app_graph_token", AsyncMock(return_value="T")),
+        patch("app.services.datasheet_library.http_redirect") as httpr,
+    ):
+        httpr.get = AsyncMock(return_value=resp)
+        assert await dl.fetch_datasheet_bytes("DRV", "ITEM") is None
+
+
+async def test_fetch_returns_none_on_empty_content():
+    resp = MagicMock(status_code=200, content=b"")
+    with (
+        patch("app.services.datasheet_library.get_app_graph_token", AsyncMock(return_value="T")),
+        patch("app.services.datasheet_library.http_redirect") as httpr,
+    ):
+        httpr.get = AsyncMock(return_value=resp)
+        assert await dl.fetch_datasheet_bytes("DRV", "ITEM") is None

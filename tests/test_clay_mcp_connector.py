@@ -10,6 +10,8 @@ Covers:
 - 401 response triggers one refresh + retry in _mcp_call
 """
 
+from unittest.mock import AsyncMock
+
 import pytest
 
 from app.services.enrichment_credit_guard import ProviderQuotaError
@@ -373,3 +375,250 @@ async def test_mcp_call_quota_after_refresh_propagates(monkeypatch):
         await clay_mcp._mcp_call("find-and-enrich-company", {"companyIdentifier": "arrow.com"})
 
     assert calls["refreshed"] == 1 and calls["n"] == 2
+
+
+# ── _mcp_call edge cases ──────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_mcp_call_returns_empty_when_no_token(monkeypatch):
+    from app.connectors import clay_mcp
+
+    async def no_token():
+        return None
+
+    monkeypatch.setattr(clay_mcp, "_access_token", no_token)
+    result = await clay_mcp._mcp_call("find-and-enrich-company", {})
+    assert result == {}
+
+
+@pytest.mark.asyncio
+async def test_mcp_call_returns_empty_when_refresh_fails_after_401(monkeypatch):
+    from app.connectors import clay_mcp
+
+    async def tok():
+        return "AT"
+
+    async def refresh_fail():
+        return None
+
+    monkeypatch.setattr(clay_mcp.clay_oauth, "get_access_token", tok)
+    monkeypatch.setattr(clay_mcp.clay_oauth, "refresh", refresh_fail)
+
+    class R:
+        status_code = 401
+
+        def json(self):
+            return {}
+
+    monkeypatch.setattr(clay_mcp.http, "post", AsyncMock(return_value=R()), raising=False)
+    result = await clay_mcp._mcp_call("find-and-enrich-company", {})
+    assert result == {}
+
+
+@pytest.mark.asyncio
+async def test_mcp_call_returns_empty_on_non_200_non_quota(monkeypatch):
+    from app.connectors import clay_mcp
+
+    async def tok():
+        return "AT"
+
+    monkeypatch.setattr(clay_mcp.clay_oauth, "get_access_token", tok)
+
+    class R:
+        status_code = 503
+
+        def json(self):
+            return {}
+
+    monkeypatch.setattr(clay_mcp.http, "post", AsyncMock(return_value=R()), raising=False)
+    result = await clay_mcp._mcp_call("find-and-enrich-company", {})
+    assert result == {}
+
+
+# ── _parse_locality edge cases ────────────────────────────────────────────────
+
+
+def test_parse_locality_empty():
+    from app.connectors.clay_mcp import _parse_locality
+
+    city, state = _parse_locality("")
+    assert city is None and state is None
+
+
+def test_parse_locality_no_state():
+    from app.connectors.clay_mcp import _parse_locality
+
+    city, state = _parse_locality("Denver")
+    assert city == "Denver" and state is None
+
+
+# ── _map_company: all-falsy informative fields ────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_map_company_returns_none_when_all_fields_empty(monkeypatch):
+    from app.connectors import clay_mcp
+
+    async def tok():
+        return "AT"
+
+    monkeypatch.setattr(clay_mcp.clay_oauth, "get_access_token", tok)
+
+    async def fake_call(tool, args):
+        return {"companies": {"empty.com": {"name": None, "domain": "empty.com"}}}
+
+    monkeypatch.setattr(clay_mcp, "_mcp_call", fake_call)
+    result = await clay_mcp.enrich_company("empty.com")
+    assert result is None
+
+
+# ── enrich_company: httpx error is swallowed ─────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_enrich_company_swallows_http_error(monkeypatch):
+    import httpx
+
+    from app.connectors import clay_mcp
+
+    async def tok():
+        return "AT"
+
+    monkeypatch.setattr(clay_mcp.clay_oauth, "get_access_token", tok)
+
+    async def raise_http(tool, args):
+        raise httpx.HTTPError("connection failed")
+
+    monkeypatch.setattr(clay_mcp, "_mcp_call", raise_http)
+    result = await clay_mcp.enrich_company("arrow.com")
+    assert result is None
+
+
+# ── _poll_emails direct test ──────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_poll_emails_returns_completed_emails(monkeypatch):
+    from app.connectors import clay_mcp
+
+    ctx = {
+        "contacts": [
+            {
+                "entityId": "eid-1",
+                "enrichments": [{"name": "Email", "state": "completed", "value": "jane@co.com"}],
+            },
+            {
+                "entityId": "eid-2",
+                "enrichments": [{"name": "Email", "state": "failed", "value": None}],
+            },
+        ]
+    }
+
+    async def fake_call(tool, args):
+        return ctx
+
+    monkeypatch.setattr(clay_mcp, "_mcp_call", fake_call)
+    monkeypatch.setattr(clay_mcp, "_POLL_DELAY", 0.0)
+
+    emails = await clay_mcp._poll_emails("task-1", 1)
+    assert emails.get("eid-1") == "jane@co.com"
+    assert "eid-2" not in emails
+
+
+@pytest.mark.asyncio
+async def test_poll_emails_stops_early_when_no_in_progress(monkeypatch):
+    from app.connectors import clay_mcp
+
+    calls = []
+
+    async def fake_call(tool, args):
+        calls.append(1)
+        return {
+            "contacts": [
+                {"entityId": "e1", "enrichments": [{"name": "Email", "state": "completed", "value": "a@b.com"}]}
+            ]
+        }
+
+    monkeypatch.setattr(clay_mcp, "_mcp_call", fake_call)
+    monkeypatch.setattr(clay_mcp, "_POLL_DELAY", 0.0)
+
+    await clay_mcp._poll_emails("task-1", 5)
+    # Stops after first poll because no in-progress enrichments
+    assert len(calls) == 1
+
+
+# ── find_contacts: title_filter and missing name ──────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_find_contacts_with_title_filter(monkeypatch):
+    from app.connectors import clay_mcp
+
+    async def tok():
+        return "AT"
+
+    monkeypatch.setattr(clay_mcp.clay_oauth, "get_access_token", tok)
+
+    captured_args = {}
+
+    async def fake_call(tool, args):
+        captured_args.update(args)
+        return {"contacts": []}
+
+    monkeypatch.setattr(clay_mcp, "_mcp_call", fake_call)
+
+    async def fake_poll(task_id, n):
+        return {}
+
+    monkeypatch.setattr(clay_mcp, "_poll_emails", fake_poll)
+
+    await clay_mcp.find_contacts("co.com", "procurement", 10, want_email=False)
+    assert "contactFilters" in captured_args
+
+
+@pytest.mark.asyncio
+async def test_find_contacts_skips_contacts_without_name(monkeypatch):
+    from app.connectors import clay_mcp
+
+    async def tok():
+        return "AT"
+
+    monkeypatch.setattr(clay_mcp.clay_oauth, "get_access_token", tok)
+
+    async def fake_call(tool, args):
+        return {
+            "contacts": [
+                {"name": None, "domain": "co.com", "entityId": "e1"},
+                {"name": "Jane", "domain": "co.com", "entityId": "e2"},
+            ]
+        }
+
+    monkeypatch.setattr(clay_mcp, "_mcp_call", fake_call)
+
+    async def fake_poll(task_id, n):
+        return {}
+
+    monkeypatch.setattr(clay_mcp, "_poll_emails", fake_poll)
+
+    out = await clay_mcp.find_contacts("co.com", "", 10, want_email=False)
+    assert len(out) == 1
+    assert out[0]["full_name"] == "Jane"
+
+
+@pytest.mark.asyncio
+async def test_find_contacts_swallows_value_error(monkeypatch):
+    from app.connectors import clay_mcp
+
+    async def tok():
+        return "AT"
+
+    monkeypatch.setattr(clay_mcp.clay_oauth, "get_access_token", tok)
+
+    async def raise_value(tool, args):
+        raise ValueError("unexpected payload")
+
+    monkeypatch.setattr(clay_mcp, "_mcp_call", raise_value)
+
+    out = await clay_mcp.find_contacts("co.com", "", 10, want_email=False)
+    assert out == []

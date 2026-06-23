@@ -15,6 +15,8 @@ import os
 
 os.environ["TESTING"] = "1"
 
+from unittest.mock import AsyncMock, patch
+
 import pytest
 
 from app.services import enrichment_router as er
@@ -593,3 +595,163 @@ async def test_sam_company_returns_none_when_no_entities(monkeypatch):
 
     result = await sam_gov_company.enrich_company("example.com", "Nonexistent Corp")
     assert result is None
+
+
+# ── thin provider wrappers: direct coverage ───────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_sam_company_wrapper_calls_connector(monkeypatch):
+    async def fake_enrich(domain, name):
+        return {"source": "sam_gov", "legal_name": name}
+
+    monkeypatch.setattr(er.sam_gov_company, "enrich_company", fake_enrich)
+    result = await er._sam_company("co.com", "Co Inc")
+    assert result is not None and result["source"] == "sam_gov"
+
+
+@pytest.mark.asyncio
+async def test_apollo_company_wrapper_returns_none_when_no_key(monkeypatch):
+    monkeypatch.setattr(er.settings, "apollo_api_key", "")
+    result = await er._apollo_company("co.com", "Co Inc")
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_apollo_company_wrapper_calls_connector(monkeypatch):
+    monkeypatch.setattr(er.settings, "apollo_api_key", "KEY")
+
+    async def fake_search(domain, key):
+        return {"source": "apollo", "legal_name": "Co Inc"}
+
+    monkeypatch.setattr(er.apollo, "search_company", fake_search)
+    result = await er._apollo_company("co.com", "Co Inc")
+    assert result is not None and result["source"] == "apollo"
+
+
+@pytest.mark.asyncio
+async def test_clay_company_wrapper_calls_connector(monkeypatch):
+    async def fake_enrich(domain):
+        return {"source": "clay", "legal_name": "Clay Co"}
+
+    monkeypatch.setattr(er.clay_mcp, "enrich_company", fake_enrich)
+    result = await er._clay_company("co.com")
+    assert result is not None and result["source"] == "clay"
+
+
+@pytest.mark.asyncio
+async def test_ai_company_wrapper_calls_through(monkeypatch):
+    async def fake_ai(domain, name):
+        return {"source": "ai", "legal_name": name}
+
+    with patch("app.enrichment_service._ai_find_company", fake_ai):
+        result = await er._ai_company("co.com", "Co Inc")
+    assert result is not None and result["source"] == "ai"
+
+
+@pytest.mark.asyncio
+async def test_lusha_contacts_wrapper(monkeypatch):
+    async def fake_search(domain, key, limit):
+        return [{"source": "lusha", "email": "x@co.com"}]
+
+    monkeypatch.setattr(er.lusha, "search_contacts", fake_search)
+    with patch("app.services.enrichment_router.get_credential_cached", return_value="KEY"):
+        result = await er._lusha_contacts("co.com", 5)
+    assert len(result) == 1
+
+
+@pytest.mark.asyncio
+async def test_explorium_contacts_wrapper(monkeypatch):
+    async def fake_search(domain, name, key, title, limit):
+        return [{"source": "explorium", "email": "y@co.com"}]
+
+    monkeypatch.setattr(er.explorium, "search_contacts", fake_search)
+    with patch("app.services.enrichment_router.get_credential_cached", return_value="KEY"):
+        result = await er._explorium_contacts("co.com", "Co", "", 5)
+    assert len(result) == 1
+
+
+# ── _gather_cheap_contacts: hunter enabled, no providers, quota error ─────────
+
+
+@pytest.mark.asyncio
+async def test_gather_cheap_contacts_with_hunter(monkeypatch):
+    monkeypatch.setattr(er.settings, "hunter_enrichment_enabled", True)
+    monkeypatch.setattr(er.settings, "apollo_api_key", "")
+    monkeypatch.setattr(er.settings, "clay_enrichment_enabled", False)
+
+    async def fake_hunter(domain):
+        return [{"source": "hunter", "email": "h@co.com"}]
+
+    with patch("app.enrichment_service._hunter_find_contacts", fake_hunter):
+        results = await er._gather_cheap_contacts("co.com", "", 5)
+
+    assert any(c.get("source") == "hunter" for c in results)
+
+
+@pytest.mark.asyncio
+async def test_gather_cheap_contacts_returns_empty_when_no_providers(monkeypatch):
+    monkeypatch.setattr(er.settings, "hunter_enrichment_enabled", False)
+    monkeypatch.setattr(er.settings, "apollo_api_key", "")
+    monkeypatch.setattr(er.settings, "clay_enrichment_enabled", False)
+
+    results = await er._gather_cheap_contacts("co.com", "", 5)
+    assert results == []
+
+
+@pytest.mark.asyncio
+async def test_gather_cheap_contacts_hunter_quota_error_is_swallowed(monkeypatch):
+    from app.services.enrichment_credit_guard import ProviderQuotaError
+
+    monkeypatch.setattr(er.settings, "hunter_enrichment_enabled", True)
+    monkeypatch.setattr(er.settings, "apollo_api_key", "")
+    monkeypatch.setattr(er.settings, "clay_enrichment_enabled", False)
+
+    async def quota_hunter(domain):
+        raise ProviderQuotaError("Hunter quota")
+
+    with patch("app.enrichment_service._hunter_find_contacts", quota_hunter):
+        results = await er._gather_cheap_contacts("co.com", "", 5)
+
+    assert results == []
+
+
+@pytest.mark.asyncio
+async def test_gather_cheap_contacts_apollo_list_results(monkeypatch):
+    monkeypatch.setattr(er.settings, "hunter_enrichment_enabled", False)
+    monkeypatch.setattr(er.settings, "apollo_api_key", "KEY")
+    monkeypatch.setattr(er.settings, "clay_enrichment_enabled", False)
+
+    async def fake_apollo_contacts(domain, key, limit):
+        return [{"source": "apollo", "email": "a@co.com", "verified": True}]
+
+    monkeypatch.setattr(er.apollo, "search_contacts", fake_apollo_contacts)
+
+    results = await er._gather_cheap_contacts("co.com", "", 5)
+    assert any(c.get("source") == "apollo" for c in results)
+
+
+# ── gather_contacts: explorium escalation quota error ─────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_gather_contacts_explorium_quota_trips_circuit(monkeypatch):
+    from app.services.enrichment_credit_guard import ProviderQuotaError
+
+    monkeypatch.setattr(er.settings, "lusha_enrichment_enabled", False)
+    monkeypatch.setattr(er.settings, "explorium_enrichment_enabled", True)
+    monkeypatch.setattr(er, "circuit_open", lambda p: False)
+
+    async def quota_expl(domain, name, title, limit):
+        raise ProviderQuotaError("Explorium quota")
+
+    monkeypatch.setattr(er, "_gather_cheap_contacts", AsyncMock(return_value=[]))
+    monkeypatch.setattr(er, "_explorium_contacts", quota_expl)
+
+    tripped = []
+    monkeypatch.setattr(er, "trip_circuit", lambda p, c: tripped.append(p))
+
+    results = await er.gather_contacts("co.com", "Co", "", 5)
+
+    assert "explorium" in tripped
+    assert results == []
