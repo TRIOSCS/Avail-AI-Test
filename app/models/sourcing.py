@@ -284,14 +284,20 @@ class Sighting(Base):
 
 
 class RequisitionAttachment(Base):
-    """File attachment on a requisition (stored in OneDrive)."""
+    """File attachment on a requisition (stored in OneDrive or company SharePoint
+    library).
+
+    library_drive_id NULL  → OneDrive fallback row (user token, item in /me/drive)
+    library_drive_id set   → company SharePoint library row (app token)
+    """
 
     __tablename__ = "requisition_attachments"
     id = Column(Integer, primary_key=True)
     requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False, index=True)
     file_name = Column(String(500), nullable=False)
-    onedrive_item_id = Column(String(500))
-    onedrive_url = Column(Text)
+    library_item_id = Column(String(500))
+    library_drive_id = Column(String(200))
+    library_web_url = Column(Text)
     thumbnail_url = Column(Text)
     content_type = Column(String(100))
     size_bytes = Column(Integer)
@@ -303,14 +309,20 @@ class RequisitionAttachment(Base):
 
 
 class RequirementAttachment(Base):
-    """File attachment on a requirement (stored in OneDrive)."""
+    """File attachment on a requirement (stored in OneDrive or company SharePoint
+    library).
+
+    library_drive_id NULL  → OneDrive fallback row (user token, item in /me/drive)
+    library_drive_id set   → company SharePoint library row (app token)
+    """
 
     __tablename__ = "requirement_attachments"
     id = Column(Integer, primary_key=True)
     requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="CASCADE"), nullable=False, index=True)
     file_name = Column(String(500), nullable=False)
-    onedrive_item_id = Column(String(500))
-    onedrive_url = Column(Text)
+    library_item_id = Column(String(500))
+    library_drive_id = Column(String(200))
+    library_web_url = Column(Text)
     thumbnail_url = Column(Text)
     content_type = Column(String(100))
     size_bytes = Column(Integer)

@@ -122,7 +122,8 @@ class EmailSignatureExtract(Base):
 
 
 class ProspectContact(Base):
-    """Enriched contacts found via Apollo/web search for customers and vendors."""
+    """Enriched contacts found via enrichment providers (Lusha, Clay, Explorium, Hunter,
+    web search) for customers and vendors."""
 
     __tablename__ = "prospect_contacts"
     id = Column(Integer, primary_key=True)

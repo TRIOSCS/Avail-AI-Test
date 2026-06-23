@@ -15,39 +15,39 @@ FIRMO_BASE_TIER: dict[str, int] = {
     "explorium": 85,
     "lusha": 75,
     "clay": 70,
-    "apollo": 65,
     "sam_gov": 60,
     "hunter": 40,
     "ai": 30,
 }
 FIRMO_FIELD_TIER: dict[str, dict[str, int]] = {
-    "legal_name": {"sam_gov": 95, "explorium": 85, "lusha": 75, "clay": 70, "apollo": 65, "ai": 30},
+    "legal_name": {"sam_gov": 95, "explorium": 85, "lusha": 75, "clay": 70, "ai": 30},
     "naics": {"sam_gov": 95, "explorium": 85, "ai": 30},
     "ticker": {"explorium": 90, "clay": 75, "ai": 30},
-    "revenue_range": {"explorium": 90, "clay": 75, "ai": 30},
-    "employee_size": {"explorium": 85, "apollo": 75, "lusha": 70, "clay": 70, "ai": 30},
-    "industry": {"explorium": 85, "apollo": 70, "clay": 70, "lusha": 65, "ai": 30},
-    "hq_city": {"explorium": 85, "sam_gov": 80, "apollo": 65, "lusha": 60, "clay": 60, "ai": 30},
-    "hq_state": {"explorium": 85, "sam_gov": 80, "apollo": 65, "lusha": 60, "clay": 60, "ai": 30},
-    "hq_country": {"explorium": 85, "sam_gov": 80, "apollo": 65, "lusha": 60, "clay": 60, "ai": 30},
-    "website": {"explorium": 80, "clay": 70, "apollo": 65, "lusha": 60, "ai": 30},
-    "domain": {"explorium": 80, "clay": 70, "apollo": 65, "lusha": 60, "ai": 30},
-    "linkedin_url": {"explorium": 85, "lusha": 80, "apollo": 65, "clay": 60, "ai": 30},
+    # Clay omitted: annual_revenue is not a base firmographic and enrich_company does
+    # not request the paid Annual Revenue data point, so Clay never supplies this field.
+    "revenue_range": {"explorium": 90, "ai": 30},
+    "employee_size": {"explorium": 85, "lusha": 70, "clay": 70, "ai": 30},
+    "industry": {"explorium": 85, "clay": 70, "lusha": 65, "ai": 30},
+    "hq_city": {"explorium": 85, "sam_gov": 80, "lusha": 60, "clay": 60, "ai": 30},
+    "hq_state": {"explorium": 85, "sam_gov": 80, "lusha": 60, "clay": 60, "ai": 30},
+    "hq_country": {"explorium": 85, "sam_gov": 80, "lusha": 60, "clay": 60, "ai": 30},
+    "website": {"explorium": 80, "clay": 70, "lusha": 60, "ai": 30},
+    "domain": {"explorium": 80, "clay": 70, "lusha": 60, "ai": 30},
+    "linkedin_url": {"explorium": 85, "lusha": 80, "clay": 60, "ai": 30},
 }
 CONTACT_BASE_TIER: dict[str, int] = {
     "lusha": 80,
     "explorium": 70,
-    "apollo": 70,
     "clay": 65,
     "hunter": 50,
     "ai": 30,
 }
 CONTACT_FIELD_TIER: dict[str, dict[str, int]] = {
-    "phone": {"lusha": 95, "apollo": 70, "explorium": 65, "hunter": 50, "ai": 30},
-    "email": {"lusha": 95, "hunter": 85, "apollo": 70, "explorium": 65, "ai": 30},
-    "title": {"explorium": 80, "apollo": 75, "lusha": 70, "clay": 65, "hunter": 50, "ai": 30},
-    "full_name": {"lusha": 80, "apollo": 70, "explorium": 70, "clay": 65, "hunter": 50, "ai": 30},
-    "linkedin_url": {"lusha": 80, "apollo": 70, "explorium": 70, "clay": 65, "hunter": 50, "ai": 30},
+    "phone": {"lusha": 95, "explorium": 65, "hunter": 50, "ai": 30},
+    "email": {"lusha": 95, "hunter": 85, "explorium": 65, "ai": 30},
+    "title": {"explorium": 80, "lusha": 70, "clay": 65, "hunter": 50, "ai": 30},
+    "full_name": {"lusha": 80, "explorium": 70, "clay": 65, "hunter": 50, "ai": 30},
+    "linkedin_url": {"lusha": 80, "explorium": 70, "clay": 65, "hunter": 50, "ai": 30},
 }
 _warned: set[str] = set()
 

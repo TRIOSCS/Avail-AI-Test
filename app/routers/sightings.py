@@ -41,7 +41,12 @@ from ..constants import (
     UnavailabilityReason,
 )
 from ..database import get_db
-from ..dependencies import require_buyer, require_fresh_token, require_user
+from ..dependencies import (
+    require_buyer,
+    require_fresh_token,
+    require_requisition_access,
+    require_user,
+)
 from ..models import User
 from ..models.intelligence import ActivityLog, MaterialCard, MaterialCardDatasheet
 from ..models.offers import Offer
@@ -758,6 +763,7 @@ async def sightings_refresh(
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
         raise HTTPException(status_code=404, detail="Requirement not found")
+    require_requisition_access(db, requirement.requisition_id, user)
 
     is_sse = source == "sse"
     refresh_failed = False
@@ -832,6 +838,8 @@ async def sightings_batch_refresh(
     reqs_by_id = {}
     if requirement_ids:
         reqs = db.query(Requirement).filter(Requirement.id.in_([int(rid) for rid in requirement_ids])).all()
+        for r in reqs:
+            require_requisition_access(db, r.requisition_id, user, label="Requirement")
         reqs_by_id = {r.id: r for r in reqs}
 
     success = 0
@@ -902,6 +910,8 @@ async def sightings_batch_assign(
 
     int_ids = [int(rid) for rid in requirement_ids]
     reqs = db.query(Requirement).filter(Requirement.id.in_(int_ids)).all()
+    for r in reqs:
+        require_requisition_access(db, r.requisition_id, user, label="Requirement")
 
     buyer_name = "nobody"
     if buyer_id:
@@ -945,6 +955,8 @@ async def sightings_batch_status(
 
     int_ids = [int(rid) for rid in requirement_ids]
     reqs = db.query(Requirement).filter(Requirement.id.in_(int_ids)).all()
+    for r in reqs:
+        require_requisition_access(db, r.requisition_id, user, label="Requirement")
 
     updated = 0
     skipped = 0
@@ -1000,6 +1012,8 @@ async def sightings_batch_notes(
 
     int_ids = [int(rid) for rid in requirement_ids]
     reqs = db.query(Requirement).filter(Requirement.id.in_(int_ids)).all()
+    for r in reqs:
+        require_requisition_access(db, r.requisition_id, user, label="Requirement")
 
     for r in reqs:
         activity = ActivityLog(
@@ -1101,6 +1115,7 @@ async def sightings_mark_unavailable(
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
         raise HTTPException(status_code=404, detail="Requirement not found")
+    require_requisition_access(db, requirement.requisition_id, user)
 
     try:
         record_unavailability(db, requirement, vendor_name, reason, note, user)
@@ -1136,6 +1151,7 @@ async def sightings_mark_available(
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
         raise HTTPException(status_code=404, detail="Requirement not found")
+    require_requisition_access(db, requirement.requisition_id, user)
 
     try:
         clear_unavailability(db, requirement, vendor_name, user)
@@ -1168,6 +1184,7 @@ async def sightings_assign_buyer(
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
         raise HTTPException(status_code=404, detail="Requirement not found")
+    require_requisition_access(db, requirement.requisition_id, user)
 
     requirement.assigned_buyer_id = buyer_id
     db.commit()
@@ -1194,6 +1211,7 @@ async def sightings_advance_status(
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
         raise HTTPException(status_code=404, detail="Requirement not found")
+    require_requisition_access(db, requirement.requisition_id, user)
 
     current = requirement.sourcing_status or SourcingStatus.OPEN
 
@@ -1243,6 +1261,7 @@ async def sightings_log_activity(
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
         raise HTTPException(status_code=404, detail="Requirement not found")
+    require_requisition_access(db, requirement.requisition_id, user)
 
     activity_type_map = {
         "note": "note",
@@ -2062,7 +2081,7 @@ def _best_contacts_by_card(db: Session, card_ids: list[int]) -> list[VendorConta
     the BEST contact per vendor.
 
     VendorContact has no is_primary flag, and a vendor can hold several contacts (an
-    rfq_manual row added inline via the composer alongside an Apollo-enriched row). An
+    rfq_manual row added inline via the composer alongside an enriched row). An
     unordered ``{c.vendor_card_id: c for c in contacts}`` lets an arbitrary (possibly
     EMPTY-email) row win, which would silently skip the vendor as "had no email". Ordering
     a usable email LAST (then verified, then higher confidence) makes the real email win.
@@ -2112,6 +2131,8 @@ async def sightings_preview_inquiry(
         raise HTTPException(status_code=400, detail="requirement_ids and vendor_names required")
 
     requirements = db.query(Requirement).filter(Requirement.id.in_(requirement_ids)).all()
+    for r in requirements:
+        require_requisition_access(db, r.requisition_id, user, label="Requirement")
 
     # Request-time re-validation against ACTIVE unavailability records (the modal
     # filter alone leaves a TOCTOU hole): excluded vendors are dropped from the
@@ -2131,7 +2152,7 @@ async def sightings_preview_inquiry(
     card_ids = [c.id for c in cards]
     # Order worst-first so the dict's last-wins keeps the BEST contact per vendor: a
     # vendor with multiple contacts (e.g. an rfq_manual row added via the composer plus
-    # an Apollo-enriched row) must not pick a NULL-email contact over one that has the
+    # an enriched row) must not pick a NULL-email contact over one that has the
     # real email — that would silently skip the vendor as "had no email".
     contacts = _best_contacts_by_card(db, card_ids)
     contact_map = {c.vendor_card_id: c for c in contacts}
@@ -2241,6 +2262,12 @@ async def sightings_send_inquiry(
         # Without this guard the send would proceed with NO requisition at all —
         # emails out, zero Contact tracking — instead of telling the user.
         raise HTTPException(status_code=400, detail="selected requirements no longer exist — refresh and retry")
+
+    # IDOR guard: a restricted (SALES/TRADER) user may only send RFQs for parts on
+    # requisitions they own. Enforce per distinct requisition_id in the basket — any
+    # non-owned requisition 404s the whole send rather than emailing on its behalf.
+    for _req_id in {r.requisition_id for r in requirements}:
+        require_requisition_access(db, _req_id, user)
 
     # Send-time re-validation (closes the TOCTOU the modal filter alone leaves open):
     # vendors with an ACTIVE unavailability record on the selected parts are dropped
@@ -2611,6 +2638,7 @@ async def sightings_create_offer(
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
         raise HTTPException(404, "Requirement not found")
+    require_requisition_access(db, requirement.requisition_id, user)
 
     # Build (and structurally validate) the payload FIRST so a bad numeric/date is
     # reported as a 422 (not masked by the essentials gate below or crashed as a 500).
@@ -2726,6 +2754,7 @@ async def sightings_review_offer(
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
         raise HTTPException(404, "Requirement not found")
+    require_requisition_access(db, requirement.requisition_id, user)
     # Scope the offer to the path requirement (IDOR guard — prevents a guessed offer_id
     # from a different requirement from being approved/rejected).
     offer = db.get(Offer, offer_id)
@@ -2753,6 +2782,7 @@ async def sightings_reconfirm_offer(
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
         raise HTTPException(404, "Requirement not found")
+    require_requisition_access(db, requirement.requisition_id, user)
     # Scope the offer to the path requirement (IDOR guard).
     offer = db.get(Offer, offer_id)
     if offer is None or offer.requirement_id != requirement_id:
@@ -2776,6 +2806,7 @@ async def sightings_mark_offer_sold(
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
         raise HTTPException(404, "Requirement not found")
+    require_requisition_access(db, requirement.requisition_id, user)
     # Scope the offer to the path requirement (IDOR guard).
     offer = db.get(Offer, offer_id)
     if offer is None or offer.requirement_id != requirement_id:
@@ -2799,6 +2830,7 @@ async def sightings_delete_offer(
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
         raise HTTPException(404, "Requirement not found")
+    require_requisition_access(db, requirement.requisition_id, user)
     # Scope the offer to the path requirement (IDOR guard).
     offer = db.get(Offer, offer_id)
     if offer is None or offer.requirement_id != requirement_id:
@@ -2875,6 +2907,166 @@ async def sightings_offer_edit_form(
     return template_response("htmx/partials/sightings/offer_form_modal.html", ctx)
 
 
+def _offer_for_requirement_or_404(db: Session, requirement_id: int, offer_id: int):
+    requirement = db.get(Requirement, requirement_id)
+    offer = db.get(Offer, offer_id)
+    if not requirement or not offer or offer.requirement_id != requirement_id:
+        raise HTTPException(404, "Not found")
+    return requirement, offer
+
+
+@router.get(
+    "/v2/partials/sightings/{requirement_id}/offers/{offer_id}/qualify-ai",
+    response_class=HTMLResponse,
+)
+async def sightings_qualify_ai(
+    request: Request,
+    requirement_id: int,
+    offer_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    """Qualify-with-AI modal: parse the linked vendor email, pre-fill the offer form,
+    and compute the ask-the-vendor gap checklist. Read-only; nothing is sent or saved."""
+    from ..models.offers import VendorResponse
+    from ..services.offer_qualification import compute_qual_gaps, normalize_offer_condition
+    from ..services.response_parser import extract_draft_offers, parse_vendor_response
+
+    requirement, offer = _offer_for_requirement_or_404(db, requirement_id, offer_id)
+    require_requisition_access(db, offer.requisition_id, user, owner_id=offer.entered_by_id, label="Offer")
+
+    vr = db.get(VendorResponse, offer.vendor_response_id) if offer.vendor_response_id else None
+    if not vr:
+        raise HTTPException(404, "No linked vendor email for this offer")
+
+    def _json_safe(v: object) -> object:
+        if v is None:
+            return ""
+        if isinstance(v, Decimal):
+            return str(v)
+        if isinstance(v, (date, datetime)):
+            return v.isoformat()
+        return v
+
+    fields = [
+        "vendor_name",
+        "mpn",
+        "manufacturer",
+        "qty_available",
+        "unit_price",
+        "lead_time",
+        "date_code",
+        "condition",
+        "packaging",
+        "firmware",
+        "hardware_code",
+        "moq",
+        "spq",
+        "warranty",
+        "country_of_origin",
+        "notes",
+    ]
+    prefill = {f: _json_safe(getattr(offer, f, None)) for f in fields}
+    _q = offer.qualification or {}
+    for _qk in (
+        "usage",
+        "refurbished_by",
+        "refurb_process",
+        "cert_doc",
+        "part_condition",
+        "provenance_story",
+        "terms",
+        "lead_time_reason",
+    ):
+        prefill[_qk] = _json_safe(_q.get(_qk))
+
+    rfq_context = {"mpn": requirement.primary_mpn, "qty": requirement.target_qty}
+    try:
+        parsed = await parse_vendor_response(vr.body or "", vr.subject or "", vr.vendor_name or "", rfq_context)
+    except Exception as exc:  # parse must never break the modal
+        logger.warning("qualify-ai parse failed for offer {}: {}", offer_id, exc)
+        parsed = None
+
+    confidence = None
+    ai_extract: dict = {}
+    if parsed:
+        confidence = parsed.get("confidence")
+        drafts = extract_draft_offers(parsed, vr.vendor_name or "")
+        if drafts:
+            ai_extract = next(
+                (d for d in drafts if (d.get("mpn") or "").lower() == (offer.mpn or "").lower()),
+                drafts[0],
+            )
+    # Overlay AI values onto EMPTY offer fields only — never clobber saved values.
+    for f in ("manufacturer", "qty_available", "unit_price", "lead_time", "date_code", "condition", "packaging", "moq"):
+        if prefill.get(f) in (None, "") and ai_extract.get(f) not in (None, ""):
+            prefill[f] = _json_safe(ai_extract.get(f))
+
+    condition = normalize_offer_condition(prefill.get("condition")) or prefill.get("condition")
+    gap_items = compute_qual_gaps(prefill, condition)
+
+    ctx = {
+        "request": request,
+        "requirement": requirement,
+        "offer": offer,
+        "prefill": prefill,
+        "gap_items": gap_items,
+        "confidence": confidence,
+        "vr": vr,
+    }
+    return template_response("htmx/partials/sightings/qual_request_modal.html", ctx)
+
+
+@router.post(
+    "/v2/partials/sightings/{requirement_id}/offers/{offer_id}/qualify-ai/draft-request",
+    response_class=HTMLResponse,
+)
+async def sightings_qualify_ai_draft(
+    request: Request,
+    requirement_id: int,
+    offer_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    """Draft a vendor reply asking for the chosen qualification items (AI-suggested gaps
+    the user kept, plus any custom items the user added).
+
+    Renders the editable compose box; sending goes through the existing send-reply path.
+    """
+    from ..models.offers import VendorResponse
+    from ..services.email_drafting import draft_email
+
+    requirement, offer = _offer_for_requirement_or_404(db, requirement_id, offer_id)
+    require_requisition_access(db, offer.requisition_id, user, owner_id=offer.entered_by_id, label="Offer")
+
+    vr = db.get(VendorResponse, offer.vendor_response_id) if offer.vendor_response_id else None
+    if not vr:
+        raise HTTPException(404, "No linked vendor email for this offer")
+
+    form = await request.form()
+    checked = [c.strip() for c in form.getlist("checked_items") if c and c.strip()]
+    custom = [c.strip() for c in form.getlist("custom_items") if c and c.strip()]
+    items_requested = checked + custom
+
+    result = await draft_email(
+        "qual_request",
+        {"vendor_name": vr.vendor_name, "subject": vr.subject, "mpn": offer.mpn, "items_requested": items_requested},
+    )
+
+    default_subject = vr.subject or "RFQ"
+    if not default_subject.lower().startswith("re:"):
+        default_subject = f"Re: {default_subject}"
+    ctx = {
+        "request": request,
+        "req_id": offer.requisition_id,
+        "r": vr,
+        "reply_subject": (result or {}).get("subject") or default_subject,
+        "reply_body": (result or {}).get("body") or "",
+        "ai_failed": result is None,
+    }
+    return template_response("htmx/partials/requisitions/tabs/reply_compose.html", ctx)
+
+
 @router.post("/v2/partials/sightings/{requirement_id}/offers/{offer_id}", response_class=HTMLResponse)
 async def sightings_update_offer(
     request: Request,
@@ -2916,6 +3108,7 @@ async def sightings_update_offer(
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
         raise HTTPException(404, "Requirement not found")
+    require_requisition_access(db, requirement.requisition_id, user)
 
     # Load the offer FIRST and scope it to the path requirement (prevents cross-requirement
     # IDOR via a guessed offer_id; 404 if missing or owned by another requirement).
@@ -3066,6 +3259,7 @@ async def sightings_offer_request(
     # guessed offer_id); 404 if the offer is missing or belongs to another requirement.
     if offer is None or offer.requirement_id != requirement_id:
         raise HTTPException(status_code=404, detail={"error": "offer not found for this requirement"})
+    require_requisition_access(db, offer.requisition_id, user, owner_id=offer.entered_by_id, label="Offer")
     draft = request_template(kind, offer.mpn)
     q = dict(offer.qualification or {})
     reqs = list(q.get("requests") or [])
@@ -3123,6 +3317,7 @@ async def sightings_offer_request_send(
     # guessed offer_id); 404 if the offer is missing or belongs to another requirement.
     if offer is None or offer.requirement_id != requirement_id:
         raise HTTPException(status_code=404, detail={"error": "offer not found for this requirement"})
+    require_requisition_access(db, offer.requisition_id, user, owner_id=offer.entered_by_id, label="Offer")
 
     q = dict(offer.qualification or {})
     reqs = list(q.get("requests") or [])

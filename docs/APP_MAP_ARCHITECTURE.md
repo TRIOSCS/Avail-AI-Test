@@ -70,6 +70,31 @@ Route Handler
 Response -> Caddy -> Browser -> HTMX swaps into DOM
 ```
 
+## Authorization & Access Control
+
+Two layers: **role gates** (who may reach an endpoint) and **ownership scoping**
+(which records a user may act on).
+
+- **Role gates** — FastAPI dependencies in `app/dependencies.py`: `require_user`
+  (any authenticated active user), `require_buyer` (BUYER_ROLES = buyer/sales/trader/
+  manager/admin), `require_admin`, `require_manager`. The non-interactive `agent`
+  account is excluded from buyer-tier actions.
+- **Ownership scoping (role-scoped model)** — `RESTRICTED_ROLES = {SALES, TRADER}`
+  (single source of truth in `app/constants.py`): sales/trader users may act only on
+  requisitions they created (`Requisition.created_by`); buyer/manager/admin are
+  unrestricted. Enforced through ONE chokepoint, not per-endpoint logic:
+  - `require_requisition_access(db, req_id, user, *, owner_id=None, label=...)` — pure
+    guard, raises 404 for a restricted non-owner. Used after loading a requisition or a
+    requisition-scoped child (Offer/Requirement/Contact/VendorResponse/SourcingLead;
+    `owner_id` covers scratch resources with a null `requisition_id`).
+  - `get_req_for_user` / `get_quote_for_user` — load-and-authorize helpers that return
+    the owned record or 404.
+
+  Every mutating or email-sending endpoint that touches a requisition-scoped resource
+  routes through one of these. Regression tests live in `tests/test_authz_*.py`
+  (a non-owner sales/trader user must get 404). 404 (not 403) is used so resource
+  existence isn't leaked.
+
 ## Frontend Architecture
 
 ```
@@ -118,7 +143,7 @@ authoritative reference. Static-analysis tests in
 | Proactive | 4 | partials/proactive/ |
 | Emails | 4 | partials/emails/ |
 | Tickets | 4 | partials/tickets/ |
-| Settings | 5 | partials/settings/ |
+| Settings | 5 | partials/settings/ — tabs: **Connectors** (unified, replaces Sources + API Keys; admin-only), Profile, System, Data Ops, Ops Group; legacy `/sources` + `/api-keys` routes 302 → Connectors |
 | Shared | 16 | partials/shared/ |
 | Buy Plans | 6 | partials/buy_plans/ — the **Deal Hub**, a role-lens shell at `/v2/buy-plans` (own primary-nav tab). `hub.html` is the shell (lens switcher + lazy `#bp-hub-body`); `_board.html` (sales "My Deals" stage board), `_orders_queue.html` (buyer "My Orders" PO-cut queue), `_supervise.html` (manager/ops "Supervise" triage strip + all-scope board) are the three lens bodies; `detail.html`/`_macros.html` are the single-plan view. Lens partial routes: `GET /v2/partials/buy-plans` (shell, `lens=` param → role-derived default), `/orders`, `/board?scope=`, `/supervise` (all in `routers/htmx_views.py`). Read models in `services/buyplan_hub.py` (`buyer_line_queue` / `deals_board` / `supervise_overview`). The retired `/v2/reporting` page folded its analytics in here (supervise strip) + the Sales Hub pipeline chip + the CRM coverage chip — `partials/reporting/` and the `reporting_dashboard` route are gone. |
 
@@ -153,7 +178,7 @@ authoritative reference. Static-analysis tests in
      Auth & Comms    Supplier APIs        AI & Intel
           │                │                    │
    Azure AD          Nexar (Octopart)     Claude API
-   Graph API         BrokerBin            Apollo API
+   Graph API         BrokerBin            Clay MCP
    Teams API         DigiKey              Explorium API
    8x8 API           Mouser
                      Element14

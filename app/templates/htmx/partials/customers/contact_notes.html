@@ -1,9 +1,16 @@
 {# contact_notes.html — Notes timeline for a site contact.
-   Receives: contact (SiteContact), notes (list[ActivityLog]), company_id, site_id.
+   Receives: contact (SiteContact), notes (list[ActivityLog]), company_id, site_id,
+             no_email_contact (bool — True when contact has no email address).
    Called by: htmx_views.py get_site_contact_notes / add_site_contact_note routes.
    Depends on: HTMX, Tailwind CSS with brand palette.
 #}
 <div class="space-y-3">
+  {% if no_email_contact %}
+  <div class="flex items-center gap-2 rounded bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-700">
+    <span>⚠</span>
+    <span>This contact has no email address — notes cannot be linked by email and will not appear in the activity feed.</span>
+  </div>
+  {% endif %}
   <h4 class="text-sm font-semibold text-gray-900">
     Notes for {{ contact.full_name or contact.email or 'Contact' }}
   </h4>

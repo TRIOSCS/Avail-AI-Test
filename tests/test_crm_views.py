@@ -574,7 +574,7 @@ class TestContactPanel:
         assert resp.status_code == 200
         assert "data-outreach-log" in resp.text
         assert 'href="tel:+14155550000"' in resp.text
-        assert 'href="mailto:jane@contactpanel.com"' in resp.text
+        assert "outlook.office.com/mail/deeplink/compose?to=" in resp.text
         assert "https://teams.microsoft.com/l/chat/0/0?users=jane%40contactpanel.com" in resp.text
         assert f'data-company-id="{company.id}"' in resp.text
         assert f'data-contact-id="{contact.id}"' in resp.text
@@ -586,8 +586,9 @@ class TestContactPanel:
         company, _, _ = self._make_company_with_contact(db_session, wechat_id="jane_wc")
         resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
         assert resp.status_code == 200
-        assert "weixin://dl/chat?jane_wc" in resp.text
         assert 'data-channel="wechat"' in resp.text
+        assert 'data-value="jane_wc"' in resp.text
+        assert "navigator.clipboard" in resp.text
 
     def test_no_wechat_action_without_handle(self, client: TestClient, db_session: Session, test_user: User):
         """No WeChat button when the contact has no wechat_id."""
@@ -1014,7 +1015,7 @@ class TestContactsTabP33:
         resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
         html = resp.text
         assert "data-outreach-log" in html
-        assert 'href="mailto:alice@p33.com"' in html
+        assert "outlook.office.com/mail/deeplink/compose?to=" in html
 
     # ── empty state ─────────────────────────────────────────────────────
 
@@ -1222,9 +1223,10 @@ class TestCompanyDetailCadenceCard:
 
 
 class TestUnifiedActivityTimeline:
-    """P3-4: activity tab merges RFQ contacts + quotes + activity logs into ONE
-    chronological timeline, fixes the q.total_amount bug, adds quality badges,
-    and exposes a hide-noise toggle.
+    """P3-4 / Step-1 CRM regroup: activity tab shows type-sectioned ActivityLog feed.
+
+    Quotes and RFQ contacts are intentionally absent — they have their own tabs. Updated
+    tests reflect the new section-per-type design.
     """
 
     # ── helpers ─────────────────────────────────────────────────────────────
@@ -1253,8 +1255,12 @@ class TestUnifiedActivityTimeline:
         resp = client.get(f"/v2/partials/customers/{co.id}/tab/activity")
         assert resp.status_code == 200
 
-    def test_all_three_event_kinds_appear_in_timeline(self, client: TestClient, db_session: Session, test_user: User):
-        """Timeline shows events from all three sources: RFQ, quote, activity."""
+    def test_activity_log_events_appear_in_sections(self, client: TestClient, db_session: Session, test_user: User):
+        """Activity tab shows ActivityLog entries in their type sections.
+
+        RFQ contacts appear in the Emails section (canonical RFQ source). Quotes are NOT
+        shown — they belong in the Quotes tab.
+        """
         from decimal import Decimal
 
         from app.models.intelligence import ActivityLog
@@ -1264,7 +1270,7 @@ class TestUnifiedActivityTimeline:
         co = self._make_company(db_session, "MergeTest Co")
         req = self._make_requisition(db_session, co)
 
-        # RFQ contact
+        # RFQ contact — should appear in Emails section (canonical RFQ source)
         rfq = RfqContact(
             requisition_id=req.id,
             user_id=test_user.id,
@@ -1275,7 +1281,7 @@ class TestUnifiedActivityTimeline:
         )
         db_session.add(rfq)
 
-        # Quote with real money value (subtotal — the correct field)
+        # Quote — should NOT appear (own tab)
         q = Quote(
             requisition_id=req.id,
             quote_number="QT-2026-001",
@@ -1285,7 +1291,7 @@ class TestUnifiedActivityTimeline:
         )
         db_session.add(q)
 
-        # Meaningful activity
+        # Meaningful activity — should appear in Emails section
         act = ActivityLog(
             user_id=test_user.id,
             activity_type="email_received",
@@ -1305,28 +1311,29 @@ class TestUnifiedActivityTimeline:
         assert resp.status_code == 200
         html = resp.text
 
-        # All three kinds present
-        assert "Acme Vendor" in html, "RFQ vendor missing from timeline"
-        assert "QT-2026-001" in html, "Quote number missing from timeline"
-        assert "Email Received" in html, "Activity entry missing from timeline"
+        # Activity log entry rendered in Emails section
+        assert "Email Received" in html, "ActivityLog entry missing from timeline"
+        # RFQ contact appears in Emails section (canonical source)
+        assert "Acme Vendor" in html, "RFQ contact must appear in Emails section"
+        # Quote is absent from this tab
+        assert "QT-2026-001" not in html, "Quote must not appear in activity tab"
 
-    def test_quote_value_renders_not_blank(self, client: TestClient, db_session: Session, test_user: User):
-        """Quote dollar value renders (guards the q.total_amount bug fix).
+    def test_quotes_absent_from_activity_tab(self, client: TestClient, db_session: Session, test_user: User):
+        """Quotes are absent from the activity tab — they belong in the Quotes tab.
 
-        The old template used q.total_amount which does NOT exist on Quote, so every
-        quote row rendered blank.  Now uses q.subtotal (or won_revenue for won quotes).
-        A quote with subtotal=1234.56 must show that value.
+        Regression guard: the old implementation mixed quotes into the activity feed.
+        The new section-per-type design renders only ActivityLog rows here.
         """
         from decimal import Decimal
 
         from app.models.quotes import Quote
 
-        co = self._make_company(db_session, "QuoteBug Co")
+        co = self._make_company(db_session, "QuoteAbsent Co")
         req = self._make_requisition(db_session, co)
 
         q = Quote(
             requisition_id=req.id,
-            quote_number="QT-BUG-001",
+            quote_number="QT-ABSENT-001",
             subtotal=Decimal("1234.56"),
             status="sent",
             created_at=datetime(2026, 6, 10, tzinfo=timezone.utc),
@@ -1336,11 +1343,12 @@ class TestUnifiedActivityTimeline:
 
         resp = client.get(f"/v2/partials/customers/{co.id}/tab/activity")
         assert resp.status_code == 200
-        # Dollar value must appear — "1,234.56" formatted
-        assert "1,234.56" in resp.text, "Quote subtotal not rendered (total_amount bug still present)"
+        # Quote must NOT appear in the activity tab
+        assert "QT-ABSENT-001" not in resp.text, "Quote must not appear in activity tab"
+        assert "1,234.56" not in resp.text, "Quote dollar value must not appear in activity tab"
 
-    def test_won_quote_shows_won_revenue(self, client: TestClient, db_session: Session, test_user: User):
-        """Won quote shows won_revenue rather than subtotal."""
+    def test_won_quote_absent_from_activity_tab(self, client: TestClient, db_session: Session, test_user: User):
+        """Won quotes are absent from the activity tab (belongs in Quotes tab)."""
         from decimal import Decimal
 
         from app.models.quotes import Quote
@@ -1350,7 +1358,7 @@ class TestUnifiedActivityTimeline:
 
         q = Quote(
             requisition_id=req.id,
-            quote_number="QT-WON-001",
+            quote_number="QT-WON-ABSENT",
             subtotal=Decimal("5000.00"),
             won_revenue=Decimal("4800.00"),
             status="won",
@@ -1361,10 +1369,11 @@ class TestUnifiedActivityTimeline:
 
         resp = client.get(f"/v2/partials/customers/{co.id}/tab/activity")
         assert resp.status_code == 200
-        assert "4,800.00" in resp.text, "Won revenue not rendered for won quote"
+        assert "QT-WON-ABSENT" not in resp.text, "Won quote must not appear in activity tab"
+        assert "4,800.00" not in resp.text, "Won revenue must not appear in activity tab"
 
-    def test_meaningful_activity_has_quality_badge(self, client: TestClient, db_session: Session, test_user: User):
-        """Meaningful activity entry carries a quality badge in the rendered HTML."""
+    def test_email_activity_renders_in_emails_section(self, client: TestClient, db_session: Session, test_user: User):
+        """email_received ActivityLog renders in the Emails section."""
         from app.models.intelligence import ActivityLog
 
         co = self._make_company(db_session, "QualityBadge Co")
@@ -1384,23 +1393,23 @@ class TestUnifiedActivityTimeline:
 
         resp = client.get(f"/v2/partials/customers/{co.id}/tab/activity")
         assert resp.status_code == 200
-        # "Meaningful" badge text must appear
-        assert "meaningful" in resp.text.lower(), "Meaningful quality badge not rendered"
+        html = resp.text
+        # Emails section header present
+        assert ">Emails<" in html, "Emails section header not rendered"
+        # The activity type label is rendered by activity_row
+        assert "Email Received" in html, "email_received activity row missing"
 
-    def test_noise_activity_has_hide_noise_marker(self, client: TestClient, db_session: Session, test_user: User):
-        """Non-meaningful (noise) activity has the hide-noise CSS class/marker."""
+    def test_system_activity_renders_in_other_section(self, client: TestClient, db_session: Session, test_user: User):
+        """System/status activities (status_changed) land in the Other section."""
         from app.models.intelligence import ActivityLog
 
-        co = self._make_company(db_session, "NoiseTest Co")
+        co = self._make_company(db_session, "OtherSection Co")
         noise = ActivityLog(
             user_id=test_user.id,
-            activity_type="email_received",
-            channel="email",
+            activity_type="status_changed",
+            channel="system",
             company_id=co.id,
-            subject="Out of office: re-joining Mon",
-            is_meaningful=False,
-            quality_score=0.1,
-            quality_classification="noise",
+            summary="Status changed to active",
             created_at=datetime(2026, 6, 10, tzinfo=timezone.utc),
         )
         db_session.add(noise)
@@ -1408,20 +1417,20 @@ class TestUnifiedActivityTimeline:
 
         resp = client.get(f"/v2/partials/customers/{co.id}/tab/activity")
         assert resp.status_code == 200
-        # Noise entries must carry the js-timeline-noise class for Alpine toggle
-        assert "js-timeline-noise" in resp.text, "Noise marker class missing from noise entry"
+        # Other section present and uses Alpine hideOther (collapsible)
+        assert ">Other<" in resp.text, "Other section header not rendered for system activity"
+        assert "hideOther" in resp.text, "Alpine hideOther toggle missing for Other section"
 
-    def test_hide_noise_toggle_control_present(self, client: TestClient, db_session: Session, test_user: User):
-        """Hide-noise Alpine toggle control is rendered in the activity tab."""
+    def test_other_section_toggle_control_present(self, client: TestClient, db_session: Session, test_user: User):
+        """The Other section has the Alpine hideOther collapse control."""
         from app.models.intelligence import ActivityLog
 
         co = self._make_company(db_session, "ToggleTest Co")
         act = ActivityLog(
             user_id=test_user.id,
-            activity_type="email_received",
-            channel="email",
+            activity_type="offer_created",
+            channel="system",
             company_id=co.id,
-            is_meaningful=False,
             created_at=datetime(2026, 6, 10, tzinfo=timezone.utc),
         )
         db_session.add(act)
@@ -1430,53 +1439,48 @@ class TestUnifiedActivityTimeline:
         resp = client.get(f"/v2/partials/customers/{co.id}/tab/activity")
         assert resp.status_code == 200
         html = resp.text
-        # Alpine x-data toggle must be present
-        assert "hideNoise" in html, "Alpine hideNoise toggle not in template"
-        assert "Hide routine" in html or "hide routine" in html.lower(), "Hide routine toggle label not found"
+        # Alpine hideOther (new name — section-level toggle)
+        assert "hideOther" in html, "Alpine hideOther toggle not in template"
 
-    def test_events_are_sorted_newest_first(self, client: TestClient, db_session: Session, test_user: User):
-        """Timeline events appear in descending chronological order (newest first)."""
-        from decimal import Decimal
-
+    def test_events_within_section_sorted_newest_first(self, client: TestClient, db_session: Session, test_user: User):
+        """Within a type section, activities appear newest-first (date groups
+        descending)."""
         from app.models.intelligence import ActivityLog
-        from app.models.quotes import Quote
 
         co = self._make_company(db_session, "SortTest Co")
-        req = self._make_requisition(db_session, co)
 
-        # Older quote
-        q = Quote(
-            requisition_id=req.id,
-            quote_number="QT-SORT-OLD",
-            subtotal=Decimal("100.00"),
-            status="draft",
-            created_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
-        )
-        db_session.add(q)
-
-        # Newer activity
-        act = ActivityLog(
+        # Two notes: older and newer
+        older = ActivityLog(
             user_id=test_user.id,
-            activity_type="sales_note",
+            activity_type="note",
             channel="manual",
             company_id=co.id,
-            notes="Follow-up call done",
-            is_meaningful=True,
+            notes="Older note from June 1",
+            created_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
+        )
+        newer = ActivityLog(
+            user_id=test_user.id,
+            activity_type="note",
+            channel="manual",
+            company_id=co.id,
+            notes="Newer note from June 5",
             created_at=datetime(2026, 6, 5, tzinfo=timezone.utc),
         )
-        db_session.add(act)
+        db_session.add_all([older, newer])
         db_session.commit()
 
         resp = client.get(f"/v2/partials/customers/{co.id}/tab/activity")
         assert resp.status_code == 200
         html = resp.text
 
-        # The newer activity should appear before (lower index) the older quote
-        act_pos = html.find("Follow-up call done")
-        quote_pos = html.find("QT-SORT-OLD")
-        assert act_pos != -1, "Activity note not found in timeline"
-        assert quote_pos != -1, "Quote not found in timeline"
-        assert act_pos < quote_pos, "Newer activity should appear before older quote (newest-first order)"
+        # Notes section present
+        assert ">Notes<" in html, "Notes section header not rendered"
+        # Newer note appears before older note (newest-first within section)
+        newer_pos = html.find("Newer note from June 5")
+        older_pos = html.find("Older note from June 1")
+        assert newer_pos != -1, "Newer note not found in timeline"
+        assert older_pos != -1, "Older note not found in timeline"
+        assert newer_pos < older_pos, "Newer note should appear before older note (newest-first)"
 
     def test_no_separate_rfq_history_section(self, client: TestClient, db_session: Session, test_user: User):
         """The old 'RFQ History' section heading is gone — replaced by unified
@@ -1594,100 +1598,24 @@ class TestUnifiedTimelineHelper:
 
 
 class TestActivityTabTruncation:
-    """Test that the activity timeline indicates when results are truncated."""
+    """Test that the activity tab indicates when ActivityLog results are truncated.
 
-    def test_activity_tab_shows_truncation_footer_when_rfq_limit_hit(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
-        """When >30 RFQ contacts exist, the timeline shows the truncation footer."""
-        from app.models.offers import Contact as RfqContact
-        from app.models.sourcing import Requisition
-
-        company = Company(name="Busy Corp", is_active=True)
-        db_session.add(company)
-        db_session.flush()
-
-        # Create a requisition for the company
-        req = Requisition(name="RFQ-001", customer_name=company.name, company_id=company.id, status="active")
-        db_session.add(req)
-        db_session.flush()
-
-        # Create 31 RFQ contacts (exceeds .limit(30))
-        base_ts = datetime.now(timezone.utc)
-        for i in range(31):
-            contact = RfqContact(
-                requisition_id=req.id,
-                user_id=test_user.id,
-                contact_type="rfq",
-                vendor_name=f"Vendor {i:02d}",
-                vendor_contact="test@example.com",
-                subject=f"RFQ {i}",
-                status="sent",
-                created_at=base_ts - timedelta(hours=i),
-            )
-            db_session.add(contact)
-        db_session.commit()
-
-        resp = client.get(f"/v2/partials/customers/{company.id}/tab/activity")
-        assert resp.status_code == 200
-        assert "Showing most recent activity" in resp.text
-
-    def test_activity_tab_shows_truncation_footer_when_quote_limit_hit(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
-        """When >20 quotes exist, the timeline shows the truncation footer."""
-        from decimal import Decimal
-
-        from app.models.crm import CustomerSite
-        from app.models.quotes import Quote
-        from app.models.sourcing import Requisition
-
-        company = Company(name="Quote Busy Corp", is_active=True)
-        db_session.add(company)
-        db_session.flush()
-
-        # Create a site for the company
-        site = CustomerSite(company_id=company.id, site_name="Main")
-        db_session.add(site)
-        db_session.flush()
-
-        # Create a requisition for the company to link quotes
-        req = Requisition(name="QT-REQ-001", company_id=company.id, customer_site_id=site.id, status="active")
-        db_session.add(req)
-        db_session.flush()
-
-        # Create 21 quotes (exceeds .limit(20))
-        base_ts = datetime.now(timezone.utc)
-        for i in range(21):
-            quote = Quote(
-                requisition_id=req.id,
-                customer_site_id=site.id,
-                quote_number=f"Q-{i:03d}",
-                status="sent",
-                subtotal=Decimal("1000.00"),
-                total_cost=Decimal("1000.00"),
-                created_at=base_ts - timedelta(hours=i),
-            )
-            db_session.add(quote)
-        db_session.commit()
-
-        resp = client.get(f"/v2/partials/customers/{company.id}/tab/activity")
-        assert resp.status_code == 200
-        assert "Showing most recent activity" in resp.text
+    The redesign fetches only ActivityLog rows (limit=50) — no RFQ contacts or quotes.
+    """
 
     def test_activity_tab_shows_truncation_footer_when_activity_limit_hit(
         self, client: TestClient, db_session: Session, test_user: User
     ):
-        """When >30 activities exist, the timeline shows the truncation footer."""
+        """When >=50 activities exist, the tab shows the truncation footer."""
         from app.models.intelligence import ActivityLog
 
         company = Company(name="Active Corp", is_active=True)
         db_session.add(company)
         db_session.flush()
 
-        # Create 31 activity logs (exceeds .limit(30))
+        # Create 51 activity logs (exceeds .limit(50))
         base_ts = datetime.now(timezone.utc)
-        for i in range(31):
+        for i in range(51):
             activity = ActivityLog(
                 company_id=company.id,
                 activity_type="sales_note",
@@ -1701,19 +1629,19 @@ class TestActivityTabTruncation:
 
         resp = client.get(f"/v2/partials/customers/{company.id}/tab/activity")
         assert resp.status_code == 200
-        assert "Showing most recent activity" in resp.text
+        assert "Showing most recent 50 activities" in resp.text
 
-    def test_activity_tab_no_truncation_footer_when_under_limits(
+    def test_activity_tab_no_truncation_footer_when_under_limit(
         self, client: TestClient, db_session: Session, test_user: User
     ):
-        """When all sources are under their limits, no truncation footer appears."""
+        """When under 50 activities, no truncation footer appears."""
         from app.models.intelligence import ActivityLog
 
         company = Company(name="Small Corp", is_active=True)
         db_session.add(company)
         db_session.flush()
 
-        # Create just 5 activities (well under .limit(30))
+        # Create just 5 activities (well under .limit(50))
         base_ts = datetime.now(timezone.utc)
         for i in range(5):
             activity = ActivityLog(
@@ -1730,7 +1658,7 @@ class TestActivityTabTruncation:
         resp = client.get(f"/v2/partials/customers/{company.id}/tab/activity")
         assert resp.status_code == 200
         # Truncation footer should NOT appear
-        assert "Showing most recent activity" not in resp.text
+        assert "Showing most recent" not in resp.text
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -3042,9 +2970,13 @@ class TestCRMMacroDedup:
         # The unified detail carries the full tab strip (no header-only fork).
         assert 'aria-label="Account detail sections"' in html
 
-    def test_activity_tab_quote_and_rfq_badges_render(self, client: TestClient, db_session: Session, test_user: User):
-        """The unified activity timeline renders quote + RFQ status via the shared
-        quote_status_badge and the canonical activity_icon — labels preserved."""
+    def test_activity_tab_renders_canonical_icon_for_email_activity(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """The activity tab renders ActivityLog rows via canonical activity_icon macro.
+
+        RFQ contacts appear in the Emails section; Quotes are absent.
+        """
         from decimal import Decimal
 
         from app.models.intelligence import ActivityLog
@@ -3056,6 +2988,7 @@ class TestCRMMacroDedup:
         req = Requisition(name="REQ-MD-AT", customer_name=co.name, company_id=co.id, status="active")
         db_session.add(req)
         db_session.flush()
+        # RFQ and quote — must NOT appear in activity tab
         rfq = RfqContact(
             requisition_id=req.id,
             user_id=test_user.id,
@@ -3087,13 +3020,13 @@ class TestCRMMacroDedup:
         resp = client.get(f"/v2/partials/customers/{co.id}/tab/activity")
         assert resp.status_code == 200
         html = resp.text
-        assert "Badge Vendor" in html
-        assert "QT-MD-AT" in html
+        # ActivityLog entry renders
         assert "Email Received" in html
         # Canonical activity_icon emits the h-8 w-8 rounded icon circle.
         assert "h-8 w-8" in html
-        # 'sent' badge is brand (unified) — no amber drift on either row.
-        assert "bg-amber-50 text-amber-700" not in html
+        # RFQ contact appears in Emails section; Quote is absent (own tab)
+        assert "Badge Vendor" in html, "RFQ contact must appear in Emails section"
+        assert "QT-MD-AT" not in html, "Quote must not appear in activity tab"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -4287,3 +4220,708 @@ class TestNoCache:
         # but 'no-cache' must not be the explicit page-response injection).
         # We check that the page_response() wrapper was NOT applied.
         assert "must-revalidate" not in cc, "HTMX partial should not carry the page-response Cache-Control header"
+
+
+# ── Phase-0 CRM Foundations: HTMX form field surfacing tests ─────────────────
+
+
+class TestCompanyPhase0FormFields:
+    """HTMX create/edit form render tests and HTMX handler persistence tests."""
+
+    # ── create form renders all Phase-0 input names ──────────────────────────
+
+    def test_create_form_renders_phase0_inputs(self, client: TestClient):
+        """GET create-form contains input[name] for every Phase-0 field."""
+        resp = client.get("/v2/partials/customers/create-form")
+        assert resp.status_code == 200
+        html = resp.text
+        for field in [
+            "legal_name",
+            "employee_size",
+            "revenue_range",
+            "phone",
+            "hq_city",
+            "hq_state",
+            "hq_country",
+            "credit_terms",
+            "tax_id",
+            "source",
+        ]:
+            assert f'name="{field}"' in html, f"create_form missing input[name={field}]"
+
+    # ── edit form renders all Phase-0 input names ────────────────────────────
+
+    def test_edit_form_renders_phase0_inputs(self, client: TestClient, db_session: Session, test_user: User):
+        """GET edit-form for an existing company contains inputs for all Phase-0
+        fields."""
+        co = Company(
+            name="EditFields Co",
+            is_active=True,
+            legal_name="EditFields Corporation",
+            employee_size="51-200",
+            revenue_range="$1M-$10M",
+            hq_city="Denver",
+            hq_state="CO",
+            hq_country="United States",
+            phone="+13035550000",
+            credit_terms="Net 30",
+            tax_id="55-1234567",
+            source="inbound",
+        )
+        db_session.add(co)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{co.id}/edit-form")
+        assert resp.status_code == 200
+        html = resp.text
+        for field in [
+            "legal_name",
+            "employee_size",
+            "revenue_range",
+            "phone",
+            "hq_city",
+            "hq_state",
+            "hq_country",
+            "credit_terms",
+            "tax_id",
+            "source",
+        ]:
+            assert f'name="{field}"' in html, f"edit_form missing input[name={field}]"
+
+    def test_edit_form_prefills_existing_values(self, client: TestClient, db_session: Session, test_user: User):
+        """Edit form pre-fills Phase-0 fields with existing DB values."""
+        co = Company(
+            name="Prefill Co",
+            is_active=True,
+            legal_name="Prefill Legal LLC",
+            hq_city="Portland",
+            credit_terms="Net 45",
+            source="referral",
+        )
+        db_session.add(co)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{co.id}/edit-form")
+        assert resp.status_code == 200
+        html = resp.text
+        assert "Prefill Legal LLC" in html
+        assert "Portland" in html
+        assert "Net 45" in html
+
+    # ── HTMX create handler persists Phase-0 fields ──────────────────────────
+
+    def test_htmx_create_persists_phase0_fields(self, client: TestClient, db_session: Session, test_user: User):
+        """POST /v2/partials/customers/create with Phase-0 fields saves them."""
+        resp = client.post(
+            "/v2/partials/customers/create",
+            data={
+                "name": "HTMXCreate P0 Co",
+                "legal_name": "HTMXCreate P0 Corporation",
+                "employee_size": "11-50",
+                "revenue_range": "$1M-$10M",
+                "hq_city": "Boulder",
+                "hq_state": "CO",
+                "hq_country": "United States",
+                "credit_terms": "Net 30",
+                "tax_id": "77-7654321",
+                "source": "outbound",
+            },
+        )
+        assert resp.status_code == 200
+        co = db_session.query(Company).filter(Company.name == "HTMXCreate P0 Co").first()
+        assert co is not None
+        assert co.legal_name == "HTMXCreate P0 Corporation"
+        assert co.employee_size == "11-50"
+        assert co.revenue_range == "$1M-$10M"
+        assert co.hq_city == "Boulder"
+        assert co.hq_state == "CO"
+        assert co.hq_country == "US"
+        assert co.credit_terms == "Net 30"
+        assert co.tax_id == "77-7654321"
+        assert co.source == "outbound"
+
+    # ── HTMX edit handler persists Phase-0 fields ────────────────────────────
+
+    def test_htmx_edit_persists_phase0_fields(self, client: TestClient, db_session: Session, test_user: User):
+        """POST /v2/partials/customers/{id}/edit with Phase-0 fields saves them."""
+        co = Company(name="HTMXEdit P0 Co", is_active=True)
+        db_session.add(co)
+        db_session.commit()
+
+        resp = client.post(
+            f"/v2/partials/customers/{co.id}/edit",
+            data={
+                "name": "HTMXEdit P0 Co",
+                "legal_name": "HTMXEdit P0 LLC",
+                "employee_size": "201-500",
+                "revenue_range": "$50M-$200M",
+                "hq_city": "Chicago",
+                "hq_state": "IL",
+                "hq_country": "United States",
+                "credit_terms": "Net 60",
+                "tax_id": "33-9876543",
+                "source": "sfdc",
+            },
+        )
+        assert resp.status_code == 200
+        db_session.refresh(co)
+        assert co.legal_name == "HTMXEdit P0 LLC"
+        assert co.employee_size == "201-500"
+        assert co.revenue_range == "$50M-$200M"
+        assert co.hq_city == "Chicago"
+        assert co.hq_country == "US"
+        assert co.credit_terms == "Net 60"
+        assert co.tax_id == "33-9876543"
+        assert co.source == "sfdc"
+
+    # ── Normalization: phone E.164 via HTMX path ─────────────────────────────
+
+    def test_htmx_create_normalizes_phone_e164(self, client: TestClient, db_session: Session, test_user: User):
+        """HTMX create handler stores phone in E.164 format."""
+        resp = client.post(
+            "/v2/partials/customers/create",
+            data={
+                "name": "PhoneNorm Create Co",
+                "phone": "555-000-0001",
+            },
+        )
+        assert resp.status_code == 200
+        co = db_session.query(Company).filter(Company.name == "PhoneNorm Create Co").first()
+        assert co is not None
+        assert co.phone is not None
+        assert co.phone.startswith("+"), f"Expected E.164 (leading +), got {co.phone!r}"
+
+    def test_htmx_edit_normalizes_phone_e164(self, client: TestClient, db_session: Session, test_user: User):
+        """HTMX edit handler normalizes phone to E.164."""
+        co = Company(name="PhoneNorm Edit Co", is_active=True)
+        db_session.add(co)
+        db_session.commit()
+
+        resp = client.post(
+            f"/v2/partials/customers/{co.id}/edit",
+            data={
+                "name": "PhoneNorm Edit Co",
+                "phone": "555-000-0002",
+            },
+        )
+        assert resp.status_code == 200
+        db_session.refresh(co)
+        assert co.phone is not None
+        assert co.phone.startswith("+"), f"Expected E.164 (leading +), got {co.phone!r}"
+
+    # ── Normalization: hq_country via HTMX path ──────────────────────────────
+
+    def test_htmx_create_normalizes_hq_country(self, client: TestClient, db_session: Session, test_user: User):
+        """HTMX create normalizes 'United States' → 'US'."""
+        resp = client.post(
+            "/v2/partials/customers/create",
+            data={
+                "name": "CountryNorm Create Co",
+                "hq_country": "United States",
+            },
+        )
+        assert resp.status_code == 200
+        co = db_session.query(Company).filter(Company.name == "CountryNorm Create Co").first()
+        assert co is not None
+        assert co.hq_country == "US"
+
+    def test_htmx_edit_normalizes_hq_country(self, client: TestClient, db_session: Session, test_user: User):
+        """HTMX edit normalizes 'United States' → 'US'."""
+        co = Company(name="CountryNorm Edit Co", is_active=True)
+        db_session.add(co)
+        db_session.commit()
+
+        resp = client.post(
+            f"/v2/partials/customers/{co.id}/edit",
+            data={
+                "name": "CountryNorm Edit Co",
+                "hq_country": "United States",
+            },
+        )
+        assert resp.status_code == 200
+        db_session.refresh(co)
+        assert co.hq_country == "US"
+
+    # ── Source: out-of-list value is preserved on blank submit ───────────────
+
+    def test_htmx_edit_preserves_out_of_list_source(self, client: TestClient, db_session: Session, test_user: User):
+        """Submitting source='' (blank sentinel) keeps the current enrichment source."""
+        co = Company(name="SourcePreserve Co", is_active=True, source="apollo")
+        db_session.add(co)
+        db_session.commit()
+
+        # Submit with blank source — simulates the blank sentinel option being selected
+        resp = client.post(
+            f"/v2/partials/customers/{co.id}/edit",
+            data={
+                "name": "SourcePreserve Co",
+                "source": "",
+            },
+        )
+        assert resp.status_code == 200
+        db_session.refresh(co)
+        assert co.source == "apollo", f"Expected source 'apollo' preserved, got {co.source!r}"
+
+
+class TestCustomerTabDeepLink:
+    """Phase-0 Task B: account-detail tabs are deep-linkable via ?tab= param.
+
+    Verifies that the server honours the tab query param, renders the correct
+    active tab in the Alpine state initialiser, and emits the push-URL on tab
+    buttons so round-tripping a shared URL lands on the right tab.
+    """
+
+    def _make_company(self, db_session: Session) -> "Company":
+        from app.models.crm import CustomerSite
+
+        co = Company(name="DeepLink Co", is_active=True)
+        db_session.add(co)
+        db_session.flush()
+        site = CustomerSite(company_id=co.id, site_name="HQ", is_active=True)
+        db_session.add(site)
+        db_session.commit()
+        return co
+
+    def test_default_tab_is_contacts(self, client: TestClient, db_session: Session, test_user: User):
+        """No ?tab param → contacts tab is active (Alpine x-data shows contacts)."""
+        co = self._make_company(db_session)
+        resp = client.get(f"/v2/partials/customers/{co.id}")
+        assert resp.status_code == 200
+        assert "activeTab: 'contacts'" in resp.text
+
+    def test_tab_contacts_explicit(self, client: TestClient, db_session: Session, test_user: User):
+        """?tab=contacts explicitly → same as default."""
+        co = self._make_company(db_session)
+        resp = client.get(f"/v2/partials/customers/{co.id}?tab=contacts")
+        assert resp.status_code == 200
+        assert "activeTab: 'contacts'" in resp.text
+
+    def test_tab_sites_activates_sites(self, client: TestClient, db_session: Session, test_user: User):
+        """?tab=sites → activeTab is 'sites'; sites tab lazy-loads via hx-
+        trigger=load."""
+        co = self._make_company(db_session)
+        resp = client.get(f"/v2/partials/customers/{co.id}?tab=sites")
+        assert resp.status_code == 200
+        html = resp.text
+        assert "activeTab: 'sites'" in html
+        # The tab content div uses a lazy hx-get for non-contacts initial tab.
+        assert f"/v2/partials/customers/{co.id}/tab/sites" in html
+        assert 'hx-trigger="load"' in html
+
+    def test_tab_files_activates_files(self, client: TestClient, db_session: Session, test_user: User):
+        """?tab=files → activeTab is 'files'; files tab lazy-loads."""
+        co = self._make_company(db_session)
+        resp = client.get(f"/v2/partials/customers/{co.id}?tab=files")
+        assert resp.status_code == 200
+        html = resp.text
+        assert "activeTab: 'files'" in html
+        assert f"/v2/partials/customers/{co.id}/tab/files" in html
+        assert 'hx-trigger="load"' in html
+
+    def test_invalid_tab_falls_back_to_contacts(self, client: TestClient, db_session: Session, test_user: User):
+        """?tab=bogus → falls back to contacts silently (no 422/500)."""
+        co = self._make_company(db_session)
+        resp = client.get(f"/v2/partials/customers/{co.id}?tab=bogus")
+        assert resp.status_code == 200
+        assert "activeTab: 'contacts'" in resp.text
+
+    def test_tab_buttons_emit_push_url(self, client: TestClient, db_session: Session, test_user: User):
+        """Every tab button carries hx-push-url so the browser URL updates on click."""
+        co = self._make_company(db_session)
+        resp = client.get(f"/v2/partials/customers/{co.id}")
+        assert resp.status_code == 200
+        html = resp.text
+        # Check a sample of tabs.
+        assert f'hx-push-url="/v2/customers/{co.id}?tab=contacts"' in html
+        assert f'hx-push-url="/v2/customers/{co.id}?tab=sites"' in html
+        assert f'hx-push-url="/v2/customers/{co.id}?tab=activity"' in html
+
+    def test_contacts_tab_inlines_content(self, client: TestClient, db_session: Session, test_user: User):
+        """Contacts tab (default) inlines the contacts partial immediately — no lazy
+        load."""
+        co = self._make_company(db_session)
+        resp = client.get(f"/v2/partials/customers/{co.id}")
+        assert resp.status_code == 200
+        html = resp.text
+        # The contacts_tab.html includes the people-search input.
+        assert "contacts_tab" not in html or "hx-trigger" not in html.split("company-tab-content")[1][:200]
+        # No load trigger on the tab content container (contacts are inlined).
+        # The dup-suggestion + name-suggestion divs DO have hx-trigger=load; we check
+        # the company-tab-content div specifically has no load trigger on itself.
+        import re
+
+        tab_content_block = re.search(r'id="company-tab-content"[^>]*>', html)
+        assert tab_content_block, "company-tab-content div not found"
+        assert "hx-trigger" not in tab_content_block.group(0)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TestDispositionFilter — P0-C disposition and has_open_reqs filters
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestDispositionFilter:
+    """Tests for the new disposition and has_open_reqs account-list filters.
+
+    Routes tested:
+      GET /v2/partials/customers/account-list (all filter params)
+    """
+
+    def _make_company(self, db_session: Session, name: str, **kwargs) -> Company:
+        co = Company(name=name, is_active=True, **kwargs)
+        db_session.add(co)
+        db_session.commit()
+        db_session.refresh(co)
+        return co
+
+    def test_disposition_active_excludes_bucket(self, client: TestClient, db_session: Session, test_user: User):
+        """Disposition=active returns active accounts and excludes bucketed ones."""
+        active = self._make_company(db_session, "Active Corp")
+        bucketed = self._make_company(db_session, "Bucket Corp", disposition="bucket")
+
+        html = client.get("/v2/partials/customers/account-list?disposition=active").text
+        assert "Active Corp" in html
+        assert "Bucket Corp" not in html
+
+    def test_disposition_bucket_returns_only_bucketed(self, client: TestClient, db_session: Session, test_user: User):
+        """Disposition=bucket returns only bucketed accounts."""
+        active = self._make_company(db_session, "Active Corp 2")
+        bucketed = self._make_company(db_session, "Bucket Corp 2", disposition="bucket")
+
+        html = client.get("/v2/partials/customers/account-list?disposition=bucket").text
+        assert "Bucket Corp 2" in html
+        assert "Active Corp 2" not in html
+
+    def test_disposition_default_hides_bucketed(self, client: TestClient, db_session: Session, test_user: User):
+        """Default view (no disposition param) still suppresses bucketed accounts."""
+        active = self._make_company(db_session, "Active Corp 3")
+        bucketed = self._make_company(db_session, "Bucket Corp 3", disposition="bucket")
+
+        html = client.get("/v2/partials/customers/account-list").text
+        assert "Active Corp 3" in html
+        assert "Bucket Corp 3" not in html
+
+    def test_disposition_null_treated_as_active(self, client: TestClient, db_session: Session, test_user: User):
+        """Companies with NULL disposition appear under disposition=active (NULL is
+        active)."""
+        null_disp = self._make_company(db_session, "Null Disposition Co")  # disposition=None
+
+        html = client.get("/v2/partials/customers/account-list?disposition=active").text
+        assert "Null Disposition Co" in html
+
+    def test_has_open_reqs_true_returns_only_companies_with_open_reqs(
+        self,
+        client: TestClient,
+        db_session: Session,
+        test_user: User,
+    ):
+        """has_open_reqs=1 returns only companies that have at least one open
+        requisition."""
+        from app.models.sourcing import Requisition
+
+        with_req = self._make_company(db_session, "HasReq Corp")
+        without_req = self._make_company(db_session, "NoReq Corp")
+
+        req = Requisition(
+            name="Open Req",
+            company_id=with_req.id,
+            status="active",
+        )
+        db_session.add(req)
+        db_session.commit()
+
+        html = client.get("/v2/partials/customers/account-list?has_open_reqs=1").text
+        assert "HasReq Corp" in html
+        assert "NoReq Corp" not in html
+
+    def test_has_open_reqs_excludes_terminal_requisitions(
+        self,
+        client: TestClient,
+        db_session: Session,
+        test_user: User,
+    ):
+        """A company whose only requisitions are terminal is excluded by
+        has_open_reqs=1."""
+        from app.models.sourcing import Requisition
+
+        only_terminal = self._make_company(db_session, "TerminalOnly Corp")
+        req = Requisition(
+            name="Won Req",
+            company_id=only_terminal.id,
+            status="won",
+        )
+        db_session.add(req)
+        db_session.commit()
+
+        html = client.get("/v2/partials/customers/account-list?has_open_reqs=1").text
+        assert "TerminalOnly Corp" not in html
+
+    def test_disposition_bucket_composes_with_has_open_reqs(
+        self,
+        client: TestClient,
+        db_session: Session,
+        test_user: User,
+    ):
+        """Disposition=bucket and has_open_reqs=1 compose: only bucketed companies with
+        open reqs."""
+        from app.models.sourcing import Requisition
+
+        bucketed_with_req = self._make_company(db_session, "BucketWithReq Corp", disposition="bucket")
+        bucketed_no_req = self._make_company(db_session, "BucketNoReq Corp", disposition="bucket")
+        req = Requisition(
+            name="Bucket Open Req",
+            company_id=bucketed_with_req.id,
+            status="sourcing",
+        )
+        db_session.add(req)
+        db_session.commit()
+
+        html = client.get("/v2/partials/customers/account-list?disposition=bucket&has_open_reqs=1").text
+        assert "BucketWithReq Corp" in html
+        assert "BucketNoReq Corp" not in html
+
+    def test_has_open_reqs_composes_with_my_only(
+        self,
+        client: TestClient,
+        db_session: Session,
+        test_user: User,
+    ):
+        """has_open_reqs=1 composes with my_only=1."""
+        from app.models.sourcing import Requisition
+
+        mine_with_req = self._make_company(db_session, "MyReq Corp", account_owner_id=test_user.id)
+        other_with_req = self._make_company(db_session, "OtherReq Corp")
+
+        for co in (mine_with_req, other_with_req):
+            req = Requisition(name="Req", company_id=co.id, status="active")
+            db_session.add(req)
+        db_session.commit()
+
+        html = client.get("/v2/partials/customers/account-list?has_open_reqs=1&my_only=1").text
+        assert "MyReq Corp" in html
+        assert "OtherReq Corp" not in html
+
+    def test_disposition_filter_ui_controls_rendered(self, client: TestClient, db_session: Session, test_user: User):
+        """The workspace filter bar renders the disposition select and has_open_reqs
+        checkbox."""
+        resp = client.get("/v2/partials/customers")
+        assert resp.status_code == 200
+        html = resp.text
+        assert 'name="disposition"' in html
+        assert "Bucketed only" in html
+        assert 'name="has_open_reqs"' in html
+
+    def test_disposition_select_reflects_active_state(self, client: TestClient, db_session: Session, test_user: User):
+        """Disposition=active is pre-selected in the dropdown when passed to the
+        workspace."""
+        resp = client.get("/v2/partials/customers?disposition=active")
+        assert resp.status_code == 200
+        assert 'value="active" selected' in resp.text
+
+    def test_has_open_reqs_checkbox_reflects_state(self, client: TestClient, db_session: Session, test_user: User):
+        """has_open_reqs=1 checkbox is pre-checked when passed to the workspace."""
+        resp = client.get("/v2/partials/customers?has_open_reqs=1")
+        assert resp.status_code == 200
+        assert 'name="has_open_reqs"' in resp.text
+        assert "checked" in resp.text
+
+
+class TestAccountActivityTab:
+    """Tests for the company Activity tab — type-sectioned feed (Step 1 of core-CRM
+    plan).
+
+    Verifies:
+      (a) Quote rows/markup are absent from the activity tab response.
+      (b) Type-section headers (Calls/Emails/Meetings/Notes) appear for accounts that
+          have activities of those types.
+      (c) Date headers (Today/Yesterday/date) appear within each section.
+      (d) Other/system activities are in the collapsible Other section (hideOther).
+    """
+
+    @pytest.fixture()
+    def _activity_company(self, db_session: Session) -> Company:
+        """A company specifically for Activity tab tests."""
+        c = Company(name="Activity Test Co", is_active=True)
+        db_session.add(c)
+        db_session.commit()
+        db_session.refresh(c)
+        return c
+
+    @pytest.fixture()
+    def _mixed_activities(self, db_session: Session, _activity_company: Company, test_user: User):
+        """ActivityLog rows spanning all sections plus a variety of types."""
+        from app.models.intelligence import ActivityLog
+
+        now = datetime.now(timezone.utc)
+        rows = [
+            ActivityLog(
+                company_id=_activity_company.id,
+                activity_type="call_logged",
+                channel="manual",
+                summary="Called procurement",
+                occurred_at=now - timedelta(hours=1),
+                user_id=test_user.id,
+            ),
+            ActivityLog(
+                company_id=_activity_company.id,
+                activity_type="email_sent",
+                channel="email",
+                summary="Sent availability update",
+                occurred_at=now - timedelta(hours=2),
+                user_id=test_user.id,
+            ),
+            ActivityLog(
+                company_id=_activity_company.id,
+                activity_type="rfq_sent",
+                channel="email",
+                summary="RFQ batch #42",
+                occurred_at=now - timedelta(hours=3),
+                user_id=test_user.id,
+            ),
+            ActivityLog(
+                company_id=_activity_company.id,
+                activity_type="meeting",
+                channel="manual",
+                summary="Quarterly review",
+                occurred_at=now - timedelta(days=2),
+                user_id=test_user.id,
+            ),
+            ActivityLog(
+                company_id=_activity_company.id,
+                activity_type="note",
+                channel="manual",
+                summary="Noted preferred payment terms",
+                occurred_at=now - timedelta(days=3),
+                user_id=test_user.id,
+            ),
+            ActivityLog(
+                company_id=_activity_company.id,
+                activity_type="status_changed",
+                channel="system",
+                summary="Status updated to active",
+                occurred_at=now - timedelta(days=1),
+                user_id=test_user.id,
+            ),
+        ]
+        db_session.add_all(rows)
+        db_session.commit()
+        return rows
+
+    def test_activity_tab_returns_200(self, client: TestClient, _activity_company: Company, _mixed_activities):
+        """GET company activity tab returns 200."""
+        resp = client.get(f"/v2/partials/customers/{_activity_company.id}/tab/activity")
+        assert resp.status_code == 200
+
+    def test_no_quote_markup_in_activity_tab(self, client: TestClient, _activity_company: Company, _mixed_activities):
+        """(a) Quote rows and quote-specific markup are absent from the activity tab."""
+        resp = client.get(f"/v2/partials/customers/{_activity_company.id}/tab/activity")
+        html = resp.text
+        # No quote detail link patterns
+        assert "/v2/quotes/" not in html
+        assert "/v2/partials/quotes/" not in html
+        # No quote-number or quote status badge CSS classes used exclusively for quotes
+        assert "quote_number" not in html
+        assert "quote-status" not in html
+
+    def test_section_headers_rendered_for_present_types(
+        self, client: TestClient, _activity_company: Company, _mixed_activities
+    ):
+        """(b) Section headers Calls/Emails/Meetings/Notes appear for types that
+        exist."""
+        resp = client.get(f"/v2/partials/customers/{_activity_company.id}/tab/activity")
+        html = resp.text
+        assert ">Calls<" in html
+        assert ">Emails<" in html
+        assert ">Meetings<" in html
+        assert ">Notes<" in html
+
+    def test_date_headers_appear_within_sections(
+        self, client: TestClient, _activity_company: Company, _mixed_activities
+    ):
+        """(c) Date headers (Today / Yesterday / date string) appear in section
+        bodies."""
+        from datetime import datetime, timedelta, timezone
+
+        resp = client.get(f"/v2/partials/customers/{_activity_company.id}/tab/activity")
+        html = resp.text
+        # Today's activities exist (call_logged + email_sent + rfq_sent)
+        assert "Today" in html
+        # status_changed is 1 day ago → "Yesterday" appears in the Other section
+        assert "Yesterday" in html
+        # The 3-day-old note renders as a %b %d, %Y date string (day_delta >= 2)
+        three_days_ago = (datetime.now(timezone.utc) - timedelta(days=3)).strftime("%b %d, %Y")
+        assert three_days_ago in html
+
+    def test_other_section_hidden_by_default(self, client: TestClient, _activity_company: Company, _mixed_activities):
+        """(d) Other section exists but is toggled via Alpine hideOther (x-show not
+        rendered)."""
+        resp = client.get(f"/v2/partials/customers/{_activity_company.id}/tab/activity")
+        html = resp.text
+        # Other section header is present
+        assert ">Other<" in html
+        # It uses Alpine x-show for collapsible body
+        assert "hideOther" in html
+
+    def test_absent_sections_not_rendered(self, client: TestClient, db_session: Session, test_user: User):
+        """Sections with no activities are not rendered (no empty section headers)."""
+        from app.models.intelligence import ActivityLog
+
+        co = Company(name="Sparse Activity Co", is_active=True)
+        db_session.add(co)
+        db_session.commit()
+
+        # Only one note — only Notes section should appear
+        db_session.add(
+            ActivityLog(
+                company_id=co.id,
+                activity_type="note",
+                channel="manual",
+                summary="Just a note",
+                occurred_at=datetime.now(timezone.utc),
+                user_id=test_user.id,
+            )
+        )
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{co.id}/tab/activity")
+        html = resp.text
+        assert ">Notes<" in html
+        assert ">Calls<" not in html
+        assert ">Emails<" not in html
+        assert ">Meetings<" not in html
+
+    def test_empty_state_when_no_activities(self, client: TestClient, db_session: Session):
+        """Empty state is shown when the company has no activities at all."""
+        co = Company(name="No Activity Co", is_active=True)
+        db_session.add(co)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{co.id}/tab/activity")
+        assert resp.status_code == 200
+        html = resp.text
+        assert "No activity recorded" in html
+
+    def test_meeting_type_in_meetings_section(self, client: TestClient, db_session: Session, test_user: User):
+        """New 'meeting' ActivityType lands in the Meetings section."""
+        from app.models.intelligence import ActivityLog
+
+        co = Company(name="MeetingOnly Co", is_active=True)
+        db_session.add(co)
+        db_session.commit()
+
+        db_session.add(
+            ActivityLog(
+                company_id=co.id,
+                activity_type="meeting",
+                channel="manual",
+                summary="Board call",
+                occurred_at=datetime.now(timezone.utc),
+                user_id=test_user.id,
+            )
+        )
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{co.id}/tab/activity")
+        html = resp.text
+        assert ">Meetings<" in html
+        assert ">Calls<" not in html

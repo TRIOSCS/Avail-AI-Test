@@ -11,6 +11,28 @@ Depends on: nothing (leaf module)
 
 from enum import StrEnum, nonmember
 
+# ---------------------------------------------------------------------------
+# File attachment limits (applies to ALL entities uniformly)
+# ---------------------------------------------------------------------------
+
+MAX_ATTACHMENT_BYTES: int = 10 * 1024 * 1024  # 10 MB
+
+ALLOWED_ATTACHMENT_EXTENSIONS: frozenset[str] = frozenset(
+    {
+        ".pdf",
+        ".xlsx",
+        ".xls",
+        ".csv",
+        ".doc",
+        ".docx",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".txt",
+        ".zip",
+    }
+)
+
 
 class ProactiveMatchStatus(StrEnum):
     """Status lifecycle for ProactiveMatch records."""
@@ -225,6 +247,13 @@ class UserRole(StrEnum):
     # Non-interactive service account (x-agent-key auth). Least privilege:
     # deliberately excluded from require_buyer's allowed set and never admin.
     AGENT = "agent"
+
+
+# Roles scoped to requisitions they own (created_by). Single source of truth for the
+# role-scoped access model: sales/trader act only on their own requisitions; buyer/
+# manager/admin are unrestricted. Read by dependencies.require_requisition_access,
+# get_req_for_user, get_quote_for_user, and the bulk/batch handlers.
+RESTRICTED_ROLES = frozenset({UserRole.SALES, UserRole.TRADER})
 
 
 class ProactiveOfferStatus(StrEnum):
@@ -472,6 +501,7 @@ class ActivityType(StrEnum):
     PART_STATUS_CHANGE = "part_status_change"
     TEAMS_MESSAGE = "teams_message"
     WECHAT_MESSAGE = "wechat_message"
+    MEETING = "meeting"
     # Vendor+part unavailability knowledge (vendor_unavailability service)
     VENDOR_UNAVAILABLE = "vendor_unavailable"  # 18 chars — fits String(20)
     VENDOR_AVAILABLE = "vendor_available"

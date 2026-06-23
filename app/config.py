@@ -290,17 +290,10 @@ class Settings(BaseSettings):
     eight_by_eight_enabled: bool = False
     eight_by_eight_poll_interval_minutes: int = 30
 
-    # --- Apollo Enrichment ---
-    apollo_api_key: str = ""
-
     # --- Lusha Enrichment (key via get_credential_cached, NOT a Settings field) ---
     lusha_enrichment_enabled: bool = False  # feature gate; off → chain == today
     lusha_cooldown_minutes: int = 15  # quota/rate-limit (402/429) circuit cooldown
     prospect_enrich_contacts_per_account: int = 5  # cap for paid contact pulls
-
-    # --- Apollo Enrichment (gate + cooldown) ---
-    apollo_enrichment_enabled: bool = False  # feature gate; off → Apollo not triggered
-    apollo_cooldown_minutes: int = 15  # quota/rate-limit (402/429) circuit cooldown
 
     # --- Hunter.io Enrichment ---
     hunter_enrichment_enabled: bool = False  # feature gate; off → Hunter not triggered

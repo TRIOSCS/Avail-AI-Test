@@ -1325,6 +1325,38 @@ class TestOffersAdditional:
             if g.get("historical_offers"):
                 assert len(g["historical_offers"]) >= 1
 
+    def test_list_offers_attachment_uses_web_url_key(self, client, db_session, test_requisition, test_offer, test_user):
+        """Fix C: offer attachment dicts in list_offers use serialize(), emitting
+        'web_url' and 'kind' — not the old 'library_web_url' key."""
+        req_item = test_requisition.requirements[0]
+        test_offer.requirement_id = req_item.id
+        db_session.commit()
+
+        att = OfferAttachment(
+            offer_id=test_offer.id,
+            file_name="spec.pdf",
+            library_web_url="https://onedrive.example.com/spec.pdf",
+            content_type="application/pdf",
+            size_bytes=1024,
+            uploaded_by_id=test_user.id,
+        )
+        db_session.add(att)
+        db_session.commit()
+
+        resp = client.get(f"/api/requisitions/{test_requisition.id}/offers")
+        assert resp.status_code == 200
+        data = resp.json()
+        all_atts = []
+        for g in data.get("groups", []):
+            for o in g.get("offers", []):
+                all_atts.extend(o.get("attachments", []))
+
+        assert len(all_atts) >= 1
+        for a in all_atts:
+            assert "web_url" in a, "serialize() key 'web_url' must be present"
+            assert "kind" in a, "serialize() key 'kind' must be present"
+            assert "library_web_url" not in a, "old key 'library_web_url' must NOT be present"
+
 
 # ── Quotes: additional coverage ───────────────────────────────────────
 
@@ -1965,7 +1997,7 @@ class TestOneDrive:
         assert resp.status_code == 200
         data = resp.json()
         assert data["file_name"] == "test.pdf"
-        assert data["onedrive_url"] == "https://onedrive.com/file"
+        assert data["web_url"] == "https://onedrive.com/file"
 
     @patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fake-token")
     @patch("app.http_client.http.put", new_callable=AsyncMock)
@@ -2044,8 +2076,8 @@ class TestOneDrive:
         att = OfferAttachment(
             offer_id=test_offer.id,
             file_name="old.pdf",
-            onedrive_item_id="drive-item-999",
-            onedrive_url="https://onedrive.com/old",
+            library_item_id="drive-item-999",
+            library_web_url="https://onedrive.com/old",
             uploaded_by_id=test_user.id,
         )
         db_session.add(att)
@@ -2062,7 +2094,7 @@ class TestOneDrive:
         att = OfferAttachment(
             offer_id=test_offer.id,
             file_name="local.pdf",
-            onedrive_item_id=None,
+            library_item_id=None,
             uploaded_by_id=test_user.id,
         )
         db_session.add(att)
@@ -2280,7 +2312,7 @@ class TestOneDriveDeleteError:
         att = OfferAttachment(
             offer_id=test_offer.id,
             file_name="fail-delete.pdf",
-            onedrive_item_id="drive-item-fail",
+            library_item_id="drive-item-fail",
             uploaded_by_id=test_user.id,
         )
         db_session.add(att)
@@ -2694,3 +2726,70 @@ def test_pricing_history_scope_for_sales(db_session, sales_user, test_quote):
             app.dependency_overrides.pop(dep, None)
     assert resp.status_code == 200
     assert resp.json()["history"] == []
+
+
+# ── Phase-0 CRM Foundations: field persistence tests ─────────────────────────
+
+
+class TestCompanyPhase0Fields:
+    """API-level tests: create + update company with Phase-0 fields persist to DB."""
+
+    @patch("app.routers.crm.companies.get_credential_cached", return_value=None)
+    @patch("app.enrichment_service.normalize_company_input", new_callable=AsyncMock)
+    def test_create_company_with_phase0_fields(self, mock_normalize, mock_cred, client, db_session):
+        """POST /api/companies with Phase-0 fields stores them on the Company row."""
+        mock_normalize.return_value = ("FieldsTest Corp", "fieldstest.com")
+        resp = client.post(
+            "/api/companies",
+            json={
+                "name": "FieldsTest Corp",
+                "legal_name": "FieldsTest Corporation LLC",
+                "employee_size": "51-200",
+                "revenue_range": "$10M-$50M",
+                "hq_city": "Austin",
+                "hq_state": "TX",
+                "hq_country": "United States",
+                "credit_terms": "Net 30",
+                "tax_id": "12-3456789",
+                "source": "referral",
+            },
+        )
+        assert resp.status_code == 200
+        company_id = resp.json()["id"]
+        co = db_session.get(Company, company_id)
+        assert co.legal_name == "FieldsTest Corporation LLC"
+        assert co.employee_size == "51-200"
+        assert co.revenue_range == "$10M-$50M"
+        assert co.hq_city == "Austin"
+        assert co.hq_state == "TX"
+        assert co.credit_terms == "Net 30"
+        assert co.tax_id == "12-3456789"
+        assert co.source == "referral"
+
+    def test_update_company_with_phase0_fields(self, client, db_session, test_company):
+        """PUT /api/companies/{id} with Phase-0 fields stores them on the Company
+        row."""
+        resp = client.put(
+            f"/api/companies/{test_company.id}",
+            json={
+                "legal_name": "Acme Electronics Inc.",
+                "employee_size": "201-500",
+                "revenue_range": "$50M-$200M",
+                "hq_city": "San Jose",
+                "hq_state": "CA",
+                "hq_country": "US",
+                "credit_terms": "Net 60",
+                "tax_id": "98-7654321",
+                "source": "sfdc",
+            },
+        )
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
+        db_session.refresh(test_company)
+        assert test_company.legal_name == "Acme Electronics Inc."
+        assert test_company.employee_size == "201-500"
+        assert test_company.revenue_range == "$50M-$200M"
+        assert test_company.hq_city == "San Jose"
+        assert test_company.credit_terms == "Net 60"
+        assert test_company.tax_id == "98-7654321"
+        assert test_company.source == "sfdc"

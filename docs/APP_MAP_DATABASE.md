@@ -141,6 +141,36 @@
 | classification | String 50 | offer\|stock_list\|ooo\|spam |
 | message_id | String 255, unique | |
 
+**`requisition_attachments`** — Files attached to a requisition (Migration 126: renamed `onedrive_item_id`→`library_item_id`, `onedrive_url`→`library_web_url`; added `library_drive_id`)
+| Column | Type | Notes |
+|--------|------|-------|
+| id | Integer PK | |
+| requisition_id | FK -> requisitions (CASCADE), indexed | |
+| file_name | String 500, not null | |
+| library_item_id | String 500, nullable | Graph item id (`NULL` = not yet uploaded) |
+| library_drive_id | String 200, nullable | `NULL` → user OneDrive fallback; non-NULL → company SharePoint library |
+| library_web_url | Text, nullable | Shareable URL |
+| thumbnail_url | Text, nullable | |
+| content_type | String 100, nullable | |
+| size_bytes | Integer, nullable | |
+| uploaded_by_id | FK -> users (SET NULL) | |
+| created_at | UTCDateTime | |
+
+**`requirement_attachments`** — Files attached to a requirement line (Migration 126: same column renames + `library_drive_id` as above)
+| Column | Type | Notes |
+|--------|------|-------|
+| id | Integer PK | |
+| requirement_id | FK -> requirements (CASCADE), indexed | |
+| file_name | String 500, not null | |
+| library_item_id | String 500, nullable | |
+| library_drive_id | String 200, nullable | `NULL` → user OneDrive; non-NULL → company SharePoint library |
+| library_web_url | Text, nullable | |
+| thumbnail_url | Text, nullable | |
+| content_type | String 100, nullable | |
+| size_bytes | Integer, nullable | |
+| uploaded_by_id | FK -> users (SET NULL) | |
+| created_at | UTCDateTime | |
+
 ---
 
 ### Offers & Quotes
@@ -202,6 +232,21 @@
 | sell_price | Numeric 12,4 | |
 | margin_pct | Numeric 5,2 | |
 
+**`offer_attachments`** — Files attached to a vendor offer (Migration 126: renamed `onedrive_item_id`→`library_item_id`, `onedrive_url`→`library_web_url`; added `library_drive_id`)
+| Column | Type | Notes |
+|--------|------|-------|
+| id | Integer PK | |
+| offer_id | FK -> offers (CASCADE), indexed (`ix_offer_attachments_offer`) | |
+| file_name | String 500, not null | |
+| library_item_id | String 500, nullable | |
+| library_drive_id | String 200, nullable | `NULL` → user OneDrive; non-NULL → company SharePoint library |
+| library_web_url | Text, nullable | |
+| thumbnail_url | Text, nullable | |
+| content_type | String 100, nullable | |
+| size_bytes | Integer, nullable | |
+| uploaded_by_id | FK -> users (SET NULL) | |
+| created_at | UTCDateTime | |
+
 ---
 
 ### Buy Plans (Fulfillment)
@@ -260,7 +305,7 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 | employee_size | String 50 | |
 | hq_city / hq_state / hq_country | String | |
 | brand_tags / commodity_tags | JSON | |
-| enrichment_source | String 50 | explorium\|apollo\|manual |
+| enrichment_source | String 50 | explorium|lusha|clay|manual |
 | is_strategic | Boolean | |
 | sf_account_id | String 255, unique | Salesforce link |
 | last_activity_at | UTCDateTime, nullable | Bumped by `log_outreach_initiated()` on every click-to-contact event; used by the CDM account workspace `staleness` sort (oldest = longest since activity first). |
@@ -274,6 +319,7 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 | naics | String 20, nullable | Migration 125. NAICS industry code. SAM.gov is authoritative (tier 95); Explorium second (tier 85). |
 | revenue_range | String 50, nullable | Migration 125. Annual revenue band (e.g. `1000000-5000000`), formatted from a `{min, max}` range by the Explorium connector. Explorium is the highest-authority source (tier 90). |
 | enrichment_provenance | JSONB, nullable, server_default `{}` | Migration 125. Per-field provenance store written by `_apply_enrichment` (enrichment_service.py). Shape: `{field: {source, tier, confidence}}`. Guards the provenance-aware overwrite rule: a field with no stored provenance is treated as manual/legacy and is never clobbered by an automated source; a field with provenance is overwritten only when the incoming (tier, confidence) pair strictly beats the stored one. |
+| **Relationships** | customer_sites, requisitions, attachments (`CompanyAttachment`), entity_tags | Migration 126 adds `attachments`. |
 
 **`customer_sites`** — Delivery/contact locations for a company
 | Column | Type | Notes |
@@ -302,7 +348,38 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 | is_priority | Boolean NOT NULL (server_default false) | Migration 118. Surfaces the contact to the TOP of the roster (`company_contact_rows` order_by). Toggled via `POST .../contacts/{id}/priority` (`_priority_toggle.html`). Mirrors `do_not_contact`. |
 | is_archived | Boolean NOT NULL (server_default false) | Migration 118. Sorts the contact to the BOTTOM of the roster but keeps it visible (NOT `is_active`, which would hide it). Toggled via `POST .../contacts/{id}/archive` (`_archive_toggle.html`). |
 | email_verified | Boolean | |
-| enrichment_source | String 50 | lusha\|apollo\|hunter\|manual |
+| enrichment_source | String 50 | lusha|clay|hunter|explorium|manual |
+| **Relationships** | customer_site, attachments (`SiteContactAttachment`) | Migration 126 adds `attachments`. |
+
+**`company_attachments`** — Files attached to a CRM company (Migration 126, new table)
+| Column | Type | Notes |
+|--------|------|-------|
+| id | Integer PK | |
+| company_id | FK -> companies (CASCADE), indexed (`ix_company_attachments_company`) | |
+| file_name | String 500, not null | |
+| library_item_id | String 500, nullable | |
+| library_drive_id | String 200, nullable | `NULL` → user OneDrive; non-NULL → company SharePoint library |
+| library_web_url | Text, nullable | |
+| thumbnail_url | Text, nullable | |
+| content_type | String 100, nullable | |
+| size_bytes | Integer, nullable | |
+| uploaded_by_id | FK -> users (SET NULL) | |
+| created_at | UTCDateTime | |
+
+**`site_contact_attachments`** — Files attached to a site contact (Migration 126, new table)
+| Column | Type | Notes |
+|--------|------|-------|
+| id | Integer PK | |
+| site_contact_id | FK -> site_contacts (CASCADE), indexed (`ix_site_contact_attachments_contact`) | |
+| file_name | String 500, not null | |
+| library_item_id | String 500, nullable | |
+| library_drive_id | String 200, nullable | `NULL` → user OneDrive; non-NULL → company SharePoint library |
+| library_web_url | Text, nullable | |
+| thumbnail_url | Text, nullable | |
+| content_type | String 100, nullable | |
+| size_bytes | Integer, nullable | |
+| uploaded_by_id | FK -> users (SET NULL) | |
+| created_at | UTCDateTime | |
 
 ---
 
@@ -378,6 +455,7 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 | validation_conflicts | JSONB, nullable | List of conflicts where a tier≥80 authoritative source contradicted a `manual` (tier 100) value — the ladder KEPT the manual value, `spec_tiers.record_validation_conflict` persisted the contradiction. Entries: `{"key": <spec_key\|"category"\|"brand"\|"manufacturer">, "manual": {value, updated_at}, "evidence": {source, tier, confidence, value, observed_at}}`; de-duped per `(key, evidence.source)`, newest evidence replaces. Cleared per-key by a PUT re-assertion of the field or the conflict-accept route. Migration 099. |
 | has_validation_conflict | Boolean NOT NULL default false | `true` iff `validation_conflicts` is non-empty — the "Needs review" review-queue filter predicate (`has_validation_conflict=true` on the faceted route). Migration 099. |
 | search_vector | TSVECTOR | Trigger-maintained FTS (weighted: MPN=A, manufacturer=B, description/category=C) |
+| **Relationships** | requirements, sightings, offers, attachments (`MaterialCardAttachment`) | Migration 126 adds `attachments`. |
 
 > **Startup backfill:** `_backfill_material_cards()` in `startup.py` runs at boot to ensure every MPN in requirements has a corresponding material card.
 
@@ -397,6 +475,21 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 >   - `ix_mc_last_searched` — partial btree `(last_searched_at) WHERE last_searched_at IS NOT NULL` (`searched_within` buckets)
 >   - Plain (non-CONCURRENT) builds per repo alembic pattern: each takes a write-blocking ShareLock on `material_cards` (~25s total for the migration on the live-size heap); reads unaffected.
 >   - Downgrade drops only the eight 098-owned indexes + the statistics object; the two `eabe89205d07`-owned names survive (only that revision's own downgrade may remove them).
+
+**`material_card_attachments`** — User-uploaded files attached to a material card part dossier (Migration 126, new table; distinct from system-captured `material_card_datasheets`)
+| Column | Type | Notes |
+|--------|------|-------|
+| id | Integer PK | |
+| material_card_id | FK -> material_cards (CASCADE), indexed (`ix_material_card_attachments_card`) | |
+| file_name | String 500, not null | |
+| library_item_id | String 500, nullable | |
+| library_drive_id | String 200, nullable | `NULL` → user OneDrive; non-NULL → company SharePoint library |
+| library_web_url | Text, nullable | |
+| thumbnail_url | Text, nullable | |
+| content_type | String 100, nullable | |
+| size_bytes | Integer, nullable | |
+| uploaded_by_id | FK -> users (SET NULL) | |
+| created_at | UTCDateTime | |
 
 **`material_vendor_history`** — Which vendors sell which parts (deduplicated)
 

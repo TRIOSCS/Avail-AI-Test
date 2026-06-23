@@ -1,0 +1,10 @@
+{#
+  settings/_connectors_testall.html — OOB bundle returned by Test-all.
+  Receives: tested_sources (list of enriched source dicts that were probed).
+  Each card is re-rendered with hx-swap-oob so its pill updates in place — no reload.
+  Called by: htmx_views.py connectors_test_all.
+#}
+{% import 'htmx/partials/settings/_connector_macros.html' as cm %}
+{% for s in tested_sources %}
+{{ cm.connector_card(s, oob=True) }}
+{% endfor %}

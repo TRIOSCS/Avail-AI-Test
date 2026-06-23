@@ -1088,12 +1088,29 @@ def seed_api_sources() -> None:
             db.delete(old_newark)
             logger.info("Removed duplicate 'newark' source (merged into 'element14')")
 
+        # Prune dead providers no longer in the catalog (idempotent — safe to re-run)
+        _PRUNE_NAMES = (
+            "aliexpress",
+            "arrow",
+            "avnet",
+            "partfuse",
+            "rs_components",
+            "siliconexpert",
+            "winsource",
+            "rocketreach_enrichment",
+            "clearbit_enrichment",
+            "apollo_enrichment",
+        )
+        for dead in _PRUNE_NAMES:
+            row = db.query(ApiSource).filter_by(name=dead).first()
+            if row:
+                db.delete(row)
+                logger.info("Pruned retired source '{}'", dead)
+
         # Backfill known monthly quotas (only sets if currently NULL)
         quota_map = {
-            "apollo_enrichment": 10000,
             "hunter_enrichment": 500,
             "lusha_enrichment": 6400,
-            "clearbit_enrichment": 1000,
             "digikey": 1000,
             "mouser": 1000,
             "oemsecrets": 5000,

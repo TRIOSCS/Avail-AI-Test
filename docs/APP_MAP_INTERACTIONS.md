@@ -328,10 +328,10 @@ Page-level + per-row RFQ/offer actions (the quick-source endpoints) are wired.
 **Degraded-source banner** — `search_service.get_market_source_health(db)` reuses
 `_build_connectors` to partition the live-market connectors into available / `down`
 (health_monitor flagged ERROR — auth/quota, operator must rotate credentials in Settings
-→ Sources) / `unconfigured` (no API key). `dossier_market` passes the result as
+→ Connectors) / `unconfigured` (no API key). `dossier_market` passes the result as
 `market_health`; the banner names each down source with its specific error as a hover
-tooltip and deep-links `/v2/settings`. Best-effort: a health lookup failure leaves
-`market_health=None` and never breaks the market section.
+tooltip and deep-links `/v2/settings` (→ Settings → Connectors tab). Best-effort: a
+health lookup failure leaves `market_health=None` and never breaks the market section.
 
 **Relevance guard** — `stream_search_mpn` keeps only hits whose `mpn_matched`
 `fuzzy_mpn_match`es the searched MPN (handles dash/case + ≤2-char revision suffixes,
@@ -489,7 +489,7 @@ type-specific `last_error` message:
 
 | Exception | last_error prefix | Operator action |
 |---|---|---|
-| `ConnectorAuthError` | "Auth error — rotate credentials: ..." | Rotate API key in Admin > API Sources |
+| `ConnectorAuthError` | "Auth error — rotate credentials: ..." | Rotate API key in Settings → Connectors |
 | `ConnectorRateLimitError` | "Rate limited — auto-recovers when window expires: ..." | Usually none |
 | `ConnectorQuotaError` | "Quota exhausted — upgrade plan or wait for cycle: ..." | Upgrade plan or wait |
 
@@ -1290,6 +1290,53 @@ proactive matches surface on the Proactive tab without waiting for the daily cro
 Bounded to 5 offers per card (per_card_limit); the engine's own dedup prevents
 duplicate matches.
 
+### Unified AI Email Drafting (RFQ rephrase · vendor reply · follow-up)
+
+```
+app/services/email_drafting.py :: draft_email(kind, context)
+    kind="rfq_rephrase" --> ai_service.rephrase_rfq (Haiku) ; fallback = original body
+    kind="follow_up"    --> claude_text (Haiku)            ; fallback = template string
+    kind="vendor_reply" --> claude_json (Haiku)            ; fallback = None (blank box)
+
+Surfaces (all human-edit-before-send; nothing auto-sends):
+  RFQ compose  "AI Rephrase" button
+    POST /v2/partials/requisitions/{req_id}/ai-rephrase-email
+      --> draft_email("rfq_rephrase") --> <script> sets #rfq-body-textarea
+  Vendor response card  "AI Draft Reply" button
+    POST /v2/partials/requisitions/{req_id}/responses/{response_id}/ai-draft-reply
+      --> draft_email("vendor_reply") --> reply_compose.html into #reply-area-{id}
+    POST /v2/partials/requisitions/{req_id}/responses/{response_id}/send-reply
+      --> Graph /me/sendMail (as user; TESTING bypass) ; marks response reviewed
+  Follow-up compose  "AI Draft" button
+    POST /v2/partials/follow-ups/{contact_id}/ai-draft
+      --> draft_email("follow_up") --> <script> sets #follow-up-body-{id}
+```
+
+Gives `rephrase_rfq` and `VendorResponse.classification` their first live consumers.
+All paths degrade gracefully when Claude is unavailable (cost_bucket="email_drafting").
+
+### Qualify-with-AI (offer pre-fill + ask-the-vendor for what's missing)
+
+```
+Offer row kebab "Qualify with AI" (shown only when offer.vendor_response_id set)
+  GET /v2/partials/sightings/{requirement_id}/offers/{offer_id}/qualify-ai
+    --> parse_vendor_response(linked email) --> extract_draft_offers
+        --> pre-fill the offer form (AI fills EMPTY fields only; saved values win)
+    --> offer_qualification.compute_qual_gaps(prefill, condition)
+        --> condition-aware checklist (genuine gaps pre-checked)
+    --> qual_request_modal.html : pre-filled offer form (same save path as edit) +
+        _qual_checklist.html (gap checkboxes + user-addable custom items via "+ Add item")
+  POST .../offers/{offer_id}/qualify-ai/draft-request
+    checked_items[] (AI gaps kept) + custom_items[] (user's own, not AI-suggested)
+    --> draft_email("qual_request") --> reply_compose.html in #qual-compose-{offer_id}
+  Send → existing send-reply path (Graph as user; TESTING bypass)
+    --> NEW: DNC hard-block in send_reply_htmx (SiteContact.do_not_contact) — never emails DNC vendors
+```
+
+Ownership-guarded via require_requisition_access (offer.requisition_id, owner_id=entered_by_id).
+Read-only pre-fill; never auto-saves or auto-sends. Loop-closes: a vendor's reply becomes a new
+linked VendorResponse, so re-opening Qualify-with-AI fills the remaining fields.
+
 ## 8. Activity Digest (AI Timeline Summary)
 
 ```
@@ -1378,6 +1425,89 @@ Two surfaces:
 `poll_inbox_htmx` (`POST /v2/partials/requisitions/{req_id}/poll-inbox`) also calls
 `_run_inbox_scan_now` and returns the refreshed responses tab; the scan is user-scoped,
 not requisition-scoped.
+
+---
+
+## 9a. Settings → Connectors Tab (admin only)
+
+Unified credential + health management surface. Replaces the old **Sources** tab and
+the orphaned **API Keys** tab: both legacy routes (`/v2/partials/settings/sources` and
+`/v2/partials/settings/api-keys`) 302 → `/v2/partials/settings/connectors`.
+
+```
+GET /v2/partials/settings/connectors
+    |
+    v
+htmx_views.settings_connectors_tab  (admin-only; 403 for non-admin)
+    |
+    +---> _build_connector_groups(db, request)
+    |       |
+    |       +---> db.query(ApiSource).order_by(display_name).all()
+    |       |     (9 dead rows excluded in-process: aliexpress/arrow/avnet/partfuse/
+    |       |      rs_components/siliconexpert/winsource + rocketreach/clearbit)
+    |       |
+    |       +---> per source: _enrich_source(source, db)
+    |       |       |
+    |       |       +---> connector_service.control_type(source)
+    |       |       |       → "key" | "oauth_clay" | "multi_field" | "browser_login"
+    |       |       |         | "scopes" | "keyless" | "planned"
+    |       |       |
+    |       |       +---> credential_service.credential_is_set / get_credential
+    |       |       |       (masked display only)
+    |       |       |
+    |       |       +---> clay_oauth.is_connected() / needs_reconnect()
+    |       |       |       (clay_enrichment only)
+    |       |       |
+    |       |       +---> connector_service.connector_state(source, ...)
+    |       |               → "live" | "error" | "off" | "needs_setup" | "untested"
+    |       |                 | "needs_reconnect" | "planned"
+    |       |
+    |       +---> connector_service.connector_group(source) → group key
+    |       |     Buckets emitted in GROUP_ORDER:
+    |       |       Part Sourcing / Enrichment / AI / Communications /
+    |       |       Browser Workers / Manual
+    |       |     7 planned connectors (findchips/future/heilind/lcsc/rochester/
+    |       |       thebrokersite/verical) render as read-only "Planned" cards
+    |       |       (no credential form, no toggle, no Test button)
+    |       |
+    |       v
+    |     connector_groups: [{key, label, sources: [enriched_dict]}]
+    |
+    v
+settings/connectors.html  (grouped card grid)
+```
+
+**Per-card controls (by `control_type`):**
+
+| `control_type` | UI |
+|---|---|
+| `key` | API key input (masked), Save via `hx-ext="json-enc"` |
+| `oauth_clay` | Connect / Reconnect / Disconnect buttons (Clay OAuth) |
+| `multi_field` | 4-field form (8×8: API key + username + password + PBX id) |
+| `keyless` | Enable toggle only (no credential; e.g. `ai_live_web`) |
+| `browser_login` | Status-only (ICS/NC workers — managed by browser-worker containers) |
+| `scopes` | Status-only (Azure AD / Teams — managed by Azure AD admin) |
+| `planned` | Read-only label, no controls |
+
+Every non-planned card has an **enable toggle** (`POST /api/sources/{id}/activate`) and a
+**Test** button (disabled if untestable). Both return JSON; the swap unit is a refreshed
+card partial:
+
+```
+POST /api/sources/{id}/activate          → JSON {status, is_active}
+POST /api/sources/{id}/test              → JSON {ok, error}
+GET  /v2/partials/settings/connector-card/{id}  → single card HTML (swap target)
+POST /v2/partials/settings/connectors/test-all  → OOB bundle of refreshed cards
+     (skips inactive / untestable; per-source failures tolerated, never abort)
+```
+
+Credential save uses `hx-ext="json-enc"` to POST a JSON body to the existing
+`POST /api/sources/{id}` endpoint (HTMX json-enc extension — not a standard form
+POST). On success the card re-fetches via `GET /v2/partials/settings/connector-card/{id}`.
+
+The degraded-source banner on the Part Dossier (`§ 2a-bis`) deep-links
+`/v2/settings` when live-market connectors are down — that link now routes to the
+Connectors tab (default tab is `connectors`).
 
 ---
 
@@ -1626,13 +1756,12 @@ to two new modules:
   | Tier | Provider | Cost | Notes |
   |------|----------|------|-------|
   | Free | SAM.gov | zero | `sam_gov_enrichment_enabled`; legal name + NAICS + HQ |
-  | Free | Apollo | flat-rate key | always-run when key configured |
   | Metered | Clay | per-credit | MCP-only; gap-gated; `clay_enrichment_enabled` |
   | Metered | Explorium | per-call | gap-gated; `explorium_enrichment_enabled` |
   | Metered | Lusha | per-call | gap-gated; `lusha_enrichment_enabled` |
   | Last resort | AI | Claude API | only when gaps remain after all above |
 
-  For contacts: Phase 1 runs Hunter + Apollo + Clay concurrently (cheap/free); Phase 2
+  For contacts: Phase 1 runs Hunter + Clay concurrently (cheap/free); Phase 2
   escalates sequentially to Lusha → Explorium only when the verified-contact count is
   below the requested limit.
 
@@ -1651,7 +1780,7 @@ to two new modules:
 | `naics` | SAM.gov (95) | Explorium (85) |
 | `ticker` | Explorium (90) | Clay (75) |
 | `revenue_range` | Explorium (90) | Clay (75) |
-| `employee_size` | Explorium (85) | Apollo (75) |
+| `employee_size` | Explorium (85) | Lusha (70) |
 | `linkedin_url` | Explorium (85) | Lusha (80) |
 | `hq_city/state/country` | Explorium (85) | SAM.gov (80) |
 
@@ -1660,8 +1789,8 @@ to two new modules:
 | Field | Highest tier | Runner-up |
 |-------|-------------|-----------|
 | `email` | Lusha (95) | Hunter (85) |
-| `phone` | Lusha (95) | Apollo (70) |
-| `title` | Explorium (80) | Apollo (75) |
+| `phone` | Lusha (95) | Explorium (65) |
+| `title` | Explorium (80) | Lusha (70) |
 
 **Provenance-aware apply.** `apply_enrichment_to_company` / `apply_enrichment_to_vendor`
 in `enrichment_service.py` call the shared `_apply_enrichment` function, which writes
@@ -1682,14 +1811,25 @@ Provenance is persisted in the new `enrichment_provenance` JSONB column on both
   `/prospects/contacts_information/enrich`. Auth: `api_key:` header (NOT
   `Authorization: Bearer`). 402/403/429 → `ProviderQuotaError`.
 - `app/connectors/clay_mcp.py` — backend MCP client (JSON-RPC 2.0 over HTTPS to
-  `https://api.clay.com/v3/mcp`). Authenticates with an OAuth access token
-  (`Authorization: Bearer <token>`); on 401 it attempts one token refresh then
-  retries. Not connected → returns `None`/`[]` (fail-soft; blend continues without
-  Clay). Company: `find-and-enrich-company` (sync). Contacts:
-  `find-and-enrich-contacts-at-company`; emails polled via `get-task-context`
-  (bounded: 5 polls × 3 s). 402/429 → `ProviderQuotaError`. **The old Clay WEBHOOK
-  path (`clay_service.py` + `POST /api/webhooks/clay`) has been removed; Clay is
-  now MCP-only.**
+  `https://api.clay.com/v3/mcp`). Clay speaks **MCP Streamable HTTP**: every
+  `tools/call` requires a session, so the connector first runs the handshake
+  (`initialize` → read the `Mcp-Session-Id` response header → `notifications/initialized`)
+  and **caches that session per access token** (reused across calls; a bare sessionless
+  call returns `400 "Missing Mcp-Session-Id header"`). `tools/call` responses are
+  **server-sent events** (`content-type: text/event-stream`), parsed from the `data:`
+  line — not plain JSON. Authenticates with an OAuth access token
+  (`Authorization: Bearer <token>`); on 401 it refreshes the token + re-initializes the
+  session then retries once; on 400/404 (expired session) it re-initializes + retries
+  once. Not connected → returns `None`/`[]` (fail-soft; blend continues without Clay).
+  Company: `find-and-enrich-company` (sync; `result.structuredContent.companies[domain]`).
+  Contacts: `find-and-enrich-contacts-at-company` (`.contacts[]`); emails polled via
+  `get-task-context` (bounded: 5 polls × 3 s). 402/429 → `ProviderQuotaError`. Protocol
+  verified live 2026-06-23. Health: `_ClayTestConnector` (in `routers/sources.py`,
+  registered for `clay_enrichment`) probes `get-credits-available` so
+  `health_monitor.ping_source` reports Clay's true state (live/error) instead of leaving
+  it `disabled` — without it, `startup.py`'s `is_active=false WHERE status='disabled'`
+  reconciliation keeps flipping the connector card off. **The old Clay WEBHOOK path
+  (`clay_service.py` + `POST /api/webhooks/clay`) has been removed; Clay is now MCP-only.**
 
   **Clay OAuth Connect flow.** `api.clay.com/v3/mcp` is OAuth-gated
   (authorization_code + PKCE S256, scope=`mcp`; no client_credentials grant).
@@ -1711,20 +1851,21 @@ Provenance is persisted in the new `enrichment_provenance` JSONB column on both
       store encrypted tokens → redirect to Settings.
     - `POST /auth/clay/disconnect` — clears stored credentials.
 
-  - **Settings → API Keys** — the Clay card is a **Connect / Reconnect / Disconnect**
-    card (no API-key input field). The `NEEDS_RECONNECT` marker surfaces a
-    "Reconnect" prompt when the refresh token has expired.
+  - **Settings → Connectors** — the Clay card renders as `control_type=oauth_clay`:
+    a **Connect / Reconnect / Disconnect** card (no API-key input field). The
+    `NEEDS_RECONNECT` marker surfaces a "Reconnect" prompt when the refresh token has
+    expired; `connector_state` returns `needs_reconnect` in that case. Clay OAuth
+    callbacks redirect to `/v2/partials/settings/connectors`.
 
   Mirrors the Azure AD OAuth pattern in `app/routers/auth.py`.
 - `app/connectors/sam_gov_company.py` — name→firmographics adapter wrapping the public
   SAM.gov entity-information API (`api.sam.gov/entity-information/v3/entities`).
 
 **Config flags** (all boolean, default `False` unless noted; set in `.env`):
-`apollo_enrichment_enabled`, `hunter_enrichment_enabled`, `sam_gov_enrichment_enabled`,
+`hunter_enrichment_enabled`, `sam_gov_enrichment_enabled`,
 `clay_enrichment_enabled`, `explorium_enrichment_enabled`, `lusha_enrichment_enabled`.
 Each metered provider also has a `*_cooldown_minutes` knob used by the circuit breaker.
-Apollo and Hunter raise `ProviderQuotaError` on 402/429 (circuit-guarded, matching the
-existing Lusha contract).
+Hunter, Clay, Explorium, and Lusha raise `ProviderQuotaError` on 402/429 (circuit-guarded).
 
 ```
 Trigger: user click ("Enrich" on CRM account / vendor) OR background prospect scan
@@ -1734,7 +1875,6 @@ enrichment_service.enrich_entity(domain, name)
     |
     +---> enrichment_router.gather_company(domain, name)
     |       +---> sam_gov_company.enrich_company()       [free, always]
-    |       +---> apollo.search_company()                [free, always]
     |       +---> clay_mcp.enrich_company()              [metered, gap-gated]
     |       +---> explorium.enrich_company()             [metered, gap-gated]
     |       +---> lusha.enrich_company()                 [metered, gap-gated]
@@ -1762,7 +1902,7 @@ Trigger: "Find Contacts" on CRM account
 enrichment_service.find_suggested_contacts(domain, name, title_filter, limit)
     |
     +---> enrichment_router.gather_contacts()
-    |       Phase 1 (concurrent): Hunter + Apollo + clay_mcp.find_contacts()
+    |       Phase 1 (concurrent): Hunter + clay_mcp.find_contacts()
     |       Phase 2 (escalation): Lusha → Explorium (only if verified < limit)
     |
     +---> firmo_tiers.blend_contacts(raw)   → deduped by email→linkedin→name,
@@ -3587,7 +3727,7 @@ the current implementation.
 | AI | 18 | Parse email, normalize, find contacts, draft RFQ |
 | Proactive | 12 | Matches, refresh, dismiss, send, scorecard |
 | Prospects | 9 | HTMX tab only (JSON `/api/prospects/*` removed, consolidated): list, stats, add-domain, detail, claim, dismiss, release, enrich (background — spawns run_enrichment_job; pulls real contacts + firmographics via Lusha chain: enrich_entity + find_suggested_contacts, fill-only onto prospect columns; recomputes both fit_score and readiness_score; 24h gate prevents repeat paid pulls), enrich-status (poll; HTTP 286 stops) |
-| Sources | 35 | Connector config, test, stocklist, webhooks |
+| Sources | 35 | Connector config, test, stocklist, webhooks; Settings Connectors tab (`GET /v2/partials/settings/connectors`, card partial, test-all); legacy `/sources` + `/api-keys` 302 → connectors |
 | Tags | 4 | List, entity tags |
 | Activity | 14 | Log calls, timeline, dashboards |
 | Admin | 15 | Users, config, diagnostics, maintenance |
@@ -3739,6 +3879,40 @@ activity + auto-advances status only for actually-sent vendors. `confirmSend` re
 headers and toasts via `$store.toast`: full success, partial (warning, distinguishing
 "N failed" from "N had no email"), or total failure (error — modal stays open to retry);
 it never infers success from the HTTP status alone.
+
+### attachmentsPanel  (htmx_app.js, Alpine.data)
+
+Backs the one shared file-attachments component
+(`templates/htmx/partials/shared/_attachments.html`, macro
+`attachments_panel(kind, entity_id)`) used identically on **five** surfaces:
+Company "Files" tab, MaterialCard "Files" tab, the contact-card kebab "Files" modal,
+the requisition Parts-tab per-requirement Files drawer, and the offer card. The macro
+maps `kind ∈ {requisition,requirement,offer,company,contact,material}` → the per-kind
+list/upload/delete URL family internally; download/open is always
+`GET /api/attachments/{kind}/{att_id}/content`.
+
+Flow (HTMX-native, no JSON-then-client-render):
+- The list container lazy-loads via `hx-get` the per-kind list URL on `load` and
+  re-fetches on the internal `attachments:refresh` trigger (explicit `hx-target="this"`).
+- The **six list endpoints** branch on `HX-Request`: present → render
+  `shared/_attachment_list.html` (HTML rows); absent → the legacy JSON array
+  (back-compat — existing tests assert the array). The branch is centralized in
+  `attachment_service.attachment_list_response(request, kind, entity_id, rows)`, which
+  also owns the kind→delete-base map.
+- Upload form (`hx-post` the list URL, `hx-encoding="multipart/form-data"`, `name="file"`,
+  `hx-swap="none"`) and each delete button (`hx-delete`) dispatch a bubbling
+  `attachments:changed` DOM event on success; the panel root catches it and fires
+  `attachments:refresh` on the list (distinct names avoid a re-fetch→re-fire loop).
+- The Alpine factory owns only interaction state: `dragging` (dropzone hover), `busy`
+  (upload spinner, toggled off the form's `htmx:beforeRequest`/`htmx:afterRequest`), and
+  `onDrop()` (assigns dropped files to the picker input → `requestSubmit()`).
+- Upload failures surface the server `{"error": …}` via the global `htmx:responseError`
+  toast handler — no per-panel error wiring.
+
+The Parts-tab drawer is a **sibling `<tr>`** (tables can't nest rows) synced to the row's
+paperclip toggle via a per-requirement `files-toggle-{id}` window event, so the drawer
+spans the full table width without breaking the column grid. The offer card and contact
+modal wrap the panel in `<template x-if>` so it only mounts (and lazy-loads) when expanded.
 
 ---
 

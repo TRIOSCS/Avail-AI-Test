@@ -232,7 +232,7 @@
   {# ── Tab Bar ─────────────────────────────────────────────── #}
   <div x-data="{ activeTab: 'vendors' }">
     <div class="flex border-b border-gray-200 mb-0">
-      {% for tab_id, tab_label in [('vendors', 'Vendors'), ('customers', 'Customers'), ('sourcing', 'Sourcing'), ('price_history', 'Price History')] %}
+      {% for tab_id, tab_label in [('vendors', 'Vendors'), ('customers', 'Customers'), ('sourcing', 'Sourcing'), ('price_history', 'Price History'), ('files', 'Files')] %}
       <button @click="activeTab = '{{ tab_id }}'"
               :class="activeTab === '{{ tab_id }}' ? 'border-b-2 border-brand-500 text-brand-600' : 'text-gray-500 hover:text-gray-700'"
               class="px-4 py-2.5 text-sm font-medium transition-colors -mb-px"

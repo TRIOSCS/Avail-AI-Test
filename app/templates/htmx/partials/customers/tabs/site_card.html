@@ -9,7 +9,7 @@
 #}
 <div id="site-{{ s.id }}" class="bg-white rounded-lg border border-gray-200" x-data="{ expanded: false, editing: false }">
   {# Collapsed header #}
-  <div class="px-4 py-3 flex items-center justify-between cursor-pointer" role="button" tabindex="0" @click="expanded = !expanded" @keydown.enter="expanded = !expanded" @keydown.space.prevent="expanded = !expanded" :aria-expanded="expanded">
+  <div class="px-4 py-3 flex items-center justify-between cursor-pointer focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-inset" role="button" tabindex="0" @click="expanded = !expanded" @keydown.enter="expanded = !expanded" @keydown.space.prevent="expanded = !expanded" :aria-expanded="expanded">
     <div class="flex items-center gap-3">
       <svg class="h-5 w-5 text-gray-400 transition-transform" :class="{ 'rotate-90': expanded }" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
@@ -47,7 +47,7 @@
     </div>
 
     {# Contact count + link to Contacts tab — NOT an inline editor #}
-    {% set active_contact_count = s.site_contacts | selectattr('is_active', 'equalto', True) | list | length %}
+    {% set active_contact_count = s.site_contacts | selectattr('is_active', 'equalto', True) | rejectattr('is_archived', 'equalto', True) | list | length %}
     <div class="px-4 py-2 border-t border-gray-100 flex items-center justify-between">
       <span class="text-xs text-gray-600">
         {{ active_contact_count }}
@@ -74,7 +74,7 @@
     {# Site actions #}
     <div class="px-4 py-2 bg-gray-50 border-t border-gray-100 flex items-center gap-2">
       <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/customers/{{ company.id }}/sites/{{ s.id }}/edit-form'})"
-              class="text-xs text-brand-500 hover:text-brand-700">
+              class="text-xs text-brand-500 hover:text-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500 rounded">
         Edit Site
       </button>
       <button hx-delete="/v2/partials/customers/{{ company.id }}/sites/{{ s.id }}"
@@ -82,7 +82,7 @@
               hx-swap="outerHTML"
               hx-confirm="Delete site '{{ s.site_name }}'? This cannot be undone."
               data-loading-disable
-              class="text-xs text-rose-500 hover:text-rose-700">
+              class="text-xs text-rose-500 hover:text-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-500 rounded">
         Delete Site
       </button>
     </div>

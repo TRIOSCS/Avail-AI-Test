@@ -287,8 +287,9 @@ htmx.on('htmx:responseError', (evt) => {
         let msg = 'Request failed. Please try again.';
         try {
             const body = JSON.parse(evt.detail.xhr.responseText);
-            if (body && typeof body.detail === 'string' && body.detail) {
-                msg = body.detail;
+            const msg_text = body.error || body.detail;
+            if (msg_text && typeof msg_text === 'string') {
+                msg = msg_text;
             }
         } catch (_) { /* not JSON — use fallback */ }
         showToast(msg, 'error');
@@ -2360,6 +2361,44 @@ Alpine.data('offerQualification', (prefill) => ({
   },
   meterTotal() { return this._items().length; },
   meterFilled() { return this._items().filter(Boolean).length; },
+}));
+
+/**
+ * attachmentsPanel — Alpine.js component for the unified file-attachments panel.
+ *
+ * Owns the dropzone hover state, a friendly busy state during upload, and the
+ * drop handler that assigns dropped files to the picker input and submits the
+ * form. The form itself is plain HTMX (multipart POST → attachments:changed);
+ * this factory only decorates it with interaction state.
+ *
+ * Called by: partials/shared/_attachments.html (attachments_panel macro)
+ * Depends on: Alpine.js, HTMX. Error toasts are surfaced by the global
+ *             htmx:responseError handler (reads body.error) — no per-panel wiring.
+ */
+Alpine.data('attachmentsPanel', () => ({
+  dragging: false,
+  busy: false,
+  busyLabel: 'Uploading…',
+
+  init() {
+    // The dropzone form is this component's root (<div> wraps it); listen on the
+    // root so both the upload form and the list container's requests are seen.
+    // Only the multipart upload toggles the busy state.
+    this.$el.addEventListener('htmx:beforeRequest', (e) => {
+      if (e.target && e.target.tagName === 'FORM') this.busy = true;
+    });
+    this.$el.addEventListener('htmx:afterRequest', (e) => {
+      if (e.target && e.target.tagName === 'FORM') this.busy = false;
+    });
+  },
+
+  onDrop(evt) {
+    this.dragging = false;
+    const files = evt.dataTransfer && evt.dataTransfer.files;
+    if (!files || !files.length) return;
+    this.$refs.fileInput.files = files;
+    this.$refs.fileInput.closest('form').requestSubmit();
+  },
 }));
 
 /* ────────────────────────────────────────────────────────────────────────

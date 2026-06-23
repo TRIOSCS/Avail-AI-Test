@@ -122,11 +122,11 @@ def _get_connector_for_source(name: str, db: Session = None):
     test_connector = {
         "anthropic_ai": _AnthropicTestConnector,
         "teams_notifications": _TeamsTestConnector,
-        "apollo_enrichment": _ApolloTestConnector,
         "lusha_enrichment": _LushaTestConnector,
         "explorium_enrichment": _ExploriumTestConnector,
         "azure_oauth": _AzureOAuthTestConnector,
         "hunter_enrichment": _HunterTestConnector,
+        "clay_enrichment": _ClayTestConnector,
     }.get(name)
     if test_connector:
         return test_connector()
@@ -197,27 +197,6 @@ class _TeamsTestConnector:
         return [{"vendor_name": "Teams", "mpn_matched": "Message posted", "status": "ok"}]
 
 
-class _ApolloTestConnector:
-    """Test Apollo API key with a search query."""
-
-    async def search(self, mpn: str) -> list[dict]:
-        from ..http_client import http
-
-        api_key = get_credential_cached("apollo_enrichment", "APOLLO_API_KEY")
-        if not api_key:
-            raise ValueError("APOLLO_API_KEY not configured")
-        resp = await http.post(
-            "https://api.apollo.io/v1/mixed_people/api_search",
-            headers={"Content-Type": "application/json", "X-Api-Key": api_key},
-            json={"q_organization_domains": ["anthropic.com"], "page": 1, "per_page": 1},
-            timeout=15,
-        )
-        if resp.status_code != 200:
-            raise ValueError(f"Apollo API returned {resp.status_code}: {resp.text[:200]}")
-        count = len(resp.json().get("people", []))
-        return [{"vendor_name": "Apollo", "mpn_matched": f"Search OK — {count} result(s)", "status": "ok"}]
-
-
 class _LushaTestConnector:
     """Test Lusha API key with a lightweight person lookup."""
 
@@ -254,6 +233,27 @@ class _HunterTestConnector:
         return [
             {"vendor_name": "Hunter.io", "mpn_matched": f"API key valid — {count} contact(s) found", "status": "ok"}
         ]
+
+
+class _ClayTestConnector:
+    """Test Clay MCP connectivity via a credits check (spends no enrichment credits).
+
+    Runs the full OAuth + MCP handshake through clay_mcp._mcp_call and calls the get-
+    credits-available tool. Raises (→ health status 'error') when Clay is not connected
+    or the session cannot be established, so the connectors card honestly reflects an
+    expired/disconnected Clay rather than silently going stale.
+    """
+
+    async def search(self, mpn: str) -> list[dict]:
+        from ..connectors import clay_mcp
+        from ..services import clay_oauth
+
+        if not clay_oauth.is_connected():
+            raise ValueError("Clay not connected — connect at Settings → Connectors")
+        result = await clay_mcp._mcp_call("get-credits-available", {})
+        if not result:
+            raise ValueError("Clay MCP health check failed — reconnect may be required")
+        return [{"vendor_name": "Clay", "mpn_matched": "MCP session OK — credits available", "status": "ok"}]
 
 
 class _ExploriumTestConnector:
@@ -485,16 +485,12 @@ async def list_api_sources(user: User = Depends(require_user), db: Session = Dep
     return {"sources": result}
 
 
-@router.post("/api/sources/{source_id}/test", response_model=ApiTestResponse)
-@limiter.limit("5/minute")
-async def test_api_source(
-    source_id: int, request: Request, user: User = Depends(require_user), db: Session = Depends(get_db)
-):
-    """Test a specific API source with a known part number."""
-    src = db.get(ApiSource, source_id)
-    if not src:
-        raise HTTPException(404, "API source not found")
+async def run_source_test(src: ApiSource, db: Session) -> dict:
+    """Run a live part-search probe against one source, persisting its health.
 
+    Shared by the per-source Test endpoint and the Connectors "Test all" sweep.
+    Tolerates connector failures (records them as `error`) and never raises.
+    """
     test_mpn = "LM358N"
     start = time.time()
     results = []
@@ -540,6 +536,19 @@ async def test_api_source(
         "error": error,
         "sample": results[:3] if results else [],
     }
+
+
+@router.post("/api/sources/{source_id}/test", response_model=ApiTestResponse)
+@limiter.limit("5/minute")
+async def test_api_source(
+    source_id: int, request: Request, user: User = Depends(require_user), db: Session = Depends(get_db)
+):
+    """Test a specific API source with a known part number."""
+    src = db.get(ApiSource, source_id)
+    if not src:
+        raise HTTPException(404, "API source not found")
+
+    return await run_source_test(src, db)
 
 
 @router.put("/api/sources/{source_id}/toggle", response_model=ToggleResponse)

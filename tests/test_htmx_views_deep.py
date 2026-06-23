@@ -436,12 +436,28 @@ class TestSettingsRoutes:
         [
             "/v2/partials/settings",
             "/v2/partials/settings?tab=profile",
-            "/v2/partials/settings/sources",
             "/v2/partials/settings/profile",
         ],
     )
     def test_settings_get_ok(self, client: TestClient, path: str):
         assert client.get(path).status_code == 200
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/v2/partials/settings/sources",
+            "/v2/partials/settings/api-keys",
+        ],
+    )
+    def test_settings_old_tabs_redirect_to_connectors(self, client: TestClient, path: str):
+        resp = client.get(path, follow_redirects=False)
+        assert resp.status_code == 302
+        assert "/connectors" in resp.headers["location"]
+
+    def test_settings_connectors_non_admin_returns_403(self, client: TestClient):
+        # connectors tab is admin-only; buyer role → 403
+        resp = client.get("/v2/partials/settings/connectors")
+        assert resp.status_code == 403
 
     def test_settings_system_non_admin(self, client: TestClient):
         # test_user is a 'buyer' — should get 403

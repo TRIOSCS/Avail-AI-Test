@@ -1,0 +1,9 @@
+{# files_tab.html — Files tab for the CRM account (company) detail.
+   Receives: company (Company).
+   Called by: company_tab route (tab == "files").
+   Depends on: the shared attachments_panel macro.
+#}
+{% from "htmx/partials/shared/_attachments.html" import attachments_panel %}
+<div class="max-w-2xl">
+  {{ attachments_panel('company', company.id) }}
+</div>

@@ -590,6 +590,9 @@ _PAGE_FLUID_SHELLS = (
     "app/templates/htmx/partials/vendors/detail.html",
     "app/templates/htmx/partials/vendors/list.html",
     "app/templates/htmx/partials/offers/review_queue.html",
+    # CRM account detail — full-width contacts-forward layout (twin of vendors/detail);
+    # renders standalone in #main-content or inside the CDM workspace right panel.
+    "app/templates/htmx/partials/customers/detail.html",
 )
 _PAGE_READABLE_SHELLS = (
     "app/templates/htmx/partials/admin/data_ops.html",
@@ -624,3 +627,24 @@ def test_page_shells_use_width_classes():
         if "page-readable" not in Path(rel).read_text():
             offenders.append(f"{rel}: missing .page-readable on shell wrapper")
     assert not offenders, "page-shells lost their width class:\n" + "\n".join(offenders)
+
+
+def test_nav_poll_badges_optout_of_push_url():
+    """Bottom-nav badges poll (hx-trigger="...every...") and are nested inside the nav
+    <a> elements, which carry hx-push-url="{{ href }}".
+
+    htmx makes hx-push-url INHERITABLE, so without an opt-out each badge poll pushes its
+    parent nav item's URL to the address bar — silently rewriting the URL on load and
+    every 60s, so refresh/bookmark/back land on the wrong page. Each polling badge must
+    set hx-push-url="false".
+    """
+    html = Path("app/templates/htmx/partials/shared/mobile_nav.html").read_text()
+    # The inheritance hazard exists only because the nav <a> pushes a URL.
+    assert 'hx-push-url="{{ href }}"' in html, "nav <a> hx-push-url contract changed — revisit this guard"
+    badges = re.findall(r"<span[^>]*hx-get=\"[^\"]*/badge\"[^>]*>", html, re.DOTALL)
+    assert badges, "expected bottom-nav badge spans with hx-get to a /badge endpoint"
+    offenders = [b[:100] for b in badges if 'hx-push-url="false"' not in b]
+    assert not offenders, (
+        "bottom-nav badge poll spans inherit the nav <a>'s hx-push-url and rewrite the "
+        'address bar; add hx-push-url="false":\n' + "\n".join(offenders)
+    )

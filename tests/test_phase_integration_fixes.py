@@ -320,6 +320,80 @@ class TestCompanyActivityTab:
         assert resp.status_code == 200
         assert "No activity recorded" in resp.text
 
+    def test_emails_section_mixed_rfq_and_activitylog(self, client: TestClient, db_session: Session, test_user: User):
+        """Emails section shows both an RFQ contact row and an ActivityLog EMAIL row,
+        and does NOT double-show an rfq_sent ActivityLog entry alongside the RfqContact
+        that is the canonical source for that RFQ."""
+        from app.constants import ActivityType
+        from app.models import Company
+        from app.models.intelligence import ActivityLog
+        from app.models.offers import Contact as RfqContact
+
+        company = Company(name="Mixed Emails Co", account_type="customer")
+        db_session.add(company)
+        db_session.flush()
+
+        req = Requisition(
+            name="Mixed Req",
+            status="active",
+            created_by=test_user.id,
+            company_id=company.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(req)
+        db_session.flush()
+
+        # Canonical RFQ source
+        rfq_contact = RfqContact(
+            requisition_id=req.id,
+            user_id=test_user.id,
+            contact_type="email",
+            vendor_name="RFQ Vendor",
+            vendor_name_normalized="rfq vendor",
+            vendor_contact="rfq@vendor.com",
+            subject="RFQ Subject",
+            status="sent",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(rfq_contact)
+
+        # rfq_sent ActivityLog — should NOT appear (double-show prevention)
+        rfq_sent_log = ActivityLog(
+            company_id=company.id,
+            requisition_id=req.id,
+            activity_type=ActivityType.RFQ_SENT,
+            channel="email",
+            summary="RFQ sent to RFQ Vendor",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(rfq_sent_log)
+
+        # Regular email ActivityLog — SHOULD appear
+        email_log = ActivityLog(
+            company_id=company.id,
+            activity_type=ActivityType.EMAIL_SENT,
+            channel="email",
+            summary="Follow-up email sent",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(email_log)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/activity")
+        assert resp.status_code == 200
+
+        # RFQ contact row must appear
+        assert "RFQ — RFQ Vendor" in resp.text, "RFQ contact row missing from Emails section"
+        assert f"Req #{req.id}" in resp.text, "Req backlink missing from RFQ row"
+
+        # Regular email ActivityLog must appear
+        assert "Follow-up email sent" in resp.text, "ActivityLog EMAIL row missing from Emails section"
+
+        # rfq_sent ActivityLog must NOT double-show (its summary should not appear)
+        assert "RFQ sent to RFQ Vendor" not in resp.text, (
+            "rfq_sent ActivityLog must not double-show alongside RfqContact"
+        )
+
 
 # ── Phase 6: AI Insights panels ─────────────────────────────────────
 

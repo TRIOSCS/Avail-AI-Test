@@ -402,3 +402,109 @@ class TestSiteCardNavFixes:
         # appears in the tab label area; "3 contact" must not be there.
         assert "2 contact" in resp.text
         assert "3 contact" not in resp.text
+
+
+class TestQAPassFixes:
+    """Tests for QA-pass fixes: kebab badge refresh, edit dup email, site counts, edit_site clear semantics."""
+
+    # Finding #2 — after DNC POST the response renders the contact with DNC state (full list refresh)
+    def test_set_contact_dnc_returns_full_contacts_list(self, client, db_session: Session, test_user: User):
+        co = _make_company(db_session, name="DNC Badge Co", owner_id=test_user.id, site_count=1)
+        site = _make_site(db_session, co, site_name="HQ")
+        contact = _make_contact(db_session, site, full_name="DNC Person")
+        db_session.commit()
+
+        resp = client.post(
+            f"/v2/partials/customers/{co.id}/contacts/{contact.id}/do-not-contact",
+            data={"do_not_contact": "1"},
+        )
+        assert resp.status_code == 200
+        # Full contacts-tab-list refresh (contains the stable swap target id)
+        assert "contacts-tab-list" in resp.text
+        # DNC badge is present because the contact is now DNC
+        assert "DNC" in resp.text
+
+    def test_set_contact_archive_returns_full_contacts_list(self, client, db_session: Session, test_user: User):
+        co = _make_company(db_session, name="Archive Badge Co", owner_id=test_user.id, site_count=1)
+        site = _make_site(db_session, co, site_name="HQ")
+        contact = _make_contact(db_session, site, full_name="Archive Person")
+        db_session.commit()
+
+        resp = client.post(
+            f"/v2/partials/customers/{co.id}/contacts/{contact.id}/archive",
+            data={"is_archived": "1"},
+        )
+        assert resp.status_code == 200
+        assert "contacts-tab-list" in resp.text
+        assert "Archived" in resp.text
+
+    def test_set_contact_priority_returns_full_contacts_list(self, client, db_session: Session, test_user: User):
+        co = _make_company(db_session, name="Priority Badge Co", owner_id=test_user.id, site_count=1)
+        site = _make_site(db_session, co, site_name="HQ")
+        contact = _make_contact(db_session, site, full_name="Priority Person")
+        db_session.commit()
+
+        resp = client.post(
+            f"/v2/partials/customers/{co.id}/contacts/{contact.id}/priority",
+            data={"is_priority": "1"},
+        )
+        assert resp.status_code == 200
+        assert "contacts-tab-list" in resp.text
+        assert "Priority" in resp.text
+
+    # Finding #3 — edit_site_contact raises 409 on duplicate email within the same site
+    def test_edit_contact_duplicate_email_returns_409(self, client, db_session: Session, test_user: User):
+        co = _make_company(db_session, name="EditDupEmail Co", owner_id=test_user.id, site_count=1)
+        site = _make_site(db_session, co, site_name="HQ")
+        c1 = SiteContact(customer_site_id=site.id, full_name="Contact One", email="shared@example.com", is_active=True)
+        c2 = SiteContact(customer_site_id=site.id, full_name="Contact Two", email="other@example.com", is_active=True)
+        db_session.add_all([c1, c2])
+        db_session.commit()
+
+        # Try to edit c2 to use c1's email
+        resp = client.post(
+            f"/v2/partials/customers/{co.id}/sites/{site.id}/contacts/{c2.id}/edit",
+            data={"full_name": "Contact Two", "email": "shared@example.com"},
+        )
+        assert resp.status_code == 409
+
+    def test_edit_contact_own_email_no_409(self, client, db_session: Session, test_user: User):
+        """Editing a contact's own email to itself should NOT raise 409."""
+        co = _make_company(db_session, name="EditOwnEmail Co", owner_id=test_user.id, site_count=1)
+        site = _make_site(db_session, co, site_name="HQ")
+        c = SiteContact(customer_site_id=site.id, full_name="Keep Email", email="keep@example.com", is_active=True)
+        db_session.add(c)
+        db_session.commit()
+
+        resp = client.post(
+            f"/v2/partials/customers/{co.id}/sites/{site.id}/contacts/{c.id}/edit",
+            data={"full_name": "Keep Email", "email": "keep@example.com"},
+        )
+        assert resp.status_code == 200
+
+    # Finding #6b — counts OOB update: after add, the re-render carries the updated count
+    def test_contacts_tab_list_shows_correct_count_after_add(self, client, db_session: Session, test_user: User):
+        co = _make_company(db_session, name="CountCo", owner_id=test_user.id, site_count=1)
+        site = _make_site(db_session, co, site_name="Plant")
+        db_session.commit()
+
+        resp = client.post(
+            f"/v2/partials/customers/{co.id}/contacts",
+            data={"full_name": "New Contact", "email": "new@plant.com", "site_id": str(site.id)},
+        )
+        assert resp.status_code == 200
+        assert "New Contact" in resp.text
+
+    # Finding #10 — edit_site with blank address CLEARS the field (no OR-fallback)
+    def test_edit_site_blank_city_clears_city(self, client, db_session: Session, test_user: User):
+        co = _make_company(db_session, name="EditSite Co", owner_id=test_user.id, site_count=1)
+        site = _make_site(db_session, co, site_name="OldName", city="OldCity")
+        db_session.commit()
+
+        resp = client.post(
+            f"/v2/partials/customers/{co.id}/sites/{site.id}/edit",
+            data={"site_name": "NewName", "city": ""},
+        )
+        assert resp.status_code == 200
+        db_session.refresh(site)
+        assert site.city is None  # blank should clear, not retain OldCity

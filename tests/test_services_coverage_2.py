@@ -257,28 +257,12 @@ class TestProspectDiscoveryEmail:
         assert result[0].name == "NewCo Inc"
         assert result[0].discovery_source == "email_history"
 
-    def test_enrich_email_domains_fallback_to_apollo(self):
-        """Falls back to Apollo when primary enrichment returns None."""
-        from app.services.prospect_discovery_email import enrich_email_domains
-
-        domains = [{"domain": "fallback.com", "email_count": 3, "sample_senders": []}]
-
-        async def fail_enrich(domain):
-            return None
-
-        async def apollo_enrich(domain):
-            return {"name": "Fallback Corp", "industry": "Tech"}
-
-        result = _run(enrich_email_domains(domains, enrich_fn=fail_enrich, apollo_enrich_fn=apollo_enrich))
-        assert len(result) == 1
-        assert result[0].name == "Fallback Corp"
-
     def test_enrich_email_domains_no_enrichment(self):
         """No enrichment data available -> empty list."""
         from app.services.prospect_discovery_email import enrich_email_domains
 
         domains = [{"domain": "nope.com", "email_count": 2, "sample_senders": []}]
-        result = _run(enrich_email_domains(domains, enrich_fn=None, apollo_enrich_fn=None))
+        result = _run(enrich_email_domains(domains, enrich_fn=None))
         assert len(result) == 0
 
     def test_run_email_mining_batch_no_domains(self, db_session: Session):

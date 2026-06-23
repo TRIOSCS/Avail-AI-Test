@@ -550,6 +550,7 @@ from .routers.activity import router as activity_router
 from .routers.admin import router as admin_router
 from .routers.ai import router as ai_router
 from .routers.alerts import router as alerts_router
+from .routers.attachments_extra import router as attachments_extra_router
 from .routers.auth import router as auth_router
 from .routers.clay_oauth import router as clay_oauth_router
 from .routers.crm import router as crm_router
@@ -572,6 +573,7 @@ from .routers.vendor_contacts import router as vendor_contacts_router
 from .routers.vendors_crud import router as vendors_crud_router
 
 # Core routers (always active)
+app.include_router(attachments_extra_router)
 app.include_router(auth_router)
 app.include_router(clay_oauth_router)
 app.include_router(admin_router)

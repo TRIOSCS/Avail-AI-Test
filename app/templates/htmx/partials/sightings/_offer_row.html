@@ -45,6 +45,10 @@
            class="absolute right-0 top-full mt-1 w-36 bg-white border border-gray-200 rounded-lg shadow-lg z-10 py-1 text-xs">
         <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/sightings/{{ requirement.id }}/offers/{{ o.id }}/edit-form'}); open = false"
                 class="w-full text-left px-3 py-1.5 text-gray-700 hover:bg-gray-50">Edit</button>
+        {% if o.vendor_response_id %}
+        <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/sightings/{{ requirement.id }}/offers/{{ o.id }}/qualify-ai'}); open = false"
+                class="w-full text-left px-3 py-1.5 text-brand-600 hover:bg-brand-50">Qualify with AI</button>
+        {% endif %}
         {% if o.status == 'pending_review' %}
         <button hx-post="/v2/partials/sightings/{{ requirement.id }}/offers/{{ o.id }}/review"
                 hx-vals='{"action": "approve"}'

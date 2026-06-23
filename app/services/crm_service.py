@@ -169,6 +169,8 @@ def cdm_company_query(
     sort: str,
     now: datetime | None = None,
     segment: int = 0,
+    disposition: str | None = None,
+    has_open_reqs: bool = False,
 ):
     """Build the filtered + sorted CDM account list query.
 
@@ -180,6 +182,13 @@ def cdm_company_query(
     drop out of the call-list everywhere, EXCEPT when the "bucket" facet is
     explicitly requested (so they stay findable + un-bucketable). The needs_call
     branch inherits its exclusion from the shared _needs_call_filter (count==list).
+
+    disposition: None/"" = default suppression behaviour (bucket hidden unless staleness="bucket");
+    "active" = only non-bucket accounts; "bucket" = only bucket accounts (overrides staleness
+    bucket-suppression so the caller can combine disposition="bucket" with any staleness band).
+
+    has_open_reqs: when True, restrict to companies that have at least one requisition whose
+    status is NOT in RequisitionStatus.TERMINAL (mirrors the open_req_count PG trigger).
     """
     query = db.query(Company).filter(Company.is_active.is_(True)).options(joinedload(Company.account_owner))
 
@@ -187,13 +196,21 @@ def cdm_company_query(
         sb = SearchBuilder(search.strip())
         query = query.filter(sb.ilike_filter(Company.name))
 
-    # Bucket suppression at the query layer (never in materialize_all_clocks).
-    # "bucket" facet reveals ONLY bucketed accounts; every other view hides them.
-    if staleness == "bucket":
+    # Disposition filter: explicit param takes full precedence over staleness-driven
+    # bucket suppression so "Active only" and "Bucket only" can compose with any
+    # staleness band. When disposition is unset, the legacy staleness-driven rules apply.
+    if disposition == "bucket":
         query = query.filter(Company.disposition == "bucket")
-    elif staleness != "needs_call":
-        # needs_call already carries _not_bucketed() via _needs_call_filter.
+    elif disposition == "active":
         query = query.filter(_not_bucketed())
+    else:
+        # Legacy bucket suppression: "bucket" staleness facet reveals only bucketed;
+        # every other view (including needs_call) hides them.
+        if staleness == "bucket":
+            query = query.filter(Company.disposition == "bucket")
+        elif staleness != "needs_call":
+            # needs_call already carries _not_bucketed() via _needs_call_filter.
+            query = query.filter(_not_bucketed())
 
     now = now or datetime.now(timezone.utc)
     overdue_cutoff = now - timedelta(days=STALENESS_OVERDUE_DAYS)
@@ -225,6 +242,17 @@ def cdm_company_query(
                 EntityTag.entity_id == Company.id,
                 EntityTag.tag_id == segment,
                 EntityTag.is_visible.is_(True),
+            )
+            .correlate(Company)
+            .exists()
+        )
+    if has_open_reqs:
+        # Mirrors the open_req_count PG trigger: open = NOT in TERMINAL statuses.
+        query = query.filter(
+            db.query(Requisition)
+            .filter(
+                Requisition.company_id == Company.id,
+                Requisition.status.notin_(RequisitionStatus.TERMINAL),
             )
             .correlate(Company)
             .exists()
@@ -274,6 +302,8 @@ def cdm_list_ctx(
     limit: int,
     offset: int,
     segment: int = 0,
+    disposition: str | None = None,
+    has_open_reqs: bool = False,
     include_overdue: bool = False,
 ) -> dict:
     """Shared context for the CDM workspace shell and its account-list partial.
@@ -283,6 +313,8 @@ def cdm_list_ctx(
     dropdown options). The account-list refresh route re-renders neither, so
     it omits both and skips the COUNT query.
     segment: when non-zero, filter companies carrying that segment tag_id.
+    disposition: None/"" = default; "active" = active only; "bucket" = bucket only.
+    has_open_reqs: when True, restrict to companies with at least one open requisition.
     """
     from .tagging import list_all_segment_tags
 
@@ -297,6 +329,8 @@ def cdm_list_ctx(
         sort=sort,
         now=now,
         segment=segment,
+        disposition=disposition,
+        has_open_reqs=has_open_reqs,
     )
     total = query.count()
     companies = query.offset(offset).limit(limit).all()
@@ -318,6 +352,8 @@ def cdm_list_ctx(
         "my_only": my_only,
         "sort": sort,
         "segment": segment,
+        "disposition": disposition or "",
+        "has_open_reqs": has_open_reqs,
         "total": total,
         "limit": limit,
         "offset": offset,
