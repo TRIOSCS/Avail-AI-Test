@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from ...constants import ActivityType, RequisitionStatus
@@ -23,9 +23,9 @@ router = APIRouter()
 async def clone_requisition(req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
     from ...dependencies import get_req_for_user
 
+    # get_req_for_user enforces role-scoped ownership (SALES/TRADER restricted to
+    # requisitions they created) and raises 404 for non-owners.
     req = get_req_for_user(db, user, req_id)
-    if not req:
-        raise HTTPException(404, "Requisition not found")
     new_req = Requisition(
         name=f"{req.name} (clone)",
         customer_name=req.customer_name,

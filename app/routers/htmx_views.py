@@ -44,10 +44,12 @@ from ..constants import (
 from ..database import get_db
 from ..dependencies import (
     get_quote_for_user,
+    get_req_for_user,
     get_user,
     has_buyer_role,
     require_admin,
     require_buyer,
+    require_requisition_access,
     require_user,
 )
 from ..models import (
@@ -1182,6 +1184,7 @@ async def add_requirement(
         raise HTTPException(422, "Manufacturer is required")
 
     req = get_requisition_or_404(db, req_id)
+    require_requisition_access(db, req_id, user)
 
     form_data = await request.form()
     sub_mpns = form_data.getlist("sub_mpn")
@@ -1238,6 +1241,7 @@ async def requisition_search_all(
     """Trigger search for all requirements in a requisition, then refresh parts
     table."""
     req = get_requisition_or_404(db, req_id)
+    require_requisition_access(db, req_id, user)
     requirements = db.query(Requirement).filter(Requirement.requisition_id == req_id).all()
     if not requirements:
         return HTMLResponse(
@@ -1481,6 +1485,7 @@ async def parse_email_action(
 ):
     """Parse vendor email and return editable offer cards."""
     req = get_requisition_or_404(db, req_id)
+    require_requisition_access(db, req_id, user)
 
     if not email_body.strip():
         return HTMLResponse(
@@ -1530,6 +1535,7 @@ async def parse_offer_action(
 ):
     """Parse freeform vendor text and return editable offer cards."""
     req = get_requisition_or_404(db, req_id)
+    require_requisition_access(db, req_id, user)
 
     if not raw_text.strip():
         return HTMLResponse(
@@ -1571,6 +1577,7 @@ async def save_parsed_offers(
 ):
     """Save user-edited parsed offers to the requisition."""
     req = get_requisition_or_404(db, req_id)
+    require_requisition_access(db, req_id, user)
 
     form = await request.form()
     vendor_name = form.get("vendor_name", "")
@@ -1726,6 +1733,8 @@ async def requisitions_bulk_action(
         raise HTTPException(400, f"Invalid action: {action}")
 
     reqs = db.query(Requisition).filter(Requisition.id.in_(ids)).all()
+    for r in reqs:
+        require_requisition_access(db, r.id, user)
 
     if action == "archive":
         for r in reqs:
@@ -1777,7 +1786,6 @@ async def requisition_inline_edit_cell(
         field: One of name, status, urgency, deadline, owner.
         context: 'row' for list view, 'header' for detail header.
     """
-    from ..dependencies import get_req_for_user
 
     valid_fields = {"name", "status", "urgency", "deadline", "owner"}
     if field not in valid_fields:
@@ -1807,7 +1815,6 @@ async def requisition_inline_save(
     For context='row', returns the full table row. For context='header', returns the
     updated header card.
     """
-    from ..dependencies import get_req_for_user
 
     req = get_req_for_user(db, user, req_id, options=[])
     if not req:
@@ -1906,7 +1913,6 @@ async def requisition_row_action(
 ):
     """Execute a row-level action (archive, activate, claim, unclaim, won, lost,
     clone)."""
-    from ..dependencies import get_req_for_user
 
     valid_actions = {"archive", "activate", "claim", "unclaim", "won", "lost", "clone"}
     if action_name not in valid_actions:
@@ -1997,6 +2003,7 @@ async def create_quote_from_offers(
         raise HTTPException(400, "No offers selected")
 
     req = get_requisition_or_404(db, req_id)
+    require_requisition_access(db, req_id, user)
 
     offers = db.query(Offer).filter(Offer.id.in_(offer_ids), Offer.requisition_id == req_id).all()
     if not offers:
@@ -2072,6 +2079,7 @@ async def review_offer(
     if action not in ("approve", "reject"):
         raise HTTPException(400, "Invalid action")
 
+    require_requisition_access(db, req_id, user)
     offer = db.query(Offer).filter(Offer.id == offer_id, Offer.requisition_id == req_id).first()
     if not offer:
         raise HTTPException(404, "Offer not found")
@@ -2137,6 +2145,7 @@ async def add_offer(
 ):
     """Create a manual offer and return refreshed offers tab."""
     get_requisition_or_404(db, req_id)  # validates existence
+    require_requisition_access(db, req_id, user)
 
     form = await request.form()
     vendor_name = (form.get("vendor_name") or "").strip()
@@ -2231,6 +2240,7 @@ async def reconfirm_offer(
     db: Session = Depends(get_db),
 ):
     """Reconfirm an offer — resets TTL and increments reconfirm count."""
+    require_requisition_access(db, req_id, user)
     offer = db.query(Offer).filter(Offer.id == offer_id, Offer.requisition_id == req_id).first()
     if not offer:
         raise HTTPException(404, "Offer not found")
@@ -2282,6 +2292,7 @@ async def edit_offer(
     """Save edits to an offer and return refreshed offers tab."""
     from ..models.intelligence import ChangeLog
 
+    require_requisition_access(db, req_id, user)
     offer = db.query(Offer).filter(Offer.id == offer_id, Offer.requisition_id == req_id).first()
     if not offer:
         raise HTTPException(404, "Offer not found")
@@ -2389,6 +2400,7 @@ async def delete_offer_htmx(
     db: Session = Depends(get_db),
 ):
     """Delete an offer and return refreshed offers tab."""
+    require_requisition_access(db, req_id, user)
     offer = db.query(Offer).filter(Offer.id == offer_id, Offer.requisition_id == req_id).first()
     if not offer:
         raise HTTPException(404, "Offer not found")
@@ -2410,6 +2422,7 @@ async def mark_offer_sold_htmx(
     """Mark an offer as sold and return refreshed offers tab."""
     from ..models.intelligence import ChangeLog
 
+    require_requisition_access(db, req_id, user)
     offer = db.query(Offer).filter(Offer.id == offer_id, Offer.requisition_id == req_id).first()
     if not offer:
         raise HTTPException(404, "Offer not found")
@@ -2483,6 +2496,7 @@ async def promote_offer_htmx(
     offer = db.get(Offer, offer_id)
     if not offer:
         raise HTTPException(404, "Offer not found")
+    require_requisition_access(db, offer.requisition_id, user, owner_id=offer.entered_by_id, label="Offer")
     if offer.status != "pending_review":
         raise HTTPException(400, "Only pending_review offers can be promoted")
 
@@ -2529,6 +2543,7 @@ async def reject_offer_htmx(
     offer = db.get(Offer, offer_id)
     if not offer:
         raise HTTPException(404, "Offer not found")
+    require_requisition_access(db, offer.requisition_id, user, owner_id=offer.entered_by_id, label="Offer")
     if offer.status != "pending_review":
         raise HTTPException(400, "Only pending_review offers can be rejected")
 
@@ -2596,6 +2611,7 @@ async def log_activity(
     from ..models.intelligence import ActivityLog
 
     get_requisition_or_404(db, req_id)  # validates existence
+    require_requisition_access(db, req_id, user)
 
     form = await request.form()
     activity_type = form.get("activity_type", "note")
@@ -2696,6 +2712,7 @@ async def ai_cleanup_email(
 ):
     """Clean up user-written email — fix grammar, tone, and formatting."""
     get_requisition_or_404(db, req_id)  # validates existence
+    require_requisition_access(db, req_id, user)
 
     user_text = body.strip()
     if not user_text:
@@ -2743,6 +2760,7 @@ async def rfq_send(
     from ..models.offers import Contact as RfqContact
 
     req = get_requisition_or_404(db, req_id)
+    require_requisition_access(db, req_id, user)
 
     form = await request.form()
     vendor_names = form.getlist("vendor_names")
@@ -2932,6 +2950,7 @@ async def send_follow_up_htmx(
     contact = db.get(RfqContact, contact_id)
     if not contact:
         raise HTTPException(404, "Contact not found")
+    require_requisition_access(db, contact.requisition_id, user, owner_id=contact.user_id, label="Contact")
 
     form = await request.form()
     body = (form.get("body") or "").strip()
@@ -3004,6 +3023,7 @@ async def review_response_htmx(
     """
     from ..models.offers import VendorResponse
 
+    require_requisition_access(db, req_id, user)
     vr = (
         db.query(VendorResponse)
         .filter(
@@ -3041,6 +3061,7 @@ async def poll_inbox_htmx(
     """Trigger a FULL inbox scan for the current user (not requisition-scoped), then
     return the refreshed responses tab."""
     get_requisition_or_404(db, req_id)  # validates existence
+    require_requisition_access(db, req_id, user)
     logger.info("Inbox poll requested for req {} by {}", req_id, user.email)
     await _run_inbox_scan_now(user, db)
     return await requisition_tab(request=request, req_id=req_id, tab="responses", user=user, db=db)
@@ -3059,6 +3080,7 @@ async def delete_requirement(
     Returns empty response for hx-swap='delete'.
     """
     get_requisition_or_404(db, req_id)  # validates existence
+    require_requisition_access(db, req_id, user)
     item = db.query(Requirement).filter(Requirement.id == item_id, Requirement.requisition_id == req_id).first()
     if not item:
         raise HTTPException(404, "Requirement not found")
@@ -3101,6 +3123,7 @@ async def update_requirement(
         raise HTTPException(422, "Manufacturer is required")
 
     req = get_requisition_or_404(db, req_id)
+    require_requisition_access(db, req_id, user)
     item = db.query(Requirement).filter(Requirement.id == item_id, Requirement.requisition_id == req_id).first()
     if not item:
         raise HTTPException(404, "Requirement not found")
@@ -3590,6 +3613,7 @@ async def add_to_requisition(
             '<div class="text-red-600 text-sm p-2">Requisition not found.</div>',
             status_code=404,
         )
+    require_requisition_access(db, int(requisition_id), user)
 
     # Find or create Requirement for this MPN
     requirement = (
@@ -7041,6 +7065,7 @@ async def log_phone_call(
 ):
     """Log a phone call to a vendor and return updated activity tab."""
     get_requisition_or_404(db, req_id)  # validates existence
+    require_requisition_access(db, req_id, user)
 
     form = await request.form()
     vendor_name = form.get("vendor_name", "").strip()
@@ -7167,6 +7192,7 @@ async def update_response_status(
     """Update vendor response status (reviewed/rejected/flagged)."""
     from ..models.offers import VendorResponse
 
+    require_requisition_access(db, req_id, user)
     vr = (
         db.query(VendorResponse)
         .filter(
@@ -8291,7 +8317,13 @@ async def lead_status_update(
     Returns updated lead card when called from results view (for OOB swap), or updated
     lead detail when called from lead detail page.
     """
+    from ..models.sourcing_lead import SourcingLead
     from ..services.sourcing_leads import update_lead_status
+
+    _lead = db.get(SourcingLead, lead_id)
+    if not _lead:
+        raise HTTPException(404, "Lead not found")
+    require_requisition_access(db, _lead.requisition_id, user, label="Lead")
 
     form = await request.form()
     status_val = form.get("status", "").strip()
@@ -8376,7 +8408,13 @@ async def lead_feedback(
 
     Returns updated lead detail.
     """
+    from ..models.sourcing_lead import SourcingLead
     from ..services.sourcing_leads import append_lead_feedback
+
+    _lead = db.get(SourcingLead, lead_id)
+    if not _lead:
+        raise HTTPException(404, "Lead not found")
+    require_requisition_access(db, _lead.requisition_id, user, label="Lead")
 
     form = await request.form()
     note = form.get("note", "").strip() or None
@@ -12278,6 +12316,7 @@ async def part_header_save(
     req = db.get(Requirement, requirement_id)
     if not req:
         raise HTTPException(404, "Part not found")
+    require_requisition_access(db, req.requisition_id, user, label="Part")
 
     if field == "sourcing_status":
         from app.services.requirement_status import transition_requirement
@@ -12403,6 +12442,7 @@ async def part_cell_save(
     req = db.get(Requirement, requirement_id)
     if not req:
         raise HTTPException(404, "Part not found")
+    require_requisition_access(db, req.requisition_id, user, label="Part")
 
     if field == "sourcing_status":
         from app.services.requirement_status import transition_requirement
@@ -12485,6 +12525,7 @@ async def part_spec_save(
     req = db.get(Requirement, requirement_id)
     if not req:
         raise HTTPException(404, "Part not found")
+    require_requisition_access(db, req.requisition_id, user, label="Part")
 
     if req.sourcing_status == SourcingStatus.ARCHIVED:
         return HTMLResponse("Cannot edit archived part", status_code=403)
@@ -12596,6 +12637,7 @@ async def save_part_notes(
     req = db.get(Requirement, requirement_id)
     if not req:
         raise HTTPException(404, "Part not found")
+    require_requisition_access(db, req.requisition_id, user, label="Part")
     old_sale_notes = req.sale_notes
     req.sale_notes = sale_notes.strip() or None
     if (req.sale_notes or "") != (old_sale_notes or ""):
@@ -12625,6 +12667,7 @@ async def create_part_task(
     req = db.get(Requirement, requirement_id)
     if not req:
         raise HTTPException(404, "Part not found")
+    require_requisition_access(db, req.requisition_id, user, label="Part")
 
     form = await request.form()
     title = (form.get("title") or "").strip()
@@ -12721,6 +12764,7 @@ async def archive_single_part(
     part = db.get(Requirement, requirement_id)
     if not part:
         raise HTTPException(404, "Part not found")
+    require_requisition_access(db, part.requisition_id, user, label="Part")
 
     part.sourcing_status = SourcingStatus.ARCHIVED
     db.commit()
@@ -12742,6 +12786,7 @@ async def unarchive_single_part(
     part = db.get(Requirement, requirement_id)
     if not part:
         raise HTTPException(404, "Part not found")
+    require_requisition_access(db, part.requisition_id, user, label="Part")
 
     part.sourcing_status = SourcingStatus.OPEN
     db.commit()
@@ -12761,6 +12806,7 @@ async def archive_requisition(
     requisition = db.get(Requisition, req_id)
     if not requisition:
         raise HTTPException(404, "Requisition not found")
+    require_requisition_access(db, req_id, user)
 
     prior_status = requisition.status
     requisition.status = RequisitionStatus.ARCHIVED
@@ -12791,6 +12837,7 @@ async def unarchive_requisition(
     requisition = db.get(Requisition, req_id)
     if not requisition:
         raise HTTPException(404, "Requisition not found")
+    require_requisition_access(db, req_id, user)
 
     prior_status = requisition.status
     requisition.status = RequisitionStatus.ACTIVE
@@ -12824,6 +12871,13 @@ async def bulk_archive(
     body = await request.json()
     requirement_ids = body.get("requirement_ids", [])
     requisition_ids = body.get("requisition_ids", [])
+
+    # Ownership guard (no-op for buyer/manager/admin; 404 for a restricted non-owner)
+    for _rid in requisition_ids:
+        require_requisition_access(db, _rid, user)
+    if requirement_ids:
+        for _r in db.query(Requirement).filter(Requirement.id.in_(requirement_ids)).all():
+            require_requisition_access(db, _r.requisition_id, user, label="Requirement")
 
     # Bulk-update parts in a single query instead of N+1
     if requirement_ids:
@@ -12867,6 +12921,13 @@ async def bulk_unarchive(
     body = await request.json()
     requirement_ids = body.get("requirement_ids", [])
     requisition_ids = body.get("requisition_ids", [])
+
+    # Ownership guard (no-op for buyer/manager/admin; 404 for a restricted non-owner)
+    for _rid in requisition_ids:
+        require_requisition_access(db, _rid, user)
+    if requirement_ids:
+        for _r in db.query(Requirement).filter(Requirement.id.in_(requirement_ids)).all():
+            require_requisition_access(db, _r.requisition_id, user, label="Requirement")
 
     # Bulk-update parts in a single query instead of N+1
     if requirement_ids:

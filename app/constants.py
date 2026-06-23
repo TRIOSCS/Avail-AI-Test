@@ -186,6 +186,13 @@ class UserRole(StrEnum):
     AGENT = "agent"
 
 
+# Roles scoped to requisitions they own (created_by). Single source of truth for the
+# role-scoped access model: sales/trader act only on their own requisitions; buyer/
+# manager/admin are unrestricted. Read by dependencies.require_requisition_access,
+# get_req_for_user, get_quote_for_user, and the bulk/batch handlers.
+RESTRICTED_ROLES = frozenset({UserRole.SALES, UserRole.TRADER})
+
+
 class ProactiveOfferStatus(StrEnum):
     """Status lifecycle for ProactiveOffer records."""
 

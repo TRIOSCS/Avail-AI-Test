@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from ...constants import ActivityType, OfferStatus, RequisitionStatus, TaskStatus
 from ...database import get_db
-from ...dependencies import get_req_for_user, require_buyer, require_user
+from ...dependencies import get_req_for_user, require_buyer, require_requisition_access, require_user
 from ...models import (
     ChangeLog,
     Contact,
@@ -1335,6 +1335,7 @@ async def add_requirement_note(
     req = db.query(Requirement).filter(Requirement.id == requirement_id).first()
     if not req:
         raise HTTPException(404, "Requirement not found")
+    require_requisition_access(db, req.requisition_id, user, label="Requirement")
     # Append to existing notes with timestamp
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
     entry = f"[{timestamp} {user.email}] {body.text}"
@@ -1420,6 +1421,7 @@ async def create_requirement_task(
     req = db.query(Requirement).filter(Requirement.id == requirement_id).first()
     if not req:
         raise HTTPException(404, "Requirement not found")
+    require_requisition_access(db, req.requisition_id, user, label="Requirement")
 
     task = RequisitionTask(
         requisition_id=req.requisition_id,

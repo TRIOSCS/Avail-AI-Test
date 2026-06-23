@@ -70,6 +70,31 @@ Route Handler
 Response -> Caddy -> Browser -> HTMX swaps into DOM
 ```
 
+## Authorization & Access Control
+
+Two layers: **role gates** (who may reach an endpoint) and **ownership scoping**
+(which records a user may act on).
+
+- **Role gates** — FastAPI dependencies in `app/dependencies.py`: `require_user`
+  (any authenticated active user), `require_buyer` (BUYER_ROLES = buyer/sales/trader/
+  manager/admin), `require_admin`, `require_manager`. The non-interactive `agent`
+  account is excluded from buyer-tier actions.
+- **Ownership scoping (role-scoped model)** — `RESTRICTED_ROLES = {SALES, TRADER}`
+  (single source of truth in `app/constants.py`): sales/trader users may act only on
+  requisitions they created (`Requisition.created_by`); buyer/manager/admin are
+  unrestricted. Enforced through ONE chokepoint, not per-endpoint logic:
+  - `require_requisition_access(db, req_id, user, *, owner_id=None, label=...)` — pure
+    guard, raises 404 for a restricted non-owner. Used after loading a requisition or a
+    requisition-scoped child (Offer/Requirement/Contact/VendorResponse/SourcingLead;
+    `owner_id` covers scratch resources with a null `requisition_id`).
+  - `get_req_for_user` / `get_quote_for_user` — load-and-authorize helpers that return
+    the owned record or 404.
+
+  Every mutating or email-sending endpoint that touches a requisition-scoped resource
+  routes through one of these. Regression tests live in `tests/test_authz_*.py`
+  (a non-owner sales/trader user must get 404). 404 (not 403) is used so resource
+  existence isn't leaked.
+
 ## Frontend Architecture
 
 ```
