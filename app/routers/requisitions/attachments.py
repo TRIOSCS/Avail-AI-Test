@@ -23,6 +23,7 @@ from ...models import (
     User,
 )
 from ...services import attachment_service
+from ...services.attachment_service import attachment_list_response
 
 router = APIRouter(tags=["requisitions"])
 
@@ -30,14 +31,15 @@ router = APIRouter(tags=["requisitions"])
 @router.get("/api/requisitions/{req_id}/attachments")
 async def list_requisition_attachments(
     req_id: int,
+    request: Request,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """List all file attachments on a requisition."""
+    """List all file attachments on a requisition (HTML for HTMX, JSON otherwise)."""
     req = get_req_for_user(db, user, req_id)
     if not req:
         raise HTTPException(404, "Requisition not found")
-    return [attachment_service.serialize(a) for a in req.attachments]
+    return attachment_list_response(request, kind="requisition", entity_id=req_id, rows=req.attachments)
 
 
 @router.post("/api/requisitions/{req_id}/attachments")
@@ -127,17 +129,18 @@ async def delete_requisition_attachment(
 @router.get("/api/requirements/{req_id}/attachments")
 async def list_requirement_attachments(
     req_id: int,
+    request: Request,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """List all file attachments on a requirement."""
+    """List all file attachments on a requirement (HTML for HTMX, JSON otherwise)."""
     requirement = db.get(Requirement, req_id)
     if not requirement:
         raise HTTPException(404, "Requirement not found")
     parent_req = get_req_for_user(db, user, requirement.requisition_id)
     if not parent_req:
         raise HTTPException(403, "Not authorized")
-    return [attachment_service.serialize(a) for a in requirement.attachments]
+    return attachment_list_response(request, kind="requirement", entity_id=req_id, rows=requirement.attachments)
 
 
 @router.post("/api/requirements/{req_id}/attachments")

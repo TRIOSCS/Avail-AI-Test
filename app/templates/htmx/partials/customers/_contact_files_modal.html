@@ -1,0 +1,18 @@
+{# _contact_files_modal.html — global-modal body hosting the shared attachments
+   panel for a single contact. Loaded into #modal-content via
+   $dispatch('open-modal', {url: '/v2/partials/contacts/{id}/files-modal'}).
+   The base modal (htmx/base.html) renders the ✕ / backdrop / Escape affordances.
+   Receives: contact (SiteContact).
+   Called by: GET /v2/partials/contacts/{contact_id}/files-modal.
+   Depends on: the shared attachments_panel macro.
+#}
+{% from "htmx/partials/shared/_attachments.html" import attachments_panel %}
+<div class="p-5">
+  <h3 id="modal-title" class="text-sm font-semibold text-gray-900">
+    Files
+    <span class="font-normal text-gray-600">· {{ contact.full_name or "Contact" }}</span>
+  </h3>
+  <div class="mt-4">
+    {{ attachments_panel('contact', contact.id) }}
+  </div>
+</div>

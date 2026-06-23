@@ -2395,6 +2395,44 @@ Alpine.data('offerQualification', (prefill) => ({
   meterFilled() { return this._items().filter(Boolean).length; },
 }));
 
+/**
+ * attachmentsPanel — Alpine.js component for the unified file-attachments panel.
+ *
+ * Owns the dropzone hover state, a friendly busy state during upload, and the
+ * drop handler that assigns dropped files to the picker input and submits the
+ * form. The form itself is plain HTMX (multipart POST → attachments:changed);
+ * this factory only decorates it with interaction state.
+ *
+ * Called by: partials/shared/_attachments.html (attachments_panel macro)
+ * Depends on: Alpine.js, HTMX. Error toasts are surfaced by the global
+ *             htmx:responseError handler (reads body.error) — no per-panel wiring.
+ */
+Alpine.data('attachmentsPanel', () => ({
+  dragging: false,
+  busy: false,
+  busyLabel: 'Uploading…',
+
+  init() {
+    // The dropzone form is this component's root (<div> wraps it); listen on the
+    // root so both the upload form and the list container's requests are seen.
+    // Only the multipart upload toggles the busy state.
+    this.$el.addEventListener('htmx:beforeRequest', (e) => {
+      if (e.target && e.target.tagName === 'FORM') this.busy = true;
+    });
+    this.$el.addEventListener('htmx:afterRequest', (e) => {
+      if (e.target && e.target.tagName === 'FORM') this.busy = false;
+    });
+  },
+
+  onDrop(evt) {
+    this.dragging = false;
+    const files = evt.dataTransfer && evt.dataTransfer.files;
+    if (!files || !files.length) return;
+    this.$refs.fileInput.files = files;
+    this.$refs.fileInput.closest('form').requestSubmit();
+  },
+}));
+
 /* ────────────────────────────────────────────────────────────────────────
    Cross-app tab alerts — in-tab spotlight for new / actionable rows.
 

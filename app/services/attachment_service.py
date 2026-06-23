@@ -213,6 +213,48 @@ async def store_and_attach(
     return att
 
 
+# Per-kind delete URL stems — the DELETE endpoint family for each entity.
+# Used by the HX-Request list partial so each row's delete button targets the
+# right route. Kept here (next to serialize) as the single source of truth.
+_DELETE_BASE: dict[str, str] = {
+    "requisition": "/api/requisition-attachments",
+    "requirement": "/api/requirement-attachments",
+    "offer": "/api/offer-attachments",
+    "company": "/api/company-attachments",
+    "contact": "/api/contact-attachments",
+    "material": "/api/material-card-attachments",
+}
+
+
+def attachment_list_response(request, *, kind: str, entity_id: int, rows: list):
+    """Return the attachment list as HTML (HTMX) or JSON (back-compat).
+
+    When the request carries `HX-Request`, render the shared list partial so the
+    panel is HTMX-native; otherwise return the plain JSON array the existing API
+    callers (and tests) expect.
+
+    request   — Starlette/FastAPI Request
+    kind      — attachment kind (requisition|requirement|offer|company|contact|material)
+    entity_id — owning entity PK (for the partial's symmetry)
+    rows      — ORM attachment rows (serialized here)
+    """
+    items = [serialize(a) for a in rows]
+    if request is not None and request.headers.get("HX-Request"):
+        from ..template_env import template_response
+
+        return template_response(
+            "htmx/partials/shared/_attachment_list.html",
+            {
+                "request": request,
+                "kind": kind,
+                "entity_id": entity_id,
+                "items": items,
+                "delete_base": _DELETE_BASE[kind],
+            },
+        )
+    return items
+
+
 def serialize(a) -> dict:
     """Return a JSON-serializable dict for an attachment row.
 

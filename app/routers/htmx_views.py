@@ -5548,7 +5548,7 @@ async def company_tab(
     if not company:
         raise HTTPException(404, "Company not found")
 
-    valid_tabs = {"sites", "contacts", "requisitions", "activity", "quotes", "buy_plans"}
+    valid_tabs = {"sites", "contacts", "requisitions", "activity", "quotes", "buy_plans", "files"}
     if tab not in valid_tabs:
         raise HTTPException(404, f"Unknown tab: {tab}")
 
@@ -5646,6 +5646,11 @@ async def company_tab(
         ctx = _base_ctx(request, user, "customers")
         ctx.update({"company": company, "buy_plans": buy_plans})
         return template_response("htmx/partials/customers/tabs/buy_plans_tab.html", ctx)
+
+    elif tab == "files":
+        ctx = _base_ctx(request, user, "customers")
+        ctx["company"] = company
+        return template_response("htmx/partials/customers/tabs/files_tab.html", ctx)
 
     else:  # activity
         from sqlalchemy import or_ as or_clause
@@ -6646,6 +6651,30 @@ async def contact_edit_form_company_scoped(
             "sites": [],
             "roles": CANONICAL_ROLES,
         },
+    )
+
+
+@router.get("/v2/partials/contacts/{contact_id}/files-modal", response_class=HTMLResponse)
+async def contact_files_modal(
+    request: Request,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the global-modal body hosting the shared attachments panel for a contact.
+
+    Loaded by the contact-card kebab "Files" action via $dispatch('open-modal').
+    Access mirrors the contact attachment endpoints: contact → site → company.
+    """
+    contact = db.get(SiteContact, contact_id)
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+    site = db.get(CustomerSite, contact.customer_site_id)
+    if not site or not db.get(Company, site.company_id):
+        raise HTTPException(404, "Contact not found")
+    return template_response(
+        "htmx/partials/customers/_contact_files_modal.html",
+        {"request": request, "contact": contact},
     )
 
 
@@ -9450,6 +9479,8 @@ async def material_tab_partial(
             .all()
         )
         return template_response("htmx/partials/materials/tabs/price_history.html", ctx)
+    elif tab_name == "files":
+        return template_response("htmx/partials/materials/tabs/files.html", ctx)
     else:
         return HTMLResponse(
             "<p class='text-gray-400 text-sm py-4 text-center'>Unknown tab</p>",

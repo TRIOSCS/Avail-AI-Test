@@ -21,7 +21,7 @@ Called by: app/main.py (router registration)
 Depends on: app/services/attachment_service, all attachment models, app/dependencies
 """
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from sqlalchemy.orm import Session, selectinload
 
 from ..database import get_db
@@ -142,10 +142,11 @@ async def serve_attachment(
 @router.get("/api/companies/{company_id}/attachments")
 async def list_company_attachments(
     company_id: int,
+    request: Request,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """List attachments on a company, newest first."""
+    """List attachments on a company, newest first (HTML for HTMX, JSON otherwise)."""
     company = user_can_access_company(db, user, company_id)
     if not company:
         raise HTTPException(404, "Company not found")
@@ -156,7 +157,7 @@ async def list_company_attachments(
         .order_by(CompanyAttachment.created_at.desc())
         .all()
     )
-    return [attachment_service.serialize(a) for a in atts]
+    return attachment_service.attachment_list_response(request, kind="company", entity_id=company_id, rows=atts)
 
 
 @router.post("/api/companies/{company_id}/attachments")
@@ -205,10 +206,12 @@ async def delete_company_attachment(
 @router.get("/api/contacts/{contact_id}/attachments")
 async def list_contact_attachments(
     contact_id: int,
+    request: Request,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """List attachments on a site contact, newest first."""
+    """List attachments on a site contact, newest first (HTML for HTMX, JSON
+    otherwise)."""
     contact = db.get(SiteContact, contact_id)
     if not contact:
         raise HTTPException(404, "Contact not found")
@@ -222,7 +225,7 @@ async def list_contact_attachments(
         .order_by(SiteContactAttachment.created_at.desc())
         .all()
     )
-    return [attachment_service.serialize(a) for a in atts]
+    return attachment_service.attachment_list_response(request, kind="contact", entity_id=contact_id, rows=atts)
 
 
 @router.post("/api/contacts/{contact_id}/attachments")
@@ -278,10 +281,12 @@ async def delete_contact_attachment(
 @router.get("/api/material-cards/{card_id}/attachments")
 async def list_material_card_attachments(
     card_id: int,
+    request: Request,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """List attachments on a material card, newest first."""
+    """List attachments on a material card, newest first (HTML for HTMX, JSON
+    otherwise)."""
     # Material cards are a shared catalog — require_user is sufficient.
     card = db.get(MaterialCard, card_id)
     if not card:
@@ -293,7 +298,7 @@ async def list_material_card_attachments(
         .order_by(MaterialCardAttachment.created_at.desc())
         .all()
     )
-    return [attachment_service.serialize(a) for a in atts]
+    return attachment_service.attachment_list_response(request, kind="material", entity_id=card_id, rows=atts)
 
 
 @router.post("/api/material-cards/{card_id}/attachments")

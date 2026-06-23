@@ -755,6 +755,25 @@ async def get_changelog(
 # ── Offer Attachments (OneDrive) ─────────────────────────────────────────
 
 
+@router.get("/api/offers/{offer_id}/attachments")
+async def list_offer_attachments(
+    offer_id: int,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """List attachments on an offer (HTML for HTMX, JSON otherwise).
+
+    Access matches the rest of the offer endpoints: gated on offer existence.
+    """
+    offer = db.get(Offer, offer_id)
+    if not offer:
+        raise HTTPException(404, "Offer not found")
+    return attachment_service.attachment_list_response(
+        request, kind="offer", entity_id=offer_id, rows=offer.attachments
+    )
+
+
 @router.post("/api/offers/{offer_id}/attachments")
 async def upload_offer_attachment(
     offer_id: int,

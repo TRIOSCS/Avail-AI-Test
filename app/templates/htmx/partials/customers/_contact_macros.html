@@ -258,6 +258,15 @@
             <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/customers/{{ company.id }}/contacts/{{ contact.id }}/edit-form'}); open = false"
                     role="menuitem"
                     class='w-full text-left px-3 py-1.5 text-brand-600 hover:bg-brand-50'>Edit</button>
+            {# Files — opens the shared attachments panel in the global modal #}
+            <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/contacts/{{ contact.id }}/files-modal'}); open = false"
+                    role="menuitem"
+                    class='w-full flex items-center gap-1.5 text-left px-3 py-1.5 text-gray-600 hover:bg-gray-50'>
+              <svg class='h-3.5 w-3.5 text-gray-400' fill='none' viewBox='0 0 24 24' stroke='currentColor' stroke-width='2'>
+                <path stroke-linecap='round' stroke-linejoin='round' d='M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13'/>
+              </svg>
+              Files
+            </button>
             {# Set Primary — only when not already primary #}
             {% if not contact.is_primary %}
             <button hx-post='/v2/partials/customers/{{ company.id }}/sites/{{ contact.customer_site_id }}/contacts/{{ contact.id }}/primary'

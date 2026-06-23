@@ -3714,6 +3714,40 @@ literal, so an apostrophe/quote title broke `Alpine.init()` and left the whole m
 AI-cleaned version. The form itself posts via HTMX to
 `/v2/partials/excess/{list_id}/solicit` and closes the modal on success.
 
+### attachmentsPanel  (htmx_app.js, Alpine.data)
+
+Backs the one shared file-attachments component
+(`templates/htmx/partials/shared/_attachments.html`, macro
+`attachments_panel(kind, entity_id)`) used identically on **five** surfaces:
+Company "Files" tab, MaterialCard "Files" tab, the contact-card kebab "Files" modal,
+the requisition Parts-tab per-requirement Files drawer, and the offer card. The macro
+maps `kind ∈ {requisition,requirement,offer,company,contact,material}` → the per-kind
+list/upload/delete URL family internally; download/open is always
+`GET /api/attachments/{kind}/{att_id}/content`.
+
+Flow (HTMX-native, no JSON-then-client-render):
+- The list container lazy-loads via `hx-get` the per-kind list URL on `load` and
+  re-fetches on the internal `attachments:refresh` trigger (explicit `hx-target="this"`).
+- The **six list endpoints** branch on `HX-Request`: present → render
+  `shared/_attachment_list.html` (HTML rows); absent → the legacy JSON array
+  (back-compat — existing tests assert the array). The branch is centralized in
+  `attachment_service.attachment_list_response(request, kind, entity_id, rows)`, which
+  also owns the kind→delete-base map.
+- Upload form (`hx-post` the list URL, `hx-encoding="multipart/form-data"`, `name="file"`,
+  `hx-swap="none"`) and each delete button (`hx-delete`) dispatch a bubbling
+  `attachments:changed` DOM event on success; the panel root catches it and fires
+  `attachments:refresh` on the list (distinct names avoid a re-fetch→re-fire loop).
+- The Alpine factory owns only interaction state: `dragging` (dropzone hover), `busy`
+  (upload spinner, toggled off the form's `htmx:beforeRequest`/`htmx:afterRequest`), and
+  `onDrop()` (assigns dropped files to the picker input → `requestSubmit()`).
+- Upload failures surface the server `{"error": …}` via the global `htmx:responseError`
+  toast handler — no per-panel error wiring.
+
+The Parts-tab drawer is a **sibling `<tr>`** (tables can't nest rows) synced to the row's
+paperclip toggle via a per-requirement `files-toggle-{id}` window event, so the drawer
+spans the full table width without breaking the column grid. The offer card and contact
+modal wrap the panel in `<template x-if>` so it only mounts (and lazy-loads) when expanded.
+
 ---
 
 ## 8x8 Integration — Operator Enablement

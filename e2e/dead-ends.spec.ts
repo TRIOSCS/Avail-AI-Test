@@ -107,6 +107,50 @@ test.describe('Dead-End Detector — Form Endpoints Accept POST', () => {
   }
 });
 
+test.describe('Dead-End Detector — Unified Attachments (Task 5)', () => {
+  // The per-kind list endpoints back the shared attachments panel. With
+  // HX-Request they return the list partial (HTML); without, JSON. Either way
+  // they must not 5xx — unauthenticated requests are expected to auth-redirect.
+  const ATTACHMENT_LIST_ENDPOINTS = [
+    '/api/requisitions/1/attachments',
+    '/api/requirements/1/attachments',
+    '/api/offers/1/attachments',
+    '/api/companies/1/attachments',
+    '/api/contacts/1/attachments',
+    '/api/material-cards/1/attachments',
+  ];
+
+  for (const url of ATTACHMENT_LIST_ENDPOINTS) {
+    test(`${url} (HX) returns non-empty HTML or auth/404, never 5xx`, async ({ request }) => {
+      const res = await request.get(url, { headers: { 'HX-Request': 'true' } });
+      expect(res.status(), `${url} crashed with ${res.status()}`).toBeLessThan(500);
+      if (res.status() === 200) {
+        const html = await res.text();
+        expect(html.trim().length, `${url} returned empty response`).toBeGreaterThan(10);
+      }
+    });
+  }
+
+  // The 5 detail surfaces that host the panel must render (or auth-redirect),
+  // never crash. The contact files-modal is loaded via $dispatch('open-modal').
+  const ATTACHMENT_SURFACES = [
+    '/v2/partials/customers/1/tab/files',
+    '/v2/partials/materials/1/tab/files',
+    '/v2/partials/contacts/1/files-modal',
+  ];
+
+  for (const url of ATTACHMENT_SURFACES) {
+    test(`${url} renders the panel surface without server error`, async ({ request }) => {
+      const res = await request.get(url, { headers: { 'HX-Request': 'true' } });
+      expect(res.status(), `${url} crashed with ${res.status()}`).toBeLessThan(500);
+      if (res.status() === 200) {
+        const html = await res.text();
+        expect(html.trim().length, `${url} returned empty response`).toBeGreaterThan(10);
+      }
+    });
+  }
+});
+
 test.describe('Dead-End Detector — 404 Handling', () => {
   test('non-existent requisition returns error, not crash', async ({ request }) => {
     const res = await request.get('/v2/partials/requisitions/999999', {
