@@ -313,9 +313,13 @@ def nonadmin_client(db_session: Session, test_user: User) -> TestClient:
 
     from app.config import settings
     from app.database import get_db
-    from app.dependencies import require_user
+    from app.dependencies import require_admin, require_user
     from app.main import app
 
+    # require_admin must run for REAL so the gating tests get a genuine 403. Under xdist
+    # another test can leak a global require_admin override onto the shared app; snapshot
+    # and clear it so this fixture is order-independent, then restore on teardown.
+    prior_admin_override = app.dependency_overrides.pop(require_admin, None)
     app.dependency_overrides[get_db] = lambda: db_session
     app.dependency_overrides[require_user] = lambda: test_user
     signer = itsdangerous.TimestampSigner(str(settings.secret_key))
@@ -327,6 +331,8 @@ def nonadmin_client(db_session: Session, test_user: User) -> TestClient:
     finally:
         app.dependency_overrides.pop(get_db, None)
         app.dependency_overrides.pop(require_user, None)
+        if prior_admin_override is not None:
+            app.dependency_overrides[require_admin] = prior_admin_override
 
 
 @pytest.fixture()
