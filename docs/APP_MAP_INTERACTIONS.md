@@ -1508,7 +1508,10 @@ Two surfaces:
     1. Requisitions list: shared/inbox_disconnected_banner.html
        (shown when health=error or is_stale=True; included at top of list.html)
     2. Settings → Profile: settings/_mailbox_sync_card.html
-       (always shows sync status + "Scan now" button)
+       (connected: friendly sync status + "Scan now" button + last-checked
+        timeago; not connected: a "Mailbox not connected" empty state with a
+        reconnect hint and no Scan-now button. m365_error_reason is rendered as
+        friendly text, not a raw string.)
 
 "Scan now" button:
     POST /v2/partials/settings/inbox/scan-now
