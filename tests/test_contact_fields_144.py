@@ -304,9 +304,13 @@ class TestReportsToSelect:
         self,
         client: TestClient,
         test_company: Company,
+        test_user: User,
         site_and_two_contacts,
+        db_session: Session,
     ):
         """Returns all active contacts for the company."""
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         _site, alice, bob = site_and_two_contacts
         resp = client.get(f"/v2/partials/customers/{test_company.id}/contacts/for-select")
         assert resp.status_code == 200
@@ -319,9 +323,13 @@ class TestReportsToSelect:
         self,
         client: TestClient,
         test_company: Company,
+        test_user: User,
         site_and_two_contacts,
+        db_session: Session,
     ):
         """exclude_id removes that contact from the list."""
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         _site, alice, bob = site_and_two_contacts
         resp = client.get(
             f"/v2/partials/customers/{test_company.id}/contacts/for-select",
@@ -337,9 +345,13 @@ class TestReportsToSelect:
         self,
         client: TestClient,
         test_company: Company,
+        test_user: User,
         site_and_two_contacts,
+        db_session: Session,
     ):
         """Items include 'id' and 'name' keys."""
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         _site, alice, _bob = site_and_two_contacts
         resp = client.get(f"/v2/partials/customers/{test_company.id}/contacts/for-select")
         assert resp.status_code == 200
@@ -361,11 +373,14 @@ class TestContactTagAssign:
         self,
         client: TestClient,
         test_company: Company,
+        test_user: User,
         site_and_two_contacts,
         segment_tag: Tag,
         db_session: Session,
     ):
         """POST tag_id= creates EntityTag with entity_type='site_contact'."""
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         _site, alice, _bob = site_and_two_contacts
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/contacts/{alice.id}/tags",
@@ -384,10 +399,13 @@ class TestContactTagAssign:
         self,
         client: TestClient,
         test_company: Company,
+        test_user: User,
         site_and_two_contacts,
         db_session: Session,
     ):
         """POST tag_name= creates a new segment tag and assigns it."""
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         _site, alice, _bob = site_and_two_contacts
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/contacts/{alice.id}/tags",
@@ -405,10 +423,14 @@ class TestContactTagAssign:
         self,
         client: TestClient,
         test_company: Company,
+        test_user: User,
         site_and_two_contacts,
         segment_tag: Tag,
+        db_session: Session,
     ):
         """Response HTML contains the tag name chip."""
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         _site, alice, _bob = site_and_two_contacts
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/contacts/{alice.id}/tags",
@@ -421,9 +443,13 @@ class TestContactTagAssign:
         self,
         client: TestClient,
         test_company: Company,
+        test_user: User,
         site_and_two_contacts,
+        db_session: Session,
     ):
         """POST with neither tag_id nor tag_name returns 400."""
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         _site, alice, _bob = site_and_two_contacts
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/contacts/{alice.id}/tags",
@@ -435,11 +461,14 @@ class TestContactTagAssign:
         self,
         client: TestClient,
         test_company: Company,
+        test_user: User,
         site_and_two_contacts,
         segment_tag: Tag,
         db_session: Session,
     ):
         """DELETE removes the EntityTag row."""
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         _site, alice, _bob = site_and_two_contacts
         et = EntityTag(
             entity_type="site_contact",
@@ -465,10 +494,14 @@ class TestContactTagAssign:
         self,
         client: TestClient,
         test_company: Company,
+        test_user: User,
         site_and_two_contacts,
         segment_tag: Tag,
+        db_session: Session,
     ):
         """DELETE for tag not assigned returns 200 (idempotent)."""
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         _site, alice, _bob = site_and_two_contacts
         resp = client.delete(f"/v2/partials/customers/{test_company.id}/contacts/{alice.id}/tags/{segment_tag.id}")
         assert resp.status_code == 200
@@ -510,3 +543,310 @@ class TestEditFormReportsToSelect:
         # We verify by checking bob's name IS present and alice's is NOT present
         # (since alice is only passed as contact= and her name doesn't appear elsewhere in this template)
         assert alice.full_name not in resp.text
+
+
+# ── 6. Security / authz DENY tests ───────────────────────────────────────────
+
+
+@pytest.fixture()
+def unrelated_client_144(db_session: Session):
+    """TestClient where the authenticated user has NO ownership relation to any
+    company."""
+    from datetime import datetime, timezone
+
+    from app.database import get_db
+    from app.dependencies import require_admin, require_buyer, require_fresh_token, require_user
+    from app.main import app
+
+    stranger = User(
+        email="stranger144@example.com",
+        name="Stranger 144",
+        role="buyer",
+        azure_id="stranger-azure-144",
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(stranger)
+    db_session.commit()
+
+    app.dependency_overrides[get_db] = lambda: db_session
+    app.dependency_overrides[require_user] = lambda: stranger
+    app.dependency_overrides[require_admin] = lambda: stranger
+    app.dependency_overrides[require_buyer] = lambda: stranger
+    app.dependency_overrides[require_fresh_token] = lambda: "mock-token"
+
+    with TestClient(app) as c:
+        yield c
+
+    for dep in [get_db, require_user, require_admin, require_buyer, require_fresh_token]:
+        app.dependency_overrides.pop(dep, None)
+
+
+class TestContactTagAuthzDeny:
+    """Unrelated rep must not access tag or select routes (IDOR/PII guard)."""
+
+    def test_assign_tag_unrelated_rep_gets_403(
+        self,
+        unrelated_client_144: TestClient,
+        test_company: Company,
+        site_and_two_contacts,
+        segment_tag: Tag,
+    ):
+        """POST tag assign by unrelated rep returns 403."""
+        _site, alice, _bob = site_and_two_contacts
+        resp = unrelated_client_144.post(
+            f"/v2/partials/customers/{test_company.id}/contacts/{alice.id}/tags",
+            data={"tag_id": str(segment_tag.id)},
+        )
+        assert resp.status_code == 403
+
+    def test_unassign_tag_unrelated_rep_gets_403(
+        self,
+        unrelated_client_144: TestClient,
+        test_company: Company,
+        site_and_two_contacts,
+        segment_tag: Tag,
+    ):
+        """DELETE tag unassign by unrelated rep returns 403."""
+        _site, alice, _bob = site_and_two_contacts
+        resp = unrelated_client_144.delete(
+            f"/v2/partials/customers/{test_company.id}/contacts/{alice.id}/tags/{segment_tag.id}"
+        )
+        assert resp.status_code == 403
+
+    def test_for_select_unrelated_rep_gets_403(
+        self,
+        unrelated_client_144: TestClient,
+        test_company: Company,
+        site_and_two_contacts,
+    ):
+        """GET contacts/for-select by unrelated rep returns 403."""
+        resp = unrelated_client_144.get(f"/v2/partials/customers/{test_company.id}/contacts/for-select")
+        assert resp.status_code == 403
+
+    def test_assign_tag_cross_company_contact_gets_404(
+        self,
+        client: TestClient,
+        test_company: Company,
+        test_user: User,
+        site_and_two_contacts,
+        segment_tag: Tag,
+        db_session: Session,
+    ):
+        """Assigning a tag to a contact from a different company returns 404 (cross-
+        company guard)."""
+        from app.models.crm import Company as _Company
+
+        test_company.account_owner_id = test_user.id
+        # Create a second company with its own contact
+        other_co = _Company(name="OtherCo144", is_active=True)
+        db_session.add(other_co)
+        db_session.flush()
+        other_site = CustomerSite(company_id=other_co.id, site_name="HQ", is_active=True)
+        db_session.add(other_site)
+        db_session.flush()
+        other_contact = SiteContact(
+            customer_site_id=other_site.id,
+            full_name="OtherPerson144",
+            first_name="OtherPerson",
+        )
+        db_session.add(other_contact)
+        db_session.commit()
+
+        # Use test_company in URL but other_contact's id → cross-company → 404
+        resp = client.post(
+            f"/v2/partials/customers/{test_company.id}/contacts/{other_contact.id}/tags",
+            data={"tag_id": str(segment_tag.id)},
+        )
+        assert resp.status_code == 404
+
+    def test_unassign_tag_cross_company_contact_gets_404(
+        self,
+        client: TestClient,
+        test_company: Company,
+        test_user: User,
+        site_and_two_contacts,
+        segment_tag: Tag,
+        db_session: Session,
+    ):
+        """Deleting a tag for a contact from a different company returns 404."""
+        from app.models.crm import Company as _Company
+
+        test_company.account_owner_id = test_user.id
+        other_co = _Company(name="OtherCoB144", is_active=True)
+        db_session.add(other_co)
+        db_session.flush()
+        other_site = CustomerSite(company_id=other_co.id, site_name="HQ", is_active=True)
+        db_session.add(other_site)
+        db_session.flush()
+        other_contact = SiteContact(
+            customer_site_id=other_site.id,
+            full_name="OtherPersonB144",
+            first_name="OtherPersonB",
+        )
+        db_session.add(other_contact)
+        db_session.commit()
+
+        resp = client.delete(
+            f"/v2/partials/customers/{test_company.id}/contacts/{other_contact.id}/tags/{segment_tag.id}"
+        )
+        assert resp.status_code == 404
+
+
+class TestReportsToSameCompanyValidation:
+    """reports_to_id from another company must be rejected (F3)."""
+
+    def test_create_reports_to_other_company_returns_400(
+        self,
+        client: TestClient,
+        test_company: Company,
+        site_and_two_contacts,
+        db_session: Session,
+    ):
+        """POST create with reports_to_id from another company returns 400."""
+        from app.models.crm import Company as _Company
+
+        other_co = _Company(name="CrossCo144C", is_active=True)
+        db_session.add(other_co)
+        db_session.flush()
+        other_site = CustomerSite(company_id=other_co.id, site_name="HQ", is_active=True)
+        db_session.add(other_site)
+        db_session.flush()
+        other_contact = SiteContact(
+            customer_site_id=other_site.id,
+            full_name="CrossPerson144",
+            first_name="CrossPerson",
+        )
+        db_session.add(other_contact)
+        db_session.commit()
+
+        resp = client.post(
+            f"/v2/partials/customers/{test_company.id}/contacts",
+            data={
+                "first_name": "NewCross144",
+                "email": "newcross-144@acme.com",
+                "reports_to_id": str(other_contact.id),
+            },
+        )
+        assert resp.status_code == 400
+
+    def test_edit_reports_to_other_company_returns_400(
+        self,
+        client: TestClient,
+        test_company: Company,
+        site_and_two_contacts,
+        db_session: Session,
+    ):
+        """POST edit with reports_to_id from another company returns 400."""
+        from app.models.crm import Company as _Company
+
+        site, alice, _bob = site_and_two_contacts
+        other_co = _Company(name="CrossCo144D", is_active=True)
+        db_session.add(other_co)
+        db_session.flush()
+        other_site = CustomerSite(company_id=other_co.id, site_name="HQ", is_active=True)
+        db_session.add(other_site)
+        db_session.flush()
+        other_contact = SiteContact(
+            customer_site_id=other_site.id,
+            full_name="CrossPersonD144",
+            first_name="CrossPersonD",
+        )
+        db_session.add(other_contact)
+        db_session.commit()
+
+        resp = client.post(
+            f"/v2/partials/customers/{test_company.id}/sites/{site.id}/contacts/{alice.id}/edit",
+            data={
+                "first_name": "Alice",
+                "last_name": "Manager",
+                "reports_to_id": str(other_contact.id),
+            },
+        )
+        assert resp.status_code == 400
+
+    def test_edit_reports_to_self_returns_400(
+        self,
+        client: TestClient,
+        test_company: Company,
+        site_and_two_contacts,
+        db_session: Session,
+    ):
+        """POST edit with reports_to_id == self (contact_id) returns 400."""
+        site, alice, _bob = site_and_two_contacts
+        resp = client.post(
+            f"/v2/partials/customers/{test_company.id}/sites/{site.id}/contacts/{alice.id}/edit",
+            data={
+                "first_name": "Alice",
+                "last_name": "Manager",
+                "reports_to_id": str(alice.id),
+            },
+        )
+        assert resp.status_code == 400
+
+
+class TestSecondaryEmailValidation:
+    """secondary_email without '@' must be rejected (F4)."""
+
+    def test_secondary_email_without_at_rejected_on_model(self, db_session: Session, test_company: Company):
+        """Model @validates rejects secondary_email without '@'."""
+        import pytest as _pytest
+
+        site = CustomerSite(
+            company_id=test_company.id,
+            site_name="ValSite144",
+            site_type="hq",
+            is_active=True,
+        )
+        db_session.add(site)
+        db_session.flush()
+
+        with _pytest.raises(ValueError, match="Invalid secondary_email"):
+            SiteContact(
+                customer_site_id=site.id,
+                full_name="ValContact144",
+                first_name="ValContact",
+                secondary_email="notanemail",
+            )
+
+    def test_secondary_email_with_at_accepted(self, db_session: Session, test_company: Company):
+        """Model @validates accepts secondary_email containing '@'."""
+        site = CustomerSite(
+            company_id=test_company.id,
+            site_name="ValSite144B",
+            site_type="hq",
+            is_active=True,
+        )
+        db_session.add(site)
+        db_session.flush()
+
+        contact = SiteContact(
+            customer_site_id=site.id,
+            full_name="ValContactB144",
+            first_name="ValContactB",
+            secondary_email="valid@acme.com",
+        )
+        db_session.add(contact)
+        db_session.commit()
+        db_session.refresh(contact)
+        assert contact.secondary_email == "valid@acme.com"
+
+    def test_secondary_email_none_accepted(self, db_session: Session, test_company: Company):
+        """Model @validates accepts None (no secondary email)."""
+        site = CustomerSite(
+            company_id=test_company.id,
+            site_name="ValSite144C",
+            site_type="hq",
+            is_active=True,
+        )
+        db_session.add(site)
+        db_session.flush()
+
+        contact = SiteContact(
+            customer_site_id=site.id,
+            full_name="ValContactC144",
+            first_name="ValContactC",
+            secondary_email=None,
+        )
+        db_session.add(contact)
+        db_session.commit()
+        assert contact.secondary_email is None

@@ -337,6 +337,12 @@ class SiteContact(Base):
             raise ValueError(f"Invalid email: {value}")
         return value
 
+    @validates("secondary_email")
+    def _validate_secondary_email(self, _key, value):
+        if value and "@" not in value:
+            raise ValueError(f"Invalid secondary_email: {value}")
+        return value
+
     @validates("phone")
     def _sync_normalized_phone(self, _key, value):
         """Keep normalized_phone (E.164) in sync with phone on every write."""

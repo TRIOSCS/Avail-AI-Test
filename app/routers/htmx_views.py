@@ -5446,7 +5446,14 @@ async def contact_assign_tag(
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise HTTPException(404, "Company not found")
-    contact = db.query(SiteContact).filter(SiteContact.id == contact_id).first()
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Not authorized to manage this account")
+    contact = (
+        db.query(SiteContact)
+        .join(CustomerSite, SiteContact.customer_site_id == CustomerSite.id)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
     if not contact:
         raise HTTPException(404, "Contact not found")
 
@@ -5525,7 +5532,14 @@ async def contact_unassign_tag(
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise HTTPException(404, "Company not found")
-    contact = db.query(SiteContact).filter(SiteContact.id == contact_id).first()
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Not authorized to manage this account")
+    contact = (
+        db.query(SiteContact)
+        .join(CustomerSite, SiteContact.customer_site_id == CustomerSite.id)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
     if not contact:
         raise HTTPException(404, "Contact not found")
 
@@ -5569,6 +5583,11 @@ async def get_company_contacts_for_select(
 
     Excludes the contact with exclude_id (self-exclusion for reports_to picker).
     """
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Not authorized to manage this account")
     q = (
         db.query(SiteContact)
         .join(CustomerSite, SiteContact.customer_site_id == CustomerSite.id)
@@ -6791,6 +6810,15 @@ async def contacts_tab_create(
     # ── reports_to_id (self-FK — not in EDITABLE_CONTACT_FIELDS) ────────────
     reports_to_id_raw = (form.get("reports_to_id") or "").strip()
     reports_to_id = int(reports_to_id_raw) if reports_to_id_raw.isdigit() else None
+    if reports_to_id is not None:
+        mgr = (
+            db.query(SiteContact)
+            .join(CustomerSite, SiteContact.customer_site_id == CustomerSite.id)
+            .filter(SiteContact.id == reports_to_id, CustomerSite.company_id == company_id)
+            .first()
+        )
+        if not mgr:
+            raise HTTPException(400, "reports_to must be a contact in the same company")
 
     # ── Create contact ──────────────────────────────────────────────────
     # contact_owner_id is intentionally NOT read from the form — ownership
@@ -8700,7 +8728,19 @@ async def edit_site_contact(
     reports_to_id_raw = form.get("reports_to_id")
     if reports_to_id_raw is not None:
         v = reports_to_id_raw.strip()
-        contact.reports_to_id = int(v) if v.isdigit() else None
+        new_reports_to_id = int(v) if v.isdigit() else None
+        if new_reports_to_id is not None:
+            if new_reports_to_id == contact_id:
+                raise HTTPException(400, "reports_to must be a contact in the same company")
+            mgr = (
+                db.query(SiteContact)
+                .join(CustomerSite, SiteContact.customer_site_id == CustomerSite.id)
+                .filter(SiteContact.id == new_reports_to_id, CustomerSite.company_id == company_id)
+                .first()
+            )
+            if not mgr:
+                raise HTTPException(400, "reports_to must be a contact in the same company")
+        contact.reports_to_id = new_reports_to_id
     contact.updated_at = datetime.now(timezone.utc)
     db.commit()
     logger.info("Contact {} edited by {}", contact_id, user.email)

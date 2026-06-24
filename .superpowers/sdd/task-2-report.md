@@ -1,8 +1,8 @@
-# Task 2 Report — Vendor Tasks + Migration 142
+# Task 2 Report — Contact Merge Routes + Templates
 
 **Date:** 2026-06-24
-**Branch:** feat/rubric-h1-vendor-parity
-**Status:** DONE — 12/12 vendor task tests + 23 static analysis = 35 total, all green
+**Branch:** feat/rubric-c-contact-merge-move
+**Status:** DONE — 13/13 tests pass (7 service + 6 route tests)
 
 ---
 
@@ -187,3 +187,94 @@ Ruff: All checks passed.
 - **No ActivityLog invariant:** maintained — `complete_crm_task` never calls `log_activity`
 - **Admin gate:** enforced in `delete_task_endpoint` via `user.role != UserRole.ADMIN` → 403
 - **Concerns:** None. All pre-commit hooks pass (ruff, ruff-format, docformatter, mypy).
+
+---
+
+## Security + Anti-Pattern Fix Pass — 2026-06-24
+
+### Fix 1 — innerHTML violation removed from `_contact_merge_form.html`
+
+**Root cause:** The typeahead `<script>` used `fetch()` + `res.innerHTML = html` to
+populate search results — banned by CLAUDE.md (`innerHTML → use htmx.ajax()`).
+
+**Fix:** Replaced the `fetch()`+`innerHTML` approach with HTMX declarative attributes:
+- Added `hx-get`, `hx-trigger="input changed delay:250ms"`, `hx-target="#contact-merge-results"`,
+  `hx-swap="innerHTML"`, `hx-include="[name='exclude_id']"` to the search `<input>`.
+- Added a hidden `<input name="exclude_id">` carrying `{{ keep.id }}`.
+- Replaced the manual `debounce` + `fetch` loop with an `htmx:afterSwap` listener to
+  toggle the hidden class on the results div.
+- The click-to-preview handler (`htmx.ajax` call) was already compliant — retained as-is.
+
+**File:** `app/templates/htmx/partials/customers/_contact_merge_form.html`
+
+### Fix 2 — remove-contact IDOR gap closed in both merge endpoints
+
+**Root cause:** `contact_merge_preview` and `contact_merge` fetched the `remove` contact
+via `db.get(SiteContact, remove_id)` — no check that the contact belongs to the same
+company. An attacker could supply any `remove_id` from another company.
+
+**Fix:** Replaced `db.get(SiteContact, remove_id)` with a JOIN-filtered query in both
+functions:
+```python
+remove = (
+    db.query(SiteContact)
+    .join(CustomerSite)
+    .filter(SiteContact.id == remove_id, CustomerSite.company_id == company_id)
+    .first()
+)
+if not remove:
+    raise HTTPException(400, "Duplicate contact not found or not in this company")
+```
+Applied identically to `contact_merge_preview` (line ~8046) and `contact_merge` (line ~8114).
+
+**File:** `app/routers/htmx_views.py`
+
+### Test run
+```
+TESTING=1 PYTHONPATH=$(pwd) pytest tests/test_contact_merge_move.py -p no:cacheprovider -q --override-ini="addopts="
+13 passed, 2 warnings in 3.94s
+```
+Ruff: All checks passed. Pre-commit: all hooks passed.
+
+### Commit
+`82468e44` — fix(crm): use htmx.ajax for typeahead, close remove-contact IDOR gap
+
+---
+
+## Static Analysis Violation Fix Pass — 2026-06-24
+
+### Fix 1 — Add `indicator:` to `htmx.ajax` call in `_contact_merge_form.html`
+
+**Root cause:** The `htmx.ajax()` options object in the typeahead click handler lacked an
+`indicator:` property — a static analysis requirement (all programmatic htmx calls must
+declare an indicator).
+
+**Fix:** Added `indicator: '#contact-merge-preview-area'` to the options object in the
+`htmx.ajax` call inside `_contact_merge_form.html`.
+
+**File:** `app/templates/htmx/partials/customers/_contact_merge_form.html`
+
+### Fix 2 — Escape LIKE wildcard in `contact_search_typeahead`
+
+**Root cause:** `contact_search_typeahead` in `htmx_views.py` used a bare
+`SiteContact.full_name.ilike(f"%{q.strip()}%")` — user-supplied `q` was not passed
+through `escape_like()`, allowing `%` and `_` in the query to act as wildcards.
+
+**Fix:** Applied `escape_like(q.strip())` (already imported at line 111) and added the
+`escape="\\"` keyword argument, matching the pattern used throughout the rest of
+`htmx_views.py`:
+```python
+SiteContact.full_name.ilike(f"%{escape_like(q.strip())}%", escape="\\"),
+```
+
+**File:** `app/routers/htmx_views.py`
+
+### Test run
+```
+test_static_analysis.py  — 23 passed
+test_contact_merge_move.py — 13 passed
+```
+All pre-commit hooks passed (ruff, ruff-format, docformatter, mypy).
+
+### Commit
+`dfa233ac` — fix(crm): add htmx.ajax indicator, escape LIKE in contact typeahead
