@@ -251,3 +251,91 @@ class TestContactsCSVExport:
         names = {r["full_name"] for r in rows}
         assert "Jane Doe" in names
         assert "Ghost Contact" not in names
+
+    def test_deactivated_contact_excluded(
+        self,
+        manager_client: TestClient,
+        owned_company: Company,
+        db_session: Session,
+    ):
+        """Fix 1: SiteContact.is_active=False must be filtered out of contacts export."""
+        site = CustomerSite(
+            company_id=owned_company.id,
+            site_name="Branch",
+            is_active=True,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(site)
+        db_session.flush()
+
+        inactive_contact = SiteContact(
+            customer_site_id=site.id,
+            full_name="Deactivated Person",
+            email="gone@owned.com",
+            is_active=False,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(inactive_contact)
+        db_session.commit()
+
+        resp = manager_client.get("/v2/customers/contacts/export.csv")
+        rows = _parse_csv(resp.text)
+        names = {r["full_name"] for r in rows}
+        assert "Deactivated Person" not in names
+
+
+class TestCSVFormulaSafety:
+    """Fix 3: String cells starting with formula chars must be escaped."""
+
+    def test_formula_prefix_company_name_escaped(
+        self,
+        manager_client: TestClient,
+        db_session: Session,
+    ):
+        """A company named '=cmd()' must appear as \"'=cmd()\" in the CSV."""
+        evil = Company(
+            name="=cmd()",
+            domain="+evil.com",
+            is_active=True,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(evil)
+        db_session.commit()
+
+        resp = manager_client.get("/v2/customers/export.csv")
+        # Raw CSV text — the escaped cell value is literally '=cmd()
+        assert "'=cmd()" in resp.text
+        assert "'+evil.com" in resp.text
+
+    def test_formula_prefix_contact_fields_escaped(
+        self,
+        manager_client: TestClient,
+        owned_company: Company,
+        db_session: Session,
+    ):
+        """Contact fields starting with formula chars must be escaped."""
+        site = CustomerSite(
+            company_id=owned_company.id,
+            site_name="@BadSite",
+            is_active=True,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(site)
+        db_session.flush()
+
+        contact = SiteContact(
+            customer_site_id=site.id,
+            full_name="-Injected",
+            title="@Title",
+            email="=user@evil.com",
+            is_active=True,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(contact)
+        db_session.commit()
+
+        resp = manager_client.get("/v2/customers/contacts/export.csv")
+        assert "'-Injected" in resp.text
+        assert "'@Title" in resp.text
+        assert "'=user@evil.com" in resp.text
+        assert "'@BadSite" in resp.text
