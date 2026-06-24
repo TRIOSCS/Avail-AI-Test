@@ -741,6 +741,27 @@ def compute_simple_priority(task: RequisitionTask) -> float:
     return min(score, 1.0)
 
 
+def snooze_task(db: Session, task_id: int) -> RequisitionTask | None:
+    """Push a task's due_at forward by one week.
+
+    If the task has no due_at, sets it to tomorrow (midnight UTC). Returns the updated
+    task, or None if not found.
+    """
+    from datetime import date
+
+    task = db.get(RequisitionTask, task_id)
+    if not task:
+        return None
+    if task.due_at:
+        task.due_at = task.due_at + timedelta(weeks=1)
+    else:
+        tomorrow = datetime.combine(date.today() + timedelta(days=1), datetime.min.time()).replace(tzinfo=timezone.utc)
+        task.due_at = tomorrow
+    db.commit()
+    db.refresh(task)
+    return task
+
+
 def apply_simple_scoring(db: Session, tasks: list[RequisitionTask]) -> None:
     """Apply rule-based scoring to tasks (fast, no AI needed)."""
     now = datetime.now(timezone.utc)

@@ -271,6 +271,7 @@ def _base_ctx(request: Request, user: User, current_view: str = "") -> dict:
         "current_view": current_view,
         "vite_js": assets["js_file"],
         "vite_css": assets["css_files"],
+        "now_utc": datetime.now(timezone.utc),
     }
 
 
@@ -1934,6 +1935,42 @@ async def requisition_inline_save(
 
     response.headers["HX-Trigger"] = json.dumps({"showToast": {"message": msg}})
     return response
+
+
+@router.patch("/v2/partials/requisitions/{req_id}/win-probability", response_class=HTMLResponse)
+async def requisition_win_probability_save(
+    request: Request,
+    req_id: int,
+    win_probability: str = Form(...),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Set win_probability (0-100) on a requisition.
+
+    Authz: same gate as other inline requisition edits (require_requisition_access).
+    Returns an inline display span with the new value.
+    """
+    from app.dependencies import require_requisition_access
+
+    req = db.get(Requisition, req_id)
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+    require_requisition_access(db, req_id, user)
+    try:
+        prob = int(win_probability)
+    except (ValueError, TypeError):
+        raise HTTPException(400, "win_probability must be an integer") from None
+    if not (0 <= prob <= 100):
+        raise HTTPException(400, "win_probability must be between 0 and 100")
+    req.win_probability = prob
+    req.updated_at = datetime.now(timezone.utc)
+    req.updated_by_id = user.id
+    db.commit()
+    db.refresh(req)
+    logger.info("Requisition {} win_probability set to {} by user {}", req_id, prob, user.id)
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx["req"] = req
+    return template_response("htmx/partials/requisitions/_win_probability.html", ctx)
 
 
 @router.post("/v2/partials/requisitions/{req_id}/action/{action_name}", response_class=HTMLResponse)
@@ -16030,6 +16067,78 @@ async def edit_task_endpoint(
         from app.services.task_service import get_open_tasks_for_vendor_card
 
         vc = db.get(_VendorContact, vendor_contact_id_edit)
+        if vc:
+            vendor_tasks = get_open_tasks_for_vendor_card(db, vc.vendor_card_id)
+            ctx = _base_ctx(request, user, "vendors")
+            ctx["vendor_id"] = vc.vendor_card_id
+            ctx["vendor_tasks"] = vendor_tasks
+            return template_response("htmx/partials/vendors/tabs/_vendor_tasks.html", ctx)
+    return HTMLResponse("")
+
+
+@router.post("/v2/partials/tasks/{task_id}/snooze", response_class=HTMLResponse)
+async def snooze_task_endpoint(
+    request: Request,
+    task_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Push a CRM task's due_at forward by one week (or set to tomorrow if no due_at).
+
+    Authz: same gate as edit/complete — assignee, creator, account owner, or admin.
+    Returns the refreshed parent task list (account, contact, or vendor card).
+    """
+    from app.services.task_service import (
+        _is_crm_task_authorized,
+        get_open_tasks_for_company,
+        get_open_tasks_for_contact,
+        snooze_task,
+    )
+
+    task = db.get(RequisitionTask, task_id)
+    if not task:
+        raise HTTPException(404, "Task not found")
+    _is_vendor = task.vendor_card_id is not None or task.vendor_contact_id is not None
+    if not task.company_id and not task.site_contact_id and not _is_vendor:
+        raise HTTPException(400, "Not a CRM task")
+    if not _is_crm_task_authorized(db, task, user.id, is_admin=(user.role == UserRole.ADMIN)):
+        raise HTTPException(403, "You are not allowed to snooze this task")
+    snooze_task(db, task_id)
+    logger.info("Task {} snoozed by user {}", task_id, user.id)
+    # Re-render the parent container (same logic as edit_task_endpoint)
+    task = db.get(RequisitionTask, task_id)
+    company_id = task.company_id if task else None
+    site_contact_id = task.site_contact_id if task else None
+    vendor_card_id_snooze = task.vendor_card_id if task else None
+    vendor_contact_id_snooze = task.vendor_contact_id if task else None
+    if company_id:
+        tasks = get_open_tasks_for_company(db, company_id)
+        ctx = _base_ctx(request, user, "customers")
+        ctx["company_id"] = company_id
+        ctx["company_tasks"] = tasks
+        return template_response("htmx/partials/customers/_account_tasks.html", ctx)
+    if site_contact_id:
+        contact = db.get(SiteContact, site_contact_id)
+        tasks = get_open_tasks_for_contact(db, site_contact_id)
+        ctx = _base_ctx(request, user, "customers")
+        ctx["contact"] = contact
+        ctx["contact_tasks"] = tasks
+        ctx["company_id"] = contact.customer_site.company_id if contact and contact.customer_site else 0
+        ctx["site_id"] = site_contact_id
+        return template_response("htmx/partials/customers/_contact_tasks.html", ctx)
+    if vendor_card_id_snooze:
+        from app.services.task_service import get_open_tasks_for_vendor_card
+
+        vendor_tasks = get_open_tasks_for_vendor_card(db, vendor_card_id_snooze)
+        ctx = _base_ctx(request, user, "vendors")
+        ctx["vendor_id"] = vendor_card_id_snooze
+        ctx["vendor_tasks"] = vendor_tasks
+        return template_response("htmx/partials/vendors/tabs/_vendor_tasks.html", ctx)
+    if vendor_contact_id_snooze:
+        from app.models.vendors import VendorContact as _VendorContact
+        from app.services.task_service import get_open_tasks_for_vendor_card
+
+        vc = db.get(_VendorContact, vendor_contact_id_snooze)
         if vc:
             vendor_tasks = get_open_tasks_for_vendor_card(db, vc.vendor_card_id)
             ctx = _base_ctx(request, user, "vendors")

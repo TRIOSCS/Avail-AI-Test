@@ -66,6 +66,7 @@ class Requisition(Base):
     # Sales context — helps buyers prioritize
     urgency = Column(String(20), default="normal")  # normal | hot | critical
     opportunity_value = Column(Numeric(12, 2))  # Estimated deal value in USD
+    win_probability = Column(Integer, nullable=True)  # 0-100 percent chance of closing
 
     # Audit trail
     updated_at = Column(UTCDateTime)
@@ -86,6 +87,12 @@ class Requisition(Base):
     def _validate_opportunity_value(self, _key, value):
         if value is not None and value < 0:
             raise ValueError("opportunity_value must be >= 0")
+        return value
+
+    @validates("win_probability")
+    def _validate_win_probability(self, _key, value):
+        if value is not None and not (0 <= int(value) <= 100):
+            raise ValueError("win_probability must be between 0 and 100")
         return value
 
     @validates("status")

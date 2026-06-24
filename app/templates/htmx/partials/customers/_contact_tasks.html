@@ -1,5 +1,5 @@
 {# _contact_tasks.html — Open tasks for a single contact.
-   Receives: contact, contact_tasks (list[RequisitionTask]), company_id, site_id
+   Receives: contact, contact_tasks (list[RequisitionTask]), company_id, site_id, now_utc (datetime, via _base_ctx)
    Called by: contact_card macro via contacts_tab.html
 #}
 <div id="contact-tasks-{{ contact.id }}" class="mt-2">
@@ -7,6 +7,8 @@
     <p class="text-xs text-gray-600 font-medium mb-1">Open tasks ({{ contact_tasks|length }})</p>
     <ul class="space-y-1">
       {% for t in contact_tasks %}
+      {% set is_overdue = t.due_at is not none and t.due_at <= now_utc %}
+      {% set is_due_today = t.due_at is not none and not is_overdue and t.due_at.date() == now_utc.date() %}
       <li class="flex items-start gap-2 text-xs">
         <form hx-post="/v2/partials/tasks/{{ t.id }}/complete"
               hx-target="#contact-tasks-{{ contact.id }}"
@@ -15,8 +17,20 @@
                   class="mt-0.5 w-4 h-4 flex-shrink-0 rounded border border-gray-300 hover:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500"
                   title="Mark done" aria-label="Complete: {{ t.title }}"></button>
         </form>
-        <span class="text-gray-800 flex-1">{{ t.title }}{% if t.due_at %} <span class="text-gray-600">&middot; {{ t.due_at.strftime('%b %-d') }}</span>{% endif %}</span>
+        <span class="text-gray-800 flex-1">{{ t.title }}{% if t.due_at %}
+          <span class="{% if is_overdue %}text-rose-600 font-semibold{% elif is_due_today %}text-amber-600 font-semibold{% else %}text-gray-400{% endif %}">
+            &middot;
+            {% if is_overdue %}Overdue ({{ t.due_at.strftime('%b %-d') }}){% elif is_due_today %}Due today{% else %}{{ t.due_at.strftime('%b %-d') }}{% endif %}
+          </span>
+          {% endif %}</span>
         <div class="flex items-center gap-1 flex-shrink-0">
+          <form hx-post="/v2/partials/tasks/{{ t.id }}/snooze"
+                hx-target="#contact-tasks-{{ contact.id }}"
+                hx-swap="outerHTML">
+            <button type="submit"
+                    class="btn btn-sm text-xs text-gray-400 hover:text-amber-600 focus:outline-none"
+                    title="Snooze 1 week" aria-label="Snooze task: {{ t.title }}">Snooze</button>
+          </form>
           <button type="button"
                   hx-get="/v2/partials/tasks/{{ t.id }}/edit-form"
                   hx-target="#contact-tasks-{{ contact.id }}"

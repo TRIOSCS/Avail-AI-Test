@@ -47,6 +47,7 @@
 | status | String 50 | active\|archived\|completed |
 | urgency | String 20 | normal\|hot\|critical |
 | opportunity_value | Numeric 12,2 | |
+| win_probability | Integer, nullable | 0-100; deal win % (migration 146) |
 | claimed_by_id | FK -> users | |
 | created_by | FK -> users | |
 | **Relationships** | requirements, attachments, contacts, offers, quotes |

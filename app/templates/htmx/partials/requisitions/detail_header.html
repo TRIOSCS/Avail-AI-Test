@@ -38,6 +38,8 @@
             {{ req.deadline or "Not set" }}
           </span>
         </span>
+        {# Win probability inline editor #}
+        {% include "htmx/partials/requisitions/_win_probability.html" %}
         {% if req.creator %}
         <span>By: <span class="text-gray-900">{{ req.creator.name }}</span></span>
         {% endif %}

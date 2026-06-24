@@ -125,6 +125,7 @@
     <ul id="my-day-tasks" class="space-y-2">
       {% for t in tasks %}
       {% set is_overdue = t.due_at is not none and t.due_at <= now_utc %}
+      {% set is_due_today = t.due_at is not none and not is_overdue and t.due_at.date() == now_utc.date() %}
       <li id="my-day-task-{{ t.id }}"
           class="flex items-start gap-3 rounded-lg border border-brand-200 bg-white px-4 py-3">
 
@@ -144,10 +145,10 @@
         <div class="min-w-0 flex-1">
           <span class="text-sm font-medium text-gray-900">{{ t.title }}</span>
 
-          {# Due date #}
+          {# Due date with overdue/due-today/future badge #}
           {% if t.due_at %}
-            <span class="ml-2 text-xs {% if is_overdue %}text-rose-600 font-semibold{% else %}text-gray-400{% endif %}">
-              &middot; due {{ t.due_at.strftime('%b %-d') }}{% if is_overdue %} (overdue){% endif %}
+            <span class="ml-2 text-xs {% if is_overdue %}text-rose-600 font-semibold{% elif is_due_today %}text-amber-600 font-semibold{% else %}text-gray-400{% endif %}">
+              {% if is_overdue %}&middot; Overdue ({{ t.due_at.strftime('%b %-d') }}){% elif is_due_today %}&middot; Due today{% else %}&middot; due {{ t.due_at.strftime('%b %-d') }}{% endif %}
             </span>
           {% endif %}
 

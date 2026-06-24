@@ -4230,6 +4230,17 @@ POST /v2/partials/tasks/{id}/complete  (require_user)
 
 DELETE /v2/partials/tasks/{id}         (require_admin for vendor tasks)
     — already existed for CRM tasks; same handler covers vendor tasks
+
+POST /v2/partials/tasks/{id}/snooze    (require_user; _is_crm_task_authorized gate)
+    — pushes due_at forward 1 week; if no due_at sets to tomorrow (midnight UTC)
+    — same authz as edit/complete: assignee, creator, account owner, or admin
+    — re-renders the parent task list (account, contact, or vendor card)
+    — returns 403 if not authorized, 404 if task not found
+
+PATCH /v2/partials/requisitions/{id}/win-probability  (require_user; require_requisition_access)
+    — sets win_probability (0-100) on a requisition; 400 on out-of-range
+    — returns _win_probability.html inline span for HTMX swap
+    — migration 146 adds the column to requisitions
 ```
 
 ### Vendor Attachments
