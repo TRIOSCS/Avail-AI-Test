@@ -190,14 +190,15 @@ class TestContactCreateFirstLast:
         )
         assert resp.status_code == 400
 
-    def test_create_with_contact_owner_id(
+    def test_create_ignores_contact_owner_id(
         self,
         client: TestClient,
         test_company: Company,
         test_user: User,
         db_session: Session,
     ):
-        """POST with contact_owner_id persists the owner FK."""
+        """POST with contact_owner_id in form data — field is ignored (picker
+        removed)."""
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/contacts",
             data={
@@ -210,7 +211,8 @@ class TestContactCreateFirstLast:
         assert resp.status_code == 200
         contact = db_session.query(SiteContact).filter(SiteContact.email == "owned@acme.com").first()
         assert contact is not None
-        assert contact.contact_owner_id == test_user.id
+        # contact_owner_id must NOT be set — picker is removed, ownership via site→account
+        assert contact.contact_owner_id is None
 
 
 # ── Edit tests ────────────────────────────────────────────────────────────────
@@ -337,10 +339,11 @@ class TestContactInlineEdit:
         test_user: User,
         db_session: Session,
     ):
-        """FIX G: contact_owner_id is NOT in EDITABLE_CONTACT_FIELDS — the inline edit
-        POST must return 404 because the inline path has no user list to populate the
-        select. Owner is set only via the contact edit form (which receives the full
-        users queryset)."""
+        """contact_owner_id is NOT in EDITABLE_CONTACT_FIELDS — inline edit returns 404.
+
+        Per Phase 1 ownership cleanup, the per-contact owner picker is removed.
+        Ownership flows via site→account, so the inline field path must remain 404.
+        """
         test_company.account_owner_id = test_user.id
         db_session.commit()
 
@@ -349,10 +352,7 @@ class TestContactInlineEdit:
             f"/v2/partials/customers/{test_company.id}/contacts/{contact.id}/field",
             data={"field": "contact_owner_id", "value": str(test_user.id)},
         )
-        assert resp.status_code == 404, (
-            "contact_owner_id inline edit must return 404 — "
-            "owner is set via the contact form, not the inline field widget"
-        )
+        assert resp.status_code == 404, "contact_owner_id inline edit must return 404"
 
     def test_inline_edit_contact_owner_id_clear_not_available(
         self,
@@ -362,51 +362,43 @@ class TestContactInlineEdit:
         test_user: User,
         db_session: Session,
     ):
-        """FIX G: clearing contact_owner_id via inline edit must also return 404.
-
-        Owner is managed exclusively via the contact edit form (Step 4).
-        """
+        """Clearing contact_owner_id via inline edit also returns 404 (picker
+        removed)."""
         test_company.account_owner_id = test_user.id
         db_session.commit()
 
         site, contact = site_and_contact
-        contact.contact_owner_id = test_user.id
-        db_session.commit()
-
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/contacts/{contact.id}/field",
             data={"field": "contact_owner_id", "value": ""},
         )
-        assert resp.status_code == 404, (
-            "contact_owner_id inline clear must return 404 — "
-            "owner is managed via the contact form, not the inline field widget"
-        )
+        assert resp.status_code == 404, "contact_owner_id inline clear must return 404"
 
 
-# ── Add-form renders owner select ─────────────────────────────────────────────
+# ── Add/edit form must NOT render contact_owner_id picker ─────────────────────
 
 
 class TestContactFormOwnerSelect:
-    """The contact add/edit form renders the owner select."""
+    """Phase 1 ownership cleanup: per-contact owner picker is removed from add/edit forms."""
 
-    def test_add_form_renders_owner_select(self, client: TestClient, test_company: Company, test_user: User):
-        """Add-form GET renders the contact_owner_id select."""
+    def test_add_form_does_not_render_owner_picker(self, client: TestClient, test_company: Company, test_user: User):
+        """Add-form GET must NOT contain contact_owner_id (picker removed)."""
         resp = client.get(f"/v2/partials/customers/{test_company.id}/contacts/add-form")
         assert resp.status_code == 200
-        assert "contact_owner_id" in resp.text
+        assert "contact_owner_id" not in resp.text
 
-    def test_edit_form_renders_owner_select(
+    def test_edit_form_does_not_render_owner_picker(
         self,
         client: TestClient,
         test_company: Company,
         site_and_contact,
         test_user: User,
     ):
-        """Edit-form GET renders the contact_owner_id select."""
+        """Edit-form GET must NOT contain contact_owner_id (picker removed)."""
         site, contact = site_and_contact
         resp = client.get(f"/v2/partials/customers/{test_company.id}/contacts/{contact.id}/edit-form")
         assert resp.status_code == 200
-        assert "contact_owner_id" in resp.text
+        assert "contact_owner_id" not in resp.text
 
     def test_add_form_renders_first_last_inputs(self, client: TestClient, test_company: Company):
         """Add form renders first_name and last_name inputs (not full_name)."""

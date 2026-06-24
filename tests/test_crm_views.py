@@ -5142,3 +5142,35 @@ class TestWS4CreateCompanySiteType:
         site = db_session.query(CustomerSite).filter(CustomerSite.company_id == co.id).first()
         assert site is not None
         assert site.site_type == "hq"
+
+
+class TestMultiSiteOwnership:
+    """Phase 1 ownership cleanup: one user may own multiple sites (rule removed)."""
+
+    def test_one_user_can_own_two_sites(self, client: TestClient, db_session: Session, test_user: User):
+        """POST create-site twice with the same owner_id must both succeed (200).
+
+        The old one-site-per-user rule has been removed so that ownership can be
+        modelled flexibly across sites under the same account.
+        """
+        from app.models.crm import CustomerSite
+
+        company = Company(name="Multi Site Owner Co", is_active=True)
+        db_session.add(company)
+        db_session.commit()
+
+        resp1 = client.post(
+            f"/v2/partials/customers/{company.id}/sites",
+            data={"site_name": "Site A", "owner_id": str(test_user.id)},
+        )
+        assert resp1.status_code == 200, f"First site create failed: {resp1.text}"
+
+        resp2 = client.post(
+            f"/v2/partials/customers/{company.id}/sites",
+            data={"site_name": "Site B", "owner_id": str(test_user.id)},
+        )
+        assert resp2.status_code == 200, f"Second site create with same owner failed: {resp2.text}"
+
+        sites = db_session.query(CustomerSite).filter(CustomerSite.company_id == company.id).all()
+        owned = [s for s in sites if s.owner_id == test_user.id]
+        assert len(owned) == 2, f"Expected 2 sites owned by same user, got {len(owned)}"

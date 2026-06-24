@@ -5320,9 +5320,8 @@ EDITABLE_CONTACT_FIELDS: dict[str, dict] = {
         "kind": "select",
         "choices": list(CANONICAL_ROLES),
     },
-    # contact_owner_id is intentionally NOT listed here — the inline edit path has no
-    # user list to populate the select. Owner is set via the contact edit form which
-    # receives the full users queryset.
+    # contact_owner_id is intentionally NOT listed here — ownership flows via
+    # site → account owner (per-contact picker removed in Phase 1).
 }
 
 # Ordered list: (field, label, kind, choices) — used by the detail template to render the
@@ -5428,18 +5427,6 @@ def apply_contact_field(
         contact.phone = v or None
     elif field == "contact_role":
         contact.contact_role = _validate_role(v)
-    elif field == "contact_owner_id":
-        if v:
-            try:
-                owner_id = int(v)
-            except ValueError:
-                raise HTTPException(400, "Invalid contact_owner_id")
-            owner = db.get(User, owner_id)
-            if not owner:
-                raise HTTPException(404, f"User {owner_id} not found")
-            contact.contact_owner_id = owner_id
-        else:
-            contact.contact_owner_id = None
     else:
         setattr(contact, field, v or None)
     contact.updated_at = datetime.now(timezone.utc)
@@ -6425,17 +6412,8 @@ async def contacts_tab_create(
     is_priority = bool((form.get("is_priority") or "").strip())
 
     # ── Create contact ──────────────────────────────────────────────────
-    # contact_owner_id from form
-    contact_owner_raw = (form.get("contact_owner_id") or "").strip()
-    contact_owner_id_val: int | None = None
-    if contact_owner_raw:
-        try:
-            contact_owner_id_val = int(contact_owner_raw)
-        except ValueError:
-            raise HTTPException(400, "Invalid contact_owner_id")
-        if not db.get(User, contact_owner_id_val):
-            raise HTTPException(404, f"User {contact_owner_id_val} not found")
-
+    # contact_owner_id is intentionally NOT read from the form — ownership
+    # flows via site → account owner (per-contact picker removed in Phase 1).
     contact = SiteContact(
         customer_site_id=site.id,
         full_name=full_name,
@@ -6449,7 +6427,6 @@ async def contacts_tab_create(
         linkedin_url=(form.get("linkedin_url") or "").strip() or None,
         contact_role=role,
         is_priority=is_priority,
-        contact_owner_id=contact_owner_id_val,
     )
     db.add(contact)
     db.commit()
@@ -6667,25 +6644,10 @@ async def create_site(
     if not site_name.strip():
         return HTMLResponse('<div class="p-2 text-xs text-rose-600">Site name is required.</div>')
 
-    # Enforce one-owner-per-site rule: each user can only own one site
     try:
         parsed_owner_id = int(owner_id) if owner_id else None
     except (ValueError, TypeError):
         parsed_owner_id = None
-    if parsed_owner_id:
-        existing = (
-            db.query(CustomerSite)
-            .filter(
-                CustomerSite.owner_id == parsed_owner_id,
-            )
-            .first()
-        )
-        if existing:
-            owner_user = db.get(User, parsed_owner_id)
-            owner_name = owner_user.display_name if owner_user else f"User #{parsed_owner_id}"
-            return HTMLResponse(
-                f'<div class="p-2 text-xs text-rose-600">{owner_name} already owns site "{existing.site_name}". Each user can only own one site.</div>'
-            )
 
     site = CustomerSite(
         company_id=company_id,
@@ -7243,8 +7205,6 @@ async def contact_field_edit_form(
         raise HTTPException(404, "Contact not found")
     meta = EDITABLE_CONTACT_FIELDS[field]
     extra: dict = {}
-    if field == "contact_owner_id":
-        extra["users"] = db.query(User).order_by(User.name).all()
     return template_response(
         "htmx/partials/customers/_field_edit.html",
         {
@@ -7726,7 +7686,6 @@ async def contact_edit_form_company_scoped(
     company = db.get(Company, company_id)
     if not company:
         raise HTTPException(404, "Company not found")
-    users = db.query(User).order_by(User.name).all()
     return template_response(
         "htmx/partials/customers/tabs/_contact_form.html",
         {
@@ -7737,7 +7696,6 @@ async def contact_edit_form_company_scoped(
             "site": site,
             "sites": [],
             "roles": CANONICAL_ROLES,
-            "users": users,
         },
     )
 

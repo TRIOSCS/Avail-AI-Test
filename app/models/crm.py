@@ -276,7 +276,8 @@ class SiteContact(Base):
     # first_name/last_name as-is (they were seeded by migration 134 backfill).
     first_name = Column(String(120))
     last_name = Column(String(120))
-    # Contact owner — falls back to the site/company account_owner when NULL.
+    # DEPRECATED / UNUSED — ownership flows via site → account owner (Phase 1 cleanup).
+    # Column is retained to avoid a migration; it will always be NULL for new contacts.
     contact_owner_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
     title = Column(String(255))
     email = Column(String(255))
