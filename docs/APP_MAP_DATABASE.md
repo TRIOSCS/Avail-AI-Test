@@ -339,7 +339,10 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 |--------|------|-------|
 | id | Integer PK | |
 | customer_site_id | FK -> customer_sites (CASCADE) | |
-| full_name | String 255 | |
+| full_name | String 255 | Derived field — recomposed from first_name + last_name on every form/inline-edit write (migration 134 seeded via backfill). |
+| first_name | String 120, nullable | Migration 134. Editable source of truth; recomposed into full_name on write. |
+| last_name | String 120, nullable | Migration 134. Editable source of truth; recomposed into full_name on write. |
+| contact_owner_id | FK -> users (SET NULL), indexed | Migration 134. Override contact owner; falls back to company.account_owner when NULL. |
 | email | String 255 | Unique per site |
 | phone | String 100 | |
 | wechat_id | String 100, nullable | WeChat handle for click-to-message outreach (migration 095_wechat_id). Written by the site-contact create form; rendered in `tabs/contacts_tab.html` as a `weixin://` deep link with `data-outreach-log`. |
@@ -349,7 +352,7 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 | is_archived | Boolean NOT NULL (server_default false) | Migration 118. Sorts the contact to the BOTTOM of the roster but keeps it visible (NOT `is_active`, which would hide it). Toggled via `POST .../contacts/{id}/archive` (`_archive_toggle.html`). |
 | email_verified | Boolean | |
 | enrichment_source | String 50 | lusha|clay|hunter|explorium|manual |
-| **Relationships** | customer_site, attachments (`SiteContactAttachment`) | Migration 126 adds `attachments`. |
+| **Relationships** | customer_site, attachments (`SiteContactAttachment`), contact_owner (`User`) | Migration 126 adds `attachments`. Migration 134 adds `contact_owner`. |
 
 **`company_attachments`** — Files attached to a CRM company (Migration 126, new table)
 | Column | Type | Notes |
@@ -812,7 +815,7 @@ SP4 Account Reclamation config keys (sourced from `.env` / `app/config.py`):
 
 **`ics_search_queue`** — ICS browser automation queue (priority, status, gate_decision). Dedup keyed on `(requirement_id, normalized_mpn)` — backed by a composite UNIQUE (`uq_ics_queue_requirement_mpn`) that replaced the legacy per-requirement UNIQUE — so the spec-code resolver can enqueue multiple AVL MPNs per requirement while concurrent enqueues still can't double-insert (the app-layer check in `QueueManager.enqueue_search` catches the resulting `IntegrityError` and returns the winning row); carries `resolved_via_spec_code` lineage.
 **`nc_search_queue`** — NetComponents browser automation queue (same structure + same composite-UNIQUE dedup `uq_nc_queue_requirement_mpn` / lineage change)
-**`tbf_search_queue`** — The Broker Forum (thebrokersite.com) browser automation queue (same structure + same composite-UNIQUE dedup `uq_tbf_queue_requirement_mpn` / lineage change). Backed by the `avail-tbf-worker` host worker; ships dormant until member creds + Phase-2 selectors land. Sister tables `tbf_search_log` (per-search audit) + `tbf_worker_status` (singleton id=1 heartbeat row, seeded by migration 130 / `seed_tbf_worker_status_singleton`).
+**`tbf_search_queue`** — The Broker Forum (thebrokersite.com) browser automation queue (same structure + same composite-UNIQUE dedup `uq_tbf_queue_requirement_mpn` / lineage change). Backed by the `avail-tbf-worker` host worker (ACTIVE: authenticates with member creds and records the real seller `vendor_name` + `vendor_phone` per listing). Sister tables `tbf_search_log` (per-search audit) + `tbf_worker_status` (singleton id=1 heartbeat row, seeded by migration 130 / `seed_tbf_worker_status_singleton`).
 
 ### OEM Spec-Code Resolver
 

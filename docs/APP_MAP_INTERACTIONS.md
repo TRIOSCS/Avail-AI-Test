@@ -777,7 +777,7 @@ policy behavior for free — in its OWN session, right where the rows are create
    follows the connector-aware delete (inside search's separate write session).
 2. `app/services/ics_worker/sighting_writer.py` — async ICS browser-worker save loop.
 3. `app/services/nc_worker/sighting_writer.py` — same, NetComponents worker.
-   `app/services/tbf_worker/sighting_writer.py` — same, The Broker Forum worker (ships dormant until Phase-2 selectors land).
+   `app/services/tbf_worker/sighting_writer.py` — same, The Broker Forum worker (ACTIVE: logs in with member creds and captures the real seller `vendor_name` + `vendor_phone` from the authenticated listing — logged-out, TBF anonymizes the seller to "TBS Member"). The session/circuit-breaker key on a POSITIVE, fail-safe logged-in marker (the "Sign out" control present, `session_manager.LOGGED_IN_MARKER`); never on "TBS Member" text, which is the logged-OUT anonymized company label.
 4. `app/routers/sources.py` — email-attachment import (ALSO the HUMAN_DIRECT/O3
    release path: a buyer-routed attachment with qty > 0 releases instead of
    stamping). A RE-SENT attachment that hits the dedup key refreshes the

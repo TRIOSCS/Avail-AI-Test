@@ -72,11 +72,19 @@
     {% endif %}
 
     {# ── Core contact fields ─────────────────────────────────────────────── #}
-    <div>
-      <label class='block text-xs font-medium text-gray-700 mb-1'>Full Name <span class='text-rose-500'>*</span></label>
-      <input type='text' name='full_name' required
-             value='{{ (contact.full_name if contact else "") | e }}'
-             class='w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500'>
+    <div class='grid grid-cols-2 gap-2'>
+      <div>
+        <label class='block text-xs font-medium text-gray-700 mb-1'>First Name <span class='text-rose-500'>*</span></label>
+        <input type='text' name='first_name'
+               value='{{ (contact.first_name if contact else "") | e }}'
+               class='w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500'>
+      </div>
+      <div>
+        <label class='block text-xs font-medium text-gray-700 mb-1'>Last Name</label>
+        <input type='text' name='last_name'
+               value='{{ (contact.last_name if contact else "") | e }}'
+               class='w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500'>
+      </div>
     </div>
 
     <div>
@@ -155,6 +163,23 @@
       <textarea name='notes' rows='2'
                 class='w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500'>{{ (contact.notes if contact else "") | e }}</textarea>
     </div>
+
+    {# ── Contact Owner ──────────────────────────────────────────────────────── #}
+    {% if users is defined and users %}
+    <div>
+      <label class='block text-xs font-medium text-gray-700 mb-1'>Contact Owner</label>
+      <select name='contact_owner_id'
+              class='w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500'>
+        <option value=''>— inherits account owner —</option>
+        {% for u in users %}
+        <option value='{{ u.id }}'
+          {% if contact and contact.contact_owner_id == u.id %}selected{% endif %}>
+          {{ u.name | e }}
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+    {% endif %}
 
     <div class='flex justify-end gap-2 pt-1'>
       <button type='button' @click='$dispatch("close-modal")'

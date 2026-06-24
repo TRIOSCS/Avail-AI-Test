@@ -72,6 +72,24 @@
               {% if company.domain or company.industry %}<span class="text-gray-300">·</span>{% endif %}
               <span>{{ company.hq_city }}{% if company.hq_country %}, {{ company.hq_country }}{% endif %}</span>
             {% endif %}
+            {# Primary contact — account-level #}
+            {% if company.primary_contact %}
+              {% if company.domain or company.industry or company.hq_city %}<span class="text-gray-300">·</span>{% endif %}
+              <span>Primary: <span class="font-medium text-gray-700">{{ company.primary_contact.full_name }}</span></span>
+            {% else %}
+              {% if company.domain or company.industry or company.hq_city %}<span class="text-gray-300">·</span>{% endif %}
+              <span class="text-gray-400 italic">+ Add primary contact</span>
+            {% endif %}
+            {# Parent company #}
+            {% if company.parent_company %}
+              <span class="text-gray-300">·</span>
+              <span>Parent: <span class="font-medium text-gray-700">{{ company.parent_company.name }}</span></span>
+            {% endif %}
+            {# Child accounts count #}
+            {% if company.child_companies %}
+              <span class="text-gray-300">·</span>
+              <span class="font-medium text-gray-700">{{ company.child_companies|length }} child account{{ 's' if company.child_companies|length != 1 else '' }}</span>
+            {% endif %}
           </div>
         </div>
       </div>
@@ -165,6 +183,24 @@
 
       {# Disposition control: Active / Bucket + Send to Prospecting. #}
       {% include 'htmx/partials/customers/_disposition_control.html' %}
+
+      {# ── Next step: soonest open account task #}
+      {% if next_account_task %}
+      <div class="text-xs text-gray-700">
+        <span class="font-medium">Next:</span>
+        {{ next_account_task.title }}
+        {% if next_account_task.due_at %}
+          <span class="text-gray-600">(due {{ next_account_task.due_at.strftime('%b %-d') }})</span>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      {# ── Account tasks ── lazy-loaded #}
+      <div hx-get="/v2/partials/customers/{{ company.id }}/tasks"
+           hx-trigger="load"
+           hx-target="this"
+           hx-swap="outerHTML"
+           class="empty:hidden"></div>
 
       {# Dual clocks: Outbound + Reply — canonical cadence_clocks macro (shared/_macros.html) #}
       {{ cadence_clocks(company, now_utc) }}

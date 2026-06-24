@@ -1,0 +1,29 @@
+{# _contact_tasks.html — Open tasks for a single contact.
+   Receives: contact, contact_tasks (list[RequisitionTask]), company_id, site_id
+   Called by: contact_card macro via contacts_tab.html
+#}
+<div id="contact-tasks-{{ contact.id }}" class="mt-2">
+  {% if contact_tasks %}
+    <p class="text-xs text-gray-600 font-medium mb-1">Open tasks ({{ contact_tasks|length }})</p>
+    <ul class="space-y-1">
+      {% for t in contact_tasks %}
+      <li class="flex items-start gap-2 text-xs">
+        <form hx-post="/v2/partials/tasks/{{ t.id }}/complete"
+              hx-target="#contact-tasks-{{ contact.id }}"
+              hx-swap="outerHTML">
+          <button type="submit"
+                  class="mt-0.5 w-4 h-4 flex-shrink-0 rounded border border-gray-300 hover:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  title="Mark done" aria-label="Complete: {{ t.title }}"></button>
+        </form>
+        <span class="text-gray-800">{{ t.title }}{% if t.due_at %} <span class="text-gray-600">&middot; {{ t.due_at.strftime('%b %-d') }}</span>{% endif %}</span>
+      </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+  <button type="button"
+          hx-get="/v2/partials/customers/{{ company_id }}/contacts/{{ contact.id }}/tasks/add-form"
+          hx-target="#contact-task-form-{{ contact.id }}"
+          hx-swap="innerHTML"
+          class="mt-1 text-xs text-brand-600 hover:text-brand-700 font-medium">+ Add task</button>
+  <div id="contact-task-form-{{ contact.id }}"></div>
+</div>

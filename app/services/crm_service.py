@@ -389,7 +389,7 @@ def company_contact_rows(db: Session, company_id: int, sites: list[CustomerSite]
     if site_map:
         contacts = (
             db.query(SiteContact)
-            .filter(SiteContact.customer_site_id.in_(list(site_map)), SiteContact.is_active.is_(True))
+            .filter(SiteContact.customer_site_id.in_(list(site_map)), SiteContact.is_active.isnot(False))
             .order_by(
                 SiteContact.is_archived.asc(),
                 SiteContact.is_priority.desc(),

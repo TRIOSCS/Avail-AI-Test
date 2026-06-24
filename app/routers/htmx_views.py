@@ -309,6 +309,7 @@ async def quotes_list_redirect():
 @router.get("/v2/sightings", response_class=HTMLResponse)
 @router.get("/v2/trouble-tickets", response_class=HTMLResponse)
 @router.get("/v2/trouble-tickets/{ticket_id:int}", response_class=HTMLResponse)
+@router.get("/v2/my-day", response_class=HTMLResponse)
 async def v2_page(request: Request, db: Session = Depends(get_db)):
     """Full page load — serves base.html with initial content via HTMX."""
 
@@ -330,6 +331,7 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         "materials",
         "follow-ups",
         "trouble-tickets",
+        "my-day",
         "crm",
         "vendors",
         "customers",
@@ -351,6 +353,8 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         partial_url = "/v2/partials/sightings/workspace"
     elif current_view == "resell":
         partial_url = "/v2/partials/resell/workspace"
+    elif current_view == "my-day":
+        partial_url = "/v2/partials/my-day"
     elif current_view == "search":
         # Deep-link the Part Dossier: ?mpn= rides along to /v2/partials/search so a
         # bookmarked /v2/search?mpn=<PN> paints the dossier on first load.
@@ -5302,7 +5306,10 @@ EDITABLE_ACCOUNT_FIELDS: dict[str, dict] = {
 }
 
 EDITABLE_CONTACT_FIELDS: dict[str, dict] = {
-    "full_name": {"label": "Name", "kind": "text"},
+    # first_name + last_name replace the old single full_name inline editor.
+    # apply_contact_field recomposes full_name when either is saved.
+    "first_name": {"label": "First Name", "kind": "text"},
+    "last_name": {"label": "Last Name", "kind": "text"},
     "title": {"label": "Title", "kind": "text"},
     "email": {"label": "Email", "kind": "text"},
     "phone": {"label": "Phone", "kind": "text"},
@@ -5313,6 +5320,9 @@ EDITABLE_CONTACT_FIELDS: dict[str, dict] = {
         "kind": "select",
         "choices": list(CANONICAL_ROLES),
     },
+    # contact_owner_id is intentionally NOT listed here — the inline edit path has no
+    # user list to populate the select. Owner is set via the contact edit form which
+    # receives the full users queryset.
 }
 
 # Ordered list: (field, label, kind, choices) — used by the detail template to render the
@@ -5365,6 +5375,16 @@ def apply_company_field(company: Company, field: str, value: str) -> None:
     company.updated_at = datetime.now(timezone.utc)
 
 
+def _recompose_full_name(contact: SiteContact) -> None:
+    """Recompose contact.full_name from first_name + last_name (in-place).
+
+    Rule: full_name is always derived from first_name/last_name when either is written
+    via the form or inline-edit path. Direct full_name writers (legacy) leave first/last
+    unchanged; this function is NOT called for those paths.
+    """
+    contact.full_name = f"{contact.first_name or ''} {contact.last_name or ''}".strip() or (contact.full_name or "")
+
+
 def apply_contact_field(
     contact: SiteContact,
     field: str,
@@ -5374,16 +5394,20 @@ def apply_contact_field(
 ) -> None:
     """Apply a single inline-edited contact field to *contact* (does NOT commit).
 
-    Validates same as edit_site_contact. Raises HTTPException for invalid values. Called
-    by both the inline-edit POST endpoint and edit_site_contact (DRY).
+    first_name / last_name edits recompose full_name automatically. At least one of
+    first_name / last_name must be non-empty (enforced here). Raises HTTPException for
+    invalid values. Called by both the inline-edit POST endpoint and edit_site_contact
+    (DRY).
     """
     if field not in EDITABLE_CONTACT_FIELDS:
         raise HTTPException(404, f"Unknown editable contact field: {field!r}")
     v = value.strip()
-    if field == "full_name":
-        if not v:
-            raise HTTPException(400, "full_name is required")
-        contact.full_name = v
+    if field in ("first_name", "last_name"):
+        setattr(contact, field, v or None)
+        # After updating, verify at least one name part remains.
+        if not contact.first_name and not contact.last_name:
+            raise HTTPException(400, "At least one of first_name or last_name is required")
+        _recompose_full_name(contact)
     elif field == "email":
         if v and "@" not in v:
             raise HTTPException(400, "Invalid email address")
@@ -5404,6 +5428,18 @@ def apply_contact_field(
         contact.phone = v or None
     elif field == "contact_role":
         contact.contact_role = _validate_role(v)
+    elif field == "contact_owner_id":
+        if v:
+            try:
+                owner_id = int(v)
+            except ValueError:
+                raise HTTPException(400, "Invalid contact_owner_id")
+            owner = db.get(User, owner_id)
+            if not owner:
+                raise HTTPException(404, f"User {owner_id} not found")
+            contact.contact_owner_id = owner_id
+        else:
+            contact.contact_owner_id = None
     else:
         setattr(contact, field, v or None)
     contact.updated_at = datetime.now(timezone.utc)
@@ -5878,6 +5914,13 @@ async def company_apply_name(
 _VALID_CUSTOMER_TABS = frozenset({"contacts", "sites", "requisitions", "activity", "quotes", "buy_plans", "files"})
 
 
+def _get_next_account_task(db: Session, company_id: int):
+    """Return the soonest open task for an account, or None."""
+    from app.services.task_service import get_next_task_for_company
+
+    return get_next_task_for_company(db, company_id)
+
+
 @router.get("/v2/partials/customers/{company_id}", response_class=HTMLResponse)
 async def company_detail_partial(
     request: Request,
@@ -5978,6 +6021,8 @@ async def company_detail_partial(
             "active_tab": active_tab,
             # WS2: known-field grid for the account card.
             "known_account_fields": KNOWN_ACCOUNT_FIELDS,
+            # Next open task for the "Next step" summary line.
+            "next_account_task": _get_next_account_task(db, company_id),
         }
     )
     return template_response("htmx/partials/customers/detail.html", ctx)
@@ -6242,6 +6287,7 @@ async def contacts_tab_add_form(
     )
     # Only honor site_id when it belongs to THIS company's active sites (IDOR-safe).
     preselect_site_id = site_id if any(s.id == site_id for s in active_sites) else None
+    users = db.query(User).order_by(User.name).all()
     return template_response(
         "htmx/partials/customers/tabs/_contact_form.html",
         {
@@ -6253,6 +6299,7 @@ async def contacts_tab_add_form(
             "sites": active_sites,
             "preselect_site_id": preselect_site_id,
             "roles": CANONICAL_ROLES,
+            "users": users,
         },
     )
 
@@ -6287,8 +6334,23 @@ async def contacts_tab_create(
         raise HTTPException(404, "Company not found")
 
     form = await request.form()
-    full_name = (form.get("full_name") or "").strip()
-    if not full_name:
+    # Step 4: accept first_name + last_name (new form) or full_name (legacy fallback).
+    first_name_val = (form.get("first_name") or "").strip() or None
+    last_name_val = (form.get("last_name") or "").strip() or None
+    full_name_legacy = (form.get("full_name") or "").strip()
+
+    if first_name_val or last_name_val:
+        # New form: compose full_name from parts
+        if not first_name_val and not last_name_val:
+            raise HTTPException(400, "At least one of first_name or last_name is required")
+        full_name = f"{first_name_val or ''} {last_name_val or ''}".strip()
+    elif full_name_legacy:
+        # Legacy: full_name submitted directly; split into parts
+        full_name = full_name_legacy
+        parts = full_name.split(" ", 1)
+        first_name_val = parts[0] or None
+        last_name_val = parts[1].strip() if len(parts) > 1 else None
+    else:
         raise HTTPException(400, "full_name is required")
 
     email_val = (form.get("email") or "").strip().lower() or None
@@ -6363,9 +6425,22 @@ async def contacts_tab_create(
     is_priority = bool((form.get("is_priority") or "").strip())
 
     # ── Create contact ──────────────────────────────────────────────────
+    # contact_owner_id from form
+    contact_owner_raw = (form.get("contact_owner_id") or "").strip()
+    contact_owner_id_val: int | None = None
+    if contact_owner_raw:
+        try:
+            contact_owner_id_val = int(contact_owner_raw)
+        except ValueError:
+            raise HTTPException(400, "Invalid contact_owner_id")
+        if not db.get(User, contact_owner_id_val):
+            raise HTTPException(404, f"User {contact_owner_id_val} not found")
+
     contact = SiteContact(
         customer_site_id=site.id,
         full_name=full_name,
+        first_name=first_name_val,
+        last_name=last_name_val,
         email=email_val,
         title=(form.get("title") or "").strip() or None,
         phone=(form.get("phone") or "").strip() or None,
@@ -6374,6 +6449,7 @@ async def contacts_tab_create(
         linkedin_url=(form.get("linkedin_url") or "").strip() or None,
         contact_role=role,
         is_priority=is_priority,
+        contact_owner_id=contact_owner_id_val,
     )
     db.add(contact)
     db.commit()
@@ -6837,6 +6913,129 @@ async def set_primary_contact(
     return _render_contacts_list(request, user, company, db)
 
 
+@router.post(
+    "/v2/partials/customers/{company_id}/primary-contact/{contact_id}",
+    response_class=HTMLResponse,
+)
+async def set_account_primary_contact(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Set Company.primary_contact_id to contact_id (account-level primary contact).
+
+    IDOR-safe: verifies contact belongs to a site under company_id.
+    Owner-or-admin gate. Returns refreshed company detail partial.
+    """
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    is_admin = user.role == UserRole.ADMIN
+    if not is_admin and company.account_owner_id != user.id:
+        raise HTTPException(403, "Only the owner or an admin can edit this account")
+
+    # IDOR-safe: verify contact belongs to a site under this company.
+    contact = (
+        db.query(SiteContact)
+        .join(CustomerSite)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+
+    company.primary_contact_id = contact_id
+    company.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(company)
+    logger.info("Company {} primary contact set to {} by {}", company_id, contact_id, user.email)
+
+    return await company_detail_partial(request=request, company_id=company_id, user=user, db=db)
+
+
+@router.post(
+    "/v2/partials/customers/{company_id}/parent",
+    response_class=HTMLResponse,
+)
+async def set_parent_company(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Set Company.parent_company_id; validates no cycle.
+
+    Accepts parent_company_id= form field (empty → clear).
+    Cycle guard: rejects self-parent and any descendant as parent.
+    Owner-or-admin gate.
+    """
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    is_admin = user.role == UserRole.ADMIN
+    if not is_admin and company.account_owner_id != user.id:
+        raise HTTPException(403, "Only the owner or an admin can edit this account")
+
+    form = await request.form()
+    raw = (form.get("parent_company_id") or "").strip()
+
+    _set_parent_company(db, company, raw)
+    company.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(company)
+    logger.info("Company {} parent set to {} by {}", company_id, raw or "None", user.email)
+
+    return await company_detail_partial(request=request, company_id=company_id, user=user, db=db)
+
+
+# ── Shared helper — parent-company validation used by set_parent_company + edit_company ──
+
+
+def _set_parent_company(db: Session, company: Company, raw_parent_id: str) -> None:
+    """Validate and set company.parent_company_id from the raw form string.
+
+    ``raw_parent_id`` is the stripped string value from the submitted form:
+      - empty string → clear the parent (set to None)
+      - integer string → validate, cycle-check, then set
+
+    Raises HTTPException(400) for bad input or cycle; HTTPException(404) for missing
+    parent. Does NOT commit — caller owns the transaction.
+    """
+    if not raw_parent_id:
+        company.parent_company_id = None
+        return
+
+    if not raw_parent_id.isdigit():
+        raise HTTPException(400, "parent_company_id must be an integer")
+
+    parent_id = int(raw_parent_id)
+    if parent_id == company.id:
+        raise HTTPException(400, "A company cannot be its own parent (would create a cycle)")
+
+    parent = db.get(Company, parent_id)
+    if not parent:
+        raise HTTPException(404, "Parent company not found")
+
+    # Cycle guard: walk ancestor chain of proposed parent; reject if we reach company.id.
+    visited: set[int] = set()
+    cursor = parent
+    while cursor.parent_company_id is not None:
+        if cursor.parent_company_id in visited:
+            break  # existing cycle in DB — stop walking
+        visited.add(cursor.id)
+        if cursor.parent_company_id == company.id:
+            raise HTTPException(400, "Setting this parent would create a cycle in the company hierarchy")
+        cursor = db.get(Company, cursor.parent_company_id)
+        if cursor is None:
+            break
+
+    company.parent_company_id = parent_id
+
+
 # ── Sprint 4: Company CRUD (parameterized routes) ──────────────────────
 
 
@@ -6854,9 +7053,12 @@ async def company_edit_form(
     users = (
         db.query(User).filter(User.role.in_((UserRole.BUYER, UserRole.TRADER, UserRole.MANAGER, UserRole.ADMIN))).all()
     )
+    all_companies = (
+        db.query(Company).filter(Company.id != company_id, Company.is_active.is_(True)).order_by(Company.name).all()
+    )
     return template_response(
         "htmx/partials/customers/edit_form.html",
-        {"request": request, "company": company, "users": users},
+        {"request": request, "company": company, "users": users, "all_companies": all_companies},
     )
 
 
@@ -6885,6 +7087,9 @@ async def edit_company(
     owner_id = form.get("owner_id", "")
     if owner_id and owner_id.isdigit():
         company.account_owner_id = int(owner_id)
+
+    parent_company_id_raw = form.get("parent_company_id", "").strip()
+    _set_parent_company(db, company, parent_company_id_raw)
 
     # Registry fields — DRY via apply_company_field.
     # source/notes/tax_id are handled explicitly above with blank-sentinel "preserve
@@ -7037,6 +7242,9 @@ async def contact_field_edit_form(
     if not contact:
         raise HTTPException(404, "Contact not found")
     meta = EDITABLE_CONTACT_FIELDS[field]
+    extra: dict = {}
+    if field == "contact_owner_id":
+        extra["users"] = db.query(User).order_by(User.name).all()
     return template_response(
         "htmx/partials/customers/_field_edit.html",
         {
@@ -7047,6 +7255,7 @@ async def contact_field_edit_form(
             "meta": meta,
             "post_url": f"/v2/partials/customers/{company_id}/contacts/{contact_id}/field",
             "display_url": f"/v2/partials/customers/{company_id}/contacts/{contact_id}/field/display/{field}",
+            **extra,
         },
     )
 
@@ -7517,6 +7726,7 @@ async def contact_edit_form_company_scoped(
     company = db.get(Company, company_id)
     if not company:
         raise HTTPException(404, "Company not found")
+    users = db.query(User).order_by(User.name).all()
     return template_response(
         "htmx/partials/customers/tabs/_contact_form.html",
         {
@@ -7527,6 +7737,7 @@ async def contact_edit_form_company_scoped(
             "site": site,
             "sites": [],
             "roles": CANONICAL_ROLES,
+            "users": users,
         },
     )
 
@@ -7584,13 +7795,28 @@ async def edit_site_contact(
 
     form = await request.form()
 
-    # Inline-registry fields — DRY via apply_contact_field
+    # Name fields — apply atomically so the "at least one required" check
+    # sees both values together rather than one-at-a-time.
+    first_name_raw = form.get("first_name")
+    last_name_raw = form.get("last_name")
+    if first_name_raw is not None or last_name_raw is not None:
+        new_first = (first_name_raw or "").strip() or None
+        new_last = (last_name_raw or "").strip() or None
+        if not new_first and not new_last:
+            raise HTTPException(400, "At least one of first_name or last_name is required")
+        contact.first_name = new_first
+        contact.last_name = new_last
+        _recompose_full_name(contact)
+
+    # Remaining registry fields (skip first_name/last_name — handled above)
     for f in EDITABLE_CONTACT_FIELDS:
+        if f in ("first_name", "last_name"):
+            continue
         raw = form.get(f)
         if raw is not None:  # field was submitted
             apply_contact_field(contact, f, raw, site_id, db)
 
-    # Non-registry fields (wechat_id + linkedin_url are written by the loop above)
+    # Non-registry fields
     contact.notes = (form.get("notes", "") or "").strip() or None
     contact.is_priority = bool((form.get("is_priority", "") or "").strip())
     contact.updated_at = datetime.now(timezone.utc)
@@ -13898,3 +14124,286 @@ async def trouble_ticket_detail(
         "htmx/partials/tickets/detail.html",
         {**_base_ctx(request, user, "tickets"), "ticket": ticket},
     )
+
+
+# ── Step 5: Account/Contact Tasks ────────────────────────────────────────────
+
+
+@router.get("/v2/partials/customers/{company_id}/tasks", response_class=HTMLResponse)
+async def account_tasks_partial(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render the open-tasks list for an account."""
+    from app.services.task_service import get_open_tasks_for_company
+
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+    tasks = get_open_tasks_for_company(db, company_id)
+    ctx = _base_ctx(request, user, "customers")
+    ctx["company_id"] = company_id
+    ctx["company_tasks"] = tasks
+    return template_response("htmx/partials/customers/_account_tasks.html", ctx)
+
+
+@router.get("/v2/partials/customers/{company_id}/tasks/add-form", response_class=HTMLResponse)
+async def account_task_add_form(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render the inline add-task form for an account."""
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+    ctx = _base_ctx(request, user, "customers")
+    ctx["company_id"] = company_id
+    return template_response("htmx/partials/customers/_account_task_form.html", ctx)
+
+
+@router.post("/v2/partials/customers/{company_id}/tasks", response_class=HTMLResponse)
+async def create_account_task(
+    request: Request,
+    company_id: int,
+    title: str = Form(""),
+    due_at: str = Form(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Create a task scoped to an account; return refreshed task list."""
+    from datetime import date
+    from datetime import timezone as _tz
+
+    from app.services.task_service import create_company_task, get_open_tasks_for_company
+
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+    is_admin = user.role == UserRole.ADMIN
+    if not is_admin and company.account_owner_id != user.id:
+        raise HTTPException(403, "Only the account owner or an admin can create tasks for this account")
+    if not title.strip():
+        return HTMLResponse('<p class="text-xs text-rose-600">Title is required.</p>')
+    due_dt = None
+    if due_at.strip():
+        try:
+            d = date.fromisoformat(due_at.strip())
+            due_dt = datetime.combine(d, datetime.min.time()).replace(tzinfo=_tz.utc)
+        except ValueError:
+            return HTMLResponse('<p class="text-xs text-rose-600">Invalid date.</p>')
+    create_company_task(
+        db,
+        company_id=company_id,
+        title=title.strip(),
+        due_at=due_dt,
+        created_by=user.id,
+        assigned_to_id=user.id,
+    )
+    tasks = get_open_tasks_for_company(db, company_id)
+    ctx = _base_ctx(request, user, "customers")
+    ctx["company_id"] = company_id
+    ctx["company_tasks"] = tasks
+    return template_response("htmx/partials/customers/_account_tasks.html", ctx)
+
+
+@router.get(
+    "/v2/partials/customers/{company_id}/contacts/{contact_id}/tasks/add-form",
+    response_class=HTMLResponse,
+)
+async def contact_task_add_form(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render the inline add-task form for a contact."""
+    contact = (
+        db.query(SiteContact)
+        .join(CustomerSite, SiteContact.customer_site_id == CustomerSite.id)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+    ctx = _base_ctx(request, user, "customers")
+    ctx["company_id"] = company_id
+    ctx["contact_id"] = contact_id
+    return template_response("htmx/partials/customers/_contact_task_form.html", ctx)
+
+
+@router.post(
+    "/v2/partials/customers/{company_id}/contacts/{contact_id}/tasks",
+    response_class=HTMLResponse,
+)
+async def create_contact_task_endpoint(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    title: str = Form(""),
+    due_at: str = Form(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Create a task scoped to a contact; return refreshed contact task list."""
+    from datetime import date
+    from datetime import timezone as _tz
+
+    from app.services.task_service import create_contact_task, get_open_tasks_for_contact
+
+    # Scoped-join IDOR guard: contact must belong to this company
+    contact = (
+        db.query(SiteContact)
+        .join(CustomerSite, SiteContact.customer_site_id == CustomerSite.id)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+    company = db.get(Company, company_id)
+    if company:
+        is_admin = user.role == UserRole.ADMIN
+        if not is_admin and company.account_owner_id != user.id:
+            raise HTTPException(403, "Only the account owner or an admin can create tasks for this account")
+    if not title.strip():
+        return HTMLResponse('<p class="text-xs text-rose-600">Title is required.</p>')
+    due_dt = None
+    if due_at.strip():
+        try:
+            d = date.fromisoformat(due_at.strip())
+            due_dt = datetime.combine(d, datetime.min.time()).replace(tzinfo=_tz.utc)
+        except ValueError:
+            return HTMLResponse('<p class="text-xs text-rose-600">Invalid date.</p>')
+    create_contact_task(
+        db,
+        site_contact_id=contact_id,
+        title=title.strip(),
+        due_at=due_dt,
+        created_by=user.id,
+        assigned_to_id=user.id,
+    )
+    tasks = get_open_tasks_for_contact(db, contact_id)
+    ctx = _base_ctx(request, user, "customers")
+    ctx["contact"] = contact
+    ctx["contact_tasks"] = tasks
+    ctx["company_id"] = company_id
+    ctx["site_id"] = contact.customer_site_id
+    return template_response("htmx/partials/customers/_contact_tasks.html", ctx)
+
+
+@router.post("/v2/partials/tasks/{task_id}/complete", response_class=HTMLResponse)
+async def complete_task_endpoint(
+    request: Request,
+    task_id: int,
+    from_my_day: bool = False,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Mark a CRM task done. No activity log is created.
+
+    Returns the refreshed parent task list (account or contact). When from_my_day=true,
+    returns an empty fragment so the row removes itself via outerHTML swap on the My Day
+    worklist.
+    """
+    from app.services.task_service import (
+        complete_crm_task,
+        get_open_tasks_for_company,
+        get_open_tasks_for_contact,
+    )
+
+    task = db.get(RequisitionTask, task_id)
+    if not task:
+        raise HTTPException(404, "Task not found")
+    try:
+        complete_crm_task(db, task_id, user.id, is_admin=(user.role == UserRole.ADMIN))
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    # My Day context: caller handles its own row removal via outerHTML swap.
+    if from_my_day:
+        return HTMLResponse("")
+    # Re-render the appropriate parent container
+    if task.company_id:
+        tasks = get_open_tasks_for_company(db, task.company_id)
+        ctx = _base_ctx(request, user, "customers")
+        ctx["company_id"] = task.company_id
+        ctx["company_tasks"] = tasks
+        return template_response("htmx/partials/customers/_account_tasks.html", ctx)
+    if task.site_contact_id:
+        contact = db.get(SiteContact, task.site_contact_id)
+        tasks = get_open_tasks_for_contact(db, task.site_contact_id)
+        ctx = _base_ctx(request, user, "customers")
+        ctx["contact"] = contact
+        ctx["contact_tasks"] = tasks
+        ctx["company_id"] = contact.customer_site.company_id if contact and contact.customer_site else 0
+        ctx["site_id"] = task.site_contact_id
+        return template_response("htmx/partials/customers/_contact_tasks.html", ctx)
+    # Fallback: requisition task — just return empty fragment
+    return HTMLResponse("")
+
+
+# ── My Day ──────────────────────────────────────────────────────────────
+
+
+@router.get("/v2/partials/my-day", response_class=HTMLResponse)
+async def my_day_partial(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """My Day worklist — overdue/due accounts I own + my open tasks.
+
+    Overdue/due accounts: reuses cdm_company_query with staleness="needs_call"
+    and my_only=True, ordered stalest-first via the outbound clock.
+    Tasks: task_service.get_my_tasks filtered to open, due/overdue first.
+
+    Called by: /v2/my-day full-page shell and nav hx-get.
+    Depends on: crm_service.cdm_company_query, crm_service.cadence_state,
+                task_service.get_my_tasks.
+    """
+    from ..services.crm_service import (
+        cadence_state as _cadence_state,
+    )
+    from ..services.crm_service import (
+        cdm_company_query as _cdm_company_query,
+    )
+    from ..services.task_service import get_my_tasks as _get_my_tasks
+
+    now = datetime.now(timezone.utc)
+
+    # 1. Overdue / due follow-up accounts I own — reuse the shared _needs_call_filter
+    #    (staleness="needs_call") so the count and this list always agree with the CRM chip.
+    _accounts_q = _cdm_company_query(
+        db,
+        user,
+        search="",
+        staleness="needs_call",
+        account_type="",
+        my_only=True,
+        sort="outbound_asc",
+        now=now,
+    )
+    accounts = _accounts_q.limit(50).all()
+
+    # Annotate each account with its cadence_state (reused — not recomputed inline).
+    account_rows = []
+    for co in accounts:
+        state = _cadence_state(co.tier, co.last_outbound_at, now)
+        out_days = (now - co.last_outbound_at).days if co.last_outbound_at else None
+        account_rows.append({"company": co, "cadence_state": state, "out_days": out_days})
+
+    # 2. My open tasks — due/overdue first (get_my_tasks already excludes done).
+    all_tasks = _get_my_tasks(db, user.id)
+    # Surface due/overdue first (past due_at), then tasks with no due_at last.
+    due_tasks = [t for t in all_tasks if t.due_at is not None and t.due_at <= now]
+    no_due_tasks = [t for t in all_tasks if t.due_at is None or t.due_at > now]
+    tasks = due_tasks + no_due_tasks
+
+    ctx = _base_ctx(request, user, "my-day")
+    ctx["account_rows"] = account_rows
+    ctx["tasks"] = tasks
+    ctx["now_utc"] = now
+    return template_response("htmx/partials/my_day.html", ctx)

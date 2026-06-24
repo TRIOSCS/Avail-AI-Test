@@ -301,6 +301,14 @@
                     role="menuitem"
                     class='w-full text-left px-3 py-1.5 text-emerald-700 hover:bg-emerald-50'>Set Primary</button>
             {% endif %}
+            {# Set as account primary — sets company.primary_contact_id (account-level, not per-site) #}
+            <button hx-post='/v2/partials/customers/{{ company.id }}/primary-contact/{{ contact.id }}'
+                    hx-target='#main-content'
+                    hx-swap='innerHTML'
+                    @click.stop='open = false'
+                    data-loading-disable
+                    role="menuitem"
+                    class='w-full text-left px-3 py-1.5 text-brand-600 hover:bg-brand-50'>Set account primary</button>
             <div class='border-t border-gray-100 my-1'></div>
             {# Role editor inline in kebab #}
             <div id='role-chip-{{ contact.id }}' class='px-3 py-1' x-data='{"editing": false}'>

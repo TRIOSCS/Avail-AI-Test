@@ -3,7 +3,7 @@
 import re
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, Boolean, Column, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Column, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship, validates
 
@@ -57,6 +57,11 @@ class Company(Base):
     ownership_cleared_at = Column(UTCDateTime)
     last_activity_at = Column(UTCDateTime, index=True)
     account_owner_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
+
+    # Step 3: Account-level primary contact (distinct from per-site is_primary)
+    primary_contact_id = Column(Integer, ForeignKey("site_contacts.id", ondelete="SET NULL"))
+    # Step 3: Parent company (self-referential hierarchy)
+    parent_company_id = Column(Integer, ForeignKey("companies.id", ondelete="SET NULL"))
 
     # CRM cadence — two clocks + tier (see docs/superpowers/plans/2026-06-17-crm-data-foundation.md)
     last_outbound_at = Column(UTCDateTime, index=True)
@@ -112,6 +117,13 @@ class Company(Base):
     sites = relationship("CustomerSite", back_populates="company", cascade="all, delete-orphan")
     account_owner = relationship("User", foreign_keys=[account_owner_id])
     attachments = relationship("CompanyAttachment", back_populates="company", cascade="all, delete-orphan")
+    primary_contact = relationship("SiteContact", foreign_keys=[primary_contact_id])
+    parent_company = relationship(
+        "Company",
+        foreign_keys=[parent_company_id],
+        backref="child_companies",
+        remote_side="Company.id",
+    )
 
     @validates("currency")
     def _validate_currency(self, _key, value):
@@ -258,6 +270,14 @@ class SiteContact(Base):
     id = Column(Integer, primary_key=True)
     customer_site_id = Column(Integer, ForeignKey("customer_sites.id", ondelete="CASCADE"), nullable=False)
     full_name = Column(String(255), nullable=False)
+    # Step 4: Name split — first_name/last_name are the editable sources of truth.
+    # full_name is DERIVED (recomposed on every first_name/last_name write via the
+    # form/inline edit path). Legacy writers that set full_name directly leave
+    # first_name/last_name as-is (they were seeded by migration 134 backfill).
+    first_name = Column(String(120))
+    last_name = Column(String(120))
+    # Contact owner — falls back to the site/company account_owner when NULL.
+    contact_owner_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
     title = Column(String(255))
     email = Column(String(255))
     phone = Column(String(100))
@@ -265,7 +285,7 @@ class SiteContact(Base):
     wechat_id = Column(String(100))
     notes = Column(Text)
     is_primary = Column(Boolean, default=False)
-    is_active = Column(Boolean, default=True)
+    is_active = Column(Boolean, default=True, server_default=text("true"))
     contact_status = Column(String(20), default="new")
     do_not_contact = Column(Boolean, nullable=False, default=False, server_default="false")
     # Increment 1 — contact disposition. is_priority surfaces a contact to the
@@ -301,6 +321,7 @@ class SiteContact(Base):
 
     customer_site = relationship("CustomerSite", back_populates="site_contacts")
     attachments = relationship("SiteContactAttachment", back_populates="site_contact", cascade="all, delete-orphan")
+    contact_owner = relationship("User", foreign_keys=[contact_owner_id])
 
     @validates("email")
     def _validate_email(self, _key, value):
@@ -334,6 +355,7 @@ class SiteContact(Base):
     __table_args__ = (
         Index("ix_site_contacts_site", "customer_site_id"),
         Index("ix_site_contacts_email", "email"),
+        Index("ix_site_contacts_contact_owner_id", "contact_owner_id"),
         UniqueConstraint("customer_site_id", "email", name="uq_site_contacts_site_email"),
     )
 

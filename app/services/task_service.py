@@ -15,9 +15,9 @@ from loguru import logger
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.constants import ActivityType, TaskStatus
+from app.constants import TaskStatus
+from app.models.crm import Company
 from app.models.task import RequisitionTask
-from app.services.activity_service import log_activity
 
 
 def _as_utc(dt: datetime | None) -> datetime | None:
@@ -204,15 +204,6 @@ def complete_task(
     task.status = TaskStatus.DONE
     task.completed_at = datetime.now(timezone.utc)
     task.completion_note = completion_note
-    log_activity(
-        db,
-        activity_type=ActivityType.TASK_COMPLETED,
-        requisition_id=task.requisition_id,
-        requirement_id=task.requirement_id,
-        user_id=user_id,
-        description=f"Task completed: {task.title}",
-        details={"task_id": task.id},
-    )
     db.commit()
     db.refresh(task)
     logger.info("Task {} completed by user {}", task_id, user_id)
@@ -236,15 +227,6 @@ def reopen_task(
         raise PermissionError("Only the assignee can reopen this task")
     task.status = TaskStatus.TODO
     task.completed_at = None
-    log_activity(
-        db,
-        activity_type=ActivityType.TASK_REOPENED,
-        requisition_id=task.requisition_id,
-        requirement_id=task.requirement_id,
-        user_id=user_id,
-        description=f"Task reopened: {task.title}",
-        details={"task_id": task.id},
-    )
     db.commit()
     db.refresh(task)
     logger.info("Task {} reopened by user {}", task_id, user_id)
@@ -276,6 +258,161 @@ def delete_task(db: Session, task_id: int) -> bool:
     db.delete(task)
     db.commit()
     return True
+
+
+# ---------------------------------------------------------------------------
+# CRM Tasks — account-scoped and contact-scoped
+# ---------------------------------------------------------------------------
+
+
+def create_company_task(
+    db: Session,
+    *,
+    company_id: int,
+    title: str,
+    description: str | None = None,
+    priority: int = 2,
+    assigned_to_id: int | None = None,
+    created_by: int | None = None,
+    due_at: datetime | None = None,
+) -> RequisitionTask:
+    """Create a task scoped to an account (company)."""
+    task = RequisitionTask(
+        company_id=company_id,
+        title=title,
+        description=description,
+        task_type="general",
+        priority=priority,
+        assigned_to_id=assigned_to_id,
+        created_by=created_by,
+        source="manual",
+        due_at=due_at,
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    logger.info("Account task created: {} (company={})", task.id, company_id)
+    return task
+
+
+def create_contact_task(
+    db: Session,
+    *,
+    site_contact_id: int,
+    title: str,
+    description: str | None = None,
+    priority: int = 2,
+    assigned_to_id: int | None = None,
+    created_by: int | None = None,
+    due_at: datetime | None = None,
+) -> RequisitionTask:
+    """Create a task scoped to a contact."""
+    task = RequisitionTask(
+        site_contact_id=site_contact_id,
+        title=title,
+        description=description,
+        task_type="general",
+        priority=priority,
+        assigned_to_id=assigned_to_id,
+        created_by=created_by,
+        source="manual",
+        due_at=due_at,
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    logger.info("Contact task created: {} (contact={})", task.id, site_contact_id)
+    return task
+
+
+def get_open_tasks_for_company(db: Session, company_id: int) -> list[RequisitionTask]:
+    """Return open tasks scoped to a company, ordered by due_at asc (nulls last)."""
+    return (
+        db.query(RequisitionTask)
+        .filter(RequisitionTask.company_id == company_id, RequisitionTask.status != TaskStatus.DONE)
+        .order_by(RequisitionTask.due_at.asc().nullslast(), RequisitionTask.created_at)
+        .all()
+    )
+
+
+def get_open_tasks_for_contact(db: Session, site_contact_id: int) -> list[RequisitionTask]:
+    """Return open tasks scoped to a contact, ordered by due_at asc (nulls last)."""
+    return (
+        db.query(RequisitionTask)
+        .filter(RequisitionTask.site_contact_id == site_contact_id, RequisitionTask.status != TaskStatus.DONE)
+        .order_by(RequisitionTask.due_at.asc().nullslast(), RequisitionTask.created_at)
+        .all()
+    )
+
+
+def get_next_task_for_company(db: Session, company_id: int) -> RequisitionTask | None:
+    """Return the soonest open task for a company (the 'next step')."""
+    return (
+        db.query(RequisitionTask)
+        .filter(RequisitionTask.company_id == company_id, RequisitionTask.status != TaskStatus.DONE)
+        .order_by(RequisitionTask.due_at.asc().nullslast(), RequisitionTask.created_at)
+        .first()
+    )
+
+
+def _is_crm_task_authorized(db: Session, task: RequisitionTask, user_id: int, is_admin: bool) -> bool:
+    """Return True if user_id is allowed to mutate the given CRM task.
+
+    Allowed if any of:
+      - user is an admin
+      - user is the assignee
+      - user is the creator
+      - user is the account_owner of the task's parent company (via company_id directly,
+        or via the contact's site → company for contact-scoped tasks)
+    """
+    if is_admin:
+        return True
+    if task.assigned_to_id == user_id:
+        return True
+    if task.created_by == user_id:
+        return True
+    # Check parent company owner
+    company_id: int | None = task.company_id
+    if company_id is None and task.site_contact_id is not None:
+        # Resolve contact → site → company
+        from app.models.crm import CustomerSite, SiteContact
+
+        contact = db.get(SiteContact, task.site_contact_id)
+        if contact and contact.customer_site_id:
+            site = db.get(CustomerSite, contact.customer_site_id)
+            if site:
+                company_id = site.company_id
+    if company_id is not None:
+        company = db.get(Company, company_id)
+        if company and company.account_owner_id == user_id:
+            return True
+    return False
+
+
+def complete_crm_task(
+    db: Session,
+    task_id: int,
+    user_id: int,
+    completion_note: str = "",
+    is_admin: bool = False,
+) -> RequisitionTask | None:
+    """Complete a CRM task (account or contact scoped). No activity log is created.
+
+    Returns the updated task, or None if not found. Raises PermissionError if the caller
+    is not the assignee, creator, parent account owner, or an admin.
+    """
+    task = db.get(RequisitionTask, task_id)
+    if not task:
+        return None
+    if not _is_crm_task_authorized(db, task, user_id, is_admin):
+        raise PermissionError("Not authorized to complete this task")
+    task.status = TaskStatus.DONE
+    task.completed_at = datetime.now(timezone.utc)
+    task.completion_note = completion_note
+    db.commit()
+    db.refresh(task)
+    logger.info("CRM task {} completed by user {}", task_id, user_id)
+    return task
 
 
 # ---------------------------------------------------------------------------
