@@ -41,15 +41,19 @@ def _make_company(db, *, owner_id=None, name="Acme Corp", domain="acme.com"):
     return co
 
 
-def _plant_activity(db, company_id, *, days_ago):
-    """Add an ActivityLog row `days_ago` days in the past."""
+def _plant_activity(db, company_id, *, days_ago, activity_type="email_sent"):
+    """Add an ActivityLog row `days_ago` days in the past.
+
+    Uses email_sent by default — notes are excluded from dormancy calc per Item 3 of the
+    CRM rubric (get_last_activity_at ignores note types).
+    """
     from datetime import timedelta
 
     ts = datetime.now(timezone.utc) - timedelta(days=days_ago)
     db.add(
         ActivityLog(
             company_id=company_id,
-            activity_type="note",
+            activity_type=activity_type,
             channel="system",
             created_at=ts,
         )
@@ -124,7 +128,7 @@ def test_get_last_activity_at_no_activity(db_session):
 
 
 def test_get_last_activity_at_returns_latest(db_session):
-    """Returns the datetime of the latest ActivityLog row."""
+    """Returns the datetime of the latest non-note ActivityLog row."""
     from app.services.activity_service import get_last_activity_at
 
     co = _make_company(db_session)
@@ -134,7 +138,7 @@ def test_get_last_activity_at_returns_latest(db_session):
         db_session.add(
             ActivityLog(
                 company_id=co.id,
-                activity_type="note",
+                activity_type="email_sent",  # real activity (not a note)
                 channel="system",
                 created_at=t,
             )
