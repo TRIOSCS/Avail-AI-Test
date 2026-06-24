@@ -14684,11 +14684,15 @@ async def complete_task_endpoint(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Mark a CRM task done. No activity log is created.
+    """Mark a CRM task done (CRM account/contact or vendor card/contact). No activity
+    log is created.
 
-    Returns the refreshed parent task list (account or contact). When from_my_day=true,
-    returns an empty fragment so the row removes itself via outerHTML swap on the My Day
-    worklist.
+    Permissive auth: the caller only needs require_user — any logged-in user may mark
+    a vendor task done (vendor tasks carry no ownership gate at complete time).
+
+    Returns the refreshed parent task list (account, contact, or vendor card). When
+    from_my_day=true, returns an empty fragment so the row removes itself via outerHTML
+    swap on the My Day worklist.
     """
     from app.services.task_service import (
         complete_crm_task,
@@ -14741,6 +14745,8 @@ async def complete_task_endpoint(
             ctx["vendor_id"] = vc.vendor_card_id
             ctx["vendor_tasks"] = vendor_tasks
             return template_response("htmx/partials/vendors/tabs/_vendor_tasks.html", ctx)
+        # VendorContact was deleted — return a safe non-blank acknowledgement.
+        return HTMLResponse('<p class="text-xs text-gray-400">Task updated.</p>')
     # Fallback: requisition task — just return empty fragment
     return HTMLResponse("")
 
@@ -14818,6 +14824,8 @@ async def delete_task_endpoint(
             ctx["vendor_id"] = vc.vendor_card_id
             ctx["vendor_tasks"] = vendor_tasks
             return template_response("htmx/partials/vendors/tabs/_vendor_tasks.html", ctx)
+        # VendorContact was deleted — return a safe non-blank acknowledgement.
+        return HTMLResponse('<p class="text-xs text-gray-400">Task deleted.</p>')
     return HTMLResponse("")
 
 

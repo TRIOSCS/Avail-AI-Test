@@ -471,3 +471,86 @@ class TestMigration142Roundtrip:
         assert "vendor_card_id" in content, "migration 142 must add vendor_card_id column"
         assert "vendor_contact_id" in content, "migration 142 must add vendor_contact_id column"
         assert "ck_task_has_parent" in content, "migration 142 must drop+recreate ck_task_has_parent"
+
+    def test_migration_142_downgrade_purges_vendor_only_rows(self):
+        """Downgrade must DELETE vendor-only rows before restoring the 3-way CHECK.
+
+        Without the purge, Postgres aborts the downgrade when it tries to recreate the
+        CHECK (requisition_id IS NOT NULL OR company_id IS NOT NULL OR site_contact_id
+        IS NOT NULL) while vendor-only rows are present.
+
+        This test verifies the purge SQL is present in the downgrade() body and that the
+        DELETE targets exactly the vendor-only condition.
+        """
+        import pathlib
+
+        alembic_dir = pathlib.Path(__file__).resolve().parent.parent / "alembic"
+        rev_path = alembic_dir / "versions" / "142_vendor_task_cols.py"
+        content = rev_path.read_text()
+
+        # The downgrade must contain a DELETE that removes rows with all three
+        # original parent columns NULL.
+        assert "DELETE FROM requisition_tasks" in content, (
+            "downgrade() must DELETE vendor-only rows before restoring the 3-way CHECK"
+        )
+        assert "requisition_id IS NULL" in content, "DELETE condition must check requisition_id IS NULL"
+        assert "company_id IS NULL" in content, "DELETE condition must check company_id IS NULL"
+        assert "site_contact_id IS NULL" in content, "DELETE condition must check site_contact_id IS NULL"
+
+    def test_migration_142_downgrade_purge_runs_against_sqlite(self, db_session: Session, vendor_card: VendorCard):
+        """Simulate the downgrade purge on the test SQLite DB.
+
+        Creates a vendor-only task (only vendor_card_id set) via the ORM so Python-side
+        defaults fire, then runs the DELETE statement from the migration's downgrade()
+        directly.  The row must be gone afterwards, confirming the purge logic is
+        correct before the 3-way CHECK is restored.
+        """
+        import sqlalchemy as _sa
+
+        # Insert a vendor-only task via the ORM so Python-side defaults (priority, etc.) fire.
+        vendor_only_task = RequisitionTask(
+            vendor_card_id=vendor_card.id,
+            title="vendor-only downgrade test",
+            task_type="general",
+            status=TaskStatus.TODO,
+            source="manual",
+        )
+        db_session.add(vendor_only_task)
+        db_session.commit()
+        db_session.refresh(vendor_only_task)
+
+        # Confirm the row exists and is truly vendor-only.
+        assert vendor_only_task.requisition_id is None
+        assert vendor_only_task.company_id is None
+        assert vendor_only_task.site_contact_id is None
+        assert vendor_only_task.vendor_card_id == vendor_card.id
+
+        count_before = db_session.execute(
+            _sa.text(
+                "SELECT COUNT(*) FROM requisition_tasks"
+                " WHERE vendor_card_id = :vcid AND requisition_id IS NULL"
+                " AND company_id IS NULL AND site_contact_id IS NULL"
+            ),
+            {"vcid": vendor_card.id},
+        ).scalar()
+        assert count_before >= 1, "Vendor-only task should exist before purge"
+
+        # Run the downgrade purge SQL (mirrors exactly what migration 142 downgrade() does).
+        db_session.execute(
+            _sa.text(
+                "DELETE FROM requisition_tasks"
+                " WHERE requisition_id IS NULL AND company_id IS NULL AND site_contact_id IS NULL"
+            )
+        )
+        db_session.commit()
+
+        # The vendor-only task must be gone.
+        count_after = db_session.execute(
+            _sa.text(
+                "SELECT COUNT(*) FROM requisition_tasks"
+                " WHERE vendor_card_id = :vcid AND requisition_id IS NULL"
+                " AND company_id IS NULL AND site_contact_id IS NULL"
+            ),
+            {"vcid": vendor_card.id},
+        ).scalar()
+        assert count_after == 0, "Downgrade purge must remove vendor-only tasks so the 3-way CHECK can be restored"

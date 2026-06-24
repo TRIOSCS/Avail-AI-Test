@@ -437,7 +437,7 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 | uploaded_by_id | FK -> users (SET NULL) | |
 | created_at | UTCDateTime | |
 
-Model: `VendorCardAttachment` (`app/models/vendor_attachments.py`).
+Model: `VendorCardAttachment` (`app/models/vendors.py`).
 
 **`vendor_contact_attachments`** — Files attached to a vendor contact (same column shape as `vendor_card_attachments`)
 | Column | Type | Notes |
@@ -453,7 +453,7 @@ Model: `VendorCardAttachment` (`app/models/vendor_attachments.py`).
 | uploaded_by_id | FK -> users (SET NULL) | |
 | created_at | UTCDateTime | |
 
-Model: `VendorContactAttachment` (`app/models/vendor_attachments.py`).
+Model: `VendorContactAttachment` (`app/models/vendors.py`).
 
 ---
 

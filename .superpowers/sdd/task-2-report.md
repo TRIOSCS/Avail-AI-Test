@@ -149,6 +149,35 @@ TESTING=1 PYTHONPATH=$(pwd) /root/availai/.venv/bin/pytest tests/test_vendor_tas
 
 ---
 
+---
+
+## Code-Review Fix Pass 2 — innerHTML Cancel Button — 2026-06-24
+
+### Finding (Important) — Add form Cancel uses banned innerHTML
+
+**Root cause:** `_vendor_task_form.html` Cancel button used
+`onclick="document.getElementById(...).innerHTML = ''"` — a banned pattern
+per CLAUDE.md (`innerHTML → use htmx.ajax() or Alpine reactive binding`).
+
+**Fix:** Replaced the `onclick` with `hx-get="/v2/partials/vendors/{{ vendor_id }}/tasks"` +
+`hx-target="#vendor-tasks-{{ vendor_id }}"` + `hx-swap="outerHTML"`. Matches the
+edit form cancel button exactly (same endpoint, same target).
+
+### File changed
+- `app/templates/htmx/partials/vendors/tabs/_vendor_task_form.html` — Cancel button
+
+### Test run
+```
+TESTING=1 PYTHONPATH=$(pwd) pytest tests/test_vendor_tasks.py tests/test_static_analysis.py -p no:cacheprovider -q
+38 passed, 18 warnings in 10.54s
+```
+Ruff: All checks passed.
+
+### Commit
+`a473584c` — fix: replace innerHTML cancel with htmx-native hx-get in vendor task add form
+
+---
+
 ## Summary (15 lines)
 
 - **Status:** DONE

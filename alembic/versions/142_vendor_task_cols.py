@@ -81,6 +81,16 @@ def downgrade() -> None:
     # Drop the extended CHECK constraint first.
     op.drop_constraint("ck_task_has_parent", "requisition_tasks", type_="check")
 
+    # Purge rows that only have vendor columns set — they would violate the 3-way CHECK
+    # that the downgrade restores (requisition_id IS NOT NULL OR company_id IS NOT NULL
+    # OR site_contact_id IS NOT NULL).
+    op.execute(
+        sa.text(
+            "DELETE FROM requisition_tasks"
+            " WHERE requisition_id IS NULL AND company_id IS NULL AND site_contact_id IS NULL"
+        )
+    )
+
     # Drop vendor_contact_id index, FK, and column.
     op.drop_index("ix_rt_vendor_contact_status", table_name="requisition_tasks")
     op.drop_constraint("fk_rt_vendor_contact", "requisition_tasks", type_="foreignkey")
