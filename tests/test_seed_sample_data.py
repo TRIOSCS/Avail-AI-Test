@@ -16,6 +16,7 @@ Depends on: tests.conftest fixtures, app.management.seed_sample_data, ORM models
 
 from __future__ import annotations
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.management import seed_sample_data as sds
@@ -130,6 +131,27 @@ def test_material_card_uses_f1_ladder(db_session: Session) -> None:
     assert mc_bare.category is None  # legacy floor; record_spec returned False (no category)
 
 
+def test_material_card_structured_specs_persist(db_session: Session) -> None:
+    """mc_mcu (2 specs) and mc_conn (1 spec) actually persist through record_spec.
+
+    Guards the §8 coverage claim: the seeder self-seeds commodity_spec_schemas and uses
+    enum-VALID values ("Cortex-M3", "SOIC-8" — not "ARM Cortex-M3"/"SOIC16"), so the
+    dossier specs panel is non-empty. Without both fixes record_spec returns False and
+    specs_structured stays None — this asserts it cannot silently regress.
+    """
+    sds.seed(db_session)
+
+    mc_mcu = db_session.query(MaterialCard).filter_by(normalized_mpn="avsamplestm32f103rb").one()
+    assert mc_mcu.specs_structured, "mc_mcu structured specs must not be empty"
+    assert set(mc_mcu.specs_structured) >= {"package", "core"}
+    assert mc_mcu.specs_structured["package"]["value"] == "LQFP48"
+    assert mc_mcu.specs_structured["core"]["value"] == "Cortex-M3"
+
+    mc_conn = db_session.query(MaterialCard).filter_by(normalized_mpn="avsamplemax3232").one()
+    assert mc_conn.specs_structured, "mc_conn structured specs must not be empty"
+    assert mc_conn.specs_structured["package"]["value"] == "SOIC-8"
+
+
 def test_offer_qualification_and_buy_plan_links(db_session: Session) -> None:
     """Offers get qualification stamped; the active buy plan carries an AI flag."""
     sds.seed(db_session)
@@ -198,6 +220,27 @@ def test_wipe_removes_sample_rows_only(db_session: Session) -> None:
     assert db_session.get(User, real_user.id) is not None
     assert db_session.get(Company, real_company.id) is not None
     assert db_session.get(MaterialCard, real_card.id) is not None
+
+
+def test_wipe_succeeds_with_fk_enforcement(db_session: Session) -> None:
+    """Wipe() of a fully-seeded DB succeeds under SQLite FK enforcement.
+
+    The conftest engine sets ``PRAGMA foreign_keys=ON``, so this proves the
+    hand-ordered deletion cascade satisfies the four ``ondelete=RESTRICT`` FKs on the
+    sample Users (ExcessList.owner_id, ExcessOffer.submitted_by, CustomerBid.owner_id,
+    ExcessOutreach.submitted_by). A reorder that deletes Users before a RESTRICT child
+    would raise IntegrityError here instead of silently passing on an FK-off engine.
+    """
+    # Assert FK enforcement is actually active for this connection — otherwise this
+    # test would be a no-op guarantee (sqlite-masks-postgres trap).
+    assert db_session.execute(text("PRAGMA foreign_keys")).scalar() == 1
+
+    sds.seed(db_session)
+    deleted = sds.wipe(db_session)  # must not raise under RESTRICT FK enforcement
+
+    assert sum(deleted.values()) > 0
+    # Every sample User is gone — proves the RESTRICT children were deleted first.
+    assert db_session.query(User).filter(User.email.like("%avsample@avsample.test")).count() == 0
 
 
 def test_wipe_on_empty_db_is_noop(db_session: Session) -> None:
