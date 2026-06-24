@@ -224,6 +224,7 @@ class CustomerSite(Base):
 
     notes = Column(Text)
     is_active = Column(Boolean, default=True, index=True)
+    do_not_contact = Column(Boolean, nullable=False, default=False, server_default="false")
 
     # v2.10: Prospecting pool fields
     last_activity_at = Column(UTCDateTime)

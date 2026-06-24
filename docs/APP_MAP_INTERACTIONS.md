@@ -4177,10 +4177,14 @@ Three inflows that feed idle CRM accounts into the prospecting pool.
 
 ## CRM Rubric Batch A — 2026-06-24
 
-### Account deactivate / reactivate
-- `POST /v2/partials/customers/{id}/deactivate` — sets `Company.is_active=False`; gate: `can_manage_account_team`; re-renders company detail partial with archived banner
-- `POST /v2/partials/customers/{id}/reactivate` — sets `Company.is_active=True`; same gate; archived banner disappears
-- Template: `detail.html` shows amber "Account archived" banner + Reactivate button when `not company.is_active`; kebab menu shows "Archive account" when `company.is_active` (both gated on `can_manage_team`)
+### Account Archive (DNC) / reactivate (migration 148)
+- `POST /v2/partials/customers/{id}/deactivate` — Archive (DNC): sets `is_active=False`, clears `account_owner_id=None`, stamps `ownership_cleared_at`, stores optional `disposition_reason` from form; gate: `can_manage_account_team`; re-renders company detail partial with rose "Archived — Do Not Call" banner
+- `POST /v2/partials/customers/{id}/reactivate` — sets `is_active=True`; gate: `is_manager_or_admin` (STRICTER than deactivate — owner cannot reactivate own account); banner disappears
+- `GET /v2/partials/customers/archived` — lists all archived (`is_active=False`) companies; gate: `require_user`; shows DNC badge + reason; Reactivate button gated on `is_manager_or_admin` (template: `archived_list.html`)
+- `POST /v2/partials/customers/{company_id}/sites/{site_id}/mark-dnc` — toggle `CustomerSite.do_not_contact`; gate: `can_manage_account`; returns updated `site_card.html` partial; DNC sites excluded from `staleness=needs_call` call-list (when company has active sites and ALL are DNC)
+- Template `detail.html`: rose "Archived — Do Not Call" banner (replaces amber); Reactivate button gated on `user.role in ('manager','admin')` (not `can_manage_team`); kebab "Archive (Do Not Call)" with updated confirm text
+- Template `site_card.html`: "Mark DNC" / "Clear DNC" toggle replaces deleted "Delete Site" action; DNC site shows `opacity-75 border-rose-200` + strikethrough name + DNC badge; `do_not_contact` field on `CustomerSite` (migration 148)
+- Name search: `cdm_list_ctx` also queries `is_active=False` companies when `search` is non-empty; `archived_search_results` in template context shows them with "Archived" badge in account list
 
 ### CRM CSV export
 - `GET /v2/customers/export.csv` — StreamingResponse, companies visible to the requesting user; managers/admins see all, reps see owned only (mirrors `cdm_company_query`)

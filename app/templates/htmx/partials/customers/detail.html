@@ -27,9 +27,14 @@
 
   {# ── Archived account banner — shown when company.is_active is False ── #}
   {% if not company.is_active %}
-  <div class="flex items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
-    <span><strong>Account archived.</strong> This account is no longer active and does not appear in the active list.</span>
-    {% if can_manage_team %}
+  <div class="flex items-center justify-between gap-3 rounded-lg border border-rose-300 bg-rose-50 px-4 py-2.5 text-sm text-rose-800">
+    <div class="min-w-0">
+      <span><strong>Archived — Do Not Call.</strong> This account is unassigned and hidden from all active lists.</span>
+      {% if company.disposition_reason %}
+      <span class="ml-2 text-rose-600">Reason: {{ company.disposition_reason }}</span>
+      {% endif %}
+    </div>
+    {% if user.role in ('manager', 'admin') %}
     <button type="button"
             hx-post="/v2/partials/customers/{{ company.id }}/reactivate"
             hx-target="#cdm-detail"
@@ -201,10 +206,10 @@
                     hx-post="/v2/partials/customers/{{ company.id }}/deactivate"
                     hx-target="#cdm-detail"
                     hx-swap="innerHTML"
-                    hx-confirm="Archive this account? It will be removed from the active list."
+                    hx-confirm="Archive (Do Not Call)? This will unassign the account and hide it from all active lists. Are you sure?"
                     @click.stop="open = false"
                     role="menuitem"
-                    class="w-full text-left px-3 py-1.5 text-rose-600 hover:bg-rose-50">Archive account</button>
+                    class="w-full text-left px-3 py-1.5 text-rose-600 hover:bg-rose-50">Archive (Do Not Call)</button>
               {% endif %}
             {% endif %}
           </div>

@@ -101,16 +101,17 @@ class TestDeactivateCompany:
 
 
 class TestReactivateCompany:
-    def test_owner_can_reactivate(self, db_session: Session, sales_user: User, owned_company: Company):
-        """Account owner can reactivate an archived account."""
+    def test_owner_cannot_reactivate(self, db_session: Session, sales_user: User, owned_company: Company):
+        """Account owner (non-manager) cannot reactivate — only manager/admin may
+        (archive-DNC policy)."""
         owned_company.is_active = False
         db_session.commit()
 
         c = _make_client_for_user(db_session, sales_user)
         resp = c.post(f"/v2/partials/customers/{owned_company.id}/reactivate")
-        assert resp.status_code == 200
+        assert resp.status_code == 403
         db_session.expire(owned_company)
-        assert owned_company.is_active is True
+        assert owned_company.is_active is False
 
     def test_manager_can_reactivate(self, db_session: Session, manager_user: User, unowned_company: Company):
         """Manager can reactivate any archived account."""
