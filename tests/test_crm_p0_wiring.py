@@ -441,3 +441,221 @@ class TestAccountAddNoteRoute:
         assert resp.status_code == 200
         # The activity tab template has a distinctive 'space-y-4' container
         assert b"space-y-4" in resp.content or b"activity" in resp.content.lower()
+
+
+# ---------------------------------------------------------------------------
+# Fix 1 — due_at clearable: empty due_at field clears stored due_at
+# ---------------------------------------------------------------------------
+
+
+class TestDueAtClearable:
+    def test_empty_due_at_clears_existing_due_at(
+        self,
+        client,
+        db_session: Session,
+        owned_company: Company,
+        test_user: User,
+    ):
+        """Posting the edit form with an empty due_at field must clear a previously set
+        due_at."""
+        from datetime import timezone
+
+        from app.services.task_service import create_company_task
+
+        task = create_company_task(
+            db_session,
+            company_id=owned_company.id,
+            title="Has a due date",
+            created_by=test_user.id,
+            assigned_to_id=test_user.id,
+            due_at=datetime(2030, 6, 1, tzinfo=timezone.utc),
+        )
+        assert task.due_at is not None
+
+        resp = client.post(
+            f"/v2/partials/tasks/{task.id}/edit",
+            data={"title": "Has a due date", "due_at": ""},
+        )
+        assert resp.status_code == 200
+        db_session.expire_all()
+        updated = db_session.get(RequisitionTask, task.id)
+        assert updated.due_at is None, "Empty due_at field must clear the stored due_at"
+
+
+# ---------------------------------------------------------------------------
+# Fix 2 — Contact-task cancel route and edit-form company_id correctness
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def contact_with_task(db_session: Session, owned_company: Company, test_user: User):
+    """A SiteContact under owned_company with one open task."""
+    from app.models.crm import CustomerSite, SiteContact
+    from app.services.task_service import create_contact_task
+
+    site = CustomerSite(company_id=owned_company.id, site_name="HQ")
+    db_session.add(site)
+    db_session.flush()
+
+    contact = SiteContact(
+        customer_site_id=site.id,
+        full_name="Jane Doe",
+        first_name="Jane",
+        last_name="Doe",
+        email="jane@example.com",
+    )
+    db_session.add(contact)
+    db_session.flush()
+
+    task = create_contact_task(
+        db_session,
+        site_contact_id=contact.id,
+        title="Contact task",
+        created_by=test_user.id,
+        assigned_to_id=test_user.id,
+    )
+    db_session.commit()
+    db_session.refresh(site)
+    db_session.refresh(contact)
+    db_session.refresh(task)
+    return {"site": site, "contact": contact, "task": task}
+
+
+class TestContactTaskCancelRoute:
+    def test_contact_tasks_refresh_route_exists(
+        self,
+        client,
+        owned_company: Company,
+        contact_with_task,
+    ):
+        """GET /v2/partials/customers/{company_id}/contacts/{contact_id}/tasks → 200."""
+        contact = contact_with_task["contact"]
+        resp = client.get(f"/v2/partials/customers/{owned_company.id}/contacts/{contact.id}/tasks")
+        assert resp.status_code == 200
+
+    def test_contact_tasks_refresh_returns_contact_task_list(
+        self,
+        client,
+        owned_company: Company,
+        contact_with_task,
+    ):
+        """The contact-tasks refresh partial contains the contact-tasks container."""
+        contact = contact_with_task["contact"]
+        resp = client.get(f"/v2/partials/customers/{owned_company.id}/contacts/{contact.id}/tasks")
+        assert resp.status_code == 200
+        assert b"contact-tasks-" in resp.content
+
+    def test_contact_task_edit_form_has_real_company_id(
+        self,
+        client,
+        owned_company: Company,
+        contact_with_task,
+    ):
+        """The edit-form for a contact-scoped task must embed the real company_id, not
+        0."""
+        task = contact_with_task["task"]
+        resp = client.get(f"/v2/partials/tasks/{task.id}/edit-form")
+        assert resp.status_code == 200
+        # The cancel button URL must NOT contain /customers/0/
+        assert b"/customers/0/" not in resp.content
+        # Must contain the real company_id
+        assert str(owned_company.id).encode() in resp.content
+
+
+# ---------------------------------------------------------------------------
+# Fix 3 — CRM-task scope guard: requisition-only task → 400
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def requisition_task(db_session: Session, test_user: User):
+    """A task scoped only to a requisition (not a CRM task)."""
+    from app.constants import TaskStatus
+    from app.models.sourcing import Requisition
+
+    req = Requisition(
+        name="Test Req",
+        status="active",
+        created_by=test_user.id,
+    )
+    db_session.add(req)
+    db_session.flush()
+
+    task = RequisitionTask(
+        requisition_id=req.id,
+        title="Req-scoped task",
+        task_type="general",
+        status=TaskStatus.TODO,
+        source="manual",
+        created_by=test_user.id,
+    )
+    db_session.add(task)
+    db_session.commit()
+    db_session.refresh(task)
+    return task
+
+
+class TestCrmTaskScopeGuard:
+    def test_delete_requisition_task_returns_400(
+        self,
+        client,
+        requisition_task: RequisitionTask,
+    ):
+        """DELETE on a requisition-only task via the CRM route must return 400."""
+        resp = client.delete(f"/v2/partials/tasks/{requisition_task.id}")
+        assert resp.status_code == 400
+
+    def test_get_edit_form_requisition_task_returns_400(
+        self,
+        client,
+        requisition_task: RequisitionTask,
+    ):
+        """GET edit-form on a requisition-only task via the CRM route must return
+        400."""
+        resp = client.get(f"/v2/partials/tasks/{requisition_task.id}/edit-form")
+        assert resp.status_code == 400
+
+    def test_post_edit_requisition_task_returns_400(
+        self,
+        client,
+        requisition_task: RequisitionTask,
+    ):
+        """POST edit on a requisition-only task via the CRM route must return 400."""
+        resp = client.post(
+            f"/v2/partials/tasks/{requisition_task.id}/edit",
+            data={"title": "New title"},
+        )
+        assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Fix 4 — Add-note form targets explicit activity-tab id
+# ---------------------------------------------------------------------------
+
+
+class TestAddNoteExplicitTarget:
+    def test_add_note_form_has_explicit_target_id(
+        self,
+        client,
+        owned_company: Company,
+    ):
+        """The add-note form must use an explicit hx-target id, not 'closest
+        .space-y-4'."""
+        resp = client.get(f"/v2/partials/customers/{owned_company.id}/activity/add-note-form")
+        assert resp.status_code == 200
+        assert b"closest .space-y-4" not in resp.content
+
+    def test_post_add_note_swaps_into_activity_tab_container(
+        self,
+        client,
+        owned_company: Company,
+    ):
+        """POST add-note response must contain the activity-tab container id."""
+        resp = client.post(
+            f"/v2/partials/customers/{owned_company.id}/activity/add-note",
+            data={"notes": "Explicit target check"},
+        )
+        assert resp.status_code == 200
+        # The activity tab container id should be present in the re-rendered content
+        expected_id = f"activity-tab-{owned_company.id}".encode()
+        assert expected_id in resp.content

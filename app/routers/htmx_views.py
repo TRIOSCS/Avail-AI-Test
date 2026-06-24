@@ -14446,6 +14446,37 @@ async def create_contact_task_endpoint(
     return template_response("htmx/partials/customers/_contact_tasks.html", ctx)
 
 
+@router.get(
+    "/v2/partials/customers/{company_id}/contacts/{contact_id}/tasks",
+    response_class=HTMLResponse,
+)
+async def contact_tasks_partial(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render the open-tasks list for a contact (used as cancel target in edit form)."""
+    from app.services.task_service import get_open_tasks_for_contact
+
+    contact = (
+        db.query(SiteContact)
+        .join(CustomerSite, SiteContact.customer_site_id == CustomerSite.id)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+    tasks = get_open_tasks_for_contact(db, contact_id)
+    ctx = _base_ctx(request, user, "customers")
+    ctx["contact"] = contact
+    ctx["contact_tasks"] = tasks
+    ctx["company_id"] = company_id
+    ctx["site_id"] = contact.customer_site_id
+    return template_response("htmx/partials/customers/_contact_tasks.html", ctx)
+
+
 @router.post("/v2/partials/tasks/{task_id}/complete", response_class=HTMLResponse)
 async def complete_task_endpoint(
     request: Request,
@@ -14516,6 +14547,8 @@ async def delete_task_endpoint(
     task = db.get(RequisitionTask, task_id)
     if not task:
         raise HTTPException(404, "Task not found")
+    if not task.company_id and not task.site_contact_id:
+        raise HTTPException(400, "Not a CRM task")
     from app.services.task_service import _is_crm_task_authorized
 
     if not _is_crm_task_authorized(db, task, user.id, is_admin=(user.role == UserRole.ADMIN)):
@@ -14554,13 +14587,22 @@ async def task_edit_form(
     task = db.get(RequisitionTask, task_id)
     if not task:
         raise HTTPException(404, "Task not found")
+    if not task.company_id and not task.site_contact_id:
+        raise HTTPException(400, "Not a CRM task")
     from app.services.task_service import _is_crm_task_authorized
 
     if not _is_crm_task_authorized(db, task, user.id, is_admin=(user.role == UserRole.ADMIN)):
         raise HTTPException(403, "You are not allowed to edit this task")
+    # Resolve the real company_id: account task has it directly; for a contact task
+    # we walk contact → site → company so the cancel button has a valid URL.
+    real_company_id = task.company_id
+    if not real_company_id and task.site_contact_id:
+        contact = db.get(SiteContact, task.site_contact_id)
+        if contact and contact.customer_site:
+            real_company_id = contact.customer_site.company_id
     ctx = _base_ctx(request, user, "customers")
     ctx["task"] = task
-    ctx["company_id"] = task.company_id or 0
+    ctx["company_id"] = real_company_id or 0
     return template_response("htmx/partials/customers/_task_edit_form.html", ctx)
 
 
@@ -14584,16 +14626,18 @@ async def edit_task_endpoint(
         _is_crm_task_authorized,
         get_open_tasks_for_company,
         get_open_tasks_for_contact,
-        update_task,
     )
 
     task = db.get(RequisitionTask, task_id)
     if not task:
         raise HTTPException(404, "Task not found")
+    if not task.company_id and not task.site_contact_id:
+        raise HTTPException(400, "Not a CRM task")
     if not _is_crm_task_authorized(db, task, user.id, is_admin=(user.role == UserRole.ADMIN)):
         raise HTTPException(403, "You are not allowed to edit this task")
     if not title.strip():
         return HTMLResponse('<p class="text-xs text-rose-600">Title is required.</p>')
+    # Parse due_at: empty string → explicit clear (None); non-empty → parse.
     due_dt = None
     if due_at.strip():
         try:
@@ -14601,7 +14645,12 @@ async def edit_task_endpoint(
             due_dt = datetime.combine(d, datetime.min.time()).replace(tzinfo=_tz.utc)
         except ValueError:
             return HTMLResponse('<p class="text-xs text-rose-600">Invalid date format.</p>')
-    update_task(db, task_id, title=title.strip(), due_at=due_dt)
+    # Set both controlled fields directly so an empty due_at clears the existing value.
+    # (update_task skips None values to avoid mass-assignment; bypass that for explicit edits.)
+    task.title = title.strip()
+    task.due_at = due_dt
+    db.commit()
+    db.refresh(task)
     logger.info("Task {} edited by user {}", task_id, user.id)
     # Re-render the parent container
     task = db.get(RequisitionTask, task_id)
