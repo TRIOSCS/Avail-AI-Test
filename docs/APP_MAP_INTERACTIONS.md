@@ -1213,6 +1213,9 @@ buyplan_workflow.py (state machine)
     |  Ops SO track:       so_status: pending --verify_so(ops)--> approved / rejected
     |  Completion gate:    all lines terminal AND so_status=approved. verify_so/verify_po require a
     |                      VerificationGroupMember (manage via Settings > Ops Group; seeded from ADMIN_EMAILS).
+    |                      admin/buy_plan_ops.toggle_ops_member guards the toggle: it refuses to
+    |                      deactivate the LAST active member or to let the acting admin deactivate
+    |                      themselves (both -> 400 JSON, auto-toasted); success fires a showToast.
     |
     +---> buyplan_notifications.py (submit/approve/reject/SO/PO/completed/cancelled + buyer/ops nudges)
     |       +---> teams_notifications.py --> Teams webhook / DM
