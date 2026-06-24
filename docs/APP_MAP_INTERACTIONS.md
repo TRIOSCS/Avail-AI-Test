@@ -2020,8 +2020,19 @@ Mark-seen (per row, background, no spinner):
   `InboundCustomerSource` (CRM — new inbound comms on a Customer account the user owns).
 - **ACTION** — clears on *act*. The count derives PURELY from work-state
   (`BuyplanActionSource`: the user's open buy-plan steps — buyer PO line / manager
-  approval / ops SO-verify). `alert_seen` does NOT change the count — it only gates
-  the cosmetic one-time pulse; the row keeps its rail until the underlying work is done.
+  approval / ops SO-verify; `TasksActionSource`: open tasks assigned to me, registered
+  under the `my-day` tab — wires `task_service.get_my_tasks_summary`). `alert_seen` does
+  NOT change the count — it only gates the cosmetic one-time pulse; the row keeps its rail
+  until the underlying work is done.
+
+**Tasks queue + core-basic gaps (Phase 3).** `GET /v2/partials/tasks` (gated
+`require_access(AccessKey.MY_DAY)`) is a filterable queue of tasks assigned to me
+(`status`/`priority`/`due`; reuses `get_my_tasks`, filters priority/due in-route) rendered
+under the My-Day nav key; its filter bar carries an EXPLICIT `hx-target="#tasks-results"`
+(never inherits `#main-content`). The My-Day nav badge is the `TasksActionSource` above.
+Bulk "Assign owner" on the account list now uses a name+role `<select>` (`cdm_list_ctx(include_users=…)`,
+manager/admin only) instead of a raw User-ID box. All clickable `<tr hx-get>` list rows
+are keyboard-accessible (`role=button` + `tabindex=0` + `keyup[Enter]` + `focus:ring-2`).
 
 `recency_floor()` keeps FYI badges from lighting up for the pre-launch backlog:
 an item only counts if newer than `max(now - alert_recency_days, ALERTS_EPOCH)`.
