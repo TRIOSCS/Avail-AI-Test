@@ -160,10 +160,16 @@ def _seed_users(db: Session, counts: _Counts) -> dict[str, User]:
 
 
 # Sample-user roles redirected to the --owner user so the sample deals land in
-# THAT user's default "mine" lenses (requisition created_by, buy-plan-line
-# buyer_id, buy-plan submitted_by_id, excess owner_id). u_manager is intentionally
-# NOT redirected — it stays the distinct approver/verifier so the approve/verify
-# workflow still shows a second actor.
+# THAT user's own-work lenses, keyed on the fields each lens filters:
+#   - buy-plan-line buyer_id   → buy-plans "orders" (buyer_line_queue)
+#   - buy-plan submitted_by_id → buy-plans "deals" (deals_board scope=mine)
+#   - excess owner_id          → resell "Open to Me"
+#   - requisition created_by   → requisitions owner-filter dropdown + the
+#                                auto-"my reqs" filter that fires only for SALES-role
+#                                users (admins/buyers see all reqs by default, so the
+#                                sample reqs are visible to an admin owner regardless).
+# u_manager is intentionally NOT redirected — it stays the distinct approver/verifier
+# so the approve/verify workflow still shows a second actor.
 _OWNER_REDIRECT_ROLES = ("u_seeder", "u_sales", "u_buyer1", "u_buyer2", "u_trader")
 
 
@@ -894,7 +900,19 @@ def _seed_wf_c(
         db, counts, q_sent, offer=None, mpn="AVSAMPLE-CUSTOM-001", qty=10, cost=Decimal(500), sell=Decimal(600)
     )
 
-    bp_draft = _mk_buy_plan(db, counts, q_sent, req2, BuyPlanStatus.DRAFT, SOVerificationStatus.PENDING, u, extra={})
+    # submitted_by_id is set even on the DRAFT so it appears in its owner's "deals"
+    # board (deals_board scope=mine filters BuyPlan.submitted_by_id == user); u_seeder
+    # is redirected to the --owner user when that option is used.
+    bp_draft = _mk_buy_plan(
+        db,
+        counts,
+        q_sent,
+        req2,
+        BuyPlanStatus.DRAFT,
+        SOVerificationStatus.PENDING,
+        u,
+        extra={"submitted_by_id": u["u_seeder"].id},
+    )
     if bp_draft is not None:
         _mk_buy_plan_line(
             db,
@@ -1548,8 +1566,10 @@ def seed(db: Session, owner_email: str | None = None) -> _Counts:
 
     When *owner_email* is given, the sample deals (requisitions, quotes, buy plans
     + their lines, excess lists) are assigned to that user instead of the sample
-    actor users, so they populate THAT user's default "mine"/"orders"/"deals"
-    lenses (not just the admin "supervise" lens). See ``_resolve_owner_user``.
+    actor users, so they surface in that user's own-work lenses (buy-plans "orders"
+    + "deals", resell "Open to Me", and the requisitions owner-filter / SALES
+    auto-filter) rather than only the admin "supervise" lens. See
+    ``_resolve_owner_user`` and ``_OWNER_REDIRECT_ROLES``.
 
     Returns per-model counts.
     """
