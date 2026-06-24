@@ -5537,6 +5537,499 @@ async def customer_contacts_partial(
     return template_response("htmx/partials/customers/contacts_list.html", ctx)
 
 
+# ── Bulk actions (static — must precede /{company_id}) ────────────────────
+# Every bulk action FILTERS selected ids to only those the caller can act on.
+# Sales/trader reps may only act on companies where can_manage_account() is True.
+# Manager/admin can act on all. "assign-owner" is MANAGER/ADMIN ONLY.
+# Non-manageable companies are silently skipped; the summary reports both counts.
+
+_VALID_BULK_COMPANY_ACTIONS = frozenset({"deactivate", "send-to-prospecting", "assign-owner"})
+_BULK_MAX_IDS = 200
+
+
+@router.post("/v2/partials/customers/bulk/{action}", response_class=HTMLResponse)
+async def customers_bulk_action(
+    request: Request,
+    action: str,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Apply a bulk action to selected companies.
+
+    Auth: deactivate + send-to-prospecting gate per-company via can_manage_account;
+    assign-owner is MANAGER/ADMIN ONLY (403 for reps).
+    Selected ids that the caller cannot act on are silently skipped; the returned
+    partial includes a summary of applied vs skipped counts.
+
+    Actions:
+    - deactivate: set is_active=False
+    - send-to-prospecting: clear ownership (ownership_cleared_at + account_owner_id=NULL)
+    - assign-owner: set account_owner_id to owner_id form param (MANAGER/ADMIN only)
+    """
+    from ..dependencies import can_manage_account, is_manager_or_admin
+
+    if action not in _VALID_BULK_COMPANY_ACTIONS:
+        raise HTTPException(400, f"Invalid action '{action}'. Allowed: {sorted(_VALID_BULK_COMPANY_ACTIONS)}")
+
+    # assign-owner is manager/admin only — 403 before reading IDs to avoid timing oracle
+    if action == "assign-owner" and not is_manager_or_admin(user):
+        raise HTTPException(403, "assign-owner requires MANAGER or ADMIN role")
+
+    form = await request.form()
+    ids_str = form.get("ids", "") or ""
+    try:
+        ids = [int(x.strip()) for x in ids_str.split(",") if x.strip().isdigit()]
+    except ValueError:
+        raise HTTPException(400, "Invalid ID list")
+
+    if len(ids) > _BULK_MAX_IDS:
+        raise HTTPException(400, f"Maximum {_BULK_MAX_IDS} companies per bulk action")
+
+    if not ids:
+        # No-op: return refreshed list
+        ctx = {"request": request, "user": user}
+        ctx.update(
+            _cdm_list_ctx(
+                db,
+                user,
+                search="",
+                staleness="",
+                account_type="",
+                my_only=False,
+                sort="oldest",
+                segment=0,
+                disposition=None,
+                has_open_reqs=False,
+                limit=50,
+                offset=0,
+            )
+        )
+        return template_response("htmx/partials/customers/_account_list.html", ctx)
+
+    companies = db.query(Company).filter(Company.id.in_(ids)).all()
+
+    # Filter to only companies this user can act on
+    if is_manager_or_admin(user):
+        authorised = companies
+        skipped = 0
+    else:
+        authorised = [c for c in companies if can_manage_account(user, c, db)]
+        skipped = len(companies) - len(authorised)
+
+    applied = 0
+    if action == "deactivate":
+        for co in authorised:
+            co.is_active = False
+            applied += 1
+    elif action == "send-to-prospecting":
+        for co in authorised:
+            co.account_owner_id = None
+            co.ownership_cleared_at = datetime.now(timezone.utc)
+            applied += 1
+    elif action == "assign-owner":
+        owner_id_raw = form.get("owner_id")
+        if not owner_id_raw:
+            raise HTTPException(400, "owner_id is required for assign-owner")
+        try:
+            new_owner_id = int(owner_id_raw)
+        except (TypeError, ValueError):
+            raise HTTPException(400, "owner_id must be an integer")
+        for co in authorised:
+            co.account_owner_id = new_owner_id
+            applied += 1
+
+    if applied:
+        db.commit()
+        logger.info(
+            "Bulk {} applied to {} companies ({} skipped) by {}",
+            action,
+            applied,
+            skipped,
+            user.email,
+        )
+
+    action_label = {
+        "deactivate": "Deactivated",
+        "send-to-prospecting": "Sent to prospecting",
+        "assign-owner": "Reassigned",
+    }.get(action, action.title())
+
+    if skipped:
+        msg = f"{action_label} {applied} of {applied + skipped} ({skipped} skipped — not yours)"
+    else:
+        msg = f"{action_label} {applied} account{'s' if applied != 1 else ''}"
+
+    ctx = {"request": request, "user": user}
+    ctx.update(
+        _cdm_list_ctx(
+            db,
+            user,
+            search="",
+            staleness="",
+            account_type="",
+            my_only=False,
+            sort="oldest",
+            segment=0,
+            disposition=None,
+            has_open_reqs=False,
+            limit=50,
+            offset=0,
+        )
+    )
+    resp = template_response("htmx/partials/customers/_account_list.html", ctx)
+    resp.headers["HX-Trigger"] = json.dumps(
+        {
+            "showToast": {"message": msg},
+            "clearSelection": True,
+        }
+    )
+    return resp
+
+
+# ── Company / contact CSV import: preview + confirm ───────────────────────
+# Auth: require_user (same gate as all CDM mutations).
+# Preview: parse CSV → return table of rows with per-row status flags
+#          (valid / duplicate / invalid).
+# Confirm: create Company rows for non-duplicate valid rows; assign importer
+#          as account_owner_id.
+# Contact preview: parse CSV → flag emails that already exist in site_contacts.
+
+_IMPORT_MAX_ROWS = 1000
+
+
+@router.post("/v2/partials/customers/import/preview", response_class=HTMLResponse)
+async def import_companies_preview(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Parse company CSV and return a preview table (no writes).
+
+    Expected columns: name (required), website, account_type.
+    Flags: duplicate (normalized_name collision), invalid (missing name).
+    """
+    import csv
+    import io as _io
+
+    from ..vendor_utils import normalize_vendor_name
+
+    form = await request.form()
+    file = form.get("file")
+    if not file:
+        raise HTTPException(400, "A CSV file is required")
+
+    try:
+        content_bytes = await file.read() if hasattr(file, "read") else file.file.read()
+        text = content_bytes.decode("utf-8", errors="replace")
+        reader = csv.DictReader(_io.StringIO(text))
+        raw_rows = list(reader)
+    except Exception:
+        return HTMLResponse(
+            '<div class="text-rose-700 text-sm p-3 bg-rose-50 rounded border border-rose-200">'
+            "Could not parse CSV — please check the file format.</div>"
+        )
+
+    if len(raw_rows) > _IMPORT_MAX_ROWS:
+        raise HTTPException(400, f"CSV exceeds {_IMPORT_MAX_ROWS} row limit")
+
+    # Build set of existing normalized names for dedup check
+    existing_norm_names = {
+        row[0] for row in db.query(Company.normalized_name).filter(Company.normalized_name.isnot(None)).all()
+    }
+
+    rows = []
+    for raw in raw_rows:
+        name = (raw.get("name") or raw.get("Name") or "").strip()
+        website = (raw.get("website") or raw.get("Website") or "").strip()
+        account_type = (raw.get("account_type") or raw.get("Account Type") or "").strip()
+        norm = normalize_vendor_name(name) if name else None
+
+        if not name:
+            status = "invalid"
+            status_label = "Missing name"
+        elif norm and norm in existing_norm_names:
+            status = "duplicate"
+            status_label = "Already exists"
+        else:
+            status = "valid"
+            status_label = "OK"
+
+        rows.append(
+            {
+                "name": name,
+                "website": website,
+                "account_type": account_type,
+                "status": status,
+                "status_label": status_label,
+            }
+        )
+
+    valid_count = sum(1 for r in rows if r["status"] == "valid")
+    dup_count = sum(1 for r in rows if r["status"] == "duplicate")
+    invalid_count = sum(1 for r in rows if r["status"] == "invalid")
+
+    import json as _json
+
+    rows_json = _json.dumps(
+        [
+            {"name": r["name"], "website": r["website"], "account_type": r["account_type"]}
+            for r in rows
+            if r["status"] == "valid"
+        ]
+    )
+
+    # Build preview table HTML inline (no new template required)
+    badge = lambda s, lbl: (  # noqa: E731
+        '<span class="px-1.5 py-0.5 rounded text-xs font-medium '
+        + (
+            "bg-emerald-100 text-emerald-700"
+            if s == "valid"
+            else "bg-amber-100 text-amber-700"
+            if s == "duplicate"
+            else "bg-rose-100 text-rose-700"
+        )
+        + f'">{lbl}</span>'
+    )
+
+    rows_html = "".join(
+        f"<tr><td class='px-2 py-1 text-sm text-gray-900'>{r['name'] or '<em class="text-gray-400">—</em>'}</td>"
+        f"<td class='px-2 py-1 text-sm text-gray-500'>{r['website'] or '—'}</td>"
+        f"<td class='px-2 py-1 text-sm text-gray-500'>{r['account_type'] or '—'}</td>"
+        f"<td class='px-2 py-1'>{badge(r['status'], r['status_label'])}</td></tr>"
+        for r in rows
+    )
+
+    html = (
+        f'<div id="import-preview" class="space-y-3">'
+        f'<div class="text-sm text-gray-700 flex gap-4">'
+        f'<span class="text-emerald-700 font-medium">{valid_count} to import</span>'
+        + (f'<span class="text-amber-700">{dup_count} duplicate</span>' if dup_count else "")
+        + (f'<span class="text-rose-700">{invalid_count} invalid</span>' if invalid_count else "")
+        + "</div>"
+        f'<div class="overflow-x-auto max-h-64 border border-gray-200 rounded">'
+        f'<table class="w-full text-left border-collapse">'
+        f'<thead class="sticky top-0 bg-gray-50 text-xs text-gray-500 uppercase">'
+        f'<tr><th class="px-2 py-1">Name</th><th class="px-2 py-1">Website</th>'
+        f'<th class="px-2 py-1">Type</th><th class="px-2 py-1">Status</th></tr>'
+        f'</thead><tbody class="divide-y divide-gray-100">{rows_html}</tbody></table></div>'
+    )
+
+    if valid_count:
+        html += (
+            f'<form hx-post="/v2/partials/customers/import/confirm"'
+            f' hx-target="#import-preview" hx-swap="outerHTML">'
+            f'<input type="hidden" name="rows_json" value=\'{rows_json}\'>'
+            f'<button type="submit" class="btn btn-primary text-sm px-4 py-1.5">'
+            f"Import {valid_count} compan{'y' if valid_count == 1 else 'ies'}</button>"
+            f"</form>"
+        )
+    else:
+        html += '<p class="text-sm text-gray-500">No valid rows to import.</p>'
+
+    html += "</div>"
+    return HTMLResponse(html)
+
+
+@router.post("/v2/partials/customers/import/confirm", response_class=HTMLResponse)
+async def import_companies_confirm(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Create Company rows from a confirmed import (validated rows_json payload).
+
+    Each row: {name, website?, account_type?}. Deduplicates by normalized_name.
+    Sets account_owner_id to the importing user.
+    """
+    import json as _json
+
+    from ..vendor_utils import normalize_vendor_name
+
+    form = await request.form()
+    rows_json_str = form.get("rows_json", "")
+    if not rows_json_str:
+        raise HTTPException(400, "rows_json is required")
+
+    try:
+        rows = _json.loads(rows_json_str)
+        if not isinstance(rows, list):
+            raise ValueError("Expected a list")
+    except (ValueError, TypeError):
+        raise HTTPException(400, "Invalid rows_json — must be a JSON array")
+
+    # Re-fetch existing normalized names to guard against race conditions
+    existing_norm = {
+        row[0] for row in db.query(Company.normalized_name).filter(Company.normalized_name.isnot(None)).all()
+    }
+
+    created = 0
+    skipped_dup = 0
+    skipped_invalid = 0
+    now = datetime.now(timezone.utc)
+
+    for row in rows:
+        name = str(row.get("name", "")).strip()
+        if not name:
+            skipped_invalid += 1
+            continue
+        norm = normalize_vendor_name(name)
+        if norm and norm in existing_norm:
+            skipped_dup += 1
+            continue
+
+        co = Company(
+            name=name,
+            website=str(row.get("website", "")).strip() or None,
+            account_type=str(row.get("account_type", "")).strip() or None,
+            account_owner_id=user.id,
+            is_active=True,
+            source="import",
+            created_at=now,
+        )
+        db.add(co)
+        if norm:
+            existing_norm.add(norm)  # prevent intra-batch duplicates
+        created += 1
+
+    if created:
+        db.commit()
+        logger.info("CSV import: {} companies created by {}", created, user.email)
+
+    parts = [f"Imported {created} compan{'y' if created == 1 else 'ies'}"]
+    if skipped_dup:
+        parts.append(f"{skipped_dup} duplicate{'s' if skipped_dup != 1 else ''} skipped")
+    if skipped_invalid:
+        parts.append(f"{skipped_invalid} invalid row{'s' if skipped_invalid != 1 else ''} skipped")
+    summary = "; ".join(parts)
+
+    html = f'<div class="bg-emerald-50 border border-emerald-200 rounded p-3 text-sm text-emerald-700">{summary}.</div>'
+    resp = HTMLResponse(html)
+    resp.headers["HX-Trigger"] = json.dumps({"showToast": {"message": summary}})
+    return resp
+
+
+# ── Contact CSV import: preview ────────────────────────────────────────────
+# Parses a CSV with columns: company_name, contact_name, email, phone, role.
+# Flags email duplicates (already in site_contacts).
+
+
+@router.post("/v2/partials/customers/import/contacts/preview", response_class=HTMLResponse)
+async def import_contacts_preview(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Parse contact CSV and return a preview table (no writes).
+
+    Expected columns: company_name (required), contact_name (required), email, phone, role.
+    Flags: duplicate (email collision in site_contacts), invalid (missing required fields).
+    """
+    import csv
+    import io as _io
+
+    from ..models.crm import SiteContact
+
+    form = await request.form()
+    file = form.get("file")
+    if not file:
+        raise HTTPException(400, "A CSV file is required")
+
+    try:
+        content_bytes = await file.read() if hasattr(file, "read") else file.file.read()
+        text = content_bytes.decode("utf-8", errors="replace")
+        reader = csv.DictReader(_io.StringIO(text))
+        raw_rows = list(reader)
+    except Exception:
+        return HTMLResponse(
+            '<div class="text-rose-700 text-sm p-3 bg-rose-50 rounded border border-rose-200">'
+            "Could not parse CSV — please check the file format.</div>"
+        )
+
+    if len(raw_rows) > _IMPORT_MAX_ROWS:
+        raise HTTPException(400, f"CSV exceeds {_IMPORT_MAX_ROWS} row limit")
+
+    # Build set of existing contact emails for duplicate check
+    existing_emails = {
+        row[0].lower()
+        for row in db.query(SiteContact.email).filter(SiteContact.email.isnot(None), SiteContact.email != "").all()
+    }
+
+    rows = []
+    for raw in raw_rows:
+        company_name = (raw.get("company_name") or "").strip()
+        contact_name = (raw.get("contact_name") or "").strip()
+        email = (raw.get("email") or "").strip().lower()
+        phone = (raw.get("phone") or "").strip()
+        role = (raw.get("role") or "").strip()
+
+        if not company_name or not contact_name:
+            status = "invalid"
+            status_label = "Missing required field"
+        elif email and email in existing_emails:
+            status = "duplicate"
+            status_label = "Email already exists"
+        else:
+            status = "valid"
+            status_label = "OK"
+
+        rows.append(
+            {
+                "company_name": company_name,
+                "contact_name": contact_name,
+                "email": email,
+                "phone": phone,
+                "role": role,
+                "status": status,
+                "status_label": status_label,
+            }
+        )
+
+    valid_count = sum(1 for r in rows if r["status"] == "valid")
+    dup_count = sum(1 for r in rows if r["status"] == "duplicate")
+    invalid_count = sum(1 for r in rows if r["status"] == "invalid")
+
+    badge = lambda s, lbl: (  # noqa: E731
+        '<span class="px-1.5 py-0.5 rounded text-xs font-medium '
+        + (
+            "bg-emerald-100 text-emerald-700"
+            if s == "valid"
+            else "bg-amber-100 text-amber-700"
+            if s == "duplicate"
+            else "bg-rose-100 text-rose-700"
+        )
+        + f'">{lbl}</span>'
+    )
+
+    rows_html = "".join(
+        f"<tr><td class='px-2 py-1 text-sm text-gray-900'>{r['company_name'] or '—'}</td>"
+        f"<td class='px-2 py-1 text-sm text-gray-900'>{r['contact_name'] or '—'}</td>"
+        f"<td class='px-2 py-1 text-sm text-gray-500'>{r['email'] or '—'}</td>"
+        f"<td class='px-2 py-1 text-sm text-gray-500'>{r['phone'] or '—'}</td>"
+        f"<td class='px-2 py-1 text-sm text-gray-500'>{r['role'] or '—'}</td>"
+        f"<td class='px-2 py-1'>{badge(r['status'], r['status_label'])}</td></tr>"
+        for r in rows
+    )
+
+    html = (
+        f'<div id="import-contacts-preview" class="space-y-3">'
+        f'<div class="text-sm text-gray-700 flex gap-4">'
+        f'<span class="text-emerald-700 font-medium">{valid_count} to import</span>'
+        + (f'<span class="text-amber-700">{dup_count} duplicate</span>' if dup_count else "")
+        + (f'<span class="text-rose-700">{invalid_count} invalid</span>' if invalid_count else "")
+        + "</div>"
+        f'<div class="overflow-x-auto max-h-64 border border-gray-200 rounded">'
+        f'<table class="w-full text-left border-collapse">'
+        f'<thead class="sticky top-0 bg-gray-50 text-xs text-gray-500 uppercase">'
+        f'<tr><th class="px-2 py-1">Company</th><th class="px-2 py-1">Name</th>'
+        f'<th class="px-2 py-1">Email</th><th class="px-2 py-1">Phone</th>'
+        f'<th class="px-2 py-1">Role</th><th class="px-2 py-1">Status</th></tr>'
+        f'</thead><tbody class="divide-y divide-gray-100">{rows_html}</tbody></table></div>'
+        f'<p class="text-xs text-gray-500">Contacts are linked to companies at confirm time.</p>'
+        f"</div>"
+    )
+    return HTMLResponse(html)
+
+
 # ── Sprint 4: Company CRUD (static routes — must precede {company_id}) ──
 
 

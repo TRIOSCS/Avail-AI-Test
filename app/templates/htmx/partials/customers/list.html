@@ -102,12 +102,64 @@
     <span class="htmx-indicator text-gray-400 text-xs">Loading...</span>
   </form>
 
-  {# Export + cross-company contacts links — below the filter bar, above the split workspace #}
-  <div class="flex justify-end gap-3 text-xs text-gray-600 mb-1">
+  {# Export + cross-company contacts links + Import — below the filter bar, above the split workspace #}
+  <div class="flex justify-end gap-3 text-xs text-gray-600 mb-1" x-data="{ importOpen: false }">
     <a hx-get="/v2/partials/contacts" hx-target="#main-content" hx-push-url="/v2/contacts"
        class="hover:text-brand-600 hover:underline cursor-pointer">All contacts</a>
     <a href="/v2/customers/export.csv" class="hover:text-brand-600 hover:underline">Export CSV</a>
     <a href="/v2/customers/contacts/export.csv" class="hover:text-brand-600 hover:underline">Export contacts</a>
+    {# Import modal trigger #}
+    <button type="button" @click="importOpen = true"
+            class="hover:text-brand-600 hover:underline cursor-pointer">Import CSV</button>
+    {# Import modal — upload → server previews → confirm creates rows #}
+    <div x-show="importOpen" x-cloak
+         class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+         @keydown.escape.window="importOpen = false">
+      <div class="bg-white rounded-xl shadow-xl w-full max-w-2xl mx-4 p-6 space-y-4"
+           @click.stop>
+        <div class="flex items-center justify-between">
+          <h3 class="text-base font-semibold text-gray-900">Import Companies / Contacts</h3>
+          <button type="button" @click="importOpen = false"
+                  class="text-gray-400 hover:text-gray-600 text-lg leading-none">&times;</button>
+        </div>
+        <div class="space-y-3">
+          <div>
+            <p class="text-sm font-medium text-gray-700 mb-1">Import Companies</p>
+            <p class="text-xs text-gray-500 mb-2">CSV columns: <code>name</code> (required), <code>website</code>, <code>account_type</code></p>
+            <form hx-post="/v2/partials/customers/import/preview"
+                  hx-target="#import-result"
+                  hx-swap="innerHTML"
+                  hx-encoding="multipart/form-data">
+              <div class="flex gap-2">
+                <input type="file" name="file" accept=".csv"
+                       class="text-xs text-gray-600 border border-gray-200 rounded px-2 py-1 flex-1">
+                <button type="submit" class="btn btn-primary btn-sm whitespace-nowrap">
+                  Preview
+                </button>
+              </div>
+            </form>
+          </div>
+          <div>
+            <p class="text-sm font-medium text-gray-700 mb-1">Import Contacts</p>
+            <p class="text-xs text-gray-500 mb-2">CSV columns: <code>company_name</code>, <code>contact_name</code> (required), <code>email</code>, <code>phone</code>, <code>role</code></p>
+            <form hx-post="/v2/partials/customers/import/contacts/preview"
+                  hx-target="#import-result"
+                  hx-swap="innerHTML"
+                  hx-encoding="multipart/form-data">
+              <div class="flex gap-2">
+                <input type="file" name="file" accept=".csv"
+                       class="text-xs text-gray-600 border border-gray-200 rounded px-2 py-1 flex-1">
+                <button type="submit" class="btn btn-secondary btn-sm whitespace-nowrap">
+                  Preview contacts
+                </button>
+              </div>
+            </form>
+          </div>
+          {# Preview / confirm result lands here #}
+          <div id="import-result"></div>
+        </div>
+      </div>
+    </div>
   </div>
 
   {# Error region — failed list refreshes / row loads land here instead of

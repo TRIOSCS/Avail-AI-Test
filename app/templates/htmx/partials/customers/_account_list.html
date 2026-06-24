@@ -1,22 +1,86 @@
-{# _account_list.html — CDM left-panel account list: rows + count + pagination.
+{# _account_list.html — CDM left-panel account list: rows + count + pagination + bulk bar.
    Each row loads the account detail into #cdm-detail and highlights via the
-   workspace-level Alpine selectedId.
+   workspace-level Alpine selectedId. Checkboxes enable bulk select for bulk actions.
    Receives: companies, total, limit, offset (filters come from #cdm-filters via hx-include).
    Called by: list.html (initial include) and companies_account_list_partial route (refresh).
    Depends on: workspace x-data (selectedId), brand palette, timeago filter.
+   Bulk actions: POST /v2/partials/customers/bulk/{action} with ids (comma-separated).
 #}
 {% from "htmx/partials/shared/_alert_macros.html" import alert_row_attrs %}
 
+{# Bulk select + action Alpine component (scoped to the list panel).
+   selectedIds: Object used as a Set — keys are company id strings.
+   clearSelection event: dispatched by HX-Trigger after a bulk apply completes. #}
+<div x-data="{
+  selectedIds: {},
+  get count() { return Object.keys(this.selectedIds).length },
+  get allSelected() { return {{ companies|length }} > 0 && Object.keys(this.selectedIds).length === {{ companies|length }} },
+  toggle(id) { if (this.selectedIds[id]) { delete this.selectedIds[id] } else { this.selectedIds[id] = true } },
+  toggleAll(checked) { if (checked) { {% for c in companies %}this.selectedIds['{{ c.id }}'] = true;{% endfor %} } else { this.selectedIds = {} } },
+  idsStr() { return Object.keys(this.selectedIds).join(',') },
+  clear() { this.selectedIds = {} }
+}" @clear-selection.window="clear()">
+
+{# ── Sticky header: count + bulk bar ───────────────────────────── #}
 {# data-offset/data-limit: read by the outreach logger's system-initiated list
    refresh (htmx_app.js) so logging a touch doesn't snap a paginated list back
    to page 1 — the filter form itself intentionally carries no offset field. #}
-<div class="sticky top-0 z-10 flex items-center justify-between px-3 py-1.5 text-[11px] font-medium text-gray-600 bg-gray-50 border-b border-gray-200"
+<div class="sticky top-0 z-10 bg-gray-50 border-b border-gray-200"
      data-offset="{{ offset }}" data-limit="{{ limit }}">
-  <span>{{ total }} account{{ "s" if total != 1 }}</span>
-  {# Slim cadence-coverage figure (reporting_service.coverage_report) — on-target+due ÷ active. #}
-  {% if coverage and coverage.summary.total %}
-  <span class="font-normal text-gray-400" title="Accounts contacted within their tier cadence">Coverage {{ coverage.summary.coverage_pct }}%</span>
-  {% endif %}
+  <div class="flex items-center justify-between px-3 py-1.5 text-[11px] font-medium text-gray-600">
+    <label class="flex items-center gap-2 cursor-pointer select-none">
+      <input type="checkbox" class="rounded border-gray-300 text-brand-500 focus:ring-brand-500"
+             :checked="allSelected"
+             @change="toggleAll($event.target.checked)"
+             aria-label="Select all accounts on this page">
+      <span>{{ total }} account{{ "s" if total != 1 }}</span>
+    </label>
+    {# Slim cadence-coverage figure (reporting_service.coverage_report) — on-target+due ÷ active. #}
+    {% if coverage and coverage.summary.total %}
+    <span class="font-normal text-gray-400" title="Accounts contacted within their tier cadence">Coverage {{ coverage.summary.coverage_pct }}%</span>
+    {% endif %}
+  </div>
+
+  {# Bulk action bar — visible only when ≥1 row is checked #}
+  <div x-show="count > 0" x-cloak class="px-3 pb-2 flex items-center gap-2 flex-wrap">
+    <span class="text-xs font-medium text-brand-700" x-text="count + ' selected'"></span>
+    {# Deactivate #}
+    <form hx-post="/v2/partials/customers/bulk/deactivate"
+          hx-target="#cdm-list" hx-swap="innerHTML"
+          hx-include="#cdm-filters"
+          class="inline">
+      <input type="hidden" name="ids" :value="idsStr()">
+      <button type="submit" class="btn btn-secondary btn-sm">Deactivate</button>
+    </form>
+    {# Send to prospecting #}
+    <form hx-post="/v2/partials/customers/bulk/send-to-prospecting"
+          hx-target="#cdm-list" hx-swap="innerHTML"
+          hx-include="#cdm-filters"
+          class="inline">
+      <input type="hidden" name="ids" :value="idsStr()">
+      <button type="submit" class="btn btn-secondary btn-sm">Send to prospecting</button>
+    </form>
+    {# Assign owner — manager/admin only; client-side accessible but server hard-gates rep calls at 403 #}
+    <span x-data="{ open: false }" class="relative inline-block">
+      <button type="button" @click="open = !open" class="btn btn-secondary btn-sm">
+        Assign owner ▾
+      </button>
+      <div x-show="open" x-cloak @click.outside="open = false"
+           class="absolute left-0 top-full mt-1 z-20 bg-white border border-gray-200 rounded-lg shadow-lg p-2 w-48">
+        <form hx-post="/v2/partials/customers/bulk/assign-owner"
+              hx-target="#cdm-list" hx-swap="innerHTML"
+              hx-include="#cdm-filters"
+              @submit="open = false">
+          <input type="hidden" name="ids" :value="idsStr()">
+          <label class="block text-xs text-gray-600 mb-1">Owner user ID</label>
+          <input type="number" name="owner_id" placeholder="User ID"
+                 class="input w-full text-xs mb-2">
+          <button type="submit" class="btn btn-primary btn-sm w-full">Assign</button>
+        </form>
+      </div>
+    </span>
+    <button type="button" @click="clear()" class="btn btn-ghost btn-sm">Clear</button>
+  </div>
 </div>
 
 {% if companies %}
@@ -28,36 +92,45 @@
        the same detail at /v2/partials/customers/{id} into #cdm-detail. Sites are
        reached inside that detail (Sites tab + Contacts site sections), so the row
        is a flat picker — no accordion, no per-site drill-down navigation. #}
-  <div id="cdm-row-{{ c.id }}"{{ alert_row_attrs(alert_markers, 'company-' ~ c.id) }} role="button" tabindex="0"
-       class="flex items-center gap-2.5 px-3 py-2.5 cursor-pointer hover:bg-gray-50 transition-colors border-l-2 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-500"
-       hx-get="/v2/partials/customers/{{ c.id }}"
-       hx-target="#cdm-detail"
-       hx-swap="innerHTML"
-       hx-target-error="#cdm-error"
-       hx-trigger="click, keyup[key=='Enter']"
-       data-loading-class="opacity-60 pointer-events-none"
-       preload="mouseover"
-       @click="selectedId = {{ c.id }}"
-       @keyup.enter="selectedId = {{ c.id }}"
+  <div id="cdm-row-{{ c.id }}"{{ alert_row_attrs(alert_markers, 'company-' ~ c.id) }}
+       class="flex items-center gap-2 px-2 py-2.5 hover:bg-gray-50 transition-colors border-l-2"
        :class="selectedId === {{ c.id }} ? 'bg-brand-50 border-l-brand-500' : 'border-l-transparent'">
-    <span class="w-2.5 h-2.5 rounded-full flex-shrink-0 {{ dot_colors.get(c.cadence_state, 'bg-gray-300') }}"
-          role="img" aria-label="{{ c.cadence_state|replace('_', ' ')|title }}"
-          title="{{ c.cadence_state|replace('_', ' ')|title }}"></span>
-    <div class="flex-1 min-w-0">
-      <p class="text-sm font-medium text-gray-900 truncate">{{ c.name }}</p>
-      <p class="text-[11px] text-gray-600 truncate">
-        {{ c.account_type or "—" }}{% if c.account_owner %} &middot; {{ c.account_owner.name }}{% endif %}
-        {% if c.tier %}<span class="ml-1 px-1 py-0.5 rounded text-xs bg-gray-100 text-gray-600">{{ c.tier }}</span>{% endif %}
-        {% if (c.site_count or 0) > 1 %}<span class="ml-1 px-1 py-0.5 rounded text-xs bg-gray-100 text-gray-600">{{ c.site_count }} sites</span>{% endif %}
-      </p>
-    </div>
-    <div class="flex-shrink-0 text-right">
-      <p class="text-[11px] {% if c.cadence_state == 'overdue' %}text-rose-600 font-medium{% elif c.cadence_state == 'due' %}text-amber-600{% else %}text-gray-400{% endif %}">
-        Out {{ c.last_outbound_at|timeago if c.last_outbound_at else "never" }}
-      </p>
-      <p class="text-[11px] text-gray-400">
-        Reply {{ c.last_reply_at|timeago if c.last_reply_at else "—" }}
-      </p>
+    {# Checkbox — stops click propagation so ticking a checkbox doesn't also load the detail #}
+    <input type="checkbox" class="rounded border-gray-300 text-brand-500 focus:ring-brand-500 flex-shrink-0"
+           :checked="selectedIds['{{ c.id }}']"
+           @click.stop="toggle('{{ c.id }}')"
+           aria-label="Select {{ c.name }}">
+    {# Row body — the actual click-to-detail area #}
+    <div role="button" tabindex="0"
+         class="flex items-center gap-2 flex-1 min-w-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-500"
+         hx-get="/v2/partials/customers/{{ c.id }}"
+         hx-target="#cdm-detail"
+         hx-swap="innerHTML"
+         hx-target-error="#cdm-error"
+         hx-trigger="click, keyup[key=='Enter']"
+         data-loading-class="opacity-60 pointer-events-none"
+         preload="mouseover"
+         @click="selectedId = {{ c.id }}"
+         @keyup.enter="selectedId = {{ c.id }}">
+      <span class="w-2.5 h-2.5 rounded-full flex-shrink-0 {{ dot_colors.get(c.cadence_state, 'bg-gray-300') }}"
+            role="img" aria-label="{{ c.cadence_state|replace('_', ' ')|title }}"
+            title="{{ c.cadence_state|replace('_', ' ')|title }}"></span>
+      <div class="flex-1 min-w-0">
+        <p class="text-sm font-medium text-gray-900 truncate">{{ c.name }}</p>
+        <p class="text-[11px] text-gray-600 truncate">
+          {{ c.account_type or "—" }}{% if c.account_owner %} &middot; {{ c.account_owner.name }}{% endif %}
+          {% if c.tier %}<span class="ml-1 px-1 py-0.5 rounded text-xs bg-gray-100 text-gray-600">{{ c.tier }}</span>{% endif %}
+          {% if (c.site_count or 0) > 1 %}<span class="ml-1 px-1 py-0.5 rounded text-xs bg-gray-100 text-gray-600">{{ c.site_count }} sites</span>{% endif %}
+        </p>
+      </div>
+      <div class="flex-shrink-0 text-right">
+        <p class="text-[11px] {% if c.cadence_state == 'overdue' %}text-rose-600 font-medium{% elif c.cadence_state == 'due' %}text-amber-600{% else %}text-gray-400{% endif %}">
+          Out {{ c.last_outbound_at|timeago if c.last_outbound_at else "never" }}
+        </p>
+        <p class="text-[11px] text-gray-400">
+          Reply {{ c.last_reply_at|timeago if c.last_reply_at else "—" }}
+        </p>
+      </div>
     </div>
   </div>
   {% endfor %}
@@ -97,3 +170,5 @@
   <p class="mt-2 text-sm text-gray-600">No accounts found</p>
 </div>
 {% endif %}
+
+</div>{# /bulk-select Alpine scope #}
