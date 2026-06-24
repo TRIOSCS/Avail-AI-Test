@@ -79,7 +79,7 @@
         {# modal-title id is set on the heading inside each loaded modal partial #}
         {# Persistent close affordance — every modal can be dismissed even if the
            loaded content template provides no close control of its own. #}
-        <button type="button" @click="onClose()" aria-label="Close"
+        <button type="button" @click="$dispatch('close-modal')" aria-label="Close"
                 class="modal-close">
           <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
