@@ -165,4 +165,10 @@ from .vendor_part_unavailability import VendorPartUnavailability  # noqa: F401
 from .vendor_sighting_summary import VendorSightingSummary  # noqa: F401
 
 # Vendors
-from .vendors import VendorCard, VendorContact, VendorReview  # noqa: F401
+from .vendors import (  # noqa: F401
+    VendorCard,
+    VendorCardAttachment,
+    VendorContact,
+    VendorContactAttachment,
+    VendorReview,
+)

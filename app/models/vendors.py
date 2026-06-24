@@ -1,4 +1,5 @@
-"""Vendor models — VendorCard, VendorContact, VendorReview."""
+"""Vendor models — VendorCard, VendorContact, VendorReview, VendorCardAttachment,
+VendorContactAttachment."""
 
 from datetime import datetime, timezone
 
@@ -12,6 +13,7 @@ from sqlalchemy import (
     Integer,
     Numeric,
     String,
+    Text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import relationship, validates
@@ -111,6 +113,7 @@ class VendorCard(Base):
     reviews = relationship("VendorReview", back_populates="vendor_card", cascade="all, delete-orphan")
     vendor_contacts = relationship("VendorContact", back_populates="vendor_card", cascade="all, delete-orphan")
     strategic_vendors = relationship("StrategicVendor", back_populates="vendor_card")
+    attachments = relationship("VendorCardAttachment", back_populates="vendor_card", cascade="all, delete-orphan")
 
     # --- Validators ---
     @validates(
@@ -190,6 +193,7 @@ class VendorContact(Base):
     last_reply_at = Column(UTCDateTime)
 
     vendor_card = relationship("VendorCard", back_populates="vendor_contacts")
+    attachments = relationship("VendorContactAttachment", back_populates="vendor_contact", cascade="all, delete-orphan")
 
     # --- Validators ---
     @validates("email")
@@ -241,4 +245,72 @@ class VendorReview(Base):
     __table_args__ = (
         Index("ix_review_vendor", "vendor_card_id"),
         Index("ix_review_user", "user_id"),
+    )
+
+
+class VendorCardAttachment(Base):
+    """File attachment on a vendor card (stored in OneDrive or company SharePoint
+    library).
+
+    Mirrors CompanyAttachment shape exactly.
+    library_drive_id NULL  → OneDrive fallback row (user token)
+    library_drive_id set   → company SharePoint library row (app token)
+
+    Called by: app/routers/attachments_extra.py, app/services/attachment_service.py
+    Depends on: VendorCard, User
+    """
+
+    __tablename__ = "vendor_card_attachments"
+    id = Column(Integer, primary_key=True)
+    vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id", ondelete="CASCADE"), nullable=False)
+    file_name = Column(String(500), nullable=False)
+    library_item_id = Column(String(500))
+    library_drive_id = Column(String(200))
+    library_web_url = Column(Text)
+    thumbnail_url = Column(Text)
+    content_type = Column(String(100))
+    size_bytes = Column(Integer)
+    uploaded_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+
+    vendor_card = relationship("VendorCard", back_populates="attachments")
+    uploaded_by = relationship("User", foreign_keys=[uploaded_by_id])
+
+    __table_args__ = (
+        Index("ix_vendor_card_attachments_card", "vendor_card_id"),
+        Index("ix_vendor_card_attachments_item", "library_item_id"),
+    )
+
+
+class VendorContactAttachment(Base):
+    """File attachment on a vendor contact (stored in OneDrive or company SharePoint
+    library).
+
+    Mirrors SiteContactAttachment shape exactly.
+    library_drive_id NULL  → OneDrive fallback row (user token)
+    library_drive_id set   → company SharePoint library row (app token)
+
+    Called by: app/routers/attachments_extra.py, app/services/attachment_service.py
+    Depends on: VendorContact, User
+    """
+
+    __tablename__ = "vendor_contact_attachments"
+    id = Column(Integer, primary_key=True)
+    vendor_contact_id = Column(Integer, ForeignKey("vendor_contacts.id", ondelete="CASCADE"), nullable=False)
+    file_name = Column(String(500), nullable=False)
+    library_item_id = Column(String(500))
+    library_drive_id = Column(String(200))
+    library_web_url = Column(Text)
+    thumbnail_url = Column(Text)
+    content_type = Column(String(100))
+    size_bytes = Column(Integer)
+    uploaded_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+
+    vendor_contact = relationship("VendorContact", back_populates="attachments")
+    uploaded_by = relationship("User", foreign_keys=[uploaded_by_id])
+
+    __table_args__ = (
+        Index("ix_vendor_contact_attachments_contact", "vendor_contact_id"),
+        Index("ix_vendor_contact_attachments_item", "library_item_id"),
     )

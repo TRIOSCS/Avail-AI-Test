@@ -1,11 +1,11 @@
 {#
   shared/_attachments.html — the unified attachments panel macro.
 
-  One signature component used identically on all five surfaces (offer,
-  requirement, requisition, company, contact, material card).
+  One signature component used identically on all seven surfaces (offer,
+  requirement, requisition, company, contact, material card, vendor card).
 
   Macro: attachments_panel(kind, entity_id)
-    kind      — one of requisition|requirement|offer|company|contact|material
+    kind      — one of requisition|requirement|offer|company|contact|material|vendor_card|vendor_contact
     entity_id — PK of the owning entity
 
   Renders:
@@ -25,12 +25,14 @@
 #}
 {% macro attachments_panel(kind, entity_id) %}
   {% set _urls = {
-    'requisition': {'list': '/api/requisitions/' ~ entity_id ~ '/attachments'},
-    'requirement': {'list': '/api/requirements/' ~ entity_id ~ '/attachments'},
-    'offer':       {'list': '/api/offers/' ~ entity_id ~ '/attachments'},
-    'company':     {'list': '/api/companies/' ~ entity_id ~ '/attachments'},
-    'contact':     {'list': '/api/contacts/' ~ entity_id ~ '/attachments'},
-    'material':    {'list': '/api/material-cards/' ~ entity_id ~ '/attachments'}
+    'requisition':   {'list': '/api/requisitions/' ~ entity_id ~ '/attachments'},
+    'requirement':   {'list': '/api/requirements/' ~ entity_id ~ '/attachments'},
+    'offer':         {'list': '/api/offers/' ~ entity_id ~ '/attachments'},
+    'company':       {'list': '/api/companies/' ~ entity_id ~ '/attachments'},
+    'contact':       {'list': '/api/contacts/' ~ entity_id ~ '/attachments'},
+    'material':      {'list': '/api/material-cards/' ~ entity_id ~ '/attachments'},
+    'vendor_card':   {'list': '/api/vendors/' ~ entity_id ~ '/attachments'},
+    'vendor_contact':{'list': '/api/vendor-contacts/' ~ entity_id ~ '/attachments'}
   } %}
   {% set list_url = _urls[kind]['list'] %}
   {% set upload_url = list_url %}

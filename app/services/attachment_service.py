@@ -228,6 +228,8 @@ _DELETE_BASE: dict[str, str] = {
     "company": "/api/company-attachments",
     "contact": "/api/contact-attachments",
     "material": "/api/material-card-attachments",
+    "vendor_card": "/api/vendor-attachments",
+    "vendor_contact": "/api/vendor-contact-attachments",
 }
 
 

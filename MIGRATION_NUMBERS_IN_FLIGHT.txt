@@ -65,3 +65,4 @@
 140  feat/ownership-p3-collaborators  account_collaborators table (Phase 3: helper collaborator access); chains onto 139_contact_is_active_default; single head verified via `alembic heads`
 141  feat/ownership-p4-compliance  prospect_accounts.reclaim_blocked_until (Phase 4: 30-day reclaim cooldown after sweep; managers bypass via reassign); chains onto 140_account_collaborators; single head verified via `alembic heads`
 142  feat/rubric-h1-vendor-parity  vendor_card_id + vendor_contact_id on requisition_tasks + extended ck_task_has_parent + vendor task routes; chains onto 141_reclaim_cooldown; single head verified via `alembic heads`
+143  feat/rubric-h1-vendor-parity  vendor_card_attachments + vendor_contact_attachments (migration 143); chains onto 142_vendor_task_cols; single head verified via `alembic heads`

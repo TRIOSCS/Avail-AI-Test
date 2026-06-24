@@ -4278,6 +4278,7 @@ async def vendor_tab(
         "reviews",
         "activity",
         "tasks",
+        "files",
     }
     if tab not in valid_tabs:
         raise HTTPException(404, f"Unknown tab: {tab}")
@@ -4455,6 +4456,11 @@ async def vendor_tab(
         ctx["vendor_id"] = vendor_id
         ctx["vendor_tasks"] = vendor_tasks
         return template_response("htmx/partials/vendors/tabs/_vendor_tasks.html", ctx)
+
+    elif tab == "files":
+        ctx = _base_ctx(request, user, "vendors")
+        ctx["vendor"] = vendor
+        return template_response("htmx/partials/vendors/tabs/files_tab.html", ctx)
 
     else:  # offers
         offers = (

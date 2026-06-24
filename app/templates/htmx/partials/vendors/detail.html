@@ -130,7 +130,8 @@
           ('offers', 'Offers'),
           ('reviews', 'Reviews'),
           ('activity', 'Activity'),
-          ('tasks', 'Tasks')
+          ('tasks', 'Tasks'),
+          ('files', 'Files')
         ] %}
         <button @click="activeTab = '{{ tab_id }}'"
                 hx-get="/v2/partials/vendors/{{ vendor.id }}/tab/{{ tab_id }}"
