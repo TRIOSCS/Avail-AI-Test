@@ -1309,6 +1309,12 @@ one-off w/ 2 offers, an awarded list).
 - **Routine → in-app only**: plan completion (`notify_completed`) — no email, no Teams.
 All tiers write an `activity_log` row linked via `buy_plan_id` (+ `requisition_id`).
 
+**Per-user email opt-out (Task 9).** `_send_email(user, ...)` early-returns (no token
+fetch, no Graph client) when the recipient's `notify_buyplan_email_enabled` is False —
+the Profile-tab toggle. Suppression is at the firing site only: the calling `notify_*`
+function still writes the recipient's in-app `activity_log` row, so nothing is lost
+in-app — only the email channel is silenced for that user.
+
 **Reporting fold.** The retired `/v2/reporting` page's analytics now live where the work
 happens: the **Supervise** lens strip (open value / avg margin / approvals / halted /
 overdue / flagged counts), the **Sales Hub** pipeline chip (`forecast_service.pipeline_summary`
@@ -1549,11 +1555,15 @@ POST /api/user/profile            (form: name, extension)
 
 POST /api/user/toggle-buyplan-email
     htmx_views.toggle_buyplan_email()
-    +---> flips user.notify_buyplan_email_enabled; toast "...enabled/disabled." (Task 9 suppresses on False)
+    +---> flips user.notify_buyplan_email_enabled; toast "...enabled/disabled."
+          When False, buyplan_notifications._send_email skips the Graph send (in-app
+          activity_log row still written — see §8 notification tiers).
 
 POST /api/user/toggle-new-offer-alert
     htmx_views.toggle_new_offer_alert()
     +---> flips user.notify_new_offer_alert_enabled; toast "New-offer alerts enabled/disabled."
+          When False, alerts.sources.offers.OfferConfirmedSource.count_for_user /
+          new_items_for_user return 0/empty, suppressing the FYI nav badge for that user.
 ```
 
 These clone the existing `toggle_8x8` (`POST /api/user/toggle-8x8`) pattern but route

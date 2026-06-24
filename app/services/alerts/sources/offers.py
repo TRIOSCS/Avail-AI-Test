@@ -3,7 +3,9 @@
 Surfaces APPROVED offers that the buyer hasn't seen yet, on requirements the buyer
 owns (assigned to them, or unassigned on a requisition they created). Drives the
 sales-hub nav badge + in-tab spotlight. As an FYI source the count excludes
-alert_seen rows, so opening an offer drains the badge.
+alert_seen rows, so opening an offer drains the badge. Honors the per-user
+Profile toggle ``User.notify_new_offer_alert_enabled``: when off the count/items
+are forced to 0/empty so the badge is suppressed for that user.
 
 Called by: services/alerts/registry.py (registered centrally by the parent).
 Depends on: services/alerts/base.AlertSource, models/offers.Offer,
@@ -66,8 +68,12 @@ class OfferConfirmedSource(AlertSource):
         return query.order_by(Offer.approved_at.asc())
 
     def count_for_user(self, db: Session, user: User) -> int:
+        if not getattr(user, "notify_new_offer_alert_enabled", True):
+            return 0
         return self._eligible_query(db, user).count()
 
     def new_items_for_user(self, db: Session, user: User) -> list[AlertItem]:
+        if not getattr(user, "notify_new_offer_alert_enabled", True):
+            return []
         offers = self._eligible_query(db, user).all()
         return [AlertItem(ref_id=o.id, anchor=f"req-{o.requirement_id}") for o in offers]
