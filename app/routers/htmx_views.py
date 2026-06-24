@@ -44,6 +44,7 @@ from ..constants import (
 from ..database import get_db
 from ..dependencies import (
     can_manage_account,
+    can_manage_account_team,
     get_quote_for_user,
     get_req_for_user,
     get_user,
@@ -55,6 +56,7 @@ from ..dependencies import (
     require_user,
 )
 from ..models import (
+    AccountCollaborator,
     ApiSource,
     BuyPlan,
     BuyPlanLine,
@@ -5971,6 +5973,16 @@ async def company_detail_partial(
     # the /tab/contacts route uses, so the default surface and the tab match.
     active_sites = sorted(sites, key=lambda s: (s.site_name or "").lower())
 
+    # Phase 3: collaborators for the header chip list
+    collaborators = (
+        db.query(AccountCollaborator, User)
+        .join(User, AccountCollaborator.user_id == User.id)
+        .filter(AccountCollaborator.company_id == company_id)
+        .order_by(User.name)
+        .all()
+    )
+    all_users = db.query(User).filter(User.is_active.is_(True)).order_by(User.name).all()
+
     ctx = _base_ctx(request, user, "customers")
     ctx.update(
         {
@@ -6007,6 +6019,10 @@ async def company_detail_partial(
             "known_account_fields": KNOWN_ACCOUNT_FIELDS,
             # Next open task for the "Next step" summary line.
             "next_account_task": _get_next_account_task(db, company_id),
+            # Phase 3: account collaborators for the header chip list
+            "collaborators": collaborators,
+            "all_users": all_users,
+            "can_manage_team": can_manage_account_team(user, company),
         }
     )
     return template_response("htmx/partials/customers/detail.html", ctx)
@@ -6991,6 +7007,130 @@ def _set_parent_company(db: Session, company: Company, raw_parent_id: str) -> No
             break
 
     company.parent_company_id = parent_id
+
+
+# ── Phase 3: Account Collaborators (add/remove helpers) ──────────────────
+
+
+@router.post("/v2/partials/customers/{company_id}/collaborators", response_class=HTMLResponse)
+async def add_account_collaborator(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Add a helper collaborator to this account.
+
+    Gate: can_manage_account_team (primary owner OR manager/admin ONLY).
+    Helpers, site-owners, and unrelated reps are denied (403).
+    Validates: user_id exists, is not the primary owner, is not already a collaborator.
+    Returns the refreshed collaborators partial.
+    """
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    if not can_manage_account_team(user, company):
+        raise HTTPException(403, "Only the account owner or a manager can manage the team")
+
+    form = await request.form()
+    raw_user_id = (form.get("user_id") or "").strip()
+    if not raw_user_id or not raw_user_id.isdigit():
+        raise HTTPException(400, "user_id is required and must be an integer")
+
+    target_user_id = int(raw_user_id)
+    target_user = db.get(User, target_user_id)
+    if not target_user:
+        raise HTTPException(404, "User not found")
+
+    if target_user_id == company.account_owner_id:
+        raise HTTPException(400, "The primary account owner cannot be added as a collaborator")
+
+    existing = db.query(AccountCollaborator).filter_by(company_id=company_id, user_id=target_user_id).first()
+    if existing:
+        raise HTTPException(409, "This user is already a collaborator on this account")
+
+    collaborator = AccountCollaborator(company_id=company_id, user_id=target_user_id, role="helper")
+    db.add(collaborator)
+    db.commit()
+    logger.info(
+        "Collaborator added: company={} user={} by {}",
+        company_id,
+        target_user_id,
+        user.email,
+    )
+
+    return await _collaborators_partial(request, company_id=company_id, user=user, db=db)
+
+
+@router.delete(
+    "/v2/partials/customers/{company_id}/collaborators/{collab_user_id}",
+    response_class=HTMLResponse,
+)
+async def remove_account_collaborator(
+    request: Request,
+    company_id: int,
+    collab_user_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Remove a helper collaborator from this account.
+
+    Gate: can_manage_account_team (primary owner OR manager/admin ONLY).
+    Helpers and unrelated reps are denied (403).
+    Returns the refreshed collaborators partial.
+    """
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    if not can_manage_account_team(user, company):
+        raise HTTPException(403, "Only the account owner or a manager can manage the team")
+
+    collaborator = db.query(AccountCollaborator).filter_by(company_id=company_id, user_id=collab_user_id).first()
+    if collaborator:
+        db.delete(collaborator)
+        db.commit()
+        logger.info(
+            "Collaborator removed: company={} user={} by {}",
+            company_id,
+            collab_user_id,
+            user.email,
+        )
+
+    return await _collaborators_partial(request, company_id=company_id, user=user, db=db)
+
+
+async def _collaborators_partial(
+    request: Request,
+    company_id: int,
+    user: User,
+    db: Session,
+):
+    """Render the collaborators partial for a given company."""
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    collaborators = (
+        db.query(AccountCollaborator, User)
+        .join(User, AccountCollaborator.user_id == User.id)
+        .filter(AccountCollaborator.company_id == company_id)
+        .order_by(User.name)
+        .all()
+    )
+    all_users = db.query(User).filter(User.is_active.is_(True)).order_by(User.name).all()
+
+    ctx = _base_ctx(request, user, "customers")
+    ctx.update(
+        {
+            "company": company,
+            "collaborators": collaborators,
+            "all_users": all_users,
+            "can_manage_team": can_manage_account_team(user, company),
+        }
+    )
+    return template_response("htmx/partials/customers/_collaborators.html", ctx)
 
 
 # ── Sprint 4: Company CRUD (parameterized routes) ──────────────────────

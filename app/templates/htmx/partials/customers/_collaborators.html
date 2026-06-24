@@ -1,0 +1,52 @@
+{# _collaborators.html — Account collaborators chip list with add/remove controls.
+   Rendered by: add_account_collaborator / remove_account_collaborator / _collaborators_partial
+   Depends on: company, collaborators (list of (AccountCollaborator, User)), all_users, can_manage_team
+   Context rule: add/remove controls only render when can_manage_team is True (manager or primary owner).
+#}
+<div id="collaborators-{{ company.id }}" class="flex flex-wrap items-center gap-1">
+  {# Chip list — always visible #}
+  {% for collab, collab_user in collaborators %}
+  <span class="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700">
+    {{ collab_user.name }}
+    {% if can_manage_team %}
+    <button type="button"
+            hx-delete="/v2/partials/customers/{{ company.id }}/collaborators/{{ collab_user.id }}"
+            hx-target="#collaborators-{{ company.id }}"
+            hx-swap="outerHTML"
+            hx-confirm="Remove {{ collab_user.name }} as collaborator?"
+            title="Remove {{ collab_user.name }}"
+            aria-label="Remove {{ collab_user.name }} as collaborator"
+            class="ml-0.5 text-gray-400 hover:text-red-500 focus:outline-none focus:ring-1 focus:ring-red-400 rounded-full">
+      <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+      </svg>
+    </button>
+    {% endif %}
+  </span>
+  {% endfor %}
+
+  {# Add control — only shown when can_manage_team #}
+  {% if can_manage_team %}
+  <form hx-post="/v2/partials/customers/{{ company.id }}/collaborators"
+        hx-target="#collaborators-{{ company.id }}"
+        hx-swap="outerHTML"
+        class="inline-flex items-center gap-1">
+    <select name="user_id"
+            class="text-xs rounded border border-gray-200 bg-white px-1.5 py-0.5 text-gray-700 focus:outline-none focus:ring-1 focus:ring-brand-500"
+            aria-label="Add collaborator">
+      <option value="">+ Add collaborator…</option>
+      {% set collab_ids = collaborators | map(attribute='1') | map(attribute='id') | list %}
+      {% set owner_id = company.account_owner_id %}
+      {% for u in all_users %}
+        {% if u.id != owner_id and u.id not in collab_ids %}
+        <option value="{{ u.id }}">{{ u.name }}</option>
+        {% endif %}
+      {% endfor %}
+    </select>
+    <button type="submit"
+            class="text-xs rounded border border-brand-200 bg-brand-50 px-2 py-0.5 text-brand-700 hover:bg-brand-100 focus:outline-none focus:ring-1 focus:ring-brand-500">
+      Add
+    </button>
+  </form>
+  {% endif %}
+</div>

@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from .constants import RESTRICTED_ROLES, UserRole
 from .database import get_db
-from .models import Company, CustomerSite, Quote, Requisition, User
+from .models import AccountCollaborator, Company, CustomerSite, Quote, Requisition, User
 
 # Non-interactive service account seeded by startup.py. It authenticates via the
 # x-agent-key header and is barred from admin/settings/buyer (RFQ) endpoints.
@@ -91,8 +91,10 @@ def can_manage_account(user: User, company: Company, db: "Session") -> bool:  # 
     - is_manager_or_admin(user)  — supervisors see/manage everything
     - company.account_owner_id == user.id  — primary account owner
     - user owns at least one CustomerSite under this company
+    - user is an AccountCollaborator (helper role) on this company  [Phase 3]
 
-    # TODO(ownership-p3): also true for account collaborators (helper role)
+    NOTE: this does NOT gate team-management actions (add/remove collaborators,
+    reassign ownership). Use can_manage_account_team() for those.
     """
     if is_manager_or_admin(user):
         return True
@@ -107,7 +109,34 @@ def can_manage_account(user: User, company: Company, db: "Session") -> bool:  # 
         )
         .exists()
     )
-    return bool(db.scalar(select(site_exists)))
+    if bool(db.scalar(select(site_exists))):
+        return True
+    # Collaborator check (Phase 3): helper collaborators can view + work the account.
+    collab_exists = (
+        select(AccountCollaborator.id)
+        .where(
+            AccountCollaborator.company_id == company.id,
+            AccountCollaborator.user_id == user.id,
+        )
+        .exists()
+    )
+    return bool(db.scalar(select(collab_exists)))
+
+
+def can_manage_account_team(user: User, company: Company) -> bool:
+    """True if *user* may add/remove collaborators or change the primary owner.
+
+    This is a STRICTER gate than can_manage_account. Helper collaborators and
+    site-owners are excluded — only the primary account owner and manager/admin
+    may alter the team roster.
+
+    Allowed when:
+    - is_manager_or_admin(user)  — supervisors manage all teams
+    - company.account_owner_id == user.id  — primary owner manages their own team
+
+    Intentionally does NOT accept collaborators, site-owners, or buyers.
+    """
+    return is_manager_or_admin(user) or company.account_owner_id == user.id
 
 
 def _require_admin_user(request: Request, db: Session, *, agent_msg: str, role_msg: str) -> User:

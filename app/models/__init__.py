@@ -18,7 +18,14 @@ from .buy_plan import BuyPlan, BuyPlanLine, VerificationGroupMember  # noqa: F40
 from .config import ApiSource, ApiUsageLog, GraphSubscription, SystemConfig  # noqa: F401
 
 # CRM: Companies & Sites
-from .crm import Company, CompanyAttachment, CustomerSite, SiteContact, SiteContactAttachment  # noqa: F401
+from .crm import (  # noqa: F401
+    AccountCollaborator,
+    Company,
+    CompanyAttachment,
+    CustomerSite,
+    SiteContact,
+    SiteContactAttachment,
+)
 
 # Discovery / Prospecting
 from .discovery_batch import DiscoveryBatch  # noqa: F401

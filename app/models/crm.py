@@ -117,6 +117,7 @@ class Company(Base):
     sites = relationship("CustomerSite", back_populates="company", cascade="all, delete-orphan")
     account_owner = relationship("User", foreign_keys=[account_owner_id])
     attachments = relationship("CompanyAttachment", back_populates="company", cascade="all, delete-orphan")
+    collaborators = relationship("AccountCollaborator", back_populates="company", cascade="all, delete-orphan")
     primary_contact = relationship("SiteContact", foreign_keys=[primary_contact_id])
     parent_company = relationship(
         "Company",
@@ -358,6 +359,40 @@ class SiteContact(Base):
         Index("ix_site_contacts_email", "email"),
         Index("ix_site_contacts_contact_owner_id", "contact_owner_id"),
         UniqueConstraint("customer_site_id", "email", name="uq_site_contacts_site_email"),
+    )
+
+
+class AccountCollaborator(Base):
+    """Account-level collaborator — a user with helper access to a CRM company.
+
+    A helper collaborator can view and work the account (can_manage_account=True) but
+    cannot modify the team roster (add/remove collaborators or change the primary owner).
+    That team-management gate is enforced by can_manage_account_team(), which requires
+    is_manager_or_admin OR company.account_owner_id == user.id.
+
+    Called by: app/dependencies.can_manage_account, app/services/crm_service.cdm_company_query,
+        app/routers/htmx_views (collaborator add/remove endpoints)
+    Depends on: Company, User
+    """
+
+    __tablename__ = "account_collaborators"
+    id = Column(Integer, primary_key=True)
+    company_id = Column(
+        Integer,
+        ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    role = Column(String(20), nullable=False, default="helper", server_default="helper")
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+
+    company = relationship("Company", back_populates="collaborators")
+    user = relationship("User", foreign_keys=[user_id])
+
+    __table_args__ = (
+        UniqueConstraint("company_id", "user_id", name="uq_account_collaborators_company_user"),
+        Index("ix_account_collaborators_company", "company_id"),
     )
 
 

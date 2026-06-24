@@ -62,3 +62,4 @@
 137  feat/crm-steps-3456  site_contacts.first_name/last_name (split from full_name, backfilled) + contact_owner_id (FK users); RE-NUMBERED 134->137; RE-CHAINED onto 136_company_links
 138  feat/crm-steps-3456  RequisitionTask.requisition_id nullable + company_id/site_contact_id FKs + CHECK >=1 parent (general account/contact tasks); RE-NUMBERED 135->138; RE-CHAINED onto 137_contact_fields
 139  fix/contact-active-visibility  site_contacts.is_active server_default=true + NULL backfill; chains onto 138_general_tasks; single head verified via `alembic heads`
+140  feat/ownership-p3-collaborators  account_collaborators table (Phase 3: helper collaborator access); chains onto 139_contact_is_active_default; single head verified via `alembic heads`

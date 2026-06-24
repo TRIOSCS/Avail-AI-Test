@@ -99,6 +99,13 @@
         <span>Owner:
           {% if company.account_owner %}<span class="font-medium text-gray-700">{{ company.account_owner.name }}</span>{% else %}<span class="text-gray-400">Unassigned</span>{% endif %}
         </span>
+        {# Phase 3: Collaborators chip list (helper access; add/remove only for manager/owner) #}
+        {% if collaborators or can_manage_team %}
+        <span class="text-gray-300">·</span>
+        <span class="inline-flex items-center gap-1 text-gray-600">Helpers:
+          {% include 'htmx/partials/customers/_collaborators.html' %}
+        </span>
+        {% endif %}
         <span class="text-gray-300">·</span>
         <span>Terms:
           {% with obj=company, field='credit_terms', entity='company',

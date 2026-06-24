@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from ..constants import RequisitionStatus
 from ..dependencies import is_manager_or_admin
-from ..models import Company, CustomerSite, Quote, Requisition, SiteContact
+from ..models import AccountCollaborator, Company, CustomerSite, Quote, Requisition, SiteContact
 from ..models.auth import User
 from ..models.tags import EntityTag
 from ..models.vendors import VendorCard
@@ -234,13 +234,16 @@ def cdm_company_query(
     if account_type in CDM_ACCOUNT_TYPES:
         query = query.filter(Company.account_type == account_type)
     if my_only and not is_manager_or_admin(user):
-        # Reps see accounts they own directly OR where they own at least one site.
+        # Reps see accounts they own directly, where they own at least one site,
+        # OR where they are a named collaborator (Phase 3: helper role).
         # Managers/admins always see everything — my_only is ignored for them.
         site_company_ids = select(CustomerSite.company_id).where(CustomerSite.owner_id == user.id)
+        collab_company_ids = select(AccountCollaborator.company_id).where(AccountCollaborator.user_id == user.id)
         query = query.filter(
             or_(
                 Company.account_owner_id == user.id,
                 Company.id.in_(site_company_ids),
+                Company.id.in_(collab_company_ids),
             )
         )
     if segment:
@@ -291,6 +294,7 @@ def cdm_overdue_count(db: Session, user: User, now: datetime | None = None) -> i
         return 0
     now = now or datetime.now(timezone.utc)
     site_company_ids = select(CustomerSite.company_id).where(CustomerSite.owner_id == user.id)
+    collab_company_ids = select(AccountCollaborator.company_id).where(AccountCollaborator.user_id == user.id)
     return (
         db.query(func.count(Company.id))
         .filter(
@@ -298,6 +302,7 @@ def cdm_overdue_count(db: Session, user: User, now: datetime | None = None) -> i
             or_(
                 Company.account_owner_id == user.id,
                 Company.id.in_(site_company_ids),
+                Company.id.in_(collab_company_ids),
             ),
             _needs_call_filter(now),
         )
