@@ -70,9 +70,9 @@ def vendor_card(db_session: Session) -> VendorCard:
 def vendor_contact(db_session: Session, vendor_card: VendorCard) -> VendorContact:
     vc = VendorContact(
         vendor_card_id=vendor_card.id,
-        name="Sam Vendor",
+        full_name="Sam Vendor",
         email="sam@tasks.example",
-        created_at=datetime.now(timezone.utc),
+        source="manual",
     )
     db_session.add(vc)
     db_session.commit()
@@ -332,6 +332,108 @@ class TestVendorTaskEndpoints:
         finally:
             for dep in overridden:
                 app.dependency_overrides.pop(dep, None)
+
+
+# ---------------------------------------------------------------------------
+# Finding 1: edit form uses correct HTMX target for vendor tasks
+# ---------------------------------------------------------------------------
+
+
+class TestVendorTaskEditForm:
+    def test_vendor_task_edit_form_renders(self, client, db_session: Session, vendor_card: VendorCard, test_user):
+        """GET edit-form for a vendor task must target #vendor-tasks-{id}, NOT #contact-
+        tasks-None."""
+        task = create_vendor_task(
+            db_session,
+            vendor_card_id=vendor_card.id,
+            title="Edit me",
+            created_by=test_user.id,
+        )
+        response = client.get(f"/v2/partials/tasks/{task.id}/edit-form")
+        assert response.status_code == 200
+        body = response.text
+        assert f"vendor-tasks-{vendor_card.id}" in body, (
+            "Edit form must target #vendor-tasks-<vendor_id>, not #contact-tasks-None"
+        )
+        assert "contact-tasks-None" not in body, "Edit form must not reference #contact-tasks-None for vendor tasks"
+
+
+# ---------------------------------------------------------------------------
+# Finding 2: vendor_contact-only task complete/delete re-renders correctly
+# ---------------------------------------------------------------------------
+
+
+class TestVendorContactOnlyTaskEndpoints:
+    """Tasks with only vendor_contact_id (no vendor_card_id) must re-render the vendor
+    task list after complete/delete, not return an empty 200."""
+
+    def _make_contact_only_task(
+        self,
+        db_session: Session,
+        vendor_contact: VendorContact,
+        test_user,
+        title: str = "Contact-only task",
+    ) -> RequisitionTask:
+        """Create a task scoped to vendor_contact_id only (no vendor_card_id)."""
+        task = RequisitionTask(
+            vendor_contact_id=vendor_contact.id,
+            title=title,
+            task_type="general",
+            status=TaskStatus.TODO,
+            source="manual",
+            created_by=test_user.id,
+        )
+        db_session.add(task)
+        db_session.commit()
+        db_session.refresh(task)
+        return task
+
+    def test_vendor_contact_task_complete_rerenders(
+        self,
+        client,
+        db_session: Session,
+        vendor_card: VendorCard,
+        vendor_contact: VendorContact,
+        test_user,
+    ):
+        """POST complete on a vendor_contact-only task must return the vendor task list
+        (not an empty fragment)."""
+        task = self._make_contact_only_task(db_session, vendor_contact, test_user)
+        response = client.post(f"/v2/partials/tasks/{task.id}/complete")
+        assert response.status_code == 200
+        assert len(response.content) > 0, "complete on vendor_contact-only task must not return empty fragment"
+        assert f"vendor-tasks-{vendor_card.id}".encode() in response.content, (
+            "Response must contain vendor task container for the parent vendor card"
+        )
+
+    def test_vendor_contact_task_delete_rerenders(
+        self,
+        admin_client,
+        db_session: Session,
+        vendor_card: VendorCard,
+        vendor_contact: VendorContact,
+        admin_user,
+    ):
+        """Admin DELETE on a vendor_contact-only task must return the vendor task list
+        (not an empty fragment)."""
+        task = RequisitionTask(
+            vendor_contact_id=vendor_contact.id,
+            title="Delete contact-only task",
+            task_type="general",
+            status=TaskStatus.TODO,
+            source="manual",
+            created_by=admin_user.id,
+        )
+        db_session.add(task)
+        db_session.commit()
+        db_session.refresh(task)
+
+        response = admin_client.delete(f"/v2/partials/tasks/{task.id}")
+        assert response.status_code == 200
+        assert len(response.content) > 0, "delete on vendor_contact-only task must not return empty fragment"
+        assert f"vendor-tasks-{vendor_card.id}".encode() in response.content, (
+            "Response must contain vendor task container for the parent vendor card"
+        )
 
 
 # ---------------------------------------------------------------------------

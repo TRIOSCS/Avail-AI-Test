@@ -14,7 +14,7 @@ Changes:
       OR site_contact_id IS NOT NULL
       OR vendor_card_id IS NOT NULL OR vendor_contact_id IS NOT NULL
 
-Downgrade: drops the vendor columns + indexes, restores original 4-column CHECK.
+Downgrade: drops the vendor columns + indexes, restores original 3-column CHECK.
 """
 
 from __future__ import annotations

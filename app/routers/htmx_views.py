@@ -14724,6 +14724,17 @@ async def complete_task_endpoint(
         ctx["vendor_id"] = task.vendor_card_id
         ctx["vendor_tasks"] = vendor_tasks
         return template_response("htmx/partials/vendors/tabs/_vendor_tasks.html", ctx)
+    if task.vendor_contact_id:
+        from app.models.vendors import VendorContact as _VendorContact
+        from app.services.task_service import get_open_tasks_for_vendor_card
+
+        vc = db.get(_VendorContact, task.vendor_contact_id)
+        if vc:
+            vendor_tasks = get_open_tasks_for_vendor_card(db, vc.vendor_card_id)
+            ctx = _base_ctx(request, user, "vendors")
+            ctx["vendor_id"] = vc.vendor_card_id
+            ctx["vendor_tasks"] = vendor_tasks
+            return template_response("htmx/partials/vendors/tabs/_vendor_tasks.html", ctx)
     # Fallback: requisition task — just return empty fragment
     return HTMLResponse("")
 
@@ -14764,6 +14775,7 @@ async def delete_task_endpoint(
     company_id = task.company_id
     site_contact_id = task.site_contact_id
     vendor_card_id = task.vendor_card_id
+    vendor_contact_id = task.vendor_contact_id
     delete_task(db, task_id)
     logger.info("Task {} deleted by user {}", task_id, user.id)
     if company_id:
@@ -14789,6 +14801,17 @@ async def delete_task_endpoint(
         ctx["vendor_id"] = vendor_card_id
         ctx["vendor_tasks"] = vendor_tasks
         return template_response("htmx/partials/vendors/tabs/_vendor_tasks.html", ctx)
+    if vendor_contact_id:
+        from app.models.vendors import VendorContact as _VendorContact
+        from app.services.task_service import get_open_tasks_for_vendor_card
+
+        vc = db.get(_VendorContact, vendor_contact_id)
+        if vc:
+            vendor_tasks = get_open_tasks_for_vendor_card(db, vc.vendor_card_id)
+            ctx = _base_ctx(request, user, "vendors")
+            ctx["vendor_id"] = vc.vendor_card_id
+            ctx["vendor_tasks"] = vendor_tasks
+            return template_response("htmx/partials/vendors/tabs/_vendor_tasks.html", ctx)
     return HTMLResponse("")
 
 
@@ -14810,6 +14833,19 @@ async def task_edit_form(
 
     if not _is_crm_task_authorized(db, task, user.id, is_admin=(user.role == UserRole.ADMIN)):
         raise HTTPException(403, "You are not allowed to edit this task")
+    # Vendor task: resolve vendor_id (vendor_card_id direct, or via vendor_contact)
+    if is_vendor_task:
+        from app.models.vendors import VendorContact as _VendorContact
+
+        vendor_id = task.vendor_card_id
+        if not vendor_id and task.vendor_contact_id:
+            vc = db.get(_VendorContact, task.vendor_contact_id)
+            if vc:
+                vendor_id = vc.vendor_card_id
+        ctx = _base_ctx(request, user, "vendors")
+        ctx["task"] = task
+        ctx["vendor_id"] = vendor_id or 0
+        return template_response("htmx/partials/vendors/tabs/_vendor_task_edit_form.html", ctx)
     # Resolve the real company_id: account task has it directly; for a contact task
     # we walk contact → site → company so the cancel button has a valid URL.
     real_company_id = task.company_id
@@ -14875,6 +14911,7 @@ async def edit_task_endpoint(
     company_id = task.company_id if task else None
     site_contact_id = task.site_contact_id if task else None
     vendor_card_id_edit = task.vendor_card_id if task else None
+    vendor_contact_id_edit = task.vendor_contact_id if task else None
     if company_id:
         tasks = get_open_tasks_for_company(db, company_id)
         ctx = _base_ctx(request, user, "customers")
@@ -14898,6 +14935,17 @@ async def edit_task_endpoint(
         ctx["vendor_id"] = vendor_card_id_edit
         ctx["vendor_tasks"] = vendor_tasks
         return template_response("htmx/partials/vendors/tabs/_vendor_tasks.html", ctx)
+    if vendor_contact_id_edit:
+        from app.models.vendors import VendorContact as _VendorContact
+        from app.services.task_service import get_open_tasks_for_vendor_card
+
+        vc = db.get(_VendorContact, vendor_contact_id_edit)
+        if vc:
+            vendor_tasks = get_open_tasks_for_vendor_card(db, vc.vendor_card_id)
+            ctx = _base_ctx(request, user, "vendors")
+            ctx["vendor_id"] = vc.vendor_card_id
+            ctx["vendor_tasks"] = vendor_tasks
+            return template_response("htmx/partials/vendors/tabs/_vendor_tasks.html", ctx)
     return HTMLResponse("")
 
 
