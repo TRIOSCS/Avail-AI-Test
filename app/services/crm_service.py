@@ -381,7 +381,12 @@ def cdm_list_ctx(
     return ctx
 
 
-def company_contact_rows(db: Session, company_id: int, sites: list[CustomerSite] | None = None) -> list[dict]:
+def company_contact_rows(
+    db: Session,
+    company_id: int,
+    sites: list[CustomerSite] | None = None,
+    viewer: User | None = None,
+) -> list[dict]:
     """Active contacts for a company across its ACTIVE sites, plus legacy site-level
     contacts.
 
@@ -395,11 +400,31 @@ def company_contact_rows(db: Session, company_id: int, sites: list[CustomerSite]
     site.contact_* (contacts_tab.html branches on row.legacy and relies on this).
     For legacy rows site is always set; for contact rows site is the contact's site
     (None only if the lookup misses).
+
+    viewer (optional): When set, applies the Phase 2b site-scope rule:
+      - manager/admin → all sites
+      - account owner (company.account_owner_id == viewer.id) → all sites
+      - else → only sites where CustomerSite.owner_id == viewer.id
+    viewer=None retains legacy behaviour (no scoping).
     """
     if sites is None:
         sites = (
             db.query(CustomerSite).filter(CustomerSite.company_id == company_id, CustomerSite.is_active.is_(True)).all()
         )
+
+    if viewer is not None:
+        # Resolve account_owner_id for this company without an extra round-trip when
+        # sites is pre-loaded; fall back to a targeted scalar if not available.
+        if sites and hasattr(sites[0], "company") and sites[0].company is not None:
+            account_owner_id = sites[0].company.account_owner_id
+        else:
+            account_owner_id = db.scalar(select(Company.account_owner_id).where(Company.id == company_id))
+
+        sees_all = is_manager_or_admin(viewer) or account_owner_id == viewer.id
+        if not sees_all:
+            # Sites with no owner (owner_id=None) are accessible to all viewers.
+            # Sites with an explicit owner are restricted to that owner.
+            sites = [s for s in sites if s.owner_id is None or s.owner_id == viewer.id]
     site_map = {s.id: s for s in sites}
     contacts: list[SiteContact] = []
     if site_map:

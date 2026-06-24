@@ -5458,7 +5458,7 @@ def _render_contacts_list(request: Request, user: User, company: Company, db: Se
     ctx.update(
         {
             "company": company,
-            "contact_rows": _company_contact_rows(db, company.id),
+            "contact_rows": _company_contact_rows(db, company.id, viewer=user),
             "now_utc": datetime.now(timezone.utc),
             "roles": CANONICAL_ROLES,
         }
@@ -5964,7 +5964,7 @@ async def company_detail_partial(
     _stats = _company_commercial_stats(db, [company.id]).get(company.id, {})
     _cadence = _cadence_state(company.tier, company.last_outbound_at)
     _nbt = _next_best_touch(company.tier, company.last_outbound_at)
-    contact_rows = _company_contact_rows(db, company_id, sites=sites)
+    contact_rows = _company_contact_rows(db, company_id, sites=sites, viewer=user)
     segment_tags = _list_company_segment_tags(company_id=company_id, db=db)
     all_segment_tags = _list_all_segment_tags(db=db)
     # Active sites (name-sorted) for the inlined Contacts site filter — same source
@@ -6059,7 +6059,7 @@ async def company_tab(
         ctx.update(
             {
                 "company": company,
-                "contact_rows": _company_contact_rows(db, company_id),
+                "contact_rows": _company_contact_rows(db, company_id, viewer=user),
                 "now_utc": datetime.now(timezone.utc),
                 "active_sites": active_sites,
                 "roles": CANONICAL_ROLES,
