@@ -1281,8 +1281,14 @@ def log_vendor_note(
     contact_name: str | None,
     db: Session,
     requisition_id: int | None = None,
+    bump_last_activity: bool = True,
 ) -> ActivityLog:
-    """Log a manual note against a vendor."""
+    """Log a manual note against a vendor.
+
+    Pass bump_last_activity=False for manual add-note routes that must be cadence-
+    neutral (i.e. vendor notes from the UI should not advance last_activity_at on the
+    VendorCard).
+    """
     record = ActivityLog(
         user_id=user_id,
         activity_type=ActivityType.NOTE,
@@ -1300,10 +1306,11 @@ def log_vendor_note(
 
     bump_clocks_from_activity(db, record)
 
-    now = datetime.now(timezone.utc)
-    db.query(VendorCard).filter(VendorCard.id == vendor_card_id).update(
-        {"last_activity_at": now}, synchronize_session=False
-    )
+    if bump_last_activity:
+        now = datetime.now(timezone.utc)
+        db.query(VendorCard).filter(VendorCard.id == vendor_card_id).update(
+            {"last_activity_at": now}, synchronize_session=False
+        )
     if vendor_contact_id:
         _increment_vendor_contact(vendor_contact_id, db)
 

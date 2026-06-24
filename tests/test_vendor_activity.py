@@ -94,10 +94,12 @@ class TestVendorActivityTab:
         assert "required" in resp.text.lower()
 
     def test_vendor_add_note_is_cadence_neutral(self, client, db_session, test_vendor_card):
-        """Posting a vendor note does NOT update last_outbound_at (cadence-neutral)."""
+        """Posting a vendor note does NOT update last_outbound_at or last_activity_at
+        (cadence-neutral)."""
         # Snapshot cadence fields before
         db_session.refresh(test_vendor_card)
         before_outbound = test_vendor_card.last_outbound_at
+        before_activity = test_vendor_card.last_activity_at
 
         resp = client.post(
             f"/v2/partials/vendors/{test_vendor_card.id}/activity/add-note",
@@ -108,9 +110,11 @@ class TestVendorActivityTab:
         # Re-read from DB
         db_session.refresh(test_vendor_card)
         after_outbound = test_vendor_card.last_outbound_at
+        after_activity = test_vendor_card.last_activity_at
 
-        # last_outbound_at must not have changed
+        # Neither cadence clock nor activity-staleness timestamp must have changed
         assert before_outbound == after_outbound
+        assert before_activity == after_activity
 
     def test_vendor_add_note_requires_auth(self, unauthenticated_client, test_vendor_card):
         """Unauthenticated POST add-note → 401 or 403."""

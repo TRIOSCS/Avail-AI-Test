@@ -14960,6 +14960,7 @@ async def vendor_activity_add_note(
         contact_name=None,
         notes=notes.strip(),
         db=db,
+        bump_last_activity=False,
     )
     db.commit()
     # Re-render the full activity tab by delegating to the existing tab handler
