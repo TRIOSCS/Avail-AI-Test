@@ -13921,14 +13921,47 @@ async def settings_system_tab(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """System config tab — admin only."""
+    """System config tab — admin only.
+
+    Renders the curated typed controls (3 toggles + 1 number input) for the four user-
+    facing flags. Effective values come from the Task-10 resolver (DB row wins, else the
+    env-backed default) so each control reflects reality. Internal watermark keys are
+    surfaced read-only in a collapsed "Job state" disclosure, never as editable
+    controls.
+    """
     if user.role != UserRole.ADMIN:
         raise HTTPException(403, "Admin only")
-    from ..services.admin_service import get_all_config
+    from ..config import settings as app_settings
+    from ..routers.admin.system import SYSTEM_JOB_STATE_KEYS, SYSTEM_SETTINGS_META
+    from ..services.admin_service import (
+        get_all_config,
+        get_effective_flag,
+        get_effective_int,
+    )
 
-    config = get_all_config(db)
+    # Resolve each curated setting's effective value, threading the env default so a
+    # missing DB row falls back to the same value the background jobs read today.
+    env_defaults = {
+        "email_mining_enabled": app_settings.email_mining_enabled,
+        "proactive_matching_enabled": app_settings.proactive_matching_enabled,
+        "activity_tracking_enabled": app_settings.activity_tracking_enabled,
+        "inbox_scan_interval_min": app_settings.inbox_scan_interval_min,
+    }
+    settings_view = []
+    for key, meta in SYSTEM_SETTINGS_META.items():
+        if meta["type"] == "bool":
+            value = get_effective_flag(db, key, env_defaults[key])
+        else:
+            value = get_effective_int(db, key, env_defaults[key])
+        settings_view.append({"key": key, "value": value, **meta})
+
+    # Read-only job-state watermark rows (collapsed disclosure).
+    all_config = get_all_config(db)
+    job_state = [row for row in all_config if row["key"] in SYSTEM_JOB_STATE_KEYS]
+
     ctx = _base_ctx(request, user, "settings")
-    ctx["config"] = config
+    ctx["system_settings"] = settings_view
+    ctx["job_state"] = job_state
     return template_response("htmx/partials/settings/system.html", ctx)
 
 

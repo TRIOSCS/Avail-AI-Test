@@ -508,9 +508,10 @@ def test_low_contrast_secondary_text_does_not_grow():
     Ratchet only (decorative icon grays are fine) — caps growth rather than banning
     outright.
     """
-    BASELINE = 413  # +3 for the Resell workspace partials (lists/detail/offers muted
+    BASELINE = 414  # +3 for the Resell workspace partials (lists/detail/offers muted
     # metadata copy — the established resell look; the bid-builder itself uses the
-    # higher-contrast text-gray-600 per this rule).
+    # higher-contrast text-gray-600 per this rule). +1 for the settings-refine profile/
+    # notifications muted copy; the curated System tab itself uses text-gray-600 throughout.
     count = _tpl_substring_count("text-gray-500")
     assert count <= BASELINE, (
         f"text-gray-500 usages rose to {count} (baseline {BASELINE}). Prefer "

@@ -3714,6 +3714,24 @@ re-resolved per run inside `_job_inbox_scan` (uses its own session). The resolve
 degrades to the env default when the session is absent (`db=None`) or the DB read
 fails, so registration never crashes.
 
+**System settings tab (curated typed UI).** `settings_system_tab`
+(`/v2/partials/settings/system`, admin-only) renders curated typed controls instead of
+a raw key/value table. The catalog `SYSTEM_SETTINGS_META` (owned in
+`app/routers/admin/system.py`) maps each of the four user-facing keys to
+`{type: bool|int, label, help, restart, min}`: three toggle switches
+(`email_mining_enabled`, `proactive_matching_enabled`, `activity_tracking_enabled`) and
+one number input (`inbox_scan_interval_min`, min 5). Each control's displayed value is
+the effective resolver value (`get_effective_flag/get_effective_int` with the env
+default). Controls `PUT /api/admin/config/{key}` (hx-swap="none"); `api_set_config`
+validates curated keys via `_validate_typed_value` — booleans accept only true/false,
+the interval rejects `< 5` with a 400 `{"error": "Inbox scan interval must be at least 5
+minutes."}` (the global handler toasts it) — and on success returns an HX-Trigger
+`showToast`. The three scheduler-read settings carry an inline "Applies after the next
+restart." note (`email_mining_enabled` resolves per-request, so it has none). Internal
+watermark keys (`teams_calls_last_poll`, `8x8_last_poll`, `proactive_last_scan`,
+`SYSTEM_JOB_STATE_KEYS`) are never editable — surfaced read-only in a collapsed
+"Job state (read-only)" disclosure.
+
 ---
 
 ## Frontend <-> Backend Pattern
