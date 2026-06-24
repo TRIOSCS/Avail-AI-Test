@@ -1669,10 +1669,17 @@ membership is curated, never "follow role"). Enforced at four points:
 | **Bottom nav** (hide revoked sections) | `_base_ctx` calls `admin.users.module_access_map(user)` → `{nav-id: bool}` `access` map; `shared/mobile_nav.html` skips any section where `access[id]` is False (default-show if absent). |
 | **Module full-page route** | `v2_page` maps the resolved `current_view` to its module `AccessKey` (`_VIEW_ACCESS`; CRM sub-views all gate on CRM); a denied view 302-redirects to the user's FIRST allowed module (`_MODULE_ENTRY_URLS` order) — target is always allowed, so no loop. No-access-at-all → 403 with logout link. Un-gated views: settings/quotes/follow-ups/tickets. |
 | **Module partial entry route** | `require_access(<module>)` dependency on each of the 10 nav-module partial routes (parts/sightings/materials/search/buy-plans/resell/crm/proactive/prospecting/my-day workspaces). |
+| **Module SUB-partial chokepoint** | `ModuleAccessMiddleware` (`app/main.py`, inner of `SessionMiddleware`) closes the gap where a revoked user could still READ a module's *sub*-partials by direct URL (those carry only `require_user`). It resolves the request path through the pure `app.access_paths.module_key_for_path` and, if a guarded prefix matches and the session user lacks the key, returns a plain 403. **Only EMPIRICALLY module-exclusive prefixes are guarded: `crm`, `resell`, `proactive`, `prospecting`, `my-day`.** The other five entry-prefixes (`parts`, `sightings`, `materials`, `search`, `buy-plans`) are SHARED cross-module (embedded by other modules' templates) and DELIBERATELY un-gated, as are all CRM *data* partials (customers/contacts/vendors/vendor-contacts) and capability/global/global-search partials — gating them would over-block. Admins and logged-out requests pass through; a DB session opens only when a guarded prefix matches. |
 | **Capability action** | `require_access(<capability>)` on: RFQ-send (`htmx_views.rfq_send`, `sightings.sightings_send_inquiry`); offer approve/reject/reconfirm (`crm/offers.py` + the Sightings `review_offer`/`reconfirm_offer` wrappers); CSV + quote exports (`crm/export.py`, `quote_builder.py`); source-test (`sources.test_api_source`). |
 
 `require_access(key)` is a factory returning a dependency that depends on `require_user`
-and raises 403 unless `user_has_access` passes (admins always pass).
+and raises 403 unless `user_has_access` passes (admins always pass). The
+`ModuleAccessMiddleware` SUB-partial chokepoint enforces the SAME `user_has_access`
+decision one layer earlier (at the ASGI level) for module-exclusive fragment URLs that
+have no per-route `require_access`, so module revocation is airtight without a gate on
+every sub-partial. CRM data partials (customers/contacts/vendors) remain reachable by
+design — they are shared cross-module, so revocation hides the CRM section/nav and blocks
+crm-prefixed partials only.
 
 ### Admin Users tab (CRUD + access editor)
 

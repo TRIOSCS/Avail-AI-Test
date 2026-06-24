@@ -46,6 +46,10 @@ Caddy (reverse proxy, TLS termination, static files)
 FastAPI Middleware Stack (in order):
     ├── 1. GZipMiddleware (compress >= 500 bytes)
     ├── 2. SessionMiddleware (HTTP-only cookie, 15-min expiry)
+    │       Inner of Session (registered before it so Session is outer): AuditUserMiddleware
+    │       (sets current_user_id contextvar) and ModuleAccessMiddleware (per-user MODULE
+    │       access chokepoint on module-exclusive HTMX sub-partials — see INTERACTIONS
+    │       "Module SUB-partial chokepoint"; reads scope["session"] so Session must run first).
     ├── 3. CSRFMiddleware (double-submit cookie on mutations)
     ├── 4. PrometheusMiddleware (request count + duration histogram, app/prometheus_metrics.py)
     │       Note: fastapi 0.137 (PR #15745) made `app.routes` a tree — `include_router`'d
