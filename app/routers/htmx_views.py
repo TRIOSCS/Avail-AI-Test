@@ -4268,7 +4268,7 @@ async def vendor_tab(
     """Return a specific tab partial for vendor detail."""
     vendor = get_vendor_card_or_404(db, vendor_id)
 
-    valid_tabs = {"overview", "contacts", "find_contacts", "emails", "analytics", "offers", "reviews"}
+    valid_tabs = {"overview", "contacts", "find_contacts", "emails", "analytics", "offers", "reviews", "activity"}
     if tab not in valid_tabs:
         raise HTTPException(404, f"Unknown tab: {tab}")
 
@@ -4414,6 +4414,27 @@ async def vendor_tab(
 
     elif tab == "reviews":
         return await vendor_reviews(request=request, vendor_id=vendor_id, user=user, db=db)
+
+    elif tab == "activity":
+        from ..models.intelligence import ActivityLog as _ActivityLog
+
+        activities = (
+            db.query(_ActivityLog)
+            .filter(_ActivityLog.vendor_card_id == vendor_id)
+            .order_by(_ActivityLog.created_at.desc())
+            .limit(50)
+            .all()
+        )
+        activities_truncated = len(activities) >= 50
+        ctx = _base_ctx(request, user, "vendors")
+        ctx.update(
+            {
+                "vendor": vendor,
+                "activities": activities,
+                "activities_truncated": activities_truncated,
+            }
+        )
+        return template_response("htmx/partials/vendors/tabs/activity_tab.html", ctx)
 
     else:  # offers
         offers = (
@@ -14886,6 +14907,66 @@ async def activity_add_note(
         company_id=company_id,
         tab="activity",
         site_id=None,
+        user=user,
+        db=db,
+    )
+
+
+# ── Vendor activity add-note ─────────────────────────────────────────────
+
+
+@router.get(
+    "/v2/partials/vendors/{vendor_id}/activity/add-note-form",
+    response_class=HTMLResponse,
+)
+async def vendor_activity_add_note_form(
+    request: Request,
+    vendor_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render the inline add-note form for the vendor Activity tab."""
+    vendor = get_vendor_card_or_404(db, vendor_id)
+    ctx = _base_ctx(request, user, "vendors")
+    ctx["vendor_id"] = vendor.id
+    return template_response("htmx/partials/vendors/_add_note_form.html", ctx)
+
+
+@router.post(
+    "/v2/partials/vendors/{vendor_id}/activity/add-note",
+    response_class=HTMLResponse,
+)
+async def vendor_activity_add_note(
+    request: Request,
+    vendor_id: int,
+    notes: str = Form(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Log a manual note against a vendor and return the refreshed Activity tab.
+
+    Cadence-neutral: direction=None so bump_clocks_from_activity does not advance
+    last_outbound_at.
+    """
+    from app.services.activity_service import log_vendor_note
+
+    vendor = get_vendor_card_or_404(db, vendor_id)
+    if not notes.strip():
+        return HTMLResponse('<p class="text-xs text-rose-600">Note text is required.</p>')
+    log_vendor_note(
+        user_id=user.id,
+        vendor_card_id=vendor.id,
+        vendor_contact_id=None,
+        contact_name=None,
+        notes=notes.strip(),
+        db=db,
+    )
+    db.commit()
+    # Re-render the full activity tab by delegating to the existing tab handler
+    return await vendor_tab(
+        request=request,
+        vendor_id=vendor_id,
+        tab="activity",
         user=user,
         db=db,
     )

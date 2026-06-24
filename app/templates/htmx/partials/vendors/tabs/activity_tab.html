@@ -1,0 +1,72 @@
+{# activity_tab.html — Vendor Activity tab: date-grouped manual note feed.
+   Receives: vendor (VendorCard), activities (list[ActivityLog] newest-first),
+             activities_truncated (bool).
+   Called by: vendor_tab route (tab=="activity") in htmx_views.py.
+   Depends on: HTMX, Alpine.js, Tailwind CSS, activity_row macro, now() Jinja global.
+#}
+{% from "htmx/partials/shared/_macros.html" import activity_row %}
+
+<div class="space-y-4" id="vendor-activity-tab-{{ vendor.id }}">
+
+  {# ── Add note button ─────────────────────────────────────────── #}
+  <div class="flex justify-end">
+    <button type="button"
+            hx-get="/v2/partials/vendors/{{ vendor.id }}/activity/add-note-form"
+            hx-target="#vendor-add-note-slot-{{ vendor.id }}"
+            hx-swap="innerHTML"
+            class="btn btn-sm text-brand-600 border-brand-200 hover:bg-brand-50 focus:ring-2 focus:ring-brand-500">
+      + Add note
+    </button>
+  </div>
+  <div id="vendor-add-note-slot-{{ vendor.id }}"></div>
+
+  {# ── Empty state ─────────────────────────────────────────────── #}
+  {% if not activities %}
+  <div class="p-8 text-center">
+    <svg class="mx-auto h-10 w-10 text-gray-300 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0116 0z"/>
+    </svg>
+    <p class="text-sm text-gray-600">No activity recorded for this vendor yet.</p>
+    <p class="text-xs text-gray-400 mt-1">Activity will appear here as you log notes and interactions.</p>
+  </div>
+  {% endif %}
+
+  {# ── Date-grouped activity feed ───────────────────────────────── #}
+  {% if activities %}
+  <div class="bg-white rounded-lg border border-gray-200 overflow-hidden">
+    <div class="px-4 py-2.5 bg-gray-50 border-b flex items-center gap-2">
+      <svg class="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+      </svg>
+      <h3 class="text-sm font-semibold text-gray-700">Notes &amp; Activity</h3>
+      <span class="inline-flex items-center px-1.5 py-0.5 text-xs font-medium rounded-full bg-gray-100 text-gray-600">{{ activities|length }}</span>
+    </div>
+    <div class="px-4 py-2">
+      {%- set today = now().date() -%}
+      {%- set ns = namespace(day=None) -%}
+      {% for a in activities %}
+        {%- set ts = a.occurred_at or a.created_at -%}
+        {% if ts and ts.date() != ns.day %}
+          {%- set ns.day = ts.date() -%}
+          {%- set day_delta = (today - ts.date()).days -%}
+          <p class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mt-4 mb-1 first:mt-1">
+            {%- if day_delta == 0 %}Today
+            {%- elif day_delta == 1 %}Yesterday
+            {%- else %}{{ ts.strftime('%b %d, %Y') }}{% endif -%}
+          </p>
+        {% endif %}
+        {{ activity_row(a) }}
+      {% endfor %}
+    </div>
+  </div>
+
+  {# ── Truncation footer ─────────────────────────────────────────── #}
+  {% if activities_truncated %}
+  <div class="px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg">
+    <p class="text-xs text-gray-400">Showing most recent 50 activities — older history may not appear.</p>
+  </div>
+  {% endif %}
+
+  {% endif %}
+
+</div>
