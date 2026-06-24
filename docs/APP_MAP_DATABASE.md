@@ -850,7 +850,15 @@ New columns (vendor parity):
 ### System & Config
 
 **`api_sources`** — Supplier connector config (credentials, quotas, health)
-**`system_config`** — Key-value app settings
+**`system_config`** — Key-value app settings. **DB row is authoritative over env** for
+the 4 System-tab feature flags (`email_mining_enabled`, `proactive_matching_enabled`,
+`activity_tracking_enabled`, `inbox_scan_interval_min`): consumers resolve via
+`admin_service.get_effective_flag/get_effective_int(db, key, env_default)` — the row's
+value wins when present/parseable, else the env-backed `settings.<flag>` is the fallback.
+A startup reconcile (`startup._reconcile_system_config`) mirrors the env value into each
+never-admin-edited row (`updated_by IS NULL`) so behaviour doesn't flip at cutover;
+`set_config_value` invalidates the 5-min in-memory config cache so a toggle takes effect
+promptly. `updated_by IS NULL` == never edited via the UI.
 
 SP4 Account Reclamation config keys (sourced from `.env` / `app/config.py`):
 | Key | Type | Default | Description |

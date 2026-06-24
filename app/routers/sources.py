@@ -50,6 +50,7 @@ from ..schemas.responses import (
     VendorEngagementDetailResponse,
 )
 from ..schemas.sources import MiningOptions, SourceStatusToggle
+from ..services.admin_service import get_effective_flag
 from ..services.credential_service import get_credential_cached
 from ..services.vendor_unavailability import apply_to_fresh_sightings
 from ..vendor_utils import normalize_vendor_name
@@ -116,7 +117,7 @@ def _get_connector_for_source(name: str, db: Session = None):
     if name == "element14" and e14_key:
         return Element14Connector(e14_key)
 
-    if name == "email_mining" and settings.email_mining_enabled:
+    if name == "email_mining" and get_effective_flag(db, "email_mining_enabled", settings.email_mining_enabled):
         return _EmailMiningTestConnector()
 
     test_connector = {
@@ -778,7 +779,7 @@ async def email_mining_status(user: User = Depends(require_user), db: Session = 
     """Get current email mining status."""
     src = db.query(ApiSource).filter_by(name="email_mining").first()
     return {
-        "enabled": settings.email_mining_enabled,
+        "enabled": get_effective_flag(db, "email_mining_enabled", settings.email_mining_enabled),
         "last_scan": src.last_success.isoformat() if src and src.last_success else None,
         "total_scans": src.total_searches if src else 0,
         "total_vendors_found": src.total_results if src else 0,

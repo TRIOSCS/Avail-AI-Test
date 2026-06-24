@@ -670,7 +670,7 @@ async def requisitions_list_partial(
             "offset": offset,
             "users": users,
             "user_role": user.role,
-            "inbox_status": get_inbox_sync_status(user),
+            "inbox_status": get_inbox_sync_status(db, user),
         }
     )
     return template_response("htmx/partials/requisitions/list.html", ctx)
@@ -13943,7 +13943,7 @@ async def settings_profile_tab(
 
     ctx = _base_ctx(request, user, "settings")
     ctx["profile_user"] = user
-    ctx["inbox_status"] = get_inbox_sync_status(user)
+    ctx["inbox_status"] = get_inbox_sync_status(db, user)
     return template_response("htmx/partials/settings/profile.html", ctx)
 
 
@@ -13972,7 +13972,7 @@ async def settings_scan_now(
     await _run_inbox_scan_now(user, db)
     db.refresh(user)
     ctx = _base_ctx(request, user, "settings")
-    ctx["inbox_status"] = get_inbox_sync_status(user)
+    ctx["inbox_status"] = get_inbox_sync_status(db, user)
     return template_response("htmx/partials/settings/_mailbox_sync_card.html", ctx)
 
 

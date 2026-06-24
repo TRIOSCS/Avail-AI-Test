@@ -1564,12 +1564,16 @@ def dismiss_activity(activity_id: int, db: Session) -> ActivityLog | None:
     return activity
 
 
-def get_inbox_sync_status(user) -> dict:
+def get_inbox_sync_status(db: Session, user) -> dict:
     """Derive inbox-sync health for the Settings card / disconnected banner.
 
     Reads existing User fields (no new columns). See
-    app/jobs/core_jobs.py:_job_inbox_scan for the scheduled poll this surfaces.
+    app/jobs/core_jobs.py:_job_inbox_scan for the scheduled poll this surfaces. The scan
+    interval resolves from the system_config DB row (admin toggle), falling back to the
+    env default — so this staleness threshold matches the actual scan cadence.
     """
+    from app.services.admin_service import get_effective_int
+
     now = datetime.now(timezone.utc)
     connected = bool(getattr(user, "m365_connected", False))
     last_scan = getattr(user, "last_inbox_scan", None)
@@ -1579,7 +1583,7 @@ def get_inbox_sync_status(user) -> dict:
     if exp is not None and _utc(exp) <= now:
         token_ok = False
 
-    interval = settings.inbox_scan_interval_min
+    interval = get_effective_int(db, "inbox_scan_interval_min", settings.inbox_scan_interval_min)
     if last_scan is None:
         is_stale = True
     else:

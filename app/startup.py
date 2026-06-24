@@ -38,6 +38,7 @@ def run_startup_migrations() -> None:
         _create_fts_triggers(conn)
         _backfill_fts(conn)
         _seed_system_config(conn)
+        _reconcile_system_config(conn)
         _seed_site_contacts(conn)
         _seed_manufacturers(conn)
         _create_count_triggers(conn)
@@ -344,6 +345,35 @@ def _seed_system_config(conn) -> None:
             VALUES (:key, :value, :desc)
             ON CONFLICT (key) DO NOTHING""",
             {"key": key, "value": value, "desc": desc},
+        )
+
+
+def _reconcile_system_config(conn) -> None:
+    """No-surprise cutover: mirror the current env value into each flag's DB row.
+
+    Task 10 makes the system_config DB row authoritative for the 4 feature flags (the
+    UI toggle becomes real). To avoid behaviour flipping at the cutover deploy, point
+    each never-admin-edited row (``updated_by IS NULL``) at the value the background
+    jobs read today — the env-backed Pydantic setting. Rows an admin has deliberately
+    set (``updated_by IS NOT NULL``) are never touched. Idempotent: re-running rewrites
+    the same value. Runtime data op only — no DDL.
+    """
+    from .config import settings
+
+    # Serialize to the seed's string format so the resolver parses it identically.
+    env_values = {
+        "inbox_scan_interval_min": str(int(settings.inbox_scan_interval_min)),
+        "email_mining_enabled": "true" if settings.email_mining_enabled else "false",
+        "proactive_matching_enabled": "true" if settings.proactive_matching_enabled else "false",
+        "activity_tracking_enabled": "true" if settings.activity_tracking_enabled else "false",
+    }
+    for key, value in env_values.items():
+        _exec(
+            conn,
+            """UPDATE system_config
+            SET value = :value
+            WHERE key = :key AND updated_by IS NULL""",
+            {"key": key, "value": value},
         )
 
 

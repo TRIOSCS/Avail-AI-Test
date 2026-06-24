@@ -3701,6 +3701,19 @@ APScheduler (scheduler.py)
             +---> Ping each connector -> update api_sources
 ```
 
+**Feature-flag resolution at job registration.** `register_all_jobs()` opens one
+short-lived `SessionLocal()` (closed in `finally`) and passes it to the three
+flag-reading registrars — `register_core_jobs`, `register_email_jobs`,
+`register_offers_jobs` — which resolve `inbox_scan_interval_min`,
+`activity_tracking_enabled`, and `proactive_matching_enabled` via
+`admin_service.get_effective_flag/get_effective_int(db, key, settings.<flag>)`. So the
+System-tab toggles are read at scheduler-config time (after
+`run_startup_migrations()` has seeded + reconciled the rows); a deliberate admin flip
+takes effect at the next scheduler reconfigure/restart. The interval/flag is also
+re-resolved per run inside `_job_inbox_scan` (uses its own session). The resolver
+degrades to the env default when the session is absent (`db=None`) or the DB read
+fails, so registration never crashes.
+
 ---
 
 ## Frontend <-> Backend Pattern

@@ -9,7 +9,7 @@ def _patch_inbox_status(monkeypatch, **status):
     """Stub get_inbox_sync_status to return the given status dict."""
     monkeypatch.setattr(
         "app.services.activity_service.get_inbox_sync_status",
-        lambda user: status,
+        lambda db, user: status,
     )
 
 
