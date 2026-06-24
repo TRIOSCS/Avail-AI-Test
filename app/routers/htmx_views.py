@@ -14095,6 +14095,43 @@ async def toggle_new_offer_alert(
     return response
 
 
+def _render_data_ops(request: Request, user: User, db: Session):
+    """Render the Data Ops tab partial — vendor/company dedup suggestions.
+
+    Each scan is guarded independently. A scan that RAISES sets a per-scan
+    ``*_scan_failed`` flag so the template can render a distinct error block instead
+    of swallowing the failure into the reassuring "no duplicates found" empty state
+    (a crashed scan must never look like a clean dataset). Reused by the merge
+    endpoints so a successful merge re-renders the surrounding list and stale pairs
+    drop without a manual refresh.
+    """
+    vendor_dupes: list = []
+    company_dupes: list = []
+    vendor_scan_failed = False
+    company_scan_failed = False
+    try:
+        from ..vendor_utils import find_vendor_dedup_candidates
+
+        vendor_dupes = find_vendor_dedup_candidates(db, threshold=85, limit=30)
+    except Exception as e:
+        vendor_scan_failed = True
+        logger.warning(f"Vendor dedup scan failed: {e}")
+    try:
+        from ..company_utils import find_company_dedup_candidates
+
+        company_dupes = find_company_dedup_candidates(db, threshold=85, limit=30)
+    except Exception as e:
+        company_scan_failed = True
+        logger.warning(f"Company dedup scan failed: {e}")
+
+    ctx = _base_ctx(request, user, "settings")
+    ctx["vendor_dupes"] = vendor_dupes
+    ctx["company_dupes"] = company_dupes
+    ctx["vendor_scan_failed"] = vendor_scan_failed
+    ctx["company_scan_failed"] = company_scan_failed
+    return template_response("htmx/partials/settings/data_ops.html", ctx)
+
+
 @router.get("/v2/partials/settings/data-ops", response_class=HTMLResponse)
 async def settings_data_ops_tab(
     request: Request,
@@ -14107,25 +14144,7 @@ async def settings_data_ops_tab(
     if not is_admin(user):
         raise HTTPException(403, "Admin only")
 
-    vendor_dupes = []
-    company_dupes = []
-    try:
-        from ..vendor_utils import find_vendor_dedup_candidates
-
-        vendor_dupes = find_vendor_dedup_candidates(db, threshold=85, limit=30)
-    except Exception as e:
-        logger.warning(f"Vendor dedup scan failed: {e}")
-    try:
-        from ..company_utils import find_company_dedup_candidates
-
-        company_dupes = find_company_dedup_candidates(db, threshold=85, limit=30)
-    except Exception as e:
-        logger.warning(f"Company dedup scan failed: {e}")
-
-    ctx = _base_ctx(request, user, "settings")
-    ctx["vendor_dupes"] = vendor_dupes
-    ctx["company_dupes"] = company_dupes
-    return template_response("htmx/partials/settings/data_ops.html", ctx)
+    return _render_data_ops(request, user, db)
 
 
 @router.get("/v2/partials/settings/api-keys", response_class=HTMLResponse)
@@ -14354,12 +14373,18 @@ async def admin_vendor_merge(
     try:
         result = _merge(keep_id, remove_id, db)
         db.commit()
-        return HTMLResponse(
-            f'<p class="text-sm text-emerald-600 py-2">Merged into {html_mod.escape(str(result.get("kept_name", "vendor")))}. '
-            f"{result.get('reassigned', 0)} records reassigned.</p>"
-        )
     except ValueError as e:
-        return HTMLResponse(f'<p class="text-sm text-rose-600 py-2">Error: {html_mod.escape(str(e))}</p>')
+        db.rollback()
+        message, kind = f"Vendor merge failed: {e}", "error"
+    else:
+        kept = db.get(VendorCard, result.get("kept", keep_id))
+        kept_name = kept.display_name if kept and kept.display_name else "vendor"
+        message = f"Merged into {kept_name}. {result.get('reassigned', 0)} records reassigned."
+        kind = "success"
+
+    resp = _render_data_ops(request, user, db)
+    settings_toast(resp, message, kind=kind)
+    return resp
 
 
 @router.post("/v2/partials/admin/company-merge", response_class=HTMLResponse)
@@ -14381,11 +14406,17 @@ async def admin_company_merge(
     try:
         result = merge_companies(keep_id, remove_id, db)
         db.commit()
-        return HTMLResponse(
-            f'<p class="text-sm text-emerald-600 py-2">Merged into {html_mod.escape(str(result.get("kept_name", "company")))}.</p>'
-        )
-    except (ValueError, Exception) as e:
-        return HTMLResponse(f'<p class="text-sm text-rose-600 py-2">Error: {html_mod.escape(str(e))}</p>')
+    except Exception as e:
+        db.rollback()
+        message, kind = f"Company merge failed: {e}", "error"
+    else:
+        kept = db.get(Company, result.get("kept", keep_id))
+        kept_name = kept.name if kept and kept.name else "company"
+        message, kind = f"Merged into {kept_name}.", "success"
+
+    resp = _render_data_ops(request, user, db)
+    settings_toast(resp, message, kind=kind)
+    return resp
 
 
 # ── Proactive Part Match ─────────────────────────────────────────────

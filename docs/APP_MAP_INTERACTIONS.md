@@ -1836,6 +1836,27 @@ merges different-`account_owner_id` accounts) are reused AS-IS.
   blank + emitted empty merge ids; dead). Default keep/remove direction follows
   `pair.auto_keep_id`; both buttons POST `/v2/partials/admin/company-merge`. Reached via
   `GET /v2/partials/settings/data-ops` (`require_user` + explicit `is_admin` gate).
+- **Vendor-Duplicates loop (same template) had the identical flat-field bug** — it read
+  `pair.name_a/id_a/sightings_a` while `vendor_utils.find_vendor_dedup_candidates` returns
+  NESTED `{vendor_a:{id,name,sightings}, vendor_b:{…}, score}` → vendor rows rendered blank
+  with empty `hx-vals` ids. Now rewritten against the nested shape, with a "suggested keep"
+  hint (keeper = higher-sighting side, ties→`vendor_a`), matching the Company loop.
+- **Honest scan-error state:** the data-ops route runs each dedup scan inside its own
+  `try/except` via the shared `_render_data_ops(request, user, db)` helper, which sets a
+  per-scan `vendor_scan_failed`/`company_scan_failed` flag. A scan that RAISES renders a
+  distinct rose error block ("Couldn't check for duplicate vendors/companies right now —
+  try Refresh.") instead of swallowing the failure into the reassuring "No duplicate …
+  found" clean empty state. The empty state copy now says "companies" (matched to the
+  card title), not "customers".
+- **Merge-button styling + post-merge refresh:** the `merge_button` macro takes an
+  `is_keeper` flag — the suggested-keep direction is a filled brand chip, the drop
+  direction a neutral outline (name truncation widened to 40 chars so similar-prefixed
+  names never render as twin buttons). Both merge endpoints now re-render the whole
+  Data Ops partial via `_render_data_ops` into `#settings-content` (so pairs referencing
+  the just-merged entity drop without a manual refresh) and surface the kept-name /
+  failure message via a `settings_toast` `HX-Trigger` rather than swapping a `<p>` into
+  the row. Both vendor and company rows carry the Alpine `x-data="{ merged: false }"`
+  guard for consistent post-merge behavior.
 - **Per-account banner:** `GET .../{company_id}/dup-suggestion` (`company_dup_suggestion`,
   declared ABOVE the catch-all) → lazy `hx-trigger=load` panel in `detail.html` →
   `_dup_suggestion.html`. Shows the top dedup match INVOLVING this company + a "Review &

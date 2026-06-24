@@ -36,15 +36,18 @@
    that same leading whitespace, used to re-indent the continuation/closing lines to
    pad+8 / pad+2 / pad, matching the original hand-indented markup. `keep_id`/`drop_id`
    are the ids kept/removed, `keep`/`drop` the names, `endpoint` the hx-post URL,
-   `target` the hx-target selector. #}
-{% macro merge_button(pad, endpoint, target, keep_id, drop_id, keep, drop) -%}
+   `target` the hx-target selector. `is_keeper` styles the suggested-keep direction as a
+   filled brand/primary chip and the drop direction as a neutral outline, so two
+   similar-prefixed names never render as two identical buttons. The name truncation is
+   wide (40 chars) for the same reason. #}
+{% macro merge_button(pad, endpoint, target, keep_id, drop_id, keep, drop, is_keeper=false) -%}
 <button data-loading-disable
 {{ pad }}        hx-post="{{ endpoint }}"
 {{ pad }}        hx-vals='{"keep_id": {{ keep_id }}, "remove_id": {{ drop_id }}}'
 {{ pad }}        hx-target="{{ target }}"
 {{ pad }}        hx-swap="innerHTML"
 {{ pad }}        hx-confirm="Merge '{{ drop }}' into '{{ keep }}'?"
-{{ pad }}        class="px-2 py-1 text-xs bg-brand-50 text-brand-600 border border-brand-200 rounded hover:bg-brand-100">
-{{ pad }}  Keep "{{ keep|truncate(20) }}"
+{{ pad }}        class="px-2 py-1 text-xs rounded {% if is_keeper %}bg-brand-500 text-white border border-brand-500 font-medium hover:bg-brand-600{% else %}bg-white text-gray-600 border border-gray-300 hover:bg-gray-50{% endif %}">
+{{ pad }}  Keep "{{ keep|truncate(40) }}"
 {{ pad }}</button>
 {%- endmacro %}
