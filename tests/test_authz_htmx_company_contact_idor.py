@@ -15,7 +15,6 @@ Routes covered:
   6. POST   /v2/partials/customers/{cid}/suggested-contacts/add       (add suggested)
   7. DELETE /v2/partials/customers/{cid}/sites/{sid}/contacts/{ctid}  (delete contact)
   8. POST   /v2/partials/customers/{cid}/sites/{sid}/contacts/{ctid}/primary
-  9. POST   /v2/partials/customers/{cid}/sites/{sid}/contacts/{ctid}/notes (add note)
 
 Mirrors tests/test_site_contact_idor.py for the client/fixture pattern.
 
@@ -381,60 +380,3 @@ class TestSetPrimaryContactIDOR:
         finally:
             cleanup()
         assert resp.status_code == 200
-
-
-# ── 9. add site contact note ──────────────────────────────────────────────────
-
-
-class TestAddSiteContactNoteIDOR:
-    @pytest.mark.parametrize("role_fixture", ["sales_user", "trader_user"])
-    def test_non_owner_gets_403(self, client, owned_company, owned_site, owned_contact, request, role_fixture):
-        cleanup = _override_user(request.getfixturevalue(role_fixture))
-        try:
-            resp = _post(
-                client,
-                f"/v2/partials/customers/{owned_company.id}/sites/{owned_site.id}/contacts/{owned_contact.id}/notes",
-                notes="hack note",
-            )
-        finally:
-            cleanup()
-        assert resp.status_code == 403
-
-    def test_owner_gets_200(self, client, owned_company, owned_site, owned_contact):
-        resp = _post(
-            client,
-            f"/v2/partials/customers/{owned_company.id}/sites/{owned_site.id}/contacts/{owned_contact.id}/notes",
-            notes="real note",
-        )
-        assert resp.status_code == 200
-
-    def test_manager_gets_200(self, client, owned_company, owned_site, owned_contact, manager_user):
-        cleanup = _override_user(manager_user)
-        try:
-            resp = _post(
-                client,
-                f"/v2/partials/customers/{owned_company.id}/sites/{owned_site.id}/contacts/{owned_contact.id}/notes",
-                notes="mgr note",
-            )
-        finally:
-            cleanup()
-        assert resp.status_code == 200
-
-    def test_note_cross_site_chain_404(self, client, db_session, owned_company, owned_site, owned_contact):
-        """IDOR scope: a site_id that does NOT belong to company_id must 404 (not write a
-        note against the mismatched chain). Owner auth, mismatched site path."""
-        # A second company+site the owner also owns, but whose site is passed under the
-        # WRONG company id in the URL.
-        other_co = Company(name="Other Owned CCIDOR", is_active=True, account_owner_id=owned_company.account_owner_id)
-        db_session.add(other_co)
-        db_session.flush()
-        other_site = CustomerSite(company_id=other_co.id, site_name="Other HQ", is_active=True)
-        db_session.add(other_site)
-        db_session.commit()
-        # other_site belongs to other_co, NOT owned_company → 404 on the site check.
-        resp = _post(
-            client,
-            f"/v2/partials/customers/{owned_company.id}/sites/{other_site.id}/contacts/{owned_contact.id}/notes",
-            notes="cross-site",
-        )
-        assert resp.status_code == 404

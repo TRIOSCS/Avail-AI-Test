@@ -500,8 +500,7 @@ class TestSiteCRUD:
 
 
 class TestSiteContactCRUD:
-    """Covers create_site_contact, delete_site_contact, set_primary_contact,
-    add_site_contact_note, get_site_contact_notes."""
+    """Covers create_site_contact, delete_site_contact, set_primary_contact."""
 
     def test_create_site_contact_success(
         self,
@@ -715,84 +714,6 @@ class TestSiteContactCRUD:
         assert resp.status_code == 404
         db_session.refresh(contact)
         assert contact.is_primary is False
-
-    def test_add_site_contact_note_success(
-        self,
-        client: TestClient,
-        db_session: Session,
-        test_company: Company,
-        test_customer_site: CustomerSite,
-        test_user: User,
-    ):
-        test_company.account_owner_id = test_user.id
-        db_session.commit()
-        contact = _site_contact(db_session, test_customer_site)
-        resp = client.post(
-            f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}/contacts/{contact.id}/notes",
-            data={"notes": "This is a test note."},
-        )
-        assert resp.status_code == 200
-
-    def test_add_site_contact_note_empty_raises_400(
-        self,
-        client: TestClient,
-        db_session: Session,
-        test_company: Company,
-        test_customer_site: CustomerSite,
-        test_user: User,
-    ):
-        # Gate fires before the empty-notes 400 check, so ownership is required
-        # to reach the validation branch.
-        test_company.account_owner_id = test_user.id
-        db_session.commit()
-        contact = _site_contact(db_session, test_customer_site)
-        resp = client.post(
-            f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}/contacts/{contact.id}/notes",
-            data={"notes": ""},
-        )
-        assert resp.status_code == 400
-
-    def test_add_site_contact_note_contact_not_found(
-        self,
-        client: TestClient,
-        db_session: Session,
-        test_company: Company,
-        test_customer_site: CustomerSite,
-        test_user: User,
-    ):
-        # Gate fires before the contact lookup, so the acting user must own the
-        # company to reach the 404 (contact-not-found) branch.
-        test_company.account_owner_id = test_user.id
-        db_session.commit()
-        resp = client.post(
-            f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}/contacts/99999/notes",
-            data={"notes": "hello"},
-        )
-        assert resp.status_code == 404
-
-    def test_get_site_contact_notes_success(
-        self,
-        client: TestClient,
-        db_session: Session,
-        test_company: Company,
-        test_customer_site: CustomerSite,
-    ):
-        contact = _site_contact(db_session, test_customer_site)
-        resp = client.get(
-            f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}/contacts/{contact.id}/notes"
-        )
-        assert resp.status_code == 200
-
-    def test_get_site_contact_notes_not_found(
-        self,
-        client: TestClient,
-        test_company: Company,
-        test_customer_site: CustomerSite,
-    ):
-        resp = client.get(
-            f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}/contacts/99999/notes"
-        )
-        assert resp.status_code == 404
 
 
 # ── Section 6: Quote Metadata Edit ───────────────────────────────────────

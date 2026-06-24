@@ -161,10 +161,13 @@ class TestVendorAttachmentModelRoundtrip:
 
 
 # ---------------------------------------------------------------------------
-# Migration 143 structural checks (SQLite-safe; PG roundtrip requires TEST_PG_URL)
+# Migration 143 hermetic round-trip
+#
+# Runs upgrade -> downgrade -> upgrade in-process on a scratch in-memory SQLite
+# engine via the shared harness (tests/migration_harness.run_ops). 143 only does
+# create_table (with inline FKs SQLite supports in CREATE TABLE) + create/drop
+# index + drop_table, so it runs portably with no patching and no PG/subprocess.
 # ---------------------------------------------------------------------------
-
-_PG_URL = os.environ.get("TEST_PG_URL", "")
 
 
 def _load_migration_143():
@@ -182,6 +185,23 @@ def _load_migration_143():
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
+
+
+def _engine_for_143():
+    """Scratch SQLite with only the FK-target tables migration 143 references."""
+    import sqlalchemy as sa
+    from sqlalchemy.pool import StaticPool
+
+    engine = sa.create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    meta = sa.MetaData()
+    sa.Table("users", meta, sa.Column("id", sa.Integer, primary_key=True))
+    sa.Table("vendor_cards", meta, sa.Column("id", sa.Integer, primary_key=True))
+    sa.Table("vendor_contacts", meta, sa.Column("id", sa.Integer, primary_key=True))
+    meta.create_all(engine)
+    return engine
+
+
+_ATTACH_TABLES = {"vendor_card_attachments", "vendor_contact_attachments"}
 
 
 class TestMigration143Roundtrip:
@@ -202,28 +222,44 @@ class TestMigration143Roundtrip:
         mod = _load_migration_143()
         assert len(mod.revision) <= 32, f"revision id {mod.revision!r} exceeds 32 chars"
 
-    @pytest.mark.skipif(not _PG_URL, reason="TEST_PG_URL not set — PG required for alembic roundtrip")
-    def test_migration_143_roundtrip_pg(self):
-        """Upgrade 143 → downgrade 142 → upgrade 143 against real PG."""
-        import subprocess
+    def test_migration_143_upgrade_creates_tables_and_indexes(self):
+        from sqlalchemy import inspect
 
-        wt = "/root/availai/.claude/worktrees/attachments-unified"
-        alembic_bin = "/root/availai/.venv/bin/alembic"
-        env = {**os.environ, "DATABASE_URL": _PG_URL}
+        from tests.migration_harness import run_ops
 
-        for cmd in [
-            ["upgrade", "143_vendor_attachments"],
-            ["downgrade", "142_vendor_task_cols"],
-            ["upgrade", "143_vendor_attachments"],
-        ]:
-            r = subprocess.run(
-                [alembic_bin, "-c", "alembic.ini"] + cmd,
-                cwd=wt,
-                capture_output=True,
-                text=True,
-                env=env,
-            )
-            assert r.returncode == 0, f"alembic {cmd} failed: {r.stderr}"
+        mod = _load_migration_143()
+        engine = _engine_for_143()
+        run_ops(engine, mod.upgrade)
+        insp = inspect(engine)
+        assert _ATTACH_TABLES <= set(insp.get_table_names())
+        card_idx = {i["name"] for i in insp.get_indexes("vendor_card_attachments")}
+        contact_idx = {i["name"] for i in insp.get_indexes("vendor_contact_attachments")}
+        assert {"ix_vendor_card_attachments_card", "ix_vendor_card_attachments_item"} <= card_idx
+        assert {"ix_vendor_contact_attachments_contact", "ix_vendor_contact_attachments_item"} <= contact_idx
+
+    def test_migration_143_downgrade_drops_tables(self):
+        from sqlalchemy import inspect
+
+        from tests.migration_harness import run_ops
+
+        mod = _load_migration_143()
+        engine = _engine_for_143()
+        run_ops(engine, mod.upgrade)
+        run_ops(engine, mod.downgrade)
+        assert not (_ATTACH_TABLES & set(inspect(engine).get_table_names()))
+
+    def test_migration_143_round_trips(self):
+        """Upgrade -> downgrade -> upgrade restores both attachment tables."""
+        from sqlalchemy import inspect
+
+        from tests.migration_harness import run_ops
+
+        mod = _load_migration_143()
+        engine = _engine_for_143()
+        run_ops(engine, mod.upgrade)
+        run_ops(engine, mod.downgrade)
+        run_ops(engine, mod.upgrade)
+        assert _ATTACH_TABLES <= set(inspect(engine).get_table_names())
 
 
 @pytest.fixture()

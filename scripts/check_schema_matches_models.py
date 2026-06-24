@@ -5,7 +5,9 @@ alembic.autogenerate.compare_metadata against app.models.Base.metadata,
 filters known false positives, prints any remaining drift, exits non-zero
 on drift.
 
-Called by: .github/workflows/ci.yml (smoke test step) + local devs.
+Called by: .github/workflows/ci.yml — invoked between ``alembic upgrade head``
+and ``alembic downgrade base`` in the "Alembic upgrade/downgrade smoke test"
+step, so a model-vs-migration drift fails CI. Also runnable by local devs.
 Depends on: app.models.Base, alembic, sqlalchemy.
 
 Usage:

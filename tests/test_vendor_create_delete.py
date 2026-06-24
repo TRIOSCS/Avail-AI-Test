@@ -216,6 +216,37 @@ def test_vendor_detail_has_delete_button(client: TestClient, vendor: VendorCard)
     assert b"Delete" in resp.content
 
 
+# ── vendors/detail.html — header consistency with account header ─────
+
+
+def test_vendor_detail_header_matches_account_header(client: TestClient, db_session: Session):
+    """The vendor detail h1 uses text-lg (matching the account detail header) and the
+    header metadata uses middot `·` separators (not pipe `|`), mirroring the account
+    header."""
+    v = VendorCard(
+        normalized_name="header consistency co",
+        display_name="Header Consistency Co",
+        hq_city="Chicago",
+        hq_country="US",
+        industry="Electronic Components",
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(v)
+    db_session.commit()
+    db_session.refresh(v)
+
+    resp = client.get(f"/v2/partials/vendors/{v.id}")
+    assert resp.status_code == 200
+    body = resp.text
+
+    # h1 must use the smaller text-lg size (account-header parity), not text-2xl.
+    assert '<h1 class="text-lg font-bold text-gray-900">Header Consistency Co</h1>' in body
+    assert '<h1 class="text-2xl font-bold text-gray-900">' not in body
+    # Header metadata separators must be the middot, not the pipe.
+    assert '<span class="text-gray-300">·</span>' in body
+    assert '<span class="text-gray-300">|</span>' not in body
+
+
 # ── Auth: unauthenticated caller is rejected ─────────────────────────
 
 
