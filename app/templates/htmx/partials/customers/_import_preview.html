@@ -1,0 +1,55 @@
+{# _import_preview.html — company CSV import preview table partial.
+   Called by: import_companies_preview (app/routers/htmx_views.py)
+   Context: rows (list of dicts: name/website/account_type/status/status_label),
+            valid_count, dup_count, invalid_count, rows_json (JSON string of valid rows).
+   Jinja auto-escapes all {{ }} interpolations — no manual html.escape needed. #}
+<div id="import-preview" class="space-y-3">
+  <div class="text-sm text-gray-700 flex gap-4">
+    <span class="text-emerald-700 font-medium">{{ valid_count }} to import</span>
+    {% if dup_count %}<span class="text-amber-700">{{ dup_count }} duplicate</span>{% endif %}
+    {% if invalid_count %}<span class="text-rose-700">{{ invalid_count }} invalid</span>{% endif %}
+  </div>
+  <div class="overflow-x-auto max-h-64 border border-gray-200 rounded">
+    <table class="w-full text-left border-collapse">
+      <thead class="sticky top-0 bg-gray-50 text-xs text-gray-600 uppercase">
+        <tr>
+          <th class="px-2 py-1">Name</th>
+          <th class="px-2 py-1">Website</th>
+          <th class="px-2 py-1">Type</th>
+          <th class="px-2 py-1">Status</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-100">
+        {% for r in rows %}
+        <tr>
+          <td class="px-2 py-1 text-sm text-gray-900">
+            {% if r.name %}{{ r.name }}{% else %}<em class="text-gray-400">—</em>{% endif %}
+          </td>
+          <td class="px-2 py-1 text-sm text-gray-600">{{ r.website or "—" }}</td>
+          <td class="px-2 py-1 text-sm text-gray-600">{{ r.account_type or "—" }}</td>
+          <td class="px-2 py-1">
+            {% if r.status == "valid" %}
+              <span class="px-1.5 py-0.5 rounded text-xs font-medium bg-emerald-100 text-emerald-700">{{ r.status_label }}</span>
+            {% elif r.status == "duplicate" %}
+              <span class="px-1.5 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700">{{ r.status_label }}</span>
+            {% else %}
+              <span class="px-1.5 py-0.5 rounded text-xs font-medium bg-rose-100 text-rose-700">{{ r.status_label }}</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if valid_count %}
+  <form hx-post="/v2/partials/customers/import/confirm"
+        hx-target="#import-preview" hx-swap="outerHTML">
+    <input type="hidden" name="rows_json" value="{{ rows_json }}">
+    <button type="submit" class="btn btn-primary btn-sm">
+      Import {{ valid_count }} compan{{ "y" if valid_count == 1 else "ies" }}
+    </button>
+  </form>
+  {% else %}
+  <p class="text-sm text-gray-600">No valid rows to import.</p>
+  {% endif %}
+</div>

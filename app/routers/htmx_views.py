@@ -5771,7 +5771,6 @@ async def import_companies_preview(
     dup_count = sum(1 for r in rows if r["status"] == "duplicate")
     invalid_count = sum(1 for r in rows if r["status"] == "invalid")
 
-    import html as _html
     import json as _json
 
     rows_json = _json.dumps(
@@ -5782,57 +5781,17 @@ async def import_companies_preview(
         ]
     )
 
-    # Build preview table HTML inline (no new template required)
-    badge = lambda s, lbl: (  # noqa: E731
-        '<span class="px-1.5 py-0.5 rounded text-xs font-medium '
-        + (
-            "bg-emerald-100 text-emerald-700"
-            if s == "valid"
-            else "bg-amber-100 text-amber-700"
-            if s == "duplicate"
-            else "bg-rose-100 text-rose-700"
-        )
-        + f'">{lbl}</span>'
+    return template_response(
+        "htmx/partials/customers/_import_preview.html",
+        {
+            "request": request,
+            "rows": rows,
+            "valid_count": valid_count,
+            "dup_count": dup_count,
+            "invalid_count": invalid_count,
+            "rows_json": rows_json,
+        },
     )
-
-    rows_html = "".join(
-        f"<tr><td class='px-2 py-1 text-sm text-gray-900'>"
-        f"{_html.escape(r['name']) if r['name'] else '<em class="text-gray-400">—</em>'}</td>"
-        f"<td class='px-2 py-1 text-sm text-gray-500'>{_html.escape(r['website']) if r['website'] else '—'}</td>"
-        f"<td class='px-2 py-1 text-sm text-gray-500'>{_html.escape(r['account_type']) if r['account_type'] else '—'}</td>"
-        f"<td class='px-2 py-1'>{badge(r['status'], r['status_label'])}</td></tr>"
-        for r in rows
-    )
-
-    html = (
-        f'<div id="import-preview" class="space-y-3">'
-        f'<div class="text-sm text-gray-700 flex gap-4">'
-        f'<span class="text-emerald-700 font-medium">{valid_count} to import</span>'
-        + (f'<span class="text-amber-700">{dup_count} duplicate</span>' if dup_count else "")
-        + (f'<span class="text-rose-700">{invalid_count} invalid</span>' if invalid_count else "")
-        + "</div>"
-        f'<div class="overflow-x-auto max-h-64 border border-gray-200 rounded">'
-        f'<table class="w-full text-left border-collapse">'
-        f'<thead class="sticky top-0 bg-gray-50 text-xs text-gray-500 uppercase">'
-        f'<tr><th class="px-2 py-1">Name</th><th class="px-2 py-1">Website</th>'
-        f'<th class="px-2 py-1">Type</th><th class="px-2 py-1">Status</th></tr>'
-        f'</thead><tbody class="divide-y divide-gray-100">{rows_html}</tbody></table></div>'
-    )
-
-    if valid_count:
-        html += (
-            f'<form hx-post="/v2/partials/customers/import/confirm"'
-            f' hx-target="#import-preview" hx-swap="outerHTML">'
-            f'<input type="hidden" name="rows_json" value="{_html.escape(rows_json)}">'
-            f'<button type="submit" class="btn btn-primary text-sm px-4 py-1.5">'
-            f"Import {valid_count} compan{'y' if valid_count == 1 else 'ies'}</button>"
-            f"</form>"
-        )
-    else:
-        html += '<p class="text-sm text-gray-500">No valid rows to import.</p>'
-
-    html += "</div>"
-    return HTMLResponse(html)
 
 
 @router.post("/v2/partials/customers/import/confirm", response_class=HTMLResponse)
@@ -5910,8 +5869,10 @@ async def import_companies_confirm(
         parts.append(f"{skipped_invalid} invalid row{'s' if skipped_invalid != 1 else ''} skipped")
     summary = "; ".join(parts)
 
-    html = f'<div class="bg-emerald-50 border border-emerald-200 rounded p-3 text-sm text-emerald-700">{summary}.</div>'
-    resp = HTMLResponse(html)
+    resp = template_response(
+        "htmx/partials/customers/_import_confirm_summary.html",
+        {"request": request, "summary": summary},
+    )
     resp.headers["HX-Trigger"] = json.dumps({"showToast": {"message": summary}})
     return resp
 
@@ -5996,7 +5957,6 @@ async def import_contacts_preview(
     dup_count = sum(1 for r in rows if r["status"] == "duplicate")
     invalid_count = sum(1 for r in rows if r["status"] == "invalid")
 
-    import html as _html
     import json as _json
 
     contacts_rows_json = _json.dumps(
@@ -6013,58 +5973,17 @@ async def import_contacts_preview(
         ]
     )
 
-    badge = lambda s, lbl: (  # noqa: E731
-        '<span class="px-1.5 py-0.5 rounded text-xs font-medium '
-        + (
-            "bg-emerald-100 text-emerald-700"
-            if s == "valid"
-            else "bg-amber-100 text-amber-700"
-            if s == "duplicate"
-            else "bg-rose-100 text-rose-700"
-        )
-        + f'">{lbl}</span>'
+    return template_response(
+        "htmx/partials/customers/_import_contacts_preview.html",
+        {
+            "request": request,
+            "rows": rows,
+            "valid_count": valid_count,
+            "dup_count": dup_count,
+            "invalid_count": invalid_count,
+            "rows_json": contacts_rows_json,
+        },
     )
-
-    rows_html = "".join(
-        f"<tr><td class='px-2 py-1 text-sm text-gray-900'>{_html.escape(r['company_name']) if r['company_name'] else '—'}</td>"
-        f"<td class='px-2 py-1 text-sm text-gray-900'>{_html.escape(r['contact_name']) if r['contact_name'] else '—'}</td>"
-        f"<td class='px-2 py-1 text-sm text-gray-500'>{_html.escape(r['email']) if r['email'] else '—'}</td>"
-        f"<td class='px-2 py-1 text-sm text-gray-500'>{_html.escape(r['phone']) if r['phone'] else '—'}</td>"
-        f"<td class='px-2 py-1 text-sm text-gray-500'>{_html.escape(r['role']) if r['role'] else '—'}</td>"
-        f"<td class='px-2 py-1'>{badge(r['status'], r['status_label'])}</td></tr>"
-        for r in rows
-    )
-
-    html = (
-        f'<div id="import-contacts-preview" class="space-y-3">'
-        f'<div class="text-sm text-gray-700 flex gap-4">'
-        f'<span class="text-emerald-700 font-medium">{valid_count} to import</span>'
-        + (f'<span class="text-amber-700">{dup_count} duplicate</span>' if dup_count else "")
-        + (f'<span class="text-rose-700">{invalid_count} invalid</span>' if invalid_count else "")
-        + "</div>"
-        f'<div class="overflow-x-auto max-h-64 border border-gray-200 rounded">'
-        f'<table class="w-full text-left border-collapse">'
-        f'<thead class="sticky top-0 bg-gray-50 text-xs text-gray-500 uppercase">'
-        f'<tr><th class="px-2 py-1">Company</th><th class="px-2 py-1">Name</th>'
-        f'<th class="px-2 py-1">Email</th><th class="px-2 py-1">Phone</th>'
-        f'<th class="px-2 py-1">Role</th><th class="px-2 py-1">Status</th></tr>'
-        f'</thead><tbody class="divide-y divide-gray-100">{rows_html}</tbody></table></div>'
-    )
-
-    if valid_count:
-        html += (
-            f'<form hx-post="/v2/partials/customers/import/contacts/confirm"'
-            f' hx-target="#import-contacts-preview" hx-swap="outerHTML">'
-            f'<input type="hidden" name="rows_json" value="{_html.escape(contacts_rows_json)}">'
-            f'<button type="submit" class="btn btn-primary text-sm px-4 py-1.5">'
-            f"Import {valid_count} contact{'s' if valid_count != 1 else ''}</button>"
-            f"</form>"
-        )
-    else:
-        html += '<p class="text-sm text-gray-500">No valid contacts to import.</p>'
-
-    html += "</div>"
-    return HTMLResponse(html)
 
 
 @router.post("/v2/partials/customers/import/contacts/confirm", response_class=HTMLResponse)
@@ -6080,7 +5999,6 @@ async def import_contacts_confirm(
     deduplicates by email within the site; skips rows whose company isn't found.
     Reports created, skipped_no_company, and skipped_dup counts.
     """
-    import html as _html
     import json as _json
 
     from ..models.crm import CustomerSite, SiteContact
@@ -6196,8 +6114,10 @@ async def import_contacts_confirm(
         parts.append(f"{skipped_dup} duplicate{'s' if skipped_dup != 1 else ''} skipped")
     summary = "; ".join(parts)
 
-    html = f'<div class="bg-emerald-50 border border-emerald-200 rounded p-3 text-sm text-emerald-700">{_html.escape(summary)}.</div>'
-    resp = HTMLResponse(html)
+    resp = template_response(
+        "htmx/partials/customers/_import_confirm_summary.html",
+        {"request": request, "summary": summary},
+    )
     resp.headers["HX-Trigger"] = json.dumps({"showToast": {"message": summary}})
     return resp
 
