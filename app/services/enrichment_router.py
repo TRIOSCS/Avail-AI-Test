@@ -150,6 +150,11 @@ async def _gather_cheap_contacts(domain: str, title_filter: str, limit: int) -> 
                 _mod.trip_circuit(provider_name, settings.clay_cooldown_minutes)
             else:
                 logger.warning("Cheap contacts provider quota error: {}", outcome)
+        elif isinstance(outcome, BaseException):
+            # Non-quota failure (timeout, transport, auth, or a bug). Don't let it vanish —
+            # without this the caller just sees an empty list and reports a false
+            # "no contacts found" with no trace to debug from.
+            logger.warning("{} cheap-contacts failed (no circuit trip): {}", provider_name or "hunter", outcome)
     return results
 
 

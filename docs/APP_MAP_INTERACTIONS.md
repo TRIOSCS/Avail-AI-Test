@@ -1981,6 +1981,23 @@ with three rules:
 Provenance is persisted in the new `enrichment_provenance` JSONB column on both
 `companies` and `vendor_cards` (migration 125).
 
+**Enrich button → result panel (content negotiation).** `POST /api/enrich/company/{id}`
+and `/api/enrich/vendor/{id}` (`app/routers/crm/enrichment.py`) content-negotiate on the
+`HX-Request` header: HTMX callers (the shared `partials/shared/enrich_button.html`) get a
+rendered `partials/shared/_enrich_result.html` panel — firmographics found, each field badged
+**Updated** (in `updated_fields`) vs **Current**, source badge + "enriched X ago", and (for
+companies) contacts discovered via `find_suggested_contacts_with_errors` with per-row Add
+buttons; programmatic callers still get JSON `{ok, updated_fields, enrichment}`. The contact
+rows reuse the shared `partials/shared/_contact_row.html` macro (also used by the Contacts-tab
+`_suggested_contacts.html`); their Add posts to the existing
+`POST /v2/partials/customers/{id}/suggested-contacts/add` with a hidden `from_enrich=1` flag,
+which makes that endpoint return a self-contained "✓ Added" `<li>` (`hx-swap=outerHTML`,
+`hx-target="closest li"`) instead of re-rendering the Contacts-tab list. The dead
+`enrich_customer_account` stub (returns `no_providers`) is no longer called from the enrich
+endpoint — it stays wired to `companies.py` bulk-create + the `customer_enrichment_batch`
+scheduler. Contact discovery degrades gracefully: a provider failure renders an amber
+"couldn't reach" banner, never a 500.
+
 **Connectors:**
 
 - `app/connectors/explorium.py` — 2-call pipeline: `/businesses/match` → business_id,

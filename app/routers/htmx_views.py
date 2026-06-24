@@ -8108,11 +8108,14 @@ async def contacts_tab_add_suggested(
     """Add a single suggested contact to a site and return the grouped list with toast.
 
     Form fields: site_id (int), full_name, email, title, phone, linkedin_url,
-    source (default "enrichment"), email_verified ("1" / "true" = True).
+    source (default "enrichment"), email_verified ("1" / "true" = True),
+    from_enrich ("1" when posted from the header Enrich result panel).
 
     Dedup: if the email already exists on the site, returns a "already on file"
     toast — never a silent no-op or 409 error.
-    Always returns _contacts_grouped_list.html + HX-Trigger toast.
+    Returns _contacts_grouped_list.html + HX-Trigger toast for the Contacts tab; when
+    from_enrich=1, returns a self-contained "✓ Added" <li> fragment (the enrich panel
+    lives outside the Contacts tab, so it self-swaps the clicked row via outerHTML).
     """
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
@@ -8200,6 +8203,18 @@ async def contacts_tab_add_suggested(
     else:
         toast_msg = f"{full_name} is already on file"
         toast_kind = "info"
+
+    # Enrich-panel Add: the result panel lives outside the Contacts tab (no
+    # #contacts-tab-list to re-render), so when the post is flagged from_enrich return a
+    # self-contained confirmation row that swaps the clicked <li> in place (hx-swap=outerHTML).
+    if (form.get("from_enrich") or "") == "1":
+        return HTMLResponse(
+            '<li class="px-4 py-3 bg-emerald-50 text-sm text-emerald-700 flex items-center gap-2">'
+            '<svg class="h-4 w-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" '
+            'stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>'
+            f"{html_mod.escape(toast_msg)}</li>",
+            headers={"HX-Trigger": json.dumps({"showToast": {"message": toast_msg, "type": toast_kind}})},
+        )
 
     response = _render_contacts_list(request, user, company, db)
     response.headers["HX-Trigger"] = json.dumps({"showToast": {"message": toast_msg, "type": toast_kind}})
