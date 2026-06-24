@@ -16,7 +16,9 @@
     <button type="submit"
             class="btn btn-sm">Save</button>
     <button type="button"
-            onclick="document.getElementById('vendor-task-form-{{ vendor_id }}').innerHTML = ''"
+            hx-get="/v2/partials/vendors/{{ vendor_id }}/tasks"
+            hx-target="#vendor-tasks-{{ vendor_id }}"
+            hx-swap="outerHTML"
             class="btn btn-sm btn-secondary">Cancel</button>
   </div>
 </form>
