@@ -757,6 +757,7 @@ Key columns:
 | swept_from_owner_id | INT FK users (SET NULL) | owner whose account was auto-swept by the daily 90-day sweep (SP4) |
 | swept_at | UTCDateTime | when the account was swept into the pool (SP4) |
 | parked_by_id | INT FK users (SET NULL) | user who manually parked the account via the sales-park flow (SP4) |
+| reclaim_blocked_until | UTCDateTime | SP4 Phase 4 compliance cooldown: former owner cannot reclaim until this passes (set at sweep = swept_at + 30d; managers bypass via reassign, which clears it) |
 
 `enrichment_data['ai_screen']` (JSONB) holds the full AI screen verdict:
 `{trio_match_score, opportunity_score, excess_likelihood, verdict, rationale, evidence, confidence, model, screened_at, grounding_fingerprint, needs_more_enrichment?}`.

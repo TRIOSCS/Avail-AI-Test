@@ -11741,6 +11741,60 @@ async def reclaim_prospect_htmx(
     )
 
 
+@router.post("/v2/partials/prospects/{prospect_id}/reassign", response_class=HTMLResponse)
+async def reassign_prospect_htmx(
+    request: Request,
+    prospect_id: int,
+    to_user_id: int = Form(...),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Manager/admin reassigns a swept prospect's company to another owner.
+
+    Overrides the Phase 4 reclaim cooldown: dismisses the swept prospect, sets the new
+    owner, and clears the cooldown. Manager/admin only. Returns the refreshed prospect
+    card/detail with a showToast trigger.
+    """
+    if not is_manager_or_admin(user):
+        raise HTTPException(403, "Only a manager or admin can reassign an account")
+
+    from ..services.prospect_reclamation import reassign_account
+
+    prospect = db.get(ProspectAccount, prospect_id)
+    if not prospect:
+        raise HTTPException(404, "Prospect not found")
+    if not prospect.company_id:
+        raise HTTPException(400, "Prospect is not linked to a company; nothing to reassign")
+
+    error = None
+    result = None
+    try:
+        result = reassign_account(prospect.company_id, to_user_id, user, db)
+    except HTTPException:
+        raise
+    except LookupError:
+        raise HTTPException(404, "Company not found")
+    except ValueError as e:
+        error = str(e)
+
+    prospect = db.get(ProspectAccount, prospect_id)
+    if not prospect:
+        raise HTTPException(404, "Prospect not found")
+
+    form = await request.form()
+    flt_status = form.get("flt_status", "")
+    msg = error or f"Reassigned {result['company_name']}"
+    return _prospect_action_response(
+        request,
+        user,
+        db,
+        prospect,
+        message=msg,
+        kind="error" if error else "success",
+        flt_status=flt_status,
+    )
+
+
 # ── Settings partials ────────────────────────────────────────────────
 
 

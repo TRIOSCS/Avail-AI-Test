@@ -4074,8 +4074,8 @@ Three inflows that feed idle CRM accounts into the prospecting pool.
 - Delegates to: `app/services/prospect_reclamation.py::job_account_sweep_with_db(db)`
 - Query: Company WHERE account_owner_id IS NOT NULL AND last ActivityLog.created_at > 90 days ago (or no activity)
 - Idempotency: skips if ProspectAccount.swept_at IS NOT NULL already
-- On match: calls `send_company_to_prospecting()` (clears ownership), sets `swept_from_owner_id`/`swept_at`/`discovery_source="auto_sweep"` on ProspectAccount
-- Notification: `_send_sweep_notification()` → Graph `/me/sendMail` TO rep CC manager (falls back to admin_emails[0])
+- On match: calls `send_company_to_prospecting()` (clears ownership), sets `swept_from_owner_id`/`swept_at`/`reclaim_blocked_until = swept_at + 30d`/`discovery_source="auto_sweep"` on ProspectAccount
+- Notification: `_send_sweep_notification()` → Graph `/me/sendMail`, ONE message per recipient (each in its own try/except so one bad address can't break the sweep). Recipients = rep + every ACTIVE user with role MANAGER/ADMIN + `settings.account_sweep_manager_email`, deduped case-insensitively by `_sweep_notification_recipients()`
 - Token: `get_valid_token(owner, db)` from `app.utils.token_manager`; skips email on missing token (no failure)
 
 ### Daily unassigned past-customer surface (2AM UTC)
@@ -4093,7 +4093,15 @@ Three inflows that feed idle CRM accounts into the prospecting pool.
 
 ### Reclaim: reclaim_prospect_account()
 - Service: `app/services/prospect_reclamation.py::reclaim_prospect_account(prospect_id, user_id, db, *, is_admin)`
-- Permission: swept_from_owner_id == user_id OR is_admin OR user.email == account_sweep_manager_email
+- Permission: swept_from_owner_id == user_id OR is_admin OR `is_manager_or_admin(user)` OR user.email == account_sweep_manager_email
+- Phase 4 cooldown: a former owner is DENIED with "This account is in a 30-day cooldown; ask a manager to reassign it." while `reclaim_blocked_until` is in the future; managers/admins (the supervisor set above) bypass it
 - Actions: dismisses ProspectAccount, re-assigns Company.account_owner_id, logs ActivityLog(activity_type="reclaim")
 - HTMX endpoint: `POST /v2/partials/prospects/{prospect_id}/reclaim` (require_user)
 - Returns: {prospect_id, company_id, company_name, status: "reclaimed"}
+
+### Manager reassign (Phase 4): reassign_account() — cooldown override
+- Service: `app/services/prospect_reclamation.py::reassign_account(company_id, to_user_id, by_user, db)`
+- Gate: `is_manager_or_admin(by_user)` else `HTTPException(403)`
+- Actions: sets `Company.account_owner_id = to_user_id` (clears ownership_cleared_at); if a swept (non-dismissed) ProspectAccount exists for the company, dismisses it (`dismiss_reason="reassigned"`) and clears `reclaim_blocked_until`; logs ActivityLog(activity_type="reassign")
+- HTMX endpoint: `POST /v2/partials/prospects/{prospect_id}/reassign` with `to_user_id` form param (require_user + in-route `is_manager_or_admin` gate)
+- Returns: {company_id, company_name, to_user_id, prospect_id|None, status: "reassigned"}

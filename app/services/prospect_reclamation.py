@@ -9,7 +9,7 @@ Depends on: app/services/activity_service.py, app/services/prospect_claim.py,
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -18,6 +18,10 @@ from ..config import settings
 from ..models.auth import User
 from ..models.crm import Company
 from ..models.prospect_account import ProspectAccount
+
+# Phase 4 compliance: a former owner cannot reclaim a freshly-swept account for this many
+# days (managers/admins bypass via reassign). Set on the ProspectAccount at sweep time.
+RECLAIM_COOLDOWN_DAYS = 30
 
 # ── Internal DB-injectable sweep (testable) ───────────────────────────────────
 
@@ -103,6 +107,7 @@ async def job_account_sweep_with_db(db: Session) -> None:
                 if pa:
                     pa.swept_from_owner_id = owner_id
                     pa.swept_at = now
+                    pa.reclaim_blocked_until = now + timedelta(days=RECLAIM_COOLDOWN_DAYS)
                     pa.discovery_source = "auto_sweep"
                     db.commit()
 
@@ -123,6 +128,46 @@ async def job_account_sweep_with_db(db: Session) -> None:
     logger.info("SP4 sweep complete: swept={}, skipped={}", swept_count, skipped_count)
 
 
+def _sweep_notification_recipients(owner: User, db: Session) -> list[str]:
+    """Resolve the deduped recipient list for a sweep notification.
+
+    Includes the rep (former owner), every ACTIVE user with role MANAGER or ADMIN, and
+    the configured settings.account_sweep_manager_email. Order is preserved with the rep
+    first; comparison is case-insensitive so the same address is never sent twice.
+
+    Called by: _send_sweep_notification
+    """
+    from ..constants import UserRole
+
+    recipients: list[str] = []
+    seen: set[str] = set()
+
+    def _add(address: str | None) -> None:
+        if not address:
+            return
+        key = address.strip().lower()
+        if not key or key in seen:
+            return
+        seen.add(key)
+        recipients.append(address.strip())
+
+    _add(owner.email)
+
+    supervisors = (
+        db.query(User)
+        .filter(
+            User.role.in_([UserRole.MANAGER, UserRole.ADMIN]),
+            User.is_active.is_(True),
+        )
+        .all()
+    )
+    for sup in supervisors:
+        _add(sup.email)
+
+    _add(settings.account_sweep_manager_email)
+    return recipients
+
+
 async def _send_sweep_notification(
     owner: User,
     company: Company,
@@ -130,10 +175,13 @@ async def _send_sweep_notification(
     prospect_id: int,
     db: Session,
 ) -> None:
-    """Send Graph /me/sendMail loss-notification to owner.
+    """Send a Graph /me/sendMail loss-notification to the rep and every supervisor.
 
-    Uses get_valid_token(owner, db). On missing token: log warning, return.
-    CC: settings.account_sweep_manager_email if set.
+    Recipients: the former owner, all active MANAGER/ADMIN users, and the configured
+    settings.account_sweep_manager_email (deduped via _sweep_notification_recipients).
+    Sends one message per recipient so a single bad address can't suppress the rest —
+    each send is wrapped in try/except so one failure never breaks the sweep. Uses the
+    OWNER's token (get_valid_token); on a missing token: log a warning and return.
 
     Called by: job_account_sweep_with_db
     """
@@ -150,36 +198,44 @@ async def _send_sweep_notification(
         return
 
     last_active_str = last_activity_at.strftime("%Y-%m-%d") if last_activity_at else "never"
-
-    cc_recipients = []
-    if settings.account_sweep_manager_email:
-        cc_recipients = [{"emailAddress": {"address": settings.account_sweep_manager_email}}]
-
-    payload = {
-        "message": {
-            "subject": f"[AVAIL] Account swept to prospecting pool: {company.name}",
-            "body": {
-                "contentType": "HTML",
-                "content": (
-                    f"<p>Your account <strong>{company.name}</strong> has been automatically moved to the "
-                    f"prospecting pool due to inactivity.</p>"
-                    f"<p><strong>Last activity:</strong> {last_active_str}</p>"
-                    f"<p><strong>Inactivity threshold:</strong> {settings.account_sweep_inactivity_days} days</p>"
-                    f"<p>You can reclaim this account from the Prospecting tab if needed.</p>"
-                ),
-            },
-            "toRecipients": [{"emailAddress": {"address": owner.email}}],
-            "ccRecipients": cc_recipients,
-        },
-        "saveToSentItems": "false",
-    }
+    body_html = (
+        f"<p>The account <strong>{company.name}</strong> has been automatically moved to the "
+        f"prospecting pool due to inactivity.</p>"
+        f"<p><strong>Last activity:</strong> {last_active_str}</p>"
+        f"<p><strong>Inactivity threshold:</strong> {settings.account_sweep_inactivity_days} days</p>"
+        f"<p>It can be reclaimed from the Prospecting tab "
+        f"(former owners after the {RECLAIM_COOLDOWN_DAYS}-day cooldown; "
+        f"managers may reassign it at any time).</p>"
+    )
 
     gc = GraphClient(token)
-    try:
-        await gc.post_json("/me/sendMail", payload)
-        logger.info("SP4 sweep notification sent to {} for company {}", owner.email, company.name)
-    except Exception:
-        logger.exception("SP4 sweep notification failed for {} company {}", owner.email, company.name)
+    recipients = _sweep_notification_recipients(owner, db)
+    sent = 0
+    for address in recipients:
+        payload = {
+            "message": {
+                "subject": f"[AVAIL] Account swept to prospecting pool: {company.name}",
+                "body": {"contentType": "HTML", "content": body_html},
+                "toRecipients": [{"emailAddress": {"address": address}}],
+            },
+            "saveToSentItems": "false",
+        }
+        try:
+            await gc.post_json("/me/sendMail", payload)
+            sent += 1
+        except Exception:
+            logger.exception(
+                "SP4 sweep notification failed for {} (company {})",
+                address,
+                company.name,
+            )
+
+    logger.info(
+        "SP4 sweep notification: sent {}/{} for company {}",
+        sent,
+        len(recipients),
+        company.name,
+    )
 
 
 # ── Auto-surface (Task 6) ─────────────────────────────────────────────────────
@@ -299,8 +355,12 @@ def reclaim_prospect_account(
 ) -> dict:
     """Reclaim a swept prospect: re-assign Company owner, remove from pool, reset clock.
 
-    Permission: swept_from_owner_id == user_id OR is_admin OR
-                user.email == settings.account_sweep_manager_email.
+    Permission: swept_from_owner_id == user_id OR is_admin OR is_manager_or_admin(user)
+                OR user.email == settings.account_sweep_manager_email.
+
+    Compliance (Phase 4): a former owner cannot reclaim while reclaim_blocked_until is in
+    the future (a 30-day post-sweep cooldown). Managers/admins bypass the cooldown — they
+    should use reassign_account, but a direct reclaim is also permitted for them.
 
     Actions:
     - Set Company.account_owner_id = user_id; Company.ownership_cleared_at = None
@@ -308,11 +368,12 @@ def reclaim_prospect_account(
     - Log a "reclaim" ActivityLog entry (resets activity clock)
 
     Returns: {prospect_id, company_id, company_name, status: "reclaimed"}
-    Raises: LookupError (not found), ValueError (permission denied / wrong status)
+    Raises: LookupError (not found), ValueError (permission denied / wrong status / cooldown)
 
     Called by: app/routers/htmx_views.py
     """
     from ..constants import ProspectAccountStatus
+    from ..dependencies import is_manager_or_admin
     from ..services.activity_service import log_activity
 
     pa = db.get(ProspectAccount, prospect_id)
@@ -328,10 +389,20 @@ def reclaim_prospect_account(
 
     manager_email = settings.account_sweep_manager_email
     is_former_owner = pa.swept_from_owner_id == user_id
-    is_manager = bool(manager_email and user.email == manager_email)
+    is_email_manager = bool(manager_email and user.email == manager_email)
+    is_supervisor = is_admin or is_manager_or_admin(user) or is_email_manager
 
-    if not (is_former_owner or is_admin or is_manager):
+    if not (is_former_owner or is_supervisor):
         raise ValueError("Reclaim permission denied: must be former owner, admin, or sweep manager")
+
+    # Phase 4 cooldown: the former owner is blocked until reclaim_blocked_until passes.
+    # Supervisors (manager/admin/configured manager email) bypass it.
+    if is_former_owner and not is_supervisor and pa.reclaim_blocked_until is not None:
+        blocked_until = pa.reclaim_blocked_until
+        if blocked_until.tzinfo is None:
+            blocked_until = blocked_until.replace(tzinfo=timezone.utc)
+        if blocked_until > datetime.now(timezone.utc):
+            raise ValueError("This account is in a 30-day cooldown; ask a manager to reassign it.")
 
     pa.status = ProspectAccountStatus.DISMISSED
     pa.dismissed_at = datetime.now(timezone.utc)
@@ -372,4 +443,93 @@ def reclaim_prospect_account(
         "company_id": company_id,
         "company_name": company_name,
         "status": "reclaimed",
+    }
+
+
+# ── Manager reassign (Phase 4) ────────────────────────────────────────────────
+
+
+def reassign_account(company_id: int, to_user_id: int, by_user: User, db: Session) -> dict:
+    """Manager/admin reassigns a Company to another owner, overriding the reclaim
+    cooldown.
+
+    This is the supervisor escape hatch for the Phase 4 30-day cooldown: a former owner who
+    is still blocked asks a manager to hand the account to someone (often back to them).
+
+    Gate: is_manager_or_admin(by_user) — else HTTPException(403). Actions:
+    - Set Company.account_owner_id = to_user_id; clear ownership_cleared_at.
+    - If a swept ProspectAccount exists for this company, dismiss it and clear
+      reclaim_blocked_until (the cooldown no longer applies once a manager has acted).
+    - Log a "reassign" ActivityLog entry on the company.
+
+    Returns: {company_id, company_name, to_user_id, prospect_id|None, status: "reassigned"}
+    Raises: HTTPException(403) (not a supervisor), LookupError (company missing),
+            ValueError (target user missing).
+
+    Called by: app/routers/htmx_views.py (POST /v2/partials/prospects/{id}/reassign)
+    """
+    from fastapi import HTTPException
+
+    from ..constants import ProspectAccountStatus
+    from ..dependencies import is_manager_or_admin
+    from ..services.activity_service import log_activity
+
+    if not is_manager_or_admin(by_user):
+        raise HTTPException(403, "Only a manager or admin can reassign an account")
+
+    co = db.get(Company, company_id)
+    if co is None:
+        raise LookupError(f"Company {company_id} not found")
+
+    target = db.get(User, to_user_id)
+    if target is None:
+        raise ValueError(f"Target user {to_user_id} not found")
+
+    co.account_owner_id = to_user_id
+    co.ownership_cleared_at = None
+
+    prospect_id: int | None = None
+    swept_pa = (
+        db.query(ProspectAccount)
+        .filter(
+            ProspectAccount.company_id == company_id,
+            ProspectAccount.status != ProspectAccountStatus.DISMISSED,
+            (ProspectAccount.swept_at.is_not(None)) | (ProspectAccount.swept_from_owner_id.is_not(None)),
+        )
+        .first()
+    )
+    if swept_pa is not None:
+        swept_pa.status = ProspectAccountStatus.DISMISSED
+        swept_pa.dismissed_at = datetime.now(timezone.utc)
+        swept_pa.dismissed_by = by_user.id
+        swept_pa.dismiss_reason = "reassigned"
+        swept_pa.reclaim_blocked_until = None
+        prospect_id = swept_pa.id
+
+    log_activity(
+        db,
+        activity_type="reassign",
+        channel="system",
+        user_id=by_user.id,
+        company_id=company_id,
+        summary=f"Account reassigned to user {to_user_id}",
+        details={"to_user_id": to_user_id, "by_user_id": by_user.id, "prospect_id": prospect_id},
+    )
+
+    db.commit()
+
+    logger.info(
+        "SP4 reassign: manager {} reassigned company {} to user {} (prospect {})",
+        by_user.id,
+        company_id,
+        to_user_id,
+        prospect_id,
+    )
+
+    return {
+        "company_id": company_id,
+        "company_name": co.name,
+        "to_user_id": to_user_id,
+        "prospect_id": prospect_id,
+        "status": "reassigned",
     }

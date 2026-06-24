@@ -2,7 +2,9 @@
 
 Covers: reclaim_prospect_account error paths, job_account_sweep wrapper,
 job_account_sweep_with_db sweep logic, _send_sweep_notification,
-job_auto_surface_reactivation wrapper, job_auto_surface_with_db surface logic.
+job_auto_surface_reactivation wrapper, job_auto_surface_with_db surface logic,
+and Phase 4 compliance: reclaim cooldown enforcement, manager reassign, and the
+rep + manager sweep notification fan-out.
 """
 
 import os
@@ -27,11 +29,12 @@ def _uid() -> str:
     return uuid.uuid4().hex[:8]
 
 
-def _user(db: Session, email: str | None = None) -> User:
+def _user(db: Session, email: str | None = None, *, role: str = "buyer", is_active: bool = True) -> User:
     u = User(
         email=email or f"user-{_uid()}@test.com",
         name="Test",
-        role="buyer",
+        role=role,
+        is_active=is_active,
         azure_id=_uid(),
         created_at=datetime.now(timezone.utc),
     )
@@ -60,6 +63,7 @@ def _prospect(
     swept_from_owner_id: int | None = None,
     status: str = "suggested",
     domain: str | None = None,
+    reclaim_blocked_until: datetime | None = None,
 ) -> ProspectAccount:
     pa = ProspectAccount(
         name=f"PA-{_uid()}",
@@ -70,6 +74,7 @@ def _prospect(
         readiness_score=0,
         company_id=company_id,
         swept_from_owner_id=swept_from_owner_id,
+        reclaim_blocked_until=reclaim_blocked_until,
         created_at=datetime.now(timezone.utc),
     )
     db.add(pa)
@@ -316,11 +321,12 @@ class TestSendSweepNotification:
         with patch("app.utils.token_manager.get_valid_token", AsyncMock(return_value=None)):
             await pr._send_sweep_notification(owner, co, None, 1, db_session)
 
-    async def test_sends_with_cc_when_manager_email_set(self, db_session: Session, monkeypatch) -> None:
+    async def test_sends_to_rep_and_configured_manager_email(self, db_session: Session, monkeypatch) -> None:
+        """Rep + configured manager email each receive a (deduped) send."""
         from app.services import prospect_reclamation as pr
 
         monkeypatch.setattr(pr.settings, "account_sweep_manager_email", "manager@trio.com")
-        owner = _user(db_session)
+        owner = _user(db_session, email="rep-cc@trio.com")
         co = _company(db_session)
         db_session.commit()
 
@@ -333,9 +339,13 @@ class TestSendSweepNotification:
         ):
             await pr._send_sweep_notification(owner, co, None, 1, db_session)
 
-        call_args = mock_gc.post_json.call_args
-        payload = call_args[0][1]
-        assert len(payload["message"]["ccRecipients"]) == 1
+        sent_to = {
+            r["emailAddress"]["address"]
+            for call in mock_gc.post_json.call_args_list
+            for r in call[0][1]["message"]["toRecipients"]
+        }
+        assert "rep-cc@trio.com" in sent_to
+        assert "manager@trio.com" in sent_to
 
     async def test_notification_exception_does_not_propagate(self, db_session: Session) -> None:
         from app.services import prospect_reclamation as pr
@@ -451,3 +461,285 @@ class TestJobAutoSurfaceWithDb:
 
         db_session.refresh(pa_existing)
         assert pa_existing.company_id == co.id
+
+
+# ── Phase 4: reclaim cooldown ─────────────────────────────────────────────────
+
+
+class TestReclaimCooldown:
+    def test_former_owner_within_cooldown_denied(self, db_session: Session) -> None:
+        """A former owner cannot reclaim while reclaim_blocked_until is in the
+        future."""
+        from datetime import timedelta
+
+        from app.services.prospect_reclamation import reclaim_prospect_account
+
+        owner = _user(db_session)
+        co = _company(db_session, owner_id=None)
+        future = datetime.now(timezone.utc) + timedelta(days=15)
+        pa = _prospect(db_session, company_id=co.id, swept_from_owner_id=owner.id, reclaim_blocked_until=future)
+        db_session.commit()
+
+        with pytest.raises(ValueError, match="30-day cooldown"):
+            reclaim_prospect_account(pa.id, owner.id, db_session)
+
+        # Account is untouched — still in the pool, owner not restored.
+        db_session.refresh(pa)
+        assert pa.status == ProspectAccountStatus.SUGGESTED
+        db_session.refresh(co)
+        assert co.account_owner_id is None
+
+    def test_former_owner_after_cooldown_allowed(self, db_session: Session) -> None:
+        """A former owner CAN reclaim once reclaim_blocked_until has passed."""
+        from datetime import timedelta
+
+        from app.services.prospect_reclamation import reclaim_prospect_account
+
+        owner = _user(db_session)
+        co = _company(db_session, owner_id=None)
+        past = datetime.now(timezone.utc) - timedelta(days=1)
+        pa = _prospect(db_session, company_id=co.id, swept_from_owner_id=owner.id, reclaim_blocked_until=past)
+        db_session.commit()
+
+        result = reclaim_prospect_account(pa.id, owner.id, db_session)
+        assert result["status"] == "reclaimed"
+        db_session.refresh(co)
+        assert co.account_owner_id == owner.id
+
+    def test_no_cooldown_set_allows_former_owner(self, db_session: Session) -> None:
+        """When reclaim_blocked_until is NULL the former owner reclaims freely."""
+        from app.services.prospect_reclamation import reclaim_prospect_account
+
+        owner = _user(db_session)
+        co = _company(db_session, owner_id=None)
+        pa = _prospect(db_session, company_id=co.id, swept_from_owner_id=owner.id, reclaim_blocked_until=None)
+        db_session.commit()
+
+        result = reclaim_prospect_account(pa.id, owner.id, db_session)
+        assert result["status"] == "reclaimed"
+
+    def test_manager_within_cooldown_allowed(self, db_session: Session, monkeypatch) -> None:
+        """A manager bypasses the cooldown even though the former owner is blocked."""
+        from datetime import timedelta
+
+        from app.services import prospect_reclamation as pr
+        from app.services.prospect_reclamation import reclaim_prospect_account
+
+        owner = _user(db_session)
+        manager = _user(db_session, role="manager")
+        co = _company(db_session, owner_id=None)
+        future = datetime.now(timezone.utc) + timedelta(days=15)
+        pa = _prospect(db_session, company_id=co.id, swept_from_owner_id=owner.id, reclaim_blocked_until=future)
+        db_session.commit()
+
+        # Ensure the bypass is by ROLE, not the configured manager email.
+        monkeypatch.setattr(pr.settings, "account_sweep_manager_email", "")
+        result = reclaim_prospect_account(pa.id, manager.id, db_session)
+        assert result["status"] == "reclaimed"
+        db_session.refresh(co)
+        assert co.account_owner_id == manager.id
+
+    def test_admin_within_cooldown_allowed(self, db_session: Session) -> None:
+        """An admin (is_admin=True) bypasses the cooldown."""
+        from datetime import timedelta
+
+        from app.services.prospect_reclamation import reclaim_prospect_account
+
+        owner = _user(db_session)
+        admin = _user(db_session, role="admin")
+        co = _company(db_session, owner_id=None)
+        future = datetime.now(timezone.utc) + timedelta(days=15)
+        pa = _prospect(db_session, company_id=co.id, swept_from_owner_id=owner.id, reclaim_blocked_until=future)
+        db_session.commit()
+
+        result = reclaim_prospect_account(pa.id, admin.id, db_session, is_admin=True)
+        assert result["status"] == "reclaimed"
+
+
+# ── Phase 4: sweep sets cooldown ──────────────────────────────────────────────
+
+
+class TestSweepSetsCooldown:
+    async def test_sweep_sets_reclaim_blocked_until(self, db_session: Session, monkeypatch) -> None:
+        """A successful sweep stamps reclaim_blocked_until = swept_at + 30 days."""
+        from datetime import timedelta
+
+        from app.services import prospect_reclamation as pr
+
+        monkeypatch.setattr(pr.settings, "account_sweep_inactivity_days", 0)
+        owner = _user(db_session)
+        _company(db_session, owner_id=owner.id)
+        pa = _prospect(db_session)
+        db_session.commit()
+
+        with (
+            patch("app.services.activity_service.get_last_activity_at", return_value=None),
+            patch(
+                "app.services.prospect_claim.send_company_to_prospecting",
+                return_value={"prospect_id": pa.id},
+            ),
+            patch.object(pr, "_send_sweep_notification", AsyncMock()),
+        ):
+            await pr.job_account_sweep_with_db(db_session)
+
+        db_session.refresh(pa)
+        assert pa.swept_at is not None
+        assert pa.reclaim_blocked_until is not None
+        delta = pa.reclaim_blocked_until - pa.swept_at
+        assert abs(delta - timedelta(days=30)) < timedelta(seconds=5)
+
+
+# ── Phase 4: reassign_account ─────────────────────────────────────────────────
+
+
+class TestReassignAccount:
+    def test_manager_reassigns_sets_owner_dismisses_clears_cooldown(self, db_session: Session) -> None:
+        """Manager reassign sets the new owner, dismisses the swept prospect, clears
+        cooldown."""
+        from datetime import timedelta
+
+        from app.models.intelligence import ActivityLog
+        from app.services.prospect_reclamation import reassign_account
+
+        manager = _user(db_session, role="manager")
+        target = _user(db_session)
+        co = _company(db_session, owner_id=None)
+        future = datetime.now(timezone.utc) + timedelta(days=15)
+        pa = _prospect(db_session, company_id=co.id, swept_from_owner_id=target.id, reclaim_blocked_until=future)
+        db_session.commit()
+
+        result = reassign_account(co.id, target.id, manager, db_session)
+        assert result["status"] == "reassigned"
+
+        db_session.refresh(co)
+        assert co.account_owner_id == target.id
+        db_session.refresh(pa)
+        assert pa.status == ProspectAccountStatus.DISMISSED
+        assert pa.reclaim_blocked_until is None
+
+        log = (
+            db_session.query(ActivityLog)
+            .filter(ActivityLog.company_id == co.id, ActivityLog.activity_type == "reassign")
+            .first()
+        )
+        assert log is not None
+
+    def test_admin_reassigns(self, db_session: Session) -> None:
+        from app.services.prospect_reclamation import reassign_account
+
+        admin = _user(db_session, role="admin")
+        target = _user(db_session)
+        co = _company(db_session, owner_id=None)
+        db_session.commit()
+
+        result = reassign_account(co.id, target.id, admin, db_session)
+        assert result["status"] == "reassigned"
+        db_session.refresh(co)
+        assert co.account_owner_id == target.id
+
+    def test_rep_reassign_raises_403(self, db_session: Session) -> None:
+        """A non-manager caller is rejected with HTTP 403."""
+        from fastapi import HTTPException
+
+        from app.services.prospect_reclamation import reassign_account
+
+        rep = _user(db_session, role="sales")
+        target = _user(db_session)
+        co = _company(db_session, owner_id=None)
+        db_session.commit()
+
+        with pytest.raises(HTTPException) as exc:
+            reassign_account(co.id, target.id, rep, db_session)
+        assert exc.value.status_code == 403
+
+    def test_reassign_missing_company_raises_lookup(self, db_session: Session) -> None:
+        from app.services.prospect_reclamation import reassign_account
+
+        manager = _user(db_session, role="manager")
+        target = _user(db_session)
+        db_session.commit()
+
+        with pytest.raises(LookupError):
+            reassign_account(999999, target.id, manager, db_session)
+
+    def test_reassign_missing_target_user_raises(self, db_session: Session) -> None:
+        from app.services.prospect_reclamation import reassign_account
+
+        manager = _user(db_session, role="manager")
+        co = _company(db_session, owner_id=None)
+        db_session.commit()
+
+        with pytest.raises(ValueError, match="not found"):
+            reassign_account(co.id, 999999, manager, db_session)
+
+
+# ── Phase 4: sweep notification fans out to managers/admins ───────────────────
+
+
+class TestSweepNotificationManagerFanout:
+    async def test_includes_active_managers_and_admins(self, db_session: Session, monkeypatch) -> None:
+        """Notification recipients include every active MANAGER/ADMIN plus the
+        configured manager email and the rep, all deduped."""
+        from app.services import prospect_reclamation as pr
+
+        owner = _user(db_session, email="rep@trio.com")
+        mgr = _user(db_session, email="boss@trio.com", role="manager")
+        adm = _user(db_session, email="admin@trio.com", role="admin")
+        # An inactive manager must NOT be notified.
+        _user(db_session, email="ghost@trio.com", role="manager", is_active=False)
+        co = _company(db_session)
+        db_session.commit()
+
+        monkeypatch.setattr(pr.settings, "account_sweep_manager_email", "configured@trio.com")
+
+        mock_gc = MagicMock()
+        mock_gc.post_json = AsyncMock()
+        with (
+            patch("app.utils.token_manager.get_valid_token", AsyncMock(return_value="TOKEN")),
+            patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+        ):
+            await pr._send_sweep_notification(owner, co, None, 1, db_session)
+
+        # One send per unique recipient.
+        sent_to = set()
+        for call in mock_gc.post_json.call_args_list:
+            payload = call[0][1]
+            for r in payload["message"]["toRecipients"]:
+                sent_to.add(r["emailAddress"]["address"])
+
+        assert "rep@trio.com" in sent_to
+        assert "boss@trio.com" in sent_to
+        assert "admin@trio.com" in sent_to
+        assert "configured@trio.com" in sent_to
+        assert "ghost@trio.com" not in sent_to
+
+    async def test_one_failure_does_not_break_others(self, db_session: Session, monkeypatch) -> None:
+        """If one recipient send raises, the others still go out (try/except per
+        send)."""
+        from app.services import prospect_reclamation as pr
+
+        owner = _user(db_session, email="rep2@trio.com")
+        _user(db_session, email="boss2@trio.com", role="manager")
+        co = _company(db_session)
+        db_session.commit()
+
+        monkeypatch.setattr(pr.settings, "account_sweep_manager_email", "")
+
+        calls = {"n": 0}
+
+        async def flaky_post(path, payload):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("first send failed")
+            return {}
+
+        mock_gc = MagicMock()
+        mock_gc.post_json = AsyncMock(side_effect=flaky_post)
+        with (
+            patch("app.utils.token_manager.get_valid_token", AsyncMock(return_value="TOKEN")),
+            patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+        ):
+            # Must not raise despite the first send blowing up.
+            await pr._send_sweep_notification(owner, co, None, 1, db_session)
+
+        assert calls["n"] >= 2
