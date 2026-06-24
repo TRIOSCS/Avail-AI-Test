@@ -31,6 +31,21 @@
 | commodity_tags | JSON | User specialties |
 | timezone | String 100 | |
 | eight_by_eight_extension | String 20 | Phone system |
+| last_login_at | UTCDateTime, nullable | Migration 148. Stamped on every successful OAuth callback. NULL + no azure_id ⇒ an "Invited" (pre-provisioned, never-logged-in) row. |
+| access_overrides | JSON, default `{}` | Migration 148. **Explicit per-user access overrides only**: `{access_key: bool}` keyed by `constants.AccessKey`. An *absent* key means "use the role default" (`constants.ROLE_ACCESS_DEFAULTS`) — the dict never stores the role default, so it stays empty until an admin grants/revokes a specific key. Read by `dependencies.user_has_access` (override wins over role default; admin → all). `ops_verification` is NOT stored here (it lives in `verification_group_members`). |
+| invited_by_id | FK -> users (SET NULL), nullable | Migration 148. The admin who invited this user (set by the Users-tab invite flow); SET NULL so the row survives the inviter's deletion. |
+
+**`user_admin_audit`** — Append-only trail of admin actions against users (Migration 148)
+| Column | Type | Notes |
+|--------|------|-------|
+| id | Integer PK | |
+| actor_id | FK -> users (SET NULL), nullable | The admin who performed the action; SET NULL so the trail survives the actor's deletion (renders as "system"). |
+| target_user_id | FK -> users (CASCADE), indexed, NOT NULL | The user acted upon; CASCADE so a user's audit rows are removed with the user. |
+| action | String 32 | `constants.UserAuditAction`: invite \| role_change \| activate \| deactivate \| access_grant \| access_revoke. |
+| detail | JSON, default `{}` | Action context, e.g. `{"from": "buyer", "to": "manager"}` (role change) or `{"key": "send_rfq", "value": "off"}` (access). |
+| created_at | UTCDateTime, indexed | |
+
+Written by `services.user_admin.record_user_audit` (caller commits); surfaced by the Settings > Users audit-log viewer (admin only).
 
 ---
 

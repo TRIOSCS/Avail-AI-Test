@@ -20,8 +20,9 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
+from app.constants import AccessKey
 from app.database import get_db
-from app.dependencies import is_manager_or_admin, require_user
+from app.dependencies import is_manager_or_admin, require_access
 from app.models import User
 from app.models.crm import Company, CustomerSite, SiteContact
 from app.services.crm_service import cdm_company_query
@@ -131,7 +132,7 @@ def _contacts_generator(db: Session, user: User):
 
 @router.get("/v2/customers/export.csv")
 async def export_companies_csv(
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.EXPORT_DATA)),
     db: Session = Depends(get_db),
 ):
     """Export visible companies as a CSV download."""
@@ -144,7 +145,7 @@ async def export_companies_csv(
 
 @router.get("/v2/customers/contacts/export.csv")
 async def export_contacts_csv(
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.EXPORT_DATA)),
     db: Session = Depends(get_db),
 ):
     """Export contacts for visible companies as a CSV download."""

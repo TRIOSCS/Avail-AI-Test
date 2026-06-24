@@ -8,7 +8,7 @@ Or from submodules: from app.models.auth import User
 from .alert_seen import AlertSeen  # noqa: F401
 
 # Auth & Users
-from .auth import User  # noqa: F401
+from .auth import User, UserAdminAudit  # noqa: F401
 from .base import Base  # noqa: F401
 
 # Buy Plans (unified V4 — structured lines, dual approval tracks)

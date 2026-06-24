@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, Boolean, Column, Integer, String, Text, text
+from sqlalchemy import JSON, Boolean, Column, ForeignKey, Integer, String, Text, text
 from sqlalchemy.orm import relationship, validates
 
 from ..database import UTCDateTime
@@ -31,6 +31,14 @@ class User(Base):
     m365_error_reason = Column(String(255))
     m365_last_healthy = Column(UTCDateTime)
     commodity_tags = Column(JSON, default=list)
+
+    # User-management foundation (Phase 1)
+    last_login_at = Column(UTCDateTime, nullable=True)
+    # Explicit per-user access overrides ONLY: {access_key_str: bool}. An absent key
+    # means "use the role default" (constants.ROLE_ACCESS_DEFAULTS). Read by
+    # dependencies.user_has_access — override wins over the role default.
+    access_overrides = Column(JSON, default=dict)
+    invited_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
     # Mailbox settings (from Graph /me/mailboxSettings)
     timezone = Column(String(100))
@@ -63,3 +71,22 @@ class User(Base):
 
             logger.warning("Unexpected role: {}. Expected one of {}", value, valid)
         return value
+
+
+class UserAdminAudit(Base):
+    """Append-only audit trail for admin actions against users.
+
+    Records who (actor) did what (action, see constants.UserAuditAction) to whom
+    (target_user_id) plus a JSON detail blob (e.g. {"from": "buyer", "to": "manager"}).
+    actor_id is nullable + SET NULL so the trail survives the admin's deletion;
+    target_user_id CASCADEs so a user's audit rows are removed with the user.
+    """
+
+    __tablename__ = "user_admin_audit"
+
+    id = Column(Integer, primary_key=True)
+    actor_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    target_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    action = Column(String(32), nullable=False)
+    detail = Column(JSON, default=dict)
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc), index=True)

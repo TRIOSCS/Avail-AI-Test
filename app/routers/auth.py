@@ -7,7 +7,8 @@ Business Rules:
 - Login via Azure AD OAuth2 code flow
 - Tokens stored in DB (not just session) for background job access
 - Token refresh handled proactively (15-min buffer) in dependencies.py
-- New users auto-created on first login
+- Login gated by an allowlist (ENABLE_USER_ALLOWLIST): unknown emails are rejected
+  unless in ADMIN_EMAILS; invited rows adopt their azure_id on first login
 - Email normalized to lowercase on login
 
 Called by: main.py (router mount)
@@ -126,6 +127,12 @@ async def callback(request: Request, code: str = "", state: str = "", db: Sessio
     email = (profile.get("mail") or profile.get("userPrincipalName", "")).strip().lower()
     user = db.query(User).filter_by(email=email).first()
     if not user:
+        # Allowlist gate: an unknown email is only auto-provisioned when the allowlist
+        # is off (legacy posture) or the email is an admin. ADMIN_EMAILS always bypass.
+        allowed = (email in settings.admin_emails) or (not settings.enable_user_allowlist)
+        if not allowed:
+            logger.warning("Login rejected — email not provisioned: {}", email)
+            return RedirectResponse("/auth/access-denied")
         user = User(
             email=email,
             name=profile.get("displayName", email),
@@ -133,6 +140,16 @@ async def callback(request: Request, code: str = "", state: str = "", db: Sessio
         )
         db.add(user)
         db.commit()
+    elif not user.is_active:
+        logger.warning("Login rejected — account disabled: {}", email)
+        return RedirectResponse("/auth/access-denied?reason=disabled")
+    elif not user.azure_id:
+        # Invite adoption: an invited row was pre-provisioned without an azure_id.
+        # Bind it on first login. The user's role is left untouched (an invited
+        # trader stays a trader).
+        user.azure_id = profile.get("id")
+
+    user.last_login_at = datetime.now(timezone.utc)
 
     # Bootstrap admin: auto-promote users in admin_emails env var
     if user.email.lower() in settings.admin_emails and user.role != UserRole.ADMIN:
@@ -162,6 +179,50 @@ async def callback(request: Request, code: str = "", state: str = "", db: Sessio
 
     request.session["user_id"] = user.id
     return RedirectResponse("/")
+
+
+@router.get("/auth/access-denied", response_class=HTMLResponse)
+async def access_denied(request: Request):
+    """Branded page shown when a login is rejected by the allowlist gate.
+
+    Default copy covers an un-provisioned email; ``?reason=disabled`` switches to
+    the disabled-account message. Self-contained (no app shell) so it renders even
+    when there is no session.
+    """
+    if request.query_params.get("reason") == "disabled":
+        heading = "Account disabled"
+        body = "Your account has been disabled."
+    else:
+        heading = "Access not provisioned"
+        body = "Your account isn't set up for AvailAI. Contact an administrator to be invited."
+    return HTMLResponse(
+        content=f"""
+<!doctype html>
+<html>
+  <head>
+    <title>{heading} — AvailAI</title>
+    <style>
+      body {{ font-family: system-ui, -apple-system, sans-serif; background: #0f172a; color: #e2e8f0;
+              display: flex; min-height: 100vh; align-items: center; justify-content: center; margin: 0; }}
+      .card {{ background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 2.5rem;
+               max-width: 28rem; text-align: center; }}
+      h1 {{ font-size: 1.25rem; margin: 0 0 0.75rem; }}
+      p {{ color: #94a3b8; line-height: 1.5; margin: 0 0 1.5rem; }}
+      a {{ color: #60a5fa; text-decoration: none; }}
+      a:hover {{ text-decoration: underline; }}
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>{heading}</h1>
+      <p>{body}</p>
+      <a href="/auth/logout">Sign in with a different account</a>
+    </div>
+  </body>
+</html>
+        """,
+        media_type="text/html",
+    )
 
 
 @router.post("/auth/logout")

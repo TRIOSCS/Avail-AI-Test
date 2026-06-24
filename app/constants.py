@@ -289,6 +289,101 @@ class UserRole(StrEnum):
 RESTRICTED_ROLES = frozenset({UserRole.SALES, UserRole.TRADER})
 
 
+# ---------------------------------------------------------------------------
+# Access registry (user-management feature, Phase 1 foundation)
+# ---------------------------------------------------------------------------
+
+
+class AccessKey(StrEnum):
+    """Per-feature access keys — the closed vocabulary of grantable access.
+
+    Single source of truth for both nav-module visibility and capability gating. A
+    user's effective access is: admin → everything; otherwise an explicit per-user
+    override (User.access_overrides) wins, else the role default (ROLE_ACCESS_DEFAULTS).
+    ops_verification is special-cased — it delegates to VerificationGroupMember (see
+    dependencies.user_has_access).
+    """
+
+    # App-section (nav module) access
+    REQUISITIONS = "requisitions"
+    SIGHTINGS = "sightings"
+    MATERIALS = "materials"
+    SEARCH = "search"
+    BUY_PLANS = "buy_plans"
+    RESELL = "resell"
+    CRM = "crm"
+    PROACTIVE = "proactive"
+    PROSPECTING = "prospecting"
+    MY_DAY = "my_day"
+    # Capability access
+    SEND_RFQ = "send_rfq"
+    APPROVE_OFFERS = "approve_offers"
+    EXPORT_DATA = "export_data"
+    MANAGE_CONNECTORS = "manage_connectors"
+    OPS_VERIFICATION = "ops_verification"
+
+
+# Partition of AccessKey into the two families above. Module keys gate nav-section
+# visibility; capability keys gate discrete actions. Kept beside the enum so callers
+# iterate the right subset (e.g. building the nav vs. the capabilities admin panel).
+MODULE_ACCESS_KEYS = (
+    AccessKey.REQUISITIONS,
+    AccessKey.SIGHTINGS,
+    AccessKey.MATERIALS,
+    AccessKey.SEARCH,
+    AccessKey.BUY_PLANS,
+    AccessKey.RESELL,
+    AccessKey.CRM,
+    AccessKey.PROACTIVE,
+    AccessKey.PROSPECTING,
+    AccessKey.MY_DAY,
+)
+CAPABILITY_ACCESS_KEYS = (
+    AccessKey.SEND_RFQ,
+    AccessKey.APPROVE_OFFERS,
+    AccessKey.EXPORT_DATA,
+    AccessKey.MANAGE_CONNECTORS,
+    AccessKey.OPS_VERIFICATION,
+)
+
+
+class UserAuditAction(StrEnum):
+    """Closed vocabulary for UserAdminAudit.action — what an admin did to a user."""
+
+    INVITE = "invite"
+    ROLE_CHANGE = "role_change"
+    ACTIVATE = "activate"
+    DEACTIVATE = "deactivate"
+    ACCESS_GRANT = "access_grant"
+    ACCESS_REVOKE = "access_revoke"
+
+
+# Default access granted to every interactive (non-admin) role. This deliberately
+# preserves TODAY'S behavior: the nav is fully visible to all interactive roles, and
+# RFQ / approve-offers / export / manage-connectors are allowed for every buyer-tier
+# role. ops_verification is INTENTIONALLY excluded — it is curated through the
+# verification group (VerificationGroupMember), never via a blanket role default, so
+# turning the access model on grants nobody new ops-verification rights.
+_INTERACTIVE_DEFAULTS = frozenset(MODULE_ACCESS_KEYS) | {
+    AccessKey.SEND_RFQ,
+    AccessKey.APPROVE_OFFERS,
+    AccessKey.EXPORT_DATA,
+    AccessKey.MANAGE_CONNECTORS,
+}
+
+# Role → default access set. Defaults exactly preserve current behavior so that
+# introducing the access layer is a no-op until an admin sets explicit overrides.
+# ADMIN gets every key; AGENT (non-interactive service account) gets none.
+ROLE_ACCESS_DEFAULTS: dict[UserRole, frozenset] = {
+    UserRole.BUYER: _INTERACTIVE_DEFAULTS,
+    UserRole.SALES: _INTERACTIVE_DEFAULTS,
+    UserRole.TRADER: _INTERACTIVE_DEFAULTS,
+    UserRole.MANAGER: _INTERACTIVE_DEFAULTS,
+    UserRole.ADMIN: frozenset(AccessKey),  # admin has everything
+    UserRole.AGENT: frozenset(),  # service account: no interactive access
+}
+
+
 class ProactiveOfferStatus(StrEnum):
     """Status lifecycle for ProactiveOffer records."""
 
@@ -394,8 +489,8 @@ class ProspectAccountStatus(StrEnum):
 class CompanyDisposition(StrEnum):
     """Salesperson-set lifecycle disposition for a Company.
 
-    NULL ⇒ active (mirrors tier's NULL ⇒ standard). "bucket" is the parking lot — a
-    bucketed account is suppressed from the "needs a call" call-list (count + click-
+    NULL ⇒ active (mirrors tier's NULL ⇒ standard). "bucket" is the parking lot —
+    a bucketed account is suppressed from the "needs a call" call-list (count + click-
     through) but stays findable/un-bucketable via the explicit Bucket facet. Never
     overloaded onto is_active.
     """
@@ -456,8 +551,8 @@ class SourceRunStatus(StrEnum):
 
 
 class SpecCodeSource(StrEnum):
-    """Provenance of an ``oem_spec_codes.source`` row — how the approved mapping entered
-    the authoritative table.
+    """Provenance of an ``oem_spec_codes.source`` row — how the approved mapping
+    entered the authoritative table.
 
     Single source of truth for the ``OemSpecCode.source`` string column
     (validated via ``@validates`` on the model). These are the *stored*

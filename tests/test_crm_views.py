@@ -4023,6 +4023,45 @@ class TestC4SuggestedContactsUI:
         )
         assert resp.status_code == 404
 
+    # ── Add from the enrich panel (from_enrich) returns a self-contained row ──
+
+    def test_post_add_suggested_from_enrich_returns_row_fragment(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """from_enrich=1 returns a single confirmation <li> (+ toast), NOT the grouped
+        list.
+
+        The enrich panel lives outside the Contacts tab (no #contacts-tab-list), so its
+        Add button must self-swap the clicked row instead of re-rendering the whole
+        contacts list.
+        """
+        from app.models.crm import SiteContact
+
+        company, site, _ = self._make_company_with_hq(db_session)
+        company.account_owner_id = test_user.id  # owner passes can_manage_account gate
+        db_session.commit()
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/suggested-contacts/add",
+            data={
+                "site_id": str(site.id),
+                "full_name": "Panel Add",
+                "email": "paneladd@acme.com",
+                "from_enrich": "1",
+            },
+        )
+        assert resp.status_code == 200
+        # Self-contained confirmation row, not the grouped accordion list
+        assert "<li" in resp.text
+        assert "Added" in resp.text
+        # The grouped list would contain the pre-existing "Existing Alice"; the fragment must not
+        assert "Existing Alice" not in resp.text
+        # Toast still fires
+        assert "showToast" in resp.headers.get("HX-Trigger", "")
+        # The contact was actually created
+        db_session.expire_all()
+        sc = db_session.query(SiteContact).filter_by(email="paneladd@acme.com").first()
+        assert sc is not None
+
 
 class TestFullWidthContactsForwardLayout:
     """Pin the full-width, contacts-forward customer + vendor detail reshape.

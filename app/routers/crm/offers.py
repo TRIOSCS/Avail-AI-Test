@@ -6,13 +6,14 @@ from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from ...constants import (
+    AccessKey,
     ActivityType,
     OfferStatus,
     RequisitionStatus,
     UserRole,
 )
 from ...database import get_db
-from ...dependencies import require_buyer, require_requisition_access, require_user
+from ...dependencies import require_access, require_buyer, require_requisition_access, require_user
 from ...models import (
     ActivityLog,
     ChangeLog,
@@ -624,7 +625,7 @@ async def delete_offer(offer_id: int, user: User = Depends(require_buyer), db: S
 @router.put("/api/offers/{offer_id}/reconfirm")
 async def reconfirm_offer(
     offer_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.APPROVE_OFFERS)),
     db: Session = Depends(get_db),
 ):
     """Mark a historical offer as reconfirmed (still valid)."""
@@ -645,7 +646,7 @@ async def reconfirm_offer(
 @router.put("/api/offers/{offer_id}/approve")
 async def approve_offer(
     offer_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.APPROVE_OFFERS)),
     db: Session = Depends(get_db),
 ):
     """Approve a pending_review offer → active."""
@@ -674,7 +675,7 @@ async def approve_offer(
 @router.put("/api/offers/{offer_id}/reject")
 async def reject_offer(
     offer_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.APPROVE_OFFERS)),
     db: Session = Depends(get_db),
     reason: str = "",
 ):
@@ -940,7 +941,7 @@ async def list_review_queue(
 @router.post("/api/offers/{offer_id}/promote")
 async def promote_offer(
     offer_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.APPROVE_OFFERS)),
     db: Session = Depends(get_db),
 ):
     """Promote a T4 (medium-confidence) offer to T5 after human review.
@@ -974,7 +975,7 @@ async def promote_offer(
 @router.post("/api/offers/{offer_id}/reject")
 async def reject_offer_t4_review(
     offer_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.APPROVE_OFFERS)),
     db: Session = Depends(get_db),
 ):
     """Reject a T4 offer — marks as rejected, keeps for audit trail.

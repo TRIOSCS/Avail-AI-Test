@@ -795,6 +795,9 @@ class TestEnrichment:
         resp = client.post(f"/api/enrich/company/{test_company.id}")
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
+        # The dead enrich_customer_account stub is no longer called from this endpoint,
+        # so its no_providers key must not appear in the JSON contract.
+        assert "customer_enrichment" not in resp.json()
 
     @patch(
         "app.routers.crm.enrichment.get_credential_cached",
@@ -1106,6 +1109,157 @@ class TestEnrichment:
             },
         )
         assert resp2.json()["added"] == 0
+
+    # ── HTMX result panel (content negotiation on HX-Request) ─────────────
+
+    @patch(
+        "app.routers.crm.enrichment.get_credential_cached",
+        side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None,
+    )
+    @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
+    @patch("app.enrichment_service.apply_enrichment_to_company")
+    @patch("app.enrichment_service.find_suggested_contacts_with_errors", new_callable=AsyncMock)
+    def test_enrich_company_hx_returns_html(
+        self, mock_find, mock_apply, mock_enrich, mock_cred, client, db_session, test_company, test_user
+    ):
+        """HTMX request renders an HTML result panel (not raw JSON) with firmographics +
+        contacts."""
+        test_company.domain = "acme.com"
+        test_company.legal_name = "Acme Electronics Inc"
+        test_company.account_owner_id = test_user.id  # owner passes can_manage_account gate
+        db_session.commit()
+        mock_enrich.return_value = {"industry": "Electronics", "legal_name": "Acme Electronics Inc"}
+        mock_apply.return_value = ["industry"]
+        mock_find.return_value = (
+            [
+                {
+                    "full_name": "Jane Buyer",
+                    "title": "Procurement Mgr",
+                    "email": "jane@acme.com",
+                    "source": "hunter",
+                    "verified": True,
+                }
+            ],
+            [],
+        )
+
+        resp = client.post(f"/api/enrich/company/{test_company.id}", headers={"HX-Request": "true"})
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers.get("content-type", "")
+        assert not resp.text.lstrip().startswith("{")  # not raw JSON
+        # Firmographics rendered from the stored record
+        assert "Acme Electronics Inc" in resp.text
+        assert "Electronic Components" in resp.text
+        # Newly-updated field gets an "Updated" pill
+        assert "Updated" in resp.text
+        # Discovered contact surfaced with an Add form flagged from_enrich
+        assert "Jane Buyer" in resp.text
+        assert "suggested-contacts/add" in resp.text
+        assert "from_enrich" in resp.text
+
+    @patch(
+        "app.routers.crm.enrichment.get_credential_cached",
+        side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None,
+    )
+    @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
+    @patch("app.enrichment_service.apply_enrichment_to_company")
+    @patch("app.enrichment_service.find_suggested_contacts_with_errors", new_callable=AsyncMock)
+    def test_enrich_company_hx_graceful_degradation(
+        self, mock_find, mock_apply, mock_enrich, mock_cred, client, db_session, test_company, test_user
+    ):
+        """Contact discovery failure still renders firmographics; shows an amber
+        'couldn't reach' banner."""
+        test_company.domain = "acme.com"
+        test_company.account_owner_id = test_user.id  # owner passes can_manage_account gate
+        db_session.commit()
+        mock_enrich.return_value = {"industry": "Electronics"}
+        mock_apply.return_value = ["industry"]
+        mock_find.side_effect = RuntimeError("clay down")
+
+        resp = client.post(f"/api/enrich/company/{test_company.id}", headers={"HX-Request": "true"})
+        assert resp.status_code == 200
+        assert "Electronic Components" in resp.text  # firmographics still render
+        assert "Couldn" in resp.text  # amber "Couldn't reach" banner
+
+    @patch(
+        "app.routers.crm.enrichment.get_credential_cached",
+        side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None,
+    )
+    @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
+    @patch("app.enrichment_service.apply_enrichment_to_company")
+    @patch("app.enrichment_service.find_suggested_contacts_with_errors", new_callable=AsyncMock)
+    def test_enrich_company_hx_no_updates_shows_current(
+        self, mock_find, mock_apply, mock_enrich, mock_cred, client, db_session, test_company, test_user
+    ):
+        """Already-enriched company (empty updated_fields) shows 'Already up to date',
+        not raw JSON."""
+        test_company.domain = "acme.com"
+        test_company.account_owner_id = test_user.id  # owner passes can_manage_account gate
+        db_session.commit()
+        mock_enrich.return_value = {"industry": "Electronics"}
+        mock_apply.return_value = []  # nothing changed — the user's real scenario
+        mock_find.return_value = ([], [])
+
+        resp = client.post(f"/api/enrich/company/{test_company.id}", headers={"HX-Request": "true"})
+        assert resp.status_code == 200
+        assert "Already up to date" in resp.text
+        assert not resp.text.lstrip().startswith("{")
+
+    @patch(
+        "app.routers.crm.enrichment.get_credential_cached",
+        side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None,
+    )
+    @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
+    @patch("app.enrichment_service.apply_enrichment_to_company")
+    @patch("app.enrichment_service.find_suggested_contacts_with_errors", new_callable=AsyncMock)
+    def test_enrich_company_hx_sanitizes_malicious_url(
+        self, mock_find, mock_apply, mock_enrich, mock_cred, client, db_session, test_company, test_user
+    ):
+        """A javascript:// website must NOT render as an executable href in the panel.
+
+        Regression for the safe_url filter on _enrich_result.html line href — a value
+        like 'javascript://alert(1)' contains '://' so the pre-filter prepend left it
+        intact; safe_url collapses any non-http(s) scheme to '#'.
+        """
+        test_company.domain = "acme.com"
+        test_company.website = "javascript://alert(document.domain)"
+        test_company.account_owner_id = test_user.id  # owner passes can_manage_account gate
+        db_session.commit()
+        mock_enrich.return_value = {"website": "javascript://alert(document.domain)"}
+        mock_apply.return_value = ["website"]
+        mock_find.return_value = ([], [])
+
+        resp = client.post(f"/api/enrich/company/{test_company.id}", headers={"HX-Request": "true"})
+        assert resp.status_code == 200
+        # The dangerous scheme must be neutralised — no executable href in the output.
+        assert "href='javascript:" not in resp.text
+        assert 'href="javascript:' not in resp.text
+        assert "href='#'" in resp.text  # safe_url fallback
+
+    @patch(
+        "app.routers.crm.enrichment.get_credential_cached",
+        side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None,
+    )
+    @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
+    @patch("app.enrichment_service.apply_enrichment_to_vendor")
+    def test_enrich_vendor_hx_firmographics_only(
+        self, mock_apply, mock_enrich, mock_cred, client, db_session, test_vendor_card
+    ):
+        """Vendor HTMX request renders firmographics HTML with NO contact discovery this
+        pass."""
+        test_vendor_card.domain = "arrow.com"
+        test_vendor_card.legal_name = "Arrow Electronics Inc"
+        db_session.commit()
+        mock_enrich.return_value = {"legal_name": "Arrow Electronics Inc"}
+        mock_apply.return_value = ["legal_name"]
+
+        resp = client.post(f"/api/enrich/vendor/{test_vendor_card.id}", headers={"HX-Request": "true"})
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers.get("content-type", "")
+        assert "Arrow Electronics Inc" in resp.text
+        # Firmographics-only: no contact Add affordance for vendors
+        assert "from_enrich" not in resp.text
+        assert "suggested-contacts/add" not in resp.text
 
 
 # ── Sync logs ─────────────────────────────────────────────────────────
@@ -2196,41 +2350,6 @@ class TestCustomerImportErrors:
         data = resp.json()
         assert len(data["errors"]) >= 1
         assert "Row 2" in data["errors"][0]
-
-
-class TestEnrichCustomerWaterfallException:
-    """Test customer waterfall enrichment exception handling (lines 66-67)."""
-
-    @patch(
-        "app.routers.crm.enrichment.get_credential_cached",
-        side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None,
-    )
-    @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
-    @patch("app.enrichment_service.apply_enrichment_to_company")
-    def test_waterfall_exception_caught(
-        self, mock_apply, mock_enrich, mock_cred, client, db_session, test_company, test_user, monkeypatch
-    ):
-        """Customer waterfall enrichment exception is caught and doesn't break the
-        request."""
-        from app.config import settings
-
-        monkeypatch.setattr(settings, "customer_enrichment_enabled", True)
-        test_company.domain = "acme.com"
-        test_company.account_owner_id = test_user.id  # owner passes can_manage_account gate
-        db_session.commit()
-        mock_enrich.return_value = {"industry": "Electronics"}
-        mock_apply.return_value = ["industry"]
-
-        with patch(
-            "app.services.customer_enrichment_service.enrich_customer_account",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("Waterfall API down"),
-        ):
-            resp = client.post(f"/api/enrich/company/{test_company.id}")
-        assert resp.status_code == 200
-        assert resp.json()["ok"] is True
-        # No customer_enrichment key since waterfall failed
-        assert "customer_enrichment" not in resp.json()
 
 
 # ── Requisition status transitions ────────────────────────────────────
