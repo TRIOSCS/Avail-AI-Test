@@ -107,6 +107,12 @@
   </div>
   {% endif %}
 
+  {# Additional details (custom fields) #}
+  <div class="card">
+    <h2 class="text-sm font-semibold text-gray-900 mb-3">Additional Details</h2>
+    {% include "htmx/partials/vendors/_custom_fields.html" %}
+  </div>
+
   {# Recent sightings #}
   {% if recent_sightings %}
   <div class="bg-white rounded-xl shadow-sm border border-brand-200 overflow-hidden">

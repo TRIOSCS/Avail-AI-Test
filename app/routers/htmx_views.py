@@ -4612,6 +4612,322 @@ async def contact_timeline(
     )
 
 
+# ── Vendor Contact CRUD (HTMX, parity P1) ──────────────────────────────────
+
+
+def _render_vendor_contacts(request: Request, vendor, contacts, user):
+    """Re-render vendor contacts tab partial."""
+    return template_response(
+        "htmx/partials/vendors/tabs/contacts.html",
+        {"request": request, "vendor": vendor, "contacts": contacts, "user": user},
+    )
+
+
+def _render_contact_row(request: Request, c, vendor):
+    """Re-render a single vendor contact row partial."""
+    return template_response(
+        "htmx/partials/vendors/tabs/contact_row.html",
+        {"request": request, "c": c, "vendor": vendor},
+    )
+
+
+@router.post("/v2/partials/vendors/{vendor_id}/contacts", response_class=HTMLResponse)
+async def vendor_contact_add(
+    request: Request,
+    vendor_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Add a vendor contact (HTMX).
+
+    require_user gate — mirrors vendor edit.
+    """
+    from ..models.vendors import VendorContact as VC
+
+    vendor = get_vendor_card_or_404(db, vendor_id)
+    form = await request.form()
+    email = (form.get("email") or "").strip()
+    if not email:
+        raise HTTPException(400, "email is required")
+    full_name = (form.get("full_name") or "").strip()
+    title = (form.get("title") or "").strip()
+    phone = (form.get("phone") or "").strip()
+
+    # Deduplicate by (vendor_card_id, email)
+    existing = db.query(VC).filter(VC.vendor_card_id == vendor_id, VC.email == email).first()
+    if existing:
+        raise HTTPException(409, "A contact with that email already exists")
+
+    vc = VC(
+        vendor_card_id=vendor_id,
+        email=email,
+        full_name=full_name or None,
+        title=title or None,
+        phone=phone or None,
+        contact_type="individual" if full_name else "company",
+        source="manual",
+        is_verified=True,
+        confidence=100,
+        is_primary=False,
+    )
+    db.add(vc)
+    db.commit()
+    db.refresh(vc)
+    logger.info("VendorContact {} added to vendor {} by {}", vc.id, vendor_id, user.email)
+    return _render_contact_row(request, vc, vendor)
+
+
+@router.put("/v2/partials/vendors/{vendor_id}/contacts/{contact_id}", response_class=HTMLResponse)
+async def vendor_contact_edit(
+    request: Request,
+    vendor_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Edit a vendor contact (HTMX).
+
+    require_user gate.
+    """
+    from ..models.vendors import VendorContact as VC
+
+    vendor = get_vendor_card_or_404(db, vendor_id)
+    vc = db.query(VC).filter(VC.id == contact_id, VC.vendor_card_id == vendor_id).first()
+    if not vc:
+        raise HTTPException(404, "Contact not found")
+
+    form = await request.form()
+    full_name = (form.get("full_name") or "").strip()
+    title = (form.get("title") or "").strip()
+    email = (form.get("email") or "").strip()
+    phone = (form.get("phone") or "").strip()
+
+    if full_name:
+        vc.full_name = full_name
+        vc.contact_type = "individual"
+    if title:
+        vc.title = title
+    if email and email != vc.email:
+        collision = db.query(VC).filter(VC.vendor_card_id == vendor_id, VC.email == email, VC.id != contact_id).first()
+        if collision:
+            raise HTTPException(409, "Another contact already has that email")
+        vc.email = email
+    if phone:
+        vc.phone = phone
+
+    db.commit()
+    db.refresh(vc)
+    logger.info("VendorContact {} updated by {}", contact_id, user.email)
+    return _render_contact_row(request, vc, vendor)
+
+
+@router.delete("/v2/partials/vendors/{vendor_id}/contacts/{contact_id}", response_class=HTMLResponse)
+async def vendor_contact_delete(
+    request: Request,
+    vendor_id: int,
+    contact_id: int,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Delete a vendor contact (HTMX).
+
+    require_admin gate — matches vendor delete auth.
+    """
+    from ..models.vendors import VendorContact as VC
+
+    get_vendor_card_or_404(db, vendor_id)
+    vc = db.query(VC).filter(VC.id == contact_id, VC.vendor_card_id == vendor_id).first()
+    if not vc:
+        raise HTTPException(404, "Contact not found")
+
+    db.delete(vc)
+    db.commit()
+    logger.info("VendorContact {} deleted by {}", contact_id, user.email)
+    return HTMLResponse("")  # HTMX deletes the row via hx-swap="outerHTML"
+
+
+@router.post(
+    "/v2/partials/vendors/{vendor_id}/contacts/{contact_id}/set-primary",
+    response_class=HTMLResponse,
+)
+async def vendor_contact_set_primary(
+    request: Request,
+    vendor_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Mark a contact as primary; clears is_primary on all other contacts for this
+    vendor."""
+    from ..models.vendors import VendorContact as VC
+
+    vendor = get_vendor_card_or_404(db, vendor_id)
+    vc = db.query(VC).filter(VC.id == contact_id, VC.vendor_card_id == vendor_id).first()
+    if not vc:
+        raise HTTPException(404, "Contact not found")
+
+    # Clear all primaries for this vendor, then set this one
+    db.query(VC).filter(VC.vendor_card_id == vendor_id).update({"is_primary": False})
+    vc.is_primary = True
+    db.commit()
+    db.refresh(vc)
+    logger.info("VendorContact {} set as primary by {}", contact_id, user.email)
+
+    contacts = (
+        db.query(VC)
+        .filter(VC.vendor_card_id == vendor_id)
+        .order_by(VC.interaction_count.desc().nullslast())
+        .limit(50)
+        .all()
+    )
+    return _render_vendor_contacts(request, vendor, contacts, user)
+
+
+# ── Vendor Ownership UI (surface existing StrategicVendor) ─────────────────
+
+
+@router.post("/v2/partials/vendors/{vendor_id}/claim", response_class=HTMLResponse)
+async def vendor_claim(
+    request: Request,
+    vendor_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Claim this vendor as strategic for the current user."""
+    from ..services.strategic_vendor_service import claim_vendor, get_vendor_status
+
+    get_vendor_card_or_404(db, vendor_id)
+    _record, error = claim_vendor(db, user.id, vendor_id)
+    if error:
+        raise HTTPException(400, error)
+    status = get_vendor_status(db, vendor_id)
+    return _render_vendor_ownership_badge(request, vendor_id, status, user)
+
+
+@router.post("/v2/partials/vendors/{vendor_id}/release", response_class=HTMLResponse)
+async def vendor_release(
+    request: Request,
+    vendor_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Release this vendor from the current user's strategic list."""
+    from ..services.strategic_vendor_service import drop_vendor, get_vendor_status
+
+    get_vendor_card_or_404(db, vendor_id)
+    _ok, error = drop_vendor(db, user.id, vendor_id)
+    if error:
+        raise HTTPException(400, error)
+    status = get_vendor_status(db, vendor_id)
+    return _render_vendor_ownership_badge(request, vendor_id, status, user)
+
+
+def _render_vendor_ownership_badge(request: Request, vendor_id: int, status, user):
+    """Render the vendor ownership badge partial."""
+    return template_response(
+        "htmx/partials/vendors/_ownership_badge.html",
+        {"request": request, "vendor_id": vendor_id, "ownership": status, "user": user},
+    )
+
+
+@router.get("/v2/partials/vendors/{vendor_id}/ownership", response_class=HTMLResponse)
+async def vendor_ownership_badge(
+    request: Request,
+    vendor_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the strategic ownership badge for a vendor (lazy-loaded)."""
+    from ..services.strategic_vendor_service import get_vendor_status
+
+    get_vendor_card_or_404(db, vendor_id)
+    status = get_vendor_status(db, vendor_id)
+    return _render_vendor_ownership_badge(request, vendor_id, status, user)
+
+
+# ── Vendor Custom Fields (parity P1) ───────────────────────────────────────
+
+
+def _render_vendor_custom_fields(request: Request, vendor):
+    """Render vendor _custom_fields partial."""
+    return template_response(
+        "htmx/partials/vendors/_custom_fields.html",
+        {"request": request, "vendor": vendor},
+    )
+
+
+@router.post("/v2/partials/vendors/{vendor_id}/custom-fields", response_class=HTMLResponse)
+async def vendor_add_custom_field(
+    request: Request,
+    vendor_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Add or overwrite a custom field on a vendor card.
+
+    require_user gate.
+    """
+    from sqlalchemy.orm.attributes import flag_modified
+
+    from ..models.vendors import VendorCard as VC
+
+    vendor = db.get(VC, vendor_id)
+    if not vendor:
+        raise HTTPException(404, "Vendor not found")
+
+    form = await request.form()
+    label = (form.get("label") or "").strip()
+    value = (form.get("value") or "").strip()
+    if not label:
+        raise HTTPException(400, "label is required")
+
+    existing = vendor.custom_fields or {}
+    updated = {**existing, label: value}
+    try:
+        vendor.custom_fields = updated
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    flag_modified(vendor, "custom_fields")
+    db.commit()
+    db.refresh(vendor)
+    logger.info("Vendor {} custom field '{}' set by {}", vendor_id, label, user.email)
+    return _render_vendor_custom_fields(request, vendor)
+
+
+@router.delete(
+    "/v2/partials/vendors/{vendor_id}/custom-fields/{label:path}",
+    response_class=HTMLResponse,
+)
+async def vendor_delete_custom_field(
+    request: Request,
+    vendor_id: int,
+    label: str,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Remove a custom field from a vendor card.
+
+    require_user gate.
+    """
+    from sqlalchemy.orm.attributes import flag_modified
+
+    from ..models.vendors import VendorCard as VC
+
+    vendor = db.get(VC, vendor_id)
+    if not vendor:
+        raise HTTPException(404, "Vendor not found")
+
+    existing = dict(vendor.custom_fields or {})
+    existing.pop(label, None)
+    vendor.custom_fields = existing
+    flag_modified(vendor, "custom_fields")
+    db.commit()
+    db.refresh(vendor)
+    logger.info("Vendor {} custom field '{}' removed by {}", vendor_id, label, user.email)
+    return _render_vendor_custom_fields(request, vendor)
+
+
 @router.get("/v2/partials/vendors/{vendor_id}/contact-nudges", response_class=HTMLResponse)
 async def vendor_contact_nudges(
     request: Request,

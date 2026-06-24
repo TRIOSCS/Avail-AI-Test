@@ -78,6 +78,13 @@
                 class="btn btn-danger btn-sm">
           Delete
         </button>
+        {# Strategic ownership badge (lazy-loaded) #}
+        <div hx-get="/v2/partials/vendors/{{ vendor.id }}/ownership"
+             hx-target="this"
+             hx-trigger="load"
+             hx-swap="innerHTML"
+             hx-push-url="false"
+             class="flex items-center"></div>
         {# Enrich #}
         {% set entity_type = "vendor" %}
         {% set entity_id = vendor.id %}

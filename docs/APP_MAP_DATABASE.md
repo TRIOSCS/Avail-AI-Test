@@ -410,6 +410,7 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 | naics | String 20, nullable | Migration 125. NAICS industry code; mirrors `companies.naics`. |
 | revenue_range | String 50, nullable | Migration 125. Annual revenue band; mirrors `companies.revenue_range`. |
 | enrichment_provenance | JSONB, nullable, server_default `{}` | Migration 125. Per-field provenance store; same shape and semantics as `companies.enrichment_provenance` — written by `apply_enrichment_to_vendor` via `_apply_enrichment`. |
+| custom_fields | JSONB, nullable, server_default `{}` | Migration 145 (P1). Arbitrary key:value "Additional details" store. Validator: max 30 keys, key ≤60 chars, value ≤500 chars. Mirrors `Company.custom_fields`. Managed via `POST/DELETE /v2/partials/vendors/{id}/custom-fields`. |
 
 **`vendor_contacts`** — People at vendor companies
 | Column | Type | Notes |
@@ -421,6 +422,7 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 | confidence | Integer 0-100 | |
 | relationship_score | Float 0-100 | |
 | activity_trend | String 20 | warming\|stable\|cooling\|dormant |
+| is_primary | Boolean NOT NULL, server_default false | Migration 145 (P1). Designates the primary contact for this vendor. `POST /v2/partials/vendors/{id}/contacts/{cid}/set-primary` clears all others atomically. |
 
 **`vendor_reviews`** — Team feedback on vendors (1-5 rating)
 

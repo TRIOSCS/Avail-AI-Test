@@ -1,4 +1,4 @@
-{# contacts.html — Vendor contacts tab with CRUD (add/edit/delete) and click-to-call.
+{# contacts.html — Vendor contacts tab with CRUD (add/edit/delete/set-primary).
    Receives: contacts (list[VendorContact]), vendor (VendorCard).
    Called by: vendor_tab_partial route (tab=="contacts") in htmx_views.py.
    Depends on: contact_row.html partial, HTMX, Alpine.js, brand palette.
@@ -20,7 +20,7 @@
           x-transition:enter="transition ease-out duration-200"
           x-transition:enter-start="opacity-0 -translate-y-2"
           x-transition:enter-end="opacity-100 translate-y-0"
-          hx-post="/api/vendors/{{ vendor.id }}/contacts"
+          hx-post="/v2/partials/vendors/{{ vendor.id }}/contacts"
           hx-target="#contacts-table-body"
           hx-swap="beforeend"
           data-loading-disable

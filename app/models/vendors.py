@@ -1,5 +1,10 @@
 """Vendor models — VendorCard, VendorContact, VendorReview, VendorCardAttachment,
-VendorContactAttachment."""
+VendorContactAttachment.
+
+Called by: routers/htmx_views.py, routers/vendor_contacts.py, routers/vendors_crud.py,
+           services/strategic_vendor_service.py, tests
+Depends on: database.UTCDateTime, models.base.Base
+"""
 
 from datetime import datetime, timezone
 
@@ -100,6 +105,9 @@ class VendorCard(Base):
     # Deep enrichment tracking
     deep_enrichment_at = Column(UTCDateTime)
 
+    # Additional details (key:value pairs, mirrors Company.custom_fields)
+    custom_fields = Column(JSONB, default=dict, server_default="{}")
+
     # Full-text search (PostgreSQL tsvector, managed by trigger)
     search_vector = Column(TSVECTOR)
 
@@ -144,6 +152,22 @@ class VendorCard(Base):
             return value
         normalized = [normalize_e164(p) for p in value if p]
         self.normalized_phones = [n for n in normalized if n is not None]
+        return value
+
+    @validates("custom_fields")
+    def _validate_custom_fields(self, _key, value):
+        """Cap: max 30 keys, key max 60 chars, value max 500 chars."""
+        if value is None:
+            return {}
+        if not isinstance(value, dict):
+            raise ValueError("custom_fields must be a dict")
+        if len(value) > 30:
+            raise ValueError("custom_fields: max 30 keys")
+        for k, v in value.items():
+            if len(str(k)) > 60:
+                raise ValueError(f"custom_fields key too long: {k!r}")
+            if len(str(v)) > 500:
+                raise ValueError(f"custom_fields value too long for key {k!r}")
         return value
 
     __table_args__ = (
@@ -191,6 +215,9 @@ class VendorContact(Base):
     ooo_return_date = Column(UTCDateTime)
     last_outbound_at = Column(UTCDateTime)
     last_reply_at = Column(UTCDateTime)
+
+    # Primary contact flag (one per vendor card; set-primary clears others)
+    is_primary = Column(Boolean, nullable=False, default=False, server_default="false")
 
     vendor_card = relationship("VendorCard", back_populates="vendor_contacts")
     attachments = relationship("VendorContactAttachment", back_populates="vendor_contact", cascade="all, delete-orphan")

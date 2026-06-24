@@ -1,0 +1,45 @@
+{# _ownership_badge.html — Strategic vendor ownership claim/release badge.
+   Shows owner name + expiry countdown when claimed; Claim button when open pool.
+   All mutations HTMX-swap this container outerHTML.
+
+   Receives: vendor_id (int), ownership (dict|None from get_vendor_status), user (User).
+   Called by: vendors/detail.html (hx-get lazy load), vendor_claim/release routes.
+   Depends on: htmx_views.py vendor_claim/release/ownership_badge routes.
+#}
+
+<div id='vendor-ownership-{{ vendor_id }}'>
+  {% if ownership %}
+    {# Claimed — show owner + expiry + release button (only owner or admin) #}
+    <div class='inline-flex items-center gap-2'>
+      <span class='inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full bg-violet-50 text-violet-700 border border-violet-200'>
+        <svg class='h-3 w-3' fill='currentColor' viewBox='0 0 20 20'>
+          <path fill-rule='evenodd' d='M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z' clip-rule='evenodd'/>
+        </svg>
+        Strategic — {{ ownership.owner_name or 'Unknown' }}
+        <span class='text-violet-500'>({{ ownership.days_remaining }}d left)</span>
+      </span>
+      {% if user.id == ownership.owner_user_id or user.role == 'admin' %}
+      <button hx-post='/v2/partials/vendors/{{ vendor_id }}/release'
+              hx-target='#vendor-ownership-{{ vendor_id }}'
+              hx-swap='outerHTML'
+              hx-confirm='Release this vendor from your strategic list?'
+              data-loading-disable
+              class='px-2 py-0.5 text-xs font-medium text-violet-600 border border-violet-200 rounded-full hover:bg-violet-50 transition-colors'>
+        Release
+      </button>
+      {% endif %}
+    </div>
+  {% else %}
+    {# Open pool — show Claim button #}
+    <button hx-post='/v2/partials/vendors/{{ vendor_id }}/claim'
+            hx-target='#vendor-ownership-{{ vendor_id }}'
+            hx-swap='outerHTML'
+            data-loading-disable
+            class='inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-gray-600 border border-gray-200 rounded-full hover:bg-brand-50 hover:text-brand-600 hover:border-brand-200 transition-colors'>
+      <svg class='h-3 w-3' fill='none' viewBox='0 0 24 24' stroke='currentColor' stroke-width='2'>
+        <path stroke-linecap='round' stroke-linejoin='round' d='M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z'/>
+      </svg>
+      Claim Strategic
+    </button>
+  {% endif %}
+</div>
