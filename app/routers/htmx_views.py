@@ -2041,6 +2041,49 @@ async def requisition_win_probability_save(
     return template_response("htmx/partials/requisitions/_win_probability.html", ctx)
 
 
+@router.patch("/v2/partials/requisitions/{req_id}/opportunity-value", response_class=HTMLResponse)
+async def requisition_opportunity_value_save(
+    request: Request,
+    req_id: int,
+    opportunity_value: str = Form(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Set opportunity_value (deal $) on a requisition, or clear it (empty string →
+    NULL).
+
+    Authz: same gate as other inline requisition edits (require_requisition_access).
+    Returns an inline display span with the new value.
+    """
+    from decimal import Decimal, InvalidOperation
+
+    from app.dependencies import require_requisition_access
+
+    req = db.get(Requisition, req_id)
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+    require_requisition_access(db, req_id, user)
+    stripped = opportunity_value.strip()
+    if stripped == "":
+        value = None
+    else:
+        try:
+            value = Decimal(stripped)
+        except (InvalidOperation, ValueError):
+            raise HTTPException(400, "opportunity_value must be a number") from None
+        if value < 0:
+            raise HTTPException(400, "opportunity_value must be >= 0")
+    req.opportunity_value = value
+    req.updated_at = datetime.now(timezone.utc)
+    req.updated_by_id = user.id
+    db.commit()
+    db.refresh(req)
+    logger.info("Requisition {} opportunity_value set to {} by user {}", req_id, value, user.id)
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx["req"] = req
+    return template_response("htmx/partials/requisitions/_opportunity_value.html", ctx)
+
+
 @router.post("/v2/partials/requisitions/{req_id}/action/{action_name}", response_class=HTMLResponse)
 async def requisition_row_action(
     request: Request,
