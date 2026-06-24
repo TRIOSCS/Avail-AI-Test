@@ -7937,6 +7937,208 @@ async def company_merge_form(
     return template_response("htmx/partials/customers/_merge_form.html", ctx)
 
 
+# ── Contact Merge Duplicate ──────────────────────────────────────────────────
+
+
+@router.get("/v2/partials/customers/{company_id}/contacts/search", response_class=HTMLResponse)
+async def contact_search_typeahead(
+    request: Request,
+    company_id: int,
+    q: str = "",
+    exclude: int = 0,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return contacts for a company as clickable typeahead results.
+
+    Used by the contact merge form to pick the "loser" contact. Excludes the keeper
+    (exclude=) so a contact cannot be merged with itself.
+    """
+    if not q.strip() or len(q.strip()) < 2:
+        return HTMLResponse("")
+
+    contacts = (
+        db.query(SiteContact)
+        .join(CustomerSite)
+        .filter(
+            CustomerSite.company_id == company_id,
+            SiteContact.id != exclude,
+            SiteContact.full_name.ilike(f"%{q.strip()}%"),
+        )
+        .order_by(SiteContact.full_name)
+        .limit(10)
+        .all()
+    )
+    rows = [
+        f'<button type="button" data-contact-id="{c.id}" '
+        f'class="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">'
+        f"{html_mod.escape(c.full_name or '')}"
+        f"{'  (' + html_mod.escape(c.email) + ')' if c.email else ''}"
+        f"</button>"
+        for c in contacts
+    ]
+    return HTMLResponse("\n".join(rows))
+
+
+@router.get(
+    "/v2/partials/customers/{company_id}/contacts/{contact_id}/merge-form",
+    response_class=HTMLResponse,
+)
+async def contact_merge_form(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the merge-duplicate modal form for a contact."""
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    keep = (
+        db.query(SiteContact)
+        .join(CustomerSite)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
+    if not keep:
+        raise HTTPException(404, "Contact not found")
+
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Only the owner or an admin can merge contacts")
+
+    return template_response(
+        "htmx/partials/customers/_contact_merge_form.html",
+        {"request": request, "keep": keep, "company": company},
+    )
+
+
+@router.get(
+    "/v2/partials/customers/{company_id}/contacts/{contact_id}/merge-preview",
+    response_class=HTMLResponse,
+)
+async def contact_merge_preview(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    remove_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return a preview of what will happen when remove_id is merged into contact_id."""
+    from ..models.intelligence import ActivityLog as _AL
+    from ..models.task import RequisitionTask as _RT
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    keep = (
+        db.query(SiteContact)
+        .join(CustomerSite)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
+    if not keep:
+        raise HTTPException(404, "Contact not found")
+
+    remove = db.get(SiteContact, remove_id)
+    if not remove:
+        raise HTTPException(400, "Duplicate contact not found")
+
+    if keep.id == remove.id:
+        raise HTTPException(400, "Cannot merge a contact with itself")
+
+    activity_count = db.query(sqlfunc.count(_AL.id)).filter(_AL.site_contact_id == remove.id).scalar() or 0
+    task_count = db.query(sqlfunc.count(_RT.id)).filter(_RT.site_contact_id == remove.id).scalar() or 0
+    from ..models.crm import SiteContactAttachment as _SCA
+
+    attachment_count = db.query(sqlfunc.count(_SCA.id)).filter(_SCA.site_contact_id == remove.id).scalar() or 0
+
+    return template_response(
+        "htmx/partials/customers/_contact_merge_preview.html",
+        {
+            "request": request,
+            "keep": keep,
+            "remove": remove,
+            "company": company,
+            "activity_count": activity_count,
+            "task_count": task_count,
+            "attachment_count": attachment_count,
+        },
+    )
+
+
+@router.post(
+    "/v2/partials/customers/{company_id}/contacts/{contact_id}/merge",
+    response_class=HTMLResponse,
+)
+async def contact_merge(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    remove_id: int = Form(...),
+    confirmed: str = Form(default=""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Merge remove_id into contact_id (the keeper).
+
+    Requires confirmed="true". Calls merge_contacts() — no FK logic here.
+    """
+    from ..services.contact_merge_service import merge_contacts as _merge
+
+    if confirmed.lower() != "true":
+        raise HTTPException(400, "Merge requires explicit confirmation (confirmed=true)")
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Only the owner or an admin can merge contacts")
+
+    keep = (
+        db.query(SiteContact)
+        .join(CustomerSite)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
+    if not keep:
+        raise HTTPException(404, "Contact not found")
+
+    if remove_id == contact_id:
+        raise HTTPException(400, "Cannot merge a contact with itself")
+
+    remove = db.get(SiteContact, remove_id)
+    if not remove:
+        raise HTTPException(400, "Duplicate contact not found")
+
+    try:
+        result = _merge(contact_id, remove_id, db)
+        db.commit()
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    logger.info(
+        "Manual contact merge: kept {} ({}), removed {} by {}",
+        contact_id,
+        keep.full_name,
+        remove_id,
+        user.email,
+    )
+
+    safe_name = html_mod.escape(keep.full_name or "")
+    response = HTMLResponse(
+        f'<p class="text-sm text-emerald-600 py-2">Merged into <strong>{safe_name}</strong>. '
+        f"{int(result.get('reassigned', 0))} record(s) reassigned.</p>",
+        status_code=200,
+    )
+    response.headers["HX-Trigger"] = '{"toast": "Contact merged successfully"}'
+    return response
+
+
 @router.get("/v2/partials/customers/{company_id}/sites/{site_id}/edit-form", response_class=HTMLResponse)
 async def site_edit_form(
     request: Request,

@@ -259,3 +259,86 @@ class TestMergeContactsService:
         db_session.refresh(task)
 
         assert task.site_contact_id == keeper.id
+
+
+# ── Merge route HTTP tests ───────────────────────────────────────────────────
+
+
+class TestMergeRoutes:
+    def test_merge_form_returns_200(
+        self,
+        owner_client_a: TestClient,
+        company_a: Company,
+        keeper: SiteContact,
+    ):
+        resp = owner_client_a.get(f"/v2/partials/customers/{company_a.id}/contacts/{keeper.id}/merge-form")
+        assert resp.status_code == 200
+        assert "merge" in resp.text.lower()
+
+    def test_merge_preview_returns_200(
+        self,
+        owner_client_a: TestClient,
+        company_a: Company,
+        keeper: SiteContact,
+        loser: SiteContact,
+    ):
+        resp = owner_client_a.get(
+            f"/v2/partials/customers/{company_a.id}/contacts/{keeper.id}/merge-preview?remove_id={loser.id}"
+        )
+        assert resp.status_code == 200
+        assert "Keep Me" in resp.text
+        assert "Lose Me" in resp.text
+
+    def test_merge_preview_same_id_returns_400(
+        self,
+        owner_client_a: TestClient,
+        company_a: Company,
+        keeper: SiteContact,
+    ):
+        resp = owner_client_a.get(
+            f"/v2/partials/customers/{company_a.id}/contacts/{keeper.id}/merge-preview?remove_id={keeper.id}"
+        )
+        assert resp.status_code == 400
+
+    def test_merge_execute_reassigns_and_deletes_loser(
+        self,
+        owner_client_a: TestClient,
+        db_session: Session,
+        company_a: Company,
+        keeper: SiteContact,
+        loser: SiteContact,
+    ):
+        loser_id = loser.id
+        resp = owner_client_a.post(
+            f"/v2/partials/customers/{company_a.id}/contacts/{keeper.id}/merge",
+            data={"remove_id": str(loser_id), "confirmed": "true"},
+        )
+        assert resp.status_code == 200
+        db_session.expire_all()
+        assert db_session.get(SiteContact, loser_id) is None
+
+    def test_merge_execute_requires_confirmed(
+        self,
+        owner_client_a: TestClient,
+        company_a: Company,
+        keeper: SiteContact,
+        loser: SiteContact,
+    ):
+        resp = owner_client_a.post(
+            f"/v2/partials/customers/{company_a.id}/contacts/{keeper.id}/merge",
+            data={"remove_id": str(loser.id), "confirmed": ""},
+        )
+        assert resp.status_code == 400
+
+    def test_merge_unrelated_rep_gets_403(
+        self,
+        unrelated_client: TestClient,
+        company_a: Company,
+        keeper: SiteContact,
+        loser: SiteContact,
+    ):
+        resp = unrelated_client.post(
+            f"/v2/partials/customers/{company_a.id}/contacts/{keeper.id}/merge",
+            data={"remove_id": str(loser.id), "confirmed": "true"},
+        )
+        assert resp.status_code == 403
