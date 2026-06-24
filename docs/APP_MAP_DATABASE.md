@@ -353,6 +353,7 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 | last_activity_at | UTCDateTime, nullable | Bumped by `log_outreach_initiated()` alongside `companies.last_activity_at`. |
 | created_by_id | FK -> users (SET NULL), nullable | Migration 147. Set automatically by `app/audit_listeners.py` on authenticated request; NULL for background/import writes. |
 | modified_by_id | FK -> users (SET NULL), nullable | Migration 147. Set automatically by `app/audit_listeners.py` on authenticated request; NULL for background/import writes. |
+| do_not_contact | Boolean NOT NULL (server_default false) | Migration 148. When True, site is excluded from `staleness=needs_call` call-list and the DNC badge renders in `site_card.html`. Toggled via `POST /v2/partials/customers/{cid}/sites/{sid}/mark-dnc` (`can_manage_account` gate). Replaces the "Delete Site" action — DNC preserves the site record while hiding it from call surfaces. |
 
 **`site_contacts`** — Individual people at customer sites
 | Column | Type | Notes |

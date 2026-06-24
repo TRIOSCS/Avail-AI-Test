@@ -7162,22 +7162,36 @@ async def deactivate_company(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Archive (soft-delete) a company by setting is_active=False.
+    """Archive (soft-delete) a company — sets is_active=False, clears ownership, stores
+    reason.
 
     Gate: can_manage_account_team — primary owner or manager/admin only.
+    On archive: unassigns account owner (ownership_cleared_at stamped) and stores
+    optional disposition_reason from the form.
     Re-renders the full company detail partial so the archived banner appears immediately.
 
-    Called by: kebab menu "Archive account" button in detail.html.
+    Called by: kebab menu "Archive (Do Not Call)" button in detail.html.
     """
     company = db.get(Company, company_id)
     if not company:
         raise HTTPException(404, "Company not found")
     if not can_manage_account_team(user, company):
         raise HTTPException(403, "Not authorized to deactivate accounts")
+    form = await request.form()
+    disposition_reason = form.get("disposition_reason", "").strip() or None
     company.is_active = False
+    company.account_owner_id = None
+    company.ownership_cleared_at = datetime.now(timezone.utc)
+    company.disposition_reason = disposition_reason
     db.commit()
     db.refresh(company)
-    logger.info("Company {} archived by {}", company_id, user.email)
+
+    from app.cache.decorators import invalidate_prefix
+
+    invalidate_prefix("company_list")
+    invalidate_prefix("companies_typeahead")
+
+    logger.info("Company {} archived (DNC) by {}, reason={!r}", company_id, user.email, disposition_reason)
     return await company_detail_partial(request=request, company_id=company_id, user=user, db=db)
 
 
@@ -7185,26 +7199,67 @@ async def deactivate_company(
 async def reactivate_company(
     request: Request,
     company_id: int,
+    from_archived: bool = Query(False, alias="from_archived"),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
     """Restore an archived company by setting is_active=True.
 
-    Gate: can_manage_account_team — primary owner or manager/admin only.
-    Re-renders the full company detail partial (banner disappears after reactivate).
+    Gate: is_manager_or_admin only.
 
-    Called by: "Reactivate" button in the archived-account banner in detail.html.
+    from_archived=true: called from the archived-list view → returns the refreshed
+    archived_list partial (so the reactivated row disappears from the list).
+    Default (false): called from the company detail banner → returns the detail
+    partial (banner disappears after reactivate).
     """
     company = db.get(Company, company_id)
     if not company:
         raise HTTPException(404, "Company not found")
-    if not can_manage_account_team(user, company):
-        raise HTTPException(403, "Not authorized to reactivate accounts")
+    if not is_manager_or_admin(user):
+        raise HTTPException(403, "Only managers and admins may reactivate archived accounts")
     company.is_active = True
     db.commit()
     db.refresh(company)
     logger.info("Company {} reactivated by {}", company_id, user.email)
+
+    if from_archived:
+        # Return refreshed archived list — reactivated company will no longer appear.
+        companies = db.query(Company).filter(Company.is_active.is_(False)).order_by(Company.name).all()
+        ctx = _base_ctx(request, user, "customers")
+        ctx.update(
+            {
+                "companies": companies,
+                "can_reactivate": True,  # gate already passed above
+            }
+        )
+        return template_response("htmx/partials/customers/archived_list.html", ctx)
+
     return await company_detail_partial(request=request, company_id=company_id, user=user, db=db)
+
+
+@router.get("/v2/partials/customers/archived", response_class=HTMLResponse)
+async def archived_companies_list(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the list of archived (DNC) companies.
+
+    Gate: require_user — any logged-in user may VIEW the archived list.
+    Reactivate button is only rendered for manager/admin.
+
+    Called by: a future "Archived" tab or "View Archived" link in the CDM workspace.
+    """
+    from ..dependencies import is_manager_or_admin as _is_mgr_admin
+
+    companies = db.query(Company).filter(Company.is_active.is_(False)).order_by(Company.name).all()
+    ctx = {
+        "request": request,
+        "user": user,
+        "companies": companies,
+        "can_reactivate": _is_mgr_admin(user),
+    }
+    return template_response("htmx/partials/customers/archived_list.html", ctx)
 
 
 @router.post("/v2/partials/customers/{company_id}/send-to-prospecting", response_class=HTMLResponse)
@@ -7576,6 +7631,10 @@ async def company_detail_partial(
             "collaborators": collaborators,
             "all_users": all_users,
             "can_manage_team": can_manage_team,
+            # Gate for the "Reactivate" button in the archived banner.
+            # Computed server-side (mirrors archived_list.html pattern) so the
+            # template never inspects raw role strings.
+            "can_reactivate": is_manager_or_admin(user),
         }
     )
     return template_response("htmx/partials/customers/detail.html", ctx)
@@ -8274,13 +8333,66 @@ async def delete_site(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Soft-delete a site (set is_active=False)."""
+    """Soft-delete a site (set is_active=False).
+
+    Gate: can_manage_account — mirrors edit_site.  Any authenticated user can hit
+    this route, so we must check ownership before mutating.
+    """
+    from ..dependencies import can_manage_account
+
+    company = db.get(Company, company_id)
+    if company is None or not can_manage_account(user, company, db):
+        raise HTTPException(403, "Not authorized to manage this account")
     site = db.query(CustomerSite).filter(CustomerSite.id == site_id, CustomerSite.company_id == company_id).first()
     if not site:
         raise HTTPException(404, "Site not found")
     site.is_active = False
     db.commit()
     return HTMLResponse("")
+
+
+@router.post(
+    "/v2/partials/customers/{company_id}/sites/{site_id}/mark-dnc",
+    response_class=HTMLResponse,
+)
+async def mark_site_dnc(
+    request: Request,
+    company_id: int,
+    site_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Toggle do_not_contact on a CustomerSite.
+
+    Gate: can_manage_account — account owner, collaborator, or manager/admin.
+    A DNC site is excluded from call-list surfaces but NOT deleted.
+    Returns an updated site_card partial.
+
+    Called by: "Mark DNC" / "Clear DNC" toggle in site_card.html.
+    """
+    from ..dependencies import can_manage_account
+
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Not authorized to manage this account")
+    site = db.get(CustomerSite, site_id)
+    if not site or site.company_id != company_id:
+        raise HTTPException(404, "Site not found")
+    site.do_not_contact = not site.do_not_contact
+    db.commit()
+    db.refresh(site)
+    logger.info(
+        "Site {} do_not_contact={} by {}",
+        site_id,
+        site.do_not_contact,
+        user.email,
+    )
+    return template_response(
+        "htmx/partials/customers/tabs/site_card.html",
+        {"request": request, "s": site, "company": company, "user": user},
+    )
 
 
 @router.get(

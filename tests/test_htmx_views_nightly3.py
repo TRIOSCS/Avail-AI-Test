@@ -451,6 +451,7 @@ class TestCustomerSites:
 
     def test_delete_site(self, client, db_session: Session, test_user: User, test_company):
         site = _company_site(db_session, test_company)
+        test_company.account_owner_id = test_user.id
         db_session.commit()
 
         resp = client.delete(f"/v2/partials/customers/{test_company.id}/sites/{site.id}")

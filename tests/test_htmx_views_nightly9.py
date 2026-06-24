@@ -443,7 +443,10 @@ class TestSiteCRUD:
         db_session: Session,
         test_company: Company,
         test_customer_site: CustomerSite,
+        test_user: User,
     ):
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         resp = client.delete(f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}")
         assert resp.status_code == 200
         assert resp.text == ""
@@ -453,8 +456,12 @@ class TestSiteCRUD:
     def test_delete_site_not_found(
         self,
         client: TestClient,
+        db_session: Session,
         test_company: Company,
+        test_user: User,
     ):
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         resp = client.delete(f"/v2/partials/customers/{test_company.id}/sites/99999")
         assert resp.status_code == 404
 

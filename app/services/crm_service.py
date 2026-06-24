@@ -238,7 +238,15 @@ def cdm_company_query(
         query = query.filter(Company.last_activity_at < overdue_cutoff)
     elif staleness == "needs_call":
         # The "N need a call" chip — must match cdm_overdue_count exactly.
-        query = query.filter(_needs_call_filter(now))
+        # Also exclude companies where they HAVE active sites but ALL of them are
+        # marked do_not_contact (nothing to call).  Companies with no sites at all
+        # still appear — the cadence obligation lives at the company level.
+        active_site_exists, non_dnc_site_exists = _dnc_site_subqueries()
+        # Exclude only when: there IS at least one active site AND none are reachable.
+        query = query.filter(
+            _needs_call_filter(now),
+            or_(~active_site_exists, non_dnc_site_exists),
+        )
     elif staleness == "due_soon":
         query = query.filter(
             Company.last_activity_at >= overdue_cutoff,
@@ -290,12 +298,39 @@ def cdm_company_query(
     return query.order_by(CDM_SORTS.get(sort, CDM_SORTS["oldest"]))
 
 
+def _dnc_site_subqueries():
+    """Return (active_site_exists, non_dnc_site_exists) correlated EXISTS subqueries.
+
+    Shared by cdm_company_query (staleness="needs_call") and cdm_overdue_count so the
+    two apply identical DNC-site suppression and count == list is guaranteed. A company
+    with no sites at all passes the filter (the cadence obligation lives at the company
+    level, not the site level).
+    """
+    active_site_exists = (
+        select(CustomerSite.id)
+        .where(CustomerSite.company_id == Company.id, CustomerSite.is_active.is_(True))
+        .correlate(Company)
+        .exists()
+    )
+    non_dnc_site_exists = (
+        select(CustomerSite.id)
+        .where(
+            CustomerSite.company_id == Company.id,
+            CustomerSite.is_active.is_(True),
+            CustomerSite.do_not_contact.is_(False),
+        )
+        .correlate(Company)
+        .exists()
+    )
+    return active_site_exists, non_dnc_site_exists
+
+
 def cdm_overdue_count(db: Session, user: User, now: datetime | None = None) -> int:
     """Count this user's accounts needing a call (overdue or never contacted).
 
     Sales/trader only — others get 0 (no chip rendered). Uses the same
-    _needs_call_filter predicate as the chip's click-through query
-    (staleness="needs_call") so count and list never diverge.
+    _needs_call_filter predicate AND the same DNC-site filter as the chip's
+    click-through query (staleness="needs_call") so count == list at all times.
 
     Mirrors the my_only visibility rule in cdm_company_query: rep sees accounts
     they own (account_owner_id) OR where they own a site.
@@ -303,12 +338,17 @@ def cdm_overdue_count(db: Session, user: User, now: datetime | None = None) -> i
     if user.role not in ("sales", "trader"):
         return 0
     now = now or datetime.now(timezone.utc)
+    active_site_exists, non_dnc_site_exists = _dnc_site_subqueries()
     return (
         db.query(func.count(Company.id))
         .filter(
             Company.is_active.is_(True),
             company_visibility_predicate(user),
             _needs_call_filter(now),
+            # Mirror cdm_company_query(staleness="needs_call"): exclude companies
+            # where every active site is DNC (nothing to call).  Companies with no
+            # active sites at all are kept — cadence obligation is at company level.
+            or_(~active_site_exists, non_dnc_site_exists),
         )
         .scalar()
         or 0
@@ -363,6 +403,18 @@ def cdm_list_ctx(
         c.staleness = staleness_tier(c.last_activity_at)
         c.cadence_state = cadence_state(c.tier, c.last_outbound_at, now)
 
+    # When a search term is provided, also surface archived (DNC) companies that match.
+    archived_search_results: list[Company] = []
+    if search.strip():
+        archived_search_results = (
+            db.query(Company)
+            .filter(Company.is_active.is_(False))
+            .filter(SearchBuilder(search.strip()).ilike_filter(Company.name))
+            .order_by(Company.name)
+            .limit(10)
+            .all()
+        )
+
     # Spotlight markers: accounts with new, unseen inbound customer comms (the owner's).
     from app.services.alerts import markers_for_tab
     from app.services.reporting_service import coverage_report
@@ -383,6 +435,7 @@ def cdm_list_ctx(
         "limit": limit,
         "offset": offset,
         "all_segment_tags": list_all_segment_tags(db),
+        "archived_search_results": archived_search_results,
     }
     if include_overdue:
         ctx["overdue_count"] = cdm_overdue_count(db, user, now=now)

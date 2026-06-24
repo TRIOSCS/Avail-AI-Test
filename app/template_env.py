@@ -287,6 +287,23 @@ def _part_description(obj) -> str:
 templates.env.filters["part_description"] = _part_description
 
 
+def _safe_url_filter(value: str | None, fallback: str = "#") -> str:
+    """Return value only when it starts with http:// or https://, else fallback.
+
+    Prevents stored javascript:/vbscript:/data: URLs from executing on click.
+    Used in templates wherever a user-supplied URL is rendered as an href.
+    """
+    if not value:
+        return fallback
+    lowered = value.strip().lower()
+    if lowered.startswith("https://") or lowered.startswith("http://"):
+        return value
+    return fallback
+
+
+templates.env.filters["safe_url"] = _safe_url_filter
+
+
 # ── Jinja2 Globals ──────────────────────────────────────────────────
 
 

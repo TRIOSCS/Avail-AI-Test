@@ -7,7 +7,7 @@
    Called by: sites_tab.html loop, and POST /v2/partials/customers/{id}/sites.
    Depends on: HTMX, Alpine.js.
 #}
-<div id="site-{{ s.id }}" class="bg-white rounded-lg border border-gray-200" x-data="{ expanded: false, editing: false }">
+<div id="site-{{ s.id }}" class="rounded-lg border {% if s.do_not_contact %}bg-gray-50 border-rose-200 opacity-75{% else %}bg-white border-gray-200{% endif %}" x-data="{ expanded: false, editing: false }">
   {# Collapsed header #}
   <div class="px-4 py-3 flex items-center justify-between cursor-pointer focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-inset" role="button" tabindex="0" @click="expanded = !expanded" @keydown.enter="expanded = !expanded" @keydown.space.prevent="expanded = !expanded" :aria-expanded="expanded">
     <div class="flex items-center gap-3">
@@ -15,8 +15,10 @@
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
       </svg>
       <div>
-        <span class="text-sm font-medium text-gray-900">{{ s.site_name }}</span>
-        {% if s.site_type %}
+        <span class="text-sm font-medium {% if s.do_not_contact %}text-gray-600 line-through{% else %}text-gray-900{% endif %}">{{ s.site_name }}</span>
+        {% if s.do_not_contact %}
+        <span class="ml-2 px-1.5 py-0.5 text-xs font-medium rounded bg-rose-100 text-rose-600 uppercase">DNC</span>
+        {% elif s.site_type %}
         <span class="ml-2 px-1.5 py-0.5 text-xs font-medium rounded bg-brand-50 text-brand-600 uppercase">{{ s.site_type }}</span>
         {% endif %}
       </div>
@@ -77,13 +79,13 @@
               class="text-xs text-brand-500 hover:text-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500 rounded">
         Edit Site
       </button>
-      <button hx-delete="/v2/partials/customers/{{ company.id }}/sites/{{ s.id }}"
+      <button hx-post="/v2/partials/customers/{{ company.id }}/sites/{{ s.id }}/mark-dnc"
               hx-target="#site-{{ s.id }}"
               hx-swap="outerHTML"
-              hx-confirm="Delete site '{{ s.site_name }}'? This cannot be undone."
+              hx-confirm="{% if s.do_not_contact %}Clear DNC status for '{{ s.site_name }}'?{% else %}Mark '{{ s.site_name }}' as Do Not Contact? It will be excluded from call lists.{% endif %}"
               data-loading-disable
-              class="text-xs text-rose-500 hover:text-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-500 rounded">
-        Delete Site
+              class="text-xs {% if s.do_not_contact %}text-amber-600 hover:text-amber-800{% else %}text-rose-500 hover:text-rose-700{% endif %} focus:outline-none focus:ring-2 focus:ring-rose-500 rounded">
+        {% if s.do_not_contact %}Clear DNC{% else %}Mark DNC{% endif %}
       </button>
     </div>
   </div>

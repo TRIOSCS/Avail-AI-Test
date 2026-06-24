@@ -4077,14 +4077,17 @@ class TestFullWidthContactsForwardLayout:
         assert "Last Out" in html
 
     def test_contacts_grid_container_class_present(self, client: TestClient, db_session: Session, test_user: User):
-        """Open site-group contact cards render in a responsive grid, not single-
-        column."""
+        """Contacts render in a compact table (compact-table class), not single-column
+        cards.
+
+        The table layout replaced the old sm:grid-cols-2 card grid.
+        """
         company, _, _ = self._make_company_with_contact(db_session)
         resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
         assert resp.status_code == 200
         html = resp.text
-        assert "grid gap-2 sm:grid-cols-2 2xl:grid-cols-3" in html
-        # Cards + their actions survive the grid switch.
+        assert "compact-table" in html
+        # Contact name and outreach actions survive the table layout.
         assert "Gridcell Greta" in html
         assert "data-outreach-log" in html
 
@@ -4984,9 +4987,13 @@ class TestKnownFieldGrid:
         assert resp.status_code == 200
         assert "Add Notes" in resp.text
 
-    def test_contact_empty_email_shows_add_affordance(self, client: TestClient, db_session: Session):
-        """Contact card with no email surfaces 'Add Email' in always-visible field
-        list."""
+    def test_contact_empty_email_shows_row(self, client: TestClient, db_session: Session):
+        """Contact with no email still renders a row in the compact table.
+
+        The old card showed an '+ Add Email' inline affordance; the compact table omits
+        that affordance (email is surfaced as '—') but the contact still appears and the
+        edit affordance (kebab / edit-form deeplink) is present.
+        """
         from app.models.crm import CustomerSite, SiteContact
 
         co = Company(name="Contact Grid Co", is_active=True)
@@ -5002,7 +5009,9 @@ class TestKnownFieldGrid:
 
         resp = client.get(f"/v2/partials/customers/{co.id}")
         assert resp.status_code == 200
-        assert "Add Email" in resp.text
+        assert "No Email Contact" in resp.text
+        # Edit affordance is still present (kebab menu points to edit-form)
+        assert f"contacts/{contact.id}/edit-form" in resp.text
 
 
 # ── WS4: modal edit-form coverage gaps ───────────────────────────────────────

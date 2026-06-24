@@ -1,8 +1,8 @@
 """User-management foundation: users.{last_login_at,access_overrides,invited_by_id}
-+ user_admin_audit table (migration 148).
++ user_admin_audit table (migration 149; renumbered 148→149 on collision).
 
-Revision ID: 148_user_mgmt
-Revises: 147_crm_audit_trail
+Revision ID: 149_user_mgmt
+Revises: 148_site_dnc
 Create Date: 2026-06-24
 
 Phase 1 (Foundation) of the user-management feature — purely additive:
@@ -20,8 +20,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "148_user_mgmt"
-down_revision = "147_crm_audit_trail"
+revision = "149_user_mgmt"
+down_revision = "148_site_dnc"
 branch_labels = None
 depends_on = None
 

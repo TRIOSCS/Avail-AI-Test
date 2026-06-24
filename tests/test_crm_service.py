@@ -807,3 +807,124 @@ class TestContactIsActiveNullBug:
         assert len(editable) == 0, (
             f"Expected soft-deleted (is_active=False) contact to be excluded; got {len(editable)} editable rows"
         )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# C1: DNC site — cdm_overdue_count must match cdm_company_query(needs_call)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestCdmOverdueCountDncParity:
+    """cdm_overdue_count must apply the same DNC site filter as cdm_company_query
+    staleness='needs_call' so count == list at all times (C1 fix)."""
+
+    def _make_sales_user(self, db: Session, suffix: str = "dnc"):
+        from app.models.auth import User
+
+        u = User(
+            email=f"sales_{suffix}@trioscs.com",
+            name=f"Sales {suffix}",
+            role="sales",
+            azure_id=f"azure-sales-{suffix}",
+        )
+        db.add(u)
+        db.flush()
+        return u
+
+    def test_all_dnc_sites_excluded_from_count(self, db_session: Session):
+        """Company whose ONLY active site is DNC must NOT appear in overdue count."""
+        from app.services.crm_service import cdm_company_query, cdm_overdue_count
+
+        user = self._make_sales_user(db_session, "c1a")
+        co = Company(name="DNC Only Co", is_active=True, account_owner_id=user.id, last_outbound_at=None)
+        db_session.add(co)
+        db_session.flush()
+
+        site = CustomerSite(company_id=co.id, site_name="HQ", is_active=True, do_not_contact=True)
+        db_session.add(site)
+        db_session.commit()
+
+        now = datetime(2026, 6, 24, 12, 0, 0, tzinfo=timezone.utc)
+
+        count = cdm_overdue_count(db_session, user, now=now)
+        list_ids = [
+            c.id
+            for c in cdm_company_query(
+                db_session,
+                user,
+                search="",
+                staleness="needs_call",
+                account_type="",
+                my_only=False,
+                sort="oldest",
+                now=now,
+            )
+        ]
+
+        assert count == 0, f"Count should be 0 for all-DNC company, got {count}"
+        assert co.id not in list_ids, "DNC-only company must not appear in needs_call list"
+
+    def test_count_equals_list_length_with_mixed_sites(self, db_session: Session):
+        """Company with ≥1 non-DNC active site appears in BOTH count and list."""
+        from app.services.crm_service import cdm_company_query, cdm_overdue_count
+
+        user = self._make_sales_user(db_session, "c1b")
+        co = Company(name="Mixed Sites Co", is_active=True, account_owner_id=user.id, last_outbound_at=None)
+        db_session.add(co)
+        db_session.flush()
+
+        # One DNC site and one reachable site
+        db_session.add(CustomerSite(company_id=co.id, site_name="DNC Site", is_active=True, do_not_contact=True))
+        db_session.add(CustomerSite(company_id=co.id, site_name="OK Site", is_active=True, do_not_contact=False))
+        db_session.commit()
+
+        now = datetime(2026, 6, 24, 12, 0, 0, tzinfo=timezone.utc)
+
+        count = cdm_overdue_count(db_session, user, now=now)
+        list_ids = [
+            c.id
+            for c in cdm_company_query(
+                db_session,
+                user,
+                search="",
+                staleness="needs_call",
+                account_type="",
+                my_only=False,
+                sort="oldest",
+                now=now,
+            )
+        ]
+
+        # count should equal the number of items in list
+        assert count == len(list_ids), f"Count {count} != list length {len(list_ids)}"
+        assert co.id in list_ids, "Mixed-site company (has non-DNC site) must appear in needs_call"
+
+    def test_no_sites_still_appears_in_count(self, db_session: Session):
+        """Company with NO sites at all must appear in both count and list (cadence at
+        co level)."""
+        from app.services.crm_service import cdm_company_query, cdm_overdue_count
+
+        user = self._make_sales_user(db_session, "c1c")
+        co = Company(name="No Sites Co", is_active=True, account_owner_id=user.id, last_outbound_at=None)
+        db_session.add(co)
+        db_session.commit()
+
+        now = datetime(2026, 6, 24, 12, 0, 0, tzinfo=timezone.utc)
+
+        count = cdm_overdue_count(db_session, user, now=now)
+        list_ids = [
+            c.id
+            for c in cdm_company_query(
+                db_session,
+                user,
+                search="",
+                staleness="needs_call",
+                account_type="",
+                my_only=False,
+                sort="oldest",
+                now=now,
+            )
+        ]
+
+        assert count == len(list_ids), f"Count {count} != list length {len(list_ids)}"
+        assert co.id in list_ids, "No-site company must still appear in needs_call"

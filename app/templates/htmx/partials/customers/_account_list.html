@@ -35,10 +35,18 @@
              aria-label="Select all accounts on this page">
       <span>{{ total }} account{{ "s" if total != 1 }}</span>
     </label>
-    {# Slim cadence-coverage figure (reporting_service.coverage_report) — on-target+due ÷ active. #}
-    {% if coverage and coverage.summary.total %}
-    <span class="font-normal text-gray-400" title="Accounts contacted within their tier cadence">Coverage {{ coverage.summary.coverage_pct }}%</span>
-    {% endif %}
+    <div class="flex items-center gap-3">
+      {# Slim cadence-coverage figure (reporting_service.coverage_report) — on-target+due ÷ active. #}
+      {% if coverage and coverage.summary.total %}
+      <span class="font-normal text-gray-400" title="Accounts contacted within their tier cadence">Coverage {{ coverage.summary.coverage_pct }}%</span>
+      {% endif %}
+      {# Browse the hidden Archive (DNC) storage — the "look thru the archive" entry point. #}
+      <a href="#" role="button"
+         hx-get="/v2/partials/customers/archived"
+         hx-target="#cdm-list" hx-swap="innerHTML" hx-push-url="false"
+         class="font-medium text-gray-600 hover:text-brand-700 hover:underline underline-offset-2 focus:outline-none focus:ring-2 focus:ring-brand-400 rounded px-1"
+         title="View archived (Do Not Call) accounts">Archive (DNC)</a>
+    </div>
   </div>
 
   {# Bulk action bar — visible only when ≥1 row is checked #}
@@ -168,6 +176,23 @@
 <div class="p-8 text-center">
   <svg class="mx-auto h-10 w-10 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
   <p class="mt-2 text-sm text-gray-600">No accounts found</p>
+</div>
+{% endif %}
+
+{% if archived_search_results %}
+<div class="mt-2 pt-2 border-t border-gray-100">
+  <p class="px-3 py-1 text-xs font-medium text-gray-400 uppercase tracking-wider">Archived — Do Not Call</p>
+  {% for company in archived_search_results %}
+  <div class="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-gray-50"
+       hx-get="/v2/partials/customers/{{ company.id }}/detail"
+       hx-target="#cdm-detail"
+       hx-swap="innerHTML">
+    <div class="min-w-0 flex-1">
+      <span class="text-sm text-gray-600 truncate block">{{ company.name }}</span>
+    </div>
+    <span class="flex-shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-rose-100 text-rose-700">Archived</span>
+  </div>
+  {% endfor %}
 </div>
 {% endif %}
 
