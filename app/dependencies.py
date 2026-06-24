@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from .constants import RESTRICTED_ROLES, UserRole
 from .database import get_db
-from .models import AccountCollaborator, Company, CustomerSite, Quote, Requisition, User
+from .models import AccountCollaborator, BuyPlan, Company, CustomerSite, Quote, Requisition, User
 
 # Non-interactive service account seeded by startup.py. It authenticates via the
 # x-agent-key header and is barred from admin/settings/buyer (RFQ) endpoints.
@@ -258,6 +258,27 @@ def get_quote_for_user(db: Session, user: User, quote_id: int, options=None) -> 
     if not quote:
         raise HTTPException(status_code=404, detail="Quote not found")
     return quote
+
+
+def get_buyplan_for_user(db: Session, user: User, plan_id: int, options=None) -> BuyPlan:
+    """Get a single buy plan with role-based requisition ownership checks.
+
+    Ownership derives through the parent Requisition (BuyPlan.requisition_id is NOT
+    NULL).
+    """
+    load_opts = options or []
+    q = (
+        db.query(BuyPlan)
+        .options(*load_opts)
+        .join(Requisition, BuyPlan.requisition_id == Requisition.id)
+        .filter(BuyPlan.id == plan_id)
+    )
+    if user.role in RESTRICTED_ROLES:
+        q = q.filter(Requisition.created_by == user.id)
+    plan = q.first()
+    if not plan:
+        raise HTTPException(status_code=404, detail="Buy plan not found")
+    return plan
 
 
 # ── Token Management ──────────────────────────────────────────────────

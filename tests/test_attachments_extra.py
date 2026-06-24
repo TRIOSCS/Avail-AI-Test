@@ -54,8 +54,11 @@ def _make_company(db: Session, name: str = "TestCo", owner_id: int | None = None
 
 
 def _make_other_company(db: Session) -> Company:
-    """A second company not owned by the test user (but still accessible — any user can
-    see any company)."""
+    """A second company NOT owned by the test user.
+
+    Post phase1-authz: company/contact attachment access is gated by can_manage_account,
+    so a non-owner (non-manager) user can no longer reach this company's attachments.
+    """
     return _make_company(db, "OtherCo")
 
 
@@ -230,12 +233,15 @@ class TestCompanyAttachments:
         resp = client.delete("/api/company-attachments/999999")
         assert resp.status_code == 404
 
-    def test_list_any_company_accessible_to_logged_in_user(self, client, db_session):
-        """Any logged-in user can access any company (no per-user ownership filter)."""
-        # _make_other_company creates a company not owned by test_user.
+    def test_list_other_company_blocked_for_non_owner(self, client, db_session):
+        """A non-owner (non-manager) user is gated out of another account's attachments.
+
+        Phase1-authz closed the IDOR where user_can_access_company was a no-op: the buyer
+        test_user does not own OtherCo, so the list endpoint now 404s (no existence leak).
+        """
         co = _make_other_company(db_session)
         resp = client.get(f"/api/companies/{co.id}/attachments")
-        assert resp.status_code == 200
+        assert resp.status_code == 404
 
 
 # ---------------------------------------------------------------------------

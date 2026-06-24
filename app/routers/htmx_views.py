@@ -45,6 +45,7 @@ from ..database import get_db
 from ..dependencies import (
     can_manage_account,
     can_manage_account_team,
+    get_buyplan_for_user,
     get_quote_for_user,
     get_req_for_user,
     get_user,
@@ -6456,6 +6457,8 @@ async def company_assign_segment_tag(
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Not authorized")
 
     form = await request.form()
     tag_id_raw = form.get("tag_id", "").strip()
@@ -6504,6 +6507,8 @@ async def company_unassign_segment_tag(
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Not authorized")
 
     _unassign_segment_tag(company_id=company_id, tag_id=tag_id, db=db)
     db.commit()
@@ -6920,6 +6925,8 @@ async def set_company_tier(
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Not authorized")
 
     form = await request.form()
     tier_raw = (form.get("tier") or "").strip()
@@ -7425,6 +7432,8 @@ async def company_apply_name(
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Not authorized")
 
     new_name = (name or "").strip()
     if not new_name:
@@ -7881,6 +7890,8 @@ async def contacts_tab_create(
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Not authorized")
 
     form = await request.form()
     # Step 4: accept first_name + last_name (new form) or full_name (legacy fallback).
@@ -8117,6 +8128,8 @@ async def contacts_tab_add_suggested(
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Not authorized")
 
     form = await request.form()
     full_name = (form.get("full_name") or "").strip()
@@ -8463,6 +8476,8 @@ async def delete_site_contact(
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Not authorized")
 
     contact = (
         db.query(SiteContact).filter(SiteContact.id == contact_id, SiteContact.customer_site_id == site_id).first()
@@ -8497,6 +8512,8 @@ async def set_primary_contact(
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Not authorized")
 
     contact = (
         db.query(SiteContact).filter(SiteContact.id == contact_id, SiteContact.customer_site_id == site_id).first()
@@ -9261,10 +9278,14 @@ async def company_merge_preview(
     keep = db.query(Company).filter(Company.id == company_id).first()
     if not keep:
         raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, keep, db):
+        raise HTTPException(403, "Not authorized to manage this account")
 
     remove = db.query(Company).filter(Company.id == remove_id).first()
     if not remove:
         raise HTTPException(400, "Duplicate company not found")
+    if not can_manage_account(user, remove, db):
+        raise HTTPException(403, "Not authorized to manage the duplicate company")
 
     if keep.id == remove.id:
         raise HTTPException(400, "Cannot merge a company with itself")
@@ -9316,6 +9337,8 @@ async def company_merge(
     keep = db.query(Company).filter(Company.id == company_id).first()
     if not keep:
         raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, keep, db):
+        raise HTTPException(403, "Not authorized to manage this account")
 
     if remove_id == company_id:
         raise HTTPException(400, "Cannot merge a company with itself")
@@ -9323,6 +9346,8 @@ async def company_merge(
     remove = db.query(Company).filter(Company.id == remove_id).first()
     if not remove:
         raise HTTPException(400, "Duplicate company not found")
+    if not can_manage_account(user, remove, db):
+        raise HTTPException(403, "Not authorized to manage the duplicate company")
 
     try:
         result = _merge(company_id, remove_id, db)
@@ -9364,6 +9389,8 @@ async def company_merge_form(
     keep = db.query(Company).filter(Company.id == company_id).first()
     if not keep:
         raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, keep, db):
+        raise HTTPException(403, "Not authorized to manage this account")
 
     ctx = {"request": request, "keep": keep}
     return template_response("htmx/partials/customers/_merge_form.html", ctx)
@@ -10001,6 +10028,17 @@ async def add_site_contact_note(
 ):
     """Add a note to a site contact and return updated notes list."""
     from ..models.intelligence import ActivityLog
+
+    # IDOR-safe: verify the site belongs to the company and the contact belongs to
+    # the site BEFORE writing — then gate on can_manage_account.
+    site = db.query(CustomerSite).filter(CustomerSite.id == site_id, CustomerSite.company_id == company_id).first()
+    if not site:
+        raise HTTPException(404, "Site not found")
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Not authorized")
 
     contact = (
         db.query(SiteContact).filter(SiteContact.id == contact_id, SiteContact.customer_site_id == site_id).first()
@@ -10917,9 +10955,11 @@ async def buy_plan_detail_partial(
     db: Session = Depends(get_db),
 ):
     """Return buy plan detail as HTML partial."""
-    bp = (
-        db.query(BuyPlan)
-        .options(
+    bp = get_buyplan_for_user(
+        db,
+        user,
+        plan_id,
+        options=[
             joinedload(BuyPlan.lines).joinedload(BuyPlanLine.offer),
             joinedload(BuyPlan.lines).joinedload(BuyPlanLine.requirement),
             joinedload(BuyPlan.lines).joinedload(BuyPlanLine.buyer),
@@ -10927,12 +10967,8 @@ async def buy_plan_detail_partial(
             joinedload(BuyPlan.requisition),
             joinedload(BuyPlan.submitted_by),
             joinedload(BuyPlan.approved_by),
-        )
-        .filter(BuyPlan.id == plan_id)
-        .first()
+        ],
     )
-    if not bp:
-        raise HTTPException(404, "Buy plan not found")
 
     ctx = _base_ctx(request, user, "buy-plans")
     ctx.update(
@@ -10960,6 +10996,9 @@ async def buy_plan_submit_partial(
         run_notify_bg,
     )
     from ..services.buyplan_workflow import submit_buy_plan
+
+    # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation.
+    get_buyplan_for_user(db, user, plan_id)
 
     form = await request.form()
     so = form.get("sales_order_number", "").strip()
@@ -11084,6 +11123,9 @@ async def buy_plan_confirm_po_partial(
     from ..services.buyplan_notifications import notify_po_confirmed, run_notify_bg
     from ..services.buyplan_workflow import confirm_po
 
+    # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation.
+    get_buyplan_for_user(db, user, plan_id)
+
     form = await request.form()
     po_number = form.get("po_number", "").strip()
     ship_date_str = form.get("estimated_ship_date", "")
@@ -11163,6 +11205,9 @@ async def buy_plan_flag_issue_partial(
     """Buyer flags issue on a line — returns refreshed detail."""
     from ..services.buyplan_workflow import flag_line_issue
 
+    # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation.
+    get_buyplan_for_user(db, user, plan_id)
+
     form = await request.form()
     issue_type = form.get("issue_type", "other")
     note = form.get("note", "")
@@ -11187,8 +11232,8 @@ async def buy_plan_cancel_partial(
     from ..services.buyplan_notifications import notify_cancelled, run_notify_bg
     from ..services.buyplan_workflow import cancel_buy_plan
 
-    if not db.get(BuyPlan, plan_id):
-        raise HTTPException(404, "Buy plan not found")
+    # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation.
+    get_buyplan_for_user(db, user, plan_id)
 
     form = await request.form()
     try:
@@ -11229,6 +11274,9 @@ async def buy_plan_reset_partial(
 ):
     """Reset halted/cancelled plan to draft — returns refreshed detail."""
     from ..services.buyplan_workflow import reset_buy_plan_to_draft
+
+    # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation.
+    get_buyplan_for_user(db, user, plan_id)
 
     try:
         reset_buy_plan_to_draft(plan_id, user, db)

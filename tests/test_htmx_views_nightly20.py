@@ -149,11 +149,14 @@ class TestBuyPlanConfirmPo:
         assert resp.status_code == 400
 
     def test_confirm_po_plan_not_found(self, client: TestClient):
+        # Phase 1 authz: the route resolves the plan via get_buyplan_for_user BEFORE any
+        # mutation. A non-existent plan id 404s at the ownership gate (the canonical
+        # not-found response) — it no longer falls through to the service's ValueError→400.
         resp = client.post(
             "/v2/partials/buy-plans/99999/lines/1/confirm-po",
             data={"po_number": "PO-001"},
         )
-        assert resp.status_code == 400
+        assert resp.status_code == 404
 
 
 # ── Buy Plan Verify PO ────────────────────────────────────────────────────

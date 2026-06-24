@@ -12,7 +12,6 @@ from ...constants import (
     UserRole,
 )
 from ...database import get_db
-from ...dependencies import is_admin as _is_admin
 from ...dependencies import require_buyer, require_requisition_access, require_user
 from ...models import (
     ActivityLog,
@@ -707,13 +706,14 @@ async def mark_offer_sold(
 ):
     """Mark an offer as sold — stock is confirmed purchased/gone.
 
-    Only the buyer who created the offer or an admin can mark it sold.
+    Gated to the requisition owner (or buyer/manager/admin) via
+    require_requisition_access, matching the sibling offer-mutation routes; restricted
+    (SALES/TRADER) non-owners 404.
     """
     offer = db.get(Offer, offer_id)
     if not offer:
         raise HTTPException(404, "Offer not found")
-    if offer.entered_by_id != user.id and not _is_admin(user):
-        raise HTTPException(403, "Only the offer creator or an admin can mark sold")
+    require_requisition_access(db, offer.requisition_id, user, owner_id=offer.entered_by_id, label="Offer")
     if offer.status == OfferStatus.SOLD:
         return {"ok": True, "status": "sold", "message": "Already marked sold"}
     old_status = offer.status

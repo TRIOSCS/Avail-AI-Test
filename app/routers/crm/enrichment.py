@@ -5,8 +5,8 @@ from sqlalchemy.orm import Session
 
 from ...config import settings
 from ...database import get_db
+from ...dependencies import can_manage_account, require_admin, require_buyer, require_user
 from ...dependencies import is_admin as _is_admin
-from ...dependencies import require_admin, require_buyer, require_user
 from ...models import Company, CustomerSite, SiteContact, SyncLog, User, VendorCard, VendorContact
 from ...rate_limit import limiter
 from ...schemas.crm import AddContactsToVendor, AddContactToSite, CustomerImportRow, EnrichDomainRequest
@@ -51,6 +51,8 @@ async def enrich_company(
     company = db.get(Company, company_id)
     if not company:
         raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "You do not have access to this company")
     domain = company.domain or company.website or ""
     if domain:
         domain = _normalize_domain(domain)
@@ -179,6 +181,9 @@ async def add_suggested_to_site(
     site = db.get(CustomerSite, payload.site_id)
     if not site:
         raise HTTPException(404, "Customer site not found")
+    company = db.get(Company, site.company_id)
+    if not company or not can_manage_account(user, company, db):
+        raise HTTPException(403, "Not authorized to manage this account")
     c = payload.contact
     # Email-based dedup (case-insensitive, mirrors create_site_contact :6003)
     if c.email:

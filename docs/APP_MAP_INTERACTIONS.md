@@ -1687,6 +1687,19 @@ contacts on active sites) and passes it to
 full_name` — priority contacts surface to the top, archived sink to the bottom
 (still shown). Legacy rows (`contact is None`) are appended after, never sorted.
 
+**Per-entity authz hardening (Phase 1, multi-user go-live).** Every state-changing
+entity-by-id route is gated on per-entity ownership BEFORE mutating (the gate precedes
+404/400/validation branches and any AI-spend/side-effect). Company/site/contact mutations
+use `can_manage_account(user, company, db)` (owner OR site-owner OR collaborator OR
+manager/admin); company_merge/merge-preview/merge-form gate BOTH the keeper and the
+duplicate. Requisitions/quotes/buy-plans/offers scope to the parent **Requisition.created_by**
+via `get_req_for_user` / `get_quote_for_user` / `get_buyplan_for_user` (BuyPlan→Requisition
+join; 404-not-403 so existence isn't leaked) and `require_requisition_access`; owner
+*reassignment* is `is_manager_or_admin`-only. Requisition list/detail visibility uses
+`RESTRICTED_ROLES` (SALES+TRADER see only own), not SALES alone. The `attachments_extra`
+company-access helper performs a real `can_manage_account` check (was a no-op). Restricted
+roles get 403 (company routes) or 404 (requisition-derived) on entities they don't own.
+
 **Disposition (Increment 1, migration 118).** Salespeople dispose of accounts +
 contacts via setter routes in `htmx_views.py` (all owner-or-admin where they touch
 ownership/disposition; `is_admin = user.role == UserRole.ADMIN`, mirroring

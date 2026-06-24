@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session, joinedload
 from ..config import settings
 from ..constants import RESTRICTED_ROLES
 from ..database import get_db
-from ..dependencies import get_req_for_user, require_user
+from ..dependencies import get_req_for_user, is_manager_or_admin, require_user
 from ..models import Offer, Requisition, User
 from ..schemas.requisitions2 import (
     BulkActionName,
@@ -352,6 +352,8 @@ async def inline_save(
         msg = f"Deadline {'set to ' + value if value else 'cleared'}"
 
     elif field == "owner":
+        if not is_manager_or_admin(user):
+            return HTMLResponse("Only a manager or admin can reassign the owner", status_code=403)
         if value and value.isdigit():
             req.created_by = int(value)
             msg = "Owner reassigned"
@@ -434,6 +436,8 @@ async def row_action(
         msg = f"Cloned '{req.name}' → REQ-{new_req.id:03d}"
 
     elif action_name == RowActionName.assign:
+        if not is_manager_or_admin(user):
+            return HTMLResponse("Only a manager or admin can reassign the owner", status_code=403)
         if owner_id:
             req.created_by = owner_id
             msg = f"'{req.name}' reassigned"
@@ -463,6 +467,8 @@ async def bulk_action(
     user: User = Depends(require_user),
 ):
     """Execute bulk action on selected requisitions."""
+    if action_name == BulkActionName.assign and not is_manager_or_admin(user):
+        return HTMLResponse("Only a manager or admin can reassign the owner", status_code=403)
     # Parse IDs
     id_list = [int(x.strip()) for x in ids.split(",") if x.strip().isdigit()]
     if not id_list:

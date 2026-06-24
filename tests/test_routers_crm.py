@@ -282,7 +282,9 @@ class TestCompanies:
         data = resp.json()
         assert len(data["matches"]) >= 1
 
-    def test_update_company(self, client, db_session, test_company):
+    def test_update_company(self, client, db_session, test_company, test_user):
+        test_company.account_owner_id = test_user.id  # owner passes can_manage_account gate
+        db_session.commit()
         resp = client.put(
             f"/api/companies/{test_company.id}",
             json={"notes": "Updated notes"},
@@ -781,8 +783,11 @@ class TestEnrichment:
     )
     @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
     @patch("app.enrichment_service.apply_enrichment_to_company")
-    def test_enrich_company_success(self, mock_apply, mock_enrich, mock_cred, client, db_session, test_company):
+    def test_enrich_company_success(
+        self, mock_apply, mock_enrich, mock_cred, client, db_session, test_company, test_user
+    ):
         test_company.domain = "acme.com"
+        test_company.account_owner_id = test_user.id  # owner passes can_manage_account gate
         db_session.commit()
         mock_enrich.return_value = {"industry": "Electronics"}
         mock_apply.return_value = ["industry"]
@@ -805,10 +810,13 @@ class TestEnrichment:
     )
     @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
     @patch("app.enrichment_service.apply_enrichment_to_company")
-    def test_enrich_company_no_domain(self, mock_apply, mock_enrich, mock_cred, client, db_session, test_company):
+    def test_enrich_company_no_domain(
+        self, mock_apply, mock_enrich, mock_cred, client, db_session, test_company, test_user
+    ):
         """Company with no domain/website raises 400."""
         test_company.domain = None
         test_company.website = None
+        test_company.account_owner_id = test_user.id  # owner passes can_manage_account gate
         db_session.commit()
 
         resp = client.post(f"/api/enrich/company/{test_company.id}")
@@ -821,11 +829,13 @@ class TestEnrichment:
     @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
     @patch("app.enrichment_service.apply_enrichment_to_company")
     def test_enrich_company_with_override_domain(
-        self, mock_apply, mock_enrich, mock_cred, client, db_session, test_company
+        self, mock_apply, mock_enrich, mock_cred, client, db_session, test_company, test_user
     ):
         """Override domain in the payload."""
         mock_enrich.return_value = {}
         mock_apply.return_value = []
+        test_company.account_owner_id = test_user.id  # owner passes can_manage_account gate
+        db_session.commit()
 
         resp = client.post(
             f"/api/enrich/company/{test_company.id}",
@@ -978,9 +988,13 @@ class TestEnrichment:
         )
         assert resp.status_code == 404
 
-    def test_add_suggested_to_site_success(self, client, db_session, test_customer_site):
+    def test_add_suggested_to_site_success(self, client, db_session, test_customer_site, test_user):
         """Creates a real SiteContact row; does NOT write legacy site.contact_*
         fields."""
+        # Grant the acting user (client → test_user) ownership of the site's company so
+        # the can_manage_account gate on add-to-site passes.
+        db_session.get(Company, test_customer_site.company_id).account_owner_id = test_user.id
+        db_session.commit()
         resp = client.post(
             "/api/suggested-contacts/add-to-site",
             json={
@@ -1022,9 +1036,11 @@ class TestEnrichment:
             "Legacy contact_email must not be overwritten"
         )
 
-    def test_add_suggested_to_site_dedup_same_email(self, client, db_session, test_customer_site):
+    def test_add_suggested_to_site_dedup_same_email(self, client, db_session, test_customer_site, test_user):
         """Posting the same email twice returns added:0 on the second call; only one row
         exists."""
+        db_session.get(Company, test_customer_site.company_id).account_owner_id = test_user.id
+        db_session.commit()
         payload = {
             "site_id": test_customer_site.id,
             "contact": {
@@ -1047,8 +1063,10 @@ class TestEnrichment:
         )
         assert count == 1
 
-    def test_add_suggested_to_site_lowercase_email_dedup(self, client, db_session, test_customer_site):
+    def test_add_suggested_to_site_lowercase_email_dedup(self, client, db_session, test_customer_site, test_user):
         """Email dedup is case-insensitive (UPPER vs lower → still dedups)."""
+        db_session.get(Company, test_customer_site.company_id).account_owner_id = test_user.id
+        db_session.commit()
         resp1 = client.post(
             "/api/suggested-contacts/add-to-site",
             json={
@@ -1067,8 +1085,10 @@ class TestEnrichment:
         )
         assert resp2.json()["added"] == 0
 
-    def test_add_suggested_to_site_name_dedup_null_email(self, client, db_session, test_customer_site):
+    def test_add_suggested_to_site_name_dedup_null_email(self, client, db_session, test_customer_site, test_user):
         """When email is absent, dedup by case-insensitive full_name within the site."""
+        db_session.get(Company, test_customer_site.company_id).account_owner_id = test_user.id
+        db_session.commit()
         resp1 = client.post(
             "/api/suggested-contacts/add-to-site",
             json={
@@ -2188,7 +2208,7 @@ class TestEnrichCustomerWaterfallException:
     @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
     @patch("app.enrichment_service.apply_enrichment_to_company")
     def test_waterfall_exception_caught(
-        self, mock_apply, mock_enrich, mock_cred, client, db_session, test_company, monkeypatch
+        self, mock_apply, mock_enrich, mock_cred, client, db_session, test_company, test_user, monkeypatch
     ):
         """Customer waterfall enrichment exception is caught and doesn't break the
         request."""
@@ -2196,6 +2216,7 @@ class TestEnrichCustomerWaterfallException:
 
         monkeypatch.setattr(settings, "customer_enrichment_enabled", True)
         test_company.domain = "acme.com"
+        test_company.account_owner_id = test_user.id  # owner passes can_manage_account gate
         db_session.commit()
         mock_enrich.return_value = {"industry": "Electronics"}
         mock_apply.return_value = ["industry"]
@@ -2488,8 +2509,10 @@ class TestCompanyTags:
         "app.utils.claude_client.claude_json",
         new_callable=AsyncMock,
     )
-    def test_analyze_tags_endpoint(self, mock_claude, client, db_session, test_company):
+    def test_analyze_tags_endpoint(self, mock_claude, client, db_session, test_company, test_user):
         """POST /api/companies/{id}/analyze-tags triggers analysis."""
+        test_company.account_owner_id = test_user.id  # owner passes can_manage_account gate
+        db_session.commit()
         mock_claude.return_value = {
             "brands": ["IBM", "HP"],
             "commodities": ["Server", "Networking"],
@@ -2537,8 +2560,10 @@ class TestCompanyTags:
         "app.utils.claude_client.claude_json",
         new_callable=AsyncMock,
     )
-    def test_analyze_tags_no_requisitions(self, mock_claude, client, db_session, test_company):
+    def test_analyze_tags_no_requisitions(self, mock_claude, client, db_session, test_company, test_user):
         """Analysis with no requisition data should not call Claude."""
+        test_company.account_owner_id = test_user.id  # owner passes can_manage_account gate
+        db_session.commit()
         resp = client.post(f"/api/companies/{test_company.id}/analyze-tags")
         assert resp.status_code == 200
         # Claude should not have been called (no parts data)
@@ -2588,8 +2613,10 @@ class TestCompanyCreateDuplicates:
 
 class TestCompanySummarize:
     @patch("app.services.account_summary_service.generate_account_summary", new_callable=AsyncMock, return_value=None)
-    def test_summarize_returns_empty_when_none(self, mock_gen, client, db_session, test_company):
+    def test_summarize_returns_empty_when_none(self, mock_gen, client, db_session, test_company, test_user):
         """AI returns None -> empty defaults."""
+        test_company.account_owner_id = test_user.id  # owner passes can_manage_account gate
+        db_session.commit()
         resp = client.post(f"/api/companies/{test_company.id}/summarize")
         assert resp.status_code == 200
         data = resp.json()
@@ -2601,7 +2628,9 @@ class TestCompanySummarize:
         new_callable=AsyncMock,
         return_value={"situation": "Growing company", "development": "Expanding", "next_steps": ["Call"]},
     )
-    def test_summarize_returns_result(self, mock_gen, client, db_session, test_company):
+    def test_summarize_returns_result(self, mock_gen, client, db_session, test_company, test_user):
+        test_company.account_owner_id = test_user.id  # owner passes can_manage_account gate
+        db_session.commit()
         resp = client.post(f"/api/companies/{test_company.id}/summarize")
         assert resp.status_code == 200
         assert resp.json()["situation"] == "Growing company"
@@ -2766,9 +2795,11 @@ class TestCompanyPhase0Fields:
         assert co.tax_id == "12-3456789"
         assert co.source == "referral"
 
-    def test_update_company_with_phase0_fields(self, client, db_session, test_company):
+    def test_update_company_with_phase0_fields(self, client, db_session, test_company, test_user):
         """PUT /api/companies/{id} with Phase-0 fields stores them on the Company
         row."""
+        test_company.account_owner_id = test_user.id  # owner passes can_manage_account gate
+        db_session.commit()
         resp = client.put(
             f"/api/companies/{test_company.id}",
             json={

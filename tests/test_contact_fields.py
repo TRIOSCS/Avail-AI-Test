@@ -152,8 +152,16 @@ def site_and_contact(db_session: Session, test_company: Company):
 class TestContactCreateFirstLast:
     """Creating a contact with first_name + last_name composes full_name."""
 
-    def test_create_first_last_composes_full_name(self, client: TestClient, test_company: Company, db_session: Session):
+    def test_create_first_last_composes_full_name(
+        self,
+        client: TestClient,
+        test_company: Company,
+        test_user: User,
+        db_session: Session,
+    ):
         """POST with first+last → contact.full_name = 'First Last'."""
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/contacts",
             data={
@@ -169,8 +177,16 @@ class TestContactCreateFirstLast:
         assert contact.last_name == "Builder"
         assert contact.full_name == "Bob Builder"
 
-    def test_create_first_only_composes_full_name(self, client: TestClient, test_company: Company, db_session: Session):
+    def test_create_first_only_composes_full_name(
+        self,
+        client: TestClient,
+        test_company: Company,
+        test_user: User,
+        db_session: Session,
+    ):
         """POST with first_name only → full_name = first_name."""
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/contacts",
             data={"first_name": "Madonna", "email": "madonna@pop.com"},
@@ -182,8 +198,16 @@ class TestContactCreateFirstLast:
         assert contact.first_name == "Madonna"
         assert contact.last_name is None
 
-    def test_create_blank_first_and_last_returns_400(self, client: TestClient, test_company: Company):
+    def test_create_blank_first_and_last_returns_400(
+        self,
+        client: TestClient,
+        test_company: Company,
+        test_user: User,
+        db_session: Session,
+    ):
         """POST with both first_name and last_name blank → 400."""
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/contacts",
             data={"first_name": "", "last_name": ""},
@@ -199,6 +223,8 @@ class TestContactCreateFirstLast:
     ):
         """POST with contact_owner_id in form data — field is ignored (picker
         removed)."""
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/contacts",
             data={
