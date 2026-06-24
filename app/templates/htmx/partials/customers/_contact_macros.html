@@ -403,6 +403,14 @@
               </form>
               {% endif %}
             </div>
+            {# Merge — dedup this contact with another #}
+            <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/customers/{{ company.id }}/contacts/{{ contact.id }}/merge-form'}); open = false"
+                    role="menuitem"
+                    class='w-full text-left px-3 py-1.5 text-gray-600 hover:bg-gray-50'>Merge duplicate</button>
+            {# Move — reassign to another account/site #}
+            <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/customers/{{ company.id }}/contacts/{{ contact.id }}/move-form'}); open = false"
+                    role="menuitem"
+                    class='w-full text-left px-3 py-1.5 text-gray-600 hover:bg-gray-50'>Move to account…</button>
             <div class='border-t border-gray-100 my-1'></div>
             {# Delete #}
             <button hx-delete='/v2/partials/customers/{{ company.id }}/sites/{{ contact.customer_site_id }}/contacts/{{ contact.id }}'
