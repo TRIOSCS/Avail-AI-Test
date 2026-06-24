@@ -73,7 +73,7 @@
         {# Delete (admin-only destructive action) #}
         <button hx-delete="/v2/partials/vendors/{{ vendor.id }}"
                 hx-target="#main-content"
-                hx-confirm="Permanently delete {{ vendor.display_name }}? This cannot be undone."
+                hx-confirm="Permanently delete {{ vendor.display_name }}? All contacts and reviews will also be removed. This cannot be undone."
                 data-loading-disable
                 class="btn btn-danger btn-sm">
           Delete

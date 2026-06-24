@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator
 
 
 def _require_vendor_name(v: str) -> str:
@@ -151,7 +151,7 @@ class VendorEmailAdd(BaseModel):
 class VendorCardCreate(BaseModel):
     """Schema for creating a new VendorCard via POST /api/vendors."""
 
-    model_config = {"str_strip_whitespace": True}
+    model_config = ConfigDict(str_strip_whitespace=True)
 
     display_name: str
     website: str | None = None
@@ -161,7 +161,6 @@ class VendorCardCreate(BaseModel):
     hq_city: str | None = None
     hq_country: str | None = None
     employee_size: str | None = None
-    notes: str | None = None
 
     @field_validator("display_name")
     @classmethod
