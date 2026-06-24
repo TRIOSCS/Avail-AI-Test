@@ -57,6 +57,25 @@
   </div>
   {% endif %}
 
+  {# AI Diagnosis — generate root cause + paste-ready fix prompt #}
+  <div class="mb-6">
+    <div class="flex items-center gap-3 mb-3">
+      <button hx-post="/api/trouble-tickets/{{ ticket.id }}/diagnose"
+              hx-target="#diagnosis-container"
+              hx-swap="outerHTML"
+              hx-indicator="#diagnose-spinner"
+              class="btn btn-primary gap-2">
+        {{ sparkle_icon("w-4 h-4") }}
+        {{ 'Re-diagnose with AI' if ticket.diagnosis else 'Diagnose with AI' }}
+        <svg id="diagnose-spinner" class="htmx-indicator animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+        </svg>
+      </button>
+    </div>
+    {% include "htmx/partials/tickets/_diagnosis.html" %}
+  </div>
+
   {# Screenshot #}
   {% if ticket.screenshot_path or ticket.screenshot_b64 %}
   <div class="mb-6">

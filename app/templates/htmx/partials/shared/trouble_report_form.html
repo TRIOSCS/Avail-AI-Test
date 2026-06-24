@@ -54,7 +54,8 @@
                   user_agent: navigator.userAgent,
                   viewport: window.innerWidth + 'x' + window.innerHeight,
                   error_log: JSON.stringify(Alpine.store('errorLog').entries),
-                  network_log: JSON.stringify(Alpine.store('networkLog').entries)
+                  network_log: JSON.stringify(Alpine.store('networkLog').entries),
+                  auto_captured_context: window._ttContext ? JSON.stringify(window._ttContext) : null
                 })
               }).then(function(r){ return r.text(); })
               .then(function(html){

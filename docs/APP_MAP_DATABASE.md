@@ -838,7 +838,11 @@ New columns (vendor parity):
 
 > Previously the CHECK constraint covered 3 scope columns (requisition_id, company_id, site_contact_id); it now extends to all 5. Tasks scoped to `vendor_contact_id` only are **not** surfaced by `get_open_tasks_for_vendor_card` (which queries by `vendor_card_id`); see `# NOTE` in `app/services/task_service.py`.
 
-**`trouble_tickets`** — Bug reports with screenshots, AI diagnosis
+**`trouble_tickets`** — Bug reports with screenshots, captured runtime context
+(`console_errors`, `network_errors`, `browser_info`, `auto_captured_context`,
+`current_view`), and AI diagnosis (`diagnosis` JSON, `generated_prompt`, `diagnosed_at`,
+`cost_tokens`, `cost_usd`) populated by `ticket_diagnosis_service`. See APP_MAP_INTERACTIONS
+"Trouble Tickets — Report capture + AI diagnosis".
 **`root_cause_groups`** — Grouped similar tickets
 **`notifications`** — User notification queue
 
