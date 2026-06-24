@@ -28,7 +28,9 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
+from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.models import VendorCard, VendorContact
@@ -224,6 +226,52 @@ class TestMigration143Roundtrip:
             assert r.returncode == 0, f"alembic {cmd} failed: {r.stderr}"
 
 
+@pytest.fixture()
+def nonadmin_client(db_session: Session) -> TestClient:
+    """TestClient where require_user is allowed but require_admin raises 403.
+
+    Used to assert that delete endpoints reject non-admin callers.
+    """
+    from app.database import get_db
+    from app.dependencies import require_admin, require_buyer, require_fresh_token, require_user
+    from app.main import app
+
+    def _override_db():
+        yield db_session
+
+    def _override_user():
+        from app.models import User
+
+        return User(
+            id=9999,
+            email="nonadmin@example.com",
+            name="Non Admin",
+            role="user",
+            azure_id="nonadmin-azure",
+            created_at=datetime.now(timezone.utc),
+        )
+
+    def _override_admin():
+        raise HTTPException(403, "Admin access required")
+
+    async def _override_fresh_token():
+        return "mock-token"
+
+    overridden_deps = [get_db, require_user, require_admin, require_buyer, require_fresh_token]
+    app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[require_user] = _override_user
+    app.dependency_overrides[require_admin] = _override_admin
+    app.dependency_overrides[require_buyer] = _override_user
+    app.dependency_overrides[require_fresh_token] = _override_fresh_token
+
+    try:
+        with TestClient(app, raise_server_exceptions=False) as c:
+            yield c
+    finally:
+        for dep in overridden_deps:
+            app.dependency_overrides.pop(dep, None)
+
+
 # ---------------------------------------------------------------------------
 # Vendor card attachment API endpoints
 # ---------------------------------------------------------------------------
@@ -311,6 +359,13 @@ class TestVendorCardAttachments:
         resp = client.delete("/api/vendor-attachments/999999")
         assert resp.status_code == 404
 
+    def test_vendor_file_delete_nonadmin_forbidden(self, nonadmin_client, db_session, test_user):
+        """DELETE /api/vendor-attachments/{id} returns 403 for non-admin callers."""
+        vendor = _make_vendor(db_session, "ForbiddenDelVendor")
+        att = _make_vendor_card_attachment(db_session, vendor.id, test_user.id)
+        resp = nonadmin_client.delete(f"/api/vendor-attachments/{att.id}")
+        assert resp.status_code == 403
+
 
 # ---------------------------------------------------------------------------
 # Vendor contact attachment API endpoints
@@ -378,6 +433,14 @@ class TestVendorContactAttachments:
     def test_delete_nonexistent_attachment_404(self, client):
         resp = client.delete("/api/vendor-contact-attachments/999999")
         assert resp.status_code == 404
+
+    def test_vendor_contact_file_delete_nonadmin_forbidden(self, nonadmin_client, db_session, test_user):
+        """DELETE /api/vendor-contact-attachments/{id} returns 403 for non-admin
+        callers."""
+        _, contact = self._setup(db_session, "E")
+        att = _make_vendor_contact_attachment(db_session, contact.id, test_user.id)
+        resp = nonadmin_client.delete(f"/api/vendor-contact-attachments/{att.id}")
+        assert resp.status_code == 403
 
 
 # ---------------------------------------------------------------------------

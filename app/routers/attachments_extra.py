@@ -29,7 +29,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from sqlalchemy.orm import Session, selectinload
 
 from ..database import get_db
-from ..dependencies import get_req_for_user, require_user
+from ..dependencies import get_req_for_user, require_admin, require_user
 from ..models import (
     Company,
     CompanyAttachment,
@@ -427,7 +427,7 @@ async def upload_vendor_card_attachment(
 @router.delete("/api/vendor-attachments/{att_id}")
 async def delete_vendor_card_attachment(
     att_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Delete a vendor card attachment (best-effort cloud delete + DB row removal)."""
@@ -492,7 +492,7 @@ async def upload_vendor_contact_attachment(
 @router.delete("/api/vendor-contact-attachments/{att_id}")
 async def delete_vendor_contact_attachment(
     att_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Delete a vendor contact attachment (best-effort cloud delete + DB row
