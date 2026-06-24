@@ -4764,7 +4764,13 @@ class TestAccountActivityTab:
         """ActivityLog rows spanning all sections plus a variety of types."""
         from app.models.intelligence import ActivityLog
 
-        now = datetime.now(timezone.utc)
+        # Anchor to noon UTC of the current day, NOT the literal current instant.
+        # The rows below place "today" activities at now - 1/2/3 hours; with a
+        # literal now() those land on the PREVIOUS calendar day when the suite
+        # runs within ~3h after UTC midnight, so the "Today" date header never
+        # renders and this test flakes. Noon ± a few hours stays on today's date
+        # regardless of run time, making the date-grouping assertions deterministic.
+        now = datetime.now(timezone.utc).replace(hour=12, minute=0, second=0, microsecond=0)
         rows = [
             ActivityLog(
                 company_id=_activity_company.id,
