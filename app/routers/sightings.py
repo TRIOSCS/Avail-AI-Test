@@ -31,6 +31,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from ..config import settings
 from ..constants import (
+    AccessKey,
     ActivityType,
     OfferStatus,
     ReleaseTrigger,
@@ -42,6 +43,7 @@ from ..constants import (
 )
 from ..database import get_db
 from ..dependencies import (
+    require_access,
     require_buyer,
     require_fresh_token,
     require_requisition_access,
@@ -282,7 +284,7 @@ def _mpn_link_map(db: Session, requirements) -> dict[str, int]:
 async def sightings_workspace(
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.SIGHTINGS)),
 ):
     """Return the split-panel workspace layout.
 
@@ -2300,7 +2302,7 @@ async def sightings_send_inquiry(
     request: Request,
     source: Literal["user", "sse"] = Query(default="user"),
     db: Session = Depends(get_db),
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.SEND_RFQ)),
     token: str = Depends(require_fresh_token),
 ):
     """Send batch RFQ to selected vendors for selected requirements.
@@ -2808,7 +2810,7 @@ async def sightings_review_offer(
     offer_id: int,
     action: str = Form(...),
     db: Session = Depends(get_db),
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.APPROVE_OFFERS)),
 ):
     """Approve or reject a pending_review offer, then re-render the offers panel."""
     from ..routers.crm.offers import approve_offer, reject_offer
@@ -2836,7 +2838,7 @@ async def sightings_reconfirm_offer(
     requirement_id: int,
     offer_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.APPROVE_OFFERS)),
 ):
     """Reconfirm an offer, then re-render the offers panel."""
     from ..routers.crm.offers import reconfirm_offer

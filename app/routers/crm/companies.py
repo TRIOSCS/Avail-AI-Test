@@ -12,7 +12,7 @@ from ...cache.decorators import cached_endpoint, invalidate_prefix
 from ...config import settings
 from ...constants import RequisitionStatus
 from ...database import get_db
-from ...dependencies import require_user
+from ...dependencies import can_manage_account, require_user
 from ...models import Company, CustomerSite, Requisition, User
 from ...schemas.crm import CompanyCreate, CompanyUpdate
 from ...services.credential_service import get_credential_cached
@@ -507,6 +507,8 @@ async def update_company(
     company = db.get(Company, company_id)
     if not company:
         raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "You do not have access to this company")
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(company, field, value)
     db.commit()
@@ -526,6 +528,8 @@ async def summarize_company(
     company = db.get(Company, company_id)
     if not company:
         raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "You do not have access to this company")
 
     from ...services.account_summary_service import generate_account_summary
 
@@ -546,6 +550,8 @@ async def analyze_company_tags(
     company = db.get(Company, company_id)
     if not company:
         raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "You do not have access to this company")
 
     from ...services.customer_analysis_service import analyze_customer_materials
 

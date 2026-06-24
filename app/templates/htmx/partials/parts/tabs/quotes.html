@@ -28,10 +28,12 @@
       <tbody class="divide-y divide-gray-200">
         {% for line in quote_lines %}
         {% set q = line.quote %}
-        <tr class="hover:bg-brand-50 cursor-pointer transition-colors"
+        <tr class="hover:bg-brand-50 cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-500"
+            role="button" tabindex="0"
             hx-get="/v2/partials/quotes/{{ q.id }}"
             hx-target="#main-content"
-            hx-push-url="/v2/quotes/{{ q.id }}">
+            hx-push-url="/v2/quotes/{{ q.id }}"
+            hx-trigger="click, keyup[key=='Enter']">
           <td class="table-cell text-sm font-medium text-brand-500 hover:text-brand-600">{{ q.quote_number or "Q-" ~ q.id }}</td>
           <td class="table-cell text-sm text-gray-600">{{ (q.requisition.customer_name if q.requisition else None) or "—" }}</td>
           <td class="table-cell text-sm text-gray-600">{{ q.requisition.name if q.requisition else "—" }}</td>

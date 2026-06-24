@@ -52,7 +52,7 @@ class TestMobileNavTemplate:
         verifies the badge wiring, not an incidental 'buy-plans' string elsewhere.
         """
         src = _TEMPLATE.read_text()
-        assert "{% elif id in ('requisitions', 'buy-plans', 'crm') %}" in src
+        assert "{% elif id in ('requisitions', 'buy-plans', 'crm', 'my-day') %}" in src
 
 
 class TestNavIdAlias:

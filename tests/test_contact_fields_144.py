@@ -131,9 +131,12 @@ class TestSecondaryFieldCreate:
         self,
         client: TestClient,
         test_company: Company,
+        test_user: User,
         db_session: Session,
     ):
         """POST with secondary_email persists it."""
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/contacts",
             data={
@@ -151,9 +154,12 @@ class TestSecondaryFieldCreate:
         self,
         client: TestClient,
         test_company: Company,
+        test_user: User,
         db_session: Session,
     ):
         """POST with secondary_phone persists it."""
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/contacts",
             data={
@@ -171,10 +177,13 @@ class TestSecondaryFieldCreate:
         self,
         client: TestClient,
         test_company: Company,
+        test_user: User,
         site_and_two_contacts,
         db_session: Session,
     ):
         """POST with reports_to_id persists it."""
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         _site, alice, _bob = site_and_two_contacts
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/contacts",
@@ -707,11 +716,17 @@ class TestReportsToSameCompanyValidation:
         self,
         client: TestClient,
         test_company: Company,
+        test_user: User,
         site_and_two_contacts,
         db_session: Session,
     ):
         """POST create with reports_to_id from another company returns 400."""
         from app.models.crm import Company as _Company
+
+        # Own the company the contact is created under so the gate is passed and
+        # the request reaches the cross-company reports_to validation (400).
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
 
         other_co = _Company(name="CrossCo144C", is_active=True)
         db_session.add(other_co)

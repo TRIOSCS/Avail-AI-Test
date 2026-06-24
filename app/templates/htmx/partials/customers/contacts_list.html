@@ -81,11 +81,13 @@
           {% for c in contacts %}
           {% set site = c.customer_site %}
           {% set company = site.company if site else None %}
-          <tr class="hover:bg-brand-50 cursor-pointer"
+          <tr class="hover:bg-brand-50 cursor-pointer focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-500"
               {% if company %}
+              role="button" tabindex="0"
               hx-get="/v2/partials/customers/{{ company.id }}?tab=contacts"
               hx-target="#main-content"
               hx-push-url="/v2/customers/{{ company.id }}?tab=contacts"
+              hx-trigger="click, keyup[key=='Enter']"
               preload="mouseover"
               {% endif %}>
             <td class="compact-cell">

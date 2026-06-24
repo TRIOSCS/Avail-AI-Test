@@ -204,8 +204,18 @@ class TestContactNotes:
         assert "No notes yet" in resp.text
 
     def test_add_note(
-        self, client: TestClient, test_company: Company, test_customer_site: CustomerSite, site_contact: SiteContact
+        self,
+        client: TestClient,
+        test_company: Company,
+        test_customer_site: CustomerSite,
+        site_contact: SiteContact,
+        test_user: User,
+        db_session: Session,
     ):
+        # add_site_contact_note is gated by can_manage_account on the owning company —
+        # the acting buyer must own it.
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}/contacts/{site_contact.id}/notes",
             data={"notes": "Called about RFQ, very responsive."},
@@ -215,8 +225,17 @@ class TestContactNotes:
         assert "Called about RFQ" in resp.text
 
     def test_add_empty_note_rejected(
-        self, client: TestClient, test_company: Company, test_customer_site: CustomerSite, site_contact: SiteContact
+        self,
+        client: TestClient,
+        test_company: Company,
+        test_customer_site: CustomerSite,
+        site_contact: SiteContact,
+        test_user: User,
+        db_session: Session,
     ):
+        # Ownership is required to pass the gate and reach the empty-note 400 branch.
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}/contacts/{site_contact.id}/notes",
             data={"notes": ""},

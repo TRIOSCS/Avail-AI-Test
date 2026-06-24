@@ -44,7 +44,11 @@ def _client_for(db_session: Session, user: User):
 
 
 class TestContactsTabCreateWechatLength:
-    def test_overlong_wechat_id_rejected(self, client, test_company: Company):
+    def test_overlong_wechat_id_rejected(self, client, test_company: Company, test_user: User, db_session: Session):
+        # contacts_tab_create is gated by can_manage_account — grant ownership so the
+        # request passes the gate and reaches the wechat length-validation 400.
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/contacts",
             data={"full_name": "Jane Doe", "wechat_id": "x" * 101},
@@ -52,7 +56,9 @@ class TestContactsTabCreateWechatLength:
         assert resp.status_code == 400
         assert "wechat" in resp.json()["error"].lower()
 
-    def test_max_length_wechat_id_accepted(self, client, test_company: Company):
+    def test_max_length_wechat_id_accepted(self, client, test_company: Company, test_user: User, db_session: Session):
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/contacts",
             data={"full_name": "Jane Doe", "wechat_id": "x" * 100},

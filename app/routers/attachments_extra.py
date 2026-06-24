@@ -29,7 +29,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from sqlalchemy.orm import Session, selectinload
 
 from ..database import get_db
-from ..dependencies import get_req_for_user, require_admin, require_user
+from ..dependencies import can_manage_account, get_req_for_user, require_admin, require_user
 from ..models import (
     Company,
     CompanyAttachment,
@@ -70,13 +70,21 @@ _KIND_MODEL = {
 
 
 def user_can_access_company(db: Session, user: User, company_id: int) -> Company | None:
-    """Return the Company if the user may access it, otherwise None.
+    """Return the Company if the user may manage it, otherwise None.
 
-    Access model mirrors company_detail_partial: any authenticated user may view any
-    existing company (no per-user ownership filtering at the detail level). Returns None
-    when the company does not exist (callers should raise 404 to avoid existence leaks).
+    Enforces account-ownership via can_manage_account: manager/admin see everything;
+    otherwise the user must be the account owner, a site-owner under the company, or a
+    collaborator. Returns None when the company does not exist OR the user lacks access —
+    callers raise 404 in both cases to avoid existence leaks.
+
+    Contact-attachment callers resolve the owning company through the
+    contact → CustomerSite → Company chain and pass that company_id here, so this single
+    gate protects company and contact attachments alike.
     """
-    return db.get(Company, company_id)
+    company = db.get(Company, company_id)
+    if company is None or not can_manage_account(user, company, db):
+        return None
+    return company
 
 
 # ---------------------------------------------------------------------------

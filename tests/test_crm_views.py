@@ -1951,8 +1951,8 @@ class TestSegmentTagViews:
       GET  /v2/partials/customers/{company_id}/segment-tags   (chips partial)
     """
 
-    def _make_company(self, db_session: Session, name: str = "SegView Co") -> Company:
-        co = Company(name=name, is_active=True)
+    def _make_company(self, db_session: Session, name: str = "SegView Co", owner: User | None = None) -> Company:
+        co = Company(name=name, is_active=True, account_owner_id=owner.id if owner else None)
         db_session.add(co)
         db_session.commit()
         db_session.refresh(co)
@@ -1969,7 +1969,7 @@ class TestSegmentTagViews:
         """POST assign creates the EntityTag and re-renders the chips partial."""
         from app.services.tagging import get_or_create_segment_tag
 
-        co = self._make_company(db_session, "AssignSeg Co")
+        co = self._make_company(db_session, "AssignSeg Co", owner=test_user)
         tag = get_or_create_segment_tag("OEM", db_session)
         db_session.commit()
 
@@ -1988,7 +1988,7 @@ class TestSegmentTagViews:
         """
         from app.services.tagging import assign_segment_tag, get_or_create_segment_tag
 
-        co = self._make_company(db_session, "UnassignSeg Co")
+        co = self._make_company(db_session, "UnassignSeg Co", owner=test_user)
         tag = get_or_create_segment_tag("At-risk", db_session)
         assign_segment_tag(company_id=co.id, tag_id=tag.id, db=db_session)
         db_session.commit()
@@ -2039,7 +2039,7 @@ class TestSegmentTagViews:
     def test_create_new_segment_tag_via_name_param(self, client: TestClient, db_session: Session, test_user: User):
         """POST with tag_name= (instead of tag_id=) creates a new segment tag and
         assigns it."""
-        co = self._make_company(db_session, "NewTag Co")
+        co = self._make_company(db_session, "NewTag Co", owner=test_user)
 
         resp = client.post(
             f"/v2/partials/customers/{co.id}/segment-tags",
@@ -2072,7 +2072,7 @@ class TestTierSetter:
 
     def test_set_tier_updates_db(self, client: TestClient, db_session: Session, test_user: User):
         """POST tier=core persists to Company.tier."""
-        co = self._make_company(db_session)
+        co = self._make_company(db_session, account_owner_id=test_user.id)
         resp = client.post(f"/v2/partials/customers/{co.id}/tier", data={"tier": "core"})
         assert resp.status_code == 200
         db_session.refresh(co)
@@ -2080,7 +2080,7 @@ class TestTierSetter:
 
     def test_set_tier_rerenders_cadence_hero(self, client: TestClient, db_session: Session, test_user: User):
         """POST tier=core re-renders the cadence hero with updated tier label."""
-        co = self._make_company(db_session)
+        co = self._make_company(db_session, account_owner_id=test_user.id)
         resp = client.post(f"/v2/partials/customers/{co.id}/tier", data={"tier": "core"})
         assert resp.status_code == 200
         # The re-rendered hero should show the tier word
@@ -2091,7 +2091,7 @@ class TestTierSetter:
         cadence from 'due' (standard 30d) to 'overdue' would NOT apply here but key
         target is 7d so 10d ago → 'due' badge → amber classes present."""
         outbound_10d_ago = datetime.now(timezone.utc) - timedelta(days=10)
-        co = self._make_company(db_session, last_outbound_at=outbound_10d_ago)
+        co = self._make_company(db_session, last_outbound_at=outbound_10d_ago, account_owner_id=test_user.id)
         # Before: standard tier → 10d is on_target (target=30)
         resp_before = client.get(f"/v2/partials/customers/{co.id}")
         assert "bg-emerald-100" in resp_before.text  # on_target
@@ -2103,13 +2103,13 @@ class TestTierSetter:
 
     def test_set_tier_invalid_value_returns_400(self, client: TestClient, db_session: Session, test_user: User):
         """POST with invalid tier value returns 400."""
-        co = self._make_company(db_session)
+        co = self._make_company(db_session, account_owner_id=test_user.id)
         resp = client.post(f"/v2/partials/customers/{co.id}/tier", data={"tier": "vip"})
         assert resp.status_code == 400
 
     def test_set_tier_blank_clears_tier(self, client: TestClient, db_session: Session, test_user: User):
         """POST with tier='' (blank/unset) clears Company.tier to None."""
-        co = self._make_company(db_session, tier="key")
+        co = self._make_company(db_session, tier="key", account_owner_id=test_user.id)
         resp = client.post(f"/v2/partials/customers/{co.id}/tier", data={"tier": ""})
         assert resp.status_code == 200
         db_session.refresh(co)
@@ -2118,7 +2118,7 @@ class TestTierSetter:
     def test_set_tier_all_valid_values_accepted(self, client: TestClient, db_session: Session, test_user: User):
         """All four valid tier values are accepted without 400."""
         for tier_val in ("key", "core", "standard", "prospect"):
-            co = self._make_company(db_session, name=f"TierSet {tier_val}")
+            co = self._make_company(db_session, name=f"TierSet {tier_val}", account_owner_id=test_user.id)
             resp = client.post(f"/v2/partials/customers/{co.id}/tier", data={"tier": tier_val})
             assert resp.status_code == 200, f"tier={tier_val} should be accepted"
 
@@ -2579,14 +2579,19 @@ class TestManualCompanyMerge:
     - Guard: same id → 400, missing id → 400, no confirmation → 400
     """
 
-    def _make_pair(self, db_session):
+    def _make_pair(self, db_session, owner):
         """Return (keep, remove) companies with one site+contact+activity each on
-        remove."""
+        remove.
+
+        Both companies are owned by *owner* so the acting user passes the
+        can_manage_account gate the merge/preview routes enforce on BOTH the keeper and
+        the duplicate before reaching the 400/404/effect branches.
+        """
         from app.models.crm import CustomerSite, SiteContact
         from app.models.intelligence import ActivityLog
 
-        keep = Company(name="Keep Corp", is_active=True)
-        remove = Company(name="Remove Corp", is_active=True)
+        keep = Company(name="Keep Corp", is_active=True, account_owner_id=owner.id)
+        remove = Company(name="Remove Corp", is_active=True, account_owner_id=owner.id)
         db_session.add_all([keep, remove])
         db_session.flush()
 
@@ -2607,7 +2612,7 @@ class TestManualCompanyMerge:
 
     def test_preview_returns_200(self, client: TestClient, db_session: Session, test_user: User):
         """GET merge-preview returns 200 with preview HTML."""
-        keep, remove, *_ = self._make_pair(db_session)
+        keep, remove, *_ = self._make_pair(db_session, test_user)
         resp = client.get(
             f"/v2/partials/customers/{keep.id}/merge-preview",
             params={"remove_id": remove.id},
@@ -2617,7 +2622,7 @@ class TestManualCompanyMerge:
 
     def test_preview_shows_remove_company_name(self, client: TestClient, db_session: Session, test_user: User):
         """Preview names the company being removed."""
-        keep, remove, *_ = self._make_pair(db_session)
+        keep, remove, *_ = self._make_pair(db_session, test_user)
         resp = client.get(
             f"/v2/partials/customers/{keep.id}/merge-preview",
             params={"remove_id": remove.id},
@@ -2626,7 +2631,7 @@ class TestManualCompanyMerge:
 
     def test_preview_shows_site_count(self, client: TestClient, db_session: Session, test_user: User):
         """Preview reports number of sites that will be reassigned."""
-        keep, remove, *_ = self._make_pair(db_session)
+        keep, remove, *_ = self._make_pair(db_session, test_user)
         resp = client.get(
             f"/v2/partials/customers/{keep.id}/merge-preview",
             params={"remove_id": remove.id},
@@ -2637,7 +2642,7 @@ class TestManualCompanyMerge:
 
     def test_preview_missing_remove_id_returns_400(self, client: TestClient, db_session: Session, test_user: User):
         """Preview with nonexistent remove_id returns 400."""
-        keep, *_ = self._make_pair(db_session)
+        keep, *_ = self._make_pair(db_session, test_user)
         resp = client.get(
             f"/v2/partials/customers/{keep.id}/merge-preview",
             params={"remove_id": 999999},
@@ -2646,7 +2651,7 @@ class TestManualCompanyMerge:
 
     def test_preview_same_id_returns_400(self, client: TestClient, db_session: Session, test_user: User):
         """Preview with remove_id == keep_id returns 400."""
-        keep, *_ = self._make_pair(db_session)
+        keep, *_ = self._make_pair(db_session, test_user)
         resp = client.get(
             f"/v2/partials/customers/{keep.id}/merge-preview",
             params={"remove_id": keep.id},
@@ -2658,7 +2663,7 @@ class TestManualCompanyMerge:
     def test_merge_without_confirmation_returns_400(self, client: TestClient, db_session: Session, test_user: User):
         """POST merge without confirmed=true is rejected (guard against accidental
         calls)."""
-        keep, remove, *_ = self._make_pair(db_session)
+        keep, remove, *_ = self._make_pair(db_session, test_user)
         resp = client.post(
             f"/v2/partials/customers/{keep.id}/merge",
             data={"remove_id": str(remove.id)},
@@ -2667,7 +2672,7 @@ class TestManualCompanyMerge:
 
     def test_merge_same_id_returns_400(self, client: TestClient, db_session: Session, test_user: User):
         """POST merge with remove_id == keep_id returns 400."""
-        keep, *_ = self._make_pair(db_session)
+        keep, *_ = self._make_pair(db_session, test_user)
         resp = client.post(
             f"/v2/partials/customers/{keep.id}/merge",
             data={"remove_id": str(keep.id), "confirmed": "true"},
@@ -2676,7 +2681,7 @@ class TestManualCompanyMerge:
 
     def test_merge_missing_remove_returns_400(self, client: TestClient, db_session: Session, test_user: User):
         """POST merge with nonexistent remove_id returns 400."""
-        keep, *_ = self._make_pair(db_session)
+        keep, *_ = self._make_pair(db_session, test_user)
         resp = client.post(
             f"/v2/partials/customers/{keep.id}/merge",
             data={"remove_id": "999999", "confirmed": "true"},
@@ -2689,7 +2694,7 @@ class TestManualCompanyMerge:
         """After merge, the loser's site belongs to keeper."""
         from app.models.crm import CustomerSite
 
-        keep, remove, site, *_ = self._make_pair(db_session)
+        keep, remove, site, *_ = self._make_pair(db_session, test_user)
         resp = client.post(
             f"/v2/partials/customers/{keep.id}/merge",
             data={"remove_id": str(remove.id), "confirmed": "true"},
@@ -2704,7 +2709,7 @@ class TestManualCompanyMerge:
         """After merge, the loser's activity belongs to keeper."""
         from app.models.intelligence import ActivityLog
 
-        keep, remove, _site, _contact, activity = self._make_pair(db_session)
+        keep, remove, _site, _contact, activity = self._make_pair(db_session, test_user)
         client.post(
             f"/v2/partials/customers/{keep.id}/merge",
             data={"remove_id": str(remove.id), "confirmed": "true"},
@@ -2716,7 +2721,7 @@ class TestManualCompanyMerge:
 
     def test_merge_deletes_loser(self, client: TestClient, db_session: Session, test_user: User):
         """After merge, the removed company is gone from DB."""
-        keep, remove, *_ = self._make_pair(db_session)
+        keep, remove, *_ = self._make_pair(db_session, test_user)
         remove_id = remove.id
         resp = client.post(
             f"/v2/partials/customers/{keep.id}/merge",
@@ -2728,7 +2733,7 @@ class TestManualCompanyMerge:
 
     def test_merge_response_redirects_to_keeper(self, client: TestClient, db_session: Session, test_user: User):
         """Merge response carries HX-Redirect header pointing to keeper detail."""
-        keep, remove, *_ = self._make_pair(db_session)
+        keep, remove, *_ = self._make_pair(db_session, test_user)
         resp = client.post(
             f"/v2/partials/customers/{keep.id}/merge",
             data={"remove_id": str(remove.id), "confirmed": "true"},
@@ -2744,8 +2749,8 @@ class TestManualCompanyMerge:
         A keeper with markup in its name must produce escaped output so the browser
         renders it as text, not as live HTML.
         """
-        keep = Company(name="<b>Evil Corp</b>", is_active=True)
-        remove = Company(name="Victim Corp", is_active=True)
+        keep = Company(name="<b>Evil Corp</b>", is_active=True, account_owner_id=test_user.id)
+        remove = Company(name="Victim Corp", is_active=True, account_owner_id=test_user.id)
         db_session.add_all([keep, remove])
         db_session.commit()
         resp = client.post(
@@ -3078,8 +3083,8 @@ class TestContactsTabHome:
         db_session.commit()
         return company, site, contact
 
-    def _make_zero_site_company(self, db_session: Session):
-        company = Company(name="Zero Site Corp", is_active=True)
+    def _make_zero_site_company(self, db_session: Session, owner: User | None = None):
+        company = Company(name="Zero Site Corp", is_active=True, account_owner_id=owner.id if owner else None)
         db_session.add(company)
         db_session.commit()
         return company
@@ -3157,7 +3162,7 @@ class TestContactsTabHome:
         list."""
         from app.models.crm import SiteContact
 
-        company, site, _ = self._make_company_with_hq(db_session)
+        company, site, _ = self._make_company_with_hq(db_session, owner=test_user)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/contacts",
             data={
@@ -3182,7 +3187,7 @@ class TestContactsTabHome:
         does not create a new contact row."""
         from app.models.crm import SiteContact
 
-        company, site, _ = self._make_company_with_hq(db_session)
+        company, site, _ = self._make_company_with_hq(db_session, owner=test_user)
         # alice@tabco.com already exists on site
         count_before = db_session.query(SiteContact).filter_by(customer_site_id=site.id).count()
         resp = client.post(
@@ -3203,7 +3208,7 @@ class TestContactsTabHome:
         atomically."""
         from app.models.crm import CustomerSite, SiteContact
 
-        company = self._make_zero_site_company(db_session)
+        company = self._make_zero_site_company(db_session, owner=test_user)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/contacts",
             data={
@@ -3224,7 +3229,7 @@ class TestContactsTabHome:
         """POST create with site_id=__new__ + new_site_name creates site and contact."""
         from app.models.crm import CustomerSite, SiteContact
 
-        company, _, _ = self._make_company_with_hq(db_session)
+        company, _, _ = self._make_company_with_hq(db_session, owner=test_user)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/contacts",
             data={
@@ -3246,7 +3251,7 @@ class TestContactsTabHome:
         self, client: TestClient, db_session: Session, test_user: User
     ):
         """POST create with site_id=__new__ but blank new_site_name returns 400."""
-        company, _, _ = self._make_company_with_hq(db_session)
+        company, _, _ = self._make_company_with_hq(db_session, owner=test_user)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/contacts",
             data={"site_id": "__new__", "new_site_name": "", "full_name": "Orphan Bob"},
@@ -3255,7 +3260,7 @@ class TestContactsTabHome:
 
     def test_post_create_missing_full_name_returns_400(self, client: TestClient, db_session: Session, test_user: User):
         """POST create without full_name returns 400."""
-        company, site, _ = self._make_company_with_hq(db_session)
+        company, site, _ = self._make_company_with_hq(db_session, owner=test_user)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/contacts",
             data={"site_id": str(site.id), "full_name": ""},
@@ -3264,7 +3269,7 @@ class TestContactsTabHome:
 
     def test_post_create_returns_grouped_list(self, client: TestClient, db_session: Session, test_user: User):
         """POST create response contains contacts-tab-list contents (grouped list)."""
-        company, site, _ = self._make_company_with_hq(db_session)
+        company, site, _ = self._make_company_with_hq(db_session, owner=test_user)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/contacts",
             data={"site_id": str(site.id), "full_name": "Carol New", "email": "carol@tabco.com"},
@@ -3425,6 +3430,8 @@ class TestContactsTabHome:
         test_site,
     ):
         """POST to create contact returns grouped list HTML with role options."""
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/contacts",
             data={"full_name": "Role Test", "site_id": str(test_site.id)},
@@ -3449,6 +3456,7 @@ class TestContactsTabHome:
         """
         from app.models.crm import SiteContact
 
+        test_company.account_owner_id = test_user.id
         # Add a second contact so the grouped list is non-empty after the first is deleted
         second = SiteContact(
             customer_site_id=test_site.id,
@@ -3477,6 +3485,8 @@ class TestContactsTabHome:
     ):
         """POST set-primary with HX-Target=contacts-tab-list returns grouped list with
         role options."""
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/sites/{test_site.id}/contacts/{test_contact.id}/primary",
             headers={"HX-Target": "contacts-tab-list"},
@@ -3512,7 +3522,7 @@ class TestC3KebabActionsAndCadence:
     Written FIRST (failing) to drive implementation per Step C3.
     """
 
-    def _make_two_contacts(self, db_session: Session, *, overdue_days: int = 0):
+    def _make_two_contacts(self, db_session: Session, *, overdue_days: int = 0, owner: User | None = None):
         """One company, one site, two contacts.
 
         If overdue_days > 0 the first contact has last_outbound_at that many days in the
@@ -3520,7 +3530,7 @@ class TestC3KebabActionsAndCadence:
         """
         from app.models.crm import CustomerSite, SiteContact
 
-        company = Company(name="Kebab Co", is_active=True)
+        company = Company(name="Kebab Co", is_active=True, account_owner_id=owner.id if owner else None)
         db_session.add(company)
         db_session.flush()
         site = CustomerSite(company_id=company.id, site_name="HQ", is_active=True)
@@ -3590,7 +3600,7 @@ class TestC3KebabActionsAndCadence:
         the grouped list."""
         from app.models.crm import SiteContact
 
-        company, site, ca, cb = self._make_two_contacts(db_session)
+        company, site, ca, cb = self._make_two_contacts(db_session, owner=test_user)
         # ca is not primary — make it primary via tab
         resp = client.post(
             f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{ca.id}/primary",
@@ -3607,7 +3617,7 @@ class TestC3KebabActionsAndCadence:
     def test_set_primary_via_tab_returns_grouped_list(self, client: TestClient, db_session: Session, test_user: User):
         """POST primary with HX-Target=contacts-tab-list re-renders grouped list (not
         site_contacts.html)."""
-        company, site, ca, cb = self._make_two_contacts(db_session)
+        company, site, ca, cb = self._make_two_contacts(db_session, owner=test_user)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{ca.id}/primary",
             headers={"HX-Target": "contacts-tab-list"},
@@ -3621,7 +3631,7 @@ class TestC3KebabActionsAndCadence:
         self, client: TestClient, db_session: Session, test_user: User
     ):
         """Grouped list re-render after primary includes all contacts under the site."""
-        company, site, ca, cb = self._make_two_contacts(db_session)
+        company, site, ca, cb = self._make_two_contacts(db_session, owner=test_user)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{ca.id}/primary",
             headers={"HX-Target": "contacts-tab-list"},
@@ -3637,7 +3647,7 @@ class TestC3KebabActionsAndCadence:
         the grouped list."""
         from app.models.crm import SiteContact
 
-        company, site, ca, cb = self._make_two_contacts(db_session)
+        company, site, ca, cb = self._make_two_contacts(db_session, owner=test_user)
         resp = client.delete(
             f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{ca.id}",
             headers={"HX-Target": "contacts-tab-list"},
@@ -3650,7 +3660,7 @@ class TestC3KebabActionsAndCadence:
         self, client: TestClient, db_session: Session, test_user: User
     ):
         """DELETE via tab re-renders grouped list with remaining contact (not empty)."""
-        company, site, ca, cb = self._make_two_contacts(db_session)
+        company, site, ca, cb = self._make_two_contacts(db_session, owner=test_user)
         resp = client.delete(
             f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{ca.id}",
             headers={"HX-Target": "contacts-tab-list"},
@@ -3667,7 +3677,7 @@ class TestC3KebabActionsAndCadence:
         with + Add Contact CTA."""
         from app.models.crm import CustomerSite, SiteContact
 
-        company = Company(name="Solo Co", is_active=True)
+        company = Company(name="Solo Co", is_active=True, account_owner_id=test_user.id)
         db_session.add(company)
         db_session.flush()
         site = CustomerSite(company_id=company.id, site_name="Main", is_active=True)
@@ -3698,7 +3708,7 @@ class TestC3KebabActionsAndCadence:
         path retired — the Sites tab no longer carries a contact editor)."""
         from app.models.crm import SiteContact
 
-        company, site, ca, cb = self._make_two_contacts(db_session)
+        company, site, ca, cb = self._make_two_contacts(db_session, owner=test_user)
         resp = client.delete(
             f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{ca.id}",
         )
@@ -3803,10 +3813,12 @@ class TestC4SuggestedContactsUI:
       POST /v2/partials/customers/{company_id}/suggested-contacts/add
     """
 
-    def _make_company_with_hq(self, db_session: Session, *, domain: str = "acme.com"):
+    def _make_company_with_hq(self, db_session: Session, *, domain: str = "acme.com", owner: User | None = None):
         from app.models.crm import CustomerSite, SiteContact
 
-        company = Company(name="Suggested Co", is_active=True, domain=domain)
+        company = Company(
+            name="Suggested Co", is_active=True, domain=domain, account_owner_id=owner.id if owner else None
+        )
         db_session.add(company)
         db_session.flush()
         site = CustomerSite(company_id=company.id, site_name="HQ", site_type="hq", is_active=True)
@@ -3923,7 +3935,7 @@ class TestC4SuggestedContactsUI:
         """POST add creates a real SiteContact and returns grouped list HTML."""
         from app.models.crm import SiteContact
 
-        company, site, _ = self._make_company_with_hq(db_session)
+        company, site, _ = self._make_company_with_hq(db_session, owner=test_user)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/suggested-contacts/add",
             data={
@@ -3946,7 +3958,7 @@ class TestC4SuggestedContactsUI:
 
     def test_post_add_suggested_returns_grouped_list(self, client: TestClient, db_session: Session, test_user: User):
         """POST add returns the re-rendered grouped list (not JSON)."""
-        company, site, _ = self._make_company_with_hq(db_session)
+        company, site, _ = self._make_company_with_hq(db_session, owner=test_user)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/suggested-contacts/add",
             data={
@@ -3963,7 +3975,7 @@ class TestC4SuggestedContactsUI:
 
     def test_post_add_suggested_emits_toast_on_success(self, client: TestClient, db_session: Session, test_user: User):
         """POST add emits an HX-Trigger toast header on success."""
-        company, site, _ = self._make_company_with_hq(db_session)
+        company, site, _ = self._make_company_with_hq(db_session, owner=test_user)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/suggested-contacts/add",
             data={
@@ -3981,7 +3993,7 @@ class TestC4SuggestedContactsUI:
     ):
         """POST add for an existing contact reports 'already on file' via toast, not
         silent no-op or 409."""
-        company, site, existing = self._make_company_with_hq(db_session)
+        company, site, existing = self._make_company_with_hq(db_session, owner=test_user)
         # alice@acme.com already exists
         resp = client.post(
             f"/v2/partials/customers/{company.id}/suggested-contacts/add",
@@ -4010,6 +4022,45 @@ class TestC4SuggestedContactsUI:
             data={"site_id": "1", "full_name": "Ghost"},
         )
         assert resp.status_code == 404
+
+    # ── Add from the enrich panel (from_enrich) returns a self-contained row ──
+
+    def test_post_add_suggested_from_enrich_returns_row_fragment(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """from_enrich=1 returns a single confirmation <li> (+ toast), NOT the grouped
+        list.
+
+        The enrich panel lives outside the Contacts tab (no #contacts-tab-list), so its
+        Add button must self-swap the clicked row instead of re-rendering the whole
+        contacts list.
+        """
+        from app.models.crm import SiteContact
+
+        company, site, _ = self._make_company_with_hq(db_session)
+        company.account_owner_id = test_user.id  # owner passes can_manage_account gate
+        db_session.commit()
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/suggested-contacts/add",
+            data={
+                "site_id": str(site.id),
+                "full_name": "Panel Add",
+                "email": "paneladd@acme.com",
+                "from_enrich": "1",
+            },
+        )
+        assert resp.status_code == 200
+        # Self-contained confirmation row, not the grouped accordion list
+        assert "<li" in resp.text
+        assert "Added" in resp.text
+        # The grouped list would contain the pre-existing "Existing Alice"; the fragment must not
+        assert "Existing Alice" not in resp.text
+        # Toast still fires
+        assert "showToast" in resp.headers.get("HX-Trigger", "")
+        # The contact was actually created
+        db_session.expire_all()
+        sc = db_session.query(SiteContact).filter_by(email="paneladd@acme.com").first()
+        assert sc is not None
 
 
 class TestFullWidthContactsForwardLayout:

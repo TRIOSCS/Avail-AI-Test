@@ -174,10 +174,12 @@
 {% endmacro %}
 
 <tr id="req-row-{{ req.id }}"
-    class="hover:bg-brand-50 cursor-pointer group transition-colors {{ 'border-l-2 border-rose-400' if req.urgency == 'critical' else '' }}"
+    role="button" tabindex="0"
+    class="hover:bg-brand-50 cursor-pointer group transition-colors focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-500 {{ 'border-l-2 border-rose-400' if req.urgency == 'critical' else '' }}"
     hx-get="/v2/partials/requisitions/{{ req.id }}"
     hx-target="#main-content"
-    hx-push-url="/v2/requisitions/{{ req.id }}">
+    hx-push-url="/v2/requisitions/{{ req.id }}"
+    hx-trigger="click, keyup[key=='Enter']">
   {# Checkbox (stops row click propagation) #}
   <td class="px-3 py-3 w-10" @click.stop>
     <input aria-label="Select requisition {{ req.name }}" type="checkbox" :value="{{ req.id }}"

@@ -24,8 +24,9 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from ..config import settings
+from ..constants import AccessKey
 from ..database import get_db
-from ..dependencies import require_fresh_token, require_settings_access, require_user
+from ..dependencies import require_access, require_fresh_token, require_settings_access, require_user
 from ..models import (
     ApiSource,
     Requirement,
@@ -541,7 +542,10 @@ async def run_source_test(src: ApiSource, db: Session) -> dict:
 @router.post("/api/sources/{source_id}/test", response_model=ApiTestResponse)
 @limiter.limit("5/minute")
 async def test_api_source(
-    source_id: int, request: Request, user: User = Depends(require_user), db: Session = Depends(get_db)
+    source_id: int,
+    request: Request,
+    user: User = Depends(require_access(AccessKey.MANAGE_CONNECTORS)),
+    db: Session = Depends(get_db),
 ):
     """Test a specific API source with a known part number."""
     src = db.get(ApiSource, source_id)

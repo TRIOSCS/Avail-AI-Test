@@ -68,7 +68,10 @@
       <input type="hidden" name="ids" :value="idsStr()">
       <button type="submit" class="btn btn-secondary btn-sm">Send to prospecting</button>
     </form>
-    {# Assign owner — manager/admin only; client-side accessible but server hard-gates rep calls at 403 #}
+    {# Assign owner — manager/admin only; the `users` list is carried for managers/admins
+       only (cdm_list_ctx include_users), so reps never render this control. Server still
+       hard-gates rep calls at 403. #}
+    {% if users %}
     <span x-data="{ open: false }" class="relative inline-block">
       <button type="button" @click="open = !open" class="btn btn-secondary btn-sm">
         Assign owner ▾
@@ -80,13 +83,16 @@
               hx-include="#cdm-filters"
               @submit="open = false">
           <input type="hidden" name="ids" :value="idsStr()">
-          <label class="block text-xs text-gray-600 mb-1">Owner user ID</label>
-          <input type="number" name="owner_id" placeholder="User ID"
-                 class="input w-full text-xs mb-2">
+          <label class="block text-xs text-gray-600 mb-1">Owner</label>
+          <select name="owner_id" class="input w-full text-xs mb-2">
+            <option value="">— None —</option>
+            {% for u in users %}<option value="{{ u.id }}">{{ u.name }} ({{ u.role }})</option>{% endfor %}
+          </select>
           <button type="submit" class="btn btn-primary btn-sm w-full">Assign</button>
         </form>
       </div>
     </span>
+    {% endif %}
     <button type="button" @click="clear()" class="btn btn-ghost btn-sm">Clear</button>
   </div>
 </div>

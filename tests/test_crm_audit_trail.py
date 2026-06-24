@@ -430,6 +430,12 @@ class TestHTTPPathAuditIntegration:
         finally:
             current_user_id_var.reset(token)
 
+        # update_company is gated by can_manage_account. The editor (who performs the
+        # PUT below) must own the company to pass the gate; this is the same user the
+        # modified_by_id stamp is asserted against.
+        co.account_owner_id = editor.id
+        db_session.flush()
+
         company_id = co.id
 
         app.dependency_overrides[get_db] = lambda: db_session

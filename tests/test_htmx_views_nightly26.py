@@ -247,7 +247,7 @@ class TestAddSiteContactNoteDirect:
         """Lines 5108–5125: POST note → creates ActivityLog, returns notes."""
         from app.routers.htmx_views import add_site_contact_note
 
-        company = _make_company(db_session)
+        company = _make_company(db_session, owner=test_user)
         site = _make_site(db_session, company)
         contact = _make_site_contact(db_session, site)
         mock_req = _mock_form_request(fields={"notes": "Called, left voicemail"})
@@ -269,7 +269,9 @@ class TestAddSiteContactNoteDirect:
 
         from app.routers.htmx_views import add_site_contact_note
 
-        company = _make_company(db_session)
+        # Gate fires before the empty-notes 400 check, so the acting user must own
+        # the company to reach the validation branch.
+        company = _make_company(db_session, owner=test_user)
         site = _make_site(db_session, company)
         contact = _make_site_contact(db_session, site)
         mock_req = _mock_form_request(fields={"notes": ""})

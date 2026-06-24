@@ -1611,6 +1611,113 @@ Connectors tab (default tab is `connectors`).
 
 ---
 
+## 9b. User Management (allowlist login, per-user access, audit)
+
+Admin-administered identity + access, surfaced at **Settings → Users** (admin only).
+Three intertwined flows: the login allowlist gate (with invite adoption), the per-user
+access model and its enforcement, and the audit trail.
+
+### Allowlist login gate + invite adoption
+
+The OAuth callback (`app/routers/auth.py callback`) is the single choke point. Gated by
+`ENABLE_USER_ALLOWLIST` (`app/config.py`, default True):
+
+```
+Azure AD OAuth callback (email normalized to lowercase)
+    |
+    +-- no users row for this email?
+    |       allowed = (email in ADMIN_EMAILS) or (not ENABLE_USER_ALLOWLIST)
+    |       |
+    |       +-- allowed     → auto-provision a User row (legacy posture / admin)
+    |       +-- NOT allowed → 302 /auth/access-denied  ("Access not provisioned")
+    |
+    +-- users row exists, but is_active = False
+    |       → 302 /auth/access-denied?reason=disabled  ("Account disabled")
+    |
+    +-- users row exists, azure_id is NULL (an INVITED, pre-provisioned row)
+    |       → INVITE ADOPTION: bind profile.id onto user.azure_id on this first login.
+    |         The invited role is left untouched (an invited trader stays a trader).
+    |
+    +-- (always) stamp user.last_login_at = now
+```
+
+`/auth/access-denied` is a self-contained branded page (no app shell, renders with no
+session); `?reason=disabled` switches the copy. An invited row is created by an admin via
+the Users tab (azure_id NULL, last_login_at NULL) and shows status **Invited** until its
+first OAuth login adopts the azure_id.
+
+### Per-user access model + enforcement
+
+Access is a layered resolution computed by `dependencies.user_has_access(user, key, db)`
+over `constants.AccessKey` (10 module keys + 5 capability keys):
+
+```
+admin role?                       → ALWAYS granted (every key)
+key == ops_verification?          → VerificationGroupMember.is_active  (single source of truth)
+explicit override present?        → User.access_overrides[key]         (override wins)
+otherwise                         → key in ROLE_ACCESS_DEFAULTS[role]   (role default)
+```
+
+`access_overrides` stores *only* explicit grants/revokes — an absent key falls through to
+the role default (defaults preserve prior behavior, so the model is a no-op until an admin
+sets an override). `ops_verification` is special: it is never stored in `access_overrides`,
+and the access editor writes `VerificationGroupMember` instead (default acts as off —
+membership is curated, never "follow role"). Enforced at four points:
+
+| Where | Mechanism |
+|---|---|
+| **Bottom nav** (hide revoked sections) | `_base_ctx` calls `admin.users.module_access_map(user)` → `{nav-id: bool}` `access` map; `shared/mobile_nav.html` skips any section where `access[id]` is False (default-show if absent). |
+| **Module full-page route** | `v2_page` maps the resolved `current_view` to its module `AccessKey` (`_VIEW_ACCESS`; CRM sub-views all gate on CRM); a denied view 302-redirects to the user's FIRST allowed module (`_MODULE_ENTRY_URLS` order) — target is always allowed, so no loop. No-access-at-all → 403 with logout link. Un-gated views: settings/quotes/follow-ups/tickets. |
+| **Module partial entry route** | `require_access(<module>)` dependency on each of the 10 nav-module partial routes (parts/sightings/materials/search/buy-plans/resell/crm/proactive/prospecting/my-day workspaces). |
+| **Module SUB-partial chokepoint** | `ModuleAccessMiddleware` (`app/main.py`, inner of `SessionMiddleware`) closes the gap where a revoked user could still READ a module's *sub*-partials by direct URL (those carry only `require_user`). It resolves the request path through the pure `app.access_paths.module_key_for_path` and, if a guarded prefix matches and the session user lacks the key, returns a plain 403. **Only EMPIRICALLY module-exclusive prefixes are guarded: `crm`, `resell`, `proactive`, `prospecting`, `my-day`.** The other five entry-prefixes (`parts`, `sightings`, `materials`, `search`, `buy-plans`) are SHARED cross-module (embedded by other modules' templates) and DELIBERATELY un-gated, as are all CRM *data* partials (customers/contacts/vendors/vendor-contacts) and capability/global/global-search partials — gating them would over-block. Admins and logged-out requests pass through; a DB session opens only when a guarded prefix matches. |
+| **Capability action** | `require_access(<capability>)` on: RFQ-send (`htmx_views.rfq_send`, `sightings.sightings_send_inquiry`); offer approve/reject/reconfirm (`crm/offers.py` + the Sightings `review_offer`/`reconfirm_offer` wrappers); CSV + quote exports (`crm/export.py`, `quote_builder.py`); source-test (`sources.test_api_source`). |
+
+`require_access(key)` is a factory returning a dependency that depends on `require_user`
+and raises 403 unless `user_has_access` passes (admins always pass). The
+`ModuleAccessMiddleware` SUB-partial chokepoint enforces the SAME `user_has_access`
+decision one layer earlier (at the ASGI level) for module-exclusive fragment URLs that
+have no per-route `require_access`, so module revocation is airtight without a gate on
+every sub-partial. CRM data partials (customers/contacts/vendors) remain reachable by
+design — they are shared cross-module, so revocation hides the CRM section/nav and blocks
+crm-prefixed partials only.
+
+### Admin Users tab (CRUD + access editor)
+
+`app/routers/admin/users.py` (admin-only via `require_admin`; the agent service account is
+404/uneditable). Every mutation appends a `UserAdminAudit` row
+(`services.user_admin.record_user_audit`) and re-renders the relevant partial; validation
+failures re-render with an inline error banner at HTTP 400.
+
+```
+GET  /v2/partials/settings/users            → users.html table (htmx_views.settings_users_tab; 403 non-admin)
+POST /api/admin/users/invite                → create interactive user (status Invited)
+POST /api/admin/users/{id}/role             → change role
+POST /api/admin/users/{id}/active           → activate / deactivate
+GET  /api/admin/users/{id}/access-panel     → user_access_panel.html (per-user access editor modal)
+POST /api/admin/users/{id}/access           → grant/revoke/reset ONE key (value ∈ on|off|default)
+GET  /api/admin/users/audit                 → users_audit.html (audit-log viewer modal)
+```
+
+Each user row shows a derived status (**Invited** | **Active** | **Disabled**). The access
+editor renders module + capability rows, each with state `on`/`off` (explicit override) or
+`default` (follow role) plus the resolved effective value. **Self-protection invariants**
+(never lock everyone out): an admin can't demote or deactivate themselves, and the last
+active admin can't be demoted or deactivated by anyone — the last-admin guard counts active
+admins `FOR UPDATE` (row-locked) so concurrent demote/deactivate requests can't race past it.
+
+### Audit trail
+
+Every Users-tab mutation writes one append-only `user_admin_audit` row recording
+`actor_id` (the admin), `target_user_id`, `action` (`constants.UserAuditAction`:
+invite/role_change/activate/deactivate/access_grant/access_revoke), a JSON `detail`
+(e.g. `{"from","to"}` for a role change, `{"key","value"}` for an access change), and
+`created_at`. The viewer (`GET /api/admin/users/audit`) loads the latest 200 rows
+newest-first, batch-resolving actor + target users in one query (no N+1); a SET-NULL'd
+actor renders as "system". `actor_id` is SET NULL (trail survives the admin's deletion);
+`target_user_id` CASCADEs with the user.
+
+---
+
 ## 10. Click-to-Contact Outreach Logging (CDM Workspace)
 
 ```
@@ -1686,6 +1793,19 @@ contacts on active sites) and passes it to
 `company_contact_rows` orders `is_archived ASC, is_priority DESC, is_primary DESC,
 full_name` — priority contacts surface to the top, archived sink to the bottom
 (still shown). Legacy rows (`contact is None`) are appended after, never sorted.
+
+**Per-entity authz hardening (Phase 1, multi-user go-live).** Every state-changing
+entity-by-id route is gated on per-entity ownership BEFORE mutating (the gate precedes
+404/400/validation branches and any AI-spend/side-effect). Company/site/contact mutations
+use `can_manage_account(user, company, db)` (owner OR site-owner OR collaborator OR
+manager/admin); company_merge/merge-preview/merge-form gate BOTH the keeper and the
+duplicate. Requisitions/quotes/buy-plans/offers scope to the parent **Requisition.created_by**
+via `get_req_for_user` / `get_quote_for_user` / `get_buyplan_for_user` (BuyPlan→Requisition
+join; 404-not-403 so existence isn't leaked) and `require_requisition_access`; owner
+*reassignment* is `is_manager_or_admin`-only. Requisition list/detail visibility uses
+`RESTRICTED_ROLES` (SALES+TRADER see only own), not SALES alone. The `attachments_extra`
+company-access helper performs a real `can_manage_account` check (was a no-op). Restricted
+roles get 403 (company routes) or 404 (requisition-derived) on entities they don't own.
 
 **Disposition (Increment 1, migration 118).** Salespeople dispose of accounts +
 contacts via setter routes in `htmx_views.py` (all owner-or-admin where they touch
@@ -1900,8 +2020,19 @@ Mark-seen (per row, background, no spinner):
   `InboundCustomerSource` (CRM — new inbound comms on a Customer account the user owns).
 - **ACTION** — clears on *act*. The count derives PURELY from work-state
   (`BuyplanActionSource`: the user's open buy-plan steps — buyer PO line / manager
-  approval / ops SO-verify). `alert_seen` does NOT change the count — it only gates
-  the cosmetic one-time pulse; the row keeps its rail until the underlying work is done.
+  approval / ops SO-verify; `TasksActionSource`: open tasks assigned to me, registered
+  under the `my-day` tab — wires `task_service.get_my_tasks_summary`). `alert_seen` does
+  NOT change the count — it only gates the cosmetic one-time pulse; the row keeps its rail
+  until the underlying work is done.
+
+**Tasks queue + core-basic gaps (Phase 3).** `GET /v2/partials/tasks` (gated
+`require_access(AccessKey.MY_DAY)`) is a filterable queue of tasks assigned to me
+(`status`/`priority`/`due`; reuses `get_my_tasks`, filters priority/due in-route) rendered
+under the My-Day nav key; its filter bar carries an EXPLICIT `hx-target="#tasks-results"`
+(never inherits `#main-content`). The My-Day nav badge is the `TasksActionSource` above.
+Bulk "Assign owner" on the account list now uses a name+role `<select>` (`cdm_list_ctx(include_users=…)`,
+manager/admin only) instead of a raw User-ID box. All clickable `<tr hx-get>` list rows
+are keyboard-accessible (`role=button` + `tabindex=0` + `keyup[Enter]` + `focus:ring-2`).
 
 `recency_floor()` keeps FYI badges from lighting up for the pre-launch backlog:
 an item only counts if newer than `max(now - alert_recency_days, ALERTS_EPOCH)`.
@@ -1980,6 +2111,23 @@ with three rules:
 
 Provenance is persisted in the new `enrichment_provenance` JSONB column on both
 `companies` and `vendor_cards` (migration 125).
+
+**Enrich button → result panel (content negotiation).** `POST /api/enrich/company/{id}`
+and `/api/enrich/vendor/{id}` (`app/routers/crm/enrichment.py`) content-negotiate on the
+`HX-Request` header: HTMX callers (the shared `partials/shared/enrich_button.html`) get a
+rendered `partials/shared/_enrich_result.html` panel — firmographics found, each field badged
+**Updated** (in `updated_fields`) vs **Current**, source badge + "enriched X ago", and (for
+companies) contacts discovered via `find_suggested_contacts_with_errors` with per-row Add
+buttons; programmatic callers still get JSON `{ok, updated_fields, enrichment}`. The contact
+rows reuse the shared `partials/shared/_contact_row.html` macro (also used by the Contacts-tab
+`_suggested_contacts.html`); their Add posts to the existing
+`POST /v2/partials/customers/{id}/suggested-contacts/add` with a hidden `from_enrich=1` flag,
+which makes that endpoint return a self-contained "✓ Added" `<li>` (`hx-swap=outerHTML`,
+`hx-target="closest li"`) instead of re-rendering the Contacts-tab list. The dead
+`enrich_customer_account` stub (returns `no_providers`) is no longer called from the enrich
+endpoint — it stays wired to `companies.py` bulk-create + the `customer_enrichment_batch`
+scheduler. Contact discovery degrades gracefully: a provider failure renders an amber
+"couldn't reach" banner, never a 500.
 
 **Connectors:**
 

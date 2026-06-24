@@ -584,7 +584,10 @@ class TestSiteContactCRUD:
         db_session: Session,
         test_company: Company,
         test_customer_site: CustomerSite,
+        test_user: User,
     ):
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         contact = _site_contact(db_session, test_customer_site)
         contact_id = contact.id
         contact_email = contact.email
@@ -601,9 +604,15 @@ class TestSiteContactCRUD:
     def test_delete_site_contact_not_found(
         self,
         client: TestClient,
+        db_session: Session,
         test_company: Company,
         test_customer_site: CustomerSite,
+        test_user: User,
     ):
+        # Gate fires before the contact lookup, so the acting user must own the
+        # company to reach the 404 (contact-not-found) branch.
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         resp = client.delete(f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}/contacts/99999")
         assert resp.status_code == 404
 
@@ -634,7 +643,10 @@ class TestSiteContactCRUD:
         db_session: Session,
         test_company: Company,
         test_customer_site: CustomerSite,
+        test_user: User,
     ):
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         contact = _site_contact(db_session, test_customer_site)
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}/contacts/{contact.id}/primary"
@@ -649,7 +661,9 @@ class TestSiteContactCRUD:
         db_session: Session,
         test_company: Company,
         test_customer_site: CustomerSite,
+        test_user: User,
     ):
+        test_company.account_owner_id = test_user.id
         c1 = _site_contact(db_session, test_customer_site, email="c1@s.com", full_name="C1")
         c2 = _site_contact(db_session, test_customer_site, email="c2@s.com", full_name="C2")
         c1.is_primary = True
@@ -667,9 +681,15 @@ class TestSiteContactCRUD:
     def test_set_primary_contact_not_found(
         self,
         client: TestClient,
+        db_session: Session,
         test_company: Company,
         test_customer_site: CustomerSite,
+        test_user: User,
     ):
+        # Gate fires before the contact lookup, so the acting user must own the
+        # company to reach the 404 (contact-not-found) branch.
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}/contacts/99999/primary"
         )
@@ -702,7 +722,10 @@ class TestSiteContactCRUD:
         db_session: Session,
         test_company: Company,
         test_customer_site: CustomerSite,
+        test_user: User,
     ):
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         contact = _site_contact(db_session, test_customer_site)
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}/contacts/{contact.id}/notes",
@@ -716,7 +739,12 @@ class TestSiteContactCRUD:
         db_session: Session,
         test_company: Company,
         test_customer_site: CustomerSite,
+        test_user: User,
     ):
+        # Gate fires before the empty-notes 400 check, so ownership is required
+        # to reach the validation branch.
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         contact = _site_contact(db_session, test_customer_site)
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}/contacts/{contact.id}/notes",
@@ -727,9 +755,15 @@ class TestSiteContactCRUD:
     def test_add_site_contact_note_contact_not_found(
         self,
         client: TestClient,
+        db_session: Session,
         test_company: Company,
         test_customer_site: CustomerSite,
+        test_user: User,
     ):
+        # Gate fires before the contact lookup, so the acting user must own the
+        # company to reach the 404 (contact-not-found) branch.
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}/contacts/99999/notes",
             data={"notes": "hello"},
