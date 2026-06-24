@@ -16,7 +16,7 @@
    Add-contact → createVendor path.
    dnc_norms: set of normalized_names whose contact email is do_not_contact (server-computed).
    contactable_non_dnc: list of normalized_names for the Alpine selectedVendors seed. #}
-<div class="p-4"
+<div class="p-4 flex flex-col h-full min-h-0"
      x-data='rfqVendorModal({{ contactable_non_dnc|tojson }}, {{ requirement_ids|tojson }})'>
 
   {# ── Step 1: Compose ─────────────────────────────────────────── #}
@@ -295,8 +295,9 @@
   </div>
 
   {# ── Step 2: Preview ─────────────────────────────────────────── #}
-  <div x-show="step === 'preview'" x-cloak>
-    <div class="flex items-center gap-2 mb-3">
+  {# Flex column so the email preview fills a resized panel (header/actions pinned). #}
+  <div x-show="step === 'preview'" x-cloak class="flex-1 min-h-0 flex flex-col">
+    <div class="flex items-center gap-2 mb-3 flex-shrink-0">
       <button @click="step = 'compose'" class="text-gray-400 hover:text-gray-600">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
@@ -306,11 +307,11 @@
     </div>
 
     {# Preview content injected via loadPreview() — server-sanitized via sanitize_html filter #}
-    <div x-ref="previewContent" class="max-h-[60vh] overflow-y-auto mb-4">
+    <div x-ref="previewContent" class="flex-1 min-h-0 overflow-y-auto mb-4">
     </div>
 
     {# Actions #}
-    <div class="flex justify-between gap-2 border-t border-gray-100 pt-3">
+    <div class="flex justify-between gap-2 border-t border-gray-100 pt-3 flex-shrink-0">
       <button @click="step = 'compose'"
               class="px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 rounded-lg transition-colors">
         &larr; Back to Edit

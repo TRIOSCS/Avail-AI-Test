@@ -70,6 +70,10 @@ import 'idiomorph/dist/idiomorph-ext.esm.js';
 import './styles.css';
 import './htmx_mobile.css';
 
+// ── Local modules ────────────────────────────────────────────
+// Pure geometry math for the resizable/movable modal wrapper (see base.html).
+import { resizeGeometry, moveGeometry, clampToViewport } from './modal_geometry.js';
+
 // ── Register all Alpine plugins ──────────────────────────────
 // Order matters: register plugins BEFORE Alpine.start()
 Alpine.plugin(focus);      // x-trap (backwards compat) + x-focus
@@ -504,6 +508,198 @@ Alpine.data('splitPanel', (panelId, defaultPct) => ({
         document.addEventListener('touchmove', onTouchMove);
         document.addEventListener('touchend', onTouchEnd);
     }
+}));
+
+/**
+ * resizableModal — global modal wrapper behavior: open/close state plus, on
+ * desktop, drag-to-move and drag-to-resize (4 edges + 4 corners) with the
+ * chosen size/position remembered per size-bucket.
+ *
+ * Bound to the single modal wrapper in htmx/base.html. Every modal loads into
+ * #modal-content inside this one panel, so geometry is owned here ONCE and
+ * survives HTMX content swaps (the panel persists; only #modal-content's
+ * innerHTML changes). Mirrors splitPanel's raw-localStorage idiom (per-drag
+ * document listeners, no permanent global handler) but uses Pointer Events +
+ * setPointerCapture so an embedded iframe can't swallow drag events mid-resize.
+ *
+ * Desktop only (>=1024px). Below that, isDesktop is false, panelStyle() returns
+ * '' and the CSS handles responsive centering / the mobile bottom-sheet layout.
+ *
+ * Persistence: localStorage 'avail_modal_geom' -> { lg:{w,h,l,t}, wide:{...} },
+ * keyed by the two existing size buckets; clamped to the live viewport on
+ * restore. Double-clicking any handle or the drag-bar resets the current bucket.
+ *
+ * Called by: app/templates/htmx/base.html (x-data="resizableModal()").
+ * Depends on: Alpine.js, ./modal_geometry.js.
+ */
+const MODAL_GEOM_KEY = 'avail_modal_geom';
+const MODAL_DESKTOP_MQ = '(min-width: 1024px)';
+
+Alpine.data('resizableModal', () => ({
+    open: false,
+    wide: false,
+    custom: false,            // true once the user has dragged/resized this bucket
+    width: 0, height: 0, left: 0, top: 0,
+    isDesktop: window.matchMedia(MODAL_DESKTOP_MQ).matches,
+    _drag: null,
+    _mq: null,
+    _onMQ: null,
+    _boundMove: null,
+    _boundUp: null,
+
+    get bucket() {
+        return this.wide ? 'wide' : 'lg';
+    },
+
+    init() {
+        this._mq = window.matchMedia(MODAL_DESKTOP_MQ);
+        this._onMQ = (e) => {
+            this.isDesktop = e.matches;
+            if (!e.matches) this.custom = false;  // drop floating geometry on shrink to mobile
+        };
+        this._mq.addEventListener('change', this._onMQ);
+    },
+
+    destroy() {
+        if (this._mq && this._onMQ) this._mq.removeEventListener('change', this._onMQ);
+        this._teardownDrag();
+    },
+
+    // Called from @open-modal — preserves the existing {url, wide} dispatch contract.
+    onOpen(detail) {
+        this.wide = !!(detail && detail.wide);
+        this.open = true;
+        this.isDesktop = this._mq ? this._mq.matches : window.matchMedia(MODAL_DESKTOP_MQ).matches;
+        this._restore();
+        if (detail && detail.url) {
+            htmx.ajax('GET', detail.url, { target: '#modal-content', swap: 'innerHTML', indicator: '#modal-loading' });
+        }
+    },
+
+    onClose() {
+        this.open = false;  // keep wide + geometry; the next open re-reads the bucket
+    },
+
+    // ── Persistence ──────────────────────────────────────────
+    _readAll() {
+        try {
+            return JSON.parse(localStorage.getItem(MODAL_GEOM_KEY) || '{}');
+        } catch {
+            return {};
+        }
+    },
+
+    _restore() {
+        if (!this.isDesktop) {
+            this.custom = false;
+            return;
+        }
+        const saved = this._readAll()[this.bucket];
+        if (saved && saved.w && saved.h) {
+            const g = clampToViewport(saved, window.innerWidth, window.innerHeight);
+            this.width = g.w; this.height = g.h; this.left = g.l; this.top = g.t;
+            this.custom = true;
+        } else {
+            this.custom = false;
+        }
+    },
+
+    _persist() {
+        const all = this._readAll();
+        all[this.bucket] = { w: this.width, h: this.height, l: this.left, t: this.top };
+        localStorage.setItem(MODAL_GEOM_KEY, JSON.stringify(all));
+    },
+
+    // Seed numeric geometry from the panel's current rendered box, so the first
+    // drag continues from exactly where the centered layout placed it (no jump).
+    _seed() {
+        const r = this.$refs.panel.getBoundingClientRect();
+        this.width = r.width; this.height = r.height; this.left = r.left; this.top = r.top;
+        this.custom = true;
+    },
+
+    // ── Drag lifecycle (pointer events, bound only for the drag's duration) ──
+    startMove(e) {
+        if (!this.isDesktop || e.button !== 0) return;
+        if (!this.custom) this._seed();
+        this._begin(e, 'move', '');
+    },
+
+    startResize(e, edge) {
+        if (!this.isDesktop || e.button !== 0) return;
+        if (!this.custom) this._seed();
+        this._begin(e, 'resize', edge);
+    },
+
+    _begin(e, mode, edge) {
+        e.preventDefault();
+        this._drag = {
+            mode, edge,
+            sx: e.clientX, sy: e.clientY,
+            start: { w: this.width, h: this.height, l: this.left, t: this.top },
+            pid: e.pointerId, target: e.target,
+        };
+        if (e.target.setPointerCapture) {
+            try { e.target.setPointerCapture(e.pointerId); } catch { /* capture unsupported */ }
+        }
+        document.body.style.userSelect = 'none';
+        this._boundMove = (ev) => this._onMove(ev);
+        this._boundUp = () => this._onUp();
+        document.addEventListener('pointermove', this._boundMove);
+        document.addEventListener('pointerup', this._boundUp);
+    },
+
+    _onMove(e) {
+        const d = this._drag;
+        if (!d) return;
+        const dx = e.clientX - d.sx;
+        const dy = e.clientY - d.sy;
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        const g = d.mode === 'move'
+            ? moveGeometry(d.start, dx, dy, vw, vh)
+            : resizeGeometry(d.start, d.edge, dx, dy, vw, vh);
+        this.width = g.w; this.height = g.h; this.left = g.l; this.top = g.t;
+    },
+
+    _onUp() {
+        const d = this._drag;
+        if (!d) return;
+        if (d.target && d.target.releasePointerCapture) {
+            try { d.target.releasePointerCapture(d.pid); } catch { /* already released */ }
+        }
+        this._teardownDrag();
+        this._persist();
+    },
+
+    _teardownDrag() {
+        if (this._boundMove) document.removeEventListener('pointermove', this._boundMove);
+        if (this._boundUp) document.removeEventListener('pointerup', this._boundUp);
+        this._boundMove = null;
+        this._boundUp = null;
+        this._drag = null;
+        document.body.style.userSelect = '';
+    },
+
+    // Double-click any handle / the drag-bar → forget this bucket, re-center.
+    reset() {
+        const all = this._readAll();
+        delete all[this.bucket];
+        localStorage.setItem(MODAL_GEOM_KEY, JSON.stringify(all));
+        this.custom = false;
+    },
+
+    // Inline style for the panel: an explicit fixed box when the user has a custom
+    // size on desktop, otherwise '' so the centered/responsive CSS layout wins.
+    panelStyle() {
+        if (!this.custom || !this.isDesktop) return '';
+        return 'position:fixed;'
+            + 'left:' + this.left + 'px;'
+            + 'top:' + this.top + 'px;'
+            + 'width:' + this.width + 'px;'
+            + 'height:' + this.height + 'px;'
+            + 'max-width:none;max-height:none;margin:0;';
+    },
 }));
 
 /**

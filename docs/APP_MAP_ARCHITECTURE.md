@@ -150,6 +150,18 @@ base.html (app shell: topbar, mobile nav, modal, toast, SSE)
 - **Real-time:** SSE via `hx-ext="sse"` for notifications
 - **Build:** Vite bundles `htmx_app.js` + `styles.css` -> content-hashed dist/
 - **Tailwind safelist:** Broadened to cover all color families (slate, red, amber, emerald, etc.) + Python content scanning so dynamic classes survive tree-shaking
+- **Modals:** One global wrapper in `base.html` driven by the `resizableModal()` Alpine
+  component (`htmx_app.js`); every dialog loads into `#modal-content` via
+  `$dispatch('open-modal', {url, wide})`. The panel (`.modal-shell`) is a flex column
+  capped to the viewport so it stays on-screen and scrolls internally — responsive on
+  every screen. On desktop (≥1024px) it is drag-to-move (top strip) + drag-to-resize
+  (8 edge/corner handles), with size/position remembered per `lg`/`wide` bucket in
+  `localStorage['avail_modal_geom']` (double-click any handle to reset); on phones
+  (<640px) it renders as a full-width bottom sheet (handles hidden). Pure geometry math
+  is isolated in `app/static/modal_geometry.js` (unit-tested, no DOM). Content fetches
+  use a `#modal-loading` spinner as the htmx indicator. Modal bodies that need to fill a
+  resized panel use a `flex flex-col h-full min-h-0` root with a `flex-1 min-h-0` scroll
+  region (e.g. `unified_modal.html` parts table, `vendor_modal.html` preview).
 
 ### HTMX Conventions
 
