@@ -218,18 +218,23 @@ def test_name_search_active_list_excludes_archived_from_default(
     assert "Acme Electronics" not in resp.text
 
 
-# ── 8. Migration 148 is the single alembic head ────────────────────────
+# ── 8. Single alembic head (149 — settings-refine notify prefs, chained onto 148) ──
 
 
 def test_migration_148_single_head():
-    """Alembic must have exactly one head and it must be migration 148."""
+    """Alembic must have exactly one head.
+
+    feat/settings-refine adds migration 149 (user notification prefs) chained onto
+    148_site_dnc, so 149 is now the single head; this test originally pinned 148 —
+    updated to track the current head.
+    """
     alembic_dir = pathlib.Path(__file__).resolve().parent.parent / "alembic"
     from alembic.script import ScriptDirectory
 
     script_dir = ScriptDirectory(str(alembic_dir))
     heads = script_dir.get_heads()
     assert len(heads) == 1, f"Expected 1 alembic head, got {heads}"
-    assert "148" in heads[0], f"Expected migration 148 as head, got {heads[0]}"
+    assert "149" in heads[0], f"Expected migration 149 as head, got {heads[0]}"
 
 
 # ── 9. Site mark-dnc toggles do_not_contact ────────────────────────────
