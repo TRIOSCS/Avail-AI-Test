@@ -43,11 +43,13 @@
         </thead>
         <tbody class="divide-y divide-gray-100">
           {% for r in results %}
-          <tr class="hover:bg-brand-50 cursor-pointer"
+          <tr class="hover:bg-brand-50 cursor-pointer focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-500"
               {% if r.vendor_id %}
+              role="button" tabindex="0"
               hx-get="/v2/partials/vendors/{{ r.vendor_id }}?mpn={{ mpn|urlencode }}"
               hx-target="{{ hx_target|default('#main-content') }}"
               hx-push-url="{{ push_url_base|default('/v2/vendors') }}/{{ r.vendor_id }}"
+              hx-trigger="click, keyup[key=='Enter']"
               {% endif %}>
             <td class="px-4 py-2.5 text-sm font-medium text-gray-900">
               {{ r.vendor_name }}

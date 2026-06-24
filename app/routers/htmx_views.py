@@ -5559,6 +5559,7 @@ async def companies_list_partial(
             limit=limit,
             offset=offset,
             include_overdue=True,
+            include_users=is_manager_or_admin(user),
         )
     )
     return template_response("htmx/partials/customers/list.html", ctx)
@@ -5600,6 +5601,7 @@ async def companies_account_list_partial(
             has_open_reqs=has_open_reqs,
             limit=limit,
             offset=offset,
+            include_users=is_manager_or_admin(user),
         )
     )
     return template_response("htmx/partials/customers/_account_list.html", ctx)
@@ -5709,6 +5711,7 @@ async def customers_bulk_action(
                 has_open_reqs=False,
                 limit=50,
                 offset=0,
+                include_users=is_manager_or_admin(user),
             )
         )
         return template_response("htmx/partials/customers/_account_list.html", ctx)
@@ -5784,6 +5787,7 @@ async def customers_bulk_action(
             has_open_reqs=False,
             limit=50,
             offset=0,
+            include_users=is_manager_or_admin(user),
         )
     )
     resp = template_response("htmx/partials/customers/_account_list.html", ctx)
@@ -17349,3 +17353,59 @@ async def my_day_partial(
     ctx["tasks"] = tasks
     ctx["now_utc"] = now
     return template_response("htmx/partials/my_day.html", ctx)
+
+
+@router.get("/v2/partials/tasks", response_class=HTMLResponse)
+async def tasks_queue_partial(
+    request: Request,
+    user: User = Depends(require_access(AccessKey.MY_DAY)),
+    db: Session = Depends(get_db),
+):
+    """Filterable Tasks queue — all tasks assigned to me, with status/priority/due
+    filters.
+
+    Reuses task_service.get_my_tasks (which supports the ``status`` filter and
+    excludes done by default); ``priority`` and ``due`` are applied here since the
+    helper does not support them. Renders the same task-row markup + complete-form as
+    My Day, plus a filter bar whose hx-get carries an EXPLICIT hx-target on the inner
+    results container (so it never inherits #main-content and replaces the whole page).
+
+    Called by: /v2/partials/tasks (filter-bar hx-get; full-list initial render).
+    Depends on: task_service.get_my_tasks.
+    """
+    from ..services.task_service import get_my_tasks as _get_my_tasks
+
+    now = datetime.now(timezone.utc)
+    status = request.query_params.get("status", "").strip()
+    priority = request.query_params.get("priority", "").strip()
+    due = request.query_params.get("due", "").strip()
+
+    # status flows through the helper (it filters at the query level + defaults to open).
+    tasks = _get_my_tasks(db, user.id, status=status or None)
+
+    # priority is an int 1-3 (3=high, 2=med, 1=low) — applied here (helper has no filter).
+    if priority in ("1", "2", "3"):
+        want = int(priority)
+        tasks = [t for t in tasks if t.priority == want]
+
+    # due bucket — helper has no due filter, so apply it here against now.
+    if due == "overdue":
+        tasks = [t for t in tasks if t.due_at is not None and t.due_at < now]
+    elif due == "today":
+        tasks = [t for t in tasks if t.due_at is not None and t.due_at.date() == now.date()]
+    elif due == "upcoming":
+        tasks = [t for t in tasks if t.due_at is not None and t.due_at >= now]
+    elif due == "none":
+        tasks = [t for t in tasks if t.due_at is None]
+
+    ctx = _base_ctx(request, user, "my-day")
+    ctx["tasks"] = tasks
+    ctx["now_utc"] = now
+    ctx["filter_status"] = status
+    ctx["filter_priority"] = priority
+    ctx["filter_due"] = due
+    # Filter-bar changes target the inner #tasks-results container — return the
+    # results-only fragment so the filter bar (and its selected values) stay put.
+    if request.headers.get("HX-Target") == "tasks-results":
+        return template_response("htmx/partials/tasks/_results.html", ctx)
+    return template_response("htmx/partials/tasks/list.html", ctx)

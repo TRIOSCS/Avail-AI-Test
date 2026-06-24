@@ -489,8 +489,8 @@ class ProspectAccountStatus(StrEnum):
 class CompanyDisposition(StrEnum):
     """Salesperson-set lifecycle disposition for a Company.
 
-    NULL ⇒ active (mirrors tier's NULL ⇒ standard). "bucket" is the parking lot —
-    a bucketed account is suppressed from the "needs a call" call-list (count + click-
+    NULL ⇒ active (mirrors tier's NULL ⇒ standard). "bucket" is the parking lot — a
+    bucketed account is suppressed from the "needs a call" call-list (count + click-
     through) but stays findable/un-bucketable via the explicit Bucket facet. Never
     overloaded onto is_active.
     """
@@ -551,8 +551,8 @@ class SourceRunStatus(StrEnum):
 
 
 class SpecCodeSource(StrEnum):
-    """Provenance of an ``oem_spec_codes.source`` row — how the approved mapping
-    entered the authoritative table.
+    """Provenance of an ``oem_spec_codes.source`` row — how the approved mapping entered
+    the authoritative table.
 
     Single source of truth for the ``OemSpecCode.source`` string column
     (validated via ``@validates`` on the model). These are the *stored*
@@ -881,6 +881,7 @@ class AlertKind(StrEnum):
     INBOUND_CUSTOMER = "inbound_customer"
     INBOUND_VENDOR = "inbound_vendor"
     BUYPLAN_ACTION = "buyplan_action"
+    TASKS_ACTION = "tasks_action"
 
 
 class SightingsSkipReason(StrEnum):

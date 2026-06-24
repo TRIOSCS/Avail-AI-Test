@@ -1,0 +1,82 @@
+{# tasks/list.html — filterable Tasks queue: all tasks assigned to me.
+   Receives: tasks (list[RequisitionTask], already filtered), now_utc (datetime),
+             filter_status / filter_priority / filter_due (str, the active filters).
+   Called by: /v2/partials/tasks (tasks_queue_partial route). On a filter change the
+              route returns tasks/_results.html (results-only) which swaps into
+              #tasks-results; the initial load returns this full template.
+   Depends on: tasks/_results.html, task_due_state global, the existing complete route.
+#}
+<title hx-swap-oob="true">Tasks — AvailAI</title>
+
+<div class="page-readable space-y-6 py-4">
+
+  {# ── Page header ─────────────────────────────────────────────────── #}
+  <div>
+    <h1 class="text-xl font-bold text-gray-900">Tasks</h1>
+    <p class="text-sm text-gray-600 mt-0.5">Every task assigned to you — filter by status, priority, or due date.</p>
+  </div>
+
+  {# ── Filter bar ──────────────────────────────────────────────────────
+     Each select fetches the queue with the combined filter values and swaps ONLY the
+     inner results container. hx-target is EXPLICIT (#tasks-results) so it never inherits
+     the #main-content target and replaces the whole page; hx-include pulls the sibling
+     filter values so all three filters always travel together. #}
+  <div class="flex flex-wrap items-center gap-3">
+    <label class="flex items-center gap-1.5 text-xs font-medium text-gray-600">
+      Status
+      <select name="status"
+              hx-get="/v2/partials/tasks"
+              hx-trigger="change"
+              hx-target="#tasks-results"
+              hx-swap="innerHTML"
+              hx-include="[name='priority'], [name='due']"
+              class="input input-sm">
+        <option value="" {% if not filter_status %}selected{% endif %}>Open</option>
+        <option value="todo" {% if filter_status == 'todo' %}selected{% endif %}>To do</option>
+        <option value="in_progress" {% if filter_status == 'in_progress' %}selected{% endif %}>In progress</option>
+        <option value="done" {% if filter_status == 'done' %}selected{% endif %}>Done</option>
+      </select>
+    </label>
+
+    <label class="flex items-center gap-1.5 text-xs font-medium text-gray-600">
+      Priority
+      <select name="priority"
+              hx-get="/v2/partials/tasks"
+              hx-trigger="change"
+              hx-target="#tasks-results"
+              hx-swap="innerHTML"
+              hx-include="[name='status'], [name='due']"
+              class="input input-sm">
+        <option value="" {% if not filter_priority %}selected{% endif %}>Any priority</option>
+        <option value="3" {% if filter_priority == '3' %}selected{% endif %}>High</option>
+        <option value="2" {% if filter_priority == '2' %}selected{% endif %}>Medium</option>
+        <option value="1" {% if filter_priority == '1' %}selected{% endif %}>Low</option>
+      </select>
+    </label>
+
+    <label class="flex items-center gap-1.5 text-xs font-medium text-gray-600">
+      Due
+      <select name="due"
+              hx-get="/v2/partials/tasks"
+              hx-trigger="change"
+              hx-target="#tasks-results"
+              hx-swap="innerHTML"
+              hx-include="[name='status'], [name='priority']"
+              class="input input-sm">
+        <option value="" {% if not filter_due %}selected{% endif %}>Any time</option>
+        <option value="overdue" {% if filter_due == 'overdue' %}selected{% endif %}>Overdue</option>
+        <option value="today" {% if filter_due == 'today' %}selected{% endif %}>Due today</option>
+        <option value="upcoming" {% if filter_due == 'upcoming' %}selected{% endif %}>Upcoming</option>
+        <option value="none" {% if filter_due == 'none' %}selected{% endif %}>No due date</option>
+      </select>
+    </label>
+  </div>
+
+  {# ── Results ──────────────────────────────────────────────────────────
+     Inner container the filter bar swaps into. The route returns tasks/_results.html
+     (results-only) on a filter change; here we include it for the first paint. #}
+  <div id="tasks-results">
+    {% include "htmx/partials/tasks/_results.html" %}
+  </div>
+
+</div>

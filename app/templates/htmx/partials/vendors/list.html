@@ -181,10 +181,12 @@
         </thead>
         <tbody class="divide-y divide-gray-200">
           {% for v in vendors %}
-          <tr class="{{ 'bg-rose-50' if v.is_blacklisted else '' }} hover:bg-brand-50 cursor-pointer"
+          <tr class="{{ 'bg-rose-50' if v.is_blacklisted else '' }} hover:bg-brand-50 cursor-pointer focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-500"
+              role="button" tabindex="0"
               hx-get="/v2/partials/vendors/{{ v.id }}"
               hx-target="{{ hx_target|default('#main-content') }}"
               hx-push-url="/v2/vendors/{{ v.id }}"
+              hx-trigger="click, keyup[key=='Enter']"
               preload="mouseover">
             {# Cadence dot #}
             <td class="px-2 py-3">
