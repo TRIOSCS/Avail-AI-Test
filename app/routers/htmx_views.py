@@ -5923,6 +5923,23 @@ async def import_contacts_preview(
         for row in db.query(SiteContact.email).filter(SiteContact.email.isnot(None), SiteContact.email != "").all()
     }
 
+    # Build company lookup for authz check (same logic as confirm)
+    import re as _re
+
+    from ..vendor_utils import normalize_vendor_name as _normalize_vendor_name
+
+    all_companies = db.query(Company).filter(Company.is_active.is_(True)).all()
+    _norm_to_company: dict[str, Company] = {}
+    _domain_to_company: dict[str, Company] = {}
+    for _co in all_companies:
+        if _co.normalized_name:
+            _norm_to_company[_co.normalized_name] = _co
+        if _co.website:
+            _dom = _re.sub(r"^https?://", "", _co.website.strip().lower())
+            _dom = _re.sub(r"^www\.", "", _dom).split("/")[0].strip()
+            if _dom:
+                _domain_to_company[_dom] = _co
+
     rows = []
     for raw in raw_rows:
         company_name = (raw.get("company_name") or "").strip()
@@ -5938,8 +5955,17 @@ async def import_contacts_preview(
             status = "duplicate"
             status_label = "Email already exists"
         else:
-            status = "valid"
-            status_label = "OK"
+            # Check if the matched company is manageable by this user
+            _norm = _normalize_vendor_name(company_name)
+            _matched_co = _norm_to_company.get(_norm) if _norm else None
+            if _matched_co is None and email and "@" in email:
+                _matched_co = _domain_to_company.get(email.split("@", 1)[1])
+            if _matched_co is not None and not (is_manager_or_admin(user) or can_manage_account(user, _matched_co, db)):
+                status = "unauthorized"
+                status_label = "Company not yours"
+            else:
+                status = "valid"
+                status_label = "OK"
 
         rows.append(
             {
@@ -5956,6 +5982,7 @@ async def import_contacts_preview(
     valid_count = sum(1 for r in rows if r["status"] == "valid")
     dup_count = sum(1 for r in rows if r["status"] == "duplicate")
     invalid_count = sum(1 for r in rows if r["status"] == "invalid")
+    unauthorized_count = sum(1 for r in rows if r["status"] == "unauthorized")
 
     import json as _json
 
@@ -5981,6 +6008,7 @@ async def import_contacts_preview(
             "valid_count": valid_count,
             "dup_count": dup_count,
             "invalid_count": invalid_count,
+            "unauthorized_count": unauthorized_count,
             "rows_json": contacts_rows_json,
         },
     )
@@ -6040,6 +6068,7 @@ async def import_contacts_confirm(
     created = 0
     skipped_no_company = 0
     skipped_dup = 0
+    skipped_unauthorized = 0
 
     for row in rows:
         company_name = str(row.get("company_name", "")).strip()
@@ -6061,6 +6090,11 @@ async def import_contacts_confirm(
 
         if co is None:
             skipped_no_company += 1
+            continue
+
+        # AUTHZ: rep may only attach contacts to companies they manage
+        if not (is_manager_or_admin(user) or can_manage_account(user, co, db)):
+            skipped_unauthorized += 1
             continue
 
         # Find or create the first ACTIVE site for this company
@@ -6112,6 +6146,8 @@ async def import_contacts_confirm(
         parts.append(f"{skipped_no_company} skipped (company not found)")
     if skipped_dup:
         parts.append(f"{skipped_dup} duplicate{'s' if skipped_dup != 1 else ''} skipped")
+    if skipped_unauthorized:
+        parts.append(f"{skipped_unauthorized} skipped — not your account{'s' if skipped_unauthorized != 1 else ''}")
     summary = "; ".join(parts)
 
     resp = template_response(

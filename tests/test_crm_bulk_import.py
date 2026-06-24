@@ -866,3 +866,153 @@ def test_import_contacts_confirm_gated(db_session: Session):
             assert resp.status_code in (401, 403)
     finally:
         app.dependency_overrides.pop(get_db, None)
+
+
+# ---------------------------------------------------------------------------
+# Security: cross-tenant IDOR — contact import authz gate
+# ---------------------------------------------------------------------------
+
+
+def test_import_contacts_confirm_rep_cannot_import_into_unowned_company(
+    db_session: Session, sales_rep: User, other_user: User
+):
+    """A rep importing a contact into a company owned by another user must NOT create
+    the contact — it must be counted as skipped_unauthorized."""
+    # Company owned by other_user, NOT sales_rep
+    foreign_co = Company(
+        name="Foreign Corp IDOR",
+        is_active=True,
+        account_owner_id=other_user.id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(foreign_co)
+    db_session.commit()
+    db_session.refresh(foreign_co)
+
+    rows = _json.dumps(
+        [
+            {
+                "company_name": "Foreign Corp IDOR",
+                "contact_name": "Injected Contact",
+                "email": "injected@foreigncorp.com",
+                "phone": "",
+                "role": "buyer",
+            }
+        ]
+    )
+    for c in _make_client(db_session, sales_rep):
+        resp = c.post(
+            "/v2/partials/customers/import/contacts/confirm",
+            data={"rows_json": rows},
+        )
+        assert resp.status_code == 200
+        # Summary must mention "not your account" (skipped_unauthorized)
+        assert "not your account" in resp.text.lower() or "skipped" in resp.text.lower()
+
+    # The contact must NOT have been created
+    db_session.expire_all()
+    contacts = db_session.query(SiteContact).filter(SiteContact.email == "injected@foreigncorp.com").all()
+    assert len(contacts) == 0, "Rep must not be able to inject a contact into a company they don't manage"
+
+
+def test_import_contacts_confirm_manager_can_import_into_any_company(
+    db_session: Session, mgr_user: User, other_user: User
+):
+    """A manager importing a contact into any company (even one they don't own) should
+    succeed."""
+    any_co = Company(
+        name="Any Corp Manager Import",
+        is_active=True,
+        account_owner_id=other_user.id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(any_co)
+    db_session.commit()
+    db_session.refresh(any_co)
+
+    rows = _json.dumps(
+        [
+            {
+                "company_name": "Any Corp Manager Import",
+                "contact_name": "Manager Imported Contact",
+                "email": "mgrimport@anycorp.com",
+                "phone": "",
+                "role": "buyer",
+            }
+        ]
+    )
+    for c in _make_client(db_session, mgr_user):
+        resp = c.post(
+            "/v2/partials/customers/import/contacts/confirm",
+            data={"rows_json": rows},
+        )
+        assert resp.status_code == 200
+        assert "1 contact" in resp.text.lower() or "imported" in resp.text.lower()
+
+    db_session.expire_all()
+    contacts = db_session.query(SiteContact).filter(SiteContact.email == "mgrimport@anycorp.com").all()
+    assert len(contacts) == 1, "Manager must be able to import contacts into any company"
+
+
+def test_import_contacts_preview_flags_unauthorized_for_rep(db_session: Session, sales_rep: User, other_user: User):
+    """Contacts preview must show rows matching an unmanageable company as
+    'unauthorized' (not importable) for a rep, but 'valid' for a manager."""
+    # Company owned by other_user — sales_rep cannot manage it
+    foreign_co = Company(
+        name="Unmanageable Preview Corp",
+        is_active=True,
+        account_owner_id=other_user.id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(foreign_co)
+    db_session.commit()
+
+    csv_bytes = (
+        b"company_name,contact_name,email,phone,role\nUnmanageable Preview Corp,Test Contact,test@unmanageable.com,,\n"
+    )
+
+    # Rep: row should be flagged as unauthorized / not importable
+    for c in _make_client(db_session, sales_rep):
+        resp = c.post(
+            "/v2/partials/customers/import/contacts/preview",
+            files={"file": ("contacts.csv", io.BytesIO(csv_bytes), "text/csv")},
+        )
+        assert resp.status_code == 200
+        assert (
+            "not your account" in resp.text.lower()
+            or "unauthorized" in resp.text.lower()
+            or "company not yours" in resp.text.lower()
+        )
+        # The hidden rows_json must be empty (no valid rows to submit)
+        assert (
+            "test@unmanageable.com" not in resp.text
+            or "0 to import" in resp.text.lower()
+            or '"email": "test@unmanageable.com"' not in resp.text
+        )
+
+
+def test_import_contacts_preview_manager_sees_all_valid(db_session: Session, mgr_user: User, other_user: User):
+    """A manager must see rows matching any company as 'valid' (not unauthorized)."""
+    any_co = Company(
+        name="Preview Any Corp Mgr",
+        is_active=True,
+        account_owner_id=other_user.id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(any_co)
+    db_session.commit()
+
+    csv_bytes = (
+        b"company_name,contact_name,email,phone,role\nPreview Any Corp Mgr,Mgr Contact,mgr@previewanycorp.com,,\n"
+    )
+
+    for c in _make_client(db_session, mgr_user):
+        resp = c.post(
+            "/v2/partials/customers/import/contacts/preview",
+            files={"file": ("contacts.csv", io.BytesIO(csv_bytes), "text/csv")},
+        )
+        assert resp.status_code == 200
+        # Manager should see it as valid (1 to import, no unauthorized)
+        assert "1 to import" in resp.text.lower() or "mgr contact" in resp.text
+        assert "not your account" not in resp.text.lower()
+        assert "unauthorized" not in resp.text.lower()
