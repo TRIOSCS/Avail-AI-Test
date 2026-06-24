@@ -234,6 +234,40 @@ window.openTroubleReport = async function openTroubleReport() {
     window.dispatchEvent(new CustomEvent('open-modal', { detail: { url: '/api/trouble-tickets/form' } }));
 };
 
+// Submit the trouble report. Called from the form's @click as a single
+// expression (window.submitTroubleReport($data)) — Alpine's evaluator rejects
+// multi-statement var/if/return bodies, so the logic lives here. `data` is the
+// form's reactive $data so toggling data.submitting drives the button state.
+window.submitTroubleReport = function submitTroubleReport(data) {
+    const descEl = document.getElementById('tr-description');
+    const desc = descEl ? descEl.value.trim() : '';
+    if (!desc) return;
+    data.submitting = true;
+    const csrf = document.cookie.match(/csrftoken=([^;]+)/) ? RegExp.$1 : '';
+    fetch('/api/trouble-tickets/submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
+        body: JSON.stringify({
+            description: desc,
+            screenshot: window._ttScreenshot || null,
+            page_url: window.location.href,
+            user_agent: navigator.userAgent,
+            viewport: window.innerWidth + 'x' + window.innerHeight,
+            error_log: JSON.stringify(Alpine.store('errorLog').entries),
+            network_log: JSON.stringify(Alpine.store('networkLog').entries),
+            auto_captured_context: window._ttContext ? JSON.stringify(window._ttContext) : null,
+        }),
+    }).then(function(r) {
+        return r.text();
+    }).then(function(html) {
+        htmx.swap('#modal-content', html, { swapStyle: 'innerHTML' });
+        data.submitting = false;
+    }).catch(function() {
+        htmx.swap('#modal-content', '<div class="p-6 text-sm text-rose-600">Something went wrong. Please try again.</div>', { swapStyle: 'innerHTML' });
+        data.submitting = false;
+    });
+};
+
 // Admin bulk action on selected tickets ('diagnose-bulk' | 'bulk-status'). POSTs
 // the ids, toasts the outcome, and fires 'ticketsUpdated' so the list refreshes.
 window.ticketBulkAction = function ticketBulkAction(kind, ids, status) {

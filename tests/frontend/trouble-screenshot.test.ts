@@ -15,7 +15,7 @@ import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
 vi.mock('htmx.org', () => ({
   default: {
     on: vi.fn(), off: vi.fn(), ajax: vi.fn(), process: vi.fn(), trigger: vi.fn(),
-    defineExtension: vi.fn(), createExtension: vi.fn(), config: {},
+    swap: vi.fn(), defineExtension: vi.fn(), createExtension: vi.fn(), config: {},
   },
 }));
 
@@ -124,6 +124,41 @@ describe('collectTroubleContext', () => {
     expect(typeof ctx.online).toBe('boolean');
     expect(ctx.app_build).toBe('build-xyz');
     expect(Array.isArray(ctx.nav_history)).toBe(true);
+  });
+});
+
+describe('submitTroubleReport (Alpine-safe single-call handler)', () => {
+  const flush = async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); };
+
+  it('POSTs the report payload with CSRF + screenshot + context, toggles submitting', async () => {
+    document.body.innerHTML = '<textarea id="tr-description">It broke</textarea><div id="modal-content"></div>';
+    document.cookie = 'csrftoken=tok123';
+    const fetchMock = vi.fn().mockResolvedValue({ text: async () => '<div>Report submitted!</div>' });
+    vi.stubGlobal('fetch', fetchMock);
+    (window as any)._ttScreenshot = 'data:image/png;base64,AAA';
+    (window as any)._ttContext = { current_view: 'search' };
+    const data: any = { submitting: false };
+
+    (window as any).submitTroubleReport(data);
+    expect(data.submitting).toBe(true); // set synchronously
+    await flush();
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/trouble-tickets/submit', expect.objectContaining({ method: 'POST' }));
+    const opts = fetchMock.mock.calls[0][1];
+    expect(opts.headers['X-CSRFToken']).toBe('tok123');
+    const body = JSON.parse(opts.body);
+    expect(body.description).toBe('It broke');
+    expect(body.screenshot).toBe('data:image/png;base64,AAA');
+    expect(JSON.parse(body.auto_captured_context).current_view).toBe('search');
+    expect(data.submitting).toBe(false); // reset after response
+  });
+
+  it('does nothing when the description is empty', () => {
+    document.body.innerHTML = '<textarea id="tr-description">   </textarea>';
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    (window as any).submitTroubleReport({ submitting: false });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 
