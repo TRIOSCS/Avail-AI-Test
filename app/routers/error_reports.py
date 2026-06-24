@@ -451,9 +451,15 @@ async def analyze_tickets(
     db.commit()
     logger.info("AI analysis grouped {} tickets into {} groups", len(tickets), len(result["groups"]))
 
-    resp = HTMLResponse("")
-    resp.headers["HX-Trigger"] = "ticketsUpdated"
-    return resp
+    # Render and return the freshly-grouped list partial so the innerHTML swap into
+    # #ticket-list shows the new groupings. The "open" logical filter mirrors the
+    # workspace's default Open view (submitted + in_progress).
+    from .htmx_views import _build_ticket_list_context
+
+    return template_response(
+        "htmx/partials/tickets/list.html",
+        {"request": request, **_build_ticket_list_context(db, "open")},
+    )
 
 
 @router.patch("/api/error-reports/{report_id}")

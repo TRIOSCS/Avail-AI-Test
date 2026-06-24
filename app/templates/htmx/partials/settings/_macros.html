@@ -9,16 +9,18 @@
 
 {# Settings tab button. `tab` is the Alpine tab id + the @click/:class token; `url`
    is the hx-get target; `label` the visible text; `icon_paths` a list of SVG path
-   `d` strings (the wrapper <svg> is identical across tabs). `extra_attrs` is appended
-   raw to the <button> (e.g. the System tab's hx-indicator + data-loading-disable). #}
-{% macro tab_button(tab, url, label, icon_paths, extra_attrs='') -%}
+   `d` strings (the wrapper <svg> is identical across tabs). `target` is the hx-target
+   selector (defaults to the in-shell content area so drill-in stays inside Settings).
+   `extra_attrs` is appended raw to the <button> (e.g. the System tab's hx-indicator
+   + data-loading-disable). #}
+{% macro tab_button(tab, url, label, icon_paths, extra_attrs='', target='#settings-content') -%}
 <button @click="tab = '{{ tab }}'"
             :class="tab === '{{ tab }}'
               ? 'border-b-2 border-brand-500 text-brand-600 bg-brand-50'
               : 'text-gray-600 hover:text-brand-600 hover:bg-brand-50'"
             class="shrink-0 whitespace-nowrap px-4 py-2.5 text-sm font-medium rounded-t-lg transition-colors"
             hx-get="{{ url }}"
-            hx-target="#settings-content"{{ extra_attrs|safe }}>
+            hx-target="{{ target }}"{{ extra_attrs|safe }}>
       <span class="flex items-center gap-1.5">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">{% for d in icon_paths %}
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="{{ d }}"/>{% endfor %}

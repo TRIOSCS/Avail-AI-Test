@@ -1,6 +1,5 @@
 <div hx-get="/v2/partials/trouble-tickets/{{ t.id }}"
-     hx-target="#main-content"
-     hx-push-url="/v2/trouble-tickets/{{ t.id }}"
+     hx-target="#settings-content"
      class="flex items-center gap-4 px-4 py-3 bg-white border border-gray-100 rounded-lg mb-1 cursor-pointer hover:bg-gray-50 transition-colors">
   <span class="text-xs font-mono text-gray-400 w-16 shrink-0">{{ t.ticket_number }}</span>
   <span class="text-sm text-gray-700 flex-1 truncate">{{ t.ai_summary or t.title }}</span>

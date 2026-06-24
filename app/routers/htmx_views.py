@@ -39,6 +39,7 @@ from ..constants import (
     SourcingStatus,
     TaskStatus,
     TicketSource,
+    TicketStatus,
     UserRole,
 )
 from ..database import get_db
@@ -292,6 +293,20 @@ async def quotes_list_redirect():
     return RedirectResponse(url="/v2/requisitions", status_code=307)
 
 
+@router.get("/v2/trouble-tickets", response_class=HTMLResponse)
+async def trouble_tickets_page_redirect():
+    """The Tickets triage console lives in-shell as a Settings tab — its rows and detail
+    drill into #settings-content, so a standalone full-page load would break drill-in.
+
+    Redirect the legacy /v2/trouble-tickets URL to the Settings page with the Tickets
+    tab active. Registered BEFORE the generic v2_page catch-all so it wins the route
+    match. Called by: browser navigation / stale bookmarks.
+    """
+    from fastapi.responses import RedirectResponse
+
+    return RedirectResponse(url="/v2/settings?tab=tickets", status_code=303)
+
+
 @router.get("/v2", response_class=HTMLResponse)
 @router.get("/v2/requisitions", response_class=HTMLResponse)
 @router.get("/v2/requisitions/{req_id:int}", response_class=HTMLResponse)
@@ -316,7 +331,6 @@ async def quotes_list_redirect():
 @router.get("/v2/follow-ups", response_class=HTMLResponse)
 @router.get("/v2/crm", response_class=HTMLResponse)
 @router.get("/v2/sightings", response_class=HTMLResponse)
-@router.get("/v2/trouble-tickets", response_class=HTMLResponse)
 @router.get("/v2/trouble-tickets/{ticket_id:int}", response_class=HTMLResponse)
 @router.get("/v2/my-day", response_class=HTMLResponse)
 async def v2_page(request: Request, db: Session = Depends(get_db)):
@@ -373,6 +387,12 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         # bookmarked /v2/search?mpn=<PN> paints the dossier on first load.
         mpn_qs = request.query_params.get("mpn", "").strip()
         partial_url = f"/v2/partials/search?mpn={quote(mpn_qs)}" if mpn_qs else "/v2/partials/search"
+    elif current_view == "settings":
+        # Thread ?tab= through so a deep-link / redirect (e.g. the legacy
+        # /v2/trouble-tickets → /v2/settings?tab=tickets) paints the right tab on
+        # first full-page load instead of defaulting to Connectors.
+        tab_qs = request.query_params.get("tab", "").strip()
+        partial_url = f"/v2/partials/settings?tab={quote(tab_qs)}" if tab_qs else "/v2/partials/settings"
     else:
         partial_url = f"/v2/partials/{current_view}"
     # Detail views: a trailing numeric id (/{view}/{id}) overrides the list partial with
@@ -16276,14 +16296,17 @@ async def trouble_tickets_workspace(request: Request, user: User = Depends(requi
     )
 
 
-@router.get("/v2/partials/trouble-tickets/list", response_class=HTMLResponse)
-async def trouble_tickets_list(
-    request: Request,
-    status: str = "",
-    user: User = Depends(require_admin),
-    db: Session = Depends(get_db),
-):
-    """Trouble Tickets list partial — grouped by root cause, filterable by status."""
+def _build_ticket_list_context(db: Session, status: str | None) -> dict:
+    """Query + group report_button tickets for the list partial.
+
+    Shared by trouble_tickets_list and error_reports.analyze_tickets so both
+    render the same grouped view. A logical ``status == "open"`` expands to the
+    (submitted, in_progress) set so in-progress tickets stay visible under the
+    "Open" pill; any other truthy status is an exact match; falsy means "all".
+
+    Called by: trouble_tickets_list, error_reports.analyze_tickets.
+    Depends on: TroubleTicket / RootCauseGroup models.
+    """
     from app.models.root_cause_group import RootCauseGroup
     from app.models.trouble_ticket import TroubleTicket
 
@@ -16292,7 +16315,9 @@ async def trouble_tickets_list(
         .options(joinedload(TroubleTicket.root_cause_group), joinedload(TroubleTicket.submitter))
         .filter(TroubleTicket.source == TicketSource.REPORT_BUTTON)
     )
-    if status:
+    if status == "open":
+        q = q.filter(TroubleTicket.status.in_([TicketStatus.SUBMITTED, TicketStatus.IN_PROGRESS]))
+    elif status:
         q = q.filter(TroubleTicket.status == status)
     q = q.order_by(desc(TroubleTicket.created_at))
     tickets = q.limit(200).all()
@@ -16313,16 +16338,26 @@ async def trouble_tickets_list(
         else:
             ungrouped.append(t)
 
+    return {
+        "total": total,
+        "groups": groups,
+        "grouped": grouped,
+        "ungrouped": ungrouped,
+        "current_status": status or "",
+    }
+
+
+@router.get("/v2/partials/trouble-tickets/list", response_class=HTMLResponse)
+async def trouble_tickets_list(
+    request: Request,
+    status: str = "",
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Trouble Tickets list partial — grouped by root cause, filterable by status."""
     return template_response(
         "htmx/partials/tickets/list.html",
-        {
-            **_base_ctx(request, user, "tickets"),
-            "total": total,
-            "groups": groups,
-            "grouped": grouped,
-            "ungrouped": ungrouped,
-            "current_status": status,
-        },
+        {**_base_ctx(request, user, "tickets"), **_build_ticket_list_context(db, status)},
     )
 
 

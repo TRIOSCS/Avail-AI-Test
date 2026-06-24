@@ -1,0 +1,173 @@
+"""test_tickets_wiring.py — wiring fixes for the Tickets triage workspace.
+
+Covers Task 3 of the settings-menu refinement:
+  1. Analyze returns the freshly-grouped list partial (not an empty body +
+     dead HX-Trigger) so the innerHTML swap into #ticket-list shows results.
+  2. The logical "open" status filter includes both submitted and in_progress
+     tickets (previously "submitted" hid in_progress).
+  3. Drill-in stays in the Settings shell — rows/detail target #settings-content
+     (no #main-content, no hx-push-url) and the full-page /v2/trouble-tickets URL
+     redirects to the Settings page with the Tickets tab active.
+  4. The detail status <select> only toasts success on r.ok (honest error path).
+
+Called by: pytest
+Depends on: conftest.py fixtures (client = admin-capable, db_session, test_user),
+            app.routers.error_reports, app.routers.htmx_views.
+"""
+
+from datetime import datetime, timezone
+from unittest.mock import AsyncMock, patch
+
+from sqlalchemy.orm import Session
+
+from app.constants import TicketStatus
+from app.models import User
+from app.models.trouble_ticket import TroubleTicket
+
+# ── Helpers ──────────────────────────────────────────────────────────
+
+
+def _seed_ticket(
+    db: Session,
+    user: User,
+    *,
+    ticket_number: str,
+    status: str,
+    title: str = "Something broke",
+) -> TroubleTicket:
+    """Seed one report_button ticket (mirrors error_reports._create_ticket shape)."""
+    t = TroubleTicket(
+        ticket_number=ticket_number,
+        submitted_by=user.id,
+        title=title,
+        description=title,
+        status=status,
+        source="report_button",
+        risk_tier="low",
+        category="other",
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(t)
+    db.commit()
+    db.refresh(t)
+    return t
+
+
+# ── Fix 2: "Open" filter includes in_progress ────────────────────────
+
+
+class TestOpenFilter:
+    def test_open_filter_includes_in_progress(self, client, db_session, test_user):
+        """Status=open surfaces BOTH submitted and in_progress tickets."""
+        _seed_ticket(db_session, test_user, ticket_number="TT-0001", status=TicketStatus.SUBMITTED)
+        _seed_ticket(db_session, test_user, ticket_number="TT-0002", status=TicketStatus.IN_PROGRESS)
+
+        html = client.get("/v2/partials/trouble-tickets/list?status=open").text
+        assert "TT-0001" in html
+        assert "TT-0002" in html
+
+    def test_open_filter_excludes_resolved(self, client, db_session, test_user):
+        """Status=open hides resolved/wont_fix tickets."""
+        _seed_ticket(db_session, test_user, ticket_number="TT-0001", status=TicketStatus.IN_PROGRESS)
+        _seed_ticket(db_session, test_user, ticket_number="TT-0003", status=TicketStatus.RESOLVED)
+
+        html = client.get("/v2/partials/trouble-tickets/list?status=open").text
+        assert "TT-0001" in html
+        assert "TT-0003" not in html
+
+    def test_explicit_submitted_still_filters(self, client, db_session, test_user):
+        """A literal status=submitted still narrows to just submitted (back-compat)."""
+        _seed_ticket(db_session, test_user, ticket_number="TT-0001", status=TicketStatus.SUBMITTED)
+        _seed_ticket(db_session, test_user, ticket_number="TT-0002", status=TicketStatus.IN_PROGRESS)
+
+        html = client.get("/v2/partials/trouble-tickets/list?status=submitted").text
+        assert "TT-0001" in html
+        assert "TT-0002" not in html
+
+
+# ── Fix 1: Analyze returns the grouped list partial ──────────────────
+
+
+class TestAnalyzeReturnsList:
+    @patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock)
+    def test_analyze_returns_nonempty_list_partial(self, mock_claude, client, db_session, test_user):
+        """Analyze renders + returns the grouped list (not an empty body)."""
+        t = _seed_ticket(db_session, test_user, ticket_number="TT-0001", status=TicketStatus.SUBMITTED)
+        mock_claude.return_value = {
+            "groups": [{"title": "Auth Errors", "suggested_fix": "Fix token", "ticket_ids": [t.id]}]
+        }
+
+        resp = client.post("/api/trouble-tickets/analyze")
+        assert resp.status_code == 200
+        body = resp.text.strip()
+        assert body != ""
+        # The list partial renders the freshly-grouped ticket + its group title.
+        assert "TT-0001" in body
+        assert "Auth Errors" in body
+
+    @patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock)
+    def test_analyze_drops_dead_ticketsupdated_trigger(self, mock_claude, client, db_session, test_user):
+        """No HX-Trigger: ticketsUpdated header (zero listeners) on the response."""
+        t = _seed_ticket(db_session, test_user, ticket_number="TT-0001", status=TicketStatus.SUBMITTED)
+        mock_claude.return_value = {"groups": [{"title": "Auth Errors", "ticket_ids": [t.id]}]}
+
+        resp = client.post("/api/trouble-tickets/analyze")
+        assert resp.status_code == 200
+        assert "ticketsUpdated" not in resp.headers.get("HX-Trigger", "")
+
+
+# ── Fix 3: in-shell drill-in (no #main-content / no push-url) ─────────
+
+
+class TestInShellDrillIn:
+    def test_row_targets_settings_content(self, client, db_session, test_user):
+        """Ticket rows drill into #settings-content, not #main-content."""
+        _seed_ticket(db_session, test_user, ticket_number="TT-0001", status=TicketStatus.SUBMITTED)
+        html = client.get("/v2/partials/trouble-tickets/list").text
+        assert "#settings-content" in html
+        assert 'hx-target="#main-content"' not in html
+        assert "hx-push-url" not in html
+
+    def test_detail_back_link_targets_settings_content(self, client, db_session, test_user):
+        """Detail (Back to Tickets) reloads the workspace into #settings-content."""
+        t = _seed_ticket(db_session, test_user, ticket_number="TT-0001", status=TicketStatus.SUBMITTED)
+        html = client.get(f"/v2/partials/trouble-tickets/{t.id}").text
+        assert "#settings-content" in html
+        assert 'hx-target="#main-content"' not in html
+        assert "hx-push-url" not in html
+
+    def test_full_page_redirects_to_settings_tickets_tab(self, client):
+        """GET /v2/trouble-tickets redirects (303) to Settings with Tickets active."""
+        resp = client.get("/v2/trouble-tickets", follow_redirects=False)
+        assert resp.status_code == 303
+        location = resp.headers["location"]
+        assert "/v2/settings" in location
+        assert "tab=tickets" in location
+
+    def test_settings_partial_tab_param_activates_tickets(self, client):
+        """The settings shell honors ?tab=tickets — this is the partial the full page
+        lazy-loads, so threading the redirect's tab param lands on Tickets."""
+        html = client.get("/v2/partials/settings?tab=tickets").text
+        # Alpine tab state initializes to 'tickets' and the first-paint content URL
+        # points at the tickets workspace (NOT a non-existent /settings/tickets route).
+        assert "{ tab: 'tickets' }" in html
+        assert 'hx-get="/v2/partials/trouble-tickets/workspace"' in html
+        assert "/v2/partials/settings/tickets" not in html
+
+    def test_settings_partial_default_tab_unchanged(self, client):
+        """The default (Connectors) tab still first-paints its own content URL."""
+        html = client.get("/v2/partials/settings").text
+        assert "{ tab: 'connectors' }" in html
+        assert 'hx-get="/v2/partials/settings/connectors"' in html
+
+
+# ── Fix 4: honest status toast (gate on r.ok) ────────────────────────
+
+
+class TestHonestToast:
+    def test_detail_status_handler_gates_on_ok(self, client, db_session, test_user):
+        """The status <select> handler checks r.ok and has a .catch path."""
+        t = _seed_ticket(db_session, test_user, ticket_number="TT-0001", status=TicketStatus.SUBMITTED)
+        html = client.get(f"/v2/partials/trouble-tickets/{t.id}").text
+        assert "r.ok" in html
+        assert ".catch" in html

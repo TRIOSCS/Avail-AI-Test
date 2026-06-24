@@ -2,9 +2,8 @@
 {% from "htmx/partials/tickets/_icons.html" import sparkle_icon, chevron_icon -%}
 {% from "htmx/partials/tickets/_context.html" import context_field -%}
 <div class="page-readable px-4 py-6">
-  {# Back button #}
-  <a hx-get="/v2/partials/trouble-tickets/workspace" hx-target="#main-content" hx-push-url="/v2/trouble-tickets"
-     @click="currentView = 'tickets'"
+  {# Back button — reloads the workspace into the Settings shell content area #}
+  <a hx-get="/v2/partials/trouble-tickets/workspace" hx-target="#settings-content"
      class="inline-flex items-center gap-1 text-sm text-gray-600 hover:text-gray-700 mb-4 cursor-pointer">
     <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M15 19l-7-7 7-7"/></svg>
     Back to Tickets
@@ -27,7 +26,15 @@
                 method: 'PATCH',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({status: status})
-              }).then(function(){ Alpine.store('toast').show = true; Alpine.store('toast').message = 'Status updated'; Alpine.store('toast').type = 'success'; })"
+              }).then(function(r){
+                var t = Alpine.store('toast');
+                if (r.ok) { t.message = 'Status updated'; t.type = 'success'; }
+                else { t.message = 'Could not update status'; t.type = 'error'; }
+                t.show = true;
+              }).catch(function(){
+                var t = Alpine.store('toast');
+                t.message = 'Could not update status'; t.type = 'error'; t.show = true;
+              })"
               class="text-sm border border-gray-300 rounded-md px-3 py-1.5 focus:border-brand-500 focus:ring-1 focus:ring-brand-500">
         <option value="submitted">Submitted</option>
         <option value="in_progress">In Progress</option>
