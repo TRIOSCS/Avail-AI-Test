@@ -34,13 +34,16 @@
     </div>
   </div>
 
-  {# Tabs #}
-  <div x-data="{ activeTab: 'parts' }">
+  {# Tabs — Build Quote is the in-workspace single-stage assembly tab (sibling to the
+     Quotes list). It points at its own owner/buyer-gated endpoint (NOT /tab/…) with an
+     explicit hx-target so the lazy load lands in #tab-content, never #main-content. #}
+  <div x-data="{ activeTab: '{{ initial_tab or 'parts' }}' }"
+       {% if initial_tab == 'build_quote' %}x-init="$nextTick(() => $refs.buildQuoteTab && htmx.trigger($refs.buildQuoteTab, 'click'))"{% endif %}>
     <div class="border-b border-gray-200 mb-4">
       <nav class="flex gap-6 -mb-px overflow-x-auto">
-        {% for tab_id, tab_label in [('parts', 'Parts'), ('offers', 'Offers'), ('responses', 'Responses'), ('quotes', 'Quotes'), ('buy_plans', 'Buy Plans')] %}
+        {% for tab_id, tab_label in [('parts', 'Parts'), ('offers', 'Offers'), ('responses', 'Responses'), ('quotes', 'Quotes'), ('build_quote', 'Build Quote'), ('buy_plans', 'Buy Plans')] %}
         <button @click="activeTab = '{{ tab_id }}'"
-                hx-get="/v2/partials/requisitions/{{ req.id }}/tab/{{ tab_id }}"
+                {% if tab_id == 'build_quote' %}x-ref="buildQuoteTab" hx-get="/v2/partials/requisitions/{{ req.id }}/build-quote"{% else %}hx-get="/v2/partials/requisitions/{{ req.id }}/tab/{{ tab_id }}"{% endif %}
                 hx-target="#tab-content"
                 hx-trigger="click"
                 hx-swap="innerHTML"
@@ -52,9 +55,14 @@
       </nav>
     </div>
 
-    {# Tab content — parts loaded inline on first load #}
+    {# Tab content — Parts is rendered inline (the default first view); a deep-linked
+       tab (e.g. ?tab=build_quote) shows a brief placeholder until its x-init click swaps in. #}
     <div id="tab-content">
+      {% if initial_tab in [none, 'parts'] %}
       {% include "htmx/partials/requisitions/tabs/parts.html" %}
+      {% else %}
+      <div class="py-10 text-center text-sm text-gray-400">Loading…</div>
+      {% endif %}
     </div>
   </div>
 </div>

@@ -1128,6 +1128,63 @@ crm/quotes.py + quote_builder_service.py
     +---> activity_service.py --> DB: INSERT activity_log
 ```
 
+**Build-Quote service layer (in-workspace tab — Chunk A).** Three additive,
+compute-on-read helpers in `quote_builder_service.py` back the reshaped
+Build-Quote tab (no schema change):
+
+- `best_cost_for(db, requirement_id)` / `best_costs_for(db, requirement_ids)`
+  — the MIN `unit_price` across a requirement's ACTIVE offers plus the offer
+  that provided it (`{"unit_cost", "offer_id"}`). Buyer-side mirror of the
+  resell `ExcessLineItem.best_offer_unit_price` rollup, computed at read time.
+- `margin_guardrail(cost, sell, *, min_margin_pct=10.0)` — pure helper
+  returning a short warning when a line sells below cost or under the margin
+  floor (matches `proactive_min_margin_pct` / `buyplan_min_margin_pct`).
+- `quote_export_context(quote)` — the CLEAN customer-facing whitelist
+  (`lines` of part_number/manufacturer/quantity/condition/cost/sell/margin/
+  extended + header). Mirrors `bid_back_service.bid_back_export_context`:
+  vendor / offer / source identity is stripped at ASSEMBLY, never by template
+  omission. `document_service.generate_quote_report_pdf` now renders
+  `quote_report.html` from this context, so the customer PDF cannot leak a
+  vendor name.
+
+**Build-Quote tab (in-workspace single-stage assembly — Chunk B).** The sales
+quote-builder modal is reshaped into a **Build Quote** tab on the requisition
+detail (`requisitions/detail.html` tab strip, sibling to the Quotes list tab),
+mirroring the resell **Build Bid** tab. The tab is lazy (`hx-trigger="click"`,
+explicit `hx-target="#tab-content"`) and owner/buyer-gated.
+
+```
+Browser (Build Quote tab) ──click──> GET /v2/partials/requisitions/{id}/build-quote
+    |                                      (require_requisition_access; quote_builder.py)
+    v
+build_quote_tab_data(db, id) ──> per line: best_costs_for ref + ACTIVE offers
+    |                            + sell seed (last-quoted -> else best-cost x 20% markup)
+    v
+requisitions/tabs/build_quote.html  (quoteBuilderTab Alpine: live margin + guardrail,
+    |                                 blended total, markup-% reseed; single-quoted x-data
+    |                                 + |tojson seed blob)
+    +-- check line -> sell-price field seeds -> live margin chip + guardrail
+    +-- "Assemble" --POST--> /v2/partials/requisitions/{id}/build-quote/assemble
+              |                  (parses QuoteBuilderLine[]; delegates to
+              v                   save_quote_from_builder -> revision lifecycle preserved)
+        re-render tab with inline clean summary (quote_export_context) +
+        Download PDF (existing /export/pdf) / Send (existing /quotes/{id}/send)
+```
+
+`quoteBuilderTab` (in `htmx_app.js`) is the single-stage simplification of the
+modal's `quoteBuilder` (same `(sell-cost)/sell` margin math + blended rollup, no
+two-panel decision flow). The list-toolbar "Build Quote" action re-points a SINGLE
+selected requisition to this tab via `?tab=build_quote` (the detail partial deep-links
++ auto-opens it); 2+ selections keep the cross-req bulk modal (`/quote-builder/multi`).
+
+**Per-line offer selection (Chunk B2).** Each line with 2+ ACTIVE offers shows a
+compact per-line `<select>` (progressive disclosure; default = best/cheapest) so the
+salesperson picks WHICH offer is used, not just the auto-best. The `selectOffer`
+Alpine action sets the line's `offerId` and re-points its `cost` so the live margin
+reflects the chosen offer. The choice rides the existing assemble payload
+(`offer_id`) through `save_quote_from_builder` onto `QuoteLine.offer_id`. Vendor
+identity stays internal — the customer doc/export strips it (`quote_export_context`).
+
 ## 6. Buy Plan Workflow
 
 ```
@@ -1137,6 +1194,10 @@ Quote accepted (status='won')
 buyplan_builder.py
     |
     +---> DB: INSERT buy_plans_v3 (DRAFT, linked to quote + requisition)
+    +---> _quote_chosen_offers: requirement_id -> QuoteLine.offer_id (one QuoteLine->Offer
+    |       join). Each line DEFAULTS to the offer the salesperson quoted (Chunk B2); when
+    |       that offer is stale/inactive or can't cover qty, falls back to the re-score /
+    |       auto-split path (mirrors resell CustomerBidLine.selected_offer_id provenance).
     +---> DB: INSERT buy_plan_lines (buyer assigned via ownership_service)
     +---> buyplan_scoring.py (ai_score per line)
     |

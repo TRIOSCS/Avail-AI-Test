@@ -1870,6 +1870,129 @@ Alpine.data('quoteBuilder', (initialLines, reqId, hasCustomerSite, requirementId
   },
 }));
 
+// ── quoteBuilderTab: in-workspace Build-Quote tab (single-stage inline) ──
+// The simplified reshape of the full quoteBuilder modal for the requisition-detail tab.
+// `data` is a plain reactive object keyed by requirement id, seeded inline by the server
+// template (best cost, best-offer id, sell seed, qty, mpn/mfr/condition per line). Reuses
+// the same margin math as the modal (margin = (sell - cost) / sell) and the same blended
+// rollup, but as a single inline form: check a line -> sell-price seeds -> live margin +
+// guardrail -> Assemble posts a QuoteBuilderLine[] payload to the assemble endpoint.
+Alpine.data('quoteBuilderTab', (reqId, hasCustomerSite, minMarginPct, quoteExists, data) => ({
+  reqId,
+  hasCustomerSite,
+  minMarginPct: minMarginPct || 10,
+  quoteExists: !!quoteExists,
+  markupPct: 20,
+  data: data || {},
+
+  // ── Per-line getters (reuse the modal's margin definition) ──
+  _sell(id) {
+    const l = this.data[id];
+    const v = parseFloat(l && l.price);
+    return Number.isFinite(v) ? v : null;
+  },
+  marginPct(id) {
+    const l = this.data[id];
+    const sell = this._sell(id);
+    if (!l || sell === null || sell <= 0 || l.cost === null) return null;
+    return (sell - l.cost) / sell * 100;
+  },
+  marginClass(id) {
+    const m = this.marginPct(id);
+    if (m === null) return 'text-gray-300';
+    if (m >= 25) return 'text-emerald-600';
+    if (m >= this.minMarginPct) return 'text-amber-600';
+    return 'text-rose-600';
+  },
+  guardrail(id) {
+    const l = this.data[id];
+    const sell = this._sell(id);
+    if (!l || sell === null || sell <= 0 || l.cost === null) return null;
+    if (sell < l.cost) return 'below cost';
+    const m = (sell - l.cost) / sell * 100;
+    if (m < this.minMarginPct) return 'thin margin';
+    return null;
+  },
+
+  // ── Selection + blended rollup ──
+  _sellOf(l) {
+    const v = parseFloat(l.price);
+    return Number.isFinite(v) && v > 0 ? v : null;
+  },
+  _selected() { return Object.values(this.data).filter(l => l.sel && this._sellOf(l) !== null); },
+  anySelected() { return Object.values(this.data).some(l => l.sel); },
+  get selectedCount() { return Object.values(this.data).filter(l => l.sel).length; },
+  get totalSell() {
+    return this._selected().reduce((sum, l) => sum + this._sellOf(l) * (l.qty || 0), 0);
+  },
+  get totalCost() {
+    return this._selected().reduce((sum, l) => sum + (l.cost || 0) * (l.qty || 0), 0);
+  },
+  get blendedMargin() {
+    const sell = this.totalSell;
+    if (sell <= 0) return null;
+    return (sell - this.totalCost) / sell * 100;
+  },
+  get blendedMarginClass() {
+    const m = this.blendedMargin;
+    if (m === null) return 'text-gray-300';
+    if (m >= 25) return 'text-emerald-600';
+    if (m >= this.minMarginPct) return 'text-amber-600';
+    return 'text-rose-600';
+  },
+  get blendedWarning() {
+    const m = this.blendedMargin;
+    if (m === null) return null;
+    if (this.totalSell < this.totalCost) return 'Blended quote is below cost.';
+    if (m < this.minMarginPct) return `Blended margin ${m.toFixed(1)}% is below the ${this.minMarginPct}% floor.`;
+    return null;
+  },
+
+  // ── Actions ──
+  applyMarkup() {
+    const factor = 1 + (this.markupPct || 0) / 100;
+    Object.values(this.data).forEach(l => {
+      if (l.cost !== null) l.price = (l.cost * factor).toFixed(4);
+    });
+  },
+
+  // Pick WHICH offer this line uses (default = best). Sets the chosen offerId (persisted on
+  // the QuoteLine, and the buy-plan default at build time) and re-points cost to that
+  // offer's price so the live margin reflects the offer actually being quoted. Vendor
+  // identity never leaves the builder — the customer doc strips it (quote_export_context).
+  selectOffer(id, offerId) {
+    const l = this.data[id];
+    if (!l) return;
+    const oid = parseInt(offerId, 10);
+    l.offerId = Number.isFinite(oid) ? oid : null;
+    const chosen = (l.offers || []).find(o => o.id === l.offerId);
+    if (chosen) l.cost = chosen.cost;
+  },
+
+  payload() {
+    return JSON.stringify(
+      Object.entries(this.data)
+        .filter(([id, l]) => l.sel && this._sellOf(l) !== null)
+        .map(([id, l]) => {
+          const sell = this._sellOf(l);
+          const cost = l.cost || 0;
+          const margin = sell > 0 ? parseFloat(((sell - cost) / sell * 100).toFixed(2)) : 0;
+          return {
+            requirement_id: Number(id),
+            offer_id: l.offerId,
+            mpn: l.mpn,
+            manufacturer: l.mfr,
+            qty: l.qty || 0,
+            cost_price: cost,
+            sell_price: sell,
+            margin_pct: margin,
+            condition: l.cond,
+          };
+        })
+    );
+  },
+}));
+
 // ── rfqVendorModal: sightings "Send RFQ" vendor-selection + compose modal ──
 // Rendered by app/templates/htmx/partials/sightings/vendor_modal.html. The server
 // passes the pre-selected vendor normalized-names and the requirement ids through a

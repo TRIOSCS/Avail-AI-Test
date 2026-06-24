@@ -15,6 +15,7 @@ from ..constants import OfferStatus, QuoteStatus
 from ..models import (
     Offer,
     Quote,
+    QuoteLine,
     Requirement,
     VendorCard,
 )
@@ -82,6 +83,12 @@ def build_buy_plan(quote_id: int, db: Session) -> BuyPlan:
     if not requirements:
         raise ValueError(f"No requirements found for requisition {quote.requisition_id}")
 
+    # Map requirement_id -> the offer the salesperson CHOSE on the quote, so the buy plan
+    # defaults to exactly what was quoted instead of re-scoring from scratch (mirrors the
+    # resell CustomerBidLine.selected_offer_id provenance). QuoteLine has no requirement_id,
+    # so derive it via the line's offer (Offer.requirement_id) in one join.
+    quote_offer_by_req = _quote_chosen_offers(quote_id, db)
+
     plan = BuyPlan(
         quote_id=quote_id,
         requisition_id=quote.requisition_id,
@@ -92,7 +99,7 @@ def build_buy_plan(quote_id: int, db: Session) -> BuyPlan:
     total_revenue = 0.0
 
     for req in requirements:
-        lines = _build_lines_for_requirement(req, customer_region, db)
+        lines = _build_lines_for_requirement(req, customer_region, db, quote_offer_by_req.get(req.id))
         for line in lines:
             line.buy_plan = plan
             # Accumulate financials
@@ -114,15 +121,44 @@ def build_buy_plan(quote_id: int, db: Session) -> BuyPlan:
     return plan
 
 
+def _quote_chosen_offers(quote_id: int, db: Session) -> dict[int, int]:
+    """Map ``requirement_id -> offer_id`` for the offers the salesperson chose on the
+    quote.
+
+    A quote line links the offer the salesperson is USING (``QuoteLine.offer_id``).
+    ``QuoteLine`` carries no requirement_id, so the requirement is derived through the
+    chosen offer (``Offer.requirement_id``) in a single join. Lines without an offer
+    (manually priced) are skipped, and a requirement with multiple quote lines keeps the
+    first chosen offer (one buy-plan default per requirement). The returned map is the
+    DEFAULT seed for ``_build_lines_for_requirement`` — staleness is validated there.
+    """
+    rows = (
+        db.query(Offer.requirement_id, QuoteLine.offer_id)
+        .join(Offer, Offer.id == QuoteLine.offer_id)
+        .filter(QuoteLine.quote_id == quote_id, QuoteLine.offer_id.isnot(None))
+        .all()
+    )
+    chosen: dict[int, int] = {}
+    for requirement_id, offer_id in rows:
+        if requirement_id is not None and requirement_id not in chosen:
+            chosen[requirement_id] = offer_id
+    return chosen
+
+
 def _build_lines_for_requirement(
     requirement: Requirement,
     customer_region: str | None,
     db: Session,
+    quote_offer_id: int | None = None,
 ) -> list[BuyPlanLine]:
     """Build buy plan lines for a single requirement.
 
-    Selects the best offer. If no single offer covers the full qty, auto-splits across
-    multiple vendors (prefer fewest splits, best score).
+    Defaults to the offer the salesperson CHOSE on the quote (*quote_offer_id*) when it
+    is still loadable + active: that offer leads (single-vendor path), and re-
+    score/auto-split only fills the remaining qty. When no chosen offer is given — or it
+    is stale/inactive — falls back to selecting the best offer; if no single offer
+    covers the full qty, auto-splits across multiple vendors (prefer fewest splits, best
+    score).
     """
     target_qty = requirement.target_qty or 1
 
@@ -149,18 +185,35 @@ def _build_lines_for_requirement(
     # Sort by score descending, then by lowest price, then newest offer (deterministic)
     scored.sort(key=lambda x: (-x[2], float(x[0].unit_price or 9999999), -(x[0].id or 0)))
 
-    # Try single-vendor fulfillment first
-    for offer, vendor_card, score in scored:
-        if (offer.qty_available or 0) >= target_qty:
-            buyer, reason = assign_buyer(offer, vendor_card, db)
-            line = _create_line(requirement, offer, target_qty, score, buyer, reason)
-            return [line]
-
-    # Auto-split: greedily assign from best-scored offers
-    lines = []
+    lines: list[BuyPlanLine] = []
     remaining = target_qty
-    used_offer_ids = set()
+    used_offer_ids: set[int] = set()
 
+    # Seed from the salesperson's chosen offer first when it is still active for this
+    # requirement. It leads the plan even when it cannot cover the full qty — the re-score
+    # fallback below then fills only the gap.
+    if quote_offer_id is not None:
+        chosen = next((tup for tup in scored if tup[0].id == quote_offer_id), None)
+        if chosen is not None:
+            offer, vendor_card, score = chosen
+            qty_avail = offer.qty_available or 0
+            if qty_avail > 0:
+                alloc = min(qty_avail, remaining)
+                buyer, reason = assign_buyer(offer, vendor_card, db)
+                lines.append(_create_line(requirement, offer, alloc, score, buyer, reason))
+                remaining -= alloc
+                used_offer_ids.add(offer.id)
+                if remaining <= 0:
+                    return lines
+
+    # Try single-vendor fulfillment first (re-score path) — only when nothing seeded yet.
+    if not lines:
+        for offer, vendor_card, score in scored:
+            if (offer.qty_available or 0) >= target_qty:
+                buyer, reason = assign_buyer(offer, vendor_card, db)
+                return [_create_line(requirement, offer, target_qty, score, buyer, reason)]
+
+    # Auto-split: greedily assign from best-scored offers to fill remaining qty.
     for offer, vendor_card, score in scored:
         if remaining <= 0:
             break
