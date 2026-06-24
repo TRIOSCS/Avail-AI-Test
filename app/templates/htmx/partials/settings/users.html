@@ -98,19 +98,24 @@
             </td>
             <td class="table-cell text-xs text-gray-600">{{ row.last_login_at | fmtdate }}</td>
             <td class="table-cell text-right">
-              {% if row.user.is_active %}
-              <button class="btn-secondary btn-sm text-rose-600"
-                      hx-post="/api/admin/users/{{ row.user.id }}/active"
-                      hx-vals='{"is_active": "false"}'
-                      hx-target="#users-content" hx-swap="outerHTML"
-                      hx-confirm="Deactivate {{ row.user.name or row.user.email }}? They won't be able to sign in.">Deactivate</button>
-              {% else %}
-              <button class="btn-secondary btn-sm text-emerald-600"
-                      hx-post="/api/admin/users/{{ row.user.id }}/active"
-                      hx-vals='{"is_active": "true"}'
-                      hx-target="#users-content" hx-swap="outerHTML"
-                      hx-confirm="Reactivate {{ row.user.name or row.user.email }}?">Activate</button>
-              {% endif %}
+              <div class="inline-flex items-center gap-2">
+                <button class="btn-secondary btn-sm"
+                        hx-get="/api/admin/users/{{ row.user.id }}/access-panel"
+                        hx-target="#user-access-modal" hx-swap="innerHTML">Access</button>
+                {% if row.user.is_active %}
+                <button class="btn-secondary btn-sm text-rose-600"
+                        hx-post="/api/admin/users/{{ row.user.id }}/active"
+                        hx-vals='{"is_active": "false"}'
+                        hx-target="#users-content" hx-swap="outerHTML"
+                        hx-confirm="Deactivate {{ row.user.name or row.user.email }}? They won't be able to sign in.">Deactivate</button>
+                {% else %}
+                <button class="btn-secondary btn-sm text-emerald-600"
+                        hx-post="/api/admin/users/{{ row.user.id }}/active"
+                        hx-vals='{"is_active": "true"}'
+                        hx-target="#users-content" hx-swap="outerHTML"
+                        hx-confirm="Reactivate {{ row.user.name or row.user.email }}?">Activate</button>
+                {% endif %}
+              </div>
             </td>
           </tr>
           {% endfor %}
@@ -119,4 +124,8 @@
     </div>
     {% endif %}
   </div>
+
+  {# Access editor modal mount — the access-panel partial loads here and removes
+     itself on close (Escape / backdrop / Close button). #}
+  <div id="user-access-modal"></div>
 </div>

@@ -5,14 +5,25 @@ Covers the Phase 1 (Foundation) primitives of the user-management feature:
   and the ops_verification delegation to VerificationGroupMember.
 - record_user_audit(): appends a UserAdminAudit row the caller commits.
 
+Plus Phase 4a (per-user access panel + nav gating):
+- module_access_map(): {nav_id: bool} powering the bottom-nav gate.
+- The admin Access editor POST /api/admin/users/{id}/access round-trips
+  access_overrides (proving the JSON column reassignment flushes) and drives
+  ops_verification through VerificationGroupMember, writing an audit row.
+- GET /access-panel + POST /access admin-only gating, 404 for the agent
+  target, and 400 for an invalid key.
+
 These are pure-unit tests against the shared in-memory SQLite session
-(conftest db_session + role-user fixtures). No HTTP / dependency overrides.
+(conftest db_session + role-user fixtures). The HTTP-level tests reuse the
+admin_client / non-admin monkeypatch technique from tests/test_user_management.py.
 
 Called by: pytest autodiscovery
-Depends on: app.dependencies, app.constants, app.services.user_admin, app.models
+Depends on: app.dependencies, app.constants, app.services.user_admin, app.models,
+            app.routers.admin.users
 """
 
 import pytest
+from fastapi.testclient import TestClient
 
 from app.constants import (
     CAPABILITY_ACCESS_KEYS,
@@ -25,6 +36,8 @@ from app.dependencies import user_has_access
 from app.models import UserAdminAudit
 from app.models.buy_plan import VerificationGroupMember
 from app.services.user_admin import record_user_audit
+
+_AGENT_EMAIL = "agent@availai.local"
 
 # The four interactive non-admin roles that preserve today's permissive behavior.
 _INTERACTIVE_ROLE_FIXTURES = ("test_user", "sales_user", "trader_user", "manager_user")
@@ -178,3 +191,234 @@ def test_record_user_audit_defaults_detail_to_empty(admin_user, test_user, db_se
     db_session.commit()
     row = db_session.query(UserAdminAudit).filter_by(target_user_id=test_user.id).one()
     assert row.detail == {}
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Phase 4a — per-user access panel + nav gating
+# ══════════════════════════════════════════════════════════════════════
+
+
+# ── module_access_map (powers the bottom-nav gate) ───────────────────
+
+
+class TestModuleAccessMap:
+    def test_admin_all_true(self, admin_user):
+        from app.routers.admin.users import NAV_ID_TO_ACCESS, module_access_map
+
+        m = module_access_map(admin_user)
+        assert set(m) == set(NAV_ID_TO_ACCESS)
+        assert all(m.values()), m
+
+    def test_buyer_all_true_by_default(self, test_user):
+        from app.routers.admin.users import NAV_ID_TO_ACCESS, module_access_map
+
+        m = module_access_map(test_user)
+        assert set(m) == set(NAV_ID_TO_ACCESS)
+        assert all(m.values()), m
+
+    def test_override_revokes_single_module(self, test_user, db_session):
+        from app.routers.admin.users import module_access_map
+
+        # The map is keyed by hyphenated nav-id; the override is keyed by the
+        # AccessKey value ("crm"). crm's nav-id IS "crm" so they coincide here.
+        test_user.access_overrides = {AccessKey.CRM.value: False}
+        db_session.commit()
+        m = module_access_map(test_user)
+        assert m["crm"] is False
+        # Every other nav module stays visible.
+        for nav_id, allowed in m.items():
+            if nav_id != "crm":
+                assert allowed is True, nav_id
+
+    def test_nav_id_map_covers_every_module_key(self):
+        from app.routers.admin.users import NAV_ID_TO_ACCESS
+
+        # Every hyphenated nav-id maps to a module AccessKey, and the set of mapped
+        # keys is exactly MODULE_ACCESS_KEYS (no module ungated, none invented).
+        assert set(NAV_ID_TO_ACCESS.values()) == set(MODULE_ACCESS_KEYS)
+        assert all(isinstance(k, str) and isinstance(v, AccessKey) for k, v in NAV_ID_TO_ACCESS.items())
+
+
+# ── HTTP fixtures (mirror tests/test_user_management.py) ─────────────
+
+
+@pytest.fixture()
+def admin_client(db_session, admin_user):
+    """TestClient authenticated as the admin user (require_admin satisfied)."""
+    from app.database import get_db
+    from app.dependencies import require_admin, require_user
+    from app.main import app
+
+    app.dependency_overrides[get_db] = lambda: db_session
+    app.dependency_overrides[require_user] = lambda: admin_user
+    app.dependency_overrides[require_admin] = lambda: admin_user
+    try:
+        yield TestClient(app)
+    finally:
+        for dep in (get_db, require_user, require_admin):
+            app.dependency_overrides.pop(dep, None)
+
+
+def _make_user(db, *, email, role="buyer", name=None, is_active=True):
+    from datetime import datetime, timezone
+
+    from app.models import User
+
+    u = User(
+        email=email,
+        name=name or email.split("@")[0],
+        role=role,
+        is_active=is_active,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(u)
+    db.commit()
+    db.refresh(u)
+    return u
+
+
+# ── POST /access — access_overrides round-trip (proves JSON reassignment) ─
+
+
+class TestAccessOverridePost:
+    def test_off_then_default_round_trips_and_flushes(self, admin_client, db_session, test_user):
+        # OFF: explicit revoke is persisted AND user_has_access reflects it.
+        r = admin_client.post(
+            f"/api/admin/users/{test_user.id}/access",
+            data={"key": AccessKey.CRM.value, "value": "off"},
+        )
+        assert r.status_code == 200
+        db_session.refresh(test_user)
+        assert test_user.access_overrides.get(AccessKey.CRM.value) is False
+        assert user_has_access(test_user, AccessKey.CRM) is False
+        rows = (
+            db_session.query(UserAdminAudit)
+            .filter_by(target_user_id=test_user.id, action=UserAuditAction.ACCESS_REVOKE.value)
+            .all()
+        )
+        assert len(rows) == 1
+        assert rows[0].detail == {"key": AccessKey.CRM.value, "value": "off"}
+
+        # DEFAULT: the key is popped from the dict → role default applies again.
+        r = admin_client.post(
+            f"/api/admin/users/{test_user.id}/access",
+            data={"key": AccessKey.CRM.value, "value": "default"},
+        )
+        assert r.status_code == 200
+        db_session.refresh(test_user)
+        assert AccessKey.CRM.value not in (test_user.access_overrides or {})
+        assert user_has_access(test_user, AccessKey.CRM) is True
+
+    def test_on_grants_for_empty_default_role(self, admin_client, db_session):
+        # An agent's role default is empty; ON must grant via a flushed override.
+        agent = _make_user(db_session, email="svc@trioscs.com", role="agent")
+        r = admin_client.post(
+            f"/api/admin/users/{agent.id}/access",
+            data={"key": AccessKey.EXPORT_DATA.value, "value": "on"},
+        )
+        assert r.status_code == 200
+        db_session.refresh(agent)
+        assert agent.access_overrides.get(AccessKey.EXPORT_DATA.value) is True
+        assert user_has_access(agent, AccessKey.EXPORT_DATA) is True
+        rows = (
+            db_session.query(UserAdminAudit)
+            .filter_by(target_user_id=agent.id, action=UserAuditAction.ACCESS_GRANT.value)
+            .all()
+        )
+        assert len(rows) == 1
+
+    def test_invalid_key_400(self, admin_client, db_session, test_user):
+        r = admin_client.post(
+            f"/api/admin/users/{test_user.id}/access",
+            data={"key": "not_a_real_key", "value": "on"},
+        )
+        assert r.status_code == 400
+
+
+# ── POST /access — ops_verification drives VerificationGroupMember ────
+
+
+class TestAccessOpsVerification:
+    def test_on_then_off_via_membership_not_overrides(self, admin_client, db_session, test_user):
+        # ON → creates an active VerificationGroupMember; overrides untouched.
+        r = admin_client.post(
+            f"/api/admin/users/{test_user.id}/access",
+            data={"key": AccessKey.OPS_VERIFICATION.value, "value": "on"},
+        )
+        assert r.status_code == 200
+        db_session.refresh(test_user)
+        assert AccessKey.OPS_VERIFICATION.value not in (test_user.access_overrides or {})
+        member = db_session.query(VerificationGroupMember).filter_by(user_id=test_user.id).one()
+        assert member.is_active is True
+        assert user_has_access(test_user, AccessKey.OPS_VERIFICATION, db_session) is True
+
+        # OFF → flips the existing membership inactive (no second row).
+        r = admin_client.post(
+            f"/api/admin/users/{test_user.id}/access",
+            data={"key": AccessKey.OPS_VERIFICATION.value, "value": "off"},
+        )
+        assert r.status_code == 200
+        members = db_session.query(VerificationGroupMember).filter_by(user_id=test_user.id).all()
+        assert len(members) == 1
+        assert members[0].is_active is False
+        db_session.refresh(test_user)
+        assert user_has_access(test_user, AccessKey.OPS_VERIFICATION, db_session) is False
+
+    def test_default_treated_as_off(self, admin_client, db_session, test_user):
+        db_session.add(VerificationGroupMember(user_id=test_user.id, is_active=True))
+        db_session.commit()
+        r = admin_client.post(
+            f"/api/admin/users/{test_user.id}/access",
+            data={"key": AccessKey.OPS_VERIFICATION.value, "value": "default"},
+        )
+        assert r.status_code == 200
+        member = db_session.query(VerificationGroupMember).filter_by(user_id=test_user.id).one()
+        assert member.is_active is False
+
+
+# ── access-panel render + admin-only gating + 404 for agent target ───
+
+
+class TestAccessPanelRender:
+    def test_panel_renders_for_admin(self, admin_client, test_user):
+        r = admin_client.get(f"/api/admin/users/{test_user.id}/access-panel")
+        assert r.status_code == 200
+        assert "Access" in r.text
+        # Capability + module labels both present.
+        assert "Buy Plans" in r.text
+        assert "Send RFQs" in r.text
+
+    def test_panel_404_for_agent_target(self, admin_client, db_session):
+        agent = _make_user(db_session, email=_AGENT_EMAIL, role="agent")
+        assert admin_client.get(f"/api/admin/users/{agent.id}/access-panel").status_code == 404
+
+    def test_access_404_for_agent_target(self, admin_client, db_session):
+        agent = _make_user(db_session, email=_AGENT_EMAIL, role="agent")
+        r = admin_client.post(
+            f"/api/admin/users/{agent.id}/access",
+            data={"key": AccessKey.CRM.value, "value": "off"},
+        )
+        assert r.status_code == 404
+
+
+class TestAccessAdminOnly:
+    @pytest.mark.parametrize("role", ["buyer", "manager"])
+    def test_endpoints_403_for_non_admin(self, db_session, role, monkeypatch, test_user):
+        from app.database import get_db
+        from app.main import app
+
+        actor = _make_user(db_session, email=f"{role}@gate.test", role=role)
+        monkeypatch.setattr("app.dependencies.require_user", lambda request, db: actor)
+        app.dependency_overrides[get_db] = lambda: db_session
+        try:
+            c = TestClient(app)
+            assert c.get(f"/api/admin/users/{test_user.id}/access-panel").status_code == 403
+            assert (
+                c.post(
+                    f"/api/admin/users/{test_user.id}/access",
+                    data={"key": AccessKey.CRM.value, "value": "off"},
+                ).status_code
+                == 403
+            )
+        finally:
+            app.dependency_overrides.pop(get_db, None)

@@ -262,12 +262,17 @@ def _parse_card_filter_params(
 
 def _base_ctx(request: Request, user: User, current_view: str = "") -> dict:
     """Shared template context for all views."""
+    from .admin.users import module_access_map
+
     assets = _vite_assets()
     return {
         "request": request,
         "user_name": user.name if user else "",
         "user_email": user.email if user else "",
         "is_admin": user.role == UserRole.ADMIN if user else False,
+        # Bottom-nav gate: {hyphenated-nav-id: bool}. None user → all True (shell never
+        # blanked). Module keys don't need db (user_has_access handles admin/role-default).
+        "access": module_access_map(user),
         "current_view": current_view,
         "vite_js": assets["js_file"],
         "vite_css": assets["css_files"],
