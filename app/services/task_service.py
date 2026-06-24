@@ -387,6 +387,7 @@ def create_vendor_task(
 
 def get_open_tasks_for_vendor_card(db: Session, vendor_card_id: int) -> list[RequisitionTask]:
     """Return open tasks scoped to a vendor card, ordered by due_at asc (nulls last)."""
+    # NOTE: Only queries by vendor_card_id. Tasks scoped to vendor_contact only are not surfaced here.
     return (
         db.query(RequisitionTask)
         .filter(

@@ -3816,7 +3816,7 @@ the current implementation.
 | Auth | 7 | OAuth login/callback/logout, status |
 | Requisitions | 47 | CRUD, search, bulk archive/assign, claim; requisitions2 split-panel detail with lazy-loaded Offers/Activity tabs (`GET /requisitions2/{id}/offers` + `/activity`, reusing the shared activity timeline) |
 | Requirements | 23 | Add parts, CSV upload, search, leads, tasks |
-| Vendors | 38 | CRUD, contacts, stock history, reviews, tags; new create: `POST /api/vendors` (201, 409 dup), `GET /v2/partials/vendors/create-form`, `POST /v2/partials/vendors/create`; delete UI: `DELETE /v2/partials/vendors/{id}` (admin, 400 if active offers) — both returning vendor detail/list HTML |
+| Vendors | 48 | CRUD, contacts, stock history, reviews, tags; new create: `POST /api/vendors` (201, 409 dup), `GET /v2/partials/vendors/create-form`, `POST /v2/partials/vendors/create`; delete UI: `DELETE /v2/partials/vendors/{id}` (admin, 400 if active offers) — both returning vendor detail/list HTML; CRM parity: activity tab (`GET /v2/partials/vendors/{id}/tabs?tab=activity`), add-note (`POST /v2/partials/vendors/{id}/activity/add-note`, cadence-neutral, `log_vendor_note(bump_last_activity=False)`), tasks tab + CRUD, attachments (`GET/POST /api/vendors/{id}/attachments`, `DELETE /api/vendor-attachments/{id}`) |
 | Companies/CRM | 42 | CRUD, sites, contacts, enrichment, import; CDM workspace (`/v2/partials/customers`, `/v2/partials/customers/account-list`); outreach logging (`POST /api/activity/outreach-initiated`); CRM task CRUD: `DELETE /v2/partials/tasks/{id}` (delete), `GET /v2/partials/tasks/{id}/edit-form` + `POST /v2/partials/tasks/{id}/edit` (edit); account add-note: `GET /v2/partials/customers/{id}/activity/add-note-form` + `POST /v2/partials/customers/{id}/activity/add-note` (cadence-neutral, direction=None → no last_outbound_at bump); all three gates reuse `_is_crm_task_authorized` (task) or `can_manage_account` (note) |
 | Offers | 30 | CRUD, line items, accept/reject, changelog |
 | Quotes | 25 | CRUD, send, PDF, e-signature, pricing history; bare `/v2/quotes` 307→`/v2/requisitions`; list partial removed; detail `/v2/quotes/{id}` unchanged; surfaced via Reqs workspace + CRM account Quotes tabs |
@@ -3984,17 +3984,18 @@ it never infers success from the HTTP status alone.
 
 Backs the one shared file-attachments component
 (`templates/htmx/partials/shared/_attachments.html`, macro
-`attachments_panel(kind, entity_id)`) used identically on **five** surfaces:
+`attachments_panel(kind, entity_id)`) used identically on **eight** surfaces:
 Company "Files" tab, MaterialCard "Files" tab, the contact-card kebab "Files" modal,
-the requisition Parts-tab per-requirement Files drawer, and the offer card. The macro
-maps `kind ∈ {requisition,requirement,offer,company,contact,material}` → the per-kind
-list/upload/delete URL family internally; download/open is always
+the requisition Parts-tab per-requirement Files drawer, the offer card, the vendor card
+"Files" tab, and vendor contact. The macro maps
+`kind ∈ {requisition,requirement,offer,company,contact,material,vendor_card,vendor_contact}`
+→ the per-kind list/upload/delete URL family internally; download/open is always
 `GET /api/attachments/{kind}/{att_id}/content`.
 
 Flow (HTMX-native, no JSON-then-client-render):
 - The list container lazy-loads via `hx-get` the per-kind list URL on `load` and
   re-fetches on the internal `attachments:refresh` trigger (explicit `hx-target="this"`).
-- The **six list endpoints** branch on `HX-Request`: present → render
+- The **eight list endpoints** branch on `HX-Request`: present → render
   `shared/_attachment_list.html` (HTML rows); absent → the legacy JSON array
   (back-compat — existing tests assert the array). The branch is centralized in
   `attachment_service.attachment_list_response(request, kind, entity_id, rows)`, which
@@ -4126,3 +4127,97 @@ Three inflows that feed idle CRM accounts into the prospecting pool.
 - `app/services/activity_service.get_last_activity_at()` now excludes `NOTE`, `SALES_NOTE`, `CONTACT_NOTE` from the `func.max(created_at)` query
 - `_NOTE_TYPES` frozenset defined at module level for clarity
 - Effect: a company with only note activities is treated as dormant; real activity (email, call, quote, etc.) still resets the 90-day clock
+
+---
+
+## Vendor CRM Parity — Activity, Tasks, Attachments
+
+Customer-parity feature giving vendor cards the same activity timeline, tasks, and file
+attachments that CRM accounts have. All routes live in `app/routers/vendors/` and are
+registered under `/v2/partials/vendors` (HTMX partials) and `/api/vendors` (JSON/upload).
+
+### Vendor Activity Tab
+
+```
+GET /v2/partials/vendors/{id}/tabs?tab=activity
+    |
+    v
+vendor_tabs() in app/routers/vendors/tabs.py
+    |
+    +---> activity_service.get_vendor_activities(db, vendor_card_id)
+    |       Returns ActivityLog rows scoped to vendor_card_id, newest-first.
+    |       Same timeline renderer as CRM account activity tab.
+    |
+    +---> renders vendors/tabs/activity.html (date-grouped timeline)
+```
+
+```
+POST /v2/partials/vendors/{id}/activity/add-note   (require_user)
+    |
+    v
+vendor_add_note() in app/routers/vendors/activity.py
+    |
+    +---> log_vendor_note(db, vendor_card_id, user_id, note_text, bump_last_activity=False)
+    |       Writes ActivityLog(activity_type=NOTE, vendor_card_id=...) — cadence-neutral.
+    |       Does NOT update last_activity_at on VendorCard (this is intentional —
+    |       log_vendor_note(bump_last_activity=False) preserves the cadence clock for
+    |       real outreach events only; notes are internal team annotations).
+    |
+    +---> re-renders the activity tab partial (OOB swap)
+```
+
+**Contract note:** `log_vendor_note(bump_last_activity=False)` from the UI add-note route
+is cadence-neutral — it does NOT update `vendor_card.last_activity_at`. Real outreach
+events (email, call) remain the sole drivers of the cadence clock.
+
+### Vendor Tasks Tab
+
+```
+GET /v2/partials/vendors/{id}/tabs?tab=tasks
+    |
+    +---> get_open_tasks_for_vendor_card(db, vendor_card_id)
+    |       Query: RequisitionTask WHERE vendor_card_id=? AND status!=DONE
+    |       NOTE: Tasks scoped to vendor_contact_id only are NOT surfaced here.
+    |
+    +---> renders vendors/tabs/tasks.html (task list + add-form toggle)
+
+POST /v2/partials/vendors/{id}/tasks   (require_user)
+    |
+    +---> create_vendor_task(db, vendor_card_id, title, due_at, user_id)
+    |       Writes RequisitionTask(vendor_card_id=..., scope=vendor_card)
+    |
+    +---> re-renders tasks tab partial
+
+POST /v2/partials/tasks/{id}/complete  (require_user)
+    — already existed for CRM tasks; now also handles vendor tasks
+    — _is_crm_task_authorized() gate covers vendor_card_id and vendor_contact_id scope
+
+DELETE /v2/partials/tasks/{id}         (require_admin for vendor tasks)
+    — already existed for CRM tasks; same handler covers vendor tasks
+```
+
+### Vendor Attachments
+
+```
+GET  /api/vendors/{id}/attachments      (require_user)
+    |
+    +---> attachment_service.list_vendor_card_attachments(db, vendor_card_id)
+    |       Returns VendorCardAttachment rows for the vendor.
+    |       HX-Request present → shared/_attachment_list.html HTML rows
+    |       HX-Request absent  → legacy JSON array (back-compat)
+
+POST /api/vendors/{id}/attachments      (require_user, multipart/form-data)
+    |
+    +---> attachment_service.upload_vendor_card_attachment(db, vendor_card_id, file, user_id)
+    |       Uploads to SharePoint/OneDrive library, inserts VendorCardAttachment row.
+
+DELETE /api/vendor-attachments/{id}     (require_admin)
+    |
+    +---> attachment_service.delete_vendor_card_attachment(db, att_id, user_id)
+            Deletes VendorCardAttachment row + removes from library if library_item_id set.
+```
+
+All three endpoints are consumed by the shared `attachmentsPanel` Alpine component via
+`kind="vendor_card"`. Vendor contact attachments use `kind="vendor_contact"` with
+analogous routes under `/api/vendor-contacts/{id}/attachments` and
+`/api/vendor-contact-attachments/{id}`.

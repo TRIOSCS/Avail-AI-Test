@@ -423,6 +423,38 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 
 **`strategic_vendors`** — Claimed vendor-buyer relationships with expiry
 
+**`vendor_card_attachments`** — Files attached to a vendor card (vendor parity with `company_attachments`)
+| Column | Type | Notes |
+|--------|------|-------|
+| id | Integer PK | |
+| vendor_card_id | FK -> vendor_cards (CASCADE), indexed | |
+| file_name | String 500, not null | |
+| library_item_id | String 500, nullable | Graph item id (`NULL` = not yet uploaded) |
+| library_drive_id | String 200, nullable | `NULL` → user OneDrive fallback; non-NULL → company SharePoint library |
+| library_web_url | Text, nullable | Shareable URL |
+| content_type | String 100, nullable | |
+| size_bytes | Integer, nullable | |
+| uploaded_by_id | FK -> users (SET NULL) | |
+| created_at | UTCDateTime | |
+
+Model: `VendorCardAttachment` (`app/models/vendor_attachments.py`).
+
+**`vendor_contact_attachments`** — Files attached to a vendor contact (same column shape as `vendor_card_attachments`)
+| Column | Type | Notes |
+|--------|------|-------|
+| id | Integer PK | |
+| vendor_contact_id | FK -> vendor_contacts (CASCADE), indexed | |
+| file_name | String 500, not null | |
+| library_item_id | String 500, nullable | |
+| library_drive_id | String 200, nullable | `NULL` → user OneDrive; non-NULL → company SharePoint library |
+| library_web_url | Text, nullable | |
+| content_type | String 100, nullable | |
+| size_bytes | Integer, nullable | |
+| uploaded_by_id | FK -> users (SET NULL) | |
+| created_at | UTCDateTime | |
+
+Model: `VendorContactAttachment` (`app/models/vendor_attachments.py`).
+
 ---
 
 ### Materials & Parts
@@ -783,7 +815,16 @@ Verdict values: `pass`, `screened_out`, `insufficient_data`, `disabled`, `cap_re
 
 ### Tasks & Tickets
 
-**`requisition_tasks`** — Tasks tied to requisitions (manual, system, or AI-generated)
+**`requisition_tasks`** — Tasks tied to requisitions, CRM accounts, or vendor cards (manual, system, or AI-generated). The `CHECK ck_requisition_task_scope` constraint requires exactly one of five scope columns to be non-NULL: `requisition_id` (req task), `company_id` (CRM account task), `site_contact_id` (CRM contact task), `vendor_card_id` (vendor card task), or `vendor_contact_id` (vendor contact task).
+
+New columns (vendor parity):
+| Column | Type | Notes |
+|--------|------|-------|
+| vendor_card_id | FK -> vendor_cards (CASCADE), nullable, indexed (`ix_requisition_tasks_vendor_card`) | Scope: task belongs to a vendor card |
+| vendor_contact_id | FK -> vendor_contacts (CASCADE), nullable, indexed (`ix_requisition_tasks_vendor_contact`) | Scope: task belongs to a vendor contact |
+
+> Previously the CHECK constraint covered 3 scope columns (requisition_id, company_id, site_contact_id); it now extends to all 5. Tasks scoped to `vendor_contact_id` only are **not** surfaced by `get_open_tasks_for_vendor_card` (which queries by `vendor_card_id`); see `# NOTE` in `app/services/task_service.py`.
+
 **`trouble_tickets`** — Bug reports with screenshots, AI diagnosis
 **`root_cause_groups`** — Grouped similar tickets
 **`notifications`** — User notification queue
