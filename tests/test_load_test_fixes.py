@@ -269,15 +269,21 @@ class TestMarkSold:
         assert resp.status_code == 404
 
     def test_mark_sold_by_other_user_forbidden(self, client, db_session, test_user):
-        """Another non-admin user cannot mark someone else's offer as sold."""
+        """A restricted (SALES/TRADER) non-owner cannot mark someone else's offer
+        sold."""
+        # require_requisition_access only gates SALES/TRADER; the default buyer role
+        # no-ops. Make the acting user restricted so the deny path is actually exercised.
+        # Scoped to THIS test only — do not mutate the shared fixture for sibling tests.
+        test_user.role = "sales"
         creator = _make_user(db_session, "Creator")
         req = _make_req(db_session, creator)
         o = _make_offer(db_session, req, creator)
         db_session.commit()
 
-        # test_user (from conftest) is NOT the creator and NOT admin
+        # test_user is a restricted non-owner (not the req creator, not the offer owner).
+        # The gate raises 404 (not 403) so resource existence isn't leaked.
         resp = client.patch(f"/api/offers/{o.id}/mark-sold")
-        assert resp.status_code == 403
+        assert resp.status_code == 404
 
     def test_mark_sold_idempotent(self, client, db_session, test_user):
         """Marking an already-sold offer returns ok without error."""

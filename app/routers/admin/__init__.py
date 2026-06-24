@@ -21,8 +21,10 @@ from ...services.credential_service import decrypt_value, encrypt_value, mask_va
 from .buy_plan_ops import router as buy_plan_ops_router
 from .spec_codes import router as spec_codes_router
 from .system import router as system_router
+from .users import router as users_router
 
 router = APIRouter()
 router.include_router(system_router)
 router.include_router(spec_codes_router)
 router.include_router(buy_plan_ops_router)
+router.include_router(users_router)

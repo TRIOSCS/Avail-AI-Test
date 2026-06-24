@@ -12,8 +12,9 @@ from fastapi.responses import Response
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from ..constants import AccessKey
 from ..database import get_db
-from ..dependencies import get_quote_for_user, require_user
+from ..dependencies import get_quote_for_user, require_access, require_user
 from ..models import User
 from ..schemas.quote_builder import QuoteBuilderSaveRequest
 
@@ -209,7 +210,7 @@ async def quote_builder_save(
 async def quote_builder_export_excel(
     req_id: int,
     quote_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.EXPORT_DATA)),
     db: Session = Depends(get_db),
 ):
     """Stream an Excel export of a saved quote."""
@@ -245,7 +246,7 @@ async def quote_builder_export_excel(
 async def quote_builder_export_pdf(
     req_id: int,
     quote_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.EXPORT_DATA)),
     db: Session = Depends(get_db),
 ):
     """Stream a PDF export of a saved quote (reuses existing PDF generator)."""

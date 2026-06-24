@@ -370,6 +370,7 @@ def cdm_list_ctx(
     disposition: str | None = None,
     has_open_reqs: bool = False,
     include_overdue: bool = False,
+    include_users: bool = False,
 ) -> dict:
     """Shared context for the CDM workspace shell and its account-list partial.
 
@@ -377,6 +378,9 @@ def cdm_list_ctx(
     "needs a call" chip, an extra COUNT query) AND account_types (the type
     dropdown options). The account-list refresh route re-renders neither, so
     it omits both and skips the COUNT query.
+    include_users: adds "users" — the active-user list (name-sorted) that backs
+    the bulk "Assign owner" <select>. Carried ONLY for managers/admins (the
+    bulk assign-owner action is manager/admin-only server-side); reps omit it.
     segment: when non-zero, filter companies carrying that segment tag_id.
     disposition: None/"" = default; "active" = active only; "bucket" = bucket only.
     has_open_reqs: when True, restrict to companies with at least one open requisition.
@@ -440,6 +444,8 @@ def cdm_list_ctx(
     if include_overdue:
         ctx["overdue_count"] = cdm_overdue_count(db, user, now=now)
         ctx["account_types"] = CDM_ACCOUNT_TYPES
+    if include_users:
+        ctx["users"] = db.query(User).filter(User.is_active.is_(True)).order_by(User.name).all()
     return ctx
 
 

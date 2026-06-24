@@ -198,8 +198,12 @@ class TestRowAction:
             resp = client.post(f"/requisitions2/{active_req.id}/action/archive")
         assert resp.status_code == 200
 
-    def test_assign_action_with_owner(self, client: TestClient, active_req: Requisition, test_user: User):
-        """Assign action with owner_id sets created_by."""
+    def test_assign_action_with_owner(
+        self, client: TestClient, active_req: Requisition, test_user: User, db_session: Session
+    ):
+        """Assign action with owner_id sets created_by (manager-only action)."""
+        test_user.role = "manager"  # owner reassignment is gated to manager/admin
+        db_session.commit()
         resp = client.post(
             f"/requisitions2/{active_req.id}/action/assign",
             data={"owner_id": str(test_user.id)},

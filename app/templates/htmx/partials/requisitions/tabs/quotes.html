@@ -24,10 +24,12 @@
       </thead>
       <tbody class="divide-y divide-gray-200">
         {% for q in quotes %}
-        <tr class="hover:bg-brand-50 cursor-pointer transition-colors"
+        <tr class="hover:bg-brand-50 cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-500"
+            role="button" tabindex="0"
             hx-get="/v2/partials/quotes/{{ q.id }}"
             hx-target="#main-content"
-            hx-push-url="/v2/quotes/{{ q.id }}">
+            hx-push-url="/v2/quotes/{{ q.id }}"
+            hx-trigger="click, keyup[key=='Enter']">
           <td class="px-4 py-2.5 text-sm font-medium text-brand-500 hover:text-brand-600">{{ q.quote_number or "Q-" ~ q.id }}</td>
           <td class="px-4 py-2.5 text-sm text-gray-600">{{ q.customer_name or "—" }}</td>
           <td class="px-4 py-2.5 text-sm text-gray-900 font-medium text-right">{{ "${:,.2f}".format(q.subtotal) if q.subtotal else "—" }}</td>

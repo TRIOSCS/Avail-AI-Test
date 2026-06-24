@@ -216,6 +216,9 @@ class Settings(BaseSettings):
 
     # --- Admin (CSV env var, parsed to list[str] by model_validator) ---
     admin_emails: str | list[str] = ""
+    # When true (go-live posture), an unknown email with no pre-provisioned user row is
+    # rejected at login instead of auto-provisioned. ADMIN_EMAILS always bypass.
+    enable_user_allowlist: bool = True
 
     # --- RFQ ---
     follow_up_days: int = 3

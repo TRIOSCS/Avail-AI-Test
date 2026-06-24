@@ -24,9 +24,9 @@ from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from .constants import RESTRICTED_ROLES, UserRole
+from .constants import RESTRICTED_ROLES, ROLE_ACCESS_DEFAULTS, AccessKey, UserRole
 from .database import get_db
-from .models import AccountCollaborator, Company, CustomerSite, Quote, Requisition, User
+from .models import AccountCollaborator, BuyPlan, Company, CustomerSite, Quote, Requisition, User
 
 # Non-interactive service account seeded by startup.py. It authenticates via the
 # x-agent-key header and is barred from admin/settings/buyer (RFQ) endpoints.
@@ -223,6 +223,52 @@ def require_buyer(request: Request, db: Session = Depends(get_db)) -> User:
     return user
 
 
+# ── Per-feature access (user-management foundation) ───────────────────
+
+
+def user_has_access(user: User, key, db: Session | None = None) -> bool:
+    """True if *user* may use the access *key* (an AccessKey or its str value).
+
+    admin → always True. ops_verification delegates to VerificationGroupMember (single
+    source of truth). Otherwise: explicit per-user override wins, else role default. An
+    unknown key (not in AccessKey) is denied.
+    """
+    if user.role == UserRole.ADMIN:
+        return True
+    key_str = str(key)
+    if key_str == AccessKey.OPS_VERIFICATION:
+        if db is None:
+            return False
+        from .models.buy_plan import VerificationGroupMember
+
+        m = db.query(VerificationGroupMember).filter_by(user_id=user.id).first()
+        return bool(m and m.is_active)
+    overrides = user.access_overrides or {}
+    if key_str in overrides:
+        return bool(overrides[key_str])
+    try:
+        ak = AccessKey(key_str)
+    except ValueError:
+        return False
+    return ak in ROLE_ACCESS_DEFAULTS.get(user.role, frozenset())
+
+
+def require_access(key):
+    """Dependency factory: 403 unless the current user has *key*.
+
+    Depends on ``require_user`` via ``Depends`` (not a direct call) so that test
+    ``dependency_overrides[require_user]`` — and any future require_user wrapper —
+    flow through to the access check unchanged.
+    """
+
+    def _dep(user: User = Depends(require_user), db: Session = Depends(get_db)) -> User:
+        if not user_has_access(user, key, db):
+            raise HTTPException(403, "You don't have access to this feature")
+        return user
+
+    return _dep
+
+
 # ── Query Helpers ─────────────────────────────────────────────────────
 
 
@@ -258,6 +304,27 @@ def get_quote_for_user(db: Session, user: User, quote_id: int, options=None) -> 
     if not quote:
         raise HTTPException(status_code=404, detail="Quote not found")
     return quote
+
+
+def get_buyplan_for_user(db: Session, user: User, plan_id: int, options=None) -> BuyPlan:
+    """Get a single buy plan with role-based requisition ownership checks.
+
+    Ownership derives through the parent Requisition (BuyPlan.requisition_id is NOT
+    NULL).
+    """
+    load_opts = options or []
+    q = (
+        db.query(BuyPlan)
+        .options(*load_opts)
+        .join(Requisition, BuyPlan.requisition_id == Requisition.id)
+        .filter(BuyPlan.id == plan_id)
+    )
+    if user.role in RESTRICTED_ROLES:
+        q = q.filter(Requisition.created_by == user.id)
+    plan = q.first()
+    if not plan:
+        raise HTTPException(status_code=404, detail="Buy plan not found")
+    return plan
 
 
 # ── Token Management ──────────────────────────────────────────────────

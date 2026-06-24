@@ -52,6 +52,19 @@ def _get_oauth_state(client):
     return params["state"][0]
 
 
+@pytest.fixture(autouse=True)
+def _legacy_open_provisioning(monkeypatch):
+    """Disable the login allowlist for this module's callback tests.
+
+    These tests predate the Phase 3 allowlist gate and exercise the legacy auto-
+    provision-unknown-email path. The allowlist-ON / invite-adoption behavior is covered
+    by tests/test_auth_allowlist.py.
+    """
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "enable_user_allowlist", False)
+
+
 @pytest.fixture()
 def auth_client(db_session: Session) -> TestClient:
     """TestClient WITHOUT auth overrides (for testing login/callback flows)."""

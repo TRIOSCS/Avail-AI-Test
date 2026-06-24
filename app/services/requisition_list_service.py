@@ -14,7 +14,7 @@ from sqlalchemy import and_, case, exists, literal, or_, select
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from app.constants import RequisitionStatus, UserRole
+from app.constants import RESTRICTED_ROLES, RequisitionStatus
 from app.models import (
     ActivityLog,
     Contact,
@@ -431,7 +431,7 @@ def list_requisitions(
     query = query.filter(Requisition.is_scratch.is_(False))
 
     # ── Role-based filtering ─────────────────────────────────────────
-    if user_role == UserRole.SALES:
+    if user_role in RESTRICTED_ROLES:
         query = query.filter(Requisition.created_by == user_id)
 
     # ── Search ───────────────────────────────────────────────────────
@@ -625,7 +625,7 @@ def get_requisition_detail(
     Returns None if not found or not accessible.
     """
     query = db.query(Requisition).filter(Requisition.id == req_id)
-    if user_role == UserRole.SALES:
+    if user_role in RESTRICTED_ROLES:
         query = query.filter(Requisition.created_by == user_id)
     req = query.first()
     if not req:

@@ -18,7 +18,7 @@ from sqlalchemy import and_, case, exists, literal, or_, select
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
-from ...constants import ActivityType, RequisitionStatus, UserRole
+from ...constants import RESTRICTED_ROLES, ActivityType, RequisitionStatus, UserRole
 from ...database import get_db
 from ...dependencies import get_req_for_user, require_admin, require_user
 from ...models import (
@@ -63,9 +63,9 @@ async def requisition_counts(
     db: Session = Depends(get_db),
 ):
     """Lightweight counts for dashboard widgets — avoids the heavy list query."""
-    # Sales sees own reqs only; all other roles see everything
+    # Restricted roles (sales/trader) see own reqs only; all other roles see everything
     base_filter = []
-    if user.role == UserRole.SALES:
+    if user.role in RESTRICTED_ROLES:
         base_filter.append(Requisition.created_by == user.id)
 
     total = db.scalar(select(sqlfunc.count(Requisition.id)).where(*base_filter))
@@ -330,8 +330,8 @@ def _build_requisition_list(q, status, sort, order, limit, offset, user, db):
     ).options(
         joinedload(Requisition.customer_site).joinedload(CustomerSite.company),
     )
-    # Sales sees own reqs only; all other roles see everything
-    if user.role == UserRole.SALES:
+    # Restricted roles (sales/trader) see own reqs only; all other roles see everything
+    if user.role in RESTRICTED_ROLES:
         query = query.filter(Requisition.created_by == user.id)
 
     if q.strip():

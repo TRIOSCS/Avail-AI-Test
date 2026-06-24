@@ -1,7 +1,7 @@
-"""Add notification-preference columns to users (migration 149).
+"""Add notification-preference columns to users (migration 151).
 
-Revision ID: 149_user_notify_prefs
-Revises: 148_site_dnc
+Revision ID: 151_user_notify_prefs
+Revises: 150_user_mgmt
 Create Date: 2026-06-24
 
 Adds two Boolean NOT NULL columns (server_default true) to users for per-user
@@ -15,8 +15,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "149_user_notify_prefs"
-down_revision = "148_site_dnc"
+revision = "151_user_notify_prefs"
+down_revision = "150_user_mgmt"
 branch_labels = None
 depends_on = None
 

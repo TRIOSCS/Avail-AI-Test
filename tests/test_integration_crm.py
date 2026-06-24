@@ -42,8 +42,15 @@ def test_list_companies(client):
     assert "ListCo Beta" in names
 
 
-def test_update_company(client):
+def test_update_company(client, db_session, test_user):
+    from app.models import Company
+
     created = client.post("/api/companies", json={"name": "OldName"}).json()
+    # create_company does not assign an owner; make the acting user the owner so the
+    # update passes the can_manage_account gate (phase1-authz IDOR fix).
+    company = db_session.get(Company, created["id"])
+    company.account_owner_id = test_user.id
+    db_session.commit()
     resp = client.put(
         f"/api/companies/{created['id']}",
         json={

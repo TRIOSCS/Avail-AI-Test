@@ -213,7 +213,7 @@ class TestListEndpointContentNegotiation:
         self._assert_html_vs_json(client, f"/api/offers/{offer.id}/attachments")
 
     def test_company(self, client, db_session, test_user):
-        co = Company(name="UICo", is_active=True, created_at=datetime.now(timezone.utc))
+        co = Company(name="UICo", is_active=True, account_owner_id=test_user.id, created_at=datetime.now(timezone.utc))
         db_session.add(co)
         db_session.commit()
         db_session.refresh(co)
@@ -222,7 +222,7 @@ class TestListEndpointContentNegotiation:
         self._assert_html_vs_json(client, f"/api/companies/{co.id}/attachments")
 
     def test_contact(self, client, db_session, test_user):
-        co = Company(name="UICo2", is_active=True, created_at=datetime.now(timezone.utc))
+        co = Company(name="UICo2", is_active=True, account_owner_id=test_user.id, created_at=datetime.now(timezone.utc))
         db_session.add(co)
         db_session.commit()
         db_session.refresh(co)

@@ -32,6 +32,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..constants import (
+    AccessKey,
     ExcessListStatus,
     ExcessOfferScope,
     ExcessOfferStatus,
@@ -39,7 +40,7 @@ from ..constants import (
     ExcessOutreachStatus,
 )
 from ..database import get_db
-from ..dependencies import require_fresh_token, require_user
+from ..dependencies import require_access, require_fresh_token, require_user
 from ..file_utils import parse_tabular_file
 from ..models import Company, User, VendorCard
 from ..models.excess import CustomerBid, ExcessLineItem, ExcessList, ExcessOffer, ExcessOfferLine, ExcessOutreach
@@ -251,7 +252,7 @@ async def resell_workspace(
     lens: str = Query("mine"),
     stage: str = Query(""),
     q: str = Query(""),
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.RESELL)),
     db: Session = Depends(get_db),
 ):
     """Split-panel Resell workspace shell: lens pills + stat strip + lists."""
