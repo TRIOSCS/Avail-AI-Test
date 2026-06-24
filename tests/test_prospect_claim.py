@@ -10,6 +10,7 @@ Depends on: conftest.py (db_session, test_user), ProspectAccount, Company,
             CustomerSite, SiteContact, User models
 """
 
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -933,3 +934,104 @@ class TestTriggerDeepEnrichmentBg:
         updated = db_session.get(ProspectAccount, prospect_id)
         ed = updated.enrichment_data or {}
         assert ed.get("contacts_created_count") == 2
+
+
+# ── Fix 1: claim cooldown bypass prevention ──────────────────────────
+
+
+def _make_swept_prospect(
+    db: Session,
+    *,
+    former_owner_id: int,
+    domain: str = "swept.com",
+    reclaim_blocked_until: "datetime | None" = None,
+) -> ProspectAccount:
+    """Helper: prospect that was swept from former_owner_id, optionally with cooldown."""
+    p = ProspectAccount(
+        name="Swept Corp",
+        domain=domain,
+        discovery_source="auto_sweep",
+        status=ProspectAccountStatus.SUGGESTED,
+        fit_score=0,
+        readiness_score=0,
+        swept_from_owner_id=former_owner_id,
+        swept_at=datetime.now(timezone.utc),
+        reclaim_blocked_until=reclaim_blocked_until,
+        enrichment_data={},
+    )
+    db.add(p)
+    db.commit()
+    db.refresh(p)
+    return p
+
+
+class TestClaimCooldown:
+    """Fix 1: former owner cannot claim their swept account during the 30-day cooldown."""
+
+    def test_former_owner_claim_within_cooldown_denied(self, db_session: Session, test_user: User):
+        blocked_until = datetime.now(timezone.utc) + timedelta(days=15)
+        prospect = _make_swept_prospect(
+            db_session,
+            former_owner_id=test_user.id,
+            domain="cooldown-block.com",
+            reclaim_blocked_until=blocked_until,
+        )
+        with pytest.raises(ValueError, match="30-day cooldown"):
+            claim_prospect(prospect.id, test_user.id, db_session)
+
+        db_session.refresh(prospect)
+        assert prospect.status == ProspectAccountStatus.SUGGESTED
+
+    def test_former_owner_claim_after_cooldown_allowed(self, db_session: Session, test_user: User):
+        past = datetime.now(timezone.utc) - timedelta(days=1)
+        prospect = _make_swept_prospect(
+            db_session,
+            former_owner_id=test_user.id,
+            domain="cooldown-past.com",
+            reclaim_blocked_until=past,
+        )
+        with patch("app.cache.decorators.invalidate_prefix"):
+            result = claim_prospect(prospect.id, test_user.id, db_session)
+        assert result["status"] == "claimed"
+
+    def test_different_rep_not_affected_by_cooldown(self, db_session: Session, test_user: User, admin_user: User):
+        """A different rep claiming is unaffected by the former owner's cooldown."""
+        blocked_until = datetime.now(timezone.utc) + timedelta(days=15)
+        prospect = _make_swept_prospect(
+            db_session,
+            former_owner_id=admin_user.id,  # admin_user is the former owner
+            domain="cooldown-other.com",
+            reclaim_blocked_until=blocked_until,
+        )
+        # test_user is NOT the former owner → cooldown doesn't apply
+        with patch("app.cache.decorators.invalidate_prefix"):
+            result = claim_prospect(prospect.id, test_user.id, db_session)
+        assert result["status"] == "claimed"
+
+    def test_manager_can_claim_despite_cooldown(self, db_session: Session):
+        """A manager/admin who happens to be the former owner is not blocked by the
+        cooldown — they can always claim (and should use reassign, but claim is allowed
+        too)."""
+        from app.constants import UserRole
+
+        mgr = User(
+            email="mgr-claim@test.com",
+            name="Manager",
+            role=UserRole.MANAGER,
+            is_active=True,
+            azure_id="mgr-claim-az",
+        )
+        db_session.add(mgr)
+        db_session.commit()
+        db_session.refresh(mgr)
+
+        blocked_until = datetime.now(timezone.utc) + timedelta(days=15)
+        prospect = _make_swept_prospect(
+            db_session,
+            former_owner_id=mgr.id,
+            domain="cooldown-manager.com",
+            reclaim_blocked_until=blocked_until,
+        )
+        with patch("app.cache.decorators.invalidate_prefix"):
+            result = claim_prospect(prospect.id, mgr.id, db_session)
+        assert result["status"] == "claimed"

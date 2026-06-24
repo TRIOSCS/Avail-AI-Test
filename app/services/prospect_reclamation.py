@@ -191,7 +191,8 @@ async def _send_sweep_notification(
     token = await get_valid_token(owner, db)
     if not token:
         logger.warning(
-            "SP4 sweep notification: no valid token for {} ({}); skipping email",
+            "SP4 sweep notification: no valid token for {} ({}); skipping all emails "
+            "(rep + managers/supervisors will NOT be notified)",
             owner.email,
             owner.id,
         )
@@ -468,14 +469,12 @@ def reassign_account(company_id: int, to_user_id: int, by_user: User, db: Sessio
 
     Called by: app/routers/htmx_views.py (POST /v2/partials/prospects/{id}/reassign)
     """
-    from fastapi import HTTPException
-
     from ..constants import ProspectAccountStatus
     from ..dependencies import is_manager_or_admin
     from ..services.activity_service import log_activity
 
     if not is_manager_or_admin(by_user):
-        raise HTTPException(403, "Only a manager or admin can reassign an account")
+        raise PermissionError("Only a manager or admin can reassign an account")
 
     co = db.get(Company, company_id)
     if co is None:
@@ -484,6 +483,8 @@ def reassign_account(company_id: int, to_user_id: int, by_user: User, db: Sessio
     target = db.get(User, to_user_id)
     if target is None:
         raise ValueError(f"Target user {to_user_id} not found")
+    if not target.is_active:
+        raise ValueError(f"Target user {to_user_id} is inactive")
 
     co.account_owner_id = to_user_id
     co.ownership_cleared_at = None

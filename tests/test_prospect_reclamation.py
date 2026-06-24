@@ -637,10 +637,8 @@ class TestReassignAccount:
         db_session.refresh(co)
         assert co.account_owner_id == target.id
 
-    def test_rep_reassign_raises_403(self, db_session: Session) -> None:
-        """A non-manager caller is rejected with HTTP 403."""
-        from fastapi import HTTPException
-
+    def test_rep_reassign_raises_permission_error(self, db_session: Session) -> None:
+        """Fix 3: service raises PermissionError (not HTTPException) for non-manager."""
         from app.services.prospect_reclamation import reassign_account
 
         rep = _user(db_session, role="sales")
@@ -648,9 +646,8 @@ class TestReassignAccount:
         co = _company(db_session, owner_id=None)
         db_session.commit()
 
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(PermissionError, match="manager or admin"):
             reassign_account(co.id, target.id, rep, db_session)
-        assert exc.value.status_code == 403
 
     def test_reassign_missing_company_raises_lookup(self, db_session: Session) -> None:
         from app.services.prospect_reclamation import reassign_account
@@ -671,6 +668,24 @@ class TestReassignAccount:
 
         with pytest.raises(ValueError, match="not found"):
             reassign_account(co.id, 999999, manager, db_session)
+
+    def test_reassign_inactive_target_raises(self, db_session: Session) -> None:
+        """Fix 2: reassigning to an inactive user must be rejected."""
+        from app.services.prospect_reclamation import reassign_account
+
+        manager = _user(db_session, role="manager")
+        inactive_target = _user(db_session, is_active=False)
+        co = _company(db_session, owner_id=None)
+        db_session.commit()
+
+        original_owner = co.account_owner_id
+
+        with pytest.raises(ValueError, match="inactive"):
+            reassign_account(co.id, inactive_target.id, manager, db_session)
+
+        # Ownership must be unchanged after the rejection.
+        db_session.refresh(co)
+        assert co.account_owner_id == original_owner
 
 
 # ── Phase 4: sweep notification fans out to managers/admins ───────────────────

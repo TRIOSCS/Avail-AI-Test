@@ -60,6 +60,7 @@ def run_startup_migrations() -> None:
     _backfill_proactive_offer_qty()
     _backfill_ticket_defaults()
     _backfill_material_cards()
+    _backfill_sweep_cooldown()
     _seed_admin_user_if_env_set()
     _seed_agent_user()
     _seed_verification_group_from_admin_emails()
@@ -1023,6 +1024,53 @@ def _backfill_ticket_defaults() -> None:
             logger.info("Backfilled {} tickets with default risk_tier/category", len(null_tickets))
     except Exception:
         logger.exception("Failed backfilling null ticket fields")
+        db.rollback()
+    finally:
+        db.close()
+
+
+def _backfill_sweep_cooldown() -> None:
+    """Backfill reclaim_blocked_until for swept rows that are missing it.
+
+    Closes the two-commit crash window introduced in Phase 4: send_company_to_prospecting
+    commits first, then the sweep sets reclaim_blocked_until in a second commit. A crash
+    between them leaves swept rows with NULL cooldown, letting the former owner reclaim
+    immediately via claim (bypassing the 30-day block).
+
+    Idempotent: only touches rows where swept_at IS NOT NULL AND reclaim_blocked_until IS
+    NULL AND status != 'dismissed'. Computes the deadline in Python (swept_at + 30 days)
+    so it works on both PostgreSQL and the SQLite test path.
+
+    Called by: run_startup_migrations
+    Depends on: ProspectAccount model, RECLAIM_COOLDOWN_DAYS constant, SessionLocal
+    """
+    from datetime import timedelta
+
+    from .models.prospect_account import ProspectAccount
+    from .services.prospect_reclamation import RECLAIM_COOLDOWN_DAYS
+
+    db = SessionLocal()
+    try:
+        rows = (
+            db.query(ProspectAccount)
+            .filter(
+                ProspectAccount.swept_at.is_not(None),
+                ProspectAccount.reclaim_blocked_until.is_(None),
+                ProspectAccount.status != "dismissed",
+            )
+            .all()
+        )
+        if not rows:
+            return
+        for pa in rows:
+            pa.reclaim_blocked_until = pa.swept_at + timedelta(days=RECLAIM_COOLDOWN_DAYS)
+        db.commit()
+        logger.info(
+            "Backfilled reclaim_blocked_until on {} swept ProspectAccount(s) missing cooldown",
+            len(rows),
+        )
+    except Exception:
+        logger.exception("Failed backfilling sweep cooldown on ProspectAccounts")
         db.rollback()
     finally:
         db.close()

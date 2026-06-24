@@ -66,8 +66,12 @@ def claim_prospect(prospect_id: int, user_id: int, db: Session) -> dict:
     Domain collision: if another Company with same domain exists, link to it.
 
     Returns: {prospect_id, company_id, company_name, status, path, warning}
-    Raises: ValueError for invalid state transitions.
+    Raises: ValueError for invalid state transitions or cooldown block.
     """
+    from datetime import timezone as _tz
+
+    from ..dependencies import is_manager_or_admin
+
     prospect = db.query(ProspectAccount).filter(ProspectAccount.id == prospect_id).with_for_update().first()
     if not prospect:
         raise LookupError("Prospect not found")
@@ -81,6 +85,16 @@ def claim_prospect(prospect_id: int, user_id: int, db: Session) -> dict:
     user = db.get(User, user_id)
     if not user:
         raise LookupError("User not found")
+
+    # Phase 4: former owner cannot self-serve around the 30-day reclaim cooldown.
+    # Managers/admins are exempt — they should use reassign but claim is allowed too.
+    if prospect.swept_from_owner_id == user_id and not is_manager_or_admin(user):
+        blocked_until = prospect.reclaim_blocked_until
+        if blocked_until is not None:
+            if blocked_until.tzinfo is None:
+                blocked_until = blocked_until.replace(tzinfo=_tz.utc)
+            if blocked_until > datetime.now(_tz.utc):
+                raise ValueError("This account is in a 30-day cooldown; ask a manager to reassign it.")
 
     if _active_site_count(db, user_id) >= SITE_CAP:
         raise ValueError(

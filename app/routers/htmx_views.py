@@ -11770,8 +11770,8 @@ async def reassign_prospect_htmx(
     result = None
     try:
         result = reassign_account(prospect.company_id, to_user_id, user, db)
-    except HTTPException:
-        raise
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
     except LookupError:
         raise HTTPException(404, "Company not found")
     except ValueError as e:
