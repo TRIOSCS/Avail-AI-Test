@@ -58,7 +58,12 @@ guards the single-head invariant when chains collide anyway.
 **Two CI schema-safety gates** (live-PG job in `ci.yml`): (1) the
 `alembic upgrade head` smoke step also runs `python scripts/check_schema_matches_models.py`
 between upgrade and `downgrade base` — CI fails if the ORM models drift from the migrated
-schema. (2) A separate **non-cascade single-step rollback** step (`upgrade head →
+schema. A block of pre-existing `001`-era drift (orphan legacy tables, raw-DDL indexes,
+constraints the baseline never created, etc.) is **grandfathered** via name-scoped
+`_GRANDFATHERED_*` sets in that script; the sets key on specific table/column/constraint
+names, so genuinely NEW drift still fails the gate. Reconcile the grandfathered entries via
+real migrations over time, removing names from the sets as you go. (2) A separate
+**non-cascade single-step rollback** step (`upgrade head →
 downgrade -1 → upgrade head`, with `ALEMBIC_ALLOW_CASCADE` UNSET) surfaces FK-dependency
 errors in a new migration's `downgrade()` that the cascade-to-base smoke test masks. A new
 migration whose single-step downgrade leaves FK-dependent objects will fail this gate.
