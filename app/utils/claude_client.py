@@ -187,6 +187,40 @@ async def claude_structured(
         ClaudeServerError: API returned 5xx
         ClaudeError: Network/timeout or all retries exhausted
     """
+    result, _usage = await claude_structured_with_usage(
+        prompt,
+        schema,
+        system=system,
+        model_tier=model_tier,
+        max_tokens=max_tokens,
+        cache_system=cache_system,
+        timeout=timeout,
+        thinking_budget=thinking_budget,
+        cost_bucket=cost_bucket,
+    )
+    return result
+
+
+async def claude_structured_with_usage(
+    prompt: str,
+    schema: dict,
+    *,
+    system: str = "",
+    model_tier: str = "fast",
+    max_tokens: int = 1024,
+    cache_system: bool = True,
+    timeout: int = 30,
+    thinking_budget: int | None = None,
+    cost_bucket: str | None = None,
+) -> tuple[dict | None, dict]:
+    """Like :func:`claude_structured`, but also returns the raw token-usage dict.
+
+    Returns ``(tool_input_or_None, usage)`` where ``usage`` carries
+    ``input_tokens``/``output_tokens`` (empty dict if the response omitted it).
+    Callers that need to record spend (e.g. trouble-ticket diagnosis) use this;
+    the plain :func:`claude_structured` wrapper preserves the original return
+    contract for the 30+ existing callers.
+    """
     if not get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY"):
         raise ClaudeUnavailableError("ANTHROPIC_API_KEY not configured")
 
@@ -249,16 +283,17 @@ async def claude_structured(
                     _raise_for_status(resp, context="Claude API error")
 
                 data = resp.json()
-                _record_usage(span, data.get("usage", {}))
+                usage = data.get("usage", {})
+                _record_usage(span, usage)
                 if cost_bucket:
-                    _meter_usage(cost_bucket, model_tier, data.get("usage", {}))
+                    _meter_usage(cost_bucket, model_tier, usage)
 
                 # Tool use response — extract the tool input (guaranteed valid JSON)
                 tool_input = _extract_tool_input(data.get("content", []))
                 if tool_input is _MISSING:
                     logger.warning("Claude structured output: no tool_use block in response")
-                    return None
-                return tool_input
+                    return None, usage
+                return tool_input, usage
 
         except (ClaudeError,):
             raise

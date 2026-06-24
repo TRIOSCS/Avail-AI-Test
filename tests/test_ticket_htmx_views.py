@@ -26,8 +26,8 @@ def _make_client(db_session: Session, user: User) -> TestClient:
     """Build a TestClient authenticated as the given user.
 
     The Tickets triage partials (workspace/list/detail) are admin-gated, so
-    require_admin is overridden to resolve the user as well — these tests verify the
-    admin console renders, not the gating (which test_tickets_gating.py owns).
+    require_admin is overridden to resolve the user as well — this file tests rendering,
+    while admin gating is covered in test_tickets_gating.py / test_ticket_diagnosis.py.
     """
 
     def _override_db():

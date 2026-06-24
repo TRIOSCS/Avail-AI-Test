@@ -5,9 +5,9 @@ Covers Task 3 of the settings-menu refinement:
      dead HX-Trigger) so the innerHTML swap into #ticket-list shows results.
   2. The logical "open" status filter includes both submitted and in_progress
      tickets (previously "submitted" hid in_progress).
-  3. Drill-in stays in the Settings shell — rows/detail target #settings-content
-     (no #main-content, no hx-push-url) and the full-page /v2/trouble-tickets URL
-     redirects to the Settings page with the Tickets tab active.
+  3. The Settings shell honors ?tab=tickets (deep-link activates the Tickets tab).
+     (Drill-in defers to main's full-page console at /v2/trouble-tickets; the
+     Settings "Tickets" tab loads the workspace and rows launch that console.)
   4. The detail status <select> only toasts success on r.ok (honest error path).
   5. analyze_tickets passes schema= (not output_schema=) to claude_structured so
      it works against the real LLM (signature-pinning regression test).
@@ -118,34 +118,13 @@ class TestAnalyzeReturnsList:
         assert "ticketsUpdated" not in resp.headers.get("HX-Trigger", "")
 
 
-# ── Fix 3: in-shell drill-in (no #main-content / no push-url) ─────────
+# ── Settings shell: ?tab=tickets deep-link activates the Tickets tab ──
+# Tickets drill-in defers to main's full-page console at /v2/trouble-tickets; the
+# Settings "Tickets" tab loads the workspace and its rows launch that console
+# (#main-content). The ?tab= deep-link painting below stays useful regardless.
 
 
-class TestInShellDrillIn:
-    def test_row_targets_settings_content(self, client, db_session, test_user):
-        """Ticket rows drill into #settings-content, not #main-content."""
-        _seed_ticket(db_session, test_user, ticket_number="TT-0001", status=TicketStatus.SUBMITTED)
-        html = client.get("/v2/partials/trouble-tickets/list").text
-        assert "#settings-content" in html
-        assert 'hx-target="#main-content"' not in html
-        assert "hx-push-url" not in html
-
-    def test_detail_back_link_targets_settings_content(self, client, db_session, test_user):
-        """Detail (Back to Tickets) reloads the workspace into #settings-content."""
-        t = _seed_ticket(db_session, test_user, ticket_number="TT-0001", status=TicketStatus.SUBMITTED)
-        html = client.get(f"/v2/partials/trouble-tickets/{t.id}").text
-        assert "#settings-content" in html
-        assert 'hx-target="#main-content"' not in html
-        assert "hx-push-url" not in html
-
-    def test_full_page_redirects_to_settings_tickets_tab(self, client):
-        """GET /v2/trouble-tickets redirects (303) to Settings with Tickets active."""
-        resp = client.get("/v2/trouble-tickets", follow_redirects=False)
-        assert resp.status_code == 303
-        location = resp.headers["location"]
-        assert "/v2/settings" in location
-        assert "tab=tickets" in location
-
+class TestSettingsTicketsTab:
     def test_settings_partial_tab_param_activates_tickets(self, client):
         """The settings shell honors ?tab=tickets — this is the partial the full page
         lazy-loads, so threading the redirect's tab param lands on Tickets."""

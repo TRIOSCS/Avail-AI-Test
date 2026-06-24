@@ -4575,3 +4575,43 @@ All three endpoints are consumed by the shared `attachmentsPanel` Alpine compone
 `kind="vendor_card"`. Vendor contact attachments use `kind="vendor_contact"` with
 analogous routes under `/api/vendor-contacts/{id}/attachments` and
 `/api/vendor-contact-attachments/{id}`.
+
+## Trouble Tickets — Report capture + AI diagnosis (2026-06-24)
+
+User-facing report (any authenticated user) and an admin-only management console with
+AI diagnosis. No DB migration — uses existing `trouble_tickets` columns.
+
+```
+Report capture (frontend, app/static/htmx_app.js):
+  More menu "Report a problem" → window.openTroubleReport()
+    |  double-rAF (menu paints out) → captureTroubleScreenshot()
+    |     lazy import('modern-screenshot') → domToPng(document.body)
+    |     viewport-clamped PNG, 2MB downscale ladder (scale 1→0.75→0.5), null on any failure
+    |  collectTroubleContext() → {nav_history, current_view (URL-derived), app_build, ...}
+    +→ $dispatch('open-modal', /api/trouble-tickets/form)
+  Capture stores: errorLog (window.onerror + console.error/warn tee), networkLog (htmx:afterRequest)
+
+POST /api/trouble-tickets/submit   (require_user)
+    +→ _create_ticket(): persists description, screenshot (disk), console_errors,
+       network_errors, browser_info, auto_captured_context (JSON), current_view
+    +→ BackgroundTask _generate_ai_summary (claude_text, fast tier)
+
+Admin console (require_admin):  Settings → Tickets  (tab admin-gated)
+  GET  /v2/partials/trouble-tickets/{workspace,list,{id}}   (require_admin)
+  GET  /api/trouble-tickets/{id}/screenshot                 (require_admin — closes IDOR)
+  POST /api/trouble-tickets/analyze         → claude_structured groups into RootCauseGroup
+  POST /api/trouble-tickets/{id}/diagnose   → ticket_diagnosis_service.diagnose_ticket
+  POST /api/trouble-tickets/diagnose-bulk   → diagnose_tickets_bulk (Semaphore(4), one commit)
+  POST /api/trouble-tickets/bulk-status     → bulk resolve/wont_fix/in_progress
+       (all set HX-Trigger "ticketsUpdated"; #ticket-list reloads on it)
+
+ticket_diagnosis_service.diagnose_ticket:
+  _build_diagnosis_prompt (text-only — claude_client has no vision; console/network truncated)
+  → claude_structured_with_usage(schema=DIAGNOSIS_SCHEMA, model_tier="smart")
+  → persists diagnosis (JSON), generated_prompt (paste-ready Claude Code prompt),
+    diagnosed_at, cost_tokens, cost_usd
+```
+
+Bulk selection state lives on the workspace Alpine component (`selected` array); row
+checkboxes bind to it; `window.ticketBulkAction(kind, ids, status)` POSTs and fires
+`ticketsUpdated`. The "Copy fix prompt" button reads the `<pre x-ref="fixprompt">` text.
