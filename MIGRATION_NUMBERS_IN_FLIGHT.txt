@@ -70,3 +70,4 @@
 145  feat/rubric-h2-vendor-parity-p1  VendorContact.is_primary (Boolean NOT NULL server_default false) + VendorCard.custom_fields (JSONB default {}); chains onto 144_contact_fields; single head verified via `alembic heads`
 146  feat/rubric-e-tasks-deal  requisitions.win_probability (Integer nullable 0-100); chains onto 145_vendor_parity_p1; single head verified via alembic heads
 147  feat/rubric-d2-audit-trail  companies+customer_sites+site_contacts: created_by_id+modified_by_id (FK users.id ondelete=SET NULL, nullable); chains onto 146_req_win_probability; single head verified via alembic heads
+148  worktree-user-management  user-management foundation: users.{last_login_at,access_overrides(JSON server_default '{}'),invited_by_id(FK users.id SET NULL)} + user_admin_audit table (actor SET NULL, target CASCADE, indexes on target_user_id+created_at); chains onto 147_crm_audit_trail; single head verified via alembic heads
