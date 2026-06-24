@@ -94,6 +94,18 @@ class TestEditVendorValidation:
         assert resp.status_code == 400
         assert "name" in resp.json()["error"].lower()
 
+    def test_partial_edit_without_display_name_leaves_name_untouched(
+        self, client, db_session, test_vendor_card: VendorCard
+    ):
+        original = test_vendor_card.display_name
+        resp = client.post(
+            f"/v2/partials/vendors/{test_vendor_card.id}/edit",
+            data={"emails": "a@arrow.com"},
+        )
+        assert resp.status_code == 200
+        db_session.refresh(test_vendor_card)
+        assert test_vendor_card.display_name == original
+
 
 # ── Part 1.4 — edit_company website ───────────────────────────────────────────
 

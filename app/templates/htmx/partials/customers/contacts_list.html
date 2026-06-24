@@ -53,6 +53,8 @@
         <option value="on_target" {{ "selected" if cadence_state == "on_target" }}>On target</option>
         <option value="new" {{ "selected" if cadence_state == "new" }}>Never contacted</option>
       </select>
+      <input type="hidden" name="offset" value="{{ offset }}">
+      <input type="hidden" name="limit" value="{{ limit }}">
       <span class="htmx-indicator text-gray-400 text-xs">Loading...</span>
     </form>
   </div>
@@ -115,17 +117,19 @@
   <div class="mt-4 flex justify-center">
     <nav class="flex gap-1 items-center">
       {% if offset > 0 %}
-      <a hx-get="/v2/partials/contacts?offset={{ offset - limit }}"
+      <a hx-get="/v2/partials/contacts"
          hx-target="#main-content"
          hx-include="#contacts-filters"
+         hx-vals='{"offset": "{{ offset - limit }}"}'
          preload="mouseover"
          class="px-3 py-1.5 text-sm bg-white border border-gray-200 rounded-lg hover:bg-brand-50 cursor-pointer">Prev</a>
       {% endif %}
       <span class="px-3 py-1.5 text-sm text-gray-600">{{ offset + 1 }}&ndash;{{ [offset + limit, total]|min }} of {{ total }}</span>
       {% if offset + limit < total %}
-      <a hx-get="/v2/partials/contacts?offset={{ offset + limit }}"
+      <a hx-get="/v2/partials/contacts"
          hx-target="#main-content"
          hx-include="#contacts-filters"
+         hx-vals='{"offset": "{{ offset + limit }}"}'
          preload="mouseover"
          class="px-3 py-1.5 text-sm bg-white border border-gray-200 rounded-lg hover:bg-brand-50 cursor-pointer">Next</a>
       {% endif %}

@@ -34,6 +34,8 @@
                class="input w-full text-sm">
       </div>
       <input type="hidden" name="dir" value="{{ dir }}">
+      <input type="hidden" name="offset" value="{{ offset }}">
+      <input type="hidden" name="limit" value="{{ limit }}">
       <select name="sort" aria-label="Sort vendor contacts" class="px-2 py-1.5 text-sm border border-gray-200 rounded-lg bg-white">
         <option value="name" {{ "selected" if sort == "name" }}>Name A–Z</option>
         <option value="vendor" {{ "selected" if sort == "vendor" }}>Vendor A–Z</option>
@@ -91,17 +93,19 @@
   <div class="mt-4 flex justify-center">
     <nav class="flex gap-1 items-center">
       {% if offset > 0 %}
-      <a hx-get="/v2/partials/vendor-contacts?offset={{ offset - limit }}"
+      <a hx-get="/v2/partials/vendor-contacts"
          hx-target="#main-content"
          hx-include="#vc-filters"
+         hx-vals='{"offset": "{{ offset - limit }}"}'
          preload="mouseover"
          class="px-3 py-1.5 text-sm bg-white border border-gray-200 rounded-lg hover:bg-brand-50 cursor-pointer">Prev</a>
       {% endif %}
       <span class="px-3 py-1.5 text-sm text-gray-600">{{ offset + 1 }}&ndash;{{ [offset + limit, total]|min }} of {{ total }}</span>
       {% if offset + limit < total %}
-      <a hx-get="/v2/partials/vendor-contacts?offset={{ offset + limit }}"
+      <a hx-get="/v2/partials/vendor-contacts"
          hx-target="#main-content"
          hx-include="#vc-filters"
+         hx-vals='{"offset": "{{ offset + limit }}"}'
          preload="mouseover"
          class="px-3 py-1.5 text-sm bg-white border border-gray-200 rounded-lg hover:bg-brand-50 cursor-pointer">Next</a>
       {% endif %}
