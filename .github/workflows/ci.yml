@@ -150,6 +150,10 @@ jobs:
           SECRET_KEY: ci-secret-key
           SESSION_SECRET: ci-session-secret
           TESTING: "0"
+          # check_schema_matches_models.py does `from app.models import Base`, so the repo
+          # root must be importable (python runs the script with sys.path[0]=scripts/, not
+          # the cwd). Without this the schema-drift gate dies on ModuleNotFoundError.
+          PYTHONPATH: ${{ github.workspace }}
           # Allow chain-replay downgrade-base to cascade-drop tables. The 001
           # explicit-DDL baseline + incremental 002+ chain don't share a clean
           # reverse drop ordering, so unwinding to base needs cascade. Production
