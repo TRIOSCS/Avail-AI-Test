@@ -1735,11 +1735,22 @@ CDM left list (`_account_list.html`), regardless of `site_count`, hx-gets the SA
   here` → add-form with `?site_id=`); single-site → one section, no filter chrome.
   `company_detail_partial` passes `active_sites` (name-sorted) + `roles` so the
   inlined default tab matches the standalone `/tab/contacts` render.
-- **Cadence/tier/disposition** is surfaced via a VISIBLE labeled "Cadence &
-  settings" header button (`aria-controls` the `#acct-settings-{id}` collapsible) —
-  no longer a kebab-only item; the kebab keeps only "Merge duplicate".
-- The contact card (`_contact_macros.html`) now carries the **site label** on its
-  title line (flagged absent in the company-wide view).
+- **Compact column layout (replaced the card grid).** Each per-site section renders
+  a `<table class="compact-table">` of `contact_row` rows (`_contact_macros.html`):
+  columns **Name · Title · Phone · Email · Last Contact** (primary contact ★).
+  Phone is a `tel:` link and Email an Outlook-web compose deeplink — both carry the
+  `data-outreach-log` attrs so `htmx_app.js` logs the touch (same path as the old
+  `outreach_btn`). Each row has an Alpine `x-data='{open:false}'` **expand drawer**
+  (chevron) revealing Teams deeplink, WeChat copy-id, secondary email/phone,
+  LinkedIn, reports-to, notes, the inline role editor and cadence clocks. Row-level
+  management (edit, set-primary, priority, archive, DNC, merge, move, delete) lives
+  in a per-row kebab so the row stays scannable. Cell padding uses the locked
+  `.compact-table`/`.td-label` utilities (no inline `px-`/`py-` on `<td>`). The old
+  `contact_card` macro is retained in `_contact_macros.html` but no longer rendered
+  by the contacts tab.
+- The contact edit modal (`_contact_form.html`) always renders **every** known
+  contact field as a labeled input (blank → empty field), so a user sees all the
+  fields they could fill in.
 The in-panel **Sites tab** (`tabs/sites_tab.html` / `site_card.html`) is left intact
 pending its CRUD-only rework (separate stage).
 

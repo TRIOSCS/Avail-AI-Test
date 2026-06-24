@@ -1,6 +1,6 @@
 {# _contact_tasks.html — Open tasks for a single contact.
    Receives: contact, contact_tasks (list[RequisitionTask]), company_id, site_id, now_utc (datetime, via _base_ctx)
-   Called by: contact_card macro via contacts_tab.html
+   Called by: contact task-CRUD endpoints in htmx_views.py (re-render target)
 #}
 <div id="contact-tasks-{{ contact.id }}" class="mt-2">
   {% if contact_tasks %}
