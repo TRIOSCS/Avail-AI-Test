@@ -43,6 +43,7 @@ from ..constants import (
 )
 from ..database import get_db
 from ..dependencies import (
+    can_manage_account,
     get_quote_for_user,
     get_req_for_user,
     get_user,
@@ -5534,8 +5535,7 @@ async def set_contact_role(
     if not company:
         raise HTTPException(404, "Company not found")
 
-    is_admin = user.role == UserRole.ADMIN
-    if not is_admin and company.account_owner_id != user.id:
+    if not can_manage_account(user, company, db):
         raise HTTPException(403, "Only the owner or an admin can edit this contact")
 
     form = await request.form()
@@ -5582,8 +5582,7 @@ async def set_contact_dnc(
     if not company:
         raise HTTPException(404, "Company not found")
 
-    is_admin = user.role == UserRole.ADMIN
-    if not is_admin and company.account_owner_id != user.id:
+    if not can_manage_account(user, company, db):
         raise HTTPException(403, "Only the owner or an admin can edit this contact")
 
     form = await request.form()
@@ -5624,8 +5623,7 @@ async def set_company_disposition(
     if not company:
         raise HTTPException(404, "Company not found")
 
-    is_admin = user.role == UserRole.ADMIN
-    if not is_admin and company.account_owner_id != user.id:
+    if not can_manage_account(user, company, db):
         raise HTTPException(403, "Only the owner or an admin can set disposition")
 
     form = await request.form()
@@ -5717,8 +5715,7 @@ async def set_contact_priority(
     if not company:
         raise HTTPException(404, "Company not found")
 
-    is_admin = user.role == UserRole.ADMIN
-    if not is_admin and company.account_owner_id != user.id:
+    if not can_manage_account(user, company, db):
         raise HTTPException(403, "Only the owner or an admin can edit this contact")
 
     form = await request.form()
@@ -5766,8 +5763,7 @@ async def set_contact_archive(
     if not company:
         raise HTTPException(404, "Company not found")
 
-    is_admin = user.role == UserRole.ADMIN
-    if not is_admin and company.account_owner_id != user.id:
+    if not can_manage_account(user, company, db):
         raise HTTPException(403, "Only the owner or an admin can edit this contact")
 
     form = await request.form()
@@ -6895,8 +6891,7 @@ async def set_account_primary_contact(
     if not company:
         raise HTTPException(404, "Company not found")
 
-    is_admin = user.role == UserRole.ADMIN
-    if not is_admin and company.account_owner_id != user.id:
+    if not can_manage_account(user, company, db):
         raise HTTPException(403, "Only the owner or an admin can edit this account")
 
     # IDOR-safe: verify contact belongs to a site under this company.
@@ -6938,8 +6933,7 @@ async def set_parent_company(
     if not company:
         raise HTTPException(404, "Company not found")
 
-    is_admin = user.role == UserRole.ADMIN
-    if not is_admin and company.account_owner_id != user.id:
+    if not can_manage_account(user, company, db):
         raise HTTPException(403, "Only the owner or an admin can edit this account")
 
     form = await request.form()
@@ -7152,8 +7146,7 @@ async def company_field_post(
     company = db.get(Company, company_id)
     if not company:
         raise HTTPException(404, "Company not found")
-    is_admin = user.role == UserRole.ADMIN
-    if not is_admin and company.account_owner_id != user.id:
+    if not can_manage_account(user, company, db):
         raise HTTPException(403, "Only the owner or an admin can edit this account")
     form = await request.form()
     field = (form.get("field") or "").strip()
@@ -7281,8 +7274,7 @@ async def contact_field_post(
     if not contact:
         raise HTTPException(404, "Contact not found")
     company = db.get(Company, company_id)
-    is_admin = user.role == UserRole.ADMIN
-    if not is_admin and (company is None or company.account_owner_id != user.id):
+    if company is None or not can_manage_account(user, company, db):
         raise HTTPException(403, "Only the owner or an admin can edit this contact")
     form = await request.form()
     field = (form.get("field") or "").strip()
@@ -7328,8 +7320,7 @@ async def company_add_custom_field(
     company = db.get(Company, company_id)
     if not company:
         raise HTTPException(404, "Company not found")
-    is_admin = user.role == UserRole.ADMIN
-    if not is_admin and company.account_owner_id != user.id:
+    if not can_manage_account(user, company, db):
         raise HTTPException(403, "Only the owner or an admin can edit this account")
     form = await request.form()
     label = (form.get("label") or "").strip()
@@ -7366,8 +7357,7 @@ async def company_delete_custom_field(
     company = db.get(Company, company_id)
     if not company:
         raise HTTPException(404, "Company not found")
-    is_admin = user.role == UserRole.ADMIN
-    if not is_admin and company.account_owner_id != user.id:
+    if not can_manage_account(user, company, db):
         raise HTTPException(403, "Only the owner or an admin can edit this account")
     existing = dict(company.custom_fields or {})
     existing.pop(label, None)
@@ -7405,8 +7395,7 @@ async def contact_add_custom_field(
     if not contact:
         raise HTTPException(404, "Contact not found")
     company = db.get(Company, company_id)
-    is_admin = user.role == UserRole.ADMIN
-    if not is_admin and (company is None or company.account_owner_id != user.id):
+    if company is None or not can_manage_account(user, company, db):
         raise HTTPException(403, "Only the owner or an admin can edit this contact")
     form = await request.form()
     label = (form.get("label") or "").strip()
@@ -7453,8 +7442,7 @@ async def contact_delete_custom_field(
     if not contact:
         raise HTTPException(404, "Contact not found")
     company = db.get(Company, company_id)
-    is_admin = user.role == UserRole.ADMIN
-    if not is_admin and (company is None or company.account_owner_id != user.id):
+    if company is None or not can_manage_account(user, company, db):
         raise HTTPException(403, "Only the owner or an admin can edit this contact")
     existing = dict(contact.custom_fields or {})
     existing.pop(label, None)
@@ -14141,8 +14129,7 @@ async def create_account_task(
     company = db.get(Company, company_id)
     if not company:
         raise HTTPException(404, "Company not found")
-    is_admin = user.role == UserRole.ADMIN
-    if not is_admin and company.account_owner_id != user.id:
+    if not can_manage_account(user, company, db):
         raise HTTPException(403, "Only the account owner or an admin can create tasks for this account")
     if not title.strip():
         return HTMLResponse('<p class="text-xs text-rose-600">Title is required.</p>')
@@ -14224,8 +14211,7 @@ async def create_contact_task_endpoint(
         raise HTTPException(404, "Contact not found")
     company = db.get(Company, company_id)
     if company:
-        is_admin = user.role == UserRole.ADMIN
-        if not is_admin and company.account_owner_id != user.id:
+        if not can_manage_account(user, company, db):
             raise HTTPException(403, "Only the account owner or an admin can create tasks for this account")
     if not title.strip():
         return HTMLResponse('<p class="text-xs text-rose-600">Title is required.</p>')

@@ -21,11 +21,12 @@ from datetime import datetime, timezone
 
 from fastapi import Depends, HTTPException, Request
 from loguru import logger
+from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from .constants import RESTRICTED_ROLES, UserRole
 from .database import get_db
-from .models import Quote, Requisition, User
+from .models import Company, CustomerSite, Quote, Requisition, User
 
 # Non-interactive service account seeded by startup.py. It authenticates via the
 # x-agent-key header and is barred from admin/settings/buyer (RFQ) endpoints.
@@ -72,6 +73,41 @@ def require_user(request: Request, db: Session = Depends(get_db)) -> User:
 def is_admin(user: User) -> bool:
     """Check if user has admin privileges (by role)."""
     return bool(user.role == UserRole.ADMIN)
+
+
+def is_manager_or_admin(user: User) -> bool:
+    """True for MANAGER or ADMIN roles (the supervisor/oversight tier).
+
+    Use this to gate visibility and management actions that a supervisor should always
+    be able to perform regardless of account ownership.
+    """
+    return user.role in (UserRole.MANAGER, UserRole.ADMIN)
+
+
+def can_manage_account(user: User, company: Company, db: "Session") -> bool:  # noqa: F821
+    """True if *user* may act on *company* as an account manager.
+
+    Allowed when ANY of the following holds:
+    - is_manager_or_admin(user)  — supervisors see/manage everything
+    - company.account_owner_id == user.id  — primary account owner
+    - user owns at least one CustomerSite under this company
+
+    # TODO(ownership-p3): also true for account collaborators (helper role)
+    """
+    if is_manager_or_admin(user):
+        return True
+    if company.account_owner_id == user.id:
+        return True
+    # Site-owner check: efficient exists() subquery — index-backed via ix_cs_owner/ix_cs_company
+    site_exists = (
+        select(CustomerSite.id)
+        .where(
+            CustomerSite.company_id == company.id,
+            CustomerSite.owner_id == user.id,
+        )
+        .exists()
+    )
+    return bool(db.scalar(select(site_exists)))
 
 
 def _require_admin_user(request: Request, db: Session, *, agent_msg: str, role_msg: str) -> User:

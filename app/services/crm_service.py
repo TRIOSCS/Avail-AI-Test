@@ -13,11 +13,12 @@ Depends on: app/models (Company, CustomerSite, SiteContact, Quote),
 
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import and_, func, or_
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy import case as sa_case
 from sqlalchemy.orm import Session, joinedload
 
 from ..constants import RequisitionStatus
+from ..dependencies import is_manager_or_admin
 from ..models import Company, CustomerSite, Quote, Requisition, SiteContact
 from ..models.auth import User
 from ..models.tags import EntityTag
@@ -232,8 +233,16 @@ def cdm_company_query(
 
     if account_type in CDM_ACCOUNT_TYPES:
         query = query.filter(Company.account_type == account_type)
-    if my_only:
-        query = query.filter(Company.account_owner_id == user.id)
+    if my_only and not is_manager_or_admin(user):
+        # Reps see accounts they own directly OR where they own at least one site.
+        # Managers/admins always see everything — my_only is ignored for them.
+        site_company_ids = select(CustomerSite.company_id).where(CustomerSite.owner_id == user.id)
+        query = query.filter(
+            or_(
+                Company.account_owner_id == user.id,
+                Company.id.in_(site_company_ids),
+            )
+        )
     if segment:
         query = query.filter(
             db.query(EntityTag)
@@ -274,15 +283,22 @@ def cdm_overdue_count(db: Session, user: User, now: datetime | None = None) -> i
     Sales/trader only — others get 0 (no chip rendered). Uses the same
     _needs_call_filter predicate as the chip's click-through query
     (staleness="needs_call") so count and list never diverge.
+
+    Mirrors the my_only visibility rule in cdm_company_query: rep sees accounts
+    they own (account_owner_id) OR where they own a site.
     """
     if user.role not in ("sales", "trader"):
         return 0
     now = now or datetime.now(timezone.utc)
+    site_company_ids = select(CustomerSite.company_id).where(CustomerSite.owner_id == user.id)
     return (
         db.query(func.count(Company.id))
         .filter(
             Company.is_active.is_(True),
-            Company.account_owner_id == user.id,
+            or_(
+                Company.account_owner_id == user.id,
+                Company.id.in_(site_company_ids),
+            ),
             _needs_call_filter(now),
         )
         .scalar()
