@@ -4088,6 +4088,106 @@ async def find_by_part_partial(
     return template_response("htmx/partials/vendors/find_by_part.html", ctx)
 
 
+@router.get("/v2/partials/vendors/create-form", response_class=HTMLResponse)
+async def vendor_create_form_early(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the create-vendor form partial (early route to precede /{vendor_id})."""
+    return template_response(
+        "htmx/partials/vendors/create_form.html",
+        {"request": request},
+    )
+
+
+@router.post("/v2/partials/vendors/create", response_class=HTMLResponse)
+async def create_vendor_partial_early(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Create a new VendorCard from the HTMX form (early route to precede
+    /{vendor_id})."""
+    from ..models import VendorCard
+    from ..vendor_utils import normalize_vendor_name
+
+    form = await request.form()
+    display_name = form.get("display_name", "").strip()
+    if not display_name:
+        raise HTTPException(400, "Vendor name is required")
+
+    norm = normalize_vendor_name(display_name)
+    existing = db.query(VendorCard).filter_by(normalized_name=norm).first()
+    if existing:
+        raise HTTPException(409, f"Vendor '{existing.display_name}' already exists (ID {existing.id})")
+
+    emails_raw = form.get("emails", "").strip()
+    emails = [e.strip() for e in emails_raw.split(",") if e.strip() and "@" in e] if emails_raw else []
+    phones_raw = form.get("phones", "").strip()
+    phones = [p.strip() for p in phones_raw.split(",") if p.strip()] if phones_raw else []
+
+    card = VendorCard(
+        normalized_name=norm,
+        display_name=display_name,
+        website=form.get("website", "").strip() or None,
+        emails=emails,
+        phones=phones,
+        industry=form.get("industry", "").strip() or None,
+        hq_city=form.get("hq_city", "").strip() or None,
+        hq_country=form.get("hq_country", "").strip() or None,
+        employee_size=form.get("employee_size", "").strip() or None,
+        source="manual",
+        is_blacklisted=False,
+        is_new_vendor=True,
+        sighting_count=0,
+    )
+    db.add(card)
+    db.commit()
+    db.refresh(card)
+    logger.info("VendorCard {} created by {}", card.id, user.email)
+    return await vendor_detail_partial(request=request, vendor_id=card.id, user=user, db=db)
+
+
+@router.delete("/v2/partials/vendors/{vendor_id}", response_class=HTMLResponse)
+async def delete_vendor_partial(
+    request: Request,
+    vendor_id: int,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Delete a vendor (admin-only) and return the refreshed vendor list."""
+    from ..models import Offer, VendorCard
+
+    card = db.get(VendorCard, vendor_id)
+    if not card:
+        raise HTTPException(404, "Vendor not found")
+    active_offers = db.query(Offer).filter(Offer.vendor_card_id == card.id).count()
+    if active_offers > 0:
+        raise HTTPException(
+            400,
+            f"Cannot delete vendor with {active_offers} active offers. Archive instead.",
+        )
+    db.delete(card)
+    db.commit()
+    logger.info("VendorCard {} deleted by {}", vendor_id, user.email)
+    # Return the vendor list using safe defaults
+    return await vendors_list_partial(
+        request=request,
+        q="",
+        hide_blacklisted=True,
+        sort="sighting_count",
+        dir="desc",
+        my_only=False,
+        limit=30,
+        offset=0,
+        hx_target="#main-content",
+        push_url_base="/v2/vendors",
+        user=user,
+        db=db,
+    )
+
+
 @router.get("/v2/partials/vendors/{vendor_id}", response_class=HTMLResponse)
 async def vendor_detail_partial(
     request: Request,
