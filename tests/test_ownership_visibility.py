@@ -5,12 +5,16 @@ Tests for:
 2. cdm_company_query() role-based visibility (list + count parity)
 3. Representative authz gate: company_field_post (POST /v2/partials/customers/{company_id}/field)
    - site-owner → 200; manager → 200; unrelated rep → 403
+4. set_parent_company stricter gate: site-owner → 403; account owner → 200; manager → 200
+5. InboundCustomerSource site-owner visibility
 
 Security: BOTH allow AND deny paths are tested for every principal.
 
 Called by: pytest
 Depends on: app.dependencies, app.services.crm_service, app.models
 """
+
+from unittest.mock import patch
 
 import pytest
 
@@ -313,7 +317,12 @@ def test_cdm_count_matches_list_for_manager(db_session):
 
 
 def _make_client_for(db_session, user: User):
-    """Return a TestClient with auth overridden to *user*."""
+    """Yield a TestClient with auth overridden to *user*.
+
+    Uses patch.dict as a context manager so overrides are atomically set and restored —
+    safe under xdist parallelism (no global mutation outside the with block, no leakage
+    on failure).
+    """
     from fastapi.testclient import TestClient
 
     from app.database import get_db
@@ -326,14 +335,9 @@ def _make_client_for(db_session, user: User):
         require_buyer: lambda: user,
         require_fresh_token: lambda: "mock-token",
     }
-    original = dict(app.dependency_overrides)
-    app.dependency_overrides.update(overrides)
-    try:
+    with patch.dict(app.dependency_overrides, overrides, clear=False):
         with TestClient(app) as c:
             yield c
-    finally:
-        app.dependency_overrides.clear()
-        app.dependency_overrides.update(original)
 
 
 @pytest.fixture()
@@ -394,3 +398,166 @@ def test_gate_unrelated_rep_denied(_users_and_company, db_session):
             data={"field": "website", "value": "https://example.com"},
         )
         assert resp.status_code == 403, f"Unrelated rep must get 403, got {resp.status_code}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 7. Stricter gate: POST /v2/partials/customers/{company_id}/parent
+#    set_parent_company — structural op; site-owner must NOT be allowed
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_set_parent_company_site_owner_denied(_users_and_company, db_session):
+    """Site-owner (not account owner) must get 403 on set_parent_company.
+
+    Reparenting the hierarchy is a structural operation; site ownership alone is not
+    sufficient — only the account owner or a manager/admin may do it.
+    """
+    ctx = _users_and_company
+    parent = _make_company(db_session, "ParentCo")
+    db_session.commit()
+    for c in _make_client_for(db_session, ctx["site_owner"]):
+        resp = c.post(
+            f"/v2/partials/customers/{ctx['company'].id}/parent",
+            data={"parent_company_id": str(parent.id)},
+        )
+        assert resp.status_code == 403, f"Site-owner must get 403 on set_parent_company, got {resp.status_code}"
+
+
+def test_set_parent_company_account_owner_allowed(_users_and_company, db_session):
+    """Account owner (not manager) may reparent their own company."""
+    ctx = _users_and_company
+    parent = _make_company(db_session, "ParentCo2")
+    db_session.commit()
+    for c in _make_client_for(db_session, ctx["account_owner"]):
+        resp = c.post(
+            f"/v2/partials/customers/{ctx['company'].id}/parent",
+            data={"parent_company_id": ""},
+        )
+        assert resp.status_code != 403, (
+            f"Account owner should NOT get 403 on set_parent_company, got {resp.status_code}"
+        )
+
+
+def test_set_parent_company_manager_allowed(_users_and_company, db_session):
+    """Manager may reparent any company."""
+    ctx = _users_and_company
+    for c in _make_client_for(db_session, ctx["manager"]):
+        resp = c.post(
+            f"/v2/partials/customers/{ctx['company'].id}/parent",
+            data={"parent_company_id": ""},
+        )
+        assert resp.status_code != 403, f"Manager should NOT get 403 on set_parent_company, got {resp.status_code}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 8. InboundCustomerSource — Phase 2 site-owner visibility
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_inbound_alert_site_owner_sees_company(_users_and_company, db_session):
+    """A site-owner (not account owner) receives inbound alerts for the company.
+
+    Phase 2 expanded visibility: reps who own a site see the account's alerts even
+    if they are not the account_owner.
+    """
+    from datetime import datetime, timezone
+
+    from app.constants import Channel, Direction
+    from app.models.intelligence import ActivityLog
+    from app.services.alerts.sources.inbound_customer import InboundCustomerSource
+
+    ctx = _users_and_company
+    company = ctx["company"]
+    site_owner = ctx["site_owner"]
+
+    # Mark the company as a Customer account (required by the alert filter).
+    company.account_type = "Customer"
+    db_session.commit()
+
+    now = datetime.now(timezone.utc)
+    activity = ActivityLog(
+        activity_type="email_received",
+        channel=Channel.EMAIL,
+        direction=Direction.INBOUND,
+        company_id=company.id,
+        subject="Question about availability",
+        occurred_at=now,
+        created_at=now,
+    )
+    db_session.add(activity)
+    db_session.commit()
+
+    source = InboundCustomerSource()
+    assert source.count_for_user(db_session, site_owner) == 1, (
+        "Site-owner should see inbound-customer alert for company they own a site under"
+    )
+
+
+def test_inbound_alert_manager_sees_all(_users_and_company, db_session):
+    """Manager sees inbound-customer alerts for all Customer accounts."""
+    from datetime import datetime, timezone
+
+    from app.constants import Channel, Direction
+    from app.models.intelligence import ActivityLog
+    from app.services.alerts.sources.inbound_customer import InboundCustomerSource
+
+    ctx = _users_and_company
+    company = ctx["company"]
+    manager = ctx["manager"]
+
+    company.account_type = "Customer"
+    db_session.commit()
+
+    now = datetime.now(timezone.utc)
+    activity = ActivityLog(
+        activity_type="email_received",
+        channel=Channel.EMAIL,
+        direction=Direction.INBOUND,
+        company_id=company.id,
+        subject="Pricing inquiry",
+        occurred_at=now,
+        created_at=now,
+    )
+    db_session.add(activity)
+    db_session.commit()
+
+    source = InboundCustomerSource()
+    assert source.count_for_user(db_session, manager) == 1, (
+        "Manager should see inbound-customer alert for any Customer account"
+    )
+
+
+def test_inbound_alert_unrelated_rep_sees_nothing(_users_and_company, db_session):
+    """An unrelated rep gets zero inbound-customer alerts for a company they don't
+    manage."""
+    from datetime import datetime, timezone
+
+    from app.constants import Channel, Direction
+    from app.models.intelligence import ActivityLog
+    from app.services.alerts.sources.inbound_customer import InboundCustomerSource
+
+    ctx = _users_and_company
+    company = ctx["company"]
+    unrelated = ctx["unrelated"]
+
+    company.account_type = "Customer"
+    db_session.commit()
+
+    now = datetime.now(timezone.utc)
+    db_session.add(
+        ActivityLog(
+            activity_type="email_received",
+            channel=Channel.EMAIL,
+            direction=Direction.INBOUND,
+            company_id=company.id,
+            subject="Inquiry",
+            occurred_at=now,
+            created_at=now,
+        )
+    )
+    db_session.commit()
+
+    source = InboundCustomerSource()
+    assert source.count_for_user(db_session, unrelated) == 0, (
+        "Unrelated rep must NOT see inbound-customer alerts for accounts they don't manage"
+    )

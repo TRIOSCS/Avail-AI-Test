@@ -48,6 +48,7 @@ from ..dependencies import (
     get_req_for_user,
     get_user,
     has_buyer_role,
+    is_manager_or_admin,
     require_admin,
     require_buyer,
     require_requisition_access,
@@ -6933,8 +6934,8 @@ async def set_parent_company(
     if not company:
         raise HTTPException(404, "Company not found")
 
-    if not can_manage_account(user, company, db):
-        raise HTTPException(403, "Only the owner or an admin can edit this account")
+    if not (is_manager_or_admin(user) or company.account_owner_id == user.id):
+        raise HTTPException(403, "Only the account owner or a manager can change company hierarchy")
 
     form = await request.form()
     raw = (form.get("parent_company_id") or "").strip()
