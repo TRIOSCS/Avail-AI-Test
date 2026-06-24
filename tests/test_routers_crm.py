@@ -1143,6 +1143,37 @@ class TestEnrichment:
     @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
     @patch("app.enrichment_service.apply_enrichment_to_company")
     @patch("app.enrichment_service.find_suggested_contacts_with_errors", new_callable=AsyncMock)
+    def test_enrich_company_hx_website_javascript_uri_not_an_href(
+        self, mock_find, mock_apply, mock_enrich, mock_cred, client, db_session, test_company
+    ):
+        """A stored javascript:/data: website must never be emitted as a clickable href.
+
+        Guards against XSS: HTML-escaping the text doesn't neutralize a dangerous URL
+        scheme in an href, so the link must be scheme-validated (safe_url).
+        """
+        test_company.domain = "acme.com"
+        test_company.website = "javascript://%0aalert(document.cookie)"
+        db_session.commit()
+        mock_enrich.return_value = {}
+        mock_apply.return_value = []
+        mock_find.return_value = ([], [])
+
+        resp = client.post(f"/api/enrich/company/{test_company.id}", headers={"HX-Request": "true"})
+        assert resp.status_code == 200
+        body = resp.text.lower()
+        # The dangerous scheme must not appear as the target of any href (single/double-quoted).
+        assert "href='javascript:" not in body
+        assert 'href="javascript:' not in body
+        assert "href='data:" not in body
+        assert 'href="data:' not in body
+
+    @patch(
+        "app.routers.crm.enrichment.get_credential_cached",
+        side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None,
+    )
+    @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
+    @patch("app.enrichment_service.apply_enrichment_to_company")
+    @patch("app.enrichment_service.find_suggested_contacts_with_errors", new_callable=AsyncMock)
     def test_enrich_company_hx_graceful_degradation(
         self, mock_find, mock_apply, mock_enrich, mock_cred, client, db_session, test_company
     ):

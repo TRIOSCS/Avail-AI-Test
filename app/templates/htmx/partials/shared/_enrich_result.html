@@ -68,7 +68,11 @@
         {% endif %}
       </p>
       {% if kind == 'link' %}
-      <a href='{{ val if "://" in val else "https://" ~ val }}' target='_blank' rel='noopener noreferrer'
+      {# Scheme-validate the href (safe_url blocks javascript:/data:/etc). Prepend https://
+         for bare domains via a startswith check — NOT a substring "://" test, which a
+         crafted javascript://… value would slip through. #}
+      {% set href = (val if val.lower().startswith(('http://', 'https://')) else 'https://' ~ val) | safe_url %}
+      <a href='{{ href }}' target='_blank' rel='noopener noreferrer'
          class='block text-sm text-brand-600 hover:text-brand-700 truncate'>{{ val | e }}</a>
       {% else %}
       <p class='text-sm text-gray-900 truncate'>{{ val | e }}</p>
