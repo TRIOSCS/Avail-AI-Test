@@ -311,6 +311,9 @@ class SiteContact(Base):
     needs_refresh = Column(Boolean, default=False)
     last_enriched_at = Column(UTCDateTime)
     linkedin_url = Column(String(500))
+    secondary_email = Column(String(255), nullable=True)
+    secondary_phone = Column(String(100), nullable=True)
+    reports_to_id = Column(Integer, ForeignKey("site_contacts.id", ondelete="SET NULL"), nullable=True, index=True)
     enrichment_field_sources = Column(JSON)  # Per-field source tracking
     custom_fields = Column(JSONB, default=dict, server_default="{}")
 
@@ -324,6 +327,9 @@ class SiteContact(Base):
     customer_site = relationship("CustomerSite", back_populates="site_contacts")
     attachments = relationship("SiteContactAttachment", back_populates="site_contact", cascade="all, delete-orphan")
     contact_owner = relationship("User", foreign_keys=[contact_owner_id])
+    reports_to = relationship(
+        "SiteContact", foreign_keys="[SiteContact.reports_to_id]", remote_side="SiteContact.id", lazy="joined"
+    )
 
     @validates("email")
     def _validate_email(self, _key, value):

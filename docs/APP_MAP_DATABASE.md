@@ -345,6 +345,9 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 | contact_owner_id | FK -> users (SET NULL), indexed | Migration 134. Override contact owner; falls back to company.account_owner when NULL. |
 | email | String 255 | Unique per site |
 | phone | String 100 | |
+| secondary_email | String 255, nullable | Migration 144. Second email address (e.g. personal or backup). Inline-editable via `EDITABLE_CONTACT_FIELDS`. |
+| secondary_phone | String 100, nullable | Migration 144. Second phone number. Inline-editable via `EDITABLE_CONTACT_FIELDS`. |
+| reports_to_id | FK -> site_contacts (SET NULL), indexed | Migration 144. Self-referential org-chart link. Rendered in contact card as "Reports to: X". |
 | wechat_id | String 100, nullable | WeChat handle for click-to-message outreach (migration 095_wechat_id). Written by the site-contact create form; rendered in `tabs/contacts_tab.html` as a `weixin://` deep link with `data-outreach-log`. |
 | contact_role | String 50 | buyer\|technical\|decision_maker\|operations |
 | do_not_contact | Boolean NOT NULL (server_default false) | Migration 116. Suppresses outreach affordances; toggled via `POST .../contacts/{id}/do-not-contact` (`_dnc_toggle.html`). |
@@ -352,7 +355,7 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 | is_archived | Boolean NOT NULL (server_default false) | Migration 118. Sorts the contact to the BOTTOM of the roster but keeps it visible (NOT `is_active`, which would hide it). Toggled via `POST .../contacts/{id}/archive` (`_archive_toggle.html`). |
 | email_verified | Boolean | |
 | enrichment_source | String 50 | lusha|clay|hunter|explorium|manual |
-| **Relationships** | customer_site, attachments (`SiteContactAttachment`), contact_owner (`User`) | Migration 126 adds `attachments`. Migration 134 adds `contact_owner`. |
+| **Relationships** | customer_site, attachments (`SiteContactAttachment`), contact_owner (`User`), reports_to (`SiteContact`, self-ref) | Migration 126 adds `attachments`. Migration 134 adds `contact_owner`. Migration 144 adds `reports_to` self-reference. |
 
 **`company_attachments`** — Files attached to a CRM company (Migration 126, new table)
 | Column | Type | Notes |

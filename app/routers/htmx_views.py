@@ -5421,6 +5421,168 @@ async def company_unassign_segment_tag(
     )
 
 
+# ── Contact tag routes ─────────────────────────────────────────────────────
+
+
+@router.post(
+    "/v2/partials/customers/{company_id}/contacts/{contact_id}/tags",
+    response_class=HTMLResponse,
+)
+async def contact_assign_tag(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Assign a segment tag to a site contact.
+
+    Accepts tag_id= (existing) or tag_name= (creates new tag_type='segment'). Returns
+    the contact tags chips partial.
+    """
+    from ..models.tags import EntityTag as _EntityTag
+    from ..models.tags import Tag as _Tag
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+    contact = db.query(SiteContact).filter(SiteContact.id == contact_id).first()
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+
+    form = await request.form()
+    tag_id_raw = (form.get("tag_id") or "").strip()
+    tag_name_raw = (form.get("tag_name") or "").strip()
+
+    if tag_name_raw:
+        tag = _get_or_create_segment_tag(tag_name_raw, db)
+    elif tag_id_raw:
+        try:
+            tag_id = int(tag_id_raw)
+        except ValueError:
+            raise HTTPException(400, "tag_id must be an integer")
+        tag = db.query(_Tag).filter_by(id=tag_id).first()
+        if not tag:
+            raise HTTPException(404, "Tag not found")
+    else:
+        raise HTTPException(400, "Provide tag_id or tag_name")
+
+    existing = db.query(_EntityTag).filter_by(entity_type="site_contact", entity_id=contact_id, tag_id=tag.id).first()
+    if existing:
+        existing.is_visible = True
+    else:
+        et = _EntityTag(
+            entity_type="site_contact",
+            entity_id=contact_id,
+            tag_id=tag.id,
+            is_visible=True,
+            interaction_count=0,
+            total_entity_interactions=0,
+        )
+        db.add(et)
+    db.commit()
+
+    contact_tags = (
+        db.query(_Tag)
+        .join(_EntityTag, _EntityTag.tag_id == _Tag.id)
+        .filter(
+            _EntityTag.entity_type == "site_contact",
+            _EntityTag.entity_id == contact_id,
+            _EntityTag.is_visible.is_(True),
+        )
+        .order_by(_Tag.name)
+        .all()
+    )
+    all_segment_tags = _list_all_segment_tags(db=db)
+    return template_response(
+        "htmx/partials/customers/_contact_tags.html",
+        {
+            "request": request,
+            "company": company,
+            "contact": contact,
+            "contact_tags": contact_tags,
+            "all_segment_tags": all_segment_tags,
+        },
+    )
+
+
+@router.delete(
+    "/v2/partials/customers/{company_id}/contacts/{contact_id}/tags/{tag_id}",
+    response_class=HTMLResponse,
+)
+async def contact_unassign_tag(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    tag_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Remove a segment tag from a site contact."""
+    from ..models.tags import EntityTag as _EntityTag
+    from ..models.tags import Tag as _Tag
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+    contact = db.query(SiteContact).filter(SiteContact.id == contact_id).first()
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+
+    et = db.query(_EntityTag).filter_by(entity_type="site_contact", entity_id=contact_id, tag_id=tag_id).first()
+    if et:
+        db.delete(et)
+        db.commit()
+
+    contact_tags = (
+        db.query(_Tag)
+        .join(_EntityTag, _EntityTag.tag_id == _Tag.id)
+        .filter(
+            _EntityTag.entity_type == "site_contact",
+            _EntityTag.entity_id == contact_id,
+            _EntityTag.is_visible.is_(True),
+        )
+        .order_by(_Tag.name)
+        .all()
+    )
+    all_segment_tags = _list_all_segment_tags(db=db)
+    return template_response(
+        "htmx/partials/customers/_contact_tags.html",
+        {
+            "request": request,
+            "company": company,
+            "contact": contact,
+            "contact_tags": contact_tags,
+            "all_segment_tags": all_segment_tags,
+        },
+    )
+
+
+@router.get("/v2/partials/customers/{company_id}/contacts/for-select")
+async def get_company_contacts_for_select(
+    company_id: int,
+    exclude_id: int | None = None,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return active site contacts for a company as JSON for the reports_to select.
+
+    Excludes the contact with exclude_id (self-exclusion for reports_to picker).
+    """
+    q = (
+        db.query(SiteContact)
+        .join(CustomerSite, SiteContact.customer_site_id == CustomerSite.id)
+        .filter(
+            CustomerSite.company_id == company_id,
+            SiteContact.is_active.is_(True),
+        )
+    )
+    if exclude_id:
+        q = q.filter(SiteContact.id != exclude_id)
+    contacts = q.order_by(SiteContact.full_name).all()
+    return [{"id": c.id, "name": c.full_name or c.first_name or "—"} for c in contacts]
+
+
 _VALID_TIERS = frozenset({"key", "core", "standard", "prospect"})
 
 # Canonical buying-role taxonomy (P2b).  Legacy values (buyer/technical/
@@ -5464,6 +5626,8 @@ EDITABLE_CONTACT_FIELDS: dict[str, dict] = {
     "title": {"label": "Title", "kind": "text"},
     "email": {"label": "Email", "kind": "text"},
     "phone": {"label": "Phone", "kind": "text"},
+    "secondary_email": {"label": "Secondary Email", "kind": "text"},
+    "secondary_phone": {"label": "Secondary Phone", "kind": "text"},
     "wechat_id": {"label": "WeChat ID", "kind": "text"},
     "linkedin_url": {"label": "LinkedIn", "kind": "text"},
     "contact_role": {
@@ -6624,6 +6788,10 @@ async def contacts_tab_create(
     role = _validate_role(form.get("contact_role") or "")
     is_priority = bool((form.get("is_priority") or "").strip())
 
+    # ── reports_to_id (self-FK — not in EDITABLE_CONTACT_FIELDS) ────────────
+    reports_to_id_raw = (form.get("reports_to_id") or "").strip()
+    reports_to_id = int(reports_to_id_raw) if reports_to_id_raw.isdigit() else None
+
     # ── Create contact ──────────────────────────────────────────────────
     # contact_owner_id is intentionally NOT read from the form — ownership
     # flows via site → account owner (per-contact picker removed in Phase 1).
@@ -6635,11 +6803,14 @@ async def contacts_tab_create(
         email=email_val,
         title=(form.get("title") or "").strip() or None,
         phone=(form.get("phone") or "").strip() or None,
+        secondary_email=(form.get("secondary_email") or "").strip() or None,
+        secondary_phone=(form.get("secondary_phone") or "").strip() or None,
         wechat_id=(form.get("wechat_id") or "").strip() or None,
         notes=(form.get("notes") or "").strip() or None,
         linkedin_url=(form.get("linkedin_url") or "").strip() or None,
         contact_role=role,
         is_priority=is_priority,
+        reports_to_id=reports_to_id,
     )
     db.add(contact)
     db.commit()
@@ -8421,6 +8592,18 @@ async def contact_edit_form_company_scoped(
     company = db.get(Company, company_id)
     if not company:
         raise HTTPException(404, "Company not found")
+    # Same-company contacts for reports_to select, excluding self
+    site_contacts_for_select = (
+        db.query(SiteContact)
+        .join(CustomerSite, SiteContact.customer_site_id == CustomerSite.id)
+        .filter(
+            CustomerSite.company_id == company_id,
+            SiteContact.is_active.is_(True),
+            SiteContact.id != contact_id,
+        )
+        .order_by(SiteContact.full_name)
+        .all()
+    )
     return template_response(
         "htmx/partials/customers/tabs/_contact_form.html",
         {
@@ -8431,6 +8614,7 @@ async def contact_edit_form_company_scoped(
             "site": site,
             "sites": [],
             "roles": CANONICAL_ROLES,
+            "site_contacts_for_select": site_contacts_for_select,
         },
     )
 
@@ -8512,6 +8696,11 @@ async def edit_site_contact(
     # Non-registry fields
     contact.notes = (form.get("notes", "") or "").strip() or None
     contact.is_priority = bool((form.get("is_priority", "") or "").strip())
+    # reports_to_id — self-FK, not in EDITABLE_CONTACT_FIELDS
+    reports_to_id_raw = form.get("reports_to_id")
+    if reports_to_id_raw is not None:
+        v = reports_to_id_raw.strip()
+        contact.reports_to_id = int(v) if v.isdigit() else None
     contact.updated_at = datetime.now(timezone.utc)
     db.commit()
     logger.info("Contact {} edited by {}", contact_id, user.email)

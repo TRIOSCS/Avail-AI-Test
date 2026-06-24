@@ -1,0 +1,77 @@
+{# _contact_tags.html — Segment-tag chips + editor for a site contact.
+   Renders the contact's current segment chips + an add-from-existing dropdown
+   + a new-tag input. All mutations target #contact-tags-{{ contact.id }}.
+
+   Receives: company, contact, contact_tags (list[Tag] — current), all_segment_tags (list[Tag] — for dropdown).
+   Called by: contact_assign_tag + contact_unassign_tag routes (htmx_views.py).
+#}
+
+<div id='contact-tags-{{ contact.id }}' class='flex flex-wrap items-center gap-2'>
+
+  {# Existing chips — each has an × remove button #}
+  {% for tag in contact_tags %}
+  <span class='inline-flex items-center gap-1 px-2.5 py-0.5 text-xs font-medium rounded-full bg-violet-100 text-violet-700 border border-violet-200'>
+    {{ tag.name }}
+    <button type='button'
+            class='ml-0.5 text-violet-400 hover:text-violet-600 focus:outline-none'
+            title='Remove {{ tag.name }}'
+            hx-delete='/v2/partials/customers/{{ company.id }}/contacts/{{ contact.id }}/tags/{{ tag.id }}'
+            hx-target='#contact-tags-{{ contact.id }}'
+            hx-swap='outerHTML'>
+      <svg class='h-3 w-3' viewBox='0 0 20 20' fill='currentColor'>
+        <path fill-rule='evenodd' d='M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z' clip-rule='evenodd'/>
+      </svg>
+    </button>
+  </span>
+  {% endfor %}
+
+  {# Add tag dropdown #}
+  <div x-data='{ open: false }' class='relative'>
+    <button type='button'
+            @click='open = !open'
+            class='inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full border border-dashed border-violet-300 text-violet-500 hover:border-violet-500 hover:text-violet-700 transition-colors'>
+      <svg class='h-3 w-3' fill='none' viewBox='0 0 24 24' stroke='currentColor'><path stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M12 4v16m8-8H4'/></svg>
+      Tag
+    </button>
+
+    <div x-show='open' @click.outside='open = false' x-cloak
+         class='absolute left-0 top-6 z-20 w-48 bg-white rounded-lg shadow-lg border border-gray-200 p-2'>
+
+      {# Pick an existing segment tag (exclude already-assigned ones) #}
+      {% set assigned_ids = contact_tags | map(attribute='id') | list %}
+      {% set ns = namespace(has_available=false) %}
+      {% for t in all_segment_tags %}{% if t.id not in assigned_ids %}{% set ns.has_available = true %}{% endif %}{% endfor %}
+      {% if ns.has_available %}
+      <p class='text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1 px-1'>Add existing</p>
+      {% for t in all_segment_tags %}
+      {% if t.id not in assigned_ids %}
+      <button type='button'
+              class='block w-full text-left px-2 py-1 text-xs text-gray-700 hover:bg-violet-50 hover:text-violet-700 rounded'
+              hx-post='/v2/partials/customers/{{ company.id }}/contacts/{{ contact.id }}/tags'
+              hx-vals='{"tag_id": "{{ t.id }}"}'
+              hx-target='#contact-tags-{{ contact.id }}'
+              hx-swap='outerHTML'
+              @click='open = false'>
+        {{ t.name }}
+      </button>
+      {% endif %}
+      {% endfor %}
+      {% endif %}
+
+      {# Create a new tag by name #}
+      <p class='text-xs font-semibold text-gray-400 uppercase tracking-wider mt-2 mb-1 px-1'>New tag</p>
+      <form hx-post='/v2/partials/customers/{{ company.id }}/contacts/{{ contact.id }}/tags'
+            hx-target='#contact-tags-{{ contact.id }}'
+            hx-swap='outerHTML'
+            @submit='open = false'
+            class='flex gap-1'>
+        <input type='text' name='tag_name' placeholder='e.g. OEM'
+               class='flex-1 min-w-0 px-2 py-1 text-xs border border-gray-200 rounded focus:ring-2 focus:ring-violet-500 focus:border-violet-500'
+               required maxlength='60'>
+        <button type='submit'
+                class='px-2 py-1 text-xs font-medium bg-violet-500 text-white rounded hover:bg-violet-600'>Add</button>
+      </form>
+    </div>
+  </div>
+
+</div>

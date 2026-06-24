@@ -439,6 +439,37 @@
       </div>
       {% endfor %}
     </div>
+    {# ── Secondary contact fields (inline-editable) ──────────────────────────── #}
+    {% if contact.secondary_email or contact.secondary_phone %}
+    <div class="mt-1 grid grid-cols-2 gap-x-3 gap-y-1">
+      {% if contact.secondary_email %}
+      <div class="min-w-0">
+        <p class="text-xs font-medium text-gray-400 uppercase tracking-wide">2nd Email</p>
+        {% with obj=contact, field='secondary_email', entity='contact',
+                meta={'label': 'Secondary Email', 'kind': 'text'},
+                edit_url='/v2/partials/customers/' ~ company.id ~ '/contacts/' ~ contact.id ~ '/field/edit/secondary_email' %}
+          {% include 'htmx/partials/customers/_field_display.html' %}
+        {% endwith %}
+      </div>
+      {% endif %}
+      {% if contact.secondary_phone %}
+      <div class="min-w-0">
+        <p class="text-xs font-medium text-gray-400 uppercase tracking-wide">2nd Phone</p>
+        {% with obj=contact, field='secondary_phone', entity='contact',
+                meta={'label': 'Secondary Phone', 'kind': 'text'},
+                edit_url='/v2/partials/customers/' ~ company.id ~ '/contacts/' ~ contact.id ~ '/field/edit/secondary_phone' %}
+          {% include 'htmx/partials/customers/_field_display.html' %}
+        {% endwith %}
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+    {# ── Reports-to (shows manager name when set) ───────────────────────────── #}
+    {% if contact.reports_to %}
+    <div class="mt-1 text-xs text-gray-500">
+      Reports to: <span class="font-medium text-gray-700">{{ contact.reports_to.full_name or contact.reports_to.first_name or '—' }}</span>
+    </div>
+    {% endif %}
     {# Per-contact cadence clocks — honest empty states for NULL timestamps #}
     {{ contact_clocks(contact, now_utc) }}
 
