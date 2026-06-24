@@ -1165,7 +1165,7 @@ class TestEnrichment:
     @patch("app.enrichment_service.apply_enrichment_to_company")
     @patch("app.enrichment_service.find_suggested_contacts_with_errors", new_callable=AsyncMock)
     def test_enrich_company_hx_website_javascript_uri_not_an_href(
-        self, mock_find, mock_apply, mock_enrich, mock_cred, client, db_session, test_company
+        self, mock_find, mock_apply, mock_enrich, mock_cred, client, db_session, test_company, test_user
     ):
         """A stored javascript:/data: website must never be emitted as a clickable href.
 
@@ -1174,6 +1174,7 @@ class TestEnrichment:
         """
         test_company.domain = "acme.com"
         test_company.website = "javascript://%0aalert(document.cookie)"
+        test_company.account_owner_id = test_user.id  # owner passes can_manage_account gate
         db_session.commit()
         mock_enrich.return_value = {}
         mock_apply.return_value = []
