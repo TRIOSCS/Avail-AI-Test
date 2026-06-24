@@ -30,7 +30,6 @@ from ..constants import (
     ActivityType,
     AttributionStatus,
     BuyPlanStatus,
-    Channel,
     ContactStatus,
     OfferStatus,
     ProactiveMatchStatus,
@@ -4655,12 +4654,40 @@ async def vendor_tab(
             .all()
         )
         activities_truncated = len(activities) >= 50
+
+        # Bucket activities into type-sections (the template renders by section), mirroring
+        # the account Activity tab. Vendors have no RFQ-contact merge (account-only), so
+        # this is a straight type bucketing of the vendor's ActivityLog rows.
+        _CALLS = frozenset({ActivityType.CALL_LOGGED})
+        _EMAILS = frozenset({ActivityType.EMAIL_SENT, ActivityType.EMAIL_RECEIVED})
+        _MEETINGS = frozenset({ActivityType.TEAMS_MESSAGE, ActivityType.WECHAT_MESSAGE, ActivityType.MEETING})
+        _NOTES = frozenset({ActivityType.NOTE, ActivityType.SALES_NOTE, ActivityType.CONTACT_NOTE})
+
+        sections: dict[str, list] = {"Calls": [], "Emails": [], "Meetings": [], "Notes": [], "Other": []}
+        for a in activities:
+            at = a.activity_type
+            if at in _CALLS:
+                sections["Calls"].append(a)
+            elif at in _EMAILS:
+                sections["Emails"].append(a)
+            elif at in _MEETINGS:
+                sections["Meetings"].append(a)
+            elif at in _NOTES:
+                sections["Notes"].append(a)
+            else:
+                sections["Other"].append(a)
+
+        # has_any_activity: drives empty-state vs. sections in the template
+        has_any_activity = bool(activities)
+
         ctx = _base_ctx(request, user, "vendors")
         ctx.update(
             {
                 "vendor": vendor,
                 "activities": activities,
+                "sections": sections,
                 "activities_truncated": activities_truncated,
+                "has_any_activity": has_any_activity,
             }
         )
         return template_response("htmx/partials/vendors/tabs/activity_tab.html", ctx)
@@ -10137,115 +10164,6 @@ async def edit_site_contact(
     logger.info("Contact {} edited by {}", contact_id, user.email)
 
     return _render_contacts_list(request, user, company, db)
-
-
-@router.post(
-    "/v2/partials/customers/{company_id}/sites/{site_id}/contacts/{contact_id}/notes",
-    response_class=HTMLResponse,
-)
-async def add_site_contact_note(
-    request: Request,
-    company_id: int,
-    site_id: int,
-    contact_id: int,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Add a note to a site contact and return updated notes list."""
-    from ..models.intelligence import ActivityLog
-
-    # IDOR-safe: verify the site belongs to the company and the contact belongs to
-    # the site BEFORE writing — then gate on can_manage_account.
-    site = db.query(CustomerSite).filter(CustomerSite.id == site_id, CustomerSite.company_id == company_id).first()
-    if not site:
-        raise HTTPException(404, "Site not found")
-    company = db.query(Company).filter(Company.id == company_id).first()
-    if not company:
-        raise HTTPException(404, "Company not found")
-    if not can_manage_account(user, company, db):
-        raise HTTPException(403, "Not authorized")
-
-    contact = (
-        db.query(SiteContact).filter(SiteContact.id == contact_id, SiteContact.customer_site_id == site_id).first()
-    )
-    if not contact:
-        raise HTTPException(404, "Contact not found")
-
-    form = await request.form()
-    notes_text = form.get("notes", "").strip()
-    if not notes_text:
-        raise HTTPException(400, "Notes cannot be empty")
-
-    log = ActivityLog(
-        user_id=user.id,
-        activity_type=ActivityType.CONTACT_NOTE,
-        channel=Channel.MANUAL,
-        contact_name=contact.full_name or "",
-        contact_email=contact.email or "",
-        notes=notes_text,
-    )
-    db.add(log)
-    db.commit()
-    logger.info("Note added for site contact {} by {}", contact_id, user.email)
-
-    # Return refreshed notes
-    return await get_site_contact_notes(
-        request=request,
-        company_id=company_id,
-        site_id=site_id,
-        contact_id=contact_id,
-        user=user,
-        db=db,
-    )
-
-
-@router.get(
-    "/v2/partials/customers/{company_id}/sites/{site_id}/contacts/{contact_id}/notes",
-    response_class=HTMLResponse,
-)
-async def get_site_contact_notes(
-    request: Request,
-    company_id: int,
-    site_id: int,
-    contact_id: int,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Return notes timeline for a site contact."""
-    from ..models.intelligence import ActivityLog
-
-    contact = (
-        db.query(SiteContact).filter(SiteContact.id == contact_id, SiteContact.customer_site_id == site_id).first()
-    )
-    if not contact:
-        raise HTTPException(404, "Contact not found")
-
-    notes = (
-        (
-            db.query(ActivityLog)
-            .filter(
-                ActivityLog.activity_type == "contact_note",
-                ActivityLog.contact_email == contact.email,
-            )
-            .order_by(ActivityLog.created_at.desc())
-            .limit(20)
-            .all()
-        )
-        if contact.email
-        else []
-    )
-
-    return template_response(
-        "htmx/partials/customers/contact_notes.html",
-        {
-            "request": request,
-            "contact": contact,
-            "notes": notes,
-            "company_id": company_id,
-            "site_id": site_id,
-            "no_email_contact": not contact.email,
-        },
-    )
 
 
 # ── Sprint 5: Quote Workflow Completion ────────────────────────────────

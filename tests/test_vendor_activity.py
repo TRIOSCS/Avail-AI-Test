@@ -128,3 +128,74 @@ class TestVendorActivityTab:
         """Unauthenticated GET add-note-form → 401 or 403."""
         resp = unauthenticated_client.get(f"/v2/partials/vendors/{test_vendor_card.id}/activity/add-note-form")
         assert resp.status_code in (401, 403)
+
+
+# ── Type-sectioned activity (parity with the account Activity tab) ──────
+
+
+def _vendor_log(db_session, vendor_card, user, activity_type, notes):
+    """Persist one ActivityLog of *activity_type* against *vendor_card*."""
+    log = ActivityLog(
+        user_id=user.id,
+        activity_type=activity_type,
+        channel="manual",
+        vendor_card_id=vendor_card.id,
+        notes=notes,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(log)
+    db_session.commit()
+    return log
+
+
+class TestVendorActivityTypeSections:
+    """The vendor Activity tab is type-sectioned (Calls/Emails/Meetings/Notes/Other),
+    mirroring the account Activity tab — not a single flat list."""
+
+    def test_vendor_tab_context_has_sections(self, db_session, test_vendor_card, test_user):
+        """vendor_tab(tab='activity') context exposes a `sections` dict bucketed by type
+        plus has_any_activity (drives the empty-state branch)."""
+        import asyncio
+        from unittest.mock import MagicMock
+
+        from app.routers.htmx_views import vendor_tab
+
+        _vendor_log(db_session, test_vendor_card, test_user, ActivityType.CALL_LOGGED, "Rang the desk")
+        _vendor_log(db_session, test_vendor_card, test_user, ActivityType.EMAIL_SENT, "Sent quote request")
+        _vendor_log(db_session, test_vendor_card, test_user, ActivityType.MEETING, "Quarterly sync")
+        _vendor_log(db_session, test_vendor_card, test_user, ActivityType.NOTE, "Reliable supplier")
+
+        request = MagicMock()
+        resp = asyncio.run(
+            vendor_tab(
+                request=request,
+                vendor_id=test_vendor_card.id,
+                tab="activity",
+                mpn="",
+                user=test_user,
+                db=db_session,
+            )
+        )
+        ctx = resp.context
+        assert "sections" in ctx
+        sections = ctx["sections"]
+        assert set(sections) == {"Calls", "Emails", "Meetings", "Notes", "Other"}
+        assert len(sections["Calls"]) == 1
+        assert len(sections["Emails"]) == 1
+        assert len(sections["Meetings"]) == 1
+        assert len(sections["Notes"]) == 1
+        assert ctx["has_any_activity"] is True
+
+    def test_vendor_activity_tab_renders_type_sections(self, client, db_session, test_vendor_card, test_user):
+        """The rendered tab shows per-type section headers when each type has items."""
+        _vendor_log(db_session, test_vendor_card, test_user, ActivityType.CALL_LOGGED, "Rang the desk")
+        _vendor_log(db_session, test_vendor_card, test_user, ActivityType.EMAIL_SENT, "Sent quote request")
+        _vendor_log(db_session, test_vendor_card, test_user, ActivityType.MEETING, "Quarterly sync")
+        _vendor_log(db_session, test_vendor_card, test_user, ActivityType.NOTE, "Reliable supplier")
+
+        resp = client.get(f"/v2/partials/vendors/{test_vendor_card.id}/tab/activity")
+        assert resp.status_code == 200
+        body = resp.text
+        # Section header <h3>s render for each populated type section.
+        for header in ("Calls", "Emails", "Meetings", "Notes"):
+            assert f'<h3 class="text-sm font-semibold text-gray-700">{header}</h3>' in body

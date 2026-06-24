@@ -55,6 +55,14 @@ append a claim line in the same PR. `tests/test_migration_numbers_in_flight.py`
 enforces uniqueness + registry completeness; `tests/test_migration_chain.py` still
 guards the single-head invariant when chains collide anyway.
 
+**Two CI schema-safety gates** (live-PG job in `ci.yml`): (1) the
+`alembic upgrade head` smoke step also runs `python scripts/check_schema_matches_models.py`
+between upgrade and `downgrade base` — CI fails if the ORM models drift from the migrated
+schema. (2) A separate **non-cascade single-step rollback** step (`upgrade head →
+downgrade -1 → upgrade head`, with `ALEMBIC_ALLOW_CASCADE` UNSET) surfaces FK-dependency
+errors in a new migration's `downgrade()` that the cascade-to-base smoke test masks. A new
+migration whose single-step downgrade leaves FK-dependent objects will fail this gate.
+
 ## 3. Quarantine before delete — nothing is lost
 
 Unmerged work and stashes are **archived as tags before deletion**, never just
