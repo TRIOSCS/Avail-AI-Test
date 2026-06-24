@@ -1002,7 +1002,7 @@ class TestBackfillBuyplanCphMainBlock:
 class TestSessionManagerStart:
     @pytest.mark.asyncio
     async def test_start_with_display_already_logged_in(self):
-        """start() launches browser, navigates home, checks health → already logged in.
+        """Start() launches browser, navigates home, checks health → already logged in.
 
         patchright is imported lazily inside start(), so we patch at the source module.
         """
@@ -1078,7 +1078,7 @@ class TestSessionManagerStart:
 
     @pytest.mark.asyncio
     async def test_login_failed_with_2fa_detection(self):
-        """login() logs 2FA message when code input is visible after failed login."""
+        """Login() logs 2FA message when code input is visible after failed login."""
         from app.services.tbf_worker.session_manager import TbfSessionManager
 
         cfg = TbfConfig()
@@ -1143,7 +1143,7 @@ class TestWorkerMainLoopPaths:
 
     @pytest.mark.asyncio
     async def test_main_outside_business_hours(self):
-        """main() sleeps when outside business hours then shuts down."""
+        """Main() sleeps when outside business hours then shuts down."""
         from app.services.tbf_worker import worker as worker_mod
 
         worker_mod._shutdown_requested = False
@@ -1189,7 +1189,7 @@ class TestWorkerMainLoopPaths:
 
     @pytest.mark.asyncio
     async def test_main_circuit_breaker_open(self):
-        """main() sleeps when circuit breaker is open."""
+        """Main() sleeps when circuit breaker is open."""
         from app.services.tbf_worker import worker as worker_mod
 
         worker_mod._shutdown_requested = False
@@ -1235,7 +1235,7 @@ class TestWorkerMainLoopPaths:
 
     @pytest.mark.asyncio
     async def test_main_daily_limit_reached(self):
-        """main() sleeps when daily search limit is reached."""
+        """Main() sleeps when daily search limit is reached."""
         from app.services.tbf_worker import worker as worker_mod
 
         worker_mod._shutdown_requested = False
@@ -1282,7 +1282,7 @@ class TestWorkerMainLoopPaths:
 
     @pytest.mark.asyncio
     async def test_main_break_time(self):
-        """main() takes a break when time_for_break is True."""
+        """Main() takes a break when time_for_break is True."""
         from app.services.tbf_worker import worker as worker_mod
 
         worker_mod._shutdown_requested = False
