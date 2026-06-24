@@ -1529,6 +1529,33 @@ Two surfaces:
 `_run_inbox_scan_now` and returns the refreshed responses tab; the scan is user-scoped,
 not requisition-scoped.
 
+### Profile mutation endpoints (any logged-in user)
+
+Settings → Profile lets a user edit their own display name, 8x8 extension, and
+notification preferences. All three handlers live in `htmx_views.py`, take
+`require_user` (the current user, NOT admin-only), commit, and emit a `showToast`
+HX-Trigger via the shared `settings_toast()` helper.
+
+```
+POST /api/user/profile            (form: name, extension)
+    htmx_views.update_user_profile()
+    +---> name.strip(): empty OR >255 chars -> 400 JSON {error, status_code, request_id}
+    +---> extension.strip(): >20 chars       -> 400 JSON {error, ...}
+    +---> sets user.name + user.eight_by_eight_extension (empty extension clears it)
+    +---> db.commit(); settings_toast("Profile updated.") -> 200 (empty body + HX-Trigger)
+
+POST /api/user/toggle-buyplan-email
+    htmx_views.toggle_buyplan_email()
+    +---> flips user.notify_buyplan_email_enabled; toast "...enabled/disabled." (Task 9 suppresses on False)
+
+POST /api/user/toggle-new-offer-alert
+    htmx_views.toggle_new_offer_alert()
+    +---> flips user.notify_new_offer_alert_enabled; toast "New-offer alerts enabled/disabled."
+```
+
+These clone the existing `toggle_8x8` (`POST /api/user/toggle-8x8`) pattern but route
+their toast through `settings_toast()`.
+
 ---
 
 ## 9a. Settings → Connectors Tab (admin only)

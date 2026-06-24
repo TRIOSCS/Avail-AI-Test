@@ -13992,6 +13992,76 @@ async def toggle_8x8(
     )
 
 
+@router.post("/api/user/profile", response_class=HTMLResponse)
+async def update_user_profile(
+    request: Request,
+    name: str = Form(""),
+    extension: str = Form(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Update the current user's display name and 8x8 extension.
+
+    Validates name (non-empty, ≤255 chars) and extension (≤20 chars). Returns 400 JSON
+    on bad input; on success commits and emits a showToast trigger.
+    """
+    from fastapi.responses import JSONResponse
+
+    name = name.strip()
+    extension = extension.strip()
+
+    if not name or len(name) > 255:
+        req_id = getattr(request.state, "request_id", "unknown")
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Name is required.", "status_code": 400, "request_id": req_id},
+        )
+    if len(extension) > 20:
+        req_id = getattr(request.state, "request_id", "unknown")
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Extension must be 20 characters or fewer.", "status_code": 400, "request_id": req_id},
+        )
+
+    user.name = name
+    user.eight_by_eight_extension = extension
+    db.commit()
+    logger.info("Profile updated", user_id=user.id)
+    response = HTMLResponse(status_code=200)
+    settings_toast(response, "Profile updated.")
+    return response
+
+
+@router.post("/api/user/toggle-buyplan-email", response_class=HTMLResponse)
+async def toggle_buyplan_email(
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Toggle buy-plan email notifications for the current user."""
+    user.notify_buyplan_email_enabled = not user.notify_buyplan_email_enabled
+    db.commit()
+    state = "enabled" if user.notify_buyplan_email_enabled else "disabled"
+    logger.info("Buy-plan email notifications toggled", user_id=user.id, enabled=user.notify_buyplan_email_enabled)
+    response = HTMLResponse(status_code=200)
+    settings_toast(response, f"Buy-plan email notifications {state}.")
+    return response
+
+
+@router.post("/api/user/toggle-new-offer-alert", response_class=HTMLResponse)
+async def toggle_new_offer_alert(
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Toggle new-offer alerts for the current user."""
+    user.notify_new_offer_alert_enabled = not user.notify_new_offer_alert_enabled
+    db.commit()
+    state = "enabled" if user.notify_new_offer_alert_enabled else "disabled"
+    logger.info("New-offer alerts toggled", user_id=user.id, enabled=user.notify_new_offer_alert_enabled)
+    response = HTMLResponse(status_code=200)
+    settings_toast(response, f"New-offer alerts {state}.")
+    return response
+
+
 @router.get("/v2/partials/settings/data-ops", response_class=HTMLResponse)
 async def settings_data_ops_tab(
     request: Request,
