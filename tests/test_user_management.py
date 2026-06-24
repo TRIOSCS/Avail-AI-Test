@@ -286,3 +286,143 @@ class TestAdminOnly:
             from app.main import app
 
             app.dependency_overrides.pop(get_db, None)
+
+
+# ── Audit log viewer (Phase 5) ───────────────────────────────────────
+
+
+def _seed_audit(db, *, actor_id, target_user_id, action, detail=None):
+    """Insert a UserAdminAudit row directly (bypasses the route)."""
+    from app.services.user_admin import record_user_audit
+
+    record_user_audit(db, actor_id=actor_id, target_user_id=target_user_id, action=action, detail=detail)
+    db.commit()
+
+
+class TestUsersAuditContext:
+    def test_resolves_actor_and_target_newest_first(self, db_session, admin_user):
+        from app.routers.admin.users import users_audit_context
+
+        target = _make_user(db_session, email="t@trioscs.com", name="Target")
+        _seed_audit(
+            db_session,
+            actor_id=admin_user.id,
+            target_user_id=target.id,
+            action=UserAuditAction.INVITE,
+            detail={"email": target.email, "role": "buyer"},
+        )
+        _seed_audit(
+            db_session,
+            actor_id=admin_user.id,
+            target_user_id=target.id,
+            action=UserAuditAction.ROLE_CHANGE,
+            detail={"from": "buyer", "to": "trader"},
+        )
+
+        ctx = users_audit_context(db_session)
+        assert ctx["total"] == 2
+        assert ctx["truncated"] is False
+        actions = [r["action"] for r in ctx["audit_rows"]]
+        # newest first → role_change (inserted last) before invite
+        assert actions == [UserAuditAction.ROLE_CHANGE, UserAuditAction.INVITE]
+        first = ctx["audit_rows"][0]
+        assert first["actor"].id == admin_user.id
+        assert first["target"].id == target.id
+
+    def test_missing_actor_and_target_tolerated(self, db_session, admin_user):
+        from app.routers.admin.users import users_audit_context
+
+        # actor_id None (system) and target pointing at a now-deleted id are tolerated.
+        target = _make_user(db_session, email="gone@trioscs.com")
+        _seed_audit(
+            db_session,
+            actor_id=None,
+            target_user_id=target.id,
+            action=UserAuditAction.DEACTIVATE,
+        )
+        ctx = users_audit_context(db_session)
+        row = ctx["audit_rows"][0]
+        assert row["actor"] is None
+        assert row["target"].id == target.id
+
+    def test_limit_truncates_and_orders(self, db_session, admin_user):
+        from app.routers.admin.users import users_audit_context
+
+        target = _make_user(db_session, email="many@trioscs.com")
+        _seed_audit(db_session, actor_id=admin_user.id, target_user_id=target.id, action=UserAuditAction.ACTIVATE)
+        _seed_audit(db_session, actor_id=admin_user.id, target_user_id=target.id, action=UserAuditAction.DEACTIVATE)
+
+        ctx = users_audit_context(db_session, limit=1)
+        assert ctx["total"] == 2
+        assert ctx["limit"] == 1
+        assert ctx["truncated"] is True
+        assert len(ctx["audit_rows"]) == 1
+        # the single returned row is the newest (deactivate, inserted last)
+        assert ctx["audit_rows"][0]["action"] == UserAuditAction.DEACTIVATE
+
+
+class TestUsersAuditEndpoint:
+    def test_renders_for_admin_with_both_actions(self, admin_client, db_session, test_user):
+        # Perform a real invite + role change so the route writes the audit rows.
+        r1 = admin_client.post("/api/admin/users/invite", data={"email": "audited@trioscs.com", "role": "buyer"})
+        assert r1.status_code == 200
+        r2 = admin_client.post(f"/api/admin/users/{test_user.id}/role", data={"role": "manager"})
+        assert r2.status_code == 200
+
+        r = admin_client.get("/api/admin/users/audit")
+        assert r.status_code == 200
+        # both humanized action labels appear, role-change (newest) before invite
+        assert "Role changed" in r.text
+        assert "Invited" in r.text
+        assert r.text.index("Role changed") < r.text.index("Invited")
+
+    def test_empty_state(self, admin_client):
+        r = admin_client.get("/api/admin/users/audit")
+        assert r.status_code == 200
+        assert "No actions recorded yet" in r.text
+
+    @pytest.mark.parametrize("role", ["buyer", "manager"])
+    def test_forbidden_for_non_admin(self, db_session, role, monkeypatch):
+        user = _make_user(db_session, email=f"{role}@auditgate.test", role=role)
+        client, get_db = _non_admin_client(db_session, user, monkeypatch)
+        try:
+            assert client.get("/api/admin/users/audit").status_code == 403
+        finally:
+            from app.main import app
+
+            app.dependency_overrides.pop(get_db, None)
+
+
+def test_users_audit_template_renders():
+    """Smoke-render users_audit.html with a hand-built context (no DB)."""
+    from types import SimpleNamespace
+
+    from app.template_env import templates
+
+    actor = SimpleNamespace(name="Admin Person", email="admin@trioscs.com")
+    target = SimpleNamespace(name=None, email="target@trioscs.com")
+    rows = [
+        {
+            "when": datetime.now(timezone.utc),
+            "actor": actor,
+            "target": target,
+            "action": UserAuditAction.ROLE_CHANGE,
+            "detail": {"from": "buyer", "to": "trader"},
+        },
+        {
+            "when": datetime.now(timezone.utc),
+            "actor": None,
+            "target": None,
+            "action": UserAuditAction.INVITE,
+            "detail": {"email": "x@trioscs.com", "role": "buyer"},
+        },
+    ]
+    html = templates.get_template("htmx/partials/settings/users_audit.html").render(
+        audit_rows=rows, limit=200, truncated=True, total=999
+    )
+    assert "User management audit log" in html
+    assert "Role changed" in html
+    assert "Invited" in html
+    assert "target@trioscs.com" in html
+    assert "system" in html  # actor None
+    assert "Showing latest 200 of 999" in html

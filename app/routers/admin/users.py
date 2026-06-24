@@ -8,6 +8,7 @@ blocked by require_admin and additionally excluded/uneditable here):
 - POST /api/admin/users/{user_id}/active          — activate / deactivate a user
 - GET  /api/admin/users/{user_id}/access-panel    — render the per-user Access editor
 - POST /api/admin/users/{user_id}/access          — grant/revoke/reset one access key
+- GET  /api/admin/users/audit                     — render the user-management audit log
 
 Each mutation writes an append-only UserAdminAudit row (services.user_admin) and
 returns the refreshed users.html partial (HTMX swaps #users-content). Validation
@@ -42,7 +43,7 @@ from ...constants import (
 )
 from ...database import get_db
 from ...dependencies import _AGENT_EMAIL, require_admin, user_has_access
-from ...models import User
+from ...models import User, UserAdminAudit
 from ...models.buy_plan import VerificationGroupMember
 from ...services.user_admin import record_user_audit
 from ...template_env import template_response
@@ -399,3 +400,46 @@ async def set_user_access(
     db.refresh(target)
     logger.info("Access {}={} for {} by {}", access_key, value, target.email, admin.email)
     return _render_access_panel(target, db, request)
+
+
+# ── Audit log viewer ─────────────────────────────────────────────────
+
+
+def users_audit_context(db: Session, limit: int = 200) -> dict:
+    """Build {audit_rows, limit, truncated, total} for the audit-log partial.
+
+    Loads the latest *limit* UserAdminAudit rows newest-first and resolves each row's
+    actor + target User. Both users are batch-loaded by id into one dict (single query)
+    so the view never N+1s; a missing actor (None / SET NULL'd) or target renders as
+    "system" / "—" in the template. `truncated` is True when more rows exist than shown.
+    """
+    total = db.query(UserAdminAudit).count()
+    audits = (
+        db.query(UserAdminAudit).order_by(UserAdminAudit.created_at.desc(), UserAdminAudit.id.desc()).limit(limit).all()
+    )
+
+    user_ids = {a.actor_id for a in audits if a.actor_id} | {a.target_user_id for a in audits if a.target_user_id}
+    users_by_id = {u.id: u for u in db.query(User).filter(User.id.in_(user_ids)).all()} if user_ids else {}
+
+    audit_rows = [
+        {
+            "when": a.created_at,
+            "actor": users_by_id.get(a.actor_id),
+            "target": users_by_id.get(a.target_user_id),
+            "action": a.action,
+            "detail": a.detail or {},
+        }
+        for a in audits
+    ]
+    return {"audit_rows": audit_rows, "limit": limit, "truncated": total > limit, "total": total}
+
+
+@router.get("/api/admin/users/audit", response_class=HTMLResponse)
+async def users_audit(
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Render the user-management audit log modal — admin only."""
+    ctx = {"request": request, **users_audit_context(db)}
+    return template_response("htmx/partials/settings/users_audit.html", ctx)
