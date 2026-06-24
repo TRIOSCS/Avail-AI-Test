@@ -249,6 +249,44 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 
+class AuditUserMiddleware:
+    """ASGI middleware that populates the request-scoped current_user_id contextvar.
+
+    Must be registered via add_middleware BEFORE SessionMiddleware is registered.
+    add_middleware() uses insert(0, ...), so adding Audit first and Session second
+    results in user_middleware = [Session, Audit].  build_middleware_stack() then
+    reverses and wraps: Audit is innermost, Session is outer — meaning Session runs
+    FIRST on the inbound path, populates scope["session"], and Audit reads it.
+
+    Inbound execution order: ... → Session (decodes cookie) → Audit (reads session) → router
+
+    Reads user_id from scope["session"] (same source as require_user) and sets the
+    contextvar for the duration of the request.  Resets in a finally block to prevent
+    cross-request leaks.  Background jobs have no request → contextvar stays None →
+    audit columns stay NULL (correct behaviour).
+    """
+
+    def __init__(self, app_inner):  # noqa: ANN001
+        self._app = app_inner
+
+    async def __call__(self, scope, receive, send):  # noqa: ANN001
+        if scope["type"] == "http":
+            from .request_context import current_user_id_var
+
+            uid = (scope.get("session") or {}).get("user_id")
+            token = current_user_id_var.set(uid)
+            try:
+                await self._app(scope, receive, send)
+            finally:
+                current_user_id_var.reset(token)
+        else:
+            await self._app(scope, receive, send)
+
+
+# Register AuditUserMiddleware BEFORE SessionMiddleware so that after LIFO ordering
+# and reversal, Session is outermost and Audit is innermost — Session populates
+# scope["session"] first, then Audit reads it.
+app.add_middleware(AuditUserMiddleware)
 app.add_middleware(
     SessionMiddleware,
     secret_key=settings.secret_key,
@@ -456,25 +494,6 @@ async def api_version_middleware(request: Request, call_next):
     response = await call_next(request)
     response.headers["X-API-Version"] = "v1"
     return response
-
-
-# L3: Audit-user middleware — set current_user_id_var for the duration of each request.
-@app.middleware("http")
-async def audit_user_middleware(request: Request, call_next):
-    """Populate the request-scoped current_user_id contextvar for CRM audit columns.
-
-    Reads user_id from the session cookie (same source as require_user). Sets the
-    contextvar before routing and resets it in a finally block so no cross-request leak
-    is possible.  Background jobs have no request so the contextvar stays None.
-    """
-    from .request_context import current_user_id_var
-
-    uid = request.session.get("user_id") if "session" in request.scope else None
-    token = current_user_id_var.set(uid)
-    try:
-        return await call_next(request)
-    finally:
-        current_user_id_var.reset(token)
 
 
 @app.get("/sw.js", include_in_schema=False)

@@ -6,6 +6,14 @@
 #       stays None → audit columns stay NULL (correct behaviour).
 # Called by: app/main.py (imported at module load so listeners register once)
 # Depends on: app/request_context.py, app/models/crm.py
+#
+# BULK-UPDATE CAVEAT: bulk query().update() calls on these models bypass ORM
+# before_update events entirely, so modified_by_id is NOT stamped on those
+# paths.  The current callers that do bulk updates (cadence_service,
+# activity_service, company_merge_service) only update timestamp columns, so
+# missing attribution is acceptable there.  Any NEW bulk-update path that
+# requires attribution must set modified_by_id manually — the listener will
+# not fire for it.
 
 from sqlalchemy import event
 
@@ -27,7 +35,14 @@ def _stamp_created(mapper, connection, target) -> None:  # noqa: ARG001
 
 
 def _stamp_modified(mapper, connection, target) -> None:  # noqa: ARG001
-    """Set modified_by_id on UPDATE if contextvar is set."""
+    """Set modified_by_id on UPDATE if contextvar is set.
+
+    Intentional asymmetry with _stamp_created:
+    - created_by_id is set ONCE on insert (guarded by ``if created_by_id is None``).
+    - modified_by_id always reflects the LATEST request user on every update
+      (no guard — latest modifier wins).
+    - Both are no-ops when the contextvar is None (background writes, CLI, jobs).
+    """
     uid = current_user_id_var.get()
     if uid is None:
         return

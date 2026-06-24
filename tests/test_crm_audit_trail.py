@@ -1,8 +1,9 @@
 """test_crm_audit_trail.py — Tests for the CRM created-by/modified-by audit trail.
 
 Covers: migration 147 round-trip, contextvar-driven stamping on insert/update,
-        NULL behaviour for background writes, cross-request isolation, and
-        company-detail template rendering.
+        NULL behaviour for background writes, cross-request isolation,
+        company-detail template rendering, and a full HTTP-path integration
+        test that exercises AuditUserMiddleware → contextvar → ORM listener → DB.
 
 Called by: pytest
 Depends on: conftest.py, app/audit_listeners.py, app/request_context.py,
@@ -18,6 +19,7 @@ from datetime import datetime, timezone
 from unittest.mock import patch
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import Column, Integer, MetaData, String, Table, create_engine, inspect
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
@@ -319,3 +321,137 @@ class TestDetailRendersCreatedBy:
         body = resp.text
         # The template renders "Created by {name}" in the audit trail paragraph
         assert test_user.name in body
+
+
+# ── Real HTTP-path integration test ──────────────────────────────────────────
+#
+# This class exercises the full chain:
+#   signed session cookie → SessionMiddleware populates scope["session"]
+#   → AuditUserMiddleware reads scope["session"]["user_id"] → sets contextvar
+#   → before_insert listener stamps created_by_id → DB persists it.
+#
+# It deliberately bypasses the conftest `client` fixture (which overrides
+# require_user) and uses a raw TestClient with a crafted signed session
+# cookie so that AuditUserMiddleware is the ONLY mechanism that could set
+# the contextvar.  If the middleware ordering bug were reintroduced (middleware
+# running before Session decodes the cookie) the test would fail with
+# created_by_id == None.
+
+
+def _make_signed_session_cookie(user_id: int, secret_key: str) -> str:
+    """Craft a valid Starlette SessionMiddleware signed cookie for the given user_id.
+
+    Replicates SessionMiddleware._sign(): base64-encode the JSON payload, then sign with
+    itsdangerous.TimestampSigner using the app's secret_key.
+    """
+    import json
+    from base64 import b64encode
+
+    import itsdangerous
+
+    payload = json.dumps({"user_id": user_id}).encode("utf-8")
+    data = b64encode(payload)
+    signer = itsdangerous.TimestampSigner(str(secret_key))
+    return signer.sign(data).decode("utf-8")
+
+
+class TestHTTPPathAuditIntegration:
+    """Integration tests that exercise the real middleware → contextvar → DB path."""
+
+    def test_create_company_via_http_stamps_created_by_id(self, db_session: Session, test_user: User):
+        """POST /api/companies through the real middleware stack stamps created_by_id.
+
+        Uses a crafted signed session cookie (no require_user override) so that
+        AuditUserMiddleware is the only mechanism that could populate the contextvar.
+        Asserts created_by_id == test_user.id, proving the middleware→listener→DB chain
+        is intact.
+        """
+        from app.config import settings
+        from app.database import get_db
+        from app.main import app
+
+        # Wire DB override only — auth deps deliberately NOT overridden so the
+        # middleware must do the work via the session cookie.
+        app.dependency_overrides[get_db] = lambda: db_session
+        try:
+            cookie_value = _make_signed_session_cookie(test_user.id, settings.secret_key)
+            with TestClient(app, raise_server_exceptions=True) as raw_client:
+                raw_client.cookies.set("session", cookie_value)
+                resp = raw_client.post(
+                    "/api/companies",
+                    json={"name": "HTTPAuditCo", "force": True},
+                    params={"force": "true"},
+                )
+            # 200 or 201 — either means the company was created
+            assert resp.status_code in (200, 201), f"Unexpected status {resp.status_code}: {resp.text}"
+            company_id = resp.json()["id"]
+
+            db_session.expire_all()
+            co = db_session.get(Company, company_id)
+            assert co is not None, "Company not found in DB"
+            assert co.created_by_id == test_user.id, (
+                f"created_by_id expected {test_user.id}, got {co.created_by_id} — "
+                "AuditUserMiddleware may be running before SessionMiddleware"
+            )
+            assert co.modified_by_id == test_user.id
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+
+    def test_update_company_via_http_stamps_modified_by_id(self, db_session: Session, test_user: User):
+        """PUT /api/companies/{id} through the real middleware stack stamps
+        modified_by_id.
+
+        A second user edits the company; created_by_id must stay as the original creator
+        and modified_by_id must switch to the editor.
+        """
+        from datetime import datetime, timezone
+
+        from app.config import settings
+        from app.database import get_db
+        from app.main import app
+
+        # Create a second user who will be the editor
+        editor = User(
+            email="editor_http@test.com",
+            name="HTTP Editor",
+            role="buyer",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(editor)
+        db_session.flush()
+
+        # Create the company attributed to test_user via direct ORM (not under test here)
+        token = current_user_id_var.set(test_user.id)
+        try:
+            co = Company(name="HTTPUpdateCo")
+            db_session.add(co)
+            db_session.flush()
+            assert co.created_by_id == test_user.id
+        finally:
+            current_user_id_var.reset(token)
+
+        company_id = co.id
+
+        app.dependency_overrides[get_db] = lambda: db_session
+        try:
+            # Now PUT as editor via real middleware + signed session cookie
+            cookie_value = _make_signed_session_cookie(editor.id, settings.secret_key)
+            with TestClient(app, raise_server_exceptions=True) as raw_client:
+                raw_client.cookies.set("session", cookie_value)
+                resp = raw_client.put(
+                    f"/api/companies/{company_id}",
+                    json={"name": "HTTPUpdateCo Renamed"},
+                )
+            assert resp.status_code == 200, f"Unexpected status {resp.status_code}: {resp.text}"
+
+            db_session.expire_all()
+            co = db_session.get(Company, company_id)
+            assert co is not None
+            # created_by_id must remain the original creator
+            assert co.created_by_id == test_user.id
+            # modified_by_id must reflect the editor who made the PUT request
+            assert co.modified_by_id == editor.id, (
+                f"modified_by_id expected {editor.id} (editor), got {co.modified_by_id}"
+            )
+        finally:
+            app.dependency_overrides.pop(get_db, None)
