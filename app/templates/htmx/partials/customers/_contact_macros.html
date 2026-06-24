@@ -858,11 +858,11 @@
              data-contact-name='{{ _cname }}'>{{ contact.secondary_phone }}</a>
         </div>
         {% endif %}
-        {# LinkedIn #}
+        {# LinkedIn — safe_url filter blocks javascript:/vbscript:/data: hrefs #}
         {% if contact.linkedin_url %}
         <div class='flex items-center gap-1'>
           <span class='text-gray-400 font-medium'>LinkedIn</span>
-          <a href='{{ contact.linkedin_url }}' target='_blank' rel='noopener noreferrer'
+          <a href='{{ contact.linkedin_url | safe_url }}' target='_blank' rel='noopener noreferrer'
              class='text-brand-600 hover:underline'>Profile</a>
         </div>
         {% endif %}

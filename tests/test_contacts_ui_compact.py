@@ -361,3 +361,114 @@ class TestEditModalSurfacesBlankFields:
         html = _render_contact_form(contact=contact, site=site, mode="edit")
         assert "alice@acme.com" in html
         assert "alice_wechat" in html
+
+
+class TestContactRowFilterAttributes:
+    """F1: Each contact row must carry data-contact-row + data-contact-search
+    + data-site-id so the contactsView JS filter can operate client-side."""
+
+    def test_contact_row_has_data_contact_row_attr(self):
+        contact = _make_contact(full_name="Alice Chen")
+        site = _make_site(id=10)
+        rows = [{"contact": contact, "site": site, "legacy": False, "cadence": "new"}]
+        html = _render_grouped_list(rows)
+        assert "data-contact-row" in html, "data-contact-row attribute missing from contact row"
+
+    def test_contact_row_has_data_contact_search_attr(self):
+        contact = _make_contact(full_name="Alice Chen")
+        site = _make_site(id=10)
+        rows = [{"contact": contact, "site": site, "legacy": False, "cadence": "new"}]
+        html = _render_grouped_list(rows)
+        assert "data-contact-search" in html, "data-contact-search attribute missing"
+
+    def test_contact_row_search_value_is_lowercased_name(self):
+        contact = _make_contact(full_name="Alice Chen")
+        site = _make_site(id=10)
+        rows = [{"contact": contact, "site": site, "legacy": False, "cadence": "new"}]
+        html = _render_grouped_list(rows)
+        assert 'data-contact-search="alice chen"' in html or "data-contact-search='alice chen'" in html
+
+    def test_contact_row_has_data_site_id_attr(self):
+        contact = _make_contact(full_name="Alice Chen")
+        site = _make_site(id=10)
+        rows = [{"contact": contact, "site": site, "legacy": False, "cadence": "new"}]
+        html = _render_grouped_list(rows)
+        assert "data-site-id" in html, "data-site-id attribute missing"
+
+    def test_contact_row_site_id_matches_site(self):
+        contact = _make_contact(full_name="Alice Chen")
+        site = _make_site(id=10)
+        rows = [{"contact": contact, "site": site, "legacy": False, "cadence": "new"}]
+        html = _render_grouped_list(rows)
+        assert 'data-site-id="10"' in html or "data-site-id='10'" in html
+
+    def test_legacy_contact_row_has_filter_attrs(self):
+        """Legacy rows must also carry filter attributes so they are not invisible to
+        JS."""
+        site = _make_site(id=10, contact_name="Bob Legacy")
+        rows = [{"contact": None, "site": site, "legacy": True, "cadence": "new"}]
+        html = _render_grouped_list(rows)
+        assert "data-contact-row" in html
+        assert "data-contact-search" in html
+
+    def test_multiple_contacts_each_has_filter_attrs(self):
+        site = _make_site(id=10)
+        c1 = _make_contact(id=1, full_name="Alice Chen")
+        c2 = _make_contact(id=2, full_name="Bob Smith")
+        rows = [
+            {"contact": c1, "site": site, "legacy": False, "cadence": "new"},
+            {"contact": c2, "site": site, "legacy": False, "cadence": "new"},
+        ]
+        html = _render_grouped_list(rows)
+        assert html.count("data-contact-row") >= 2, "Each contact row must have data-contact-row"
+
+
+class TestLinkedInUrlXssSanitization:
+    """F2: linkedin_url (and any other raw-URL field) must not render javascript: hrefs.
+
+    A stored value of 'javascript:alert(1)' must not appear verbatim in an href.
+    The safe_url filter must return '#' (or empty) for non-http(s) values.
+    """
+
+    def _render_macros_linkedin(self, linkedin_url: str) -> str:
+        """Render the contact_row macro directly to test the linkedin href."""
+        contact = _make_contact(linkedin_url=linkedin_url, email=None, phone=None, wechat_id=None)
+        site = _make_site(id=10)
+        rows = [{"contact": contact, "site": site, "legacy": False, "cadence": "new"}]
+        # We need the expand drawer visible to see linkedin; render grouped list
+        return _render_grouped_list(rows)
+
+    def test_javascript_url_not_in_href(self):
+        html = self._render_macros_linkedin("javascript:alert(1)")
+        # The literal javascript: must not appear as an href value
+        assert "href='javascript:alert(1)'" not in html
+        assert 'href="javascript:alert(1)"' not in html
+
+    def test_javascript_url_replaced_with_safe_fallback(self):
+        html = self._render_macros_linkedin("javascript:alert(1)")
+        # It must either be dropped (no anchor) or replaced with '#' or empty
+        if "linkedin" in html.lower() or "Profile" in html:
+            # The link must not have javascript: anywhere near an href
+            import re
+
+            hrefs = re.findall(r'href=["\']([^"\']*)["\']', html)
+            for h in hrefs:
+                assert not h.startswith("javascript:"), f"Unsafe href found: {h!r}"
+
+    def test_valid_https_linkedin_url_renders_as_href(self):
+        html = self._render_macros_linkedin("https://linkedin.com/in/alice")
+        assert "https://linkedin.com/in/alice" in html
+
+    def test_http_url_also_passes(self):
+        html = self._render_macros_linkedin("http://example.com/profile")
+        assert "http://example.com/profile" in html
+
+    def test_vbscript_url_blocked(self):
+        html = self._render_macros_linkedin("vbscript:msgbox(1)")
+        assert "href='vbscript:msgbox(1)'" not in html
+        assert 'href="vbscript:msgbox(1)"' not in html
+
+    def test_data_url_blocked(self):
+        html = self._render_macros_linkedin("data:text/html,<script>alert(1)</script>")
+        assert "href='data:text/html" not in html
+        assert 'href="data:text/html' not in html

@@ -86,16 +86,19 @@
               <th class="w-14"></th>
             </tr>
           </thead>
-          <tbody>
-            {% for row in sorted_rows %}
-              {% set _cname = (row.contact.full_name if row.contact else row.site.contact_name) or '' %}
-              {# data-contact-row / data-contact-search: used by contactsView JS filter #}
-              {# We wrap in a fragment-style comment; the <tr> itself carries the attrs
-                 via the macro — but since Jinja macros render raw HTML, we put the search
-                 attrs on a wrapping <tbody> scoped to one row. #}
+          {# Each contact gets its own <tbody> so contactsView JS can toggle it via
+             classList.toggle('hidden') on the data-contact-row element.
+             Multiple <tbody> per table is valid HTML5.
+             data-contact-search must be lowercase (JS does .includes(needle) on it).
+             data-site-id enables the per-site dropdown filter. #}
+          {% for row in sorted_rows %}
+            {% set _cname = (row.contact.full_name if row.contact else row.site.contact_name) or '' %}
+            <tbody data-contact-row
+                   data-site-id="{{ grp_site.id if grp_site else 0 }}"
+                   data-contact-search="{{ _cname | lower }}">
               {{ contact_row(company, row.contact, row.site, row.legacy, now_utc, row.cadence if not row.legacy else 'new', _roles) }}
-            {% endfor %}
-          </tbody>
+            </tbody>
+          {% endfor %}
         </table>
       </div>
     </section>
