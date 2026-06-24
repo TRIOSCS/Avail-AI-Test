@@ -11108,6 +11108,22 @@ async def settings_ops_group_tab(
     return template_response("htmx/partials/settings/ops_group.html", ctx)
 
 
+@router.get("/v2/partials/settings/users", response_class=HTMLResponse)
+async def settings_users_tab(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Users management tab (invite / role / activate) — admin only."""
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(403, "Admin only")
+    from .admin.users import users_context
+
+    ctx = _base_ctx(request, user, "settings")
+    ctx.update(users_context(db))
+    return template_response("htmx/partials/settings/users.html", ctx)
+
+
 @router.post("/v2/partials/buy-plans/{plan_id}/reset", response_class=HTMLResponse)
 async def buy_plan_reset_partial(
     request: Request,
