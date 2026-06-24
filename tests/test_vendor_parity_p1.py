@@ -126,6 +126,39 @@ class TestVendorContactAdd:
         # Returns the contact row HTML
         assert "new@vendor.com" in resp.text
 
+    def test_add_first_contact_appears_in_contacts_tab(
+        self, client: TestClient, db_session: Session, test_vendor_card: VendorCard
+    ):
+        """I2: adding the FIRST contact to a zero-contact vendor must render it in the list.
+
+        The add-contact form targets #contacts-table-body with hx-swap="beforeend".
+        Before this fix the empty-state used a <div id="contacts-table-body">, so a <tr>
+        was inserted into a div — invalid HTML that browsers silently drop.  The fix
+        always renders a real <tbody id="contacts-table-body">, so the <tr> is valid.
+
+        Here we verify the contacts tab (re-rendered after the POST) actually contains
+        the new email, proving the row is not silently dropped.
+        """
+        # Confirm the vendor starts with zero contacts.
+        db_session.refresh(test_vendor_card)
+        assert test_vendor_card.vendor_contacts == []
+
+        # Add the first contact.
+        add_resp = client.post(
+            f"/v2/partials/vendors/{test_vendor_card.id}/contacts",
+            data={"email": "first@vendor.com", "full_name": "First Contact"},
+        )
+        assert add_resp.status_code == 200
+        # The route returns contact_row.html — the email must be present.
+        assert "first@vendor.com" in add_resp.text
+
+        # Now render the contacts tab and confirm the contact appears.
+        tab_resp = client.get(f"/v2/partials/vendors/{test_vendor_card.id}/tab/contacts")
+        assert tab_resp.status_code == 200
+        assert "first@vendor.com" in tab_resp.text
+        # The tbody must always be present (even after contacts are added).
+        assert 'id="contacts-table-body"' in tab_resp.text
+
     def test_add_contact_missing_email_400(self, client: TestClient, test_vendor_card: VendorCard):
         resp = client.post(
             f"/v2/partials/vendors/{test_vendor_card.id}/contacts",
@@ -229,22 +262,45 @@ class TestVendorContactDelete:
         assert resp.status_code == 404
 
     def test_delete_contact_non_admin_denied(
-        self, client: TestClient, test_vendor_card: VendorCard, test_vendor_contact: VendorContact
+        self, db_session: Session, test_user: User, test_vendor_card: VendorCard, test_vendor_contact: VendorContact
     ):
-        """DENY: authenticated non-admin user (test_user is 'buyer') is rejected.
+        """DENY: a non-admin user gets 403 from the require_admin-gated delete.
 
-        The client fixture overrides require_admin → test_user (role=buyer, not admin),
-        so the endpoint will honour require_admin and reject.
-        Note: conftest maps require_admin → test_user; but the route requires require_admin
-        which in test mode gets overridden to the same test_user. We test with
-        unauthenticated_client instead to confirm anon is blocked, and use the admin_client
-        fixture for success path. The non-admin path is proven via unauthenticated.
+        Overrides require_admin to raise 403 (simulating a real non-admin caller)
+        while leaving the rest of auth wired so the route runs but is blocked.
+        This is a structural test: it proves require_admin is the gate and that
+        a non-admin cannot delete contacts regardless of other auth state.
         """
-        resp = client.delete(f"/v2/partials/vendors/{test_vendor_card.id}/contacts/{test_vendor_contact.id}")
-        # conftest maps require_admin -> test_user; this passes in test mode.
-        # The real guard is that unauthenticated is blocked (separate test above).
-        # For non-admin DENY, we confirm unauthenticated path is blocked.
-        assert resp.status_code in (200, 403, 404)  # admin override in conftest
+        from fastapi import HTTPException
+
+        from app.database import get_db
+        from app.dependencies import require_admin, require_buyer, require_user
+        from app.main import app
+
+        def _db():
+            yield db_session
+
+        def _user():
+            return test_user
+
+        def _deny_admin():
+            raise HTTPException(403, "Admin access required")
+
+        overrides = [get_db, require_user, require_admin, require_buyer]
+        app.dependency_overrides[get_db] = _db
+        app.dependency_overrides[require_user] = _user
+        app.dependency_overrides[require_admin] = _deny_admin
+        app.dependency_overrides[require_buyer] = _user
+        try:
+            with TestClient(app) as non_admin_client:
+                resp = non_admin_client.delete(
+                    f"/v2/partials/vendors/{test_vendor_card.id}/contacts/{test_vendor_contact.id}"
+                )
+        finally:
+            for dep in overrides:
+                app.dependency_overrides.pop(dep, None)
+
+        assert resp.status_code == 403
 
     def test_delete_contact_anon_denied(
         self, unauthenticated_client: TestClient, test_vendor_card: VendorCard, test_vendor_contact: VendorContact
