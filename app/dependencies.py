@@ -254,10 +254,14 @@ def user_has_access(user: User, key, db: Session | None = None) -> bool:
 
 
 def require_access(key):
-    """Dependency factory: 403 unless the current user has *key*."""
+    """Dependency factory: 403 unless the current user has *key*.
 
-    def _dep(request: Request, db: Session = Depends(get_db)) -> User:
-        user = require_user(request, db)
+    Depends on ``require_user`` via ``Depends`` (not a direct call) so that test
+    ``dependency_overrides[require_user]`` — and any future require_user wrapper —
+    flow through to the access check unchanged.
+    """
+
+    def _dep(user: User = Depends(require_user), db: Session = Depends(get_db)) -> User:
         if not user_has_access(user, key, db):
             raise HTTPException(403, "You don't have access to this feature")
         return user

@@ -422,3 +422,294 @@ class TestAccessAdminOnly:
             )
         finally:
             app.dependency_overrides.pop(get_db, None)
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Phase 4b — route access enforcement (require_access wired onto real routes)
+# ══════════════════════════════════════════════════════════════════════
+
+
+def _client_as(db_session, user):
+    """A TestClient whose require_user / require_buyer / require_fresh_token all resolve
+    to *user*, and whose get_db uses the test session.
+
+    require_access depends on require_user via Depends, so overriding require_user makes
+    the per-user access_overrides on *user* flow straight into the gate.
+    """
+    from app.database import get_db
+    from app.dependencies import require_buyer, require_fresh_token, require_user
+    from app.main import app
+
+    app.dependency_overrides[get_db] = lambda: db_session
+    app.dependency_overrides[require_user] = lambda: user
+    app.dependency_overrides[require_buyer] = lambda: user
+
+    async def _fresh():
+        return "mock-token"
+
+    app.dependency_overrides[require_fresh_token] = _fresh
+    client = TestClient(app)
+    client._overridden = (get_db, require_user, require_buyer, require_fresh_token)
+    return client
+
+
+def _drop_overrides(client):
+    from app.main import app
+
+    for dep in getattr(client, "_overridden", ()):  # pragma: no branch
+        app.dependency_overrides.pop(dep, None)
+
+
+# ── module PARTIAL entry routes are gated ────────────────────────────
+
+
+class TestModulePartialGating:
+    def test_crm_shell_403_when_crm_revoked(self, db_session, test_user):
+        test_user.access_overrides = {AccessKey.CRM.value: False}
+        db_session.commit()
+        c = _client_as(db_session, test_user)
+        try:
+            assert c.get("/v2/partials/crm/shell").status_code == 403
+        finally:
+            _drop_overrides(c)
+
+    def test_crm_shell_200_for_default_buyer(self, db_session, test_user):
+        c = _client_as(db_session, test_user)
+        try:
+            assert c.get("/v2/partials/crm/shell").status_code == 200
+        finally:
+            _drop_overrides(c)
+
+    def test_sightings_workspace_403_when_revoked(self, db_session, test_user):
+        test_user.access_overrides = {AccessKey.SIGHTINGS.value: False}
+        db_session.commit()
+        c = _client_as(db_session, test_user)
+        try:
+            assert c.get("/v2/partials/sightings/workspace").status_code == 403
+        finally:
+            _drop_overrides(c)
+
+    def test_resell_workspace_403_when_revoked(self, db_session, test_user):
+        test_user.access_overrides = {AccessKey.RESELL.value: False}
+        db_session.commit()
+        c = _client_as(db_session, test_user)
+        try:
+            assert c.get("/v2/partials/resell/workspace").status_code == 403
+        finally:
+            _drop_overrides(c)
+
+    def test_materials_workspace_403_when_revoked(self, db_session, test_user):
+        test_user.access_overrides = {AccessKey.MATERIALS.value: False}
+        db_session.commit()
+        c = _client_as(db_session, test_user)
+        try:
+            assert c.get("/v2/partials/materials/workspace").status_code == 403
+        finally:
+            _drop_overrides(c)
+
+    def test_admin_never_blocked_on_partial(self, db_session, admin_user):
+        # An admin with a stray override is still admin → user_has_access short-circuits True.
+        admin_user.access_overrides = {AccessKey.CRM.value: False}
+        db_session.commit()
+        c = _client_as(db_session, admin_user)
+        try:
+            assert c.get("/v2/partials/crm/shell").status_code == 200
+        finally:
+            _drop_overrides(c)
+
+
+# ── v2_page full-page module gate (redirect to first allowed) ─────────
+
+
+class TestV2PageGating:
+    """v2_page reads get_user(request, db) directly (NOT the require_user override), so
+    we monkeypatch the bound name on the router module to authenticate."""
+
+    def _patch_user(self, monkeypatch, db_session, user):
+        from app.database import get_db
+        from app.main import app
+
+        monkeypatch.setattr("app.routers.htmx_views.get_user", lambda request, db: user)
+        app.dependency_overrides[get_db] = lambda: db_session
+        return TestClient(app)
+
+    def _unpatch(self):
+        from app.database import get_db
+        from app.main import app
+
+        app.dependency_overrides.pop(get_db, None)
+
+    def test_crm_page_redirects_when_crm_revoked(self, db_session, test_user, monkeypatch):
+        test_user.access_overrides = {AccessKey.CRM.value: False}
+        db_session.commit()
+        c = self._patch_user(monkeypatch, db_session, test_user)
+        try:
+            r = c.get("/v2/crm", follow_redirects=False)
+            assert r.status_code == 302
+            # Redirect target is an allowed module — requisitions is first in MODULE order.
+            assert r.headers["location"] == "/v2/requisitions"
+        finally:
+            self._unpatch()
+
+    def test_crm_page_200_for_default_buyer(self, db_session, test_user, monkeypatch):
+        c = self._patch_user(monkeypatch, db_session, test_user)
+        try:
+            assert c.get("/v2/crm", follow_redirects=False).status_code == 200
+        finally:
+            self._unpatch()
+
+    def test_redirect_skips_revoked_first_module(self, db_session, test_user, monkeypatch):
+        # Requisitions revoked too → redirect lands on the next allowed module (sightings).
+        test_user.access_overrides = {
+            AccessKey.CRM.value: False,
+            AccessKey.REQUISITIONS.value: False,
+        }
+        db_session.commit()
+        c = self._patch_user(monkeypatch, db_session, test_user)
+        try:
+            r = c.get("/v2/crm", follow_redirects=False)
+            assert r.status_code == 302
+            assert r.headers["location"] == "/v2/sightings"
+        finally:
+            self._unpatch()
+
+    def test_no_modules_allowed_returns_403(self, db_session, monkeypatch):
+        # A non-admin agent (empty role defaults, no grants) → no module allowed → 403.
+        agent = _make_user(db_session, email="locked@trioscs.com", role="agent")
+        c = self._patch_user(monkeypatch, db_session, agent)
+        try:
+            r = c.get("/v2/crm", follow_redirects=False)
+            assert r.status_code == 403
+            assert "don't have access" in r.text.lower() or "logout" in r.text.lower()
+        finally:
+            self._unpatch()
+
+    def test_ungated_view_not_redirected(self, db_session, test_user, monkeypatch):
+        # settings is not in _VIEW_ACCESS → never gated even with everything revoked.
+        test_user.access_overrides = {k.value: False for k in MODULE_ACCESS_KEYS}
+        db_session.commit()
+        c = self._patch_user(monkeypatch, db_session, test_user)
+        try:
+            assert c.get("/v2/settings", follow_redirects=False).status_code == 200
+        finally:
+            self._unpatch()
+
+    def test_admin_never_redirected(self, db_session, admin_user, monkeypatch):
+        admin_user.access_overrides = {AccessKey.CRM.value: False}
+        db_session.commit()
+        c = self._patch_user(monkeypatch, db_session, admin_user)
+        try:
+            assert c.get("/v2/crm", follow_redirects=False).status_code == 200
+        finally:
+            self._unpatch()
+
+
+# ── capability endpoints are gated ───────────────────────────────────
+
+
+def _make_pending_offer(db, req):
+    from datetime import datetime, timezone
+
+    from app.models import Offer
+
+    o = Offer(
+        requisition_id=req.id,
+        requirement_id=req.requirements[0].id,
+        vendor_name="Arrow Electronics",
+        mpn=req.requirements[0].primary_mpn,
+        status="pending_review",
+        entered_by_id=req.created_by,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(o)
+    db.commit()
+    db.refresh(o)
+    return o
+
+
+class TestCapabilityGating:
+    def test_export_companies_403_when_export_revoked(self, db_session, test_user):
+        test_user.access_overrides = {AccessKey.EXPORT_DATA.value: False}
+        db_session.commit()
+        c = _client_as(db_session, test_user)
+        try:
+            assert c.get("/v2/customers/export.csv").status_code == 403
+        finally:
+            _drop_overrides(c)
+
+    def test_export_companies_200_for_default_buyer(self, db_session, test_user):
+        c = _client_as(db_session, test_user)
+        try:
+            assert c.get("/v2/customers/export.csv").status_code == 200
+        finally:
+            _drop_overrides(c)
+
+    def test_approve_offer_403_when_capability_revoked(self, db_session, test_user, test_requisition):
+        test_user.access_overrides = {AccessKey.APPROVE_OFFERS.value: False}
+        db_session.commit()
+        offer = _make_pending_offer(db_session, test_requisition)
+        c = _client_as(db_session, test_user)
+        try:
+            assert c.put(f"/api/offers/{offer.id}/approve").status_code == 403
+        finally:
+            _drop_overrides(c)
+
+    def test_approve_offer_works_for_default_buyer(self, db_session, test_user, test_requisition):
+        offer = _make_pending_offer(db_session, test_requisition)
+        c = _client_as(db_session, test_user)
+        try:
+            r = c.put(f"/api/offers/{offer.id}/approve")
+            assert r.status_code == 200, r.text
+            assert r.json()["status"] == "active"
+        finally:
+            _drop_overrides(c)
+
+    def test_sightings_review_offer_403_when_approve_revoked(self, db_session, test_user):
+        # The Sightings offers panel is an alternate entry point that approves/rejects
+        # offers — it must honor the same approve_offers gate (no bypass).
+        test_user.access_overrides = {AccessKey.APPROVE_OFFERS.value: False}
+        db_session.commit()
+        c = _client_as(db_session, test_user)
+        try:
+            # Gate fires before path/body resolution → 403 with dummy ids.
+            assert c.post("/v2/partials/sightings/1/offers/1/review").status_code == 403
+        finally:
+            _drop_overrides(c)
+
+    def test_sightings_reconfirm_offer_403_when_approve_revoked(self, db_session, test_user):
+        test_user.access_overrides = {AccessKey.APPROVE_OFFERS.value: False}
+        db_session.commit()
+        c = _client_as(db_session, test_user)
+        try:
+            assert c.post("/v2/partials/sightings/1/offers/1/reconfirm").status_code == 403
+        finally:
+            _drop_overrides(c)
+
+    def test_send_inquiry_403_when_send_rfq_revoked(self, db_session, test_user):
+        test_user.access_overrides = {AccessKey.SEND_RFQ.value: False}
+        db_session.commit()
+        c = _client_as(db_session, test_user)
+        try:
+            # Gate runs before the handler body / form parsing → 403, not 422.
+            assert c.post("/v2/partials/sightings/send-inquiry").status_code == 403
+        finally:
+            _drop_overrides(c)
+
+    def test_test_api_source_403_when_manage_connectors_revoked(self, db_session, test_user):
+        test_user.access_overrides = {AccessKey.MANAGE_CONNECTORS.value: False}
+        db_session.commit()
+        c = _client_as(db_session, test_user)
+        try:
+            # Source id need not exist — the gate fires before db.get(ApiSource).
+            assert c.post("/api/sources/999999/test").status_code == 403
+        finally:
+            _drop_overrides(c)
+
+    def test_admin_never_blocked_on_capability(self, db_session, admin_user):
+        admin_user.access_overrides = {AccessKey.EXPORT_DATA.value: False}
+        db_session.commit()
+        c = _client_as(db_session, admin_user)
+        try:
+            assert c.get("/v2/customers/export.csv").status_code == 200
+        finally:
+            _drop_overrides(c)
