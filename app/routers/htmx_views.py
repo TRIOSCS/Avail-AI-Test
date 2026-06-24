@@ -7945,16 +7945,20 @@ async def contact_search_typeahead(
     request: Request,
     company_id: int,
     q: str = "",
-    exclude: int = 0,
+    exclude_id: int = 0,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
     """Return contacts for a company as clickable typeahead results.
 
     Used by the contact merge form to pick the "loser" contact. Excludes the keeper
-    (exclude=) so a contact cannot be merged with itself.
+    (exclude_id=) so a contact cannot be merged with itself.
     """
     if not q.strip() or len(q.strip()) < 2:
+        return HTMLResponse("")
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company or not can_manage_account(user, company, db):
         return HTMLResponse("")
 
     contacts = (
@@ -7962,7 +7966,7 @@ async def contact_search_typeahead(
         .join(CustomerSite)
         .filter(
             CustomerSite.company_id == company_id,
-            SiteContact.id != exclude,
+            SiteContact.id != exclude_id,
             SiteContact.full_name.ilike(f"%{escape_like(q.strip())}%", escape="\\"),
         )
         .order_by(SiteContact.full_name)
@@ -8145,7 +8149,9 @@ async def contact_merge(
         f"{int(result.get('reassigned', 0))} record(s) reassigned.</p>",
         status_code=200,
     )
-    response.headers["HX-Trigger"] = '{"toast": "Contact merged successfully"}'
+    response.headers["HX-Trigger"] = json.dumps(
+        {"showToast": {"message": "Contact merged successfully", "type": "success"}}
+    )
     return response
 
 
@@ -8292,6 +8298,19 @@ async def contact_move(
 
     if not can_manage_account(user, target_company, db):
         raise HTTPException(403, "You do not have access to the target company")
+
+    # Email collision guard: (customer_site_id, email) unique constraint
+    if contact.email:
+        collision = (
+            db.query(SiteContact)
+            .filter(
+                SiteContact.customer_site_id == target_site_id,
+                SiteContact.email == contact.email,
+            )
+            .first()
+        )
+        if collision:
+            raise HTTPException(400, "A contact with this email already exists at the target site")
 
     # Execute move
     old_site_id = contact.customer_site_id

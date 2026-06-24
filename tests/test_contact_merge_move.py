@@ -260,6 +260,47 @@ class TestMergeContactsService:
 
         assert task.site_contact_id == keeper.id
 
+    def test_attachments_reassigned_not_deleted(self, db_session: Session, keeper: SiteContact, loser: SiteContact):
+        """SiteContactAttachment on the loser must be reassigned to keeper, not cascade-
+        deleted."""
+        from app.models.crm import SiteContactAttachment
+
+        att = SiteContactAttachment(
+            site_contact_id=loser.id,
+            file_name="invoice.pdf",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(att)
+        db_session.commit()
+        att_id = att.id
+
+        from app.services.contact_merge_service import merge_contacts
+
+        merge_contacts(keeper.id, loser.id, db_session)
+        db_session.commit()
+
+        db_session.expire_all()
+        refreshed = db_session.get(SiteContactAttachment, att_id)
+        assert refreshed is not None, "Attachment was deleted instead of reassigned"
+        assert refreshed.site_contact_id == keeper.id
+
+    def test_company_primary_contact_cleared_when_loser_was_primary(
+        self, db_session: Session, company_a: Company, keeper: SiteContact, loser: SiteContact
+    ):
+        """Company.primary_contact_id is cleared when the loser contact was the company
+        primary."""
+        company_a.primary_contact_id = loser.id
+        db_session.commit()
+
+        from app.services.contact_merge_service import merge_contacts
+
+        merge_contacts(keeper.id, loser.id, db_session)
+        db_session.commit()
+        db_session.expire(company_a)
+        db_session.refresh(company_a)
+
+        assert company_a.primary_contact_id is None
+
 
 # ── Merge route HTTP tests ───────────────────────────────────────────────────
 

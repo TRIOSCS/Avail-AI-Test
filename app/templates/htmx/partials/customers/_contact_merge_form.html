@@ -45,7 +45,7 @@
         const inp = document.getElementById('contact-merge-search');
         const res = document.getElementById('contact-merge-results');
         if (!inp || !res) return;
-        inp.addEventListener('htmx:afterSwap', function () {
+        res.addEventListener('htmx:afterSwap', function () {
           res.classList.toggle('hidden', !res.textContent.trim());
         });
         res.addEventListener('click', function (e) {
