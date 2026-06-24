@@ -18,11 +18,11 @@
   <div id="task-edit-error-{{ task.id }}"></div>
   <div class="flex gap-2">
     <button type="submit"
-            class="px-3 py-1 text-xs font-medium bg-brand-600 text-white rounded hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500">Save</button>
+            class="btn btn-primary btn-sm">Save</button>
     <button type="button"
             hx-get="/v2/partials/{% if task.company_id %}customers/{{ task.company_id }}/tasks{% else %}customers/{{ company_id }}/contacts/{{ task.site_contact_id }}/tasks{% endif %}"
             hx-target="#{% if task.company_id %}account-tasks-{{ task.company_id }}{% else %}contact-tasks-{{ task.site_contact_id }}{% endif %}"
             hx-swap="outerHTML"
-            class="px-3 py-1 text-xs font-medium text-gray-600 rounded border border-gray-200 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-brand-500">Cancel</button>
+            class="btn btn-secondary btn-sm">Cancel</button>
   </div>
 </form>
