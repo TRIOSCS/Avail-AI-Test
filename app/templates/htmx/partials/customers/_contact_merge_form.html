@@ -56,7 +56,7 @@
           res.classList.add('hidden');
           htmx.ajax('GET',
             '/v2/partials/customers/{{ company.id }}/contacts/{{ keep.id }}/merge-preview?remove_id=' + rid,
-            { target: '#contact-merge-preview-area', swap: 'innerHTML' }
+            { target: '#contact-merge-preview-area', swap: 'innerHTML', indicator: '#contact-merge-preview-area' }
           );
         });
         document.addEventListener('click', function (e) {

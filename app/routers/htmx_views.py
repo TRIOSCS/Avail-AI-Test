@@ -7963,7 +7963,7 @@ async def contact_search_typeahead(
         .filter(
             CustomerSite.company_id == company_id,
             SiteContact.id != exclude,
-            SiteContact.full_name.ilike(f"%{q.strip()}%"),
+            SiteContact.full_name.ilike(f"%{escape_like(q.strip())}%", escape="\\"),
         )
         .order_by(SiteContact.full_name)
         .limit(10)
