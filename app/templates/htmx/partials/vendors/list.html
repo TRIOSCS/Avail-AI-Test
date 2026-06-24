@@ -5,18 +5,57 @@
    Depends on: brand palette, timeago filter.
 #}
 
-<div class="page-fluid">
+<div class="page-fluid" x-data="{ importOpen: false }">
   <div class="flex items-center justify-between mb-4">
     <div>
       <p class="text-sm text-gray-600 mt-1">{{ total }} vendor{{ "s" if total != 1 }}</p>
     </div>
-    <button hx-get="/v2/partials/vendors/create-form"
-            hx-target="#main-content"
-            data-loading-disable
-            class="btn-primary btn-sm">
-      <svg class="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-      Add Vendor
-    </button>
+    <div class="flex items-center gap-2">
+      <a hx-get="/v2/partials/vendor-contacts"
+         hx-target="#main-content"
+         hx-push-url="/v2/vendor-contacts"
+         class="btn btn-secondary btn-sm cursor-pointer">
+        Contacts
+      </a>
+      <button type="button" @click="importOpen = true" class="btn btn-secondary btn-sm">
+        <svg class="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+        Import Vendors
+      </button>
+      <button hx-get="/v2/partials/vendors/create-form"
+              hx-target="#main-content"
+              data-loading-disable
+              class="btn-primary btn-sm">
+        <svg class="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+        Add Vendor
+      </button>
+    </div>
+  </div>
+
+  {# Import Vendors modal — uploads a CSV to the existing admin import endpoint.
+     Result HTML is swapped into #vendor-import-result. CSV header: name,email,phone,website. #}
+  <div x-show="importOpen" x-cloak
+       class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+       @keydown.escape.window="importOpen = false">
+    <div class="bg-white rounded-lg shadow-xl w-full max-w-md" @click.outside="importOpen = false">
+      <div class="modal-header">
+        <h3 class="h4">Import Vendors</h3>
+        <button type="button" class="modal-close" @click="importOpen = false" aria-label="Close">&times;</button>
+      </div>
+      <form class="modal-body space-y-3"
+            hx-post="/v2/partials/admin/import/vendors"
+            hx-target="#vendor-import-result"
+            hx-swap="innerHTML"
+            hx-encoding="multipart/form-data">
+        <p class="text-sm text-gray-600">Upload a CSV with a header row of <code>name,email,phone,website</code>. Existing vendors (matched by normalized name) are skipped.</p>
+        <input type="file" name="file" accept=".csv,text/csv" required
+               class="block w-full text-sm text-gray-600 file:mr-3 file:rounded file:border-0 file:bg-brand-50 file:px-3 file:py-1.5 file:text-sm file:text-brand-700">
+        <div id="vendor-import-result"></div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary btn-sm" @click="importOpen = false">Close</button>
+          <button type="submit" class="btn btn-primary btn-sm" data-loading-disable>Import</button>
+        </div>
+      </form>
+    </div>
   </div>
 
   {# Tab bar: All Vendors / My Vendors #}
