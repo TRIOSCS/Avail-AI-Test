@@ -43,6 +43,7 @@ from typing import Any
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.constants import (
     ActivityType,
     AIFlagSeverity,
@@ -156,6 +157,43 @@ def _seed_users(db: Session, counts: _Counts) -> dict[str, User]:
         )
         out[var] = row
     return out
+
+
+# Sample-user roles redirected to the --owner user so the sample deals land in
+# THAT user's default "mine" lenses (requisition created_by, buy-plan-line
+# buyer_id, buy-plan submitted_by_id, excess owner_id). u_manager is intentionally
+# NOT redirected — it stays the distinct approver/verifier so the approve/verify
+# workflow still shows a second actor.
+_OWNER_REDIRECT_ROLES = ("u_seeder", "u_sales", "u_buyer1", "u_buyer2", "u_trader")
+
+
+def _resolve_owner_user(db: Session, email: str) -> User:
+    """Resolve the ``--owner`` email to a User row (case-insensitive).
+
+    Returns the existing user if present. Otherwise PRE-PROVISIONS a real owner
+    account (so it's ready when that person logs in via OAuth, which matches on
+    email): this user is NOT sample-tagged and is therefore NEVER removed by
+    ``--wipe``. Role is ``admin`` when the email is in ``settings.admin_emails``,
+    else ``buyer``.
+    """
+    norm = email.strip()
+    user = db.query(User).filter(User.email.ilike(norm)).first()
+    if user is not None:
+        logger.info("seed-sample: --owner resolved to existing user id={} email={}", user.id, user.email)
+        return user
+    admin_emails = settings.admin_emails if isinstance(settings.admin_emails, list) else []
+    role = "admin" if norm.lower() in {e.lower() for e in admin_emails} else "buyer"
+    user = User(email=norm, name=norm.split("@", 1)[0], role=role, is_active=True)
+    db.add(user)
+    db.flush()
+    logger.warning(
+        "seed-sample: --owner user not found; pre-provisioned REAL owner account "
+        "id={} email={} role={} (not sample-tagged; survives --wipe)",
+        user.id,
+        user.email,
+        role,
+    )
+    return user
 
 
 def _seed_companies(db: Session, counts: _Counts, u: dict[str, User]) -> dict[str, Company]:
@@ -1505,14 +1543,28 @@ def _seed_wf_f(db: Session, counts: _Counts, reqs1: dict, vc: dict, u: dict) -> 
 # ── Orchestration ────────────────────────────────────────────────────
 
 
-def seed(db: Session) -> _Counts:
+def seed(db: Session, owner_email: str | None = None) -> _Counts:
     """Idempotently seed (or top up) the full sample dataset.
+
+    When *owner_email* is given, the sample deals (requisitions, quotes, buy plans
+    + their lines, excess lists) are assigned to that user instead of the sample
+    actor users, so they populate THAT user's default "mine"/"orders"/"deals"
+    lenses (not just the admin "supervise" lens). See ``_resolve_owner_user``.
 
     Returns per-model counts.
     """
     counts: _Counts = {}
     u = _seed_users(db, counts)
     db.flush()
+    if owner_email:
+        owner = _resolve_owner_user(db, owner_email)
+        for role in _OWNER_REDIRECT_ROLES:
+            u[role] = owner
+        logger.info(
+            "seed-sample: sample deals owned by {} (redirected roles: {})",
+            owner.email,
+            ", ".join(_OWNER_REDIRECT_ROLES),
+        )
     co = _seed_companies(db, counts, u)
     site = _seed_sites(db, counts, co, u)
     con = _seed_contacts(db, counts, site, co)
@@ -1660,6 +1712,16 @@ def main(argv: list[str] | None = None) -> int:
     """CLI entry point."""
     parser = argparse.ArgumentParser(description="Seed (or wipe) the AvailAI sample dataset (idempotent additive).")
     parser.add_argument("--wipe", action="store_true", help="Delete only tagged sample rows, then exit.")
+    parser.add_argument(
+        "--owner",
+        metavar="EMAIL",
+        default=None,
+        help=(
+            "Assign the sample deals (requisitions/quotes/buy plans/excess) to this user's email "
+            "so they show in that user's default 'mine'/'orders'/'deals' lenses. Resolves an "
+            "existing user or pre-provisions a real (non-sample, never-wiped) account. Ignored with --wipe."
+        ),
+    )
     args = parser.parse_args(argv)
 
     from app.database import SessionLocal
@@ -1669,7 +1731,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.wipe:
             wipe(db)
         else:
-            seed(db)
+            seed(db, owner_email=args.owner)
     finally:
         db.close()
     return 0
