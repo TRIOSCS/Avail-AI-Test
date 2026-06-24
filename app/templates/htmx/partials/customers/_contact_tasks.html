@@ -7,8 +7,9 @@
     <p class="text-xs text-gray-600 font-medium mb-1">Open tasks ({{ contact_tasks|length }})</p>
     <ul class="space-y-1">
       {% for t in contact_tasks %}
-      {% set is_overdue = t.due_at is not none and t.due_at <= now_utc %}
-      {% set is_due_today = t.due_at is not none and not is_overdue and t.due_at.date() == now_utc.date() %}
+      {% set _due_state = task_due_state(t, now_utc) %}
+      {% set is_overdue = _due_state[0] %}
+      {% set is_due_today = _due_state[1] %}
       <li class="flex items-start gap-2 text-xs">
         <form hx-post="/v2/partials/tasks/{{ t.id }}/complete"
               hx-target="#contact-tasks-{{ contact.id }}"

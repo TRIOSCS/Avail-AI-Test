@@ -298,6 +298,23 @@ def _now() -> datetime:
 
 templates.env.globals["now"] = _now
 
+
+def _task_due_state(task, now_utc: datetime) -> tuple[bool, bool]:
+    """Return (is_overdue, is_due_today) for a task row, coercing naive due_at to UTC.
+
+    Centralises the comparison so templates never do datetime arithmetic directly, which
+    would TypeError under SQLite when due_at is naive and now_utc is aware.
+    """
+    if task.due_at is None:
+        return (False, False)
+    due = task.due_at if task.due_at.tzinfo is not None else task.due_at.replace(tzinfo=timezone.utc)
+    is_overdue = due <= now_utc
+    is_due_today = not is_overdue and due.date() == now_utc.date()
+    return (is_overdue, is_due_today)
+
+
+templates.env.globals["task_due_state"] = _task_due_state
+
 from .services.crm_service import cadence_state  # noqa: E402
 
 templates.env.globals["cadence_state"] = cadence_state

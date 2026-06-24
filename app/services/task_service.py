@@ -747,15 +747,13 @@ def snooze_task(db: Session, task_id: int) -> RequisitionTask | None:
     If the task has no due_at, sets it to tomorrow (midnight UTC). Returns the updated
     task, or None if not found.
     """
-    from datetime import date
-
     task = db.get(RequisitionTask, task_id)
     if not task:
         return None
     if task.due_at:
         task.due_at = task.due_at + timedelta(weeks=1)
     else:
-        tomorrow = datetime.combine(date.today() + timedelta(days=1), datetime.min.time()).replace(tzinfo=timezone.utc)
+        tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
         task.due_at = tomorrow
     db.commit()
     db.refresh(task)

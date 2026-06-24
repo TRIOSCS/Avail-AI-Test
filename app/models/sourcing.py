@@ -91,9 +91,15 @@ class Requisition(Base):
 
     @validates("win_probability")
     def _validate_win_probability(self, _key, value):
-        if value is not None and not (0 <= int(value) <= 100):
+        if value is None:
+            return value
+        try:
+            v = int(value)
+        except (ValueError, TypeError):
+            raise ValueError(f"win_probability must be an integer, got {value!r}") from None
+        if not (0 <= v <= 100):
             raise ValueError("win_probability must be between 0 and 100")
-        return value
+        return v
 
     @validates("status")
     def _validate_status(self, _key, value):

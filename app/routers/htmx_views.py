@@ -1941,11 +1941,11 @@ async def requisition_inline_save(
 async def requisition_win_probability_save(
     request: Request,
     req_id: int,
-    win_probability: str = Form(...),
+    win_probability: str = Form(""),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Set win_probability (0-100) on a requisition.
+    """Set win_probability (0-100) on a requisition, or clear it (empty string → NULL).
 
     Authz: same gate as other inline requisition edits (require_requisition_access).
     Returns an inline display span with the new value.
@@ -1956,12 +1956,16 @@ async def requisition_win_probability_save(
     if not req:
         raise HTTPException(404, "Requisition not found")
     require_requisition_access(db, req_id, user)
-    try:
-        prob = int(win_probability)
-    except (ValueError, TypeError):
-        raise HTTPException(400, "win_probability must be an integer") from None
-    if not (0 <= prob <= 100):
-        raise HTTPException(400, "win_probability must be between 0 and 100")
+    stripped = win_probability.strip()
+    if stripped == "":
+        prob = None
+    else:
+        try:
+            prob = int(stripped)
+        except (ValueError, TypeError):
+            raise HTTPException(400, "win_probability must be an integer") from None
+        if not (0 <= prob <= 100):
+            raise HTTPException(400, "win_probability must be between 0 and 100")
     req.win_probability = prob
     req.updated_at = datetime.now(timezone.utc)
     req.updated_by_id = user.id

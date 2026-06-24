@@ -155,7 +155,7 @@ class TestTaskSnoozeService:
         from app.services.task_service import snooze_task
 
         snoozed = snooze_task(db_session, task.id)
-        tomorrow = datetime.combine(date.today() + timedelta(days=1), datetime.min.time()).replace(tzinfo=timezone.utc)
+        tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
         assert snoozed is not None
         assert abs((snoozed.due_at - tomorrow).total_seconds()) < 2
 
@@ -268,7 +268,7 @@ class TestDueOverdueBadgeTemplate:
         assert "today" in html.lower() or "overdue" in html.lower()
 
     def test_future_badge_shown(self, client, db_session: Session, owned_company: Company, test_user: User):
-        """A task due in 5 days shows a future-due badge (not overdue)."""
+        """A task due in 5 days shows a future-due indicator (not overdue)."""
         create_company_task(
             db_session,
             company_id=owned_company.id,
@@ -278,8 +278,10 @@ class TestDueOverdueBadgeTemplate:
             assigned_to_id=test_user.id,
         )
         html = self._render_account_tasks(client, owned_company)
-        # future: no "overdue" text, but "Due in" or just the date
-        assert "overdue" not in html.lower() or "Future task" in html
+        # The task row must be present
+        assert "Future task" in html
+        # A future task must NOT show the overdue badge
+        assert "overdue" not in html.lower()
 
     def test_no_due_date_no_badge(self, client, db_session: Session, owned_company: Company, test_user: User):
         """A task with no due_at shows no due badge."""
@@ -380,6 +382,21 @@ class TestWinProbabilityRoute:
             data={"win_probability": "-5"},
         )
         assert resp.status_code == 400
+
+    def test_win_probability_empty_clears_to_none(self, client, db_session: Session, test_requisition: Requisition):
+        """Submitting an empty win_probability clears the value to NULL (200, not
+        400)."""
+        # First set a value
+        test_requisition.win_probability = 55
+        db_session.commit()
+        # Now clear it
+        resp = client.patch(
+            f"/v2/partials/requisitions/{test_requisition.id}/win-probability",
+            data={"win_probability": ""},
+        )
+        assert resp.status_code == 200
+        db_session.refresh(test_requisition)
+        assert test_requisition.win_probability is None
 
     def test_win_probability_unauthorized_returns_403(
         self,
