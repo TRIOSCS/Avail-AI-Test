@@ -8038,6 +8038,9 @@ async def contact_merge_preview(
     if not company:
         raise HTTPException(404, "Company not found")
 
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Only the owner or an admin can merge contacts")
+
     keep = (
         db.query(SiteContact)
         .join(CustomerSite)

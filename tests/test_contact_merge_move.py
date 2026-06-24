@@ -384,6 +384,19 @@ class TestMergeRoutes:
         )
         assert resp.status_code == 403
 
+    def test_merge_preview_unrelated_rep_gets_403(
+        self,
+        unrelated_client: TestClient,
+        company_a: Company,
+        keeper: SiteContact,
+        loser: SiteContact,
+    ):
+        """GET merge-preview must be gated — cross-tenant IDOR guard."""
+        resp = unrelated_client.get(
+            f"/v2/partials/customers/{company_a.id}/contacts/{keeper.id}/merge-preview?remove_id={loser.id}"
+        )
+        assert resp.status_code == 403
+
 
 # ── Move route HTTP tests ────────────────────────────────────────────────────
 
