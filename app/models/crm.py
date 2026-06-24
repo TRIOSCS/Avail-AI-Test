@@ -114,8 +114,15 @@ class Company(Base):
         onupdate=lambda: datetime.now(timezone.utc),
     )
 
+    # Audit trail — set automatically by app/audit_listeners.py on every
+    # authenticated request; NULL for background-job / import writes.
+    created_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    modified_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
     sites = relationship("CustomerSite", back_populates="company", cascade="all, delete-orphan")
     account_owner = relationship("User", foreign_keys=[account_owner_id])
+    created_by = relationship("User", foreign_keys=[created_by_id])
+    modified_by = relationship("User", foreign_keys=[modified_by_id])
     attachments = relationship("CompanyAttachment", back_populates="company", cascade="all, delete-orphan")
     collaborators = relationship("AccountCollaborator", back_populates="company", cascade="all, delete-orphan")
     primary_contact = relationship("SiteContact", foreign_keys=[primary_contact_id])
@@ -231,8 +238,15 @@ class CustomerSite(Base):
         onupdate=lambda: datetime.now(timezone.utc),
     )
 
+    # Audit trail — set automatically by app/audit_listeners.py on every
+    # authenticated request; NULL for background-job / import writes.
+    created_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    modified_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
     company = relationship("Company", back_populates="sites")
     owner = relationship("User", foreign_keys=[owner_id])
+    created_by = relationship("User", foreign_keys=[created_by_id])
+    modified_by = relationship("User", foreign_keys=[modified_by_id])
     site_contacts = relationship("SiteContact", back_populates="customer_site", cascade="all, delete-orphan")
 
     @validates("contact_email")
@@ -324,9 +338,16 @@ class SiteContact(Base):
         onupdate=lambda: datetime.now(timezone.utc),
     )
 
+    # Audit trail — set automatically by app/audit_listeners.py on every
+    # authenticated request; NULL for background-job / import writes.
+    created_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    modified_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
     customer_site = relationship("CustomerSite", back_populates="site_contacts")
     attachments = relationship("SiteContactAttachment", back_populates="site_contact", cascade="all, delete-orphan")
     contact_owner = relationship("User", foreign_keys=[contact_owner_id])
+    created_by = relationship("User", foreign_keys=[created_by_id])
+    modified_by = relationship("User", foreign_keys=[modified_by_id])
     reports_to = relationship(
         "SiteContact", foreign_keys="[SiteContact.reports_to_id]", remote_side="SiteContact.id", lazy="joined"
     )

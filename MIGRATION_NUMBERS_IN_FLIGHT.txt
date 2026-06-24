@@ -69,3 +69,4 @@
 144  feat/rubric-d-contact-fields  site_contacts.secondary_email + secondary_phone + reports_to_id (self-FK SET NULL) + EntityTag entity_type='site_contact'; chains onto 143_vendor_attachments; single head verified via `alembic heads`
 145  feat/rubric-h2-vendor-parity-p1  VendorContact.is_primary (Boolean NOT NULL server_default false) + VendorCard.custom_fields (JSONB default {}); chains onto 144_contact_fields; single head verified via `alembic heads`
 146  feat/rubric-e-tasks-deal  requisitions.win_probability (Integer nullable 0-100); chains onto 145_vendor_parity_p1; single head verified via alembic heads
+147  feat/rubric-d2-audit-trail  companies+customer_sites+site_contacts: created_by_id+modified_by_id (FK users.id ondelete=SET NULL, nullable); chains onto 146_req_win_probability; single head verified via alembic heads

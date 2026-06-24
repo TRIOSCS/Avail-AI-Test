@@ -1816,6 +1816,36 @@ Both `/v2/contacts` and `/v2/vendor-contacts` are full-page entry points wired i
 
 ---
 
+## 10a. CRM Audit Trail (created_by / modified_by)
+
+Migration 147 adds `created_by_id` + `modified_by_id` (FK → `users.id`, `ondelete=SET NULL`,
+nullable) to `companies`, `customer_sites`, and `site_contacts`.
+
+Mechanism — three-layer:
+
+1. **`app/request_context.py`** — `current_user_id_var: ContextVar[int | None]` (default
+   `None`). Single module, no circular deps. Background jobs and imports never set it.
+
+2. **`app/main.py` `audit_user_middleware`** (L3 HTTP middleware) — on every request,
+   reads `user_id` from the Starlette session scope and calls
+   `current_user_id_var.set(uid)`.  Resets the token in a `finally` block so cross-request
+   leak is impossible even under async cancellation.
+
+3. **`app/audit_listeners.py` `register_audit_listeners()`** — registers
+   `before_insert` / `before_update` SQLAlchemy event listeners on `Company`,
+   `CustomerSite`, `SiteContact`.  On insert: sets `created_by_id` and `modified_by_id`
+   if the contextvar is non-None and the column is not already explicitly set.  On update:
+   sets only `modified_by_id`.  Called once at module load from `app/main.py`.
+
+Invariants:
+- Authenticated request writes → both columns populated.
+- Background job / APScheduler / import writes → both columns NULL.
+- No cross-request contamination — `ContextVar.reset()` in `finally`.
+- Company detail template (`htmx/partials/customers/detail.html`) renders
+  "Created by {name} · Updated by {name}" inside the collapsible account-settings panel.
+
+---
+
 ## 11. Cross-App Alerts (Nav Badges + In-Tab Spotlight)
 
 A reusable alert layer (`app/services/alerts/`) drives an emerald count badge on

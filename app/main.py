@@ -17,8 +17,14 @@ from sqlalchemy.orm import Session
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
+from .audit_listeners import register_audit_listeners
 from .config import APP_VERSION, settings
 from .database import get_db
+
+# Register CRM audit-trail event listeners (before_insert / before_update).
+# Must run at import time, before any ORM session is used, so listeners
+# are in place for the first request.
+register_audit_listeners()
 
 # Schema managed by Alembic migrations — see alembic/ directory
 # To apply:  alembic upgrade head
@@ -450,6 +456,25 @@ async def api_version_middleware(request: Request, call_next):
     response = await call_next(request)
     response.headers["X-API-Version"] = "v1"
     return response
+
+
+# L3: Audit-user middleware — set current_user_id_var for the duration of each request.
+@app.middleware("http")
+async def audit_user_middleware(request: Request, call_next):
+    """Populate the request-scoped current_user_id contextvar for CRM audit columns.
+
+    Reads user_id from the session cookie (same source as require_user). Sets the
+    contextvar before routing and resets it in a finally block so no cross-request leak
+    is possible.  Background jobs have no request so the contextvar stays None.
+    """
+    from .request_context import current_user_id_var
+
+    uid = request.session.get("user_id") if "session" in request.scope else None
+    token = current_user_id_var.set(uid)
+    try:
+        return await call_next(request)
+    finally:
+        current_user_id_var.reset(token)
 
 
 @app.get("/sw.js", include_in_schema=False)

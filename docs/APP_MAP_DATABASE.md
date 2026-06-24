@@ -320,7 +320,9 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 | naics | String 20, nullable | Migration 125. NAICS industry code. SAM.gov is authoritative (tier 95); Explorium second (tier 85). |
 | revenue_range | String 50, nullable | Migration 125. Annual revenue band (e.g. `1000000-5000000`), formatted from a `{min, max}` range by the Explorium connector. Explorium is the highest-authority source (tier 90). |
 | enrichment_provenance | JSONB, nullable, server_default `{}` | Migration 125. Per-field provenance store written by `_apply_enrichment` (enrichment_service.py). Shape: `{field: {source, tier, confidence}}`. Guards the provenance-aware overwrite rule: a field with no stored provenance is treated as manual/legacy and is never clobbered by an automated source; a field with provenance is overwritten only when the incoming (tier, confidence) pair strictly beats the stored one. |
-| **Relationships** | customer_sites, requisitions, attachments (`CompanyAttachment`), entity_tags | Migration 126 adds `attachments`. |
+| created_by_id | FK -> users (SET NULL), nullable | Migration 147. Set automatically by `app/audit_listeners.py` (`before_insert` event) from `current_user_id_var` on every authenticated request; NULL for background/import writes. |
+| modified_by_id | FK -> users (SET NULL), nullable | Migration 147. Set automatically by `app/audit_listeners.py` (`before_update` event) from `current_user_id_var`; NULL for background/import writes. |
+| **Relationships** | customer_sites, requisitions, attachments (`CompanyAttachment`), entity_tags, created_by (`User`), modified_by (`User`) | Migration 126 adds `attachments`. Migration 147 adds audit trail. |
 
 **`customer_sites`** — Delivery/contact locations for a company
 | Column | Type | Notes |
@@ -334,6 +336,8 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 | site_type | String 50 | HQ\|Branch\|Warehouse\|Manufacturing |
 | payment_terms / shipping_terms | String 100 | |
 | last_activity_at | UTCDateTime, nullable | Bumped by `log_outreach_initiated()` alongside `companies.last_activity_at`. |
+| created_by_id | FK -> users (SET NULL), nullable | Migration 147. Set automatically by `app/audit_listeners.py` on authenticated request; NULL for background/import writes. |
+| modified_by_id | FK -> users (SET NULL), nullable | Migration 147. Set automatically by `app/audit_listeners.py` on authenticated request; NULL for background/import writes. |
 
 **`site_contacts`** — Individual people at customer sites
 | Column | Type | Notes |
@@ -356,7 +360,9 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 | is_archived | Boolean NOT NULL (server_default false) | Migration 118. Sorts the contact to the BOTTOM of the roster but keeps it visible (NOT `is_active`, which would hide it). Toggled via `POST .../contacts/{id}/archive` (`_archive_toggle.html`). |
 | email_verified | Boolean | |
 | enrichment_source | String 50 | lusha|clay|hunter|explorium|manual |
-| **Relationships** | customer_site, attachments (`SiteContactAttachment`), contact_owner (`User`), reports_to (`SiteContact`, self-ref) | Migration 126 adds `attachments`. Migration 134 adds `contact_owner`. Migration 144 adds `reports_to` self-reference. |
+| created_by_id | FK -> users (SET NULL), nullable | Migration 147. Set automatically by `app/audit_listeners.py` on authenticated request; NULL for background/import writes. |
+| modified_by_id | FK -> users (SET NULL), nullable | Migration 147. Set automatically by `app/audit_listeners.py` on authenticated request; NULL for background/import writes. |
+| **Relationships** | customer_site, attachments (`SiteContactAttachment`), contact_owner (`User`), reports_to (`SiteContact`, self-ref), created_by (`User`), modified_by (`User`) | Migration 126 adds `attachments`. Migration 134 adds `contact_owner`. Migration 144 adds `reports_to` self-reference. Migration 147 adds audit trail. |
 
 **`company_attachments`** — Files attached to a CRM company (Migration 126, new table)
 | Column | Type | Notes |

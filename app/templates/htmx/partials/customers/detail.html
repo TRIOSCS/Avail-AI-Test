@@ -273,6 +273,13 @@
           {% include "htmx/partials/customers/_custom_fields.html" %}
         {% endwith %}
       </div>
+
+      {# ── Audit trail — created / modified by ─────────────────────── #}
+      <p class="text-xs text-gray-400 mt-1">
+        Created by <span class="text-gray-600 font-medium">{{ company.created_by.name if company.created_by else '—' }}</span>
+        &middot;
+        Updated by <span class="text-gray-600 font-medium">{{ company.modified_by.name if company.modified_by else '—' }}</span>
+      </p>
     </div>
   </div>
 
