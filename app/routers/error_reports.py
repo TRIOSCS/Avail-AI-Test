@@ -48,6 +48,15 @@ class TicketUpdate(BaseModel):
     resolution_notes: Optional[str] = Field(None, max_length=5000)
 
 
+class DiagnoseBulkBody(BaseModel):
+    ticket_ids: list[int] = Field(..., min_length=1, max_length=50)
+
+
+class BulkStatusBody(BaseModel):
+    ticket_ids: list[int] = Field(..., min_length=1, max_length=200)
+    status: TicketStatus
+
+
 def _ensure_upload_dir() -> None:
     global _upload_dir_ready
     if not _upload_dir_ready:
@@ -71,8 +80,8 @@ def _save_screenshot(ticket_id: int, b64_data: str) -> str | None:
         with open(path, "wb") as f:
             f.write(png_bytes)
         return path
-    except Exception:
-        logger.warning("Failed to save screenshot for ticket {}", ticket_id)
+    except Exception as e:
+        logger.warning("Failed to save screenshot for ticket {}: {}", ticket_id, e)
         return None
 
 
@@ -87,7 +96,7 @@ def _create_ticket(
 
     Args:
         context: optional dict with keys user_agent, browser_info,
-                 console_errors, network_errors.
+                 console_errors, network_errors, auto_captured_context, current_view.
     """
     ctx = context or {}
     ticket = TroubleTicket(
@@ -100,6 +109,8 @@ def _create_ticket(
         browser_info=ctx.get("browser_info") or None,
         console_errors=ctx.get("console_errors") or None,
         network_errors=ctx.get("network_errors") or None,
+        auto_captured_context=ctx.get("auto_captured_context") or None,
+        current_view=ctx.get("current_view") or None,
         source=TicketSource.REPORT_BUTTON,
         status=TicketStatus.SUBMITTED,
         risk_tier="low",
@@ -175,7 +186,7 @@ async def submit_trouble_ticket(
 ):
     """Handle submission from trouble ticket form — accepts JSON or form data."""
     content_type = request.headers.get("content-type", "")
-    screenshot_b64 = ua = viewport = error_log = network_log_raw = None
+    screenshot_b64 = ua = viewport = error_log = network_log_raw = auto_ctx_raw = None
 
     if "application/json" in content_type:
         try:
@@ -192,6 +203,7 @@ async def submit_trouble_ticket(
         viewport = body.get("viewport")
         error_log = body.get("error_log")
         network_log_raw = body.get("network_log")
+        auto_ctx_raw = body.get("auto_captured_context")
     else:
         # Legacy form-encoded fallback
         form = await request.form()
@@ -220,6 +232,13 @@ async def submit_trouble_ticket(
         except (ValueError, TypeError):
             network_errors = None
 
+    auto_ctx = None
+    if auto_ctx_raw:
+        try:
+            auto_ctx = json.loads(auto_ctx_raw) if isinstance(auto_ctx_raw, str) else auto_ctx_raw
+        except (ValueError, TypeError):
+            auto_ctx = None
+
     try:
         ticket = _create_ticket(
             db,
@@ -231,6 +250,8 @@ async def submit_trouble_ticket(
                 "browser_info": browser_info,
                 "console_errors": error_log,
                 "network_errors": network_errors,
+                "auto_captured_context": auto_ctx,
+                "current_view": (auto_ctx or {}).get("current_view") if isinstance(auto_ctx, dict) else None,
             },
         )
         if screenshot_b64:
@@ -264,10 +285,14 @@ async def submit_trouble_ticket(
 @router.get("/api/trouble-tickets/{ticket_id}/screenshot")
 async def get_ticket_screenshot(
     ticket_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Serve screenshot PNG from disk; fall back to legacy screenshot_b64."""
+    """Serve screenshot PNG from disk; fall back to legacy screenshot_b64.
+
+    Admin-only: screenshots can contain sensitive on-screen data (customer
+    names, pricing, contacts), so retrieval is gated to the ticket console.
+    """
     ticket = db.get(TroubleTicket, ticket_id)
     if not ticket:
         raise HTTPException(404, "Ticket not found")
@@ -418,7 +443,7 @@ async def analyze_tickets(
                 f"Tickets:\n{json.dumps(ticket_data, indent=2)}"
             ),
             system="You are a bug triage assistant. Group related bug reports by their likely root cause.",
-            output_schema=tool_schema,
+            schema=tool_schema,
             model_tier="fast",
         )
     except (ClaudeUnavailableError, ClaudeError) as e:
@@ -482,3 +507,88 @@ async def update_ticket(
 
     logger.info("Ticket {} updated to {} by user {}", ticket.ticket_number, ticket.status, user.id)
     return {"id": ticket.id, "status": ticket.status}
+
+
+# ── AI diagnosis (admin) ──────────────────────────────────────────
+
+
+@router.post("/api/trouble-tickets/{ticket_id}/diagnose", response_class=HTMLResponse)
+async def diagnose_ticket_endpoint(
+    request: Request,
+    ticket_id: int,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Admin: AI-diagnose one ticket. Returns the diagnosis partial for HTMX swap."""
+    from ..services.ticket_diagnosis_service import diagnose_ticket
+    from ..utils.claude_errors import ClaudeError, ClaudeUnavailableError
+
+    ticket = db.get(TroubleTicket, ticket_id)
+    if not ticket:
+        raise HTTPException(404, "Ticket not found")
+
+    try:
+        await diagnose_ticket(db, ticket)
+    except (ClaudeUnavailableError, ClaudeError) as e:
+        logger.warning("Diagnose failed for ticket {}: {}", ticket.ticket_number, e)
+        return HTMLResponse(
+            '<div class="p-3 text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-lg">'
+            "AI diagnosis is unavailable right now. Please try again later.</div>"
+        )
+
+    resp = template_response(
+        "htmx/partials/tickets/_diagnosis.html",
+        {"request": request, "ticket": ticket},
+    )
+    resp.headers["HX-Trigger"] = "ticketsUpdated"
+    return resp
+
+
+@router.post("/api/trouble-tickets/diagnose-bulk", response_class=HTMLResponse)
+async def diagnose_bulk_endpoint(
+    body: DiagnoseBulkBody,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Admin: AI-diagnose the selected tickets concurrently."""
+    from ..services.ticket_diagnosis_service import diagnose_tickets_bulk
+
+    tickets = (
+        db.query(TroubleTicket)
+        .filter(TroubleTicket.id.in_(body.ticket_ids))
+        .filter(TroubleTicket.source == TicketSource.REPORT_BUTTON)
+        .all()
+    )
+    outcomes = await diagnose_tickets_bulk(db, tickets)
+    ok = sum(1 for v in outcomes.values() if v == "ok")
+    total = len(body.ticket_ids)
+
+    resp = HTMLResponse(
+        f'<div class="p-3 text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg">'
+        f"Diagnosed {ok} of {total} selected ticket{'s' if total != 1 else ''}.</div>"
+    )
+    resp.headers["HX-Trigger"] = "ticketsUpdated"
+    return resp
+
+
+@router.post("/api/trouble-tickets/bulk-status", response_class=HTMLResponse)
+async def bulk_status_endpoint(
+    body: BulkStatusBody,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Admin: bulk status change (resolve / wont_fix / in_progress / submitted)."""
+    tickets = db.query(TroubleTicket).filter(TroubleTicket.id.in_(body.ticket_ids)).all()
+    now = datetime.now(timezone.utc)
+    for ticket in tickets:
+        ticket.status = body.status
+        ticket.updated_at = now
+        if body.status == TicketStatus.RESOLVED:
+            ticket.resolved_at = now
+            ticket.resolved_by_id = user.id
+    db.commit()
+    logger.info("Bulk status {} applied to {} tickets by user {}", body.status, len(tickets), user.id)
+
+    resp = HTMLResponse("")
+    resp.headers["HX-Trigger"] = "ticketsUpdated"
+    return resp

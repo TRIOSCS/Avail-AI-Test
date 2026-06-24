@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.dependencies import require_user
+from app.dependencies import require_admin, require_user
 from app.main import app
 from app.models import User
 from app.models.root_cause_group import RootCauseGroup
@@ -23,7 +23,12 @@ from app.models.trouble_ticket import TroubleTicket
 
 
 def _make_client(db_session: Session, user: User) -> TestClient:
-    """Build a TestClient authenticated as the given user."""
+    """Build a TestClient authenticated as the given user.
+
+    The trouble-ticket console routes are admin-gated, so require_admin is also
+    overridden to *user* here — this file tests rendering, while admin gating is covered
+    in test_ticket_diagnosis.py.
+    """
 
     def _override_db():
         yield db_session
@@ -33,6 +38,7 @@ def _make_client(db_session: Session, user: User) -> TestClient:
 
     app.dependency_overrides[get_db] = _override_db
     app.dependency_overrides[require_user] = _override_user
+    app.dependency_overrides[require_admin] = _override_user
     return TestClient(app)
 
 

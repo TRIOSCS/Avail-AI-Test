@@ -280,6 +280,7 @@ def _base_ctx(request: Request, user: User, current_view: str = "") -> dict:
         "vite_js": assets["js_file"],
         "vite_css": assets["css_files"],
         "now_utc": datetime.now(timezone.utc),
+        "build_commit": os.environ.get("BUILD_COMMIT", "dev"),
     }
 
 
@@ -398,6 +399,11 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         "requisitions",
     )
     current_view = next((seg for seg in _VIEW_SEGMENTS if f"/{seg}" in path), "requisitions")
+
+    # Trouble-ticket console is admin-only — non-admins get a clean 403 instead of
+    # a page shell whose inner (admin-gated) partial would 403 on load.
+    if current_view == "trouble-tickets" and user.role != UserRole.ADMIN:
+        raise HTTPException(403, "Admin access required")
 
     # Module access gate (Phase 4b). If the requested view maps to a module the user may
     # not see, redirect to their first allowed module (admins always pass user_has_access
@@ -16365,8 +16371,8 @@ async def bulk_unarchive(
 
 
 @router.get("/v2/partials/trouble-tickets/workspace", response_class=HTMLResponse)
-async def trouble_tickets_workspace(request: Request, user: User = Depends(require_user)):
-    """Trouble Tickets workspace — loaded into #main-content."""
+async def trouble_tickets_workspace(request: Request, user: User = Depends(require_admin)):
+    """Trouble Tickets workspace — loaded into #main-content (admin-only console)."""
     return template_response(
         "htmx/partials/tickets/workspace.html",
         {**_base_ctx(request, user, "tickets")},
@@ -16377,10 +16383,11 @@ async def trouble_tickets_workspace(request: Request, user: User = Depends(requi
 async def trouble_tickets_list(
     request: Request,
     status: str = "",
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Trouble Tickets list partial — grouped by root cause, filterable by status."""
+    """Trouble Tickets list partial — grouped by root cause, filterable by status
+    (admin-only)."""
     from app.models.root_cause_group import RootCauseGroup
     from app.models.trouble_ticket import TroubleTicket
 
@@ -16427,10 +16434,11 @@ async def trouble_tickets_list(
 async def trouble_ticket_detail(
     request: Request,
     ticket_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Trouble Ticket detail partial — swapped into #main-content."""
+    """Trouble Ticket detail partial — swapped into #main-content (admin-only
+    console)."""
     from app.models.trouble_ticket import TroubleTicket
 
     ticket = (
