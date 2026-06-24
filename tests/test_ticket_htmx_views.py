@@ -25,9 +25,9 @@ from app.models.trouble_ticket import TroubleTicket
 def _make_client(db_session: Session, user: User) -> TestClient:
     """Build a TestClient authenticated as the given user.
 
-    The trouble-ticket console routes are admin-gated, so require_admin is also
-    overridden to *user* here — this file tests rendering, while admin gating is covered
-    in test_ticket_diagnosis.py.
+    The Tickets triage partials (workspace/list/detail) are admin-gated, so
+    require_admin is overridden to resolve the user as well — this file tests rendering,
+    while admin gating is covered in test_tickets_gating.py / test_ticket_diagnosis.py.
     """
 
     def _override_db():

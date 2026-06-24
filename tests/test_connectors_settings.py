@@ -236,6 +236,12 @@ def admin_client(db_session, admin_user):
     yield from _make_admin_client(db_session, admin_user)
 
 
+@pytest.fixture()
+def empty_admin_client(db_session, admin_user):
+    """Admin client with NO ApiSource rows — for the empty-state test."""
+    yield from _make_admin_client(db_session, admin_user)
+
+
 # ── Tests ─────────────────────────────────────────────────────────────
 
 
@@ -447,3 +453,101 @@ def test_credential_save_round_trip(admin_client, db_session):
     assert r.json().get("saved") is True
     assert credential_is_set(db_session, "lusha_enrichment", "LUSHA_API_KEY")
     assert get_credential(db_session, "lusha_enrichment", "LUSHA_API_KEY") == "sk-test-roundtrip-123"
+
+
+# ── Task 5: empty state, confirms, success toasts, test-all summary, vocab ──
+
+
+def test_connectors_empty_state_when_no_sources(empty_admin_client):
+    """With no ApiSource rows the tab shows an empty-state message, not a bare
+    header."""
+    html = empty_admin_client.get("/v2/partials/settings/connectors").text
+    assert "No connectors" in html, "Expected empty-state heading when no sources exist"
+    assert "text-sm text-gray-600" in html, "Expected house-style empty-state heading class"
+    assert "text-xs text-gray-400" in html, "Expected house-style empty-state hint class"
+
+
+def test_connectors_tab_not_empty_state_when_sources_exist(admin_client):
+    """When sources are seeded the empty-state message must NOT render."""
+    html = admin_client.get("/v2/partials/settings/connectors").text
+    assert "No connectors" not in html
+
+
+def test_save_credentials_emits_success_toast(admin_client):
+    """PUT credentials carries a showToast HX-Trigger so the user sees confirmation."""
+    r = admin_client.put(
+        "/api/sources/lusha_enrichment/credentials",
+        json={"credentials": {"LUSHA_API_KEY": "sk-test-toast-1"}},
+    )
+    assert r.status_code == 200
+    assert "showToast" in r.headers.get("HX-Trigger", ""), "Expected showToast HX-Trigger on save"
+
+
+def test_activate_emits_success_toast(admin_client, db_session):
+    """PUT activate carries a showToast HX-Trigger naming the source + new state."""
+    from app.models import ApiSource as AS
+
+    src = db_session.query(AS).filter_by(name="lusha_enrichment").first()
+    r = admin_client.put(f"/api/sources/{src.id}/activate")
+    assert r.status_code == 200
+    trigger = r.headers.get("HX-Trigger", "")
+    assert "showToast" in trigger, "Expected showToast HX-Trigger on activate"
+    assert "Lusha" in trigger, "Expected the source display name in the toast"
+
+
+def test_clay_disconnect_has_confirm(admin_client, monkeypatch):
+    """Connected Clay card carries an hx-confirm on Disconnect."""
+    import app.routers.htmx_views as v
+
+    monkeypatch.setattr(v.clay_oauth, "is_connected", lambda: True)
+    html = admin_client.get("/v2/partials/settings/connectors").text
+    assert "hx-confirm=" in html
+    assert "Disconnect Clay enrichment for everyone" in html
+
+
+def test_live_source_toggle_has_confirm(admin_client, db_session):
+    """A LIVE source's enable toggle carries an hx-confirm (disabling it is app-
+    wide)."""
+    from app.models import ApiSource as AS
+
+    src = db_session.query(AS).filter_by(name="lusha_enrichment").first()
+    src.status = "live"
+    src.is_active = True
+    src.credentials = {"LUSHA_API_KEY": "x"}  # credential_set so state resolves to live
+    db_session.commit()
+    from app.services.credential_service import _cred_cache
+
+    _cred_cache.clear()
+    html = admin_client.get("/v2/partials/settings/connectors").text
+    assert "hx-confirm=" in html, "Expected hx-confirm on the live source toggle"
+    assert "Searches will return fewer results" in html
+
+
+def test_non_live_source_toggle_has_no_confirm_text(admin_client):
+    """A pending (non-live) source must NOT carry the disable-confirm copy."""
+    # All seeded sources are pending/needs_setup — none live — so the live-only
+    # confirm copy must be absent.
+    html = admin_client.get("/v2/partials/settings/connectors").text
+    assert "Searches will return fewer results" not in html
+
+
+def test_test_all_returns_summary_fragment(admin_client, db_session):
+    """Test-all returns an aggregate summary line targeting a dedicated container."""
+    from app.models import ApiSource as AS
+
+    sam = db_session.query(AS).filter_by(name="sam_gov_enrichment").first()
+    sam.is_active = True
+    db_session.commit()
+
+    r = admin_client.post("/v2/partials/settings/connectors/test-all")
+    assert r.status_code == 200
+    assert "Tested" in r.text, "Expected an aggregate 'Tested N' summary line"
+    assert "test-all-summary" in r.text, "Expected the dedicated summary container id"
+
+
+def test_header_and_group_use_consistent_vocab(admin_client):
+    """Header counter + group header use the same canonical word ('need setup'), not the
+    old 'need attention' lexicon."""
+    html = admin_client.get("/v2/partials/settings/connectors").text
+    assert "need attention" not in html, "Header should use unified 'need setup' vocab"
+    assert "need setup" in html or "needs setup" in html.lower()

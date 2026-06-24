@@ -59,18 +59,24 @@ class TestOpsGroupTab:
 
 
 class TestToggleOpsMember:
-    def test_toggle_add_then_deactivate(self, client, db_session, test_user):
-        r = client.post("/api/admin/ops-group/toggle", data={"user_id": test_user.id})
+    def test_toggle_add_then_deactivate(self, client, db_session, test_user, sales_user):
+        # Keep test_user (the authed admin) active so deactivating sales_user trips
+        # neither the self-removal nor the last-member guard — this exercises the
+        # add -> deactivate toggle mechanic, which the guards must not interfere with.
+        db_session.add(VerificationGroupMember(user_id=test_user.id, is_active=True))
+        db_session.commit()
+
+        r = client.post("/api/admin/ops-group/toggle", data={"user_id": sales_user.id})
         assert r.status_code == 200
-        m = db_session.query(VerificationGroupMember).filter_by(user_id=test_user.id).first()
+        m = db_session.query(VerificationGroupMember).filter_by(user_id=sales_user.id).first()
         assert m is not None and m.is_active is True
 
-        r2 = client.post("/api/admin/ops-group/toggle", data={"user_id": test_user.id})
+        r2 = client.post("/api/admin/ops-group/toggle", data={"user_id": sales_user.id})
         assert r2.status_code == 200
         db_session.refresh(m)
         assert m.is_active is False
         # unique(user_id): still exactly one row (toggle, not delete+reinsert)
-        assert db_session.query(VerificationGroupMember).filter_by(user_id=test_user.id).count() == 1
+        assert db_session.query(VerificationGroupMember).filter_by(user_id=sales_user.id).count() == 1
 
     def test_toggle_unknown_user_404(self, client):
         assert client.post("/api/admin/ops-group/toggle", data={"user_id": 999999}).status_code == 404

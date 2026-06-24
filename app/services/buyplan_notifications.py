@@ -143,9 +143,19 @@ def _wrap_email(title: str, body_inner: str) -> str:
 
 
 async def _send_email(user: User, subject: str, html_body: str, db: Session):
-    """Send an email to a single user via Graph API."""
+    """Send an email to a single user via Graph API.
+
+    Honors the recipient's per-user preference: when
+    ``notify_buyplan_email_enabled`` is False the Graph send is skipped entirely
+    (no token fetch, no client build). The caller's in-app ``ActivityLog`` row is
+    written separately and is unaffected — only the email channel is suppressed.
+    """
     from ..utils.graph_client import GraphClient
     from ..utils.token_manager import get_valid_token
+
+    if not getattr(user, "notify_buyplan_email_enabled", True):
+        logger.info("buy plan email suppressed (opted out) for {}", user.email)
+        return
 
     try:
         token = await get_valid_token(user, db)

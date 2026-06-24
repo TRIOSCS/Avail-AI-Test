@@ -297,6 +297,45 @@ def unauthenticated_client(db_session: Session) -> TestClient:
 
 
 @pytest.fixture()
+def nonadmin_client(db_session: Session, test_user: User) -> TestClient:
+    """TestClient authed as a non-admin buyer with require_admin LEFT REAL (for 403
+    gating tests).
+
+    A real session cookie is seeded so that require_admin (which calls require_user as a
+    plain function, not via Depends) resolves the buyer through the genuine auth path
+    and hits its role check — yielding a real 403, not a 401. The require_user Depends
+    override covers the submission-path endpoints that stay open to any login.
+    """
+    import base64
+    import json
+
+    import itsdangerous
+
+    from app.config import settings
+    from app.database import get_db
+    from app.dependencies import require_admin, require_user
+    from app.main import app
+
+    # require_admin must run for REAL so the gating tests get a genuine 403. Under xdist
+    # another test can leak a global require_admin override onto the shared app; snapshot
+    # and clear it so this fixture is order-independent, then restore on teardown.
+    prior_admin_override = app.dependency_overrides.pop(require_admin, None)
+    app.dependency_overrides[get_db] = lambda: db_session
+    app.dependency_overrides[require_user] = lambda: test_user
+    signer = itsdangerous.TimestampSigner(str(settings.secret_key))
+    session_cookie = signer.sign(base64.b64encode(json.dumps({"user_id": test_user.id}).encode())).decode()
+    try:
+        with TestClient(app) as c:
+            c.cookies.set("session", session_cookie)
+            yield c
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(require_user, None)
+        if prior_admin_override is not None:
+            app.dependency_overrides[require_admin] = prior_admin_override
+
+
+@pytest.fixture()
 def admin_user(db_session: Session) -> User:
     """An admin-role user for privileged operations."""
     user = User(

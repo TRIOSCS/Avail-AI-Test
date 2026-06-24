@@ -1,10 +1,17 @@
 {#
   settings/_connectors_testall.html — OOB bundle returned by Test-all.
-  Receives: tested_sources (list of enriched source dicts that were probed).
+  Receives: tested_sources (list of enriched source dicts that were probed),
+  tested_count, failed_count.
   Each card is re-rendered with hx-swap-oob so its pill updates in place — no reload.
+  An aggregate summary line OOB-swaps into #test-all-summary so the result is visible
+  even when the changed cards are far down a long page.
   Called by: htmx_views.py connectors_test_all.
 #}
 {% import 'htmx/partials/settings/_connector_macros.html' as cm %}
 {% for s in tested_sources %}
 {{ cm.connector_card(s, oob=True) }}
 {% endfor %}
+<div id="test-all-summary" hx-swap-oob="true"
+     class="text-xs {{ 'text-red-600' if failed_count else 'text-gray-500' }}" aria-live="polite">
+  {% if tested_count %}Tested {{ tested_count }}{% if failed_count %} · {{ failed_count }} failed{% else %} · all OK{% endif %}{% else %}Nothing to test — no live connectors.{% endif %}
+</div>

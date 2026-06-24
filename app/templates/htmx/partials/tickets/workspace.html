@@ -27,7 +27,7 @@
 
   {# Filter pills #}
   <div class="flex gap-2 mb-4" x-data="{ filter: '' }">
-    {% set filters = [('', 'All'), ('submitted', 'Open'), ('resolved', 'Resolved'), ('wont_fix', "Won't Fix")] %}
+    {% set filters = [('', 'All'), ('open', 'Open'), ('resolved', 'Resolved'), ('wont_fix', "Won't Fix")] %}
     {% for val, label in filters %}
     <button @click="filter = '{{ val }}'"
             hx-get="/v2/partials/trouble-tickets/list?status={{ val }}"
