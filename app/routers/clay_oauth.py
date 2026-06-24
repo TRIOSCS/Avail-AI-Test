@@ -9,6 +9,7 @@ intel_cache. /callback looks up and immediately expires the entry (1-second TTL 
 — intel_cache.set_cached cannot store None, so this is the invalidation mechanism).
 """
 
+import json
 import secrets
 
 from fastapi import APIRouter, Depends, Request
@@ -90,4 +91,8 @@ async def callback(
 async def disconnect(request: Request, _: object = Depends(require_admin)) -> RedirectResponse:
     """Revoke stored Clay OAuth tokens and remove them from the DB."""
     clay_oauth.disconnect()
-    return RedirectResponse(f"{_PARTIAL_SETTINGS_URL}?clay=disconnected", status_code=302)
+    resp = RedirectResponse(f"{_PARTIAL_SETTINGS_URL}?clay=disconnected", status_code=302)
+    # Surface success feedback — htmx reads HX-Trigger off the redirect response
+    # before following it, so the toast fires even though the body is a redirect.
+    resp.headers["HX-Trigger"] = json.dumps({"showToast": {"message": "Clay disconnected.", "type": "success"}})
+    return resp

@@ -18,7 +18,7 @@ import os
 import time
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from loguru import logger
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -580,15 +580,20 @@ async def toggle_api_source(
 @router.put("/api/sources/{source_id}/activate", response_model=ToggleActiveResponse)
 async def toggle_source_active(
     source_id: int,
+    response: Response,
     user: User = Depends(require_settings_access),
     db: Session = Depends(get_db),
 ):
     """Toggle is_active flag on a source (settings access required)."""
+    from ..routers.htmx_views import settings_toast
+
     src = db.get(ApiSource, source_id)
     if not src:
         raise HTTPException(404, "API source not found")
     src.is_active = not src.is_active
     db.commit()
+    name = src.display_name or src.name
+    settings_toast(response, f"{name} {'enabled' if src.is_active else 'disabled'}.")
     return {"ok": True, "is_active": src.is_active}
 
 
@@ -664,6 +669,7 @@ async def system_alerts(
 async def update_source_credentials(
     source_name: str,
     request: Request,
+    response: Response,
     user: User = Depends(require_settings_access),
     db: Session = Depends(get_db),
 ):
@@ -671,6 +677,7 @@ async def update_source_credentials(
 
     Skips blank values (preserves existing).
     """
+    from ..routers.htmx_views import settings_toast
     from ..services.credential_service import _cred_cache, encrypt_value
 
     src = db.query(ApiSource).filter_by(name=source_name).first()
@@ -696,6 +703,9 @@ async def update_source_credentials(
     for k in keys_to_clear:
         _cred_cache.pop(k, None)
     logger.info("Credentials updated for source '{}' by user {}", source_name, user.email)
+    # A single-key source ("Save key") vs. a multi-field one ("Save credentials").
+    label = "Key saved." if len(src.env_vars or []) <= 1 else "Credentials saved."
+    settings_toast(response, label)
     return {"saved": True, "source": source_name}
 
 

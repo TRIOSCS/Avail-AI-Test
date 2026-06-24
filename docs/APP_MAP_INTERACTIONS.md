@@ -1546,8 +1546,10 @@ htmx_views.settings_connectors_tab  (admin-only; 403 for non-admin)
     +---> _build_connector_groups(db, request)
     |       |
     |       +---> db.query(ApiSource).order_by(display_name).all()
-    |       |     (9 dead rows excluded in-process: aliexpress/arrow/avnet/partfuse/
-    |       |      rs_components/siliconexpert/winsource + rocketreach/clearbit)
+    |       |     (dead rows excluded in-process via the shared module-level
+    |       |      htmx_views._DEAD_CONNECTORS frozenset — single source of truth
+    |       |      referenced by both _build_connector_groups and connectors_test_all:
+    |       |      rocketreach_enrichment / clearbit_enrichment)
     |       |
     |       +---> per source: _enrich_source(source, db)
     |       |       |
@@ -1597,16 +1599,33 @@ Every non-planned card has an **enable toggle** (`POST /api/sources/{id}/activat
 card partial:
 
 ```
-POST /api/sources/{id}/activate          → JSON {status, is_active}
+PUT  /api/sources/{id}/activate          → JSON {ok, is_active} + showToast HX-Trigger
 POST /api/sources/{id}/test              → JSON {ok, error}
+PUT  /api/sources/{name}/credentials     → JSON {saved} + showToast HX-Trigger
 GET  /v2/partials/settings/connector-card/{id}  → single card HTML (swap target)
 POST /v2/partials/settings/connectors/test-all  → OOB bundle of refreshed cards
+     + an OOB summary line ("Tested N · M failed") into #test-all-summary
      (skips inactive / untestable; per-source failures tolerated, never abort)
 ```
 
-Credential save uses `hx-ext="json-enc"` to POST a JSON body to the existing
-`POST /api/sources/{id}` endpoint (HTMX json-enc extension — not a standard form
-POST). On success the card re-fetches via `GET /v2/partials/settings/connector-card/{id}`.
+Credential save uses `hx-ext="json-enc"` to PUT a nested JSON body
+(`{credentials:{ENV:val}}`) to `PUT /api/sources/{name}/credentials` (HTMX json-enc
+extension — not a standard form POST). On success the card re-fetches via
+`GET /v2/partials/settings/connector-card/{id}`.
+
+**Feedback & safety polish (Task 5):**
+- **Success toasts** — `activate` and `credentials` handlers attach a `showToast`
+  HX-Trigger via `htmx_views.settings_toast` (lazy import to avoid a circular import):
+  "Key saved." / "Credentials saved." / "<name> enabled/disabled." Clay `disconnect`
+  (router `clay_oauth.py`) sets the same HX-Trigger on its 302 ("Clay disconnected.").
+- **Destructive confirms** (`hx-confirm`, client-side) — Clay **Disconnect** ("Disconnect
+  Clay enrichment for everyone? …"); the enable toggle gains a confirm **only when the
+  card state is `live`** (Jinja-conditional, single-quoted, name `|e`-escaped) since
+  disabling a live source reduces search/enrichment app-wide.
+- **Empty state** — when `connector_groups` is empty (no `ApiSource` rows) the tab renders
+  a house-style ghost-icon empty block ("No connectors yet.") instead of a bare header.
+- **Unified status vocabulary** — header counter and group counts both read "N need setup"
+  (was "need attention" / inconsistent singular); the per-card pill labels remain canonical.
 
 The degraded-source banner on the Part Dossier (`§ 2a-bis`) deep-links
 `/v2/settings` when live-market connectors are down — that link now routes to the

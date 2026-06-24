@@ -14037,6 +14037,11 @@ async def settings_api_keys_tab(
     return RedirectResponse("/v2/partials/settings/connectors", status_code=302)
 
 
+# Retired data providers — excluded from the connectors tab and the Test-all sweep.
+# Single source of truth referenced by both _build_connector_groups and connectors_test_all.
+_DEAD_CONNECTORS = frozenset({"rocketreach_enrichment", "clearbit_enrichment"})
+
+
 def _build_connector_field(db, source_name: str, env_var: str) -> dict:
     """Return {is_set, masked} for one env-var credential field."""
     from ..services.credential_service import credential_is_set, get_credential, mask_value
@@ -14124,14 +14129,12 @@ def _build_connector_groups(db, request) -> list[dict]:
     """
     from ..services import connector_service
 
-    _DEAD = {"rocketreach_enrichment", "clearbit_enrichment"}
-
     sources = db.query(ApiSource).order_by(ApiSource.display_name).all()
 
     buckets: dict[str, list[dict]] = {key: [] for key, _ in connector_service.GROUP_ORDER}
 
     for src in sources:
-        if src.name in _DEAD:
+        if src.name in _DEAD_CONNECTORS:
             continue
         group_key = connector_service.connector_group(src)
         if group_key not in buckets:
@@ -14206,12 +14209,11 @@ async def connectors_test_all(
 
     from ..routers.sources import run_source_test
 
-    _DEAD = {"rocketreach_enrichment", "clearbit_enrichment"}
     sources = db.query(ApiSource).order_by(ApiSource.display_name).all()
 
     tested: list[dict] = []
     for src in sources:
-        if src.name in _DEAD or not src.is_active:
+        if src.name in _DEAD_CONNECTORS or not src.is_active:
             continue
         enriched = _enrich_source(src, db)
         if not enriched["testable"]:
@@ -14222,8 +14224,11 @@ async def connectors_test_all(
             logger.warning("Test-all probe failed for {}: {}", src.name, e)
         tested.append(_enrich_source(src, db))
 
+    failed = sum(1 for s in tested if s["state"] == "error")
     ctx = _base_ctx(request, user, "settings")
     ctx["tested_sources"] = tested
+    ctx["tested_count"] = len(tested)
+    ctx["failed_count"] = failed
     return template_response("htmx/partials/settings/_connectors_testall.html", ctx)
 
 
