@@ -903,16 +903,33 @@ def days_since_last_activity(company_id: int, db: Session) -> int | None:
     return delta.days
 
 
-def get_last_activity_at(company_id: int, db: Session) -> datetime | None:
-    """Return the UTC datetime of the most recent ActivityLog entry for a company.
+_NOTE_TYPES = frozenset(
+    {
+        ActivityType.NOTE,
+        ActivityType.SALES_NOTE,
+        ActivityType.CONTACT_NOTE,
+    }
+)
 
-    None if no activity ever. Covers ALL event types (email, call, note, meeting,
-    quote, RFQ, buy-plan updates) because all writers set ActivityLog.company_id.
+
+def get_last_activity_at(company_id: int, db: Session) -> datetime | None:
+    """Return the UTC datetime of the most recent non-note ActivityLog entry for a
+    company.
+
+    None if no activity ever (or only note-type entries). Notes (NOTE, SALES_NOTE,
+    CONTACT_NOTE) are excluded so that a quick note does not reset the dormancy clock.
     Used by the SP4 90-day sweep to determine dormancy.
 
     Called by: app/services/prospect_reclamation.py
     """
-    latest = db.query(func.max(ActivityLog.created_at)).filter(ActivityLog.company_id == company_id).scalar()
+    latest = (
+        db.query(func.max(ActivityLog.created_at))
+        .filter(
+            ActivityLog.company_id == company_id,
+            ActivityLog.activity_type.notin_(_NOTE_TYPES),
+        )
+        .scalar()
+    )
     if not latest:
         return None
     if latest.tzinfo is None:

@@ -102,6 +102,12 @@
     <span class="htmx-indicator text-gray-400 text-xs">Loading...</span>
   </form>
 
+  {# Export links — placed below the filter bar, above the split workspace #}
+  <div class="flex justify-end gap-3 text-xs text-gray-500 mb-1">
+    <a href="/v2/customers/export.csv" class="hover:text-brand-600 hover:underline">Export CSV</a>
+    <a href="/v2/customers/contacts/export.csv" class="hover:text-brand-600 hover:underline">Export contacts</a>
+  </div>
+
   {# Error region — failed list refreshes / row loads land here instead of
      silently leaving stale rows behind (response-targets extension). #}
   <div id="cdm-error" class="mb-2 empty:hidden rounded-lg border border-rose-200 bg-rose-50 p-2 text-sm text-rose-700 flex-shrink-0"></div>

@@ -25,6 +25,23 @@
     <span class="text-gray-700 font-medium truncate">{{ company.name }}</span>
   </nav>
 
+  {# ── Archived account banner — shown when company.is_active is False ── #}
+  {% if not company.is_active %}
+  <div class="flex items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
+    <span><strong>Account archived.</strong> This account is no longer active and does not appear in the active list.</span>
+    {% if can_manage_team %}
+    <button type="button"
+            hx-post="/v2/partials/customers/{{ company.id }}/reactivate"
+            hx-target="#cdm-detail"
+            hx-swap="innerHTML"
+            hx-confirm="Restore this account to active status?"
+            class="flex-shrink-0 rounded-md bg-amber-100 px-3 py-1 text-xs font-medium text-amber-900 hover:bg-amber-200">
+      Reactivate
+    </button>
+    {% endif %}
+  </div>
+  {% endif %}
+
   {# Possible-duplicate banner — lazy (hx-target=this avoids inheriting the
      #main-content hx-target). Renders nothing when there is no near-dup. #}
   <div hx-get="/v2/partials/customers/{{ company.id }}/dup-suggestion"
@@ -177,6 +194,19 @@
                     @click.stop="$dispatch('open-modal'); open = false"
                     role="menuitem"
                     class="w-full text-left px-3 py-1.5 text-gray-700 hover:bg-gray-50">Merge duplicate</button>
+            {# Archive / restore — only shown to users who can manage the team #}
+            {% if can_manage_team %}
+              {% if company.is_active %}
+            <button type="button"
+                    hx-post="/v2/partials/customers/{{ company.id }}/deactivate"
+                    hx-target="#cdm-detail"
+                    hx-swap="innerHTML"
+                    hx-confirm="Archive this account? It will be removed from the active list."
+                    @click.stop="open = false"
+                    role="menuitem"
+                    class="w-full text-left px-3 py-1.5 text-rose-600 hover:bg-rose-50">Archive account</button>
+              {% endif %}
+            {% endif %}
           </div>
         </div>
       </div>

@@ -5655,6 +5655,58 @@ async def set_company_disposition(
     )
 
 
+@router.post("/v2/partials/customers/{company_id}/deactivate", response_class=HTMLResponse)
+async def deactivate_company(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Archive (soft-delete) a company by setting is_active=False.
+
+    Gate: can_manage_account_team — primary owner or manager/admin only.
+    Re-renders the full company detail partial so the archived banner appears immediately.
+
+    Called by: kebab menu "Archive account" button in detail.html.
+    """
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+    if not can_manage_account_team(user, company):
+        raise HTTPException(403, "Not authorized to deactivate accounts")
+    company.is_active = False
+    db.commit()
+    db.refresh(company)
+    logger.info("Company {} archived by {}", company_id, user.email)
+    return await company_detail_partial(request=request, company_id=company_id, user=user, db=db)
+
+
+@router.post("/v2/partials/customers/{company_id}/reactivate", response_class=HTMLResponse)
+async def reactivate_company(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Restore an archived company by setting is_active=True.
+
+    Gate: can_manage_account_team — primary owner or manager/admin only.
+    Re-renders the full company detail partial (banner disappears after reactivate).
+
+    Called by: "Reactivate" button in the archived-account banner in detail.html.
+    """
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+    if not can_manage_account_team(user, company):
+        raise HTTPException(403, "Not authorized to reactivate accounts")
+    company.is_active = True
+    db.commit()
+    db.refresh(company)
+    logger.info("Company {} reactivated by {}", company_id, user.email)
+    return await company_detail_partial(request=request, company_id=company_id, user=user, db=db)
+
+
 @router.post("/v2/partials/customers/{company_id}/send-to-prospecting", response_class=HTMLResponse)
 async def send_company_to_prospecting_htmx(
     request: Request,

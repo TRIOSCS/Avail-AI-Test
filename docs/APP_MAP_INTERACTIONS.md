@@ -4105,3 +4105,24 @@ Three inflows that feed idle CRM accounts into the prospecting pool.
 - Actions: sets `Company.account_owner_id = to_user_id` (clears ownership_cleared_at); if a swept (non-dismissed) ProspectAccount exists for the company, dismisses it (`dismiss_reason="reassigned"`) and clears `reclaim_blocked_until`; logs ActivityLog(activity_type="reassign")
 - HTMX endpoint: `POST /v2/partials/prospects/{prospect_id}/reassign` with `to_user_id` form param (require_user + in-route `is_manager_or_admin` gate)
 - Returns: {company_id, company_name, to_user_id, prospect_id|None, status: "reassigned"}
+
+---
+
+## CRM Rubric Batch A — 2026-06-24
+
+### Account deactivate / reactivate
+- `POST /v2/partials/customers/{id}/deactivate` — sets `Company.is_active=False`; gate: `can_manage_account_team`; re-renders company detail partial with archived banner
+- `POST /v2/partials/customers/{id}/reactivate` — sets `Company.is_active=True`; same gate; archived banner disappears
+- Template: `detail.html` shows amber "Account archived" banner + Reactivate button when `not company.is_active`; kebab menu shows "Archive account" when `company.is_active` (both gated on `can_manage_team`)
+
+### CRM CSV export
+- `GET /v2/customers/export.csv` — StreamingResponse, companies visible to the requesting user; managers/admins see all, reps see owned only (mirrors `cdm_company_query`)
+- `GET /v2/customers/contacts/export.csv` — StreamingResponse, contacts under those companies
+- Both set `Content-Disposition: attachment` and `text/csv`
+- Registered in `app/routers/crm/export.py` → included in `app/routers/crm/__init__.py`
+- Export links added to `list.html` below the filter form
+
+### Notes excluded from dormancy
+- `app/services/activity_service.get_last_activity_at()` now excludes `NOTE`, `SALES_NOTE`, `CONTACT_NOTE` from the `func.max(created_at)` query
+- `_NOTE_TYPES` frozenset defined at module level for clarity
+- Effect: a company with only note activities is treated as dormant; real activity (email, call, quote, etc.) still resets the 90-day clock
