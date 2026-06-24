@@ -145,13 +145,13 @@ class TestV2PagePathVariants:
             "/v2/settings",
             "/v2/materials",
             "/v2/follow-ups",
-            "/v2/trouble-tickets",
+            # NB: /v2/trouble-tickets is admin-only (the management console) — its
+            # gating is covered in test_ticket_diagnosis.py::TestAdminGating.
             "/v2/search",
             "/v2/crm",
             "/v2/sightings",
             "/v2/materials/1",
             "/v2/prospecting/1",
-            "/v2/trouble-tickets/1",
             "/v2/resell/1",
             "/v2/prospecting/5",
             "/v2/sourcing/leads/1",

@@ -2,6 +2,11 @@
      hx-target="#main-content"
      hx-push-url="/v2/trouble-tickets/{{ t.id }}"
      class="flex items-center gap-4 px-4 py-3 bg-white border border-gray-100 rounded-lg mb-1 cursor-pointer hover:bg-gray-50 transition-colors">
+  <input type="checkbox" @click.stop
+         @change="typeof toggle === 'function' && toggle({{ t.id }})"
+         :checked="typeof selected !== 'undefined' && selected.includes({{ t.id }})"
+         class="shrink-0 rounded border-gray-300 text-brand-600 focus:ring-brand-500 cursor-pointer"
+         aria-label="Select ticket {{ t.ticket_number }}">
   <span class="text-xs font-mono text-gray-400 w-16 shrink-0">{{ t.ticket_number }}</span>
   <span class="text-sm text-gray-700 flex-1 truncate">{{ t.ai_summary or t.title }}</span>
   <span class="text-xs px-2 py-0.5 rounded-full shrink-0
