@@ -2626,7 +2626,7 @@ async def offer_review_queue(
 async def promote_offer_htmx(
     request: Request,
     offer_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.APPROVE_OFFERS)),
     db: Session = Depends(get_db),
 ):
     """Promote a pending_review offer to active and return refreshed queue."""
@@ -2673,7 +2673,7 @@ async def promote_offer_htmx(
 async def reject_offer_htmx(
     request: Request,
     offer_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.APPROVE_OFFERS)),
     db: Session = Depends(get_db),
 ):
     """Reject a pending_review offer and return refreshed queue."""

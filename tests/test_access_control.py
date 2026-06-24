@@ -676,6 +676,27 @@ class TestCapabilityGating:
         finally:
             _drop_overrides(c)
 
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/v2/partials/offers/1/promote",  # review-queue HTMX promote
+            "/v2/partials/offers/1/reject",  # review-queue HTMX reject
+            "/api/offers/1/promote",  # review-queue JSON promote (T4→T5)
+            "/api/offers/1/reject",  # review-queue JSON reject
+        ],
+    )
+    def test_review_queue_promote_reject_403_when_approve_revoked(self, db_session, test_user, path):
+        # The review-queue promote/reject endpoints perform the same pending_review →
+        # active/rejected transition as approve_offer — they must honor approve_offers
+        # (no bypass via the review queue). Gate fires before db.get → 403 with dummy id.
+        test_user.access_overrides = {AccessKey.APPROVE_OFFERS.value: False}
+        db_session.commit()
+        c = _client_as(db_session, test_user)
+        try:
+            assert c.post(path).status_code == 403
+        finally:
+            _drop_overrides(c)
+
     def test_sightings_reconfirm_offer_403_when_approve_revoked(self, db_session, test_user):
         test_user.access_overrides = {AccessKey.APPROVE_OFFERS.value: False}
         db_session.commit()

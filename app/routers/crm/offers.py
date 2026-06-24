@@ -941,7 +941,7 @@ async def list_review_queue(
 @router.post("/api/offers/{offer_id}/promote")
 async def promote_offer(
     offer_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.APPROVE_OFFERS)),
     db: Session = Depends(get_db),
 ):
     """Promote a T4 (medium-confidence) offer to T5 after human review.
@@ -975,7 +975,7 @@ async def promote_offer(
 @router.post("/api/offers/{offer_id}/reject")
 async def reject_offer_t4_review(
     offer_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.APPROVE_OFFERS)),
     db: Session = Depends(get_db),
 ):
     """Reject a T4 offer — marks as rejected, keeps for audit trail.
