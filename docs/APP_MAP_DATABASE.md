@@ -22,7 +22,7 @@
 | email | String 255, unique | |
 | name | String 255 | |
 | role | String 20 | buyer\|sales\|trader\|manager\|admin |
-| is_active | Boolean | default True |
+| is_active | Boolean NOT NULL (server_default true) | Migration 149 hardened it (was nullable): a NULL `is_active` made `require_user` 403-lock the user. `companies.is_active` + `customer_sites.is_active` were hardened identically in the same migration (backfill NULL→true + NOT NULL + server_default), closing the same silent-vanish/lockout class as migration 139 did for `site_contacts`. |
 | azure_id | String 255, unique | |
 | refresh_token | EncryptedText | For Graph API offline access |
 | access_token | EncryptedText | |

@@ -222,11 +222,10 @@ def test_name_search_active_list_excludes_archived_from_default(
 
 
 def test_migration_148_single_head():
-    """Alembic must have exactly one head, and 148_site_dnc must stay in the chain.
+    """Alembic must have exactly one head, and migration 148 must be in the chain.
 
-    148_site_dnc may no longer BE the head once a later migration chains onto it (e.g.
-    149_user_mgmt) — the invariant that matters is no multiple-head fork, plus that the
-    archive-dnc revision remains reachable from the single head.
+    (148 is no longer required to be the *tip* — later migrations chain onto it — so this
+    asserts the durable invariants: a single head and that 148 landed in the revision graph.)
     """
     alembic_dir = pathlib.Path(__file__).resolve().parent.parent / "alembic"
     from alembic.script import ScriptDirectory
@@ -234,8 +233,8 @@ def test_migration_148_single_head():
     script_dir = ScriptDirectory(str(alembic_dir))
     heads = script_dir.get_heads()
     assert len(heads) == 1, f"Expected 1 alembic head, got {heads}"
-    chain = {rev.revision for rev in script_dir.walk_revisions()}
-    assert "148_site_dnc" in chain, f"148_site_dnc missing from the revision chain {sorted(chain)}"
+    revisions = {sc.revision for sc in script_dir.walk_revisions()}
+    assert "148_site_dnc" in revisions, "migration 148_site_dnc must be present in the chain"
 
 
 # ── 9. Site mark-dnc toggles do_not_contact ────────────────────────────
