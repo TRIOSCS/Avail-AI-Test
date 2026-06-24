@@ -32,7 +32,7 @@ class Company(Base):
     website = Column(String(500))
     industry = Column(String(255))
     notes = Column(Text)
-    is_active = Column(Boolean, default=True, index=True)
+    is_active = Column(Boolean, nullable=False, default=True, server_default=text("true"), index=True)
 
     # Enrichment fields (shared structure with VendorCard)
     domain = Column(String(255), index=True)
@@ -223,7 +223,7 @@ class CustomerSite(Base):
     carrier_account = Column(String(100))  # Customer shipping account number
 
     notes = Column(Text)
-    is_active = Column(Boolean, default=True, index=True)
+    is_active = Column(Boolean, nullable=False, default=True, server_default=text("true"), index=True)
     do_not_contact = Column(Boolean, nullable=False, default=False, server_default="false")
 
     # v2.10: Prospecting pool fields
