@@ -80,8 +80,8 @@ def _save_screenshot(ticket_id: int, b64_data: str) -> str | None:
         with open(path, "wb") as f:
             f.write(png_bytes)
         return path
-    except Exception:
-        logger.warning("Failed to save screenshot for ticket {}", ticket_id)
+    except Exception as e:
+        logger.warning("Failed to save screenshot for ticket {}: {}", ticket_id, e)
         return None
 
 
