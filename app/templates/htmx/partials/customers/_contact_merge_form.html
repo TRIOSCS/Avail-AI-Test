@@ -19,12 +19,20 @@
       Duplicate contact to remove
     </label>
 
+    <input type="hidden" name="exclude_id" value="{{ keep.id }}">
+
     <div class="relative">
       <input type="text"
              id="contact-merge-search"
+             name="q"
              placeholder="Type contact name…"
              autocomplete="off"
-             class="input w-full">
+             class="input w-full"
+             hx-get="/v2/partials/customers/{{ company.id }}/contacts/search"
+             hx-trigger="input changed delay:250ms"
+             hx-target="#contact-merge-results"
+             hx-swap="innerHTML"
+             hx-include="[name='exclude_id']">
       <div id="contact-merge-results"
            class="absolute z-30 w-full bg-white border border-gray-200 rounded-md shadow-lg mt-1 hidden">
       </div>
@@ -37,20 +45,8 @@
         const inp = document.getElementById('contact-merge-search');
         const res = document.getElementById('contact-merge-results');
         if (!inp || !res) return;
-        let debounce;
-        inp.addEventListener('input', function () {
-          clearTimeout(debounce);
-          const q = inp.value.trim();
-          if (q.length < 2) { res.classList.add('hidden'); return; }
-          debounce = setTimeout(async function () {
-            const r = await fetch(
-              '/v2/partials/customers/{{ company.id }}/contacts/search?q=' + encodeURIComponent(q) +
-              '&exclude={{ keep.id }}'
-            );
-            const html = await r.text();
-            res.innerHTML = html;
-            res.classList.toggle('hidden', !html.trim());
-          }, 250);
+        inp.addEventListener('htmx:afterSwap', function () {
+          res.classList.toggle('hidden', !res.textContent.trim());
         });
         res.addEventListener('click', function (e) {
           const btn = e.target.closest('[data-contact-id]');

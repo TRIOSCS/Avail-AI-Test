@@ -8043,9 +8043,14 @@ async def contact_merge_preview(
     if not keep:
         raise HTTPException(404, "Contact not found")
 
-    remove = db.get(SiteContact, remove_id)
+    remove = (
+        db.query(SiteContact)
+        .join(CustomerSite)
+        .filter(SiteContact.id == remove_id, CustomerSite.company_id == company_id)
+        .first()
+    )
     if not remove:
-        raise HTTPException(400, "Duplicate contact not found")
+        raise HTTPException(400, "Duplicate contact not found or not in this company")
 
     if keep.id == remove.id:
         raise HTTPException(400, "Cannot merge a contact with itself")
@@ -8111,9 +8116,14 @@ async def contact_merge(
     if remove_id == contact_id:
         raise HTTPException(400, "Cannot merge a contact with itself")
 
-    remove = db.get(SiteContact, remove_id)
+    remove = (
+        db.query(SiteContact)
+        .join(CustomerSite)
+        .filter(SiteContact.id == remove_id, CustomerSite.company_id == company_id)
+        .first()
+    )
     if not remove:
-        raise HTTPException(400, "Duplicate contact not found")
+        raise HTTPException(400, "Duplicate contact not found or not in this company")
 
     try:
         result = _merge(contact_id, remove_id, db)
