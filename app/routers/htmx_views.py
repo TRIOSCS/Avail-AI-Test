@@ -8166,6 +8166,8 @@ async def create_site(
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Not authorized to manage this account")
 
     if not site_name.strip():
         return HTMLResponse('<div class="p-2 text-xs text-rose-600">Site name is required.</div>')
@@ -8264,6 +8266,9 @@ async def create_site_contact(
     site = db.query(CustomerSite).filter(CustomerSite.id == site_id, CustomerSite.company_id == company_id).first()
     if not site:
         raise HTTPException(404, "Site not found")
+    company = db.get(Company, company_id)
+    if company is None or not can_manage_account(user, company, db):
+        raise HTTPException(403, "Not authorized to manage this account")
 
     if not full_name.strip():
         return HTMLResponse('<div class="p-2 text-xs text-rose-600">Name is required.</div>')
@@ -8694,6 +8699,8 @@ async def edit_company(
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Not authorized to manage this account")
 
     form = await request.form()
     name = form.get("name", "").strip()
@@ -9676,6 +9683,9 @@ async def edit_site(
     site = db.query(CustomerSite).filter(CustomerSite.id == site_id, CustomerSite.company_id == company_id).first()
     if not site:
         raise HTTPException(404, "Site not found")
+    company = db.get(Company, company_id)
+    if company is None or not can_manage_account(user, company, db):
+        raise HTTPException(403, "Not authorized to manage this account")
 
     form = await request.form()
     site_name = form.get("site_name", "").strip()
@@ -9811,6 +9821,9 @@ async def edit_site_contact(
     site = db.query(CustomerSite).filter(CustomerSite.id == site_id, CustomerSite.company_id == company_id).first()
     if not site:
         raise HTTPException(404, "Site not found")
+    company = db.get(Company, company_id)
+    if company is None or not can_manage_account(user, company, db):
+        raise HTTPException(403, "Not authorized to manage this account")
 
     form = await request.form()
 
@@ -9859,7 +9872,6 @@ async def edit_site_contact(
     db.commit()
     logger.info("Contact {} edited by {}", contact_id, user.email)
 
-    company = db.query(Company).filter(Company.id == company_id).first()
     return _render_contacts_list(request, user, company, db)
 
 

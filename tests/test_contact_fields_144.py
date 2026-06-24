@@ -197,10 +197,13 @@ class TestSecondaryFieldEdit:
         self,
         client: TestClient,
         test_company: Company,
+        test_user: User,
         site_and_two_contacts,
         db_session: Session,
     ):
         """POST edit with secondary_email persists it."""
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         site, alice, _bob = site_and_two_contacts
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/sites/{site.id}/contacts/{alice.id}/edit",
@@ -214,10 +217,13 @@ class TestSecondaryFieldEdit:
         self,
         client: TestClient,
         test_company: Company,
+        test_user: User,
         site_and_two_contacts,
         db_session: Session,
     ):
         """POST edit with reports_to_id persists it."""
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         site, alice, bob = site_and_two_contacts
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/sites/{site.id}/contacts/{bob.id}/edit",
@@ -231,10 +237,12 @@ class TestSecondaryFieldEdit:
         self,
         client: TestClient,
         test_company: Company,
+        test_user: User,
         site_and_two_contacts,
         db_session: Session,
     ):
         """POST edit with reports_to_id='' clears it."""
+        test_company.account_owner_id = test_user.id
         site, alice, bob = site_and_two_contacts
         bob.reports_to_id = alice.id
         db_session.commit()
@@ -733,12 +741,14 @@ class TestReportsToSameCompanyValidation:
         self,
         client: TestClient,
         test_company: Company,
+        test_user: User,
         site_and_two_contacts,
         db_session: Session,
     ):
         """POST edit with reports_to_id from another company returns 400."""
         from app.models.crm import Company as _Company
 
+        test_company.account_owner_id = test_user.id
         site, alice, _bob = site_and_two_contacts
         other_co = _Company(name="CrossCo144D", is_active=True)
         db_session.add(other_co)
@@ -768,10 +778,13 @@ class TestReportsToSameCompanyValidation:
         self,
         client: TestClient,
         test_company: Company,
+        test_user: User,
         site_and_two_contacts,
         db_session: Session,
     ):
         """POST edit with reports_to_id == self (contact_id) returns 400."""
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         site, alice, _bob = site_and_two_contacts
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/sites/{site.id}/contacts/{alice.id}/edit",

@@ -340,7 +340,10 @@ class TestCompanyCRUD:
         client: TestClient,
         db_session: Session,
         test_company: Company,
+        test_user: User,
     ):
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/edit",
             data={
@@ -373,7 +376,10 @@ class TestSiteCRUD:
         client: TestClient,
         db_session: Session,
         test_company: Company,
+        test_user: User,
     ):
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/sites",
             data={
@@ -393,8 +399,12 @@ class TestSiteCRUD:
     def test_create_site_no_name_returns_error_html(
         self,
         client: TestClient,
+        db_session: Session,
         test_company: Company,
+        test_user: User,
     ):
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/sites",
             data={"site_name": ""},
@@ -414,8 +424,11 @@ class TestSiteCRUD:
         client: TestClient,
         db_session: Session,
         test_company: Company,
+        test_user: User,
     ):
         # Create a site with no owner_id — skips the owner-conflict branch
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/sites",
             data={"site_name": "Branch Office"},
@@ -451,7 +464,10 @@ class TestSiteCRUD:
         db_session: Session,
         test_company: Company,
         test_customer_site: CustomerSite,
+        test_user: User,
     ):
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}/edit",
             data={"site_name": "Renamed HQ", "city": "New York", "country": "US"},
@@ -486,7 +502,10 @@ class TestSiteContactCRUD:
         db_session: Session,
         test_company: Company,
         test_customer_site: CustomerSite,
+        test_user: User,
     ):
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}/contacts",
             data={
@@ -507,9 +526,13 @@ class TestSiteContactCRUD:
     def test_create_site_contact_no_name_returns_error(
         self,
         client: TestClient,
+        db_session: Session,
         test_company: Company,
         test_customer_site: CustomerSite,
+        test_user: User,
     ):
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}/contacts",
             data={"full_name": "", "email": "x@x.com"},
@@ -534,7 +557,9 @@ class TestSiteContactCRUD:
         db_session: Session,
         test_company: Company,
         test_customer_site: CustomerSite,
+        test_user: User,
     ):
+        test_company.account_owner_id = test_user.id
         # Create contact first
         email = f"dup-{uuid.uuid4().hex[:6]}@site.com"
         _site_contact(db_session, test_customer_site, email=email)

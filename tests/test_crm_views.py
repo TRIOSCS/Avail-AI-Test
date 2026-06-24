@@ -624,7 +624,7 @@ class TestContactPanel:
         """Site contact create form accepts a WeChat ID."""
         from app.models.crm import CustomerSite, SiteContact
 
-        company = Company(name="WeChat Create Co", is_active=True)
+        company = Company(name="WeChat Create Co", is_active=True, account_owner_id=test_user.id)
         db_session.add(company)
         db_session.flush()
         site = CustomerSite(company_id=company.id, site_name="HQ", is_active=True)
@@ -647,7 +647,7 @@ class TestContactPanel:
         test engine ignores VARCHAR lengths; Postgres would 500)."""
         from app.models.crm import CustomerSite, SiteContact
 
-        company = Company(name="WeChat Long Co", is_active=True)
+        company = Company(name="WeChat Long Co", is_active=True, account_owner_id=test_user.id)
         db_session.add(company)
         db_session.flush()
         site = CustomerSite(company_id=company.id, site_name="HQ", is_active=True)
@@ -2317,10 +2317,10 @@ class TestRoleChipLegacy:
 class TestEditSite:
     """P2c: Edit-site modal form (GET edit-form + POST edit)."""
 
-    def _make_company_with_site(self, db_session: Session):
+    def _make_company_with_site(self, db_session: Session, owner: User | None = None):
         from app.models.crm import CustomerSite
 
-        company = Company(name="Edit Site Co", is_active=True)
+        company = Company(name="Edit Site Co", is_active=True, account_owner_id=owner.id if owner else None)
         db_session.add(company)
         db_session.flush()
         site = CustomerSite(
@@ -2359,7 +2359,7 @@ class TestEditSite:
         new values."""
         from app.models.crm import CustomerSite
 
-        company, site = self._make_company_with_site(db_session)
+        company, site = self._make_company_with_site(db_session, owner=test_user)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/sites/{site.id}/edit",
             data={
@@ -2390,7 +2390,7 @@ class TestEditSite:
     def test_post_site_edit_re_renders_sites_tab(self, client: TestClient, db_session: Session, test_user: User):
         """POST edit response is the refreshed sites tab containing the updated site
         name."""
-        company, site = self._make_company_with_site(db_session)
+        company, site = self._make_company_with_site(db_session, owner=test_user)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/sites/{site.id}/edit",
             data={"site_name": "New HQ Name", "city": "Salem", "country": "US"},
@@ -2402,7 +2402,7 @@ class TestEditSite:
         self, client: TestClient, db_session: Session, test_user: User
     ):
         """POST edit with empty site_name returns 400."""
-        company, site = self._make_company_with_site(db_session)
+        company, site = self._make_company_with_site(db_session, owner=test_user)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/sites/{site.id}/edit",
             data={"site_name": "", "city": "Boston", "country": "US"},
@@ -2413,10 +2413,10 @@ class TestEditSite:
 class TestEditContact:
     """P2c: Edit-contact modal form (GET edit-form + POST edit)."""
 
-    def _make_company_with_contact(self, db_session: Session):
+    def _make_company_with_contact(self, db_session: Session, owner: User | None = None):
         from app.models.crm import CustomerSite, SiteContact
 
-        company = Company(name="Edit Contact Co", is_active=True)
+        company = Company(name="Edit Contact Co", is_active=True, account_owner_id=owner.id if owner else None)
         db_session.add(company)
         db_session.flush()
         site = CustomerSite(company_id=company.id, site_name="HQ", is_active=True)
@@ -2469,7 +2469,7 @@ class TestEditContact:
         """POST edit saves title + phone; re-rendered contacts show new values."""
         from app.models.crm import SiteContact
 
-        company, site, contact = self._make_company_with_contact(db_session)
+        company, site, contact = self._make_company_with_contact(db_session, owner=test_user)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
             data={
@@ -2496,7 +2496,7 @@ class TestEditContact:
         edit form)."""
         from app.models.crm import SiteContact
 
-        company, site, contact = self._make_company_with_contact(db_session)
+        company, site, contact = self._make_company_with_contact(db_session, owner=test_user)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
             data={
@@ -2515,7 +2515,7 @@ class TestEditContact:
 
     def test_post_contact_edit_legacy_role_returns_400(self, client: TestClient, db_session: Session, test_user: User):
         """POST contact edit with legacy role 'decision_maker' returns 400."""
-        company, site, contact = self._make_company_with_contact(db_session)
+        company, site, contact = self._make_company_with_contact(db_session, owner=test_user)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
             data={
@@ -2532,7 +2532,7 @@ class TestEditContact:
     ):
         """POST edit response contains the updated name in the re-rendered contacts
         panel."""
-        company, site, contact = self._make_company_with_contact(db_session)
+        company, site, contact = self._make_company_with_contact(db_session, owner=test_user)
         # Step 4: use first_name + last_name (full_name is derived)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
@@ -2551,7 +2551,7 @@ class TestEditContact:
         self, client: TestClient, db_session: Session, test_user: User
     ):
         """POST edit with both first_name and last_name empty returns 400."""
-        company, site, contact = self._make_company_with_contact(db_session)
+        company, site, contact = self._make_company_with_contact(db_session, owner=test_user)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
             data={"first_name": "", "last_name": "", "title": "Buyer", "email": "alice@editco.com"},
@@ -2562,7 +2562,7 @@ class TestEditContact:
         self, client: TestClient, db_session: Session, test_user: User
     ):
         """POST edit with malformed email returns 400."""
-        company, site, contact = self._make_company_with_contact(db_session)
+        company, site, contact = self._make_company_with_contact(db_session, owner=test_user)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
             data={"full_name": "Alice Smith", "email": "not-an-email"},
@@ -3058,10 +3058,10 @@ class TestContactsTabHome:
            (with HX-Target branch)
     """
 
-    def _make_company_with_hq(self, db_session: Session, name: str = "Tab Home Co"):
+    def _make_company_with_hq(self, db_session: Session, name: str = "Tab Home Co", owner: User | None = None):
         from app.models.crm import CustomerSite, SiteContact
 
-        company = Company(name=name, is_active=True)
+        company = Company(name=name, is_active=True, account_owner_id=owner.id if owner else None)
         db_session.add(company)
         db_session.flush()
         site = CustomerSite(company_id=company.id, site_name="HQ", site_type="hq", is_active=True)
@@ -3279,7 +3279,7 @@ class TestContactsTabHome:
         """POST edit with a canonical contact_role persists it to the DB."""
         from app.models.crm import SiteContact
 
-        company, site, contact = self._make_company_with_hq(db_session)
+        company, site, contact = self._make_company_with_hq(db_session, owner=test_user)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
             data={
@@ -3295,7 +3295,7 @@ class TestContactsTabHome:
 
     def test_edit_invalid_role_returns_400(self, client: TestClient, db_session: Session, test_user: User):
         """POST edit with legacy 'decision_maker' role returns 400."""
-        company, site, contact = self._make_company_with_hq(db_session)
+        company, site, contact = self._make_company_with_hq(db_session, owner=test_user)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
             data={
@@ -3310,7 +3310,7 @@ class TestContactsTabHome:
         """POST edit with blank contact_role clears the field to NULL."""
         from app.models.crm import SiteContact
 
-        company, site, contact = self._make_company_with_hq(db_session)
+        company, site, contact = self._make_company_with_hq(db_session, owner=test_user)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
             data={
@@ -3329,7 +3329,7 @@ class TestContactsTabHome:
     ):
         """POST edit with HX-Target=contacts-tab-list returns the grouped list
         partial."""
-        company, site, contact = self._make_company_with_hq(db_session)
+        company, site, contact = self._make_company_with_hq(db_session, owner=test_user)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
             data={"full_name": "Alice Prime", "email": "alice@tabco.com"},
@@ -3347,7 +3347,7 @@ class TestContactsTabHome:
         """POST edit without HX-Target now always returns grouped list
         (site_contacts.html path retired — the Sites tab no longer carries a contact
         editor)."""
-        company, site, contact = self._make_company_with_hq(db_session)
+        company, site, contact = self._make_company_with_hq(db_session, owner=test_user)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
             data={"full_name": "Alice Prime", "email": "alice@tabco.com"},
@@ -3361,7 +3361,7 @@ class TestContactsTabHome:
         """POST edit with linkedin_url persists it to the DB."""
         from app.models.crm import SiteContact
 
-        company, site, contact = self._make_company_with_hq(db_session)
+        company, site, contact = self._make_company_with_hq(db_session, owner=test_user)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
             data={
@@ -3379,7 +3379,7 @@ class TestContactsTabHome:
         """POST edit with is_priority=1 sets the flag."""
         from app.models.crm import SiteContact
 
-        company, site, contact = self._make_company_with_hq(db_session)
+        company, site, contact = self._make_company_with_hq(db_session, owner=test_user)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
             data={
@@ -3495,6 +3495,8 @@ class TestContactsTabHome:
     ):
         """POST edit contact with HX-Target=contacts-tab-list returns grouped list with
         role options."""
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/sites/{test_site.id}/contacts/{test_contact.id}/edit",
             data={"full_name": test_contact.full_name, "contact_role": "buyer_po"},
@@ -4356,7 +4358,7 @@ class TestCompanyPhase0FormFields:
 
     def test_htmx_edit_persists_phase0_fields(self, client: TestClient, db_session: Session, test_user: User):
         """POST /v2/partials/customers/{id}/edit with Phase-0 fields saves them."""
-        co = Company(name="HTMXEdit P0 Co", is_active=True)
+        co = Company(name="HTMXEdit P0 Co", is_active=True, account_owner_id=test_user.id)
         db_session.add(co)
         db_session.commit()
 
@@ -4405,7 +4407,7 @@ class TestCompanyPhase0FormFields:
 
     def test_htmx_edit_normalizes_phone_e164(self, client: TestClient, db_session: Session, test_user: User):
         """HTMX edit handler normalizes phone to E.164."""
-        co = Company(name="PhoneNorm Edit Co", is_active=True)
+        co = Company(name="PhoneNorm Edit Co", is_active=True, account_owner_id=test_user.id)
         db_session.add(co)
         db_session.commit()
 
@@ -4439,7 +4441,7 @@ class TestCompanyPhase0FormFields:
 
     def test_htmx_edit_normalizes_hq_country(self, client: TestClient, db_session: Session, test_user: User):
         """HTMX edit normalizes 'United States' → 'US'."""
-        co = Company(name="CountryNorm Edit Co", is_active=True)
+        co = Company(name="CountryNorm Edit Co", is_active=True, account_owner_id=test_user.id)
         db_session.add(co)
         db_session.commit()
 
@@ -4458,7 +4460,7 @@ class TestCompanyPhase0FormFields:
 
     def test_htmx_edit_preserves_out_of_list_source(self, client: TestClient, db_session: Session, test_user: User):
         """Submitting source='' (blank sentinel) keeps the current enrichment source."""
-        co = Company(name="SourcePreserve Co", is_active=True, source="apollo")
+        co = Company(name="SourcePreserve Co", is_active=True, source="apollo", account_owner_id=test_user.id)
         db_session.add(co)
         db_session.commit()
 
@@ -5048,7 +5050,7 @@ class TestWS4AccountModalFields:
 
     def test_modal_edit_persists_domain(self, client: TestClient, db_session: Session, test_user: User):
         """POST edit with domain persists to DB."""
-        co = self._make_company(db_session)
+        co = self._make_company(db_session, account_owner_id=test_user.id)
         resp = client.post(
             f"/v2/partials/customers/{co.id}/edit",
             data={"name": co.name, "domain": "modal-domain.com"},
@@ -5059,7 +5061,7 @@ class TestWS4AccountModalFields:
 
     def test_modal_edit_persists_linkedin_url(self, client: TestClient, db_session: Session, test_user: User):
         """POST edit with linkedin_url persists to DB."""
-        co = self._make_company(db_session)
+        co = self._make_company(db_session, account_owner_id=test_user.id)
         resp = client.post(
             f"/v2/partials/customers/{co.id}/edit",
             data={"name": co.name, "linkedin_url": "https://linkedin.com/company/ws4test"},
@@ -5070,7 +5072,7 @@ class TestWS4AccountModalFields:
 
     def test_modal_edit_persists_account_type(self, client: TestClient, db_session: Session, test_user: User):
         """POST edit with account_type persists valid choice to DB."""
-        co = self._make_company(db_session)
+        co = self._make_company(db_session, account_owner_id=test_user.id)
         resp = client.post(
             f"/v2/partials/customers/{co.id}/edit",
             data={"name": co.name, "account_type": "Partner"},
@@ -5081,7 +5083,7 @@ class TestWS4AccountModalFields:
 
     def test_modal_edit_blank_account_type_clears(self, client: TestClient, db_session: Session, test_user: User):
         """POST edit with blank account_type clears it to None."""
-        co = self._make_company(db_session, account_type="Customer")
+        co = self._make_company(db_session, account_type="Customer", account_owner_id=test_user.id)
         resp = client.post(
             f"/v2/partials/customers/{co.id}/edit",
             data={"name": co.name, "account_type": ""},
@@ -5116,6 +5118,8 @@ class TestWS4SiteEditModal:
         """POST site edit with owner_id persists it to DB."""
 
         co, site = self._make_company_with_site(db_session)
+        co.account_owner_id = test_user.id
+        db_session.commit()
         resp = client.post(
             f"/v2/partials/customers/{co.id}/sites/{site.id}/edit",
             data={"site_name": "HQ", "owner_id": str(test_user.id)},
@@ -5155,7 +5159,7 @@ class TestMultiSiteOwnership:
         """
         from app.models.crm import CustomerSite
 
-        company = Company(name="Multi Site Owner Co", is_active=True)
+        company = Company(name="Multi Site Owner Co", is_active=True, account_owner_id=test_user.id)
         db_session.add(company)
         db_session.commit()
 

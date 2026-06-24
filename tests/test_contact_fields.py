@@ -225,10 +225,13 @@ class TestContactEditFirstLast:
         self,
         client: TestClient,
         test_company: Company,
+        test_user: User,
         site_and_contact,
         db_session: Session,
     ):
         """POST with first+last → full_name is recomposed."""
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         site, contact = site_and_contact
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/sites/{site.id}/contacts/{contact.id}/edit",
@@ -244,10 +247,12 @@ class TestContactEditFirstLast:
         self,
         client: TestClient,
         test_company: Company,
+        test_user: User,
         site_and_contact,
         db_session: Session,
     ):
         """Editing first+last keeps values and recomposes."""
+        test_company.account_owner_id = test_user.id
         site, contact = site_and_contact
         contact.first_name = "Alice"
         contact.last_name = "Smith"
@@ -266,9 +271,13 @@ class TestContactEditFirstLast:
         self,
         client: TestClient,
         test_company: Company,
+        test_user: User,
         site_and_contact,
+        db_session: Session,
     ):
         """Clearing both first AND last name → 400."""
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         site, contact = site_and_contact
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/sites/{site.id}/contacts/{contact.id}/edit",

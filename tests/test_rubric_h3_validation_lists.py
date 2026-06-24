@@ -111,7 +111,9 @@ class TestEditVendorValidation:
 
 
 class TestEditCompanyWebsite:
-    def test_invalid_website_rejected(self, client, test_company: Company):
+    def test_invalid_website_rejected(self, client, test_company: Company, test_user: User, db_session: Session):
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/edit",
             data={"name": "Acme", "website": "not a url at all !!!"},
@@ -120,7 +122,11 @@ class TestEditCompanyWebsite:
         err = resp.json()["error"].lower()
         assert "website" in err or "url" in err
 
-    def test_valid_website_accepted_and_normalized(self, client, db_session, test_company: Company):
+    def test_valid_website_accepted_and_normalized(
+        self, client, db_session: Session, test_company: Company, test_user: User
+    ):
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/edit",
             data={"name": "Acme", "website": "acme-electronics.com"},

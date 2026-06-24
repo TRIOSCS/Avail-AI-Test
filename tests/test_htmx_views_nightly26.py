@@ -60,8 +60,8 @@ def _make_req(db: Session, user: User) -> Requisition:
     return req
 
 
-def _make_company(db: Session) -> Company:
-    co = Company(name="TestCo N26", is_active=True)
+def _make_company(db: Session, owner: User | None = None) -> Company:
+    co = Company(name="TestCo N26", is_active=True, account_owner_id=owner.id if owner else None)
     db.add(co)
     db.commit()
     db.refresh(co)
@@ -179,7 +179,7 @@ class TestEditCompanyDirect:
         """Lines 5038–5057: POST form updates Company fields."""
         from app.routers.htmx_views import edit_company
 
-        company = _make_company(db_session)
+        company = _make_company(db_session, owner=test_user)
         mock_req = _mock_form_request(
             fields={"name": "Updated N26", "website": "https://updated.com", "industry": "Tech"}
         )
@@ -210,7 +210,7 @@ class TestEditSiteDirect:
         """Lines 5074–5083: POST form updates CustomerSite fields."""
         from app.routers.htmx_views import edit_site
 
-        company = _make_company(db_session)
+        company = _make_company(db_session, owner=test_user)
         site = _make_site(db_session, company)
         mock_req = _mock_form_request(fields={"site_name": "Branch Office", "city": "Austin", "country": "US"})
         with patch("app.routers.htmx_views.company_tab", new_callable=AsyncMock) as mock_tab:

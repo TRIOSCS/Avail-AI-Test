@@ -11,7 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.models import Company, CustomerSite, SiteContact
+from app.models import Company, CustomerSite, SiteContact, User
 
 # ── Create Company ───────────────────────────────────────────────────
 
@@ -78,7 +78,9 @@ class TestEditCompany:
         assert "Edit Company" in resp.text
         assert test_company.name in resp.text
 
-    def test_edit_saves_changes(self, client: TestClient, test_company: Company, db_session: Session):
+    def test_edit_saves_changes(self, client: TestClient, test_company: Company, test_user: User, db_session: Session):
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/edit",
             data={"name": "Acme Global", "website": "https://acme-global.com"},
@@ -103,8 +105,15 @@ class TestEditCompany:
 
 class TestEditSite:
     def test_edit_site(
-        self, client: TestClient, test_company: Company, test_customer_site: CustomerSite, db_session: Session
+        self,
+        client: TestClient,
+        test_company: Company,
+        test_customer_site: CustomerSite,
+        test_user: User,
+        db_session: Session,
     ):
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}/edit",
             data={"site_name": "Branch Office", "city": "Dallas", "country": "US"},
