@@ -13260,6 +13260,16 @@ def _prospect_toast(response, message: str, kind: str = "success") -> None:
     response.headers["HX-Trigger"] = json.dumps({"showToast": {"message": message, "type": kind}})
 
 
+def settings_toast(response, message: str, kind: str = "success") -> None:
+    """Attach a showToast HX-Trigger for settings mutation responses.
+
+    Called by settings mutation handlers to surface success/error feedback via the
+    Alpine $store.toast. Mirrors _prospect_toast but is scoped to settings so later
+    tasks can import it cleanly.
+    """
+    response.headers["HX-Trigger"] = json.dumps({"showToast": {"message": message, "type": kind}})
+
+
 def _wants_detail(request: Request) -> bool:
     """True when an action came from the detail view (targets #main-content) rather than
     from an in-grid card (targets #prospect-<id>) — so we return the right partial."""
