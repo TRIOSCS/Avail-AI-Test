@@ -264,7 +264,7 @@ async def submit_trouble_ticket(
 @router.get("/api/trouble-tickets/{ticket_id}/screenshot")
 async def get_ticket_screenshot(
     ticket_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Serve screenshot PNG from disk; fall back to legacy screenshot_b64."""

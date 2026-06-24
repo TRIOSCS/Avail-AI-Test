@@ -3908,7 +3908,7 @@ the current implementation.
 | Tags | 4 | List, entity tags |
 | Activity | 14 | Log calls, timeline, dashboards |
 | Admin | 15 | Users, config, diagnostics, maintenance |
-| Tickets | 12 | Error reports, trouble tickets, AI analysis |
+| Tickets | 12 | Error reports, trouble tickets, AI analysis; **admin-gated triage vs. open submission**: the maintainer triage console (`GET /v2/partials/trouble-tickets/workspace`, `.../list`, `.../{id}` and screenshot `GET /api/trouble-tickets/{id}/screenshot`) is `require_admin` (also hidden behind `{% if is_admin %}` Tickets tab in settings/index.html — non-admins can't see or reach it, closing the cross-user report leak), while the floating "Report a Problem" submission flow stays open to any login: `GET /api/trouble-tickets/form`, `POST /api/trouble-tickets/submit`, `POST /api/trouble-tickets` + `POST /api/error-reports` remain `require_user` |
 | Documents | 2 | Requisition PDF, quote PDF |
 | Quote Builder | 5 | Draft, save, send, signature |
 | Events | 1 | SSE stream |

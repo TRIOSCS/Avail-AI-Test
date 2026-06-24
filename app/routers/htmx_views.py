@@ -16268,7 +16268,7 @@ async def bulk_unarchive(
 
 
 @router.get("/v2/partials/trouble-tickets/workspace", response_class=HTMLResponse)
-async def trouble_tickets_workspace(request: Request, user: User = Depends(require_user)):
+async def trouble_tickets_workspace(request: Request, user: User = Depends(require_admin)):
     """Trouble Tickets workspace — loaded into #main-content."""
     return template_response(
         "htmx/partials/tickets/workspace.html",
@@ -16280,7 +16280,7 @@ async def trouble_tickets_workspace(request: Request, user: User = Depends(requi
 async def trouble_tickets_list(
     request: Request,
     status: str = "",
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Trouble Tickets list partial — grouped by root cause, filterable by status."""
@@ -16330,7 +16330,7 @@ async def trouble_tickets_list(
 async def trouble_ticket_detail(
     request: Request,
     ticket_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Trouble Ticket detail partial — swapped into #main-content."""
