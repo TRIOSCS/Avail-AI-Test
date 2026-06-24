@@ -417,8 +417,8 @@ async def analyze_tickets(
                 "and a suggested fix. Return JSON with a 'groups' array.\n\n"
                 f"Tickets:\n{json.dumps(ticket_data, indent=2)}"
             ),
+            schema=tool_schema,
             system="You are a bug triage assistant. Group related bug reports by their likely root cause.",
-            output_schema=tool_schema,
             model_tier="fast",
         )
     except (ClaudeUnavailableError, ClaudeError) as e:

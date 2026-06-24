@@ -9,6 +9,8 @@ Covers Task 3 of the settings-menu refinement:
      (no #main-content, no hx-push-url) and the full-page /v2/trouble-tickets URL
      redirects to the Settings page with the Tickets tab active.
   4. The detail status <select> only toasts success on r.ok (honest error path).
+  5. analyze_tickets passes schema= (not output_schema=) to claude_structured so
+     it works against the real LLM (signature-pinning regression test).
 
 Called by: pytest
 Depends on: conftest.py fixtures (client = admin-capable, db_session, test_user),
@@ -171,3 +173,48 @@ class TestHonestToast:
         html = client.get(f"/v2/partials/trouble-tickets/{t.id}").text
         assert "r.ok" in html
         assert ".catch" in html
+
+
+# ── Fix 5: analyze passes schema= (not output_schema=) ──────────────
+
+
+class TestAnalyzeSchemaKwarg:
+    """Signature-pinning regression: analyze_tickets must call claude_structured
+    with the real ``schema`` kwarg, not the nonexistent ``output_schema`` kwarg.
+
+    The shim below MATCHES the real claude_structured signature exactly.  If the
+    caller passes ``output_schema=`` the shim raises TypeError (unexpected kwarg),
+    which propagates through the try/except (TypeError is not ClaudeError) and
+    causes a 500.  Once the caller uses ``schema=`` the shim accepts it and the
+    endpoint returns 200 with the grouped list.
+    """
+
+    def test_analyze_uses_schema_kwarg_not_output_schema(self, client, db_session, test_user):
+        """Analyze endpoint returns 200+groups when claude_structured uses schema=."""
+        t = _seed_ticket(db_session, test_user, ticket_number="TT-0099", status=TicketStatus.SUBMITTED)
+
+        canned = {"groups": [{"title": "Boot Loop", "suggested_fix": "Fix init", "ticket_ids": [t.id]}]}
+
+        async def _signature_pinned_shim(
+            prompt: str,
+            schema: dict,
+            *,
+            system: str = "",
+            model_tier: str = "fast",
+            max_tokens: int = 1024,
+            cache_system: bool = True,
+            timeout: int = 30,
+            thinking_budget=None,
+            cost_bucket=None,
+        ) -> dict:
+            # If the caller passed ``output_schema=`` it would have blown up BEFORE
+            # reaching here (Python raises TypeError for unexpected kwargs immediately).
+            return canned
+
+        with patch("app.utils.claude_client.claude_structured", new=_signature_pinned_shim):
+            resp = client.post("/api/trouble-tickets/analyze")
+
+        assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text[:200]}"
+        body = resp.text
+        assert "TT-0099" in body
+        assert "Boot Loop" in body
