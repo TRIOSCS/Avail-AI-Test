@@ -7136,15 +7136,18 @@ async def deactivate_company(
 async def reactivate_company(
     request: Request,
     company_id: int,
+    from_archived: bool = Query(False, alias="from_archived"),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
     """Restore an archived company by setting is_active=True.
 
-    Gate: can_manage_account_team — primary owner or manager/admin only.
-    Re-renders the full company detail partial (banner disappears after reactivate).
+    Gate: is_manager_or_admin only.
 
-    Called by: "Reactivate" button in the archived-account banner in detail.html.
+    from_archived=true: called from the archived-list view → returns the refreshed
+    archived_list partial (so the reactivated row disappears from the list).
+    Default (false): called from the company detail banner → returns the detail
+    partial (banner disappears after reactivate).
     """
     company = db.get(Company, company_id)
     if not company:
@@ -7155,6 +7158,19 @@ async def reactivate_company(
     db.commit()
     db.refresh(company)
     logger.info("Company {} reactivated by {}", company_id, user.email)
+
+    if from_archived:
+        # Return refreshed archived list — reactivated company will no longer appear.
+        companies = db.query(Company).filter(Company.is_active.is_(False)).order_by(Company.name).all()
+        ctx = _base_ctx(request, user, "customers")
+        ctx.update(
+            {
+                "companies": companies,
+                "can_reactivate": True,  # gate already passed above
+            }
+        )
+        return template_response("htmx/partials/customers/archived_list.html", ctx)
+
     return await company_detail_partial(request=request, company_id=company_id, user=user, db=db)
 
 
@@ -7552,6 +7568,10 @@ async def company_detail_partial(
             "collaborators": collaborators,
             "all_users": all_users,
             "can_manage_team": can_manage_team,
+            # Gate for the "Reactivate" button in the archived banner.
+            # Computed server-side (mirrors archived_list.html pattern) so the
+            # template never inspects raw role strings.
+            "can_reactivate": is_manager_or_admin(user),
         }
     )
     return template_response("htmx/partials/customers/detail.html", ctx)
@@ -8250,7 +8270,16 @@ async def delete_site(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Soft-delete a site (set is_active=False)."""
+    """Soft-delete a site (set is_active=False).
+
+    Gate: can_manage_account — mirrors edit_site.  Any authenticated user can hit
+    this route, so we must check ownership before mutating.
+    """
+    from ..dependencies import can_manage_account
+
+    company = db.get(Company, company_id)
+    if company is None or not can_manage_account(user, company, db):
+        raise HTTPException(403, "Not authorized to manage this account")
     site = db.query(CustomerSite).filter(CustomerSite.id == site_id, CustomerSite.company_id == company_id).first()
     if not site:
         raise HTTPException(404, "Site not found")

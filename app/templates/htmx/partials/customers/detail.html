@@ -34,7 +34,7 @@
       <span class="ml-2 text-rose-600">Reason: {{ company.disposition_reason }}</span>
       {% endif %}
     </div>
-    {% if user.role in ('manager', 'admin') %}
+    {% if can_reactivate %}
     <button type="button"
             hx-post="/v2/partials/customers/{{ company.id }}/reactivate"
             hx-target="#cdm-detail"

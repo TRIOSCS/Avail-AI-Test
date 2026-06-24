@@ -312,3 +312,121 @@ def test_site_delete_action_gone():
     tpl = pathlib.Path(__file__).resolve().parent.parent / "app/templates/htmx/partials/customers/tabs/site_card.html"
     text = tpl.read_text()
     assert "Delete Site" not in text, "Delete Site action should have been removed from site_card.html"
+
+
+# ── 13. C2 (IDOR) — delete_site must deny unrelated reps ──────────────
+
+
+def test_delete_site_idor_deny(
+    db_session: Session,
+    test_company: Company,
+    test_customer_site: "CustomerSite",
+    sales_user: "User",
+):
+    """DELETE /sites/{site_id} by an unrelated rep must return 403, not soft-delete."""
+    # sales_user does not own test_company → can_manage_account returns False
+    test_company.account_owner_id = None
+    db_session.commit()
+
+    c = _make_client(db_session, sales_user)
+    try:
+        resp = c.delete(f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}")
+    finally:
+        _cleanup_overrides()
+
+    assert resp.status_code == 403, f"Expected 403, got {resp.status_code}"
+
+    # Site must NOT have been deleted
+    db_session.expire(test_customer_site)
+    assert test_customer_site.is_active is True, "Site should not have been soft-deleted"
+
+
+# ── 14. I1 — company_detail_partial passes can_reactivate context ──────
+
+
+def test_detail_partial_passes_can_reactivate_to_template(
+    db_session: Session,
+    test_company: Company,
+    manager_user: "User",
+):
+    """GET company_detail_partial as manager: response must include Reactivate button."""
+    test_company.is_active = False
+    db_session.commit()
+
+    c = _make_client(db_session, manager_user)
+    try:
+        resp = c.get(f"/v2/partials/customers/{test_company.id}")
+    finally:
+        _cleanup_overrides()
+
+    assert resp.status_code == 200
+    assert "Reactivate" in resp.text, "Manager should see Reactivate button in archived detail"
+
+
+def test_detail_partial_sales_no_reactivate(
+    db_session: Session,
+    test_company: Company,
+    sales_user: "User",
+):
+    """GET company_detail_partial as sales rep: Reactivate button must NOT appear."""
+    test_company.is_active = False
+    # Give sales_user ownership so they can view it
+    test_company.account_owner_id = sales_user.id
+    db_session.commit()
+
+    c = _make_client(db_session, sales_user)
+    try:
+        resp = c.get(f"/v2/partials/customers/{test_company.id}")
+    finally:
+        _cleanup_overrides()
+
+    assert resp.status_code == 200
+    assert "Reactivate" not in resp.text, "Sales rep should NOT see Reactivate button"
+
+
+# ── 15. L2 — reactivate from archived view returns archived_list partial ─
+
+
+def test_reactivate_from_archived_returns_archived_list(
+    db_session: Session,
+    test_company: Company,
+    manager_user: "User",
+):
+    """POST reactivate?from_archived=true → returns archived_list partial (not
+    detail)."""
+    test_company.is_active = False
+    db_session.commit()
+
+    c = _make_client(db_session, manager_user)
+    try:
+        resp = c.post(f"/v2/partials/customers/{test_company.id}/reactivate?from_archived=true")
+    finally:
+        _cleanup_overrides()
+
+    assert resp.status_code == 200
+    # archived_list has a distinctive heading
+    assert "Archived Accounts" in resp.text, "reactivate?from_archived=true should return the archived_list partial"
+    # The reactivated company should NOT be in the list
+    assert "Acme Electronics" not in resp.text, "Reactivated company should not appear in archived list"
+
+
+def test_reactivate_from_detail_returns_detail(
+    db_session: Session,
+    test_company: Company,
+    manager_user: "User",
+):
+    """POST reactivate (no from_archived param) → returns company_detail_partial."""
+    test_company.is_active = False
+    db_session.commit()
+
+    c = _make_client(db_session, manager_user)
+    try:
+        resp = c.post(f"/v2/partials/customers/{test_company.id}/reactivate")
+    finally:
+        _cleanup_overrides()
+
+    assert resp.status_code == 200
+    # detail partial has the company name in breadcrumb
+    assert "Acme Electronics" in resp.text, (
+        "reactivate without from_archived should return detail partial showing the company"
+    )

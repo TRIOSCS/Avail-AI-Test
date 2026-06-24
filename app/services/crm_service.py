@@ -241,22 +241,7 @@ def cdm_company_query(
         # Also exclude companies where they HAVE active sites but ALL of them are
         # marked do_not_contact (nothing to call).  Companies with no sites at all
         # still appear — the cadence obligation lives at the company level.
-        active_site_exists = (
-            select(CustomerSite.id)
-            .where(CustomerSite.company_id == Company.id, CustomerSite.is_active.is_(True))
-            .correlate(Company)
-            .exists()
-        )
-        non_dnc_site_exists = (
-            select(CustomerSite.id)
-            .where(
-                CustomerSite.company_id == Company.id,
-                CustomerSite.is_active.is_(True),
-                CustomerSite.do_not_contact.is_(False),
-            )
-            .correlate(Company)
-            .exists()
-        )
+        active_site_exists, non_dnc_site_exists = _dnc_site_subqueries()
         # Exclude only when: there IS at least one active site AND none are reachable.
         query = query.filter(
             _needs_call_filter(now),
@@ -313,12 +298,39 @@ def cdm_company_query(
     return query.order_by(CDM_SORTS.get(sort, CDM_SORTS["oldest"]))
 
 
+def _dnc_site_subqueries():
+    """Return (active_site_exists, non_dnc_site_exists) correlated EXISTS subqueries.
+
+    Shared by cdm_company_query (staleness="needs_call") and cdm_overdue_count so the
+    two apply identical DNC-site suppression and count == list is guaranteed. A company
+    with no sites at all passes the filter (the cadence obligation lives at the company
+    level, not the site level).
+    """
+    active_site_exists = (
+        select(CustomerSite.id)
+        .where(CustomerSite.company_id == Company.id, CustomerSite.is_active.is_(True))
+        .correlate(Company)
+        .exists()
+    )
+    non_dnc_site_exists = (
+        select(CustomerSite.id)
+        .where(
+            CustomerSite.company_id == Company.id,
+            CustomerSite.is_active.is_(True),
+            CustomerSite.do_not_contact.is_(False),
+        )
+        .correlate(Company)
+        .exists()
+    )
+    return active_site_exists, non_dnc_site_exists
+
+
 def cdm_overdue_count(db: Session, user: User, now: datetime | None = None) -> int:
     """Count this user's accounts needing a call (overdue or never contacted).
 
     Sales/trader only — others get 0 (no chip rendered). Uses the same
-    _needs_call_filter predicate as the chip's click-through query
-    (staleness="needs_call") so count and list never diverge.
+    _needs_call_filter predicate AND the same DNC-site filter as the chip's
+    click-through query (staleness="needs_call") so count == list at all times.
 
     Mirrors the my_only visibility rule in cdm_company_query: rep sees accounts
     they own (account_owner_id) OR where they own a site.
@@ -326,12 +338,17 @@ def cdm_overdue_count(db: Session, user: User, now: datetime | None = None) -> i
     if user.role not in ("sales", "trader"):
         return 0
     now = now or datetime.now(timezone.utc)
+    active_site_exists, non_dnc_site_exists = _dnc_site_subqueries()
     return (
         db.query(func.count(Company.id))
         .filter(
             Company.is_active.is_(True),
             company_visibility_predicate(user),
             _needs_call_filter(now),
+            # Mirror cdm_company_query(staleness="needs_call"): exclude companies
+            # where every active site is DNC (nothing to call).  Companies with no
+            # active sites at all are kept — cadence obligation is at company level.
+            or_(~active_site_exists, non_dnc_site_exists),
         )
         .scalar()
         or 0
