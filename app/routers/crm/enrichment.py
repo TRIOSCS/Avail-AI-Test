@@ -3,7 +3,6 @@ from loguru import logger
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
 
-from ...config import settings
 from ...database import get_db
 from ...dependencies import is_admin as _is_admin
 from ...dependencies import require_admin, require_buyer, require_user
@@ -11,6 +10,7 @@ from ...models import Company, CustomerSite, SiteContact, SyncLog, User, VendorC
 from ...rate_limit import limiter
 from ...schemas.crm import AddContactsToVendor, AddContactToSite, CustomerImportRow, EnrichDomainRequest
 from ...services.credential_service import get_credential_cached
+from ...template_env import template_response
 
 router = APIRouter()
 
@@ -18,6 +18,14 @@ router = APIRouter()
 def _normalize_domain(value: str) -> str:
     """Strip scheme, www, and any path from a domain/website string."""
     return value.replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0]
+
+
+def _wants_html(request: Request) -> bool:
+    """True for HTMX requests — the enrich button POSTs with the HX-Request header.
+
+    HTMX callers get a rendered result panel; programmatic/API callers get JSON.
+    """
+    return request.headers.get("HX-Request") == "true"
 
 
 def _require_enrichment_provider() -> None:
@@ -40,11 +48,17 @@ def _require_enrichment_provider() -> None:
 @router.post("/api/enrich/company/{company_id}")
 async def enrich_company(
     company_id: int,
+    request: Request,
     payload: EnrichDomainRequest = EnrichDomainRequest(),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Enrich a customer company with external data."""
+    """Enrich a customer company with external data.
+
+    Content-negotiates on the HX-Request header: HTMX callers (the Enrich button) get a
+    rendered result panel — firmographics found, what was updated vs already-current, and
+    discovered contacts with Add buttons; programmatic callers get JSON.
+    """
     _require_enrichment_provider()
     from ...enrichment_service import apply_enrichment_to_company, enrich_entity
 
@@ -60,32 +74,62 @@ async def enrich_company(
         raise HTTPException(400, "No domain available — set company website or domain first")
     enrichment = await enrich_entity(domain, company.name)
     updated = apply_enrichment_to_company(company, enrichment)
-
-    # Also trigger customer enrichment waterfall for contact discovery
-    waterfall_result = None
-    if settings.customer_enrichment_enabled:
-        try:
-            from ...services.customer_enrichment_service import enrich_customer_account
-
-            waterfall_result = await enrich_customer_account(company_id, db)
-        except Exception as e:
-            logger.warning("Customer waterfall enrichment error: {}", e)
-
     db.commit()
-    result = {"ok": True, "updated_fields": updated, "enrichment": enrichment}
-    if waterfall_result:
-        result["customer_enrichment"] = waterfall_result
-    return result
+
+    if not _wants_html(request):
+        return {"ok": True, "updated_fields": updated, "enrichment": enrichment}
+
+    # HTMX path: discover contacts for the panel via the real Hunter/Clay waterfall.
+    # Firmographics are already committed, so a discovery failure degrades to an amber
+    # banner rather than blocking the panel.
+    suggested: list[dict] = []
+    errored: list[str] = []
+    try:
+        from ...enrichment_service import find_suggested_contacts_with_errors
+
+        suggested, errored = await find_suggested_contacts_with_errors(domain, company.name or "")
+    except Exception as e:
+        # Degrade to the amber "couldn't reach" banner rather than 500 the panel, but keep
+        # the traceback (exc_info) so a genuine bug here still reaches Sentry/logs.
+        logger.opt(exception=e).warning("enrich_company contact discovery failed for {}", company_id)
+        errored = ["all"]
+
+    active_sites = (
+        db.query(CustomerSite)
+        .filter(CustomerSite.company_id == company_id, CustomerSite.is_active.is_(True))
+        .order_by(CustomerSite.site_name)
+        .all()
+    )
+    return template_response(
+        "htmx/partials/shared/_enrich_result.html",
+        {
+            "request": request,
+            "entity": company,
+            "entity_type": "company",
+            "updated_fields": updated,
+            "show_contacts": True,
+            "suggested": suggested,
+            "errored_providers": errored,
+            "active_sites": active_sites,
+            "add_target": "closest li",
+            "add_swap": "outerHTML",
+        },
+    )
 
 
 @router.post("/api/enrich/vendor/{card_id}")
 async def enrich_vendor_card(
     card_id: int,
+    request: Request,
     payload: EnrichDomainRequest = EnrichDomainRequest(),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Enrich a vendor card with external data."""
+    """Enrich a vendor card with external data.
+
+    Content-negotiates on HX-Request: HTMX callers get the firmographics result panel
+    (contact discovery is company-only for now); programmatic callers get JSON.
+    """
     _require_enrichment_provider()
     from ...enrichment_service import apply_enrichment_to_vendor, enrich_entity
 
@@ -102,7 +146,20 @@ async def enrich_vendor_card(
     enrichment = await enrich_entity(domain, card.display_name)
     updated = apply_enrichment_to_vendor(card, enrichment)
     db.commit()
-    return {"ok": True, "updated_fields": updated, "enrichment": enrichment}
+
+    if not _wants_html(request):
+        return {"ok": True, "updated_fields": updated, "enrichment": enrichment}
+
+    return template_response(
+        "htmx/partials/shared/_enrich_result.html",
+        {
+            "request": request,
+            "entity": card,
+            "entity_type": "vendor",
+            "updated_fields": updated,
+            "show_contacts": False,
+        },
+    )
 
 
 @router.get("/api/suggested-contacts")
