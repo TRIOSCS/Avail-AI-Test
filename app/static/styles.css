@@ -47,16 +47,19 @@
      modifier `btn-primary btn-sm`. Sizes are defined AFTER the variants so
      an explicit size wins over the variant's default md padding. ─────── */
   .btn {
-    @apply inline-flex items-center justify-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 text-sm font-medium rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed;
   }
-  .btn-primary   { @apply btn bg-brand-500 text-white hover:bg-brand-600 focus:ring-brand-500; }
+  /* Primary = the one accent (Trio azure via --accent). Written as raw CSS so
+     it can reference the var; --tw-ring-color feeds the @apply'd focus:ring-2. */
+  .btn-primary   { @apply btn; background-color: var(--accent); color: var(--accent-contrast); --tw-ring-color: var(--accent-ring); }
+  .btn-primary:hover { background-color: var(--accent-hover); }
   .btn-secondary { @apply btn bg-white text-gray-700 border border-gray-200 hover:bg-gray-50 focus:ring-brand-500; }
   .btn-danger    { @apply btn bg-rose-500 text-white hover:bg-rose-600 focus:ring-rose-500; }
   .btn-ghost     { @apply btn bg-transparent text-gray-600 hover:bg-gray-100 focus:ring-brand-500; }
   /* size overrides — defined last so they beat the variant's baked-in md size */
-  .btn-sm { @apply px-3 py-1.5 text-xs; }
-  .btn-md { @apply px-4 py-2 text-sm; }
-  .btn-lg { @apply px-5 py-2.5 text-sm; }
+  .btn-sm { @apply px-2.5 py-1 text-xs; }
+  .btn-md { @apply px-3.5 py-1.5 text-sm; }
+  .btn-lg { @apply px-4 py-2 text-sm; }
 
   /* ── Badges — three locked families. .badge=status/lifecycle pill
      (semantic color comes from the macro color map); .chip=rectangular
@@ -73,9 +76,9 @@
 
   /* ── Cards — resting surfaces. Border is brand-200 (the dominant card
      border) so cards never depend on the legacy border-gray override. ── */
-  .card    { @apply bg-white rounded-xl border border-brand-200 shadow-card p-4; }
-  .card-sm { @apply bg-white rounded-xl border border-brand-200 p-3; }
-  .card-lg { @apply bg-white rounded-xl border border-brand-200 shadow-card p-6; }
+  .card    { @apply bg-white rounded-xl border border-brand-200 shadow-card p-3.5; }
+  .card-sm { @apply bg-white rounded-xl border border-brand-200 p-2.5; }
+  .card-lg { @apply bg-white rounded-xl border border-brand-200 shadow-card p-5; }
 
   /* ── Typography scale — 4 heading levels + label + secondary/tertiary
      text. Floor for secondary/caption copy is text-[11px]; secondary uses
@@ -87,41 +90,62 @@
   .form-label     { @apply block text-xs font-medium text-gray-700 mb-1; }
   .text-secondary { @apply text-xs text-gray-600; }
   .text-tertiary  { @apply text-[11px] text-brand-400; }
+  /* Key-figure accent — opt-in for hero numerics (deal value, margin, win%). */
+  .figure-accent  { color: var(--accent); font-variant-numeric: tabular-nums; }
 
   /* ── Inputs — one focus spec (ring-2 brand). .input-focus is the mixin
      for native controls (checkbox/select) that can't take full .input. ─ */
   .input {
-    @apply w-full px-3 py-2 text-sm bg-white border border-gray-300 rounded-lg text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 disabled:bg-gray-50 disabled:text-gray-400;
+    @apply w-full px-3 py-1.5 text-sm bg-white border border-gray-300 rounded-lg text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 disabled:bg-gray-50 disabled:text-gray-400;
+    --tw-ring-color: var(--accent-ring);
   }
-  .input-sm    { @apply px-2 py-1 text-xs; }
-  .input-focus { @apply focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500; }
+  .input:focus { border-color: var(--accent); }
+  .input-sm    { @apply px-2 py-0.5 text-xs; }
+  .input-focus { @apply focus:outline-none focus:ring-2; --tw-ring-color: var(--accent-ring); }
+  .input-focus:focus { border-color: var(--accent); }
 
   /* ── Modal chrome — locked header/body/footer padding + close button
      (retires the top-2.5 right-2.5 magic numbers in base.html). ─────── */
-  .modal-header { @apply flex items-center justify-between px-5 py-4 border-b border-brand-200; }
-  .modal-body   { @apply px-5 py-4; }
-  .modal-footer { @apply flex items-center justify-end gap-2 px-5 py-4 border-t border-brand-200; }
+  .modal-header { @apply flex items-center justify-between px-4 py-3 border-b border-brand-200; }
+  .modal-body   { @apply px-4 py-3; }
+  .modal-footer { @apply flex items-center justify-end gap-2 px-4 py-3 border-t border-brand-200; }
   .modal-close  { @apply absolute top-3 right-3 z-20 inline-flex items-center justify-center h-8 w-8 rounded-full bg-white/80 text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors; }
 
   /* ── Table cell padding — named utilities so one-off cells stop inlining
      px-4 py-3. Values match the .data-table / .compact-table locks below. */
-  .table-cell          { padding: 14px 16px; }
-  .table-cell--head    { padding: 12px 16px; }
-  .compact-cell        { padding: 6px 10px; }
-  .compact-cell--head  { padding: 8px 10px; }
-  .compact-cell--dense { padding: 4px 10px; }
+  .table-cell          { padding: 8px 12px; }
+  .table-cell--head    { padding: 7px 12px; }
+  .compact-cell        { padding: 5px 10px; }
+  .compact-cell--head  { padding: 7px 10px; }
+  .compact-cell--dense { padding: 3px 10px; }
 
   /* ── Border tokens — the unified line colors as classes. Conversion
      target for the legacy `.border-gray-200/100 !important` override
      below: sweeps migrate border-gray-* → border-line-* page by page;
      once drained, the !important block is deleted. ─────────────────── */
-  .border-line-base   { border-color: #BFC4CE; }
-  .border-line-subtle { border-color: #D5D8DF; }
+  .border-line-base   { border-color: var(--line); }
+  .border-line-subtle { border-color: var(--line-subtle); }
 
   /* ── Table wrapper ──────────────────────────────────────────────── */
   .table-wrapper {
     @apply bg-white rounded-xl shadow-sm border border-gray-200 overflow-x-auto;
   }
+}
+
+/* ── Accent + line tokens — single source of truth ────────────────────
+   --accent drives every interactive accent (primary buttons, active nav,
+   focus rings, key figures). Sourced from the Trio brand azure (trioscs.com:
+   theme primary #127FBF; #007DBD is the AA-safe step used here). Swap these
+   values to re-theme the whole app; kept in sync with the Tailwind `accent-*`
+   family in tailwind.config.js. --line/--line-subtle are the two canonical
+   hairline colors the .border-line-* classes resolve to. ──────────────── */
+:root {
+  --accent:          #007DBD;
+  --accent-hover:    #0B6699;
+  --accent-contrast: #FFFFFF;
+  --accent-ring:     rgb(0 125 189 / 0.40);
+  --line:            #BFC4CE;
+  --line-subtle:     #D5D8DF;
 }
 
 /* ── Part-number styling ─────────────────────────────────────────── */
@@ -354,18 +378,18 @@ hr { border-color: #BFC4CE; }
 .responsive-table th,
 .data-table th {
   font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
+  font-weight: 600;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
   color: #6B7280;
   background: #fff;
   border-bottom: 2px solid #BFC4CE;
-  padding: 12px 16px;
+  padding: 7px 10px;
 }
 
 .responsive-table td,
 .data-table td {
-  padding: 14px 16px;
+  padding: 5px 10px;
   border-bottom: 1px solid #BFC4CE;
   color: #1e293b;
   font-size: 13px;
@@ -397,7 +421,7 @@ hr { border-color: #BFC4CE; }
   color: #6B7280;
   background: #fff;
   border-bottom: 2px solid #BFC4CE;
-  padding: 8px 10px;
+  padding: 7px 10px;
   position: sticky;
   top: 0;
   z-index: 5;
@@ -405,7 +429,7 @@ hr { border-color: #BFC4CE; }
   user-select: none;
 }
 .compact-table td {
-  padding: 6px 10px;
+  padding: 5px 10px;
   border-bottom: 1px solid #BFC4CE;
   color: #1e293b;
   white-space: nowrap;
@@ -440,8 +464,8 @@ hr { border-color: #BFC4CE; }
   padding-bottom: 6px;
 }
 .compact-table--dense td {
-  padding-top: 4px;
-  padding-bottom: 4px;
+  padding-top: 3px;
+  padding-bottom: 3px;
 }
 
 /* Ensure tables don't collapse columns below readable widths */
