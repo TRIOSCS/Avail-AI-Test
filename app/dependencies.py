@@ -98,7 +98,7 @@ def can_manage_account(user: User, company: Company, db: "Session") -> bool:  # 
     """
     if is_manager_or_admin(user):
         return True
-    if company.account_owner_id == user.id:
+    if company.account_owner_id is not None and company.account_owner_id == user.id:
         return True
     # Site-owner check: efficient exists() subquery — index-backed via ix_cs_owner/ix_cs_company
     site_exists = (
@@ -136,7 +136,7 @@ def can_manage_account_team(user: User, company: Company) -> bool:
 
     Intentionally does NOT accept collaborators, site-owners, or buyers.
     """
-    return is_manager_or_admin(user) or company.account_owner_id == user.id
+    return is_manager_or_admin(user) or (company.account_owner_id is not None and company.account_owner_id == user.id)
 
 
 def _require_admin_user(request: Request, db: Session, *, agent_msg: str, role_msg: str) -> User:

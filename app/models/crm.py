@@ -381,7 +381,6 @@ class AccountCollaborator(Base):
         Integer,
         ForeignKey("companies.id", ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     role = Column(String(20), nullable=False, default="helper", server_default="helper")

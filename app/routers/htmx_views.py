@@ -5981,7 +5981,8 @@ async def company_detail_partial(
         .order_by(User.name)
         .all()
     )
-    all_users = db.query(User).filter(User.is_active.is_(True)).order_by(User.name).all()
+    can_manage_team = can_manage_account_team(user, company)
+    all_users = db.query(User).filter(User.is_active.is_(True)).order_by(User.name).all() if can_manage_team else []
 
     ctx = _base_ctx(request, user, "customers")
     ctx.update(
@@ -6022,7 +6023,7 @@ async def company_detail_partial(
             # Phase 3: account collaborators for the header chip list
             "collaborators": collaborators,
             "all_users": all_users,
-            "can_manage_team": can_manage_account_team(user, company),
+            "can_manage_team": can_manage_team,
         }
     )
     return template_response("htmx/partials/customers/detail.html", ctx)
@@ -7060,7 +7061,7 @@ async def add_account_collaborator(
         user.email,
     )
 
-    return await _collaborators_partial(request, company_id=company_id, user=user, db=db)
+    return await _collaborators_partial(request, company_id=company_id, user=user, db=db, company=company)
 
 
 @router.delete(
@@ -7087,6 +7088,10 @@ async def remove_account_collaborator(
     if not can_manage_account_team(user, company):
         raise HTTPException(403, "Only the account owner or a manager can manage the team")
 
+    # Validate the target user exists (prevents state-probing via silent 200 on garbage ids)
+    if not db.get(User, collab_user_id):
+        raise HTTPException(404, "User not found")
+
     collaborator = db.query(AccountCollaborator).filter_by(company_id=company_id, user_id=collab_user_id).first()
     if collaborator:
         db.delete(collaborator)
@@ -7098,7 +7103,7 @@ async def remove_account_collaborator(
             user.email,
         )
 
-    return await _collaborators_partial(request, company_id=company_id, user=user, db=db)
+    return await _collaborators_partial(request, company_id=company_id, user=user, db=db, company=company)
 
 
 async def _collaborators_partial(
@@ -7106,9 +7111,15 @@ async def _collaborators_partial(
     company_id: int,
     user: User,
     db: Session,
+    company: "Company | None" = None,
 ):
-    """Render the collaborators partial for a given company."""
-    company = db.query(Company).filter(Company.id == company_id).first()
+    """Render the collaborators partial for a given company.
+
+    *company* may be passed by callers that already hold the loaded object to avoid a
+    second DB fetch.  If omitted, it is fetched here.
+    """
+    if company is None:
+        company = db.get(Company, company_id)
     if not company:
         raise HTTPException(404, "Company not found")
 
@@ -7119,7 +7130,8 @@ async def _collaborators_partial(
         .order_by(User.name)
         .all()
     )
-    all_users = db.query(User).filter(User.is_active.is_(True)).order_by(User.name).all()
+    can_manage_team = can_manage_account_team(user, company)
+    all_users = db.query(User).filter(User.is_active.is_(True)).order_by(User.name).all() if can_manage_team else []
 
     ctx = _base_ctx(request, user, "customers")
     ctx.update(
@@ -7127,7 +7139,7 @@ async def _collaborators_partial(
             "company": company,
             "collaborators": collaborators,
             "all_users": all_users,
-            "can_manage_team": can_manage_account_team(user, company),
+            "can_manage_team": can_manage_team,
         }
     )
     return template_response("htmx/partials/customers/_collaborators.html", ctx)

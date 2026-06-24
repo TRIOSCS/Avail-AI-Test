@@ -350,6 +350,31 @@ def test_can_manage_account_team_site_owner_denied(db_session):
     assert can_manage_account_team(site_owner, co) is False
 
 
+def test_can_manage_account_team_null_owner_sales_denied(db_session):
+    """A company with NULL account_owner_id must deny a sales user (not match
+    None==None)."""
+    from app.dependencies import can_manage_account_team
+
+    sales = _make_user(db_session, "sales", "sales.nullowner@t.com")
+    co = _make_company(db_session, "NullOwnerCo")  # account_owner_id=None
+    db_session.flush()
+
+    assert co.account_owner_id is None
+    assert can_manage_account_team(sales, co) is False
+
+
+def test_can_manage_account_team_null_owner_manager_allowed(db_session):
+    """A manager must still be allowed even when account_owner_id is NULL."""
+    from app.dependencies import can_manage_account_team
+
+    mgr = _make_user(db_session, "manager", "mgr.nullowner@t.com")
+    co = _make_company(db_session, "NullOwnerMgrCo")  # account_owner_id=None
+    db_session.flush()
+
+    assert co.account_owner_id is None
+    assert can_manage_account_team(mgr, co) is True
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 6. HTTP endpoint: POST /v2/partials/customers/{id}/collaborators
 # ─────────────────────────────────────────────────────────────────────────────
@@ -495,6 +520,16 @@ def test_remove_collaborator_unrelated_rep_denied(_collab_setup, db_session):
             f"/v2/partials/customers/{ctx['company'].id}/collaborators/{ctx['helper'].id}",
         )
         assert resp.status_code == 403, f"Unrelated rep must get 403, got {resp.status_code}"
+
+
+def test_remove_collaborator_nonexistent_user_returns_404(_collab_setup, db_session):
+    """Removing with a garbage user_id must return 404 (not a silent 200)."""
+    ctx = _collab_setup
+    for c in _make_client(db_session, ctx["manager"]):
+        resp = c.delete(
+            f"/v2/partials/customers/{ctx['company'].id}/collaborators/999999999",
+        )
+        assert resp.status_code == 404, f"Nonexistent user_id must return 404, got {resp.status_code}"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
