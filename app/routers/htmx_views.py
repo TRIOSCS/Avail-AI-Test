@@ -5634,6 +5634,9 @@ async def customers_bulk_action(
             new_owner_id = int(owner_id_raw)
         except (TypeError, ValueError):
             raise HTTPException(400, "owner_id must be an integer")
+        new_owner = db.get(User, new_owner_id)
+        if not new_owner or not new_owner.is_active:
+            raise HTTPException(400, "owner_id does not correspond to an active user")
         for co in authorised:
             co.account_owner_id = new_owner_id
             applied += 1
@@ -5768,6 +5771,7 @@ async def import_companies_preview(
     dup_count = sum(1 for r in rows if r["status"] == "duplicate")
     invalid_count = sum(1 for r in rows if r["status"] == "invalid")
 
+    import html as _html
     import json as _json
 
     rows_json = _json.dumps(
@@ -5792,9 +5796,10 @@ async def import_companies_preview(
     )
 
     rows_html = "".join(
-        f"<tr><td class='px-2 py-1 text-sm text-gray-900'>{r['name'] or '<em class="text-gray-400">—</em>'}</td>"
-        f"<td class='px-2 py-1 text-sm text-gray-500'>{r['website'] or '—'}</td>"
-        f"<td class='px-2 py-1 text-sm text-gray-500'>{r['account_type'] or '—'}</td>"
+        f"<tr><td class='px-2 py-1 text-sm text-gray-900'>"
+        f"{_html.escape(r['name']) if r['name'] else '<em class="text-gray-400">—</em>'}</td>"
+        f"<td class='px-2 py-1 text-sm text-gray-500'>{_html.escape(r['website']) if r['website'] else '—'}</td>"
+        f"<td class='px-2 py-1 text-sm text-gray-500'>{_html.escape(r['account_type']) if r['account_type'] else '—'}</td>"
         f"<td class='px-2 py-1'>{badge(r['status'], r['status_label'])}</td></tr>"
         for r in rows
     )
@@ -5818,7 +5823,7 @@ async def import_companies_preview(
         html += (
             f'<form hx-post="/v2/partials/customers/import/confirm"'
             f' hx-target="#import-preview" hx-swap="outerHTML">'
-            f'<input type="hidden" name="rows_json" value=\'{rows_json}\'>'
+            f'<input type="hidden" name="rows_json" value="{_html.escape(rows_json)}">'
             f'<button type="submit" class="btn btn-primary text-sm px-4 py-1.5">'
             f"Import {valid_count} compan{'y' if valid_count == 1 else 'ies'}</button>"
             f"</form>"
@@ -5856,6 +5861,9 @@ async def import_companies_confirm(
             raise ValueError("Expected a list")
     except (ValueError, TypeError):
         raise HTTPException(400, "Invalid rows_json — must be a JSON array")
+
+    if len(rows) > _IMPORT_MAX_ROWS:
+        raise HTTPException(400, f"rows_json exceeds {_IMPORT_MAX_ROWS} row limit")
 
     # Re-fetch existing normalized names to guard against race conditions
     existing_norm = {
@@ -5988,6 +5996,23 @@ async def import_contacts_preview(
     dup_count = sum(1 for r in rows if r["status"] == "duplicate")
     invalid_count = sum(1 for r in rows if r["status"] == "invalid")
 
+    import html as _html
+    import json as _json
+
+    contacts_rows_json = _json.dumps(
+        [
+            {
+                "company_name": r["company_name"],
+                "contact_name": r["contact_name"],
+                "email": r["email"],
+                "phone": r["phone"],
+                "role": r["role"],
+            }
+            for r in rows
+            if r["status"] == "valid"
+        ]
+    )
+
     badge = lambda s, lbl: (  # noqa: E731
         '<span class="px-1.5 py-0.5 rounded text-xs font-medium '
         + (
@@ -6001,11 +6026,11 @@ async def import_contacts_preview(
     )
 
     rows_html = "".join(
-        f"<tr><td class='px-2 py-1 text-sm text-gray-900'>{r['company_name'] or '—'}</td>"
-        f"<td class='px-2 py-1 text-sm text-gray-900'>{r['contact_name'] or '—'}</td>"
-        f"<td class='px-2 py-1 text-sm text-gray-500'>{r['email'] or '—'}</td>"
-        f"<td class='px-2 py-1 text-sm text-gray-500'>{r['phone'] or '—'}</td>"
-        f"<td class='px-2 py-1 text-sm text-gray-500'>{r['role'] or '—'}</td>"
+        f"<tr><td class='px-2 py-1 text-sm text-gray-900'>{_html.escape(r['company_name']) if r['company_name'] else '—'}</td>"
+        f"<td class='px-2 py-1 text-sm text-gray-900'>{_html.escape(r['contact_name']) if r['contact_name'] else '—'}</td>"
+        f"<td class='px-2 py-1 text-sm text-gray-500'>{_html.escape(r['email']) if r['email'] else '—'}</td>"
+        f"<td class='px-2 py-1 text-sm text-gray-500'>{_html.escape(r['phone']) if r['phone'] else '—'}</td>"
+        f"<td class='px-2 py-1 text-sm text-gray-500'>{_html.escape(r['role']) if r['role'] else '—'}</td>"
         f"<td class='px-2 py-1'>{badge(r['status'], r['status_label'])}</td></tr>"
         for r in rows
     )
@@ -6024,10 +6049,157 @@ async def import_contacts_preview(
         f'<th class="px-2 py-1">Email</th><th class="px-2 py-1">Phone</th>'
         f'<th class="px-2 py-1">Role</th><th class="px-2 py-1">Status</th></tr>'
         f'</thead><tbody class="divide-y divide-gray-100">{rows_html}</tbody></table></div>'
-        f'<p class="text-xs text-gray-500">Contacts are linked to companies at confirm time.</p>'
-        f"</div>"
     )
+
+    if valid_count:
+        html += (
+            f'<form hx-post="/v2/partials/customers/import/contacts/confirm"'
+            f' hx-target="#import-contacts-preview" hx-swap="outerHTML">'
+            f'<input type="hidden" name="rows_json" value="{_html.escape(contacts_rows_json)}">'
+            f'<button type="submit" class="btn btn-primary text-sm px-4 py-1.5">'
+            f"Import {valid_count} contact{'s' if valid_count != 1 else ''}</button>"
+            f"</form>"
+        )
+    else:
+        html += '<p class="text-sm text-gray-500">No valid contacts to import.</p>'
+
+    html += "</div>"
     return HTMLResponse(html)
+
+
+@router.post("/v2/partials/customers/import/contacts/confirm", response_class=HTMLResponse)
+async def import_contacts_confirm(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Create SiteContact rows from a confirmed contacts import.
+
+    Per row: matches company by normalized_name or domain; attaches contact to
+    the company's first ACTIVE site (creates an HQ site if none exists);
+    deduplicates by email within the site; skips rows whose company isn't found.
+    Reports created, skipped_no_company, and skipped_dup counts.
+    """
+    import html as _html
+    import json as _json
+
+    from ..models.crm import CustomerSite, SiteContact
+    from ..utils.phone import normalize_e164
+    from ..vendor_utils import normalize_vendor_name
+
+    form = await request.form()
+    rows_json_str = form.get("rows_json", "")
+    if not rows_json_str:
+        raise HTTPException(400, "rows_json is required")
+
+    try:
+        rows = _json.loads(rows_json_str)
+        if not isinstance(rows, list):
+            raise ValueError("Expected a list")
+    except (ValueError, TypeError):
+        raise HTTPException(400, "Invalid rows_json — must be a JSON array")
+
+    if len(rows) > _IMPORT_MAX_ROWS:
+        raise HTTPException(400, f"rows_json exceeds {_IMPORT_MAX_ROWS} row limit")
+
+    # Build company lookup: normalized_name → Company (active preferred)
+    all_companies = db.query(Company).filter(Company.is_active.is_(True)).all()
+    norm_to_company: dict[str, Company] = {}
+    domain_to_company: dict[str, Company] = {}
+    for co in all_companies:
+        if co.normalized_name:
+            norm_to_company[co.normalized_name] = co
+        if co.website:
+            # extract domain: strip scheme + www
+            import re as _re
+
+            domain = _re.sub(r"^https?://", "", co.website.strip().lower())
+            domain = _re.sub(r"^www\.", "", domain).split("/")[0].strip()
+            if domain:
+                domain_to_company[domain] = co
+
+    now = datetime.now(timezone.utc)
+    created = 0
+    skipped_no_company = 0
+    skipped_dup = 0
+
+    for row in rows:
+        company_name = str(row.get("company_name", "")).strip()
+        contact_name = str(row.get("contact_name", "")).strip()
+        email = str(row.get("email", "")).strip().lower() or None
+        phone = str(row.get("phone", "")).strip() or None
+        role = str(row.get("role", "")).strip() or None
+
+        if not company_name or not contact_name:
+            skipped_no_company += 1
+            continue
+
+        # Match company by normalized name, then by domain
+        norm = normalize_vendor_name(company_name)
+        co = norm_to_company.get(norm) if norm else None
+        if co is None and email and "@" in email:
+            email_domain = email.split("@", 1)[1]
+            co = domain_to_company.get(email_domain)
+
+        if co is None:
+            skipped_no_company += 1
+            continue
+
+        # Find or create the first ACTIVE site for this company
+        site = (
+            db.query(CustomerSite)
+            .filter(CustomerSite.company_id == co.id, CustomerSite.is_active.is_(True))
+            .order_by(CustomerSite.id)
+            .first()
+        )
+        if site is None:
+            site = CustomerSite(
+                company_id=co.id,
+                site_name="HQ",
+                is_active=True,
+                created_at=now,
+            )
+            db.add(site)
+            db.flush()  # get site.id
+
+        # Deduplicate by email within the site
+        if email:
+            existing = (
+                db.query(SiteContact)
+                .filter(SiteContact.customer_site_id == site.id, SiteContact.email == email)
+                .first()
+            )
+            if existing:
+                skipped_dup += 1
+                continue
+
+        contact = SiteContact(
+            customer_site_id=site.id,
+            full_name=contact_name,
+            email=email,
+            phone=normalize_e164(phone) if phone else None,
+            contact_role=role,
+            is_active=True,
+            created_at=now,
+        )
+        db.add(contact)
+        created += 1
+
+    if created:
+        db.commit()
+        logger.info("Contact CSV import: {} contacts created by {}", created, user.email)
+
+    parts = [f"Imported {created} contact{'s' if created != 1 else ''}"]
+    if skipped_no_company:
+        parts.append(f"{skipped_no_company} skipped (company not found)")
+    if skipped_dup:
+        parts.append(f"{skipped_dup} duplicate{'s' if skipped_dup != 1 else ''} skipped")
+    summary = "; ".join(parts)
+
+    html = f'<div class="bg-emerald-50 border border-emerald-200 rounded p-3 text-sm text-emerald-700">{_html.escape(summary)}.</div>'
+    resp = HTMLResponse(html)
+    resp.headers["HX-Trigger"] = json.dumps({"showToast": {"message": summary}})
+    return resp
 
 
 # ── Sprint 4: Company CRUD (static routes — must precede {company_id}) ──

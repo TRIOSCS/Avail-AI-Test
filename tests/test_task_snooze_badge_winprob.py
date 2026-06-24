@@ -449,16 +449,17 @@ class TestWinProbabilityMigration:
     """Verify migration 146 chains correctly from 145 as single head."""
 
     def test_migration_146_is_single_head(self):
-        """There must be exactly one alembic head and it must be migration 146."""
-        import subprocess
-        import sys
+        """Exactly one alembic head, and migration 146 is in the chain.
 
-        result = subprocess.run(
-            [sys.executable, "-m", "alembic", "heads"],
-            capture_output=True,
-            text=True,
-            cwd="/root/availai/.claude/worktrees/attachments-unified",
+        Do NOT assert which revision is the head — later migrations legitimately chain
+        on top of 146, so hardcoding the head id is brittle.
+        """
+        from alembic.config import Config
+        from alembic.script import ScriptDirectory
+
+        script = ScriptDirectory.from_config(Config("alembic.ini"))
+        heads = script.get_heads()
+        assert len(heads) == 1, f"Expected 1 head, got {len(heads)}: {heads}"
+        assert script.get_revision("146_req_win_probability") is not None, (
+            "146_req_win_probability missing from the migration chain"
         )
-        heads = [line.strip() for line in result.stdout.splitlines() if line.strip() and "(head)" in line]
-        assert len(heads) == 1, f"Expected 1 head, got: {result.stdout!r}"
-        assert "146" in heads[0], f"Expected head to contain '146', got: {heads[0]!r}"

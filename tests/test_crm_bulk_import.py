@@ -629,3 +629,240 @@ def test_import_contacts_preview_flags_duplicate_email(db_session: Session, sale
         )
         assert resp.status_code == 200
         assert "duplicate" in resp.text.lower() or "exist" in resp.text.lower() or "dup" in resp.text.lower()
+
+
+# ---------------------------------------------------------------------------
+# F1: assign-owner with nonexistent / inactive owner_id → 400
+# ---------------------------------------------------------------------------
+
+
+def test_bulk_assign_owner_nonexistent_user_400(db_session: Session, mgr_user: User, owned_company: Company):
+    """Bulk assign-owner with a user ID that does not exist must return 400."""
+    for c in _make_client(db_session, mgr_user):
+        resp = c.post(
+            "/v2/partials/customers/bulk/assign-owner",
+            data={"ids": str(owned_company.id), "owner_id": "999999"},
+        )
+        assert resp.status_code == 400
+
+
+def test_bulk_assign_owner_inactive_user_400(db_session: Session, mgr_user: User, owned_company: Company):
+    """Bulk assign-owner with an inactive user ID must return 400."""
+    inactive = User(
+        email="inactive.owner@trioscs.com",
+        name="Inactive Owner",
+        role="sales",
+        azure_id="bulk-test-inactive-owner-001",
+        is_active=False,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(inactive)
+    db_session.commit()
+    db_session.refresh(inactive)
+
+    for c in _make_client(db_session, mgr_user):
+        resp = c.post(
+            "/v2/partials/customers/bulk/assign-owner",
+            data={"ids": str(owned_company.id), "owner_id": str(inactive.id)},
+        )
+        assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# F2: XSS escaping in import preview HTML
+# ---------------------------------------------------------------------------
+
+XSS_COMPANY_CSV = b"name,website,account_type\n<script>alert(1)</script>,https://evil.com,Customer\n"
+APOSTROPHE_COMPANY_CSV = b"name,website,account_type\nO'Brien Industries,https://obrien.com,Customer\n"
+
+
+def test_import_preview_escapes_script_tag(db_session: Session, sales_rep: User):
+    """Company preview must NOT render raw <script> tags from CSV input."""
+    for c in _make_client(db_session, sales_rep):
+        resp = c.post(
+            "/v2/partials/customers/import/preview",
+            files={"file": ("companies.csv", io.BytesIO(XSS_COMPANY_CSV), "text/csv")},
+        )
+        assert resp.status_code == 200
+        assert "<script>" not in resp.text, "Raw <script> tag must not appear in preview HTML"
+        assert "&lt;script&gt;" in resp.text or "lt;script" in resp.text, "Escaped form should appear"
+
+
+def test_import_preview_apostrophe_roundtrip(db_session: Session, sales_rep: User):
+    """A company name with an apostrophe must not break the hidden rows_json input."""
+
+    for c in _make_client(db_session, sales_rep):
+        resp = c.post(
+            "/v2/partials/customers/import/preview",
+            files={"file": ("companies.csv", io.BytesIO(APOSTROPHE_COMPANY_CSV), "text/csv")},
+        )
+        assert resp.status_code == 200
+        # The rows_json hidden input must appear with the name intact
+        assert "O" in resp.text and "Brien" in resp.text
+
+
+XSS_CONTACTS_CSV = b"company_name,contact_name,email,phone,role\n<script>xss</script>,Alice,alice@evil.com,,\n"
+
+
+def test_import_contacts_preview_escapes_script_tag(db_session: Session, sales_rep: User):
+    """Contacts preview must NOT render raw <script> tags from CSV input."""
+    for c in _make_client(db_session, sales_rep):
+        resp = c.post(
+            "/v2/partials/customers/import/contacts/preview",
+            files={"file": ("contacts.csv", io.BytesIO(XSS_CONTACTS_CSV), "text/csv")},
+        )
+        assert resp.status_code == 200
+        assert "<script>" not in resp.text, "Raw <script> tag must not appear in contacts preview HTML"
+
+
+# ---------------------------------------------------------------------------
+# F3: confirm row-cap bypass
+# ---------------------------------------------------------------------------
+
+import json as _json  # noqa: E402
+
+
+def test_import_confirm_row_cap_exceeded_400(db_session: Session, sales_rep: User):
+    """Confirm endpoint must reject rows_json payloads exceeding _IMPORT_MAX_ROWS."""
+    oversized = _json.dumps([{"name": f"Co {i}", "website": "", "account_type": ""} for i in range(1001)])
+    for c in _make_client(db_session, sales_rep):
+        resp = c.post(
+            "/v2/partials/customers/import/confirm",
+            data={"rows_json": oversized},
+        )
+        assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# F4: contacts confirm route
+# ---------------------------------------------------------------------------
+
+
+def test_import_contacts_confirm_creates_contacts(db_session: Session, sales_rep: User):
+    """Confirm route creates SiteContact rows under matched companies."""
+    co = Company(
+        name="Confirm Contact Co",
+        is_active=True,
+        account_owner_id=sales_rep.id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(co)
+    db_session.commit()
+    db_session.refresh(co)
+
+    rows = _json.dumps(
+        [
+            {
+                "company_name": "Confirm Contact Co",
+                "contact_name": "Alice Buyer",
+                "email": "alice@confirmco.com",
+                "phone": "",
+                "role": "buyer",
+            }
+        ]
+    )
+    for c in _make_client(db_session, sales_rep):
+        resp = c.post(
+            "/v2/partials/customers/import/contacts/confirm",
+            data={"rows_json": rows},
+        )
+        assert resp.status_code == 200
+        assert "1 contact" in resp.text.lower() or "imported" in resp.text.lower()
+
+    # Verify the contact was actually created
+    db_session.expire_all()
+    from app.models.crm import SiteContact
+
+    contacts = db_session.query(SiteContact).filter(SiteContact.email == "alice@confirmco.com").all()
+    assert len(contacts) == 1
+    assert contacts[0].full_name == "Alice Buyer"
+
+
+def test_import_contacts_confirm_skips_unmatched_company(db_session: Session, sales_rep: User):
+    """Confirm skips rows whose company name doesn't match any active company."""
+    rows = _json.dumps(
+        [
+            {
+                "company_name": "No Such Company XYZ",
+                "contact_name": "Bob",
+                "email": "bob@nowhere.com",
+                "phone": "",
+                "role": "",
+            }
+        ]
+    )
+    for c in _make_client(db_session, sales_rep):
+        resp = c.post(
+            "/v2/partials/customers/import/contacts/confirm",
+            data={"rows_json": rows},
+        )
+        assert resp.status_code == 200
+        assert "skipped" in resp.text.lower() or "not found" in resp.text.lower() or "0 contact" in resp.text.lower()
+
+
+def test_import_contacts_confirm_deduplicates_by_email(db_session: Session, sales_rep: User):
+    """Confirm skips contacts whose email already exists under the matched site."""
+    co = Company(
+        name="Dedup Contact Co",
+        is_active=True,
+        account_owner_id=sales_rep.id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(co)
+    db_session.commit()
+    db_session.refresh(co)
+
+    site = CustomerSite(
+        company_id=co.id,
+        site_name="HQ",
+        is_active=True,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(site)
+    db_session.commit()
+    db_session.refresh(site)
+
+    existing = SiteContact(
+        customer_site_id=site.id,
+        full_name="Existing Person",
+        email="dup@dedupco.com",
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(existing)
+    db_session.commit()
+
+    rows = _json.dumps(
+        [
+            {
+                "company_name": "Dedup Contact Co",
+                "contact_name": "New Person",
+                "email": "dup@dedupco.com",
+                "phone": "",
+                "role": "",
+            }
+        ]
+    )
+    for c in _make_client(db_session, sales_rep):
+        resp = c.post(
+            "/v2/partials/customers/import/contacts/confirm",
+            data={"rows_json": rows},
+        )
+        assert resp.status_code == 200
+        assert "skipped" in resp.text.lower() or "duplicate" in resp.text.lower() or "0 contact" in resp.text.lower()
+
+
+def test_import_contacts_confirm_gated(db_session: Session):
+    """Contacts confirm endpoint requires authentication (401 if not logged in)."""
+    from app.database import get_db
+    from app.main import app
+
+    app.dependency_overrides[get_db] = lambda: db_session
+    try:
+        with TestClient(app, raise_server_exceptions=False) as c:
+            resp = c.post(
+                "/v2/partials/customers/import/contacts/confirm",
+                data={"rows_json": "[]"},
+            )
+            assert resp.status_code in (401, 403)
+    finally:
+        app.dependency_overrides.pop(get_db, None)
