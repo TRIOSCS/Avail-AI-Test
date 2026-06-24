@@ -24,6 +24,18 @@
 
 <div class='space-y-4'>
 
+  {# ── Add note button ──────────────────────────────────────────── #}
+  <div class='flex justify-end'>
+    <button type='button'
+            hx-get='/v2/partials/customers/{{ company.id }}/activity/add-note-form'
+            hx-target='#add-note-slot-{{ company.id }}'
+            hx-swap='innerHTML'
+            class='px-3 py-1.5 text-xs font-medium text-brand-600 border border-brand-200 rounded hover:bg-brand-50 focus:outline-none focus:ring-2 focus:ring-brand-500'>
+      + Add note
+    </button>
+  </div>
+  <div id='add-note-slot-{{ company.id }}'></div>
+
   {# ── AI Digest (lazy) ─────────────────────────────────────────── #}
   <div hx-get='/v2/partials/customers/{{ company.id }}/activity-digest'
        hx-trigger='load' hx-target='this' hx-swap='innerHTML'>

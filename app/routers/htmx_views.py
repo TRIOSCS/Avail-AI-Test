@@ -14496,6 +14496,200 @@ async def complete_task_endpoint(
     return HTMLResponse("")
 
 
+@router.delete("/v2/partials/tasks/{task_id}", response_class=HTMLResponse)
+async def delete_task_endpoint(
+    request: Request,
+    task_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Delete a CRM task. Same authz gate as complete_task_endpoint.
+
+    Returns the refreshed parent task list (account or contact).
+    """
+    from app.services.task_service import (
+        delete_task,
+        get_open_tasks_for_company,
+        get_open_tasks_for_contact,
+    )
+
+    task = db.get(RequisitionTask, task_id)
+    if not task:
+        raise HTTPException(404, "Task not found")
+    from app.services.task_service import _is_crm_task_authorized
+
+    if not _is_crm_task_authorized(db, task, user.id, is_admin=(user.role == UserRole.ADMIN)):
+        raise HTTPException(403, "You are not allowed to delete this task")
+    # Capture parent refs before deletion
+    company_id = task.company_id
+    site_contact_id = task.site_contact_id
+    delete_task(db, task_id)
+    logger.info("Task {} deleted by user {}", task_id, user.id)
+    if company_id:
+        tasks = get_open_tasks_for_company(db, company_id)
+        ctx = _base_ctx(request, user, "customers")
+        ctx["company_id"] = company_id
+        ctx["company_tasks"] = tasks
+        return template_response("htmx/partials/customers/_account_tasks.html", ctx)
+    if site_contact_id:
+        contact = db.get(SiteContact, site_contact_id)
+        tasks = get_open_tasks_for_contact(db, site_contact_id)
+        ctx = _base_ctx(request, user, "customers")
+        ctx["contact"] = contact
+        ctx["contact_tasks"] = tasks
+        ctx["company_id"] = contact.customer_site.company_id if contact and contact.customer_site else 0
+        ctx["site_id"] = site_contact_id
+        return template_response("htmx/partials/customers/_contact_tasks.html", ctx)
+    return HTMLResponse("")
+
+
+@router.get("/v2/partials/tasks/{task_id}/edit-form", response_class=HTMLResponse)
+async def task_edit_form(
+    request: Request,
+    task_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the inline edit form for an existing CRM task (prefilled)."""
+    task = db.get(RequisitionTask, task_id)
+    if not task:
+        raise HTTPException(404, "Task not found")
+    from app.services.task_service import _is_crm_task_authorized
+
+    if not _is_crm_task_authorized(db, task, user.id, is_admin=(user.role == UserRole.ADMIN)):
+        raise HTTPException(403, "You are not allowed to edit this task")
+    ctx = _base_ctx(request, user, "customers")
+    ctx["task"] = task
+    ctx["company_id"] = task.company_id or 0
+    return template_response("htmx/partials/customers/_task_edit_form.html", ctx)
+
+
+@router.post("/v2/partials/tasks/{task_id}/edit", response_class=HTMLResponse)
+async def edit_task_endpoint(
+    request: Request,
+    task_id: int,
+    title: str = Form(""),
+    due_at: str = Form(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Update title and/or due_at on a CRM task; return refreshed parent list.
+
+    Authz: same gate as complete/delete — assignee, creator, account owner, or admin.
+    """
+    from datetime import date
+    from datetime import timezone as _tz
+
+    from app.services.task_service import (
+        _is_crm_task_authorized,
+        get_open_tasks_for_company,
+        get_open_tasks_for_contact,
+        update_task,
+    )
+
+    task = db.get(RequisitionTask, task_id)
+    if not task:
+        raise HTTPException(404, "Task not found")
+    if not _is_crm_task_authorized(db, task, user.id, is_admin=(user.role == UserRole.ADMIN)):
+        raise HTTPException(403, "You are not allowed to edit this task")
+    if not title.strip():
+        return HTMLResponse('<p class="text-xs text-rose-600">Title is required.</p>')
+    due_dt = None
+    if due_at.strip():
+        try:
+            d = date.fromisoformat(due_at.strip())
+            due_dt = datetime.combine(d, datetime.min.time()).replace(tzinfo=_tz.utc)
+        except ValueError:
+            return HTMLResponse('<p class="text-xs text-rose-600">Invalid date format.</p>')
+    update_task(db, task_id, title=title.strip(), due_at=due_dt)
+    logger.info("Task {} edited by user {}", task_id, user.id)
+    # Re-render the parent container
+    task = db.get(RequisitionTask, task_id)
+    company_id = task.company_id if task else None
+    site_contact_id = task.site_contact_id if task else None
+    if company_id:
+        tasks = get_open_tasks_for_company(db, company_id)
+        ctx = _base_ctx(request, user, "customers")
+        ctx["company_id"] = company_id
+        ctx["company_tasks"] = tasks
+        return template_response("htmx/partials/customers/_account_tasks.html", ctx)
+    if site_contact_id:
+        contact = db.get(SiteContact, site_contact_id)
+        tasks = get_open_tasks_for_contact(db, site_contact_id)
+        ctx = _base_ctx(request, user, "customers")
+        ctx["contact"] = contact
+        ctx["contact_tasks"] = tasks
+        ctx["company_id"] = contact.customer_site.company_id if contact and contact.customer_site else 0
+        ctx["site_id"] = site_contact_id
+        return template_response("htmx/partials/customers/_contact_tasks.html", ctx)
+    return HTMLResponse("")
+
+
+@router.get(
+    "/v2/partials/customers/{company_id}/activity/add-note-form",
+    response_class=HTMLResponse,
+)
+async def activity_add_note_form(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render the inline add-note form for the account Activity tab."""
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "You are not allowed to add notes for this account")
+    ctx = _base_ctx(request, user, "customers")
+    ctx["company_id"] = company_id
+    return template_response("htmx/partials/customers/_add_note_form.html", ctx)
+
+
+@router.post(
+    "/v2/partials/customers/{company_id}/activity/add-note",
+    response_class=HTMLResponse,
+)
+async def activity_add_note(
+    request: Request,
+    company_id: int,
+    notes: str = Form(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Log a manual note against a company and return the refreshed Activity tab.
+
+    A note does NOT advance the outbound cadence clock (cadence-neutral: direction=None
+    → bump_clocks_from_activity early-returns without touching last_outbound_at).
+    """
+    from app.services.activity_service import log_company_note
+
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "You are not allowed to add notes for this account")
+    if not notes.strip():
+        return HTMLResponse('<p class="text-xs text-rose-600">Note text is required.</p>')
+    log_company_note(
+        user_id=user.id,
+        company_id=company_id,
+        contact_name=None,
+        notes=notes.strip(),
+        db=db,
+    )
+    db.commit()
+    # Re-render the full activity tab by delegating to the existing tab handler
+    return await company_tab(
+        request=request,
+        company_id=company_id,
+        tab="activity",
+        site_id=None,
+        user=user,
+        db=db,
+    )
+
+
 # ── My Day ──────────────────────────────────────────────────────────────
 
 
