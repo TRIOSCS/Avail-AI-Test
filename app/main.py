@@ -283,9 +283,86 @@ class AuditUserMiddleware:
             await self._app(scope, receive, send)
 
 
-# Register AuditUserMiddleware BEFORE SessionMiddleware so that after LIFO ordering
-# and reversal, Session is outermost and Audit is innermost — Session populates
-# scope["session"] first, then Audit reads it.
+class ModuleAccessMiddleware:
+    """ASGI chokepoint enforcing per-user MODULE access on module-exclusive HTMX sub-
+    partials.
+
+    Each module's *entry* partial is already gated by ``require_access(<key>)``; this
+    closes the remaining gap where a user with a module revoked could still READ that
+    module's *sub*-partials by direct URL (those sub-partials carry only
+    ``require_user``). One chokepoint beats per-sub-partial gates.
+
+    Registration mirrors AuditUserMiddleware: it must be added via add_middleware
+    BEFORE SessionMiddleware so that after LIFO ordering Session is outer and this is
+    inner — Session decodes the cookie into scope["session"] first, then this reads it.
+
+    Inbound order: ... → Session (decodes cookie) → ModuleAccess (reads session) → router
+
+    Safety: only the EMPIRICALLY module-exclusive prefixes are guarded
+    (app.access_paths.module_key_for_path). SHARED partials — CRM data
+    (customers/contacts/vendors), the shared module entry-partials
+    (parts/sightings/materials/search/buy-plans), capability/global partials, and
+    global search — resolve to None and pass through untouched. The decision is
+    computed FIRST and a DB session is opened ONLY when a guarded prefix matches, so
+    the overwhelming majority of requests pay nothing. Logged-out requests (no
+    session user_id — covers x-agent-key auth and test DI overrides too) pass through;
+    the route's own deps still enforce auth. Admins are never blocked (user_has_access
+    returns True for admin).
+    """
+
+    # Methods that can render/mutate a fragment. HEAD/OPTIONS are harmless and skipped
+    # so preflight/probe traffic never opens a DB session.
+    _GUARDED_METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE"})
+
+    def __init__(self, app_inner):  # noqa: ANN001
+        self._app = app_inner
+
+    async def __call__(self, scope, receive, send):  # noqa: ANN001
+        if scope["type"] != "http" or scope.get("method") not in self._GUARDED_METHODS:
+            await self._app(scope, receive, send)
+            return
+
+        # Cheap path decision FIRST — no DB unless a guarded prefix matches.
+        from .access_paths import module_key_for_path
+
+        key = module_key_for_path(scope.get("path", ""))
+        if key is None:
+            await self._app(scope, receive, send)
+            return
+
+        user_id = (scope.get("session") or {}).get("user_id")
+        if not user_id:
+            # Logged out / agent key / test override — let the route's deps decide.
+            await self._app(scope, receive, send)
+            return
+
+        from .database import SessionLocal
+        from .dependencies import user_has_access
+        from .models import User
+
+        db = SessionLocal()
+        try:
+            user = db.get(User, user_id)
+            allowed = user is not None and user_has_access(user, key, db)
+        finally:
+            db.close()
+
+        if allowed:
+            await self._app(scope, receive, send)
+            return
+
+        # HTMX fragment request — a plain 403 body is all the client shows.
+        from starlette.responses import PlainTextResponse
+
+        await PlainTextResponse("Module access denied", status_code=403)(scope, receive, send)
+
+
+# Register AuditUserMiddleware and ModuleAccessMiddleware BEFORE SessionMiddleware so
+# that after LIFO ordering and reversal, Session is outermost — it populates
+# scope["session"] first, then both inner middlewares read it. ModuleAccess is added
+# after Audit (so it wraps inside Audit), which is irrelevant to correctness: both
+# only read the session Session already decoded.
+app.add_middleware(ModuleAccessMiddleware)
 app.add_middleware(AuditUserMiddleware)
 app.add_middleware(
     SessionMiddleware,

@@ -264,10 +264,15 @@ def test_put_rejects_offvocab_category_422(client, db_session: Session):
     assert card.category == "dram"
 
 
-def test_workspace_hides_add_part_for_non_buyer(db_session: Session):
-    """POST /api/materials/add is require_buyer; the workspace (require_user) must not
-    show the Add-part button to roles whose submit would 403 (agent is the only
-    require_user role outside require_buyer's allowed set)."""
+def test_workspace_blocks_non_interactive_agent(db_session: Session):
+    """The materials workspace is module-gated via require_access(MATERIALS).
+
+    The
+    non-interactive agent service account has no module access by design
+    (ROLE_ACCESS_DEFAULTS[AGENT] is empty — least privilege), so it is blocked (403)
+    before it can ever reach the buyer-gated Add-part action. This is a strictly
+    stronger guarantee than hiding the button: the agent never renders the page.
+    """
     from fastapi.testclient import TestClient
 
     from app.database import get_db
@@ -290,8 +295,7 @@ def test_workspace_hides_add_part_for_non_buyer(db_session: Session):
     try:
         with TestClient(app) as c:
             resp = c.get("/v2/partials/materials/workspace")
-            assert resp.status_code == 200
-            assert "Add part" not in resp.text
+            assert resp.status_code == 403
     finally:
         app.dependency_overrides.pop(get_db, None)
         app.dependency_overrides.pop(require_user, None)

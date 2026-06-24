@@ -26,6 +26,7 @@ from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from ..constants import (
+    AccessKey,
     ActivityType,
     AttributionStatus,
     BuyPlanStatus,
@@ -50,10 +51,12 @@ from ..dependencies import (
     get_user,
     has_buyer_role,
     is_manager_or_admin,
+    require_access,
     require_admin,
     require_buyer,
     require_requisition_access,
     require_user,
+    user_has_access,
 )
 from ..models import (
     AccountCollaborator,
@@ -262,12 +265,17 @@ def _parse_card_filter_params(
 
 def _base_ctx(request: Request, user: User, current_view: str = "") -> dict:
     """Shared template context for all views."""
+    from .admin.users import module_access_map
+
     assets = _vite_assets()
     return {
         "request": request,
         "user_name": user.name if user else "",
         "user_email": user.email if user else "",
         "is_admin": user.role == UserRole.ADMIN if user else False,
+        # Bottom-nav gate: {hyphenated-nav-id: bool}. None user → all True (shell never
+        # blanked). Module keys don't need db (user_has_access handles admin/role-default).
+        "access": module_access_map(user),
         "current_view": current_view,
         "vite_js": assets["js_file"],
         "vite_css": assets["css_files"],
@@ -290,6 +298,43 @@ async def quotes_list_redirect():
     from fastapi.responses import RedirectResponse
 
     return RedirectResponse(url="/v2/requisitions", status_code=307)
+
+
+# Full-page module access gate (Phase 4b). Maps a resolved current_view to the AccessKey
+# that gates it. Views NOT present here (settings, quotes, follow-ups, trouble-tickets)
+# are never gated. CRM sub-views (customers/contacts/vendors/...) all gate on CRM.
+_VIEW_ACCESS: dict[str, AccessKey] = {
+    "requisitions": AccessKey.REQUISITIONS,
+    "sightings": AccessKey.SIGHTINGS,
+    "materials": AccessKey.MATERIALS,
+    "search": AccessKey.SEARCH,
+    "buy-plans": AccessKey.BUY_PLANS,
+    "resell": AccessKey.RESELL,
+    "crm": AccessKey.CRM,
+    "customers": AccessKey.CRM,
+    "contacts": AccessKey.CRM,
+    "vendors": AccessKey.CRM,
+    "vendor-contacts": AccessKey.CRM,
+    "proactive": AccessKey.PROACTIVE,
+    "prospecting": AccessKey.PROSPECTING,
+    "my-day": AccessKey.MY_DAY,
+}
+
+# Ordered (AccessKey, full-page url) list in MODULE order. When a user is denied the view
+# they requested, v2_page redirects to the FIRST module in this list they are allowed —
+# the target is always an allowed view, so no redirect loop is possible.
+_MODULE_ENTRY_URLS: tuple[tuple[AccessKey, str], ...] = (
+    (AccessKey.REQUISITIONS, "/v2/requisitions"),
+    (AccessKey.SIGHTINGS, "/v2/sightings"),
+    (AccessKey.MATERIALS, "/v2/materials"),
+    (AccessKey.SEARCH, "/v2/search"),
+    (AccessKey.BUY_PLANS, "/v2/buy-plans"),
+    (AccessKey.RESELL, "/v2/resell"),
+    (AccessKey.CRM, "/v2/crm"),
+    (AccessKey.PROACTIVE, "/v2/proactive"),
+    (AccessKey.PROSPECTING, "/v2/prospecting"),
+    (AccessKey.MY_DAY, "/v2/my-day"),
+)
 
 
 @router.get("/v2", response_class=HTMLResponse)
@@ -353,6 +398,24 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         "requisitions",
     )
     current_view = next((seg for seg in _VIEW_SEGMENTS if f"/{seg}" in path), "requisitions")
+
+    # Module access gate (Phase 4b). If the requested view maps to a module the user may
+    # not see, redirect to their first allowed module (admins always pass user_has_access
+    # so they never redirect). Only the REQUESTED view is checked — the redirect target is
+    # always an allowed view, so no loop is possible. Views absent from _VIEW_ACCESS
+    # (settings, quotes, follow-ups, trouble-tickets) are never gated.
+    gate_key = _VIEW_ACCESS.get(current_view)
+    if gate_key is not None and not user_has_access(user, gate_key, db):
+        from fastapi.responses import RedirectResponse
+
+        target = next((url for key, url in _MODULE_ENTRY_URLS if user_has_access(user, key, db)), None)
+        if target is not None:
+            return RedirectResponse(target, status_code=302)
+        return HTMLResponse(
+            "<p>You don't have access to any sections. Contact an administrator.</p>"
+            '<p><a href="/auth/logout">Log out</a></p>',
+            status_code=403,
+        )
 
     # Determine the correct partial URL for initial content load
     if current_view == "requisitions":
@@ -464,7 +527,7 @@ async def search_results_page(
 @router.get("/v2/partials/parts/workspace", response_class=HTMLResponse)
 async def parts_workspace_partial(
     request: Request,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.REQUISITIONS)),
     db: Session = Depends(get_db),
 ):
     """Return the split-panel parts workspace shell."""
@@ -2563,7 +2626,7 @@ async def offer_review_queue(
 async def promote_offer_htmx(
     request: Request,
     offer_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.APPROVE_OFFERS)),
     db: Session = Depends(get_db),
 ):
     """Promote a pending_review offer to active and return refreshed queue."""
@@ -2610,7 +2673,7 @@ async def promote_offer_htmx(
 async def reject_offer_htmx(
     request: Request,
     offer_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.APPROVE_OFFERS)),
     db: Session = Depends(get_db),
 ):
     """Reject a pending_review offer and return refreshed queue."""
@@ -2855,7 +2918,7 @@ async def ai_rephrase_email(
 async def rfq_send(
     request: Request,
     req_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.SEND_RFQ)),
     db: Session = Depends(get_db),
 ):
     """Send RFQs via Graph API, falling back to DB-only in test mode."""
@@ -3480,7 +3543,7 @@ async def update_requirement(
 async def search_form_partial(
     request: Request,
     mpn: str = "",
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.SEARCH)),
     db: Session = Depends(get_db),
 ):
     """Search surface entry point.
@@ -10814,7 +10877,7 @@ def _default_lens(user: User, db: Session) -> str:
 async def buy_plans_list_partial(
     request: Request,
     lens: str = "",
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.BUY_PLANS)),
     db: Session = Depends(get_db),
 ):
     """Return the Buy Plan Deal Hub shell.
@@ -11233,6 +11296,22 @@ async def settings_ops_group_tab(
     ctx = _base_ctx(request, user, "settings")
     ctx.update(ops_group_context(db))
     return template_response("htmx/partials/settings/ops_group.html", ctx)
+
+
+@router.get("/v2/partials/settings/users", response_class=HTMLResponse)
+async def settings_users_tab(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Users management tab (invite / role / activate) — admin only."""
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(403, "Admin only")
+    from .admin.users import users_context
+
+    ctx = _base_ctx(request, user, "settings")
+    ctx.update(users_context(db))
+    return template_response("htmx/partials/settings/users.html", ctx)
 
 
 @router.post("/v2/partials/buy-plans/{plan_id}/reset", response_class=HTMLResponse)
@@ -12032,7 +12111,7 @@ async def materials_list_partial(
 @router.get("/v2/partials/materials/workspace", response_class=HTMLResponse)
 async def materials_workspace_partial(
     request: Request,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.MATERIALS)),
     db: Session = Depends(get_db),
 ):
     """Render the faceted search workspace layout."""
@@ -13384,7 +13463,7 @@ async def prospecting_list_partial(
     sort: str = "ai_match_desc",
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.PROSPECTING)),
     db: Session = Depends(get_db),
 ):
     """Return the prospecting card grid as an HTML partial.
@@ -14272,7 +14351,7 @@ async def admin_company_merge(
 async def proactive_list_partial(
     request: Request,
     tab: str = "matches",
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.PROACTIVE)),
     db: Session = Depends(get_db),
 ):
     """Proactive matches list partial — shows matches and sent offers."""
@@ -17123,7 +17202,7 @@ async def vendor_activity_add_note(
 @router.get("/v2/partials/my-day", response_class=HTMLResponse)
 async def my_day_partial(
     request: Request,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.MY_DAY)),
     db: Session = Depends(get_db),
 ):
     """My Day worklist — overdue/due accounts I own + my open tasks.
