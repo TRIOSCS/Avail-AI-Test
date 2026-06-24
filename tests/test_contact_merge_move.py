@@ -342,3 +342,148 @@ class TestMergeRoutes:
             data={"remove_id": str(loser.id), "confirmed": "true"},
         )
         assert resp.status_code == 403
+
+
+# ── Move route HTTP tests ────────────────────────────────────────────────────
+
+
+@pytest.fixture()
+def owner_client_b(db_session: Session, company_b: Company, test_user: User) -> TestClient:
+    """TestClient where test_user owns company_b (target for move)."""
+    company_b.account_owner_id = test_user.id
+    db_session.commit()
+
+    from app.database import get_db
+    from app.dependencies import require_admin, require_buyer, require_fresh_token, require_user
+    from app.main import app
+
+    app.dependency_overrides[get_db] = lambda: db_session
+    app.dependency_overrides[require_user] = lambda: test_user
+    app.dependency_overrides[require_admin] = lambda: test_user
+    app.dependency_overrides[require_buyer] = lambda: test_user
+    app.dependency_overrides[require_fresh_token] = lambda: "mock-token"
+
+    with TestClient(app) as c:
+        yield c
+
+    for dep in [get_db, require_user, require_admin, require_buyer, require_fresh_token]:
+        app.dependency_overrides.pop(dep, None)
+
+
+@pytest.fixture()
+def owner_both_client(db_session: Session, company_a: Company, company_b: Company, test_user: User) -> TestClient:
+    """TestClient where test_user owns both company_a and company_b."""
+    company_a.account_owner_id = test_user.id
+    company_b.account_owner_id = test_user.id
+    db_session.commit()
+
+    from app.database import get_db
+    from app.dependencies import require_admin, require_buyer, require_fresh_token, require_user
+    from app.main import app
+
+    app.dependency_overrides[get_db] = lambda: db_session
+    app.dependency_overrides[require_user] = lambda: test_user
+    app.dependency_overrides[require_admin] = lambda: test_user
+    app.dependency_overrides[require_buyer] = lambda: test_user
+    app.dependency_overrides[require_fresh_token] = lambda: "mock-token"
+
+    with TestClient(app) as c:
+        yield c
+
+    for dep in [get_db, require_user, require_admin, require_buyer, require_fresh_token]:
+        app.dependency_overrides.pop(dep, None)
+
+
+class TestMoveRoute:
+    def test_move_form_returns_200(
+        self,
+        owner_client_a: TestClient,
+        company_a: Company,
+        keeper: SiteContact,
+    ):
+        resp = owner_client_a.get(f"/v2/partials/customers/{company_a.id}/contacts/{keeper.id}/move-form")
+        assert resp.status_code == 200
+        assert "move" in resp.text.lower()
+
+    def test_move_updates_site(
+        self,
+        owner_both_client: TestClient,
+        db_session: Session,
+        company_a: Company,
+        site_b: CustomerSite,
+        keeper: SiteContact,
+    ):
+        """Contact is moved to a site under another company the user can manage."""
+        resp = owner_both_client.post(
+            f"/v2/partials/customers/{company_a.id}/contacts/{keeper.id}/move",
+            data={"target_site_id": str(site_b.id)},
+        )
+        assert resp.status_code == 200
+        db_session.expire(keeper)
+        db_session.refresh(keeper)
+        assert keeper.customer_site_id == site_b.id
+
+    def test_move_inactive_target_returns_400(
+        self,
+        owner_both_client: TestClient,
+        db_session: Session,
+        company_a: Company,
+        company_b: Company,
+        keeper: SiteContact,
+    ):
+        """Moving to an inactive site → 400."""
+        inactive_site = CustomerSite(company_id=company_b.id, site_name="Closed", is_active=False)
+        db_session.add(inactive_site)
+        db_session.commit()
+
+        resp = owner_both_client.post(
+            f"/v2/partials/customers/{company_a.id}/contacts/{keeper.id}/move",
+            data={"target_site_id": str(inactive_site.id)},
+        )
+        assert resp.status_code == 400
+
+    def test_move_nonexistent_target_returns_400(
+        self,
+        owner_client_a: TestClient,
+        company_a: Company,
+        keeper: SiteContact,
+    ):
+        resp = owner_client_a.post(
+            f"/v2/partials/customers/{company_a.id}/contacts/{keeper.id}/move",
+            data={"target_site_id": "99999999"},
+        )
+        assert resp.status_code == 400
+
+    def test_move_unrelated_rep_gets_403(
+        self,
+        unrelated_client: TestClient,
+        company_a: Company,
+        site_b: CustomerSite,
+        keeper: SiteContact,
+    ):
+        """Rep not managing source company → 403."""
+        resp = unrelated_client.post(
+            f"/v2/partials/customers/{company_a.id}/contacts/{keeper.id}/move",
+            data={"target_site_id": str(site_b.id)},
+        )
+        assert resp.status_code == 403
+
+    def test_move_target_not_managed_gets_403(
+        self,
+        owner_client_a: TestClient,
+        db_session: Session,
+        company_a: Company,
+        company_b: Company,
+        site_b: CustomerSite,
+        keeper: SiteContact,
+    ):
+        """Rep manages source but NOT target company → 403."""
+        # company_b has no owner → owner_client_a user can't manage it
+        company_b.account_owner_id = None
+        db_session.commit()
+
+        resp = owner_client_a.post(
+            f"/v2/partials/customers/{company_a.id}/contacts/{keeper.id}/move",
+            data={"target_site_id": str(site_b.id)},
+        )
+        assert resp.status_code == 403

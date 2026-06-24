@@ -8149,6 +8149,167 @@ async def contact_merge(
     return response
 
 
+# ── Contact Move ─────────────────────────────────────────────────────────────
+
+
+@router.get("/v2/partials/customers/{company_id}/sites-options")
+async def company_sites_options(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return JSON list of active sites for a company for the move-contact site picker.
+
+    Used by Alpine.js in _contact_move_form.html to populate the site select on
+    company change. Returns [{"id": N, "name": "..."}].
+    """
+    from fastapi.responses import JSONResponse
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        return JSONResponse([])
+
+    if not can_manage_account(user, company, db):
+        return JSONResponse([])
+
+    sites = (
+        db.query(CustomerSite)
+        .filter(CustomerSite.company_id == company_id, CustomerSite.is_active.is_(True))
+        .order_by(CustomerSite.site_name)
+        .all()
+    )
+    return JSONResponse([{"id": s.id, "name": s.site_name or f"Site {s.id}"} for s in sites])
+
+
+@router.get("/v2/partials/customers/{company_id}/contacts/{contact_id}/move-form", response_class=HTMLResponse)
+async def contact_move_form(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the move-contact modal form.
+
+    Lists all companies the user can manage so they can pick a target.
+    """
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    contact = (
+        db.query(SiteContact)
+        .join(CustomerSite)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Only the owner or an admin can move this contact")
+
+    # Build list of companies the user can manage (for the target picker)
+    if is_manager_or_admin(user):
+        manageable = db.query(Company).filter(Company.is_active.is_(True)).order_by(Company.name).all()
+    else:
+        # owned companies + collaborator companies
+        owned = db.query(Company).filter(Company.is_active.is_(True), Company.account_owner_id == user.id).all()
+        collab_ids = [
+            row[0]
+            for row in db.query(AccountCollaborator.company_id).filter(AccountCollaborator.user_id == user.id).all()
+        ]
+        if collab_ids:
+            collab_cos = db.query(Company).filter(Company.id.in_(collab_ids)).all()
+        else:
+            collab_cos = []
+        seen = {c.id for c in owned}
+        manageable = list(owned)
+        for co in collab_cos:
+            if co.id not in seen:
+                manageable.append(co)
+                seen.add(co.id)
+        manageable.sort(key=lambda c: c.name or "")
+
+    return template_response(
+        "htmx/partials/customers/_contact_move_form.html",
+        {
+            "request": request,
+            "contact": contact,
+            "company": company,
+            "companies": manageable,
+        },
+    )
+
+
+@router.post(
+    "/v2/partials/customers/{company_id}/contacts/{contact_id}/move",
+    response_class=HTMLResponse,
+)
+async def contact_move(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    target_site_id: int = Form(...),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Move contact_id to target_site_id.
+
+    Validates: source company accessible, target site exists + is active,
+    target company accessible by the same user. Re-renders contacts-tab-list
+    for the SOURCE company (contact is gone from here now).
+    """
+    # Source authz
+    source_company = db.query(Company).filter(Company.id == company_id).first()
+    if not source_company:
+        raise HTTPException(404, "Company not found")
+
+    if not can_manage_account(user, source_company, db):
+        raise HTTPException(403, "Only the owner or an admin can move this contact")
+
+    contact = (
+        db.query(SiteContact)
+        .join(CustomerSite)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+
+    # Target site validation
+    target_site = db.query(CustomerSite).filter(CustomerSite.id == target_site_id).first()
+    if not target_site:
+        raise HTTPException(400, "Target site not found")
+    if not target_site.is_active:
+        raise HTTPException(400, "Target site is inactive")
+
+    # Target authz
+    target_company = db.query(Company).filter(Company.id == target_site.company_id).first()
+    if not target_company:
+        raise HTTPException(400, "Target company not found")
+
+    if not can_manage_account(user, target_company, db):
+        raise HTTPException(403, "You do not have access to the target company")
+
+    # Execute move
+    old_site_id = contact.customer_site_id
+    contact.customer_site_id = target_site_id
+    db.commit()
+
+    logger.info(
+        "Contact move: contact {} ({}) moved from site {} → site {} by {}",
+        contact_id,
+        contact.full_name,
+        old_site_id,
+        target_site_id,
+        user.email,
+    )
+
+    return _render_contacts_list(request, user, source_company, db)
+
+
 @router.get("/v2/partials/customers/{company_id}/sites/{site_id}/edit-form", response_class=HTMLResponse)
 async def site_edit_form(
     request: Request,
