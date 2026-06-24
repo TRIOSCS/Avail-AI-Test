@@ -11,7 +11,7 @@
        moreOpen: false,
        activeNav: '{{ current_view }}',
        urlToNav(url) {
-         const map = {'/v2/requisitions':'requisitions','/v2/sightings':'sightings','/v2/materials':'materials','/v2/search':'search','/v2/buy-plans':'buy-plans','/v2/resell':'resell','/v2/crm':'crm','/v2/customers':'crm','/v2/vendors':'crm','/v2/proactive':'proactive','/v2/prospecting':'prospecting','/v2/my-day':'my-day','/v2/settings':'settings'};
+         const map = {'/v2/requisitions':'requisitions','/v2/sightings':'sightings','/v2/materials':'materials','/v2/search':'search','/v2/buy-plans':'buy-plans','/v2/resell':'resell','/v2/crm':'crm','/v2/customers':'crm','/v2/contacts':'crm','/v2/vendor-contacts':'crm','/v2/vendors':'crm','/v2/proactive':'proactive','/v2/prospecting':'prospecting','/v2/my-day':'my-day','/v2/settings':'settings'};
          for (const [prefix, id] of Object.entries(map)) { if (url.startsWith(prefix)) return id; }
          return this.activeNav;
        }

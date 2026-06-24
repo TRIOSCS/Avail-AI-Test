@@ -1778,6 +1778,42 @@ merges different-`account_owner_id` accounts) are reused AS-IS.
   keeps the rep's typed name (the AI fix still strengthens the duplicate check), making
   naming suggest-only end-to-end.
 
+### 10a. Global contact lists + vendor CSV import UI
+
+Two cross-entity contact workspaces sit alongside the CDM account workspace, plus a
+UI for the previously-headless vendor CSV import. All three are thin routes in
+`htmx_views.py`; the scoping logic lives in `crm_service.py`.
+
+- **`GET /v2/contacts`** (`customer_contacts_partial` → `customers/contacts_list.html`)
+  — cross-company customer-contacts workspace. **Cross-tenant PII**: the role-scope is
+  the SAME predicate as the CDM `my_only` branch, factored into the shared
+  `crm_service.company_visibility_predicate(user)` (account-owner OR site-owner OR
+  named collaborator). SALES/TRADER reps see ONLY contacts in accounts they can manage;
+  MANAGER/ADMIN see all (the predicate is skipped for `is_manager_or_admin`).
+  `customer_contacts_query` joins `SiteContact → CustomerSite → Company` (all
+  `is_active`), filters search (name OR email) / company / role; `cadence_state` is a
+  DERIVED dot (not a column) so it is computed via `cadence_state_of` and filtered in
+  Python by `customer_contacts_list_ctx`. The company-filter dropdown is built from the
+  same visibility scope. `require_user`. Reached via the "All contacts" link in
+  `customers/list.html`.
+- **`GET /v2/vendor-contacts`** (`vendor_contacts_partial` → `vendors/contacts_list.html`)
+  — global vendor-contacts list, the HTML twin of `GET /api/vendor-contacts/bulk`
+  (`vendor_contacts.py`). View-open (`require_user`; vendor data is not tenant-scoped);
+  blacklisted vendors excluded, mirroring the bulk route. Search (contact name/email or
+  vendor name) + sort (name/vendor/email/relationship score) + pagination. Reached via
+  the "Contacts" link in `vendors/list.html`.
+- **Vendor CSV import UI** — `vendors/list.html` now carries an "Import Vendors" button
+  + Alpine modal that POSTs `multipart/form-data` to the existing
+  `POST /v2/partials/admin/import/vendors` (`import_vendors_csv`, `require_admin`). CSV
+  header `name,email,phone,website`; existing vendors (matched by normalized name) are
+  skipped; the result HTML swaps into `#vendor-import-result`. The button renders for
+  all users; the endpoint enforces admin.
+
+Both `/v2/contacts` and `/v2/vendor-contacts` are full-page entry points wired into
+`v2_page` (segments precede `customers`/`vendors` — `/contacts` is a substring of
+`/vendor-contacts`) and borrow the CRM nav highlight via `_NAV_ID_ALIAS` +
+`mobile_nav.html`'s `urlToNav` map.
+
 ---
 
 ## 11. Cross-App Alerts (Nav Badges + In-Tab Spotlight)

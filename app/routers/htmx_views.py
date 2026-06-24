@@ -120,7 +120,9 @@ _DASH = "\u2014"  # em-dash for template fallbacks
 # Reporting surface was retired, so no view needs to borrow another tab's highlight.
 # Quote detail (/v2/quotes/{id}) falls through to "quotes", which matches no nav item —
 # correct, since it has no parent tab to highlight.
-_NAV_ID_ALIAS: dict[str, str] = {}
+# The global contact lists live under the CRM nav item (twins of Customers/Vendors),
+# so they borrow the "crm" highlight.
+_NAV_ID_ALIAS: dict[str, str] = {"contacts": "crm", "vendor-contacts": "crm"}
 
 # Vite manifest for asset fingerprinting — read once at import time.
 _MANIFEST_PATH = Path("app/static/dist/.vite/manifest.json")
@@ -297,6 +299,8 @@ async def quotes_list_redirect():
 @router.get("/v2/vendors/{vendor_id:int}", response_class=HTMLResponse)
 @router.get("/v2/customers", response_class=HTMLResponse)
 @router.get("/v2/customers/{company_id:int}", response_class=HTMLResponse)
+@router.get("/v2/contacts", response_class=HTMLResponse)
+@router.get("/v2/vendor-contacts", response_class=HTMLResponse)
 @router.get("/v2/buy-plans", response_class=HTMLResponse)
 @router.get("/v2/buy-plans/{bp_id:int}", response_class=HTMLResponse)
 @router.get("/v2/resell", response_class=HTMLResponse)
@@ -337,7 +341,11 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         "trouble-tickets",
         "my-day",
         "crm",
+        # "vendor-contacts" / "contacts" must precede "vendors" / "customers" — the
+        # match is a substring test and "/contacts" is contained in "/vendor-contacts".
+        "vendor-contacts",
         "vendors",
+        "contacts",
         "customers",
         "search",
         "sightings",
@@ -3998,6 +4006,68 @@ async def vendors_list_partial(
     return template_response("htmx/partials/vendors/list.html", ctx)
 
 
+# ── Global vendor-contacts list ────────────────────────────────────────────
+# View-open (require_user) — vendor data is not tenant-scoped, mirroring the
+# /api/vendor-contacts/bulk endpoint this surfaces. Search/sort/paginate over all
+# structured VendorContacts (blacklisted vendors excluded, as in the bulk route).
+
+
+@router.get("/v2/partials/vendor-contacts", response_class=HTMLResponse)
+async def vendor_contacts_partial(
+    request: Request,
+    search: str = "",
+    sort: str = "name",
+    dir: str = "asc",
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the global vendor-contacts list as an HTML partial."""
+    from ..models import VendorCard
+
+    query = (
+        db.query(VendorContact)
+        .join(VendorCard, VendorContact.vendor_card_id == VendorCard.id)
+        .filter(VendorCard.is_blacklisted.is_(False))
+        .options(joinedload(VendorContact.vendor_card))
+    )
+    if search.strip():
+        sb = SearchBuilder(search.strip())
+        query = query.filter(
+            or_(
+                sb.ilike_filter(VendorContact.full_name, VendorContact.email),
+                sb.ilike_filter(VendorCard.display_name),
+            )
+        )
+
+    sort_col_map = {
+        "name": VendorContact.full_name,
+        "email": VendorContact.email,
+        "vendor": VendorCard.display_name,
+        "score": VendorContact.relationship_score,
+    }
+    sort_col = sort_col_map.get(sort, VendorContact.full_name)
+    order = sort_col.desc().nullslast() if dir == "desc" else sort_col.asc().nullslast()
+
+    total = query.count()
+    contacts = query.order_by(order, VendorContact.id).offset(offset).limit(limit).all()
+
+    ctx = _base_ctx(request, user, "crm")
+    ctx.update(
+        {
+            "contacts": contacts,
+            "search": search,
+            "sort": sort,
+            "dir": dir,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+    )
+    return template_response("htmx/partials/vendors/contacts_list.html", ctx)
+
+
 @router.get("/v2/partials/vendors/find-by-part", response_class=HTMLResponse)
 async def find_by_part_partial(
     request: Request,
@@ -4531,8 +4601,15 @@ async def edit_vendor(
     vendor = get_vendor_card_or_404(db, vendor_id)
 
     form = await request.form()
-    display_name = form.get("display_name", "").strip()
-    if display_name:
+    # VendorCard.display_name is NOT NULL. The edit form always submits it (required
+    # input), so a submitted-but-blank value means the user cleared a required field —
+    # reject it. A field that is ABSENT entirely is a partial edit (website/emails-only),
+    # which must leave the existing name untouched.
+    display_name_raw = form.get("display_name")
+    if display_name_raw is not None:
+        display_name = display_name_raw.strip()
+        if not display_name:
+            raise HTTPException(400, "Vendor name is required.")
         vendor.display_name = display_name
         from ..vendor_utils import normalize_vendor_name
 
@@ -4543,7 +4620,13 @@ async def edit_vendor(
 
     emails_raw = form.get("emails", "").strip()
     if emails_raw:
-        vendor.emails = [e.strip() for e in emails_raw.split(",") if e.strip()]
+        emails = [e.strip() for e in emails_raw.split(",") if e.strip()]
+        # Reject anything that isn't a plausible address — an entry without an
+        # '@' is a data-entry mistake, not a contactable email.
+        invalid = [e for e in emails if "@" not in e]
+        if invalid:
+            raise HTTPException(400, f"Invalid email address: {', '.join(invalid)}")
+        vendor.emails = emails
 
     phones_raw = form.get("phones", "").strip()
     if phones_raw:
@@ -5374,6 +5457,45 @@ async def companies_account_list_partial(
     return template_response("htmx/partials/customers/_account_list.html", ctx)
 
 
+# ── Global customer-contacts list (cross-company, role-scoped) ─────────────
+# /v2/contacts is cross-tenant PII: SALES/TRADER reps see ONLY contacts in
+# accounts they can manage (shared company_visibility_predicate); MANAGER/ADMIN
+# see all. Scoping lives in crm_service.customer_contacts_query — this route is
+# thin HTTP glue.
+
+
+@router.get("/v2/partials/contacts", response_class=HTMLResponse)
+async def customer_contacts_partial(
+    request: Request,
+    search: str = "",
+    company_id: int = Query(0, ge=0),
+    contact_role: str = "",
+    cadence_state: str = "",
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the cross-company customer-contacts workspace as an HTML partial."""
+    from ..services.crm_service import customer_contacts_list_ctx
+
+    ctx = _base_ctx(request, user, "crm")
+    ctx.update(
+        customer_contacts_list_ctx(
+            db,
+            user,
+            search=search,
+            company_id=company_id,
+            contact_role=contact_role,
+            cadence_state=cadence_state,
+            limit=limit,
+            offset=offset,
+        )
+    )
+    ctx["contact_roles"] = CANONICAL_ROLES
+    return template_response("htmx/partials/customers/contacts_list.html", ctx)
+
+
 # ── Sprint 4: Company CRUD (static routes — must precede {company_id}) ──
 
 
@@ -6018,7 +6140,14 @@ def apply_company_field(company: Company, field: str, value: str) -> None:
     elif field == "industry":
         company.industry = v or None
     elif field == "website":
-        company.website = v or None
+        # Reuse the Company schema's website validator so the inline-edit + edit_company
+        # paths reject bad URLs the same way the create form does.
+        from ..schemas.crm import normalize_website
+
+        try:
+            company.website = normalize_website(v)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
     else:
         setattr(company, field, v or None)
     company.updated_at = datetime.now(timezone.utc)
@@ -7123,6 +7252,13 @@ async def contacts_tab_create(
     role = _validate_role(form.get("contact_role") or "")
     is_priority = bool((form.get("is_priority") or "").strip())
 
+    # SiteContact.wechat_id is String(100); SQLite (tests) ignores VARCHAR lengths
+    # but Postgres 500s on over-length. Reject here, matching the legacy
+    # create_site_contact guard so the canonical add path is consistent.
+    wechat_id_val = (form.get("wechat_id") or "").strip()
+    if len(wechat_id_val) > 100:
+        raise HTTPException(400, "WeChat ID must be 100 characters or fewer.")
+
     # ── reports_to_id (self-FK — not in EDITABLE_CONTACT_FIELDS) ────────────
     reports_to_id_raw = (form.get("reports_to_id") or "").strip()
     reports_to_id = int(reports_to_id_raw) if reports_to_id_raw.isdigit() else None
@@ -7149,7 +7285,7 @@ async def contacts_tab_create(
         phone=(form.get("phone") or "").strip() or None,
         secondary_email=(form.get("secondary_email") or "").strip() or None,
         secondary_phone=(form.get("secondary_phone") or "").strip() or None,
-        wechat_id=(form.get("wechat_id") or "").strip() or None,
+        wechat_id=wechat_id_val or None,
         notes=(form.get("notes") or "").strip() or None,
         linkedin_url=(form.get("linkedin_url") or "").strip() or None,
         contact_role=role,

@@ -102,8 +102,10 @@
     <span class="htmx-indicator text-gray-400 text-xs">Loading...</span>
   </form>
 
-  {# Export links — placed below the filter bar, above the split workspace #}
-  <div class="flex justify-end gap-3 text-xs text-gray-500 mb-1">
+  {# Export + cross-company contacts links — below the filter bar, above the split workspace #}
+  <div class="flex justify-end gap-3 text-xs text-gray-600 mb-1">
+    <a hx-get="/v2/partials/contacts" hx-target="#main-content" hx-push-url="/v2/contacts"
+       class="hover:text-brand-600 hover:underline cursor-pointer">All contacts</a>
     <a href="/v2/customers/export.csv" class="hover:text-brand-600 hover:underline">Export CSV</a>
     <a href="/v2/customers/contacts/export.csv" class="hover:text-brand-600 hover:underline">Export contacts</a>
   </div>

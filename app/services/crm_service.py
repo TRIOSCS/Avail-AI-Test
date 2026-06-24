@@ -159,6 +159,24 @@ def _needs_call_filter(now: datetime):
     )
 
 
+def company_visibility_predicate(user: User):
+    """Predicate restricting Company rows to those *user* (a rep) can manage: account-
+    owner OR owner of at least one site OR named collaborator.
+
+    Single source of truth for rep-scoped account visibility — used by
+    cdm_company_query's my_only branch, cdm_overdue_count, and the global customer-
+    contacts list. Callers must themselves skip it for managers/admins
+    (is_manager_or_admin), who see everything.
+    """
+    site_company_ids = select(CustomerSite.company_id).where(CustomerSite.owner_id == user.id)
+    collab_company_ids = select(AccountCollaborator.company_id).where(AccountCollaborator.user_id == user.id)
+    return or_(
+        Company.account_owner_id == user.id,
+        Company.id.in_(site_company_ids),
+        Company.id.in_(collab_company_ids),
+    )
+
+
 def cdm_company_query(
     db: Session,
     user: User,
@@ -237,15 +255,7 @@ def cdm_company_query(
         # Reps see accounts they own directly, where they own at least one site,
         # OR where they are a named collaborator (Phase 3: helper role).
         # Managers/admins always see everything — my_only is ignored for them.
-        site_company_ids = select(CustomerSite.company_id).where(CustomerSite.owner_id == user.id)
-        collab_company_ids = select(AccountCollaborator.company_id).where(AccountCollaborator.user_id == user.id)
-        query = query.filter(
-            or_(
-                Company.account_owner_id == user.id,
-                Company.id.in_(site_company_ids),
-                Company.id.in_(collab_company_ids),
-            )
-        )
+        query = query.filter(company_visibility_predicate(user))
     if segment:
         query = query.filter(
             db.query(EntityTag)
@@ -293,17 +303,11 @@ def cdm_overdue_count(db: Session, user: User, now: datetime | None = None) -> i
     if user.role not in ("sales", "trader"):
         return 0
     now = now or datetime.now(timezone.utc)
-    site_company_ids = select(CustomerSite.company_id).where(CustomerSite.owner_id == user.id)
-    collab_company_ids = select(AccountCollaborator.company_id).where(AccountCollaborator.user_id == user.id)
     return (
         db.query(func.count(Company.id))
         .filter(
             Company.is_active.is_(True),
-            or_(
-                Company.account_owner_id == user.id,
-                Company.id.in_(site_company_ids),
-                Company.id.in_(collab_company_ids),
-            ),
+            company_visibility_predicate(user),
             _needs_call_filter(now),
         )
         .scalar()
@@ -384,6 +388,115 @@ def cdm_list_ctx(
         ctx["overdue_count"] = cdm_overdue_count(db, user, now=now)
         ctx["account_types"] = CDM_ACCOUNT_TYPES
     return ctx
+
+
+# Same keys as the cadence-dot map in the customers _account_list / vendor list.
+CONTACT_CADENCE_DOTS = ("new", "on_target", "due", "overdue")
+
+
+def customer_contacts_query(
+    db: Session,
+    user: User,
+    *,
+    search: str = "",
+    company_id: int = 0,
+    contact_role: str = "",
+):
+    """Cross-company customer-contacts query, role-scoped + filtered.
+
+    Joins SiteContact → CustomerSite → Company and restricts to active rows.
+    SALES/TRADER reps see ONLY contacts in companies they can manage (the shared
+    company_visibility_predicate — account-owner OR site-owner OR collaborator);
+    MANAGER/ADMIN see all. This is the cross-tenant-PII gate for /v2/contacts.
+
+    Filters: search (name OR email), company_id, contact_role. cadence_state is a
+    derived value (not a column) so it is filtered in Python by the caller, not here.
+    Ordered newest-activity-first to surface the most recently touched contacts.
+    """
+    query = (
+        db.query(SiteContact)
+        .join(CustomerSite, SiteContact.customer_site_id == CustomerSite.id)
+        .join(Company, CustomerSite.company_id == Company.id)
+        .filter(
+            SiteContact.is_active.is_(True),
+            CustomerSite.is_active.is_(True),
+            Company.is_active.is_(True),
+        )
+        .options(joinedload(SiteContact.customer_site).joinedload(CustomerSite.company))
+    )
+    if not is_manager_or_admin(user):
+        query = query.filter(company_visibility_predicate(user))
+    if search.strip():
+        sb = SearchBuilder(search.strip())
+        query = query.filter(or_(sb.ilike_filter(SiteContact.full_name), sb.ilike_filter(SiteContact.email)))
+    if company_id:
+        query = query.filter(Company.id == company_id)
+    if contact_role:
+        query = query.filter(SiteContact.contact_role == contact_role)
+    return query.order_by(SiteContact.last_activity_at.desc().nullslast(), SiteContact.id.desc())
+
+
+def customer_contacts_list_ctx(
+    db: Session,
+    user: User,
+    *,
+    search: str = "",
+    company_id: int = 0,
+    contact_role: str = "",
+    cadence_state: str = "",
+    limit: int = 50,
+    offset: int = 0,
+) -> dict:
+    """Template context for the global customer-contacts list (/v2/contacts).
+
+    Applies the role-scoped query, derives each contact's cadence_state, then
+    (optionally) filters on it in Python — cadence_state is computed, not stored. The
+    company dropdown is built from the same visibility scope so a rep can only filter
+    within accounts they can see.
+    """
+    now = datetime.now(timezone.utc)
+    base = customer_contacts_query(db, user, search=search, company_id=company_id, contact_role=contact_role)
+
+    if cadence_state in CONTACT_CADENCE_DOTS:
+        # cadence_state is derived → fetch the filtered set, compute, then slice.
+        rows = base.all()
+        for c in rows:
+            c.cadence_state = cadence_state_of(c, now)
+        rows = [c for c in rows if c.cadence_state == cadence_state]
+        total = len(rows)
+        contacts = rows[offset : offset + limit]
+    else:
+        total = base.count()
+        contacts = base.offset(offset).limit(limit).all()
+        for c in contacts:
+            c.cadence_state = cadence_state_of(c, now)
+
+    # Company filter options: distinct companies within the viewer's scope.
+    company_q = (
+        db.query(Company.id, Company.name)
+        .join(CustomerSite, CustomerSite.company_id == Company.id)
+        .filter(Company.is_active.is_(True), CustomerSite.is_active.is_(True))
+    )
+    if not is_manager_or_admin(user):
+        company_q = company_q.filter(company_visibility_predicate(user))
+    companies = company_q.distinct().order_by(Company.name).all()
+
+    return {
+        "contacts": contacts,
+        "companies": companies,
+        "search": search,
+        "company_id": company_id,
+        "contact_role": contact_role,
+        "cadence_state": cadence_state,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+def cadence_state_of(contact: SiteContact, now: datetime) -> str:
+    """Contact-level cadence dot — standard 30d outbound clock (tier=None)."""
+    return cadence_state(None, contact.last_outbound_at, now)
 
 
 def company_contact_rows(
