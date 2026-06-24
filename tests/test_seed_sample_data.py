@@ -1,0 +1,212 @@
+"""test_seed_sample_data.py — Tests for the AvailAI sample-data seeder.
+
+Verifies the management command at app/management/seed_sample_data.py:
+  * a fresh seed creates the expected entities (spot-check counts/links per workflow),
+  * a SECOND seed run is idempotent (no duplicate rows, counts stable),
+  * --wipe removes ALL sample rows while leaving a pre-existing non-sample row
+    untouched.
+
+Runs under TESTING=1 against the in-memory SQLite engine from conftest (db_session
+fixture). Calls the seeder's seed()/wipe() functions directly with the test session
+— no live email/Graph/supplier/MCP effects (the seeder constructs all rows directly).
+
+Called by: pytest autodiscovery.
+Depends on: tests.conftest fixtures, app.management.seed_sample_data, ORM models.
+"""
+
+from __future__ import annotations
+
+from sqlalchemy.orm import Session
+
+from app.management import seed_sample_data as sds
+from app.models.auth import User
+from app.models.buy_plan import BuyPlan, VerificationGroupMember
+from app.models.crm import Company, CustomerSite, SiteContact
+from app.models.excess import (
+    BuyerScore,
+    CustomerBid,
+    CustomerBidLine,
+    ExcessLineItem,
+    ExcessList,
+    ExcessOffer,
+    ExcessOfferLine,
+    ExcessOutreach,
+)
+from app.models.intelligence import ActivityLog, MaterialCard
+from app.models.offers import Offer
+from app.models.quotes import Quote, QuoteLine
+from app.models.sourcing import Requirement, Requisition, Sighting
+from app.models.task import RequisitionTask
+from app.models.vendor_part_unavailability import VendorPartUnavailability
+from app.models.vendors import VendorCard, VendorContact
+
+
+def _count(db: Session, model: type) -> int:
+    return db.query(model).count()
+
+
+def _all_counts(db: Session) -> dict[str, int]:
+    models = [
+        User,
+        Company,
+        CustomerSite,
+        SiteContact,
+        VendorCard,
+        VendorContact,
+        MaterialCard,
+        Requisition,
+        Requirement,
+        Sighting,
+        Offer,
+        Quote,
+        QuoteLine,
+        BuyPlan,
+        VerificationGroupMember,
+        ExcessList,
+        ExcessLineItem,
+        ExcessOffer,
+        ExcessOfferLine,
+        CustomerBid,
+        CustomerBidLine,
+        ExcessOutreach,
+        BuyerScore,
+        ActivityLog,
+        RequisitionTask,
+        VendorPartUnavailability,
+    ]
+    return {m.__name__: _count(db, m) for m in models}
+
+
+def test_fresh_seed_creates_expected_entities(db_session: Session) -> None:
+    """A fresh seed builds the full cast and the documented per-workflow records."""
+    sds.seed(db_session)
+
+    # Named cast (§2).
+    assert _count(db_session, User) == 6
+    assert _count(db_session, Company) == 6
+    assert _count(db_session, CustomerSite) == 4
+    assert _count(db_session, SiteContact) == 5
+    assert _count(db_session, VendorCard) == 6
+    assert _count(db_session, VendorContact) == 6
+    assert _count(db_session, MaterialCard) == 3
+    assert _count(db_session, VerificationGroupMember) == 1
+
+    # Requisitions: req1/req2/req3 + the excess-demand scratch req.
+    assert _count(db_session, Requisition) == 4
+
+    # Excess / resell (WF-E).
+    assert _count(db_session, ExcessList) == 1
+    assert _count(db_session, ExcessLineItem) == 3
+    assert _count(db_session, ExcessOffer) == 4  # 3 per-line + 1 take-all
+    assert _count(db_session, ExcessOfferLine) == 6
+    assert _count(db_session, CustomerBid) == 1
+    assert _count(db_session, CustomerBidLine) == 2
+    assert _count(db_session, ExcessOutreach) == 3
+    assert _count(db_session, BuyerScore) == 3
+
+    # My Day timeline.
+    assert _count(db_session, ActivityLog) == 8
+    assert _count(db_session, RequisitionTask) == 4
+
+    # Vendor intelligence.
+    assert _count(db_session, VendorPartUnavailability) == 4
+
+    # Quotes (Q-0001..0005).
+    assert _count(db_session, Quote) == 5
+
+
+def test_material_card_uses_f1_ladder(db_session: Session) -> None:
+    """Category/brand/manufacturer land via the ladder; mc_bare stays NULL-category."""
+    sds.seed(db_session)
+
+    mc_mcu = db_session.query(MaterialCard).filter_by(normalized_mpn="avsamplestm32f103rb").one()
+    assert mc_mcu.category == "microcontrollers"
+    assert mc_mcu.category_source == sds.SEED_SRC
+    assert mc_mcu.brand == "STMicroelectronics"
+    # Manual ST Micro then higher-tier STMicroelectronics → recorded conflict.
+    assert mc_mcu.has_validation_conflict is True
+
+    mc_bare = db_session.query(MaterialCard).filter_by(normalized_mpn="avsamplelegacy01").one()
+    assert mc_bare.category is None  # legacy floor; record_spec returned False (no category)
+
+
+def test_offer_qualification_and_buy_plan_links(db_session: Session) -> None:
+    """Offers get qualification stamped; the active buy plan carries an AI flag."""
+    sds.seed(db_session)
+
+    # The COMPLETE-qualification offer (o1) is selected for quote.
+    o1 = (
+        db_session.query(Offer)
+        .filter_by(mpn="AVSAMPLE-STM32F103RB", vendor_name="AVSAMPLE Pinnacle Components", unit_price=50.0)
+        .one()
+    )
+    assert o1.qualification_status is not None
+    assert o1.selected_for_quote is True
+
+    # The ACTIVE plan (on q_won2) has the WARNING price_increase ai_flag.
+    q_won2 = db_session.query(Quote).filter_by(quote_number="AVSAMPLE-Q-0005").one()
+    bp_active = db_session.query(BuyPlan).filter_by(quote_id=q_won2.id).one()
+    assert bp_active.status == "active"
+    assert bp_active.ai_flags and bp_active.ai_flags[0]["type"] == "price_increase"
+    assert bp_active.ai_flags[0]["line_id"] is not None
+
+
+def test_second_seed_is_idempotent(db_session: Session) -> None:
+    """Re-running the seeder creates nothing new — counts are stable."""
+    sds.seed(db_session)
+    before = _all_counts(db_session)
+
+    counts = sds.seed(db_session)
+    after = _all_counts(db_session)
+
+    assert after == before, "second seed changed row counts"
+    # The tally must report zero created on the second run.
+    total_created = sum(b["created"] for b in counts.values())
+    assert total_created == 0, f"second run created {total_created} rows"
+
+
+def test_wipe_removes_sample_rows_only(db_session: Session) -> None:
+    """--wipe deletes every sample row but leaves a pre-existing real row untouched."""
+    # Pre-existing NON-sample data that must survive the wipe.
+    real_user = User(email="real.person@trioscs.com", name="Real Person", role="buyer", is_active=True)
+    real_company = Company(name="Real Customer Inc", account_type="Customer", source="sfdc", is_active=True)
+    real_card = MaterialCard(normalized_mpn="lm358n", display_mpn="LM358N", enrichment_status="verified")
+    db_session.add_all([real_user, real_company, real_card])
+    db_session.commit()
+
+    sds.seed(db_session)
+    assert _count(db_session, User) == 7  # 6 sample + 1 real
+
+    sds.wipe(db_session)
+
+    # All sample rows gone.
+    assert db_session.query(User).filter(User.email.like("%avsample@avsample.test")).count() == 0
+    assert db_session.query(Company).filter(Company.source == sds.SAMPLE_TAG).count() == 0
+    assert db_session.query(VendorCard).filter(VendorCard.source == sds.SAMPLE_TAG).count() == 0
+    assert db_session.query(MaterialCard).filter(MaterialCard.normalized_mpn.like("avsample%")).count() == 0
+    assert db_session.query(Requisition).filter(Requisition.name.like("AVSAMPLE ·%")).count() == 0
+    assert db_session.query(ExcessList).filter(ExcessList.source_filename == sds.SAMPLE_TAG).count() == 0
+    assert _count(db_session, Quote) == 0
+    assert _count(db_session, Offer) == 0
+    assert _count(db_session, Sighting) == 0
+    assert _count(db_session, ActivityLog) == 0
+    assert _count(db_session, RequisitionTask) == 0
+    assert _count(db_session, VendorPartUnavailability) == 0
+    assert _count(db_session, BuyerScore) == 0
+
+    # Real rows untouched.
+    assert db_session.get(User, real_user.id) is not None
+    assert db_session.get(Company, real_company.id) is not None
+    assert db_session.get(MaterialCard, real_card.id) is not None
+
+
+def test_wipe_on_empty_db_is_noop(db_session: Session) -> None:
+    """--wipe with no sample data deletes nothing (and does not raise)."""
+    real_company = Company(name="Lonely Real Co", account_type="Customer", source="sfdc", is_active=True)
+    db_session.add(real_company)
+    db_session.commit()
+
+    deleted = sds.wipe(db_session)
+
+    assert sum(deleted.values()) == 0
+    assert db_session.get(Company, real_company.id) is not None
