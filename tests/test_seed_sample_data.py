@@ -253,3 +253,92 @@ def test_wipe_on_empty_db_is_noop(db_session: Session) -> None:
 
     assert sum(deleted.values()) == 0
     assert db_session.get(Company, real_company.id) is not None
+
+
+def test_owner_assigns_deals_to_existing_user(db_session: Session) -> None:
+    """--owner redirects deal ownership to the named user's own-work lenses.
+
+    Requisition created_by, buy-plan-line buyer_id, buy-plan submitted_by_id and
+    excess owner_id all become the owner — while u_manager stays the distinct
+    approver so the approve/verify workflow still shows a second actor.
+    """
+    owner = User(email="boss@trioscs.com", name="Boss", role="admin", is_active=True)
+    db_session.add(owner)
+    db_session.commit()
+
+    sds.seed(db_session, owner_email="boss@trioscs.com")
+
+    # The existing user was reused, not duplicated: 6 sample users + the owner.
+    assert _count(db_session, User) == 7
+    assert db_session.query(User).filter(User.email == "boss@trioscs.com").count() == 1
+
+    # Every sample requisition is owned by the owner ('mine' requisitions lens).
+    reqs = db_session.query(Requisition).filter(Requisition.name.like("AVSAMPLE%")).all()
+    assert reqs and all(r.created_by == owner.id for r in reqs)
+
+    # Every buy-plan line's buyer is the owner ('orders' lens = BuyPlanLine.buyer_id).
+    from app.models.buy_plan import BuyPlanLine
+
+    lines = db_session.query(BuyPlanLine).all()
+    assert lines and all(line.buyer_id == owner.id for line in lines)
+
+    # EVERY buy plan — draft, pending AND active — is submitted by the owner so all
+    # three surface in the owner's "deals" board (deals_board scope=mine filters
+    # BuyPlan.submitted_by_id == user; the DRAFT must not be left with NULL).
+    plans = db_session.query(BuyPlan).all()
+    assert len(plans) == 3
+    assert all(bp.submitted_by_id == owner.id for bp in plans)
+
+    # The ACTIVE plan is APPROVED by the distinct sample manager (not the owner).
+    q_won2 = db_session.query(Quote).filter_by(quote_number="AVSAMPLE-Q-0005").one()
+    bp_active = db_session.query(BuyPlan).filter_by(quote_id=q_won2.id).one()
+    assert bp_active.approved_by_id is not None and bp_active.approved_by_id != owner.id
+    manager = db_session.query(User).filter(User.email.like("manager.avsample@%")).one()
+    assert bp_active.approved_by_id == manager.id
+
+    # The sample excess list is owned by the owner ('Open to Me' resell lens).
+    assert db_session.query(ExcessList).filter(ExcessList.owner_id == owner.id).count() == 1
+
+
+def test_owner_pre_provisions_missing_user_and_survives_wipe(db_session: Session) -> None:
+    """An unknown --owner email pre-provisions a REAL (non-sample) user that --wipe
+    keeps."""
+    sds.seed(db_session, owner_email="newowner@trioscs.com")
+
+    owner = db_session.query(User).filter(User.email == "newowner@trioscs.com").one()
+    assert owner.is_active is True
+    # Real account — NOT sample-tagged (its email is not on the avsample domain).
+    assert not owner.email.endswith("avsample.test")
+    assert db_session.query(Requisition).filter(Requisition.name.like("AVSAMPLE%")).first().created_by == owner.id
+
+    sds.wipe(db_session)
+
+    # Sample users gone; the pre-provisioned real owner survives.
+    assert db_session.query(User).filter(User.email.like("%avsample@avsample.test")).count() == 0
+    assert db_session.get(User, owner.id) is not None
+
+
+def test_wipe_with_owner_succeeds_under_fk_enforcement(db_session: Session) -> None:
+    """Wipe() of an --owner-seeded DB succeeds under FK enforcement.
+
+    With --owner the RESTRICT FKs (ExcessList.owner_id, ExcessOffer.submitted_by,
+    CustomerBid.owner_id, ExcessOutreach.submitted_by) point at the REAL owner user,
+    which wipe() does NOT delete. Deleting the tagged child rows while that real parent
+    survives must still satisfy ondelete=RESTRICT — this exercises that path under the
+    conftest engine's PRAGMA foreign_keys=ON (else it's a no-op guarantee).
+    """
+    assert db_session.execute(text("PRAGMA foreign_keys")).scalar() == 1
+
+    sds.seed(db_session, owner_email="fkowner@trioscs.com")
+    owner = db_session.query(User).filter(User.email == "fkowner@trioscs.com").one()
+
+    deleted = sds.wipe(db_session)  # must not raise IntegrityError under RESTRICT
+
+    assert sum(deleted.values()) > 0
+    # All tagged excess rows (which referenced the real owner) are gone, no orphans.
+    assert _count(db_session, ExcessList) == 0
+    assert _count(db_session, ExcessOffer) == 0
+    assert _count(db_session, CustomerBid) == 0
+    assert _count(db_session, ExcessOutreach) == 0
+    # The real owner survives the wipe.
+    assert db_session.get(User, owner.id) is not None
