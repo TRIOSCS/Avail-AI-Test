@@ -93,6 +93,7 @@ from app.models.task import RequisitionTask
 from app.models.vendor_part_unavailability import VendorPartUnavailability
 from app.models.vendors import VendorCard, VendorContact
 from app.scoring import score_sighting_v2
+from app.services.commodity_registry import seed_commodity_schemas
 from app.services.offer_qualification import apply_qualification
 from app.services.spec_tiers import set_brand, set_category, set_manufacturer
 from app.services.spec_write_service import record_spec
@@ -259,6 +260,14 @@ def _seed_vendor_contacts(db: Session, counts: _Counts, vc: dict[str, VendorCard
 
 def _seed_material_cards(db: Session, counts: _Counts) -> dict[str, MaterialCard]:
     """Build the 3 sample MaterialCards through the F1 ladder (never direct writes)."""
+    # record_spec() looks up a per-commodity schema row from commodity_spec_schemas;
+    # without it EVERY structured-spec write returns False ("no schema for commodity=..").
+    # On a fresh / staging DB the operator may run this seeder before app startup has
+    # run its schema seed, and the test SQLite DB never seeds it at all — so make the
+    # seeder self-contained and seed the schemas here. Idempotent (skips existing rows).
+    seed_commodity_schemas(db)
+    db.flush()
+
     out: dict[str, MaterialCard] = {}
 
     # mc_mcu — full ladder + 2 specs + demand telemetry + a validation conflict.
@@ -282,8 +291,13 @@ def _seed_material_cards(db: Session, counts: _Counts) -> dict[str, MaterialCard
         set_brand(mc_mcu, "STMicroelectronics", source=SEED_SRC, confidence=SEED_CONF)
         set_manufacturer(mc_mcu, "STMicroelectronics", source=SEED_SRC, confidence=SEED_CONF)
         db.flush()
-        record_spec(db, mc_mcu.id, "package", "LQFP48", source=SEED_SRC, confidence=SEED_CONF)
-        record_spec(db, mc_mcu.id, "core", "ARM Cortex-M3", source=SEED_SRC, confidence=SEED_CONF)
+        # ``core`` is an enum: the allowed value is "Cortex-M3" (NOT "ARM Cortex-M3"
+        # — an enum mismatch silently returns False). ``package`` is a free-text enum
+        # (enum_values=None) so "LQFP48" is accepted as-is. Log the return so an
+        # unexpected False can never silently leave the dossier specs panel empty.
+        wrote_pkg = record_spec(db, mc_mcu.id, "package", "LQFP48", source=SEED_SRC, confidence=SEED_CONF)
+        wrote_core = record_spec(db, mc_mcu.id, "core", "Cortex-M3", source=SEED_SRC, confidence=SEED_CONF)
+        logger.info("seed-sample: mc_mcu record_spec package={} core={} (expected both True)", wrote_pkg, wrote_core)
         db.flush()
     out["mc_mcu"] = mc_mcu
 
@@ -302,7 +316,10 @@ def _seed_material_cards(db: Session, counts: _Counts) -> dict[str, MaterialCard
         set_category(mc_conn, "analog_ic", source=SEED_SRC, confidence=SEED_CONF)
         set_manufacturer(mc_conn, "Maxim Integrated", source=SEED_SRC, confidence=SEED_CONF)
         db.flush()
-        record_spec(db, mc_conn.id, "package", "SOIC16", source=SEED_SRC, confidence=SEED_CONF)
+        # analog_ic.package is an enum: the allowed value is "SOIC-8" (NOT "SOIC16",
+        # which fails enum validation → False). Log the return for the same reason.
+        wrote_pkg = record_spec(db, mc_conn.id, "package", "SOIC-8", source=SEED_SRC, confidence=SEED_CONF)
+        logger.info("seed-sample: mc_conn record_spec package={} (expected True)", wrote_pkg)
         db.flush()
     out["mc_conn"] = mc_conn
 
@@ -1538,6 +1555,17 @@ def wipe(db: Session) -> dict[str, int]:
     """Delete ONLY tagged sample rows, FK-safe (leaf → root).
 
     No-op on real data.
+
+    LOAD-BEARING DELETION ORDER (do NOT reorder): several sample-User-referencing
+    tables use ``ondelete="RESTRICT"`` in Postgres —
+    ``ExcessOffer.submitted_by``, ``ExcessOutreach.submitted_by``,
+    ``CustomerBid.owner_id`` and ``ExcessList.owner_id`` (app/models/excess.py).
+    The sample Users are therefore deleted **last** and only succeed because every
+    RESTRICT child (Excess* rows, BuyPlan*, etc.) is removed earlier. SQLite ignores
+    FKs unless ``PRAGMA foreign_keys=ON`` (the test engine sets it), so the order is
+    additionally verified by ``test_wipe_succeeds_with_fk_enforcement`` against a
+    fully-seeded, FK-enforcing DB. A future reorder that strands a RESTRICT child
+    will fail that test (and crash a real Postgres wipe) — keep this order.
     """
     like_email = f"%avsample@{SAMPLE_EMAIL_DOMAIN}"
 
