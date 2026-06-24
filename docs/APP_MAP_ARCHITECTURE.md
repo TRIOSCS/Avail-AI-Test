@@ -72,8 +72,9 @@ Response -> Caddy -> Browser -> HTMX swaps into DOM
 
 ## Authorization & Access Control
 
-Two layers: **role gates** (who may reach an endpoint) and **ownership scoping**
-(which records a user may act on).
+Three layers: **role gates** (who may reach an endpoint), **ownership scoping**
+(which records a user may act on), and **per-feature access** (which nav modules +
+capabilities a user is granted).
 
 - **Role gates** — FastAPI dependencies in `app/dependencies.py`: `require_user`
   (any authenticated active user), `require_buyer` (BUYER_ROLES = buyer/sales/trader/
@@ -94,6 +95,41 @@ Two layers: **role gates** (who may reach an endpoint) and **ownership scoping**
   routes through one of these. Regression tests live in `tests/test_authz_*.py`
   (a non-owner sales/trader user must get 404). 404 (not 403) is used so resource
   existence isn't leaked.
+
+- **Per-feature access (user-management feature)** — an access registry gates both
+  nav-module visibility and discrete capabilities, administered from Settings > Users.
+  - **Access registry (`app/constants.py`)** — `AccessKey` StrEnum is the closed
+    vocabulary of grantable access: 10 module keys (`MODULE_ACCESS_KEYS` — requisitions/
+    sightings/materials/search/buy_plans/resell/crm/proactive/prospecting/my_day) + 5
+    capability keys (`CAPABILITY_ACCESS_KEYS` — send_rfq/approve_offers/export_data/
+    manage_connectors/ops_verification). `ROLE_ACCESS_DEFAULTS` maps each `UserRole` to
+    its default key set; defaults deliberately preserve prior behavior (every interactive
+    role gets all modules + all capabilities except `ops_verification`; admin → all; agent
+    → none), so turning the layer on is a no-op until an admin sets an override.
+    `UserAuditAction` StrEnum is the closed vocabulary for the audit trail.
+  - **Effective-access resolution (`app/dependencies.py`)** — `user_has_access(user,
+    key, db)`: admin → always True; `ops_verification` delegates to
+    `VerificationGroupMember` (single source of truth); otherwise an explicit per-user
+    override (`User.access_overrides`) wins, else the role default. `require_access(key)`
+    is a dependency factory (depends on `require_user`) that raises 403 unless the user
+    has `key` — applied to the 10 nav-module partial entry routes and the capability
+    actions (RFQ-send, offer approve/reject/reconfirm, CSV/quote exports, source-test).
+  - **Admin Users surface (`app/routers/admin/users.py`)** — admin-only CRUD: invite,
+    change role, activate/deactivate, a per-user access editor (module + capability
+    toggles; `ops_verification` writes `VerificationGroupMember`), and an audit-log
+    viewer. Self-protection invariants: no self-demote/deactivate, the last active admin
+    is row-locked-protected, the agent account is uneditable. Every mutation appends a
+    `UserAdminAudit` row via `services.user_admin.record_user_audit`. `module_access_map`
+    (here) builds the `{nav-id: bool}` map consumed by the nav gate.
+  - **Templates** — Settings > Users tab (`partials/settings/users.html` +
+    `user_access_panel.html` access editor + `users_audit.html` log; tab wired in
+    `settings/index.html`, GET tab `htmx_views.settings_users_tab`). Nav gating:
+    `_base_ctx` exposes the `{nav-id: bool}` `access` map and `shared/mobile_nav.html`
+    hides revoked sections; `v2_page` redirects a denied module to the first allowed one.
+  - **Config** — `ENABLE_USER_ALLOWLIST` (`app/config.py`, default True): when on, an
+    OAuth login by an unknown email (no pre-provisioned row) is rejected at the callback
+    unless the email is in `ADMIN_EMAILS`. See APP_MAP_INTERACTIONS for the allowlist +
+    invite-adoption flow.
 
 ## Frontend Architecture
 
@@ -143,7 +179,7 @@ authoritative reference. Static-analysis tests in
 | Proactive | 4 | partials/proactive/ |
 | Emails | 4 | partials/emails/ |
 | Tickets | 4 | partials/tickets/ |
-| Settings | 5 | partials/settings/ — tabs: **Connectors** (unified, replaces Sources + API Keys; admin-only), Profile, System, Data Ops, Ops Group; legacy `/sources` + `/api-keys` routes 302 → Connectors |
+| Settings | 8 | partials/settings/ — tabs: **Connectors** (unified, replaces Sources + API Keys; admin-only), Profile, System, Data Ops, Ops Group, **Users** (admin-only); legacy `/sources` + `/api-keys` routes 302 → Connectors. Users tab = `users.html` (invite/role/activate table) + `user_access_panel.html` (per-user access editor modal) + `users_audit.html` (audit-log viewer); see Authorization & Access Control. |
 | Shared | 16 | partials/shared/ |
 | Buy Plans | 6 | partials/buy_plans/ — the **Deal Hub**, a role-lens shell at `/v2/buy-plans` (own primary-nav tab). `hub.html` is the shell (lens switcher + lazy `#bp-hub-body`); `_board.html` (sales "My Deals" stage board), `_orders_queue.html` (buyer "My Orders" PO-cut queue), `_supervise.html` (manager/ops "Supervise" triage strip + all-scope board) are the three lens bodies; `detail.html`/`_macros.html` are the single-plan view. Lens partial routes: `GET /v2/partials/buy-plans` (shell, `lens=` param → role-derived default), `/orders`, `/board?scope=`, `/supervise` (all in `routers/htmx_views.py`). Read models in `services/buyplan_hub.py` (`buyer_line_queue` / `deals_board` / `supervise_overview`). The retired `/v2/reporting` page folded its analytics in here (supervise strip) + the Sales Hub pipeline chip + the CRM coverage chip — `partials/reporting/` and the `reporting_dashboard` route are gone. |
 
