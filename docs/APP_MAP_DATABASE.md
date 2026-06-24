@@ -31,6 +31,9 @@
 | commodity_tags | JSON | User specialties |
 | timezone | String 100 | |
 | eight_by_eight_extension | String 20 | Phone system |
+| eight_by_eight_enabled | Boolean | default False |
+| notify_buyplan_email_enabled | Boolean NOT NULL | default True; Profile-tab toggle — suppress buy-plan email notifications (migration 149) |
+| notify_new_offer_alert_enabled | Boolean NOT NULL | default True; Profile-tab toggle — suppress new-offer alert notifications (migration 149) |
 
 ---
 

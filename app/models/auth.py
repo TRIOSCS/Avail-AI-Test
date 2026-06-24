@@ -41,6 +41,10 @@ class User(Base):
     eight_by_eight_extension = Column(String(20))
     eight_by_eight_enabled = Column(Boolean, default=False)
 
+    # Notification preferences (Profile tab toggles — Tasks 7-9 wire the UI)
+    notify_buyplan_email_enabled = Column(Boolean, default=True, nullable=False)
+    notify_new_offer_alert_enabled = Column(Boolean, default=True, nullable=False)
+
     created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
 
     requisitions = relationship("Requisition", back_populates="creator", foreign_keys="[Requisition.created_by]")
