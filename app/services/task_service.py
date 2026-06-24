@@ -355,6 +355,49 @@ def get_next_task_for_company(db: Session, company_id: int) -> RequisitionTask |
     )
 
 
+def create_vendor_task(
+    db: Session,
+    *,
+    vendor_card_id: int,
+    title: str,
+    description: str | None = None,
+    priority: int = 2,
+    assigned_to_id: int | None = None,
+    created_by: int | None = None,
+    due_at: datetime | None = None,
+) -> RequisitionTask:
+    """Create a task scoped to a vendor card."""
+    task = RequisitionTask(
+        vendor_card_id=vendor_card_id,
+        title=title,
+        description=description,
+        task_type="general",
+        priority=priority,
+        assigned_to_id=assigned_to_id,
+        created_by=created_by,
+        source="manual",
+        due_at=due_at,
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    logger.info("Vendor task created: {} (vendor_card={})", task.id, vendor_card_id)
+    return task
+
+
+def get_open_tasks_for_vendor_card(db: Session, vendor_card_id: int) -> list[RequisitionTask]:
+    """Return open tasks scoped to a vendor card, ordered by due_at asc (nulls last)."""
+    return (
+        db.query(RequisitionTask)
+        .filter(
+            RequisitionTask.vendor_card_id == vendor_card_id,
+            RequisitionTask.status != TaskStatus.DONE,
+        )
+        .order_by(RequisitionTask.due_at.asc().nullslast(), RequisitionTask.created_at)
+        .all()
+    )
+
+
 def _is_crm_task_authorized(db: Session, task: RequisitionTask, user_id: int, is_admin: bool) -> bool:
     """Return True if user_id is allowed to mutate the given CRM task.
 
@@ -364,12 +407,17 @@ def _is_crm_task_authorized(db: Session, task: RequisitionTask, user_id: int, is
       - user is the creator
       - user is the account_owner of the task's parent company (via company_id directly,
         or via the contact's site → company for contact-scoped tasks)
+      - task is vendor-scoped (any authenticated user may mutate vendor tasks)
     """
     if is_admin:
         return True
     if task.assigned_to_id == user_id:
         return True
     if task.created_by == user_id:
+        return True
+    # Vendor-scoped tasks: any authenticated user may complete/edit them.
+    # Delete requires admin — callers that enforce admin-only must do so before calling here.
+    if task.vendor_card_id is not None or task.vendor_contact_id is not None:
         return True
     # Check parent company owner
     company_id: int | None = task.company_id

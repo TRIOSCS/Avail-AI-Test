@@ -4268,7 +4268,17 @@ async def vendor_tab(
     """Return a specific tab partial for vendor detail."""
     vendor = get_vendor_card_or_404(db, vendor_id)
 
-    valid_tabs = {"overview", "contacts", "find_contacts", "emails", "analytics", "offers", "reviews", "activity"}
+    valid_tabs = {
+        "overview",
+        "contacts",
+        "find_contacts",
+        "emails",
+        "analytics",
+        "offers",
+        "reviews",
+        "activity",
+        "tasks",
+    }
     if tab not in valid_tabs:
         raise HTTPException(404, f"Unknown tab: {tab}")
 
@@ -4435,6 +4445,16 @@ async def vendor_tab(
             }
         )
         return template_response("htmx/partials/vendors/tabs/activity_tab.html", ctx)
+
+    elif tab == "tasks":
+        from app.services.task_service import get_open_tasks_for_vendor_card
+
+        vendor_tasks = get_open_tasks_for_vendor_card(db, vendor_id)
+        ctx = _base_ctx(request, user, "vendors")
+        ctx["vendor"] = vendor
+        ctx["vendor_id"] = vendor_id
+        ctx["vendor_tasks"] = vendor_tasks
+        return template_response("htmx/partials/vendors/tabs/_vendor_tasks.html", ctx)
 
     else:  # offers
         offers = (
@@ -14696,6 +14716,14 @@ async def complete_task_endpoint(
         ctx["company_id"] = contact.customer_site.company_id if contact and contact.customer_site else 0
         ctx["site_id"] = task.site_contact_id
         return template_response("htmx/partials/customers/_contact_tasks.html", ctx)
+    if task.vendor_card_id:
+        from app.services.task_service import get_open_tasks_for_vendor_card
+
+        vendor_tasks = get_open_tasks_for_vendor_card(db, task.vendor_card_id)
+        ctx = _base_ctx(request, user, "vendors")
+        ctx["vendor_id"] = task.vendor_card_id
+        ctx["vendor_tasks"] = vendor_tasks
+        return template_response("htmx/partials/vendors/tabs/_vendor_tasks.html", ctx)
     # Fallback: requisition task — just return empty fragment
     return HTMLResponse("")
 
@@ -14720,15 +14748,22 @@ async def delete_task_endpoint(
     task = db.get(RequisitionTask, task_id)
     if not task:
         raise HTTPException(404, "Task not found")
-    if not task.company_id and not task.site_contact_id:
+    is_vendor_task = task.vendor_card_id is not None or task.vendor_contact_id is not None
+    is_crm_task = task.company_id is not None or task.site_contact_id is not None
+    if not is_crm_task and not is_vendor_task:
         raise HTTPException(400, "Not a CRM task")
     from app.services.task_service import _is_crm_task_authorized
 
-    if not _is_crm_task_authorized(db, task, user.id, is_admin=(user.role == UserRole.ADMIN)):
+    # Vendor task delete requires admin; customer task uses the full authz gate.
+    if is_vendor_task and not is_crm_task:
+        if user.role != UserRole.ADMIN:
+            raise HTTPException(403, "Only admins can delete vendor tasks")
+    elif not _is_crm_task_authorized(db, task, user.id, is_admin=(user.role == UserRole.ADMIN)):
         raise HTTPException(403, "You are not allowed to delete this task")
     # Capture parent refs before deletion
     company_id = task.company_id
     site_contact_id = task.site_contact_id
+    vendor_card_id = task.vendor_card_id
     delete_task(db, task_id)
     logger.info("Task {} deleted by user {}", task_id, user.id)
     if company_id:
@@ -14746,6 +14781,14 @@ async def delete_task_endpoint(
         ctx["company_id"] = contact.customer_site.company_id if contact and contact.customer_site else 0
         ctx["site_id"] = site_contact_id
         return template_response("htmx/partials/customers/_contact_tasks.html", ctx)
+    if vendor_card_id:
+        from app.services.task_service import get_open_tasks_for_vendor_card
+
+        vendor_tasks = get_open_tasks_for_vendor_card(db, vendor_card_id)
+        ctx = _base_ctx(request, user, "vendors")
+        ctx["vendor_id"] = vendor_card_id
+        ctx["vendor_tasks"] = vendor_tasks
+        return template_response("htmx/partials/vendors/tabs/_vendor_tasks.html", ctx)
     return HTMLResponse("")
 
 
@@ -14760,7 +14803,8 @@ async def task_edit_form(
     task = db.get(RequisitionTask, task_id)
     if not task:
         raise HTTPException(404, "Task not found")
-    if not task.company_id and not task.site_contact_id:
+    is_vendor_task = task.vendor_card_id is not None or task.vendor_contact_id is not None
+    if not task.company_id and not task.site_contact_id and not is_vendor_task:
         raise HTTPException(400, "Not a CRM task")
     from app.services.task_service import _is_crm_task_authorized
 
@@ -14804,7 +14848,8 @@ async def edit_task_endpoint(
     task = db.get(RequisitionTask, task_id)
     if not task:
         raise HTTPException(404, "Task not found")
-    if not task.company_id and not task.site_contact_id:
+    _is_vendor = task.vendor_card_id is not None or task.vendor_contact_id is not None
+    if not task.company_id and not task.site_contact_id and not _is_vendor:
         raise HTTPException(400, "Not a CRM task")
     if not _is_crm_task_authorized(db, task, user.id, is_admin=(user.role == UserRole.ADMIN)):
         raise HTTPException(403, "You are not allowed to edit this task")
@@ -14829,6 +14874,7 @@ async def edit_task_endpoint(
     task = db.get(RequisitionTask, task_id)
     company_id = task.company_id if task else None
     site_contact_id = task.site_contact_id if task else None
+    vendor_card_id_edit = task.vendor_card_id if task else None
     if company_id:
         tasks = get_open_tasks_for_company(db, company_id)
         ctx = _base_ctx(request, user, "customers")
@@ -14844,7 +14890,94 @@ async def edit_task_endpoint(
         ctx["company_id"] = contact.customer_site.company_id if contact and contact.customer_site else 0
         ctx["site_id"] = site_contact_id
         return template_response("htmx/partials/customers/_contact_tasks.html", ctx)
+    if vendor_card_id_edit:
+        from app.services.task_service import get_open_tasks_for_vendor_card
+
+        vendor_tasks = get_open_tasks_for_vendor_card(db, vendor_card_id_edit)
+        ctx = _base_ctx(request, user, "vendors")
+        ctx["vendor_id"] = vendor_card_id_edit
+        ctx["vendor_tasks"] = vendor_tasks
+        return template_response("htmx/partials/vendors/tabs/_vendor_tasks.html", ctx)
     return HTMLResponse("")
+
+
+# ---------------------------------------------------------------------------
+# Vendor task routes
+# ---------------------------------------------------------------------------
+
+
+@router.get("/v2/partials/vendors/{vendor_id}/tasks", response_class=HTMLResponse)
+async def vendor_tasks_partial(
+    request: Request,
+    vendor_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render the open-tasks list for a vendor card."""
+    from app.services.task_service import get_open_tasks_for_vendor_card
+
+    vendor = get_vendor_card_or_404(db, vendor_id)
+    tasks = get_open_tasks_for_vendor_card(db, vendor_id)
+    ctx = _base_ctx(request, user, "vendors")
+    ctx["vendor_id"] = vendor_id
+    ctx["vendor"] = vendor
+    ctx["vendor_tasks"] = tasks
+    return template_response("htmx/partials/vendors/tabs/_vendor_tasks.html", ctx)
+
+
+@router.get("/v2/partials/vendors/{vendor_id}/tasks/add-form", response_class=HTMLResponse)
+async def vendor_task_add_form(
+    request: Request,
+    vendor_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render the inline add-task form for a vendor card."""
+    get_vendor_card_or_404(db, vendor_id)
+    ctx = _base_ctx(request, user, "vendors")
+    ctx["vendor_id"] = vendor_id
+    return template_response("htmx/partials/vendors/tabs/_vendor_task_form.html", ctx)
+
+
+@router.post("/v2/partials/vendors/{vendor_id}/tasks", response_class=HTMLResponse)
+async def create_vendor_task_endpoint(
+    request: Request,
+    vendor_id: int,
+    title: str = Form(""),
+    due_at: str = Form(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Create a task scoped to a vendor; return refreshed task list."""
+    from datetime import date as _date
+    from datetime import timezone as _tz
+
+    from app.services.task_service import create_vendor_task, get_open_tasks_for_vendor_card
+
+    vendor = get_vendor_card_or_404(db, vendor_id)
+    if not title.strip():
+        return HTMLResponse('<p class="text-xs text-rose-600">Title is required.</p>')
+    due_dt = None
+    if due_at.strip():
+        try:
+            d = _date.fromisoformat(due_at.strip())
+            due_dt = datetime.combine(d, datetime.min.time()).replace(tzinfo=_tz.utc)
+        except ValueError:
+            return HTMLResponse('<p class="text-xs text-rose-600">Invalid date.</p>')
+    create_vendor_task(
+        db,
+        vendor_card_id=vendor_id,
+        title=title.strip(),
+        due_at=due_dt,
+        created_by=user.id,
+        assigned_to_id=user.id,
+    )
+    tasks = get_open_tasks_for_vendor_card(db, vendor_id)
+    ctx = _base_ctx(request, user, "vendors")
+    ctx["vendor_id"] = vendor_id
+    ctx["vendor"] = vendor
+    ctx["vendor_tasks"] = tasks
+    return template_response("htmx/partials/vendors/tabs/_vendor_tasks.html", ctx)
 
 
 @router.get(
