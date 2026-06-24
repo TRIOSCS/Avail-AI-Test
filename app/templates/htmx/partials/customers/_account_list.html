@@ -35,10 +35,18 @@
              aria-label="Select all accounts on this page">
       <span>{{ total }} account{{ "s" if total != 1 }}</span>
     </label>
-    {# Slim cadence-coverage figure (reporting_service.coverage_report) — on-target+due ÷ active. #}
-    {% if coverage and coverage.summary.total %}
-    <span class="font-normal text-gray-400" title="Accounts contacted within their tier cadence">Coverage {{ coverage.summary.coverage_pct }}%</span>
-    {% endif %}
+    <div class="flex items-center gap-3">
+      {# Slim cadence-coverage figure (reporting_service.coverage_report) — on-target+due ÷ active. #}
+      {% if coverage and coverage.summary.total %}
+      <span class="font-normal text-gray-400" title="Accounts contacted within their tier cadence">Coverage {{ coverage.summary.coverage_pct }}%</span>
+      {% endif %}
+      {# Browse the hidden Archive (DNC) storage — the "look thru the archive" entry point. #}
+      <a href="#" role="button"
+         hx-get="/v2/partials/customers/archived"
+         hx-target="#cdm-list" hx-swap="innerHTML" hx-push-url="false"
+         class="font-medium text-gray-600 hover:text-brand-700 hover:underline underline-offset-2 focus:outline-none focus:ring-2 focus:ring-brand-400 rounded px-1"
+         title="View archived (Do Not Call) accounts">Archive (DNC)</a>
+    </div>
   </div>
 
   {# Bulk action bar — visible only when ≥1 row is checked #}

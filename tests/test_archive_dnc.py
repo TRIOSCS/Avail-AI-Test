@@ -430,3 +430,48 @@ def test_reactivate_from_detail_returns_detail(
     assert "Acme Electronics" in resp.text, (
         "reactivate without from_archived should return detail partial showing the company"
     )
+
+
+# ── UI entry points: browse-archive link + back link ───────────────────
+
+
+def test_account_list_has_archive_browse_link(
+    db_session: Session,
+    test_company: Company,
+    test_user: User,
+):
+    """The active account list exposes a link to browse the Archive (DNC) view — the
+    user's 'go and look thru the archive' entry point."""
+    c = _make_client(db_session, test_user)
+    try:
+        resp = c.get("/v2/partials/customers/account-list")
+    finally:
+        _cleanup_overrides()
+
+    assert resp.status_code == 200
+    assert 'hx-get="/v2/partials/customers/archived"' in resp.text, (
+        "account list should link to the archived browse view"
+    )
+
+
+def test_archived_view_has_back_link_and_wired_reactivate(
+    db_session: Session,
+    test_company: Company,
+    manager_user: "User",
+):
+    """The archived browse view has a back-to-accounts link and its Reactivate button
+    passes from_archived=true (so the list refreshes, not the detail)."""
+    test_company.is_active = False
+    db_session.commit()
+
+    c = _make_client(db_session, manager_user)
+    try:
+        resp = c.get("/v2/partials/customers/archived")
+    finally:
+        _cleanup_overrides()
+
+    assert resp.status_code == 200
+    assert 'hx-get="/v2/partials/customers/account-list"' in resp.text, "archived view needs a back-to-accounts link"
+    assert "reactivate?from_archived=true" in resp.text, (
+        "Reactivate from the archived view must pass from_archived=true"
+    )
