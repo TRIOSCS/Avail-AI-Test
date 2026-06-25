@@ -17,16 +17,16 @@
      class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
      role="dialog" aria-modal="true" aria-label="User management audit log"
      @click.self="$el.remove()" @keydown.escape.window="$el.remove()">
-  <div class="bg-white rounded-lg border border-brand-200 shadow-2xl w-full max-w-2xl mx-4 max-h-[85vh] flex flex-col">
+  <div class="bg-white rounded-lg border border-line-base shadow-2xl w-full max-w-2xl mx-4 max-h-[85vh] flex flex-col">
 
     {# ── Header ──────────────────────────────────────────────────────── #}
-    <div class="flex items-start justify-between px-5 py-4 border-b border-brand-200">
+    <div class="flex items-start justify-between px-5 py-4 border-b border-line-base">
       <div>
         <h3 class="text-lg font-semibold text-brand-900">User management audit log</h3>
         <p class="text-xs text-gray-600 mt-0.5">Every invite, role change, activation and access change, newest first.</p>
       </div>
       <button type="button" @click="$el.closest('#user-audit-log').remove()"
-              class="btn-secondary btn-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+              class="btn-secondary btn-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
               aria-label="Close">Close</button>
     </div>
 
@@ -47,7 +47,7 @@
         </thead>
         <tbody class="divide-y divide-gray-100">
           {% for row in audit_rows %}
-          <tr class="hover:bg-brand-50/50 transition-colors">
+          <tr class="hover:bg-accent-50/50 transition-colors">
             <td class="table-cell text-xs text-gray-600 whitespace-nowrap">{{ row.when | fmtdate }}</td>
             <td class="table-cell text-sm text-gray-900">
               {{ row.actor.name or row.actor.email if row.actor else 'system' }}
@@ -56,7 +56,7 @@
               {{ row.target.name or row.target.email if row.target else '—' }}
             </td>
             <td class="table-cell">
-              <span class="badge bg-brand-50 text-brand-700 border-brand-200">{{ action_labels.get(row.action, row.action) }}</span>
+              <span class="badge-info">{{ action_labels.get(row.action, row.action) }}</span>
             </td>
             <td class="table-cell text-xs text-gray-600">
               {% if row.detail %}
@@ -71,7 +71,7 @@
       </table>
     </div>
     {% if truncated %}
-    <div class="px-5 py-3 border-t border-brand-200 text-xs text-gray-600">Showing latest {{ limit }} of {{ total }}.</div>
+    <div class="px-5 py-3 border-t border-line-base text-xs text-gray-600">Showing latest {{ limit }} of {{ total }}.</div>
     {% endif %}
     {% endif %}
   </div>

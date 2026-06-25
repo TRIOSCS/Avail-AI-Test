@@ -4,8 +4,8 @@
                 admin/buy_plan_ops.toggle_ops_member (POST, swaps #ops-group-content).
    CSRF: htmx_app.js injects x-csrftoken on the toggle POST automatically. #}
 <div class="space-y-4" id="ops-group-content">
-  <div class="bg-white border border-brand-200 rounded-lg overflow-hidden">
-    <div class="px-5 py-4 bg-gray-50 border-b border-brand-200">
+  <div class="bg-white border border-line-base rounded-lg overflow-hidden">
+    <div class="px-5 py-4 bg-gray-50 border-b border-line-base">
       <h2 class="text-lg font-semibold text-gray-900">Ops Verification Group</h2>
       <p class="text-xs text-gray-600 mt-0.5">
         Members can verify Sales Orders and Purchase Orders in the buy-plan workflow.
@@ -30,7 +30,7 @@
         </thead>
         <tbody class="divide-y divide-gray-100">
           {% for row in rows %}
-          <tr class="hover:bg-brand-50/50 transition-colors">
+          <tr class="hover:bg-accent-50/50 transition-colors">
             <td class="table-cell">
               <div class="text-sm font-medium text-gray-900">{{ row.user.name or row.user.email }}</div>
               <div class="text-xs text-gray-600">{{ row.user.email }}</div>
@@ -58,7 +58,7 @@
                       hx-target="#ops-group-content" hx-swap="outerHTML"
                       hx-confirm="Grant {{ row.user.name or row.user.email }} authority to verify Sales Orders and Purchase Orders?"
                       data-loading-disable
-                      class="px-2.5 py-1 text-xs font-medium text-brand-600 bg-brand-50 border border-brand-200 rounded hover:bg-brand-100 transition-colors">Add</button>
+                      class="px-2.5 py-1 text-xs font-medium text-accent-600 bg-accent-50 border border-accent-200 rounded hover:bg-accent-100 transition-colors">Add</button>
               {% endif %}
             </td>
           </tr>
