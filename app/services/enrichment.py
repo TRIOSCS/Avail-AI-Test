@@ -23,6 +23,7 @@ from app.services.tagging import (
     get_or_create_commodity_tag,
     tag_material_card,
 )
+from app.shared_constants import JUNK_MANUFACTURERS
 
 # Connector configs: (source_name, connector_class_path, credential_keys, confidence)
 # Ordered by priority — authoritative distributors first
@@ -65,8 +66,6 @@ _CONNECTOR_CONFIGS = [
     },
 ]
 
-_IGNORED_MANUFACTURERS = {"", "unknown", "n/a", "various", "none", "other", "generic"}
-
 
 def _manufacturers_agree(a: str, b: str) -> bool:
     """Fuzzy manufacturer-name match: exact, or either name contains the other."""
@@ -79,14 +78,14 @@ def _nexar_manufacturer(data: dict) -> str | None:
     """Extract the first result's manufacturer name from a Nexar GraphQL payload.
 
     Returns the trimmed name, or None when there is no result or it is a junk/placeholder
-    manufacturer (per ``_IGNORED_MANUFACTURERS``).
+    manufacturer (per ``JUNK_MANUFACTURERS``).
     """
     results = (data.get("data") or {}).get("supSearchMpn", {}).get("results", [])
     if not results:
         return None
     part = results[0].get("part", {})
     mfr = ((part.get("manufacturer") or {}).get("name") or "").strip()
-    if not mfr or mfr.lower() in _IGNORED_MANUFACTURERS:
+    if not mfr or mfr.lower() in JUNK_MANUFACTURERS:
         return None
     return mfr
 
@@ -124,7 +123,7 @@ async def _try_connector_config(config: dict, mpn: str) -> dict | None:
         results = await asyncio.wait_for(connector.search(mpn), timeout=15)
         for r in results:
             mfr = (r.get("manufacturer") or "").strip()
-            if mfr.lower() not in _IGNORED_MANUFACTURERS:
+            if mfr.lower() not in JUNK_MANUFACTURERS:
                 return {
                     "manufacturer": mfr,
                     "category": (r.get("category") or r.get("description") or "").strip()[:200] or None,

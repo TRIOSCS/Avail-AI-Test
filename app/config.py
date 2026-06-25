@@ -54,9 +54,7 @@ class Settings(BaseSettings):
 
     # --- Rate limiting ---
     rate_limit_default: str = "120/minute"
-    rate_limit_search: str = "20/minute"
     rate_limit_enabled: bool = True
-    rate_limit_ai_search: str = "10/minute"
 
     # --- Cross-app alerts ---
     alert_recency_days: int = 30  # FYI alerts only count items newer than this
@@ -331,7 +329,6 @@ class Settings(BaseSettings):
     mvp_mode: bool = True
 
     # --- Frontend ---
-    use_htmx: bool = True
     # Gates the merged v2 opportunity-table rendering on /requisitions2.
     # See docs/superpowers/specs/2026-04-21-opportunity-table-merged-design.md
     # Flip to false + restart to revert to legacy rendering with no code change.
