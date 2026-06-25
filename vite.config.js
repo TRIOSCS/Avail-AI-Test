@@ -17,7 +17,8 @@ export default defineConfig({
     rollupOptions: {
       input: {
         htmx_app: resolve(__dirname, "app/static/htmx_app.js"),
-        htmx_mobile: resolve(__dirname, "app/static/htmx_mobile.css"),
+        // htmx_mobile.css is imported by htmx_app.js (so it ships in that bundle);
+        // a standalone entry emitted an htmx_mobile-*.css that nothing loaded.
         styles: resolve(__dirname, "app/static/styles.css"),
       },
     },
