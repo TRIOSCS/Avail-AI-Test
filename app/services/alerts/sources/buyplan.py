@@ -30,6 +30,7 @@ from app.constants import (
     BuyPlanStatus,
     SOVerificationStatus,
 )
+from app.dependencies import can_approve_buy_plans
 from app.models.auth import User
 from app.models.buy_plan import BuyPlan, BuyPlanLine, VerificationGroupMember
 
@@ -83,8 +84,6 @@ class BuyplanActionSource(AlertSource):
         #    right. Single source of truth: can_approve_buy_plans (the per-user column the
         #    approve route + service enforce), NOT a role set — so the badge never counts a
         #    step the user could not actually act on, and always counts one they can.
-        from app.dependencies import can_approve_buy_plans
-
         if can_approve_buy_plans(user):
             approval_plans = (
                 db.query(BuyPlan.id)

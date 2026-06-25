@@ -159,7 +159,7 @@ def _log_approval_activity(plan: BuyPlan, action: str, user: User, notes: str | 
     # timeline without extra resolution here.
     log_activity(
         db,
-        activity_type=str(activity_type),
+        activity_type=activity_type,
         user_id=user.id,
         buy_plan_id=plan.id,
         requisition_id=plan.requisition_id,
