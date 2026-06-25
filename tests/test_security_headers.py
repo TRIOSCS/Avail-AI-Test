@@ -87,6 +87,45 @@ def test_error_response_format(client):
     assert "request_id" in data
 
 
+# ── Cache-Control no-store tests ──────────────────────────────────────
+
+
+def test_partial_html_response_is_no_store(client):
+    """HTMX partial (/v2/partials/*) HTML responses carry no-store/no-cache.
+
+    Without this, browsers heuristically cache partial GETs and in-app HTMX navigation
+    keeps swapping in stale UI after a deploy until a hard-refresh.
+    """
+    resp = client.get("/v2/partials/requisitions/create-form")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/html")
+    cache_control = resp.headers.get("Cache-Control", "")
+    assert "no-store" in cache_control
+    assert "no-cache" in cache_control
+    assert "must-revalidate" in cache_control
+    assert resp.headers.get("Pragma") == "no-cache"
+
+
+def test_full_page_html_response_is_no_store(client):
+    """Full-page (non-HTMX) HTML shell is also no-store so a redeploy's shell + hashed
+    bundle refs are fetched fresh, not served from a stale cached shell."""
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/html")
+    cache_control = resp.headers.get("Cache-Control", "")
+    assert "no-store" in cache_control
+    assert resp.headers.get("Pragma") == "no-cache"
+
+
+def test_json_response_is_not_no_store(client, test_requisition):
+    """JSON API responses are NOT touched by the HTML no-store branch."""
+    resp = client.get("/api/requisitions")
+    assert "application/json" in resp.headers.get("content-type", "")
+    # The HTML branch must not have run: no no-store Cache-Control, no Pragma.
+    assert "no-store" not in resp.headers.get("Cache-Control", "")
+    assert "Pragma" not in resp.headers
+
+
 # ── CSP tests ────────────────────────────────────────────────────────
 
 

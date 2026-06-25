@@ -27,7 +27,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "155_roles_manager"
-down_revision = "153_quote_graph_ids"
+down_revision = "154_drop_dead_cols"
 branch_labels = None
 depends_on = None
 

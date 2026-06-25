@@ -537,18 +537,19 @@ async def request_id_middleware(request: Request, call_next):
                 response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
             else:
                 response.headers["Cache-Control"] = "public, max-age=3600"
-        # Full-page HTML loads (non-HTMX requests): no-cache so a new deploy's shell + hashed
-        # CSS/JS bundle is fetched fresh instead of a heuristically-cached stale shell. HTMX
-        # partials (HX-Request) and /static (above) are unaffected. Set HERE (outermost
-        # middleware) because header sets on the TemplateResponse itself are dropped by inner
-        # response processing before reaching the client.
-        elif (
-            request.headers.get("HX-Request") is None
-            and not path.startswith("/api")
-            and "/partials/" not in path
-            and "text/html" in (response.headers.get("content-type") or "")
-        ):
-            response.headers["Cache-Control"] = "no-cache, must-revalidate"
+        # Every HTML response — full-page shell AND HTMX partials (/v2/partials/*) — is
+        # made non-cacheable so a new deploy's markup is fetched fresh instead of a
+        # heuristically-cached stale fragment. Without this, browsers cache partial GETs
+        # and in-app HTMX navigation keeps swapping in stale UI until a hard-refresh.
+        # Guard is the response content-type ONLY (starts with "text/html"): that naturally
+        # excludes JSON, content-hashed /static assets (handled above), text/event-stream
+        # SSE streams, and file downloads (PDF/CSV/image Content-Disposition responses),
+        # and we never read the response body — so streaming responses stay intact. Set
+        # HERE (outermost middleware) because header sets on the TemplateResponse itself
+        # are dropped by inner response processing before reaching the client.
+        elif (response.headers.get("content-type") or "").startswith("text/html"):
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
 
         # Skip noisy paths (static files, health checks)
         if not (path.startswith("/static") or path == "/health"):

@@ -6,7 +6,7 @@
    so stale pairs referencing the merged entity drop without a manual refresh).
    Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}
-{% from "htmx/partials/settings/_macros.html" import merge_button -%}
+{% from "htmx/partials/settings/_macros.html" import merge_button, delete_both_button, mass_action_bar -%}
 <div class="space-y-6">
 
   {# ── Pending OEM Spec-Code Mappings (admin approval queue) ── #}
@@ -30,7 +30,11 @@
   </div>
 
   {# ── Vendor Dedup ──────────────────────────────────────── #}
-  <div class="bg-white border border-line-base rounded-lg overflow-hidden">
+  {# x-data="dedupSelect()" scopes the per-section multi-select. Selection unit is the
+     pair token "<keeperId>-<loserId>"; the mass-action bar reads it for bulk ops. The
+     whole section re-swaps into #settings-content on each action, and the afterSwap
+     handler re-initTrees that node so the checkboxes rebind. #}
+  <div class="bg-white border border-line-base rounded-lg overflow-hidden" x-data="dedupSelect()">
     <div class="px-4 py-3 bg-gray-50 border-b flex items-center justify-between">
       <h2 class="text-lg font-semibold text-gray-900">Vendor Duplicates</h2>
       <button hx-get="/v2/partials/settings/data-ops"
@@ -46,17 +50,42 @@
       <p class="text-sm text-rose-600">Couldn't check for duplicate vendors right now &mdash; try Refresh.</p>
     </div>
     {% elif vendor_dupes %}
+    {# Pre-compute keeper-first pair tokens so both the per-row checkbox and the select-all
+       agree on the canonical "<keeperId>-<loserId>" form (keeper-first → bulk merge keeps
+       the suggested side). #}
+    {% set vendor_tokens = [] %}
+    {% for pair in vendor_dupes %}
+      {% set keep_first = (pair.vendor_a.sightings or 0) >= (pair.vendor_b.sightings or 0) %}
+      {% set _kid = pair.vendor_a.id if keep_first else pair.vendor_b.id %}
+      {% set _lid = pair.vendor_b.id if keep_first else pair.vendor_a.id %}
+      {% set _ = vendor_tokens.append(_kid ~ '-' ~ _lid) %}
+    {% endfor %}
+    <div class="px-4 py-2 border-b border-gray-100 flex items-center gap-2">
+      {# tojson is Markup-safe and emits double-quoted strings, so it MUST live in a
+         SINGLE-quoted attribute — a double-quoted @change would have the token's " close
+         the attribute early and silently kill Alpine init for the whole component. #}
+      <input type="checkbox" aria-label="Select all vendor pairs"
+             class="rounded border-gray-300 text-accent-500 focus:ring-accent-400"
+             :checked="count === {{ vendor_tokens|length }} && count > 0"
+             @change='toggleAll($event.target.checked, {{ vendor_tokens|tojson }})'>
+      <span class="text-xs text-gray-600">Select all</span>
+    </div>
     <div class="divide-y divide-gray-100">
       {# find_vendor_dedup_candidates returns NESTED pairs: pair.vendor_a/vendor_b
          each {id, name, sightings}, plus pair.score. The suggested keeper is the side
-         with more sightings (more evidence → richer card); ties keep vendor_a. Both
+         with more sightings (more evidence → richer card); ties keep vendor_a. The merge
          buttons wire to the admin vendor-merge endpoint, which re-renders this whole
          partial into #settings-content so the merged pair drops. #}
       {% for pair in vendor_dupes %}
       {% set keep_first = (pair.vendor_a.sightings or 0) >= (pair.vendor_b.sightings or 0) %}
       {% set keeper = pair.vendor_a if keep_first else pair.vendor_b %}
       {% set loser = pair.vendor_b if keep_first else pair.vendor_a %}
-      <div class="px-4 py-3 flex items-center gap-4" x-data="{ merged: false }">
+      {% set token = keeper.id ~ '-' ~ loser.id %}
+      <div class="px-4 py-3 flex items-center gap-4" data-pair="{{ token }}">
+        <input type="checkbox" aria-label="Select pair {{ keeper.name }} and {{ loser.name }}"
+               class="rounded border-gray-300 text-accent-500 focus:ring-accent-400"
+               :checked="has('{{ token }}')"
+               @change="toggle('{{ token }}', $event.target.checked)">
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-2 text-sm">
             <span class="font-medium text-gray-900">{{ pair.vendor_a.name }}</span>
@@ -69,15 +98,15 @@
             &middot; suggested keep: <span class="font-medium text-gray-700">{{ keeper.name|truncate(24) }}</span>
           </p>
         </div>
-        <template x-if="!merged" x-cloak>
-          <div class="flex gap-2">
-            {{ merge_button('            ', '/v2/partials/admin/vendor-merge', '#settings-content', keeper.id, loser.id, keeper.name, loser.name, true) }}
-            {{ merge_button('            ', '/v2/partials/admin/vendor-merge', '#settings-content', loser.id, keeper.id, loser.name, keeper.name, false) }}
-          </div>
-        </template>
+        <div class="flex gap-2">
+          {{ merge_button('          ', '/v2/partials/admin/vendor-merge', '#settings-content', keeper.id, loser.id, keeper.name, loser.name, true) }}
+          {{ merge_button('          ', '/v2/partials/admin/vendor-merge', '#settings-content', loser.id, keeper.id, loser.name, keeper.name, false) }}
+          {{ delete_both_button('/v2/partials/admin/vendor-delete-both', '#settings-content', keeper.id, loser.id, keeper.name, loser.name) }}
+        </div>
       </div>
       {% endfor %}
     </div>
+    {{ mass_action_bar('/v2/partials/admin/vendor-bulk', '#settings-content', 'vendor') }}
     {% else %}
     <div class="px-4 py-8 text-center">
       <p class="text-sm text-gray-600">No duplicate vendors found at the current threshold.</p>
@@ -86,7 +115,7 @@
   </div>
 
   {# ── Company Dedup ─────────────────────────────────────── #}
-  <div class="bg-white border border-line-base rounded-lg overflow-hidden">
+  <div class="bg-white border border-line-base rounded-lg overflow-hidden" x-data="dedupSelect()">
     <div class="px-4 py-3 bg-gray-50 border-b">
       <h2 class="text-lg font-semibold text-gray-900">Company Duplicates</h2>
     </div>
@@ -97,6 +126,21 @@
       <p class="text-sm text-rose-600">Couldn't check for duplicate companies right now &mdash; try Refresh.</p>
     </div>
     {% elif company_dupes %}
+    {% set company_tokens = [] %}
+    {% for pair in company_dupes %}
+      {% set keep_first = (pair.auto_keep_id == pair.company_a.id) %}
+      {% set _kid = pair.company_a.id if keep_first else pair.company_b.id %}
+      {% set _lid = pair.company_b.id if keep_first else pair.company_a.id %}
+      {% set _ = company_tokens.append(_kid ~ '-' ~ _lid) %}
+    {% endfor %}
+    <div class="px-4 py-2 border-b border-gray-100 flex items-center gap-2">
+      {# tojson must live in a SINGLE-quoted attribute (see vendor select-all note). #}
+      <input type="checkbox" aria-label="Select all company pairs"
+             class="rounded border-gray-300 text-accent-500 focus:ring-accent-400"
+             :checked="count === {{ company_tokens|length }} && count > 0"
+             @change='toggleAll($event.target.checked, {{ company_tokens|tojson }})'>
+      <span class="text-xs text-gray-600">Select all</span>
+    </div>
     <div class="divide-y divide-gray-100">
       {# find_company_dedup_candidates returns NESTED pairs: pair.company_a/company_b
          each {id, name, site_count, has_owner}, plus pair.score + pair.auto_keep_id.
@@ -108,7 +152,12 @@
       {% set keep_first = (pair.auto_keep_id == pair.company_a.id) %}
       {% set keeper = pair.company_a if keep_first else pair.company_b %}
       {% set loser = pair.company_b if keep_first else pair.company_a %}
-      <div class="px-4 py-3 flex items-center gap-4" x-data="{ merged: false }">
+      {% set token = keeper.id ~ '-' ~ loser.id %}
+      <div class="px-4 py-3 flex items-center gap-4" data-pair="{{ token }}">
+        <input type="checkbox" aria-label="Select pair {{ keeper.name }} and {{ loser.name }}"
+               class="rounded border-gray-300 text-accent-500 focus:ring-accent-400"
+               :checked="has('{{ token }}')"
+               @change="toggle('{{ token }}', $event.target.checked)">
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-2 text-sm">
             <span class="font-medium text-gray-900">{{ pair.company_a.name }}</span>
@@ -121,15 +170,15 @@
             &middot; suggested keep: <span class="font-medium text-gray-700">{{ keeper.name|truncate(24) }}</span>
           </p>
         </div>
-        <template x-if="!merged" x-cloak>
-          <div class="flex gap-2">
-            {{ merge_button('            ', '/v2/partials/admin/company-merge', '#settings-content', keeper.id, loser.id, keeper.name, loser.name, true) }}
-            {{ merge_button('            ', '/v2/partials/admin/company-merge', '#settings-content', loser.id, keeper.id, loser.name, keeper.name, false) }}
-          </div>
-        </template>
+        <div class="flex gap-2">
+          {{ merge_button('          ', '/v2/partials/admin/company-merge', '#settings-content', keeper.id, loser.id, keeper.name, loser.name, true) }}
+          {{ merge_button('          ', '/v2/partials/admin/company-merge', '#settings-content', loser.id, keeper.id, loser.name, keeper.name, false) }}
+          {{ delete_both_button('/v2/partials/admin/company-delete-both', '#settings-content', keeper.id, loser.id, keeper.name, loser.name) }}
+        </div>
       </div>
       {% endfor %}
     </div>
+    {{ mass_action_bar('/v2/partials/admin/company-bulk', '#settings-content', 'company') }}
     {% else %}
     <div class="px-4 py-8 text-center">
       <p class="text-sm text-gray-600">No duplicate companies found at the current threshold.</p>
