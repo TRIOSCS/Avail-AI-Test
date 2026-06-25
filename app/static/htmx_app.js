@@ -1106,6 +1106,35 @@ Alpine.data('rowActionRail', () => ({
   },
 }));
 
+// Data Ops dedup multi-select — one instance per dedup section (vendor / company).
+// Selection unit is a PAIR token "<keeperId>-<loserId>" (keeper-first so bulk-merge
+// keeps the suggested side). Mirrors rq2Page's Set-based pattern (reassign the Set to
+// trigger Alpine reactivity). Lives inside #settings-content, which the htmx:afterSwap
+// handler re-initTrees, so it rebinds cleanly after each merge/delete re-render.
+Alpine.data('dedupSelect', () => ({
+  selected: new Set(),
+  toggle(token, checked) {
+    if (checked) { this.selected.add(token); } else { this.selected.delete(token); }
+    this.selected = new Set(this.selected);
+  },
+  toggleAll(checked, tokens) {
+    if (checked) { tokens.forEach(t => this.selected.add(t)); } else { this.selected.clear(); }
+    this.selected = new Set(this.selected);
+  },
+  clear() { this.selected = new Set(); },
+  has(token) { return this.selected.has(token); },
+  get count() { return this.selected.size; },
+  // Comma-joined "a-b,c-d" string the bulk endpoint parses.
+  get pairsStr() { return [...this.selected].join(','); },
+  // Hide the dismissed rows immediately (client-only); the form re-renders the list.
+  hideSelected() {
+    this.selected.forEach(token => {
+      const row = this.$root.querySelector('[data-pair="' + token + '"]');
+      if (row) { row.style.display = 'none'; }
+    });
+  },
+}));
+
 // ── Page-level loading bar for navigation ──────────────────
 // Shows a slim progress bar at the top when navigating between pages.
 htmx.on('htmx:beforeRequest', function(evt) {
@@ -1142,9 +1171,18 @@ htmx.on('htmx:afterSwap', function(evt) {
     // x-chip-overflow — directives that must re-bind after filter/sort/action swaps;
     // rfq-affinity-section — affinity rows whose :checked/@change checkboxes bind to
     // the surrounding rfqVendorModal x-data scope, otherwise the checkboxes are inert
-    // and ticked affinity vendors never enter selectedVendors / never get sent).
+    // and ticked affinity vendors never enter selectedVendors / never get sent;
+    // settings-content — the Settings tab body is lazy-swapped here and re-swapped by
+    // every settings mutation (e.g. a dedup merge re-renders Data Ops), so its Alpine
+    // directives — the Data Ops multi-select bar — must re-init or the checkboxes go
+    // inert and selection state is lost after the first action).
     if (t && typeof Alpine !== 'undefined' && typeof Alpine.initTree === 'function') {
-        if (t.id === 'lead-drawer-content' || t.id === 'rq2-table' || t.id === 'rfq-affinity-section') {
+        if (
+            t.id === 'lead-drawer-content' ||
+            t.id === 'rq2-table' ||
+            t.id === 'rfq-affinity-section' ||
+            t.id === 'settings-content'
+        ) {
             Alpine.initTree(t);
         }
     }

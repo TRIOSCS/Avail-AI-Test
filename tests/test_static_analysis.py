@@ -643,3 +643,64 @@ def test_nav_poll_badges_optout_of_push_url():
         "bottom-nav badge poll spans inherit the nav <a>'s hx-push-url and rewrite the "
         'address bar; add hx-push-url="false":\n' + "\n".join(offenders)
     )
+
+
+def _func_source(path: str, func_name: str) -> str:
+    """Return the source text of a top-level function by name (AST, line-shift
+    proof)."""
+    import ast
+
+    src = Path(path).read_text()
+    tree = ast.parse(src)
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == func_name:
+            return ast.get_source_segment(src, node)
+    raise AssertionError(f"{func_name} not found in {path}")
+
+
+def test_delete_vendor_cards_does_not_null_notnull_cascade_children():
+    """REGRESSION (CRITICAL, structural): the SQLite test DB ignores NOT-NULL-on-UPDATE,
+    so a functional test alone can't prove the bug stays fixed.
+
+    Lock it in structurally: the
+    four NOT-NULL ondelete=CASCADE children of a vendor card must NOT be enumerated in
+    ``delete_vendor_cards``' detach/NULL list — NULLing them raises NotNullViolation on
+    Postgres. They cascade-delete with the card via ``db.delete(card)``.
+    """
+    body = _func_source("app/services/vendor_merge_service.py", "delete_vendor_cards")
+    # A NOT-NULL child enumerated as a real detach tuple — (Model, "vendor_card_id") — is
+    # the bug. Match that exact tuple syntax so prose/comment mentions of the model names
+    # (which explain WHY they're excluded) don't false-trip the guard.
+    notnull_children = ["VendorContact", "VendorReview", "VendorMetricsSnapshot", "BuyerVendorStats"]
+    offenders = [m for m in notnull_children if f'({m}, "vendor_card_id")' in body]
+    assert not offenders, (
+        "delete_vendor_cards lists NOT-NULL ondelete=CASCADE children in its detach/NULL "
+        f"loop — NULLing these raises NotNullViolation on Postgres: {offenders}. "
+        "Remove them; db.delete(card) cascade-deletes them."
+    )
+    # And the cascade path itself must still be present (both cards explicitly deleted).
+    assert "db.delete(card_a)" in body and "db.delete(card_b)" in body, (
+        "delete_vendor_cards must db.delete() both cards so the DB ON DELETE CASCADE removes the NOT-NULL children."
+    )
+
+
+def test_dedup_services_fail_closed_on_detach_error():
+    """REGRESSION (MEDIUM): both delete-both services must FAIL CLOSED — a detach/purge
+    error re-raises so the route rolls back, never deleting the parents and silently
+    orphaning/losing dependent rows.
+
+    Guard: every ``except`` in the detach/purge loops
+    re-raises (no fail-open ``logger.warning`` + fall-through).
+    """
+    for path, func in (
+        ("app/services/company_merge_service.py", "delete_companies"),
+        ("app/services/vendor_merge_service.py", "delete_vendor_cards"),
+    ):
+        body = _func_source(path, func)
+        # The detach/purge region precedes the parent db.delete().
+        region = re.split(r"db\.delete\(\w+_a\)", body)[0]
+        # Every except in that region must re-raise. A bare logger.warning with no raise is
+        # the fail-open data-loss path we removed.
+        for m in re.finditer(r"except Exception as e:(.*?)(?=\n {0,8}\w|\Z)", region, re.DOTALL):
+            block = m.group(1)
+            assert "raise" in block, f"{func}: detach/purge except block fails open (no re-raise):\n{block}"
