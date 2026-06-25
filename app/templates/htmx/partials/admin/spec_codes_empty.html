@@ -3,10 +3,10 @@
              the #spec-codes-content region after the last row is approved/rejected.
    Called by: spec_codes_pending.html (inline) and
               app/routers/admin/spec_codes.py (OOB swap on last-row removal).
-   Depends on: Tailwind CSS with brand palette.
+   Depends on: Tailwind CSS design-system primitives (.border-line-base).
 #}
 <div id="spec-codes-content"{% if oob %} hx-swap-oob="true"{% endif %}>
-  <div class="bg-white border border-brand-200 rounded-lg px-4 py-8 text-center">
+  <div class="bg-white border border-line-base rounded-lg px-4 py-8 text-center">
     <p class="text-sm text-gray-600">No pending mappings.</p>
   </div>
 </div>
