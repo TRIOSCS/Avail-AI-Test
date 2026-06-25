@@ -6,6 +6,7 @@
    Depends on: task_due_state global, the existing complete route
                (/v2/partials/tasks/{id}/complete).
 #}
+{% from "htmx/partials/shared/_macros.html" import task_priority_badge %}
 {% if tasks %}
 <ul id="tasks-list" class="space-y-2">
   {% for t in tasks %}
@@ -31,14 +32,8 @@
     <div class="min-w-0 flex-1">
       <span class="text-sm font-medium text-gray-900">{{ t.title }}</span>
 
-      {# Priority indicator (3=high, 1=low) — mirrors the requisition task list. #}
-      {% if t.priority == 3 %}
-        <span class="ml-2 inline-flex px-2 py-0.5 text-xs font-semibold uppercase tracking-wider rounded-full
-                     bg-rose-100 text-rose-700">High</span>
-      {% elif t.priority == 1 %}
-        <span class="ml-2 inline-flex px-2 py-0.5 text-xs font-semibold uppercase tracking-wider rounded-full
-                     bg-gray-100 text-gray-600">Low</span>
-      {% endif %}
+      {# Priority indicator (3=high, 1=low) — shared macro from _macros.html. #}
+      <span class="ml-2">{{ task_priority_badge(t.priority) }}</span>
 
       {# Due date with overdue/due-today/future badge #}
       {% if t.due_at %}

@@ -183,6 +183,22 @@ Usage:
                Accessibility: the label is plain text so the meaning does not
                depend on color alone; the dot carries aria-hidden.
 #}
+{# ── Task Priority Badge ──────────────────────────────────────────── #}
+{#
+  Purpose:     Renders a priority badge for a task (3=high, 2=normal, 1=low).
+               Normal priority renders nothing (no visual noise).
+  Depends on:  Tailwind CSS.
+  Called-by:   htmx/partials/my_day.html, htmx/partials/tasks/_results.html
+#}
+{% macro task_priority_badge(priority) -%}
+{%- if priority == 3 -%}
+<span class="inline-flex px-2 py-0.5 text-xs font-semibold uppercase tracking-wider rounded-full bg-rose-100 text-rose-700">High</span>
+{%- elif priority == 1 -%}
+<span class="inline-flex px-2 py-0.5 text-xs font-semibold uppercase tracking-wider rounded-full bg-gray-100 text-gray-600">Low</span>
+{%- endif -%}
+{%- endmacro %}
+
+
 {% macro status_dot(value) %}
 {%- set bucket_map = {
   'active': 'open', 'sourcing': 'sourcing', 'offers': 'offered',
