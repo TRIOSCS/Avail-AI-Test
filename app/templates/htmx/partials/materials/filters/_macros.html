@@ -1,7 +1,26 @@
 {# Filter macros for faceted search sidebar.
-   Called by: subfilters.html
+   Called by: subfilters.html, workspace.html (removable_chip)
    Depends on: Alpine.js materialsFilter() component on parent
 #}
+
+{% macro removable_chip(label, tone, remove_expr) %}
+{# Active-filter pill with a × dismiss button.
+   label       — raw HTML: may contain <span x-text="…"> or plain text.
+   tone        — color key: 'blue' | 'amber' | 'gray' | 'accent'.
+   remove_expr — Alpine expression for the button @click handler.
+#}
+{% set tone_map = {
+  'blue':   ('bg-blue-50',   'text-blue-700',   'border-blue-200',   'hover:text-blue-900'),
+  'amber':  ('bg-amber-50',  'text-amber-700',  'border-amber-200',  'hover:text-amber-900'),
+  'gray':   ('bg-gray-100',  'text-gray-600',   'border-gray-200',   'hover:text-gray-900'),
+  'accent': ('bg-accent-50', 'text-accent-700', 'border-accent-200', 'hover:text-accent-900'),
+} %}
+{% set t = tone_map.get(tone, tone_map['gray']) %}
+<span class="chip {{ t[0] }} {{ t[1] }} {{ t[2] }}">
+  {{ label|safe }}
+  <button @click="{{ remove_expr }}" class="{{ t[3] }} ml-0.5" aria-label="Remove filter">&times;</button>
+</span>
+{% endmacro %}
 
 {% macro checkbox_group(spec_key, display_name, values, counts, active_values) %}
 {# Fold state lives on the parent materialsFilter component (ui.facetExpanded[spec_key]) so it
@@ -13,7 +32,7 @@
      don't have to scroll a long list. State lives on the parent (ui.facetSearch[spec_key]). #}
   <input type="text" x-model="ui.facetSearch['{{ spec_key }}']" placeholder="Search {{ display_name|lower }}…"
          aria-label="Search {{ display_name }}"
-         class="w-full mb-1 px-2 py-1 text-[13px] border border-gray-200 rounded focus:ring-1 focus:ring-accent-500 focus:border-accent-500">
+         class="w-full mb-1 px-2 py-1 text-[13px] border border-gray-200 rounded input-focus">
   {% endif %}
   {# A search box only helps if its matches are reachable: when present, the collapsed clamp
      must scroll (overflow-y-auto) instead of hiding matches below the fold (overflow-hidden). #}
@@ -75,14 +94,14 @@
            :value="subFilters['{{ spec_key }}_min'] || ''"
            @input.debounce.600ms="setRange('{{ spec_key }}', 'min', $event.target.value)"
            aria-label="{{ display_name }} minimum"
-           class="w-full px-2 py-1.5 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-accent-500 focus:border-accent-500 tabular-nums"
+           class="w-full px-2 py-1.5 text-sm border border-gray-200 rounded input-focus tabular-nums"
            min="{{ range_data.min }}" max="{{ range_data.max }}" step="any">
     <span class="text-gray-300 text-xs flex-shrink-0">&ndash;</span>
     <input type="number" placeholder="{{ '%.4g'|format(range_data.max) }}"
            :value="subFilters['{{ spec_key }}_max'] || ''"
            @input.debounce.600ms="setRange('{{ spec_key }}', 'max', $event.target.value)"
            aria-label="{{ display_name }} maximum"
-           class="w-full px-2 py-1.5 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-accent-500 focus:border-accent-500 tabular-nums"
+           class="w-full px-2 py-1.5 text-sm border border-gray-200 rounded input-focus tabular-nums"
            min="{{ range_data.min }}" max="{{ range_data.max }}" step="any">
   </div>
   {% else %}
@@ -116,7 +135,7 @@
   <h4 class="text-[11px] font-semibold text-gray-400 uppercase tracking-widest mb-1.5">{{ display_name }}</h4>
   <input type="text" x-model="ui.facetSearch['{{ spec_key }}']" placeholder="Search {{ display_name|lower }}…"
          aria-label="Search {{ display_name }}"
-         class="w-full mb-1 px-2 py-1 text-[13px] border border-gray-200 rounded focus:ring-1 focus:ring-accent-500 focus:border-accent-500">
+         class="w-full mb-1 px-2 py-1 text-[13px] border border-gray-200 rounded input-focus">
   <div class="space-y-0.5 max-h-40 overflow-y-auto">
     {% for val in values %}
     {# Single-quoted attributes: |tojson emits double quotes, so it is safe inside single

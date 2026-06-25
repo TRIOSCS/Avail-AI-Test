@@ -2,7 +2,7 @@
    Called by: htmx_views.py materials_workspace route
    Depends on: Alpine.js materialsFilter() in htmx_app.js
 #}
-{% from "htmx/partials/materials/filters/_macros.html" import disclosure_header %}
+{% from "htmx/partials/materials/filters/_macros.html" import disclosure_header, removable_chip %}
 <div id="materials-workspace" x-data="materialsFilter"
      data-display-names='{{ display_names|tojson }}' class="flex h-full">
 
@@ -359,102 +359,57 @@
       <template x-if="commodity || q || Object.keys(subFilters).length > 0 || confidenceNarrowed || lifecycle.length > 0 || rohs.length > 0 || condition.length > 0 || hasDatasheet || needsReview || sourcingActiveCount > 0" x-cloak>
         <div class="flex flex-wrap gap-1.5 mt-2">
           <template x-if="q" x-cloak>
-            <span class="chip bg-blue-50 text-blue-700 border-blue-200">
-              Search: <span x-text="q"></span>
-              <button @click="q = ''; applyFilters()" class="hover:text-blue-900 ml-0.5" aria-label="Remove filter">&times;</button>
-            </span>
+            {{ removable_chip('Search: <span x-text="q"></span>', 'blue', "q = ''; applyFilters()") }}
           </template>
           {# Data-confidence chips — only when narrowed from the all-on default #}
           <template x-for="group in activeConfidenceGroups" :key="'conf-' + group.key">
-            <span class="chip bg-amber-50 text-amber-700 border-amber-200">
-              Confidence: <span x-text="group.label"></span>
-              <button @click="toggleConfidenceGroup(group.key)" class="hover:text-amber-900 ml-0.5" aria-label="Remove filter">&times;</button>
-            </span>
+            {{ removable_chip('Confidence: <span x-text="group.label"></span>', 'amber', 'toggleConfidenceGroup(group.key)') }}
           </template>
           {# Lifecycle chips #}
           <template x-for="val in lifecycle" :key="'lc-' + val">
-            <span class="chip bg-gray-100 text-gray-600 border-gray-200">
-              <span x-text="'Lifecycle: ' + val.toUpperCase()"></span>
-              <button @click="removeGlobalFacet('lifecycle', val)" class="hover:text-gray-900 ml-0.5" aria-label="Remove filter">&times;</button>
-            </span>
+            {{ removable_chip("<span x-text=\"'Lifecycle: ' + val.toUpperCase()\"></span>", 'gray', "removeGlobalFacet('lifecycle', val)") }}
           </template>
           {# RoHS chips #}
           <template x-for="val in rohs" :key="'rohs-' + val">
-            <span class="chip bg-gray-100 text-gray-600 border-gray-200">
-              <span x-text="'RoHS: ' + val"></span>
-              <button @click="removeGlobalFacet('rohs', val)" class="hover:text-gray-900 ml-0.5" aria-label="Remove filter">&times;</button>
-            </span>
+            {{ removable_chip("<span x-text=\"'RoHS: ' + val\"></span>", 'gray', "removeGlobalFacet('rohs', val)") }}
           </template>
           {# Condition chips #}
           <template x-for="val in condition" :key="'cond-' + val">
-            <span class="chip bg-gray-100 text-gray-600 border-gray-200">
-              <span x-text="'Condition: ' + val"></span>
-              <button @click="removeGlobalFacet('condition', val)" class="hover:text-gray-900 ml-0.5" aria-label="Remove filter">&times;</button>
-            </span>
+            {{ removable_chip("<span x-text=\"'Condition: ' + val\"></span>", 'gray', "removeGlobalFacet('condition', val)") }}
           </template>
           {# Has-datasheet chip #}
           <template x-if="hasDatasheet" x-cloak>
-            <span class="chip bg-gray-100 text-gray-600 border-gray-200">
-              Has datasheet
-              <button @click="hasDatasheet = false; applyFilters()" class="hover:text-gray-900 ml-0.5" aria-label="Remove filter">&times;</button>
-            </span>
+            {{ removable_chip('Has datasheet', 'gray', 'hasDatasheet = false; applyFilters()') }}
           </template>
           {# Needs-review chip — validation-conflict review queue #}
           <template x-if="needsReview" x-cloak>
-            <span class="chip bg-amber-50 text-amber-700 border-amber-200">
-              Needs review
-              <button @click="needsReview = false; applyFilters()" class="hover:text-amber-900 ml-0.5" aria-label="Remove filter">&times;</button>
-            </span>
+            {{ removable_chip('Needs review', 'amber', 'needsReview = false; applyFilters()') }}
           </template>
           {# Sourcing-signal chips #}
           <template x-if="hasStock" x-cloak>
-            <span class="chip bg-gray-100 text-gray-600 border-gray-200">
-              Has stock seen
-              <button @click="hasStock = false; applyFilters()" class="hover:text-gray-900 ml-0.5" aria-label="Remove filter">&times;</button>
-            </span>
+            {{ removable_chip('Has stock seen', 'gray', 'hasStock = false; applyFilters()') }}
           </template>
           <template x-if="hasPrice" x-cloak>
-            <span class="chip bg-gray-100 text-gray-600 border-gray-200">
-              Has price
-              <button @click="hasPrice = false; applyFilters()" class="hover:text-gray-900 ml-0.5" aria-label="Remove filter">&times;</button>
-            </span>
+            {{ removable_chip('Has price', 'gray', 'hasPrice = false; applyFilters()') }}
           </template>
           <template x-if="hasCrosses" x-cloak>
-            <span class="chip bg-gray-100 text-gray-600 border-gray-200">
-              Has alternates
-              <button @click="hasCrosses = false; applyFilters()" class="hover:text-gray-900 ml-0.5" aria-label="Remove filter">&times;</button>
-            </span>
+            {{ removable_chip('Has alternates', 'gray', 'hasCrosses = false; applyFilters()') }}
           </template>
           <template x-if="internal !== 'all'" x-cloak>
-            <span class="chip bg-gray-100 text-gray-600 border-gray-200">
-              <span x-text="internal === 'internal' ? 'Internal parts' : 'Standard MPNs'"></span>
-              <button @click="setInternal('all')" class="hover:text-gray-900 ml-0.5" aria-label="Remove filter">&times;</button>
-            </span>
+            {{ removable_chip("<span x-text=\"internal === 'internal' ? 'Internal parts' : 'Standard MPNs'\"></span>", 'gray', "setInternal('all')") }}
           </template>
           <template x-if="searchedWithin !== 'any'" x-cloak>
-            <span class="chip bg-gray-100 text-gray-600 border-gray-200">
-              <span x-text="'Searched: ' + searchedWithin"></span>
-              <button @click="searchedWithin = 'any'; applyFilters()" class="hover:text-gray-900 ml-0.5" aria-label="Remove filter">&times;</button>
-            </span>
+            {{ removable_chip("<span x-text=\"'Searched: ' + searchedWithin\"></span>", 'gray', "searchedWithin = 'any'; applyFilters()") }}
           </template>
           <template x-if="minSearches > 0" x-cloak>
-            <span class="chip bg-gray-100 text-gray-600 border-gray-200">
-              <span x-text="'Min searches: ' + minSearches"></span>
-              <button @click="minSearches = 0; applyFilters()" class="hover:text-gray-900 ml-0.5" aria-label="Remove filter">&times;</button>
-            </span>
+            {{ removable_chip("<span x-text=\"'Min searches: ' + minSearches\"></span>", 'gray', 'minSearches = 0; applyFilters()') }}
           </template>
           <template x-if="commodity" x-cloak>
-            <span class="chip bg-accent-50 text-accent-700 border-accent-200">
-              <span x-text="commodityDisplayName"></span>
-              <button @click="selectCommodity(null)" class="hover:text-accent-900 ml-0.5" aria-label="Remove filter">&times;</button>
-            </span>
+            {{ removable_chip('<span x-text="commodityDisplayName"></span>', 'accent', 'selectCommodity(null)') }}
           </template>
           <template x-for="[key, vals] in Object.entries(subFilters)" :key="key">
             <template x-for="val in (Array.isArray(vals) ? vals : [vals])" :key="key + val">
-              <span class="chip bg-gray-100 text-gray-600 border-gray-200">
-                <span x-text="(key.endsWith('__vals') ? key.slice(0, -6) : key).replace(/_/g, ' ') + ': ' + val"></span>
-                <button @click="removeFilter(key, val)" class="hover:text-gray-900 ml-0.5" aria-label="Remove filter">&times;</button>
-              </span>
+              {{ removable_chip("<span x-text=\"(key.endsWith('__vals') ? key.slice(0, -6) : key).replace(/_/g, ' ') + ': ' + val\"></span>", 'gray', 'removeFilter(key, val)') }}
             </template>
           </template>
         </div>
