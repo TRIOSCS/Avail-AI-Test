@@ -35,7 +35,6 @@ class TestDefaults:
             ("app_url", "http://localhost:8000"),
             ("database_url", "postgresql://availai:availai@db:5432/availai"),
             ("rate_limit_enabled", True),
-            ("rate_limit_ai_search", "10/minute"),
             ("admin_emails", []),
             ("own_domains", frozenset({"trioscs.com"})),
         ],
