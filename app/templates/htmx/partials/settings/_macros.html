@@ -16,8 +16,8 @@
 {% macro tab_button(tab, url, label, icon_paths, extra_attrs='', target='#settings-content') -%}
 <button @click="tab = '{{ tab }}'"
             :class="tab === '{{ tab }}'
-              ? 'border-b-2 border-brand-500 text-brand-600 bg-brand-50'
-              : 'text-gray-600 hover:text-brand-600 hover:bg-brand-50'"
+              ? 'border-b-2 border-accent-500 text-accent-600 bg-accent-50'
+              : 'text-gray-600 hover:text-accent-600 hover:bg-accent-50'"
             class="shrink-0 whitespace-nowrap px-4 py-2.5 text-sm font-medium rounded-t-lg transition-colors"
             hx-get="{{ url }}"
             hx-target="{{ target }}"{{ extra_attrs|safe }}>
@@ -47,7 +47,7 @@
 {{ pad }}        hx-target="{{ target }}"
 {{ pad }}        hx-swap="innerHTML"
 {{ pad }}        hx-confirm="Merge '{{ drop }}' into '{{ keep }}'?"
-{{ pad }}        class="px-2 py-1 text-xs rounded {% if is_keeper %}bg-brand-500 text-white border border-brand-500 font-medium hover:bg-brand-600{% else %}bg-white text-gray-600 border border-gray-300 hover:bg-gray-50{% endif %}">
+{{ pad }}        class="px-2 py-1 text-xs rounded {% if is_keeper %}bg-accent-500 text-white border border-accent-500 font-medium hover:bg-accent-600{% else %}bg-white text-gray-600 border border-gray-300 hover:bg-gray-50{% endif %}">
 {{ pad }}  Keep "{{ keep|truncate(40) }}"
 {{ pad }}</button>
 {%- endmacro %}

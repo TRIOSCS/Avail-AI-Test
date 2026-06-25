@@ -18,7 +18,7 @@
 {% set content_url = _tab_content_urls.get(active_tab, '/v2/partials/settings/' ~ active_tab) %}
 <div class="page-fluid" x-data="{ tab: '{{ active_tab }}' }">
   {# Tab buttons — scroll horizontally on narrow screens instead of overflowing the page #}
-  <div class="flex gap-1 mb-6 border-b border-brand-200 overflow-x-auto">
+  <div class="flex gap-1 mb-6 border-b border-line-base overflow-x-auto">
     {{ tab_button('connectors', '/v2/partials/settings/connectors', 'Connectors', ['M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4']) }}
 
     {% if is_admin %}
@@ -46,7 +46,7 @@
        hx-target="#settings-content"
        hx-indicator="#settings-load-spinner">
     <div id="settings-load-spinner" class="htmx-indicator flex items-center justify-center py-6 sm:py-8">
-      <svg class="h-6 w-6 text-brand-400 animate-spin" viewBox="0 0 24 24" fill="none">
+      <svg class="h-6 w-6 text-accent-400 animate-spin" viewBox="0 0 24 24" fill="none">
         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
         <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
       </svg>

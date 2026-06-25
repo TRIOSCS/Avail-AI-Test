@@ -12,7 +12,7 @@
 <div class="max-w-2xl">
   {# Identity + click-to-call card. Alpine holds name/extension so each save
      posts both fields (the endpoint requires name AND extension together). #}
-  <div class="bg-white border border-brand-200 rounded-lg p-4 mb-6"
+  <div class="bg-white border border-line-base rounded-lg p-4 mb-6"
        x-data='{
          editingName: false,
          name: {{ (profile_user.name or "")|tojson }},
@@ -24,7 +24,7 @@
     <div class="space-y-5">
       {# Avatar + editable display name (email shown once, here) #}
       <div class="flex items-center gap-4">
-        <div class="w-14 h-14 rounded-full bg-brand-500 flex items-center justify-center text-white text-xl font-bold">
+        <div class="w-14 h-14 rounded-full bg-accent-500 flex items-center justify-center text-white text-xl font-bold">
           <span x-text="(name && name[0] ? name[0] : '?').toUpperCase()">{{ profile_user.name[0]|upper if profile_user.name else '?' }}</span>
         </div>
         <div class="min-w-0">
@@ -33,7 +33,7 @@
             <p class="text-lg font-semibold text-gray-900 truncate" x-text="name">{{ profile_user.name }}</p>
             <button type="button"
                     @click="draftName = name; editingName = true; $nextTick(() => $refs.nameInput.focus())"
-                    class="text-gray-400 hover:text-brand-600 shrink-0"
+                    class="text-gray-400 hover:text-accent-600 shrink-0"
                     title="Edit display name" aria-label="Edit display name">
               <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
@@ -49,9 +49,9 @@
             <input type="text" name="name" x-ref="nameInput" x-model="draftName"
                    maxlength="255" required
                    @keydown.escape="editingName = false"
-                   class="text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-brand-400">
+                   class="input input-sm w-auto">
             <input type="hidden" name="extension" :value="extension">
-            <button type="submit" class="text-xs font-medium text-brand-600 hover:text-brand-800">Save</button>
+            <button type="submit" class="text-xs font-medium text-accent-600 hover:text-accent-800">Save</button>
             <button type="button" @click="editingName = false" class="text-xs text-gray-400 hover:text-gray-600">Cancel</button>
           </form>
           <p class="text-sm text-gray-600 truncate">{{ profile_user.email }}</p>
@@ -64,7 +64,7 @@
       <div>
         <label class="block text-sm font-medium text-gray-600 mb-1.5">Role</label>
         {% set role_colors = {
-          'admin': 'bg-brand-500 text-white',
+          'admin': 'bg-accent-500 text-white',
           'buyer': 'bg-emerald-50 text-emerald-700',
           'sales': 'bg-amber-50 text-amber-700',
           'manager': 'bg-brand-100 text-brand-600',
@@ -93,15 +93,15 @@
         <div class="flex items-center gap-2">
           <input type="text" name="extension" x-model="extension"
                  maxlength="20" placeholder="e.g. 1234"
-                 class="w-40 text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-400">
-          <button type="submit" class="px-3 py-1.5 text-xs font-medium text-brand-600 bg-brand-50 border border-brand-200 rounded-lg hover:bg-brand-100">Save</button>
+                 class="input input-sm w-40">
+          <button type="submit" class="px-3 py-1.5 text-xs font-medium text-accent-600 bg-accent-50 border border-accent-200 rounded-lg hover:bg-accent-100">Save</button>
         </div>
       </form>
     </div>
   </div>
 
   {# 8x8 click-to-call enable/disable #}
-  <div class="bg-white border border-brand-200 rounded-lg p-4 mb-6"
+  <div class="bg-white border border-line-base rounded-lg p-4 mb-6"
        x-data="{ enabled: {{ 'true' if profile_user.eight_by_eight_enabled is defined and profile_user.eight_by_eight_enabled else 'false' }} }">
     <div class="flex items-center justify-between">
       <div>
@@ -114,20 +114,20 @@
                hx-post="/api/user/toggle-8x8"
                hx-swap="none"
                data-loading-disable>
-        <div class="w-11 h-6 bg-gray-200 peer-focus:ring-2 peer-focus:ring-brand-300 rounded-full
+        <div class="w-11 h-6 bg-gray-200 peer-focus:ring-2 peer-focus:ring-accent-300 rounded-full
                     peer peer-checked:after:translate-x-full peer-checked:after:border-white
                     after:content-[''] after:absolute after:top-[2px] after:left-[2px]
                     after:bg-white after:border-gray-300 after:border after:rounded-full
-                    after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-500"></div>
+                    after:h-5 after:w-5 after:transition-all peer-checked:bg-accent-500"></div>
       </label>
     </div>
-    <div x-show="enabled" x-cloak class="mt-3 p-3 bg-brand-50 rounded-md">
-      <p class="text-xs text-brand-600">Click-to-call is active. Phone numbers across the app will dial through 8x8.</p>
+    <div x-show="enabled" x-cloak class="mt-3 p-3 bg-accent-50 rounded-md">
+      <p class="text-xs text-accent-600">Click-to-call is active. Phone numbers across the app will dial through 8x8.</p>
     </div>
   </div>
 
   {# Notifications card — two toggles cloned from the 8x8 toggle markup #}
-  <div class="bg-white border border-brand-200 rounded-lg p-4 mb-6">
+  <div class="bg-white border border-line-base rounded-lg p-4 mb-6">
     <h3 class="text-sm font-semibold text-gray-900 mb-4">Notifications</h3>
     <div class="space-y-4">
       {# Buy-plan email updates #}
@@ -143,11 +143,11 @@
                  hx-post="/api/user/toggle-buyplan-email"
                  hx-swap="none"
                  data-loading-disable>
-          <div class="w-11 h-6 bg-gray-200 peer-focus:ring-2 peer-focus:ring-brand-300 rounded-full
+          <div class="w-11 h-6 bg-gray-200 peer-focus:ring-2 peer-focus:ring-accent-300 rounded-full
                       peer peer-checked:after:translate-x-full peer-checked:after:border-white
                       after:content-[''] after:absolute after:top-[2px] after:left-[2px]
                       after:bg-white after:border-gray-300 after:border after:rounded-full
-                      after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-500"></div>
+                      after:h-5 after:w-5 after:transition-all peer-checked:bg-accent-500"></div>
         </label>
       </div>
 
@@ -164,11 +164,11 @@
                  hx-post="/api/user/toggle-new-offer-alert"
                  hx-swap="none"
                  data-loading-disable>
-          <div class="w-11 h-6 bg-gray-200 peer-focus:ring-2 peer-focus:ring-brand-300 rounded-full
+          <div class="w-11 h-6 bg-gray-200 peer-focus:ring-2 peer-focus:ring-accent-300 rounded-full
                       peer peer-checked:after:translate-x-full peer-checked:after:border-white
                       after:content-[''] after:absolute after:top-[2px] after:left-[2px]
                       after:bg-white after:border-gray-300 after:border after:rounded-full
-                      after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-500"></div>
+                      after:h-5 after:w-5 after:transition-all peer-checked:bg-accent-500"></div>
         </label>
       </div>
     </div>
