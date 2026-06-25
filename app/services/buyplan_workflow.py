@@ -58,6 +58,11 @@ def submit_buy_plan(
     plan.submitted_by_id = user.id
     plan.submitted_at = datetime.now(timezone.utc)
     plan.salesperson_notes = salesperson_notes
+    # Clear any prior approval decision (a previously-rejected plan re-enters the queue
+    # clean — no stale approved_at/approval_notes carrying the old rejection forward).
+    plan.approved_by_id = None
+    plan.approved_at = None
+    plan.approval_notes = None
 
     if line_edits:
         _apply_line_edits(plan, line_edits, db)
@@ -102,9 +107,13 @@ def approve_buy_plan(
     if plan.status != BuyPlanStatus.PENDING.value:
         raise ValueError(f"Can only approve/reject pending plans (current: {plan.status})")
 
-    allowed_roles = {"manager", "admin"}
-    if not user.role or user.role not in allowed_roles:
-        raise PermissionError(f"Only managers/admins can approve buy plans (user role: {user.role})")
+    # Single source of truth for the approval right: the per-user can_approve_buy_plans
+    # column (admin-toggled, not role-derived). This MUST match the predicate that hides
+    # the UI and the require_buyplan_approver dependency that gates the POST.
+    from ..dependencies import can_approve_buy_plans
+
+    if not can_approve_buy_plans(user):
+        raise PermissionError("Buy-plan approval right required to approve/reject")
 
     now = datetime.now(timezone.utc)
     if action == "approve":
@@ -116,15 +125,46 @@ def approve_buy_plan(
         plan.approval_notes = notes
         logger.info("Buy plan {} approved by {}", plan_id, user.email)
         _generate_buyer_tasks(plan, db)
+        _log_approval_activity(plan, "approve", user, notes, db)
     elif action == "reject":
+        reason = (notes or "").strip()
+        if not reason:
+            raise ValueError("A rejection reason is required")
         plan.status = BuyPlanStatus.DRAFT.value
-        plan.approval_notes = notes
-        logger.info("Buy plan {} rejected by {}: {}", plan_id, user.email, notes)
+        plan.approved_by_id = user.id
+        plan.approved_at = now
+        plan.approval_notes = reason
+        logger.info("Buy plan {} rejected by {}: {}", plan_id, user.email, reason)
+        _log_approval_activity(plan, "reject", user, reason, db)
     else:
         raise ValueError(f"Invalid action: {action}")
 
     db.flush()
     return plan
+
+
+def _log_approval_activity(plan: BuyPlan, action: str, user: User, notes: str | None, db: Session) -> None:
+    """Record an ActivityLog row for an approve/reject decision (audit trail)."""
+    from ..constants import ActivityType
+    from .activity_service import log_activity
+
+    verb = "approved" if action == "approve" else "rejected"
+    activity_type = ActivityType.BUYPLAN_APPROVED if action == "approve" else ActivityType.BUYPLAN_REJECTED
+    description = f"Buy plan #{plan.id} {verb} by {user.name or user.email}"
+    if notes:
+        description = f"{description}: {notes}"
+
+    # BuyPlan.requisition_id is NOT NULL, so log_activity always resolves the company from
+    # the requisition (req -> customer_site -> company) — the row lands on the customer
+    # timeline without extra resolution here.
+    log_activity(
+        db,
+        activity_type=str(activity_type),
+        user_id=user.id,
+        buy_plan_id=plan.id,
+        requisition_id=plan.requisition_id,
+        description=description,
+    )
 
 
 # ── Workflow: SO Verification ────────────────────────────────────────

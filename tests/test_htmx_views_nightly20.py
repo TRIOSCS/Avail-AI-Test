@@ -111,9 +111,15 @@ class TestBuyPlanSubmit:
 
 
 class TestBuyPlanApprove:
-    def test_approve_requires_manager(self, client: TestClient, db_session: Session, test_requisition: Requisition):
-        """Buyer role cannot approve — 403."""
+    def test_approve_requires_approval_right(
+        self, client: TestClient, db_session: Session, test_user, test_requisition: Requisition, monkeypatch
+    ):
+        """A user without the can_approve_buy_plans right cannot approve — 403 from the
+        require_buyplan_approver dependency (role is irrelevant)."""
         bp = _make_buy_plan(db_session, test_requisition, status=BuyPlanStatus.PENDING)
+        db_session.commit()
+        # The REAL require_buyplan_approver runs against test_user (no right) → 403.
+        monkeypatch.setattr("app.dependencies.require_user", lambda request, db: test_user)
         resp = client.post(
             f"/v2/partials/buy-plans/{bp.id}/approve",
             data={"action": "approve"},

@@ -805,9 +805,13 @@ class TestApproveBuyPlan:
         test_user: User,
         manager_user: User,
     ):
-        """Manager approve → active."""
+        """Approver grant → active.
+
+        Approval is gated by the per-user right, not role.
+        """
         plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
         plan.status = BuyPlanStatus.PENDING.value
+        manager_user.can_approve_buy_plans = True
         db_session.flush()
 
         result = approve_buy_plan(
@@ -829,9 +833,10 @@ class TestApproveBuyPlan:
         test_user: User,
         manager_user: User,
     ):
-        """Manager reject → back to draft."""
+        """Approver reject → back to draft (reason required)."""
         plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
         plan.status = BuyPlanStatus.PENDING.value
+        manager_user.can_approve_buy_plans = True
         db_session.flush()
 
         result = approve_buy_plan(
@@ -851,9 +856,10 @@ class TestApproveBuyPlan:
         test_user: User,
         manager_user: User,
     ):
-        """Manager can swap a vendor on a specific line."""
+        """An approver can swap a vendor on a specific line during approval."""
         plan, line, _, req = _make_draft_plan(db_session, test_quote, test_user)
         plan.status = BuyPlanStatus.PENDING.value
+        manager_user.can_approve_buy_plans = True
         alt_offer = _make_offer(
             db_session,
             test_quote.requisition_id,
@@ -906,6 +912,7 @@ class TestApproveBuyPlan:
     ):
         plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
         plan.status = BuyPlanStatus.PENDING.value
+        manager_user.can_approve_buy_plans = True
         db_session.flush()
 
         with pytest.raises(ValueError, match="Invalid action"):

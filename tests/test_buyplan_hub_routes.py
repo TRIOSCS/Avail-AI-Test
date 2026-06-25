@@ -460,6 +460,7 @@ def test_supervise_manager_shows_strip_and_approvals(
         status=BuyPlanStatus.PENDING,
         submitted_by_id=sales_user.id,
     )
+    manager_user.can_approve_buy_plans = True  # approval right gates the Approvals section
     db_session.commit()
 
     app.dependency_overrides[require_user] = lambda: manager_user
@@ -550,9 +551,13 @@ def test_approve_origin_supervise_returns_supervise_body(
         status=BuyPlanStatus.PENDING,
         submitted_by_id=sales_user.id,
     )
+    manager_user.can_approve_buy_plans = True  # require_buyplan_approver gates the POST
     db_session.commit()
 
+    from app.dependencies import require_buyplan_approver
+
     app.dependency_overrides[require_user] = lambda: manager_user
+    app.dependency_overrides[require_buyplan_approver] = lambda: manager_user
     try:
         resp = client.post(
             f"/v2/partials/buy-plans/{plan.id}/approve",
@@ -560,6 +565,7 @@ def test_approve_origin_supervise_returns_supervise_body(
         )
     finally:
         app.dependency_overrides.pop(require_user, None)
+        app.dependency_overrides.pop(require_buyplan_approver, None)
     assert resp.status_code == 200
     body = resp.text
     # Supervise body carries the metric strip; the detail "Line Items" header is absent.
@@ -583,9 +589,13 @@ def test_approve_default_origin_returns_detail(
         status=BuyPlanStatus.PENDING,
         submitted_by_id=sales_user.id,
     )
+    manager_user.can_approve_buy_plans = True  # require_buyplan_approver gates the POST
     db_session.commit()
 
+    from app.dependencies import require_buyplan_approver
+
     app.dependency_overrides[require_user] = lambda: manager_user
+    app.dependency_overrides[require_buyplan_approver] = lambda: manager_user
     try:
         resp = client.post(
             f"/v2/partials/buy-plans/{plan.id}/approve",
@@ -593,5 +603,6 @@ def test_approve_default_origin_returns_detail(
         )
     finally:
         app.dependency_overrides.pop(require_user, None)
+        app.dependency_overrides.pop(require_buyplan_approver, None)
     assert resp.status_code == 200
     assert "Line Items" in resp.text

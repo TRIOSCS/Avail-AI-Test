@@ -229,8 +229,12 @@ def _compute_blocker(plan: BuyPlan) -> str:
         return "SO needs verification"
 
     if status == BuyPlanStatus.DRAFT:
-        rejected = so_status == SOVerificationStatus.REJECTED or bool(
-            plan.approval_notes and "reject" in plan.approval_notes.lower()
+        # A DRAFT that carries an approval decision timestamp was sent back by an approver
+        # (approve_buy_plan stamps approved_at on reject) → distinguish it from a fresh draft.
+        rejected = (
+            plan.approved_at is not None
+            or so_status == SOVerificationStatus.REJECTED
+            or bool(plan.approval_notes and "reject" in plan.approval_notes.lower())
         )
         if rejected:
             return "rejected — resubmit"

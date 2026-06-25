@@ -343,3 +343,10 @@ templates.env.globals["cadence_state"] = cadence_state
 # Must stay in sync with CANONICAL_ROLES in app/routers/htmx_views.py.
 _CANONICAL_ROLES = ("specifier", "buyer_po", "ap_payer", "logistics", "exec", "other")
 templates.env.globals["roles"] = _CANONICAL_ROLES
+
+# Buy-plan approval right exposed as a Jinja2 global so templates hide the approve/reject
+# UI using the SAME predicate the require_buyplan_approver dependency enforces on the POST
+# (single source of truth — the per-user User.can_approve_buy_plans column).
+from .dependencies import can_approve_buy_plans  # noqa: E402
+
+templates.env.globals["can_approve_buy_plans"] = can_approve_buy_plans

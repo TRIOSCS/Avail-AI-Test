@@ -44,6 +44,7 @@ from ..constants import (
 )
 from ..database import get_db
 from ..dependencies import (
+    can_approve_buy_plans,
     can_manage_account,
     can_manage_account_team,
     get_buyplan_for_user,
@@ -55,6 +56,7 @@ from ..dependencies import (
     require_access,
     require_admin,
     require_buyer,
+    require_buyplan_approver,
     require_requisition_access,
     require_user,
     user_has_access,
@@ -11072,6 +11074,7 @@ def _render_supervise_body(request: Request, user: User, db: Session) -> HTMLRes
             "archive": completed_archive(db, user, scope="all"),
             "is_ops": _is_ops_member(user, db),
             "is_manager": user.role in (UserRole.MANAGER, UserRole.ADMIN),
+            "can_approve": can_approve_buy_plans(user),
             "user": user,
         }
     )
@@ -11174,10 +11177,14 @@ async def buy_plan_submit_partial(
 async def buy_plan_approve_partial(
     request: Request,
     plan_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_buyplan_approver),
     db: Session = Depends(get_db),
 ):
-    """Manager approves or rejects a pending buy plan — returns refreshed detail."""
+    """Approve or reject a pending buy plan — returns refreshed detail.
+
+    Gated by ``require_buyplan_approver`` (403 unless the user holds the per-user
+    can_approve_buy_plans right). Reject requires a reason (enforced in the service).
+    """
     from ..services.buyplan_notifications import (
         notify_approved,
         notify_rejected,
@@ -11189,9 +11196,6 @@ async def buy_plan_approve_partial(
     action = form.get("action", "approve")
     origin = form.get("origin", "")
 
-    if user.role not in (UserRole.MANAGER, UserRole.ADMIN):
-        raise HTTPException(403, "Manager or admin role required")
-
     try:
         plan = approve_buy_plan(plan_id, action, user, db, notes=form.get("notes"))
         db.commit()
@@ -11199,7 +11203,11 @@ async def buy_plan_approve_partial(
             await run_notify_bg(notify_approved, plan.id)
         else:
             await run_notify_bg(notify_rejected, plan.id)
-    except (ValueError, PermissionError) as e:
+    except PermissionError as e:
+        # The dependency already 403s unauthorized callers; this maps the service's
+        # defense-in-depth approval-right check to 403 (not 400) if it is ever reached.
+        raise HTTPException(403, str(e))
+    except ValueError as e:
         raise HTTPException(400, str(e))
 
     if origin == "supervise":
