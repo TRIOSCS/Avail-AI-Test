@@ -153,7 +153,7 @@ def users_context(db: Session) -> dict:
             "user": u,
             "status": _user_status(u),
             "last_login_at": u.last_login_at,
-            "can_approve_buy_plans": bool(u.can_approve_buy_plans),
+            "can_approve_buy_plans": u.can_approve_buy_plans,
         }
         for u in users
     ]
@@ -316,7 +316,7 @@ async def set_buyplan_approver(
     target = _editable_target(db, user_id)
     grant = str(can_approve).strip().lower() in {"true", "1", "on", "yes"}
 
-    if bool(target.can_approve_buy_plans) == grant:
+    if target.can_approve_buy_plans == grant:
         return _render(db, request)  # no-op, nothing to audit
 
     target.can_approve_buy_plans = grant
