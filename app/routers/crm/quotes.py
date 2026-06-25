@@ -370,6 +370,27 @@ async def preview_quote_email(
     return {"html": html}
 
 
+@router.get("/api/quotes/{quote_id}/preflight")
+async def quote_preflight_check(
+    quote_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Advisory pre-send checks (DNC recipient / non-US country-of-origin / MPN drift).
+
+    Read-only; returns the warnings the send UI surfaces. Advisory only — it never blocks
+    the send (the salesperson decides). See app/services/quote_preflight.py.
+    """
+    from ...dependencies import get_quote_for_user
+    from ...services.quote_preflight import quote_preflight
+
+    quote = get_quote_for_user(db, user, quote_id)
+    if not quote:
+        raise HTTPException(404, "Quote not found")
+    warnings = quote_preflight(db, quote)
+    return {"warnings": [w.to_dict() for w in warnings], "count": len(warnings)}
+
+
 @router.post("/api/quotes/{quote_id}/send")
 async def send_quote(
     quote_id: int,
