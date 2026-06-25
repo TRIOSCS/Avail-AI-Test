@@ -4,6 +4,7 @@
   Called by: proactive/list.html loop.
   Depends on: Alpine.js (parent proactiveGroup scope), Tailwind CSS.
 #}
+{%- from "htmx/partials/proactive/_macros.html" import margin_badge %}
 <tr id="match-row-{{ match.id }}"
     class="hover:bg-gray-50 transition-colors"
     :class="selected[{{ match.id }}] && 'bg-blue-50'">
@@ -47,18 +48,7 @@
     {% if match.unit_price %}${{ "%.4f"|format(match.unit_price) }}{% else %}--{% endif %}
   </td>
   {# Margin pill — .badge-mini via semantic color map #}
-  <td>
-    {% if match.margin_pct is not none %}
-    <span class="badge-mini
-      {{ 'bg-emerald-50 text-emerald-700' if match.margin_pct >= 20 else
-         'bg-amber-50 text-amber-700' if match.margin_pct >= 10 else
-         'bg-rose-50 text-rose-700' }}">
-      {{ "%.0f"|format(match.margin_pct) }}%
-    </span>
-    {% else %}
-    <span class="badge-mini bg-gray-100 text-gray-400">N/A</span>
-    {% endif %}
-  </td>
+  <td>{{ margin_badge(match.margin_pct) }}</td>
   {# Score pill — .badge-mini #}
   <td>
     {% set score = match.match_score|default(0) %}
