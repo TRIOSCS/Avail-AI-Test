@@ -2022,8 +2022,41 @@ merges different-`account_owner_id` accounts) are reused AS-IS.
   Data Ops partial via `_render_data_ops` into `#settings-content` (so pairs referencing
   the just-merged entity drop without a manual refresh) and surface the kept-name /
   failure message via a `settings_toast` `HX-Trigger` rather than swapping a `<p>` into
-  the row. Both vendor and company rows carry the Alpine `x-data="{ merged: false }"`
-  guard for consistent post-merge behavior.
+  the row.
+- **Click-merge bug fix (root cause):** the merge buttons used to be wrapped in a dead
+  `x-data="{ merged: false }"` + `<template x-if="!merged" x-cloak>` guard. `merged` was
+  never set true, so the wrapper added nothing — but because the Data Ops body is always
+  delivered by an HTMX swap into `#settings-content` (which was NOT in the
+  `htmx:afterSwap` `Alpine.initTree` allow-list), the `x-if` template was not reliably
+  initialized: `x-cloak` (`display:none !important`) stayed applied and the buttons were
+  hidden/inert, so a click hit a half-bound Alpine expression and threw instead of
+  merging. Fix: the dead wrapper is removed (the buttons are pure HTMX, no Alpine needed)
+  **and** `#settings-content` is added to the `htmx:afterSwap` initTree allow-list so the
+  whole Settings cluster's Alpine directives re-init after every settings swap. The
+  vendor-merge route now also catches `Exception` (was `ValueError`-only), matching
+  company-merge, so an unexpected DB error surfaces as a toast not a 500.
+- **Delete-both:** each pair row also has a rose-outline **Delete both** button
+  (`delete_both_button` macro) → `POST /v2/partials/admin/vendor-delete-both` /
+  `company-delete-both` (`id_a`/`id_b` form fields, admin-gated). Backed by
+  `vendor_merge_service.delete_vendor_cards` / `company_merge_service.delete_companies`:
+  dependent business records are **detached** (FK NULLed — offers/sightings/etc. survive
+  unlinked, mirroring how merge reassigns rather than cascade-deletes), company-scoped
+  rows with NOT-NULL `company_id` (`customer_part_history`, `excess_lists`) are purged,
+  and sites/attachments/collaborators go via the ORM `all, delete-orphan` cascade. Native
+  `hx-confirm` spells out both names ("cannot be undone").
+- **Multi-select mass actions:** each dedup section is an `x-data="dedupSelect()"` Alpine
+  component (registered in `htmx_app.js`, Set-based, mirroring `rq2Page`). Selection unit
+  is a keeper-first **pair token** `"<keeperId>-<loserId>"`; per-row checkboxes + a
+  section select-all feed a sticky `mass_action_bar` (visible when `count > 0`) with
+  **Merge selected / Delete selected / Dismiss for now / Clear**. Each action POSTs a
+  single comma-joined `pairs` field + an `action` field to
+  `POST /v2/partials/admin/vendor-bulk` / `company-bulk` (`_dedup_bulk` parses the tokens
+  via `_parse_dedup_pairs`, gates admin, caps at `_MAX_DEDUP_PAIRS=200`, processes
+  per-pair with per-pair commit + failure tolerance). The select-all `@change` is a
+  **single-quoted** attribute because `tojson` emits double-quoted tokens (a double-quoted
+  attr would close early and kill Alpine init). `Dismiss for now` is **view-only** (it
+  hides the rows client-side and re-renders; pairs reappear on the next scan — there is no
+  durable dismissal table yet).
 - **Per-account banner:** `GET .../{company_id}/dup-suggestion` (`company_dup_suggestion`,
   declared ABOVE the catch-all) → lazy `hx-trigger=load` panel in `detail.html` →
   `_dup_suggestion.html`. Shows the top dedup match INVOLVING this company + a "Review &

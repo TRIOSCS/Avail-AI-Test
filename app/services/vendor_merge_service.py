@@ -107,3 +107,67 @@ def merge_vendor_cards(keep_id: int, remove_id: int, db: Session) -> dict:
         reassigned,
     )
     return {"ok": True, "kept": keep.id, "removed": remove_id, "reassigned": reassigned}
+
+
+def delete_vendor_cards(id_a: int, id_b: int, db: Session) -> dict:
+    """Delete BOTH vendor cards in a dedup pair (neither is worth keeping).
+
+    Dependent business records (offers, sightings, reviews, …) are NOT deleted — their
+    ``vendor_card_id`` is NULLed so the offer/sighting survives as an unlinked record,
+    exactly as merge reassigns FKs rather than cascading. Then both cards are deleted.
+    Does NOT commit — caller must commit.
+
+    Returns:
+        {"ok": True, "deleted": [int, int], "detached": int}
+
+    Raises:
+        ValueError if either card is missing or the two ids are identical.
+    """
+    from ..models import (
+        ActivityLog,
+        BuyerVendorStats,
+        EnrichmentQueue,
+        Offer,
+        ProspectContact,
+        StockListHash,
+        VendorMetricsSnapshot,
+        VendorReview,
+    )
+
+    if id_a == id_b:
+        raise ValueError("Cannot delete a vendor pair with identical ids")
+    card_a = db.get(VendorCard, id_a)
+    card_b = db.get(VendorCard, id_b)
+    if not card_a or not card_b:
+        raise ValueError("One or both vendor cards not found")
+
+    fk_tables = [
+        (VendorContact, "vendor_card_id"),
+        (VendorReview, "vendor_card_id"),
+        (Offer, "vendor_card_id"),
+        (VendorMetricsSnapshot, "vendor_card_id"),
+        (StockListHash, "vendor_card_id"),
+        (BuyerVendorStats, "vendor_card_id"),
+        (ActivityLog, "vendor_card_id"),
+        (EnrichmentQueue, "vendor_card_id"),
+        (ProspectContact, "vendor_card_id"),
+    ]
+    detached = 0
+    for model, col in fk_tables:
+        try:
+            count = (
+                db.query(model)
+                .filter(getattr(model, col).in_([id_a, id_b]))
+                .update({col: None}, synchronize_session="fetch")
+            )
+            detached += count
+        except Exception as e:
+            logger.error("Vendor delete-both: FK detach failed on {}.{}: {}", model.__tablename__, col, e)
+            raise ValueError(f"Vendor delete aborted — failed to detach {model.__tablename__}.{col}: {e}") from e
+
+    db.delete(card_a)
+    db.delete(card_b)
+    db.flush()
+
+    logger.info("Vendor delete-both: removed {} + {}, detached {} records", id_a, id_b, detached)
+    return {"ok": True, "deleted": [id_a, id_b], "detached": detached}

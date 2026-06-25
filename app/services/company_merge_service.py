@@ -196,3 +196,74 @@ def merge_companies(keep_id: int, remove_id: int, db: Session) -> dict:
         "sites_deleted": sites_deleted,
         "reassigned": reassigned,
     }
+
+
+def delete_companies(id_a: int, id_b: int, db: Session) -> dict:
+    """Delete BOTH companies in a dedup pair (neither is worth keeping).
+
+    Company-scoped data (sites, attachments, collaborators, customer part history,
+    excess lists) is deleted along with the company — it has no meaning without it.
+    Cross-domain references that merely *point at* the company (activity log, sightings,
+    knowledge entries, prospect accounts) are NULLed so those records survive unlinked,
+    mirroring how merge reassigns rather than cascade-deletes them. Does NOT commit —
+    caller must commit.
+
+    Returns:
+        {"ok": True, "deleted": [int, int], "detached": int, "purged": int}
+
+    Raises:
+        ValueError if either company is missing or the two ids are identical.
+    """
+    from ..models import ActivityLog, Sighting
+    from ..models.excess import ExcessList
+    from ..models.knowledge import KnowledgeEntry
+    from ..models.prospect_account import ProspectAccount
+    from ..models.purchase_history import CustomerPartHistory
+
+    if id_a == id_b:
+        raise ValueError("Cannot delete a company pair with identical ids")
+    co_a = db.get(Company, id_a)
+    co_b = db.get(Company, id_b)
+    if not co_a or not co_b:
+        raise ValueError("One or both companies not found")
+
+    ids = [id_a, id_b]
+
+    # Detach soft references (nullable / SET NULL) — these records outlive the company.
+    detached = 0
+    for model, col in [
+        (ActivityLog, "company_id"),
+        (Sighting, "source_company_id"),
+        (KnowledgeEntry, "company_id"),
+        (ProspectAccount, "company_id"),
+    ]:
+        try:
+            detached += (
+                db.query(model).filter(getattr(model, col).in_(ids)).update({col: None}, synchronize_session="fetch")
+            )
+        except Exception as e:
+            logger.warning("Company delete-both: failed to detach {}.{}: {}", model.__tablename__, col, e)
+
+    # Purge company-scoped rows (NOT-NULL company_id) that are meaningless without the
+    # company. Sites/attachments/collaborators go via the ORM "all, delete-orphan" cascade
+    # on db.delete(company); these two tables are not ORM-cascaded so purge explicitly.
+    purged = 0
+    for model in (CustomerPartHistory, ExcessList):
+        try:
+            purged += db.query(model).filter(model.company_id.in_(ids)).delete(synchronize_session="fetch")
+        except Exception as e:
+            logger.warning("Company delete-both: failed to purge {}: {}", model.__tablename__, e)
+
+    db.delete(co_a)
+    db.delete(co_b)
+    db.flush()
+
+    try:
+        from ..cache.decorators import invalidate_prefix
+
+        invalidate_prefix("company_list")
+    except Exception as e:
+        logger.warning("Company delete-both: cache invalidation failed: {}", e)
+
+    logger.info("Company delete-both: removed {} + {}, detached {}, purged {}", id_a, id_b, detached, purged)
+    return {"ok": True, "deleted": [id_a, id_b], "detached": detached, "purged": purged}
