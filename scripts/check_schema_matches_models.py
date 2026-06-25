@@ -160,6 +160,11 @@ _GRANDFATHERED_MODIFY_TYPE = {
     ("oem_crosswalk", "looked_up_at"),
     ("oem_crosswalk", "created_at"),
     ("oem_crosswalk", "updated_at"),
+    # partsurfer_desc_negative (migration 152): same UTCDateTime → TIMESTAMP no-op.
+    ("partsurfer_desc_negative", "looked_up_at"),
+    ("partsurfer_desc_negative", "retry_after"),
+    ("partsurfer_desc_negative", "created_at"),
+    ("partsurfer_desc_negative", "updated_at"),
 }
 
 # (table, column) pairs with a column-COMMENT-only diff (model sets a comment the

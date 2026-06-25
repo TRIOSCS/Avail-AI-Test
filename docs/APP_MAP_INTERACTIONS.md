@@ -2736,6 +2736,19 @@ owns arbitration in one place:
        (83) — OEM catalog text beats the card's own desc — but loses to the
        deterministic decoders (mpn_decode 85); it ties fru_matrix_decode (84, a
        different vendor — tie not load-bearing).
+       NEGATIVE CACHE (durable, partsurfer_desc_negative table — migration 125):
+       BEFORE fetching, the pass drops candidate spares with a FRESH negative row via
+       partsurfer_negative_cache.blocked_spare_norms, so a dead/ungrammatical HP spare
+       is NOT re-queried every batch (the throughput win on the 145k not_found cards).
+       A None no-result is recorded as reason="no_result" (90-day window, the same
+       policy as oem_crosswalk no_match); a description that the grammar DECLINES for
+       every card (an opaque/truncated reply — NOT evidence the OEM lacks the part) is
+       recorded as reason="ungrammatical" with a SHORT 14-day window so the improving
+       grammar re-checks it sooner; both via record_negative inside a per-spare SAVEPOINT.
+       A throttle (PartSurferTransient) and a per-card DB failure are NEVER cached (a
+       transient outage / write error is not a verdict on the spare). This is a DISTINCT
+       sub-resource from the oem_crosswalk no_match cache (Pass A / canonical-MPN web
+       resolution) — a spare can miss one and hit the other, so they use separate keys.
     3.6. enrichment.py::_apply_enrichment_to_card → _harvest_connector_enrichment    —
        connector-description harvest (no new network — harvests data the connector
        pipeline ALREADY fetches per call but _try_connector_config previously discarded),

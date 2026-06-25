@@ -1,0 +1,1132 @@
+{
+  "auditedPages": 10,
+  "totalFindings": 123,
+  "perPage": [
+    {
+      "page": "Sales Hub (Requisitions) \u2014 /v2/requisitions",
+      "summary": "This is the app's central work surface: a split-panel parts workspace (left = filterable parts table via parts/list.html, right = detail tabs for the selected part). The table-level CSS primitives (.compact-table, .panel-header, .ws-tab, .badge family) are good and the offers/sourcing tabs partly adopt the named cell utilities (.table-cell, .compact-cell). But the filter/toolbar and pagination in list.html are hand-rolled with brand-500 active states, gray-* hairlines, and a wall of text-[10px]/text-[9px] that sits below the new 11px readability floor \u2014 this is the single largest pocket of foundation-debt on the page. Against the philosophy it has the right bones (dense, keyboard-ish, institutional memory in the sourcing tab's score/tier/phone) but fails the Three-Second Rule on \"Where am I?\" (no title/breadcrumb) and \"What needs my attention?\" (the Bid Due column has zero urgency treatment), and the offers tab \u2014 the decision surface \u2014 shows no vendor-trust signal at all.",
+      "findings": [
+        {
+          "category": "a11y",
+          "severity": "high",
+          "effort": "M",
+          "location": "app/templates/htmx/partials/parts/list.html:24,42,51,68,71,76,81,213,219,225,237",
+          "issue": "The entire left-panel toolbar (Add Req button, search input, status filter pills, bulk-action bar, pagination, undo countdown) is sized text-[10px], and two table cells (owner avatar initial, spec /6 suffix) are text-[9px]. The PR0 foundation sets a hard readability floor of 'no body copy < 11px'. ~14 distinct controls/labels here violate it \u2014 the densest, most-used controls on the app's home page are the least legible.",
+          "fix": "Bump these to text-[11px] (the .chip/.badge-mini token size) or text-xs. The search input should adopt .input/.input-sm (which is text-xs + the accent focus ring) rather than a bespoke text-[10px] input. Keep the avatar circle but raise the initial to text-[10px] minimum, or use text-[11px] leading-none."
+        },
+        {
+          "category": "foundation-debt",
+          "severity": "high",
+          "effort": "M",
+          "location": "app/templates/htmx/partials/parts/list.html:52,67,68,71,93,142,176",
+          "issue": "Active/primary states use brand-* instead of the new accent. Status filter pills go 'bg-brand-500 text-white' when active (line 52), the Add Req CTA is bg-brand-500 (line 24), the bulk-action bar is bg-brand-50/border-brand-200/text-brand-700 (lines 67-68), and select-checkboxes are text-brand-500. Per PR0, any ACTIVE state, PRIMARY cta, or focus ring must resolve to accent-*; brand-* is only correct for neutral chrome.",
+          "fix": "Active filter pill \u2192 accent-500/accent-600; Add Req \u2192 .btn-primary (or accent-500). Bulk bar \u2192 accent-50/accent-200/accent-700. Checkbox accent color \u2192 text-accent-500. Leave neutral card/border brand usage alone."
+        },
+        {
+          "category": "foundation-debt",
+          "severity": "medium",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/parts/list.html:42",
+          "issue": "Search input uses a bespoke 'focus:ring-1 focus:ring-brand-500 focus:border-brand-500' focus spec instead of the foundation's single .input focus contract (ring-2, --accent-ring, accent border). Focus rings are explicitly called out in PR0 as needing to move to accent.",
+          "fix": "Replace the input's border/focus classes with .input .input-sm (resolves to the accent focus ring) and drop the inline ring-brand-500 classes. Same for the inner search SVG positioning which can stay."
+        },
+        {
+          "category": "foundation-debt",
+          "severity": "medium",
+          "effort": "S",
+          "location": "app/static/styles.css:558-561 (.ws-tab-active) consumed by app/templates/htmx/partials/parts/workspace.html:104",
+          "issue": "The active detail-tab indicator (color #3A4252 + 2px slate underline) and the tab-bar/pagination separators 'border-brand-200' (workspace.html:100, list.html:212) are slate/brand, not accent. The active tab is the canonical 'active state' the foundation says should read as the one accent.",
+          "fix": "Set .ws-tab-active color + border-bottom-color to var(--accent). Convert the 'border-b-2 border-brand-200' tab bar and 'border-t-2 border-brand-200' pagination strips to .border-line-base (or accent if you want them to echo the active tab)."
+        },
+        {
+          "category": "consistency",
+          "severity": "medium",
+          "effort": "M",
+          "location": "app/templates/htmx/partials/parts/list.html:22-29,45-55,216-226",
+          "issue": "The Add Req button, the six status filter pills, and the Prev/Next pagination buttons re-implement the .btn / .chip / .filter-pill primitives inline (px-2 py-0.5 text-[10px] font-semibold rounded + hand-rolled active/hover color logic) instead of using the shared component vocabulary. This is the 'bespoke markup re-implementing a primitive' smell and is why this toolbar drifts from sibling pages.",
+          "fix": "Render the status filters with the shared filter-pill/.chip pattern (toggle accent active), the Add Req button as .btn-primary .btn-sm, and Prev/Next as .btn-secondary .btn-sm. Drives consistency and fixes the accent + readability debt in one pass."
+        },
+        {
+          "category": "foundation-debt",
+          "severity": "medium",
+          "effort": "M",
+          "location": "app/templates/htmx/partials/parts/list.html:42,52,76,93,142,219,225 ; header.html:8 ; tabs/offers.html:12,13,54 ; tabs/sourcing.html:12,13,25,40,88,106",
+          "issue": "Hairlines across the cluster use border-gray-300 / border-gray-200 / divide-gray-200 / divide-gray-100 instead of the line tokens. PR0 is draining the legacy border-gray-* override page-by-page; this page still has 32 such occurrences. The part header strip (header.html:8) and both detail-tab table wrappers are gray-bordered.",
+          "fix": "Convert hairlines to .border-line-base / .border-line-subtle (and for divide, swap to the compact-table/data-table classes which already carry the #BFC4CE border). The two detail-tab tables could drop their bespoke 'min-w-full divide-y divide-gray-200' wrapper and adopt .compact-table outright."
+        },
+        {
+          "category": "density",
+          "severity": "medium",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/parts/tabs/sourcing.html:119,127",
+          "issue": "The Score and Tier cells inline 'px-3 py-2' while every sibling cell in the same table uses .compact-cell (5px 10px). The two inlined cells render looser than the rest of the row, breaking the density lock the rest of the table already honors.",
+          "fix": "Replace 'px-3 py-2 whitespace-nowrap' with 'compact-cell whitespace-nowrap' on both <td>s so the row is uniform."
+        },
+        {
+          "category": "hierarchy",
+          "severity": "high",
+          "effort": "M",
+          "location": "app/templates/htmx/partials/parts/list.html:189-190 (Bid Due column) ; col_defs at list.html:105",
+          "issue": "Three-Second-Rule 'What needs my attention?' failure: the Bid Due (need_by_date) column renders raw '{{ req.need_by_date or '\u2014' }}' with no urgency treatment \u2014 overdue, due-today, and due-next-month all look identical. For a broker racing bid deadlines this is the single most decision-relevant column and it carries zero visual signal.",
+          "fix": "Compute days-to-due and apply a semantic treatment: overdue \u2192 text-rose-600 font-semibold (or .badge-warning), due \u22642 days \u2192 amber, else neutral. Mirror the existing spec-count badge pattern so it stays compact. This is the highest buyer-payoff change on the page."
+        },
+        {
+          "category": "hierarchy",
+          "severity": "medium",
+          "effort": "M",
+          "location": "app/templates/htmx/partials/parts/workspace.html:8-19 (pipeline strip) and absence of any page title",
+          "issue": "Three-Second-Rule 'Where am I?': the page has no title or breadcrumb. Identity rests entirely on the bottom-nav active label. The only header element is the 26px pipeline strip, and its key figures (open value, weighted forecast) are rendered as plain text-gray-700, not emphasized \u2014 the foundation provides .figure-accent precisely for hero numerics like these.",
+          "fix": "Add a lightweight title/eyebrow ('Sales Hub' or 'Requisitions') to the pipeline strip or panel-header so the page self-identifies on direct load. Apply .figure-accent to the open-value and weighted-forecast numbers so the institutional-memory figures read as the page's key metrics."
+        },
+        {
+          "category": "hierarchy",
+          "severity": "medium",
+          "effort": "M",
+          "location": "app/templates/htmx/partials/parts/tabs/offers.html:27-48",
+          "issue": "Trust-must-be-visible failure on the decision surface: the offers table shows vendor_name as plain text with no trust/safety signal ('delivered before' vs 'never heard of them'). The sourcing tab already surfaces score/tier/phone per vendor, but the offers tab \u2014 where the buyer actually picks who to buy from \u2014 shows none of it. A stale tag exists (line 43-44) but vendor reliability does not.",
+          "fix": "Add a vendor-trust indicator to the Vendor cell (e.g. a small .badge-success 'Known' / neutral 'New' chip, or the same tier the sourcing tab computes), reusing the existing scoring/tier data rather than a new primitive. Keeps 'the phone is the weapon' and trust-at-a-glance consistent across both tabs."
+        },
+        {
+          "category": "consistency",
+          "severity": "low",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/parts/tabs/offers.html:37-44",
+          "issue": "Offer status uses raw 'bg-green-100 text-green-700' / 'bg-blue-100 text-blue-700' / 'bg-gray-100' spans plus a one-off amber Stale tag, instead of the locked .badge family (.badge-success/.badge-info/.badge). The adjacent sourcing tab uses yet another color map (bg-emerald-50/bg-blue-50). Two tabs of the same workspace render status badges three different ways.",
+          "fix": "Route both tabs' status badges through the .badge / .badge-success / .badge-info / .badge-warning helpers (or the shared status_badge macro already imported elsewhere) so offer status, sighting status, and the table status pill share one vocabulary."
+        },
+        {
+          "category": "foundation-debt",
+          "severity": "low",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/parts/workspace.html:12,76-77 ; list.html:12",
+          "issue": "Drag-handle hover/active uses brand-400/brand-500 (workspace.html:76-77) and the pipeline strip + parts-list wrapper use border-gray-200 (workspace.html:12, list.html implicit). The resize handle's active state is an interactive accent moment that should read as the accent.",
+          "fix": "Drag handle hover \u2192 bg-accent-400, dragging \u2192 bg-accent-500. Pipeline strip border-gray-200 \u2192 .border-line-base. Low impact but completes the accent/line sweep for this template."
+        },
+        {
+          "category": "polish",
+          "severity": "low",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/parts/list.html:200-208 (empty state)",
+          "issue": "The 'No parts found' empty state has no primary action \u2014 it tells the buyer to 'Adjust filters or add requirements' but offers no button, even though the Add Req CTA exists 180px above in the toolbar. Three-Second-Rule 'What next?' is unanswered when the list is empty (the most likely first-run / fresh-DB state per project notes).",
+          "fix": "Add an 'Add Requisition' .btn-primary .btn-sm inside the empty state that dispatches the same open-modal event as the toolbar button, so a zero-state buyer has a one-click path forward."
+        }
+      ],
+      "topOpportunities": [
+        "Refactor the left-panel toolbar + pagination in list.html in one pass: convert the hand-rolled text-[10px] brand-500 filter pills / Add Req / Prev-Next to the shared .btn-* / .chip / filter-pill primitives with accent active states and the .input search field. This single edit clears the page's biggest readability-floor violation, the largest accent foundation-debt pocket, AND the worst consistency smell simultaneously.",
+        "Add urgency treatment to the Bid Due (need_by_date) column (overdue=rose, due-soon=amber). Highest buyer-workflow payoff per unit effort \u2014 it makes the home table answer 'what needs my attention?' at a glance for deadline-driven bid work, which it currently cannot.",
+        "Surface a vendor-trust signal on the Offers tab (reuse the score/tier the Sightings tab already computes). The offers tab is the actual buy-decision surface and today shows no 'delivered before vs never heard of them' cue, violating the trust-at-a-glance principle that is core to a broker sourcing tool.",
+        "Run the line-token + accent sweep across the cluster (32 border-gray-* \u2192 .border-line-*, the slate .ws-tab-active and border-brand-200 strips \u2192 accent) so the workspace stops drifting from the rest of the post-PR0 app; mostly mechanical S/M effort that locks the page onto the new baseline."
+      ],
+      "key": "sales-hub"
+    },
+    {
+      "page": "Sightings (/v2/sightings)",
+      "summary": "Sightings is a mature, dense split-panel command view that already adopts much of the foundation: the vendor table in detail.html uses .compact-cell--head, primary CTAs in detail.html / offers_panel.html use .btn-primary/.btn-sm, status pills route through the shared status_badge macro, and the empty state reuses the shared partial. The gap is almost entirely in form controls and the RFQ modal: nearly every input/select/textarea across table.html, vendor_modal.html, activity_section.html, offer_form_modal.html and qual_request_modal.html still hand-rolls focus:ring-brand-* / focus:border-brand-* instead of the .input class, so focus rings have NOT moved to the accent \u2014 the most pervasive piece of foundation-debt on the page. The modal's terminal \"Send to N Vendors\" CTA is bespoke bg-brand-500/600 rather than .btn-primary, and the detail-panel tab indicator + Build-RFQ link use brand-500/600 for active/primary states. Hierarchy is strong (priority dashboard strip answers \"what needs attention\" in <3s, phone is one tap on every vendor row), so the work here is conformance polish, not restructuring.",
+      "findings": [
+        {
+          "category": "foundation-debt",
+          "severity": "high",
+          "effort": "M",
+          "location": "app/templates/htmx/partials/sightings/table.html:72,80",
+          "issue": "The two primary filter inputs (Search MPN/customer, Manufacturer) hand-roll their focus state as focus:border-brand-400 focus:ring-1/ring-2 focus:ring-brand-200 instead of using the .input class. Post-PR0 the canonical focus ring resolves to the accent (--accent-ring) via .input/.input-focus; these are the most-used controls on the page and still glow brand, not azure \u2014 visible foundation-debt every time the buyer searches.",
+          "fix": "Replace the bespoke class string on both inputs with `class=\"input\"` (drop border/focus utilities). .input already supplies w-full px-3 py-1.5 text-sm, the gray-300 border, and the accent focus ring. Keep the flex-1 min-w / w-[140px] width utility by appending it to the class list (e.g. class=\"input flex-1 min-w-[150px]\")."
+        },
+        {
+          "category": "foundation-debt",
+          "severity": "high",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/sightings/vendor_modal.html:291,320",
+          "issue": "The modal's terminal primary action \u2014 'Send to N Vendors' (compose step) and 'Confirm & Send' (preview step) \u2014 is bespoke `bg-brand-500 hover:bg-brand-600` (compose) and `bg-green-600 hover:bg-green-700` (preview). Neither resolves to the accent; the single most important CTA in the RFQ flow is off-token, and the two send buttons don't even match each other.",
+          "fix": "Swap both to `class=\"btn-primary\"` (add the disabled:* utilities back via Alpine :disabled which already exists). This moves the send CTA onto the azure accent and unifies the two-step flow. The Cancel/Back buttons should become .btn-secondary for the same reason (lines 278, 315)."
+        },
+        {
+          "category": "foundation-debt",
+          "severity": "medium",
+          "effort": "M",
+          "location": "app/templates/htmx/partials/sightings/activity_section.html:34,46,55",
+          "issue": "The activity log's type-select, title input and note textarea inline `focus:border-brand-400 focus:ring-brand-400` with rounded-md/border-gray-300 rather than .input. Same brand-not-accent focus-ring debt as the filter bar, and the rounded-md diverges from the .input rounded-lg standard.",
+          "fix": "Replace each control's class with `input input-sm` (text-xs py-1.5 px-2 maps cleanly to input-sm); for the textarea add `resize-none`. This drops the brand focus ring, the ad-hoc rounded-md, and the hardcoded border-gray-300 in one move."
+        },
+        {
+          "category": "foundation-debt",
+          "severity": "medium",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/sightings/detail.html:85",
+          "issue": "The detail-panel tab indicator uses border-brand-500 text-brand-500 for the ACTIVE tab. Per PR0 an active-state indicator is exactly what should move to the accent; the active Vendors/Offers/Activity tab currently reads brand, not azure.",
+          "fix": "Change the active branch from 'border-brand-500 text-brand-500' to use the accent \u2014 e.g. style the active state with the accent var (class 'text-accent-600 border-accent-600' if the accent-* Tailwind family is safelisted, matching how active bottom-nav resolves). Inactive 'text-gray-500 hover:text-gray-900' stays."
+        },
+        {
+          "category": "foundation-debt",
+          "severity": "medium",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/sightings/detail.html:22-24,39",
+          "issue": "Build RFQ is a primary action correctly using .btn-primary, but the Customer link (line 39) and the inline status <select> hover (line 60 hover:border-brand-400) use brand-600/brand-400 for an interactive/primary accent. The Build-RFQ pill in _vendor_row.html:157 likewise uses border-brand-200 text-brand-600 hover:bg-brand-50 \u2014 a primary 'phone is the weapon' action styled in brand, not accent.",
+          "fix": "Move the interactive-accent usages to accent-*: customer link text-accent-600, the status select hover:border-accent-400, and the per-vendor Build RFQ pill to text-accent-600 border-accent-200 hover:bg-accent-50. Leaves neutral chrome (gray borders/cards) on brand-*/gray-* as intended."
+        },
+        {
+          "category": "foundation-debt",
+          "severity": "low",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/sightings/offer_form_modal.html:31, qual_request_modal.html:28, vendor_modal.html:204-208",
+          "issue": "The offer-entry, qual-request and add-vendor-contact form fields inline `focus:ring-brand-500 focus:border-brand-500` (and rounded, not rounded-lg) rather than .input. These are the offer-capture and add-vendor surfaces \u2014 low traffic but they perpetuate the brand-focus-ring debt and a divergent corner radius.",
+          "fix": "Replace each field's class with `input` (or `input input-sm` for the compact add-vendor fields). Normalizes focus ring to accent and radius to rounded-lg across all sightings forms."
+        },
+        {
+          "category": "density",
+          "severity": "low",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/sightings/table.html:123-135,149,154,158-159",
+          "issue": "The requirements <table class=\"compact-table\"> inlines px-3 py-2 / px-2 py-2 on every <th> and <td>. The unlayered .compact-table th/td CSS lock (styles.css:415,431 \u2014 padding 7px/5px 10px) overrides these equal-specificity utilities, so the inline paddings are dead weight that masks the lock and diverges from the sibling vendor table in detail.html which correctly uses .compact-cell--head. Cosmetically fine today, but it's exactly the inlined-cell-padding pattern the foundation wants drained, and it invites drift if the lock ever changes specificity.",
+          "fix": "Strip the px-*/py-* utilities from the thead <th> and tbody <td> elements (keep text-left/right/center, widths, and hidden-breakpoint classes). Let .compact-table own row padding, matching detail.html. The checkbox cells can use .compact-cell if explicit padding is wanted."
+        },
+        {
+          "category": "consistency",
+          "severity": "medium",
+          "effort": "M",
+          "location": "app/templates/htmx/partials/sightings/table.html:18-40",
+          "issue": "The priority dashboard strip (Urgent/Stale/Pending) and the status pills (lines 51-58) hand-roll pill markup with one-off bg-rose-100/amber-100/blue-100 + px-3 py-1 rounded-full, while the rest of the app has .badge/.chip/.badge-mini primitives and a status_badge macro. The counters and pills re-implement a primitive with bespoke color maps, so they don't track the shared badge family or the unified 11px uppercase header type.",
+          "fix": "Keep the hx-get button behavior but render the visual pill via .chip/.badge (or .badge-warning/.badge-info helpers) so color, padding, radius and border come from the locked family. At minimum align the status pills (line 54) to the same px/text scale as .chip rather than text-[10px]/[9px] one-offs."
+        },
+        {
+          "category": "consistency",
+          "severity": "low",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/sightings/_vendor_row.html:76-98, _offer_row.html:22, vendor_modal.html:47",
+          "issue": "Vendor-status pills, OOO/overlap/sub-MPN badges and offer-status pills are all rendered as raw `inline-flex px-1.5 py-0.5 text-[10px] rounded-full {color}` literals with per-file color maps, instead of the .badge/.chip primitives. The same 'status pill' concept is re-implemented in at least three files with slightly different padding/text sizes, so the badge vocabulary drifts row-to-row.",
+          "fix": "Introduce a small shared macro (or reuse status_badge with a status_map) for the vendor-status and offer-status pills so the color maps live once; render the metadata badges (OOO, overlap, via-MPN) through .chip/.badge-mini. Non-blocking but removes triplicated color dictionaries."
+        },
+        {
+          "category": "hierarchy",
+          "severity": "low",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/sightings/detail.html:30-36",
+          "issue": "Key figures in the detail header \u2014 Qty and Target price \u2014 are rendered at text-xs font-mono text-gray-700, visually identical to their labels. The buyer's two most decision-relevant numbers (how many, target $) get no emphasis, missing the foundation's .figure-accent hero-numeric treatment and weakening the 3-second 'is this worth my time' read.",
+          "fix": "Bump the Qty and Target values to a larger/heavier weight (e.g. text-sm font-semibold) and consider .figure-accent on the target price so the hero numbers stand out from the gray labels. Coverage % already gets a bar; the header numbers should match that emphasis."
+        },
+        {
+          "category": "a11y",
+          "severity": "medium",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/sightings/table.html:145-148, list.html:202-203",
+          "issue": "Requirement rows are click-to-select via @click=\"selectReq(id)\" on a <tr> with cursor-pointer but no role/tabindex/keydown handler, so the primary navigation of the page is mouse-only \u2014 a keyboard user cannot select a requirement to load the detail panel. The foundation calls out keyboard nav on rows as a lens.",
+          "fix": "Add `tabindex=\"0\" role=\"button\"` and `@keydown.enter=\"selectReq({{ r.id }})\"` (and space) to the row, mirroring the accent focus-ring so the focused row is visible. Ensure the row's focus outline uses the accent ring rather than being suppressed."
+        },
+        {
+          "category": "a11y",
+          "severity": "low",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/sightings/table.html:251",
+          "issue": "The mobile card selected-state uses ring-2 ring-brand-300; selection/active emphasis is now an accent concern. Minor, but it's a brand-* active state on a selection indicator.",
+          "fix": "Change to ring-2 with the accent ring color (ring-accent-300 if safelisted, or the row-selected token) to match the desktop row-selected treatment and the accent foundation."
+        }
+      ],
+      "topOpportunities": [
+        "Adopt .input everywhere (table.html filter bar, vendor_modal, activity_section, offer/qual modals): one find-replace sweep moves every form-control focus ring from brand to the azure accent and unifies radius \u2014 the single highest-leverage foundation conformance fix on the page, and the filter inputs are touched on nearly every visit.",
+        "Put the RFQ-send flow on the accent: switch vendor_modal.html's 'Send to N Vendors' / 'Confirm & Send' to .btn-primary and Cancel/Back to .btn-secondary. This is the terminal CTA of the core 'phone is the weapon' RFQ workflow and is currently both off-token and internally inconsistent (brand-500 vs green-600).",
+        "Make the requirements rows keyboard-navigable (tabindex/role/@keydown.enter on the <tr> in table.html): the page's primary interaction \u2014 selecting a requirement to load the detail panel \u2014 is mouse-only today, blocking keyboard-driven buyers the Bloomberg-terminal doctrine targets.",
+        "Move active/interactive-accent states off brand-* in detail.html (active tab indicator, customer link, inline status select) and the per-vendor Build RFQ pill, so 'what's active / what to click next' reads in the one azure accent rather than the legacy brand blue."
+      ],
+      "key": "sightings"
+    },
+    {
+      "page": "Materials (/v2/materials)",
+      "summary": "Materials is a dense, well-structured faceted-search workspace that already honors much of the foundation: results use .compact-table compact-table--dense (correct cell locks), .badge for status/lifecycle/condition pills, the mobile \"Show Results\" button uses .btn-primary, empty/loading/error states exist, and rows are keyboard-operable. The dominant gap is accent migration: the entire surface predates PR0 and still resolves every ACTIVE state, focus ring, primary CTA, and key figure to brand-500/600/700/800 instead of accent-* \u2014 so this page reads in the old brand hue while the rest of the app moves to Trio azure. Secondary debt is bespoke markup re-implementing primitives (the desktop \"Add part\" button, sidebar inputs, and active-filter pills hand-roll .btn-primary/.input/.chip) and inlined px-4/py-2 paddings on the search-bar and detail header that run looser than the new density locks.",
+      "findings": [
+        {
+          "category": "foundation-debt",
+          "severity": "high",
+          "effort": "M",
+          "location": "app/templates/htmx/partials/materials/workspace.html:48-50,65,77,79,138,159,181-207",
+          "issue": "Every ACTIVE/selected/focus state in the sidebar resolves to brand-* not accent-*: 'Clear all'/'Copy link' (brand-600), recent-commodity active chip (bg-brand-100 text-brand-800 border-brand-300), category-search focus ring (focus:ring-brand-500), 'All Materials' active state (bg-brand-100 text-brand-800 border-brand-500), confidence/sourcing checkboxes (text-brand-600 focus:ring-brand-500), Part-type/Searched-within toggles active (bg-brand-50 text-brand-700 border-brand-300), Min-searches input focus ring. Per PR0 these active/focus states must move to accent-*.",
+          "fix": "Swap brand-\u2192accent- for selected/active/focus only: text-brand-600\u2192text-accent-600, bg-brand-100 text-brand-800 border-brand-300/500\u2192bg-accent-100 text-accent-800 border-accent-300/500, focus:ring-brand-500\u2192focus:ring-accent-500 (or apply .input/.input-focus which already carry the accent ring), text-brand-600 focus:ring-brand-500 on checkboxes\u2192text-accent-600 focus:ring-accent-500, bg-brand-50 text-brand-700 border-brand-300\u2192bg-accent-50 text-accent-700 border-accent-300. Leave neutral chrome/borders on brand-*."
+        },
+        {
+          "category": "foundation-debt",
+          "severity": "high",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/materials/workspace.html:286,304,313-322",
+          "issue": "The primary 'Add part' CTA hand-rolls bg-brand-500 ... hover:bg-brand-600 instead of the .btn-primary primitive, so it stays brand-blue while the foundation's primary accent is Trio azure; the mobile filter-count badge is bg-brand-500; and the search input uses focus:ring-brand-500 focus:border-brand-500. The sibling mobile 'Show Results' button (line 263) already uses .btn-primary, making the desktop CTA inconsistent within the same template.",
+          "fix": "Replace the Add-part button's bg-brand-500/hover:bg-brand-600 with .btn-primary (keep the icon spans + flex-shrink-0). Change the mobile filter badge bg-brand-500\u2192bg-accent-500. Apply class .input (or swap focus:ring-brand-500 focus:border-brand-500\u2192accent) to the search input so its focus ring resolves to --accent like the rest of the app."
+        },
+        {
+          "category": "foundation-debt",
+          "severity": "high",
+          "effort": "M",
+          "location": "app/templates/htmx/partials/materials/filters/_macros.html:16,29,38,58,99,104,151",
+          "issue": "Filter macros (rendered on every page load) bake brand-* into active/focus states: facet search-box focus:ring-brand-500 focus:border-brand-500, checkbox text-brand-600 focus:ring-brand-500, 'Show all' toggle text-brand-600 hover:text-brand-700, numeric/boolean selected chips bg-brand-50 text-brand-700 border-brand-300, range-input focus:ring-brand-500, and the disclosure_header active-count badge bg-brand-100 text-brand-700. These are all active/focus surfaces that PR0 routes to accent-*.",
+          "fix": "Migrate the active/focus tokens to accent-*: focus:ring-brand-500 focus:border-brand-500\u2192accent (or use .input on the search/range inputs), checkbox text-brand-600 focus:ring-brand-500\u2192text-accent-600 focus:ring-accent-500, selected-chip bg-brand-50 text-brand-700 border-brand-300\u2192bg-accent-50 text-accent-700 border-accent-300, 'Show all' text-brand-600\u2192text-accent-600, header count badge bg-brand-100 text-brand-700\u2192bg-accent-100 text-accent-700."
+        },
+        {
+          "category": "foundation-debt",
+          "severity": "medium",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/materials/filters/tree.html:23",
+          "issue": "The commodity-tree active row (the primary navigation selection for the whole page) uses bg-brand-100 text-brand-800 font-semibold border-l-[3px] border-brand-500 \u2014 an active state still in the old brand hue. This is the single most-clicked selector on the page, so it visibly reads off-accent.",
+          "fix": "Change the active branch to bg-accent-100 text-accent-800 ... border-accent-500; leave the inactive branch's neutral text-gray-600 untouched."
+        },
+        {
+          "category": "foundation-debt",
+          "severity": "medium",
+          "effort": "M",
+          "location": "app/templates/htmx/partials/materials/detail.html:58,69,82-95,150,210,237",
+          "issue": "Detail page key figure + CTAs + active tab are still brand-*: the Searches count (the page's hero numeric) is font-bold text-brand-600 rather than the opt-in .figure-accent; Enrich/Insights buttons and the Save submit hand-roll text-brand-600 bg-brand-50 / bg-brand-500 hover:bg-brand-600 instead of primitives; the active tab indicator is border-brand-500 text-brand-600; edit-form inputs use focus:ring-brand-500.",
+          "fix": "Wrap the Searches value in .figure-accent. Convert the Save submit to .btn-primary. Move Enrich/Insights to accent-tinted ghost styling (text-accent-600 bg-accent-50 border-accent-200) or .btn-secondary. Active tab\u2192border-accent-500 text-accent-600. Edit-input focus rings\u2192accent or class .input."
+        },
+        {
+          "category": "consistency",
+          "severity": "medium",
+          "effort": "M",
+          "location": "app/templates/htmx/partials/materials/workspace.html:335,342,349-432",
+          "issue": "The active-filter chips re-implement a primitive by hand: each is inline-flex items-center gap-1 px-2 py-0.5 ...-50 text-...-700 rounded-full text-xs across ~12 near-duplicate blocks (blue-50, amber-50, gray-100, brand-50). The foundation provides .badge (rounded-full status pill) and .chip (rectangular metadata tag); hand-rolled markup means each chip can drift in padding/size and none picks up the locked badge sizing.",
+          "fix": "Collapse the removable filter chips onto the .chip (or .badge) primitive plus a semantic color override, e.g. <span class=\"chip bg-gray-100 text-gray-600 border-gray-200\">\u2026</span>, and route the commodity/AI chips' accent color through accent-* (bg-accent-50 text-accent-700). One macro for 'removable chip(label, onRemove, color)' would dedupe all ~12 blocks."
+        },
+        {
+          "category": "density",
+          "severity": "medium",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/materials/workspace.html:276,279-280,318",
+          "issue": "The results-area search bar header inlines p-4 and the buttons inline px-3 py-2, which is looser than the new locks (<main> is p-3, .btn is px-3.5 py-1.5). The detail hero (detail.html:15 p-4 mb-6) and tab buttons (px-4 py-2.5) likewise run loose. Inlined paddings here visibly diverge from the tightened standard elsewhere.",
+          "fix": "Bring the search-bar container to p-3 (matching <main>), let the Add-part/filter buttons inherit .btn padding via the primitives, and tighten detail.html section paddings/margins (p-4\u2192p-3, mb-6\u2192mb-4) toward the density locks. Use the named cell/btn utilities rather than re-inlining px/py."
+        },
+        {
+          "category": "foundation-debt",
+          "severity": "low",
+          "effort": "M",
+          "location": "app/templates/htmx/partials/materials/workspace.html:26,28,44,130,276; app/templates/htmx/partials/materials/list.html:34,39,228; app/templates/htmx/partials/materials/detail.html:15,234",
+          "issue": "Hairlines/dividers use border-gray-100/200 and the legacy override block rather than the line tokens, and the results table + cards use border-brand-200 for their hairline frame. PR0 introduces .border-line-base / .border-line-subtle (--line #BFC4CE / --line-subtle #D5D8DF) to drain the border-gray-* !important block page-by-page.",
+          "fix": "Convert structural hairlines (sidebar border-r, section border-t dividers, search-bar border-b, table/card frame, tab border-b, pagination button borders) from border-gray-100/200 and border-brand-200 to .border-line-subtle (light dividers) or .border-line-base (table/card frame)."
+        },
+        {
+          "category": "hierarchy",
+          "severity": "medium",
+          "effort": "M",
+          "location": "app/templates/htmx/partials/materials/workspace.html:1-9 (no page title/breadcrumb); list.html:26-29 (result count)",
+          "issue": "Three-Second-Rule 'Where am I?' is weak: the workspace root renders straight into the filter/results columns with no page title or breadcrumb (the only label is the bottom-nav). The result count ('N results in <commodity>') is the closest thing to an at-a-glance answer but sits small (text-sm) inside the results scroll area, and there is no count/urgency cue for the high-value 'Needs review' (validation-conflict) queue at the page level \u2014 it's only reachable as a buried sidebar toggle.",
+          "fix": "Add a compact page header (title 'Materials' + active-commodity breadcrumb) above the two columns, and surface a 'Needs review (N)' attention chip near the search bar that toggles needsReview \u2014 turning the institutional-memory review queue into a glanceable, one-click action instead of a hidden filter."
+        },
+        {
+          "category": "a11y",
+          "severity": "low",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/materials/list.html:71-77",
+          "issue": "Result rows are role=button tabindex=0 with focus:ring-brand-500 (focus ring still in the old brand hue, not the accent the foundation standardizes on). Functionally accessible, but the focus indicator won't match the app-wide accent focus treatment.",
+          "fix": "Change the row focus ring focus:ring-brand-500\u2192focus:ring-accent-500 (focus:ring-inset retained) so keyboard focus matches the foundation's accent focus spec."
+        },
+        {
+          "category": "consistency",
+          "severity": "low",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/materials/list.html:114,122,126,195",
+          "issue": "Description/Manufacturer/Last-Seen cells add inline truncate max-w-[200px]/[160px] and a category sub-line at text-[11px]; the MPN cell uses font-data font-semibold text-brand-600 (the MPN, a key identifier, is colored in the old brand hue). The 11px sub-line is at the readability floor and the brand-tinted MPN is an active-ish emphasis that PR0 would route to accent.",
+          "fix": "Keep truncation but move the prominent MPN's text-brand-600 to text-accent-600 (or leave neutral gray-900 and reserve accent for genuinely interactive text) for consistency with the foundation's single-accent rule; confirm the category sub-line stays >=11px (it is exactly at the floor)."
+        },
+        {
+          "category": "polish",
+          "severity": "low",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/materials/list.html:224-236",
+          "issue": "Pagination buttons (Prev/Next/page-range) are bespoke px-3 py-1.5 ... border border-brand-200 rounded-lg hover:bg-brand-50 rather than the .btn-secondary primitive, and use brand-* hover. Minor, but it's another primitive re-implementation that will drift from the locked button sizing/hover.",
+          "fix": "Replace Prev/Next with .btn-secondary .btn-sm; if a brand hover tint is desired keep it neutral (hover:bg-gray-50) per the secondary spec, removing the bespoke brand-200/brand-50 styling."
+        }
+      ],
+      "topOpportunities": [
+        "Run a single accent-migration pass across workspace.html, _macros.html, tree.html and detail.html: every ACTIVE/selected/focus/primary brand-500/600/700/800 \u2192 accent-* (and the Searches hero numeric \u2192 .figure-accent). This is the highest-leverage move \u2014 it's the bulk of the page's foundation-debt, mechanically safe (accent-* is already safelisted), and instantly aligns the most-used sourcing surface with the new app-wide azure.",
+        "Adopt the primitives for the buttons and chips: convert the desktop 'Add part' CTA and detail Save to .btn-primary, Prev/Next to .btn-secondary, and collapse the ~12 hand-rolled active-filter chips onto a single .chip/.badge macro. Removes drift and guarantees the locked sizing/hover everywhere.",
+        "Add a lightweight page header (title 'Materials' + active-commodity breadcrumb) and surface a glanceable 'Needs review (N)' attention chip by the search bar \u2014 closing the Three-Second-Rule 'where am I / what needs attention' gaps and turning the validation-conflict review queue into a one-click action instead of a buried sidebar toggle.",
+        "Drain the line-token debt on this page: convert structural hairlines (sidebar/section dividers, search-bar/table/card/tab frames) from border-gray-*/border-brand-200 to .border-line-subtle/.border-line-base, and tighten the inlined p-4/px-4 py-2.5 paddings toward the new density locks (p-3, primitive button padding)."
+      ],
+      "key": "materials"
+    },
+    {
+      "page": "Search / Part Dossier (/v2/search)",
+      "summary": "The Part Dossier (\"The Bench\") is one of the best-architected surfaces in the app: instant DB-read hero, lazy-loaded sections with explicit hx-target guards, a reused lead-detail drawer, a two-tier sticky search/rail, and genuinely strong empty/loading/degraded states (the SSE empty-state pivots to \"what we know,\" the degraded-source banner is exemplary). Its hierarchy mostly satisfies the Three-Second Rule \u2014 title (mono MPN H1), attention cues (knowledge tiles, AUTH/confidence badges, \"New to us\"), and a prominent Send-RFQ primary are all present. The problem is purely foundation timing: this page was authored just before PR0 and never migrated, so every primary CTA still hardcodes brand-600/700 instead of .btn-primary/--accent, the tier-1 search input uses focus:ring-brand-500 instead of .input/accent-ring, hairlines are border-gray-*, and hero key-figures don't use .figure-accent. The landing form.html already adopted .btn-primary, which proves the rest is migratable debt, not a constraint.",
+      "findings": [
+        {
+          "category": "foundation-debt",
+          "severity": "high",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/search/dossier_hero.html:134",
+          "issue": "The page's single most important CTA \u2014 hero 'Send RFQ' \u2014 hardcodes bg-brand-600 hover:bg-brand-700 instead of the accent. Under PR0 the primary CTA must resolve to --accent (Trio azure) via .btn-primary, so this key action now renders in the wrong (legacy brand) color vs every other page's primary button.",
+          "fix": "Replace the bespoke class list with `btn-primary` (keep the inline-flex/gap/icon and shadow-sm if desired: `btn-primary shadow-sm`). Drops 6 utility classes and adopts the accent + accent focus ring automatically."
+        },
+        {
+          "category": "foundation-debt",
+          "severity": "high",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/search/dossier_shell.html:26,42,171",
+          "issue": "Three more primary CTAs on bg-brand-600 hover:bg-brand-700: the tier-1 sticky search 'Search' button (line 26), the condensed-rail 'Send RFQ' (line 42), and the mobile action-sheet 'Send RFQ' (line 171). All are primary actions that PR0 says must be accent, but they render in legacy brand blue.",
+          "fix": "Convert each to `.btn-primary` with size modifiers: line 26 \u2192 `btn-primary btn-sm`; line 42 \u2192 `btn-primary btn-sm` (keep the inline-flex icon); line 171 \u2192 `btn-primary flex-1` (full-width). This both fixes the accent and collapses the duplicated padding/color soup to one primitive."
+        },
+        {
+          "category": "foundation-debt",
+          "severity": "high",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/search/lead_detail.html:191",
+          "issue": "The drawer's 'Add to Shortlist' primary action is bg-brand-600 hover:bg-brand-700 \u2014 same legacy-brand-instead-of-accent debt. The drawer is the per-vendor decision surface, so its primary should be accent.",
+          "fix": "Replace the class with `btn-primary flex-1` (the wrapper already provides the flex row)."
+        },
+        {
+          "category": "foundation-debt",
+          "severity": "high",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/search/form.html:16-19",
+          "issue": "The landing search input uses `focus:ring-2 focus:ring-brand-500 focus:border-brand-500` plus a hand-rolled border/padding stack instead of the .input primitive. PR0 made .input the single focus spec (ring-2 + accent ring + accent border). This is the page's primary entry control and its focus ring is legacy brand, not accent.",
+          "fix": "Replace the bespoke classes with `input font-mono tracking-tight` (keep flex-1 via a wrapper or `class=\"input ...\"`). The .input class already supplies px-3 py-1.5, border, rounded-lg, accent focus ring, and accent focus border."
+        },
+        {
+          "category": "foundation-debt",
+          "severity": "medium",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/search/dossier_shell.html:22-24",
+          "issue": "The tier-1 sticky-bar part-number input is a bare bg-transparent input with `placeholder:text-gray-400 outline-none` and NO focus ring at all \u2014 keyboard users get zero visible focus affordance on the dossier's most-used control (deep-link a new PN). This is both an a11y gap and an accent-token miss.",
+          "fix": "Add the accent focus mixin: append `input-focus rounded-md` (input-focus = focus:outline-none focus:ring-2 with accent ring + accent border on :focus) so the transparent bar still shows an accent ring on keyboard focus."
+        },
+        {
+          "category": "foundation-debt",
+          "severity": "medium",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/search/dossier_hero.html:79,108-111",
+          "issue": "The two hero key-figures buyers scan first \u2014 the Market price (line 79, font-mono text-2xl) and the knowledge count numerals (lines 108-111, font-mono text-lg) \u2014 are plain text-brand-900, not the new .figure-accent. PR0 introduced .figure-accent specifically for hero numerics so the decision-driving number reads as the accent and gets tabular-nums alignment.",
+          "fix": "Add `.figure-accent` to the market-price <span> (line 79) and to the four count numerals (lines 108-111) where the value is non-zero (keep text-gray-300 for the zero/empty case). Gives tabular-nums + accent emphasis on the figures buyers triage by."
+        },
+        {
+          "category": "foundation-debt",
+          "severity": "medium",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/search/dossier_hero.html:92-93",
+          "issue": "The price sparkline hardcodes inline hex colors (stroke=\"#838B9B\", fill=\"#4B5463\") in the SVG. PR0 drains inline hex in favor of tokens; these greys are off-palette one-offs that won't re-theme with --accent and read as arbitrary.",
+          "fix": "Use currentColor + a Tailwind text color (e.g. wrap in `text-brand-400`/`text-brand-600` and set stroke=\"currentColor\"/fill=\"currentColor\"), or point the trend line at var(--accent) so the hero's price trend matches the accent the figures now use."
+        },
+        {
+          "category": "foundation-debt",
+          "severity": "medium",
+          "effort": "S",
+          "location": "app/static/styles.css:610-614 (.count-tile dt)",
+          "issue": "The .count-tile dt rule (used by the hero knowledge tiles) hardcodes font-size:0.62rem (~9.9px) AND color:#838B9B. That violates the PR0 11px readability floor for the tile labels (Offers/Won/Sightings/Reqs) and uses an inline hex instead of a token. Because it lives in the shared CSS it silently affects the dossier hero.",
+          "fix": "Bump font-size to 0.6875rem (11px) to meet the floor and replace `color:#838B9B` with a token-backed grey (e.g. `color: var(--line)` is wrong semantically \u2014 use the brand-400/gray-500 utility on the element, or define the color via @apply text-gray-500). Smallest change: set font-size:0.6875rem and swap the hex for `@apply text-gray-500`."
+        },
+        {
+          "category": "a11y",
+          "severity": "medium",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/search/dossier_hero.html:116; dossier_specs.html:32",
+          "issue": "Two text-[9px] instances fall under the PR0 11px readability floor: the buyer-avatar initials (hero line 116) and the spec evidence-tier 'Direct/Sourced' tag (specs line 32). The evidence tag in particular conveys provenance/trust and is barely legible.",
+          "fix": "Hero avatars: bump to text-[10px] minimum given the 20px circle, or accept as a decorative non-text-content exception (initials are redundant with the title attr) \u2014 at minimum raise to text-[10px]. Specs evidence tag (line 32): raise to text-[11px] (it is meaningful body content) and reuse `.badge-mini` / `.chip` rather than the one-off rounded px-1 span."
+        },
+        {
+          "category": "consistency",
+          "severity": "medium",
+          "effort": "M",
+          "location": "app/templates/htmx/partials/search/dossier_hero.html:138,141; dossier_shell.html:45,46,174; lead_detail.html",
+          "issue": "Every secondary/outline button (Add Offer, Add to Requisition, rail Add Offer/Add to Req, mobile Actions) re-implements the same outline pattern by hand: `bg-white border border-brand-300 text-brand-700 ... hover:bg-brand-50`. PR0 provides .btn-secondary as the locked outline primitive. The hand-rolled variants drift in padding (px-4 py-2 vs px-3 py-1.5 vs px-3 py-2.5) and are line-debt-adjacent.",
+          "fix": "Replace the bespoke outline buttons with `.btn-secondary` (+ `.btn-sm` where a compact size is wanted). One primitive normalizes padding/border/hover across the hero bar, the rail, the mobile sheet, and the drawer, and kills the brand-300 hairline borders in the same stroke."
+        },
+        {
+          "category": "consistency",
+          "severity": "low",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/search/shortlist_bar.html:26-28",
+          "issue": "shortlist_bar's 'Create RFQ' uses a hand-rolled outline (px-4 py-2 ... bg-white text-brand-700 border border-brand-300) while its sibling 'Add to Requisition' correctly uses .btn-primary (line 22). Two buttons in the same bar, one primitive and one bespoke \u2014 inconsistent button vocabulary in a single component.",
+          "fix": "Convert 'Create RFQ' to `.btn-secondary` and the trailing 'Clear' to `.btn-ghost btn-sm` so all three buttons in the bar use the locked .btn-* family."
+        },
+        {
+          "category": "foundation-debt",
+          "severity": "medium",
+          "effort": "M",
+          "location": "app/templates/htmx/partials/search/history_panel.html:26,61,73,84,90,100,109,117,132; vendor_card.html:88,97; dossier_shell.html:109,162; dossier_hero.html:55",
+          "issue": "Pervasive border-gray-* hairlines across the dossier (history_panel uses border-gray-50/100 on every accordion/row divider; vendor_card sub-offer table border-gray-100/200; the lead-drawer panel border-l border-gray-200; the history skeleton border-gray-100). PR0 introduced --line/--line-subtle via .border-line-* and is draining border-gray-* page by page. These hairlines currently lean on the legacy !important override block.",
+          "fix": "Sweep border-gray-100/200/50 \u2192 .border-line-subtle (and divide-gray-* \u2192 divide-[color:var(--line-subtle)] or the brand-100 dividers already used elsewhere on this page for consistency). The dossier already uses divide-brand-100 in the market list, so align the history panel/drawer to the same hairline."
+        },
+        {
+          "category": "consistency",
+          "severity": "low",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/search/history_panel.html:40,53,79,138; lead_detail.html:209-213,228-233",
+          "issue": "The 'What we know' panel and lead-detail use blue-600/blue-50/blue-700 for the 'Open full part page \u2192' / 'View full FRU matrix \u2192' links and buyer chips, while the rest of the dossier (and PR0) standardize interactive accents on brand/accent. These blue-* links are a third color family competing with brand and accent in the same surface.",
+          "fix": "Recolor the inline link CTAs to `text-brand-600 hover:text-brand-700` (or accent via a small link utility) and the buyer/cross-ref chips to bg-brand-100 text-brand-700 to match the hero's brand pills, removing the stray blue-* family."
+        },
+        {
+          "category": "density",
+          "severity": "low",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/search/vendor_card.html:89-101",
+          "issue": "The expandable sub-offers table is a bespoke <table class=\"w-full text-xs\"> with hand-inlined `py-1` cells and a gray-500 thead, re-implementing a table primitive instead of using .compact-table / the named .compact-cell utilities the foundation provides. Header is text-gray-500 (not the unified 600/0.05em/11px uppercase header spec).",
+          "fix": "Apply `compact-table` to the <table> (gets the locked th/td padding + unified header type) or, if keeping it inline, swap `py-1` cells for `.compact-cell--dense` and the thead row for the 11px-uppercase header treatment so the nested table matches the app's table density."
+        },
+        {
+          "category": "foundation-debt",
+          "severity": "low",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/search/lead_detail.html:141,148,156",
+          "issue": "The drawer's evidence section uses a near-black bg-gray-800 / border-gray-700 'terminal' block \u2014 an off-palette one-off dark card that exists nowhere else in the foundation and uses border-gray-700 hairlines. It reads as a bespoke island vs the white .card surfaces around it.",
+          "fix": "Either bring it into the palette (bg-brand-900 with border-line-base, if a dark evidence block is intentional) or convert it to a normal white .card with the same data \u2014 and replace border-gray-700 with a token. Low priority but it's the most visually divergent block on the surface."
+        },
+        {
+          "category": "hierarchy",
+          "severity": "low",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/search/vendor_card.html:67",
+          "issue": "Per-row market actions (RFQ this / +Offer / Details) are lg:opacity-0 group-hover:opacity-100 \u2014 fully hidden until hover on desktop. 'The phone is the weapon': the next outreach action should be ~one click away and discoverable. Hover-to-reveal hides the fastest path to action and is invisible to keyboard/touch-pad users who don't hover, weakening the Three-Second 'what do I do next'.",
+          "fix": "Make the row actions persistently visible at low emphasis (e.g. lg:opacity-60 group-hover:opacity-100) so the RFQ/Details affordance is always discoverable, or at minimum reveal on focus-within (add `lg:focus-within:opacity-100`) so keyboard tabbing exposes them."
+        },
+        {
+          "category": "polish",
+          "severity": "low",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/search/dossier_shell.html:78-93 vs dossier_market.html:21",
+          "issue": "Minor loading-to-content rhythm gap: the shell market skeleton (lines 84-89) renders rows with `px-4 py-3` and a left bar, but the real cache-hit market (dossier_market.html) leads with a `px-4 py-2.5` freshness header before the rows \u2014 so on swap the content shifts vs the skeleton. Small but visible jump on every dossier load.",
+          "fix": "Add a matching ~py-2.5 header placeholder bar to the skeleton (a thin freshness/refresh row) so the skeleton geometry matches the resolved market header and the swap doesn't reflow."
+        }
+      ],
+      "topOpportunities": [
+        "One sweep to migrate every primary CTA to .btn-primary and the search inputs to .input/.input-focus (dossier_hero.html:134, dossier_shell.html:26/42/171, lead_detail.html:191, form.html:16, dossier_shell.html:22). This is the single highest-leverage fix: it moves the page's most-used controls onto the Trio-azure accent and the accent focus ring in one pass, fixes the missing keyboard focus ring on the tier-1 search bar, and deletes a pile of duplicated padding/color classes \u2014 pure conformance win with near-zero risk.",
+        "Emphasize the decision figures: add .figure-accent to the hero market price and the four knowledge-count numerals (dossier_hero.html:79,108-111). These are the numbers a buyer triages by in the first 3 seconds; accent + tabular-nums makes the dossier's value proposition (price + institutional memory) pop instead of reading as flat brand-900 text.",
+        "Hairline + stray-color sweep: convert the border-gray-* dividers in history_panel/vendor_card/drawer to .border-line-subtle (align to the divide-brand-100 already used in the market list) and recolor the blue-600 'Open full part page'/'FRU matrix' links and buyer chips to brand. This drains this page off the legacy border-gray !important block and removes the third (blue) color family competing with brand/accent.",
+        "Make per-vendor row actions discoverable (vendor_card.html:67): the live-market list IS the page's action surface, but RFQ/+Offer/Details are hover-only on desktop and invisible to keyboard/touch users. Showing them at low emphasis (or on focus-within) directly serves 'the phone is the weapon' \u2014 the next outreach action one click away \u2014 for the highest-traffic interaction on the dossier."
+      ],
+      "key": "search"
+    },
+    {
+      "page": "Buy Plans (/v2/buy-plans)",
+      "summary": "The Buy Plans deal hub (hub.html \u2192 _board/_orders_queue/_supervise lenses, plus detail.html) is functionally rich and role-aware, and it scores well on the Three-Second Rule: clear `<h1>`, status badge, progress stepper, slim metric strips, and prominent role-aware action banners. But it predates the PR0 foundation and almost entirely re-implements primitives by hand: both tables are bespoke `min-w-full divide-y` markup (not data-table/compact-table) with inlined `px-4 py-3` / `text-xs text-gray-500` headers, so they render looser and lighter-weight than the rest of the app; the active lens pill, inline-form focus rings, and several CTAs still use brand-* where the foundation now wants accent; and hairlines are border-gray-* rather than .border-line-*. The detail page is also internally inconsistent \u2014 some buttons are `.btn btn-primary btn-sm`, others are raw `bg-emerald-600`/`bg-rose-600`. Nothing is broken, but the page is one of the higher-debt surfaces against the new baseline.",
+      "findings": [
+        {
+          "category": "density",
+          "severity": "high",
+          "effort": "M",
+          "location": "app/templates/htmx/partials/buy_plans/_orders_queue.html:25-34, detail.html:247-257",
+          "issue": "Both data tables (orders queue + line items) are hand-rolled `<table class=\"min-w-full divide-y divide-gray-200\">` with inline `px-4 py-3` cells and `text-xs font-medium text-gray-500` headers. This ignores the new density locks: data-table td is now 5px 10px and th is 7px 10px, and headers are unified to 11px/600/0.05em uppercase #6B7280. The page reads measurably looser and its headers lighter (font-medium vs 600) than every other table in the app.",
+          "fix": "Convert both tables to `class=\"data-table\"` (or `compact-table` for the dense line grid) and drop the per-cell `px-4 py-3` and per-th `text-xs font-medium text-gray-500 uppercase tracking-wider` \u2014 the class supplies padding, weight, tracking, and the 2px header rule. Keep only alignment utilities (text-right) on cells."
+        },
+        {
+          "category": "foundation-debt",
+          "severity": "high",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/buy_plans/hub.html:28-31",
+          "issue": "The active lens pill ('My Deals'/'My Orders'/'Supervise') resolves to `bg-brand-500 text-white` for the selected state. Per PR0 the single accent (Trio azure) now owns active-state chrome; an active selector on brand-500 is foundation-debt. (The resell sibling shares this exact pattern, so it is a program-wide sweep, but it is still debt here.)",
+          "fix": "Change the active branch to the accent: `'bg-accent-600 text-white shadow-sm'` (or a shared `.tab-pill--active` if one is introduced), leaving the inactive `bg-brand-100 text-brand-600` neutral chrome as-is."
+        },
+        {
+          "category": "foundation-debt",
+          "severity": "medium",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/buy_plans/_orders_queue.html:81-83, detail.html:307-311,513,519,524,548,571,607,632",
+          "issue": "Every inline form input/textarea uses `border border-brand-200 ... focus:ring-brand-500` (or `focus:ring-2 focus:ring-brand-500`). The foundation centralizes input styling in `.input`/`.input-sm` whose focus ring resolves to --accent. A brand-500 focus ring on a primary data-entry control is exactly the focus-ring case PR0 moved to accent.",
+          "fix": "Replace the bespoke input classes with `.input` (or `.input-sm` for the w-28 PO# fields), which supplies the border, padding, and accent focus ring. This also drops the per-field `border-brand-200 focus:ring-2 focus:ring-brand-500` repetition."
+        },
+        {
+          "category": "consistency",
+          "severity": "medium",
+          "effort": "M",
+          "location": "app/templates/htmx/partials/buy_plans/detail.html:176-182,557,581,334,342; _supervise.html:56-62,91,119-125",
+          "issue": "Action buttons are inconsistent: some use the shared `.btn btn-primary btn-sm` (lines 195,217,233,534), but Approve/Reject/Verify/Confirm are hand-rolled `px-3 py-1.5 ... bg-emerald-600/bg-rose-600 text-white rounded-md`. Two button systems coexist on the same screen, and the approve/reject greens/roses don't map to any btn variant. This is bespoke markup re-implementing the .btn primitive.",
+          "fix": "Standardize: destructive actions \u2192 `.btn btn-danger btn-sm`; approve/verify \u2192 a `.btn-success` variant (add one to styles.css mirroring btn-danger) or `.btn btn-primary btn-sm` if approve should read as the primary accent action. Remove the raw `bg-emerald-600/bg-rose-600 px-\u2026 py-\u2026` button markup."
+        },
+        {
+          "category": "foundation-debt",
+          "severity": "medium",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/buy_plans/_board.html:30-31; _supervise.html:40,75,105,137,158,178-179; _orders_queue.html:124,130-131",
+          "issue": "Card and section hairlines use `border-gray-200`/`border-gray-100` (column shells, triage card headers, team-orders table). PR0 introduced --line/--line-subtle via .border-line-base/.border-line-subtle and is draining border-gray-* page by page; these are line-debt.",
+          "fix": "Swap `border-gray-200` \u2192 `.border-line-base` and the lighter internal dividers `border-gray-100` \u2192 `.border-line-subtle` on the card/section/column borders. Leave the brand-200 card borders (which already match the card primitive) alone."
+        },
+        {
+          "category": "hierarchy",
+          "severity": "medium",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/buy_plans/detail.html:44-50",
+          "issue": "On the detail header the two hero figures a buyer scans for \u2014 total value (`$\u2026`) and margin % \u2014 are rendered as plain `text-sm text-gray-900 font-semibold`, the same weight/size as the 'N lines / N vendors' metadata beside them. The most important numbers on the deal don't stand out, weakening the 'what needs my attention' read.",
+          "fix": "Emphasize the total value with `.figure-accent` (the opt-in hero-numeric accent) and/or bump to `text-base`/`text-lg`, and keep the margin in its semantic emerald/amber/rose. Demote 'lines/vendors' to a lighter weight so the money figure wins the hierarchy."
+        },
+        {
+          "category": "consistency",
+          "severity": "low",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/buy_plans/detail.html:38-41,461,474; _orders_queue.html:153-155",
+          "issue": "Several status/metadata pills are hand-rolled `inline-flex px-\u2026 py-\u2026 text-xs \u2026 rounded-full` (Stock Sale chip, SO 'pending' pill, queue 'PO to cut'/'verifying' badges) rather than the shared `.badge`/`.chip` primitives that status_badge already emits elsewhere on this same page. Bespoke pills drift from the badge family's padding/border.",
+          "fix": "Route these through `.badge` (status/lifecycle) or `.chip` (the 'stock' metadata tag), e.g. `<span class=\"badge bg-amber-50 text-amber-700 border-amber-200\">`, so they inherit the locked badge geometry. The line_colors/so_colors maps already feed status_badge \u2014 extend that pattern instead of inlining."
+        },
+        {
+          "category": "polish",
+          "severity": "low",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/buy_plans/hub.html:49",
+          "issue": "The lazy-body loading placeholder is a bare `p-8 text-center text-gray-400 text-sm` 'Loading\u2026' with no skeleton or spinner \u2014 and the surrounding lens chrome paints first, so the body flashes empty. Minor, but it's the first thing a buyer sees on every hub visit.",
+          "fix": "Use the shared loading affordance (spinner/skeleton) consistent with other lazy bodies, or at minimum tighten `p-8` to match the page's p-3 rhythm and add the app spinner icon so the empty flash reads as intentional loading."
+        },
+        {
+          "category": "a11y",
+          "severity": "low",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/buy_plans/_board.html:38-43, _supervise.html:142-149,163-170,184-191",
+          "issue": "Deal cards and triage rows are clickable via `hx-get` on a `<div>`/`<a>` with `cursor-pointer` but no `tabindex`/`role=link` and no visible focus state, so keyboard users can't reach or see focus on the primary navigation target of the board. Contrast: PR0 routes focus rings through accent on real controls.",
+          "fix": "Make card/row navigations real focusable controls \u2014 either an `<a href>`-style element with the accent focus ring, or add `tabindex=\"0\" role=\"link\"` plus a `focus-visible:ring-2` accent ring and an Enter/Space handler \u2014 so the board is keyboard-navigable per the 'fast, keyboard-navigable' doctrine."
+        }
+      ],
+      "topOpportunities": [
+        "Convert the two bespoke tables (orders-queue + line-items) to the shared data-table/compact-table classes. This is the single highest-leverage move: it instantly fixes the density-debt (5px/10px locks), unifies header type (11px/600/0.05em), and removes ~40 inlined `px-4 py-3 text-xs font-medium text-gray-500` declarations \u2014 bringing the buyer's two most-used grids into visual parity with the rest of the app.",
+        "Sweep brand-* \u2192 accent on active/interactive states: the lens pill active branch (hub.html) and the inline-form focus rings (\u2192 `.input`/`.input-sm`). Small, mechanical, and it makes the page obey the one-accent rule where a buyer's eye actually tracks state.",
+        "Standardize the detail/supervise action buttons onto the .btn family (add a btn-success variant for Approve/Verify; btn-danger for Reject). Eliminates the dual button system on the most action-dense screen and makes the primary CTA reliably read as the accent.",
+        "Strengthen the detail-header hierarchy by promoting the total-value figure with .figure-accent and de-emphasizing the lines/vendors metadata, so the 'what's this deal worth / what needs attention' answer lands in under three seconds."
+      ],
+      "key": "buy-plans"
+    },
+    {
+      "findings": [
+        {
+          "category": "foundation-debt",
+          "severity": "high",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/resell/workspace.html:28-29",
+          "issue": "The lens switch ('My Lists' / 'Open to Me') is the primary mode toggle on this page, and its ACTIVE state hard-codes `bg-brand-500 text-white`. Under PR0 the one accent for active states is Trio azure (accent-*); this active pill still reads as the old brand blue, so it diverges from the bottom-nav active indicator and the accent CTAs sitting right next to it.",
+          "fix": "Swap the active branch to the accent family: `bg-accent-500 text-white shadow-sm` (and `bg-accent-100 text-accent-700 hover:bg-accent-200` for the inactive branch to keep the pair on one ramp). Note this is a hand-rolled copy of `filter_pill` \u2014 see the consistency finding to collapse it to the macro once the macro itself is moved to accent.",
+          "fix_short": "Move the active lens pill from brand-500 to accent-500"
+        },
+        {
+          "category": "foundation-debt",
+          "severity": "high",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/resell/detail.html:114",
+          "issue": "The detail tab bar (Lines / Offers / Build Bid / Outreach / Activity) marks the ACTIVE tab with `border-brand-500 text-brand-700`. This is the page's primary in-panel navigation; per PR0 an active-state indicator must resolve to the accent, not brand-*. As-is the active tab underline is a different blue from the page loading bar and active bottom-nav.",
+          "fix": "Change the active branch to `border-accent-500 text-accent-700`. Leaves the inactive/hover branch (`border-transparent text-gray-500 hover:text-gray-700`) untouched.",
+          "fix_short": "Active tab underline/label to accent-* instead of brand-*"
+        },
+        {
+          "category": "foundation-debt",
+          "severity": "medium",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/resell/workspace.html:67",
+          "issue": "The triage stat-card 'selected' affordance uses `ring-2 ring-brand-400`. The triage strip is the page's primary attention/urgency cue (the Three-Second-Rule 'what needs my attention' surface), so its selected ring is an active-state indicator and should carry the accent under PR0.",
+          "fix": "Change to `ring-2 ring-accent-400` so the selected triage card matches the lens pill and tab accent.",
+          "fix_short": "Triage selected ring brand-400 to accent-400"
+        },
+        {
+          "category": "foundation-debt",
+          "severity": "medium",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/resell/_lists.html:38",
+          "issue": "The list-search input is a bespoke input with `focus:ring-2 focus:ring-brand-500 focus:border-brand-500` instead of the foundation `.input`/`.input-focus` classes. PR0 routes every focus ring through `--accent-ring`; this one still glows brand blue, and it also re-implements `.input`'s padding/border by hand (px-3 py-1.5, border-brand-200).",
+          "fix": "Replace the bespoke classes with the `.input` class (it already carries the accent focus ring, rounded-lg, and tight padding): `class=\"input\"` plus `type=\"search\"`. If the brand-200 border tint is intentional, keep only that one override; the ring must come from .input.",
+          "fix_short": "List search to .input (accent focus ring) not focus:ring-brand-500"
+        },
+        {
+          "category": "foundation-debt",
+          "severity": "medium",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/resell/offer_buyers_modal.html:135",
+          "issue": "The buyer-search typeahead in the 'Offer to buyers' modal hand-rolls a focus ring with `focus:border-brand-400 focus:ring-2 focus:ring-brand-200` instead of using `.input`. Focus rings are an explicit PR0 accent surface; this one is brand-tinted and a second smaller ring radius than the rest of the app.",
+          "fix": "Replace with `class=\"input\"` (drop the inline px/border/ring classes). Keeps the typeahead behavior; just unifies the focus treatment to the accent ring.",
+          "fix_short": "Buyer typeahead input to .input (accent focus)"
+        },
+        {
+          "category": "foundation-debt",
+          "severity": "medium",
+          "effort": "M",
+          "location": "app/templates/htmx/partials/resell/offer_buyers_modal.html:162-178",
+          "issue": "Three separate scope/channel segmented toggles ('whole_list'/'per_line', and the channel buttons) mark the ACTIVE segment with `bg-brand-500 text-white` (line 162, 165, 178). Same pattern repeats in offer_form.html:25,28. These are active-state selectors and should be on the accent ramp per PR0; brand-500 here reads inconsistently against the accent primary CTA in the same modal footer.",
+          "fix": "Replace the active branches `bg-brand-500 text-white` (and `border-brand-500` on 178) with `bg-accent-500 text-white` / `border-accent-500`, and the inactive hover `hover:bg-brand-50` with `hover:bg-accent-50`. Do the same two edits in offer_form.html:25,28.",
+          "fix_short": "Segmented-toggle active state brand-500 to accent-500 (both modals)"
+        },
+        {
+          "category": "foundation-debt",
+          "severity": "low",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/resell/_lists.html:50",
+          "issue": "Opportunity-row dividers use `border-b border-gray-100`. Per PR0 hairlines should use the line tokens (.border-line-base / .border-line-subtle) rather than border-gray-*, which is the legacy override block being drained page-by-page. Same border-gray-100 hairline recurs on the modal footers (offer_form.html:74, create_modal.html:32, add_line_modal.html:47, offer_buyers_modal.html:204).",
+          "fix": "Change the list-row divider to `border-b border-line-subtle`. For the four modal footers, the shared `.modal-footer` class already encapsulates the bordered footer (border-brand-200) \u2014 fold those bespoke `pt-2 border-t border-gray-100` footers into `.modal-footer` to both fix the line token and adopt the locked modal padding.",
+          "fix_short": "border-gray-100 hairlines to border-line-subtle / .modal-footer"
+        },
+        {
+          "category": "consistency",
+          "severity": "medium",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/resell/workspace.html:23-32",
+          "issue": "The lens switch re-implements the `filter_pill` macro inline (same `px-3.5 py-1.5 rounded-full font-medium` pill, same active/inactive brand classes) rather than calling the shared macro \u2014 a primitive re-implemented by hand. The page already imports and uses filter_pill correctly in _lists.html:25, so this is an inconsistency within the same feature. (The hand-roll exists because the lens needs Alpine `:class` reactivity the macro doesn't expose.)",
+          "fix": "Either extend `filter_pill` to accept an optional Alpine `:class` reactive variant, or at minimum align the hand-rolled pill's classes to the macro's exact spec (`px-3 py-1.5`, accent active branch) so the two pill rows on the page are visually identical. Lowest-effort: keep the hand-roll but match classes + move to accent.",
+          "fix_short": "Align hand-rolled lens pills to filter_pill spec/accent"
+        },
+        {
+          "category": "hierarchy",
+          "severity": "medium",
+          "effort": "M",
+          "location": "app/templates/htmx/partials/resell/_lines.html:118-121",
+          "issue": "Best-offer unit price \u2014 the single most decision-relevant figure for a trader scanning a list \u2014 is rendered as `text-emerald-600` body weight in the table, while the take-all lump price in _offers.html:48 gets `text-lg font-bold`. The key figure on the default (Lines) tab is not emphasized, weakening the Three-Second-Rule 'what should I do next' read. PR0 provides `.figure-accent` for hero numerics; emerald is fine as the 'good price' signal but the figure has no size/weight hierarchy over the qty/condition cells next to it.",
+          "fix": "Keep emerald for the 'best price' semantic but give the figure weight hierarchy \u2014 it already has font-semibold; consider promoting the single-line card's Best-offer (_lines.html:90) to the same prominence as the take-all lump (text-lg). No token change required, this is a weight/scale pass so the buyer's eye lands on price first.",
+          "fix_short": "Emphasize best-offer price as the key figure on Lines tab"
+        },
+        {
+          "category": "hierarchy",
+          "severity": "low",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/resell/detail.html:184-192",
+          "issue": "The Activity tab is a permanent 'coming soon' placeholder shipped as a real tab in the bar. A buyer who clicks it hits a dead end, costing a click against the Three-Second-Rule and implying institutional-memory (last-contacted, part history, prior outcomes) that the page promises elsewhere but doesn't deliver here.",
+          "fix": "Either hide the Activity tab until the timeline ships (remove the `tabs + [('activity','Activity')]` append on detail.html:111) or wire it to the existing activity-timeline partial used elsewhere in the app. Hiding is the S-effort honest move; wiring is M.",
+          "fix_short": "Hide or wire the placeholder Activity tab"
+        },
+        {
+          "category": "consistency",
+          "severity": "low",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/resell/_lines.html:33",
+          "issue": "The draft import dropzone uses a bespoke `rounded-lg border border-dashed border-brand-200 bg-gray-50 p-3` block rather than the shared empty-state/dropzone vocabulary. Minor, but it is a one-off surface that another page's importer would render differently.",
+          "fix": "Acceptable as-is given there's no shared dropzone primitive, but the `border-brand-200` dashed border could move to `border-line-base` for hairline consistency. Low priority \u2014 flag only.",
+          "fix_short": "Dropzone dashed border to line token (optional)"
+        },
+        {
+          "category": "a11y",
+          "severity": "low",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/resell/detail.html:113-118",
+          "issue": "The detail tab buttons are `<button>`s toggling Alpine `tab` state but expose no `role=\"tab\"`/`aria-selected`/`aria-controls`, and the tab-panel divs have no `role=\"tabpanel\"`. Keyboard users get focusable buttons (good) but no screen-reader tab semantics. The offer-count badge (`{{ offer_count }}`) also has no accessible label distinguishing it from the tab name.",
+          "fix": "Add `role=\"tab\"` + `:aria-selected=\"tab === '{{ key }}'\"` to each tab button and `role=\"tabpanel\"` to the x-show panels; wrap the count badge with `aria-label=\"{{ offer_count }} offers\"`. Pairs naturally with the accent active-state edit on the same line.",
+          "fix_short": "Add ARIA tab/tabpanel roles to detail tabs"
+        },
+        {
+          "category": "polish",
+          "severity": "low",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/resell/workspace.html:91,108-114",
+          "issue": "Loading and empty placeholders use raw `text-gray-400`/`text-gray-300` ad-hoc markup rather than a shared empty-state/skeleton primitive, and the 'Loading\u2026' string differs from the lazy-tab 'Loading offers\u2026' / 'Loading bid builder\u2026' phrasings \u2014 minor inconsistency in the loading vocabulary across the same page.",
+          "fix": "Low priority. If a shared `empty_state`/skeleton macro exists, route the right-panel empty (lines 108-114) and the list-loading stub through it; otherwise standardize the loading copy. Flag only.",
+          "fix_short": "Standardize loading/empty placeholders (optional)"
+        }
+      ],
+      "page": "Resell (/v2/resell)",
+      "summary": "The Resell workspace is one of the cleaner pages in the app: it leans hard on the shared vocabulary (compact-table, filter_pill, stat_card, status_badge, coverage_meter, .btn-primary/.btn-secondary, .card, .input), the split-panel matches the sourcing workspace, lazy-loads carry their explicit hx-target (avoiding the documented landmine), and empty states are honest invitations rather than blank tables. The dominant gap is PR0 accent adoption: every active-state indicator on the page \u2014 the lens switch, the detail tab bar, the triage selected-ring, the offer/channel segmented toggles \u2014 and every bespoke focus ring still resolve to brand-500/700/400 rather than the new accent-* family, so the page's blues are subtly inconsistent with the accent CTAs and bottom-nav sitting right beside them. Secondary debt is a handful of border-gray-100 hairlines (rows + four modal footers) that should move to line tokens / the .modal-footer class, two inputs that hand-roll what .input now provides, and a permanent 'coming soon' Activity tab that dead-ends.",
+      "topOpportunities": [
+        "Sweep all active-state indicators to the accent ramp in one pass: lens switch (workspace.html:28), detail tab bar (detail.html:114), triage ring (workspace.html:67), and the four segmented toggles across offer_buyers_modal.html + offer_form.html. This is the single highest-leverage change \u2014 it's ~8 one-line edits that bring the page's entire interactive-blue surface onto the PR0 accent, eliminating the brand-vs-accent flicker against the primary CTAs and bottom-nav.",
+        "Unify the two bespoke inputs (_lists.html:38 search, offer_buyers_modal.html:135 typeahead) onto the `.input` class so their focus rings flow through --accent-ring instead of brand tints \u2014 removes hand-rolled padding/border/ring duplication and fixes the focus-ring accent debt in the same edit.",
+        "Convert the border-gray-100 hairlines to line tokens \u2014 fold the four modal footers (offer_form/create/add_line/offer_buyers) into the shared `.modal-footer` (gets both the line token AND the locked padding) and change the list-row divider to `.border-line-subtle`. Drains this page from the legacy border-gray override block.",
+        "Make a decision on the Activity tab: either hide it (S) or wire it to the existing activity-timeline partial (M). A permanent 'coming soon' tab is a Three-Second-Rule dead-end and undercuts the page's institutional-memory promise."
+      ],
+      "key": "resell"
+    },
+    {
+      "page": "CRM (/v2/crm)",
+      "summary": "The CRM route is a thin Alpine tab shell (shell.html) over two very different surfaces: a modern split-panel Customers/CDM workspace (list.html + _account_list.html) and a much looser, pre-foundation Vendors table (vendors/list.html). The Customers side is dense and well-structured but predates PR0: it still uses brand-500/600 for active/selected states, inlines focus rings (focus:ring-brand-500), and hand-rolls cell padding rather than using accent-*, .input/.input-focus, or the named cell utilities. The Vendors tab is the bigger debt sink \u2014 a bespoke px-4 py-3 table with font-medium gray-500 headers (vs the locked .data-table th 600/11px/7px-10px), text-brand-500 as the primary link/title color, and border-gray-200 hairlines, so it reads noticeably looser and off-accent next to the rest of the app. Neither tab uses the new accent for primary CTAs/active state, and the shell's own tab bar is still entirely brand-500/600.",
+      "findings": [
+        {
+          "category": "foundation-debt",
+          "severity": "high",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/crm/_shell_macros.html:12",
+          "issue": "The CRM tab bar's active state is brand-500/600 (border-b-2 border-brand-500 text-brand-600 bg-brand-50). Per PR0 the active tab indicator/label is an ACTIVE state and must resolve to the accent, not brand-*. This is the very first thing a buyer sees on /v2/crm and it's off-foundation.",
+          "fix": "Swap the active branch to accent: border-accent-500 text-accent-700 (or text-accent-600) and bg-accent-50; keep the inactive hover on neutral grays. Mirror whatever sibling tab bars adopted in PR0 so all tab bars match."
+        },
+        {
+          "category": "foundation-debt",
+          "severity": "high",
+          "effort": "M",
+          "location": "app/templates/htmx/partials/vendors/list.html:67-85",
+          "issue": "Vendors sub-tab bar (All Vendors / My Vendors / Find by Part) uses border-gray-200 underline and text-brand-600 border-brand-500 for the active tab. Active state should be accent-*, and the hairline should be a line token. This diverges from both the foundation and the CRM shell's own tab bar above it.",
+          "fix": "Active branch \u2192 text-accent-700 border-accent-500; container border-b-2 \u2192 border-line-base (or border-accent style matching the shell). Ideally factor these two tab bars onto the shared tab_button macro so CRM has one tab vocabulary."
+        },
+        {
+          "category": "foundation-debt",
+          "severity": "high",
+          "effort": "M",
+          "location": "app/templates/htmx/partials/vendors/list.html:153-179",
+          "issue": "Vendor table is hand-rolled: <table class=\"min-w-full divide-y divide-gray-200\"> with <th class=\"px-4 py-3 ... font-medium text-gray-500\">. The locked .data-table th is font-weight 600 / 11px / letter-spacing .05em / padding 7px 10px, and td is 5px 10px. This table is both looser (px-4 py-3) and lighter-weight (font-medium 500) than every other table in the app, so the Vendors tab visibly reads as a different era.",
+          "fix": "Convert to the shared table primitive: wrap in .table-wrapper and use class=\"data-table\" on the <table>, dropping the inline px-4 py-3 / divide-y / font-medium / text-gray-500 on th and td. Header cells then inherit the unified 600/11px/uppercase spec and the locked padding automatically."
+        },
+        {
+          "category": "foundation-debt",
+          "severity": "high",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/vendors/list.html:200",
+          "issue": "Vendor display name (the primary clickable identity / key figure in each row) is text-brand-500. Under PR0 the accent is the one azure for primary emphasis; a key linked figure should be accent-*, and brand-500 as a 'link blue' is exactly the legacy usage being drained. Same brand-500 link color recurs in the sort-header hover (line 165 hover:text-brand-500).",
+          "fix": "Change the vendor name to text-accent-700 (or accent-600) and the sort-header hover to hover:text-accent-600. Reserve brand-* for neutral chrome only."
+        },
+        {
+          "category": "foundation-debt",
+          "severity": "medium",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/customers/_account_list.html:111",
+          "issue": "Selected-row highlight is brand-50 + border-l-brand-500 (selectedId === c.id ? 'bg-brand-50 border-l-brand-500'). Row selection is an active state and should carry the accent so the chosen account matches the app-wide selection color introduced in PR0.",
+          "fix": "Swap to bg-accent-50 border-l-accent-500 for the selected branch. (The selected-row treatment in the opportunity table / sightings should be the reference.)"
+        },
+        {
+          "category": "foundation-debt",
+          "severity": "medium",
+          "effort": "M",
+          "location": "app/templates/htmx/partials/customers/list.html:30,33,46,55,64,80,87",
+          "issue": "Every filter/sort control in the CDM filter bar inlines its own field styling \u2014 'px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500' on the search input and 'px-2 py-1.5 ... border-gray-200' on each <select>. PR0 provides .input/.input-sm (accent ring + line border) precisely so controls stop hand-rolling brand-500 rings and gray borders.",
+          "fix": "Replace the search input class with .input (or .input .input-sm) and the selects with .input .input-sm, dropping the focus:ring-brand-500/border-gray-200 inline classes. Checkboxes (lines 75,88,113,123) should use .input-focus + text-accent-500 instead of text-brand-500 focus:ring-brand-500."
+        },
+        {
+          "category": "consistency",
+          "severity": "medium",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/vendors/list.html:89,151,260",
+          "issue": "Vendor list re-implements card/wrapper chrome three times as 'bg-white rounded-lg shadow border border-gray-200' (filter bar, table wrapper, empty state) instead of the .card / .table-wrapper primitives. rounded-lg + shadow also diverges from .card's rounded-xl + shadow-card, so these surfaces don't match the Customers side or the rest of the app.",
+          "fix": "Use .card for the filter-bar and empty-state panels and .table-wrapper for the table container. This also fixes the border-gray-200 hairline debt on those three blocks in one move."
+        },
+        {
+          "category": "consistency",
+          "severity": "medium",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/vendors/list.html:27",
+          "issue": "'Add Vendor' primary CTA uses bare class=\"btn-primary btn-sm\" with no .btn base \u2014 and elsewhere the codebase composes .btn-primary which already @applies btn. More notably it sits visually as the page's primary action but the whole Vendors header has no title/eyebrow (only '{{total}} vendors'), so the primary CTA floats without a 'where am I' anchor (Three-Second Rule).",
+          "fix": "Keep class=\"btn-primary btn-sm\" (btn-primary already includes btn, so this is fine \u2014 but verify it renders the accent fill). Add a lightweight section heading/eyebrow (e.g. an .h2 'Vendors' or reuse the shell tab as the title) so the count and CTA have a titled header."
+        },
+        {
+          "category": "consistency",
+          "severity": "medium",
+          "effort": "M",
+          "location": "app/templates/htmx/partials/customers/list.html:118-162",
+          "issue": "The Import-CSV modal in the Customers list is hand-rolled (fixed inset-0 bg-black/40, bg-white rounded-xl p-6, manual &times; close, ad-hoc header) instead of the locked .modal-header/.modal-body/.modal-footer/.modal-close primitives that the sibling Vendors import modal (vendors/list.html:39-58) correctly uses. Two CRM modals, two different modal vocabularies.",
+          "fix": "Rebuild the customers import modal on the shared modal-* chrome (modal-header with .h4 title + .modal-close, modal-body, modal-footer with btn-secondary/btn-primary) to match the vendors import modal and the rest of the app."
+        },
+        {
+          "category": "hierarchy",
+          "severity": "medium",
+          "effort": "M",
+          "location": "app/templates/htmx/partials/crm/shell.html:7-23",
+          "issue": "Three-Second Rule, 'Where am I?': the CRM shell has no page title/breadcrumb and no urgency cue at the shell level. It opens straight into a tab bar + a generic spinner. The 'X need a call' urgency count exists but is buried inside the Customers account-list (only visible after the lazy load and only if overdue_count>0). A buyer landing on /v2/crm sees no attention signal until the inner partial paints.",
+          "fix": "Add a slim CRM header above the tab bar (title 'CRM' / 'Companies & Vendors') and surface the call-list urgency badge ('N accounts need a call') at the shell or tab-label level so attention is answerable before the inner partial loads."
+        },
+        {
+          "category": "hierarchy",
+          "severity": "low",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/customers/detail.html:146-150",
+          "issue": "Win rate, Rev 90d, and Last req are the account's key commercial figures but are rendered as font-semibold text-gray-900 inline in a dot-separated chip strip, with no accent emphasis. PR0 added .figure-accent specifically for hero numerics (deal value / margin / win%); these read as ordinary metadata rather than the institutional-memory signal a buyer scans for.",
+          "fix": "Apply .figure-accent to the Win % and Rev 90d values (the two decision-driving figures) so they pop as key figures, consistent with how hero numerics are treated elsewhere post-PR0."
+        },
+        {
+          "category": "a11y",
+          "severity": "low",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/customers/_account_list.html:119,165,176; app/templates/htmx/partials/vendors/list.html:184",
+          "issue": "Row and pagination focus rings are inlined as focus:ring-brand-500 (and focus:ring-inset focus:ring-brand-500 on the clickable rows). These are real, keyboard-reachable focus targets, so post-PR0 the focus ring should be the accent ring, not brand-500. Functionally present, but off the new focus color.",
+          "fix": "Replace focus:ring-brand-500 with the accent focus treatment (focus:ring-accent-500, or add the .input-focus mixin where it composes). Do this consistently across the row, the resize divider (list.html:183 hover:bg-brand-400), and pagination links."
+        },
+        {
+          "category": "polish",
+          "severity": "low",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/crm/shell.html:16-22",
+          "issue": "The shell's only loading state is a centered gray spinner + 'Loading...' for the entire tab content. Both the Customers split-panel and the Vendors table are content-rich; a bare spinner gives no shape of what's coming and flashes a layout jump when the dense partial swaps in. The inner empty states (vendors 'No vendors found', accounts 'No accounts found') are fine, but the shell-level loader is the weakest moment.",
+          "fix": "Lower-priority, but consider a skeleton matching the split-panel/table shape (or at minimum reuse the app's standard loading partial) so the swap doesn't jump. Not blocking \u2014 note it as polish."
+        }
+      ],
+      "topOpportunities": [
+        "Adopt the foundation on the Vendors tab \u2014 it's the single biggest visual outlier in CRM: convert the hand-rolled px-4 py-3 / font-medium gray table to .table-wrapper + .data-table, move text-brand-500 name/links and the active sub-tab to accent-*, and replace the three 'bg-white rounded-lg shadow border-gray-200' blocks with .card/.table-wrapper. One template, removes most of this page's foundation debt and makes Vendors match Customers.",
+        "Move all active/selected/focus states across both CRM surfaces to the accent: shell tab bar (_shell_macros.html active branch), selected account row (_account_list.html:111 bg-brand-50 border-l-brand-500), and the inline focus:ring-brand-500 rings. High-visibility, low-effort, and makes CRM read as 'on the new foundation' instantly.",
+        "Give the CRM shell a Three-Second-Rule header: a title/breadcrumb plus the call-list urgency count surfaced at the shell/tab level instead of buried inside the lazy-loaded account list, so a buyer landing on /v2/crm immediately sees where they are and what needs a call.",
+        "Unify the two import modals on the shared modal-* primitives (rebuild the customers list.html modal to match the vendors one) and swap the CDM filter-bar controls to .input/.input-sm \u2014 both eliminate hand-rolled brand-500 rings and gray borders and align CRM's form chrome with the rest of the app."
+      ],
+      "key": "crm"
+    },
+    {
+      "page": "Proactive (/v2/proactive)",
+      "summary": "The Proactive page is a well-structured, genuinely useful surface (grouped matches, trust cues like \"trusted\"/\"unreliable\", purchase-count memory, prepare/send/convert workflow) but it predates the PR0 foundation almost entirely. Every interactive accent still resolves to brand-* (active tab, all primary CTAs, focus rings, scorecard figures) instead of the new Trio-azure accent; the one place it does adopt the new vocabulary is the empty-state \"Check again\" .btn-primary, proving the convention is available and just not applied elsewhere. The match/sent/prepare tables hand-roll min-w-full divide-y divide-gray-200 with inline px-3 py-2.5 / px-4 py-3 cell padding and border-gray-* headers rather than .data-table/.compact-table + the named cell/line utilities, so the page reads looser and lighter-lined than the rest of the app. There is also no page <h1> at all, weakening the \"Where am I?\" answer.",
+      "findings": [
+        {
+          "category": "foundation-debt",
+          "severity": "high",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/proactive/list.html:52-70",
+          "issue": "The active tab indicator uses bg-brand-500 text-white shadow-sm and inactive tabs use bg-brand-50 text-brand-600. Active/selected state is exactly what PR0 moves to the accent. Both Matches and Sent tabs are brand-* on the most important 'what am I looking at' control.",
+          "fix": "Active tab: background-color:var(--accent); color:var(--accent-contrast) (or a bg-accent-500 text-white utility). Inactive: keep neutral chrome but make the active label/indicator accent. Mirror however the active bottom-nav indicator now resolves so the in-page tab matches the global active treatment."
+        },
+        {
+          "category": "foundation-debt",
+          "severity": "high",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/proactive/list.html:123-127",
+          "issue": "The primary 'Prepare (N)' CTA is hand-rolled bg-brand-500 hover:bg-brand-600 rounded-lg rather than .btn-primary, so it does not resolve to the accent and re-implements a primitive. This is the page's main forward action.",
+          "fix": "Replace the bespoke classes with .btn-primary .btn-sm (the empty-state 'Check again' button on line 184 already uses .btn-primary \u2014 match it). Keep the :disabled binding."
+        },
+        {
+          "category": "foundation-debt",
+          "severity": "high",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/proactive/prepare.html:208-212",
+          "issue": "The 'Send to N Contacts' submit \u2014 the terminal primary action of the whole proactive workflow \u2014 is hand-rolled bg-brand-500 hover:bg-brand-600 instead of the accent .btn-primary.",
+          "fix": "Use .btn-primary (with the existing :disabled='contactCount === 0' binding). Same for the brand-500 Prepare button; converge all primary CTAs in the cluster on .btn-primary so they all read Trio azure."
+        },
+        {
+          "category": "foundation-debt",
+          "severity": "medium",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/proactive/list.html:16-22 and prepare.html:188-189",
+          "issue": "The 'Scorecard' toggle and 'Generate AI Draft' button use text-brand-600 bg-brand-50 border-brand-200 hover:bg-brand-100 \u2014 a brand-tinted secondary treatment. With the accent now the single interactive color, these brand-tinted action buttons diverge from the new vocabulary.",
+          "fix": "Move to a shared secondary/ghost primitive (.btn-secondary or .btn-ghost) for neutral chrome, or to an accent-tinted variant (accent-50/accent-200/accent-700) so the tint matches the new accent rather than legacy brand."
+        },
+        {
+          "category": "foundation-debt",
+          "severity": "medium",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/proactive/_match_row.html:14-15 and list.html:110-111 and prepare.html:124-126",
+          "issue": "Every checkbox uses text-brand-500 focus:ring-brand-500 for the checked color and focus ring. Focus rings are explicitly part of the PR0 accent migration (.input-focus resolves to --accent-ring); these still ring brand.",
+          "fix": "Apply .input-focus to the native checkboxes (it sets the accent ring) and switch the checked accent to text-accent-500 (or accent-color:var(--accent)). Covers row selection, select-all, and the contact picker."
+        },
+        {
+          "category": "foundation-debt",
+          "severity": "medium",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/proactive/prepare.html:90",
+          "issue": "The sell-price number input uses inline border-gray-300 focus:border-brand-500 focus:ring-brand-500 with hand-rolled py-1 px-2 instead of the .input/.input-sm primitive, so its focus ring is brand (not accent) and its padding/border diverge from every other field on the page (the subject/body inputs already use class='input').",
+          "fix": "Replace with class='input input-sm w-24 text-right tabular-nums' so the focus ring resolves to the accent and the control matches the subject/body fields (lines 171,179)."
+        },
+        {
+          "category": "foundation-debt",
+          "severity": "medium",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/proactive/scorecard.html:20,28,33,37,41",
+          "issue": "The scorecard's hero numerics (Sent, Conv. Rate, Revenue, Gross Profit, Pipeline) are text-2xl font-bold in text-gray-900 / text-brand-700 / text-emerald-700 / text-amber-700. These are the page's key figures \u2014 exactly what .figure-accent (opt-in accent for hero numerics) targets \u2014 yet none use it, and the brand-700 Conv. Rate figure is foundation-debt.",
+          "fix": "Apply .figure-accent to the headline activity figure (e.g. Sent or Conv. Rate) so the primary KPI reads accent; keep emerald/amber for the explicitly semantic money tiles. At minimum convert the text-brand-700 Conv. Rate value off brand."
+        },
+        {
+          "category": "foundation-debt",
+          "severity": "medium",
+          "effort": "M",
+          "location": "app/templates/htmx/partials/proactive/list.html:98,150-163,206-216",
+          "issue": "Group headers and all three tables draw hairlines with border-gray-200 / divide-gray-200 / divide-gray-100 instead of the --line tokens (line-debt the page-by-page sweep is meant to drain). The borders here are visibly lighter than .data-table's 1px #BFC4CE rows elsewhere.",
+          "fix": "Convert group-header borders to .border-line-base and, if tables are migrated to .data-table/.compact-table (see density finding), the row/header hairlines come from the table class for free. Otherwise swap divide-gray-* \u2192 the .border-line-* classes."
+        },
+        {
+          "category": "density",
+          "severity": "medium",
+          "effort": "M",
+          "location": "app/templates/htmx/partials/proactive/_match_row.html:11-86 and list.html:150-168",
+          "issue": "The Matches table is bespoke (min-w-full divide-y divide-gray-200) with every cell inlining px-3 py-2.5 and every header px-3 py-2 text-xs font-medium text-gray-500 \u2014 looser than and stylistically off from the new locks (.data-table td 5px 10px, th 11px/600/0.05em uppercase). Headers are font-medium not 600, and text-xs not the 11px header spec.",
+          "fix": "Migrate the table to class='data-table' (or compact-table) and drop the per-cell px/py; the foundation supplies the ~5px 10px td / 7px 10px th padding and the unified 600/0.05em/11px uppercase header type. If a class migration is too invasive, at minimum replace inline cell padding with .table-cell/.table-cell--head and set headers to the 11px/600 spec."
+        },
+        {
+          "category": "density",
+          "severity": "medium",
+          "effort": "M",
+          "location": "app/templates/htmx/partials/proactive/list.html:206-216 and prepare.html:51-60",
+          "issue": "The Sent-offers table and the prepare.html 'Selected Parts' table repeat the same hand-rolled min-w-full divide-y pattern with px-4 py-2 / px-4 py-3 cell padding and font-medium text-gray-500 headers \u2014 the looser px-4 py-3 spacing the foundation explicitly flags, duplicated across three tables.",
+          "fix": "Apply the same .data-table/.compact-table migration to both tables so all three proactive tables share one density and header type; remove the inline px-4 py-3 cells."
+        },
+        {
+          "category": "hierarchy",
+          "severity": "medium",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/proactive/list.html:11-23",
+          "issue": "The page header has no title \u2014 it is an empty <div> wrapping only a <p class='text-sm text-gray-600'>AI-matched vendor stock...</p>. There is no <h1> anywhere on the list page (grep confirms zero h1/h2). The 'Where am I?' answer relies entirely on the bottom-nav highlight; the page never names itself.",
+          "fix": "Add an <h1>/page-title (e.g. 'Proactive') above the description, matching the prepare.html h1 treatment (text-xl font-bold) and the title pattern used by sibling pages, so the page self-identifies."
+        },
+        {
+          "category": "hierarchy",
+          "severity": "low",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/proactive/list.html:59-61,105",
+          "issue": "Urgency/attention cue is weak and inconsistent: the Matches tab count badge is bg-emerald-500 (green = success, not attention), while the per-group count is a flat text-gray-400 'N matches'. A buyer scanning for 'what needs my attention' gets a green pill (reads as done/good) and muted gray per-customer urgency.",
+          "fix": "Make the new-match count read as attention (accent or amber pill via .badge), not emerald; consider promoting the per-group match count to a .badge so high-value customers stand out. Reserve emerald for converted/won states (as the Sent tab already does)."
+        },
+        {
+          "category": "consistency",
+          "severity": "low",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/proactive/list.html:60,252-257 and _match_row.html:51-69",
+          "issue": "Status/score/margin pills and count badges are all hand-rolled inline-flex ... rounded-full/rounded rather than the locked .badge/.chip/.badge-mini primitives. The Sent status pill, the match-count pill, the Score pill and Margin pill each re-implement a primitive with slightly different padding (px-2 py-0.5 vs px-1.5 py-0.5), causing drift.",
+          "fix": "Route status pills through .badge (with the semantic color map), score/margin micro-pills through .badge-mini or .chip. This unifies padding/radius and lets the badge family carry future restyles."
+        },
+        {
+          "category": "consistency",
+          "severity": "low",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/proactive/list.html:139-143 and prepare.html:204-207",
+          "issue": "Secondary buttons are bespoke: the Dismiss button is bg-white border-gray-200 hover:bg-gray-50 and the prepare Cancel is a text-gray-600 <a> styled as a button \u2014 neither uses .btn-secondary/.btn-ghost, so secondary actions look different from secondary actions on other pages.",
+          "fix": "Use .btn-secondary for Dismiss and .btn-ghost (or .btn-secondary) for Cancel so secondary actions are consistent app-wide and inherit the accent focus ring."
+        },
+        {
+          "category": "a11y",
+          "severity": "low",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/proactive/list.html:52-70",
+          "issue": "The tab bar is built from <a hx-get> elements with no role='tab'/aria-selected and no aria-label distinguishing the active tab; the active state is conveyed by color only. Keyboard/screen-reader users can't tell which tab is current beyond the visual fill.",
+          "fix": "Add role='tab' + aria-selected='true|false' (or aria-current='page') on the tab anchors so the active tab is announced; ensure focus-visible shows the accent ring."
+        },
+        {
+          "category": "polish",
+          "severity": "low",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/proactive/list.html:239-240",
+          "issue": "The Sent tab 'Sent To' cell truncates recipient emails with |truncate(40) but offers no title/tooltip with the full list, so a buyer can't see who an offer actually went to without leaving the page \u2014 works against the 'phone is the weapon / contact one click away' principle.",
+          "fix": "Add title='{{ offer.recipient_emails | join(\", \") }}' on the cell (or render as wrapping .chip tags) so the full recipient list is recoverable on hover."
+        }
+      ],
+      "topOpportunities": [
+        "Accent migration sweep (S, high leverage): move the active tab indicator, the Prepare and Send primary CTAs, the scorecard hero figure, and all checkbox/input focus rings off brand-* onto the accent (.btn-primary / .figure-accent / .input-focus / accent-*). This single change snaps the whole page onto the new foundation, and the page already proves the pattern with its empty-state .btn-primary.",
+        "Table primitives migration (M): convert the three hand-rolled tables (Matches, Sent, Selected Parts) to .data-table/.compact-table + named cell utilities. Removes inline px-3/px-4 py-2.5/py-3 density-debt, fixes border-gray-* line-debt, and unifies the font-medium/text-xs headers to the locked 11px/600/0.05em uppercase spec in one move.",
+        "Add a real page title + sharpen the attention cue (S): give the list page an <h1> 'Proactive' so it answers 'Where am I?', and recolor the new-match count from emerald (reads as 'done') to an accent/amber attention pill so 'what needs my attention?' is answered at a glance \u2014 both core Three-Second-Rule wins for near-zero effort.",
+        "Converge pills and secondary buttons on the shared vocabulary (S): route status/score/margin pills through .badge/.badge-mini and Dismiss/Cancel through .btn-secondary/.btn-ghost, eliminating the bespoke padding drift and giving secondary actions the accent focus ring for free."
+      ],
+      "key": "proactive"
+    },
+    {
+      "page": "Prospecting (/v2/prospecting)",
+      "summary": "The prospecting cluster (list.html, _card.html, stats.html, detail.html, add_result.html) predates the PR0 foundation and adopts none of it: every primary CTA, active filter pill, and focus ring still resolves to brand-500/600 instead of the new accent, and not a single shared primitive (.btn-primary, .input, .badge/.chip, .card, .empty-state) is used \u2014 all are re-implemented inline with hardcoded px/py. The grid/card content is genuinely strong on the philosophy axis (fit/readiness/AI-match scores, buyer-ready badges, priority reasons, contacts, similar wins, warm-intro and \"Call now\" KPIs deliver trust-at-a-glance and institutional memory), but the list view has no page title/breadcrumb, so the \"Where am I?\" leg of the three-second rule is weak, and the primary \"phone is the weapon\" action (call/email the contact) is buried two clicks deep with no contact info or outreach CTA on the card itself. Foundation-debt is the dominant theme: this is a clean-content page wearing the old chrome.",
+      "findings": [
+        {
+          "category": "foundation-debt",
+          "severity": "high",
+          "effort": "M",
+          "location": "app/templates/htmx/partials/prospecting/list.html:29,44,75,128,136 + _card.html:128 + detail.html:47,77",
+          "issue": "Every primary CTA (Add prospect, Add, Claim, Create Requisition) and the active filter pill use bg-brand-500 hover:bg-brand-600 instead of the new accent. Post-PR0 these primary/active surfaces must resolve to --accent (Trio azure). This is the single biggest foundation gap on the page \u2014 the page's most important buttons are the wrong color vs the rest of the app.",
+          "fix": "Replace the inline `px-3 py-1.5 bg-brand-500 text-white ... rounded-lg hover:bg-brand-600` button markup with `.btn-primary` (add `.btn-sm` where the compact card variant is wanted). For the active filter pill at list.html:75 swap `bg-brand-500 text-white` for the accent (`bg-accent-500` / accent var). Leave the green Create-Requisition button as-is (intentional semantic success)."
+        },
+        {
+          "category": "consistency",
+          "severity": "high",
+          "effort": "M",
+          "location": "app/templates/htmx/partials/prospecting/list.html:41-44,59-61,85-87 + _card.html:123-138 + detail.html:44-71",
+          "issue": "The cluster re-implements four shared primitives by hand: search/domain/sort inputs inline `px-3 py-2 border border-brand-200 rounded-lg focus:ring-2 focus:ring-brand-500` instead of `.input`; status/source/reason pills inline `inline-flex px-2 py-0.5 text-xs ... rounded-full` instead of `.badge`/`.chip`; cards inline `bg-white border border-brand-200 rounded-lg p-4` instead of `.card`; buttons inline padding instead of `.btn-*`. This is exactly the 'one-off bespoke markup re-implementing a primitive' smell, and it's why the focus rings are still brand not accent.",
+          "fix": "Migrate inputs to `.input` (focus ring becomes accent for free), status/reason/source pills to `.badge`/`.chip` with the semantic color map, card containers to `.card`/`.card-sm`, and buttons to `.btn-primary`/`.btn-secondary`. This collapses ~all the brand-500 focus/active debt and the bespoke padding in one pass."
+        },
+        {
+          "category": "density",
+          "severity": "medium",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/prospecting/list.html:16,53,104 + stats.html:8,12,16,20",
+          "issue": "Vertical rhythm is looser than the post-PR0 locks: stats KPI panel uses mb-5, the filter bar mb-6 and space-y-3, the stats cards p-4, and card grid gap-4 \u2014 all inherited from the old whitespace-heavy era. A Bloomberg-dense buyer pipeline should pack more cards above the fold; the stacked stats(mb-5) + count-line(mb-4) + filters(mb-6) burns ~3 rows of vertical space before any prospect is visible.",
+          "fix": "Tighten to the foundation scale: stats panel mb-3, filter block mb-4 with space-y-2, grid gap-3, and stats cards to `.card-sm` (p-2.5). Consider collapsing the standalone count line (list.html:21) into the filter row to recover a row."
+        },
+        {
+          "category": "hierarchy",
+          "severity": "medium",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/prospecting/list.html:11-20",
+          "issue": "The list view has no page title or breadcrumb \u2014 the first visible text is the '{{ total }} prospects' count. The 'Where am I?' leg of the three-second rule relies entirely on the bottom-nav active state. Sibling detail.html has an h1, but the primary working surface (the grid) does not, so a deep-linked/refreshed list lands with no on-page heading.",
+          "fix": "Add a compact header row above the count: an `.h1`/`.h2` 'Prospecting' title (with a one-line subtitle like 'Suggested accounts ranked by fit + buying signals'), and move the Add-prospect control into that header row so title + primary action share the top line."
+        },
+        {
+          "category": "hierarchy",
+          "severity": "medium",
+          "effort": "M",
+          "location": "app/templates/htmx/partials/prospecting/_card.html:99-118",
+          "issue": "'The phone is still the weapon,' but the card surfaces only a contact COUNT ('3 contacts \u00b7 1 DM') \u2014 no name, no email/phone, and no outreach CTA. Acting on a buyer-ready prospect requires click \u2192 detail \u2192 scan contacts \u2192 click email: 3+ clicks. The card's quick-action row only offers Claim/Dismiss, not the next outreach step.",
+          "fix": "On buyer-ready / claimed cards, surface the top decision-maker (name + title) and a one-click mailto/copy-email or 'Email' action in the quick-action row, so the next outreach is ~one click from the grid. Reuse contact_stats_map's existing data; the detail page already has the contact list to model the row from."
+        },
+        {
+          "category": "a11y",
+          "severity": "medium",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/prospecting/list.html:59-66,85-92 + _card.html:123-138 + detail.html:44-71",
+          "issue": "All inputs and buttons hardcode `focus:ring-brand-500` (or have no focus style at all, e.g. the filter-pill buttons list.html:74 and card action buttons _card.html:123). Post-PR0 the canonical visible focus ring is the accent via `.input`/`.btn-*`. Keyboard users get an off-brand ring on inputs and NO visible ring on the pill/action buttons.",
+          "fix": "Adopting `.input` and `.btn-*` (per the consistency finding) gives every control the accent focus ring automatically. For the bare filter-pill `<button>`s, ensure they carry a `.btn-*` or at minimum `focus:ring-2` with the accent ring color so the active filter is keyboard-discoverable."
+        },
+        {
+          "category": "a11y",
+          "severity": "medium",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/prospecting/list.html:74-82",
+          "issue": "The status filter pills convey active state only via background color (bg-brand-500 vs bg-brand-100) with no aria-pressed/aria-current. Screen-reader and color-blind users can't tell which filter is active; the count badge inside the pill is the only non-color cue. Sibling materials/filters/tree.html sets aria-current.",
+          "fix": "Add `aria-pressed=\"{{ 'true' if status == val else 'false' }}\"` (or aria-current) to each filter pill button, matching the materials tree pattern, alongside the accent active-state migration."
+        },
+        {
+          "category": "foundation-debt",
+          "severity": "low",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/prospecting/_card.html:122,141 + detail.html:229 + list.html:135,148",
+          "issue": "Hairlines use border-gray-100 / divide-gray-100 (card action separators, contact divider, disabled pagination buttons) instead of the new line tokens. This is line-debt the page-by-page sweep is meant to drain.",
+          "fix": "Convert `border-gray-100`/`divide-gray-100` hairlines to `.border-line-subtle` (and the disabled pagination border to `.border-line-base`/`.border-line-subtle`) so they pick up --line-subtle."
+        },
+        {
+          "category": "consistency",
+          "severity": "low",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/prospecting/list.html:110-121",
+          "issue": "The empty state is hand-rolled (bespoke svg + bg-white border border-brand-200 rounded-lg p-6 text-center) rather than using a shared empty-state primitive/pattern used elsewhere, so its padding (p-6/p-8) and look diverge from the rest of the app and from the no-enrichment empty state in detail.html:341.",
+          "fix": "Standardize on the app's empty-state pattern/`.card` container with consistent padding, and reuse it for both the list empty state and the detail no-enrichment state so they match."
+        },
+        {
+          "category": "polish",
+          "severity": "low",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/prospecting/_card.html:54,64 + detail.html:125,138",
+          "issue": "The score progress-bar track is hardcoded `bg-gray-200` with inline `style=\"width: {{ fit }}%\"`. The track gray is fine, but this score-bar markup is duplicated four times across card+detail with no shared component, so any visual tweak (e.g. accent track, rounded ends) must be changed in four places.",
+          "fix": "Extract the score bar into a Jinja macro in _macros.html (track + fill + width) so card and detail share one definition; the fill color already comes from score_bar_color(). Optional: this is where a foundation score-bar utility would live."
+        },
+        {
+          "category": "hierarchy",
+          "severity": "low",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/prospecting/stats.html:9-22",
+          "issue": "The KPI panel is the page's 'What needs my attention?' answer, but 'Buyer-ready' and 'Call now' (the action-driving numbers) render at the same 2xl weight as the passive 'Suggested'/'Claimed' counts, and none are clickable to filter the grid. The most actionable figures don't stand out and don't act as entry points.",
+          "fix": "Emphasize the action figures (apply `.figure-accent` to 'Call now' and keep emerald for 'Buyer-ready') and make each KPI card a filter link (hx-get to the grid with the corresponding status/sort) so a buyer can jump straight to the call-now subset \u2014 satisfying 'What should I do next?' in one click."
+        }
+      ],
+      "topOpportunities": [
+        "Single foundation-adoption pass on the cluster: migrate inputs\u2192.input, status/reason/source pills\u2192.badge/.chip, card containers\u2192.card, and all primary/active buttons+filter pills\u2192.btn-primary/accent. This one change clears the high-severity accent debt (24 brand-500/600 usages), fixes the off-brand/missing focus rings, removes the bespoke-primitive smell, and tightens density \u2014 the highest leverage move on the page.",
+        "Bring the next outreach action onto the card (top decision-maker name + one-click email) so 'the phone is the weapon' holds from the grid \u2014 turning a 3-click path into 1 click for the buyer-ready accounts that matter most.",
+        "Add a page title/header to the list view and make the KPI tiles (Buyer-ready, Call now) clickable filter entry points with accent emphasis \u2014 closing all three legs of the three-second rule (Where am I / What needs attention / What next) for the cheapest effort.",
+        "Tighten the vertical rhythm to the post-PR0 locks (stats mb-3 + .card-sm tiles, filters mb-4/space-y-2, grid gap-3) so more ranked prospects sit above the fold on this dense pipeline view."
+      ],
+      "key": "prospecting"
+    },
+    {
+      "page": "My Day (/v2/my-day)",
+      "summary": "My Day is a clean, single-purpose worklist (two sections: \"Follow up\" accounts + \"My tasks\") rendered by one self-contained partial with no includes. It already adopts several foundation locks: `.page-readable` shell, the unified `text-xl font-bold` h1, and brand-* correctly used for neutral row chrome/borders. The gaps are: (1) it never uses the accent token anywhere \u2014 focus rings, hover states and links all sit on brand-* even though this is exactly the active/focus/CTA surface PR0 says should resolve to accent; (2) it re-implements `.badge` inline four times instead of the primitive; (3) it fails the third part of the Three-Second Rule \u2014 there is no next-action/CTA (the \"phone is still the weapon\" call/email affordance is absent) even though the data to drive it is present; and (4) it drifted from its own sibling (Tasks queue) on metadata contrast (text-gray-400 vs text-gray-600) and dropped the priority badge those rows show.",
+      "findings": [
+        {
+          "category": "hierarchy",
+          "severity": "high",
+          "effort": "M",
+          "location": "app/templates/htmx/partials/my_day.html:66-105",
+          "issue": "Three-Second-Rule failure on \"what do I do next?\". The whole point of My Day is to drive outreach, and the row even shows \"Last outbound {{ row.out_days }}d ago\" / \"Never contacted\" (lines 92-96) \u2014 but the only action is navigating into the customer page. There is no call/email affordance on the row, contradicting the doctrine that \"the phone is still the weapon\" and the next outreach action should be ~one click away. A buyer scanning 50 overdue accounts must open each one to act.",
+          "fix": "Add a right-aligned quick-action on each Follow-up row: a phone/email button (or a small `.btn-secondary` / icon button) using the account's primary contact, plus an inline \"Log call\" affordance. Reuse the contact/log-call pattern already present in customers/_account_tasks.html rather than inventing new markup, and keep it as one-click as the chevron currently is."
+        },
+        {
+          "category": "foundation-debt",
+          "severity": "high",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/my_day.html:140-142",
+          "issue": "The task-complete checkbox focus ring is `focus:ring-brand-500` (and hover `hover:border-brand-400`). PR0 makes focus rings part of the one-accent system (`.input-focus` / `--accent-ring`). This is the page's only interactive control with a focus ring, so it should resolve to accent, not brand-500. (Note: sibling _account_tasks/_contact_tasks share this exact pattern, so this is app-wide foundation-debt being drained page-by-page \u2014 fix here as part of that drain.)",
+          "fix": "Swap `focus:outline-none focus:ring-2 focus:ring-brand-500` for the foundation focus utility `.input-focus` (or `focus:ring-2` with `--tw-ring-color: var(--accent-ring)`), and move the hover to the accent family. Apply the same change to the matching sibling task-checkbox partials so they stay consistent."
+        },
+        {
+          "category": "consistency",
+          "severity": "medium",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/my_day.html:56-57,82-85,119-120",
+          "issue": "Four inline re-implementations of the badge primitive: the section count pills (lines 56-57 rose, 119-120 amber) and the cadence pill (lines 82-85) hand-roll `inline-flex items-center ... px-1.5/px-2 py-0.5 rounded-full text-xs font-bold/medium` instead of using `.badge` / `.badge-warning` / `.badge-mini` from styles.css. This is the bespoke-markup-re-implementing-a-primitive smell called out in the doctrine, and it makes the pills diverge subtly (font-bold here vs font-medium in the .badge family).",
+          "fix": "Replace the count pills with the `.badge` (or `.badge-mini`) primitive and map the cadence colors through the existing `.badge-warning`/`.badge-success` helpers (or a small {success,warning,danger} map onto `.badge`). Keep the count-pill semantics (rose=overdue urgency, amber=tasks) but route the box model through the shared class so spacing/radius/weight stay locked."
+        },
+        {
+          "category": "consistency",
+          "severity": "medium",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/my_day.html:130-175",
+          "issue": "My Day task rows dropped the priority badge that the sibling Tasks queue renders. tasks/_results.html:35-41 shows a High/Low priority pill on each task row; the My Day task row (which uses the identical id scheme my-day-task-{{t.id}} and the same complete endpoint) omits it entirely. A buyer triaging their day can't see which open task is high-priority \u2014 institutional-memory/urgency cue lost \u2014 and the two surfaces for the same object now look different.",
+          "fix": "Port the priority badge block from tasks/_results.html:35-41 into the My Day task row (after the title span, line 147), reusing the same markup so the two task surfaces are visually identical. While doing so, convert that pill to the `.badge` primitive per the finding above."
+        },
+        {
+          "category": "a11y",
+          "severity": "medium",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/my_day.html:87,110,157,179,46",
+          "issue": "Secondary metadata uses `text-gray-400` (owner/last-outbound line 87, empty section text 110, task linked-entity row 157, empty-task text 179, empty-state subtext 46). The sibling Tasks queue uses `text-gray-600` for the same information (tasks/_results.html:51, list.html:16, _results.html:73). gray-400 on white is below comfortable contrast for this body-adjacent copy and is an in-feature inconsistency (same data, two shades). It also de-emphasizes the exact \"Never contacted / 12d ago\" institutional-memory signal the page exists to surface.",
+          "fix": "Bump the metadata/linked-entity/empty-state secondary text from `text-gray-400` to `text-gray-600` to match the Tasks queue and clear the contrast floor. The 'Last outbound Nd ago' / 'Never contacted' string in particular should be at gray-600 so the urgency reads at a glance."
+        },
+        {
+          "category": "hierarchy",
+          "severity": "low",
+          "effort": "S",
+          "location": "app/templates/htmx/partials/my_day.html:33-34",
+          "issue": "No breadcrumb/'Where am I?' beyond the h1, and the count of overdue accounts only appears as a small pill next to the section header. The single most attention-worthy number for this page (how many accounts are overdue) is not emphasized as a key figure. PR0 provides `.figure-accent` for hero numerics precisely for this.",
+          "fix": "Consider surfacing the overdue-accounts count as a `.figure-accent` figure in or beside the header (e.g. \"3 accounts need a call today\"), so the 'What needs my attention?' answer is readable in <3s rather than as an inline pill. Keep it lightweight \u2014 one accent numeric, not a stat card grid."
+        },
+        {
+          "category": "consistency",
+          "severity": "low",
+          "effort": "M",
+          "location": "app/templates/htmx/partials/my_day.html:39-47",
+          "issue": "The all-caught-up empty state is bespoke markup (rounded-xl border border-brand-100 bg-brand-50 + inline SVG). There is no shared `.empty-state` class in styles.css, so other pages also hand-roll these \u2014 but this one diverges in its border (brand-100) and uses brand-300 for the icon, where most empty states would key the affirmative icon to a semantic/emerald or neutral tone. Minor, and partly a missing-primitive problem rather than this page's fault.",
+          "fix": "Low priority: align the empty-state container to the same border-line / card treatment used elsewhere (border-line-subtle on bg-white or the established empty-state pattern) and consider an emerald check tone for the affirmative 'all caught up' icon. If/when an `.empty-state` primitive lands, adopt it here. Don't invent a one-off."
+        }
+      ],
+      "topOpportunities": [
+        "Add a one-click outreach action (call/email + log-call) to each Follow-up row \u2014 biggest workflow payoff: it turns My Day from a navigation list into the actual daily call-down tool the doctrine demands ('the phone is still the weapon'), and the driving data (last-outbound days, owner) is already on the row. (hierarchy/high, M)",
+        "Restore the priority badge on My Day task rows to match tasks/_results.html, and route it + the count/cadence pills through the shared `.badge` primitive \u2014 restores a lost urgency cue and removes 4 bespoke pill re-implementations in one pass. (consistency, S)",
+        "Fix contrast/accent debt: bump text-gray-400 metadata to gray-600 (matching the Tasks sibling) and move the task-checkbox focus ring from brand-500 to the accent `.input-focus` token \u2014 small, mechanical, and brings the page onto the PR0 accent+readability locks. (a11y + foundation-debt, S)"
+      ],
+      "key": "my-day"
+    }
+  ]
+}
