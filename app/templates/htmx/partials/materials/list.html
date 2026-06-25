@@ -31,7 +31,7 @@
 <div class="sr-only" role="status" aria-live="polite">{{ "{:,}".format(total) }} result{{ '' if total == 1 else 's' }}{% if commodity_display %} in {{ commodity_display }}{% endif %}{% if q %} matching {{ q }}{% endif %}</div>
 
 {# Table #}
-<div class="bg-white rounded-lg border border-brand-200 overflow-hidden">
+<div class="bg-white rounded-lg border border-line-base overflow-hidden">
   {% set lc_colors = {
     'active': 'bg-emerald-50 text-emerald-700 border-emerald-200',
     'eol': 'bg-amber-50 text-amber-700 border-amber-200',
@@ -68,7 +68,7 @@
       </thead>
       <tbody>
         {% for m in materials %}
-        <tr class="cursor-pointer focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-500"
+        <tr class="cursor-pointer focus:outline-none focus:ring-2 focus:ring-inset focus:ring-accent-500"
             role="button" tabindex="0"
             hx-get="/v2/partials/materials/{{ m.id }}"
             hx-target="#main-content"
@@ -77,7 +77,7 @@
             preload="mouseover">
           <td>
             <div class="flex items-center gap-1.5">
-              <span class="font-data font-semibold text-brand-600">{{ m.display_mpn or m.normalized_mpn or "--" }}</span>
+              <span class="font-data font-semibold text-accent-600">{{ m.display_mpn or m.normalized_mpn or "--" }}</span>
               {% if m.datasheet_url %}
               {# target=_blank anchor inside the hx-get row — same pattern as the
                  web-sourced/OEM status links below. #}
@@ -225,12 +225,12 @@
   <nav class="flex gap-1 items-center">
     {% if offset > 0 %}
     <button @click="goToPage({{ (offset - limit) // limit }})"
-       class="px-3 py-1.5 text-sm bg-white border border-brand-200 rounded-lg hover:bg-brand-50 cursor-pointer transition-colors">Prev</button>
+       class="btn-secondary btn-sm cursor-pointer">Prev</button>
     {% endif %}
     <span class="px-3 py-1.5 text-sm text-gray-600">{{ offset + 1 }}&ndash;{{ [offset + limit, total]|min }} of {{ total }}</span>
     {% if offset + limit < total %}
     <button @click="goToPage({{ (offset + limit) // limit }})"
-       class="px-3 py-1.5 text-sm bg-white border border-brand-200 rounded-lg hover:bg-brand-50 cursor-pointer transition-colors">Next</button>
+       class="btn-secondary btn-sm cursor-pointer">Next</button>
     {% endif %}
   </nav>
 </div>
