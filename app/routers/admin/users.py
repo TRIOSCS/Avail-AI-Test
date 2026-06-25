@@ -148,7 +148,15 @@ def users_context(db: Session) -> dict:
     (htmx_views.settings_users_tab) and the mutation POSTs below.
     """
     users = db.query(User).filter(User.email != _AGENT_EMAIL).order_by(User.name.is_(None), User.name, User.email).all()
-    rows = [{"user": u, "status": _user_status(u), "last_login_at": u.last_login_at} for u in users]
+    rows = [
+        {
+            "user": u,
+            "status": _user_status(u),
+            "last_login_at": u.last_login_at,
+            "can_approve_buy_plans": u.can_approve_buy_plans,
+        }
+        for u in users
+    ]
     return {"rows": rows, "roles": _ASSIGNABLE_ROLES, "active_admin_count": _active_admin_count(db)}
 
 
@@ -286,6 +294,36 @@ async def set_user_active(
     record_user_audit(db, actor_id=admin.id, target_user_id=target.id, action=action)
     db.commit()
     logger.info("User {} {} by {}", target.email, "activated" if activate else "deactivated", admin.email)
+    return _render(db, request)
+
+
+@router.post("/api/admin/users/{user_id}/buyplan-approver", response_class=HTMLResponse)
+async def set_buyplan_approver(
+    request: Request,
+    user_id: int,
+    can_approve: str = Form(...),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Grant or revoke a user's buy-plan approval right; returns the refreshed Users
+    partial.
+
+    The right is the per-user User.can_approve_buy_plans column enforced by
+    dependencies.require_buyplan_approver. Admin-only (require_admin); each change
+    writes an APPROVAL_GRANT / APPROVAL_REVOKE audit row. A no-op (state unchanged) re-
+    renders without auditing, mirroring change_user_role / set_user_active.
+    """
+    target = _editable_target(db, user_id)
+    grant = str(can_approve).strip().lower() in {"true", "1", "on", "yes"}
+
+    if target.can_approve_buy_plans == grant:
+        return _render(db, request)  # no-op, nothing to audit
+
+    target.can_approve_buy_plans = grant
+    action = UserAuditAction.APPROVAL_GRANT if grant else UserAuditAction.APPROVAL_REVOKE
+    record_user_audit(db, actor_id=admin.id, target_user_id=target.id, action=action)
+    db.commit()
+    logger.info("User {} buy-plan approval {} by {}", target.email, "granted" if grant else "revoked", admin.email)
     return _render(db, request)
 
 

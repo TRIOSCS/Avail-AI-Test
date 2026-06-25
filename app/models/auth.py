@@ -53,6 +53,12 @@ class User(Base):
     notify_buyplan_email_enabled = Column(Boolean, default=True, nullable=False)
     notify_new_offer_alert_enabled = Column(Boolean, default=True, nullable=False)
 
+    # Buy-plan approval right (per-user grant, admin-toggled in Users settings). Gates the
+    # buy-plan approve/reject action via dependencies.require_buyplan_approver /
+    # can_approve_buy_plans. Independent of role: admins do NOT auto-qualify — the column
+    # is the single source of truth, so the toggle UI reflects exactly who can approve.
+    can_approve_buy_plans = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+
     created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
 
     requisitions = relationship("Requisition", back_populates="creator", foreign_keys="[Requisition.created_by]")

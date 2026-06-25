@@ -223,6 +223,32 @@ def require_buyer(request: Request, db: Session = Depends(get_db)) -> User:
     return user
 
 
+# ── Buy-plan approval right (per-user grant) ──────────────────────────
+
+
+def can_approve_buy_plans(user: User | None) -> bool:
+    """True if *user* holds the per-user buy-plan approval right.
+
+    Reads the User.can_approve_buy_plans column directly (single source of truth — the
+    grant is admin-toggled in Users settings, not role-derived). This predicate is the
+    shared gate so any surface that hides the approve/reject UI checks the SAME flag the
+    POST enforces via require_buyplan_approver.
+    """
+    return bool(user is not None and getattr(user, "can_approve_buy_plans", False))
+
+
+def require_buyplan_approver(request: Request, db: Session = Depends(get_db)) -> User:
+    """Dependency: 403 unless the current user holds the buy-plan approval right.
+
+    Gates the buy-plan approve/reject action (wired by a separate task). The right is a
+    per-user grant (User.can_approve_buy_plans), not a role — see can_approve_buy_plans.
+    """
+    user = require_user(request, db)
+    if not can_approve_buy_plans(user):
+        raise HTTPException(403, "Buy-plan approval right required for this action")
+    return user
+
+
 # ── Per-feature access (user-management foundation) ───────────────────
 
 
