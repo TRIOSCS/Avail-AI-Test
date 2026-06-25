@@ -20,13 +20,13 @@
 
     {# Scope toggle #}
     <input type="hidden" name="scope" :value="scope">
-    <div class="flex rounded-lg border border-brand-200 overflow-hidden text-sm">
+    <div class="flex rounded-lg border border-line-base overflow-hidden text-sm">
       <button type="button" @click="scope = 'per_line'"
-              :class="scope === 'per_line' ? 'bg-brand-500 text-white' : 'bg-white text-gray-600 hover:bg-brand-50'"
+              :class="scope === 'per_line' ? 'bg-accent-500 text-white' : 'bg-white text-gray-600 hover:bg-accent-50'"
               class="flex-1 py-2 font-medium transition-colors">Per-line</button>
       <button type="button" @click="scope = 'take_all'"
-              :class="scope === 'take_all' ? 'bg-brand-500 text-white' : 'bg-white text-gray-600 hover:bg-brand-50'"
-              class="flex-1 py-2 font-medium transition-colors border-l border-brand-200">Take the whole list</button>
+              :class="scope === 'take_all' ? 'bg-accent-500 text-white' : 'bg-white text-gray-600 hover:bg-accent-50'"
+              class="flex-1 py-2 font-medium transition-colors border-l border-line-base">Take the whole list</button>
     </div>
 
     {# Per-line fields #}
@@ -71,7 +71,7 @@
       <textarea name="notes" rows="2" class="input" placeholder="Optional notes for the trader…"></textarea>
     </div>
 
-    <div class="flex justify-end gap-3 pt-2 border-t border-gray-100">
+    <div class="modal-footer">
       <button type="button" @click="$dispatch('close-modal')" class="btn btn-secondary">Cancel</button>
       <button type="submit" class="btn btn-primary">Submit offer</button>
     </div>

@@ -25,8 +25,8 @@
               hx-swap="innerHTML"
               @click="lens = '{{ l }}'; stage = ''"
               :class="lens === '{{ l }}'
-                      ? 'bg-brand-500 text-white shadow-sm'
-                      : 'bg-brand-100 text-brand-600 hover:bg-brand-200'"
+                      ? 'bg-accent-500 text-white shadow-sm'
+                      : 'bg-accent-100 text-accent-600 hover:bg-accent-200'"
               class="px-3.5 py-1.5 text-sm font-medium rounded-full transition-colors">
         {{ label }}
       </button>
@@ -64,7 +64,7 @@
             hx-target="#resell-list-body"
             hx-swap="innerHTML"
             @click="stage = '{{ stage_key }}'"
-            :class="stage === '{{ stage_key }}' ? 'ring-2 ring-brand-400' : ''"
+            :class="stage === '{{ stage_key }}' ? 'ring-2 ring-accent-400' : ''"
             class="text-left rounded-xl transition-shadow hover:shadow-card">
       {{ stat_card(label, value, sub) }}
     </button>
@@ -72,7 +72,7 @@
   </div>
 
   {# ── Split panel: lists (left) + detail (right) ─────────────────── #}
-  <div class="flex flex-1 overflow-hidden min-h-0 rounded-xl border border-brand-200 bg-white"
+  <div class="flex flex-1 overflow-hidden min-h-0 rounded-xl border border-line-base bg-white"
        id="split-resell"
        x-data="splitPanel('resell', 38)">
 
@@ -80,7 +80,7 @@
        LANDMINE (spec HTMX trap): hx-trigger="load" carries an EXPLICIT
        hx-target so it doesn't inherit #main-content's hx-target="this" and
        wipe the page. #}
-    <div class="overflow-auto border-r border-brand-200 flex-shrink-0"
+    <div class="overflow-auto border-r border-line-base flex-shrink-0"
          :style="'width:' + leftWidth + '%'"
          id="split-left-resell">
       <div id="resell-list-body"
@@ -93,13 +93,13 @@
     </div>
 
     {# Resizable divider — same affordance as the sourcing workspace. #}
-    <div class="w-1 bg-brand-200 hover:bg-brand-400 cursor-col-resize flex-shrink-0 relative group transition-colors"
+    <div class="w-1 bg-accent-200 hover:bg-accent-400 cursor-col-resize flex-shrink-0 relative group transition-colors"
          @mousedown="startResize($event)"
          @touchstart.prevent="startTouchResize($event)">
       <div class="absolute top-1/2 -translate-y-1/2 left-1/2 -translate-x-1/2 w-3 h-8 flex flex-col items-center justify-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-        <div class="w-0.5 h-0.5 rounded-full bg-brand-500"></div>
-        <div class="w-0.5 h-0.5 rounded-full bg-brand-500"></div>
-        <div class="w-0.5 h-0.5 rounded-full bg-brand-500"></div>
+        <div class="w-0.5 h-0.5 rounded-full bg-accent-500"></div>
+        <div class="w-0.5 h-0.5 rounded-full bg-accent-500"></div>
+        <div class="w-0.5 h-0.5 rounded-full bg-accent-500"></div>
       </div>
     </div>
 

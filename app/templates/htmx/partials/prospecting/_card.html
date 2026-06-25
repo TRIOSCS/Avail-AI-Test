@@ -6,15 +6,15 @@
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}{% import "htmx/partials/prospecting/_macros.html" as score %}
 {% set prospect_status_colors = {
-  'suggested': 'bg-brand-100 text-brand-600',
-  'claimed': 'bg-emerald-50 text-emerald-700',
-  'dismissed': 'bg-gray-100 text-gray-600'
+  'suggested': 'bg-brand-100 text-brand-600 border-brand-200',
+  'claimed': 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  'dismissed': 'bg-gray-100 text-gray-600 border-gray-200'
 } %}
 {% set snap = (snapshots or {}).get(prospect.id, {}) %}
 {% set cstats = (contact_stats_map or {}).get(prospect.id, {}) %}
 
 <div id="prospect-{{ prospect.id }}"
-     class="bg-white border border-brand-200 rounded-lg p-4 hover:shadow-md hover:border-brand-300 transition-all">
+     class="card p-4 hover:shadow-md transition-all">
   {# Card body — an anchor so it's keyboard-focusable, right-clickable, and SR-actionable #}
   <a href="/v2/prospecting/{{ prospect.id }}"
      hx-get="/v2/partials/prospecting/{{ prospect.id }}"
@@ -27,15 +27,15 @@
       <div class="min-w-0">
         <h3 class="text-sm font-bold text-gray-900 truncate">{{ prospect.name }}</h3>
         {% if prospect.domain %}
-        <p class="text-xs text-brand-400 truncate">{{ prospect.domain }}</p>
+        <p class="text-xs text-gray-500 truncate">{{ prospect.domain }}</p>
         {% endif %}
       </div>
       <div class="shrink-0 ml-2 flex flex-col items-end gap-1">
-        <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ prospect_status_colors.get(prospect.status, 'bg-gray-100 text-gray-600') }}">
+        <span class="badge {{ prospect_status_colors.get(prospect.status, 'bg-gray-100 text-gray-600 border-gray-200') }}">
           {{ prospect.status|capitalize }}
         </span>
         {% if snap.is_buyer_ready %}
-        <span class="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-semibold rounded-full bg-emerald-100 text-emerald-700"
+        <span class="badge bg-emerald-100 text-emerald-700 border-emerald-200"
               title="Composite buyer-ready score: {{ snap.buyer_ready_score }}/100">
           <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.957a1 1 0 00.95.69h4.162c.969 0 1.371 1.24.588 1.81l-3.367 2.446a1 1 0 00-.364 1.118l1.287 3.957c.3.922-.755 1.688-1.54 1.118l-3.366-2.446a1 1 0 00-1.176 0l-3.366 2.446c-.784.57-1.838-.196-1.539-1.118l1.286-3.957a1 1 0 00-.363-1.118L2.07 9.384c-.783-.57-.38-1.81.588-1.81h4.162a1 1 0 00.95-.69l1.286-3.957z"/></svg>
           Buyer-ready
@@ -86,11 +86,11 @@
     {% endif %}
     {% endif %}
 
-    {# Top buyer-ready reasons #}
+    {# Top buyer-ready reasons — use .chip for consistent metadata tag styling #}
     {% if snap.priority_reasons %}
     <div class="flex flex-wrap gap-1 mb-2">
       {% for reason in snap.priority_reasons[:2] %}
-      <span class="inline-flex px-2 py-0.5 text-[11px] rounded-full bg-brand-50 text-brand-600 border border-brand-100">{{ reason }}</span>
+      <span class="chip bg-brand-50 text-brand-600 border-brand-100">{{ reason }}</span>
       {% endfor %}
     </div>
     {% endif %}
@@ -109,7 +109,7 @@
     {# Discovery source + claimed-by #}
     <div class="mt-2 flex items-center justify-between">
       {% if prospect.discovery_source %}
-      <span class="inline-flex px-2 py-0.5 text-xs font-medium bg-gray-100 text-gray-600 rounded-full">{{ prospect.discovery_source }}</span>
+      <span class="chip bg-gray-100 text-gray-600 border-gray-200">{{ prospect.discovery_source }}</span>
       {% else %}<span></span>{% endif %}
       {% if prospect.status == 'claimed' and prospect.claimed_by_user %}
       <span class="text-xs text-gray-600">Claimed by {{ prospect.claimed_by_user.name|default('—') }}</span>
@@ -119,13 +119,13 @@
 
   {# Quick action buttons #}
   {% if prospect.status == 'suggested' %}
-  <div class="mt-3 pt-3 border-t border-gray-100 flex gap-2">
+  <div class="mt-3 pt-3 border-t border-line-subtle flex gap-2">
     <button hx-post="/v2/partials/prospecting/{{ prospect.id }}/claim"
             hx-target="#prospect-{{ prospect.id }}"
             hx-swap="outerHTML"
             hx-vals='{"flt_status": "{{ status|default('') }}"}'
             data-loading-disable
-            class="flex-1 px-2 py-1.5 bg-brand-500 text-white text-xs font-medium rounded-md hover:bg-brand-600 transition-colors">
+            class="btn-primary btn-sm flex-1">
       Claim
     </button>
     <button hx-post="/v2/partials/prospecting/{{ prospect.id }}/dismiss"
@@ -133,12 +133,12 @@
             hx-swap="outerHTML"
             hx-vals='{"flt_status": "{{ status|default('') }}"}'
             data-loading-disable
-            class="flex-1 px-2 py-1.5 bg-white border border-brand-200 text-brand-700 text-xs font-medium rounded-md hover:bg-brand-50 transition-colors">
+            class="btn-secondary btn-sm flex-1">
       Dismiss
     </button>
   </div>
   {% elif prospect.status == 'dismissed' %}
-  <div class="mt-3 pt-3 border-t border-gray-100">
+  <div class="mt-3 pt-3 border-t border-line-subtle">
     <span class="text-xs text-gray-400">Dismissed {{ prospect.dismissed_at.strftime('%b %d') if prospect.dismissed_at else '' }}</span>
   </div>
   {% endif %}

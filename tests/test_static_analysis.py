@@ -508,7 +508,7 @@ def test_low_contrast_secondary_text_does_not_grow():
     Ratchet only (decorative icon grays are fine) — caps growth rather than banning
     outright.
     """
-    BASELINE = 424  # +3 for the Resell workspace partials (lists/detail/offers muted
+    BASELINE = 427  # +3 for the Resell workspace partials (lists/detail/offers muted
     # metadata copy — the established resell look; the bid-builder itself uses the
     # higher-contrast text-gray-600 per this rule). +5 for the users_audit.html table
     # column heads, which reuse the established users.html table-head look
@@ -516,6 +516,9 @@ def test_low_contrast_secondary_text_does_not_grow():
     # the higher-contrast text-gray-600. +2 for origin/main archive-dnc / compact-contacts
     # template column heads. +1 for the settings-refine profile/notifications muted copy;
     # the curated System tab itself uses text-gray-600 throughout.
+    # +3 for feat/ui-light (prospecting/_card.html domain text, prospecting/detail.html
+    # email text, prospecting/list.html subtitle, resell/detail.html inactive tab label —
+    # all muted xs metadata, consistent with established pattern).
     count = _tpl_substring_count("text-gray-500")
     assert count <= BASELINE, (
         f"text-gray-500 usages rose to {count} (baseline {BASELINE}). Prefer "

@@ -151,13 +151,21 @@ def test_lists_open_lens_hides_customer(client, db_session, trader_user, posted_
 
 
 def test_detail_renders_tabs(client, trader_user, posted_list):
-    """Detail renders the breadcrumb + chips + the four lazy tabs."""
+    """Detail renders the breadcrumb + chips + the three core tabs.
+
+    The Activity tab was removed per the 2026-06-24 UI-review audit which flagged it as
+    a permanent dead-end 'coming soon' placeholder (no backing route/partial existed).
+    The audit recommended hiding it (S option); the feat/ui-light restyle PR removed it.
+    This test asserts the tabs that are actually present.
+    """
     resp = client.get(f"/v2/partials/resell/{posted_list.id}")
     assert resp.status_code == 200
     body = resp.text
     assert "Resell" in body and posted_list.title in body
-    for label in ("Lines", "Offers", "Build Bid", "Activity"):
+    for label in ("Lines", "Offers", "Build Bid"):
         assert label in body
+    # Activity tab intentionally absent (audit-approved removal of dead-end placeholder)
+    assert "Activity" not in body
 
 
 def test_lines_multi_is_table(client, trader_user, posted_list):
