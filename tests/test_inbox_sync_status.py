@@ -20,34 +20,34 @@ def _user(**kw):
 
 
 def test_status_ok():
-    s = get_inbox_sync_status(_user())
+    s = get_inbox_sync_status(None, _user())
     assert s["health"] == InboxSyncHealth.OK
     assert s["connected"] is True
 
 
 def test_status_error_when_disconnected():
-    s = get_inbox_sync_status(_user(m365_connected=False))
+    s = get_inbox_sync_status(None, _user(m365_connected=False))
     assert s["health"] == InboxSyncHealth.ERROR
 
 
 def test_status_error_when_token_expired():
-    s = get_inbox_sync_status(_user(token_expires_at=datetime.now(timezone.utc) - timedelta(minutes=1)))
+    s = get_inbox_sync_status(None, _user(token_expires_at=datetime.now(timezone.utc) - timedelta(minutes=1)))
     assert s["health"] == InboxSyncHealth.ERROR
 
 
 def test_status_warning_when_stale():
     old = datetime.now(timezone.utc) - timedelta(hours=6)
-    s = get_inbox_sync_status(_user(last_inbox_scan=old))
+    s = get_inbox_sync_status(None, _user(last_inbox_scan=old))
     assert s["health"] == InboxSyncHealth.WARNING
     assert s["is_stale"] is True
 
 
 def test_status_stale_when_never_scanned():
-    s = get_inbox_sync_status(_user(last_inbox_scan=None))
+    s = get_inbox_sync_status(None, _user(last_inbox_scan=None))
     assert s["is_stale"] is True
 
 
 def test_status_error_when_connected_but_no_token():
-    s = get_inbox_sync_status(_user(access_token=None))
+    s = get_inbox_sync_status(None, _user(access_token=None))
     assert s["health"] == InboxSyncHealth.ERROR
     assert s["token_ok"] is False

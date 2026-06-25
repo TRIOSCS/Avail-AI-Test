@@ -93,6 +93,10 @@ from .nc_search_log import NcSearchLog  # noqa: F401
 from .nc_search_queue import NcSearchQueue  # noqa: F401
 from .nc_worker_status import NcWorkerStatus  # noqa: F401
 
+# In-app notifications (registered so the table is in Base.metadata; the model file's
+# docstring claimed this but the import was missing — schema-drift gate flagged it)
+from .notification import Notification  # noqa: F401
+
 # OEM web-resolution crosswalk (PartSurfer/PSREF spare → canonical MPN cache)
 from .oem_crosswalk import OemCrosswalk  # noqa: F401
 

@@ -35,8 +35,8 @@
               <div class="text-sm font-medium text-gray-900">{{ row.user.name or row.user.email }}</div>
               <div class="text-xs text-gray-600">{{ row.user.email }}</div>
             </td>
-            <td class="table-cell text-sm text-gray-600">{{ row.user.role }}</td>
-            <td class="table-cell text-xs text-gray-600">{{ row.member.added_at | fmtdate if row.member else '—' }}</td>
+            <td class="table-cell text-sm text-gray-600">{{ (row.user.role | replace('_', ' ') | title) if row.user.role else '—' }}</td>
+            <td class="table-cell text-xs text-gray-600">{{ row.member.added_at | fmtdate if row.is_member else '—' }}</td>
             <td class="table-cell">
               {% if row.is_member %}
               <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-emerald-100 text-emerald-700">Active</span>
@@ -51,10 +51,13 @@
               <button hx-post="/api/admin/ops-group/toggle" hx-vals='{"user_id": {{ row.user.id }}}'
                       hx-target="#ops-group-content" hx-swap="outerHTML"
                       hx-confirm="Remove {{ row.user.name or row.user.email }} from the ops verification group?"
+                      data-loading-disable
                       class="px-2.5 py-1 text-xs font-medium text-rose-600 bg-rose-50 border border-rose-200 rounded hover:bg-rose-100 transition-colors">Remove</button>
               {% else %}
               <button hx-post="/api/admin/ops-group/toggle" hx-vals='{"user_id": {{ row.user.id }}}'
                       hx-target="#ops-group-content" hx-swap="outerHTML"
+                      hx-confirm="Grant {{ row.user.name or row.user.email }} authority to verify Sales Orders and Purchase Orders?"
+                      data-loading-disable
                       class="px-2.5 py-1 text-xs font-medium text-brand-600 bg-brand-50 border border-brand-200 rounded hover:bg-brand-100 transition-colors">Add</button>
               {% endif %}
             </td>

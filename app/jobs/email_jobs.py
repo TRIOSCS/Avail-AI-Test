@@ -26,12 +26,20 @@ from ..shared_constants import RFQ_SUBJECT_TAG_RE
 from ..utils.token_manager import _utc
 
 
-def register_email_jobs(scheduler, settings):
-    """Register email/contacts/calendar jobs with the scheduler."""
+def register_email_jobs(scheduler, settings, db=None):
+    """Register email/contacts/calendar jobs with the scheduler.
+
+    *db* (when provided) lets activity_tracking_enabled resolve from the system_config
+    DB row (admin toggle) instead of only the env default.
+    """
+    from ..services.admin_service import get_effective_flag
+
+    activity_tracking = get_effective_flag(db, "activity_tracking_enabled", settings.activity_tracking_enabled)
+
     if settings.contacts_sync_enabled:
         scheduler.add_job(_job_contacts_sync, IntervalTrigger(hours=24), id="contacts_sync", name="Contacts sync")
 
-    if settings.activity_tracking_enabled and settings.ownership_sweep_enabled:
+    if activity_tracking and settings.ownership_sweep_enabled:
         scheduler.add_job(_job_ownership_sweep, IntervalTrigger(hours=12), id="ownership_sweep", name="Ownership sweep")
         scheduler.add_job(
             _job_site_ownership_sweep,
@@ -39,7 +47,7 @@ def register_email_jobs(scheduler, settings):
             id="site_ownership_sweep",
             name="Site ownership sweep",
         )
-    elif settings.activity_tracking_enabled:
+    elif activity_tracking:
         logger.info("Ownership sweep disabled (OWNERSHIP_SWEEP_ENABLED=false) — activity tracking still active")
 
     if settings.contact_scoring_enabled:
@@ -64,7 +72,7 @@ def register_email_jobs(scheduler, settings):
         name="Vendor email health scores",
     )
 
-    if settings.activity_tracking_enabled:
+    if activity_tracking:
         scheduler.add_job(
             _job_calendar_scan,
             CronTrigger(hour=6, minute=0),

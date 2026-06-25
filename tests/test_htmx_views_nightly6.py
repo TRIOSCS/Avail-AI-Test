@@ -433,14 +433,17 @@ class TestAdminRoutes:
         db_session.refresh(vc2)
 
         with patch("app.services.vendor_merge_service.merge_vendor_cards") as mock_merge:
-            mock_merge.return_value = {"kept_name": "Arrow Electronics", "reassigned": 3}
+            mock_merge.return_value = {"ok": True, "kept": test_vendor_card.id, "reassigned": 3}
             resp = admin_client.post(
                 "/v2/partials/admin/vendor-merge",
                 data={"keep_id": str(test_vendor_card.id), "remove_id": str(vc2.id)},
             )
 
+        # The endpoint re-renders the whole Data Ops list (so stale pairs drop) and
+        # surfaces the merge result via the showToast HX-Trigger header.
         assert resp.status_code == 200
-        assert "Merged" in resp.text or "Arrow" in resp.text
+        assert "Vendor Duplicates" in resp.text
+        assert "Merged" in resp.headers.get("HX-Trigger", "")
 
     def test_vendor_merge_value_error_returns_error_html(self, admin_client, db_session, test_vendor_card):
         """merge_vendor_cards raises ValueError → error HTML, no 500."""
@@ -454,8 +457,11 @@ class TestAdminRoutes:
                 },
             )
 
+        # On failure the list still re-renders (no 500) and the error surfaces via the
+        # showToast HX-Trigger header.
         assert resp.status_code == 200
-        assert "Error" in resp.text or "error" in resp.text.lower()
+        assert "Vendor Duplicates" in resp.text
+        assert "failed" in resp.headers.get("HX-Trigger", "").lower()
 
     def test_vendor_merge_non_admin_raises_403(self, client, db_session, test_vendor_card):
         """Non-admin user calling vendor-merge → 403."""
@@ -500,14 +506,17 @@ class TestAdminRoutes:
         co2 = _make_company(db_session, "Acme B")
 
         with patch("app.services.company_merge_service.merge_companies") as mock_merge:
-            mock_merge.return_value = {"kept_name": "Acme A"}
+            mock_merge.return_value = {"ok": True, "kept": co1.id}
             resp = admin_client.post(
                 "/v2/partials/admin/company-merge",
                 data={"keep_id": str(co1.id), "remove_id": str(co2.id)},
             )
 
+        # The endpoint re-renders the whole Data Ops list and surfaces the merge result
+        # via the showToast HX-Trigger header.
         assert resp.status_code == 200
-        assert "Merged" in resp.text or "Acme" in resp.text
+        assert "Company Duplicates" in resp.text
+        assert "Merged" in resp.headers.get("HX-Trigger", "")
 
     def test_company_merge_error_returns_error_html(self, admin_client, db_session):
         """merge_companies raises → error HTML returned."""
@@ -521,8 +530,11 @@ class TestAdminRoutes:
                 data={"keep_id": str(co1.id), "remove_id": str(co2.id)},
             )
 
+        # On failure the list still re-renders (no 500) and the error surfaces via the
+        # showToast HX-Trigger header.
         assert resp.status_code == 200
-        assert "Error" in resp.text or "error" in resp.text.lower()
+        assert "Company Duplicates" in resp.text
+        assert "failed" in resp.headers.get("HX-Trigger", "").lower()
 
     def test_company_merge_non_admin_raises_403(self, client, db_session):
         """Non-admin calling company-merge → 403."""

@@ -1213,6 +1213,9 @@ buyplan_workflow.py (state machine)
     |  Ops SO track:       so_status: pending --verify_so(ops)--> approved / rejected
     |  Completion gate:    all lines terminal AND so_status=approved. verify_so/verify_po require a
     |                      VerificationGroupMember (manage via Settings > Ops Group; seeded from ADMIN_EMAILS).
+    |                      admin/buy_plan_ops.toggle_ops_member guards the toggle: it refuses to
+    |                      deactivate the LAST active member or to let the acting admin deactivate
+    |                      themselves (both -> 400 JSON, auto-toasted); success fires a showToast.
     |
     +---> buyplan_notifications.py (submit/approve/reject/SO/PO/completed/cancelled + buyer/ops nudges)
     |       +---> teams_notifications.py --> Teams webhook / DM
@@ -1305,6 +1308,12 @@ one-off w/ 2 offers, an awarded list).
   (`notify_approved`, per assigned buyer).
 - **Routine → in-app only**: plan completion (`notify_completed`) — no email, no Teams.
 All tiers write an `activity_log` row linked via `buy_plan_id` (+ `requisition_id`).
+
+**Per-user email opt-out (Task 9).** `_send_email(user, ...)` early-returns (no token
+fetch, no Graph client) when the recipient's `notify_buyplan_email_enabled` is False —
+the Profile-tab toggle. Suppression is at the firing site only: the calling `notify_*`
+function still writes the recipient's in-app `activity_log` row, so nothing is lost
+in-app — only the email channel is silenced for that user.
 
 **Reporting fold.** The retired `/v2/reporting` page's analytics now live where the work
 happens: the **Supervise** lens strip (open value / avg margin / approvals / halted /
@@ -1505,7 +1514,10 @@ Two surfaces:
     1. Requisitions list: shared/inbox_disconnected_banner.html
        (shown when health=error or is_stale=True; included at top of list.html)
     2. Settings → Profile: settings/_mailbox_sync_card.html
-       (always shows sync status + "Scan now" button)
+       (connected: friendly sync status + "Scan now" button + last-checked
+        timeago; not connected: a "Mailbox not connected" empty state with a
+        reconnect hint and no Scan-now button. m365_error_reason is rendered as
+        friendly text, not a raw string.)
 
 "Scan now" button:
     POST /v2/partials/settings/inbox/scan-now
@@ -1526,6 +1538,37 @@ Two surfaces:
 `_run_inbox_scan_now` and returns the refreshed responses tab; the scan is user-scoped,
 not requisition-scoped.
 
+### Profile mutation endpoints (any logged-in user)
+
+Settings → Profile lets a user edit their own display name, 8x8 extension, and
+notification preferences. All three handlers live in `htmx_views.py`, take
+`require_user` (the current user, NOT admin-only), commit, and emit a `showToast`
+HX-Trigger via the shared `settings_toast()` helper.
+
+```
+POST /api/user/profile            (form: name, extension)
+    htmx_views.update_user_profile()
+    +---> name.strip(): empty OR >255 chars -> 400 JSON {error, status_code, request_id}
+    +---> extension.strip(): >20 chars       -> 400 JSON {error, ...}
+    +---> sets user.name + user.eight_by_eight_extension (empty extension clears it)
+    +---> db.commit(); settings_toast("Profile updated.") -> 200 (empty body + HX-Trigger)
+
+POST /api/user/toggle-buyplan-email
+    htmx_views.toggle_buyplan_email()
+    +---> flips user.notify_buyplan_email_enabled; toast "...enabled/disabled."
+          When False, buyplan_notifications._send_email skips the Graph send (in-app
+          activity_log row still written — see §8 notification tiers).
+
+POST /api/user/toggle-new-offer-alert
+    htmx_views.toggle_new_offer_alert()
+    +---> flips user.notify_new_offer_alert_enabled; toast "New-offer alerts enabled/disabled."
+          When False, alerts.sources.offers.OfferConfirmedSource.count_for_user /
+          new_items_for_user return 0/empty, suppressing the FYI nav badge for that user.
+```
+
+These clone the existing `toggle_8x8` (`POST /api/user/toggle-8x8`) pattern but route
+their toast through `settings_toast()`.
+
 ---
 
 ## 9a. Settings → Connectors Tab (admin only)
@@ -1543,8 +1586,10 @@ htmx_views.settings_connectors_tab  (admin-only; 403 for non-admin)
     +---> _build_connector_groups(db, request)
     |       |
     |       +---> db.query(ApiSource).order_by(display_name).all()
-    |       |     (9 dead rows excluded in-process: aliexpress/arrow/avnet/partfuse/
-    |       |      rs_components/siliconexpert/winsource + rocketreach/clearbit)
+    |       |     (dead rows excluded in-process via the shared module-level
+    |       |      htmx_views._DEAD_CONNECTORS frozenset — single source of truth
+    |       |      referenced by both _build_connector_groups and connectors_test_all:
+    |       |      rocketreach_enrichment / clearbit_enrichment)
     |       |
     |       +---> per source: _enrich_source(source, db)
     |       |       |
@@ -1594,16 +1639,33 @@ Every non-planned card has an **enable toggle** (`POST /api/sources/{id}/activat
 card partial:
 
 ```
-POST /api/sources/{id}/activate          → JSON {status, is_active}
+PUT  /api/sources/{id}/activate          → JSON {ok, is_active} + showToast HX-Trigger
 POST /api/sources/{id}/test              → JSON {ok, error}
+PUT  /api/sources/{name}/credentials     → JSON {saved} + showToast HX-Trigger
 GET  /v2/partials/settings/connector-card/{id}  → single card HTML (swap target)
 POST /v2/partials/settings/connectors/test-all  → OOB bundle of refreshed cards
+     + an OOB summary line ("Tested N · M failed") into #test-all-summary
      (skips inactive / untestable; per-source failures tolerated, never abort)
 ```
 
-Credential save uses `hx-ext="json-enc"` to POST a JSON body to the existing
-`POST /api/sources/{id}` endpoint (HTMX json-enc extension — not a standard form
-POST). On success the card re-fetches via `GET /v2/partials/settings/connector-card/{id}`.
+Credential save uses `hx-ext="json-enc"` to PUT a nested JSON body
+(`{credentials:{ENV:val}}`) to `PUT /api/sources/{name}/credentials` (HTMX json-enc
+extension — not a standard form POST). On success the card re-fetches via
+`GET /v2/partials/settings/connector-card/{id}`.
+
+**Feedback & safety polish (Task 5):**
+- **Success toasts** — `activate` and `credentials` handlers attach a `showToast`
+  HX-Trigger via `htmx_views.settings_toast` (lazy import to avoid a circular import):
+  "Key saved." / "Credentials saved." / "<name> enabled/disabled." Clay `disconnect`
+  (router `clay_oauth.py`) sets the same HX-Trigger on its 302 ("Clay disconnected.").
+- **Destructive confirms** (`hx-confirm`, client-side) — Clay **Disconnect** ("Disconnect
+  Clay enrichment for everyone? …"); the enable toggle gains a confirm **only when the
+  card state is `live`** (Jinja-conditional, single-quoted, name `|e`-escaped) since
+  disabling a live source reduces search/enrichment app-wide.
+- **Empty state** — when `connector_groups` is empty (no `ApiSource` rows) the tab renders
+  a house-style ghost-icon empty block ("No connectors yet.") instead of a bare header.
+- **Unified status vocabulary** — header counter and group counts both read "N need setup"
+  (was "need attention" / inconsistent singular); the per-card pill labels remain canonical.
 
 The degraded-source banner on the Part Dossier (`§ 2a-bis`) deep-links
 `/v2/settings` when live-market connectors are down — that link now routes to the
@@ -1894,6 +1956,27 @@ merges different-`account_owner_id` accounts) are reused AS-IS.
   blank + emitted empty merge ids; dead). Default keep/remove direction follows
   `pair.auto_keep_id`; both buttons POST `/v2/partials/admin/company-merge`. Reached via
   `GET /v2/partials/settings/data-ops` (`require_user` + explicit `is_admin` gate).
+- **Vendor-Duplicates loop (same template) had the identical flat-field bug** — it read
+  `pair.name_a/id_a/sightings_a` while `vendor_utils.find_vendor_dedup_candidates` returns
+  NESTED `{vendor_a:{id,name,sightings}, vendor_b:{…}, score}` → vendor rows rendered blank
+  with empty `hx-vals` ids. Now rewritten against the nested shape, with a "suggested keep"
+  hint (keeper = higher-sighting side, ties→`vendor_a`), matching the Company loop.
+- **Honest scan-error state:** the data-ops route runs each dedup scan inside its own
+  `try/except` via the shared `_render_data_ops(request, user, db)` helper, which sets a
+  per-scan `vendor_scan_failed`/`company_scan_failed` flag. A scan that RAISES renders a
+  distinct rose error block ("Couldn't check for duplicate vendors/companies right now —
+  try Refresh.") instead of swallowing the failure into the reassuring "No duplicate …
+  found" clean empty state. The empty state copy now says "companies" (matched to the
+  card title), not "customers".
+- **Merge-button styling + post-merge refresh:** the `merge_button` macro takes an
+  `is_keeper` flag — the suggested-keep direction is a filled brand chip, the drop
+  direction a neutral outline (name truncation widened to 40 chars so similar-prefixed
+  names never render as twin buttons). Both merge endpoints now re-render the whole
+  Data Ops partial via `_render_data_ops` into `#settings-content` (so pairs referencing
+  the just-merged entity drop without a manual refresh) and surface the kept-name /
+  failure message via a `settings_toast` `HX-Trigger` rather than swapping a `<p>` into
+  the row. Both vendor and company rows carry the Alpine `x-data="{ merged: false }"`
+  guard for consistent post-merge behavior.
 - **Per-account banner:** `GET .../{company_id}/dup-suggestion` (`company_dup_suggestion`,
   declared ABOVE the catch-all) → lazy `hx-trigger=load` panel in `detail.html` →
   `_dup_suggestion.html`. Shows the top dedup match INVOLVING this company + a "Review &
@@ -3787,6 +3870,37 @@ APScheduler (scheduler.py)
             +---> Ping each connector -> update api_sources
 ```
 
+**Feature-flag resolution at job registration.** `register_all_jobs()` opens one
+short-lived `SessionLocal()` (closed in `finally`) and passes it to the three
+flag-reading registrars — `register_core_jobs`, `register_email_jobs`,
+`register_offers_jobs` — which resolve `inbox_scan_interval_min`,
+`activity_tracking_enabled`, and `proactive_matching_enabled` via
+`admin_service.get_effective_flag/get_effective_int(db, key, settings.<flag>)`. So the
+System-tab toggles are read at scheduler-config time (after
+`run_startup_migrations()` has seeded + reconciled the rows); a deliberate admin flip
+takes effect at the next scheduler reconfigure/restart. The interval/flag is also
+re-resolved per run inside `_job_inbox_scan` (uses its own session). The resolver
+degrades to the env default when the session is absent (`db=None`) or the DB read
+fails, so registration never crashes.
+
+**System settings tab (curated typed UI).** `settings_system_tab`
+(`/v2/partials/settings/system`, admin-only) renders curated typed controls instead of
+a raw key/value table. The catalog `SYSTEM_SETTINGS_META` (owned in
+`app/routers/admin/system.py`) maps each of the four user-facing keys to
+`{type: bool|int, label, help, restart, min}`: three toggle switches
+(`email_mining_enabled`, `proactive_matching_enabled`, `activity_tracking_enabled`) and
+one number input (`inbox_scan_interval_min`, min 5). Each control's displayed value is
+the effective resolver value (`get_effective_flag/get_effective_int` with the env
+default). Controls `PUT /api/admin/config/{key}` (hx-swap="none"); `api_set_config`
+validates curated keys via `_validate_typed_value` — booleans accept only true/false,
+the interval rejects `< 5` with a 400 `{"error": "Inbox scan interval must be at least 5
+minutes."}` (the global handler toasts it) — and on success returns an HX-Trigger
+`showToast`. The three scheduler-read settings carry an inline "Applies after the next
+restart." note (`email_mining_enabled` resolves per-request, so it has none). Internal
+watermark keys (`teams_calls_last_poll`, `8x8_last_poll`, `proactive_last_scan`,
+`SYSTEM_JOB_STATE_KEYS`) are never editable — surfaced read-only in a collapsed
+"Job state (read-only)" disclosure.
+
 ---
 
 ## Frontend <-> Backend Pattern
@@ -4056,7 +4170,7 @@ the current implementation.
 | Tags | 4 | List, entity tags |
 | Activity | 14 | Log calls, timeline, dashboards |
 | Admin | 15 | Users, config, diagnostics, maintenance |
-| Tickets | 12 | Error reports, trouble tickets, AI analysis |
+| Tickets | 12 | Error reports, trouble tickets, AI analysis; **admin-gated triage vs. open submission**: the maintainer triage console (`GET /v2/partials/trouble-tickets/workspace`, `.../list`, `.../{id}` and screenshot `GET /api/trouble-tickets/{id}/screenshot`) is `require_admin` (also hidden behind `{% if is_admin %}` Tickets tab in settings/index.html — non-admins can't see or reach it, closing the cross-user report leak), while the floating "Report a Problem" submission flow stays open to any login: `GET /api/trouble-tickets/form`, `POST /api/trouble-tickets/submit`, `POST /api/trouble-tickets` + `POST /api/error-reports` remain `require_user`. **In-shell triage wiring**: the Tickets console lives inside the Settings shell — `_build_ticket_list_context(db, status)` (in htmx_views) is the single list query+grouping helper shared by `GET .../list` and `POST /api/trouble-tickets/analyze` (analyze renders+returns the freshly-grouped `list.html` so the `innerHTML` swap into `#ticket-list` shows results — no more empty body + dead `HX-Trigger: ticketsUpdated`). The logical `status="open"` filter expands to `(submitted, in_progress)` so in-progress tickets stay under the workspace's "Open" pill. Drill-in rows/detail target `#settings-content` (no `#main-content`, no `hx-push-url`); the legacy full-page `GET /v2/trouble-tickets` route redirects 303 → `/v2/settings?tab=tickets` (registered before the generic `v2_page` catch-all; `v2_page` threads `?tab=` through for settings and `settings/index.html` maps the active tab to its first-paint content URL so `tab=tickets` lazy-loads the workspace, not a non-existent `/settings/tickets`). The detail status `<select>` gates its "Status updated" toast on `r.ok` (+`.catch`) so a failed PATCH shows an error toast |
 | Documents | 2 | Requisition PDF, quote PDF |
 | Quote Builder | 5 | Draft, save, send, signature |
 | Events | 1 | SSE stream |
@@ -4461,3 +4575,43 @@ All three endpoints are consumed by the shared `attachmentsPanel` Alpine compone
 `kind="vendor_card"`. Vendor contact attachments use `kind="vendor_contact"` with
 analogous routes under `/api/vendor-contacts/{id}/attachments` and
 `/api/vendor-contact-attachments/{id}`.
+
+## Trouble Tickets — Report capture + AI diagnosis (2026-06-24)
+
+User-facing report (any authenticated user) and an admin-only management console with
+AI diagnosis. No DB migration — uses existing `trouble_tickets` columns.
+
+```
+Report capture (frontend, app/static/htmx_app.js):
+  More menu "Report a problem" → window.openTroubleReport()
+    |  double-rAF (menu paints out) → captureTroubleScreenshot()
+    |     lazy import('modern-screenshot') → domToPng(document.body)
+    |     viewport-clamped PNG, 2MB downscale ladder (scale 1→0.75→0.5), null on any failure
+    |  collectTroubleContext() → {nav_history, current_view (URL-derived), app_build, ...}
+    +→ $dispatch('open-modal', /api/trouble-tickets/form)
+  Capture stores: errorLog (window.onerror + console.error/warn tee), networkLog (htmx:afterRequest)
+
+POST /api/trouble-tickets/submit   (require_user)
+    +→ _create_ticket(): persists description, screenshot (disk), console_errors,
+       network_errors, browser_info, auto_captured_context (JSON), current_view
+    +→ BackgroundTask _generate_ai_summary (claude_text, fast tier)
+
+Admin console (require_admin):  Settings → Tickets  (tab admin-gated)
+  GET  /v2/partials/trouble-tickets/{workspace,list,{id}}   (require_admin)
+  GET  /api/trouble-tickets/{id}/screenshot                 (require_admin — closes IDOR)
+  POST /api/trouble-tickets/analyze         → claude_structured groups into RootCauseGroup
+  POST /api/trouble-tickets/{id}/diagnose   → ticket_diagnosis_service.diagnose_ticket
+  POST /api/trouble-tickets/diagnose-bulk   → diagnose_tickets_bulk (Semaphore(4), one commit)
+  POST /api/trouble-tickets/bulk-status     → bulk resolve/wont_fix/in_progress
+       (all set HX-Trigger "ticketsUpdated"; #ticket-list reloads on it)
+
+ticket_diagnosis_service.diagnose_ticket:
+  _build_diagnosis_prompt (text-only — claude_client has no vision; console/network truncated)
+  → claude_structured_with_usage(schema=DIAGNOSIS_SCHEMA, model_tier="smart")
+  → persists diagnosis (JSON), generated_prompt (paste-ready Claude Code prompt),
+    diagnosed_at, cost_tokens, cost_usd
+```
+
+Bulk selection state lives on the workspace Alpine component (`selected` array); row
+checkboxes bind to it; `window.ticketBulkAction(kind, ids, status)` POSTs and fires
+`ticketsUpdated`. The "Copy fix prompt" button reads the `<pre x-ref="fixprompt">` text.

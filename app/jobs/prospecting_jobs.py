@@ -54,7 +54,7 @@ def register_sweep_jobs(scheduler, settings):
             _job_account_sweep,
             CronTrigger(hour=1, minute=0),
             id="account_sweep",
-            name="90-day account hardline sweep",
+            name=f"{settings.account_sweep_inactivity_days}-day account hardline sweep",
         )
     if settings.prospecting_enabled and settings.account_reactivation_sweep_enabled:
         scheduler.add_job(
