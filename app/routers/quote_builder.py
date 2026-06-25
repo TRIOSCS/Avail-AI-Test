@@ -295,6 +295,7 @@ def _build_quote_tab_context(request: Request, db: Session, req, quote=None) -> 
         build_quote_tab_data,
         quote_export_context,
     )
+    from ..services.quote_preflight import quote_preflight
 
     if quote is None:
         quote = (
@@ -338,6 +339,9 @@ def _build_quote_tab_context(request: Request, db: Session, req, quote=None) -> 
         "has_customer_site": bool(req.customer_site_id),
         "quote": quote,
         "summary": quote_export_context(quote) if quote else None,
+        # Advisory pre-send checks (DNC / non-US COO / MPN drift). Surfaced as a banner
+        # above Send; never blocks the send (see services/quote_preflight.py).
+        "preflight_warnings": [w.to_dict() for w in quote_preflight(db, quote)] if quote else [],
     }
 
 

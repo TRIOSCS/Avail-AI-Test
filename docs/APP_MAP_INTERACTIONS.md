@@ -1168,8 +1168,18 @@ requisitions/tabs/build_quote.html  (quoteBuilderTab Alpine: live margin + guard
               |                  (parses QuoteBuilderLine[]; delegates to
               v                   save_quote_from_builder -> revision lifecycle preserved)
         re-render tab with inline clean summary (quote_export_context) +
+        advisory pre-send banner (quote_preflight) +
         Download PDF (existing /export/pdf) / Send (existing /quotes/{id}/send)
 ```
+
+**Quote pre-flight (advisory, never blocks send).** `services/quote_preflight.py`
+`quote_preflight(db, quote)` runs three deterministic read-only checks and returns a list of
+`PreflightWarning`s: **dnc** (recipient `CustomerSite.do_not_contact`, or a `SiteContact` at
+that site whose email matches the recipient and is `do_not_contact`), **country_of_origin**
+(a quoted line's sourced `Offer.country_of_origin` is non-US), and **mpn_drift** (a quoted MPN,
+via `normalize_mpn`, is not among the requisition's requirement MPNs). The Build-Quote tab
+(`quote_builder._build_quote_tab_context`) surfaces them as an amber banner above Send; it never
+disables Send. Also exposed at `GET /api/quotes/{id}/preflight` (`{warnings, count}`).
 
 `quoteBuilderTab` (in `htmx_app.js`) is the single-stage simplification of the
 modal's `quoteBuilder` (same `(sell-cost)/sell` margin math + blended rollup, no
