@@ -29,7 +29,7 @@
            class="input input-sm flex-1 min-w-[150px] max-w-[240px]">
 
     <select name="staleness" aria-label="Filter by activity staleness"
-            class="input input-sm">
+            class="input input-sm w-44">
       <option value="">All activity</option>
       <option value="overdue" {{ "selected" if staleness == "overdue" }}>Overdue (30d+)</option>
       <option value="due_soon" {{ "selected" if staleness == "due_soon" }}>Due soon (14&ndash;30d)</option>
@@ -42,7 +42,7 @@
     </select>
 
     <select name="account_type" aria-label="Filter by account type"
-            class="input input-sm">
+            class="input input-sm w-44">
       <option value="">All types</option>
       {% for t in account_types %}
       <option value="{{ t }}" {{ "selected" if account_type == t }}>{{ t }}</option>
@@ -51,7 +51,7 @@
 
     {% if all_segment_tags %}
     <select name="segment" aria-label="Filter by segment tag"
-            class="input input-sm">
+            class="input input-sm w-44">
       <option value="0">All segments</option>
       {% for t in all_segment_tags %}
       <option value="{{ t.id }}" {{ "selected" if segment == t.id }}>{{ t.name }}</option>
@@ -60,7 +60,7 @@
     {% endif %}
 
     <select name="sort" aria-label="Sort accounts"
-            class="input input-sm">
+            class="input input-sm w-44">
       <option value="oldest" {{ "selected" if sort == "oldest" }}>Longest since activity</option>
       <option value="newest" {{ "selected" if sort == "newest" }}>Most recent activity</option>
       <option value="outbound_asc" {{ "selected" if sort == "outbound_asc" }}>Stalest outbound</option>
@@ -76,7 +76,7 @@
     </label>
 
     <select name="disposition" aria-label="Filter by disposition"
-            class="input input-sm">
+            class="input input-sm w-44">
       <option value="">All accounts</option>
       <option value="active" {{ "selected" if disposition == "active" }}>Active only</option>
       <option value="bucket" {{ "selected" if disposition == "bucket" }}>Bucketed only</option>
