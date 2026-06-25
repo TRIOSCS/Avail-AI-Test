@@ -50,7 +50,7 @@
     {% if history.buyers %}
     <div class="mt-2 flex flex-wrap gap-1">
       {% for b in history.buyers %}
-      <span class="inline-block rounded-full bg-brand-100 px-2 py-0.5 text-[11px] text-brand-700">{{ b.name or b.email }}</span>
+      <span class="inline-block rounded-full bg-accent-100 px-2 py-0.5 text-[11px] text-accent-700">{{ b.name or b.email }}</span>
       {% endfor %}
     </div>
     {% endif %}
