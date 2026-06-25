@@ -63,6 +63,20 @@ downgrade -1 → upgrade head`, with `ALEMBIC_ALLOW_CASCADE` UNSET) surfaces FK-
 errors in a new migration's `downgrade()` that the cascade-to-base smoke test masks. A new
 migration whose single-step downgrade leaves FK-dependent objects will fail this gate.
 
+The drift gate has **two filter layers**, deliberately separate:
+- `_ALLOWLIST` — genuine *false positives* (cosmetic type-rendering quirks where model and
+  migration emit identical DDL): `Numeric`↔`NUMERIC`, and the `UTCDateTime` TypeDecorator vs its
+  `TIMESTAMP` impl. These are not drift. (Note: alembic yields column `modify_*` diffs as a *list*
+  of tuples, so `filter_allowlist` unwraps list-form diffs before testing predicates — a bare
+  `d[0] == "modify_type"` check on the outer list is dead code.)
+- `_GRANDFATHERED_DIFFS` — *real, pre-existing* drift accepted on an **interim** basis. Each entry
+  is a **name-scoped signature** (`_diff_signature`): a new drift of any *other* table/column/index/
+  constraint produces a signature not in the set and still fails CI, so the grandfather list can't
+  silently absorb fresh regressions. **DANGER:** the model-less tables here (`buy_plans`,
+  `enrichment_credit_usage`, `notification_engagement`, `self_heal_log`, `_sp1_desc_backup`) hold
+  live data or back a downgrade — they are grandfathered (kept), **never** auto-dropped. The exit
+  path — reconcile each bucket via a real migration until the set is empty — is tracked in #465.
+
 ## 3. Quarantine before delete — nothing is lost
 
 Unmerged work and stashes are **archived as tags before deletion**, never just

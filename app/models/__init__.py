@@ -93,6 +93,11 @@ from .nc_search_log import NcSearchLog  # noqa: F401
 from .nc_search_queue import NcSearchQueue  # noqa: F401
 from .nc_worker_status import NcWorkerStatus  # noqa: F401
 
+# In-app notifications (trouble-ticket / self-heal events). Must be imported so the
+# `notifications` table is registered on Base.metadata — otherwise the schema-drift gate
+# (scripts/check_schema_matches_models.py) sees it as an unmodelled table and fails CI.
+from .notification import Notification  # noqa: F401
+
 # OEM web-resolution crosswalk (PartSurfer/PSREF spare → canonical MPN cache)
 from .oem_crosswalk import OemCrosswalk  # noqa: F401
 
