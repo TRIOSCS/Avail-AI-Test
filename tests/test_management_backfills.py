@@ -23,7 +23,8 @@ os.environ["TESTING"] = "1"
 
 class TestBackfillQuoteSource:
     def _mock_db(self, quotes_to_update):
-        """Return a mock session where query().filter().all() yields quotes_to_update."""
+        """Return a mock session where query().filter().all() yields
+        quotes_to_update."""
 
         db = MagicMock()
         mock_query = MagicMock()
