@@ -5,6 +5,7 @@
    Called by: vendors_list_partial route.
    Depends on: accent palette (post-PR0), timeago filter.
 #}
+{% from "htmx/partials/shared/_macros.html" import badge %}
 
 <div class="page-fluid" x-data="{ importOpen: false }">
 
@@ -152,7 +153,7 @@
   {# Table view — .table-wrapper + .data-table for consistent density and accent chrome. #}
   {% if view != 'cards' and vendors %}
   <div class="table-wrapper">
-    <table class="data-table">
+    <table class="data-table w-full">
       <thead>
         <tr>
           {# Cadence dot column — no label, narrow #}
@@ -205,7 +206,7 @@
           </td>
           <td>
             {% if v.is_blacklisted %}
-              <span class="badge bg-rose-50 text-rose-700 border-rose-200">Blacklisted</span>
+              {{ badge('Blacklisted', 'danger') }}
             {% elif v.vendor_score %}
               <span class="badge badge-success">{{ "%.0f"|format(v.vendor_score) }}</span>
             {% else %}
