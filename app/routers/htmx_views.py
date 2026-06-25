@@ -17531,6 +17531,8 @@ async def my_day_partial(
 
     # 1. Overdue / due follow-up accounts I own — reuse the shared _needs_call_filter
     #    (staleness="needs_call") so the count and this list always agree with the CRM chip.
+    #    Eager-load primary_contact so each row can render the one-click call/email
+    #    outreach action without an N+1 lazy-load per account (up to 50 rows).
     _accounts_q = _cdm_company_query(
         db,
         user,
@@ -17540,14 +17542,19 @@ async def my_day_partial(
         my_only=True,
         sort="outbound_asc",
         now=now,
-    )
+    ).options(joinedload(Company.primary_contact))
     accounts = _accounts_q.limit(50).all()
 
     # Annotate each account with its cadence_state (reused — not recomputed inline).
+    # attention_count = accounts the page exists to action: overdue (clock blown) or
+    # never-contacted ("new"). Surfaced as the header's single key figure.
     account_rows = []
+    attention_count = 0
     for co in accounts:
         state = _cadence_state(co.tier, co.last_outbound_at, now)
         out_days = (now - co.last_outbound_at).days if co.last_outbound_at else None
+        if state in ("overdue", "new"):
+            attention_count += 1
         account_rows.append({"company": co, "cadence_state": state, "out_days": out_days})
 
     # 2. My open tasks — due/overdue first (get_my_tasks already excludes done).
@@ -17559,6 +17566,7 @@ async def my_day_partial(
 
     ctx = _base_ctx(request, user, "my-day")
     ctx["account_rows"] = account_rows
+    ctx["attention_count"] = attention_count
     ctx["tasks"] = tasks
     ctx["now_utc"] = now
     return template_response("htmx/partials/my_day.html", ctx)

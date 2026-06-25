@@ -1,7 +1,8 @@
 {# spec_codes_pending.html — Admin pending OEM spec-code approval queue.
    Receives: rows (list[OemSpecCodePending]), user (User).
    Called by: app/routers/admin/spec_codes.py list_pending endpoint.
-   Depends on: HTMX, json-enc extension, Tailwind CSS with brand palette,
+   Depends on: HTMX, json-enc extension, Tailwind CSS design-system primitives
+               (.btn-*, accent CSS vars, .border-line-*),
                admin/_macros.html (spec_code_th).
 #}
 {% from "htmx/partials/admin/_macros.html" import spec_code_th -%}
@@ -18,7 +19,7 @@
   {% if not rows %}
     {% include "htmx/partials/admin/spec_codes_empty.html" with context %}
   {% else %}
-    <div id="spec-codes-content" class="bg-white border border-brand-200 rounded-lg overflow-hidden">
+    <div id="spec-codes-content" class="bg-white border border-line-base rounded-lg overflow-hidden">
       <div class="overflow-x-auto">
         <table class="min-w-full divide-y divide-gray-200">
           <thead class="bg-gray-50">
@@ -34,7 +35,7 @@
           </thead>
           <tbody class="divide-y divide-gray-100" id="spec-codes-pending-tbody">
             {% for row in rows %}
-            <tr id="spec-row-{{ row.id }}" class="align-top hover:bg-brand-50/30 transition-colors">
+            <tr id="spec-row-{{ row.id }}" class="align-top hover:bg-gray-50 transition-colors">
               <td class="table-cell text-sm font-mono text-gray-900">{{ row.oem }}</td>
               <td class="table-cell text-sm font-mono text-gray-900">{{ row.spec_code }}</td>
               <td class="table-cell text-sm">
@@ -56,7 +57,7 @@
                   {% for c in row.citations %}
                     {% if c.url and (c.url.startswith('http://') or c.url.startswith('https://')) %}
                       <a href="{{ c.url }}" target="_blank" rel="noopener noreferrer"
-                         class="text-brand-600 hover:text-brand-700 underline">link</a>{% if not loop.last %}, {% endif %}
+                         class="underline" style="color:var(--accent)">link</a>{% if not loop.last %}, {% endif %}
                     {% elif c.url %}
                       <span class="text-gray-400" title="{{ c.url }}">link (invalid url)</span>{% if not loop.last %}, {% endif %}
                     {% endif %}
@@ -76,7 +77,7 @@
                           hx-vals='{"edited_avl": null}'
                           hx-target="#spec-row-{{ row.id }}"
                           hx-swap="outerHTML"
-                          class="px-2 py-1 text-xs font-medium bg-brand-50 text-brand-600 border border-brand-200 rounded hover:bg-brand-100">
+                          class="btn btn-sm btn-primary">
                     Approve
                   </button>
                   <button data-loading-disable
@@ -86,14 +87,14 @@
                           hx-confirm="Reject this mapping and blacklist all proposed MPNs?"
                           hx-target="#spec-row-{{ row.id }}"
                           hx-swap="outerHTML"
-                          class="px-2 py-1 text-xs font-medium bg-rose-50 text-rose-600 border border-rose-200 rounded hover:bg-rose-100">
+                          class="btn btn-sm btn-danger">
                     Reject
                   </button>
                   <button data-loading-disable
                           hx-post="/admin/spec-codes/pending/{{ row.id }}/re-resolve"
                           hx-target="#spec-row-{{ row.id }}"
                           hx-swap="outerHTML"
-                          class="px-2 py-1 text-xs font-medium bg-gray-50 text-gray-700 border border-gray-200 rounded hover:bg-gray-100">
+                          class="btn btn-sm btn-secondary">
                     Re-resolve
                   </button>
                 </div>

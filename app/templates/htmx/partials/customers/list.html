@@ -8,18 +8,16 @@
                _detail_empty.html, accent palette (post-PR0).
 #}
 
-{# fitHeight: sized to the viewport in both mount contexts (standalone page and
-   CRM shell tab). @resize.window is auto-unbound by Alpine when the element is
-   swapped out — never add window listeners via x-init here (they leak across
-   HTMX navigations). #}
-<div id="cdm-workspace" class="flex flex-col min-h-[420px]"
-     x-data="{ selectedId: null, fitHeight() { this.$el.style.height = Math.max(420, window.innerHeight - this.$el.getBoundingClientRect().top - 64) + 'px' }, autoSelectFirst() { if (this.selectedId !== null) return; const detail = this.$el.querySelector('#cdm-detail'); if (!detail || !detail.querySelector('[data-cdm-empty]')) return; const first = this.$el.querySelector('#cdm-list [role=\'button\'][hx-get]'); if (first) first.click() } }"
-     x-init="$nextTick(() => { fitHeight(); autoSelectFirst() })"
-     @resize.window.debounce.150ms="fitHeight()">
+{# Natural-flow workspace: the PAGE scrolls (no inner per-pane scrollbars / no viewport
+   height cap). autoSelectFirst loads the first account into the detail pane on mount
+   when nothing is selected. #}
+<div id="cdm-workspace" class="flex flex-col"
+     x-data="{ selectedId: null, autoSelectFirst() { if (this.selectedId !== null) return; const detail = this.$el.querySelector('#cdm-detail'); if (!detail || !detail.querySelector('[data-cdm-empty]')) return; const first = this.$el.querySelector('#cdm-list [role=\'button\'][hx-get]'); if (first) first.click() } }"
+     x-init="$nextTick(() => autoSelectFirst())">
 
   {# ── Filter / sort bar ─────────────────────────────────────── #}
   {# All filter controls use .input / .input-sm (accent ring, line border) per PR0. #}
-  <form id="cdm-filters" class="flex items-center gap-2 flex-wrap pb-3 flex-shrink-0"
+  <form id="cdm-filters" class="flex items-center gap-1.5 flex-wrap pb-2 flex-shrink-0"
         hx-get="/v2/partials/customers/account-list"
         hx-target="#cdm-list"
         hx-swap="innerHTML"
@@ -28,7 +26,7 @@
 
     <input id="cdm-search" aria-label="Search accounts" type="text" name="search" value="{{ search }}"
            placeholder="Search accounts..."
-           class="input flex-1 min-w-[160px]">
+           class="input input-sm flex-1 min-w-[150px] max-w-[240px]">
 
     <select name="staleness" aria-label="Filter by activity staleness"
             class="input input-sm">
@@ -172,13 +170,13 @@
 
   {# ── Split workspace: account list (left) + detail panel (right) ── #}
   <div id="split-cdm"
-       class="flex flex-1 overflow-hidden min-h-0 bg-white border border-line-base rounded-lg"
+       class="flex bg-white border border-line-base rounded-lg"
        x-data="splitPanel('cdm', 35)">
 
     {# Left panel: scrollable account list #}
-    <div class="border-r border-line-base flex flex-col bg-white flex-shrink-0 overflow-hidden"
+    <div class="border-r border-line-base flex flex-col bg-white flex-shrink-0"
          :style="'width: ' + leftWidth + '%'">
-      <div id="cdm-list" class="flex-1 overflow-y-auto">
+      <div id="cdm-list" class="flex-1">
         {% include "htmx/partials/customers/_account_list.html" %}
       </div>
     </div>
@@ -192,7 +190,7 @@
          @keydown.right.prevent="leftWidth = Math.min(70, leftWidth + 2); localStorage.setItem('avail_split_cdm', leftWidth)"></div>
 
     {# Right panel: account detail #}
-    <div id="cdm-detail" class="flex-1 overflow-y-auto bg-white min-w-0 p-4">
+    <div id="cdm-detail" class="flex-1 bg-white min-w-0 p-4">
       {% include "htmx/partials/customers/_detail_empty.html" %}
     </div>
 

@@ -10,14 +10,14 @@
 <div class="space-y-6">
 
   {# ── Pending OEM Spec-Code Mappings (admin approval queue) ── #}
-  <div class="bg-white border border-brand-200 rounded-lg overflow-hidden">
+  <div class="bg-white border border-line-base rounded-lg overflow-hidden">
     <div class="px-4 py-3 bg-gray-50 border-b flex items-center justify-between">
       <h2 class="text-lg font-semibold text-gray-900">OEM Spec-Code Approvals</h2>
       <a hx-get="/admin/spec-codes/pending"
          hx-target="#main-content"
          hx-push-url="true"
          href="/admin/spec-codes/pending"
-         class="px-3 py-1 text-xs font-medium text-brand-600 border border-brand-200 rounded hover:bg-brand-50">
+         class="px-3 py-1 text-xs font-medium text-accent-600 border border-accent-200 rounded hover:bg-accent-50">
         Open queue
       </a>
     </div>
@@ -30,12 +30,12 @@
   </div>
 
   {# ── Vendor Dedup ──────────────────────────────────────── #}
-  <div class="bg-white border border-brand-200 rounded-lg overflow-hidden">
+  <div class="bg-white border border-line-base rounded-lg overflow-hidden">
     <div class="px-4 py-3 bg-gray-50 border-b flex items-center justify-between">
       <h2 class="text-lg font-semibold text-gray-900">Vendor Duplicates</h2>
       <button hx-get="/v2/partials/settings/data-ops"
               hx-target="#settings-content"
-              class="px-3 py-1 text-xs font-medium text-brand-500 border border-brand-200 rounded hover:bg-brand-50">
+              class="px-3 py-1 text-xs font-medium text-accent-600 border border-accent-200 rounded hover:bg-accent-50">
         Refresh
       </button>
     </div>
@@ -86,7 +86,7 @@
   </div>
 
   {# ── Company Dedup ─────────────────────────────────────── #}
-  <div class="bg-white border border-brand-200 rounded-lg overflow-hidden">
+  <div class="bg-white border border-line-base rounded-lg overflow-hidden">
     <div class="px-4 py-3 bg-gray-50 border-b">
       <h2 class="text-lg font-semibold text-gray-900">Company Duplicates</h2>
     </div>

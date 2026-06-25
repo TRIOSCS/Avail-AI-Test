@@ -11,8 +11,8 @@
   {% endif %}
 
   {# ── Invite ──────────────────────────────────────────────────────── #}
-  <div class="bg-white border border-brand-200 rounded-lg overflow-hidden">
-    <div class="px-5 py-4 bg-gray-50 border-b border-brand-200">
+  <div class="bg-white border border-line-base rounded-lg overflow-hidden">
+    <div class="px-5 py-4 bg-gray-50 border-b border-line-base">
       <h2 class="text-lg font-semibold text-gray-900">Invite a user</h2>
       <p class="text-xs text-gray-600 mt-0.5">
         Add a teammate by email and pick their role. They can sign in with their
@@ -46,8 +46,8 @@
   </div>
 
   {# ── User table ──────────────────────────────────────────────────── #}
-  <div class="bg-white border border-brand-200 rounded-lg overflow-hidden">
-    <div class="px-5 py-4 bg-gray-50 border-b border-brand-200 flex items-start justify-between gap-3">
+  <div class="bg-white border border-line-base rounded-lg overflow-hidden">
+    <div class="px-5 py-4 bg-gray-50 border-b border-line-base flex items-start justify-between gap-3">
       <div>
         <h2 class="text-lg font-semibold text-gray-900">Users</h2>
         <p class="text-xs text-gray-600 mt-0.5">
@@ -76,7 +76,7 @@
         </thead>
         <tbody class="divide-y divide-gray-100">
           {% for row in rows %}
-          <tr class="hover:bg-brand-50/50 transition-colors">
+          <tr class="hover:bg-accent-50/50 transition-colors">
             <td class="table-cell">
               <div class="text-sm font-medium text-gray-900">{{ row.user.name or row.user.email }}</div>
               <div class="text-xs text-gray-600">{{ row.user.email }}</div>
