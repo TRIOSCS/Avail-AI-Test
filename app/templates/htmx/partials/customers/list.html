@@ -17,7 +17,7 @@
 
   {# ── Filter / sort bar ─────────────────────────────────────── #}
   {# All filter controls use .input / .input-sm (accent ring, line border) per PR0. #}
-  <form id="cdm-filters" class="flex items-center gap-1.5 flex-wrap pb-2 flex-shrink-0"
+  <form id="cdm-filters" class="flex items-center gap-1.5 flex-wrap pb-1 flex-shrink-0"
         hx-get="/v2/partials/customers/account-list"
         hx-target="#cdm-list"
         hx-swap="innerHTML"
@@ -69,7 +69,7 @@
       <option value="name_desc" {{ "selected" if sort == "name_desc" }}>Name Z&ndash;A</option>
     </select>
 
-    <label class="inline-flex items-center gap-1.5 px-2 py-1.5 text-sm text-gray-600 cursor-pointer">
+    <label class="inline-flex items-center gap-1.5 px-1.5 py-0.5 text-xs text-gray-600 cursor-pointer">
       <input type="checkbox" name="my_only" value="1" {{ "checked" if my_only }}
              class="rounded border-gray-300 input-focus text-accent-500">
       My accounts
@@ -82,7 +82,7 @@
       <option value="bucket" {{ "selected" if disposition == "bucket" }}>Bucketed only</option>
     </select>
 
-    <label class="inline-flex items-center gap-1.5 px-2 py-1.5 text-sm text-gray-600 cursor-pointer">
+    <label class="inline-flex items-center gap-1.5 px-1.5 py-0.5 text-xs text-gray-600 cursor-pointer">
       <input type="checkbox" name="has_open_reqs" value="1" {{ "checked" if has_open_reqs }}
              class="rounded border-gray-300 input-focus text-accent-500">
       Has open reqs
@@ -103,7 +103,7 @@
 
   {# Export + cross-company contacts links + Import — below the filter bar, above the split workspace #}
   {# Import modal uses the shared modal-* primitives to match vendors import and the rest of the app. #}
-  <div class="flex justify-end gap-3 text-xs text-gray-600 mb-1" x-data="{ importOpen: false }">
+  <div class="flex justify-end gap-3 text-xs text-gray-600 mb-0.5" x-data="{ importOpen: false }">
     <a hx-get="/v2/partials/contacts" hx-target="#main-content" hx-push-url="/v2/contacts"
        class="hover:text-accent-600 hover:underline cursor-pointer">All contacts</a>
     <a href="/v2/customers/export.csv" class="hover:text-accent-600 hover:underline">Export CSV</a>

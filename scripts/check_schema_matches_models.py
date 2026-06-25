@@ -33,9 +33,10 @@ from app.models import Base
 # that already existed in `001`-era migrations / raw-DDL startup hooks before
 # this gate landed (orphan legacy tables with no model, indexes created by raw
 # DDL the model never declares, unique constraints the model declares but the
-# baseline never created, two dead columns, one stale FK render, a TypeDecorator
-# reflection mismatch, and a column-comment-only diff). Reconcile them properly
-# later via real migrations; see the schema-drift tracking issue.
+# baseline never created, a TypeDecorator reflection mismatch, and a
+# column-comment-only diff). Reconcile them properly later via real migrations;
+# see the schema-drift tracking issue. (The two dead columns + one redundant FK
+# were reconciled by migration 154 / #464.)
 #
 # Each set is keyed on a SPECIFIC NAME (table name, (table, column) pair,
 # constraint name, or (table, sorted-columns) tuple) so the predicate matches
@@ -113,15 +114,14 @@ _GRANDFATHERED_ADD_INDEXES = {
 }
 
 # Dead columns still in the DB but dropped from the models.
-_GRANDFATHERED_REMOVE_COLUMNS = {
-    ("activity_log", "source_url"),
-    ("vendor_responses", "teams_alert_sent_at"),
-}
+# Reconciled by migration 154 (#464): activity_log.source_url and
+# vendor_responses.teams_alert_sent_at were dropped, so the gate enforces them for real now.
+_GRANDFATHERED_REMOVE_COLUMNS: set[tuple[str, str]] = set()
 
 # Stale FK present in the DB (named) the model no longer declares.
-_GRANDFATHERED_REMOVE_FKS = {
-    "fk_activity_log_quote",
-}
+# Reconciled by migration 154 (#464): the redundant fk_activity_log_quote was dropped, so the
+# gate enforces it for real now.
+_GRANDFATHERED_REMOVE_FKS: set[str] = set()
 
 # Unique constraints the model declares but the baseline DB never created, so
 # autogenerate wants to add them. Many are single-column ``unique=True`` columns

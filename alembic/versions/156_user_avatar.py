@@ -21,7 +21,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "156_user_avatar"
-down_revision = "153_quote_graph_ids"
+down_revision = "155_roles_manager"
 branch_labels = None
 depends_on = None
 

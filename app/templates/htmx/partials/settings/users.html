@@ -69,6 +69,7 @@
           <tr>
             <th class="table-cell--head text-left text-xs font-medium text-gray-500 uppercase tracking-wider">User</th>
             <th class="table-cell--head text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
+            <th class="table-cell--head text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Approve buy plans</th>
             <th class="table-cell--head text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
             <th class="table-cell--head text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last login</th>
             <th class="table-cell--head"></th>
@@ -91,6 +92,21 @@
                 <option value="{{ r }}"{{ ' selected' if row.user.role == r else '' }}>{{ r | capitalize }}</option>
                 {% endfor %}
               </select>
+            </td>
+            <td class="table-cell">
+              {# Per-user buy-plan approval right. The checkbox POSTs its new state on
+                 change; can_approve always carries an explicit value (the hidden 'false'
+                 field) so an unchecked box still submits a revoke, not an absent field. #}
+              <label class="inline-flex items-center cursor-pointer">
+                <input type="hidden" name="can_approve" value="false">
+                <input type="checkbox" name="can_approve" value="true"
+                       class="h-4 w-4 rounded border-gray-300 text-accent-600 focus:ring-accent-500"
+                       {{ 'checked' if row.can_approve_buy_plans else '' }}
+                       hx-post="/api/admin/users/{{ row.user.id }}/buyplan-approver"
+                       hx-target="#users-content" hx-swap="outerHTML"
+                       hx-trigger="change">
+                <span class="ml-2 text-xs text-gray-600">{{ 'Yes' if row.can_approve_buy_plans else 'No' }}</span>
+              </label>
             </td>
             <td class="table-cell">
               {% if row.status == 'Active' %}

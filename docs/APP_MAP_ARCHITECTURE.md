@@ -58,6 +58,14 @@ FastAPI Middleware Stack (in order):
     │       route table (nesting-agnostic, correct on 0.136.x and 0.137.x).
     ├── 5. CSP Middleware (Content-Security-Policy header)
     ├── 6. Request ID Middleware (UUID tracking, timing, logging)
+    │       Also owns Cache-Control (set HERE, the OUTERMOST @app.middleware, because
+    │       inner response processing drops headers set on the TemplateResponse itself):
+    │       /static/assets/* (Vite-hashed) -> immutable 1yr; other /static -> 1hr; EVERY
+    │       text/html response — full-page shell AND /v2/partials/* HTMX fragments ->
+    │       no-store,no-cache,must-revalidate + Pragma:no-cache (so a redeploy's markup is
+    │       fetched fresh, not heuristically cached stale). Guard is the response
+    │       content-type ONLY (starts "text/html"), so JSON, SSE (text/event-stream), and
+    │       file downloads (Content-Disposition) are untouched and streaming bodies unread.
     └── 7. API Version Middleware (/api/v1/* -> /api/*)
     │
     ▼
@@ -84,6 +92,10 @@ capabilities a user is granted).
   (any authenticated active user), `require_buyer` (BUYER_ROLES = buyer/sales/trader/
   manager/admin), `require_admin`, `require_manager`. The non-interactive `agent`
   account is excluded from buyer-tier actions.
+- **Per-user buy-plan approval right** — `require_buyplan_approver(request, db)` 403s
+  unless `User.can_approve_buy_plans` is set (predicate: `can_approve_buy_plans(user)`).
+  Role-independent (admins do NOT auto-qualify); the column is the single source of truth,
+  admin-toggled in the Users settings tab. Gates the buy-plan approve/reject action.
 - **Ownership scoping (role-scoped model)** — `RESTRICTED_ROLES = {SALES, TRADER}`
   (single source of truth in `app/constants.py`): sales/trader users may act only on
   requisitions they created (`Requisition.created_by`); buyer/manager/admin are

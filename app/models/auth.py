@@ -56,6 +56,11 @@ class User(Base):
     # Profile photo — stored basename of the file under avatars.AVATARS_DIR
     # (e.g. "user_12_a1b2c3d4.png"); NULL falls back to the initials avatar.
     avatar_path = Column(String(255), nullable=True)
+    # Buy-plan approval right (per-user grant, admin-toggled in Users settings). Gates the
+    # buy-plan approve/reject action via dependencies.require_buyplan_approver /
+    # can_approve_buy_plans. Independent of role: admins do NOT auto-qualify — the column
+    # is the single source of truth, so the toggle UI reflects exactly who can approve.
+    can_approve_buy_plans = Column(Boolean, nullable=False, default=False, server_default=text("false"))
 
     created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
 
