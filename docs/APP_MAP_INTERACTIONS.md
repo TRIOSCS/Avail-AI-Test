@@ -1452,6 +1452,16 @@ Offer row kebab "Qualify with AI" (shown only when offer.vendor_response_id set)
     --> NEW: DNC hard-block in send_reply_htmx (SiteContact.do_not_contact) — never emails DNC vendors
 ```
 
+**DNC hard-block parity across vendor-send paths.** The canonical idiom — query
+`SiteContact` by `func.lower(email) == recipient.lower()` with `do_not_contact.is_(True)`;
+if matched, do NOT call Graph `/me/sendMail` — is enforced on every vendor-send path:
+`send_reply_htmx` (recipient `vr.vendor_email`), `send_follow_up_htmx` (recipient
+`contact.vendor_contact`), and `send_email_reply` (recipient form `to`) each return the
+rose "do-not-contact" partial *before* the TESTING gate / token fetch; the service path
+`email_service.send_batch_rfq` skips the recipient (`status="skipped"`, `error="do-not-contact"`)
+and continues. The resell `submit_outreach_email` path delegates to `send_batch_rfq`, so a
+DNC buyer is recorded `ExcessOutreachStatus.NO_RESPONSE` and never emailed.
+
 Ownership-guarded via require_requisition_access (offer.requisition_id, owner_id=entered_by_id).
 Read-only pre-fill; never auto-saves or auto-sends. Loop-closes: a vendor's reply becomes a new
 linked VendorResponse, so re-opening Qualify-with-AI fills the remaining fields.
@@ -2349,6 +2359,20 @@ enrichment_service.py (orchestrator)
     +---> DB: INSERT enrichment_queue (proposed changes for review)
     +---> DB: INSERT enrichment_jobs (batch tracking)
 ```
+
+### Prospect Discovery — monthly email mining (`prospect_scheduler.job_discover_prospects`)
+
+The 1st-of-month discovery job's email-mining branch needs a real mailbox identity
+(it scans `/me`). It selects the first M365-connected user
+(`User.refresh_token.isnot(None)` then `u.access_token and u.m365_connected`) — the same
+selection the calendar/inbox jobs use — resolves a token via
+`token_manager.get_valid_token(user, db)`, builds `GraphClient(token)`, and calls
+`prospect_discovery_email.run_email_mining_batch(...)`. `mine_unknown_domains` lists the
+inbox via `GraphClient.get_all_pages("/me/mailFolders/inbox/messages", params={$filter,
+$select, $orderby, $top})`, which auto-paginates and returns a flat list of message dicts.
+No mailbox or no token ⇒ the branch logs a warning and skips (email_count stays 0); the
+surrounding `except` keeps the scheduler resilient. (There is no `get_graph_client()`
+factory and `GraphClient` has no `list_messages` — both were dead references, now fixed.)
 
 ---
 

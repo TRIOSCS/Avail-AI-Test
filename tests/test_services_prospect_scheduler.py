@@ -542,10 +542,31 @@ class TestJobErrorHandling:
 class TestDiscoverProspectsJob:
     """Happy-path tests for job_discover_prospects — the most complex job."""
 
+    @staticmethod
+    def _connected_user(db):
+        """Seed an M365-connected user so the email-mining branch can resolve a
+        mailbox."""
+        from app.models import User
+
+        u = User(
+            email="miner@trioscs.com",
+            name="Inbox Miner",
+            role="buyer",
+            azure_id="miner-001",
+            m365_connected=True,
+            access_token="at",
+            refresh_token="rt",
+        )
+        db.add(u)
+        db.commit()
+        return u
+
     @pytest.mark.asyncio
     async def test_discover_happy_path(self, db_session):
         """Full discovery job with mocked external services."""
         from app.schemas.prospect_account import ProspectAccountCreate
+
+        self._connected_user(db_session)
 
         mock_explorium_result = ProspectAccountCreate(
             name="Discovered Corp",
@@ -563,13 +584,14 @@ class TestDiscoverProspectsJob:
             discovery_source="email_history",
         )
 
-        mock_graph = MagicMock()
         mock_run_explorium = AsyncMock(return_value=[mock_explorium_result])
         mock_run_email = AsyncMock(return_value=[mock_email_result])
 
         with (
             patch("app.database.SessionLocal", return_value=db_session),
             patch.object(db_session, "close"),
+            patch("app.utils.token_manager.get_valid_token", new=AsyncMock(return_value="graph-tok")),
+            patch("app.utils.graph_client.GraphClient", return_value=MagicMock()),
             patch.dict(
                 "sys.modules",
                 {
@@ -578,9 +600,6 @@ class TestDiscoverProspectsJob:
                     ),
                     "app.services.prospect_discovery_email": MagicMock(
                         run_email_mining_batch=mock_run_email,
-                    ),
-                    "app.utils.graph_client": MagicMock(
-                        get_graph_client=MagicMock(return_value=mock_graph),
                     ),
                 },
             ),
@@ -590,11 +609,15 @@ class TestDiscoverProspectsJob:
         assert result["explorium_count"] == 1
         assert result["email_count"] == 1
         assert "batch_id" in result
+        # S10 regression: the mining batch was invoked with a real GraphClient token path.
+        mock_run_email.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_discover_explorium_fails_email_continues(self, db_session):
         """Explorium failure doesn't block email mining."""
         from app.schemas.prospect_account import ProspectAccountCreate
+
+        self._connected_user(db_session)
 
         mock_email_result = ProspectAccountCreate(
             name="Email Only",
@@ -602,13 +625,14 @@ class TestDiscoverProspectsJob:
             discovery_source="email_history",
         )
 
-        mock_graph = MagicMock()
         mock_run_explorium = AsyncMock(side_effect=Exception("Explorium down"))
         mock_run_email = AsyncMock(return_value=[mock_email_result])
 
         with (
             patch("app.database.SessionLocal", return_value=db_session),
             patch.object(db_session, "close"),
+            patch("app.utils.token_manager.get_valid_token", new=AsyncMock(return_value="graph-tok")),
+            patch("app.utils.graph_client.GraphClient", return_value=MagicMock()),
             patch.dict(
                 "sys.modules",
                 {
@@ -617,9 +641,6 @@ class TestDiscoverProspectsJob:
                     ),
                     "app.services.prospect_discovery_email": MagicMock(
                         run_email_mining_batch=mock_run_email,
-                    ),
-                    "app.utils.graph_client": MagicMock(
-                        get_graph_client=MagicMock(return_value=mock_graph),
                     ),
                 },
             ),
@@ -632,7 +653,34 @@ class TestDiscoverProspectsJob:
     @pytest.mark.asyncio
     async def test_discover_both_fail_still_completes(self, db_session):
         """Both sources fail — batch still completes with 0 results."""
+        self._connected_user(db_session)
+
         mock_run_explorium = AsyncMock(side_effect=Exception("Explorium down"))
+
+        with (
+            patch("app.database.SessionLocal", return_value=db_session),
+            patch.object(db_session, "close"),
+            # Token acquisition blows up — email mining must swallow it (no crash) and report 0.
+            patch("app.utils.token_manager.get_valid_token", new=AsyncMock(side_effect=Exception("No graph token"))),
+            patch.dict(
+                "sys.modules",
+                {
+                    "app.services.prospect_discovery_explorium": MagicMock(
+                        run_explorium_discovery_batch=mock_run_explorium,
+                    ),
+                },
+            ),
+        ):
+            result = await job_discover_prospects()
+
+        assert result["explorium_count"] == 0
+        assert result["email_count"] == 0
+
+    @pytest.mark.asyncio
+    async def test_discover_no_connected_user_skips_email_mining(self, db_session):
+        """S10: with no M365-connected user, email mining is skipped (no crash, count=0)."""
+        mock_run_explorium = AsyncMock(return_value=[])
+        mock_run_email = AsyncMock(return_value=[])
 
         with (
             patch("app.database.SessionLocal", return_value=db_session),
@@ -643,16 +691,17 @@ class TestDiscoverProspectsJob:
                     "app.services.prospect_discovery_explorium": MagicMock(
                         run_explorium_discovery_batch=mock_run_explorium,
                     ),
-                    "app.utils.graph_client": MagicMock(
-                        get_graph_client=MagicMock(side_effect=Exception("No graph token")),
+                    "app.services.prospect_discovery_email": MagicMock(
+                        run_email_mining_batch=mock_run_email,
                     ),
                 },
             ),
         ):
             result = await job_discover_prospects()
 
-        assert result["explorium_count"] == 0
         assert result["email_count"] == 0
+        # No mailbox → mining batch never runs (and never raises NameError on get_graph_client).
+        mock_run_email.assert_not_awaited()
 
 
 class TestEnrichPoolJob:

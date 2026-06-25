@@ -98,11 +98,18 @@ async def mine_unknown_domains(
     domain_counts: dict[str, dict] = {}
 
     try:
-        messages = await graph_client.list_messages(
-            folder="inbox",
-            since=since,
-            top=1000,
-            select=["from", "receivedDateTime"],
+        # GraphClient.get_all_pages auto-paginates and returns a flat list of message
+        # dicts (it unwraps each page's "value"). Inbox messages received since the
+        # lookback window, newest first; only the sender + timestamp are needed.
+        messages = await graph_client.get_all_pages(
+            "/me/mailFolders/inbox/messages",
+            params={
+                "$filter": f"receivedDateTime ge {since.strftime('%Y-%m-%dT%H:%M:%SZ')}",
+                "$select": "from,receivedDateTime",
+                "$orderby": "receivedDateTime desc",
+                "$top": "100",
+            },
+            max_items=1000,
         )
 
         for msg in messages:

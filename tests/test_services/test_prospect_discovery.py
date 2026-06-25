@@ -286,7 +286,7 @@ class TestEmailMining:
 
         # Mock Graph client
         mock_graph = AsyncMock()
-        mock_graph.list_messages.return_value = [
+        mock_graph.get_all_pages.return_value = [
             # Unknown domain — should be captured (appears 3 times)
             {"from": {"emailAddress": {"address": "alice@newcorp.com", "name": "Alice"}}},
             {"from": {"emailAddress": {"address": "bob@newcorp.com", "name": "Bob"}}},
@@ -324,7 +324,7 @@ class TestEmailMining:
         db_session.commit()
 
         mock_graph = AsyncMock()
-        mock_graph.list_messages.return_value = [
+        mock_graph.get_all_pages.return_value = [
             {"from": {"emailAddress": {"address": "a@alreadyfound.com", "name": "A"}}},
             {"from": {"emailAddress": {"address": "b@alreadyfound.com", "name": "B"}}},
         ]
@@ -337,7 +337,7 @@ class TestEmailMining:
         from app.services.prospect_discovery_email import mine_unknown_domains
 
         mock_graph = AsyncMock()
-        mock_graph.list_messages.side_effect = Exception("Graph API down")
+        mock_graph.get_all_pages.side_effect = Exception("Graph API down")
 
         results = await mine_unknown_domains(mock_graph, db_session)
         assert results == []
@@ -410,7 +410,7 @@ class TestEmailMiningBatch:
         from app.services.prospect_discovery_email import run_email_mining_batch
 
         mock_graph = AsyncMock()
-        mock_graph.list_messages.return_value = [
+        mock_graph.get_all_pages.return_value = [
             {"from": {"emailAddress": {"address": "a@newbiz.com", "name": "A"}}},
             {"from": {"emailAddress": {"address": "b@newbiz.com", "name": "B"}}},
         ]
@@ -439,7 +439,7 @@ class TestEmailMiningBatch:
         from app.services.prospect_discovery_email import run_email_mining_batch
 
         mock_graph = AsyncMock()
-        mock_graph.list_messages.return_value = []
+        mock_graph.get_all_pages.return_value = []
 
         results = await run_email_mining_batch("empty-batch", mock_graph, db_session)
 
@@ -503,7 +503,7 @@ class TestGracefulDegradation:
         from app.services.prospect_discovery_email import run_email_mining_batch
 
         mock_graph = AsyncMock()
-        mock_graph.list_messages.side_effect = Exception("Graph API 503")
+        mock_graph.get_all_pages.side_effect = Exception("Graph API 503")
 
         results = await run_email_mining_batch("crash-batch", mock_graph, db_session)
 

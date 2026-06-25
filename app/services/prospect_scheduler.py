@@ -180,15 +180,31 @@ async def job_discover_prospects() -> dict:
             logger.exception("Explorium discovery failed: {}", e)
             db.rollback()
 
-        # Email mining (always runs)
+        # Email mining (runs when an M365-connected mailbox is available)
         try:
+            from app.models import User
             from app.services.prospect_discovery_email import _explorium_domain_enrich, run_email_mining_batch
-            from app.utils.graph_client import get_graph_client
+            from app.utils.graph_client import GraphClient
+            from app.utils.token_manager import get_valid_token
 
-            graph = get_graph_client()
-            email_results = await run_email_mining_batch(batch_id, graph, db, enrich_fn=_explorium_domain_enrich)
-            email_count = _persist_discovery_results(db, batch, email_results)
-            db.commit()
+            # Email mining needs a real mailbox identity. Pick the first M365-connected
+            # user with credentials on file (same selection the calendar/inbox jobs use),
+            # resolve a valid Graph token, then run the mining batch against /me.
+            users = db.query(User).filter(User.refresh_token.isnot(None)).all()
+            miner = next((u for u in users if u.access_token and u.m365_connected), None)
+            if not miner:
+                logger.warning("Email mining skipped — no M365-connected user with credentials on file")
+            else:
+                token = await get_valid_token(miner, db)
+                if not token:
+                    logger.warning("Email mining skipped — could not obtain a Graph token for {}", miner.email)
+                else:
+                    graph = GraphClient(token)
+                    email_results = await run_email_mining_batch(
+                        batch_id, graph, db, enrich_fn=_explorium_domain_enrich
+                    )
+                    email_count = _persist_discovery_results(db, batch, email_results)
+                    db.commit()
         except Exception as e:
             logger.exception("Email mining failed: {}", e)
             db.rollback()
