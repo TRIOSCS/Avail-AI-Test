@@ -129,7 +129,7 @@
     {% set step_label = bp.status|capitalize %}
   {% endif %}
 
-  <div class="mb-5 bg-white rounded-lg border border-brand-200 px-5 py-4">
+  <div class="mb-5 bg-white rounded-lg border border-line-base px-5 py-4">
     <div class="flex gap-1.5">
       {% for i in range(1, 6) %}
         {% if bp.status == 'cancelled' %}
@@ -241,8 +241,8 @@
 
   {# ═══ 4. SIMPLIFIED LINE ITEMS TABLE ═══ #}
   {# Finding #1: convert to data-table, drop per-cell px-4 py-3 and per-th font-medium text-gray-500 uppercase #}
-  <div class="bg-white rounded-lg shadow-sm overflow-hidden border border-brand-200 mb-6">
-    <div class="px-4 py-3 bg-gray-50 border-b border-brand-200">
+  <div class="bg-white rounded-lg shadow-sm overflow-hidden border border-line-base mb-6">
+    <div class="px-4 py-3 bg-gray-50 border-b border-line-base">
       <h2 class="text-lg font-semibold text-gray-900">Line Items
         <span class="ml-1 text-sm font-normal text-gray-600">({{ lines|length }})</span>
       </h2>
@@ -262,7 +262,7 @@
         </thead>
         <tbody>
           {% for line in lines %}
-          <tr id="bp-line-{{ line.id }}" class="hover:bg-brand-50/40 transition-colors">
+          <tr id="bp-line-{{ line.id }}" class="transition-colors">
             {# Part (MPN) #}
             <td class="font-mono font-medium text-gray-900">
               {{ line.requirement.primary_mpn if line.requirement else '-' }}
@@ -464,21 +464,21 @@
         <svg class="w-4 h-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
         {% else %}
         {# Finding #7: bespoke inline pill → .badge primitive #}
-        <span class="badge bg-amber-50 text-amber-700 border-amber-200">pending</span>
+        <span class="badge-warning">pending</span>
         {% endif %}
       </div>
       {{ collapse_chevron("showSo") }}
     </button>
     <div x-show="showSo" x-cloak x-collapse class="px-4 pb-4">
       <div class="flex items-center gap-3 text-sm">
-        {% set so_colors = {
-          'pending': 'bg-amber-50 text-amber-700 border-amber-200',
-          'approved': 'bg-emerald-50 text-emerald-700 border-emerald-200',
-          'rejected': 'bg-rose-50 text-rose-700 border-rose-200'
+        {% set so_badge = {
+          'pending': 'badge-warning',
+          'approved': 'badge-success',
+          'rejected': 'badge-danger'
         } %}
         <span class="text-gray-600">Status:</span>
         {# Finding #7: bespoke SO status pill → .badge primitive #}
-        <span class="badge {{ so_colors.get(bp.so_status, 'bg-gray-100 text-gray-600 border-gray-200') }}">
+        <span class="{{ so_badge.get(bp.so_status, 'badge') }}">
           {{ bp.so_status|capitalize if bp.so_status else 'Pending' }}
         </span>
         {% if bp.so_verified_by %}

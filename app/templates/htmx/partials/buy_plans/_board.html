@@ -43,9 +43,9 @@
            preload="mouseover"
            tabindex="0"
            role="link"
-           @keydown.enter.prevent="htmx.ajax('GET', '/v2/partials/buy-plans/{{ d.plan_id }}', {target: '#main-content', swap: 'innerHTML'}); history.pushState(null, '', '/v2/buy-plans/{{ d.plan_id }}')"
-           @keydown.space.prevent="htmx.ajax('GET', '/v2/partials/buy-plans/{{ d.plan_id }}', {target: '#main-content', swap: 'innerHTML'}); history.pushState(null, '', '/v2/buy-plans/{{ d.plan_id }}')"
-           class="bg-white rounded-md border border-brand-200 p-3 cursor-pointer hover:shadow-sm transition-shadow
+           @keydown.enter.prevent="$el.click()"
+           @keydown.space.prevent="$el.click()"
+           class="bg-white rounded-md border border-line-base p-3 cursor-pointer hover:shadow-sm transition-shadow
                   focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:outline-none
                   {% if d.needs_my_action %}ring-2 ring-amber-400{% endif %}">
         {# Customer + stock badge #}
@@ -53,16 +53,13 @@
           <span class="text-sm font-bold text-gray-900 leading-tight">{{ d.customer_name or '-' }}</span>
           {% if d.is_stock_sale %}
           {# Finding #7: bespoke stock tag → .chip primitive #}
-          <span class="chip bg-purple-50 text-purple-600 border-purple-200 flex-shrink-0">stock</span>
+          <span class="chip bg-purple-50 text-purple-700 border-purple-200 flex-shrink-0">stock</span>
           {% endif %}
         </div>
         {# Value + margin #}
         <div class="mt-1.5 flex items-center justify-between gap-2">
           <span class="text-sm font-semibold text-gray-900">${{ '{:,.2f}'.format(d.value|float) if d.value else '0.00' }}</span>
-          <span class="badge
-                       {% if m >= 30 %}bg-emerald-50 text-emerald-700 border-emerald-200
-                       {% elif m >= 15 %}bg-amber-50 text-amber-700 border-amber-200
-                       {% else %}bg-rose-50 text-rose-700 border-rose-200{% endif %}">
+          <span class="{% if m >= 30 %}badge-success{% elif m >= 15 %}badge-warning{% else %}badge-danger{% endif %}">
             {{ '{:.1f}'.format(m) }}%
           </span>
         </div>

@@ -22,7 +22,7 @@
 
 {% if queue %}
 {# Finding #1: convert to data-table; drop per-cell px-4 py-3 and per-th text-xs font-medium text-gray-500 uppercase tracking-wider #}
-<div class="overflow-x-auto bg-white rounded-lg shadow border border-brand-200">
+<div class="overflow-x-auto bg-white rounded-lg shadow border border-line-base">
   <table class="data-table w-full">
     <thead>
       <tr>
@@ -108,7 +108,7 @@
   </table>
 </div>
 {% else %}
-<div class="bg-white rounded-lg shadow border border-brand-200 px-4 py-6 sm:py-8 text-center">
+<div class="bg-white rounded-lg shadow border border-line-base px-4 py-6 sm:py-8 text-center">
   <svg class="mx-auto h-12 w-12 text-emerald-300 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
   </svg>
@@ -153,9 +153,9 @@
           <td class="text-right whitespace-nowrap">
             <span class="text-gray-600">{{ '{:,}'.format(row.quantity) if row.quantity is not none else '-' }}</span>
             {% if row.status == 'awaiting_po' %}
-            <span class="ml-2 badge bg-amber-50 text-amber-700 border-amber-200">PO to cut</span>
+            <span class="ml-2 badge-warning">PO to cut</span>
             {% elif row.status == 'pending_verify' %}
-            <span class="ml-2 badge bg-blue-50 text-blue-700 border-blue-200">verifying</span>
+            <span class="ml-2 badge-info">verifying</span>
             {% endif %}
           </td>
         </tr>
