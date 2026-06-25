@@ -73,7 +73,9 @@ RUN useradd -r -u 1000 -m appuser \
 # NOTE: /app/uploads is a named volume (see docker-compose.yml). Docker seeds a
 # *fresh* volume from this image dir, so creating it appuser-owned here makes new
 # volumes writable by the runtime user (trouble-ticket screenshots). An EXISTING
-# root-owned volume must be chowned once: docker exec -u 0 <app> chown -R appuser:appuser /app/uploads
+# root-owned volume is NOT re-seeded from the image, so docker-entrypoint.sh
+# re-asserts `chown -R appuser:appuser /app/uploads` on every start (TT-0002),
+# and app/startup.py fails fast at boot if the dir still isn't writable.
 
 ENTRYPOINT ["tini", "--", "./docker-entrypoint.sh"]
 # No --forwarded-allow-ips here: uvicorn safe-defaults to 127.0.0.1 when the

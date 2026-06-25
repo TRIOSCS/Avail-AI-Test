@@ -4660,6 +4660,16 @@ POST /api/trouble-tickets/submit   (require_user)
     +→ _create_ticket(): persists description, screenshot (disk), console_errors,
        network_errors, browser_info, auto_captured_context (JSON), current_view
     +→ BackgroundTask _generate_ai_summary (claude_text, fast tier)
+    Screenshot storage durability (TT-0002): PNGs land in error_reports.UPLOAD_DIR
+    (/app/uploads/tickets) on the `uploads` named volume, which the non-root app
+    process (appuser) must own. Three layers keep it durable: (1) Dockerfile chowns
+    it at build (fresh volumes); (2) docker-entrypoint.sh re-chowns /app/uploads to
+    appuser on every start as root before runuser (existing/upgraded volumes);
+    (3) startup.ensure_screenshot_storage() (called from main.py lifespan, NOT gated
+    by run_startup_migrations' TESTING short-circuit) mkdir+os.access(W_OK) and raises
+    RuntimeError at boot if still not writable. _save_screenshot() re-raises
+    PermissionError/OSError (returns None only for bad/undecodable base64); the submit
+    route catches them → JSON 500 {"error": "Screenshot storage is not writable — ..."}.
 
 Admin console (require_admin):  Settings → Tickets  (tab admin-gated)
   GET  /v2/partials/trouble-tickets/{workspace,list,{id}}   (require_admin)

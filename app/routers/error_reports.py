@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from loguru import logger
 from markupsafe import escape
 from pydantic import BaseModel, Field
@@ -67,7 +67,10 @@ def _ensure_upload_dir() -> None:
 def _save_screenshot(ticket_id: int, b64_data: str) -> str | None:
     """Decode base64 PNG and save to disk.
 
-    Returns path or None on failure.
+    Returns the saved path, or None for bad input (empty/oversized/undecodable base64).
+    Storage faults — a non-writable dir (PermissionError) or a full disk (OSError) — are
+    re-raised so the caller can surface a clear 500 instead of silently dropping the
+    screenshot (TT-0002).
     """
     if not b64_data or len(b64_data) > MAX_SCREENSHOT_B64_SIZE:
         return None
@@ -75,14 +78,14 @@ def _save_screenshot(ticket_id: int, b64_data: str) -> str | None:
         if "," in b64_data[:100]:
             b64_data = b64_data.split(",", 1)[1]
         png_bytes = base64.b64decode(b64_data)
-        _ensure_upload_dir()
-        path = os.path.join(UPLOAD_DIR, f"TT-{ticket_id}.png")
-        with open(path, "wb") as f:
-            f.write(png_bytes)
-        return path
     except Exception as e:
-        logger.warning("Failed to save screenshot for ticket {}: {}", ticket_id, e)
+        logger.warning("Undecodable screenshot for ticket {}: {}", ticket_id, e)
         return None
+    _ensure_upload_dir()
+    path = os.path.join(UPLOAD_DIR, f"TT-{ticket_id}.png")
+    with open(path, "wb") as f:
+        f.write(png_bytes)
+    return path
 
 
 def _create_ticket(
@@ -254,11 +257,6 @@ async def submit_trouble_ticket(
                 "current_view": (auto_ctx or {}).get("current_view") if isinstance(auto_ctx, dict) else None,
             },
         )
-        if screenshot_b64:
-            path = _save_screenshot(ticket.id, screenshot_b64)
-            if path:
-                ticket.screenshot_path = path
-                db.commit()
     except Exception:
         db.rollback()
         logger.exception("Failed to create trouble ticket for user {}", user.id)
@@ -266,6 +264,23 @@ async def submit_trouble_ticket(
             '<div class="p-4 text-rose-600 text-sm">Something went wrong saving your report. Please try again.</div>',
             status_code=500,
         )
+
+    # Screenshot persistence is best-effort relative to the ticket (the ticket is
+    # already committed above), but a non-writable storage dir is an infra fault
+    # we must surface clearly rather than swallow (TT-0002).
+    if screenshot_b64:
+        try:
+            path = _save_screenshot(ticket.id, screenshot_b64)
+            if path:
+                ticket.screenshot_path = path
+                db.commit()
+        except (PermissionError, OSError) as exc:
+            db.rollback()
+            logger.exception("Screenshot storage not writable for ticket {}: {}", ticket.id, exc)
+            return JSONResponse(
+                status_code=500,
+                content={"error": "Screenshot storage is not writable — contact an administrator."},
+            )
 
     background_tasks.add_task(_generate_ai_summary, ticket.id)
 

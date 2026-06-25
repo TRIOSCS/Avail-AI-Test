@@ -35,12 +35,17 @@ register_audit_listeners()
 @asynccontextmanager
 async def lifespan(app):
     """App startup/shutdown — launches background scheduler."""
-    from .startup import run_startup_migrations
+    from .startup import ensure_screenshot_storage, run_startup_migrations
 
     if not os.environ.get("TESTING"):
         # S1: Fail-fast on default secret key (skip in test mode)
         if settings.secret_key == "change-me-in-production":
             raise RuntimeError("SESSION_SECRET or SECRET_KEY must be set. See .env.example for required variables.")
+
+        # S1b: Fail-fast if the trouble-ticket screenshot storage dir isn't
+        # writable by this process (TT-0002) — surfaces a misconfigured/root-owned
+        # uploads volume at boot instead of silently dropping screenshots later.
+        ensure_screenshot_storage()
 
         # S2: Warn about missing critical env vars (don't crash — vendor keys are optional)
         missing = []
