@@ -230,6 +230,9 @@ def delete_companies(id_a: int, id_b: int, db: Session) -> dict:
     ids = [id_a, id_b]
 
     # Detach soft references (nullable / SET NULL) — these records outlive the company.
+    # Fail CLOSED: a detach error re-raises so the route rolls back rather than deleting
+    # the companies anyway and silently orphaning/losing the dependent rows (mirrors the
+    # vendor service's abort-and-surface).
     detached = 0
     for model, col in [
         (ActivityLog, "company_id"),
@@ -242,17 +245,20 @@ def delete_companies(id_a: int, id_b: int, db: Session) -> dict:
                 db.query(model).filter(getattr(model, col).in_(ids)).update({col: None}, synchronize_session="fetch")
             )
         except Exception as e:
-            logger.warning("Company delete-both: failed to detach {}.{}: {}", model.__tablename__, col, e)
+            logger.error("Company delete-both: failed to detach {}.{}: {}", model.__tablename__, col, e)
+            raise ValueError(f"Company delete aborted — failed to detach {model.__tablename__}.{col}: {e}") from e
 
     # Purge company-scoped rows (NOT-NULL company_id) that are meaningless without the
     # company. Sites/attachments/collaborators go via the ORM "all, delete-orphan" cascade
     # on db.delete(company); these two tables are not ORM-cascaded so purge explicitly.
+    # Fail CLOSED here too — a purge error must abort, never delete the company anyway.
     purged = 0
     for model in (CustomerPartHistory, ExcessList):
         try:
             purged += db.query(model).filter(model.company_id.in_(ids)).delete(synchronize_session="fetch")
         except Exception as e:
-            logger.warning("Company delete-both: failed to purge {}: {}", model.__tablename__, e)
+            logger.error("Company delete-both: failed to purge {}: {}", model.__tablename__, e)
+            raise ValueError(f"Company delete aborted — failed to purge {model.__tablename__}: {e}") from e
 
     db.delete(co_a)
     db.delete(co_b)

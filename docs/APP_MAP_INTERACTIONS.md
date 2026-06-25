@@ -2038,11 +2038,19 @@ merges different-`account_owner_id` accounts) are reused AS-IS.
 - **Delete-both:** each pair row also has a rose-outline **Delete both** button
   (`delete_both_button` macro) → `POST /v2/partials/admin/vendor-delete-both` /
   `company-delete-both` (`id_a`/`id_b` form fields, admin-gated). Backed by
-  `vendor_merge_service.delete_vendor_cards` / `company_merge_service.delete_companies`:
-  dependent business records are **detached** (FK NULLed — offers/sightings/etc. survive
-  unlinked, mirroring how merge reassigns rather than cascade-deletes), company-scoped
-  rows with NOT-NULL `company_id` (`customer_part_history`, `excess_lists`) are purged,
-  and sites/attachments/collaborators go via the ORM `all, delete-orphan` cascade. Native
+  `vendor_merge_service.delete_vendor_cards` / `company_merge_service.delete_companies`.
+  Both split dependents into **detach vs cascade**: soft references that merely point at
+  the parent (vendor: offers/stock-list-hashes/activity-log/prospect-contacts/enrichment-queue;
+  company: activity-log/sightings/knowledge/prospect-accounts) are **detached** (FK NULLed,
+  survive unlinked, mirroring how merge reassigns), while children declared NOT-NULL
+  `ondelete=CASCADE` are **never NULLed** (that raises NotNullViolation on Postgres) and
+  cascade-delete with the parent via `db.delete()` (vendor: `vendor_contacts`/`vendor_reviews`/
+  `vendor_metrics_snapshot`/`buyer_vendor_stats` — the first two also via ORM
+  `all, delete-orphan`; company: sites/attachments/collaborators via ORM cascade, plus
+  `customer_part_history`/`excess_lists` purged explicitly since they're not ORM-cascaded).
+  Both services are **fail-closed**: any detach/purge error logs at error level and
+  re-raises so the route rolls back rather than deleting the parents and orphaning rows;
+  the single-pair routes catch it and surface an error toast (never a 500). Native
   `hx-confirm` spells out both names ("cannot be undone").
 - **Multi-select mass actions:** each dedup section is an `x-data="dedupSelect()"` Alpine
   component (registered in `htmx_app.js`, Set-based, mirroring `rq2Page`). Selection unit
@@ -2052,7 +2060,10 @@ merges different-`account_owner_id` accounts) are reused AS-IS.
   single comma-joined `pairs` field + an `action` field to
   `POST /v2/partials/admin/vendor-bulk` / `company-bulk` (`_dedup_bulk` parses the tokens
   via `_parse_dedup_pairs`, gates admin, caps at `_MAX_DEDUP_PAIRS=200`, processes
-  per-pair with per-pair commit + failure tolerance). The select-all `@change` is a
+  per-pair with per-pair commit + rollback). A per-pair failure doesn't abort the batch,
+  but each is logged at error level with its pair id + action, the failing pair tokens are
+  named in the toast message, and **any** failure makes the toast an `error` (a partial
+  failure never shows green success). The select-all `@change` is a
   **single-quoted** attribute because `tojson` emits double-quoted tokens (a double-quoted
   attr would close early and kill Alpine init). `Dismiss for now` is **view-only** (it
   hides the rows client-side and re-renders; pairs reappear on the next scan — there is no

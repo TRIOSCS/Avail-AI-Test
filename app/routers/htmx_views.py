@@ -14716,8 +14716,9 @@ async def _dedup_bulk(request, user, db, entity: str) -> HTMLResponse:
 
     ``merge`` keeps the FIRST id of each pair (the template emits keeper-first tokens);
     ``delete`` removes both; ``dismiss`` is a view-only clear (no durable state yet — the
-    rows just drop from this render and reappear on the next scan). Per-pair failures are
-    tolerated and counted, never aborting the batch.
+    rows just drop from this render and reappear on the next scan). Per-pair failures don't
+    abort the batch, but each is logged at error level and the failing pair tokens are
+    surfaced in the toast — any failure makes the toast an ``error`` (never green success).
     """
     from ..dependencies import is_admin
 
@@ -14750,7 +14751,7 @@ async def _dedup_bulk(request, user, db, entity: str) -> HTMLResponse:
         merge_fn, delete_fn, noun = merge_companies, delete_companies, "company"
 
     done = 0
-    failed = 0
+    failed_tokens: list[str] = []
     for a, b in pairs:
         try:
             if action == "merge":
@@ -14761,15 +14762,17 @@ async def _dedup_bulk(request, user, db, entity: str) -> HTMLResponse:
             done += 1
         except Exception as e:
             db.rollback()
-            failed += 1
-            logger.warning("Bulk {} {}: pair {}-{} failed: {}", noun, action, a, b, e)
+            failed_tokens.append(f"{a}-{b}")
+            logger.error("Bulk {} {}: pair {}-{} failed: {}", noun, action, a, b, e)
 
     verb = "Merged" if action == "merge" else "Deleted"
+    failed = len(failed_tokens)
     message = f"{verb} {done} {noun} pair(s)."
     if failed:
-        message += f" {failed} failed."
+        message += f" {failed} failed: {', '.join(failed_tokens)}."
     resp = _render_data_ops(request, user, db)
-    settings_toast(resp, message, kind="error" if failed and not done else "success")
+    # Any failure surfaces as an error toast — a partial failure must not look green.
+    settings_toast(resp, message, kind="error" if failed else "success")
     return resp
 
 

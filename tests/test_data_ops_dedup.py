@@ -178,6 +178,42 @@ class TestDeleteBoth:
         assert surviving is not None
         assert surviving.vendor_card_id is None
 
+    def test_vendor_delete_both_cascades_notnull_children(self, admin_client, db_session, test_user):
+        """REGRESSION (CRITICAL): the four NOT-NULL, ondelete=CASCADE children of a
+        vendor card — VendorContact, VendorReview, VendorMetricsSnapshot,
+        BuyerVendorStats — must NOT be NULLed (that raised a NotNullViolation on
+        Postgres, breaking delete-both for every real vendor).
+
+        They cascade-delete WITH the card. Insert one of each before delete-both and
+        assert it succeeds and each child is gone (not orphaned).
+        """
+        from datetime import date
+
+        from app.models import BuyerVendorStats, VendorContact, VendorMetricsSnapshot, VendorReview
+
+        v1, v2 = _vendors(db_session, "Casc A", "Casc A Inc")
+        contact = VendorContact(vendor_card_id=v1.id, full_name="Jane Buyer", source="manual")
+        review = VendorReview(vendor_card_id=v1.id, user_id=test_user.id, rating=4, comment="ok")
+        snap = VendorMetricsSnapshot(vendor_card_id=v1.id, snapshot_date=date.today(), composite_score=80.0)
+        stats = BuyerVendorStats(vendor_card_id=v1.id, user_id=test_user.id, rfqs_sent=3)
+        db_session.add_all([contact, review, snap, stats])
+        db_session.commit()
+        cid, rid, sid, bid = contact.id, review.id, snap.id, stats.id
+
+        resp = admin_client.post("/v2/partials/admin/vendor-delete-both", data={"id_a": str(v1.id), "id_b": str(v2.id)})
+        # The whole point: this is a 200, not a 500/NotNullViolation.
+        assert resp.status_code == 200, resp.text[:1500]
+        db_session.expire_all()
+
+        # Both cards gone.
+        assert db_session.get(VendorCard, v1.id) is None
+        assert db_session.get(VendorCard, v2.id) is None
+        # All four NOT-NULL children cascade-deleted — gone, NOT orphaned with a stale FK.
+        assert db_session.get(VendorContact, cid) is None
+        assert db_session.get(VendorReview, rid) is None
+        assert db_session.get(VendorMetricsSnapshot, sid) is None
+        assert db_session.get(BuyerVendorStats, bid) is None
+
 
 # ── PART 4: multi-select bulk mass actions ──────────────────────────────────
 
@@ -237,3 +273,21 @@ class TestBulkActions:
         resp = admin_client.post("/v2/partials/admin/vendor-bulk", data={"action": "merge", "pairs": f"{good},{bad}"})
         assert resp.status_code == 200, resp.text[:1500]
         assert db_session.get(VendorCard, v2.id) is None  # good pair merged
+
+    def test_bulk_partial_failure_surfaces_in_toast(self, admin_client, db_session):
+        """REGRESSION (HIGH): a partial failure must NOT show a green success toast —
+        the failing pair token appears in the message and the toast kind is 'error'."""
+        import json
+
+        v1, v2 = _vendors(db_session, "ToastFail A", "ToastFail A Inc")
+        good = f"{v1.id}-{v2.id}"
+        bad = "99991-99992"
+        resp = admin_client.post("/v2/partials/admin/vendor-bulk", data={"action": "merge", "pairs": f"{good},{bad}"})
+        assert resp.status_code == 200, resp.text[:1500]
+        trigger = json.loads(resp.headers["HX-Trigger"])
+        toast = trigger["showToast"]
+        # The failing pair token is named in the message, not reduced to a bare count.
+        assert "99991-99992" in toast["message"]
+        # Any failure → not green success.
+        assert toast["type"] != "success"
+        assert toast["type"] == "error"
