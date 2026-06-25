@@ -382,7 +382,7 @@ async def test_worker_pass_grammar_declines_categorize_none(db_session: Session,
     stats = await worker._partsurfer_desc_pass(db_session, cards)
     db_session.commit()
 
-    assert stats == {"fetched": 2, "categorized": 0, "specs_written": 0, "failed": 0}
+    assert stats == {"fetched": 2, "categorized": 0, "specs_written": 0, "failed": 0, "skipped_cached": 0}
 
 
 async def test_run_one_batch_gates_partsurfer_pass_on_flag(db_session: Session, monkeypatch):
@@ -450,3 +450,194 @@ async def test_run_one_batch_gates_partsurfer_pass_on_flag(db_session: Session, 
         await _drive()
         assert "875507-B21" in fetched
         assert db_session.get(MaterialCard, cid_on).category == "dram"
+
+
+# --- negative cache: no-result / ungrammatical spares are durably cached + not re-queried -
+
+
+def _neg_rows(db: Session):
+    from app.models import PartsurferDescNegative
+
+    return db.query(PartsurferDescNegative).all()
+
+
+async def test_no_result_is_negative_cached(db_session: Session, monkeypatch):
+    # A fetch that returns None (genuine no-result) writes a no_result negative row so the
+    # dead spare is not re-fetched daily.
+    from app.models import PartsurferDescNegative
+    from app.services.enrichment_worker import worker
+
+    seed_commodity_schemas(db_session)
+    card = _hp_card(db_session, "918042-601")
+
+    async def fake_fetch(spare, **_kw):
+        return None  # no description on PartSurfer
+
+    _patch_fetch(monkeypatch, fake_fetch)
+    _patch_no_sleep(monkeypatch, worker)
+
+    stats = await worker._partsurfer_desc_pass(db_session, [card])
+    db_session.commit()
+
+    assert stats["fetched"] == 1
+    assert stats["categorized"] == 0
+    rows = _neg_rows(db_session)
+    assert len(rows) == 1
+    assert rows[0].reason == "no_result"
+    assert isinstance(rows[0], PartsurferDescNegative)
+    assert rows[0].spare_raw == "918042-601"
+
+
+async def test_fresh_negative_suppresses_refetch(db_session: Session, monkeypatch):
+    # A spare with a FRESH negative row is dropped before the fetch -- never re-queried
+    # within the window. The fetcher must not be called for it.
+    from app.services.enrichment_worker import worker
+    from app.services.enrichment_worker.partsurfer_negative_cache import record_negative
+    from app.utils.normalization import normalize_mpn_key
+
+    seed_commodity_schemas(db_session)
+    card = _hp_card(db_session, "918042-601")
+    # Pre-seed a fresh no_result negative on the worker's actual key (normalize_mpn_key
+    # strips the hyphen) -> retry_after 90d out.
+    norm = normalize_mpn_key(card.display_mpn)
+    record_negative(db_session, card.display_mpn, norm, "no_result")
+    db_session.commit()
+
+    fetched: list[str] = []
+
+    async def fake_fetch(spare, **_kw):
+        fetched.append(spare)
+        return None
+
+    _patch_fetch(monkeypatch, fake_fetch)
+    _patch_no_sleep(monkeypatch, worker)
+
+    stats = await worker._partsurfer_desc_pass(db_session, [card])
+    db_session.commit()
+
+    assert fetched == []  # suppressed by the negative cache
+    assert stats["fetched"] == 0
+    assert stats["skipped_cached"] == 1
+
+
+async def test_stale_negative_is_retried_after_window(db_session: Session, monkeypatch):
+    # A STALE negative row (retry_after in the past) does NOT suppress -- the spare is
+    # re-fetched and the row refreshed in place (no duplicate).
+    from datetime import datetime, timedelta, timezone
+
+    from app.services.enrichment_worker import worker
+    from app.services.enrichment_worker.partsurfer_negative_cache import record_negative
+    from app.utils.normalization import normalize_mpn_key
+
+    seed_commodity_schemas(db_session)
+    card = _hp_card(db_session, "726719-B21")
+    stale = datetime.now(timezone.utc) - timedelta(days=100)  # past the 90d window
+    record_negative(db_session, card.display_mpn, normalize_mpn_key(card.display_mpn), "no_result", now=stale)
+    db_session.commit()
+
+    fetched: list[str] = []
+
+    async def fake_fetch(spare, **_kw):
+        fetched.append(spare)
+        return _DIMM_DESC  # now PartSurfer DOES return a description
+
+    _patch_fetch(monkeypatch, fake_fetch)
+    _patch_no_sleep(monkeypatch, worker)
+
+    stats = await worker._partsurfer_desc_pass(db_session, [card])
+    db_session.commit()
+
+    assert fetched == ["726719-B21"]  # retried after the window
+    assert stats["fetched"] == 1
+    assert card.category == "dram"  # categorized this time
+    # The stale row was consulted but the spare hit this time -> no NEW negative kept it,
+    # and the prior stale row is not blocking anymore (one row max either way).
+    assert len(_neg_rows(db_session)) <= 1
+
+
+async def test_ungrammatical_description_is_short_cached(db_session: Session, monkeypatch):
+    # Fetch SUCCEEDS but the grammar declines (categorize_and_record -> (False, 0)). That is
+    # NOT a no-result: it is cached as 'ungrammatical' with the SHORT window, never long.
+    from datetime import datetime, timezone
+
+    from app.services.desc_extractor import writer as desc_writer
+    from app.services.enrichment_worker import worker
+    from app.services.enrichment_worker.partsurfer_negative_cache import (
+        PARTSURFER_UNGRAMMATICAL_RETRY_DAYS,
+    )
+
+    seed_commodity_schemas(db_session)
+    card = _hp_card(db_session, "918042-601")
+
+    async def fake_fetch(spare, **_kw):
+        return "SOME OPAQUE HP DESCRIPTION THE GRAMMAR DECLINES"
+
+    _patch_fetch(monkeypatch, fake_fetch)
+    _patch_no_sleep(monkeypatch, worker)
+    monkeypatch.setattr(desc_writer, "categorize_and_record", lambda *a, **k: (False, 0))
+
+    stats = await worker._partsurfer_desc_pass(db_session, [card])
+    db_session.commit()
+
+    assert stats["fetched"] == 1
+    assert stats["categorized"] == 0
+    rows = _neg_rows(db_session)
+    assert len(rows) == 1
+    assert rows[0].reason == "ungrammatical"
+    # Short window: retry_after is ~14d out, NOT 90d.
+    delta_days = (rows[0].retry_after - rows[0].looked_up_at).days
+    assert delta_days == PARTSURFER_UNGRAMMATICAL_RETRY_DAYS
+    # And it really does suppress a re-fetch within the short window.
+    assert datetime.now(timezone.utc) < rows[0].retry_after
+
+
+async def test_transient_is_never_negative_cached(db_session: Session, monkeypatch):
+    # A throttle/outage (PartSurferTransient) is NOT a verdict on the spare -- it must NOT
+    # write a negative row (otherwise a transient outage would lock spares out for 90 days).
+    from app.services.enrichment_worker import worker
+    from app.services.enrichment_worker.partsurfer_resolver import PartSurferTransient
+
+    seed_commodity_schemas(db_session)
+    card = _hp_card(db_session, "918042-601")
+
+    async def fake_fetch(spare, **_kw):
+        raise PartSurferTransient("partsurfer 503 for 918042-601")
+
+    _patch_fetch(monkeypatch, fake_fetch)
+    _patch_no_sleep(monkeypatch, worker)
+
+    stats = await worker._partsurfer_desc_pass(db_session, [card])
+    db_session.commit()
+
+    assert stats["fetched"] == 0
+    assert _neg_rows(db_session) == []  # no negative row written for a transient
+
+
+async def test_grammar_decline_with_db_failure_is_not_cached(db_session: Session, monkeypatch):
+    # If the grammar would have run but the per-card write RAISED (IntegrityError), that is a
+    # DB failure, not a grammar verdict -- it must NOT be cached as ungrammatical.
+    from sqlalchemy.exc import IntegrityError
+
+    from app.services.desc_extractor import writer as desc_writer
+    from app.services.enrichment_worker import worker
+
+    seed_commodity_schemas(db_session)
+    card = _hp_card(db_session, "918042-601")
+
+    async def fake_fetch(spare, **_kw):
+        return _DIMM_DESC
+
+    _patch_fetch(monkeypatch, fake_fetch)
+    _patch_no_sleep(monkeypatch, worker)
+
+    def boom(*a, **k):
+        raise IntegrityError("simulated", {}, Exception("boom"))
+
+    monkeypatch.setattr(desc_writer, "categorize_and_record", boom)
+
+    stats = await worker._partsurfer_desc_pass(db_session, [card])
+    db_session.commit()
+
+    assert stats["fetched"] == 1
+    assert stats["failed"] == 1
+    assert _neg_rows(db_session) == []  # a DB failure is not negative-cached
