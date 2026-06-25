@@ -25,6 +25,7 @@ from app.services.tagging import (
     get_or_create_commodity_tag,
     tag_material_card,
 )
+from app.shared_constants import JUNK_MANUFACTURERS
 
 
 def _untagged_card_filter(db: Session):
@@ -198,9 +199,6 @@ def run_prefix_backfill(db: Session, batch_size: int = 1000) -> dict:
     }
 
 
-_JUNK_MANUFACTURERS = {"unknown", "n/a", "various", "", "none", "other", "generic", "-", "na"}
-
-
 def backfill_manufacturer_from_sightings(db: Session, batch_size: int = 500) -> dict:
     """Mine sighting manufacturer data for untagged material cards.
 
@@ -259,7 +257,7 @@ def backfill_manufacturer_from_sightings(db: Session, batch_size: int = 500) -> 
             mfr_counts: Counter = Counter()
             for (mfr,) in sighting_mfrs:
                 cleaned = mfr.strip()
-                if cleaned.lower() not in _JUNK_MANUFACTURERS:
+                if cleaned.lower() not in JUNK_MANUFACTURERS:
                     mfr_counts[cleaned] += 1
 
             if not mfr_counts:
