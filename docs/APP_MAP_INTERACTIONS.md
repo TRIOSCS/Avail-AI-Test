@@ -4687,7 +4687,10 @@ docker-entrypoint.sh `mkdir -p /app/uploads/avatars` + the existing recursive
 `chown -R appuser:appuser /app/uploads`; `startup.ensure_avatar_storage()` called from
 the main.py lifespan right after `ensure_screenshot_storage()`). Routes (all
 `require_user`, own-profile by construction — no user path param): `POST /api/user/avatar`
-(multipart; validates content-type ∈ {png,jpeg,webp,gif} + ≤2 MB, writes
+(multipart; validates the REAL image type by magic bytes via `filetype.guess` ∈
+{png,jpeg,webp,gif} + ≤2 MB — both the accepted type AND the on-disk `{ext}` derive from
+the verified bytes, never the attacker-controlled `Content-Type` header, so a polyglot
+labelled `image/png` can't be stored as `.png` and served back inline; writes
 `user_{id}_{uuid8}.{ext}`, deletes the prior file, sets `User.avatar_path`, returns
 empty 200 + `HX-Trigger` {avatarUpdated:{filename}, showToast}); `DELETE /api/user/avatar`
 (clears path + file); `GET /api/user/avatar/{filename}` (FileResponse, path-traversal

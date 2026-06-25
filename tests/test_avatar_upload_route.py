@@ -3,7 +3,9 @@
 Covers app/routers/avatars.py:
   - POST /api/user/avatar stores a valid image, sets the AUTHENTICATED user's
     avatar_path (own-profile only — no user path param exists), persists the file;
-  - content-type and size validation return the project's JSON `"error"` shape;
+  - magic-byte (real content) and size validation return the project's JSON
+    `"error"` shape — a non-image payload mislabelled ``image/png`` is rejected and
+    nothing is written to disk;
   - DELETE /api/user/avatar clears avatar_path and removes the file;
   - GET /api/user/avatar/{filename} serves the stored image and blocks traversal;
   - the routes are login-gated (unauthenticated → 401/403).
@@ -67,7 +69,9 @@ class TestUpload:
         assert test_user.avatar_path is not None
         assert other.avatar_path is None
 
-    def test_rejects_non_image_content_type(self, client, db_session, test_user, avatars_tmp):
+    def test_rejects_non_image_bytes(self, client, db_session, test_user, avatars_tmp):
+        """Bytes that aren't a recognised image are rejected regardless of the (here,
+        honest) Content-Type, in the project's JSON `"error"` shape."""
         resp = client.post(
             "/api/user/avatar",
             files={"file": ("notes.txt", b"hello", "text/plain")},
@@ -77,6 +81,30 @@ class TestUpload:
         assert "error" in body and "detail" not in body
         db_session.refresh(test_user)
         assert test_user.avatar_path is None
+
+    def test_rejects_polyglot_mislabelled_as_png(self, client, db_session, test_user, avatars_tmp):
+        """SECURITY (magic-byte root fix): an upload whose BYTES are not a valid image —
+        e.g. an HTML/JS polyglot — but sent with ``Content-Type: image/png`` must be
+        rejected by the magic-byte check, and nothing may be written to disk.
+
+        Validating
+        the header (``file.content_type``) instead of the bytes would let this through,
+        store it as ``.png``, and serve it back inline same-origin.
+        """
+        payload = b"<html><script>alert(1)</script>"
+        resp = client.post(
+            "/api/user/avatar",
+            files={"file": ("evil.png", payload, "image/png")},
+        )
+        assert resp.status_code == 400
+        body = resp.json()
+        assert "error" in body and "detail" not in body
+        assert "PNG" in body["error"]  # the image-type rejection, not size/empty
+
+        db_session.refresh(test_user)
+        assert test_user.avatar_path is None
+        # Root-fix guarantee: the malicious payload never touched the storage volume.
+        assert list(avatars_tmp.iterdir()) == []
 
     def test_rejects_oversize_image(self, client, db_session, test_user, avatars_tmp):
         from app.routers import avatars

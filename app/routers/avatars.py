@@ -22,6 +22,7 @@ import json
 import os
 import uuid
 
+import filetype
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from loguru import logger
@@ -52,8 +53,11 @@ def _avatar_response(toast: str, filename: str | None) -> HTMLResponse:
 
 AVATARS_DIR = "/app/uploads/avatars"
 MAX_AVATAR_BYTES = 2 * 1024 * 1024  # 2 MB
-# content-type → file extension. The serve route infers media type back from the
-# extension, so this map is the single source of truth for accepted image types.
+# Real (magic-byte-detected) mime → file extension. The upload route derives both the
+# accepted type AND the on-disk extension from the VERIFIED bytes via filetype.guess(),
+# never from the attacker-controlled Content-Type header; the serve route infers media
+# type back from the extension. This map is the single source of truth for accepted
+# image types.
 ALLOWED_AVATAR_TYPES = {
     "image/png": "png",
     "image/jpeg": "jpg",
@@ -94,20 +98,26 @@ async def upload_avatar(
 ):
     """Store an uploaded image as the current user's profile photo.
 
-    Validates content-type (PNG/JPEG/WEBP/GIF) and size (≤2 MB), writes the file
-    under AVATARS_DIR with a per-user UUID basename, deletes any prior avatar, and
-    sets ``user.avatar_path``. Own-profile only — there is no user path param, so
+    Validates the REAL image type by magic bytes (PNG/JPEG/WEBP/GIF) and size
+    (≤2 MB), writes the file under AVATARS_DIR with a per-user UUID basename, deletes
+    any prior avatar, and sets ``user.avatar_path``. The accepted type AND the on-disk
+    extension are a function of the verified bytes — never the attacker-controlled
+    ``Content-Type`` header — so a polyglot labelled ``image/png`` cannot be stored as
+    ``.png`` and served back inline. Own-profile only — there is no user path param, so
     a logged-in user can only ever change their own photo.
     """
-    ext = ALLOWED_AVATAR_TYPES.get((file.content_type or "").lower())
-    if ext is None:
-        return _json_error(request, 400, "Avatar must be a PNG, JPEG, WEBP, or GIF image.")
-
     data = await file.read()
     if not data:
         return _json_error(request, 400, "Uploaded avatar is empty.")
     if len(data) > MAX_AVATAR_BYTES:
         return _json_error(request, 400, "Avatar must be 2 MB or smaller.")
+
+    # Trust the bytes, not the header: filetype.guess inspects magic bytes, so the
+    # accepted mime (and the extension written to disk) is derived from real content.
+    kind = filetype.guess(data)
+    if kind is None or kind.mime not in ALLOWED_AVATAR_TYPES:
+        return _json_error(request, 400, "Avatar must be a PNG, JPEG, WEBP, or GIF image.")
+    ext = ALLOWED_AVATAR_TYPES[kind.mime]
 
     _ensure_avatar_dir()
     filename = f"user_{user.id}_{uuid.uuid4().hex[:8]}.{ext}"
