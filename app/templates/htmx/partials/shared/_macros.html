@@ -541,6 +541,8 @@ Usage:
   {{ activity_icon(a.activity_type) }}
   <div class="flex-1 min-w-0">
     <div class="flex items-center gap-2 flex-wrap">
+      {# Actor avatar — the user who performed this activity (eager-loaded as a.user). #}
+      {% if a.user %}{{ user_avatar(a.user) }}{% endif %}
       <p class="text-sm font-medium text-gray-900">{{ a.activity_type|replace('_', ' ')|title }}</p>
       {% set who = a.vendor_card.display_name if a.vendor_card_id and a.vendor_card else a.contact_name %}
       {% if who %}
@@ -754,3 +756,40 @@ Usage:
   </div>
 </td>
 {% endmacro %}
+
+
+{# ── User Avatar ──────────────────────────────────────────────────── #}
+{#
+  Purpose:     The one user-icon every surface reaches for. Renders `user`'s
+               uploaded profile photo when `user.avatar_path` is set, else the
+               accent-tinted initials fallback (house pattern: bg-brand-100 +
+               text-brand-600 circle, first letter of the name).
+  Depends on:  GET /api/user/avatar/{filename} (app/routers/avatars.py) to serve
+               the photo; no import needed beyond this macro.
+  Called-by:   shared/_macros.html activity_row (comm ledger actor),
+               buy_plans/detail.html (line assignee).
+  Business:    `user` may be None (e.g. an unassigned line / system activity) —
+               renders a neutral '?' circle so callers don't need a None guard.
+               Sizes: sm (h-6, table rows), md (h-9), lg (h-12, headers).
+  Usage:
+    {% from "htmx/partials/shared/_macros.html" import user_avatar %}
+    {{ user_avatar(line.buyer) }}
+    {{ user_avatar(a.user, size='md') }}
+#}
+{% macro user_avatar(user, size='sm') -%}
+{%- set _dims = {
+  'sm': 'h-6 w-6 text-[11px]',
+  'md': 'h-9 w-9 text-sm',
+  'lg': 'h-12 w-12 text-lg'
+} -%}
+{%- set _dim = _dims.get(size, _dims['sm']) -%}
+{%- set _name = (user.name if user and user.name else (user.email if user and user.email else '')) -%}
+{%- set _title = _name or 'Unassigned' -%}
+{%- if user and user.avatar_path -%}
+<img src="/api/user/avatar/{{ user.avatar_path }}" alt="{{ _title }}" title="{{ _title }}"
+     class="{{ _dim.split(' ')[0] }} {{ _dim.split(' ')[1] }} rounded-full object-cover flex-shrink-0 bg-gray-100">
+{%- else -%}
+<span class="inline-flex items-center justify-center {{ _dim }} rounded-full bg-brand-100 text-brand-600 font-bold flex-shrink-0"
+      title="{{ _title }}">{{ (_name[:1]|upper) if _name else '?' }}</span>
+{%- endif -%}
+{%- endmacro %}

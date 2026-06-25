@@ -16,13 +16,14 @@ if [ "$SESSION_SECRET" = "change-me-to-random-string" ]; then
     exit 1
 fi
 
-# Ensure the trouble-ticket screenshot dir on the `uploads` named volume is
-# owned by appuser (TT-0002). The Dockerfile chowns it at build time, but Docker
-# seeds a *fresh* volume from the image dir only — an EXISTING (e.g. root-owned,
-# pre-this-fix) volume keeps its old ownership across deploys/restarts, so the
-# non-root app process can't write screenshots. Re-asserting it here (as root,
-# before we drop to appuser below) makes the fix durable on every container start.
-mkdir -p /app/uploads/tickets
+# Ensure the upload subdirs on the `uploads` named volume are owned by appuser
+# (TT-0002): trouble-ticket screenshots AND profile avatars. The Dockerfile
+# chowns them at build time, but Docker seeds a *fresh* volume from the image dir
+# only — an EXISTING (e.g. root-owned, pre-this-fix) volume keeps its old
+# ownership across deploys/restarts, so the non-root app process can't write.
+# Re-asserting it here (as root, before we drop to appuser below) makes the fix
+# durable on every container start.
+mkdir -p /app/uploads/tickets /app/uploads/avatars
 chown -R appuser:appuser /app/uploads
 
 # Copy static files to shared volume for Caddy direct serving (runs as root)

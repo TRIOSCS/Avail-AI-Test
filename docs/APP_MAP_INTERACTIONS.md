@@ -4680,6 +4680,23 @@ POST /api/trouble-tickets/submit   (require_user)
     PermissionError/OSError (returns None only for bad/undecodable base64); the submit
     route catches them → JSON 500 {"error": "Screenshot storage is not writable — ..."}.
 
+Profile avatars (parallel to TT-0002 storage): `app/routers/avatars.py` adds a second
+`uploads`-volume subdir, `AVATARS_DIR` = `/app/uploads/avatars`, with the SAME three
+durability layers (Dockerfile mkdir+chown of `/app/uploads/{tickets,avatars}`;
+docker-entrypoint.sh `mkdir -p /app/uploads/avatars` + the existing recursive
+`chown -R appuser:appuser /app/uploads`; `startup.ensure_avatar_storage()` called from
+the main.py lifespan right after `ensure_screenshot_storage()`). Routes (all
+`require_user`, own-profile by construction — no user path param): `POST /api/user/avatar`
+(multipart; validates content-type ∈ {png,jpeg,webp,gif} + ≤2 MB, writes
+`user_{id}_{uuid8}.{ext}`, deletes the prior file, sets `User.avatar_path`, returns
+empty 200 + `HX-Trigger` {avatarUpdated:{filename}, showToast}); `DELETE /api/user/avatar`
+(clears path + file); `GET /api/user/avatar/{filename}` (FileResponse, path-traversal
+guarded against `realpath` leaving `AVATARS_DIR`, like the screenshot serve route). The
+uploader lives in `settings/profile.html`; the shared `user_avatar(user, size)` macro
+(`shared/_macros.html`) renders the photo or an accent-tinted initials circle and is
+applied in the `activity_row` macro (comm-ledger actor `a.user`) and `buy_plans/detail.html`
+(line assignee `line.buyer`).
+
 Admin console (require_admin):  Settings → Tickets  (tab admin-gated)
   GET  /v2/partials/trouble-tickets/{workspace,list,{id}}   (require_admin)
   GET  /api/trouble-tickets/{id}/screenshot                 (require_admin — closes IDOR)

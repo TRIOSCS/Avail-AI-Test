@@ -53,6 +53,10 @@ class User(Base):
     notify_buyplan_email_enabled = Column(Boolean, default=True, nullable=False)
     notify_new_offer_alert_enabled = Column(Boolean, default=True, nullable=False)
 
+    # Profile photo — stored basename of the file under avatars.AVATARS_DIR
+    # (e.g. "user_12_a1b2c3d4.png"); NULL falls back to the initials avatar.
+    avatar_path = Column(String(255), nullable=True)
+
     created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
 
     requisitions = relationship("Requisition", back_populates="creator", foreign_keys="[Requisition.created_by]")
