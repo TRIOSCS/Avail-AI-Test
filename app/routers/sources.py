@@ -18,7 +18,7 @@ import os
 import time
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from loguru import logger
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -51,6 +51,7 @@ from ..schemas.responses import (
     VendorEngagementDetailResponse,
 )
 from ..schemas.sources import MiningOptions, SourceStatusToggle
+from ..services.admin_service import get_effective_flag
 from ..services.credential_service import get_credential_cached
 from ..services.vendor_unavailability import apply_to_fresh_sightings
 from ..vendor_utils import normalize_vendor_name
@@ -117,7 +118,7 @@ def _get_connector_for_source(name: str, db: Session = None):
     if name == "element14" and e14_key:
         return Element14Connector(e14_key)
 
-    if name == "email_mining" and settings.email_mining_enabled:
+    if name == "email_mining" and get_effective_flag(db, "email_mining_enabled", settings.email_mining_enabled):
         return _EmailMiningTestConnector()
 
     test_connector = {
@@ -584,15 +585,20 @@ async def toggle_api_source(
 @router.put("/api/sources/{source_id}/activate", response_model=ToggleActiveResponse)
 async def toggle_source_active(
     source_id: int,
+    response: Response,
     user: User = Depends(require_settings_access),
     db: Session = Depends(get_db),
 ):
     """Toggle is_active flag on a source (settings access required)."""
+    from ..routers.htmx_views import settings_toast
+
     src = db.get(ApiSource, source_id)
     if not src:
         raise HTTPException(404, "API source not found")
     src.is_active = not src.is_active
     db.commit()
+    name = src.display_name or src.name
+    settings_toast(response, f"{name} {'enabled' if src.is_active else 'disabled'}.")
     return {"ok": True, "is_active": src.is_active}
 
 
@@ -668,6 +674,7 @@ async def system_alerts(
 async def update_source_credentials(
     source_name: str,
     request: Request,
+    response: Response,
     user: User = Depends(require_settings_access),
     db: Session = Depends(get_db),
 ):
@@ -675,6 +682,7 @@ async def update_source_credentials(
 
     Skips blank values (preserves existing).
     """
+    from ..routers.htmx_views import settings_toast
     from ..services.credential_service import _cred_cache, encrypt_value
 
     src = db.query(ApiSource).filter_by(name=source_name).first()
@@ -700,6 +708,9 @@ async def update_source_credentials(
     for k in keys_to_clear:
         _cred_cache.pop(k, None)
     logger.info("Credentials updated for source '{}' by user {}", source_name, user.email)
+    # A single-key source ("Save key") vs. a multi-field one ("Save credentials").
+    label = "Key saved." if len(src.env_vars or []) <= 1 else "Credentials saved."
+    settings_toast(response, label)
     return {"saved": True, "source": source_name}
 
 
@@ -772,7 +783,7 @@ async def email_mining_status(user: User = Depends(require_user), db: Session = 
     """Get current email mining status."""
     src = db.query(ApiSource).filter_by(name="email_mining").first()
     return {
-        "enabled": settings.email_mining_enabled,
+        "enabled": get_effective_flag(db, "email_mining_enabled", settings.email_mining_enabled),
         "last_scan": src.last_success.isoformat() if src and src.last_success else None,
         "total_scans": src.total_searches if src else 0,
         "total_vendors_found": src.total_results if src else 0,

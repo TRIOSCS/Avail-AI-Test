@@ -17,15 +17,21 @@ from ..scheduler import _traced_job
 from ..utils.token_manager import _utc
 
 
-def register_core_jobs(scheduler, settings):
-    """Register core jobs with the scheduler."""
+def register_core_jobs(scheduler, settings, db=None):
+    """Register core jobs with the scheduler.
+
+    *db* (when provided) lets inbox_scan_interval_min and activity_tracking_enabled
+    resolve from the system_config DB row (admin toggle) instead of only the env
+    default.
+    """
+    from ..services.admin_service import get_effective_flag, get_effective_int
+
+    scan_interval_min = get_effective_int(db, "inbox_scan_interval_min", settings.inbox_scan_interval_min)
     scheduler.add_job(
         _job_auto_archive, IntervalTrigger(minutes=5), id="auto_archive", name="Auto-archive stale requisitions"
     )
     scheduler.add_job(_job_token_refresh, IntervalTrigger(minutes=5), id="token_refresh", name="Token refresh")
-    scheduler.add_job(
-        _job_inbox_scan, IntervalTrigger(minutes=settings.inbox_scan_interval_min), id="inbox_scan", name="Inbox scan"
-    )
+    scheduler.add_job(_job_inbox_scan, IntervalTrigger(minutes=scan_interval_min), id="inbox_scan", name="Inbox scan")
     scheduler.add_job(_job_batch_results, IntervalTrigger(minutes=5), id="batch_results", name="Process batch results")
     scheduler.add_job(
         _job_batch_parse_signatures,
@@ -39,7 +45,7 @@ def register_core_jobs(scheduler, settings):
         id="poll_signature_batch",
         name="Poll signature batch results",
     )
-    if settings.activity_tracking_enabled:
+    if get_effective_flag(db, "activity_tracking_enabled", settings.activity_tracking_enabled):
         scheduler.add_job(
             _job_webhook_subscriptions, IntervalTrigger(minutes=5), id="webhook_subs", name="Webhook subscriptions"
         )
@@ -159,6 +165,7 @@ async def _job_inbox_scan():
     from ..config import settings
     from ..database import SessionLocal
     from ..models import User
+    from ..services.admin_service import get_effective_int
     from .email_jobs import _scan_user_inbox
 
     # Use a short-lived session just to identify users that need scanning
@@ -166,7 +173,9 @@ async def _job_inbox_scan():
     try:
         now = datetime.now(timezone.utc)
         users = db.query(User).filter(User.refresh_token.isnot(None)).all()
-        scan_interval = timedelta(minutes=settings.inbox_scan_interval_min)
+        scan_interval = timedelta(
+            minutes=get_effective_int(db, "inbox_scan_interval_min", settings.inbox_scan_interval_min)
+        )
 
         users_to_scan = []
         for user in users:

@@ -218,7 +218,7 @@ def test_name_search_active_list_excludes_archived_from_default(
     assert "Acme Electronics" not in resp.text
 
 
-# ── 8. Migration 148 is the single alembic head ────────────────────────
+# ── 8. Single alembic head (149 — settings-refine notify prefs, chained onto 148) ──
 
 
 def test_migration_148_single_head():

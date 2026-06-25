@@ -11,10 +11,12 @@ Depends on: app/services/admin_service.py, app/services/credential_service.py,
             app/models, app/dependencies
 """
 
+import json
 import os
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import JSONResponse
 from loguru import logger
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -28,6 +30,53 @@ from ...schemas.admin import SourceCredentialsUpdate
 from ...services.admin_service import get_all_config, get_system_health, set_config_value
 
 router = APIRouter(tags=["admin"])
+
+
+# -- Curated system-settings catalog ---------------------------------------
+#
+# The System settings tab edits exactly these four user-facing keys via typed
+# controls (toggles + a number input). The meta map is the single source of truth
+# for label/help/type, owned in code here. `restart` flags the scheduler-read
+# settings whose change only takes full effect after the next app restart (the DB
+# value is still saved immediately). `email_mining_enabled` resolves per-request,
+# so it has no restart note. `min` bounds the integer control + write validation.
+
+INTERVAL_MIN_MINUTES = 5
+
+SYSTEM_SETTINGS_META: dict[str, dict] = {
+    "email_mining_enabled": {
+        "type": "bool",
+        "label": "Email mining",
+        "help": "Mine connected inboxes for parts demand & vendor offers.",
+        "restart": False,
+    },
+    "proactive_matching_enabled": {
+        "type": "bool",
+        "label": "Proactive offer matching",
+        "help": "Auto-match inbound offers to open requirements.",
+        "restart": True,
+    },
+    "activity_tracking_enabled": {
+        "type": "bool",
+        "label": "CRM activity tracking",
+        "help": "Log emails/calls onto company & contact timelines.",
+        "restart": True,
+    },
+    "inbox_scan_interval_min": {
+        "type": "int",
+        "label": "Inbox scan interval (minutes)",
+        "help": "How often connected inboxes are scanned.",
+        "restart": True,
+        "min": INTERVAL_MIN_MINUTES,
+    },
+}
+
+# Internal watermark/job-state keys: never editable; optionally shown read-only.
+SYSTEM_JOB_STATE_KEYS: tuple[str, ...] = (
+    "teams_calls_last_poll",
+    "8x8_last_poll",
+    "proactive_last_scan",
+)
 
 
 def _iso(dt):
@@ -55,6 +104,32 @@ def api_get_config(
     return get_all_config(db)
 
 
+def _validate_typed_value(key: str, value: str) -> str:
+    """Coerce/validate a curated typed setting; return the canonical string to store.
+
+    Raises HTTPException(400) with a plain-language message on bad input. Keys not in
+    the curated catalog are passed through unchanged (legacy free-text behaviour).
+    """
+    meta = SYSTEM_SETTINGS_META.get(key)
+    if meta is None:
+        return value
+    raw = value.strip()
+    if meta["type"] == "bool":
+        normalized = raw.lower()
+        if normalized in ("true", "false"):
+            return normalized
+        raise HTTPException(400, "Value must be true or false.")
+    if meta["type"] == "int":
+        try:
+            n = int(raw)
+        except (ValueError, TypeError):
+            raise HTTPException(400, "Inbox scan interval must be a whole number.")
+        if n < meta["min"]:
+            raise HTTPException(400, "Inbox scan interval must be at least 5 minutes.")
+        return str(n)
+    return value
+
+
 @router.put("/api/admin/config/{key}")
 @limiter.limit("10/minute")
 def api_set_config(
@@ -64,10 +139,15 @@ def api_set_config(
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    result = set_config_value(db, key, body.value, user.email)
+    canonical = _validate_typed_value(key, body.value)
+    result = set_config_value(db, key, canonical, user.email)
     if "error" in result:
         raise HTTPException(result.get("status", 400), result["error"])
-    return result
+    # Surface success via the shared toast (htmx_app.js bridges showToast → $store.toast).
+    return JSONResponse(
+        content=result,
+        headers={"HX-Trigger": json.dumps({"showToast": {"message": "Setting saved.", "type": "success"}})},
+    )
 
 
 # -- System Health (settings_access) ---------------------------------------

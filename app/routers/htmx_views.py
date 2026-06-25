@@ -30,7 +30,6 @@ from ..constants import (
     ActivityType,
     AttributionStatus,
     BuyPlanStatus,
-    Channel,
     ContactStatus,
     OfferStatus,
     ProactiveMatchStatus,
@@ -40,6 +39,7 @@ from ..constants import (
     SourcingStatus,
     TaskStatus,
     TicketSource,
+    TicketStatus,
     UserRole,
 )
 from ..database import get_db
@@ -281,6 +281,7 @@ def _base_ctx(request: Request, user: User, current_view: str = "") -> dict:
         "vite_js": assets["js_file"],
         "vite_css": assets["css_files"],
         "now_utc": datetime.now(timezone.utc),
+        "build_commit": os.environ.get("BUILD_COMMIT", "dev"),
     }
 
 
@@ -400,6 +401,11 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
     )
     current_view = next((seg for seg in _VIEW_SEGMENTS if f"/{seg}" in path), "requisitions")
 
+    # Trouble-ticket console is admin-only — non-admins get a clean 403 instead of
+    # a page shell whose inner (admin-gated) partial would 403 on load.
+    if current_view == "trouble-tickets" and user.role != UserRole.ADMIN:
+        raise HTTPException(403, "Admin access required")
+
     # Module access gate (Phase 4b). If the requested view maps to a module the user may
     # not see, redirect to their first allowed module (admins always pass user_has_access
     # so they never redirect). Only the REQUESTED view is checked — the redirect target is
@@ -437,6 +443,12 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         # bookmarked /v2/search?mpn=<PN> paints the dossier on first load.
         mpn_qs = request.query_params.get("mpn", "").strip()
         partial_url = f"/v2/partials/search?mpn={quote(mpn_qs)}" if mpn_qs else "/v2/partials/search"
+    elif current_view == "settings":
+        # Thread ?tab= through so a deep-link / redirect (e.g. the legacy
+        # /v2/trouble-tickets → /v2/settings?tab=tickets) paints the right tab on
+        # first full-page load instead of defaulting to Connectors.
+        tab_qs = request.query_params.get("tab", "").strip()
+        partial_url = f"/v2/partials/settings?tab={quote(tab_qs)}" if tab_qs else "/v2/partials/settings"
     else:
         partial_url = f"/v2/partials/{current_view}"
     # Detail views: a trailing numeric id (/{view}/{id}) overrides the list partial with
@@ -714,7 +726,7 @@ async def requisitions_list_partial(
             "offset": offset,
             "users": users,
             "user_role": user.role,
-            "inbox_status": get_inbox_sync_status(user),
+            "inbox_status": get_inbox_sync_status(db, user),
         }
     )
     return template_response("htmx/partials/requisitions/list.html", ctx)
@@ -4655,12 +4667,40 @@ async def vendor_tab(
             .all()
         )
         activities_truncated = len(activities) >= 50
+
+        # Bucket activities into type-sections (the template renders by section), mirroring
+        # the account Activity tab. Vendors have no RFQ-contact merge (account-only), so
+        # this is a straight type bucketing of the vendor's ActivityLog rows.
+        _CALLS = frozenset({ActivityType.CALL_LOGGED})
+        _EMAILS = frozenset({ActivityType.EMAIL_SENT, ActivityType.EMAIL_RECEIVED})
+        _MEETINGS = frozenset({ActivityType.TEAMS_MESSAGE, ActivityType.WECHAT_MESSAGE, ActivityType.MEETING})
+        _NOTES = frozenset({ActivityType.NOTE, ActivityType.SALES_NOTE, ActivityType.CONTACT_NOTE})
+
+        sections: dict[str, list] = {"Calls": [], "Emails": [], "Meetings": [], "Notes": [], "Other": []}
+        for a in activities:
+            at = a.activity_type
+            if at in _CALLS:
+                sections["Calls"].append(a)
+            elif at in _EMAILS:
+                sections["Emails"].append(a)
+            elif at in _MEETINGS:
+                sections["Meetings"].append(a)
+            elif at in _NOTES:
+                sections["Notes"].append(a)
+            else:
+                sections["Other"].append(a)
+
+        # has_any_activity: drives empty-state vs. sections in the template
+        has_any_activity = bool(activities)
+
         ctx = _base_ctx(request, user, "vendors")
         ctx.update(
             {
                 "vendor": vendor,
                 "activities": activities,
+                "sections": sections,
                 "activities_truncated": activities_truncated,
+                "has_any_activity": has_any_activity,
             }
         )
         return template_response("htmx/partials/vendors/tabs/activity_tab.html", ctx)
@@ -10139,115 +10179,6 @@ async def edit_site_contact(
     return _render_contacts_list(request, user, company, db)
 
 
-@router.post(
-    "/v2/partials/customers/{company_id}/sites/{site_id}/contacts/{contact_id}/notes",
-    response_class=HTMLResponse,
-)
-async def add_site_contact_note(
-    request: Request,
-    company_id: int,
-    site_id: int,
-    contact_id: int,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Add a note to a site contact and return updated notes list."""
-    from ..models.intelligence import ActivityLog
-
-    # IDOR-safe: verify the site belongs to the company and the contact belongs to
-    # the site BEFORE writing — then gate on can_manage_account.
-    site = db.query(CustomerSite).filter(CustomerSite.id == site_id, CustomerSite.company_id == company_id).first()
-    if not site:
-        raise HTTPException(404, "Site not found")
-    company = db.query(Company).filter(Company.id == company_id).first()
-    if not company:
-        raise HTTPException(404, "Company not found")
-    if not can_manage_account(user, company, db):
-        raise HTTPException(403, "Not authorized")
-
-    contact = (
-        db.query(SiteContact).filter(SiteContact.id == contact_id, SiteContact.customer_site_id == site_id).first()
-    )
-    if not contact:
-        raise HTTPException(404, "Contact not found")
-
-    form = await request.form()
-    notes_text = form.get("notes", "").strip()
-    if not notes_text:
-        raise HTTPException(400, "Notes cannot be empty")
-
-    log = ActivityLog(
-        user_id=user.id,
-        activity_type=ActivityType.CONTACT_NOTE,
-        channel=Channel.MANUAL,
-        contact_name=contact.full_name or "",
-        contact_email=contact.email or "",
-        notes=notes_text,
-    )
-    db.add(log)
-    db.commit()
-    logger.info("Note added for site contact {} by {}", contact_id, user.email)
-
-    # Return refreshed notes
-    return await get_site_contact_notes(
-        request=request,
-        company_id=company_id,
-        site_id=site_id,
-        contact_id=contact_id,
-        user=user,
-        db=db,
-    )
-
-
-@router.get(
-    "/v2/partials/customers/{company_id}/sites/{site_id}/contacts/{contact_id}/notes",
-    response_class=HTMLResponse,
-)
-async def get_site_contact_notes(
-    request: Request,
-    company_id: int,
-    site_id: int,
-    contact_id: int,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Return notes timeline for a site contact."""
-    from ..models.intelligence import ActivityLog
-
-    contact = (
-        db.query(SiteContact).filter(SiteContact.id == contact_id, SiteContact.customer_site_id == site_id).first()
-    )
-    if not contact:
-        raise HTTPException(404, "Contact not found")
-
-    notes = (
-        (
-            db.query(ActivityLog)
-            .filter(
-                ActivityLog.activity_type == "contact_note",
-                ActivityLog.contact_email == contact.email,
-            )
-            .order_by(ActivityLog.created_at.desc())
-            .limit(20)
-            .all()
-        )
-        if contact.email
-        else []
-    )
-
-    return template_response(
-        "htmx/partials/customers/contact_notes.html",
-        {
-            "request": request,
-            "contact": contact,
-            "notes": notes,
-            "company_id": company_id,
-            "site_id": site_id,
-            "no_email_contact": not contact.email,
-        },
-    )
-
-
 # ── Sprint 5: Quote Workflow Completion ────────────────────────────────
 
 
@@ -13449,6 +13380,16 @@ def _prospect_toast(response, message: str, kind: str = "success") -> None:
     response.headers["HX-Trigger"] = json.dumps({"showToast": {"message": message, "type": kind}})
 
 
+def settings_toast(response, message: str, kind: str = "success") -> None:
+    """Attach a showToast HX-Trigger for settings mutation responses.
+
+    Called by settings mutation handlers to surface success/error feedback via the
+    Alpine $store.toast. Mirrors _prospect_toast but is scoped to settings so later
+    tasks can import it cleanly.
+    """
+    response.headers["HX-Trigger"] = json.dumps({"showToast": {"message": message, "type": kind}})
+
+
 def _wants_detail(request: Request) -> bool:
     """True when an action came from the detail view (targets #main-content) rather than
     from an in-grid card (targets #prospect-<id>) — so we return the right partial."""
@@ -14080,14 +14021,47 @@ async def settings_system_tab(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """System config tab — admin only."""
+    """System config tab — admin only.
+
+    Renders the curated typed controls (3 toggles + 1 number input) for the four user-
+    facing flags. Effective values come from the Task-10 resolver (DB row wins, else the
+    env-backed default) so each control reflects reality. Internal watermark keys are
+    surfaced read-only in a collapsed "Job state" disclosure, never as editable
+    controls.
+    """
     if user.role != UserRole.ADMIN:
         raise HTTPException(403, "Admin only")
-    from ..services.admin_service import get_all_config
+    from ..config import settings as app_settings
+    from ..routers.admin.system import SYSTEM_JOB_STATE_KEYS, SYSTEM_SETTINGS_META
+    from ..services.admin_service import (
+        get_all_config,
+        get_effective_flag,
+        get_effective_int,
+    )
 
-    config = get_all_config(db)
+    # Resolve each curated setting's effective value, threading the env default so a
+    # missing DB row falls back to the same value the background jobs read today.
+    env_defaults = {
+        "email_mining_enabled": app_settings.email_mining_enabled,
+        "proactive_matching_enabled": app_settings.proactive_matching_enabled,
+        "activity_tracking_enabled": app_settings.activity_tracking_enabled,
+        "inbox_scan_interval_min": app_settings.inbox_scan_interval_min,
+    }
+    settings_view = []
+    for key, meta in SYSTEM_SETTINGS_META.items():
+        if meta["type"] == "bool":
+            value = get_effective_flag(db, key, env_defaults[key])
+        else:
+            value = get_effective_int(db, key, env_defaults[key])
+        settings_view.append({"key": key, "value": value, **meta})
+
+    # Read-only job-state watermark rows (collapsed disclosure).
+    all_config = get_all_config(db)
+    job_state = [row for row in all_config if row["key"] in SYSTEM_JOB_STATE_KEYS]
+
     ctx = _base_ctx(request, user, "settings")
-    ctx["config"] = config
+    ctx["system_settings"] = settings_view
+    ctx["job_state"] = job_state
     return template_response("htmx/partials/settings/system.html", ctx)
 
 
@@ -14102,7 +14076,7 @@ async def settings_profile_tab(
 
     ctx = _base_ctx(request, user, "settings")
     ctx["profile_user"] = user
-    ctx["inbox_status"] = get_inbox_sync_status(user)
+    ctx["inbox_status"] = get_inbox_sync_status(db, user)
     return template_response("htmx/partials/settings/profile.html", ctx)
 
 
@@ -14131,7 +14105,7 @@ async def settings_scan_now(
     await _run_inbox_scan_now(user, db)
     db.refresh(user)
     ctx = _base_ctx(request, user, "settings")
-    ctx["inbox_status"] = get_inbox_sync_status(user)
+    ctx["inbox_status"] = get_inbox_sync_status(db, user)
     return template_response("htmx/partials/settings/_mailbox_sync_card.html", ctx)
 
 
@@ -14151,6 +14125,113 @@ async def toggle_8x8(
     )
 
 
+@router.post("/api/user/profile", response_class=HTMLResponse)
+async def update_user_profile(
+    request: Request,
+    name: str = Form(""),
+    extension: str = Form(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Update the current user's display name and 8x8 extension.
+
+    Validates name (non-empty, ≤255 chars) and extension (≤20 chars). Returns 400 JSON
+    on bad input; on success commits and emits a showToast trigger.
+    """
+    from fastapi.responses import JSONResponse
+
+    name = name.strip()
+    extension = extension.strip()
+
+    if not name or len(name) > 255:
+        req_id = getattr(request.state, "request_id", "unknown")
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Name is required.", "status_code": 400, "request_id": req_id},
+        )
+    if len(extension) > 20:
+        req_id = getattr(request.state, "request_id", "unknown")
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Extension must be 20 characters or fewer.", "status_code": 400, "request_id": req_id},
+        )
+
+    user.name = name
+    user.eight_by_eight_extension = extension
+    db.commit()
+    logger.info("Profile updated", user_id=user.id)
+    response = HTMLResponse(status_code=200)
+    settings_toast(response, "Profile updated.")
+    return response
+
+
+@router.post("/api/user/toggle-buyplan-email", response_class=HTMLResponse)
+async def toggle_buyplan_email(
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Toggle buy-plan email notifications for the current user."""
+    user.notify_buyplan_email_enabled = not user.notify_buyplan_email_enabled
+    db.commit()
+    state = "enabled" if user.notify_buyplan_email_enabled else "disabled"
+    logger.info("Buy-plan email notifications toggled", user_id=user.id, enabled=user.notify_buyplan_email_enabled)
+    response = HTMLResponse(status_code=200)
+    settings_toast(response, f"Buy-plan email notifications {state}.")
+    return response
+
+
+@router.post("/api/user/toggle-new-offer-alert", response_class=HTMLResponse)
+async def toggle_new_offer_alert(
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Toggle new-offer alerts for the current user."""
+    user.notify_new_offer_alert_enabled = not user.notify_new_offer_alert_enabled
+    db.commit()
+    state = "enabled" if user.notify_new_offer_alert_enabled else "disabled"
+    logger.info("New-offer alerts toggled", user_id=user.id, enabled=user.notify_new_offer_alert_enabled)
+    response = HTMLResponse(status_code=200)
+    settings_toast(response, f"New-offer alerts {state}.")
+    return response
+
+
+def _render_data_ops(request: Request, user: User, db: Session):
+    """Render the Data Ops tab partial — vendor/company dedup suggestions.
+
+    Each scan is guarded independently. A scan that RAISES sets a per-scan
+    ``*_scan_failed`` flag so the template can render a distinct error block instead
+    of swallowing the failure into the reassuring "no duplicates found" empty state
+    (a crashed scan must never look like a clean dataset). Reused by the merge
+    endpoints so a successful merge re-renders the surrounding list and stale pairs
+    drop without a manual refresh.
+    """
+    vendor_dupes: list = []
+    company_dupes: list = []
+    vendor_scan_failed = False
+    company_scan_failed = False
+    try:
+        from ..vendor_utils import find_vendor_dedup_candidates
+
+        vendor_dupes = find_vendor_dedup_candidates(db, threshold=85, limit=30)
+    except Exception as e:
+        vendor_scan_failed = True
+        logger.warning(f"Vendor dedup scan failed: {e}")
+    try:
+        from ..company_utils import find_company_dedup_candidates
+
+        company_dupes = find_company_dedup_candidates(db, threshold=85, limit=30)
+    except Exception as e:
+        company_scan_failed = True
+        logger.warning(f"Company dedup scan failed: {e}")
+
+    ctx = _base_ctx(request, user, "settings")
+    ctx["vendor_dupes"] = vendor_dupes
+    ctx["company_dupes"] = company_dupes
+    ctx["vendor_scan_failed"] = vendor_scan_failed
+    ctx["company_scan_failed"] = company_scan_failed
+    return template_response("htmx/partials/settings/data_ops.html", ctx)
+
+
 @router.get("/v2/partials/settings/data-ops", response_class=HTMLResponse)
 async def settings_data_ops_tab(
     request: Request,
@@ -14163,25 +14244,7 @@ async def settings_data_ops_tab(
     if not is_admin(user):
         raise HTTPException(403, "Admin only")
 
-    vendor_dupes = []
-    company_dupes = []
-    try:
-        from ..vendor_utils import find_vendor_dedup_candidates
-
-        vendor_dupes = find_vendor_dedup_candidates(db, threshold=85, limit=30)
-    except Exception as e:
-        logger.warning(f"Vendor dedup scan failed: {e}")
-    try:
-        from ..company_utils import find_company_dedup_candidates
-
-        company_dupes = find_company_dedup_candidates(db, threshold=85, limit=30)
-    except Exception as e:
-        logger.warning(f"Company dedup scan failed: {e}")
-
-    ctx = _base_ctx(request, user, "settings")
-    ctx["vendor_dupes"] = vendor_dupes
-    ctx["company_dupes"] = company_dupes
-    return template_response("htmx/partials/settings/data_ops.html", ctx)
+    return _render_data_ops(request, user, db)
 
 
 @router.get("/v2/partials/settings/api-keys", response_class=HTMLResponse)
@@ -14194,6 +14257,11 @@ async def settings_api_keys_tab(
     from fastapi.responses import RedirectResponse
 
     return RedirectResponse("/v2/partials/settings/connectors", status_code=302)
+
+
+# Retired data providers — excluded from the connectors tab and the Test-all sweep.
+# Single source of truth referenced by both _build_connector_groups and connectors_test_all.
+_DEAD_CONNECTORS = frozenset({"rocketreach_enrichment", "clearbit_enrichment"})
 
 
 def _build_connector_field(db, source_name: str, env_var: str) -> dict:
@@ -14283,14 +14351,12 @@ def _build_connector_groups(db, request) -> list[dict]:
     """
     from ..services import connector_service
 
-    _DEAD = {"rocketreach_enrichment", "clearbit_enrichment"}
-
     sources = db.query(ApiSource).order_by(ApiSource.display_name).all()
 
     buckets: dict[str, list[dict]] = {key: [] for key, _ in connector_service.GROUP_ORDER}
 
     for src in sources:
-        if src.name in _DEAD:
+        if src.name in _DEAD_CONNECTORS:
             continue
         group_key = connector_service.connector_group(src)
         if group_key not in buckets:
@@ -14365,12 +14431,11 @@ async def connectors_test_all(
 
     from ..routers.sources import run_source_test
 
-    _DEAD = {"rocketreach_enrichment", "clearbit_enrichment"}
     sources = db.query(ApiSource).order_by(ApiSource.display_name).all()
 
     tested: list[dict] = []
     for src in sources:
-        if src.name in _DEAD or not src.is_active:
+        if src.name in _DEAD_CONNECTORS or not src.is_active:
             continue
         enriched = _enrich_source(src, db)
         if not enriched["testable"]:
@@ -14381,8 +14446,11 @@ async def connectors_test_all(
             logger.warning("Test-all probe failed for {}: {}", src.name, e)
         tested.append(_enrich_source(src, db))
 
+    failed = sum(1 for s in tested if s["state"] == "error")
     ctx = _base_ctx(request, user, "settings")
     ctx["tested_sources"] = tested
+    ctx["tested_count"] = len(tested)
+    ctx["failed_count"] = failed
     return template_response("htmx/partials/settings/_connectors_testall.html", ctx)
 
 
@@ -14405,12 +14473,18 @@ async def admin_vendor_merge(
     try:
         result = _merge(keep_id, remove_id, db)
         db.commit()
-        return HTMLResponse(
-            f'<p class="text-sm text-emerald-600 py-2">Merged into {html_mod.escape(str(result.get("kept_name", "vendor")))}. '
-            f"{result.get('reassigned', 0)} records reassigned.</p>"
-        )
     except ValueError as e:
-        return HTMLResponse(f'<p class="text-sm text-rose-600 py-2">Error: {html_mod.escape(str(e))}</p>')
+        db.rollback()
+        message, kind = f"Vendor merge failed: {e}", "error"
+    else:
+        kept = db.get(VendorCard, result.get("kept", keep_id))
+        kept_name = kept.display_name if kept and kept.display_name else "vendor"
+        message = f"Merged into {kept_name}. {result.get('reassigned', 0)} records reassigned."
+        kind = "success"
+
+    resp = _render_data_ops(request, user, db)
+    settings_toast(resp, message, kind=kind)
+    return resp
 
 
 @router.post("/v2/partials/admin/company-merge", response_class=HTMLResponse)
@@ -14432,11 +14506,17 @@ async def admin_company_merge(
     try:
         result = merge_companies(keep_id, remove_id, db)
         db.commit()
-        return HTMLResponse(
-            f'<p class="text-sm text-emerald-600 py-2">Merged into {html_mod.escape(str(result.get("kept_name", "company")))}.</p>'
-        )
-    except (ValueError, Exception) as e:
-        return HTMLResponse(f'<p class="text-sm text-rose-600 py-2">Error: {html_mod.escape(str(e))}</p>')
+    except Exception as e:
+        db.rollback()
+        message, kind = f"Company merge failed: {e}", "error"
+    else:
+        kept = db.get(Company, result.get("kept", keep_id))
+        kept_name = kept.name if kept and kept.name else "company"
+        message, kind = f"Merged into {kept_name}.", "success"
+
+    resp = _render_data_ops(request, user, db)
+    settings_toast(resp, message, kind=kind)
+    return resp
 
 
 # ── Proactive Part Match ─────────────────────────────────────────────
@@ -16447,22 +16527,26 @@ async def bulk_unarchive(
 
 
 @router.get("/v2/partials/trouble-tickets/workspace", response_class=HTMLResponse)
-async def trouble_tickets_workspace(request: Request, user: User = Depends(require_user)):
-    """Trouble Tickets workspace — loaded into #main-content."""
+async def trouble_tickets_workspace(request: Request, user: User = Depends(require_admin)):
+    """Trouble Tickets workspace — loaded into #settings-content (admin-only
+    console)."""
     return template_response(
         "htmx/partials/tickets/workspace.html",
         {**_base_ctx(request, user, "tickets")},
     )
 
 
-@router.get("/v2/partials/trouble-tickets/list", response_class=HTMLResponse)
-async def trouble_tickets_list(
-    request: Request,
-    status: str = "",
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Trouble Tickets list partial — grouped by root cause, filterable by status."""
+def _build_ticket_list_context(db: Session, status: str | None) -> dict:
+    """Query + group report_button tickets for the list partial.
+
+    Shared by trouble_tickets_list and error_reports.analyze_tickets so both
+    render the same grouped view. A logical ``status == "open"`` expands to the
+    (submitted, in_progress) set so in-progress tickets stay visible under the
+    "Open" pill; any other truthy status is an exact match; falsy means "all".
+
+    Called by: trouble_tickets_list, error_reports.analyze_tickets.
+    Depends on: TroubleTicket / RootCauseGroup models.
+    """
     from app.models.root_cause_group import RootCauseGroup
     from app.models.trouble_ticket import TroubleTicket
 
@@ -16471,7 +16555,9 @@ async def trouble_tickets_list(
         .options(joinedload(TroubleTicket.root_cause_group), joinedload(TroubleTicket.submitter))
         .filter(TroubleTicket.source == TicketSource.REPORT_BUTTON)
     )
-    if status:
+    if status == "open":
+        q = q.filter(TroubleTicket.status.in_([TicketStatus.SUBMITTED, TicketStatus.IN_PROGRESS]))
+    elif status:
         q = q.filter(TroubleTicket.status == status)
     q = q.order_by(desc(TroubleTicket.created_at))
     tickets = q.limit(200).all()
@@ -16492,16 +16578,26 @@ async def trouble_tickets_list(
         else:
             ungrouped.append(t)
 
+    return {
+        "total": total,
+        "groups": groups,
+        "grouped": grouped,
+        "ungrouped": ungrouped,
+        "current_status": status or "",
+    }
+
+
+@router.get("/v2/partials/trouble-tickets/list", response_class=HTMLResponse)
+async def trouble_tickets_list(
+    request: Request,
+    status: str = "",
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Trouble Tickets list partial — grouped by root cause, filterable by status."""
     return template_response(
         "htmx/partials/tickets/list.html",
-        {
-            **_base_ctx(request, user, "tickets"),
-            "total": total,
-            "groups": groups,
-            "grouped": grouped,
-            "ungrouped": ungrouped,
-            "current_status": status,
-        },
+        {**_base_ctx(request, user, "tickets"), **_build_ticket_list_context(db, status)},
     )
 
 
@@ -16509,10 +16605,11 @@ async def trouble_tickets_list(
 async def trouble_ticket_detail(
     request: Request,
     ticket_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Trouble Ticket detail partial — swapped into #main-content."""
+    """Trouble Ticket detail partial — swapped into #main-content (admin-only
+    console)."""
     from app.models.trouble_ticket import TroubleTicket
 
     ticket = (

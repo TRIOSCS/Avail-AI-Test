@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="app-build" content="{{ build_commit|default('') }}">
   <title>{% block title %}AvailAI{% endblock %}</title>
   <!-- Aptos (Office 365/Win11) → Segoe UI → system fallbacks -->
   {% for css_file in vite_css|default([]) %}

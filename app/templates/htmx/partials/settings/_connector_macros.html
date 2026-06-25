@@ -147,6 +147,7 @@ hx-on::after-request='if(event.detail.successful){htmx.ajax("GET","/v2/partials/
                {% if s.state == 'needs_setup' %}disabled{% endif %}
                hx-put="/api/sources/{{ s.id }}/activate"
                hx-trigger="change"
+               {% if s.state == 'live' %}hx-confirm='Turn off {{ s.display_name|e }}? Searches will return fewer results until it&#39;s back on.'{% endif %}
                hx-target="#connector-card-{{ s.id }}"
                hx-swap="none"
                {{ _refresh_attr(s) }}
@@ -178,6 +179,7 @@ hx-on::after-request='if(event.detail.successful){htmx.ajax("GET","/v2/partials/
         <button class="btn-md text-red-600"
                 type="button"
                 hx-post="/auth/clay/disconnect"
+                hx-confirm="Disconnect Clay enrichment for everyone? This stops enrichment until reconnected."
                 hx-target="#connector-card-{{ s.id }}"
                 hx-swap="none"
                 {{ _refresh_attr(s) }}>Disconnect</button>

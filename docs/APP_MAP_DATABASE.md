@@ -31,6 +31,9 @@
 | commodity_tags | JSON | User specialties |
 | timezone | String 100 | |
 | eight_by_eight_extension | String 20 | Phone system |
+| eight_by_eight_enabled | Boolean | default False |
+| notify_buyplan_email_enabled | Boolean NOT NULL | default True; Profile-tab toggle — suppress buy-plan email notifications (migration 151) |
+| notify_new_offer_alert_enabled | Boolean NOT NULL | default True; Profile-tab toggle — suppress new-offer alert notifications (migration 151) |
 | last_login_at | UTCDateTime, nullable | Migration 148. Stamped on every successful OAuth callback. NULL + no azure_id ⇒ an "Invited" (pre-provisioned, never-logged-in) row. |
 | access_overrides | JSON, default `{}` | Migration 148. **Explicit per-user access overrides only**: `{access_key: bool}` keyed by `constants.AccessKey`. An *absent* key means "use the role default" (`constants.ROLE_ACCESS_DEFAULTS`) — the dict never stores the role default, so it stays empty until an admin grants/revokes a specific key. Read by `dependencies.user_has_access` (override wins over role default; admin → all). `ops_verification` is NOT stored here (it lives in `verification_group_members`). |
 | invited_by_id | FK -> users (SET NULL), nullable | Migration 148. The admin who invited this user (set by the Users-tab invite flow); SET NULL so the row survives the inviter's deletion. |
@@ -853,7 +856,11 @@ New columns (vendor parity):
 
 > Previously the CHECK constraint covered 3 scope columns (requisition_id, company_id, site_contact_id); it now extends to all 5. Tasks scoped to `vendor_contact_id` only are **not** surfaced by `get_open_tasks_for_vendor_card` (which queries by `vendor_card_id`); see `# NOTE` in `app/services/task_service.py`.
 
-**`trouble_tickets`** — Bug reports with screenshots, AI diagnosis
+**`trouble_tickets`** — Bug reports with screenshots, captured runtime context
+(`console_errors`, `network_errors`, `browser_info`, `auto_captured_context`,
+`current_view`), and AI diagnosis (`diagnosis` JSON, `generated_prompt`, `diagnosed_at`,
+`cost_tokens`, `cost_usd`) populated by `ticket_diagnosis_service`. See APP_MAP_INTERACTIONS
+"Trouble Tickets — Report capture + AI diagnosis".
 **`root_cause_groups`** — Grouped similar tickets
 **`notifications`** — User notification queue
 
@@ -862,7 +869,15 @@ New columns (vendor parity):
 ### System & Config
 
 **`api_sources`** — Supplier connector config (credentials, quotas, health)
-**`system_config`** — Key-value app settings
+**`system_config`** — Key-value app settings. **DB row is authoritative over env** for
+the 4 System-tab feature flags (`email_mining_enabled`, `proactive_matching_enabled`,
+`activity_tracking_enabled`, `inbox_scan_interval_min`): consumers resolve via
+`admin_service.get_effective_flag/get_effective_int(db, key, env_default)` — the row's
+value wins when present/parseable, else the env-backed `settings.<flag>` is the fallback.
+A startup reconcile (`startup._reconcile_system_config`) mirrors the env value into each
+never-admin-edited row (`updated_by IS NULL`) so behaviour doesn't flip at cutover;
+`set_config_value` invalidates the 5-min in-memory config cache so a toggle takes effect
+promptly. `updated_by IS NULL` == never edited via the UI.
 
 SP4 Account Reclamation config keys (sourced from `.env` / `app/config.py`):
 | Key | Type | Default | Description |
