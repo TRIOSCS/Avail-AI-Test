@@ -20,7 +20,7 @@
       {% if count > 0 %}
       <button @click="selectCommodity('{{ sub }}')"
               x-show='!categorySearch || {{ (display_names.get(sub, sub)|lower)|tojson }}.includes(categorySearch.toLowerCase())'
-              :class="commodity === '{{ sub }}' ? 'bg-brand-100 text-brand-800 font-semibold border-l-[3px] border-brand-500' : 'text-gray-600 hover:bg-gray-50 border-l-[3px] border-transparent'"
+              :class="commodity === '{{ sub }}' ? 'bg-accent-100 text-accent-800 font-semibold border-l-[3px] border-accent-500' : 'text-gray-600 hover:bg-gray-50 border-l-[3px] border-transparent'"
               :aria-current="commodity === '{{ sub }}' ? 'true' : undefined"
               class="w-full text-left px-3 py-1.5 text-sm rounded-r flex items-center justify-between transition-colors">
         <span>{{ display_names.get(sub, sub) }}</span>

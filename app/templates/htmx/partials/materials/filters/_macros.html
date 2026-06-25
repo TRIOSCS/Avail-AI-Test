@@ -1,19 +1,38 @@
 {# Filter macros for faceted search sidebar.
-   Called by: subfilters.html
+   Called by: subfilters.html, workspace.html (removable_chip)
    Depends on: Alpine.js materialsFilter() component on parent
 #}
+
+{% macro removable_chip(label, tone, remove_expr) %}
+{# Active-filter pill with a × dismiss button.
+   label       — raw HTML: may contain <span x-text="…"> or plain text.
+   tone        — color key: 'blue' | 'amber' | 'gray' | 'accent'.
+   remove_expr — Alpine expression for the button @click handler.
+#}
+{% set tone_map = {
+  'blue':   ('bg-blue-50',   'text-blue-700',   'border-blue-200',   'hover:text-blue-900'),
+  'amber':  ('bg-amber-50',  'text-amber-700',  'border-amber-200',  'hover:text-amber-900'),
+  'gray':   ('bg-gray-100',  'text-gray-600',   'border-gray-200',   'hover:text-gray-900'),
+  'accent': ('bg-accent-50', 'text-accent-700', 'border-accent-200', 'hover:text-accent-900'),
+} %}
+{% set t = tone_map.get(tone, tone_map['gray']) %}
+<span class="chip {{ t[0] }} {{ t[1] }} {{ t[2] }}">
+  {{ label|safe }}
+  <button @click="{{ remove_expr }}" class="{{ t[3] }} ml-0.5" aria-label="Remove filter">&times;</button>
+</span>
+{% endmacro %}
 
 {% macro checkbox_group(spec_key, display_name, values, counts, active_values) %}
 {# Fold state lives on the parent materialsFilter component (ui.facetExpanded[spec_key]) so it
    survives HTMX re-renders of this partial; no partial-local x-data. spec_key is [a-z0-9_]. #}
 <div class="mb-3">
-  <h4 class="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-1.5">{{ display_name }}</h4>
+  <h4 class="text-[11px] font-semibold text-gray-400 uppercase tracking-widest mb-1.5">{{ display_name }}</h4>
   {% if values|length > 12 %}
   {# Long enum facet (>12 values): a search-within box (mirrors typeahead_group) so users
      don't have to scroll a long list. State lives on the parent (ui.facetSearch[spec_key]). #}
   <input type="text" x-model="ui.facetSearch['{{ spec_key }}']" placeholder="Search {{ display_name|lower }}…"
          aria-label="Search {{ display_name }}"
-         class="w-full mb-1 px-2 py-1 text-[13px] border border-gray-200 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500">
+         class="w-full mb-1 px-2 py-1 text-[13px] border border-gray-200 rounded input-focus">
   {% endif %}
   {# A search box only helps if its matches are reachable: when present, the collapsed clamp
      must scroll (overflow-y-auto) instead of hiding matches below the fold (overflow-hidden). #}
@@ -26,7 +45,7 @@
       <input type="checkbox" value="{{ val }}"
              :checked='(subFilters[{{ spec_key|tojson }}] || []).includes({{ val|tojson }})'
              @change='toggleFilter({{ spec_key|tojson }}, {{ val|tojson }})'
-             class="rounded border-gray-300 text-brand-600 focus:ring-brand-500 h-3.5 w-3.5">
+             class="rounded border-gray-300 text-accent-600 focus:ring-accent-500 h-3.5 w-3.5">
       <span class="text-gray-700 truncate flex-1 text-[13px]">{{ val }}</span>
       <span class="text-[11px] text-gray-400 tabular-nums">{{ counts[val] if (counts and val in counts) else 0 }}</span>
     </label>
@@ -35,7 +54,7 @@
   {% if values|length > 6 %}
   <button @click="ui.facetExpanded['{{ spec_key }}'] = !ui.facetExpanded['{{ spec_key }}']"
           :aria-expanded="!!ui.facetExpanded['{{ spec_key }}']"
-          class="text-[11px] text-brand-600 hover:text-brand-700 font-medium mt-1 px-2"
+          class="text-[11px] text-accent-600 hover:text-accent-700 font-medium mt-1 px-2"
           x-text="ui.facetExpanded['{{ spec_key }}'] ? 'Show less' : 'Show all ({{ values|length }})'"></button>
   {% endif %}
 </div>
@@ -55,7 +74,7 @@
      single quotes), so chip.value is safe inside single quotes — a double-quoted attribute
      would close early and break Alpine init. spec_key is [a-z0-9_]. #}
   <button type="button" @click='toggleNumericChip({{ spec_key|tojson }}, {{ chip.value|tojson }})'
-          :class='(subFilters[{{ (spec_key ~ "__vals")|tojson }}] || []).includes({{ chip.value|tojson }}) ? "bg-brand-50 text-brand-700 border-brand-300" : "bg-white text-gray-500 border-gray-200 hover:border-gray-300"'
+          :class='(subFilters[{{ (spec_key ~ "__vals")|tojson }}] || []).includes({{ chip.value|tojson }}) ? "bg-accent-50 text-accent-700 border-accent-300" : "bg-white text-gray-500 border-gray-200 hover:border-gray-300"'
           class="px-2 py-0.5 text-[12px] border rounded-md transition-colors tabular-nums">
     {{ '%g'|format(chip.value) }} <span class="opacity-60">({{ counts.get(chip.value|string, 0) }})</span>
   </button>
@@ -66,7 +85,7 @@
 
 {% macro range_input(spec_key, display_name, range_data, unit, active_min, active_max) %}
 <div class="mb-3">
-  <h4 class="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-1.5">
+  <h4 class="text-[11px] font-semibold text-gray-400 uppercase tracking-widest mb-1.5">
     {{ display_name }}{% if unit %} <span class="text-gray-300 font-normal">({{ unit }})</span>{% endif %}
   </h4>
   {% if range_data and range_data.min is not none %}
@@ -75,14 +94,14 @@
            :value="subFilters['{{ spec_key }}_min'] || ''"
            @input.debounce.600ms="setRange('{{ spec_key }}', 'min', $event.target.value)"
            aria-label="{{ display_name }} minimum"
-           class="w-full px-2 py-1.5 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 tabular-nums"
+           class="w-full px-2 py-1.5 text-sm border border-gray-200 rounded input-focus tabular-nums"
            min="{{ range_data.min }}" max="{{ range_data.max }}" step="any">
     <span class="text-gray-300 text-xs flex-shrink-0">&ndash;</span>
     <input type="number" placeholder="{{ '%.4g'|format(range_data.max) }}"
            :value="subFilters['{{ spec_key }}_max'] || ''"
            @input.debounce.600ms="setRange('{{ spec_key }}', 'max', $event.target.value)"
            aria-label="{{ display_name }} maximum"
-           class="w-full px-2 py-1.5 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 tabular-nums"
+           class="w-full px-2 py-1.5 text-sm border border-gray-200 rounded input-focus tabular-nums"
            min="{{ range_data.min }}" max="{{ range_data.max }}" step="any">
   </div>
   {% else %}
@@ -93,15 +112,15 @@
 
 {% macro boolean_toggle(spec_key, display_name, counts, active_value) %}
 <div class="mb-3">
-  <h4 class="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-1.5">{{ display_name }}</h4>
+  <h4 class="text-[11px] font-semibold text-gray-400 uppercase tracking-widest mb-1.5">{{ display_name }}</h4>
   <div class="flex gap-1.5">
     <button @click="toggleFilter('{{ spec_key }}', 'true')"
-            :class="(subFilters['{{ spec_key }}'] || []).includes('true') ? 'bg-brand-50 text-brand-700 border-brand-300' : 'bg-white text-gray-500 border-gray-200 hover:border-gray-300'"
+            :class="(subFilters['{{ spec_key }}'] || []).includes('true') ? 'bg-accent-50 text-accent-700 border-accent-300' : 'bg-white text-gray-500 border-gray-200 hover:border-gray-300'"
             class="px-3 py-1 text-sm border rounded-md transition-colors">
       Yes <span class="text-[11px] opacity-60 tabular-nums">({{ counts['true'] if (counts and 'true' in counts) else 0 }})</span>
     </button>
     <button @click="toggleFilter('{{ spec_key }}', 'false')"
-            :class="(subFilters['{{ spec_key }}'] || []).includes('false') ? 'bg-brand-50 text-brand-700 border-brand-300' : 'bg-white text-gray-500 border-gray-200 hover:border-gray-300'"
+            :class="(subFilters['{{ spec_key }}'] || []).includes('false') ? 'bg-accent-50 text-accent-700 border-accent-300' : 'bg-white text-gray-500 border-gray-200 hover:border-gray-300'"
             class="px-3 py-1 text-sm border rounded-md transition-colors">
       No <span class="text-[11px] opacity-60 tabular-nums">({{ counts['false'] if (counts and 'false' in counts) else 0 }})</span>
     </button>
@@ -113,10 +132,10 @@
 {# Open-vocabulary facet (no canonical enum_values, e.g. connector series): a search box
    over the top-N observed values by count. Avoids a thousand-row (0) dump. #}
 <div class="mb-3">
-  <h4 class="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-1.5">{{ display_name }}</h4>
+  <h4 class="text-[11px] font-semibold text-gray-400 uppercase tracking-widest mb-1.5">{{ display_name }}</h4>
   <input type="text" x-model="ui.facetSearch['{{ spec_key }}']" placeholder="Search {{ display_name|lower }}…"
          aria-label="Search {{ display_name }}"
-         class="w-full mb-1 px-2 py-1 text-[13px] border border-gray-200 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500">
+         class="w-full mb-1 px-2 py-1 text-[13px] border border-gray-200 rounded input-focus">
   <div class="space-y-0.5 max-h-40 overflow-y-auto">
     {% for val in values %}
     {# Single-quoted attributes: |tojson emits double quotes, so it is safe inside single
@@ -126,7 +145,7 @@
       <input type="checkbox" value="{{ val }}"
              :checked='(subFilters[{{ spec_key|tojson }}] || []).includes({{ val|tojson }})'
              @change='toggleFilter({{ spec_key|tojson }}, {{ val|tojson }})'
-             class="rounded border-gray-300 text-brand-600 focus:ring-brand-500 h-3.5 w-3.5">
+             class="rounded border-gray-300 text-accent-600 focus:ring-accent-500 h-3.5 w-3.5">
       <span class="text-gray-700 truncate flex-1 text-[13px]">{{ val }}</span>
       <span class="text-[11px] text-gray-400 tabular-nums">{{ counts[val] if (counts and val in counts) else 0 }}</span>
     </label>
@@ -142,13 +161,13 @@
 {# Collapsible section header (chevron + label + optional active-count badge). state_var,
    badge_show, badge_text are Alpine expressions on the parent materialsFilter component. #}
 <button @click="{{ state_var }} = !{{ state_var }}" :aria-expanded="{{ state_var }}" aria-controls="{{ panel_id }}"
-        class="w-full flex items-center justify-between text-[10px] font-semibold text-gray-400 uppercase tracking-widest">
+        class="w-full flex items-center justify-between text-[11px] font-semibold text-gray-400 uppercase tracking-widest">
   <span class="flex items-center gap-1.5">
     <svg class="w-3 h-3 transition-transform" :class="{{ state_var }} && 'rotate-90'" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
     {{ label }}
   </span>
   <template x-if="{{ badge_show }}">
-    <span class="bg-brand-100 text-brand-700 rounded-full px-1.5 text-[10px] font-medium normal-case" x-text="{{ badge_text }}"></span>
+    <span class="bg-accent-100 text-accent-700 rounded-full px-1.5 text-[10px] font-medium normal-case" x-text="{{ badge_text }}"></span>
   </template>
 </button>
 {% endmacro %}
