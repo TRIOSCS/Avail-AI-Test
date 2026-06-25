@@ -384,12 +384,19 @@
   {% set flag_count = bp.ai_flags|length if bp.ai_flags else 0 %}
   {% if bp.ai_summary or flag_count > 0 %}
   <div class="border-t border-gray-100">
-    <button @click="showAi = !showAi" class="w-full px-4 py-2 flex items-center justify-between text-left hover:bg-gray-50 transition-colors">
-      <div class="flex items-center gap-2">
-        <svg class="w-4 h-4 text-brand-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
-        <span class="text-sm font-semibold text-gray-700">AI Insights</span>
+    {% set top_flag = top_flag if top_flag is defined else None %}
+    <button @click="showAi = !showAi" class="w-full px-4 py-2 flex items-center justify-between gap-3 text-left hover:bg-gray-50 transition-colors">
+      <div class="flex items-center gap-2 min-w-0">
+        <svg class="w-4 h-4 flex-shrink-0 text-brand-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+        <span class="text-sm font-semibold text-gray-700 flex-shrink-0">AI Insights</span>
         {% if flag_count > 0 %}
-        <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-100 text-amber-700 text-xs font-bold">{{ flag_count }}</span>
+        <span class="inline-flex items-center justify-center w-5 h-5 flex-shrink-0 rounded-full bg-amber-100 text-amber-700 text-xs font-bold">{{ flag_count }}</span>
+        {% endif %}
+        {# State the actual top issue at first glance — the verbatim flag reason, not just a count. #}
+        {% if top_flag and top_flag.message %}
+        <span class="text-xs truncate
+                     {% if top_flag.severity == 'critical' %}text-rose-600{% elif top_flag.severity == 'warning' %}text-amber-700{% else %}text-gray-500{% endif %}"
+              title="{{ top_flag.message }}">{{ top_flag.message }}</span>
         {% endif %}
       </div>
       {{ collapse_chevron("showAi") }}
