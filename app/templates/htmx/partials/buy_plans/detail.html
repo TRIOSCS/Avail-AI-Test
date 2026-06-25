@@ -35,19 +35,22 @@
         <h1 class="text-2xl font-bold text-gray-900">Buy Plan #{{ bp.id }}</h1>
         {{ status_badge(bp.status) }}
         {% if bp.is_stock_sale %}
-        <span class="inline-flex px-2.5 py-1 text-xs font-semibold rounded-full bg-purple-100 text-purple-800">
-          <svg class="w-3 h-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
+        {# Finding #7: bespoke stock-sale tag → .chip primitive #}
+        <span class="chip bg-purple-50 text-purple-700 border-purple-200 inline-flex items-center gap-1">
+          <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
           Stock Sale
         </span>
         {% endif %}
       </div>
-      <div class="flex items-center gap-4 text-sm text-gray-600">
-        <span class="font-semibold text-gray-900">${{ '{:,.2f}'.format(total_cost) }}</span>
-        <span class="{% if margin >= 30 %}text-emerald-700{% elif margin >= 15 %}text-amber-700{% else %}text-rose-700{% endif %} font-semibold">
+      {# Finding #6: total value → .figure-accent; margin keeps its semantic colour;
+         lines/vendors demoted to lighter weight so the money figure wins hierarchy #}
+      <div class="flex items-center gap-4 text-sm text-gray-500">
+        <span class="figure-accent text-base font-bold">${{ '{:,.2f}'.format(total_cost) }}</span>
+        <span class="{% if margin >= 30 %}text-emerald-700{% elif margin >= 15 %}text-amber-700{% else %}text-rose-700{% endif %} font-semibold text-sm">
           {{ '{:.1f}'.format(margin) }}%
         </span>
-        <span>{{ lines|length }} line{{ 's' if lines|length != 1 }}</span>
-        <span>{{ unique_vendors|length }} vendor{{ 's' if unique_vendors|length != 1 }}</span>
+        <span class="text-xs text-gray-400">{{ lines|length }} line{{ 's' if lines|length != 1 }}</span>
+        <span class="text-xs text-gray-400">{{ unique_vendors|length }} vendor{{ 's' if unique_vendors|length != 1 }}</span>
         {# Cancel/Reset only shown here when NOT in action banner #}
         {% if not has_action_banner %}
           {% if bp.status in ('halted', 'cancelled') %}
@@ -55,13 +58,13 @@
                   hx-target="#main-content"
                   hx-confirm="Reset this buy plan to draft?"
                   data-loading-disable
-                  class="px-3 py-1.5 bg-white border border-brand-200 text-brand-700 text-xs font-medium rounded-md hover:bg-brand-50 transition-colors">
+                  class="btn btn-secondary btn-sm">
             Reset to Draft
           </button>
           {% endif %}
           {% if bp.status not in ('completed', 'cancelled') %}
           <button @click="modalType = 'cancel'; showModal = true"
-                  class="px-3 py-1.5 bg-white border border-gray-300 text-gray-600 text-xs font-medium rounded-md hover:bg-gray-50 transition-colors">
+                  class="btn btn-secondary btn-sm">
             Cancel
           </button>
           {% endif %}
@@ -96,7 +99,6 @@
   </div>
 
   {# ═══ 2. PROGRESS BAR STEPPER ═══ #}
-  {# Determine stepper state #}
   {% set steps = ['Draft', 'Submit', 'Approve', 'PO Exec', 'Complete'] %}
   {% if bp.status == 'draft' %}
     {% set filled = 1 %}
@@ -127,7 +129,7 @@
     {% set step_label = bp.status|capitalize %}
   {% endif %}
 
-  <div class="mb-5 bg-white rounded-lg border border-brand-200 px-5 py-4">
+  <div class="mb-5 bg-white rounded-lg border border-line-base px-5 py-4">
     <div class="flex gap-1.5">
       {% for i in range(1, 6) %}
         {% if bp.status == 'cancelled' %}
@@ -165,6 +167,7 @@
   {% endif %}
 
   {# Manager/Admin: plan pending approval #}
+  {# Finding #4: raw bg-emerald-600/bg-rose-600 banner buttons → .btn family #}
   {% if show_approval_banner %}
   <div class="mb-4 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex items-center justify-between gap-3">
     <div class="flex items-center gap-3">
@@ -173,11 +176,11 @@
     </div>
     <div class="flex gap-2 flex-shrink-0">
       <button @click="modalType = 'approve'; showModal = true"
-              class="px-3 py-1.5 bg-emerald-600 text-white text-xs font-medium rounded-md hover:bg-emerald-700 transition-colors">
+              class="btn btn-primary btn-sm">
         Approve
       </button>
       <button @click="modalType = 'reject'; showModal = true"
-              class="px-3 py-1.5 bg-rose-600 text-white text-xs font-medium rounded-md hover:bg-rose-700 transition-colors">
+              class="btn btn-danger btn-sm">
         Reject
       </button>
     </div>
@@ -237,50 +240,51 @@
   {% endif %}
 
   {# ═══ 4. SIMPLIFIED LINE ITEMS TABLE ═══ #}
-  <div class="bg-white rounded-lg shadow-sm overflow-hidden border border-brand-200 mb-6">
-    <div class="px-4 py-3 bg-gray-50 border-b border-brand-200">
+  {# Finding #1: convert to data-table, drop per-cell px-4 py-3 and per-th font-medium text-gray-500 uppercase #}
+  <div class="bg-white rounded-lg shadow-sm overflow-hidden border border-line-base mb-6">
+    <div class="px-4 py-3 bg-gray-50 border-b border-line-base">
       <h2 class="text-lg font-semibold text-gray-900">Line Items
         <span class="ml-1 text-sm font-normal text-gray-600">({{ lines|length }})</span>
       </h2>
     </div>
     <div class="overflow-x-auto">
-      <table class="min-w-full divide-y divide-gray-200">
-        <thead class="bg-gray-50">
+      <table class="data-table w-full">
+        <thead>
           <tr>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Part</th>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vendor</th>
-            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Qty</th>
-            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Unit Cost</th>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
+            <th class="text-left">Part</th>
+            <th class="text-left">Description</th>
+            <th class="text-left">Vendor</th>
+            <th class="text-right">Qty</th>
+            <th class="text-right">Unit Cost</th>
+            <th class="text-left">Status</th>
+            <th class="text-left">Action</th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-gray-200">
+        <tbody>
           {% for line in lines %}
-          <tr id="bp-line-{{ line.id }}" class="hover:bg-brand-50/40 transition-colors">
+          <tr id="bp-line-{{ line.id }}" class="transition-colors">
             {# Part (MPN) #}
-            <td class="px-4 py-3 text-sm font-mono font-medium text-gray-900">
+            <td class="font-mono font-medium text-gray-900">
               {{ line.requirement.primary_mpn if line.requirement else '-' }}
             </td>
             {# Description — from MaterialCard (source of truth) #}
             {% set desc = line.requirement|part_description if line.requirement else '' %}
-            <td class="px-4 py-3 text-sm text-gray-600 truncate max-w-[200px]" title="{{ desc }}">
+            <td class="text-gray-600 truncate max-w-[200px]" title="{{ desc }}">
               {{ desc or '-' }}
             </td>
             {# Vendor + buyer below #}
-            <td class="px-4 py-3">
-              <div class="text-sm text-gray-900">{{ line.offer.vendor_name if line.offer else '-' }}</div>
+            <td>
+              <div class="text-gray-900">{{ line.offer.vendor_name if line.offer else '-' }}</div>
               {% if line.buyer %}
               <div class="text-xs text-gray-400">{{ line.buyer.name }}</div>
               {% endif %}
             </td>
             {# Qty #}
-            <td class="px-4 py-3 text-sm text-gray-600 text-right">{{ '{:,}'.format(line.quantity) }}</td>
+            <td class="text-right text-gray-600">{{ '{:,}'.format(line.quantity) }}</td>
             {# Unit Cost #}
-            <td class="px-4 py-3 text-sm text-gray-600 text-right">${{ '{:,.4f}'.format(line.unit_cost|float) if line.unit_cost else '-' }}</td>
+            <td class="text-right text-gray-600">${{ '{:,.4f}'.format(line.unit_cost|float) if line.unit_cost else '-' }}</td>
             {# Status + PO# #}
-            <td class="px-4 py-3">
+            <td>
               {% set line_colors = {
                 'awaiting_po': 'bg-amber-50 text-amber-700',
                 'pending_verify': 'bg-brand-100 text-brand-600',
@@ -293,8 +297,8 @@
               <div class="font-mono text-xs text-gray-600 mt-0.5">{{ line.po_number }}</div>
               {% endif %}
             </td>
-            {# Action #}
-            <td class="px-4 py-3">
+            {# Action — Finding #4: bespoke bg-emerald/rose buttons → .btn family #}
+            <td>
               {% if bp.status == 'active' %}
                 {% if line.status == 'awaiting_po' %}
                   <div x-data="{ showPo: false, poNum: '', shipDate: '' }">
@@ -302,24 +306,25 @@
                       Enter PO &rarr;
                     </a>
                     <div x-show="showPo" x-cloak x-collapse class="mt-2 space-y-1.5">
+                      {# Finding #3: bespoke border+focus-ring → .input .input-sm #}
                       <div>
                         <input aria-label="PO#" x-model="poNum" type="text" placeholder="PO#"
-                               class="w-28 px-2 py-1 text-xs border border-brand-200 rounded-md focus:ring-brand-500">
+                               class="input input-sm w-28">
                       </div>
                       <div>
                         <input aria-label="Estimated ship date" x-model="shipDate" type="date"
-                               class="w-28 px-2 py-1 text-xs border border-brand-200 rounded-md focus:ring-brand-500">
+                               class="input input-sm w-28">
                       </div>
                       <div class="flex gap-1">
                         <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/lines/{{ line.id }}/confirm-po"
                                 hx-target="#main-content"
                                 :hx-vals="JSON.stringify({po_number: poNum, estimated_ship_date: shipDate})"
                                 data-loading-disable
-                                class="px-2 py-1 text-xs bg-brand-500 text-white rounded-md hover:bg-brand-600 transition-colors">
+                                class="btn btn-primary btn-sm">
                           Confirm
                         </button>
                         <button @click="$dispatch('open-modal', { type: 'issue-{{ line.id }}' }); modalType = 'issue-{{ line.id }}'; showModal = true"
-                                class="px-2 py-1 text-xs text-rose-600 border border-rose-200 rounded-md hover:bg-rose-50 transition-colors">
+                                class="btn btn-danger btn-sm">
                           Issue
                         </button>
                       </div>
@@ -331,7 +336,7 @@
                             hx-target="#main-content"
                             hx-vals='{"action": "approve"}'
                             data-loading-disable
-                            class="px-2.5 py-1 text-xs bg-emerald-600 text-white rounded-md hover:bg-emerald-700 transition-colors font-medium">
+                            class="btn btn-primary btn-sm">
                       Verify
                     </button>
                     <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/lines/{{ line.id }}/verify-po"
@@ -339,7 +344,7 @@
                             hx-vals='{"action": "reject"}'
                             data-loading-disable
                             hx-confirm="Reject this PO?"
-                            class="px-2.5 py-1 text-xs text-rose-600 border border-rose-200 rounded-md hover:bg-rose-50 transition-colors font-medium">
+                            class="btn btn-danger btn-sm">
                       Reject
                     </button>
                   </div>
@@ -357,7 +362,7 @@
           {% endfor %}
           {% if not lines %}
           <tr>
-            <td colspan="7" class="px-4 py-6 sm:py-8 text-center">
+            <td colspan="7" class="py-6 sm:py-8 text-center">
               <svg class="mx-auto h-8 w-8 text-gray-300 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/>
               </svg>
@@ -458,20 +463,22 @@
         {% if bp.so_status == 'approved' %}
         <svg class="w-4 h-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
         {% else %}
-        <span class="inline-flex px-1.5 py-0.5 text-xs font-semibold rounded-full bg-amber-50 text-amber-700">pending</span>
+        {# Finding #7: bespoke inline pill → .badge primitive #}
+        <span class="badge-warning">pending</span>
         {% endif %}
       </div>
       {{ collapse_chevron("showSo") }}
     </button>
     <div x-show="showSo" x-cloak x-collapse class="px-4 pb-4">
       <div class="flex items-center gap-3 text-sm">
-        {% set so_colors = {
-          'pending': 'bg-amber-50 text-amber-700 border-amber-200',
-          'approved': 'bg-emerald-50 text-emerald-700 border-emerald-200',
-          'rejected': 'bg-rose-50 text-rose-700 border-rose-200'
+        {% set so_badge = {
+          'pending': 'badge-warning',
+          'approved': 'badge-success',
+          'rejected': 'badge-danger'
         } %}
         <span class="text-gray-600">Status:</span>
-        <span class="inline-flex px-2.5 py-0.5 text-xs font-semibold rounded-full {{ so_colors.get(bp.so_status, 'bg-gray-100 text-gray-600') }}">
+        {# Finding #7: bespoke SO status pill → .badge primitive #}
+        <span class="{{ so_badge.get(bp.so_status, 'badge') }}">
           {{ bp.so_status|capitalize if bp.so_status else 'Pending' }}
         </span>
         {% if bp.so_verified_by %}
@@ -509,19 +516,18 @@
           <div class="space-y-3">
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1">SO# <span class="text-rose-500">*</span></label>
+              {# Finding #3: bespoke modal inputs → .input #}
               <input x-model="so" type="text" required
-                     class="w-full px-3 py-2 border border-brand-200 rounded-md text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                     class="input w-full"
                      placeholder="Acctivate Sales Order #">
             </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1">Customer PO#</label>
-              <input x-model="cpo" type="text"
-                     class="w-full px-3 py-2 border border-brand-200 rounded-md text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+              <input x-model="cpo" type="text" class="input w-full">
             </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-              <textarea x-model="notes" rows="2"
-                        class="w-full px-3 py-2 border border-brand-200 rounded-md text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500"></textarea>
+              <textarea x-model="notes" rows="2" class="input w-full"></textarea>
             </div>
           </div>
           <div class="mt-5 flex justify-end gap-2">
@@ -544,17 +550,17 @@
           <h3 class="text-lg font-semibold text-gray-900 mb-4">Approve Buy Plan</h3>
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">Notes (optional)</label>
-            <textarea x-model="notes" rows="3"
-                      class="w-full px-3 py-2 border border-brand-200 rounded-md text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500"></textarea>
+            <textarea x-model="notes" rows="3" class="input w-full"></textarea>
           </div>
           <div class="mt-5 flex justify-end gap-2">
             {{ modal_cancel_btn() }}
+            {# Finding #4: raw bg-emerald-600 → .btn btn-primary #}
             <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/approve"
                     hx-target="#main-content"
                     :hx-vals="JSON.stringify({action: 'approve', notes: notes})"
                     data-loading-disable
                     @click="showModal = false"
-                    class="px-4 py-2 text-sm bg-emerald-600 text-white rounded-md hover:bg-emerald-700 font-medium transition-colors">
+                    class="btn btn-primary">
               Approve
             </button>
           </div>
@@ -568,17 +574,18 @@
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">Reason <span class="text-rose-500">*</span></label>
             <textarea x-model="notes" rows="3" required
-                      class="w-full px-3 py-2 border border-brand-200 rounded-md text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                      class="input w-full"
                       placeholder="Why is this being rejected?"></textarea>
           </div>
           <div class="mt-5 flex justify-end gap-2">
             {{ modal_cancel_btn() }}
+            {# Finding #4: raw bg-rose-600 → .btn btn-danger #}
             <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/approve"
                     hx-target="#main-content"
                     :hx-vals="JSON.stringify({action: 'reject', notes: notes})"
                     data-loading-disable
                     @click="showModal = false"
-                    class="px-4 py-2 text-sm bg-rose-600 text-white rounded-md hover:bg-rose-700 font-medium transition-colors">
+                    class="btn btn-danger">
               Reject
             </button>
           </div>
@@ -604,7 +611,7 @@
             <div x-show="action !== 'approve'" x-cloak x-collapse>
               <label class="block text-sm font-medium text-gray-700 mb-1">Note <span class="text-rose-500">*</span></label>
               <textarea x-model="note" rows="2"
-                        class="w-full px-3 py-2 border border-brand-200 rounded-md text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                        class="input w-full"
                         placeholder="Reason for rejection or halt..."></textarea>
             </div>
           </div>
@@ -629,7 +636,7 @@
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">Reason</label>
             <textarea x-model="reason" rows="2"
-                      class="w-full px-3 py-2 border border-brand-200 rounded-md text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                      class="input w-full"
                       placeholder="Why is this being cancelled?"></textarea>
           </div>
           <div class="mt-5 flex justify-end gap-2">

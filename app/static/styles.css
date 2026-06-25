@@ -72,6 +72,7 @@
      shares one shape. */
   .badge-success { @apply badge bg-emerald-50 text-emerald-700 border-emerald-200; }
   .badge-warning { @apply badge bg-amber-50 text-amber-700 border-amber-200; }
+  .badge-danger  { @apply badge bg-rose-50 text-rose-700 border-rose-200; }
   .badge-info    { @apply badge bg-brand-100 text-brand-700 border-brand-200; }
 
   /* ── Cards — resting surfaces. Border is brand-200 (the dominant card
@@ -125,6 +126,8 @@
      once drained, the !important block is deleted. ─────────────────── */
   .border-line-base   { border-color: var(--line); }
   .border-line-subtle { border-color: var(--line-subtle); }
+  .divide-line-base > * + *   { border-color: var(--line); }
+  .divide-line-subtle > * + * { border-color: var(--line-subtle); }
 
   /* ── Table wrapper ──────────────────────────────────────────────── */
   .table-wrapper {

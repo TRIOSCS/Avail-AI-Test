@@ -36,11 +36,12 @@
 
   {# ── Approvals (manager/admin) ── #}
   {% if is_manager and tri.approvals %}
+  {# Finding #5: section card border-line-base/subtle #}
   <div class="bg-white rounded-lg shadow-sm border border-amber-200">
-    <div class="px-4 py-2 border-b border-gray-100 text-xs font-semibold text-gray-600 uppercase tracking-wider">
+    <div class="px-4 py-2 border-b border-line-subtle text-xs font-semibold text-gray-600 uppercase tracking-wider">
       Approvals waiting ({{ tri.approvals|length }})
     </div>
-    <div class="divide-y divide-gray-100">
+    <div class="divide-y divide-line-subtle">
       {% for p in tri.approvals %}
       <div class="flex items-center justify-between gap-3 px-4 py-2">
         <div class="min-w-0">
@@ -49,16 +50,17 @@
         </div>
         <div class="flex items-center gap-3 flex-shrink-0">
           <span class="text-sm font-semibold text-gray-700">${{ '{:,.2f}'.format(p.value|float) if p.value else '0.00' }}</span>
+          {# Finding #4: raw emerald/rose buttons → .btn family #}
           <form hx-post="/v2/partials/buy-plans/{{ p.plan_id }}/approve"
                 hx-target="#bp-hub-body" hx-swap="innerHTML" class="flex items-center gap-1.5">
             <input type="hidden" name="origin" value="supervise">
             <button type="submit" name="action" value="approve" data-loading-disable
-                    class="px-2.5 py-1 text-xs font-medium bg-emerald-500 text-white rounded-md hover:bg-emerald-600 transition-colors">
+                    class="btn btn-primary btn-sm">
               Approve
             </button>
             <button type="submit" name="action" value="reject" data-loading-disable
                     hx-confirm="Reject this buy plan?"
-                    class="px-2.5 py-1 text-xs font-medium text-rose-600 border border-rose-200 rounded-md hover:bg-rose-50 transition-colors">
+                    class="btn btn-danger btn-sm">
               Reject
             </button>
           </form>
@@ -71,11 +73,11 @@
 
   {# ── Needs SO verification (ops) ── #}
   {% if is_ops and tri.so_pending %}
-  <div class="bg-white rounded-lg shadow-sm border border-brand-200">
-    <div class="px-4 py-2 border-b border-gray-100 text-xs font-semibold text-gray-600 uppercase tracking-wider">
+  <div class="bg-white rounded-lg shadow-sm border border-line-base">
+    <div class="px-4 py-2 border-b border-line-subtle text-xs font-semibold text-gray-600 uppercase tracking-wider">
       Needs SO verification ({{ tri.so_pending|length }})
     </div>
-    <div class="divide-y divide-gray-100">
+    <div class="divide-y divide-line-subtle">
       {% for p in tri.so_pending %}
       <div class="flex items-center justify-between gap-3 px-4 py-2">
         <div class="min-w-0">
@@ -88,7 +90,7 @@
                 hx-target="#bp-hub-body" hx-swap="innerHTML" class="flex items-center gap-1.5">
             <input type="hidden" name="origin" value="supervise">
             <button type="submit" name="action" value="approve" data-loading-disable
-                    class="px-2.5 py-1 text-xs font-medium bg-emerald-500 text-white rounded-md hover:bg-emerald-600 transition-colors">
+                    class="btn btn-primary btn-sm">
               Verify SO
             </button>
           </form>
@@ -101,11 +103,11 @@
 
   {# ── POs awaiting verification (ops) ── #}
   {% if is_ops and tri.po_pending_verify %}
-  <div class="bg-white rounded-lg shadow-sm border border-brand-200">
-    <div class="px-4 py-2 border-b border-gray-100 text-xs font-semibold text-gray-600 uppercase tracking-wider">
+  <div class="bg-white rounded-lg shadow-sm border border-line-base">
+    <div class="px-4 py-2 border-b border-line-subtle text-xs font-semibold text-gray-600 uppercase tracking-wider">
       POs awaiting verification ({{ tri.po_pending_verify|length }})
     </div>
-    <div class="divide-y divide-gray-100">
+    <div class="divide-y divide-line-subtle">
       {% for ln in tri.po_pending_verify %}
       <div class="flex items-center justify-between gap-3 px-4 py-2">
         <div class="min-w-0">
@@ -116,12 +118,12 @@
               hx-target="#bp-hub-body" hx-swap="innerHTML" class="flex items-center gap-1.5 flex-shrink-0">
           <input type="hidden" name="origin" value="supervise">
           <button type="submit" name="action" value="approve" data-loading-disable
-                  class="px-2.5 py-1 text-xs font-medium bg-emerald-500 text-white rounded-md hover:bg-emerald-600 transition-colors">
+                  class="btn btn-primary btn-sm">
             Verify PO
           </button>
           <button type="submit" name="action" value="reject" data-loading-disable
                   hx-confirm="Kick this PO back to the buyer?"
-                  class="px-2.5 py-1 text-xs font-medium text-rose-600 border border-rose-200 rounded-md hover:bg-rose-50 transition-colors">
+                  class="btn btn-danger btn-sm">
             Reject
           </button>
         </form>
@@ -134,16 +136,18 @@
   {# ── Overdue POs ── #}
   {% if tri.overdue_pos %}
   <div class="bg-white rounded-lg shadow-sm border border-rose-200">
-    <div class="px-4 py-2 border-b border-gray-100 text-xs font-semibold text-gray-600 uppercase tracking-wider">
+    <div class="px-4 py-2 border-b border-line-subtle text-xs font-semibold text-gray-600 uppercase tracking-wider">
       Overdue POs ({{ tri.overdue_pos|length }})
     </div>
-    <div class="divide-y divide-gray-100">
+    {# Finding #9: real focusable links for keyboard nav on triage rows #}
+    <div class="divide-y divide-line-subtle">
       {% for ln in tri.overdue_pos %}
       <a hx-get="/v2/partials/buy-plans/{{ ln.plan_id }}"
          hx-target="#main-content"
          hx-push-url="/v2/buy-plans/{{ ln.plan_id }}"
          preload="mouseover"
-         class="flex items-center justify-between gap-3 px-4 py-2 cursor-pointer hover:bg-rose-50/40">
+         class="flex items-center justify-between gap-3 px-4 py-2 cursor-pointer hover:bg-rose-50/40
+                focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:outline-none focus-visible:bg-rose-50/40">
         <span class="text-sm font-mono font-medium text-gray-900">{{ ln.mpn or '—' }}</span>
         <span class="text-xs text-gray-400 flex-shrink-0">{{ ln.vendor_name or '—' }} · {{ ln.buyer_name or '—' }}</span>
       </a>
@@ -155,16 +159,17 @@
   {# ── Flagged issues ── #}
   {% if tri.flagged %}
   <div class="bg-white rounded-lg shadow-sm border border-rose-200">
-    <div class="px-4 py-2 border-b border-gray-100 text-xs font-semibold text-gray-600 uppercase tracking-wider">
+    <div class="px-4 py-2 border-b border-line-subtle text-xs font-semibold text-gray-600 uppercase tracking-wider">
       Flagged issues ({{ tri.flagged|length }})
     </div>
-    <div class="divide-y divide-gray-100">
+    <div class="divide-y divide-line-subtle">
       {% for ln in tri.flagged %}
       <a hx-get="/v2/partials/buy-plans/{{ ln.plan_id }}"
          hx-target="#main-content"
          hx-push-url="/v2/buy-plans/{{ ln.plan_id }}"
          preload="mouseover"
-         class="flex items-center justify-between gap-3 px-4 py-2 cursor-pointer hover:bg-rose-50/40">
+         class="flex items-center justify-between gap-3 px-4 py-2 cursor-pointer hover:bg-rose-50/40
+                focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:outline-none focus-visible:bg-rose-50/40">
         <span class="text-sm font-mono font-medium text-gray-900">{{ ln.mpn or '—' }}</span>
         <span class="text-xs text-rose-600 flex-shrink-0">{{ ln.issue_type or 'issue' }}</span>
       </a>
@@ -175,17 +180,18 @@
 
   {# ── Halted ── #}
   {% if tri.halted %}
-  <div class="bg-white rounded-lg shadow-sm border border-gray-200">
-    <div class="px-4 py-2 border-b border-gray-100 text-xs font-semibold text-gray-600 uppercase tracking-wider">
+  <div class="bg-white rounded-lg shadow-sm border border-line-base">
+    <div class="px-4 py-2 border-b border-line-subtle text-xs font-semibold text-gray-600 uppercase tracking-wider">
       Halted ({{ tri.halted|length }})
     </div>
-    <div class="divide-y divide-gray-100">
+    <div class="divide-y divide-line-subtle">
       {% for p in tri.halted %}
       <a hx-get="/v2/partials/buy-plans/{{ p.plan_id }}"
          hx-target="#main-content"
          hx-push-url="/v2/buy-plans/{{ p.plan_id }}"
          preload="mouseover"
-         class="flex items-center justify-between gap-3 px-4 py-2 cursor-pointer hover:bg-gray-50">
+         class="flex items-center justify-between gap-3 px-4 py-2 cursor-pointer hover:bg-gray-50
+                focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:outline-none">
         <span class="text-sm font-bold text-gray-900">{{ p.customer_name or '—' }}</span>
         <span class="text-xs text-gray-400 flex-shrink-0">{{ p.submitted_by_name or '—' }}</span>
       </a>

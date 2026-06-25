@@ -98,7 +98,7 @@ def test_hub_lens_highlight_is_alpine_reactive(client: TestClient):
     assert "x-data=\"{ lens: 'orders' }\"" in body
     # Active-pill highlight is bound reactively to that lens var.
     assert ':class="lens ===' in body
-    assert "bg-brand-500 text-white shadow-sm" in body
+    assert "bg-accent-600 text-white shadow-sm" in body
 
 
 def test_hub_shell_lens_deals_loads_board_mine(client: TestClient):
