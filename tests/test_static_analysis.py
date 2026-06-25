@@ -493,7 +493,7 @@ def test_tiny_text_does_not_grow():
 
     Ratchet — sweeps lower this as they bump 10px → text-xs / text-[11px].
     """
-    BASELINE = 58  # +2 for S3 DNC chip in vendor_modal.html (matches existing badge pattern)
+    BASELINE = 33  # tightened to current count after the UI accent/readability program (was 58)
     count = _tpl_substring_count("text-[10px]")
     assert count <= BASELINE, (
         f"text-[10px] usages rose to {count} (baseline {BASELINE}). Use text-xs "
@@ -508,17 +508,7 @@ def test_low_contrast_secondary_text_does_not_grow():
     Ratchet only (decorative icon grays are fine) — caps growth rather than banning
     outright.
     """
-    BASELINE = 427  # +3 for the Resell workspace partials (lists/detail/offers muted
-    # metadata copy — the established resell look; the bid-builder itself uses the
-    # higher-contrast text-gray-600 per this rule). +5 for the users_audit.html table
-    # column heads, which reuse the established users.html table-head look
-    # (.table-cell--head ... text-gray-500 uppercase); body copy in that partial uses
-    # the higher-contrast text-gray-600. +2 for origin/main archive-dnc / compact-contacts
-    # template column heads. +1 for the settings-refine profile/notifications muted copy;
-    # the curated System tab itself uses text-gray-600 throughout.
-    # +3 for feat/ui-light (prospecting/_card.html domain text, prospecting/detail.html
-    # email text, prospecting/list.html subtitle, resell/detail.html inactive tab label —
-    # all muted xs metadata, consistent with established pattern).
+    BASELINE = 399  # tightened to current count after the UI accent/readability program (was 427)
     count = _tpl_substring_count("text-gray-500")
     assert count <= BASELINE, (
         f"text-gray-500 usages rose to {count} (baseline {BASELINE}). Prefer "
@@ -529,7 +519,7 @@ def test_low_contrast_secondary_text_does_not_grow():
 def test_focus_ring_1_does_not_grow():
     """One focus-ring spec: ring-2 (see .input / .btn). Ratchet down the legacy
     ring-1 usages; never add a new one."""
-    BASELINE = 66  # +1 for S4 fix-email amber input in preview_inquiry.html
+    BASELINE = 55  # tightened to current count after the UI program (was 66)
     count = _tpl_substring_count("focus:ring-1")
     assert count <= BASELINE, (
         f"focus:ring-1 usages rose to {count} (baseline {BASELINE}). Use the "
@@ -543,9 +533,7 @@ def test_inline_table_cell_padding_does_not_grow():
 
     Ratchet.
     """
-    BASELINE = 527  # +4 for the Resell workspace email-solicitation / offer tables
-    # (inline-padded cells in the resell partials; the bid-builder + bid PDF use
-    # .compact-table / CSS cell padding, not inline px-/py-).
+    BASELINE = 417  # tightened to current count after the UI program (was 527)
     count = _tpl_regex_count(r'<t[dh][^>]*class="[^"]*\bp[xy]-[0-9]')
     assert count <= BASELINE, (
         f"inline-padded <td>/<th> rose to {count} (baseline {BASELINE}). Use "
@@ -558,10 +546,7 @@ def test_inline_button_sizing_does_not_grow():
 
     Macro files are the canonical source and are excluded. Ratchet.
     """
-    BASELINE = 280  # origin/main inline buttons + 4 for the trouble-ticket feature: 3 console
-    # bulk-action status pills (semantic green/gray/blue resolve/wont-fix/in-progress, same
-    # inline pattern as settings/ops_group.html) + the More-menu "Report a problem" button
-    # (matches the adjacent Settings/Sign-out menu-row padding). Diagnose/Clear/Copy use .btn/.btn-sm.
+    BASELINE = 224  # tightened to current count after the UI program (was 280)
     count = _tpl_regex_count(r'<button[^>]*class="[^"]*\bp[xy]-[0-9]', exclude={"_macros.html"})
     assert count <= BASELINE, (
         f"inline-sized <button> rose to {count} (baseline {BASELINE}). Use .btn-sm/md/lg or the btn_* macros."
