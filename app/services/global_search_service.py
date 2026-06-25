@@ -1,7 +1,7 @@
 """Global search service — fast SQL search + AI intent search.
 
 Provides two search tiers:
-  - fast_search(): pg_trgm fuzzy matching across 7 entity types (<100ms)
+  - fast_search(): pg_trgm fuzzy matching across 9 entity types (<100ms)
   - ai_search(): Claude Haiku intent parsing + targeted queries (<2s)
 
 Called by: app/routers/htmx_views.py (global search endpoints)
