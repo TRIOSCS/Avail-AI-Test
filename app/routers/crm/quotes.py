@@ -378,8 +378,8 @@ async def quote_preflight_check(
 ):
     """Advisory pre-send checks (DNC recipient / non-US country-of-origin / MPN drift).
 
-    Read-only; returns the warnings the send UI surfaces. Advisory only — it never blocks
-    the send (the salesperson decides). See app/services/quote_preflight.py.
+    Read-only; returns the warnings the send UI surfaces. Advisory only — it never
+    blocks the send (the salesperson decides). See app/services/quote_preflight.py.
     """
     from ...dependencies import get_quote_for_user
     from ...services.quote_preflight import quote_preflight

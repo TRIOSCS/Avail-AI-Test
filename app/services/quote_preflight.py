@@ -38,7 +38,10 @@ _MAX_LISTED = 5  # cap the MPNs/lines named in a message so the banner stays sho
 
 @dataclass(frozen=True)
 class PreflightWarning:
-    """One advisory finding. ``level`` is always 'warning' — preflight never errors/blocks."""
+    """One advisory finding.
+
+    ``level`` is always 'warning' — preflight never errors/blocks.
+    """
 
     code: str  # "dnc" | "country_of_origin" | "mpn_drift"
     message: str
@@ -71,7 +74,10 @@ def _quote_line_refs(quote: Quote) -> list[tuple[str | None, int | None]]:
 
 
 def quote_preflight(db: Session, quote: Quote) -> list[PreflightWarning]:
-    """Run the advisory pre-send checks. Pure read; returns [] when nothing is flagged."""
+    """Run the advisory pre-send checks.
+
+    Pure read; returns [] when nothing is flagged.
+    """
     warnings: list[PreflightWarning] = []
 
     # 1. Do-Not-Contact recipient — site-level flag and/or a matching DNC contact.
