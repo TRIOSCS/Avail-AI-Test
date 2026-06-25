@@ -33,13 +33,13 @@ from sqlalchemy.orm import Session
 
 from ...constants import ApprovalRecipientStatus, ApprovalRequestStatus
 from ...models.approvals import (
-    ApprovalEvent,
     ApprovalOutbox,
     ApprovalRequest,
     ApprovalStep,
     ApprovalStepRecipient,
 )
 from ...models.quality_plan import Prepayment, QualityPlan
+from .events import record as _record_event
 from .routing import route_request
 
 # action → terminal request status / per-recipient status / audit event_type
@@ -168,16 +168,9 @@ def decide(
     request.resolved_at = now
     request.resolution_note = comment
 
-    # Audit trail (minimal inline writer; Task 5 swaps in ApprovalEventService).
+    # Audit trail — one ApprovalEvent + one ActivityLog via ApprovalEventService.
     event_type = "approved" if approved else "rejected"
-    db.add(
-        ApprovalEvent(
-            request_id=request.id,
-            actor_id=user.id,
-            event_type=event_type,
-            note=comment,
-        )
-    )
+    _record_event(db, request, user, event_type, metadata={"comment": comment} if comment else None)
 
     # Enqueue exactly one notification for the request owner (fall back to requester,
     # then the decider) — recipient_user_id is NOT NULL.

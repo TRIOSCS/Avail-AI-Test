@@ -635,6 +635,12 @@ class ActivityType(StrEnum):
     # Vendor+part unavailability knowledge (vendor_unavailability service)
     VENDOR_UNAVAILABLE = "vendor_unavailable"  # 18 chars — fits String(20)
     VENDOR_AVAILABLE = "vendor_available"
+    # Approval lifecycle (approval engine — Task 5)
+    APPROVAL_REQUESTED = "aprvl_requested"  # 15 chars
+    APPROVAL_APPROVED = "aprvl_approved"  # 14 chars
+    APPROVAL_REJECTED = "aprvl_rejected"  # 14 chars
+    APPROVAL_DELEGATED = "aprvl_delegated"  # 15 chars
+    APPROVAL_CANCELLED = "aprvl_cancelled"  # 15 chars
 
 
 class CallOutcome(StrEnum):
