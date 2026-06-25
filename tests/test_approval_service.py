@@ -14,6 +14,7 @@ Depends on: conftest (db_session), app.services.approvals.service,
 from decimal import Decimal
 
 import pytest
+from sqlalchemy import select
 
 from app.constants import (
     ApprovalGateType,
@@ -25,6 +26,7 @@ from app.models.approvals import (
     ApprovalGateConfig,
     ApprovalOutbox,
     ApprovalRequest,
+    ApprovalStep,
     ApprovalStepRecipient,
 )
 from app.services.approvals.service import create_request, decide
@@ -132,10 +134,9 @@ def test_create_request_persists_and_routes(db_session, prepayment_request_with_
 
     recipient_user_ids = {
         r.user_id
-        for r in db_session.query(ApprovalStepRecipient)
-        .join(ApprovalStepRecipient.step)
-        .filter_by(request_id=req.id)
-        .all()
+        for r in db_session.execute(
+            select(ApprovalStepRecipient).join(ApprovalStepRecipient.step).where(ApprovalStep.request_id == req.id)
+        ).scalars()
     }
     assert recipient_user_ids == {mike.id, marcus.id}
 
@@ -157,13 +158,11 @@ def test_decide_records_recipient_decision(db_session, prepayment_request_with_t
     req = prepayment_request_with_two_recipients
     decide(db_session, req.id, mike, "approve")
 
-    recipient = (
-        db_session.query(ApprovalStepRecipient)
+    recipient = db_session.execute(
+        select(ApprovalStepRecipient)
         .join(ApprovalStepRecipient.step)
-        .filter_by(request_id=req.id)
-        .filter(ApprovalStepRecipient.user_id == mike.id)
-        .one()
-    )
+        .where(ApprovalStep.request_id == req.id, ApprovalStepRecipient.user_id == mike.id)
+    ).scalar_one()
     assert recipient.status == ApprovalRecipientStatus.APPROVED
     assert recipient.decided_at is not None
 
@@ -173,11 +172,11 @@ def test_decide_enqueues_outbox_and_event(db_session, prepayment_request_with_tw
     req = prepayment_request_with_two_recipients
     decide(db_session, req.id, mike, "approve")
 
-    outbox = db_session.query(ApprovalOutbox).filter_by(request_id=req.id).all()
+    outbox = db_session.execute(select(ApprovalOutbox).where(ApprovalOutbox.request_id == req.id)).scalars().all()
     assert len(outbox) == 1
     assert (outbox[0].payload or {}).get("event_type") == "decided"
 
-    events = db_session.query(ApprovalEvent).filter_by(request_id=req.id).all()
+    events = db_session.execute(select(ApprovalEvent).where(ApprovalEvent.request_id == req.id)).scalars().all()
     assert any(e.event_type == "approved" for e in events)
 
 
@@ -206,3 +205,12 @@ def test_non_recipient_forbidden(db_session, prepayment_request_with_two_recipie
 def test_unknown_action_rejected(db_session, prepayment_request_with_two_recipients, mike):
     with pytest.raises(ValueError):
         decide(db_session, prepayment_request_with_two_recipients.id, mike, "maybe")
+
+
+# ── decide: missing request ──────────────────────────────────────────────────────
+
+
+def test_unknown_request_id_raises(db_session, mike):
+    """Decide raises ValueError with a clear message for a non-existent request id."""
+    with pytest.raises(ValueError, match="ApprovalRequest 999999 not found"):
+        decide(db_session, 999999, mike, "approve")
