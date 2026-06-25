@@ -28,15 +28,15 @@
   <div class="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
     <div>
       <span class="text-gray-400">Qty:</span>
-      <span class="font-mono text-gray-700">{{ requirement.target_qty or '—' }}</span>
+      <span class="font-mono text-sm font-semibold text-gray-800">{{ requirement.target_qty or '—' }}</span>
     </div>
     <div>
       <span class="text-gray-400">Target:</span>
-      <span class="font-mono text-gray-700">{{ '$%.2f'|format(requirement.target_price) if requirement.target_price else '—' }}</span>
+      <span class="figure-accent text-sm font-semibold">{{ '$%.2f'|format(requirement.target_price) if requirement.target_price else '—' }}</span>
     </div>
     <div>
       <span class="text-gray-400">Customer:</span>
-      <a href="/v2/requisitions/{{ requisition.id }}" class="text-brand-600 hover:underline">
+      <a href="/v2/requisitions/{{ requisition.id }}" class="text-accent-600 hover:underline">
         {{ requisition.customer_name or '—' }}
       </a>
     </div>
@@ -57,7 +57,7 @@
               hx-swap="innerHTML"
               data-loading-disable
               name="status"
-              class="inline-block border-0 border-b border-dashed border-gray-300 bg-transparent text-xs {{ status_styles.get(requirement.sourcing_status or 'open', 'text-gray-700') }} p-0 pr-4 focus:ring-0 cursor-pointer hover:border-brand-400">
+              class="inline-block border-0 border-b border-dashed border-gray-300 bg-transparent text-xs {{ status_styles.get(requirement.sourcing_status or 'open', 'text-gray-700') }} p-0 pr-4 focus:ring-0 cursor-pointer hover:border-accent-400">
         <option value="{{ requirement.sourcing_status or 'open' }}" selected>
           {{ (requirement.sourcing_status or 'open')|capitalize }}
         </option>
@@ -82,7 +82,7 @@
       {% for tab_id, tab_label in [('vendors', 'Vendors'), ('offers', 'Offers'), ('activity', 'Activity')] %}
       <button @click="activeTab = '{{ tab_id }}'"
               type="button"
-              :class="activeTab === '{{ tab_id }}' ? 'border-brand-500 text-brand-500' : 'border-transparent text-gray-500 hover:text-gray-900 hover:border-gray-200'"
+              :class="activeTab === '{{ tab_id }}' ? 'border-accent-600 text-accent-600' : 'border-transparent text-gray-500 hover:text-gray-900 hover:border-gray-200'"
               class="py-2 px-1 text-xs font-medium border-b-2 transition-colors whitespace-nowrap">
         {{ tab_label }}
       </button>
@@ -130,7 +130,7 @@
     </div>
     {% if extra_count > 0 %}
     <button @click="vendorsExpanded = !vendorsExpanded"
-            class="w-full mt-1 py-1.5 text-xs text-brand-600 hover:text-brand-800 font-medium text-center transition-colors">
+            class="w-full mt-1 py-1.5 text-xs text-accent-600 hover:text-accent-800 font-medium text-center transition-colors">
       <span x-text="vendorsExpanded ? 'Show less' : 'Show {{ extra_count }} more vendor{{ 's' if extra_count != 1 }}'"></span>
     </button>
     {% endif %}

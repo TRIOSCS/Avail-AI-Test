@@ -51,9 +51,9 @@
     {% for val, label, count in pills %}
     <button hx-get="/v2/partials/sightings?status={{ val }}&q={{ q }}&group_by={{ group_by }}&manufacturer={{ manufacturer|default('') }}"
             hx-target="#sightings-table" hx-swap="innerHTML"
-            class="px-2 py-0.5 rounded text-[10px] font-medium transition-colors
-                   {{ 'bg-brand-100 text-brand-700' if status == val else 'text-gray-400 hover:text-gray-600' }}">
-      {{ label }} <span class="text-[9px]">{{ count }}</span>
+            class="px-2 py-0.5 rounded text-[11px] font-medium transition-colors
+                   {{ 'bg-accent-100 text-accent-700' if status == val else 'text-gray-400 hover:text-gray-600' }}">
+      {{ label }} <span class="text-[11px]">{{ count }}</span>
     </button>
     {% endfor %}
   </div>
@@ -69,7 +69,7 @@
          hx-trigger="keyup changed delay:300ms"
          hx-target="#sightings-table"
          :hx-vals="JSON.stringify({status: sStatus, group_by: sGroupBy, manufacturer: sManufacturer})"
-         class="flex-1 min-w-[150px] rounded-lg border border-gray-200 px-3 py-1.5 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-200 outline-none">
+         class="input flex-1 min-w-[150px]">
   <input aria-label="Filter by manufacturer" type="text" name="manufacturer" value="{{ manufacturer|default('') }}"
          placeholder="Manufacturer..."
          x-model="sManufacturer"
@@ -77,7 +77,7 @@
          hx-trigger="keyup changed delay:300ms"
          hx-target="#sightings-table"
          :hx-vals="JSON.stringify({status: sStatus, group_by: sGroupBy, q: sQ})"
-         class="w-[140px] rounded-lg border border-gray-200 px-3 py-1.5 text-sm focus:border-brand-400 focus:ring-2 focus:ring-brand-200 outline-none">
+         class="input w-[140px]">
   <select name="group_by" x-model="sGroupBy"
           hx-get="/v2/partials/sightings"
           hx-trigger="change"
@@ -120,19 +120,19 @@
   <table class="compact-table w-full">
     <thead>
       <tr>
-        <th class="px-2 py-2 w-8">
+        <th class="w-8">
           <input aria-label="Select all requirements" type="checkbox" x-model="toggleAll"
                  @change="document.querySelectorAll('.req-checkbox').forEach(cb => { cb.checked = toggleAll; if (toggleAll) $store.sightingSelection.toggle(parseInt(cb.value)); else $store.sightingSelection.clear(); })"
                  class="rounded border-gray-300">
         </th>
-        <th class="px-3 py-2 text-left">Part Numbers</th>
-        <th class="px-3 py-2 text-left hidden sm:table-cell">Description</th>
-        <th class="px-3 py-2 text-right w-[60px] hidden sm:table-cell">Qty</th>
-        <th class="px-3 py-2 text-left hidden xl:table-cell">Customer</th>
-        <th class="px-3 py-2 text-left w-[80px] hidden xl:table-cell">Sales</th>
-        <th class="px-3 py-2 text-left w-[80px]">Coverage</th>
-        <th class="px-3 py-2 text-left w-[80px]">Status</th>
-        <th class="px-3 py-2 text-center w-[60px] hidden xl:table-cell">Priority</th>
+        <th class="text-left">Part Numbers</th>
+        <th class="text-left hidden sm:table-cell">Description</th>
+        <th class="text-right w-[60px] hidden sm:table-cell">Qty</th>
+        <th class="text-left hidden xl:table-cell">Customer</th>
+        <th class="text-left w-[80px] hidden xl:table-cell">Sales</th>
+        <th class="text-left w-[80px]">Coverage</th>
+        <th class="text-left w-[80px]">Status</th>
+        <th class="text-center w-[60px] hidden xl:table-cell">Priority</th>
       </tr>
     </thead>
     <tbody>
@@ -145,25 +145,29 @@
       <tr class="group cursor-pointer {{ 'bg-rose-50/30' if is_hot else '' }}"
           :class="selectedReqId == {{ r.id }} ? 'row-selected' : ''"
           @click="selectReq({{ r.id }})"
+          @keydown.enter="selectReq({{ r.id }})"
+          @keydown.space.prevent="selectReq({{ r.id }})"
+          tabindex="0"
+          role="button"
           data-req-id="{{ r.id }}">
-        <td class="px-2 py-2" @click.stop>
+        <td @click.stop>
           <input aria-label="Select requirement {{ r.primary_mpn }}" type="checkbox" class="req-checkbox rounded border-gray-300" value="{{ r.id }}"
                  :checked="$store.sightingSelection.has({{ r.id }})"
                  @change="$store.sightingSelection.toggle({{ r.id }})">
         </td>
-        <td class="px-3 py-2">
+        <td>
           {{ mpn_chips(r, link_map=link_map) }}
         </td>
         {% set desc = r|part_description %}
-        <td class="px-3 py-2 text-sm text-gray-600 truncate max-w-[180px] hidden sm:table-cell" title="{{ desc }}">{{ desc or '—' }}</td>
-        <td class="px-3 py-2 text-right font-mono hidden sm:table-cell">{{ r.target_qty or '—' }}</td>
-        <td class="px-3 py-2 text-gray-600 truncate max-w-[140px] hidden xl:table-cell">
+        <td class="text-sm text-gray-600 truncate max-w-[180px] hidden sm:table-cell" title="{{ desc }}">{{ desc or '—' }}</td>
+        <td class="text-right font-mono hidden sm:table-cell">{{ r.target_qty or '—' }}</td>
+        <td class="text-gray-600 truncate max-w-[140px] hidden xl:table-cell">
           {{ r.requisition.customer_name or '—' }}
         </td>
-        <td class="px-3 py-2 text-gray-600 text-xs truncate hidden xl:table-cell">
+        <td class="text-gray-600 text-xs truncate hidden xl:table-cell">
           {{ r.requisition.creator.name if r.requisition.creator else '—' }}
         </td>
-        <td class="px-3 py-2 coverage-cell"
+        <td class="coverage-cell"
             x-data="{ refreshing: false }"
             :class="refreshing ? 'opacity-60' : ''">
           <div class="relative flex items-center gap-1">
@@ -187,13 +191,13 @@
             </button>
           </div>
         </td>
-        <td class="px-3 py-2">
+        <td>
           <div class="flex items-center gap-1.5">
             <span class="transition-colors duration-200">{{ m.status_badge(r.sourcing_status) }}</span>
             {# Hover-revealed quick Build RFQ button — @click.stop so it doesn't
                select the row; mirrors the refresh icon-button pattern above #}
             <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/sightings/vendor-modal?requirement_ids={{ r.id }}'})"
-                    class="opacity-0 group-hover:opacity-100 transition-opacity text-gray-300 hover:text-brand-600"
+                    class="opacity-0 group-hover:opacity-100 transition-opacity text-gray-300 hover:text-accent-600"
                     title="Build RFQ for this part">
               <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
@@ -201,11 +205,11 @@
             </button>
           </div>
         </td>
-        <td class="px-3 py-2 text-center hidden xl:table-cell">
+        <td class="text-center hidden xl:table-cell">
           {% if r.priority_score %}
             {% set pri = r.priority_score %}
             {% set pri_label = 'High' if pri >= 70 else ('Med' if pri >= 40 else 'Low') %}
-            <span class="inline-flex px-1.5 py-0.5 text-[10px] font-semibold rounded-full {{ 'bg-rose-50 text-rose-700' if pri >= 70 else ('bg-amber-50 text-amber-700' if pri >= 40 else 'bg-gray-100 text-gray-500') }}">{{ pri_label }}</span>
+            <span class="chip {{ 'bg-rose-50 text-rose-700 border-rose-200' if pri >= 70 else ('bg-amber-50 text-amber-700 border-amber-200' if pri >= 40 else 'bg-gray-100 text-gray-500 border-gray-200') }}">{{ pri_label }}</span>
           {% endif %}
         </td>
       </tr>
@@ -248,7 +252,7 @@
     {% set cov_pct = ((cov_qty / r.target_qty * 100) if r.target_qty and r.target_qty > 0 else 0)|int %}
     {% set cov_pct = [cov_pct, 100]|min %}
     <div class="bg-white border border-gray-200 rounded-lg p-3 sightings-slide-up cursor-pointer"
-         :class="selectedReqId == {{ r.id }} ? 'ring-2 ring-brand-300' : ''"
+         :class="selectedReqId == {{ r.id }} ? 'ring-2 ring-accent-300' : ''"
          @click="selectReq({{ r.id }})">
       <div class="flex items-center justify-between mb-1.5">
         <div class="flex-1 min-w-0">{{ mpn_chips(r, link_map=link_map) }}</div>
@@ -265,7 +269,7 @@
         </div>
         <span class="text-[10px] text-gray-400 w-7 text-right">{{ cov_pct }}%</span>
         <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/sightings/vendor-modal?requirement_ids={{ r.id }}'})"
-                class="inline-flex items-center justify-center min-w-[24px] min-h-[24px] text-gray-400 hover:text-brand-600 transition-colors"
+                class="inline-flex items-center justify-center min-w-[24px] min-h-[24px] text-gray-400 hover:text-accent-600 transition-colors"
                 title="Build RFQ for this part">
           <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
@@ -306,7 +310,7 @@
        x-transition:leave="transition ease-in duration-150"
        x-transition:leave-start="translate-y-0 opacity-100"
        x-transition:leave-end="translate-y-full opacity-0"
-       class="sticky bottom-0 bg-white border-t border-brand-200 px-3 py-2 flex items-center gap-3 shadow-lg">
+       class="sticky bottom-0 bg-white border-t border-accent-200 px-3 py-2 flex items-center gap-3 shadow-lg">
     <span class="text-xs font-medium text-gray-600" x-text="$store.sightingSelection.count + ' selected'"></span>
     <span x-show="$store.sightingSelection.count > visibleSelectedCount && visibleSelectedCount > 0"
           x-cloak
