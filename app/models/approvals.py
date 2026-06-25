@@ -5,8 +5,9 @@ Purpose: Core approval-workflow tables: ApprovalRequest, ApprovalStep,
          ApprovalGateConfig.
 
 Called by: services/approvals.py (not yet written), routers/approvals.py (Task 3+)
-Depends on: models.base, app.constants (ApprovalGateType, ApprovalRequestStatus,
-            ApprovalRecipientStatus, ApprovalStepRule), models.auth (User)
+Depends on: models.base, app.constants (ApprovalRequestStatus,
+            ApprovalRecipientStatus, ApprovalStepRule; gate_type stores
+            ApprovalGateType values, set by the service layer), models.auth (User)
 """
 
 from datetime import datetime, timezone
