@@ -5,21 +5,21 @@
    (review/reconfirm/mark-sold/delete) re-render #sightings-offers-panel. #}
 {% from "htmx/partials/offers/_field_macros.html" import qual_badge %}
 {% set sc = {
-  'active': 'bg-emerald-50 text-emerald-700',
-  'pending_review': 'bg-amber-50 text-amber-700',
-  'approved': 'bg-emerald-50 text-emerald-700',
-  'rejected': 'bg-rose-50 text-rose-700',
-  'sold': 'bg-gray-100 text-gray-600',
-  'won': 'bg-emerald-50 text-emerald-700',
-  'expired': 'bg-gray-100 text-gray-500',
+  'active': 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  'pending_review': 'bg-amber-50 text-amber-700 border-amber-200',
+  'approved': 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  'rejected': 'bg-rose-50 text-rose-700 border-rose-200',
+  'sold': 'bg-gray-100 text-gray-600 border-gray-200',
+  'won': 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  'expired': 'bg-gray-100 text-gray-500 border-gray-200',
 } %}
 <div id="offer-row-{{ o.id }}" class="group px-2 py-1.5 hover:bg-gray-50/50" x-data="{ open: false, expand: false }">
   <div class="flex items-center gap-2">
     <div class="flex-1 min-w-0">
       <div class="flex items-center gap-2">
         <button @click.stop="expand = !expand"
-                class="font-medium text-gray-900 text-sm truncate hover:text-brand-600 text-left">{{ o.vendor_name or '—' }}</button>
-        <span class="inline-flex px-1.5 py-0.5 text-xs font-medium rounded-full {{ sc.get(o.status, 'bg-gray-100 text-gray-600') }}">
+                class="font-medium text-gray-900 text-sm truncate hover:text-accent-600 text-left">{{ o.vendor_name or '—' }}</button>
+        <span class="chip {{ sc.get(o.status, 'bg-gray-100 text-gray-600 border-gray-200') }}">
           {{ (o.status or 'unknown')|replace('_', ' ')|capitalize }}
         </span>
         {{ qual_badge(o) }}
@@ -47,7 +47,7 @@
                 class="w-full text-left px-3 py-1.5 text-gray-700 hover:bg-gray-50">Edit</button>
         {% if o.vendor_response_id %}
         <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/sightings/{{ requirement.id }}/offers/{{ o.id }}/qualify-ai'}); open = false"
-                class="w-full text-left px-3 py-1.5 text-brand-600 hover:bg-brand-50">Qualify with AI</button>
+                class="w-full text-left px-3 py-1.5 text-accent-600 hover:bg-accent-50">Qualify with AI</button>
         {% endif %}
         {% if o.status == 'pending_review' %}
         <button hx-post="/v2/partials/sightings/{{ requirement.id }}/offers/{{ o.id }}/review"
@@ -64,7 +64,7 @@
         <button hx-post="/v2/partials/sightings/{{ requirement.id }}/offers/{{ o.id }}/reconfirm"
                 hx-target="#sightings-offers-panel" hx-swap="innerHTML" data-loading-disable
                 @click.stop="open = false"
-                class="w-full text-left px-3 py-1.5 text-brand-600 hover:bg-brand-50">Reconfirm</button>
+                class="w-full text-left px-3 py-1.5 text-accent-600 hover:bg-accent-50">Reconfirm</button>
         <button hx-post="/v2/partials/sightings/{{ requirement.id }}/offers/{{ o.id }}/mark-sold"
                 hx-target="#sightings-offers-panel" hx-swap="innerHTML"
                 hx-confirm="Mark this offer as sold?" data-loading-disable
@@ -111,17 +111,17 @@
     {% if requests %}
     {% set kind_display = {'images': 'Images', 'fpq': 'FPQ', 'cert': 'Cert', 'pkg_qty': 'Pkg qty'} %}
     {% set status_colors = {
-      'pending': 'bg-amber-50 text-amber-700',
-      'sent': 'bg-blue-50 text-blue-700',
-      'skipped': 'bg-amber-100 text-amber-600',
-      'failed': 'bg-rose-50 text-rose-700',
+      'pending': 'bg-amber-50 text-amber-700 border-amber-200',
+      'sent': 'bg-blue-50 text-blue-700 border-blue-200',
+      'skipped': 'bg-amber-100 text-amber-600 border-amber-200',
+      'failed': 'bg-rose-50 text-rose-700 border-rose-200',
     } %}
     <div class="flex flex-wrap items-center gap-1 pt-0.5">
       {% for r in requests %}
       {% set r_kind = r.get('kind', '') %}
       {% set r_status = r.get('status', '') %}
       {% set color = status_colors.get(r_status, 'bg-gray-100 text-gray-500') %}
-      <span class="inline-flex px-1.5 py-0.5 text-xs font-medium rounded-full {{ color }}">
+      <span class="chip {{ color }}">
         {{ kind_display.get(r_kind, r_kind|capitalize) }}{% if r_status != 'pending' %} — {{ r_status }}{% endif %}
       </span>
       {# Per-PENDING Send control: fires the token-bearing send route for this entry. #}
