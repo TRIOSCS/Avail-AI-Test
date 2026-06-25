@@ -2032,8 +2032,52 @@ merges different-`account_owner_id` accounts) are reused AS-IS.
   Data Ops partial via `_render_data_ops` into `#settings-content` (so pairs referencing
   the just-merged entity drop without a manual refresh) and surface the kept-name /
   failure message via a `settings_toast` `HX-Trigger` rather than swapping a `<p>` into
-  the row. Both vendor and company rows carry the Alpine `x-data="{ merged: false }"`
-  guard for consistent post-merge behavior.
+  the row.
+- **Click-merge bug fix (root cause):** the merge buttons used to be wrapped in a dead
+  `x-data="{ merged: false }"` + `<template x-if="!merged" x-cloak>` guard. `merged` was
+  never set true, so the wrapper added nothing — but because the Data Ops body is always
+  delivered by an HTMX swap into `#settings-content` (which was NOT in the
+  `htmx:afterSwap` `Alpine.initTree` allow-list), the `x-if` template was not reliably
+  initialized: `x-cloak` (`display:none !important`) stayed applied and the buttons were
+  hidden/inert, so a click hit a half-bound Alpine expression and threw instead of
+  merging. Fix: the dead wrapper is removed (the buttons are pure HTMX, no Alpine needed)
+  **and** `#settings-content` is added to the `htmx:afterSwap` initTree allow-list so the
+  whole Settings cluster's Alpine directives re-init after every settings swap. The
+  vendor-merge route now also catches `Exception` (was `ValueError`-only), matching
+  company-merge, so an unexpected DB error surfaces as a toast not a 500.
+- **Delete-both:** each pair row also has a rose-outline **Delete both** button
+  (`delete_both_button` macro) → `POST /v2/partials/admin/vendor-delete-both` /
+  `company-delete-both` (`id_a`/`id_b` form fields, admin-gated). Backed by
+  `vendor_merge_service.delete_vendor_cards` / `company_merge_service.delete_companies`.
+  Both split dependents into **detach vs cascade**: soft references that merely point at
+  the parent (vendor: offers/stock-list-hashes/activity-log/prospect-contacts/enrichment-queue;
+  company: activity-log/sightings/knowledge/prospect-accounts) are **detached** (FK NULLed,
+  survive unlinked, mirroring how merge reassigns), while children declared NOT-NULL
+  `ondelete=CASCADE` are **never NULLed** (that raises NotNullViolation on Postgres) and
+  cascade-delete with the parent via `db.delete()` (vendor: `vendor_contacts`/`vendor_reviews`/
+  `vendor_metrics_snapshot`/`buyer_vendor_stats` — the first two also via ORM
+  `all, delete-orphan`; company: sites/attachments/collaborators via ORM cascade, plus
+  `customer_part_history`/`excess_lists` purged explicitly since they're not ORM-cascaded).
+  Both services are **fail-closed**: any detach/purge error logs at error level and
+  re-raises so the route rolls back rather than deleting the parents and orphaning rows;
+  the single-pair routes catch it and surface an error toast (never a 500). Native
+  `hx-confirm` spells out both names ("cannot be undone").
+- **Multi-select mass actions:** each dedup section is an `x-data="dedupSelect()"` Alpine
+  component (registered in `htmx_app.js`, Set-based, mirroring `rq2Page`). Selection unit
+  is a keeper-first **pair token** `"<keeperId>-<loserId>"`; per-row checkboxes + a
+  section select-all feed a sticky `mass_action_bar` (visible when `count > 0`) with
+  **Merge selected / Delete selected / Dismiss for now / Clear**. Each action POSTs a
+  single comma-joined `pairs` field + an `action` field to
+  `POST /v2/partials/admin/vendor-bulk` / `company-bulk` (`_dedup_bulk` parses the tokens
+  via `_parse_dedup_pairs`, gates admin, caps at `_MAX_DEDUP_PAIRS=200`, processes
+  per-pair with per-pair commit + rollback). A per-pair failure doesn't abort the batch,
+  but each is logged at error level with its pair id + action, the failing pair tokens are
+  named in the toast message, and **any** failure makes the toast an `error` (a partial
+  failure never shows green success). The select-all `@change` is a
+  **single-quoted** attribute because `tojson` emits double-quoted tokens (a double-quoted
+  attr would close early and kill Alpine init). `Dismiss for now` is **view-only** (it
+  hides the rows client-side and re-renders; pairs reappear on the next scan — there is no
+  durable dismissal table yet).
 - **Per-account banner:** `GET .../{company_id}/dup-suggestion` (`company_dup_suggestion`,
   declared ABOVE the catch-all) → lazy `hx-trigger=load` panel in `detail.html` →
   `_dup_suggestion.html`. Shows the top dedup match INVOLVING this company + a "Review &
@@ -2165,11 +2209,17 @@ Mark-seen (per row, background, no spinner):
   NOT change the count — it only gates the cosmetic one-time pulse; the row keeps its rail
   until the underlying work is done.
 
-**Tasks queue + core-basic gaps (Phase 3).** `GET /v2/partials/tasks` (gated
-`require_access(AccessKey.MY_DAY)`) is a filterable queue of tasks assigned to me
-(`status`/`priority`/`due`; reuses `get_my_tasks`, filters priority/due in-route) rendered
-under the My-Day nav key; its filter bar carries an EXPLICIT `hx-target="#tasks-results"`
-(never inherits `#main-content`). The My-Day nav badge is the `TasksActionSource` above.
+**Tasks page + core-basic gaps (Phase 3).** `GET /v2/partials/my-day` (gated
+`require_access(AccessKey.MY_DAY)`) is the **Tasks** page (nav label "Tasks"; formerly
+"My Day", which also carried a follow-up-accounts call-down section — that account cadence
+now lives in CRM, so this page is tasks-only). It is a filterable queue of tasks assigned
+to me (`status`/`priority`/`due`; reuses `get_my_tasks`, filters priority/due in-route),
+grouped by urgency (Overdue → Due soon → Later → No due date). Templates: `tasks/list.html`
+(full page incl. filter bar) and `tasks/_results.html` (results-only fragment, returned
+when `HX-Target == "tasks-results"`). The filter bar carries an EXPLICIT
+`hx-target="#tasks-results"` (never inherits `#main-content`). The standalone
+`GET /v2/partials/tasks` queue endpoint was folded into this route. The My-Day/Tasks nav
+badge is the `TasksActionSource` above.
 Bulk "Assign owner" on the account list now uses a name+role `<select>` (`cdm_list_ctx(include_users=…)`,
 manager/admin only) instead of a raw User-ID box. All clickable `<tr hx-get>` list rows
 are keyboard-accessible (`role=button` + `tabindex=0` + `keyup[Enter]` + `focus:ring-2`).
@@ -4689,6 +4739,26 @@ POST /api/trouble-tickets/submit   (require_user)
     RuntimeError at boot if still not writable. _save_screenshot() re-raises
     PermissionError/OSError (returns None only for bad/undecodable base64); the submit
     route catches them → JSON 500 {"error": "Screenshot storage is not writable — ..."}.
+
+Profile avatars (parallel to TT-0002 storage): `app/routers/avatars.py` adds a second
+`uploads`-volume subdir, `AVATARS_DIR` = `/app/uploads/avatars`, with the SAME three
+durability layers (Dockerfile mkdir+chown of `/app/uploads/{tickets,avatars}`;
+docker-entrypoint.sh `mkdir -p /app/uploads/avatars` + the existing recursive
+`chown -R appuser:appuser /app/uploads`; `startup.ensure_avatar_storage()` called from
+the main.py lifespan right after `ensure_screenshot_storage()`). Routes (all
+`require_user`, own-profile by construction — no user path param): `POST /api/user/avatar`
+(multipart; validates the REAL image type by magic bytes via `filetype.guess` ∈
+{png,jpeg,webp,gif} + ≤2 MB — both the accepted type AND the on-disk `{ext}` derive from
+the verified bytes, never the attacker-controlled `Content-Type` header, so a polyglot
+labelled `image/png` can't be stored as `.png` and served back inline; writes
+`user_{id}_{uuid8}.{ext}`, deletes the prior file, sets `User.avatar_path`, returns
+empty 200 + `HX-Trigger` {avatarUpdated:{filename}, showToast}); `DELETE /api/user/avatar`
+(clears path + file); `GET /api/user/avatar/{filename}` (FileResponse, path-traversal
+guarded against `realpath` leaving `AVATARS_DIR`, like the screenshot serve route). The
+uploader lives in `settings/profile.html`; the shared `user_avatar(user, size)` macro
+(`shared/_macros.html`) renders the photo or an accent-tinted initials circle and is
+applied in the `activity_row` macro (comm-ledger actor `a.user`) and `buy_plans/detail.html`
+(line assignee `line.buyer`).
 
 Admin console (require_admin):  Settings → Tickets  (tab admin-gated)
   GET  /v2/partials/trouble-tickets/{workspace,list,{id}}   (require_admin)

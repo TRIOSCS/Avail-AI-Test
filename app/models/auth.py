@@ -53,6 +53,9 @@ class User(Base):
     notify_buyplan_email_enabled = Column(Boolean, default=True, nullable=False)
     notify_new_offer_alert_enabled = Column(Boolean, default=True, nullable=False)
 
+    # Profile photo — stored basename of the file under avatars.AVATARS_DIR
+    # (e.g. "user_12_a1b2c3d4.png"); NULL falls back to the initials avatar.
+    avatar_path = Column(String(255), nullable=True)
     # Buy-plan approval right (per-user grant, admin-toggled in Users settings). Gates the
     # buy-plan approve/reject action via dependencies.require_buyplan_approver /
     # can_approve_buy_plans. Independent of role: admins do NOT auto-qualify — the column

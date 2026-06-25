@@ -1,188 +1,112 @@
-"""Tests for Step 6 — My Day worklist (/v2/partials/my-day).
+"""Tests for the Tasks page (/v2/partials/my-day) — formerly "My Day".
+
+The page was reworked from a follow-up-accounts + tasks split into a tasks-only,
+filterable worklist (status / priority / due), grouped by urgency. The nav id stays
+``my-day`` (URL/access unchanged); only the display label and the page became "Tasks".
 
 Covers:
-- route returns 200 with overdue account I own + open task assigned to me
-- does NOT list another user's overdue account (my_only scoping)
-- does NOT list another user's task
-- completed task does not appear
-- on-target account (not overdue) does not appear
-- empty state renders when nothing is due
-- completing a task from My Day removes the row (outerHTML swap, empty fragment)
-- completing a task from My Day does NOT create an ActivityLog
+- route returns 200; heading + nav-level title say "Tasks"
+- lists my open task assigned to me; excludes another user's task; excludes done by default
+- the follow-up-accounts section is GONE (no overdue-account row, no outreach rail)
+- urgency grouping headers (Overdue / Due soon / Later / No due date) render
+- status / priority / due filters narrow the list
+- the filter bar carries an EXPLICIT hx-target (#tasks-results) and a results-only
+  fragment is returned for an HX-Target=tasks-results request
+- completing a task from the page removes the row (outerHTML swap, empty fragment) and
+  creates no ActivityLog
 
 Called by: pytest
-Depends on: conftest.py (db_session, test_user, test_company, client)
+Depends on: conftest.py (db_session, test_user, manager_user, test_company,
+            test_requisition, client)
 """
 
 from __future__ import annotations
 
 import os
+import re
 
 os.environ["TESTING"] = "1"
 
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from freezegun import freeze_time
 from sqlalchemy.orm import Session
 from starlette.testclient import TestClient
 
+from app.constants import TaskStatus
 from app.models import ActivityLog, Company
-from app.models.crm import CustomerSite, SiteContact
 from app.models.task import RequisitionTask
 
 
-def _add_primary_contact(
-    db_session: Session,
-    company: Company,
+def _add_task(
+    db: Session,
     *,
-    phone: str = "+15551234567",
-    email: str = "buyer@acme.test",
-    do_not_contact: bool = False,
-) -> SiteContact:
-    """Attach a primary SiteContact (via a CustomerSite) to ``company``.
-
-    Used to exercise the My Day one-click outreach rail (Call / Email), which reads
-    ``company.primary_contact``.
-    """
-    site = CustomerSite(company_id=company.id, site_name="HQ", is_active=True)
-    db_session.add(site)
-    db_session.flush()
-    contact = SiteContact(
-        customer_site_id=site.id,
-        full_name="Pat Buyer",
-        phone=phone,
-        email=email,
-        do_not_contact=do_not_contact,
+    user_id: int,
+    title: str,
+    company=None,
+    req=None,
+    status: str = TaskStatus.TODO.value,
+    priority: int = 2,
+    due_at=None,
+) -> RequisitionTask:
+    t = RequisitionTask(
+        company_id=company.id if company is not None else None,
+        requisition_id=req.id if req is not None else None,
+        title=title,
+        status=status,
+        priority=priority,
+        assigned_to_id=user_id,
+        due_at=due_at,
+        completed_at=datetime.now(timezone.utc) if status == TaskStatus.DONE.value else None,
+        created_at=datetime.now(timezone.utc),
     )
-    db_session.add(contact)
-    db_session.flush()
-    company.primary_contact_id = contact.id
-    db_session.commit()
-    db_session.refresh(company)
-    return contact
+    db.add(t)
+    db.commit()
+    db.refresh(t)
+    return t
 
 
 # ---------------------------------------------------------------------------
-# Helpers / fixtures
+# Fixtures
 # ---------------------------------------------------------------------------
-
-
-@pytest.fixture()
-def overdue_owned_company(db_session: Session, test_user) -> Company:
-    """An account owned by test_user whose outbound clock is 35 days stale (overdue)."""
-    co = Company(
-        name="Overdue Acme",
-        is_active=True,
-        account_owner_id=test_user.id,
-        last_outbound_at=datetime.now(timezone.utc) - timedelta(days=35),
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(co)
-    db_session.commit()
-    db_session.refresh(co)
-    return co
-
-
-@pytest.fixture()
-def other_user(db_session: Session):
-    """A second user — used to verify my_only scoping."""
-    from app.models.auth import User
-
-    u = User(
-        email="other@trioscs.com",
-        name="Other User",
-        role="buyer",
-        azure_id="test-azure-id-other",
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(u)
-    db_session.commit()
-    db_session.refresh(u)
-    return u
-
-
-@pytest.fixture()
-def other_user_overdue_company(db_session: Session, other_user) -> Company:
-    """An overdue account owned by other_user — must NOT appear on my My Day."""
-    co = Company(
-        name="Other User Overdue",
-        is_active=True,
-        account_owner_id=other_user.id,
-        last_outbound_at=datetime.now(timezone.utc) - timedelta(days=40),
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(co)
-    db_session.commit()
-    db_session.refresh(co)
-    return co
-
-
-@pytest.fixture()
-def on_target_owned_company(db_session: Session, test_user) -> Company:
-    """An account owned by test_user with a recent outbound (2 days ago — on target)."""
-    co = Company(
-        name="On Target Corp",
-        is_active=True,
-        account_owner_id=test_user.id,
-        last_outbound_at=datetime.now(timezone.utc) - timedelta(days=2),
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(co)
-    db_session.commit()
-    db_session.refresh(co)
-    return co
 
 
 @pytest.fixture()
 def my_open_task(db_session: Session, test_user, test_company) -> RequisitionTask:
     """An open task assigned to test_user, linked to test_company, due yesterday."""
-    t = RequisitionTask(
-        company_id=test_company.id,
+    return _add_task(
+        db_session,
+        user_id=test_user.id,
         title="Follow up on quote",
-        status="todo",
-        assigned_to_id=test_user.id,
+        company=test_company,
         due_at=datetime.now(timezone.utc) - timedelta(days=1),
-        created_at=datetime.now(timezone.utc),
     )
-    db_session.add(t)
-    db_session.commit()
-    db_session.refresh(t)
-    return t
 
 
 @pytest.fixture()
-def other_user_task(db_session: Session, other_user, test_company) -> RequisitionTask:
-    """An open task assigned to other_user — must NOT appear on my My Day."""
-    t = RequisitionTask(
-        company_id=test_company.id,
+def other_user_task(db_session: Session, manager_user, test_company) -> RequisitionTask:
+    """An open task assigned to another user — must NOT appear on my Tasks page."""
+    return _add_task(
+        db_session,
+        user_id=manager_user.id,
         title="Other user task",
-        status="todo",
-        assigned_to_id=other_user.id,
+        company=test_company,
         due_at=datetime.now(timezone.utc) - timedelta(days=1),
-        created_at=datetime.now(timezone.utc),
     )
-    db_session.add(t)
-    db_session.commit()
-    db_session.refresh(t)
-    return t
 
 
 @pytest.fixture()
 def my_done_task(db_session: Session, test_user, test_company) -> RequisitionTask:
-    """A completed task assigned to test_user — must NOT appear."""
-    t = RequisitionTask(
-        company_id=test_company.id,
+    """A completed task assigned to test_user — excluded unless status=done."""
+    return _add_task(
+        db_session,
+        user_id=test_user.id,
         title="Already done task",
-        status="done",
-        assigned_to_id=test_user.id,
+        company=test_company,
+        status=TaskStatus.DONE.value,
         due_at=datetime.now(timezone.utc) - timedelta(days=2),
-        completed_at=datetime.now(timezone.utc),
-        created_at=datetime.now(timezone.utc),
     )
-    db_session.add(t)
-    db_session.commit()
-    db_session.refresh(t)
-    return t
 
 
 # ---------------------------------------------------------------------------
@@ -190,159 +114,187 @@ def my_done_task(db_session: Session, test_user, test_company) -> RequisitionTas
 # ---------------------------------------------------------------------------
 
 
-class TestMyDayRoute:
+class TestTasksPageRoute:
     def test_returns_200(self, client: TestClient):
-        """Route returns 200 HTML."""
         resp = client.get("/v2/partials/my-day")
         assert resp.status_code == 200
         assert "text/html" in resp.headers["content-type"]
 
-    def test_shows_overdue_account_i_own(
-        self, client: TestClient, db_session: Session, test_user, overdue_owned_company
-    ):
-        """Overdue account I own appears in the Follow up section."""
+    def test_heading_and_title_say_tasks(self, client: TestClient):
+        """The page heading and the OOB <title> both read 'Tasks', not 'My Day'."""
         resp = client.get("/v2/partials/my-day")
-        assert resp.status_code == 200
-        assert overdue_owned_company.name in resp.text
+        assert ">Tasks<" in resp.text
+        assert "Tasks — AvailAI" in resp.text
+        assert "My Day" not in resp.text
 
-    def test_shows_my_open_task(self, client: TestClient, db_session: Session, my_open_task):
-        """Open task assigned to me appears in the My tasks section."""
+    def test_shows_my_open_task(self, client: TestClient, my_open_task):
         resp = client.get("/v2/partials/my-day")
         assert resp.status_code == 200
         assert my_open_task.title in resp.text
 
-    def test_excludes_other_users_account(
-        self,
-        client: TestClient,
-        db_session: Session,
-        other_user_overdue_company,
-        overdue_owned_company,
-    ):
-        """Overdue account owned by another user does NOT appear (my_only scoping)."""
-        resp = client.get("/v2/partials/my-day")
-        assert resp.status_code == 200
-        assert other_user_overdue_company.name not in resp.text
-        # Own account still there
-        assert overdue_owned_company.name in resp.text
-
-    def test_excludes_other_users_task(
-        self,
-        client: TestClient,
-        db_session: Session,
-        other_user_task,
-        my_open_task,
-    ):
-        """Task assigned to another user does NOT appear."""
+    def test_excludes_other_users_task(self, client: TestClient, other_user_task, my_open_task):
         resp = client.get("/v2/partials/my-day")
         assert resp.status_code == 200
         assert other_user_task.title not in resp.text
         assert my_open_task.title in resp.text
 
-    def test_excludes_completed_task(self, client: TestClient, db_session: Session, my_done_task):
-        """Completed task does not appear."""
+    def test_default_excludes_done(self, client: TestClient, my_done_task):
         resp = client.get("/v2/partials/my-day")
         assert resp.status_code == 200
         assert my_done_task.title not in resp.text
 
-    def test_excludes_on_target_account(self, client: TestClient, db_session: Session, on_target_owned_company):
-        """Account with recent outbound (on target) does not appear in Follow up."""
+    def test_full_page_returns_200(self, client: TestClient):
+        """GET /v2/my-day full-page shell returns 200."""
+        resp = client.get("/v2/my-day")
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]
+
+
+class TestTasksPageNoFollowUpSection:
+    """The follow-up-accounts call-down section and its outreach rail are gone."""
+
+    def test_no_follow_up_heading(self, client: TestClient, my_open_task):
+        """The "Follow up" / "My tasks" section headings are gone.
+
+        Matches the heading *element* (an <hN> whose inner text starts with the label
+        after the opening ``>`` and whitespace) rather than a bare substring, so a task
+        titled e.g. "Follow up on quote" (``>Follow up on quote``) can't false-positive.
+        """
+        resp = client.get("/v2/partials/my-day")
+        assert not re.search(r">\s+Follow up\b", resp.text)
+        assert not re.search(r">\s+My tasks\b", resp.text)
+
+    def test_overdue_owned_account_not_listed(self, client: TestClient, db_session: Session, test_user):
+        """An overdue account I own no longer surfaces here (it lives in CRM now)."""
+        co = Company(
+            name="Overdue Acme Inc",
+            is_active=True,
+            account_owner_id=test_user.id,
+            last_outbound_at=datetime.now(timezone.utc) - timedelta(days=40),
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(co)
+        db_session.commit()
         resp = client.get("/v2/partials/my-day")
         assert resp.status_code == 200
-        assert on_target_owned_company.name not in resp.text
+        assert co.name not in resp.text
 
-    def test_empty_state_when_nothing_due(self, client: TestClient, db_session: Session):
-        """Empty state renders when no overdue accounts and no open tasks."""
+    def test_no_outreach_rail(self, client: TestClient, my_open_task):
+        """No Call/Email outreach affordance or auto-log hook on the Tasks page."""
         resp = client.get("/v2/partials/my-day")
-        assert resp.status_code == 200
-        assert "All caught up" in resp.text
+        assert "tel:" not in resp.text
+        assert "data-outreach-log" not in resp.text
 
-    def test_empty_state_absent_when_there_is_work(self, client: TestClient, db_session: Session, my_open_task):
-        """Empty state does not show when there is at least one open task."""
+
+class TestTasksPageGrouping:
+    @freeze_time("2026-06-25 12:00:00")
+    def test_urgency_group_headers_render(self, client: TestClient, db_session: Session, test_user, test_company):
+        """Overdue / Due soon / Later / No due date headers appear for matching
+        tasks."""
+        now = datetime.now(timezone.utc)
+        _add_task(
+            db_session, user_id=test_user.id, title="Overdue one", company=test_company, due_at=now - timedelta(days=3)
+        )
+        _add_task(
+            db_session, user_id=test_user.id, title="Soon one", company=test_company, due_at=now + timedelta(hours=2)
+        )
+        _add_task(
+            db_session, user_id=test_user.id, title="Later one", company=test_company, due_at=now + timedelta(days=10)
+        )
+        _add_task(db_session, user_id=test_user.id, title="Undated one", company=test_company, due_at=None)
         resp = client.get("/v2/partials/my-day")
+        assert "Overdue" in resp.text
+        assert "Due soon" in resp.text
+        assert "Later" in resp.text
+        assert "No due date" in resp.text
+
+
+class TestTasksPageFilters:
+    def test_full_load_has_filter_bar(self, client: TestClient):
+        resp = client.get("/v2/partials/my-day")
+        assert 'name="status"' in resp.text
+        assert 'name="priority"' in resp.text
+        assert 'name="due"' in resp.text
+
+    def test_filter_bar_has_explicit_hx_target(self, client: TestClient):
+        """Filter selects target the inner #tasks-results, never #main-content."""
+        resp = client.get("/v2/partials/my-day")
+        assert 'hx-target="#tasks-results"' in resp.text
+        assert 'id="tasks-results"' in resp.text
+
+    def test_results_only_fragment_on_hx_target_header(self, client: TestClient, my_open_task):
+        """A filter-bar request (HX-Target=tasks-results) returns results only — no
+        filter bar, no title swap."""
+        resp = client.get("/v2/partials/my-day", headers={"HX-Target": "tasks-results"})
         assert resp.status_code == 200
-        assert "All caught up" not in resp.text
+        assert my_open_task.title in resp.text
+        assert 'name="status"' not in resp.text
+        assert "<title" not in resp.text
+
+    def test_status_done_filter_shows_done(self, client: TestClient, db_session, test_user, test_company):
+        done = _add_task(
+            db_session, user_id=test_user.id, title="Done task", company=test_company, status=TaskStatus.DONE.value
+        )
+        open_t = _add_task(db_session, user_id=test_user.id, title="Open task", company=test_company)
+        resp = client.get("/v2/partials/my-day?status=done")
+        assert done.title in resp.text
+        assert open_t.title not in resp.text
+
+    def test_priority_filter(self, client: TestClient, db_session, test_user, test_company):
+        high = _add_task(db_session, user_id=test_user.id, title="High task", company=test_company, priority=3)
+        low = _add_task(db_session, user_id=test_user.id, title="Low task", company=test_company, priority=1)
+        resp = client.get("/v2/partials/my-day?priority=3")
+        assert high.title in resp.text
+        assert low.title not in resp.text
+
+    def test_due_overdue_filter(self, client: TestClient, db_session, test_user, test_company):
+        overdue = _add_task(
+            db_session,
+            user_id=test_user.id,
+            title="Overdue task",
+            company=test_company,
+            due_at=datetime.now(timezone.utc) - timedelta(days=2),
+        )
+        future = _add_task(
+            db_session,
+            user_id=test_user.id,
+            title="Future task",
+            company=test_company,
+            due_at=datetime.now(timezone.utc) + timedelta(days=5),
+        )
+        resp = client.get("/v2/partials/my-day?due=overdue")
+        assert overdue.title in resp.text
+        assert future.title not in resp.text
+
+    def test_due_none_filter(self, client: TestClient, db_session, test_user, test_company):
+        no_due = _add_task(db_session, user_id=test_user.id, title="No due task", company=test_company)
+        with_due = _add_task(
+            db_session,
+            user_id=test_user.id,
+            title="Has due task",
+            company=test_company,
+            due_at=datetime.now(timezone.utc) + timedelta(days=3),
+        )
+        resp = client.get("/v2/partials/my-day?due=none")
+        assert no_due.title in resp.text
+        assert with_due.title not in resp.text
 
 
-class TestMyDayCompleteTask:
-    def test_completing_task_from_my_day_returns_empty(self, client: TestClient, db_session: Session, my_open_task):
+class TestTasksPageCompleteTask:
+    def test_completing_task_returns_empty(self, client: TestClient, my_open_task):
         """POST complete with from_my_day=true returns empty fragment (row removes
         itself)."""
         resp = client.post(f"/v2/partials/tasks/{my_open_task.id}/complete?from_my_day=true")
         assert resp.status_code == 200
         assert resp.text.strip() == ""
 
-    def test_completing_task_from_my_day_sets_done(self, client: TestClient, db_session: Session, my_open_task):
-        """Task status becomes done after completing from My Day."""
+    def test_completing_task_sets_done(self, client: TestClient, db_session: Session, my_open_task):
         client.post(f"/v2/partials/tasks/{my_open_task.id}/complete?from_my_day=true")
         db_session.expire(my_open_task)
         assert my_open_task.status == "done"
 
     def test_completing_task_creates_no_activity_log(self, client: TestClient, db_session: Session, my_open_task):
-        """Completing a task from My Day creates NO ActivityLog (no fake logging)."""
         before = db_session.query(ActivityLog).count()
         client.post(f"/v2/partials/tasks/{my_open_task.id}/complete?from_my_day=true")
         after = db_session.query(ActivityLog).count()
         assert after == before
-
-
-class TestMyDayAttentionHeader:
-    def test_attention_count_shown_for_overdue_account(
-        self, client: TestClient, db_session: Session, overdue_owned_company
-    ):
-        """The header surfaces a 'needs a call today' attention figure for an overdue
-        account."""
-        resp = client.get("/v2/partials/my-day")
-        assert resp.status_code == 200
-        assert "need" in resp.text and "a call today" in resp.text
-        # The accent key-figure container is present (figure-accent token).
-        assert "figure-accent" in resp.text
-
-    def test_no_attention_figure_when_no_accounts(self, client: TestClient, db_session: Session, my_open_task):
-        """With tasks but no overdue accounts, the call-today figure is absent."""
-        resp = client.get("/v2/partials/my-day")
-        assert resp.status_code == 200
-        assert "a call today" not in resp.text
-
-
-class TestMyDayOutreach:
-    def test_call_and_email_actions_render_for_reachable_contact(
-        self, client: TestClient, db_session: Session, overdue_owned_company
-    ):
-        """A reachable primary contact yields one-click Call (tel:) + Email links."""
-        _add_primary_contact(db_session, overdue_owned_company)
-        resp = client.get("/v2/partials/my-day")
-        assert resp.status_code == 200
-        assert "tel:+15551234567" in resp.text
-        assert "buyer@acme.test" in resp.text
-        # Outreach auto-logging hook is wired on the action.
-        assert "data-outreach-log" in resp.text
-
-    def test_outreach_suppressed_for_do_not_contact(
-        self, client: TestClient, db_session: Session, overdue_owned_company
-    ):
-        """A do_not_contact primary contact gets no Call/Email affordance."""
-        _add_primary_contact(db_session, overdue_owned_company, do_not_contact=True)
-        resp = client.get("/v2/partials/my-day")
-        assert resp.status_code == 200
-        assert "tel:+15551234567" not in resp.text
-        assert "buyer@acme.test" not in resp.text
-
-    def test_no_call_link_when_account_has_no_contact(
-        self, client: TestClient, db_session: Session, overdue_owned_company
-    ):
-        """An overdue account with no primary contact still renders (no tel: link), and
-        the row's Log action remains available."""
-        resp = client.get("/v2/partials/my-day")
-        assert resp.status_code == 200
-        assert overdue_owned_company.name in resp.text
-        assert "tel:" not in resp.text
-        # The manual log affordance is always present on a follow-up row.
-        assert "activity/add-note-form" in resp.text
-
-
-class TestMyDayFullPage:
-    def test_full_page_returns_200(self, client: TestClient):
-        """GET /v2/my-day full-page shell returns 200."""
-        resp = client.get("/v2/my-day")
-        assert resp.status_code == 200
-        assert "text/html" in resp.headers["content-type"]

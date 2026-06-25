@@ -5,7 +5,7 @@
   Called by: htmx_views.py buy_plan_detail_partial endpoint.
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}
-{% from "htmx/partials/shared/_macros.html" import status_badge %}
+{% from "htmx/partials/shared/_macros.html" import status_badge, user_avatar %}
 {% from "htmx/partials/buy_plans/_macros.html" import collapse_chevron, modal_cancel_btn -%}
 <title hx-swap-oob="true">Buy Plan #{{ bp.id }} — AvailAI</title>
 
@@ -272,11 +272,14 @@
             <td class="text-gray-600 truncate max-w-[200px]" title="{{ desc }}">
               {{ desc or '-' }}
             </td>
-            {# Vendor + buyer below #}
+            {# Vendor + buyer (assignee) below #}
             <td>
               <div class="text-gray-900">{{ line.offer.vendor_name if line.offer else '-' }}</div>
               {% if line.buyer %}
-              <div class="text-xs text-gray-400">{{ line.buyer.name }}</div>
+              <div class="flex items-center gap-1.5 mt-0.5">
+                {{ user_avatar(line.buyer) }}
+                <span class="text-xs text-gray-400">{{ line.buyer.name }}</span>
+              </div>
               {% endif %}
             </td>
             {# Qty #}

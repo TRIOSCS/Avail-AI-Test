@@ -35,7 +35,7 @@ register_audit_listeners()
 @asynccontextmanager
 async def lifespan(app):
     """App startup/shutdown — launches background scheduler."""
-    from .startup import ensure_screenshot_storage, run_startup_migrations
+    from .startup import ensure_avatar_storage, ensure_screenshot_storage, run_startup_migrations
 
     if not os.environ.get("TESTING"):
         # S1: Fail-fast on default secret key (skip in test mode)
@@ -46,6 +46,8 @@ async def lifespan(app):
         # writable by this process (TT-0002) — surfaces a misconfigured/root-owned
         # uploads volume at boot instead of silently dropping screenshots later.
         ensure_screenshot_storage()
+        # Same guard for the parallel profile-avatar subdir on the uploads volume.
+        ensure_avatar_storage()
 
         # S2: Warn about missing critical env vars (don't crash — vendor keys are optional)
         missing = []
@@ -537,18 +539,19 @@ async def request_id_middleware(request: Request, call_next):
                 response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
             else:
                 response.headers["Cache-Control"] = "public, max-age=3600"
-        # Full-page HTML loads (non-HTMX requests): no-cache so a new deploy's shell + hashed
-        # CSS/JS bundle is fetched fresh instead of a heuristically-cached stale shell. HTMX
-        # partials (HX-Request) and /static (above) are unaffected. Set HERE (outermost
-        # middleware) because header sets on the TemplateResponse itself are dropped by inner
-        # response processing before reaching the client.
-        elif (
-            request.headers.get("HX-Request") is None
-            and not path.startswith("/api")
-            and "/partials/" not in path
-            and "text/html" in (response.headers.get("content-type") or "")
-        ):
-            response.headers["Cache-Control"] = "no-cache, must-revalidate"
+        # Every HTML response — full-page shell AND HTMX partials (/v2/partials/*) — is
+        # made non-cacheable so a new deploy's markup is fetched fresh instead of a
+        # heuristically-cached stale fragment. Without this, browsers cache partial GETs
+        # and in-app HTMX navigation keeps swapping in stale UI until a hard-refresh.
+        # Guard is the response content-type ONLY (starts with "text/html"): that naturally
+        # excludes JSON, content-hashed /static assets (handled above), text/event-stream
+        # SSE streams, and file downloads (PDF/CSV/image Content-Disposition responses),
+        # and we never read the response body — so streaming responses stay intact. Set
+        # HERE (outermost middleware) because header sets on the TemplateResponse itself
+        # are dropped by inner response processing before reaching the client.
+        elif (response.headers.get("content-type") or "").startswith("text/html"):
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
 
         # Skip noisy paths (static files, health checks)
         if not (path.startswith("/static") or path == "/health"):
@@ -678,6 +681,7 @@ from .routers.ai import router as ai_router
 from .routers.alerts import router as alerts_router
 from .routers.attachments_extra import router as attachments_extra_router
 from .routers.auth import router as auth_router
+from .routers.avatars import router as avatars_router
 from .routers.clay_oauth import router as clay_oauth_router
 from .routers.crm import router as crm_router
 from .routers.documents import router as documents_router
@@ -701,6 +705,7 @@ from .routers.vendors_crud import router as vendors_crud_router
 # Core routers (always active)
 app.include_router(attachments_extra_router)
 app.include_router(auth_router)
+app.include_router(avatars_router)
 app.include_router(clay_oauth_router)
 app.include_router(admin_router)
 app.include_router(ai_router)

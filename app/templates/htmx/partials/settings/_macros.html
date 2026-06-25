@@ -51,3 +51,63 @@
 {{ pad }}  Keep "{{ keep|truncate(40) }}"
 {{ pad }}</button>
 {%- endmacro %}
+
+{# "Delete both" dedup action — for a pair where neither record is worth keeping. POSTs
+   the two ids to a delete-both endpoint that detaches dependent records and removes both.
+   The confirm is a native hx-confirm (same UX as merge_button), spelling out the names so
+   a misclick can't silently destroy data. `a_id`/`b_id` are the two ids, `a_name`/`b_name`
+   the names, `endpoint` the hx-post URL, `target` the hx-target selector. #}
+{% macro delete_both_button(endpoint, target, a_id, b_id, a_name, b_name) -%}
+<button data-loading-disable
+        hx-post="{{ endpoint }}"
+        hx-vals='{"id_a": {{ a_id }}, "id_b": {{ b_id }}}'
+        hx-target="{{ target }}"
+        hx-swap="innerHTML"
+        hx-confirm="Delete BOTH '{{ a_name }}' and '{{ b_name }}'? This cannot be undone."
+        class="px-2 py-1 text-xs rounded bg-white text-rose-600 border border-rose-300 hover:bg-rose-50">
+  Delete both
+</button>
+{%- endmacro %}
+
+{# Sticky mass-action bar for a dedup section. Visible only when ≥1 pair is selected
+   (count is the dedupSelect Alpine x-data). `endpoint` is the section's bulk URL,
+   `target` the hx-target. Mirrors the requisitions2 / customers bulk bar: one hidden
+   `pairs` field bound to the Alpine selection, one `action` field per button. Bulk
+   delete + dismiss are confirmed; dismiss also hides the rows immediately (client-only).
+   `noun` is the singular entity word for the confirm copy. #}
+{% macro mass_action_bar(endpoint, target, noun) -%}
+<div x-show="count > 0" x-cloak
+     class="sticky bottom-0 z-10 flex items-center gap-2 px-4 py-2 bg-accent-50 border-t border-accent-200">
+  <span class="text-xs font-medium text-accent-700"><span x-text="count"></span> selected</span>
+  <form hx-post="{{ endpoint }}" hx-target="{{ target }}" hx-swap="innerHTML" class="inline">
+    <input type="hidden" name="action" value="merge">
+    <input type="hidden" name="pairs" :value="pairsStr">
+    <button type="submit" data-loading-disable
+            class="px-2 py-1 text-xs rounded bg-accent-500 text-white border border-accent-500 font-medium hover:bg-accent-600">
+      Merge selected
+    </button>
+  </form>
+  <form hx-post="{{ endpoint }}" hx-target="{{ target }}" hx-swap="innerHTML"
+        hx-confirm="Delete BOTH records in every selected pair? This cannot be undone." class="inline">
+    <input type="hidden" name="action" value="delete">
+    <input type="hidden" name="pairs" :value="pairsStr">
+    <button type="submit" data-loading-disable
+            class="px-2 py-1 text-xs rounded bg-white text-rose-600 border border-rose-300 hover:bg-rose-50">
+      Delete selected
+    </button>
+  </form>
+  <form hx-post="{{ endpoint }}" hx-target="{{ target }}" hx-swap="innerHTML"
+        @submit="hideSelected()" class="inline">
+    <input type="hidden" name="action" value="dismiss">
+    <input type="hidden" name="pairs" :value="pairsStr">
+    <button type="submit" data-loading-disable
+            class="px-2 py-1 text-xs rounded bg-white text-gray-600 border border-gray-300 hover:bg-gray-50">
+      Dismiss for now
+    </button>
+  </form>
+  <button type="button" @click="clear()"
+          class="px-2 py-1 text-xs rounded text-gray-600 hover:text-gray-800">
+    Clear
+  </button>
+</div>
+{%- endmacro %}
