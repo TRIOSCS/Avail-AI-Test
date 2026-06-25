@@ -35,11 +35,11 @@
   {% include "htmx/partials/shared/topbar.html" %}
 
   {# ── Page-level loading bar ────────────────────────────────── #}
-  <div id="page-loading-bar" class="fixed top-0 left-0 right-0 h-0.5 z-50 bg-brand-500 origin-left scale-x-0 transition-transform duration-300"
+  <div id="page-loading-bar" class="fixed top-0 left-0 right-0 h-0.5 z-50 bg-accent-500 origin-left scale-x-0 transition-transform duration-300"
        hidden></div>
 
   {# ── Page content ─────────────────────────────────────────── #}
-  <main id="main-content" class="main-content p-4 pb-[52px] bg-white" hx-target="this" hx-swap="innerHTML">
+  <main id="main-content" class="main-content p-3 pb-[52px] bg-white" hx-target="this" hx-swap="innerHTML">
     {% block content %}{% endblock %}
   </main>
 
