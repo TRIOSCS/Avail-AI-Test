@@ -322,8 +322,10 @@ class TestCompanyActivities:
         )
         assert resp.status_code == 404
 
-    def test_log_company_call_success(self, client, test_company, db_session):
+    def test_log_company_call_success(self, client, test_company, db_session, test_user):
         """POST call log creates an activity record."""
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         with patch(
             "app.services.activity_service.log_company_call",
             return_value=MagicMock(id=42),
@@ -344,8 +346,10 @@ class TestCompanyActivities:
         )
         assert resp.status_code == 404
 
-    def test_log_company_note_success(self, client, test_company, db_session):
+    def test_log_company_note_success(self, client, test_company, db_session, test_user):
         """POST note creates an activity record."""
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         with patch(
             "app.services.activity_service.log_company_note",
             return_value=MagicMock(id=77),

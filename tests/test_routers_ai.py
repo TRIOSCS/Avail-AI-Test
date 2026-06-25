@@ -368,7 +368,7 @@ def test_promote_to_site_contact(ai_client, db_session, ai_test_user):
     """POST /api/ai/prospect-contacts/{id}/promote creates SiteContact."""
     from app.models import Company, CustomerSite, ProspectContact, SiteContact
 
-    co = Company(name="Promo Co")
+    co = Company(name="Promo Co", account_owner_id=ai_test_user.id)
     db_session.add(co)
     db_session.flush()
     site = CustomerSite(company_id=co.id, site_name="HQ")

@@ -23,11 +23,16 @@ def _clear_rate_limit():
 
 
 @pytest.fixture
-def cdm_company(db_session):
-    """Company + site + contact wired together for outreach tests."""
+def cdm_company(db_session, test_user):
+    """Company + site + contact wired together for outreach tests.
+
+    Owned by ``test_user`` (the authenticated client) so the account-authz gate on
+    the activity-logging routes passes for the happy-path attribution tests.
+    """
     company = Company(
         name="Outreach Test Co",
         is_active=True,
+        account_owner_id=test_user.id,
         last_activity_at=datetime.now(timezone.utc) - timedelta(days=40),
     )
     db_session.add(company)

@@ -19,7 +19,12 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..database import get_db
-from ..dependencies import get_req_for_user, require_requisition_access, require_user
+from ..dependencies import (
+    can_manage_account,
+    get_req_for_user,
+    require_requisition_access,
+    require_user,
+)
 from ..models import (
     Contact,
     CustomerSite,
@@ -296,6 +301,17 @@ async def promote_prospect_contact(
     db: Session = Depends(get_db),
 ):
     """Promote a prospect contact to a VendorContact or SiteContact."""
+    # Authz: a site-linked prospect promotes into a SiteContact under a customer account,
+    # so gate it on account-management. Vendor-linked prospects are global (no owner).
+    pc = db.get(ProspectContact, contact_id)
+    if pc is not None and pc.customer_site_id and not pc.vendor_card_id:
+        from ..models import Company
+
+        site = db.get(CustomerSite, pc.customer_site_id)
+        company = db.get(Company, site.company_id) if site else None
+        if not company or not can_manage_account(user, company, db):
+            raise HTTPException(403, "Not authorized to manage this account")
+
     from ..services.ai_offer_service import promote_prospect_contact as _promote
 
     try:

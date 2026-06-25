@@ -204,8 +204,10 @@ def test_company_activity_status_with_activity(client, test_company, test_activi
 # ═══════════════════════════════════════════════════════════════════════
 
 
-def test_log_company_call(client, test_company):
+def test_log_company_call(client, test_company, test_user, db_session):
     """POST /api/companies/{id}/activities/call logs a phone call."""
+    test_company.account_owner_id = test_user.id
+    db_session.commit()
     resp = client.post(
         f"/api/companies/{test_company.id}/activities/call",
         json={"phone": "+1-555-1234", "duration_seconds": 180, "notes": "Discussed pricing"},
@@ -215,8 +217,10 @@ def test_log_company_call(client, test_company):
     assert data["status"] == "logged"
 
 
-def test_log_company_note(client, test_company):
+def test_log_company_note(client, test_company, test_user, db_session):
     """POST /api/companies/{id}/activities/note logs a note."""
+    test_company.account_owner_id = test_user.id
+    db_session.commit()
     resp = client.post(
         f"/api/companies/{test_company.id}/activities/note",
         json={"notes": "Met at trade show"},
