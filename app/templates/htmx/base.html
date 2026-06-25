@@ -48,24 +48,39 @@
 
   {% endblock %}
 
-  {# ── Modal (global) ──────────────────────────────────────── #}
-  <div x-data="{ open: false, wide: false }" x-show="open" x-cloak x-transition
-       @open-modal.window="
-         wide = !!($event.detail && $event.detail.wide);
-         open = true;
-         if ($event.detail && $event.detail.url) {
-           htmx.ajax('GET', $event.detail.url, {target: '#modal-content', swap: 'innerHTML'});
-         }
-       "
-       @close-modal.window="open = false; wide = false"
-       @keydown.escape.window="open = false"
+  {# ── Modal (global) — responsive everywhere; on desktop (>=1024px) the panel is
+       drag-to-move + drag-to-resize with its size/position remembered. All ~13
+       modals share this one wrapper; behavior lives in resizableModal()
+       (htmx_app.js). On phones it renders as a full-width bottom sheet (CSS). ── #}
+  <div x-data="resizableModal()" x-show="open" x-cloak x-transition
+       @open-modal.window="onOpen($event.detail)"
+       @close-modal.window="onClose()"
+       @keydown.escape.window="onClose()"
        class="fixed inset-0 z-50">
-    <div class="fixed inset-0 bg-black/50" role="presentation" @click="open = false" aria-hidden="true"></div>
-    <div class="fixed inset-0 flex items-start justify-center overflow-y-auto p-4">
-      <div class="relative bg-white rounded-lg shadow-float w-full my-auto"
+    <div class="fixed inset-0 bg-black/50" role="presentation" @click="onClose()" aria-hidden="true"></div>
+    {# Centering layer — used while the panel is in its default centered/responsive
+       state. Once the user gives the panel a custom size/position on desktop it
+       floats as a fixed box, so this layer goes click-through (backdrop-close still
+       works in the gaps) and the panel re-enables its own pointer events. #}
+    <div class="fixed inset-0 flex items-start justify-center overflow-y-auto p-4"
+         :class="custom && isDesktop ? 'pointer-events-none' : ''">
+      <div x-ref="panel"
+           class="modal-shell relative bg-white rounded-lg shadow-float w-full my-auto"
            role="dialog" aria-modal="true" aria-labelledby="modal-title"
-           :class="wide ? 'max-w-[calc(100vw-2rem)]' : 'max-w-lg'"
+           :class="custom && isDesktop ? 'pointer-events-auto' : (wide ? 'max-w-[calc(100vw-2rem)]' : 'max-w-lg')"
+           :style="panelStyle()"
            x-trap.noscroll="open">
+
+        {# Drag-to-move grip (desktop only) — a VISIBLE slim bar with its OWN space at the
+           top of the panel (a flex child, not an overlay), so it never sits over the modal
+           title, back-arrow, or top-row controls the way the old transparent strip did. The
+           centered pill signals draggability. #}
+        <div class="modal-grip" x-show="isDesktop"
+             @pointerdown="startMove($event)" @dblclick="reset()"
+             title="Drag to move · double-click to reset" aria-hidden="true">
+          <span class="modal-grip-handle"></span>
+        </div>
+
         {# modal-title id is set on the heading inside each loaded modal partial #}
         {# Persistent close affordance — every modal can be dismissed even if the
            loaded content template provides no close control of its own. #}
@@ -75,7 +90,30 @@
             <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
           </svg>
         </button>
-        <div id="modal-content"></div>
+
+        {# Loading spinner — shown only while modal content is being fetched
+           (htmx indicator target; z below the close button so it never blocks dismissal). #}
+        <div id="modal-loading" class="modal-loading absolute inset-0 z-10 items-center justify-center rounded-lg bg-white/70" aria-hidden="true">
+          <div class="animate-spin h-6 w-6 border-2 border-brand-500 border-t-transparent rounded-full"></div>
+        </div>
+
+        <div id="modal-content" class="modal-content-region"></div>
+
+        {# Resize handles (desktop only): 4 edges + 4 corners. The wrapper is
+           display:contents so it adds no box; each handle is absolutely positioned
+           against the panel. Non-focusable so the focus trap / Tab order is intact. #}
+        <template x-if="isDesktop">
+          <div class="contents" aria-hidden="true">
+            <div class="mrz mrz-n"  @pointerdown="startResize($event,'n')"  @dblclick="reset()"></div>
+            <div class="mrz mrz-s"  @pointerdown="startResize($event,'s')"  @dblclick="reset()"></div>
+            <div class="mrz mrz-e"  @pointerdown="startResize($event,'e')"  @dblclick="reset()"></div>
+            <div class="mrz mrz-w"  @pointerdown="startResize($event,'w')"  @dblclick="reset()"></div>
+            <div class="mrz mrz-ne" @pointerdown="startResize($event,'ne')" @dblclick="reset()"></div>
+            <div class="mrz mrz-nw" @pointerdown="startResize($event,'nw')" @dblclick="reset()"></div>
+            <div class="mrz mrz-se" @pointerdown="startResize($event,'se')" @dblclick="reset()"></div>
+            <div class="mrz mrz-sw" @pointerdown="startResize($event,'sw')" @dblclick="reset()"></div>
+          </div>
+        </template>
       </div>
     </div>
   </div>

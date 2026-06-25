@@ -734,6 +734,98 @@ th.resizable { position: relative; }
   background: rgb(99 146 204 / 0.4);
 }
 
+/* ── Resizable / movable / responsive modal ───────────────────────────
+   Drives the single shared modal wrapper in htmx/base.html (behavior in
+   resizableModal(), htmx_app.js). .modal-shell is a flex column capped to the
+   viewport so EVERY modal stays on-screen and scrolls internally — responsive
+   even without resizing. On desktop (>=1024px) the user drags the top strip to
+   move the panel and the edge/corner handles to resize it; on phones it becomes
+   a full-width bottom sheet and the handles are hidden. ───────────────────── */
+.modal-shell {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 2rem);
+}
+/* Body region fills the panel and owns the scroll, so header/close/handles stay put. */
+.modal-content-region {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+/* Visible drag-to-move grip — a flex child at the top of .modal-shell (NOT an absolute
+   overlay), so it occupies its own space and the modal's title/controls sit cleanly below
+   it. The centered pill is the affordance; the whole bar is the grab zone. Desktop-only
+   (x-show="isDesktop"). */
+.modal-grip {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 20px;
+  cursor: move;
+  touch-action: none;
+  background: #F4F6F8;
+  border-bottom: 1px solid #E5E8EC;
+  border-radius: 0.5rem 0.5rem 0 0;
+}
+.modal-grip:hover { background: #ECEFF3; }
+.modal-grip-handle {
+  width: 36px;
+  height: 4px;
+  border-radius: 9999px;
+  background: #C2C8D0;
+}
+.modal-grip:hover .modal-grip-handle { background: #A9B0BA; }
+
+/* Edge + corner resize handles — desktop only (rendered under x-if="isDesktop").
+   Sit just over the panel border with a generous hit area and directional cursors. */
+.mrz { position: absolute; z-index: 15; background: transparent; touch-action: none; }
+.mrz-n, .mrz-s { left: 10px; right: 10px; height: 10px; cursor: ns-resize; }
+.mrz-e, .mrz-w { top: 10px; bottom: 10px; width: 10px; cursor: ew-resize; }
+.mrz-n { top: -3px; }
+.mrz-s { bottom: -3px; }
+.mrz-e { right: -3px; }
+.mrz-w { left: -3px; }
+.mrz-ne, .mrz-nw, .mrz-se, .mrz-sw { width: 18px; height: 18px; z-index: 16; }
+.mrz-ne { top: -4px; right: -4px; cursor: nesw-resize; }
+.mrz-nw { top: -4px; left: -4px;  cursor: nwse-resize; }
+.mrz-se { bottom: -4px; right: -4px; cursor: nwse-resize; }
+.mrz-sw { bottom: -4px; left: -4px;  cursor: nesw-resize; }
+/* Subtle grip hint on the conventional bottom-right corner while hovering the panel. */
+.modal-shell:hover .mrz-se::after {
+  content: "";
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 9px;
+  height: 9px;
+  border-right: 2px solid #ADB3BF;
+  border-bottom: 2px solid #ADB3BF;
+  border-radius: 0 0 0.25rem 0;
+}
+
+/* Content loading spinner overlay — shown ONLY while a modal's content is being
+   fetched (htmx toggles .htmx-request on the indicator element). */
+.modal-loading { display: none; }
+.htmx-request.modal-loading { display: flex; }
+
+/* Phones (<640px): full-width bottom sheet. resizableModal clears `custom` below
+   1024px so panelStyle() returns '' (no inline style to override); these rules sit
+   after @tailwind utilities, so they win over the panel's max-w-* / my-auto by
+   source order without !important. The drag-bar is hidden by its own x-show and the
+   resize handles aren't rendered (x-if) on mobile, so no display reset is needed. */
+@media (max-width: 639px) {
+  .modal-shell {
+    position: fixed;
+    inset: auto 0 0 0;
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+    max-height: 92vh;
+    border-radius: 1rem 1rem 0 0;
+  }
+}
+
 /* ── Cross-app tab alerts: in-tab spotlight ──────────────────────────
    Emerald accent rail on rows carrying new/actionable items (same palette as
    the proactive badge). FYI rows pulse once then fade after being seen; ACTION
