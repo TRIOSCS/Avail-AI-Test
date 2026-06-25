@@ -777,19 +777,20 @@ Usage:
     {{ user_avatar(a.user, size='md') }}
 #}
 {% macro user_avatar(user, size='sm') -%}
+{# _box = circle height/width (used by both branches); _text = font size (initials only). #}
 {%- set _dims = {
-  'sm': 'h-6 w-6 text-[11px]',
-  'md': 'h-9 w-9 text-sm',
-  'lg': 'h-12 w-12 text-lg'
+  'sm': {'box': 'h-6 w-6',  'text': 'text-[11px]'},
+  'md': {'box': 'h-9 w-9',  'text': 'text-sm'},
+  'lg': {'box': 'h-12 w-12', 'text': 'text-lg'}
 } -%}
 {%- set _dim = _dims.get(size, _dims['sm']) -%}
-{%- set _name = (user.name if user and user.name else (user.email if user and user.email else '')) -%}
+{%- set _name = (user.name or user.email or '') if user else '' -%}
 {%- set _title = _name or 'Unassigned' -%}
 {%- if user and user.avatar_path -%}
 <img src="/api/user/avatar/{{ user.avatar_path }}" alt="{{ _title }}" title="{{ _title }}"
-     class="{{ _dim.split(' ')[0] }} {{ _dim.split(' ')[1] }} rounded-full object-cover flex-shrink-0 bg-gray-100">
+     class="{{ _dim.box }} rounded-full object-cover flex-shrink-0 bg-gray-100">
 {%- else -%}
-<span class="inline-flex items-center justify-center {{ _dim }} rounded-full bg-brand-100 text-brand-600 font-bold flex-shrink-0"
+<span class="inline-flex items-center justify-center {{ _dim.box }} {{ _dim.text }} rounded-full bg-brand-100 text-brand-600 font-bold flex-shrink-0"
       title="{{ _title }}">{{ (_name[:1]|upper) if _name else '?' }}</span>
 {%- endif -%}
 {%- endmacro %}
