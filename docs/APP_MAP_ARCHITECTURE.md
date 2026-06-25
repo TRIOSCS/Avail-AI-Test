@@ -58,6 +58,14 @@ FastAPI Middleware Stack (in order):
     │       route table (nesting-agnostic, correct on 0.136.x and 0.137.x).
     ├── 5. CSP Middleware (Content-Security-Policy header)
     ├── 6. Request ID Middleware (UUID tracking, timing, logging)
+    │       Also owns Cache-Control (set HERE, the OUTERMOST @app.middleware, because
+    │       inner response processing drops headers set on the TemplateResponse itself):
+    │       /static/assets/* (Vite-hashed) -> immutable 1yr; other /static -> 1hr; EVERY
+    │       text/html response — full-page shell AND /v2/partials/* HTMX fragments ->
+    │       no-store,no-cache,must-revalidate + Pragma:no-cache (so a redeploy's markup is
+    │       fetched fresh, not heuristically cached stale). Guard is the response
+    │       content-type ONLY (starts "text/html"), so JSON, SSE (text/event-stream), and
+    │       file downloads (Content-Disposition) are untouched and streaming bodies unread.
     └── 7. API Version Middleware (/api/v1/* -> /api/*)
     │
     ▼
