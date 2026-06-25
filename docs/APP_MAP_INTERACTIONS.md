@@ -1266,8 +1266,15 @@ non-supervisor who requests it is served the mine-scope board (defense in depth)
 GET /v2/partials/buy-plans?lens=          (shell: switcher + lazy #bp-hub-body)
     |
     +-- lens=deals     --> GET /partials/buy-plans/board?scope=mine|all
-    |                        services/buyplan_hub.deals_board   (sales stage board;
+    |                        services/buyplan_hub.deals_board   (sales stage board:
+    |                        3 ACTIVE columns Draft/Pending/Active — COMPLETED excluded;
     |                        scope=all role-gated to supervisors)
+    |                        + completed_archive(scope=…) → collapsed "Completed (N)"
+    |                          archive section below the board (_archive.html). Lazy
+    |                          "Load older" pages via GET /partials/buy-plans/archive?
+    |                          scope=…&offset=… (returns _archive_rows.html, self-replacing
+    |                          button, completed_at-desc, page size ARCHIVE_PAGE_SIZE=20).
+    |                          Keeps the daily 10–15 completions out of the working board.
     +-- lens=orders    --> GET /partials/buy-plans/orders
     |                        services/buyplan_hub.buyer_line_queue (buyer PO-cut queue)
     |                        + buyplan_hub.team_line_queue (read-only "Team Orders"
@@ -1276,8 +1283,10 @@ GET /v2/partials/buy-plans?lens=          (shell: switcher + lazy #bp-hub-body)
     +-- lens=supervise --> GET /partials/buy-plans/supervise
                              services/buyplan_hub.supervise_overview (triage strip:
                              approvals / SO+PO verify / overdue / flagged / halted)
-                             + deals_board(scope=all). Triage forms post origin=supervise
-                             so the action re-renders THIS body into #bp-hub-body.
+                             + deals_board(scope=all) + completed_archive(scope=all)
+                             (the same archive section renders below the embedded board).
+                             Triage forms post origin=supervise so the action re-renders
+                             THIS body into #bp-hub-body.
 ```
 
 **Resell workspace — resell/excess split-panel (Chunk F, ADDITIVE).** `/v2/resell` is

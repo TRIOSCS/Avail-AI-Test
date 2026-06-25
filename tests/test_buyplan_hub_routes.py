@@ -270,9 +270,12 @@ def test_board_mine_rings_needs_my_action(client: TestClient, db_session: Sessio
     resp = client.get("/v2/partials/buy-plans/board?scope=mine")
     assert resp.status_code == 200
     body = resp.text
-    # 4 columns
-    for col in ("Draft", "Pending", "Active", "Done"):
+    # 3 active columns — "Done" is gone; completed work lives in the archive.
+    for col in ("Draft", "Pending", "Active"):
         assert col in body
+    assert ">Done<" not in body
+    # Completed archive section is present below the board.
+    assert "Completed" in body
     # needs_my_action ring
     assert "ring-2 ring-amber-400" in body
 
@@ -322,6 +325,77 @@ def test_board_scope_all_allowed_for_manager(
         app.dependency_overrides.pop(require_user, None)
     assert resp.status_code == 200
     assert f"/v2/partials/buy-plans/{sales_plan.id}" in resp.text
+
+
+# ── Completed archive ──────────────────────────────────────────────────────
+
+
+def test_board_archive_shows_completed_count(client: TestClient, db_session: Session, test_user, test_requisition):
+    """The board's archive section shows the completed count and a completed card."""
+    from datetime import datetime, timezone
+
+    q = _make_quote(db_session, test_requisition.id)
+    done_plan = _make_plan(
+        db_session,
+        quote_id=q.id,
+        req_id=test_requisition.id,
+        status=BuyPlanStatus.COMPLETED,
+        submitted_by_id=test_user.id,
+        completed_at=datetime.now(timezone.utc),
+    )
+    db_session.commit()
+
+    resp = client.get("/v2/partials/buy-plans/board?scope=mine")
+    assert resp.status_code == 200
+    body = resp.text
+    # Count badge "(1)" rendered with the accent figure class.
+    assert "Completed" in body
+    assert "(1)" in body
+    # Completed plan is an openable archive card, NOT in an active column.
+    assert f"/v2/partials/buy-plans/{done_plan.id}" in body
+
+
+def test_archive_partial_returns_rows(client: TestClient, db_session: Session, test_user, test_requisition):
+    """The lazy archive route returns completed rows for the requested page."""
+    from datetime import datetime, timedelta, timezone
+
+    q = _make_quote(db_session, test_requisition.id)
+    now = datetime.now(timezone.utc)
+    plan = _make_plan(
+        db_session,
+        quote_id=q.id,
+        req_id=test_requisition.id,
+        status=BuyPlanStatus.COMPLETED,
+        submitted_by_id=test_user.id,
+        completed_at=now - timedelta(days=3),
+    )
+    db_session.commit()
+
+    resp = client.get("/v2/partials/buy-plans/archive?scope=mine&offset=0")
+    assert resp.status_code == 200
+    assert f"/v2/partials/buy-plans/{plan.id}" in resp.text
+
+
+def test_archive_scope_all_forced_to_mine_for_non_manager(
+    client: TestClient, db_session: Session, test_user, manager_user, test_requisition
+):
+    """Scope=all on the archive route must not leak another user's completed plans."""
+    from datetime import datetime, timezone
+
+    q = _make_quote(db_session, test_requisition.id)
+    other = _make_plan(
+        db_session,
+        quote_id=q.id,
+        req_id=test_requisition.id,
+        status=BuyPlanStatus.COMPLETED,
+        submitted_by_id=manager_user.id,
+        completed_at=datetime.now(timezone.utc),
+    )
+    db_session.commit()
+
+    resp = client.get("/v2/partials/buy-plans/archive?scope=all")
+    assert resp.status_code == 200
+    assert f"/v2/partials/buy-plans/{other.id}" not in resp.text
 
 
 # ── confirm-po origin behavior ─────────────────────────────────────────────

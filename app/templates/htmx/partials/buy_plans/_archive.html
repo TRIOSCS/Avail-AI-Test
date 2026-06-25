@@ -1,0 +1,37 @@
+{#
+  buy_plans/_archive.html — collapsed "Completed" archive section below the active board.
+  Holds completed transactions out of the working board so the daily 10–15 completions
+  don't pile up. Collapsed by default (Alpine x-show); header shows the count with
+  .figure-accent on the number. Rows are paginated — only the most recent page is in the
+  DOM; "Load older" (htmx) appends the next page in place (see _archive_rows.html).
+  Receives: archive (dict from buyplan_hub.completed_archive:
+                     deals/total/limit/offset/next_offset),
+            scope (str: 'mine'|'all').
+  Embedded by: _board.html (which both lenses render).
+  Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
+#}
+<section class="mt-5" x-data="{ open: false }">
+  <button type="button"
+          @click="open = !open"
+          :aria-expanded="open"
+          class="btn-ghost btn-sm w-full justify-between border border-line-base bg-gray-50 hover:bg-gray-100">
+    <span class="flex items-center gap-2 text-xs font-semibold text-gray-600 uppercase tracking-wider">
+      <svg class="h-3.5 w-3.5 text-gray-400 transition-transform"
+           :class="open ? 'rotate-90' : ''"
+           viewBox="0 0 20 20" fill="currentColor">
+        <path fill-rule="evenodd" d="M7.21 14.77a.75.75 0 0 1 .02-1.06L11.168 10 7.23 6.29a.75.75 0 1 1 1.04-1.08l4.5 4.25a.75.75 0 0 1 0 1.08l-4.5 4.25a.75.75 0 0 1-1.06-.02Z" clip-rule="evenodd"/>
+      </svg>
+      Completed
+      <span class="figure-accent font-bold normal-case">({{ archive.total }})</span>
+    </span>
+    <span class="text-[11px] text-gray-400 normal-case font-normal" x-show="!open">most recent first</span>
+  </button>
+
+  <div x-show="open" x-collapse class="mt-2 space-y-1.5">
+    {% if archive.deals %}
+    {% include "htmx/partials/buy_plans/_archive_rows.html" %}
+    {% else %}
+    <div class="px-3 py-6 text-center text-xs text-gray-300">No completed transactions yet.</div>
+    {% endif %}
+  </div>
+</section>

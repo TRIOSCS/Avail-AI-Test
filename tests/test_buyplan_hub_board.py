@@ -1,20 +1,24 @@
-"""Tests for buyplan_hub.deals_board — the stage-grouped deal board read model.
+"""Tests for buyplan_hub.deals_board + completed_archive — the deal hub read models.
 
 Covers:
-- Column bucketing by status (DRAFT→draft, PENDING→pending, ACTIVE/HALTED→active,
-  COMPLETED→done, CANCELLED omitted)
+- Column bucketing by status (DRAFT→draft, PENDING→pending, ACTIVE/HALTED→active);
+  COMPLETED moves to the archive, CANCELLED omitted entirely
 - scope=mine filters by submitted_by_id; scope=all returns everything
 - po_progress counts (verified, total-non-cancelled)
 - blocker text: ACTIVE + 2 AWAITING_PO lines → "2 POs to cut"
 - blocker text: all lines VERIFIED + so_status APPROVED → "ready to fulfill"
 - CANCELLED plans omitted from all columns
+- completed_archive: COMPLETED-only, completed_at-desc ordering, scope filtering,
+  and limit/offset pagination (next_offset, total)
 
-Depends on: app/services/buyplan_hub.deals_board,
+Depends on: app/services/buyplan_hub.deals_board + completed_archive,
             conftest fixtures (db_session, test_user, manager_user, test_quote,
             test_requisition).
 """
 
 from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
@@ -33,6 +37,7 @@ def _make_plan(
     total_cost=None,
     total_margin_pct=None,
     is_stock_sale: bool = False,
+    completed_at=None,
 ) -> BuyPlan:
     """Create + flush a minimal BuyPlan header."""
     plan = BuyPlan(
@@ -44,6 +49,7 @@ def _make_plan(
         total_cost=total_cost,
         total_margin_pct=total_margin_pct,
         is_stock_sale=is_stock_sale,
+        completed_at=completed_at,
     )
     db.add(plan)
     db.flush()
@@ -100,20 +106,22 @@ def test_deals_board_column_bucketing(db_session, test_user, test_quote, test_re
 
     board = deals_board(db_session, test_user, scope="all")
 
-    # All four keys must always be present
-    assert set(board.keys()) == {"draft", "pending", "active", "done"}
+    # Active board holds in-progress work only — three columns, no "done".
+    assert set(board.keys()) == {"draft", "pending", "active"}
 
     draft_ids = [d["plan_id"] for d in board["draft"]]
     pending_ids = [d["plan_id"] for d in board["pending"]]
     active_ids = [d["plan_id"] for d in board["active"]]
-    done_ids = [d["plan_id"] for d in board["done"]]
+    all_active_ids = draft_ids + pending_ids + active_ids
 
     assert draft_plan.id in draft_ids
     assert pending_plan.id in pending_ids
     assert active_plan.id in active_ids
     assert halted_plan.id in active_ids  # HALTED → active column
-    assert completed_plan.id in done_ids
-    assert cancelled_plan.id not in (draft_ids + pending_ids + active_ids + done_ids)
+    # COMPLETED moves to the archive — it must NOT clutter the active board.
+    assert completed_plan.id not in all_active_ids
+    # CANCELLED is omitted entirely.
+    assert cancelled_plan.id not in all_active_ids
 
 
 # ── 2. Scope mine vs all ──────────────────────────────────────────────
@@ -328,3 +336,155 @@ def test_deals_board_needs_my_action_draft(db_session, test_user, manager_user, 
 
     assert draft_deal["needs_my_action"] is True
     assert active_deal["needs_my_action"] is False
+
+
+# ── 9. Completed archive: scope, contents, ordering ───────────────────
+
+
+def _ts(days_ago: int) -> datetime:
+    """A tz-aware UTC timestamp ``days_ago`` days in the past."""
+    return datetime.now(timezone.utc) - timedelta(days=days_ago)
+
+
+def test_completed_archive_only_completed_plans(db_session, test_user, test_quote, test_requisition):
+    """Archive returns only COMPLETED plans — never active/cancelled ones."""
+    from app.services.buyplan_hub import completed_archive
+
+    completed = _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.COMPLETED,
+        submitted_by_id=test_user.id,
+        completed_at=_ts(1),
+    )
+    _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.ACTIVE,
+        submitted_by_id=test_user.id,
+    )
+    _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.CANCELLED,
+        submitted_by_id=test_user.id,
+    )
+
+    page = completed_archive(db_session, test_user, scope="all")
+
+    assert page["total"] == 1
+    assert [d["plan_id"] for d in page["deals"]] == [completed.id]
+    # Card carries completed_at for the date-completed column.
+    assert page["deals"][0]["completed_at"] is not None
+
+
+def test_completed_archive_ordered_by_completed_at_desc(db_session, test_user, test_quote, test_requisition):
+    """Most recently completed first; completed_at desc."""
+    from app.services.buyplan_hub import completed_archive
+
+    older = _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.COMPLETED,
+        submitted_by_id=test_user.id,
+        completed_at=_ts(10),
+    )
+    newer = _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.COMPLETED,
+        submitted_by_id=test_user.id,
+        completed_at=_ts(2),
+    )
+
+    page = completed_archive(db_session, test_user, scope="all")
+
+    assert [d["plan_id"] for d in page["deals"]] == [newer.id, older.id]
+
+
+def test_completed_archive_scope_mine_filters_owner(db_session, test_user, manager_user, test_quote, test_requisition):
+    """Scope=mine returns only the caller's completed plans; scope=all returns both."""
+    from app.services.buyplan_hub import completed_archive
+
+    mine = _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.COMPLETED,
+        submitted_by_id=test_user.id,
+        completed_at=_ts(1),
+    )
+    theirs = _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.COMPLETED,
+        submitted_by_id=manager_user.id,
+        completed_at=_ts(1),
+    )
+
+    mine_page = completed_archive(db_session, test_user, scope="mine")
+    assert [d["plan_id"] for d in mine_page["deals"]] == [mine.id]
+    assert mine_page["total"] == 1
+
+    all_page = completed_archive(db_session, test_user, scope="all")
+    assert {d["plan_id"] for d in all_page["deals"]} == {mine.id, theirs.id}
+    assert all_page["total"] == 2
+
+
+def test_completed_archive_pagination(db_session, test_user, test_quote, test_requisition):
+    """Limit/offset page the archive; next_offset advances then exhausts."""
+    from app.services.buyplan_hub import completed_archive
+
+    # 5 completed plans, distinct completion dates so order is deterministic.
+    plans = [
+        _make_plan(
+            db_session,
+            quote_id=test_quote.id,
+            requisition_id=test_requisition.id,
+            status=BuyPlanStatus.COMPLETED,
+            submitted_by_id=test_user.id,
+            completed_at=_ts(i + 1),
+        )
+        for i in range(5)
+    ]
+    newest_first = [p.id for p in plans]  # _ts(1) is newest → index 0 first
+
+    page1 = completed_archive(db_session, test_user, scope="all", limit=2, offset=0)
+    assert page1["total"] == 5
+    assert page1["limit"] == 2
+    assert page1["offset"] == 0
+    assert [d["plan_id"] for d in page1["deals"]] == newest_first[:2]
+    assert page1["next_offset"] == 2
+
+    page2 = completed_archive(db_session, test_user, scope="all", limit=2, offset=2)
+    assert [d["plan_id"] for d in page2["deals"]] == newest_first[2:4]
+    assert page2["next_offset"] == 4
+
+    page3 = completed_archive(db_session, test_user, scope="all", limit=2, offset=4)
+    assert [d["plan_id"] for d in page3["deals"]] == newest_first[4:]
+    # Last page — no more to load.
+    assert page3["next_offset"] is None
+
+
+def test_completed_archive_empty(db_session, test_user, test_quote, test_requisition):
+    """No completed plans → empty page, total 0, no next_offset."""
+    from app.services.buyplan_hub import completed_archive
+
+    _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.ACTIVE,
+        submitted_by_id=test_user.id,
+    )
+
+    page = completed_archive(db_session, test_user, scope="all")
+    assert page["total"] == 0
+    assert page["deals"] == []
+    assert page["next_offset"] is None

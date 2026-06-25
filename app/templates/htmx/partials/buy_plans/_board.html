@@ -1,13 +1,17 @@
 {#
-  buy_plans/_board.html — "My Deals" / manager board: 4 stage columns of deal cards.
-  Columns: Draft, Pending, Active, Done. Each card opens the existing detail partial.
+  buy_plans/_board.html — "My Deals" / manager board: 3 active stage columns of deal cards
+  + a collapsed Completed archive section below.
+  Columns: Draft, Pending, Active (in-progress work only). Each card opens the detail partial.
+  Completed transactions move OUT of the board into the archive (see _archive.html) so the
+  daily 10–15 completions don't clutter the working board.
   needs_my_action cards sort first and gain an amber ring. No Alpine on cards — HTMX only.
-  Receives: board (dict: draft/pending/active/done lists from buyplan_hub.deals_board),
-            scope (str: 'mine'|'all').
-  Called by: htmx_views.py buy_plans_board_partial.
-  Depends on: HTMX, Tailwind CSS with brand palette.
+  Receives: board (dict: draft/pending/active lists from buyplan_hub.deals_board),
+            scope (str: 'mine'|'all'),
+            archive (dict from buyplan_hub.completed_archive: deals/total/limit/offset/next_offset).
+  Called by: htmx_views.py buy_plans_board_partial; embedded by _supervise.html.
+  Depends on: HTMX, Alpine.js (archive toggle), Tailwind CSS with brand palette.
 #}
-{% set columns = [('draft', 'Draft'), ('pending', 'Pending'), ('active', 'Active'), ('done', 'Done')] %}
+{% set columns = [('draft', 'Draft'), ('pending', 'Pending'), ('active', 'Active')] %}
 {% set open_cards = board.draft + board.pending + board.active %}
 {% set open_value = open_cards|map(attribute='value')|select|map('float')|sum %}
 
@@ -24,7 +28,7 @@
 </div>
 {% endif %}
 
-<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
   {% for key, label in columns %}
   {% set cards = board[key]|sort(attribute='needs_my_action', reverse=True) %}
   {# Finding #5: border-gray-200 → border-line-base on column shells #}
@@ -88,3 +92,6 @@
   </div>
   {% endfor %}
 </div>
+
+{# ── Completed archive (collapsed; lives below the active board) ── #}
+{% include "htmx/partials/buy_plans/_archive.html" %}

@@ -173,9 +173,12 @@ _STATUS_TO_COLUMN: dict[str, str] = {
     BuyPlanStatus.PENDING: "pending",
     BuyPlanStatus.ACTIVE: "active",
     BuyPlanStatus.HALTED: "active",
-    BuyPlanStatus.COMPLETED: "done",
+    # COMPLETED → archive section (see completed_archive), not an active column
     # CANCELLED → omitted (no entry)
 }
+
+#: Default page size for the completed-transactions archive ("load older" chunk).
+ARCHIVE_PAGE_SIZE = 20
 
 _STAGE_LABELS: dict[str, str] = {
     BuyPlanStatus.DRAFT: "Draft",
@@ -237,8 +240,36 @@ def _compute_blocker(plan: BuyPlan) -> str:
     return ""
 
 
+def _deal_card(plan: BuyPlan, user: object) -> dict:
+    """Build the shared deal-card read dict for one plan.
+
+    Used by both the active board (``deals_board``) and the completed archive
+    (``completed_archive``) so a card looks identical wherever it renders. The
+    ``completed_at`` field is meaningful only for archived (COMPLETED) plans.
+    """
+    # po_progress: (verified_count, total_non_cancelled_count)
+    active_lines = [ln for ln in plan.lines if ln.status != BuyPlanLineStatus.CANCELLED]
+    verified_count = sum(1 for ln in active_lines if ln.status == BuyPlanLineStatus.VERIFIED)
+
+    # needs_my_action: sales owner must act when plan is DRAFT
+    needs_my_action = plan.status == BuyPlanStatus.DRAFT and plan.submitted_by_id == user.id
+
+    return {
+        "plan_id": plan.id,
+        "customer_name": _customer_name(plan),
+        "value": plan.total_cost,
+        "margin_pct": plan.total_margin_pct,
+        "stage_label": _STAGE_LABELS.get(plan.status, plan.status),
+        "blocker": _compute_blocker(plan),
+        "po_progress": (verified_count, len(active_lines)),
+        "needs_my_action": needs_my_action,
+        "is_stock_sale": plan.is_stock_sale,
+        "completed_at": plan.completed_at,
+    }
+
+
 def deals_board(db: Session, user: object, *, scope: str) -> dict[str, list[dict]]:
-    """Return the stage-grouped deal board for sales or manager views.
+    """Return the stage-grouped *active* deal board for sales or manager views.
 
     Parameters
     ----------
@@ -253,17 +284,23 @@ def deals_board(db: Session, user: object, *, scope: str) -> dict[str, list[dict
 
     Returns
     -------
-    dict with keys ``"draft"``, ``"pending"``, ``"active"``, ``"done"``.
+    dict with keys ``"draft"``, ``"pending"``, ``"active"``.
     Each value is a list of deal dicts ordered newest-first (by ``created_at``
-    descending).  CANCELLED plans are omitted entirely.
+    descending). COMPLETED plans are excluded here — they live in the paginated
+    archive (see ``completed_archive``); CANCELLED plans are omitted entirely.
 
     Each deal dict contains:
         plan_id, customer_name, value, margin_pct, stage_label, blocker,
-        po_progress (cut: int, total: int), needs_my_action: bool, is_stock_sale
+        po_progress (cut: int, total: int), needs_my_action: bool, is_stock_sale,
+        completed_at
     """
     query = (
         db.query(BuyPlan)
-        .filter(BuyPlan.status != BuyPlanStatus.CANCELLED)
+        .filter(
+            BuyPlan.status.notin_(
+                (BuyPlanStatus.CANCELLED, BuyPlanStatus.COMPLETED),
+            )
+        )
         .options(
             # Eager-load quote + lines; customer_site/company lazy-loaded within session
             joinedload(BuyPlan.quote),
@@ -277,39 +314,79 @@ def deals_board(db: Session, user: object, *, scope: str) -> dict[str, list[dict
 
     plans = query.all()
 
-    board: dict[str, list[dict]] = {"draft": [], "pending": [], "active": [], "done": []}
+    board: dict[str, list[dict]] = {"draft": [], "pending": [], "active": []}
 
     for plan in plans:
         column = _STATUS_TO_COLUMN.get(plan.status)
         if column is None:
-            # Safety net — CANCELLED already filtered above; unknown status skipped
+            # Safety net — CANCELLED/COMPLETED already filtered above; unknown status skipped
             continue
-
-        customer_name = _customer_name(plan)
-
-        # po_progress: (verified_count, total_non_cancelled_count)
-        active_lines = [ln for ln in plan.lines if ln.status != BuyPlanLineStatus.CANCELLED]
-        verified_count = sum(1 for ln in active_lines if ln.status == BuyPlanLineStatus.VERIFIED)
-        po_progress = (verified_count, len(active_lines))
-
-        # needs_my_action: sales owner must act when plan is DRAFT
-        needs_my_action = plan.status == BuyPlanStatus.DRAFT and plan.submitted_by_id == user.id
-
-        board[column].append(
-            {
-                "plan_id": plan.id,
-                "customer_name": customer_name,
-                "value": plan.total_cost,
-                "margin_pct": plan.total_margin_pct,
-                "stage_label": _STAGE_LABELS.get(plan.status, plan.status),
-                "blocker": _compute_blocker(plan),
-                "po_progress": po_progress,
-                "needs_my_action": needs_my_action,
-                "is_stock_sale": plan.is_stock_sale,
-            }
-        )
+        board[column].append(_deal_card(plan, user))
 
     return board
+
+
+def completed_archive(
+    db: Session,
+    user: object,
+    *,
+    scope: str,
+    limit: int = ARCHIVE_PAGE_SIZE,
+    offset: int = 0,
+) -> dict:
+    """Return one page of COMPLETED (archived) deals, newest-completed first.
+
+    The active board (``deals_board``) shows only in-progress work; completed
+    transactions move here so the daily 10–15 don't pile up. Ordered by
+    ``completed_at`` descending (NULLS LAST, then ``created_at`` desc as a
+    deterministic tiebreak for any legacy row whose ``completed_at`` was never
+    stamped). Paginated via ``limit``/``offset`` for the "load older" lazy chunk.
+
+    Parameters
+    ----------
+    scope:
+        ``"mine"`` — only plans where ``submitted_by_id == user.id``.
+        ``"all"``  — all completed plans regardless of owner (manager/ops view).
+    limit, offset:
+        Standard page window. ``limit`` is clamped to ``[1, 100]``.
+
+    Returns
+    -------
+    dict with keys:
+        ``deals``       — list of deal dicts (same shape as ``deals_board`` cards,
+                          with ``completed_at`` populated),
+        ``total``       — total COMPLETED plans in scope,
+        ``limit``       — the clamped page size used,
+        ``offset``      — the offset used,
+        ``next_offset`` — offset for the next page, or ``None`` when exhausted.
+    """
+    limit = max(1, min(int(limit), 100))
+    offset = max(0, int(offset))
+
+    base = db.query(BuyPlan).filter(BuyPlan.status == BuyPlanStatus.COMPLETED)
+    if scope == "mine":
+        base = base.filter(BuyPlan.submitted_by_id == user.id)
+
+    total = base.with_entities(func.count(BuyPlan.id)).scalar() or 0
+
+    plans = (
+        base.options(joinedload(BuyPlan.quote), joinedload(BuyPlan.lines))
+        .order_by(BuyPlan.completed_at.desc().nullslast(), BuyPlan.created_at.desc())
+        .limit(limit)
+        .offset(offset)
+        .all()
+    )
+
+    deals = [_deal_card(plan, user) for plan in plans]
+    next_offset = offset + limit if offset + limit < total else None
+
+    return {
+        "deals": deals,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "next_offset": next_offset,
+    }
 
 
 # ── Supervise overview ────────────────────────────────────────────────
