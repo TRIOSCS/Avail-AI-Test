@@ -25,18 +25,17 @@ def _env_py_source():
 def _load_migration():
     """Load the initial migration module dynamically.
 
-    Mocks alembic.op and sqlalchemy so migrations can be imported outside of Alembic's
-    runtime context (where op is a stub).
+    Imports the migration file in isolation via ``importlib`` (the migration's
+    ``from alembic import op`` resolves to the real alembic ``op`` proxy, which imports
+    fine outside a live alembic run — these tests only read the module's source and
+    metadata, never invoke ``op.*``). The module is NOT registered in ``sys.modules`` and
+    nothing in the global ``alembic`` package is mutated: an earlier version stubbed
+    ``sys.modules["alembic"]`` / ``alembic.op`` with ``MagicMock``s and never restored
+    them, which under pytest-xdist corrupted the shared ``alembic`` import for every later
+    test on the same worker (the migration round-trip harness' ``from alembic.migration
+    import MigrationContext`` then failed with ``'alembic' is not a package``). Keeping the
+    load hermetic — no global import-state side effects — is the fix for that flake.
     """
-    import sys
-    from unittest.mock import MagicMock
-
-    # The project's alembic/ dir shadows the real package — inject stubs
-    alembic_mod = sys.modules.get("alembic") or MagicMock()
-    alembic_mod.op = MagicMock()
-    sys.modules["alembic"] = alembic_mod
-    sys.modules["alembic.op"] = alembic_mod.op
-
     files = sorted(MIGRATION_DIR.glob("*.py"))
     assert len(files) >= 1, "No migration files found"
     spec = importlib.util.spec_from_file_location("mig", files[0])
