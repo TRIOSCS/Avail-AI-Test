@@ -143,9 +143,9 @@
           <span class="font-medium text-gray-700">{{ cadence_label.get(cadence_state, cadence_state|title) }}</span>
         </span>
         <span class="text-gray-300">·</span>
-        <span>Win <span class="font-semibold text-gray-900">{% if win_rate is not none %}{{ win_rate }}%{% else %}—{% endif %}</span></span>
+        <span>Win <span class="figure-accent font-semibold">{% if win_rate is not none %}{{ win_rate }}%{% else %}—{% endif %}</span></span>
         <span class="text-gray-300">·</span>
-        <span>Rev 90d <span class="font-semibold text-gray-900">{% if revenue_90d %}${{ "{:,.0f}".format(revenue_90d) }}{% else %}—{% endif %}</span></span>
+        <span>Rev 90d <span class="figure-accent font-semibold">{% if revenue_90d %}${{ "{:,.0f}".format(revenue_90d) }}{% else %}—{% endif %}</span></span>
         <span class="text-gray-300">·</span>
         <span>Last req <span class="font-semibold text-gray-900">{% if last_req_date %}{{ last_req_date[:10] }}{% else %}—{% endif %}</span></span>
         <span class="text-gray-300">·</span>
@@ -169,8 +169,8 @@
                 aria-controls="acct-settings-{{ company.id }}"
                 aria-label="Cadence &amp; settings"
                 title="Cadence &amp; settings"
-                :class="showAcctSettings ? 'bg-brand-50 text-brand-600 border-brand-200' : 'text-gray-600 border-gray-200 hover:bg-gray-50'"
-                class="inline-flex items-center rounded-lg border p-1.5 transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500">
+                :class="showAcctSettings ? 'bg-accent-50 text-accent-700 border-accent-200' : 'text-gray-600 border-gray-200 hover:bg-gray-50'"
+                class="inline-flex items-center rounded-lg border p-1.5 transition-colors focus:outline-none focus:ring-2 focus:ring-accent-500">
           <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
             <path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
             <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
@@ -180,7 +180,7 @@
         {# Kebab — overflow actions (Merge duplicate) #}
         <div class="relative inline-block" x-data="{ open: false }" @click.outside="open = false">
           <button @click.stop="open = !open" type="button"
-                  class="p-1.5 text-gray-400 hover:text-gray-600 rounded transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  class="p-1.5 text-gray-400 hover:text-gray-600 rounded transition-colors focus:outline-none focus:ring-2 focus:ring-accent-500"
                   aria-label="More account actions"
                   :aria-expanded="open ? 'true' : 'false'"
                   aria-haspopup="menu">
@@ -312,11 +312,11 @@
                 hx-target="#company-tab-content"
                 hx-swap="innerHTML"
                 hx-push-url="/v2/customers/{{ company.id }}?tab={{ tab_id }}"
-                :class="activeTab === '{{ tab_id }}' ? 'border-brand-500 text-brand-600 font-semibold' : 'border-transparent text-gray-600 hover:text-gray-700 hover:border-gray-300'"
+                :class="activeTab === '{{ tab_id }}' ? 'border-accent-500 text-accent-700 font-semibold' : 'border-transparent text-gray-600 hover:text-gray-700 hover:border-gray-300'"
                 class="shrink-0 whitespace-nowrap py-3 px-1 text-sm font-medium border-b-2 transition-colors inline-flex items-center gap-1.5">
           {{ tab_label }}
           {% if tab_count is not none and tab_count > 0 %}
-            <span class="inline-flex items-center justify-center h-5 min-w-[20px] px-1 text-xs font-bold rounded-full bg-brand-100 text-brand-600">{{ tab_count }}</span>
+            <span class="inline-flex items-center justify-center h-5 min-w-[20px] px-1 text-xs font-bold rounded-full bg-accent-100 text-accent-700">{{ tab_count }}</span>
           {% endif %}
         </button>
         {% endfor %}

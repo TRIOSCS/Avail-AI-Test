@@ -5,7 +5,7 @@
              limit, offset, overdue_count, account_types, disposition, has_open_reqs.
    Called by: companies_list_partial route (htmx_views.py).
    Depends on: splitPanel Alpine component (htmx_app.js), _account_list.html,
-               _detail_empty.html, brand palette.
+               _detail_empty.html, accent palette (post-PR0).
 #}
 
 {# fitHeight: sized to the viewport in both mount contexts (standalone page and
@@ -18,6 +18,7 @@
      @resize.window.debounce.150ms="fitHeight()">
 
   {# ── Filter / sort bar ─────────────────────────────────────── #}
+  {# All filter controls use .input / .input-sm (accent ring, line border) per PR0. #}
   <form id="cdm-filters" class="flex items-center gap-2 flex-wrap pb-3 flex-shrink-0"
         hx-get="/v2/partials/customers/account-list"
         hx-target="#cdm-list"
@@ -27,10 +28,10 @@
 
     <input id="cdm-search" aria-label="Search accounts" type="text" name="search" value="{{ search }}"
            placeholder="Search accounts..."
-           class="flex-1 min-w-[160px] px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+           class="input flex-1 min-w-[160px]">
 
     <select name="staleness" aria-label="Filter by activity staleness"
-            class="px-2 py-1.5 text-sm border border-gray-200 rounded-lg">
+            class="input input-sm">
       <option value="">All activity</option>
       <option value="overdue" {{ "selected" if staleness == "overdue" }}>Overdue (30d+)</option>
       <option value="due_soon" {{ "selected" if staleness == "due_soon" }}>Due soon (14&ndash;30d)</option>
@@ -43,7 +44,7 @@
     </select>
 
     <select name="account_type" aria-label="Filter by account type"
-            class="px-2 py-1.5 text-sm border border-gray-200 rounded-lg">
+            class="input input-sm">
       <option value="">All types</option>
       {% for t in account_types %}
       <option value="{{ t }}" {{ "selected" if account_type == t }}>{{ t }}</option>
@@ -52,7 +53,7 @@
 
     {% if all_segment_tags %}
     <select name="segment" aria-label="Filter by segment tag"
-            class="px-2 py-1.5 text-sm border border-gray-200 rounded-lg">
+            class="input input-sm">
       <option value="0">All segments</option>
       {% for t in all_segment_tags %}
       <option value="{{ t.id }}" {{ "selected" if segment == t.id }}>{{ t.name }}</option>
@@ -61,7 +62,7 @@
     {% endif %}
 
     <select name="sort" aria-label="Sort accounts"
-            class="px-2 py-1.5 text-sm border border-gray-200 rounded-lg">
+            class="input input-sm">
       <option value="oldest" {{ "selected" if sort == "oldest" }}>Longest since activity</option>
       <option value="newest" {{ "selected" if sort == "newest" }}>Most recent activity</option>
       <option value="outbound_asc" {{ "selected" if sort == "outbound_asc" }}>Stalest outbound</option>
@@ -72,12 +73,12 @@
 
     <label class="inline-flex items-center gap-1.5 px-2 py-1.5 text-sm text-gray-600 cursor-pointer">
       <input type="checkbox" name="my_only" value="1" {{ "checked" if my_only }}
-             class="rounded border-gray-300 text-brand-500 focus:ring-brand-500">
+             class="rounded border-gray-300 input-focus text-accent-500">
       My accounts
     </label>
 
     <select name="disposition" aria-label="Filter by disposition"
-            class="px-2 py-1.5 text-sm border border-gray-200 rounded-lg">
+            class="input input-sm">
       <option value="">All accounts</option>
       <option value="active" {{ "selected" if disposition == "active" }}>Active only</option>
       <option value="bucket" {{ "selected" if disposition == "bucket" }}>Bucketed only</option>
@@ -85,7 +86,7 @@
 
     <label class="inline-flex items-center gap-1.5 px-2 py-1.5 text-sm text-gray-600 cursor-pointer">
       <input type="checkbox" name="has_open_reqs" value="1" {{ "checked" if has_open_reqs }}
-             class="rounded border-gray-300 text-brand-500 focus:ring-brand-500">
+             class="rounded border-gray-300 input-focus text-accent-500">
       Has open reqs
     </label>
 
@@ -103,26 +104,26 @@
   </form>
 
   {# Export + cross-company contacts links + Import — below the filter bar, above the split workspace #}
+  {# Import modal uses the shared modal-* primitives to match vendors import and the rest of the app. #}
   <div class="flex justify-end gap-3 text-xs text-gray-600 mb-1" x-data="{ importOpen: false }">
     <a hx-get="/v2/partials/contacts" hx-target="#main-content" hx-push-url="/v2/contacts"
-       class="hover:text-brand-600 hover:underline cursor-pointer">All contacts</a>
-    <a href="/v2/customers/export.csv" class="hover:text-brand-600 hover:underline">Export CSV</a>
-    <a href="/v2/customers/contacts/export.csv" class="hover:text-brand-600 hover:underline">Export contacts</a>
-    {# Import modal trigger #}
+       class="hover:text-accent-600 hover:underline cursor-pointer">All contacts</a>
+    <a href="/v2/customers/export.csv" class="hover:text-accent-600 hover:underline">Export CSV</a>
+    <a href="/v2/customers/contacts/export.csv" class="hover:text-accent-600 hover:underline">Export contacts</a>
     <button type="button" @click="importOpen = true"
-            class="hover:text-brand-600 hover:underline cursor-pointer">Import CSV</button>
-    {# Import modal — upload → server previews → confirm creates rows #}
+            class="hover:text-accent-600 hover:underline cursor-pointer">Import CSV</button>
+
+    {# Import modal — built on shared modal-* primitives to match vendors import modal. #}
     <div x-show="importOpen" x-cloak
          class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
          @keydown.escape.window="importOpen = false">
-      <div class="bg-white rounded-xl shadow-xl w-full max-w-2xl mx-4 p-6 space-y-4"
+      <div class="bg-white rounded-xl shadow-xl w-full max-w-2xl mx-4 relative"
            @click.stop>
-        <div class="flex items-center justify-between">
-          <h3 class="text-base font-semibold text-gray-900">Import Companies / Contacts</h3>
-          <button type="button" @click="importOpen = false"
-                  class="text-gray-400 hover:text-gray-600 text-lg leading-none">&times;</button>
+        <div class="modal-header">
+          <h3 class="h4">Import Companies / Contacts</h3>
+          <button type="button" class="modal-close" @click="importOpen = false" aria-label="Close">&times;</button>
         </div>
-        <div class="space-y-3">
+        <div class="modal-body space-y-4">
           <div>
             <p class="text-sm font-medium text-gray-700 mb-1">Import Companies</p>
             <p class="text-xs text-gray-500 mb-2">CSV columns: <code>name</code> (required), <code>website</code>, <code>account_type</code></p>
@@ -132,7 +133,7 @@
                   hx-encoding="multipart/form-data">
               <div class="flex gap-2">
                 <input type="file" name="file" accept=".csv"
-                       class="text-xs text-gray-600 border border-gray-200 rounded px-2 py-1 flex-1">
+                       class="text-xs text-gray-600 border border-line-base rounded px-2 py-1 flex-1">
                 <button type="submit" class="btn btn-primary btn-sm whitespace-nowrap">
                   Preview
                 </button>
@@ -148,7 +149,7 @@
                   hx-encoding="multipart/form-data">
               <div class="flex gap-2">
                 <input type="file" name="file" accept=".csv"
-                       class="text-xs text-gray-600 border border-gray-200 rounded px-2 py-1 flex-1">
+                       class="text-xs text-gray-600 border border-line-base rounded px-2 py-1 flex-1">
                 <button type="submit" class="btn btn-secondary btn-sm whitespace-nowrap">
                   Preview contacts
                 </button>
@@ -157,6 +158,9 @@
           </div>
           {# Preview / confirm result lands here #}
           <div id="import-result"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary btn-sm" @click="importOpen = false">Close</button>
         </div>
       </div>
     </div>
@@ -168,19 +172,19 @@
 
   {# ── Split workspace: account list (left) + detail panel (right) ── #}
   <div id="split-cdm"
-       class="flex flex-1 overflow-hidden min-h-0 bg-white border border-gray-200 rounded-lg"
+       class="flex flex-1 overflow-hidden min-h-0 bg-white border border-line-base rounded-lg"
        x-data="splitPanel('cdm', 35)">
 
     {# Left panel: scrollable account list #}
-    <div class="border-r border-gray-200 flex flex-col bg-white flex-shrink-0 overflow-hidden"
+    <div class="border-r border-line-base flex flex-col bg-white flex-shrink-0 overflow-hidden"
          :style="'width: ' + leftWidth + '%'">
       <div id="cdm-list" class="flex-1 overflow-y-auto">
         {% include "htmx/partials/customers/_account_list.html" %}
       </div>
     </div>
 
-    {# Resizable divider #}
-    <div class="w-1 bg-gray-200 hover:bg-brand-400 cursor-col-resize flex-shrink-0 transition-colors"
+    {# Resizable divider — active drag state uses accent (interactive accent moment). #}
+    <div class="w-1 bg-gray-200 hover:bg-accent-400 cursor-col-resize flex-shrink-0 transition-colors"
          role="separator" aria-label="Resize panels" tabindex="0"
          @mousedown="startResize($event)"
          @touchstart.prevent="startTouchResize($event)"
