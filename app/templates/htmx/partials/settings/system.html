@@ -13,9 +13,9 @@
 #}
 
 <div class="max-w-2xl">
-  <div class="bg-white border border-brand-200 rounded-lg p-4 mb-6">
+  <div class="bg-white border border-line-base rounded-lg p-4 mb-6">
     <div class="flex items-center gap-2 mb-1">
-      <svg class="w-5 h-5 text-brand-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <svg class="w-5 h-5 text-accent-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
       </svg>
       <h2 class="text-lg font-semibold text-gray-900">System Settings</h2>
@@ -45,11 +45,11 @@
                    hx-ext="json-enc"
                    data-loading-disable
                    aria-label="{{ item.label }}">
-            <div class="w-11 h-6 bg-gray-200 peer-focus:ring-2 peer-focus:ring-brand-300 rounded-full
+            <div class="w-11 h-6 bg-gray-200 peer-focus:ring-2 peer-focus:ring-accent-300 rounded-full
                         peer peer-checked:after:translate-x-full peer-checked:after:border-white
                         after:content-[''] after:absolute after:top-[2px] after:left-[2px]
                         after:bg-white after:border-gray-300 after:border after:rounded-full
-                        after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-500"></div>
+                        after:h-5 after:w-5 after:transition-all peer-checked:bg-accent-500"></div>
           </label>
         </div>
         {% else %}
@@ -70,11 +70,10 @@
               <input type="number" name="value" value="{{ item.value }}"
                      min="{{ item.min }}" step="1" required
                      aria-label="{{ item.label }}"
-                     class="w-24 text-sm border border-gray-300 rounded px-2 py-1.5
-                            focus:outline-none focus:ring-2 focus:ring-brand-400">
+                     class="input input-sm w-24">
               <button type="submit" data-loading-disable
-                      class="px-3 py-1.5 text-xs font-medium text-brand-600 bg-brand-50
-                             border border-brand-200 rounded-lg hover:bg-brand-100">Save</button>
+                      class="px-3 py-1.5 text-xs font-medium text-accent-600 bg-accent-50
+                             border border-accent-200 rounded-lg hover:bg-accent-100">Save</button>
             </form>
           </div>
         </div>
@@ -86,7 +85,7 @@
 
   {# Read-only job-state watermarks — collapsed disclosure, never editable. #}
   {% if job_state %}
-  <div class="bg-white border border-brand-200 rounded-lg p-4 mb-6"
+  <div class="bg-white border border-line-base rounded-lg p-4 mb-6"
        x-data="{ open: false }">
     <button type="button" @click="open = !open"
             class="w-full flex items-center justify-between text-left">
