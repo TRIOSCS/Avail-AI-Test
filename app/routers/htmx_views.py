@@ -499,7 +499,7 @@ async def global_search(
     """Global search across all entity types (type-ahead)."""
     from app.services.global_search_service import fast_search
 
-    results = fast_search(q, db)
+    results = fast_search(q, db, user)
     return template_response(
         "htmx/partials/shared/search_results.html",
         {**_base_ctx(request, user), "results": results, "query": q},
@@ -516,7 +516,7 @@ async def ai_search_endpoint(
     """AI-powered search — triggered by Enter key."""
     from app.services.global_search_service import ai_search
 
-    results = await ai_search(q, db)
+    results = await ai_search(q, db, user)
     return template_response(
         "htmx/partials/shared/search_results.html",
         {**_base_ctx(request, user), "results": results, "query": q, "ai_search": True},
@@ -533,7 +533,7 @@ async def search_results_page(
     """Full search results page."""
     from app.services.global_search_service import fast_search
 
-    results = fast_search(q, db) if q else {"best_match": None, "groups": {}, "total_count": 0}
+    results = fast_search(q, db, user) if q else {"best_match": None, "groups": {}, "total_count": 0}
     return template_response(
         "htmx/partials/search/full_results.html",
         {**_base_ctx(request, user), "results": results, "query": q},

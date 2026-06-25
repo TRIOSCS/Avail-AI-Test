@@ -3878,6 +3878,38 @@ Search coverage:
           for parts list filtering
 ```
 
+### Universal Top-Search (global search bar)
+
+The header search input (templates/htmx/partials/shared/topbar.html, name="q") debounces
+into `GET /v2/partials/search/global` → `htmx_views.global_search` →
+`global_search_service.fast_search(q, db, user)` → renders the grouped dropdown
+`partials/shared/search_results.html`. Pressing Enter posts `/v2/partials/search/ai` →
+`ai_search(q, db, user)` (Claude Haiku intent parse, falls back to fast_search). "View all"
+renders the full page `partials/search/full_results.html` via `/v2/partials/search/results`.
+
+```
+fast_search(query, db, user)  — one universal entity search, grouped results:
+    +---> 9 groups: requisitions, companies, vendors, vendor_contacts, site_contacts,
+    |     parts, offers, material_cards (material hub), sightings.
+    +---> Part number: matches Requirement / Offer / MaterialCard / Sighting by ILIKE
+    |     AND by exact normalized_mpn == normalize_mpn_key(query) (separator-insensitive,
+    |     index-backed), so a PN returns every req/offer/card/sighting it appears on.
+    +---> Vendor: VendorCard surfaced by its own name/email/phone OR via a matching
+    |     VendorContact (vendor_card_id subquery) OR a matching Offer.vendor_name — so a
+    |     contact name / stocked MPN leads back to the card. Its contacts, offers, and
+    |     sightings surface in their own groups.
+    +---> Sightings carry their parent requisition_id (Sighting→Requirement join) for nav;
+    |     material cards link to the Part Dossier (/v2/search?mpn=...).
+    +---> Read-gating: for RESTRICTED_ROLES (SALES/TRADER) the requisition-scoped groups
+    |     (requisitions, parts, offers, sightings) are limited to requisitions the user
+    |     owns (created_by); requisition-less offers are hidden from them. Companies /
+    |     vendors / contacts / material cards follow the app-wide all-visible read policy.
+    |     user=None (legacy/test callers) ⇒ unrestricted. _run_intent_query (AI path)
+    |     applies the same gate; ai_search caches only for unrestricted users.
+    +---> Reuses: SearchBuilder (escape_like ILIKE + pg_trgm similarity order),
+          normalize_mpn_key, MaterialCard.deleted_at soft-delete filter.
+```
+
 ---
 
 ## Scoring System Hierarchy
