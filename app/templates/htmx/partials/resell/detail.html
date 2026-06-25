@@ -14,7 +14,7 @@
      x-data="{ tab: 'lines' }">
 
   {# ── Slim header ──────────────────────────────────────────────── #}
-  <div class="px-5 py-3 border-b border-brand-200 bg-white flex-shrink-0">
+  <div class="px-5 py-3 border-b border-line-base bg-white flex-shrink-0">
     {# Breadcrumb #}
     <nav class="text-xs text-gray-400 mb-1" aria-label="Breadcrumb">
       <a hx-get="/v2/partials/resell/workspace?lens=mine"
@@ -104,17 +104,19 @@
 
   {# ── Tab bar ──────────────────────────────────────────────────── #}
   {# Outreach (the trader→buyer board) is OWNER-only — non-owners never see who the
-     list has been offered to. #}
-  <div class="px-5 border-b border-brand-200 bg-white flex-shrink-0 flex gap-4">
+     list has been offered to. Activity tab hidden until timeline ships. #}
+  <div class="px-5 border-b border-line-base bg-white flex-shrink-0 flex gap-4"
+       role="tablist">
     {% set tabs = [('lines', 'Lines'), ('offers', 'Offers'), ('build', 'Build Bid')] %}
     {% if can_see_customer %}{% set tabs = tabs + [('outreach', 'Outreach')] %}{% endif %}
-    {% set tabs = tabs + [('activity', 'Activity')] %}
     {% for key, label in tabs %}
     <button @click="tab = '{{ key }}'"
-            :class="tab === '{{ key }}' ? 'border-brand-500 text-brand-700' : 'border-transparent text-gray-500 hover:text-gray-700'"
+            role="tab"
+            :aria-selected="tab === '{{ key }}'"
+            :class="tab === '{{ key }}' ? 'border-accent-500 text-accent-700' : 'border-transparent text-gray-500 hover:text-gray-700'"
             class="py-2.5 text-sm font-medium border-b-2 transition-colors">
       {{ label }}
-      {% if key == 'offers' and offer_count %}<span class="ml-1 px-1.5 py-0.5 text-xs rounded-full bg-amber-100 text-amber-700">{{ offer_count }}</span>{% endif %}
+      {% if key == 'offers' and offer_count %}<span class="ml-1 px-1.5 py-0.5 text-xs rounded-full bg-amber-100 text-amber-700" aria-label="{{ offer_count }} offers">{{ offer_count }}</span>{% endif %}
     </button>
     {% endfor %}
   </div>
@@ -123,13 +125,13 @@
   <div class="flex-1 overflow-y-auto p-5">
 
     {# Lines — loads immediately (default tab). #}
-    <div x-show="tab === 'lines'" id="tab-lines-{{ el.id }}">
+    <div x-show="tab === 'lines'" role="tabpanel" id="tab-lines-{{ el.id }}">
       {% include "htmx/partials/resell/_lines.html" %}
     </div>
 
     {# Offers — lazy. LANDMINE: intersect/load MUST carry an explicit hx-target
        or it inherits #main-content's hx-target="this" and wipes the page. #}
-    <div x-show="tab === 'offers'" x-cloak>
+    <div x-show="tab === 'offers'" x-cloak role="tabpanel">
       <div id="tab-offers-{{ el.id }}"
            hx-get="/v2/partials/resell/{{ el.id }}/offers"
            hx-trigger="intersect once"
@@ -142,7 +144,7 @@
     {# Build Bid — owner-only bid-back builder, lazy-loaded. Non-owners never see
        the planning prices; the endpoint 403s and the tab shows the private notice.
        LANDMINE: the lazy loader MUST carry an explicit hx-target. #}
-    <div x-show="tab === 'build'" x-cloak>
+    <div x-show="tab === 'build'" x-cloak role="tabpanel">
       {% if can_see_customer %}
       <div id="tab-build-{{ el.id }}"
            hx-get="/v2/partials/resell/{{ el.id }}/build-bid"
@@ -164,7 +166,7 @@
        My-Day) and lazy-loads on its own so an empty strip costs nothing.
        LANDMINE: every lazy loader carries an explicit hx-target. #}
     {% if can_see_customer %}
-    <div x-show="tab === 'outreach'" x-cloak class="space-y-4">
+    <div x-show="tab === 'outreach'" x-cloak class="space-y-4" role="tabpanel">
       <div id="tab-not-yet-{{ el.id }}"
            hx-get="/v2/partials/resell/{{ el.id }}/not-yet-strip"
            hx-trigger="intersect once"
@@ -180,15 +182,5 @@
     </div>
     {% endif %}
 
-    {# Activity — lightweight placeholder this slice. #}
-    <div x-show="tab === 'activity'" x-cloak>
-      <div class="mx-auto max-w-md text-center py-10">
-        <svg class="mx-auto mb-3 h-10 w-10 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
-        </svg>
-        <p class="text-sm font-medium text-gray-600">Activity timeline coming soon</p>
-        <p class="text-xs text-gray-400 mt-1">Posts, offers landing, and bid-back events will stream here.</p>
-      </div>
-    </div>
   </div>
 </div>

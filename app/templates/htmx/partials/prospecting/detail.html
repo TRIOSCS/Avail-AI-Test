@@ -10,7 +10,7 @@
 <div class="page-readable">
 
   {# Header card #}
-  <div class="bg-white border border-brand-200 rounded-lg p-6 mb-6">
+  <div class="card p-6 mb-6">
     <div class="flex items-start justify-between">
       <div>
         <h1 class="text-2xl font-bold text-gray-900">{{ prospect.name }}</h1>
@@ -25,11 +25,11 @@
         </div>
         <div class="mt-2 flex items-center gap-2">
           {% set prospect_status_colors = {
-            'suggested': 'bg-brand-100 text-brand-600',
-            'claimed': 'bg-emerald-50 text-emerald-700',
-            'dismissed': 'bg-gray-100 text-gray-600'
+            'suggested': 'bg-brand-100 text-brand-600 border-brand-200',
+            'claimed': 'bg-emerald-50 text-emerald-700 border-emerald-200',
+            'dismissed': 'bg-gray-100 text-gray-600 border-gray-200'
           } %}
-          <span class="inline-flex px-2.5 py-1 text-xs font-semibold rounded-full {{ prospect_status_colors.get(prospect.status, 'bg-gray-100 text-gray-700') }}">
+          <span class="badge {{ prospect_status_colors.get(prospect.status, 'bg-gray-100 text-gray-700 border-gray-200') }}">
             {{ prospect.status|capitalize }}
           </span>
           {% if prospect.claimed_by_user %}
@@ -44,13 +44,13 @@
         <button hx-post="/v2/partials/prospecting/{{ prospect.id }}/claim"
                 hx-target="#main-content"
                 data-loading-disable
-                class="px-3 py-1.5 bg-brand-500 text-white text-sm font-medium rounded-lg hover:bg-brand-600 transition-colors">
+                class="btn-primary btn-sm">
           Claim
         </button>
         <button hx-post="/v2/partials/prospecting/{{ prospect.id }}/dismiss"
                 hx-target="#main-content"
                 data-loading-disable
-                class="px-3 py-1.5 bg-white border border-brand-200 text-brand-700 text-sm font-medium rounded-lg hover:bg-brand-50 transition-colors">
+                class="btn-secondary btn-sm">
           Dismiss
         </button>
         {% elif prospect.status == 'claimed' %}
@@ -58,7 +58,7 @@
                 hx-target="#main-content"
                 hx-confirm="Release this prospect back to the pool? This clears your claim and company ownership."
                 data-loading-disable
-                class="px-3 py-1.5 bg-white border border-brand-200 text-brand-700 text-sm font-medium rounded-lg hover:bg-brand-50 transition-colors">
+                class="btn-secondary btn-sm">
           Release
         </button>
         {% endif %}
@@ -66,7 +66,7 @@
                 hx-target="#enrich-status-zone"
                 hx-swap="innerHTML"
                 {% if enrich_state == 'running' %}disabled{% endif %}
-                class="px-3 py-1.5 bg-white border border-brand-200 text-brand-700 text-sm font-medium rounded-lg hover:bg-brand-50 transition-colors disabled:opacity-50">
+                class="btn-secondary btn-sm disabled:opacity-50">
           Enrich
         </button>
         {% if prospect.status == 'claimed' %}
@@ -74,7 +74,7 @@
            hx-get="/v2/partials/requisitions?action=create&customer={{ prospect.name|urlencode }}"
            hx-target="#main-content"
            hx-push-url="true"
-           class="px-3 py-1.5 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 transition-colors">
+           class="btn-primary btn-sm">
           Create Requisition
         </a>
         {% endif %}
@@ -89,14 +89,14 @@
 
   {# Buyer-ready summary — the headline explainability #}
   {% if snapshot %}
-  <div class="bg-white border {{ 'border-emerald-300' if snapshot.is_buyer_ready else 'border-brand-200' }} rounded-lg p-5 mb-6">
+  <div class="card {{ 'border-emerald-300' if snapshot.is_buyer_ready else '' }} p-5 mb-6">
     <div class="flex items-center justify-between mb-3">
       <div class="flex items-center gap-3">
         <span class="text-sm font-medium text-gray-600">Buyer-ready score</span>
         <span class="text-2xl font-bold {{ score.score_text_color(snapshot.buyer_ready_score) }}">{{ snapshot.buyer_ready_score }}<span class="text-sm text-gray-400">/100</span></span>
       </div>
       {% if snapshot.is_buyer_ready %}
-      <span class="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-full bg-emerald-100 text-emerald-700">
+      <span class="badge bg-emerald-100 text-emerald-700 border-emerald-200">
         <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.957a1 1 0 00.95.69h4.162c.969 0 1.371 1.24.588 1.81l-3.367 2.446a1 1 0 00-.364 1.118l1.287 3.957c.3.922-.755 1.688-1.54 1.118l-3.366-2.446a1 1 0 00-1.176 0l-3.366 2.446c-.784.57-1.838-.196-1.539-1.118l1.286-3.957a1 1 0 00-.363-1.118L2.07 9.384c-.783-.57-.38-1.81.588-1.81h4.162a1 1 0 00.95-.69l1.286-3.957z"/></svg>
         Buyer-ready
       </span>
@@ -118,7 +118,7 @@
   {# Scores section — side by side #}
   <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
     {# Fit score #}
-    <div class="bg-white border border-brand-200 rounded-lg p-6">
+    <div class="card p-6">
       <div class="text-sm font-medium text-gray-600 mb-2">Fit Score <span class="text-gray-300">· ICP match</span></div>
       {% set fit = prospect.fit_score or 0 %}
       <div class="text-3xl font-bold {{ score.score_text_color(fit) }}">{{ fit }}%</div>
@@ -131,7 +131,7 @@
     </div>
 
     {# Readiness score #}
-    <div class="bg-white border border-brand-200 rounded-lg p-6">
+    <div class="card p-6">
       <div class="text-sm font-medium text-gray-600 mb-2">Readiness Score <span class="text-gray-300">· near-term timing</span></div>
       {% set ready = prospect.readiness_score or 0 %}
       <div class="text-3xl font-bold {{ score.score_text_color(ready) }}">{{ ready }}%</div>
@@ -162,14 +162,14 @@
      account has not been screened. #}
   {% set ai_screen = enrichment.get('ai_screen', {}) %}
   {% if ai_screen and ai_screen.get('verdict') %}
-  <div class="bg-white border border-brand-200 rounded-lg p-5 mb-6">
+  <div class="card p-5 mb-6">
     <h2 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
       AI Screening
       {% set verdict = ai_screen.get('verdict', '') %}
-      <span class="inline-flex px-2 py-0.5 text-xs font-semibold rounded-full
-        {% if verdict == 'pass' %}bg-emerald-100 text-emerald-700
-        {% elif verdict == 'screened_out' %}bg-amber-100 text-amber-700
-        {% else %}bg-gray-100 text-gray-600{% endif %}">
+      <span class="badge
+        {% if verdict == 'pass' %}bg-emerald-100 text-emerald-700 border-emerald-200
+        {% elif verdict == 'screened_out' %}bg-amber-100 text-amber-700 border-amber-200
+        {% else %}bg-gray-100 text-gray-600 border-gray-200{% endif %}">
         {{ verdict|replace('_', ' ')|capitalize }}
       </span>
     </h2>
@@ -219,32 +219,32 @@
 
   {# Contacts #}
   {% if contacts %}
-  <div class="bg-white border border-brand-200 rounded-lg p-5 mb-6">
+  <div class="card p-5 mb-6">
     <h2 class="text-lg font-semibold text-gray-900 mb-3">
       Contacts
       <span class="text-sm font-normal text-gray-400">
         {{ contact_stats.total }} total · {{ contact_stats.verified }} verified · {{ contact_stats.decision_makers }} decision-maker{{ "s" if contact_stats.decision_makers != 1 }}
       </span>
     </h2>
-    <div class="divide-y divide-gray-100">
+    <div class="divide-y divide-[color:var(--line-subtle)]">
       {% for c in contacts %}
       <div class="py-2.5 flex items-center justify-between gap-3">
         <div class="min-w-0">
           <p class="text-sm font-medium text-gray-900 truncate">{{ c.get('name', 'Unknown') }}</p>
           {% if c.get('title') %}<p class="text-xs text-gray-600 truncate">{{ c.title }}</p>{% endif %}
-          {% if c.get('email') %}<p class="text-xs text-brand-400 truncate">{{ c.email }}</p>{% endif %}
+          {% if c.get('email') %}<p class="text-xs text-gray-500 truncate">{{ c.email }}</p>{% endif %}
         </div>
         <div class="shrink-0 flex items-center gap-1.5">
           {% if c.get('seniority') == 'decision_maker' %}
-          <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-brand-100 text-brand-600">Decision-maker</span>
+          <span class="badge bg-brand-100 text-brand-600 border-brand-200">Decision-maker</span>
           {% endif %}
           {% if c.get('verified') %}
-          <span class="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-emerald-50 text-emerald-700">
+          <span class="badge bg-emerald-50 text-emerald-700 border-emerald-200">
             <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
             Verified
           </span>
           {% else %}
-          <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-gray-100 text-gray-600">Unverified</span>
+          <span class="badge bg-gray-100 text-gray-600 border-gray-200">Unverified</span>
           {% endif %}
         </div>
       </div>
@@ -255,11 +255,11 @@
 
   {# Similar customers / prior wins #}
   {% if similar_customers %}
-  <div class="bg-white border border-brand-200 rounded-lg p-5 mb-6">
+  <div class="card p-5 mb-6">
     <h2 class="text-lg font-semibold text-gray-900 mb-3">Similar wins</h2>
     <div class="flex flex-wrap gap-2">
       {% for s in similar_customers %}
-      <span class="inline-flex px-2.5 py-1 text-xs font-medium rounded-full bg-brand-50 text-brand-600 border border-brand-100">
+      <span class="chip bg-brand-50 text-brand-600 border-brand-100">
         {{ s.get('name', s) if s is mapping else s }}
       </span>
       {% endfor %}
@@ -268,10 +268,10 @@
   {% endif %}
 
   {# Discovery info #}
-  <div class="bg-white border border-brand-200 rounded-lg p-4 mb-6">
+  <div class="card p-4 mb-6">
     <div class="flex items-center gap-3 text-sm">
       <span class="text-gray-600">Discovery Source:</span>
-      <span class="inline-flex px-2.5 py-0.5 text-xs font-medium bg-brand-100 text-brand-600 rounded-full">
+      <span class="chip bg-brand-100 text-brand-600 border-brand-200">
         {{ prospect.discovery_source }}
       </span>
       <span class="text-gray-400">{{ prospect.created_at.strftime('%b %d, %Y') if prospect.created_at else '—' }}</span>
@@ -280,7 +280,7 @@
 
   {# Enrichment data #}
   {% if enrichment %}
-  <div class="bg-brand-50 border border-brand-200 rounded-lg p-5 mb-6">
+  <div class="card bg-brand-50 p-5 mb-6">
     <h2 class="text-lg font-semibold text-gray-900 mb-4">Enrichment Data</h2>
 
     {% if enrichment.get('sam_gov') %}
@@ -329,7 +329,7 @@
       <h3 class="text-sm font-semibold text-gray-700 mb-2">Signals</h3>
       <div class="flex flex-wrap gap-2">
         {% for signal in enrichment.signals %}
-        <span class="inline-flex items-center px-2.5 py-1 text-xs font-medium bg-amber-50 text-amber-700 rounded-full">
+        <span class="chip bg-amber-50 text-amber-700 border-amber-200">
           {{ signal }}
         </span>
         {% endfor %}
@@ -338,7 +338,7 @@
     {% endif %}
   </div>
   {% else %}
-  <div class="bg-brand-50 border border-brand-200 rounded-lg p-6 mb-6 text-center">
+  <div class="card bg-brand-50 p-6 mb-6 text-center">
     <svg class="mx-auto w-8 h-8 text-brand-300 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
     </svg>
@@ -379,7 +379,7 @@
 
   {# Description / AI writeup #}
   {% if prospect.ai_writeup or prospect.description %}
-  <div class="bg-white border border-brand-200 rounded-lg p-5 mb-6">
+  <div class="card p-5 mb-6">
     <h2 class="text-lg font-semibold text-gray-900 mb-2">About</h2>
     <p class="text-sm text-gray-600 leading-relaxed">{{ prospect.ai_writeup or prospect.description }}</p>
   </div>
@@ -387,7 +387,7 @@
 
   {# Additional details grid #}
   {% if prospect.employee_count_range or prospect.revenue_range or prospect.hq_location or prospect.naics_code %}
-  <div class="bg-white border border-brand-200 rounded-lg p-5 mb-6">
+  <div class="card p-5 mb-6">
     <h2 class="text-lg font-semibold text-gray-900 mb-3">Company Details</h2>
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
       {% if prospect.employee_count_range %}

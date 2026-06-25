@@ -30,7 +30,7 @@
 
   {# ── Easy entry (owner, draft only — lines lock on post) ──────── #}
   {% if is_owner and is_draft %}
-  <div id="import-area" class="rounded-lg border border-dashed border-brand-200 bg-gray-50 p-3"
+  <div id="import-area" class="rounded-lg border border-dashed border-line-base bg-gray-50 p-3"
        x-data="{ uploading: false }">
     <div class="flex items-center justify-between gap-2">
       <p class="text-xs text-gray-500">Add parts — drop a file, or add one line.</p>

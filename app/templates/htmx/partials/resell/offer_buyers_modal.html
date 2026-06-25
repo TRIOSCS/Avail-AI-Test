@@ -132,7 +132,7 @@
         <input type="text" x-model="query" @input.debounce.300ms="search()"
                @focus="searchOpen = results.length > 0" @click.away="searchOpen = false"
                placeholder="Add a buyer by name…" autocomplete="off" aria-label="Add a buyer by name"
-               class="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:border-brand-400 focus:ring-2 focus:ring-brand-200 outline-none">
+               class="input w-full">
         <div x-show="searchOpen" x-cloak
              class="absolute z-50 left-0 right-0 mt-1 max-h-40 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-lg">
           <template x-for="r in results" :key="r.type + '-' + r.id">
@@ -146,9 +146,9 @@
       {# Added chips. #}
       <div class="mt-2 flex flex-wrap gap-1.5" x-show="addedCompanies.length" x-cloak>
         <template x-for="c in addedCompanies" :key="c.type + '-' + c.id">
-          <span class="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full bg-brand-100 text-brand-700">
+          <span class="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full bg-accent-100 text-accent-700">
             <span x-text="c.name"></span>
-            <button type="button" @click="drop(c)" class="text-brand-500 hover:text-brand-700">&times;</button>
+            <button type="button" @click="drop(c)" class="text-accent-500 hover:text-accent-700">&times;</button>
           </span>
         </template>
       </div>
@@ -157,13 +157,13 @@
     {# ── Scope ─────────────────────────────────────────────────────── #}
     <div>
       <label class="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Scope</label>
-      <div class="flex rounded-lg border border-brand-200 overflow-hidden text-sm">
+      <div class="flex rounded-lg border border-line-base overflow-hidden text-sm">
         <button type="button" @click="scope = 'whole_list'"
-                :class="scope === 'whole_list' ? 'bg-brand-500 text-white' : 'bg-white text-gray-600 hover:bg-brand-50'"
+                :class="scope === 'whole_list' ? 'bg-accent-500 text-white' : 'bg-white text-gray-600 hover:bg-accent-50'"
                 class="flex-1 py-2 font-medium transition-colors">Whole list</button>
         <button type="button" @click="scope = 'per_line'"
-                :class="scope === 'per_line' ? 'bg-brand-500 text-white' : 'bg-white text-gray-600 hover:bg-brand-50'"
-                class="flex-1 py-2 font-medium transition-colors border-l border-brand-200">
+                :class="scope === 'per_line' ? 'bg-accent-500 text-white' : 'bg-white text-gray-600 hover:bg-accent-50'"
+                class="flex-1 py-2 font-medium transition-colors border-l border-line-base">
           {% if scope_lines %}These {{ scope_lines|length }} line{{ 's' if scope_lines|length != 1 }}{% else %}Per line{% endif %}
         </button>
       </div>
@@ -175,7 +175,7 @@
       <div class="flex flex-wrap gap-2 text-sm">
         {% for ch in channels %}
         <button type="button" @click="channel = '{{ ch }}'"
-                :class="channel === '{{ ch }}' ? 'bg-brand-500 text-white border-brand-500' : 'bg-white text-gray-600 border-gray-200 hover:bg-brand-50'"
+                :class="channel === '{{ ch }}' ? 'bg-accent-500 text-white border-accent-500' : 'bg-white text-gray-600 border-gray-200 hover:bg-accent-50'"
                 class="px-3 py-1.5 rounded-full border font-medium transition-colors capitalize">{{ ch }}</button>
         {% endfor %}
       </div>
@@ -201,7 +201,7 @@
       <textarea name="notes" rows="2" class="input" placeholder="e.g. left a voicemail, marketplace thread link…"></textarea>
     </div>
 
-    <div class="flex justify-end gap-3 pt-2 border-t border-gray-100">
+    <div class="modal-footer">
       <button type="button" @click="$dispatch('close-modal')" class="btn btn-secondary">Cancel</button>
       <button type="submit" :disabled="count === 0" class="btn btn-primary disabled:opacity-50">
         <span x-show="channel === 'email'" x-cloak>Send to <span x-text="count"></span></span>
@@ -209,4 +209,5 @@
       </button>
     </div>
   </form>
+
 </div>

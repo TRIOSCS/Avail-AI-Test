@@ -10,28 +10,21 @@
 
 <div class="page-fluid">
 
-  {# Stats KPI panel — lazy-loaded so the grid paints first; OOB-refreshed after grid actions.
-     hx-target MUST be explicit: without it the div inherits #main-content's hx-target="this",
-     so the lazy stats load would wipe the whole list (cards included) instead of filling itself. #}
-  <div id="prospect-stats" class="mb-5"
-       hx-get="/v2/partials/prospecting/stats" hx-trigger="load"
-       hx-target="#prospect-stats" hx-swap="innerHTML"></div>
-
-  <div class="flex items-center justify-between mb-4">
-    <span class="text-sm text-gray-600">
-      {{ total }} {% if status %}{{ status }}{% endif %} prospect{{ "s" if total != 1 }}
-      {% if q %}matching &ldquo;{{ q }}&rdquo;{% endif %}
-    </span>
-
+  {# ── Page header ─────────────────────────────────────────────────── #}
+  <div class="flex items-center justify-between mb-3">
+    <div>
+      <h1 class="text-xl font-bold text-gray-900">Prospecting</h1>
+      <p class="text-xs text-gray-500 mt-0.5">Suggested accounts ranked by fit + buying signals</p>
+    </div>
     {# Add-prospect control #}
     <div x-data="{ open: false }" class="relative">
       <button @click="open = !open"
-              class="inline-flex items-center gap-1 px-3 py-1.5 bg-brand-500 text-white text-sm font-medium rounded-lg hover:bg-brand-600 transition-colors">
-        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+              class="btn-primary btn-sm">
+        <svg class="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
         Add prospect
       </button>
       <div x-show="open" x-cloak @click.outside="open = false" x-transition
-           class="absolute right-0 mt-2 w-72 bg-white border border-brand-200 rounded-lg shadow-lg p-3 z-20">
+           class="absolute right-0 mt-2 w-72 bg-white border border-line-base rounded-lg shadow-lg p-3 z-20">
         <form hx-post="/v2/partials/prospecting/add-domain"
               hx-target="#add-prospect-result"
               hx-swap="innerHTML"
@@ -39,9 +32,8 @@
           <label class="block text-xs font-medium text-gray-600 mb-1" for="add-domain-input">Company domain</label>
           <div class="flex gap-2">
             <input id="add-domain-input" type="text" name="domain" placeholder="acme.com" required
-                   class="flex-1 px-2.5 py-1.5 border border-brand-200 rounded-md text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
-            <button type="submit" data-loading-disable
-                    class="px-3 py-1.5 bg-brand-500 text-white text-sm font-medium rounded-md hover:bg-brand-600 transition-colors">Add</button>
+                   class="input flex-1">
+            <button type="submit" data-loading-disable class="btn-primary btn-sm">Add</button>
           </div>
         </form>
         <div id="add-prospect-result" class="mt-2 empty:hidden"></div>
@@ -49,16 +41,29 @@
     </div>
   </div>
 
+  {# Stats KPI panel — lazy-loaded so the grid paints first; OOB-refreshed after grid actions.
+     hx-target MUST be explicit: without it the div inherits #main-content's hx-target="this",
+     so the lazy stats load would wipe the whole list (cards included) instead of filling itself. #}
+  <div id="prospect-stats" class="mb-3"
+       hx-get="/v2/partials/prospecting/stats" hx-trigger="load"
+       hx-target="#prospect-stats" hx-swap="innerHTML"></div>
+
+  <div class="flex items-center mb-4">
+    <span class="text-sm text-gray-600">
+      {{ total }} {% if status %}{{ status }}{% endif %} prospect{{ "s" if total != 1 }}
+      {% if q %}matching &ldquo;{{ q }}&rdquo;{% endif %}
+    </span>
+  </div>
+
   {# Search + Filter + Sort bar #}
-  <div id="prospect-filters" class="space-y-3 mb-6">
+  <div id="prospect-filters" class="space-y-2 mb-4">
     {# status carrier so search/sort requests preserve the active filter #}
     <input type="hidden" name="status" value="{{ status }}">
 
     {# Search bar #}
     <div>
       <input aria-label="Search prospects" type="text" name="q" value="{{ q }}" placeholder="Search by name or domain..."
-             class="w-full sm:w-80 px-3 py-2 border border-brand-200 rounded-lg text-sm
-                    focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+             class="input w-full sm:w-80"
              hx-get="/v2/partials/prospecting"
              hx-trigger="keyup changed delay:300ms"
              hx-target="#main-content"
@@ -72,7 +77,8 @@
                             'claimed': status_counts.get('claimed', 0), 'dismissed': status_counts.get('dismissed', 0)} %}
       {% for val, label in [('', 'All'), ('suggested', 'Suggested'), ('claimed', 'Claimed'), ('dismissed', 'Dismissed')] %}
       <button class="px-3 py-1.5 text-sm font-medium rounded-full transition-colors
-                     {% if status == val %}bg-brand-500 text-white shadow-sm{% else %}bg-brand-100 text-brand-600 hover:bg-brand-200{% endif %}"
+                     {% if status == val %}bg-accent-500 text-white shadow-sm{% else %}bg-brand-100 text-brand-600 hover:bg-brand-200{% endif %}"
+              aria-pressed="{{ 'true' if status == val else 'false' }}"
               hx-get="/v2/partials/prospecting?status={{ val|urlencode }}&sort={{ sort|urlencode }}&q={{ q|urlencode }}"
               hx-target="#main-content"
               hx-push-url="true">
@@ -83,8 +89,7 @@
 
       <div class="ml-auto">
         <select name="sort"
-                class="px-3 py-1.5 border border-brand-200 rounded-lg text-sm
-                       focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                class="input input-sm"
                 hx-get="/v2/partials/prospecting"
                 hx-trigger="change"
                 hx-target="#main-content"
@@ -101,13 +106,13 @@
 
   {# Card grid — 3-col desktop, 2-col tablet, 1-col mobile #}
   {% if prospects %}
-  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
+  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3">
     {% for prospect in prospects %}
     {% include "htmx/partials/prospecting/_card.html" %}
     {% endfor %}
   </div>
   {% else %}
-  <div class="bg-white border border-brand-200 rounded-lg p-6 sm:p-8 text-center">
+  <div class="card p-6 sm:p-8 text-center">
     <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
             d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z"/>
@@ -128,11 +133,11 @@
     <a hx-get="/v2/partials/prospecting?page={{ page - 1 }}&status={{ status|urlencode }}&sort={{ sort|urlencode }}&q={{ q|urlencode }}"
        hx-target="#main-content"
        hx-push-url="true"
-       class="px-3 py-1.5 text-sm bg-white border border-brand-200 rounded-lg hover:bg-brand-50 cursor-pointer transition-colors">
+       class="btn-secondary btn-sm cursor-pointer">
       &larr; Prev
     </a>
     {% else %}
-    <span class="px-3 py-1.5 text-sm text-gray-400 border border-gray-100 rounded-lg cursor-not-allowed">&larr; Prev</span>
+    <span class="px-3 py-1.5 text-sm text-gray-400 border border-line-subtle rounded-lg cursor-not-allowed">&larr; Prev</span>
     {% endif %}
 
     <span class="px-3 py-1.5 text-sm text-gray-600">Page {{ page }} of {{ total_pages }}</span>
@@ -141,11 +146,11 @@
     <a hx-get="/v2/partials/prospecting?page={{ page + 1 }}&status={{ status|urlencode }}&sort={{ sort|urlencode }}&q={{ q|urlencode }}"
        hx-target="#main-content"
        hx-push-url="true"
-       class="px-3 py-1.5 text-sm bg-white border border-brand-200 rounded-lg hover:bg-brand-50 cursor-pointer transition-colors">
+       class="btn-secondary btn-sm cursor-pointer">
       Next &rarr;
     </a>
     {% else %}
-    <span class="px-3 py-1.5 text-sm text-gray-400 border border-gray-100 rounded-lg cursor-not-allowed">Next &rarr;</span>
+    <span class="px-3 py-1.5 text-sm text-gray-400 border border-line-subtle rounded-lg cursor-not-allowed">Next &rarr;</span>
     {% endif %}
   </div>
   {% endif %}
