@@ -2155,11 +2155,17 @@ Mark-seen (per row, background, no spinner):
   NOT change the count — it only gates the cosmetic one-time pulse; the row keeps its rail
   until the underlying work is done.
 
-**Tasks queue + core-basic gaps (Phase 3).** `GET /v2/partials/tasks` (gated
-`require_access(AccessKey.MY_DAY)`) is a filterable queue of tasks assigned to me
-(`status`/`priority`/`due`; reuses `get_my_tasks`, filters priority/due in-route) rendered
-under the My-Day nav key; its filter bar carries an EXPLICIT `hx-target="#tasks-results"`
-(never inherits `#main-content`). The My-Day nav badge is the `TasksActionSource` above.
+**Tasks page + core-basic gaps (Phase 3).** `GET /v2/partials/my-day` (gated
+`require_access(AccessKey.MY_DAY)`) is the **Tasks** page (nav label "Tasks"; formerly
+"My Day", which also carried a follow-up-accounts call-down section — that account cadence
+now lives in CRM, so this page is tasks-only). It is a filterable queue of tasks assigned
+to me (`status`/`priority`/`due`; reuses `get_my_tasks`, filters priority/due in-route),
+grouped by urgency (Overdue → Due soon → Later → No due date). Templates: `tasks/list.html`
+(full page incl. filter bar) and `tasks/_results.html` (results-only fragment, returned
+when `HX-Target == "tasks-results"`). The filter bar carries an EXPLICIT
+`hx-target="#tasks-results"` (never inherits `#main-content`). The standalone
+`GET /v2/partials/tasks` queue endpoint was folded into this route. The My-Day/Tasks nav
+badge is the `TasksActionSource` above.
 Bulk "Assign owner" on the account list now uses a name+role `<select>` (`cdm_list_ctx(include_users=…)`,
 manager/admin only) instead of a raw User-ID box. All clickable `<tr hx-get>` list rows
 are keyboard-accessible (`role=button` + `tabindex=0` + `keyup[Enter]` + `focus:ring-2`).
