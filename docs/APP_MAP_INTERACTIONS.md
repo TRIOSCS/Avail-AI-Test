@@ -1802,6 +1802,7 @@ GET  /v2/partials/settings/users            → users.html table (htmx_views.set
 POST /api/admin/users/invite                → create interactive user (status Invited)
 POST /api/admin/users/{id}/role             → change role
 POST /api/admin/users/{id}/active           → activate / deactivate
+POST /api/admin/users/{id}/buyplan-approver → grant/revoke the per-user buy-plan approval right (User.can_approve_buy_plans); APPROVAL_GRANT/APPROVAL_REVOKE audit
 GET  /api/admin/users/{id}/access-panel     → user_access_panel.html (per-user access editor modal)
 POST /api/admin/users/{id}/access           → grant/revoke/reset ONE key (value ∈ on|off|default)
 GET  /api/admin/users/audit                 → users_audit.html (audit-log viewer modal)

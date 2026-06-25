@@ -356,6 +356,8 @@ class UserAuditAction(StrEnum):
     DEACTIVATE = "deactivate"
     ACCESS_GRANT = "access_grant"
     ACCESS_REVOKE = "access_revoke"
+    APPROVAL_GRANT = "approval_grant"  # granted buy-plan approval right
+    APPROVAL_REVOKE = "approval_revoke"  # revoked buy-plan approval right
 
 
 # Default access granted to every interactive (non-admin) role. This deliberately
