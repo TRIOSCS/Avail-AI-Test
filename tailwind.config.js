@@ -10,7 +10,7 @@ module.exports = {
     // All color shades used in the app — prevents purge issues when
     // adding new shades in templates between deploys.
     {
-      pattern: /^(bg|text|border)-(slate|gray|brand|amber|emerald|rose|blue|violet|sky)-(50|100|200|300|400|500|600|700|800|900)$/,
+      pattern: /^(bg|text|border)-(slate|gray|brand|accent|amber|emerald|rose|blue|violet|sky)-(50|100|200|300|400|500|600|700|800|900)$/,
       variants: ['hover'],
     },
     // Design-system shadow tiers — keep available even before the page
@@ -42,6 +42,21 @@ module.exports = {
           700: '#3A4252',
           800: '#2A3040',
           900: '#1C2130',
+        },
+        // Trio brand azure (trioscs.com) — the single interactive accent.
+        // Mirror of --accent* in styles.css (keep in sync: 500 = --accent,
+        // 600 = --accent-hover). 500 #007DBD ≈ 4.5:1 on white — AA at threshold.
+        accent: {
+          50: '#E7F3FA',
+          100: '#C9E6F4',
+          200: '#9BD0EC',
+          300: '#66B5E0',
+          400: '#2E97D2',
+          500: '#007DBD',
+          600: '#0B6699',
+          700: '#095A85',
+          800: '#094C6E',
+          900: '#0A3F5A',
         }
       }
     }
