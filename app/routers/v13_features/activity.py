@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from ...config import settings
 from ...database import get_db
-from ...dependencies import require_admin, require_user
+from ...dependencies import can_manage_account, require_admin, require_user
 from ...models import Company, User, VendorCard
 from ...rate_limit import limiter
 from ...schemas.v13_features import (
@@ -254,6 +254,8 @@ async def log_company_phone_call(
     company = db.get(Company, company_id)
     if not company:
         raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Not authorized to manage this account")
 
     from app.services.activity_service import log_company_call
 
@@ -283,6 +285,8 @@ async def log_company_note_endpoint(
     company = db.get(Company, company_id)
     if not company:
         raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Not authorized to manage this account")
 
     from app.services.activity_service import log_company_note
 

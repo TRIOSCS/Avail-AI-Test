@@ -31,7 +31,7 @@ from ..constants import (
     OutreachChannel,
 )
 from ..database import get_db
-from ..dependencies import require_user
+from ..dependencies import can_manage_account, require_user
 from ..models import ActivityLog, Company, CustomerSite, SiteContact, User, VendorCard
 from ..schemas.activity import (
     ActivityTimelineResponse,
@@ -70,6 +70,7 @@ def _check_rate_limit(user_id: int, bucket: str = "call", limit: int = _RATE_LIM
 
 def _validated_entity_ids(
     db: Session,
+    user: User,
     company_id: int | None,
     customer_site_id: int | None,
     site_contact_id: int | None = None,
@@ -116,6 +117,22 @@ def _validated_entity_ids(
         )
         site_contact_id = None
         dropped.append("contact")
+
+    # Authorization: only attribute the activity to an account the user may act on. A
+    # non-owner who clicks call/contact still gets their action logged, but it must NOT
+    # bump another rep's account clocks (last_activity_at / cadence) — drop the links.
+    if company_id is not None:
+        company = db.get(Company, company_id)
+        if company is not None and not can_manage_account(user, company, db):
+            logger.warning(f"activity log: user {user.id} may not manage company {company_id} — dropping account links")
+            company_id = None
+            if customer_site_id is not None and "site" not in dropped:
+                customer_site_id = None
+                dropped.append("site")
+            if site_contact_id is not None and "contact" not in dropped:
+                site_contact_id = None
+                dropped.append("contact")
+            dropped.append("company")
     return company_id, customer_site_id, site_contact_id, dropped
 
 
@@ -142,7 +159,7 @@ def call_initiated(
         phone_display = format_phone_display(body.phone_number)
 
         # Resolve company from vendor if not provided
-        company_id, customer_site_id, _, _ = _validated_entity_ids(db, body.company_id, body.customer_site_id)
+        company_id, customer_site_id, _, _ = _validated_entity_ids(db, user, body.company_id, body.customer_site_id)
         vendor_card_id = body.vendor_card_id
         vendor_name = None
 
@@ -234,7 +251,7 @@ def outreach_initiated(
             raise HTTPException(429, "Too many outreach logs — try again in a minute")
 
         company_id, customer_site_id, site_contact_id, dropped = _validated_entity_ids(
-            db, body.company_id, body.customer_site_id, body.site_contact_id
+            db, user, body.company_id, body.customer_site_id, body.site_contact_id
         )
 
         try:

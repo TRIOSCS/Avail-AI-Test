@@ -129,7 +129,11 @@ class TestCallInitiated:
         record = db_session.get(ActivityLog, resp.json()["id"])
         assert "origin=vendor_detail" in record.notes
 
-    def test_with_company_id(self, client, db_session, test_company):
+    def test_with_company_id(self, client, db_session, test_company, test_user):
+        # Owner attribution: the authenticated client (test_user) must own the account
+        # for the activity-authz gate to keep the company link.
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         resp = client.post(
             "/api/activity/call-initiated",
             json={
