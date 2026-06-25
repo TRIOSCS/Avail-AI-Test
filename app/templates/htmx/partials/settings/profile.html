@@ -100,6 +100,65 @@
     </div>
   </div>
 
+  {# Profile photo uploader. Stores under /app/uploads/avatars; the macro-rendered
+     avatar across comms + buy-plans reads the same User.avatar_path. Alpine tracks
+     hasAvatar/src so the preview updates in place after upload/remove without a full
+     re-render. onResult() reads the new basename from the response HX-Trigger header
+     (avatarUpdated.filename, null on remove) and cache-busts the src.
+     applyName initial is single-quoted: tojson is Markup-safe and escapes ' . #}
+  <div class="bg-white border border-line-base rounded-lg p-4 mb-6"
+       x-data='{
+         hasAvatar: {{ "true" if profile_user.avatar_path else "false" }},
+         src: {{ (("/api/user/avatar/" ~ profile_user.avatar_path) if profile_user.avatar_path else "")|tojson }},
+         onResult(evt) {
+           if (!evt.detail.successful) return;
+           var trig = evt.detail.xhr.getResponseHeader("HX-Trigger");
+           var fn = trig ? (JSON.parse(trig).avatarUpdated || {}).filename : null;
+           if (fn) { this.hasAvatar = true; this.src = "/api/user/avatar/" + fn + "?t=" + Date.now(); }
+           else { this.hasAvatar = false; this.src = ""; }
+         }
+       }'>
+    <h3 class="text-sm font-semibold text-gray-900 mb-4">Profile photo</h3>
+    <div class="flex items-center gap-4">
+      {# Current photo / initials fallback #}
+      <template x-if="hasAvatar">
+        <img :src="src" alt="Profile photo"
+             class="w-16 h-16 rounded-full object-cover bg-gray-100 flex-shrink-0">
+      </template>
+      <template x-if="!hasAvatar">
+        <span class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-brand-100 text-brand-600 text-xl font-bold flex-shrink-0">{{ profile_user.name[0]|upper if profile_user.name else '?' }}</span>
+      </template>
+
+      <div class="min-w-0">
+        <p class="text-xs text-gray-600 mb-2">PNG, JPEG, WEBP, or GIF up to 2&nbsp;MB.</p>
+        <div class="flex items-center gap-2">
+          {# Upload form: hidden file input, auto-submit on change (mirrors _attachments.html). #}
+          <form hx-post="/api/user/avatar"
+                hx-encoding="multipart/form-data"
+                hx-swap="none"
+                hx-indicator="#avatar-uploading"
+                @htmx:after-request="$refs.avatarInput.value = ''; onResult($event)">
+            <input type="file" name="file" x-ref="avatarInput"
+                   accept="image/png,image/jpeg,image/webp,image/gif" class="hidden"
+                   @change="if ($refs.avatarInput.files.length) $el.closest('form').requestSubmit()">
+            <button type="button" @click="$refs.avatarInput.click()"
+                    class="px-3 py-1.5 text-xs font-medium text-accent-600 bg-accent-50 border border-accent-200 rounded-lg hover:bg-accent-100">
+              <span x-text="hasAvatar ? 'Change photo' : 'Upload photo'">{{ 'Change photo' if profile_user.avatar_path else 'Upload photo' }}</span>
+            </button>
+          </form>
+          <button type="button" x-show="hasAvatar"
+                  hx-delete="/api/user/avatar"
+                  hx-swap="none"
+                  @htmx:after-request="onResult($event)"
+                  class="px-3 py-1.5 text-xs font-medium text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50">
+            Remove
+          </button>
+          <span id="avatar-uploading" class="htmx-indicator text-xs text-gray-400">Uploading…</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
   {# 8x8 click-to-call enable/disable #}
   <div class="bg-white border border-line-base rounded-lg p-4 mb-6"
        x-data="{ enabled: {{ 'true' if profile_user.eight_by_eight_enabled is defined and profile_user.eight_by_eight_enabled else 'false' }} }">

@@ -35,7 +35,7 @@ register_audit_listeners()
 @asynccontextmanager
 async def lifespan(app):
     """App startup/shutdown — launches background scheduler."""
-    from .startup import ensure_screenshot_storage, run_startup_migrations
+    from .startup import ensure_avatar_storage, ensure_screenshot_storage, run_startup_migrations
 
     if not os.environ.get("TESTING"):
         # S1: Fail-fast on default secret key (skip in test mode)
@@ -46,6 +46,8 @@ async def lifespan(app):
         # writable by this process (TT-0002) — surfaces a misconfigured/root-owned
         # uploads volume at boot instead of silently dropping screenshots later.
         ensure_screenshot_storage()
+        # Same guard for the parallel profile-avatar subdir on the uploads volume.
+        ensure_avatar_storage()
 
         # S2: Warn about missing critical env vars (don't crash — vendor keys are optional)
         missing = []
@@ -679,6 +681,7 @@ from .routers.ai import router as ai_router
 from .routers.alerts import router as alerts_router
 from .routers.attachments_extra import router as attachments_extra_router
 from .routers.auth import router as auth_router
+from .routers.avatars import router as avatars_router
 from .routers.clay_oauth import router as clay_oauth_router
 from .routers.crm import router as crm_router
 from .routers.documents import router as documents_router
@@ -702,6 +705,7 @@ from .routers.vendors_crud import router as vendors_crud_router
 # Core routers (always active)
 app.include_router(attachments_extra_router)
 app.include_router(auth_router)
+app.include_router(avatars_router)
 app.include_router(clay_oauth_router)
 app.include_router(admin_router)
 app.include_router(ai_router)
