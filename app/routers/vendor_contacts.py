@@ -29,6 +29,7 @@ from ..utils.vendor_helpers import (
     _background_enrich_vendor,
     clean_emails,
     clean_phones,
+    find_vendor_card_by_name,
     get_or_create_card,
     merge_contact_into_card,
     scrape_website_contacts,
@@ -77,7 +78,7 @@ async def lookup_vendor_contact(
     vendor_name = payload.vendor_name
 
     norm = normalize_vendor_name(vendor_name)
-    card = db.query(VendorCard).filter_by(normalized_name=norm).first()
+    card = find_vendor_card_by_name(vendor_name, db)
     if not card:
         card = VendorCard(normalized_name=norm, display_name=vendor_name, emails=[], phones=[])
         db.add(card)
@@ -85,7 +86,7 @@ async def lookup_vendor_contact(
             db.flush()
         except IntegrityError:
             db.rollback()
-            card = db.query(VendorCard).filter_by(normalized_name=norm).first()
+            card = find_vendor_card_by_name(vendor_name, db)
 
     # TIER 1: Cache check (free, instant)
     if card.emails:

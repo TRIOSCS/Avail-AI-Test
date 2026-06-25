@@ -36,6 +36,7 @@ from app.utils.vendor_helpers import (
     card_to_dict,
     clean_emails,
     clean_phones,
+    find_vendor_card_by_name,
     get_or_create_card,
     is_private_url,
     merge_contact_into_card,
@@ -1098,3 +1099,59 @@ class TestMergeContactIntoCard:
             changed = merge_contact_into_card(card, ["a@b.com"], ["+1-555-0100"], source="api")
         assert changed is True
         assert card.source == "api"
+
+
+# ── find_vendor_card_by_name ─────────────────────────────────────────
+
+
+class TestFindVendorCardByName:
+    """Tests for the find_vendor_card_by_name helper.
+
+    Verifies exact normalized lookup, miss, and case-insensitive normalization.
+    """
+
+    def _add_card(self, db_session, normalized_name: str, display_name: str) -> VendorCard:
+        card = VendorCard(
+            normalized_name=normalized_name,
+            display_name=display_name,
+            emails=[],
+            phones=[],
+        )
+        db_session.add(card)
+        db_session.commit()
+        return card
+
+    def test_returns_card_for_exact_normalized_match(self, db_session):
+        """find_vendor_card_by_name returns the card when normalized name matches."""
+        self._add_card(db_session, "arrow electronics", "Arrow Electronics")
+        result = find_vendor_card_by_name("Arrow Electronics", db_session)
+        assert result is not None
+        assert result.display_name == "Arrow Electronics"
+
+    def test_case_insensitive_normalization(self, db_session):
+        """Normalization lowercases; different-case input hits the same card."""
+        self._add_card(db_session, "arrow electronics", "Arrow Electronics")
+        result = find_vendor_card_by_name("ARROW ELECTRONICS", db_session)
+        assert result is not None
+        assert result.normalized_name == "arrow electronics"
+
+    def test_returns_none_when_no_match(self, db_session):
+        """Returns None when no card matches the normalized name."""
+        result = find_vendor_card_by_name("Nonexistent Vendor XYZ", db_session)
+        assert result is None
+
+    def test_ignores_unrelated_cards(self, db_session):
+        """Does not return cards with different normalized names."""
+        self._add_card(db_session, "arrow electronics", "Arrow Electronics")
+        result = find_vendor_card_by_name("Digikey", db_session)
+        assert result is None
+
+    def test_normalizes_before_query(self, db_session):
+        """Helper normalizes the input — whitespace and punctuation stripped."""
+        from app.vendor_utils import normalize_vendor_name
+
+        raw = "  Arrow  Electronics  "
+        norm = normalize_vendor_name(raw)
+        self._add_card(db_session, norm, "Arrow Electronics")
+        result = find_vendor_card_by_name(raw, db_session)
+        assert result is not None

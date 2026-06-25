@@ -28,7 +28,7 @@ from ..schemas.vendors import VendorBlacklistToggle, VendorCardCreate, VendorCar
 from ..services.vendor_duplicates import _fuzzy_match_python  # noqa: F401
 from ..services.vendor_duplicates import check_vendor_duplicate as _check_vendor_duplicate
 from ..utils.search_builder import SearchBuilder
-from ..utils.vendor_helpers import card_to_dict
+from ..utils.vendor_helpers import card_to_dict, find_vendor_card_by_name
 from ..vendor_utils import normalize_vendor_name
 
 router = APIRouter(tags=["vendors"])
@@ -62,7 +62,7 @@ async def create_vendor(
     already exists. Returns 422 if the display_name is missing or blank.
     """
     norm = normalize_vendor_name(data.display_name)
-    existing = db.query(VendorCard).filter_by(normalized_name=norm).first()
+    existing = find_vendor_card_by_name(data.display_name, db)
     if existing:
         raise HTTPException(
             409,

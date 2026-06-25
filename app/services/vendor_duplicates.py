@@ -20,6 +20,7 @@ from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlalchemy.orm import Session
 
 from ..models import VendorCard
+from ..utils.vendor_helpers import find_vendor_card_by_name
 from ..vendor_utils import normalize_vendor_name
 
 FUZZY_MATCH_POOL_SIZE = 500  # Max vendors loaded for fuzzy duplicate check
@@ -86,7 +87,7 @@ def check_vendor_duplicate(name: str, db: Session) -> list[dict]:
     norm = normalize_vendor_name(name)
 
     # Exact match — the one confident duplicate, short-circuits fuzzy entirely
-    exact = db.query(VendorCard).filter_by(normalized_name=norm).first()
+    exact = find_vendor_card_by_name(name, db)
     if exact:
         return [
             {
