@@ -1,4 +1,4 @@
-{# shell.html — CRM shell: page header + Customers/Vendors tab bar.
+{# shell.html — CRM shell: Customers/Vendors tab bar + lazy tab content.
    Receives: user (User), default_tab (str).
    Called by: crm/views.py crm_shell route.
    Depends on: Alpine.js, HTMX, accent palette (post-PR0), _shell_macros.html.
@@ -6,13 +6,9 @@
 {% from "htmx/partials/crm/_shell_macros.html" import tab_button -%}
 <div x-data="{ tab: '{{ default_tab }}' }">
 
-  {# ── CRM page header — Three-Second Rule: "Where am I?" ───────────────── #}
-  <div class="flex items-center justify-between mb-4">
-    <div>
-      <h1 class="text-lg font-bold text-gray-900">CRM</h1>
-      <p class="text-xs text-gray-500">Companies &amp; Vendors</p>
-    </div>
-  </div>
+  {# Page heading intentionally omitted: the Customers/Vendors tab strip below
+     plus the bottom-nav highlight already answer "Where am I?" — a separate
+     "CRM / Companies & Vendors" title duplicated that and wasted vertical space. #}
 
   {# Tab bar — Pattern C (active: accent underline + accent-50 fill) #}
   <div class="flex gap-1 mb-6 border-b border-line-base">
