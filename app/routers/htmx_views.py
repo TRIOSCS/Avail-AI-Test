@@ -4341,6 +4341,7 @@ async def create_vendor_partial_early(
     """Create a new VendorCard from the HTMX form (early route to precede
     /{vendor_id})."""
     from ..models import VendorCard
+    from ..utils.vendor_helpers import find_vendor_card_by_name
     from ..vendor_utils import normalize_vendor_name
 
     form = await request.form()
@@ -4349,7 +4350,7 @@ async def create_vendor_partial_early(
         raise HTTPException(400, "Vendor name is required")
 
     norm = normalize_vendor_name(display_name)
-    existing = db.query(VendorCard).filter_by(normalized_name=norm).first()
+    existing = find_vendor_card_by_name(display_name, db)
     if existing:
         raise HTTPException(409, f"Vendor '{existing.display_name}' already exists (ID {existing.id})")
 

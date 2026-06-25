@@ -54,6 +54,7 @@ from ..schemas.sources import MiningOptions, SourceStatusToggle
 from ..services.admin_service import get_effective_flag
 from ..services.credential_service import get_credential_cached
 from ..services.vendor_unavailability import apply_to_fresh_sightings
+from ..utils.vendor_helpers import find_vendor_card_by_name
 from ..vendor_utils import normalize_vendor_name
 
 router = APIRouter()
@@ -741,7 +742,7 @@ async def scan_inbox_for_vendors(request: Request, user: User = Depends(require_
             continue
 
         norm = normalize_vendor_name(vendor_name)
-        card = db.query(VendorCard).filter_by(normalized_name=norm).first()
+        card = find_vendor_card_by_name(vendor_name, db)
         if not card:
             card = VendorCard(
                 normalized_name=norm,

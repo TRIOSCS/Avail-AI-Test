@@ -56,6 +56,22 @@ def _record_alternate_name(card: VendorCard, vendor_name: str, db: Session, *, c
         db.rollback()
 
 
+def find_vendor_card_by_name(name: str, db: Session) -> VendorCard | None:
+    """Return the VendorCard whose normalized_name matches name, or None.
+
+    Normalizes name with normalize_vendor_name() then performs an exact
+    filter_by(normalized_name=...) lookup — the same idiom used at every call
+    site that only needs a quick existence check (no fuzzy fallback, no create).
+
+    Called by: app.routers.vendors_crud, app.routers.htmx_views,
+               app.routers.vendor_contacts, app.routers.sources,
+               app.services.vendor_duplicates
+    Depends on: vendor_utils.normalize_vendor_name, models.VendorCard
+    """
+    norm = normalize_vendor_name(name)
+    return db.query(VendorCard).filter_by(normalized_name=norm).first()
+
+
 def get_or_create_card(vendor_name: str, db: Session, domain: str | None = None) -> VendorCard:
     """Find existing VendorCard by normalized name, domain, or fuzzy match, or create
     new.
