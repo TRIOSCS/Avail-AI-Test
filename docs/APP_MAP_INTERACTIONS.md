@@ -1237,6 +1237,15 @@ buyplan_workflow.py (state machine)
     |                       v                    v
     |                 draft (reject)         halted (SO halt)
     |
+    |  approve/reject gate: the per-user can_approve_buy_plans right (NOT role) — the POST
+    |   route depends on require_buyplan_approver (403 otherwise), approve_buy_plan re-checks
+    |   the predicate, and the detail/supervise templates hide the controls via the
+    |   can_approve_buy_plans Jinja global. Reject requires a reason (service-enforced, 400 on
+    |   blank) and stamps approved_by/approved_at + sends the plan back to draft; the hub
+    |   blocker reads that stamp to mark a rejected draft "rejected — resubmit" (vs a fresh
+    |   draft's "ready to submit"). submit_buy_plan clears the prior decision on resubmit.
+    |   approve AND reject each write a BUYPLAN_APPROVED/BUYPLAN_REJECTED ActivityLog (plan-scoped).
+    |
     |  Per-line (active):  awaiting_po --confirm_po--> pending_verify --verify_po(ops)--> verified
     |  Ops SO track:       so_status: pending --verify_so(ops)--> approved / rejected
     |  Completion gate:    all lines terminal AND so_status=approved. verify_so/verify_po require a

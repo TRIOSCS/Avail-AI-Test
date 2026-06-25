@@ -34,8 +34,8 @@
 
 <div class="space-y-3 mb-6">
 
-  {# ── Approvals (manager/admin) ── #}
-  {% if is_manager and tri.approvals %}
+  {# ── Approvals (users holding the buy-plan approval right) ── #}
+  {% if can_approve and tri.approvals %}
   {# Finding #5: section card border-line-base/subtle #}
   <div class="bg-white rounded-lg shadow-sm border border-amber-200">
     <div class="px-4 py-2 border-b border-line-subtle text-xs font-semibold text-gray-600 uppercase tracking-wider">
@@ -58,11 +58,14 @@
                     class="btn btn-primary btn-sm">
               Approve
             </button>
-            <button type="submit" name="action" value="reject" data-loading-disable
-                    hx-confirm="Reject this buy plan?"
-                    class="btn btn-danger btn-sm">
-              Reject
-            </button>
+            {# Reject requires a reason — open the click-in review screen where the reason
+               modal lives (single place reasons are captured) rather than a blind reject. #}
+            <a hx-get="/v2/partials/buy-plans/{{ p.plan_id }}"
+               hx-target="#main-content"
+               hx-push-url="/v2/buy-plans/{{ p.plan_id }}"
+               class="btn btn-danger btn-sm cursor-pointer">
+              Review / Reject
+            </a>
           </form>
         </div>
       </div>

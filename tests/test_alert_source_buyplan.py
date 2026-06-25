@@ -114,7 +114,7 @@ def test_buyer_line_not_awaiting_po_not_counted(db_session, test_user, test_quot
 def test_pending_plan_counts_for_approver_not_for_non_approver(
     db_session, test_user, manager_user, admin_user, test_quote, test_requisition
 ):
-    # PENDING + no approver = needs manager approval. (BuyPlanStatus has no SUBMITTED;
+    # PENDING + no approver = needs approval. (BuyPlanStatus has no SUBMITTED;
     # PENDING is the awaiting-approval state — see source module docstring.)
     _make_plan(
         db_session,
@@ -124,11 +124,19 @@ def test_pending_plan_counts_for_approver_not_for_non_approver(
         approved_by_id=None,
     )
 
-    # manager + admin can approve (matches buyplan_workflow.approve_buy_plan's allowed set).
+    # The badge counts for users holding the can_approve_buy_plans right (the single
+    # source of truth the approve route + service enforce), regardless of role.
+    manager_user.can_approve_buy_plans = True
+    admin_user.can_approve_buy_plans = True
+    db_session.flush()
     assert SOURCE.count_for_user(db_session, manager_user) == 1
     assert SOURCE.count_for_user(db_session, admin_user) == 1
-    # test_user is a plain buyer — cannot approve.
+    # test_user lacks the right — does not count (even though it's a buyer).
     assert SOURCE.count_for_user(db_session, test_user) == 0
+    # An admin-role user WITHOUT the right also does not count — role alone never qualifies.
+    admin_user.can_approve_buy_plans = False
+    db_session.flush()
+    assert SOURCE.count_for_user(db_session, admin_user) == 0
 
 
 def test_pending_plan_already_approved_not_counted(db_session, manager_user, admin_user, test_quote, test_requisition):
@@ -139,6 +147,8 @@ def test_pending_plan_already_approved_not_counted(db_session, manager_user, adm
         status=BuyPlanStatus.PENDING.value,
         approved_by_id=admin_user.id,
     )
+    manager_user.can_approve_buy_plans = True  # holds the right, but the plan is already approved
+    db_session.flush()
     assert SOURCE.count_for_user(db_session, manager_user) == 0
 
 
@@ -255,6 +265,7 @@ def test_pending_plan_not_double_counted_for_admin_ops_member(db_session, admin_
         so_verified_by_id=None,
     )
     db_session.add(VerificationGroupMember(user_id=admin_user.id, is_active=True))
+    admin_user.can_approve_buy_plans = True  # holds the approval right
     db_session.flush()
     assert SOURCE.count_for_user(db_session, admin_user) == 1
 

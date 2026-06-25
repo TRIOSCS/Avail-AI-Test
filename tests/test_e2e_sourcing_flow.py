@@ -64,6 +64,8 @@ def _full_setup(db: Session):
         name="Manager",
         role="manager",
         azure_id="az-mgr-e2e",
+        # Approval is gated by the per-user right (not role), so grant it to the approver.
+        can_approve_buy_plans=True,
         created_at=datetime.now(timezone.utc),
     )
     buyer = User(
@@ -352,14 +354,14 @@ class TestBuyPlanFullLifecycle:
         assert plan.status == BuyPlanStatus.ACTIVE.value  # not completed
 
     def test_buyer_cannot_approve(self, db_session):
-        """Non-manager/admin users cannot approve buy plans."""
+        """A user without the can_approve_buy_plans right cannot approve buy plans."""
         ctx = self._setup_plan(db_session, total_cost=10000.0)
         plan = ctx["plan"]
 
         plan = submit_buy_plan(plan.id, "SO-005", ctx["sales"], db_session)
         assert plan.status == BuyPlanStatus.PENDING.value
 
-        with pytest.raises(PermissionError, match="Only managers/admins"):
+        with pytest.raises(PermissionError, match="approval right required"):
             approve_buy_plan(plan.id, "approve", ctx["buyer"], db_session)
 
     def test_po_reject_resubmit_cycle(self, db_session):

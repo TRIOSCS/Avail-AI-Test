@@ -19,11 +19,11 @@
 
 {# Determine if action banner handles actions (suppresses standalone action bar) #}
 {% set show_buyer_banner = my_awaiting_lines|length > 0 and bp.status == 'active' %}
-{% set show_approval_banner = bp.status == 'pending' and (is_admin or user.role in ['manager', 'admin']) %}
+{% set show_approval_banner = bp.status == 'pending' and can_approve_buy_plans(user) %}
 {% set show_so_banner = bp.status == 'active' and is_ops_member and bp.so_status == 'pending' %}
 {% set show_verify_banner = bp.status == 'active' and is_ops_member and pending_verify_lines|length > 0 %}
-{% set show_rejected_banner = bp.status == 'draft' and bp.cancellation_reason %}
-{% set show_draft_banner = bp.status == 'draft' and not bp.cancellation_reason %}
+{% set show_rejected_banner = bp.status == 'draft' and (bp.cancellation_reason or (bp.approved_at and bp.approval_notes)) %}
+{% set show_draft_banner = bp.status == 'draft' and not show_rejected_banner %}
 {% set has_action_banner = show_buyer_banner or show_approval_banner or show_so_banner or show_verify_banner or show_rejected_banner or show_draft_banner %}
 
 <div class="page-fluid" x-data="{ showModal: false, modalType: '', showAi: false, showNotes: false, showSo: false }">
@@ -547,6 +547,10 @@
         </div>
       </template>
 
+      {# Approve + Reject modals — gated to approvers (same right as the banner), so a
+         non-approver's DOM carries no orphaned approve form. The POST is also gated
+         server-side by require_buyplan_approver. #}
+      {% if show_approval_banner %}
       {# Approve modal #}
       <template x-if="modalType === 'approve'" x-cloak>
         <div x-data="{ notes: '' }">
@@ -594,6 +598,7 @@
           </div>
         </div>
       </template>
+      {% endif %}
 
       {# Verify SO modal #}
       <template x-if="modalType === 'verify-so'" x-cloak>

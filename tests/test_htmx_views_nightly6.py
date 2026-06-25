@@ -370,12 +370,14 @@ class TestBuyPlanWorkflow:
         )
         assert resp.status_code == 400
 
-    def test_approve_non_manager_raises_403(self, client, db_session, test_user):
-        """Buyer role (not manager/admin) calling approve → 403.
+    def test_approve_without_right_raises_403(self, client, db_session, test_user, monkeypatch):
+        """A user without the can_approve_buy_plans right calling approve → 403.
 
-        The conftest client uses test_user which has role='buyer'. The approve route
-        checks user.role not in (MANAGER, ADMIN).
+        The approve route depends on require_buyplan_approver, which 403s before the
+        route body when the user lacks the right (role is irrelevant). test_user is a
+        buyer with no approval grant.
         """
+        monkeypatch.setattr("app.dependencies.require_user", lambda request, db: test_user)
         resp = client.post(
             "/v2/partials/buy-plans/999/approve",
             data={"action": "approve"},
