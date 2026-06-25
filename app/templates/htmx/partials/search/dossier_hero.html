@@ -45,7 +45,7 @@
               <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>FRU crosswalk
             </span>
           {% endif %}
-          {% if card.category %}<span class="rounded-md bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-700">{{ card.category }}</span>{% endif %}
+          {% if card.category %}<span class="rounded-md bg-accent-50 px-2 py-0.5 text-[11px] font-medium text-accent-700">{{ card.category }}</span>{% endif %}
           {% set lc = (card.lifecycle_status or '')|lower %}
           {% if card.lifecycle_status %}
           <span class="rounded-md px-2 py-0.5 text-[11px] font-medium border
@@ -72,15 +72,16 @@
       </div>
 
       {# Zone B — market price strip + sparkline #}
-      <div class="lg:w-[200px] lg:border-l lg:border-brand-100 lg:pl-5 shrink-0">
+      <div class="lg:w-[200px] lg:border-l border-line-subtle lg:pl-5 shrink-0">
         <p class="text-xs uppercase tracking-wide text-gray-400 font-semibold">Market price</p>
         {% if pt %}
         <div class="mt-1 flex items-baseline gap-1.5">
-          <span class="font-mono text-2xl font-bold text-brand-900">${{ (pt.last_price if pt.last_price is not none else pt.min_price)|pricefmt }}</span>
+          {# figure-accent: tabular-nums + accent color for the decision-driving numeral #}
+          <span class="font-mono text-2xl font-bold figure-accent">${{ (pt.last_price if pt.last_price is not none else pt.min_price)|pricefmt }}</span>
           <span class="text-xs text-gray-400">last</span>
         </div>
         <p class="font-mono text-xs text-gray-600 mt-0.5">${{ pt.min_price|pricefmt }} – ${{ pt.max_price|pricefmt }}</p>
-        {# Sparkline from min/last/max — a 3-point glanceable trend (no axes). #}
+        {# Sparkline from min/last/max — a 3-point glanceable trend (no axes). currentColor via text-brand-400 wrapper. #}
         {% set lo = pt.min_price|float %}
         {% set hi = pt.max_price|float %}
         {% set last = (pt.last_price if pt.last_price is not none else pt.max_price)|float %}
@@ -88,9 +89,9 @@
         {% set y_lo = 30 - ((lo - lo) / span) * 28 %}
         {% set y_hi = 30 - ((hi - lo) / span) * 28 %}
         {% set y_last = 30 - ((last - lo) / span) * 28 %}
-        <svg viewBox="0 0 120 32" class="mt-2 w-full h-8" preserveAspectRatio="none">
-          <polyline fill="none" stroke="#838B9B" stroke-width="1.5" points="0,{{ '%.1f'|format(y_lo) }} 60,{{ '%.1f'|format(y_hi) }} 120,{{ '%.1f'|format(y_last) }}"/>
-          <circle cx="120" cy="{{ '%.1f'|format(y_last) }}" r="2" fill="#4B5463"/>
+        <svg viewBox="0 0 120 32" class="mt-2 w-full h-8 text-brand-400" preserveAspectRatio="none">
+          <polyline fill="none" stroke="currentColor" stroke-width="1.5" points="0,{{ '%.1f'|format(y_lo) }} 60,{{ '%.1f'|format(y_hi) }} 120,{{ '%.1f'|format(y_last) }}"/>
+          <circle cx="120" cy="{{ '%.1f'|format(y_last) }}" r="2" fill="currentColor"/>
         </svg>
         <p class="text-xs text-gray-400 mt-1">{{ pt.currency }} · min–max–last</p>
         {% else %}
@@ -102,18 +103,19 @@
       </div>
 
       {# Zone C — knowledge counts #}
-      <div class="lg:w-[150px] lg:border-l lg:border-brand-100 lg:pl-5 shrink-0">
+      <div class="lg:w-[150px] lg:border-l border-line-subtle lg:pl-5 shrink-0">
         <p class="text-xs uppercase tracking-wide text-gray-400 font-semibold mb-2">What we know</p>
         <div class="grid grid-cols-2 gap-x-3 gap-y-2 count-tile">
-          <div><div class="font-mono text-lg font-bold leading-none {{ 'text-brand-900' if history.offers_count else 'text-gray-300' }}">{{ history.offers_count }}</div><dt>Offers</dt></div>
+          {# figure-accent on non-zero counts; gray-300 for zero/empty — buyers scan these first #}
+          <div><div class="font-mono text-lg font-bold leading-none {{ 'figure-accent' if history.offers_count else 'text-gray-300' }}">{{ history.offers_count }}</div><dt>Offers</dt></div>
           <div><div class="font-mono text-lg font-bold leading-none {{ 'text-emerald-600' if history.confirmed_count else 'text-gray-300' }}">{{ history.confirmed_count }}</div><dt>Won</dt></div>
-          <div><div class="font-mono text-lg font-bold leading-none {{ 'text-brand-900' if history.sightings_count else 'text-gray-300' }}">{{ history.sightings_count }}</div><dt>Sightings</dt></div>
-          <div><div class="font-mono text-lg font-bold leading-none {{ 'text-brand-900' if history.requirements_count else 'text-gray-300' }}">{{ history.requirements_count }}</div><dt>Reqs</dt></div>
+          <div><div class="font-mono text-lg font-bold leading-none {{ 'figure-accent' if history.sightings_count else 'text-gray-300' }}">{{ history.sightings_count }}</div><dt>Sightings</dt></div>
+          <div><div class="font-mono text-lg font-bold leading-none {{ 'figure-accent' if history.requirements_count else 'text-gray-300' }}">{{ history.requirements_count }}</div><dt>Reqs</dt></div>
         </div>
         {% if history.buyers %}
         <div class="mt-2 flex items-center -space-x-1.5">
           {% for b in history.buyers[:3] %}
-          <span class="h-5 w-5 rounded-full bg-blue-100 text-blue-700 grid place-items-center text-[9px] font-semibold ring-2 ring-white" title="{{ b.name or b.email }}">{{ (b.name or b.email)[:2]|upper }}</span>
+          <span class="h-5 w-5 rounded-full bg-accent-100 text-accent-700 grid place-items-center text-[11px] font-semibold ring-2 ring-white" title="{{ b.name or b.email }}">{{ (b.name or b.email)[:2]|upper }}</span>
           {% endfor %}
           <span class="text-xs text-gray-400 pl-2.5">{{ history.buyers|length }} buyer{{ '' if history.buyers|length == 1 else 's' }}</span>
         </div>
@@ -129,16 +131,16 @@
       Actions create a quick-source requisition and capture the live results below.
     </p>
     <div class="flex items-center gap-2">
-      {# Send RFQ — primary. POSTs the shortlisted rows (endpoint lands in the next task). #}
+      {# Send RFQ — primary CTA migrated to .btn-primary (accent token + accent focus ring). #}
       <button type="button" @click="sendRfq()"
-              class="px-4 py-2 rounded-lg bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700 transition-colors inline-flex items-center gap-2 shadow-sm">
+              class="btn-primary shadow-sm inline-flex items-center gap-2">
         <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M3 11l18-8-8 18-2-7-8-3z"/></svg>Send RFQ
       </button>
       <button type="button" @click="addOffer()"
-              class="px-4 py-2 rounded-lg bg-white border border-brand-300 text-brand-700 text-sm font-medium hover:bg-brand-50 transition-colors">Add Offer</button>
+              class="btn-secondary">Add Offer</button>
       {# Add to Requisition — intentional (non-scratch) path: existing requisition picker in the global modal. #}
       <button type="button" @click="addToReq()"
-              class="px-4 py-2 rounded-lg bg-white border border-brand-300 text-brand-700 text-sm font-medium hover:bg-brand-50 transition-colors inline-flex items-center gap-1.5">
+              class="btn-secondary inline-flex items-center gap-1.5">
         Add to Requisition
       </button>
       {# overflow #}

@@ -29,7 +29,7 @@
       <span class="font-mono">{{ val }}</span>
       {% if field is mapping and field.source %}
       {% set conf = field.confidence|default(0)|float %}
-      <span class="ml-1 align-middle rounded px-1 text-[9px] {{ 'bg-brand-50 text-brand-600' if conf >= 0.9 else 'bg-gray-50 text-gray-500' }}"
+      <span class="ml-1 align-middle badge-mini {{ 'bg-brand-50 text-brand-600' if conf >= 0.9 else 'bg-gray-50 text-gray-500' }}"
             title="source: {{ field.source }}{% if field.confidence is not none %} · conf {{ field.confidence }}{% endif %}">
         {{ 'Direct' if conf >= 0.9 else 'Sourced' }}
       </span>
