@@ -28,11 +28,13 @@ from loguru import logger
 from sqlalchemy import text
 
 from app.constants import (
-    BidStatus,
     BuyPlanLineStatus,
     BuyPlanStatus,
     ExcessLineItemStatus,
     ExcessListStatus,
+    ExcessOfferScope,
+    ExcessOfferStatus,
+    OfferLineMatchStatus,
     OfferStatus,
     QuoteStatus,
     RequisitionStatus,
@@ -44,7 +46,7 @@ from app.database import SessionLocal
 from app.models.auth import User
 from app.models.buy_plan import BuyPlan, BuyPlanLine
 from app.models.crm import Company, CustomerSite
-from app.models.excess import Bid, ExcessLineItem, ExcessList
+from app.models.excess import ExcessLineItem, ExcessList, ExcessOffer, ExcessOfferLine
 from app.models.intelligence import MaterialCard
 from app.models.offers import Offer
 from app.models.quotes import Quote, QuoteLine
@@ -574,7 +576,7 @@ def seed_excess_lists(db, user, companies, sites, vendor_cards):
     ]
 
     line_statuses = list(ExcessLineItemStatus)
-    bid_statuses = list(BidStatus)
+    offer_statuses = list(ExcessOfferStatus)
 
     for i, ecfg in enumerate(excess_configs):
         co = companies[ecfg["co_idx"]]
@@ -616,26 +618,37 @@ def seed_excess_lists(db, user, companies, sites, vendor_cards):
             db.add(eli)
             db.flush()
 
-            # Add bids for bidding/closed lists
+            # Add inbound broker offers for bidding/closed lists (Trading module:
+            # ExcessOffer + per-line ExcessOfferLine — the replacement for the old Bid).
             if ecfg["status"] in (ExcessListStatus.BIDDING, ExcessListStatus.CLOSED):
                 for k in range(2):
                     vc = vendor_cards[(i + j + k) % len(vendor_cards)]
-                    bs = bid_statuses[(i + j + k) % len(bid_statuses)]
+                    os_ = offer_statuses[(i + j + k) % len(offer_statuses)]
 
-                    bid = Bid(
-                        excess_line_item_id=eli.id,
-                        bidder_vendor_card_id=vc.id,
-                        unit_price=price * Decimal(str(0.85 + k * 0.1)),
-                        quantity_wanted=qty // (2 + k),
-                        lead_time_days=5 + k * 3,
-                        status=bs.value,
-                        source="manual",
-                        created_by=user.id,
+                    offer = ExcessOffer(
+                        excess_list_id=el.id,
+                        submitted_by=user.id,
+                        offerer_vendor_card_id=vc.id,
+                        scope=ExcessOfferScope.PER_LINE.value,
+                        status=os_.value,
+                        notes="Seeded demo offer",
                     )
-                    db.add(bid)
+                    db.add(offer)
+                    db.flush()
+                    db.add(
+                        ExcessOfferLine(
+                            offer_id=offer.id,
+                            excess_line_item_id=eli.id,
+                            mpn_raw=pn,
+                            quantity=qty // (2 + k),
+                            unit_price=price * Decimal(str(0.85 + k * 0.1)),
+                            lead_time_days=5 + k * 3,
+                            match_status=OfferLineMatchStatus.MATCHED.value,
+                        )
+                    )
 
     db.flush()
-    logger.info("Excess lists with line items and bids seeded")
+    logger.info("Excess lists with line items and inbound offers seeded")
 
 
 def main():

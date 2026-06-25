@@ -1,0 +1,37 @@
+[Unit]
+Description=AVAIL The Broker Forum (TBF) Search Worker
+Documentation=https://github.com/TRIOSCS/Avail-AI-Test
+After=network.target avail-xvfb.service
+Requires=avail-xvfb.service
+# Crash-loop backoff: if it restarts >5 times in an hour, systemd stops trying
+# (and the app-side liveness watchdog alerts on the stale heartbeat).
+StartLimitIntervalSec=3600
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/root/availai
+EnvironmentFile=/root/availai/.env.tbf-worker
+Environment="DISPLAY=:99"
+Environment="PYTHONPATH=/root/availai"
+# Runs from the pinned-lockfile venv (requirements.txt), NOT system python, so the
+# host workers carry the same pinned deps as the docker app/enrichment images.
+# deploy.sh refreshes this venv from requirements.txt on every deploy.
+ExecStart=/root/availai/.venv/bin/python -m app.services.tbf_worker.worker
+# always (not on-failure) so a clean exit(0) still restarts — a fresh process
+# usually clears a wedged browser/session.
+Restart=always
+RestartSec=300
+# Xvfb + Chrome init can be slow; don't let systemd kill a slow-but-healthy start.
+TimeoutStartSec=120
+StandardOutput=journal
+StandardError=journal
+
+# Safety limits
+MemoryMax=2G
+CPUQuota=50%
+
+[Install]
+WantedBy=multi-user.target

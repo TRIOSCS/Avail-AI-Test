@@ -2,20 +2,30 @@
   empty_state.html — Centered placeholder shown when a list has no items.
   Renders inside a white card with a gray icon, message, and optional CTA button.
   Called by: any list partial that can be empty (requisitions, vendors, companies, etc.)
-  Depends on: HTMX (optional, for action_url)
-  Context vars: message (str), action_url (str, optional), action_label (str, optional)
+  Depends on: HTMX (optional, for action_url), Alpine.js (optional, for action_alpine_click)
+  Context vars:
+    message (str)
+    action_url (str, optional) — renders an hx-get anchor
+    action_alpine_click (str, optional) — renders an Alpine @click button instead of hx-get anchor
+    action_label (str, optional)
 #}
-<div class="mx-auto max-w-sm rounded-xl bg-white p-12 text-center shadow-sm border border-gray-100">
+<div class="mx-auto max-w-sm rounded-xl bg-white p-6 sm:p-8 text-center shadow-sm border border-gray-100">
   <svg class="mx-auto mb-4 h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
     <path stroke-linecap="round" stroke-linejoin="round"
           d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/>
   </svg>
-  <p class="text-base font-medium text-gray-500">{{ message|default("No items found.") }}</p>
-  {% if action_url %}
+  <p class="text-base font-medium text-gray-600">{{ message|default("No items found.") }}</p>
+  {% if action_alpine_click %}
+  <button type='button'
+          @click='{{ action_alpine_click }}'
+          class='mt-6 btn-primary'>
+    {{ action_label|default("Create one") }}
+  </button>
+  {% elif action_url %}
   <a href="{{ action_url }}"
      hx-get="{{ action_url }}"
      hx-target="#main-content"
-     class="mt-6 inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-brand-600 transition-colors">
+     class="mt-6 btn-primary">
     {{ action_label|default("Create one") }}
   </a>
   {% endif %}

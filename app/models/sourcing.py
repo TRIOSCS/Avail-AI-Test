@@ -66,6 +66,7 @@ class Requisition(Base):
     # Sales context — helps buyers prioritize
     urgency = Column(String(20), default="normal")  # normal | hot | critical
     opportunity_value = Column(Numeric(12, 2))  # Estimated deal value in USD
+    win_probability = Column(Integer, nullable=True)  # 0-100 percent chance of closing
 
     # Audit trail
     updated_at = Column(UTCDateTime)
@@ -87,6 +88,18 @@ class Requisition(Base):
         if value is not None and value < 0:
             raise ValueError("opportunity_value must be >= 0")
         return value
+
+    @validates("win_probability")
+    def _validate_win_probability(self, _key, value):
+        if value is None:
+            return value
+        try:
+            v = int(value)
+        except (ValueError, TypeError):
+            raise ValueError(f"win_probability must be an integer, got {value!r}") from None
+        if not (0 <= v <= 100):
+            raise ValueError("win_probability must be between 0 and 100")
+        return v
 
     @validates("status")
     def _validate_status(self, _key, value):
@@ -284,14 +297,20 @@ class Sighting(Base):
 
 
 class RequisitionAttachment(Base):
-    """File attachment on a requisition (stored in OneDrive)."""
+    """File attachment on a requisition (stored in OneDrive or company SharePoint
+    library).
+
+    library_drive_id NULL  → OneDrive fallback row (user token, item in /me/drive)
+    library_drive_id set   → company SharePoint library row (app token)
+    """
 
     __tablename__ = "requisition_attachments"
     id = Column(Integer, primary_key=True)
     requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False, index=True)
     file_name = Column(String(500), nullable=False)
-    onedrive_item_id = Column(String(500))
-    onedrive_url = Column(Text)
+    library_item_id = Column(String(500))
+    library_drive_id = Column(String(200))
+    library_web_url = Column(Text)
     thumbnail_url = Column(Text)
     content_type = Column(String(100))
     size_bytes = Column(Integer)
@@ -303,14 +322,20 @@ class RequisitionAttachment(Base):
 
 
 class RequirementAttachment(Base):
-    """File attachment on a requirement (stored in OneDrive)."""
+    """File attachment on a requirement (stored in OneDrive or company SharePoint
+    library).
+
+    library_drive_id NULL  → OneDrive fallback row (user token, item in /me/drive)
+    library_drive_id set   → company SharePoint library row (app token)
+    """
 
     __tablename__ = "requirement_attachments"
     id = Column(Integer, primary_key=True)
     requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="CASCADE"), nullable=False, index=True)
     file_name = Column(String(500), nullable=False)
-    onedrive_item_id = Column(String(500))
-    onedrive_url = Column(Text)
+    library_item_id = Column(String(500))
+    library_drive_id = Column(String(200))
+    library_web_url = Column(Text)
     thumbnail_url = Column(Text)
     content_type = Column(String(100))
     size_bytes = Column(Integer)

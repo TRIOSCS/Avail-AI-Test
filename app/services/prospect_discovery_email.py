@@ -13,7 +13,6 @@ from app.config import settings
 from app.models import Company, VendorCard
 from app.models.prospect_account import ProspectAccount
 from app.schemas.prospect_account import ProspectAccountCreate
-from app.services.prospect_scoring import calculate_fit_score, calculate_readiness_score
 
 # Common freemail domains to exclude
 FREEMAIL_DOMAINS = frozenset(
@@ -142,75 +141,122 @@ async def mine_unknown_domains(
     return results
 
 
+def _map_explorium_to_prospect(c: dict) -> dict:
+    """Map an Explorium CRM firmographic dict to the prospect-account shape.
+
+    Explorium's connector returns the company shape (legal_name, employee_size,
+    hq_city/state/country, naics, ...); prospects use name/employee_count_range/
+    hq_location/region/naics_code. Reuses the prospect-discovery location + region
+    helpers (they read the hq_* keys directly).
+    """
+    from app.services.prospect_discovery_explorium import _build_location, _detect_region
+
+    return {
+        "name": c.get("legal_name"),
+        "industry": c.get("industry"),
+        "naics_code": c.get("naics"),
+        "employee_count_range": c.get("employee_size"),
+        "revenue_range": c.get("revenue_range"),
+        "website": c.get("website"),
+        "hq_location": _build_location(c),
+        "region": _detect_region(c),
+        "description": c.get("description"),
+        "discovery_source": "explorium",
+    }
+
+
+async def _explorium_domain_enrich(domain: str) -> dict | None:
+    """Eager enrich_fn for email mining: one Explorium domain match → prospect shape.
+
+    Self-gating: returns None (→ the domain stays a bare prospect) when Explorium is
+    disabled, the credential is missing, or the explorium circuit is open. A
+    ProviderQuotaError trips the circuit and returns None. Explorium-only by design —
+    no Clay/Lusha — so cost per batch is bounded.
+    """
+    from app.connectors import explorium
+    from app.services import enrichment_credit_guard as cg
+    from app.services.credential_service import get_credential_cached
+
+    if not settings.explorium_enrichment_enabled or cg.circuit_open("explorium"):
+        return None
+    api_key = get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY")
+    if not api_key:
+        return None
+    try:
+        company = await explorium.enrich_company(domain, "", api_key)
+    except cg.ProviderQuotaError:
+        cg.trip_circuit("explorium", settings.explorium_cooldown_minutes)
+        return None
+    if not company:
+        return None
+    return _map_explorium_to_prospect(company)
+
+
 async def enrich_email_domains(
     domains: list[dict],
     enrich_fn=None,
-    apollo_enrich_fn=None,
+    enrich_cap: int = 25,
 ) -> list[ProspectAccountCreate]:
-    """Enrich unknown domains with company data from Explorium or Apollo.
+    """Turn mined domains into prospect accounts (hybrid: signal-always + capped
+    enrich).
 
     Args:
-        domains: list of {domain, email_count, sample_senders}
-        enrich_fn: async function(domain) -> dict|None (Explorium match-business)
-        apollo_enrich_fn: async function(domain) -> dict|None (Apollo fallback)
+        domains: list of {domain, email_count, sample_senders}, sorted by email volume.
+        enrich_fn: async (domain) -> dict|None firmographics in the prospect shape.
+        enrich_cap: how many domains (the highest-volume first) to eagerly enrich.
 
-    Returns list of ProspectAccountCreate schemas.
+    Every domain becomes a ProspectAccountCreate from the email signal alone; the first
+    *enrich_cap* domains additionally get enrich_fn merged over the base when it returns
+    data. Domains past the cap, and enrichment misses, are created unenriched and stay
+    enrichable on demand later. No domain is dropped.
     """
     prospects: list[ProspectAccountCreate] = []
+    enriched_count = 0
 
-    for d_info in domains:
+    for index, d_info in enumerate(domains):
         domain = d_info["domain"]
-        company_data = None
 
-        # Try primary enrichment (Explorium), then fall back to Apollo.
-        for source, fn in (("Explorium", enrich_fn), ("Apollo", apollo_enrich_fn)):
-            if company_data or not fn:
-                continue
+        company_data: dict = {}
+        if enrich_fn and index < enrich_cap:
             try:
-                company_data = await fn(domain)
+                company_data = await enrich_fn(domain) or {}
             except Exception as e:
-                logger.warning("{} enrich failed for {}: {}", source, domain, e)
+                logger.warning("Email-mining enrich failed for {}: {}", domain, e)
+                company_data = {}
+            if company_data:
+                enriched_count += 1
 
-        if not company_data:
-            logger.debug("Skip {}: no enrichment data available", domain)
-            continue
-
-        # Score
-        fit_data = {
-            "name": company_data.get("name", domain),
-            "industry": company_data.get("industry"),
-            "naics_code": company_data.get("naics_code"),
-            "employee_count_range": company_data.get("employee_count_range"),
-            "region": company_data.get("region"),
-        }
-        fit_score, fit_reasoning = calculate_fit_score(fit_data)
-        readiness_score, _ = calculate_readiness_score(fit_data, {})
-
-        prospect = ProspectAccountCreate(
-            name=company_data.get("name") or domain,
-            domain=domain,
-            website=company_data.get("website") or f"https://{domain}",
-            industry=company_data.get("industry"),
-            naics_code=company_data.get("naics_code"),
-            employee_count_range=company_data.get("employee_count_range"),
-            hq_location=company_data.get("hq_location"),
-            region=company_data.get("region"),
-            description=company_data.get("description"),
-            discovery_source="email_history",
-            enrichment_data={
-                "email_mining": {
-                    "email_count": d_info["email_count"],
-                    "sample_senders": d_info["sample_senders"],
+        # Fit/readiness scoring is computed at persist time (_persist_discovery_results)
+        # from the persisted prospect fields, so no scoring is done here.
+        prospects.append(
+            ProspectAccountCreate(
+                name=company_data.get("name") or domain,
+                domain=domain,
+                website=company_data.get("website") or f"https://{domain}",
+                industry=company_data.get("industry"),
+                naics_code=company_data.get("naics_code"),
+                employee_count_range=company_data.get("employee_count_range"),
+                revenue_range=company_data.get("revenue_range"),
+                hq_location=company_data.get("hq_location"),
+                region=company_data.get("region"),
+                description=company_data.get("description"),
+                discovery_source="email_history",
+                enrichment_data={
+                    "email_mining": {
+                        "email_count": d_info["email_count"],
+                        "sample_senders": d_info["sample_senders"],
+                    },
+                    "enrichment_source": company_data.get("discovery_source") if company_data else None,
                 },
-                "enrichment_source": company_data.get("discovery_source", "unknown"),
-            },
+            )
         )
-        prospects.append(prospect)
 
     logger.info(
-        "Email domain enrichment: {} domains submitted, {} enriched",
+        "Email domain enrichment: {} domains → {} prospects ({} eagerly enriched, cap {})",
         len(domains),
         len(prospects),
+        enriched_count,
+        enrich_cap,
     )
 
     return prospects
@@ -221,20 +267,22 @@ async def run_email_mining_batch(
     graph_client,
     db: Session,
     enrich_fn=None,
-    apollo_enrich_fn=None,
+    enrich_cap: int | None = None,
     days_back: int = 90,
 ) -> list[ProspectAccountCreate]:
-    """Full email mining pipeline: scan -> enrich -> dedup -> score.
+    """Full email mining pipeline: scan -> build prospects (signal + capped enrich).
 
     Args:
         batch_id: human-readable batch identifier
         graph_client: Graph API client
         db: database session
-        enrich_fn: Explorium enrichment function
-        apollo_enrich_fn: Apollo enrichment fallback
+        enrich_fn: async (domain) -> dict|None firmographics in the prospect shape
+        enrich_cap: max domains to eagerly enrich; defaults to settings.email_mining_enrich_cap
         days_back: inbox lookback period
     """
     logger.info("Starting email mining batch: {}", batch_id)
+    if enrich_cap is None:
+        enrich_cap = settings.email_mining_enrich_cap
 
     # Step 1: Mine unknown domains
     domains = await mine_unknown_domains(graph_client, db, days_back)
@@ -243,12 +291,8 @@ async def run_email_mining_batch(
         logger.info("Email mining batch {}: no unknown domains found", batch_id)
         return []
 
-    # Step 2: Enrich
-    prospects = await enrich_email_domains(
-        domains,
-        enrich_fn=enrich_fn,
-        apollo_enrich_fn=apollo_enrich_fn,
-    )
+    # Step 2: Build prospects (signal-always; top enrich_cap eagerly Explorium-enriched)
+    prospects = await enrich_email_domains(domains, enrich_fn=enrich_fn, enrich_cap=enrich_cap)
 
     logger.info(
         "Email mining batch {}: {} domains mined, {} prospects created",

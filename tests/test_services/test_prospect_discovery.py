@@ -368,26 +368,8 @@ class TestEmailEnrichment:
         assert results[0].discovery_source == "email_history"
 
     @pytest.mark.asyncio
-    async def test_enrich_fallback_to_apollo(self):
-        from app.services.prospect_discovery_email import enrich_email_domains
-
-        mock_explorium = AsyncMock(return_value=None)  # primary fails
-        mock_apollo = AsyncMock(
-            return_value={
-                "name": "Apollo Found",
-                "domain": "apollofound.com",
-                "industry": "Manufacturing",
-            }
-        )
-
-        domains = [{"domain": "apollofound.com", "email_count": 3, "sample_senders": []}]
-        results = await enrich_email_domains(domains, enrich_fn=mock_explorium, apollo_enrich_fn=mock_apollo)
-
-        assert len(results) == 1
-        assert results[0].name == "Apollo Found"
-
-    @pytest.mark.asyncio
-    async def test_enrich_skip_when_no_data(self):
+    async def test_enrich_creates_bare_prospect_when_no_data(self):
+        """Hybrid: a domain with no enrichment is still captured as a bare prospect."""
         from app.services.prospect_discovery_email import enrich_email_domains
 
         mock_enrich = AsyncMock(return_value=None)
@@ -395,25 +377,29 @@ class TestEmailEnrichment:
         domains = [{"domain": "unknown.com", "email_count": 2, "sample_senders": []}]
         results = await enrich_email_domains(domains, enrich_fn=mock_enrich)
 
-        assert len(results) == 0
+        assert len(results) == 1
+        p = results[0]
+        assert p.domain == "unknown.com"
+        assert p.name == "unknown.com"  # falls back to the domain
+        assert p.industry is None
+        assert p.website == "https://unknown.com"
+        assert p.enrichment_data["email_mining"]["email_count"] == 2
 
     @pytest.mark.asyncio
-    async def test_enrich_explorium_exception_falls_through(self):
+    async def test_enrich_explorium_exception_creates_bare_prospect(self):
+        """Explorium raising is swallowed → domain still captured as a bare prospect."""
         from app.services.prospect_discovery_email import enrich_email_domains
 
         mock_explorium = AsyncMock(side_effect=Exception("API timeout"))
-        mock_apollo = AsyncMock(
-            return_value={
-                "name": "Fallback Corp",
-                "domain": "fallback.com",
-            }
-        )
 
         domains = [{"domain": "fallback.com", "email_count": 4, "sample_senders": []}]
-        results = await enrich_email_domains(domains, enrich_fn=mock_explorium, apollo_enrich_fn=mock_apollo)
+        results = await enrich_email_domains(domains, enrich_fn=mock_explorium)
 
+        # Exception swallowed; domain still becomes a bare prospect, not dropped/crashed
         assert len(results) == 1
-        assert results[0].name == "Fallback Corp"
+        assert results[0].domain == "fallback.com"
+        assert results[0].industry is None
+        mock_explorium.assert_awaited_once()
 
 
 class TestEmailMiningBatch:

@@ -4,6 +4,7 @@ Called by: pytest
 Depends on: conftest.py fixtures (db_session)
 """
 
+import asyncio
 import signal
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -140,7 +141,7 @@ class TestMainLoop:
             patch("app.services.ics_worker.scheduler.SearchScheduler"),
             patch("app.services.ics_worker.circuit_breaker.CircuitBreaker"),
             patch("app.services.ics_worker.ai_gate.process_ai_gate"),
-            patch("app.services.ics_worker.queue_manager.get_next_queued_item"),
+            patch("app.services.ics_worker.queue_manager.claim_next_queued_item"),
         ):
             from app.services.ics_worker.worker import main
 
@@ -168,7 +169,7 @@ class TestMainLoop:
             patch("app.services.ics_worker.scheduler.SearchScheduler"),
             patch("app.services.ics_worker.circuit_breaker.CircuitBreaker"),
             patch("app.services.ics_worker.ai_gate.process_ai_gate"),
-            patch("app.services.ics_worker.queue_manager.get_next_queued_item"),
+            patch("app.services.ics_worker.queue_manager.claim_next_queued_item"),
         ):
             from app.services.ics_worker.worker import main
 
@@ -201,7 +202,7 @@ class TestMainLoop:
                 patch("app.services.ics_worker.scheduler.SearchScheduler"),
                 patch("app.services.ics_worker.circuit_breaker.CircuitBreaker"),
                 patch("app.services.ics_worker.ai_gate.process_ai_gate"),
-                patch("app.services.ics_worker.queue_manager.get_next_queued_item"),
+                patch("app.services.ics_worker.queue_manager.claim_next_queued_item"),
             ):
                 from app.services.ics_worker.worker import main
 
@@ -246,7 +247,7 @@ class TestMainLoop:
                 patch("app.services.ics_worker.scheduler.SearchScheduler", return_value=mock_scheduler),
                 patch("app.services.ics_worker.circuit_breaker.CircuitBreaker"),
                 patch("app.services.ics_worker.ai_gate.process_ai_gate"),
-                patch("app.services.ics_worker.queue_manager.get_next_queued_item"),
+                patch("app.services.ics_worker.queue_manager.claim_next_queued_item"),
                 patch("asyncio.sleep", side_effect=mock_sleep),
             ):
                 from app.services.ics_worker.worker import main
@@ -273,6 +274,7 @@ class TestMainLoop:
         mock_scheduler.next_delay.return_value = 0
 
         mock_config = MagicMock()
+        mock_config.ICS_SEARCH_TIMEOUT_SECONDS = 150
         mock_config.ICS_MAX_DAILY_SEARCHES = 0  # Already exceeded
 
         call_count = 0
@@ -295,7 +297,7 @@ class TestMainLoop:
                 patch("app.services.ics_worker.scheduler.SearchScheduler", return_value=mock_scheduler),
                 patch("app.services.ics_worker.circuit_breaker.CircuitBreaker"),
                 patch("app.services.ics_worker.ai_gate.process_ai_gate"),
-                patch("app.services.ics_worker.queue_manager.get_next_queued_item"),
+                patch("app.services.ics_worker.queue_manager.claim_next_queued_item"),
                 patch("asyncio.sleep", side_effect=mock_sleep),
             ):
                 from app.services.ics_worker.worker import main
@@ -321,6 +323,7 @@ class TestMainLoop:
         mock_scheduler.next_delay.return_value = 0
 
         mock_config = MagicMock()
+        mock_config.ICS_SEARCH_TIMEOUT_SECONDS = 150
         mock_config.ICS_MAX_DAILY_SEARCHES = 1000
 
         mock_breaker = MagicMock()
@@ -347,7 +350,7 @@ class TestMainLoop:
                 patch("app.services.ics_worker.scheduler.SearchScheduler", return_value=mock_scheduler),
                 patch("app.services.ics_worker.circuit_breaker.CircuitBreaker", return_value=mock_breaker),
                 patch("app.services.ics_worker.ai_gate.process_ai_gate"),
-                patch("app.services.ics_worker.queue_manager.get_next_queued_item"),
+                patch("app.services.ics_worker.queue_manager.claim_next_queued_item"),
                 patch("asyncio.sleep", side_effect=mock_sleep),
             ):
                 from app.services.ics_worker.worker import main
@@ -374,6 +377,7 @@ class TestMainLoop:
         mock_scheduler.next_delay.return_value = 0
 
         mock_config = MagicMock()
+        mock_config.ICS_SEARCH_TIMEOUT_SECONDS = 150
         mock_config.ICS_MAX_DAILY_SEARCHES = 1000
 
         mock_breaker = MagicMock()
@@ -399,7 +403,7 @@ class TestMainLoop:
                 patch("app.services.ics_worker.scheduler.SearchScheduler", return_value=mock_scheduler),
                 patch("app.services.ics_worker.circuit_breaker.CircuitBreaker", return_value=mock_breaker),
                 patch("app.services.ics_worker.ai_gate.process_ai_gate", new_callable=AsyncMock),
-                patch("app.services.ics_worker.queue_manager.get_next_queued_item", return_value=None),
+                patch("app.services.ics_worker.queue_manager.claim_next_queued_item", return_value=None),
                 patch("asyncio.sleep", side_effect=mock_sleep),
             ):
                 from app.services.ics_worker.worker import main
@@ -428,6 +432,7 @@ class TestMainLoop:
         mock_scheduler.next_delay.return_value = 0
 
         mock_config = MagicMock()
+        mock_config.ICS_SEARCH_TIMEOUT_SECONDS = 150
         mock_config.ICS_MAX_DAILY_SEARCHES = 1000
 
         mock_breaker = MagicMock()
@@ -469,7 +474,7 @@ class TestMainLoop:
                 patch("app.services.ics_worker.scheduler.SearchScheduler", return_value=mock_scheduler),
                 patch("app.services.ics_worker.circuit_breaker.CircuitBreaker", return_value=mock_breaker),
                 patch("app.services.ics_worker.ai_gate.process_ai_gate", new_callable=AsyncMock),
-                patch("app.services.ics_worker.queue_manager.get_next_queued_item", side_effect=get_next),
+                patch("app.services.ics_worker.queue_manager.claim_next_queued_item", side_effect=get_next),
                 patch("app.services.ics_worker.queue_manager.mark_status"),
                 patch("app.services.ics_worker.queue_manager.mark_completed") as mock_complete,
                 patch(
@@ -508,6 +513,7 @@ class TestMainLoop:
         mock_scheduler.next_delay.return_value = 0
 
         mock_config = MagicMock()
+        mock_config.ICS_SEARCH_TIMEOUT_SECONDS = 150
         mock_config.ICS_MAX_DAILY_SEARCHES = 1000
 
         mock_breaker = MagicMock()
@@ -545,7 +551,7 @@ class TestMainLoop:
                 patch("app.services.ics_worker.scheduler.SearchScheduler", return_value=mock_scheduler),
                 patch("app.services.ics_worker.circuit_breaker.CircuitBreaker", return_value=mock_breaker),
                 patch("app.services.ics_worker.ai_gate.process_ai_gate", new_callable=AsyncMock),
-                patch("app.services.ics_worker.queue_manager.get_next_queued_item", side_effect=get_next),
+                patch("app.services.ics_worker.queue_manager.claim_next_queued_item", side_effect=get_next),
                 patch("app.services.ics_worker.queue_manager.mark_status") as mock_mark,
                 patch("asyncio.sleep", side_effect=mock_sleep),
             ):
@@ -555,6 +561,82 @@ class TestMainLoop:
 
             # mark_status should have been called with "failed"
             mock_mark.assert_any_call(db_session, mock_item, "failed", error="Session authentication failed")
+        finally:
+            worker_mod._shutdown_requested = original
+
+    @pytest.mark.asyncio
+    async def test_main_search_timeout_fails_item(self, db_session):
+        """A search that exceeds the timeout marks the item failed and continues (no
+        hang)."""
+        _seed_worker_status(db_session)
+        import app.services.ics_worker.worker as worker_mod
+
+        mock_session = MagicMock()
+        mock_session.start = AsyncMock()
+        mock_session.stop = AsyncMock()
+        mock_session.is_logged_in = True
+        mock_session.ensure_session = AsyncMock(return_value=True)
+        mock_session.page = MagicMock()
+
+        mock_scheduler = MagicMock()
+        mock_scheduler.is_business_hours.return_value = True
+        mock_scheduler.time_for_break.return_value = False
+        mock_scheduler.next_delay.return_value = 0
+
+        mock_config = MagicMock()
+        mock_config.ICS_SEARCH_TIMEOUT_SECONDS = 150
+        mock_config.ICS_MAX_DAILY_SEARCHES = 1000
+
+        mock_breaker = MagicMock()
+        mock_breaker.should_stop.return_value = False
+
+        mock_item = MagicMock()
+        mock_item.id = 1
+        mock_item.mpn = "TEST"
+
+        item_returned = False
+
+        def get_next(db):
+            nonlocal item_returned
+            if not item_returned:
+                item_returned = True
+                return mock_item
+            return None
+
+        call_count = 0
+
+        async def mock_sleep(seconds):
+            nonlocal call_count
+            call_count += 1
+            if call_count >= 2:
+                worker_mod._shutdown_requested = True
+
+        original = worker_mod._shutdown_requested
+        try:
+            worker_mod._shutdown_requested = False
+
+            with (
+                patch("app.database.SessionLocal", return_value=db_session),
+                patch("app.services.ics_worker.queue_manager.recover_stale_searches"),
+                patch("app.services.ics_worker.session_manager.IcsSessionManager", return_value=mock_session),
+                patch("app.services.ics_worker.config.IcsConfig", return_value=mock_config),
+                patch("app.services.ics_worker.scheduler.SearchScheduler", return_value=mock_scheduler),
+                patch("app.services.ics_worker.circuit_breaker.CircuitBreaker", return_value=mock_breaker),
+                patch("app.services.ics_worker.ai_gate.process_ai_gate", new_callable=AsyncMock),
+                patch("app.services.ics_worker.queue_manager.claim_next_queued_item", side_effect=get_next),
+                patch("app.services.ics_worker.queue_manager.mark_status") as mock_mark,
+                patch(
+                    "app.services.ics_worker.search_engine.search_part",
+                    new_callable=AsyncMock,
+                    side_effect=asyncio.TimeoutError,
+                ),
+                patch("asyncio.sleep", side_effect=mock_sleep),
+            ):
+                from app.services.ics_worker.worker import main
+
+                await main()
+
+            mock_mark.assert_any_call(db_session, mock_item, "failed", error="Search timeout")
         finally:
             worker_mod._shutdown_requested = original
 
@@ -576,6 +658,7 @@ class TestMainLoop:
         mock_scheduler.next_delay.return_value = 0
 
         mock_config = MagicMock()
+        mock_config.ICS_SEARCH_TIMEOUT_SECONDS = 150
         mock_config.ICS_MAX_DAILY_SEARCHES = 1000
 
         mock_breaker = MagicMock()
@@ -601,7 +684,7 @@ class TestMainLoop:
                 patch("app.services.ics_worker.scheduler.SearchScheduler", return_value=mock_scheduler),
                 patch("app.services.ics_worker.circuit_breaker.CircuitBreaker", return_value=mock_breaker),
                 patch("app.services.ics_worker.ai_gate.process_ai_gate", new_callable=AsyncMock),
-                patch("app.services.ics_worker.queue_manager.get_next_queued_item"),
+                patch("app.services.ics_worker.queue_manager.claim_next_queued_item"),
                 patch("asyncio.sleep", side_effect=mock_sleep),
             ):
                 from app.services.ics_worker.worker import main
@@ -631,6 +714,7 @@ class TestMainLoop:
         mock_scheduler.next_delay.return_value = 0
 
         mock_config = MagicMock()
+        mock_config.ICS_SEARCH_TIMEOUT_SECONDS = 150
         mock_config.ICS_MAX_DAILY_SEARCHES = 1000
 
         mock_breaker = MagicMock()
@@ -669,7 +753,7 @@ class TestMainLoop:
                 patch("app.services.ics_worker.scheduler.SearchScheduler", return_value=mock_scheduler),
                 patch("app.services.ics_worker.circuit_breaker.CircuitBreaker", return_value=mock_breaker),
                 patch("app.services.ics_worker.ai_gate.process_ai_gate", new_callable=AsyncMock),
-                patch("app.services.ics_worker.queue_manager.get_next_queued_item", side_effect=get_next),
+                patch("app.services.ics_worker.queue_manager.claim_next_queued_item", side_effect=get_next),
                 patch("app.services.ics_worker.queue_manager.mark_status") as mock_mark,
                 patch(
                     "app.services.ics_worker.search_engine.search_part",
@@ -707,6 +791,7 @@ class TestMainLoop:
         mock_scheduler.next_delay.return_value = 0
 
         mock_config = MagicMock()
+        mock_config.ICS_SEARCH_TIMEOUT_SECONDS = 150
         mock_config.ICS_MAX_DAILY_SEARCHES = 1000
 
         mock_breaker = MagicMock()
@@ -744,7 +829,7 @@ class TestMainLoop:
                 patch("app.services.ics_worker.scheduler.SearchScheduler", return_value=mock_scheduler),
                 patch("app.services.ics_worker.circuit_breaker.CircuitBreaker", return_value=mock_breaker),
                 patch("app.services.ics_worker.ai_gate.process_ai_gate", new_callable=AsyncMock),
-                patch("app.services.ics_worker.queue_manager.get_next_queued_item", side_effect=get_next),
+                patch("app.services.ics_worker.queue_manager.claim_next_queued_item", side_effect=get_next),
                 patch("app.services.ics_worker.queue_manager.mark_status") as mock_mark,
                 patch(
                     "app.services.ics_worker.search_engine.search_part",
@@ -783,6 +868,7 @@ class TestMainLoop:
         mock_scheduler.next_delay.return_value = 0
 
         mock_config = MagicMock()
+        mock_config.ICS_SEARCH_TIMEOUT_SECONDS = 150
         mock_config.ICS_MAX_DAILY_SEARCHES = 1000
 
         mock_breaker = MagicMock()
@@ -821,7 +907,7 @@ class TestMainLoop:
                 patch("app.services.ics_worker.scheduler.SearchScheduler", return_value=mock_scheduler),
                 patch("app.services.ics_worker.circuit_breaker.CircuitBreaker", return_value=mock_breaker),
                 patch("app.services.ics_worker.ai_gate.process_ai_gate", new_callable=AsyncMock),
-                patch("app.services.ics_worker.queue_manager.get_next_queued_item", side_effect=get_next),
+                patch("app.services.ics_worker.queue_manager.claim_next_queued_item", side_effect=get_next),
                 patch("app.services.ics_worker.queue_manager.mark_status"),
                 patch("app.services.ics_worker.queue_manager.mark_completed"),
                 patch(

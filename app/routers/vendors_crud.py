@@ -20,7 +20,7 @@ from ..models import Company, Offer, User, VendorCard, VendorReview
 from ..models.strategic import StrategicVendor
 from ..models.vendors import VendorContact
 from ..schemas.responses import VendorDetailResponse, VendorListResponse
-from ..schemas.vendors import VendorBlacklistToggle, VendorCardUpdate, VendorReviewCreate
+from ..schemas.vendors import VendorBlacklistToggle, VendorCardCreate, VendorCardUpdate, VendorReviewCreate
 
 # The duplicate-check logic lives in the service (shared with the sightings RFQ
 # composer's POST composer-vendor endpoint). _fuzzy_match_python is re-exported
@@ -29,6 +29,7 @@ from ..services.vendor_duplicates import _fuzzy_match_python  # noqa: F401
 from ..services.vendor_duplicates import check_vendor_duplicate as _check_vendor_duplicate
 from ..utils.search_builder import SearchBuilder
 from ..utils.vendor_helpers import card_to_dict
+from ..vendor_utils import normalize_vendor_name
 
 router = APIRouter(tags=["vendors"])
 
@@ -47,6 +48,49 @@ async def check_vendor_duplicate(
     wrapper over services.vendor_duplicates.check_vendor_duplicate.
     """
     return {"matches": _check_vendor_duplicate(name, db)}
+
+
+@router.post("/api/vendors", status_code=201)
+async def create_vendor(
+    data: VendorCardCreate,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Create a new VendorCard.
+
+    Returns 201 on success. Returns 409 if a vendor with the same normalized name
+    already exists. Returns 422 if the display_name is missing or blank.
+    """
+    norm = normalize_vendor_name(data.display_name)
+    existing = db.query(VendorCard).filter_by(normalized_name=norm).first()
+    if existing:
+        raise HTTPException(
+            409,
+            f"Vendor '{existing.display_name}' already exists (ID {existing.id})",
+        )
+
+    card = VendorCard(
+        normalized_name=norm,
+        display_name=data.display_name,
+        website=data.website or None,
+        emails=data.emails or [],
+        phones=data.phones or [],
+        industry=data.industry or None,
+        hq_city=data.hq_city or None,
+        hq_country=data.hq_country or None,
+        employee_size=data.employee_size or None,
+        source="manual",
+        is_blacklisted=False,
+        is_new_vendor=True,
+        sighting_count=0,
+    )
+    db.add(card)
+    db.commit()
+    db.refresh(card)
+    from loguru import logger
+
+    logger.info("VendorCard {} created by {}", card.id, user.email)
+    return card_to_dict(card, db)
 
 
 @router.get("/api/vendors", response_model=VendorListResponse, response_model_exclude_none=True)

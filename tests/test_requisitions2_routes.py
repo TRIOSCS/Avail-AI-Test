@@ -345,8 +345,9 @@ def test_row_action_lost(client, test_requisition, db_session):
     assert test_requisition.status == "lost"
 
 
-def test_row_action_assign(client, test_requisition, db_session, sales_user):
-    """POST assign action reassigns the requisition owner."""
+def test_row_action_assign(client, test_requisition, db_session, test_user, sales_user):
+    """POST assign action reassigns the requisition owner (manager-only action)."""
+    test_user.role = "manager"  # owner reassignment is gated to manager/admin
     test_requisition.status = "active"
     db_session.commit()
 
@@ -361,7 +362,8 @@ def test_row_action_assign(client, test_requisition, db_session, sales_user):
 
 
 def test_row_action_assign_without_owner_id(client, test_requisition, test_user, db_session):
-    """POST assign without owner_id does not change owner."""
+    """POST assign without owner_id does not change owner (manager performing it)."""
+    test_user.role = "manager"
     test_requisition.status = "active"
     original_owner = test_requisition.created_by
     db_session.commit()
@@ -413,8 +415,9 @@ def test_row_action_claim_already_claimed(client, test_requisition, db_session, 
 # ── Bulk actions — assign ────────────────────────────────────────────
 
 
-def test_bulk_assign(client, test_requisition, db_session, sales_user):
-    """Bulk assign changes owner on selected requisitions."""
+def test_bulk_assign(client, test_requisition, db_session, test_user, sales_user):
+    """Bulk assign changes owner on selected requisitions (manager-only action)."""
+    test_user.role = "manager"  # owner reassignment is gated to manager/admin
     test_requisition.status = "active"
     db_session.commit()
 
@@ -430,7 +433,8 @@ def test_bulk_assign(client, test_requisition, db_session, sales_user):
 
 
 def test_bulk_assign_no_owner_id(client, test_requisition, db_session, test_user):
-    """Bulk assign without owner_id does not change owners."""
+    """Bulk assign without owner_id does not change owners (manager performing it)."""
+    test_user.role = "manager"
     test_requisition.status = "active"
     original_owner = test_requisition.created_by
     db_session.commit()
@@ -693,8 +697,10 @@ def test_inline_save_deadline(client, test_requisition):
     assert "showToast" in resp.headers.get("HX-Trigger", "")
 
 
-def test_inline_save_owner(client, test_requisition, test_user):
-    """PATCH inline saves owner."""
+def test_inline_save_owner(client, test_requisition, test_user, db_session):
+    """PATCH inline saves owner (manager-only action)."""
+    test_user.role = "manager"  # owner reassignment is gated to manager/admin
+    db_session.commit()
     resp = client.patch(
         f"/requisitions2/{test_requisition.id}/inline",
         data={"field": "owner", "value": str(test_user.id)},

@@ -138,21 +138,21 @@ class TestV2PagePathVariants:
         "path",
         [
             "/v2/buy-plans",
-            "/v2/excess",
+            "/v2/resell",
             "/v2/quotes",
             "/v2/prospecting",
             "/v2/proactive",
             "/v2/settings",
             "/v2/materials",
             "/v2/follow-ups",
-            "/v2/trouble-tickets",
+            # NB: /v2/trouble-tickets is admin-only (the management console) — its
+            # gating is covered in test_ticket_diagnosis.py::TestAdminGating.
             "/v2/search",
             "/v2/crm",
             "/v2/sightings",
             "/v2/materials/1",
             "/v2/prospecting/1",
-            "/v2/trouble-tickets/1",
-            "/v2/excess/1",
+            "/v2/resell/1",
             "/v2/prospecting/5",
             "/v2/sourcing/leads/1",
         ],
@@ -436,12 +436,28 @@ class TestSettingsRoutes:
         [
             "/v2/partials/settings",
             "/v2/partials/settings?tab=profile",
-            "/v2/partials/settings/sources",
             "/v2/partials/settings/profile",
         ],
     )
     def test_settings_get_ok(self, client: TestClient, path: str):
         assert client.get(path).status_code == 200
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/v2/partials/settings/sources",
+            "/v2/partials/settings/api-keys",
+        ],
+    )
+    def test_settings_old_tabs_redirect_to_connectors(self, client: TestClient, path: str):
+        resp = client.get(path, follow_redirects=False)
+        assert resp.status_code == 302
+        assert "/connectors" in resp.headers["location"]
+
+    def test_settings_connectors_non_admin_returns_403(self, client: TestClient):
+        # connectors tab is admin-only; buyer role → 403
+        resp = client.get("/v2/partials/settings/connectors")
+        assert resp.status_code == 403
 
     def test_settings_system_non_admin(self, client: TestClient):
         # test_user is a 'buyer' — should get 403

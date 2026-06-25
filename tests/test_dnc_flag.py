@@ -24,9 +24,9 @@ from app.models.crm import Company, CustomerSite, SiteContact
 
 
 @pytest.fixture
-def dnc_company(db_session: Session):
-    """Company + site + two contacts: one DNC, one not."""
-    company = Company(name="DNC Test Co", is_active=True)
+def dnc_company(db_session: Session, test_user):
+    """Company (owned by test_user) + site + two contacts: one DNC, one not."""
+    company = Company(name="DNC Test Co", is_active=True, account_owner_id=test_user.id)
     db_session.add(company)
     db_session.flush()
 

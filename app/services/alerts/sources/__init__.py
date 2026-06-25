@@ -9,9 +9,11 @@ from ..registry import register
 from .buyplan import BuyplanActionSource
 from .inbound_customer import InboundCustomerSource
 from .offers import OfferConfirmedSource
+from .tasks import TasksActionSource
 
 register("requisitions", OfferConfirmedSource())  # Sales Hub
 register("buy-plans", BuyplanActionSource())  # Buy Plans is its own primary nav tab
 register("crm", InboundCustomerSource())  # CRM — inbound from a customer
+register("my-day", TasksActionSource())  # My Day — open tasks assigned to me
 
-__all__ = ["OfferConfirmedSource", "BuyplanActionSource", "InboundCustomerSource"]
+__all__ = ["OfferConfirmedSource", "BuyplanActionSource", "InboundCustomerSource", "TasksActionSource"]

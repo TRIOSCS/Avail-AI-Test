@@ -18,14 +18,15 @@ import os
 import time
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from loguru import logger
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from ..config import settings
+from ..constants import AccessKey
 from ..database import get_db
-from ..dependencies import require_fresh_token, require_settings_access, require_user
+from ..dependencies import require_access, require_fresh_token, require_settings_access, require_user
 from ..models import (
     ApiSource,
     Requirement,
@@ -50,6 +51,7 @@ from ..schemas.responses import (
     VendorEngagementDetailResponse,
 )
 from ..schemas.sources import MiningOptions, SourceStatusToggle
+from ..services.admin_service import get_effective_flag
 from ..services.credential_service import get_credential_cached
 from ..services.vendor_unavailability import apply_to_fresh_sightings
 from ..vendor_utils import normalize_vendor_name
@@ -116,17 +118,17 @@ def _get_connector_for_source(name: str, db: Session = None):
     if name == "element14" and e14_key:
         return Element14Connector(e14_key)
 
-    if name == "email_mining" and settings.email_mining_enabled:
+    if name == "email_mining" and get_effective_flag(db, "email_mining_enabled", settings.email_mining_enabled):
         return _EmailMiningTestConnector()
 
     test_connector = {
         "anthropic_ai": _AnthropicTestConnector,
         "teams_notifications": _TeamsTestConnector,
-        "apollo_enrichment": _ApolloTestConnector,
         "lusha_enrichment": _LushaTestConnector,
         "explorium_enrichment": _ExploriumTestConnector,
         "azure_oauth": _AzureOAuthTestConnector,
         "hunter_enrichment": _HunterTestConnector,
+        "clay_enrichment": _ClayTestConnector,
     }.get(name)
     if test_connector:
         return test_connector()
@@ -197,27 +199,6 @@ class _TeamsTestConnector:
         return [{"vendor_name": "Teams", "mpn_matched": "Message posted", "status": "ok"}]
 
 
-class _ApolloTestConnector:
-    """Test Apollo API key with a search query."""
-
-    async def search(self, mpn: str) -> list[dict]:
-        from ..http_client import http
-
-        api_key = get_credential_cached("apollo_enrichment", "APOLLO_API_KEY")
-        if not api_key:
-            raise ValueError("APOLLO_API_KEY not configured")
-        resp = await http.post(
-            "https://api.apollo.io/v1/mixed_people/api_search",
-            headers={"Content-Type": "application/json", "X-Api-Key": api_key},
-            json={"q_organization_domains": ["anthropic.com"], "page": 1, "per_page": 1},
-            timeout=15,
-        )
-        if resp.status_code != 200:
-            raise ValueError(f"Apollo API returned {resp.status_code}: {resp.text[:200]}")
-        count = len(resp.json().get("people", []))
-        return [{"vendor_name": "Apollo", "mpn_matched": f"Search OK — {count} result(s)", "status": "ok"}]
-
-
 class _LushaTestConnector:
     """Test Lusha API key with a lightweight person lookup."""
 
@@ -254,6 +235,27 @@ class _HunterTestConnector:
         return [
             {"vendor_name": "Hunter.io", "mpn_matched": f"API key valid — {count} contact(s) found", "status": "ok"}
         ]
+
+
+class _ClayTestConnector:
+    """Test Clay MCP connectivity via a credits check (spends no enrichment credits).
+
+    Runs the full OAuth + MCP handshake through clay_mcp._mcp_call and calls the get-
+    credits-available tool. Raises (→ health status 'error') when Clay is not connected
+    or the session cannot be established, so the connectors card honestly reflects an
+    expired/disconnected Clay rather than silently going stale.
+    """
+
+    async def search(self, mpn: str) -> list[dict]:
+        from ..connectors import clay_mcp
+        from ..services import clay_oauth
+
+        if not clay_oauth.is_connected():
+            raise ValueError("Clay not connected — connect at Settings → Connectors")
+        result = await clay_mcp._mcp_call("get-credits-available", {})
+        if not result:
+            raise ValueError("Clay MCP health check failed — reconnect may be required")
+        return [{"vendor_name": "Clay", "mpn_matched": "MCP session OK — credits available", "status": "ok"}]
 
 
 class _ExploriumTestConnector:
@@ -485,16 +487,12 @@ async def list_api_sources(user: User = Depends(require_user), db: Session = Dep
     return {"sources": result}
 
 
-@router.post("/api/sources/{source_id}/test", response_model=ApiTestResponse)
-@limiter.limit("5/minute")
-async def test_api_source(
-    source_id: int, request: Request, user: User = Depends(require_user), db: Session = Depends(get_db)
-):
-    """Test a specific API source with a known part number."""
-    src = db.get(ApiSource, source_id)
-    if not src:
-        raise HTTPException(404, "API source not found")
+async def run_source_test(src: ApiSource, db: Session) -> dict:
+    """Run a live part-search probe against one source, persisting its health.
 
+    Shared by the per-source Test endpoint and the Connectors "Test all" sweep.
+    Tolerates connector failures (records them as `error`) and never raises.
+    """
     test_mpn = "LM358N"
     start = time.time()
     results = []
@@ -542,6 +540,22 @@ async def test_api_source(
     }
 
 
+@router.post("/api/sources/{source_id}/test", response_model=ApiTestResponse)
+@limiter.limit("5/minute")
+async def test_api_source(
+    source_id: int,
+    request: Request,
+    user: User = Depends(require_access(AccessKey.MANAGE_CONNECTORS)),
+    db: Session = Depends(get_db),
+):
+    """Test a specific API source with a known part number."""
+    src = db.get(ApiSource, source_id)
+    if not src:
+        raise HTTPException(404, "API source not found")
+
+    return await run_source_test(src, db)
+
+
 @router.put("/api/sources/{source_id}/toggle", response_model=ToggleResponse)
 async def toggle_api_source(
     source_id: int,
@@ -571,15 +585,20 @@ async def toggle_api_source(
 @router.put("/api/sources/{source_id}/activate", response_model=ToggleActiveResponse)
 async def toggle_source_active(
     source_id: int,
+    response: Response,
     user: User = Depends(require_settings_access),
     db: Session = Depends(get_db),
 ):
     """Toggle is_active flag on a source (settings access required)."""
+    from ..routers.htmx_views import settings_toast
+
     src = db.get(ApiSource, source_id)
     if not src:
         raise HTTPException(404, "API source not found")
     src.is_active = not src.is_active
     db.commit()
+    name = src.display_name or src.name
+    settings_toast(response, f"{name} {'enabled' if src.is_active else 'disabled'}.")
     return {"ok": True, "is_active": src.is_active}
 
 
@@ -655,6 +674,7 @@ async def system_alerts(
 async def update_source_credentials(
     source_name: str,
     request: Request,
+    response: Response,
     user: User = Depends(require_settings_access),
     db: Session = Depends(get_db),
 ):
@@ -662,6 +682,7 @@ async def update_source_credentials(
 
     Skips blank values (preserves existing).
     """
+    from ..routers.htmx_views import settings_toast
     from ..services.credential_service import _cred_cache, encrypt_value
 
     src = db.query(ApiSource).filter_by(name=source_name).first()
@@ -687,6 +708,9 @@ async def update_source_credentials(
     for k in keys_to_clear:
         _cred_cache.pop(k, None)
     logger.info("Credentials updated for source '{}' by user {}", source_name, user.email)
+    # A single-key source ("Save key") vs. a multi-field one ("Save credentials").
+    label = "Key saved." if len(src.env_vars or []) <= 1 else "Credentials saved."
+    settings_toast(response, label)
     return {"saved": True, "source": source_name}
 
 
@@ -759,7 +783,7 @@ async def email_mining_status(user: User = Depends(require_user), db: Session = 
     """Get current email mining status."""
     src = db.query(ApiSource).filter_by(name="email_mining").first()
     return {
-        "enabled": settings.email_mining_enabled,
+        "enabled": get_effective_flag(db, "email_mining_enabled", settings.email_mining_enabled),
         "last_scan": src.last_success.isoformat() if src and src.last_success else None,
         "total_scans": src.total_searches if src else 0,
         "total_vendors_found": src.total_results if src else 0,

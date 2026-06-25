@@ -12,7 +12,7 @@ from ...cache.decorators import cached_endpoint, invalidate_prefix
 from ...config import settings
 from ...constants import RequisitionStatus
 from ...database import get_db
-from ...dependencies import require_user
+from ...dependencies import can_manage_account, require_user
 from ...models import Company, CustomerSite, Requisition, User
 from ...schemas.crm import CompanyCreate, CompanyUpdate
 from ...services.credential_service import get_credential_cached
@@ -405,6 +405,19 @@ async def create_company(
         notes=payload.notes,
         domain=clean_domain or payload.domain,
         linkedin_url=payload.linkedin_url,
+        account_type=payload.account_type,
+        phone=payload.phone,
+        credit_terms=payload.credit_terms,
+        tax_id=payload.tax_id,
+        currency=payload.currency,
+        preferred_carrier=payload.preferred_carrier,
+        legal_name=payload.legal_name,
+        employee_size=payload.employee_size,
+        revenue_range=payload.revenue_range,
+        hq_city=payload.hq_city,
+        hq_state=payload.hq_state,
+        hq_country=payload.hq_country,
+        source=payload.source or "manual",
     )
     db.add(company)
     db.flush()  # get company.id before creating site
@@ -427,7 +440,6 @@ async def create_company(
     if domain and (
         get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY")
         or get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY")
-        or getattr(settings, "apollo_api_key", "")
         or getattr(settings, "hunter_api_key", "")
     ):
         from ...enrichment_service import apply_enrichment_to_company, enrich_entity
@@ -495,6 +507,8 @@ async def update_company(
     company = db.get(Company, company_id)
     if not company:
         raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "You do not have access to this company")
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(company, field, value)
     db.commit()
@@ -514,6 +528,8 @@ async def summarize_company(
     company = db.get(Company, company_id)
     if not company:
         raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "You do not have access to this company")
 
     from ...services.account_summary_service import generate_account_summary
 
@@ -534,6 +550,8 @@ async def analyze_company_tags(
     company = db.get(Company, company_id)
     if not company:
         raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "You do not have access to this company")
 
     from ...services.customer_analysis_service import analyze_customer_materials
 

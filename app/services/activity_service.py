@@ -14,8 +14,17 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
 from app.config import settings
-from app.constants import ActivityType, Channel, Direction, EventType, InboxSyncHealth, OutreachChannel
+from app.constants import (
+    MEANINGFUL_CALL_OUTCOMES,
+    ActivityType,
+    Channel,
+    Direction,
+    EventType,
+    InboxSyncHealth,
+    OutreachChannel,
+)
 from app.models import ActivityLog, Company, CustomerSite, SiteContact, VendorCard, VendorContact
+from app.utils.phone import normalize_e164
 from app.utils.token_manager import _utc
 from app.vendor_utils import GENERIC_EMAIL_DOMAINS as _GENERIC_DOMAINS
 
@@ -85,6 +94,14 @@ def match_email_to_entity(email_addr: str, db: Session) -> dict | None:
     Returns {"type": "company"|"vendor", "id": int, "name": str} or None. Checks
     customer sites first, then vendor contacts, then vendor card email lists.
 
+    Resolution order (most-specific wins):
+      1. Exact SiteContact.email match (highest-confidence — personal address)
+      2. Exact CustomerSite.contact_email match
+      3. Exact VendorContact.email match
+      4. Domain → Company match; on multi-match fuzzy-scores against the email
+         local-part via fuzzy_score_vendor and picks the best-scoring entity.
+      5. Domain → VendorCard match; same fuzzy tie-break on multi-match.
+
     For customer-side matches also resolves the SiteContact whose email equals the
     address and includes site_contact_id in the result (None when no contact found).
     """
@@ -92,8 +109,37 @@ def match_email_to_entity(email_addr: str, db: Session) -> dict | None:
         return None
     email_lower = email_addr.strip().lower()
     domain = email_lower.split("@")[-1] if "@" in email_lower else None
+    local_part = email_lower.split("@")[0] if "@" in email_lower else email_lower
 
-    # 1. Check customer_sites.contact_email (exact match)
+    # 1. Exact SiteContact.email match — resolves directly to company without
+    #    needing an intermediate CustomerSite lookup.
+    # Order: verified first, then primary, then lowest id — mirrors _resolve_site_contact.
+    sc_exact = (
+        db.query(SiteContact)
+        .join(CustomerSite, SiteContact.customer_site_id == CustomerSite.id)
+        .filter(
+            func.lower(SiteContact.email) == email_lower,
+            CustomerSite.is_active.is_(True),
+        )
+        .order_by(
+            SiteContact.email_verified.desc(),
+            SiteContact.is_primary.desc(),
+            SiteContact.id.asc(),
+        )
+        .first()
+    )
+    if sc_exact:
+        site = db.get(CustomerSite, sc_exact.customer_site_id)
+        if site:
+            return {
+                "type": "company",
+                "id": site.company_id,
+                "name": site.site_name,
+                "site_id": site.id,
+                "site_contact_id": sc_exact.id,
+            }
+
+    # 2. Exact CustomerSite.contact_email match
     site = (
         db.query(CustomerSite)
         .filter(
@@ -112,32 +158,41 @@ def match_email_to_entity(email_addr: str, db: Session) -> dict | None:
             "site_contact_id": sc_id,
         }
 
-    # 2. Check vendor_contacts table (exact match)
+    # 3. Exact VendorContact.email match
     vc = db.query(VendorContact).filter(func.lower(VendorContact.email) == email_lower).first()
     if vc:
         card = db.get(VendorCard, vc.vendor_card_id)
         if card:
             return {"type": "vendor", "id": card.id, "name": card.display_name, "vendor_contact_id": vc.id}
 
-    # 3. Domain match against companies
-    if domain and domain not in _GENERIC_DOMAINS:
-        company = db.query(Company).filter(func.lower(Company.domain) == domain, Company.is_active.is_(True)).first()
-        if company:
-            sc_id = _resolve_site_contact(email_lower, company.id, None, db)
-            return {"type": "company", "id": company.id, "name": company.name, "site_contact_id": sc_id}
+    if not domain or domain in _GENERIC_DOMAINS:
+        return None
 
-    # 4. Domain match against vendor_cards
-    if domain and domain not in _GENERIC_DOMAINS:
-        vendor = (
-            db.query(VendorCard)
-            .filter(
-                func.lower(VendorCard.domain) == domain,
-                VendorCard.is_blacklisted.is_(False),
-            )
-            .first()
+    # 4. Domain match against companies — fuzzy tie-break when multiple match.
+    companies = db.query(Company).filter(func.lower(Company.domain) == domain, Company.is_active.is_(True)).all()
+    if companies:
+        from app.vendor_utils import fuzzy_score_vendor
+
+        best = max(companies, key=lambda c: fuzzy_score_vendor(local_part, c.name))
+        sc_id = _resolve_site_contact(email_lower, best.id, None, db)
+        return {"type": "company", "id": best.id, "name": best.name, "site_contact_id": sc_id}
+
+    # 5. Domain match against vendor_cards — fuzzy tie-break when multiple match.
+    vendors = (
+        db.query(VendorCard)
+        .filter(
+            func.lower(VendorCard.domain) == domain,
+            VendorCard.is_blacklisted.is_(False),
         )
-        if vendor:
-            return {"type": "vendor", "id": vendor.id, "name": vendor.display_name}
+        .all()
+    )
+    if vendors:
+        if len(vendors) == 1:
+            return {"type": "vendor", "id": vendors[0].id, "name": vendors[0].display_name}
+        from app.vendor_utils import fuzzy_score_vendor
+
+        best = max(vendors, key=lambda v: fuzzy_score_vendor(local_part, v.display_name))
+        return {"type": "vendor", "id": best.id, "name": best.display_name}
 
     return None
 
@@ -148,65 +203,200 @@ def _phone_digits(phone: str | None) -> str:
 
 
 def match_phone_to_entity(phone: str, db: Session) -> dict | None:
-    """Match a phone number to a company or vendor card.
+    """Unified E.164 phone matcher — queries normalized columns in priority order.
 
-    Uses SQL suffix match on PostgreSQL (regexp_replace), Python fallback on SQLite.
-    Batch-loads VendorCards to avoid N+1.
+    Collects ALL distinct entity matches (company_id XOR vendor_card_id) across
+    five priority tiers and returns the highest-priority match dict. Sets
+    ambiguous=True when more than one distinct entity matched.
+
+    Priority order:
+      1. SiteContact.normalized_phone
+      2. Company.normalized_phone
+      3. CustomerSite.normalized_phone / normalized_phone_2
+      4. VendorContact.normalized_phone
+      5. VendorCard.normalized_phones (JSON list, Python filter)
+
+    Returns None if the number is unparseable or no match found.
     """
-    if not phone:
+    e164 = normalize_e164(phone)
+    if e164 is None:
         return None
-    digits = _phone_digits(phone)
-    if len(digits) < 7:
-        return None
-    suffix = digits[-10:]  # last 10 digits for matching
 
-    # Check customer_sites — try PostgreSQL regex, fall back to basic LIKE
-    try:
-        sites = (
-            db.query(CustomerSite)
-            .filter(
-                CustomerSite.contact_phone.isnot(None),
-                CustomerSite.is_active.is_(True),
-                func.regexp_replace(CustomerSite.contact_phone, r"\D", "", "g").like(f"%{suffix}"),
+    seen: set[tuple] = set()
+    candidates: list[dict] = []
+
+    # ── Priority 1: SiteContact ──────────────────────────────────────────
+    contacts = db.query(SiteContact).filter(SiteContact.normalized_phone == e164, SiteContact.is_active.is_(True)).all()
+    for contact in contacts:
+        site = db.get(CustomerSite, contact.customer_site_id)
+        company_id = site.company_id if site else None
+        if company_id is None:
+            continue
+        company = db.get(Company, company_id)
+        key = ("company", company_id)
+        if key not in seen:
+            seen.add(key)
+            candidates.append(
+                {
+                    "type": "company",
+                    "id": company_id,
+                    "name": company.name if company else None,
+                    "source": "site_contact",
+                    "company_id": company_id,
+                    "vendor_card_id": None,
+                    "_site_id": site.id if site else None,
+                    "_site_contact_id": contact.id,
+                    "_contact_name": contact.full_name,
+                    "_vendor_contact_id": None,
+                }
             )
-            .all()
+
+    # ── Priority 2: Company ──────────────────────────────────────────────
+    companies = db.query(Company).filter(Company.normalized_phone == e164, Company.is_active.is_(True)).all()
+    for company in companies:
+        key = ("company", company.id)
+        if key not in seen:
+            seen.add(key)
+            candidates.append(
+                {
+                    "type": "company",
+                    "id": company.id,
+                    "name": company.name,
+                    "source": "company",
+                    "company_id": company.id,
+                    "vendor_card_id": None,
+                    "_site_id": None,
+                    "_site_contact_id": None,
+                    "_contact_name": None,
+                    "_vendor_contact_id": None,
+                }
+            )
+
+    # ── Priority 3: CustomerSite ─────────────────────────────────────────
+    sites = (
+        db.query(CustomerSite)
+        .filter(
+            (CustomerSite.normalized_phone == e164) | (CustomerSite.normalized_phone_2 == e164),
+            CustomerSite.is_active.is_(True),
         )
-    except Exception:
-        db.rollback()
-        sites = (
-            db.query(CustomerSite)
-            .filter(CustomerSite.contact_phone.isnot(None), CustomerSite.is_active.is_(True))
-            .all()
-        )
+        .all()
+    )
     for site in sites:
-        site_digits = _phone_digits(site.contact_phone)
-        if site_digits and site_digits[-10:] == suffix:
-            return {"type": "company", "id": site.company_id, "name": site.site_name, "site_id": site.id}
-
-    # Check vendor_contacts — batch VendorCard lookup to avoid N+1
-    try:
-        vcs = (
-            db.query(VendorContact)
-            .filter(
-                VendorContact.phone.isnot(None),
-                func.regexp_replace(VendorContact.phone, r"\D", "", "g").like(f"%{suffix}"),
+        key = ("company", site.company_id)
+        if key not in seen:
+            seen.add(key)
+            company = db.get(Company, site.company_id)
+            candidates.append(
+                {
+                    "type": "company",
+                    "id": site.company_id,
+                    "name": company.name if company else site.site_name,
+                    "source": "customer_site",
+                    "company_id": site.company_id,
+                    "vendor_card_id": None,
+                    "_site_id": site.id,
+                    "_site_contact_id": None,
+                    "_contact_name": None,
+                    "_vendor_contact_id": None,
+                }
             )
-            .all()
-        )
-    except Exception:
-        db.rollback()
-        vcs = db.query(VendorContact).filter(VendorContact.phone.isnot(None)).limit(1000).all()  # Safety limit
-    if vcs:
-        card_ids = [vc.vendor_card_id for vc in vcs if vc.vendor_card_id]
-        card_map = {c.id: c for c in db.query(VendorCard).filter(VendorCard.id.in_(card_ids)).all()} if card_ids else {}
-        for vc in vcs:
-            vc_digits = _phone_digits(vc.phone)
-            if vc_digits and vc_digits[-10:] == suffix:
-                card = card_map.get(vc.vendor_card_id)
-                if card:
-                    return {"type": "vendor", "id": card.id, "name": card.display_name, "vendor_contact_id": vc.id}
 
-    return None
+    # ── Priority 4: VendorContact ────────────────────────────────────────
+    vcs = db.query(VendorContact).filter(VendorContact.normalized_phone == e164).all()
+    for vc in vcs:
+        card = db.get(VendorCard, vc.vendor_card_id) if vc.vendor_card_id else None
+        if card is None:
+            continue
+        key = ("vendor", card.id)
+        if key not in seen:
+            seen.add(key)
+            candidates.append(
+                {
+                    "type": "vendor",
+                    "id": card.id,
+                    "name": card.display_name,
+                    "source": "vendor_contact",
+                    "company_id": None,
+                    "vendor_card_id": card.id,
+                    "_site_id": None,
+                    "_site_contact_id": None,
+                    "_contact_name": None,
+                    "_vendor_contact_id": vc.id,
+                }
+            )
+
+    # ── Priority 5: VendorCard phones JSON ──────────────────────────────
+    vendor_cards = db.query(VendorCard).filter(VendorCard.is_blacklisted.is_(False)).all()
+    for card in vendor_cards:
+        key = ("vendor", card.id)
+        if key in seen:
+            continue
+        if e164 in (card.normalized_phones or []):
+            seen.add(key)
+            candidates.append(
+                {
+                    "type": "vendor",
+                    "id": card.id,
+                    "name": card.display_name,
+                    "source": "vendor_card",
+                    "company_id": None,
+                    "vendor_card_id": card.id,
+                    "_site_id": None,
+                    "_site_contact_id": None,
+                    "_contact_name": None,
+                    "_vendor_contact_id": None,
+                }
+            )
+
+    if not candidates:
+        return None
+
+    best = candidates[0]
+    ambiguous = len(candidates) > 1
+
+    # Build public candidate list (no internal _ fields)
+    public_candidates = [
+        {
+            "type": c["type"],
+            "id": c["id"],
+            "name": c["name"],
+            "source": c["source"],
+            "company_id": c["company_id"],
+            "vendor_card_id": c["vendor_card_id"],
+        }
+        for c in candidates
+    ]
+
+    if best["type"] == "company":
+        return {
+            "type": "company",
+            "id": best["company_id"],
+            "name": best["name"],
+            "company_id": best["company_id"],
+            "site_id": best["_site_id"],  # backward compat for _match_entity_links
+            "customer_site_id": best["_site_id"],
+            "site_contact_id": best["_site_contact_id"],
+            "contact_name": best.get("_contact_name"),
+            "vendor_card_id": None,
+            "vendor_contact_id": None,
+            "ambiguous": ambiguous,
+            "candidates": public_candidates,
+        }
+    # vendor
+    return {
+        "type": "vendor",
+        "id": best["vendor_card_id"],
+        "name": best["name"],
+        "company_id": None,
+        "site_id": None,
+        "customer_site_id": None,
+        "site_contact_id": None,
+        "contact_name": None,
+        "vendor_card_id": best["vendor_card_id"],
+        "vendor_contact_id": best["_vendor_contact_id"],
+        "ambiguous": ambiguous,
+        "candidates": public_candidates,
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -310,6 +500,122 @@ def log_email_activity(
     return record
 
 
+def log_meeting_activity(
+    user_id: int | None,
+    graph_event_id: str,
+    subject: str | None,
+    start_dt: datetime,
+    end_dt: datetime,
+    organizer_email: str | None,
+    attendee_emails: list[str],
+    location: str | None,
+    db: Session,
+) -> list["ActivityLog"]:
+    """Log a calendar meeting, linking each matched external attendee.
+
+    Mirrors log_email_activity: resolves attendees via match_email_to_entity +
+    _match_entity_links, filters own-domain / generic / junk addresses, and calls
+    bump_clocks_from_activity for each linked row.
+
+    Returns the list of ActivityLog rows created (one per matched external entity).
+    Returns [] if only internal attendees or the event was already logged.
+    Dedup key: ``external_id = "calendar-{graph_event_id}"``.
+    """
+    from app.config import settings
+    from app.shared_constants import JUNK_DOMAINS, JUNK_EMAIL_PREFIXES
+
+    external_id = f"calendar-{graph_event_id}"
+
+    # Idempotent re-scan: skip if ANY row with this external_id already exists.
+    existing = db.query(ActivityLog).filter(ActivityLog.external_id == external_id).first()
+    if existing:
+        return []
+
+    own_domains: frozenset[str] = settings.own_domains
+    _all_generic = _GENERIC_DOMAINS | JUNK_DOMAINS
+
+    def _is_internal(email: str) -> bool:
+        domain = email.split("@")[-1] if "@" in email else ""
+        return domain in own_domains
+
+    def _is_junk(email: str) -> bool:
+        domain = email.split("@")[-1] if "@" in email else ""
+        local = email.split("@")[0] if "@" in email else email
+        if domain in _all_generic:
+            return True
+        if local in JUNK_EMAIL_PREFIXES:
+            return True
+        return False
+
+    organizer_lower = (organizer_email or "").strip().lower()
+    organizer_is_own = _is_internal(organizer_lower) if organizer_lower else True
+    direction = Direction.OUTBOUND if organizer_is_own else Direction.INBOUND
+    duration_seconds = max(0, int((end_dt - start_dt).total_seconds()))
+
+    from .cadence_service import bump_clocks_from_activity
+
+    rows: list[ActivityLog] = []
+    matched_entity_keys: set[str] = set()
+
+    for raw_email in attendee_emails:
+        email_lower = raw_email.strip().lower()
+        if not email_lower or "@" not in email_lower:
+            continue
+        if _is_internal(email_lower):
+            continue
+        if _is_junk(email_lower):
+            continue
+
+        match = match_email_to_entity(email_lower, db)
+        if not match:
+            continue
+
+        # Deduplicate: one row per entity per event (3-person meeting = 3 rows but same
+        # entity must not appear twice if attendee list has duplicates).
+        entity_key = f"{match['type']}:{match['id']}"
+        if entity_key in matched_entity_keys:
+            continue
+        matched_entity_keys.add(entity_key)
+
+        record = ActivityLog(
+            user_id=user_id,
+            activity_type=ActivityType.MEETING,
+            channel=Channel.CALENDAR,
+            **_match_entity_links(match),
+            subject=(subject or "")[:500] or None,
+            external_id=external_id,
+            direction=direction,
+            event_type=EventType.MEETING,
+            is_meaningful=True,
+            duration_seconds=duration_seconds,
+            occurred_at=start_dt,
+            details={
+                "attendees": attendee_emails[:20],
+                "organizer": organizer_email,
+                "location": location,
+                "subject": subject,
+                "graph_event_id": graph_event_id,
+            },
+            summary=f"Meeting: {subject or '(no subject)'}",
+        )
+        db.add(record)
+        db.flush()
+
+        bump_clocks_from_activity(db, record)
+        _update_last_activity(match, db, user_id)
+        _update_vendor_contact_stats(match, db)
+        logger.info(
+            "Meeting activity logged: {} → {} '{}' by user {}",
+            graph_event_id,
+            match["type"],
+            match["name"],
+            user_id,
+        )
+        rows.append(record)
+
+    return rows
+
+
 def _normalize_direction(direction: str | None) -> str | None:
     """Canonicalize a direction input to a stored Direction value or None.
 
@@ -324,8 +630,12 @@ def _normalize_direction(direction: str | None) -> str | None:
     }.get((direction or "").strip().lower())
 
 
+# Sentinel: distinguishes "caller did not pass a match" from "caller passed None (no match found)".
+_NO_MATCH = object()
+
+
 def log_call_activity(
-    user_id: int,
+    user_id: int | None,
     direction: str | None,  # accepts sent/received/inbound/outbound/None
     phone: str,
     duration_seconds: int | None,
@@ -336,15 +646,24 @@ def log_call_activity(
     requisition_id: int | None = None,
     requirement_id: int | None = None,
     force_meaningful: bool | None = None,
+    occurred_at: datetime | None = None,
+    details: dict | None = None,
+    match_result: object = _NO_MATCH,
 ) -> ActivityLog | None:
-    """Log a phone call activity."""
+    """Log a phone call activity.
+
+    Pass occurred_at to stamp the true call time on the row (e.g. from 8x8 CDR). Pass
+    details to store structured metadata (e.g. call_outcome, department, source). When
+    details carries a call_outcome, is_meaningful is determined by whether the outcome
+    is CONNECTED; otherwise the existing duration >= 30s gate applies.
+    """
     direction = _normalize_direction(direction)
     if external_id:
         existing = db.query(ActivityLog).filter(ActivityLog.external_id == external_id).first()
         if existing:
             return None
 
-    match = match_phone_to_entity(phone, db)
+    match = match_phone_to_entity(phone, db) if match_result is _NO_MATCH else match_result
 
     activity_type = ActivityType.CALL_LOGGED
 
@@ -353,6 +672,14 @@ def log_call_activity(
         verb = "to" if direction == "outbound" else "from"
         target = contact_name or phone or "unknown"
         subject = f"Call {verb} {target}"
+
+    # is_meaningful logic: outcome-gate takes priority over duration-gate
+    if force_meaningful is not None:
+        is_meaningful = force_meaningful
+    elif details and details.get("call_outcome"):
+        is_meaningful = details["call_outcome"] in MEANINGFUL_CALL_OUTCOMES
+    else:
+        is_meaningful = duration_seconds is not None and duration_seconds >= CALL_MEANINGFUL_MIN_SECONDS
 
     record = ActivityLog(
         user_id=user_id,
@@ -369,11 +696,9 @@ def log_call_activity(
         summary=subject,
         requisition_id=requisition_id,
         requirement_id=requirement_id,
-        is_meaningful=(
-            force_meaningful
-            if force_meaningful is not None
-            else (duration_seconds is not None and duration_seconds >= CALL_MEANINGFUL_MIN_SECONDS)
-        ),
+        occurred_at=occurred_at,
+        details=details,
+        is_meaningful=is_meaningful,
     )
     db.add(record)
     db.flush()
@@ -578,16 +903,33 @@ def days_since_last_activity(company_id: int, db: Session) -> int | None:
     return delta.days
 
 
-def get_last_activity_at(company_id: int, db: Session) -> datetime | None:
-    """Return the UTC datetime of the most recent ActivityLog entry for a company.
+_NOTE_TYPES = frozenset(
+    {
+        ActivityType.NOTE,
+        ActivityType.SALES_NOTE,
+        ActivityType.CONTACT_NOTE,
+    }
+)
 
-    None if no activity ever. Covers ALL event types (email, call, note, meeting,
-    quote, RFQ, buy-plan updates) because all writers set ActivityLog.company_id.
+
+def get_last_activity_at(company_id: int, db: Session) -> datetime | None:
+    """Return the UTC datetime of the most recent non-note ActivityLog entry for a
+    company.
+
+    None if no activity ever (or only note-type entries). Notes (NOTE, SALES_NOTE,
+    CONTACT_NOTE) are excluded so that a quick note does not reset the dormancy clock.
     Used by the SP4 90-day sweep to determine dormancy.
 
     Called by: app/services/prospect_reclamation.py
     """
-    latest = db.query(func.max(ActivityLog.created_at)).filter(ActivityLog.company_id == company_id).scalar()
+    latest = (
+        db.query(func.max(ActivityLog.created_at))
+        .filter(
+            ActivityLog.company_id == company_id,
+            ActivityLog.activity_type.notin_(_NOTE_TYPES),
+        )
+        .scalar()
+    )
     if not latest:
         return None
     if latest.tzinfo is None:
@@ -939,8 +1281,14 @@ def log_vendor_note(
     contact_name: str | None,
     db: Session,
     requisition_id: int | None = None,
+    bump_last_activity: bool = True,
 ) -> ActivityLog:
-    """Log a manual note against a vendor."""
+    """Log a manual note against a vendor.
+
+    Pass bump_last_activity=False for manual add-note routes that must be cadence-
+    neutral (i.e. vendor notes from the UI should not advance last_activity_at on the
+    VendorCard).
+    """
     record = ActivityLog(
         user_id=user_id,
         activity_type=ActivityType.NOTE,
@@ -958,10 +1306,11 @@ def log_vendor_note(
 
     bump_clocks_from_activity(db, record)
 
-    now = datetime.now(timezone.utc)
-    db.query(VendorCard).filter(VendorCard.id == vendor_card_id).update(
-        {"last_activity_at": now}, synchronize_session=False
-    )
+    if bump_last_activity:
+        now = datetime.now(timezone.utc)
+        db.query(VendorCard).filter(VendorCard.id == vendor_card_id).update(
+            {"last_activity_at": now}, synchronize_session=False
+        )
     if vendor_contact_id:
         _increment_vendor_contact(vendor_contact_id, db)
 
@@ -1215,12 +1564,16 @@ def dismiss_activity(activity_id: int, db: Session) -> ActivityLog | None:
     return activity
 
 
-def get_inbox_sync_status(user) -> dict:
+def get_inbox_sync_status(db: Session, user) -> dict:
     """Derive inbox-sync health for the Settings card / disconnected banner.
 
     Reads existing User fields (no new columns). See
-    app/jobs/core_jobs.py:_job_inbox_scan for the scheduled poll this surfaces.
+    app/jobs/core_jobs.py:_job_inbox_scan for the scheduled poll this surfaces. The scan
+    interval resolves from the system_config DB row (admin toggle), falling back to the
+    env default — so this staleness threshold matches the actual scan cadence.
     """
+    from app.services.admin_service import get_effective_int
+
     now = datetime.now(timezone.utc)
     connected = bool(getattr(user, "m365_connected", False))
     last_scan = getattr(user, "last_inbox_scan", None)
@@ -1230,7 +1583,7 @@ def get_inbox_sync_status(user) -> dict:
     if exp is not None and _utc(exp) <= now:
         token_ok = False
 
-    interval = settings.inbox_scan_interval_min
+    interval = get_effective_int(db, "inbox_scan_interval_min", settings.inbox_scan_interval_min)
     if last_scan is None:
         is_stale = True
     else:

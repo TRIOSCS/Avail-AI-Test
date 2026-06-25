@@ -1,11 +1,11 @@
 """Unified Enrichment Service.
 
-Shared enrichment workflow for both vendor cards and customer companies. Supports
-Explorium (Vibe Prospecting), Apollo.io (company + contact enrichment), and AI (Claude +
-web search) as enrichment providers. AI runs last to fill remaining gaps.
+Shared enrichment workflow for both vendor cards and customer companies. enrich_entity
+and find_suggested_contacts delegate provider orchestration to
+app.services.enrichment_router and per-field arbitration (by tier) to
+app.services.firmo_tiers. apply_enrichment_to_* functions are provenance-aware.
 """
 
-import asyncio
 import re
 from datetime import datetime, timezone
 from typing import Optional
@@ -13,13 +13,41 @@ from typing import Optional
 import httpx
 from loguru import logger
 
-from .config import settings
-from .connectors import lusha
-from .http_client import http
 from .services.ai_service import enrich_contacts_websearch
 from .services.credential_service import get_credential_cached
-from .services.enrichment_credit_guard import ProviderQuotaError, circuit_open, trip_circuit
 from .utils.claude_client import claude_json, claude_text
+
+# ── Contact relevance ─────────────────────────────────────────────────────
+
+# B2B title keywords used to filter suggested contacts to procurement-relevant roles.
+# Referenced by find_suggested_contacts and find_suggested_contacts_with_errors — single source.
+_RELEVANT_CONTACT_KEYWORDS: frozenset[str] = frozenset(
+    {
+        "procurement",
+        "purchasing",
+        "buyer",
+        "sourcing",
+        "supply chain",
+        "component",
+        "commodity",
+        "materials",
+        "vendor",
+        "supplier",
+        "sales",
+        "account",
+        "business development",
+        "director",
+        "president",
+        "vp",
+        "manager",
+        "engineer",
+        "operations",
+        "logistics",
+        "inventory",
+        "planning",
+        "quality",
+    }
+)
 
 # ── Normalization ────────────────────────────────────────────────────────
 
@@ -262,96 +290,6 @@ def normalize_company_output(data: dict) -> dict:
     return out
 
 
-# ── Provider: Explorium (Vibe Prospecting) ──────────────────────────────
-
-EXPLORIUM_BASE = "https://api.explorium.ai/v1"
-
-
-async def _explorium_find_company(domain: str, name: str = "") -> Optional[dict]:
-    """Look up a company on Explorium by domain.
-
-    Returns normalized company data.
-    """
-    api_key = get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY")
-    if not api_key:
-        logger.debug("Explorium API key not configured — skipping")
-        return None
-    try:
-        resp = await http.post(
-            f"{EXPLORIUM_BASE}/match/business",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json={"domain": domain, "name": name},
-            timeout=15,
-        )
-        if resp.status_code != 200:
-            logger.warning("Explorium company lookup failed: {}", resp.status_code)
-            return None
-        data = resp.json()
-        firmo = {k.replace("firmo_", ""): v for k, v in data.items() if k.startswith("firmo_")}
-        return {
-            "source": "explorium",
-            "legal_name": firmo.get("name"),
-            "domain": domain,
-            "linkedin_url": firmo.get("linkedin_profile"),
-            "industry": firmo.get("linkedin_industry_category"),
-            "employee_size": firmo.get("number_of_employees_range"),
-            "hq_city": firmo.get("city_name"),
-            "hq_state": firmo.get("region_name"),
-            "hq_country": firmo.get("country_name"),
-            "website": firmo.get("website"),
-            "ticker": firmo.get("ticker"),
-            "naics": firmo.get("naics"),
-            "revenue_range": firmo.get("yearly_revenue_range"),
-        }
-    except (httpx.HTTPError, KeyError, ValueError) as e:
-        logger.error("Explorium company lookup error: {}", e)
-        return None
-
-
-async def _explorium_find_contacts(domain: str, title_filter: str = "") -> list[dict]:
-    """Find contacts at a company via Explorium."""
-    api_key = get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY")
-    if not api_key:
-        return []
-    try:
-        payload = {"company_domain": domain}
-        if title_filter:
-            payload["job_title_keywords"] = [title_filter]
-        resp = await http.post(
-            f"{EXPLORIUM_BASE}/fetch/prospects",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-            timeout=20,
-        )
-        if resp.status_code != 200:
-            logger.warning("Explorium contacts returned HTTP {} for {}", resp.status_code, domain)
-            return []
-        prospects = resp.json().get("prospects") or []
-        return [
-            {
-                "source": "explorium",
-                "full_name": p.get("full_name"),
-                "title": p.get("job_title"),
-                "email": p.get("email"),
-                "phone": p.get("phone"),
-                "linkedin_url": p.get("linkedin_url"),
-                "location": p.get("location"),
-                "company": p.get("company_name"),
-            }
-            for p in prospects
-            if p.get("full_name")
-        ]
-    except (httpx.HTTPError, KeyError, ValueError) as e:
-        logger.error("Explorium contacts lookup error: {}", e)
-        return []
-
-
 # ── Provider: AI (Claude + Web Search) ───────────────────────────────────
 
 COMPANY_SEARCH_SYSTEM = (
@@ -451,21 +389,16 @@ async def _ai_find_contacts(domain: str, name: str = "", title_filter: str = "")
 # ── Unified Enrichment ──────────────────────────────────────────────────
 
 
-def _lusha_enabled() -> bool:
-    """True when Lusha is feature-gated on AND a key is resolvable (DB or env)."""
-    return settings.lusha_enrichment_enabled and bool(get_credential_cached("lusha_enrichment", "LUSHA_API_KEY"))
-
-
 async def enrich_entity(domain: str, name: str = "") -> dict:
     """Enrich a business entity (vendor or customer) by domain.
 
-    Phase 1: Explorium lookup.
-    Phase 1b: Apollo enrichment (fills gaps from Phase 1).
-    Phase 2: AI + web search fills remaining gaps (conditional).
-    Merge priority: Explorium > Apollo > AI.
-    Results cached in IntelCache with 14-day TTL keyed by domain.
+    Delegates provider orchestration to enrichment_router.gather_company and field-level
+    arbitration to firmo_tiers.blend_company. Results cached in IntelCache with 14-day
+    TTL keyed by domain.
     """
     from .cache.intel_cache import get_cached, set_cached
+    from .services import enrichment_router
+    from .services.firmo_tiers import blend_company
 
     # Layer 1: input cleanup
     name, domain = await normalize_company_input(name, domain)
@@ -476,73 +409,19 @@ async def enrich_entity(domain: str, name: str = "") -> dict:
     if cached is not None:
         return cached
 
-    result = {
-        "legal_name": None,
-        "domain": domain,
-        "linkedin_url": None,
-        "industry": None,
-        "employee_size": None,
-        "hq_city": None,
-        "hq_state": None,
-        "hq_country": None,
-        "website": None,
-        "source": None,
-    }
-
-    _enrichable = [
-        "legal_name",
-        "industry",
-        "employee_size",
-        "hq_city",
-        "hq_state",
-        "hq_country",
-        "website",
-        "linkedin_url",
-    ]
-
-    def _merge(provider_data: dict | None, source_label: str) -> None:
-        """Merge provider results into result, tracking sources."""
-        if not provider_data:
-            return
-        for k, v in provider_data.items():
-            if k != "source" and v and not result.get(k):
-                result[k] = v
-        current = result.get("source") or ""
-        if source_label not in current:
-            result["source"] = f"{current}+{source_label}" if current else source_label
-
-    def _gaps_remain() -> bool:
-        return any(not result.get(f) for f in _enrichable)
-
-    # ── Phase 1: Explorium ──
-    _merge(await _explorium_find_company(domain, name), "explorium")
-
-    # ── Phase 1a: Lusha (verified contacts/firmographics) — gap-gated, circuit-guarded ──
-    if _lusha_enabled() and not circuit_open("lusha") and _gaps_remain():
-        try:
-            _merge(
-                await lusha.enrich_company(domain, get_credential_cached("lusha_enrichment", "LUSHA_API_KEY") or ""),
-                "lusha",
-            )
-        except ProviderQuotaError:
-            logger.warning("Lusha quota/rate-limit on company {} — tripping circuit", domain)
-            trip_circuit("lusha", settings.lusha_cooldown_minutes)
-
-    # ── Phase 1b: Apollo enrichment (fills gaps; gap-gated → spares credits) ──
-    if settings.apollo_api_key and _gaps_remain():
-        from .connectors.apollo import search_company as apollo_search
-
-        _merge(await apollo_search(domain, settings.apollo_api_key), "apollo")
-
-    # ── Phase 2: AI fills remaining gaps (conditional) ──
-    if _gaps_remain():
-        _merge(await _ai_find_company(domain, name), "ai")
+    results = await enrichment_router.gather_company(domain, name)
+    blended = blend_company(results)
+    blended.setdefault("domain", domain)
 
     # Layer 2: output normalization
-    normalized = normalize_company_output(result)
+    normalized = normalize_company_output(blended)
 
-    # Cache enrichment result for 14 days
-    if any(v for k, v in normalized.items() if k != "domain"):
+    # Carry provenance through normalization so apply functions and callers can use it
+    if blended.get("_provenance"):
+        normalized["_provenance"] = blended["_provenance"]
+
+    # Cache only when there is substantive data beyond the bare domain
+    if any(v for k, v in normalized.items() if k not in ("domain", "_provenance")):
         set_cached(cache_key, normalized, ttl_days=14)
 
     return normalized
@@ -576,142 +455,164 @@ async def _hunter_find_contacts(domain: str) -> list[dict]:
     return results
 
 
+_RELEVANT_KEYWORDS = {
+    "procurement",
+    "purchasing",
+    "buyer",
+    "sourcing",
+    "supply chain",
+    "component",
+    "commodity",
+    "materials",
+    "vendor",
+    "supplier",
+    "sales",
+    "account",
+    "business development",
+    "director",
+    "president",
+    "vp",
+    "manager",
+    "engineer",
+    "operations",
+    "logistics",
+    "inventory",
+    "planning",
+    "quality",
+}
+
+
+def _is_relevant(contact: dict) -> bool:
+    title = (contact.get("title") or "").lower()
+    if not title:
+        return bool(contact.get("email"))  # Keep if has email but no title
+    return any(kw in title for kw in _RELEVANT_KEYWORDS)
+
+
 async def find_suggested_contacts(domain: str, name: str = "", title_filter: str = "", limit: int = 10) -> list[dict]:
     """Find suggested contacts at a company from all configured providers.
 
-    Lusha (verified) runs first; if it returns >= limit verified contacts the existing
-    concurrent Explorium+Hunter+AI gather is skipped, else they run and results are
-    merged. Returns a deduplicated, relevance-filtered list. Each contact has:
-    full_name, title, email, phone, linkedin_url, location, source (and verified for
-    Lusha rows).
+    Delegates provider orchestration to enrichment_router.gather_contacts and field-
+    level deduplication / arbitration to firmo_tiers.blend_contacts. Returns a
+    relevance-filtered list capped at *limit*. Each contact has: full_name, title,
+    email, phone, linkedin_url, location, source (and verified for rows from providers
+    that surface it).
     """
-    all_contacts: list[dict] = []
+    from .services import enrichment_router
+    from .services.firmo_tiers import blend_contacts
 
-    # ── Lusha first (verified source) — circuit-guarded ──
-    if _lusha_enabled() and not circuit_open("lusha"):
-        try:
-            all_contacts = await lusha.search_contacts(
-                domain, get_credential_cached("lusha_enrichment", "LUSHA_API_KEY") or "", limit
-            )
-        except ProviderQuotaError:
-            logger.warning("Lusha quota/rate-limit on contacts {} — tripping circuit", domain)
-            trip_circuit("lusha", settings.lusha_cooldown_minutes)
-
-    # Fall through to the existing concurrent providers unless Lusha already satisfied the need.
-    if not (len(all_contacts) >= limit and any(c.get("verified") for c in all_contacts)):
-        results = await asyncio.gather(
-            _explorium_find_contacts(domain, title_filter),
-            _hunter_find_contacts(domain),
-            _ai_find_contacts(domain, name, title_filter),
-            return_exceptions=True,
-        )
-        for r in results:
-            if isinstance(r, Exception):
-                logger.warning("Contact provider failed: {}", r)
-                continue
-            all_contacts.extend(r)
-
-    # Deduplicate by email or linkedin_url or full_name
-    seen = set()
-    unique = []
-    for c in all_contacts:
-        key = (c.get("email") or "").lower() or c.get("linkedin_url") or (c.get("full_name") or "").lower()
-        if not key or key in seen:
-            continue
-        seen.add(key)
-        unique.append(c)
-
-    # Filter to relevant B2B titles — avoid wasting credits on irrelevant contacts
-    _RELEVANT_KEYWORDS = {
-        "procurement",
-        "purchasing",
-        "buyer",
-        "sourcing",
-        "supply chain",
-        "component",
-        "commodity",
-        "materials",
-        "vendor",
-        "supplier",
-        "sales",
-        "account",
-        "business development",
-        "director",
-        "president",
-        "vp",
-        "manager",
-        "engineer",
-        "operations",
-        "logistics",
-        "inventory",
-        "planning",
-        "quality",
-    }
-
-    def _is_relevant(contact: dict) -> bool:
-        title = (contact.get("title") or "").lower()
-        if not title:
-            return bool(contact.get("email"))  # Keep if has email but no title
-        return any(kw in title for kw in _RELEVANT_KEYWORDS)
-
+    raw = await enrichment_router.gather_contacts(domain, name, title_filter, limit)
+    unique = blend_contacts(raw)
     filtered = [c for c in unique if _is_relevant(c)]
     # If filter removed everything, return unfiltered (don't lose all results)
-    return filtered if filtered else unique
+    return (filtered if filtered else unique)[:limit]
+
+
+_ENRICH_FIELDS = (
+    "domain",
+    "linkedin_url",
+    "legal_name",
+    "industry",
+    "employee_size",
+    "hq_city",
+    "hq_state",
+    "hq_country",
+    "website",
+    "ticker",
+    "naics",
+    "revenue_range",
+)
+
+
+def _apply_enrichment(obj, data: dict) -> list[str]:
+    """Shared provenance-aware enrichment writer.
+
+    Rules:
+      1. Empty field → always write (whether or not provenance is present).
+      2. Field has existing value but no stored provenance → manual/legacy; protect it.
+      3. Field has existing value with stored provenance → overwrite only when incoming
+         tier (then confidence) strictly beats the stored tier (then confidence).
+    """
+    updated: list[str] = []
+    prov_in = data.get("_provenance") or {}
+    store = dict(getattr(obj, "enrichment_provenance", None) or {})
+    for field in _ENRICH_FIELDS:
+        val = data.get(field)
+        if not val:
+            continue
+        incoming = prov_in.get(field)
+        current = getattr(obj, field, None)
+        if current:
+            # Existing value: check whether we may overwrite.
+            if incoming is None:
+                # No provenance for the incoming value → never clobber.
+                continue
+            existing = store.get(field)
+            if existing is None:
+                # Stored value lacks provenance (manual/legacy) → protect it.
+                continue
+            inc_key = (incoming.get("tier", 0), incoming.get("confidence", 0.0))
+            cur_key = (existing.get("tier", 0), existing.get("confidence", 0.0))
+            if inc_key <= cur_key:
+                continue
+        setattr(obj, field, val)
+        if incoming:
+            store[field] = {
+                "source": incoming.get("source"),
+                "tier": incoming.get("tier", 0),
+                "confidence": incoming.get("confidence", 1.0),
+            }
+        updated.append(field)
+    if updated:
+        obj.enrichment_provenance = store
+        obj.last_enriched_at = datetime.now(timezone.utc)
+        obj.enrichment_source = data.get("source", "unknown")
+    return updated
+
+
+async def find_suggested_contacts_with_errors(
+    domain: str, name: str = "", title_filter: str = "", limit: int = 10
+) -> tuple[list[dict], list[str]]:
+    """Like find_suggested_contacts but also returns which providers errored.
+
+    Returns (contacts, errored_provider_names) so the UI can distinguish:
+      - zero results + empty errors  → neutral "No contacts found"
+      - zero results + errors        → amber "Couldn't reach <provider>"
+      - contacts present             → render the list with Add buttons
+
+    Delegates to find_suggested_contacts (which calls enrichment_router.gather_contacts).
+    Derives errored_providers by snapshotting circuit state before/after: any metered
+    contact provider whose circuit transitions from closed to open during the call has
+    tripped due to a quota/rate-limit error.
+    """
+    from .services import enrichment_router as er
+
+    # Metered contact providers that gather_contacts may trip on ProviderQuotaError.
+    _metered: tuple[str, ...] = ("clay", "lusha", "explorium")
+
+    # Snapshot closed circuits before the gather so we can detect newly-tripped ones.
+    before: frozenset[str] = frozenset(p for p in _metered if not er.circuit_open(p))
+
+    contacts = await find_suggested_contacts(domain, name, title_filter, limit)
+
+    # Any provider that was closed before but is now open has newly tripped.
+    errored: list[str] = [p for p in before if er.circuit_open(p)]
+
+    return contacts, errored
 
 
 def apply_enrichment_to_company(company, data: dict) -> list[str]:
-    """Apply enrichment data dict to a Company model.
+    """Apply blended enrichment to a Company (provenance-aware; protects manual values).
 
     Returns list of fields updated.
     """
-    updated = []
-    # Each field is set only when present in `data` and currently empty on the model.
-    fields = (
-        "domain",
-        "linkedin_url",
-        "legal_name",
-        "industry",
-        "employee_size",
-        "hq_city",
-        "hq_state",
-        "hq_country",
-        "website",
-    )
-    for field in fields:
-        val = data.get(field)
-        if val and not getattr(company, field, None):
-            setattr(company, field, val)
-            updated.append(field)
-    if updated:
-        company.last_enriched_at = datetime.now(timezone.utc)
-        company.enrichment_source = data.get("source", "unknown")
-    return updated
+    return _apply_enrichment(company, data)
 
 
 def apply_enrichment_to_vendor(card, data: dict) -> list[str]:
-    """Apply enrichment data dict to a VendorCard model.
+    """Apply blended enrichment to a VendorCard (provenance-aware; protects manual
+    values).
 
     Returns list of fields updated.
     """
-    updated = []
-    # Each field is set only when present in `data` and currently empty on the model.
-    fields = (
-        "linkedin_url",
-        "legal_name",
-        "industry",
-        "employee_size",
-        "hq_city",
-        "hq_state",
-        "hq_country",
-        "domain",
-        "website",
-    )
-    for field in fields:
-        val = data.get(field)
-        if val and not getattr(card, field, None):
-            setattr(card, field, val)
-            updated.append(field)
-    if updated:
-        card.last_enriched_at = datetime.now(timezone.utc)
-        card.enrichment_source = data.get("source", "unknown")
-    return updated
+    return _apply_enrichment(card, data)

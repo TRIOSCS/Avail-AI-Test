@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator
 
 
 def _require_vendor_name(v: str) -> str:
@@ -146,6 +146,41 @@ class VendorEmailAdd(BaseModel):
         if not v or "@" not in v:
             raise ValueError("valid email required")
         return v
+
+
+class VendorCardCreate(BaseModel):
+    """Schema for creating a new VendorCard via POST /api/vendors."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    display_name: str
+    website: str | None = None
+    emails: list[str] | None = None
+    phones: list[str] | None = None
+    industry: str | None = None
+    hq_city: str | None = None
+    hq_country: str | None = None
+    employee_size: str | None = None
+
+    @field_validator("display_name")
+    @classmethod
+    def name_required(cls, v: str) -> str:
+        return _require_vendor_name(v)
+
+    @field_validator("emails", mode="before")
+    @classmethod
+    def clean_emails(cls, v: list[str] | None) -> list[str] | None:
+        def clean(e: str) -> str | None:
+            if not e or "@" not in str(e):
+                return None
+            return str(e).strip().lower()
+
+        return _dedupe_cleaned(v, clean)
+
+    @field_validator("phones", mode="before")
+    @classmethod
+    def clean_phones(cls, v: list[str] | None) -> list[str] | None:
+        return _dedupe_cleaned(v, lambda p: str(p).strip() if p and str(p).strip() else None)
 
 
 class MaterialCardUpdate(BaseModel):

@@ -26,7 +26,7 @@
 {% set show_draft_banner = bp.status == 'draft' and not bp.cancellation_reason %}
 {% set has_action_banner = show_buyer_banner or show_approval_banner or show_so_banner or show_verify_banner or show_rejected_banner or show_draft_banner %}
 
-<div class="max-w-7xl mx-auto" x-data="{ showModal: false, modalType: '', showAi: false, showNotes: false, showSo: false }">
+<div class="page-fluid" x-data="{ showModal: false, modalType: '', showAi: false, showNotes: false, showSo: false }">
 
   {# ═══ 1. COMPACT HEADER WITH INLINE STATS ═══ #}
   <div class="mb-4">
@@ -68,7 +68,7 @@
         {% endif %}
       </div>
     </div>
-    <div class="mt-1 text-sm text-gray-500 flex flex-wrap gap-x-4">
+    <div class="mt-1 text-sm text-gray-600 flex flex-wrap gap-x-4">
       <span>
         {% if bp.requisition and bp.requisition.customer_name %}
           {{ bp.requisition.customer_name }}
@@ -192,7 +192,7 @@
       <span class="text-sm text-blue-800">Sales Order {{ bp.sales_order_number or '#' }} needs verification.</span>
     </div>
     <button @click="modalType = 'verify-so'; showModal = true"
-            class="flex-shrink-0 px-3 py-1.5 bg-brand-500 text-white text-xs font-medium rounded-md hover:bg-brand-600 transition-colors">
+            class="flex-shrink-0 btn btn-primary btn-sm">
       Verify SO
     </button>
   </div>
@@ -214,7 +214,7 @@
       <span class="text-sm text-blue-800">Plan was rejected. Review notes and resubmit.</span>
     </div>
     <button @click="modalType = 'submit'; showModal = true"
-            class="flex-shrink-0 px-3 py-1.5 bg-brand-500 text-white text-xs font-medium rounded-md hover:bg-brand-600 transition-colors">
+            class="flex-shrink-0 btn btn-primary btn-sm">
       Submit
     </button>
   </div>
@@ -230,7 +230,7 @@
       <span class="text-sm text-blue-800">Ready to submit. Add SO# to proceed.</span>
     </div>
     <button @click="modalType = 'submit'; showModal = true"
-            class="flex-shrink-0 px-3 py-1.5 bg-brand-500 text-white text-xs font-medium rounded-md hover:bg-brand-600 transition-colors">
+            class="flex-shrink-0 btn btn-primary btn-sm">
       Submit
     </button>
   </div>
@@ -240,7 +240,7 @@
   <div class="bg-white rounded-lg shadow-sm overflow-hidden border border-brand-200 mb-6">
     <div class="px-4 py-3 bg-gray-50 border-b border-brand-200">
       <h2 class="text-lg font-semibold text-gray-900">Line Items
-        <span class="ml-1 text-sm font-normal text-gray-500">({{ lines|length }})</span>
+        <span class="ml-1 text-sm font-normal text-gray-600">({{ lines|length }})</span>
       </h2>
     </div>
     <div class="overflow-x-auto">
@@ -265,7 +265,7 @@
             </td>
             {# Description — from MaterialCard (source of truth) #}
             {% set desc = line.requirement|part_description if line.requirement else '' %}
-            <td class="px-4 py-3 text-sm text-gray-500 truncate max-w-[200px]" title="{{ desc }}">
+            <td class="px-4 py-3 text-sm text-gray-600 truncate max-w-[200px]" title="{{ desc }}">
               {{ desc or '-' }}
             </td>
             {# Vendor + buyer below #}
@@ -286,11 +286,11 @@
                 'pending_verify': 'bg-brand-100 text-brand-600',
                 'verified': 'bg-emerald-50 text-emerald-700',
                 'issue': 'bg-rose-50 text-rose-700',
-                'cancelled': 'bg-gray-100 text-gray-500'
+                'cancelled': 'bg-gray-100 text-gray-600'
               } %}
               {{ status_badge(line.status, status_map=line_colors) }}
               {% if line.po_number %}
-              <div class="font-mono text-xs text-gray-500 mt-0.5">{{ line.po_number }}</div>
+              <div class="font-mono text-xs text-gray-600 mt-0.5">{{ line.po_number }}</div>
               {% endif %}
             </td>
             {# Action #}
@@ -357,11 +357,11 @@
           {% endfor %}
           {% if not lines %}
           <tr>
-            <td colspan="7" class="px-4 py-12 text-center">
+            <td colspan="7" class="px-4 py-6 sm:py-8 text-center">
               <svg class="mx-auto h-8 w-8 text-gray-300 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/>
               </svg>
-              <p class="text-sm text-gray-500">No line items.</p>
+              <p class="text-sm text-gray-600">No line items.</p>
             </td>
           </tr>
           {% endif %}
@@ -381,7 +381,7 @@
         <svg class="w-4 h-4 text-brand-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
         <span class="text-sm font-semibold text-gray-700">AI Insights</span>
         {% if flag_count > 0 %}
-        <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-100 text-amber-700 text-[10px] font-bold">{{ flag_count }}</span>
+        <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-100 text-amber-700 text-xs font-bold">{{ flag_count }}</span>
         {% endif %}
       </div>
       {{ collapse_chevron("showAi") }}
@@ -458,7 +458,7 @@
         {% if bp.so_status == 'approved' %}
         <svg class="w-4 h-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
         {% else %}
-        <span class="inline-flex px-1.5 py-0.5 text-[10px] font-semibold rounded-full bg-amber-50 text-amber-700">pending</span>
+        <span class="inline-flex px-1.5 py-0.5 text-xs font-semibold rounded-full bg-amber-50 text-amber-700">pending</span>
         {% endif %}
       </div>
       {{ collapse_chevron("showSo") }}
@@ -475,7 +475,7 @@
           {{ bp.so_status|capitalize if bp.so_status else 'Pending' }}
         </span>
         {% if bp.so_verified_by %}
-        <span class="text-gray-500">by {{ bp.so_verified_by.name }}</span>
+        <span class="text-gray-600">by {{ bp.so_verified_by.name }}</span>
         {% endif %}
       </div>
       {% if bp.so_rejection_note %}
@@ -531,7 +531,7 @@
                     :hx-vals="JSON.stringify({sales_order_number: so, customer_po_number: cpo, salesperson_notes: notes})"
                     data-loading-disable
                     @click="showModal = false"
-                    class="px-4 py-2 text-sm bg-brand-500 text-white rounded-md hover:bg-brand-600 font-medium transition-colors">
+                    class="btn btn-primary">
               Submit
             </button>
           </div>
@@ -615,7 +615,7 @@
                     :hx-vals="JSON.stringify({action: action, rejection_note: note})"
                     data-loading-disable
                     @click="showModal = false"
-                    class="px-4 py-2 text-sm bg-brand-500 text-white rounded-md hover:bg-brand-600 font-medium transition-colors">
+                    class="btn btn-primary">
               Confirm
             </button>
           </div>
@@ -639,7 +639,7 @@
                     :hx-vals="JSON.stringify({reason: reason})"
                     data-loading-disable
                     @click="showModal = false"
-                    class="px-4 py-2 text-sm bg-rose-500 text-white rounded-md hover:bg-rose-600 font-medium transition-colors">
+                    class="btn btn-danger">
               Cancel Plan
             </button>
           </div>

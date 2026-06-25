@@ -14,7 +14,7 @@
 
 {# ── TIER 1 — persistent dossier search bar (deep-links a new PN) ── #}
 <div class="sticky tier-search z-20 -mx-4 bg-white/95 backdrop-blur border-b border-brand-200">
-  <div class="max-w-5xl mx-auto px-4 py-2 flex items-center gap-2">
+  <div class="page-readable px-4 py-2 flex items-center gap-2">
     <svg class="h-4 w-4 text-brand-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
     <form class="flex flex-1 items-center gap-2"
           x-data="{ q: '{{ mpn|default('') }}' }"
@@ -35,7 +35,7 @@
   <div x-show="railShown" x-cloak
        x-transition:enter="transition ease-out duration-150" x-transition:enter-start="opacity-0 -translate-y-1" x-transition:enter-end="opacity-100 translate-y-0"
        class="sticky tier-rail z-10 -mx-4 bg-white border-b border-brand-200 shadow-sm">
-    <div class="max-w-5xl mx-auto px-4 py-2 flex items-center gap-3">
+    <div class="page-readable px-4 py-2 flex items-center gap-3">
       <span class="font-mono text-sm font-bold text-brand-900 truncate">{{ mpn }}</span>
       <div class="ml-auto flex items-center gap-2">
         <button @click="$dispatch('dossier-send-rfq')"
@@ -50,7 +50,7 @@
 </div>
 
 {# ── DOSSIER BODY ── #}
-<div class="max-w-5xl mx-auto pt-5 pb-32 space-y-5">
+<div class="page-readable pt-5 pb-32 space-y-5">
 
   {# IDENTITY HERO + ACTION BAR — instant DB read, no skeleton flash. #}
   <div id="dossier-hero"

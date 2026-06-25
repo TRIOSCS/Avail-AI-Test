@@ -1,4 +1,4 @@
-{# contact_row.html — Single vendor contact row with inline editing.
+{# contact_row.html — Single vendor contact row with inline editing, set-primary, delete.
    Receives: c (VendorContact), vendor (VendorCard).
    Called by: partials/vendors/tabs/contacts.html (loop include), add/update contact routes.
    Depends on: HTMX, Alpine.js, Tailwind CSS.
@@ -9,24 +9,39 @@
 
   {# ── Display mode ────────────────────────────────────────── #}
   <td class="px-4 py-2 text-sm font-medium text-gray-900" x-show="!editing" x-cloak>
-    {{ c.full_name or "—" }}
+    <div class="flex items-center gap-1.5">
+      {{ c.full_name or "—" }}
+      {% if c.is_primary %}
+        <span class="px-1.5 py-0.5 text-xs font-medium rounded bg-brand-50 text-brand-600 border border-brand-200">Primary</span>
+      {% endif %}
+    </div>
   </td>
-  <td class="px-4 py-2 text-sm text-gray-500" x-show="!editing" x-cloak>{{ c.title or "—" }}</td>
-  <td class="px-4 py-2 text-sm text-gray-500" x-show="!editing" x-cloak>{{ c.email or "—" }}</td>
+  <td class="px-4 py-2 text-sm text-gray-600" x-show="!editing" x-cloak>{{ c.title or "—" }}</td>
+  <td class="px-4 py-2 text-sm text-gray-600" x-show="!editing" x-cloak>{{ c.email or "—" }}</td>
   <td class="px-4 py-2 text-sm" x-show="!editing" x-cloak>
     {% if c.phone %}
       <a href="tel:{{ c.phone }}" class="text-brand-500 hover:text-brand-600">{{ c.phone }}</a>
     {% else %}
-      <span class="text-gray-500">&mdash;</span>
+      <span class="text-gray-600">&mdash;</span>
     {% endif %}
   </td>
-  <td class="px-4 py-2 text-sm text-gray-500 text-right" x-show="!editing" x-cloak>{{ c.interaction_count or 0 }}</td>
+  <td class="px-4 py-2 text-sm text-gray-600 text-right" x-show="!editing" x-cloak>{{ c.interaction_count or 0 }}</td>
   <td class="px-4 py-2 text-center" x-show="!editing" x-cloak>
     <div class="flex items-center justify-center gap-2">
       <button @click.stop="editing = true"
               class="text-xs text-brand-500 hover:text-brand-600 font-medium opacity-0 group-hover:opacity-100">
         Edit
       </button>
+      {% if not c.is_primary %}
+      <button hx-post="/v2/partials/vendors/{{ vendor.id }}/contacts/{{ c.id }}/set-primary"
+              hx-target="#contacts-table-body"
+              hx-swap="innerHTML"
+              data-loading-disable
+              class="text-xs text-violet-600 hover:text-violet-700 font-medium opacity-0 group-hover:opacity-100"
+              @click.stop>
+        Set Primary
+      </button>
+      {% endif %}
       <button hx-post="/api/vendors/{{ vendor.id }}/contacts/{{ c.id }}/log-call"
               hx-swap="none"
               data-loading-disable
@@ -34,9 +49,9 @@
               @click.stop>
         Log Call
       </button>
-      <button hx-delete="/api/vendors/{{ vendor.id }}/contacts/{{ c.id }}"
+      <button hx-delete="/v2/partials/vendors/{{ vendor.id }}/contacts/{{ c.id }}"
               hx-target="#vendor-contact-{{ c.id }}"
-              hx-swap="delete"
+              hx-swap="outerHTML"
               hx-confirm="Delete this contact?"
               data-loading-disable
               class="text-xs text-rose-500 hover:text-rose-700 font-medium opacity-0 group-hover:opacity-100"
@@ -48,7 +63,7 @@
 
   {# ── Edit mode (double-click or Edit button) ─────────────── #}
   <td colspan="6" x-show="editing" x-cloak>
-    <form hx-put="/api/vendors/{{ vendor.id }}/contacts/{{ c.id }}"
+    <form hx-put="/v2/partials/vendors/{{ vendor.id }}/contacts/{{ c.id }}"
           hx-target="#vendor-contact-{{ c.id }}" hx-swap="outerHTML"
           data-loading-disable
           class="flex items-center gap-2 py-1">

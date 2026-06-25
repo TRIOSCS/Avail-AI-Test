@@ -1398,7 +1398,8 @@ class TestRunIntentQuery:
         req.customer_name = "Acme"
         req.status = "active"
 
-        db.query.return_value.filter.return_value.limit.return_value.all.return_value = [req]
+        # Requisition path chains TWO filters: ilike_filter + is_scratch.is_(False)
+        db.query.return_value.filter.return_value.filter.return_value.limit.return_value.all.return_value = [req]
 
         group_key, results = _run_intent_query(
             {"entity_type": "requisition", "text_query": "Test"},
@@ -1730,6 +1731,23 @@ class TestTryConnectorConfig:
 
 
 class TestEnrichBatch:
+    @pytest.fixture(autouse=True)
+    def _isolate_ebay_harvest(self):
+        """enrich_batch (PR #418) calls harvest_ebay_titles for every found card, which
+        looks the eBay credential up in the api_sources table.
+
+        These unit tests drive enrich_batch with a MagicMock db, so that lookup escapes
+        the mock and hits the table-less in-memory engine (no such table: api_sources).
+        eBay harvesting has its own coverage in test_ebay_title_mining.py; isolate it
+        here so these tests stay focused on enrich_batch's match/skip counting.
+        """
+        with patch(
+            "app.services.enrichment.harvest_ebay_titles",
+            new_callable=AsyncMock,
+            return_value=0,
+        ):
+            yield
+
     def test_batch_enrichment(self):
         from app.services.enrichment import enrich_batch
 

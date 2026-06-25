@@ -5,6 +5,7 @@ Depends on: app.routers.crm.views
 """
 
 from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -13,6 +14,41 @@ from sqlalchemy.orm import Session
 from app.models.auth import User
 from app.models.crm import Company
 from tests.conftest import engine  # noqa: F401
+
+
+@pytest.fixture()
+def test_site(db_session: Session, test_company: Company):
+    """A CustomerSite (HQ) belonging to test_company."""
+    from app.models.crm import CustomerSite
+
+    site = CustomerSite(
+        company_id=test_company.id,
+        site_name="HQ",
+        site_type="hq",
+        is_active=True,
+    )
+    db_session.add(site)
+    db_session.commit()
+    db_session.refresh(site)
+    return site
+
+
+@pytest.fixture()
+def test_contact(db_session: Session, test_site):
+    """A SiteContact belonging to test_site."""
+    from app.models.crm import SiteContact
+
+    contact = SiteContact(
+        customer_site_id=test_site.id,
+        full_name="Test Contact",
+        email="testcontact@acme.com",
+        contact_role="buyer",
+        is_primary=True,
+    )
+    db_session.add(contact)
+    db_session.commit()
+    db_session.refresh(contact)
+    return contact
 
 
 class TestCRMShell:
@@ -538,7 +574,7 @@ class TestContactPanel:
         assert resp.status_code == 200
         assert "data-outreach-log" in resp.text
         assert 'href="tel:+14155550000"' in resp.text
-        assert 'href="mailto:jane@contactpanel.com"' in resp.text
+        assert "outlook.office.com/mail/deeplink/compose?to=" in resp.text
         assert "https://teams.microsoft.com/l/chat/0/0?users=jane%40contactpanel.com" in resp.text
         assert f'data-company-id="{company.id}"' in resp.text
         assert f'data-contact-id="{contact.id}"' in resp.text
@@ -550,8 +586,9 @@ class TestContactPanel:
         company, _, _ = self._make_company_with_contact(db_session, wechat_id="jane_wc")
         resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
         assert resp.status_code == 200
-        assert "weixin://dl/chat?jane_wc" in resp.text
         assert 'data-channel="wechat"' in resp.text
+        assert 'data-value="jane_wc"' in resp.text
+        assert "navigator.clipboard" in resp.text
 
     def test_no_wechat_action_without_handle(self, client: TestClient, db_session: Session, test_user: User):
         """No WeChat button when the contact has no wechat_id."""
@@ -587,7 +624,7 @@ class TestContactPanel:
         """Site contact create form accepts a WeChat ID."""
         from app.models.crm import CustomerSite, SiteContact
 
-        company = Company(name="WeChat Create Co", is_active=True)
+        company = Company(name="WeChat Create Co", is_active=True, account_owner_id=test_user.id)
         db_session.add(company)
         db_session.flush()
         site = CustomerSite(company_id=company.id, site_name="HQ", is_active=True)
@@ -610,7 +647,7 @@ class TestContactPanel:
         test engine ignores VARCHAR lengths; Postgres would 500)."""
         from app.models.crm import CustomerSite, SiteContact
 
-        company = Company(name="WeChat Long Co", is_active=True)
+        company = Company(name="WeChat Long Co", is_active=True, account_owner_id=test_user.id)
         db_session.add(company)
         db_session.flush()
         site = CustomerSite(company_id=company.id, site_name="HQ", is_active=True)
@@ -661,6 +698,47 @@ class TestContactPanel:
         assert "Jane Contact" in tab.text
         assert "Ghost Contact" not in tab.text
         assert "Ghost Legacy" not in tab.text
+
+    def test_legacy_and_real_same_email_renders_one_row(self, client: TestClient, db_session: Session, test_user: User):
+        """When a site has both a legacy contact_* entry AND a real SiteContact with the
+        same email, company_contact_rows dedup ensures only one row is rendered — the
+        real SiteContact wins and the legacy duplicate is suppressed."""
+        from app.models.crm import CustomerSite, SiteContact
+
+        company = Company(name="Dedup Legacy Co", is_active=True)
+        db_session.add(company)
+        db_session.flush()
+        # Site carries legacy contact_* fields
+        site = CustomerSite(
+            company_id=company.id,
+            site_name="HQ",
+            is_active=True,
+            contact_name="Legacy Jane",
+            contact_email="shared@dedup.com",
+        )
+        db_session.add(site)
+        db_session.flush()
+        # Real SiteContact with the same email
+        sc = SiteContact(
+            customer_site_id=site.id,
+            full_name="Real Jane",
+            email="shared@dedup.com",
+            enrichment_source="hunter",
+        )
+        db_session.add(sc)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        assert resp.status_code == 200
+        html = resp.text
+        # The real SiteContact name must appear
+        assert "Real Jane" in html
+        # The legacy duplicate must NOT appear as a second card (its name is suppressed)
+        assert "Legacy Jane" not in html, (
+            "Legacy contact should be suppressed when a real SiteContact has the same email"
+        )
+        # Confirm only 1 contact entry rendered (the site grouping shows "1 contact")
+        assert "1 contact" in html, "Site group should show 1 contact, not 2"
 
 
 class TestEmailIntelligenceInActivity:
@@ -937,7 +1015,7 @@ class TestContactsTabP33:
         resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
         html = resp.text
         assert "data-outreach-log" in html
-        assert 'href="mailto:alice@p33.com"' in html
+        assert "outlook.office.com/mail/deeplink/compose?to=" in html
 
     # ── empty state ─────────────────────────────────────────────────────
 
@@ -1145,9 +1223,10 @@ class TestCompanyDetailCadenceCard:
 
 
 class TestUnifiedActivityTimeline:
-    """P3-4: activity tab merges RFQ contacts + quotes + activity logs into ONE
-    chronological timeline, fixes the q.total_amount bug, adds quality badges,
-    and exposes a hide-noise toggle.
+    """P3-4 / Step-1 CRM regroup: activity tab shows type-sectioned ActivityLog feed.
+
+    Quotes and RFQ contacts are intentionally absent — they have their own tabs. Updated
+    tests reflect the new section-per-type design.
     """
 
     # ── helpers ─────────────────────────────────────────────────────────────
@@ -1176,8 +1255,12 @@ class TestUnifiedActivityTimeline:
         resp = client.get(f"/v2/partials/customers/{co.id}/tab/activity")
         assert resp.status_code == 200
 
-    def test_all_three_event_kinds_appear_in_timeline(self, client: TestClient, db_session: Session, test_user: User):
-        """Timeline shows events from all three sources: RFQ, quote, activity."""
+    def test_activity_log_events_appear_in_sections(self, client: TestClient, db_session: Session, test_user: User):
+        """Activity tab shows ActivityLog entries in their type sections.
+
+        RFQ contacts appear in the Emails section (canonical RFQ source). Quotes are NOT
+        shown — they belong in the Quotes tab.
+        """
         from decimal import Decimal
 
         from app.models.intelligence import ActivityLog
@@ -1187,7 +1270,7 @@ class TestUnifiedActivityTimeline:
         co = self._make_company(db_session, "MergeTest Co")
         req = self._make_requisition(db_session, co)
 
-        # RFQ contact
+        # RFQ contact — should appear in Emails section (canonical RFQ source)
         rfq = RfqContact(
             requisition_id=req.id,
             user_id=test_user.id,
@@ -1198,7 +1281,7 @@ class TestUnifiedActivityTimeline:
         )
         db_session.add(rfq)
 
-        # Quote with real money value (subtotal — the correct field)
+        # Quote — should NOT appear (own tab)
         q = Quote(
             requisition_id=req.id,
             quote_number="QT-2026-001",
@@ -1208,7 +1291,7 @@ class TestUnifiedActivityTimeline:
         )
         db_session.add(q)
 
-        # Meaningful activity
+        # Meaningful activity — should appear in Emails section
         act = ActivityLog(
             user_id=test_user.id,
             activity_type="email_received",
@@ -1228,28 +1311,29 @@ class TestUnifiedActivityTimeline:
         assert resp.status_code == 200
         html = resp.text
 
-        # All three kinds present
-        assert "Acme Vendor" in html, "RFQ vendor missing from timeline"
-        assert "QT-2026-001" in html, "Quote number missing from timeline"
-        assert "Email Received" in html, "Activity entry missing from timeline"
+        # Activity log entry rendered in Emails section
+        assert "Email Received" in html, "ActivityLog entry missing from timeline"
+        # RFQ contact appears in Emails section (canonical source)
+        assert "Acme Vendor" in html, "RFQ contact must appear in Emails section"
+        # Quote is absent from this tab
+        assert "QT-2026-001" not in html, "Quote must not appear in activity tab"
 
-    def test_quote_value_renders_not_blank(self, client: TestClient, db_session: Session, test_user: User):
-        """Quote dollar value renders (guards the q.total_amount bug fix).
+    def test_quotes_absent_from_activity_tab(self, client: TestClient, db_session: Session, test_user: User):
+        """Quotes are absent from the activity tab — they belong in the Quotes tab.
 
-        The old template used q.total_amount which does NOT exist on Quote, so every
-        quote row rendered blank.  Now uses q.subtotal (or won_revenue for won quotes).
-        A quote with subtotal=1234.56 must show that value.
+        Regression guard: the old implementation mixed quotes into the activity feed.
+        The new section-per-type design renders only ActivityLog rows here.
         """
         from decimal import Decimal
 
         from app.models.quotes import Quote
 
-        co = self._make_company(db_session, "QuoteBug Co")
+        co = self._make_company(db_session, "QuoteAbsent Co")
         req = self._make_requisition(db_session, co)
 
         q = Quote(
             requisition_id=req.id,
-            quote_number="QT-BUG-001",
+            quote_number="QT-ABSENT-001",
             subtotal=Decimal("1234.56"),
             status="sent",
             created_at=datetime(2026, 6, 10, tzinfo=timezone.utc),
@@ -1259,11 +1343,12 @@ class TestUnifiedActivityTimeline:
 
         resp = client.get(f"/v2/partials/customers/{co.id}/tab/activity")
         assert resp.status_code == 200
-        # Dollar value must appear — "1,234.56" formatted
-        assert "1,234.56" in resp.text, "Quote subtotal not rendered (total_amount bug still present)"
+        # Quote must NOT appear in the activity tab
+        assert "QT-ABSENT-001" not in resp.text, "Quote must not appear in activity tab"
+        assert "1,234.56" not in resp.text, "Quote dollar value must not appear in activity tab"
 
-    def test_won_quote_shows_won_revenue(self, client: TestClient, db_session: Session, test_user: User):
-        """Won quote shows won_revenue rather than subtotal."""
+    def test_won_quote_absent_from_activity_tab(self, client: TestClient, db_session: Session, test_user: User):
+        """Won quotes are absent from the activity tab (belongs in Quotes tab)."""
         from decimal import Decimal
 
         from app.models.quotes import Quote
@@ -1273,7 +1358,7 @@ class TestUnifiedActivityTimeline:
 
         q = Quote(
             requisition_id=req.id,
-            quote_number="QT-WON-001",
+            quote_number="QT-WON-ABSENT",
             subtotal=Decimal("5000.00"),
             won_revenue=Decimal("4800.00"),
             status="won",
@@ -1284,10 +1369,11 @@ class TestUnifiedActivityTimeline:
 
         resp = client.get(f"/v2/partials/customers/{co.id}/tab/activity")
         assert resp.status_code == 200
-        assert "4,800.00" in resp.text, "Won revenue not rendered for won quote"
+        assert "QT-WON-ABSENT" not in resp.text, "Won quote must not appear in activity tab"
+        assert "4,800.00" not in resp.text, "Won revenue must not appear in activity tab"
 
-    def test_meaningful_activity_has_quality_badge(self, client: TestClient, db_session: Session, test_user: User):
-        """Meaningful activity entry carries a quality badge in the rendered HTML."""
+    def test_email_activity_renders_in_emails_section(self, client: TestClient, db_session: Session, test_user: User):
+        """email_received ActivityLog renders in the Emails section."""
         from app.models.intelligence import ActivityLog
 
         co = self._make_company(db_session, "QualityBadge Co")
@@ -1307,23 +1393,23 @@ class TestUnifiedActivityTimeline:
 
         resp = client.get(f"/v2/partials/customers/{co.id}/tab/activity")
         assert resp.status_code == 200
-        # "Meaningful" badge text must appear
-        assert "meaningful" in resp.text.lower(), "Meaningful quality badge not rendered"
+        html = resp.text
+        # Emails section header present
+        assert ">Emails<" in html, "Emails section header not rendered"
+        # The activity type label is rendered by activity_row
+        assert "Email Received" in html, "email_received activity row missing"
 
-    def test_noise_activity_has_hide_noise_marker(self, client: TestClient, db_session: Session, test_user: User):
-        """Non-meaningful (noise) activity has the hide-noise CSS class/marker."""
+    def test_system_activity_renders_in_other_section(self, client: TestClient, db_session: Session, test_user: User):
+        """System/status activities (status_changed) land in the Other section."""
         from app.models.intelligence import ActivityLog
 
-        co = self._make_company(db_session, "NoiseTest Co")
+        co = self._make_company(db_session, "OtherSection Co")
         noise = ActivityLog(
             user_id=test_user.id,
-            activity_type="email_received",
-            channel="email",
+            activity_type="status_changed",
+            channel="system",
             company_id=co.id,
-            subject="Out of office: re-joining Mon",
-            is_meaningful=False,
-            quality_score=0.1,
-            quality_classification="noise",
+            summary="Status changed to active",
             created_at=datetime(2026, 6, 10, tzinfo=timezone.utc),
         )
         db_session.add(noise)
@@ -1331,20 +1417,20 @@ class TestUnifiedActivityTimeline:
 
         resp = client.get(f"/v2/partials/customers/{co.id}/tab/activity")
         assert resp.status_code == 200
-        # Noise entries must carry the js-timeline-noise class for Alpine toggle
-        assert "js-timeline-noise" in resp.text, "Noise marker class missing from noise entry"
+        # Other section present and uses Alpine hideOther (collapsible)
+        assert ">Other<" in resp.text, "Other section header not rendered for system activity"
+        assert "hideOther" in resp.text, "Alpine hideOther toggle missing for Other section"
 
-    def test_hide_noise_toggle_control_present(self, client: TestClient, db_session: Session, test_user: User):
-        """Hide-noise Alpine toggle control is rendered in the activity tab."""
+    def test_other_section_toggle_control_present(self, client: TestClient, db_session: Session, test_user: User):
+        """The Other section has the Alpine hideOther collapse control."""
         from app.models.intelligence import ActivityLog
 
         co = self._make_company(db_session, "ToggleTest Co")
         act = ActivityLog(
             user_id=test_user.id,
-            activity_type="email_received",
-            channel="email",
+            activity_type="offer_created",
+            channel="system",
             company_id=co.id,
-            is_meaningful=False,
             created_at=datetime(2026, 6, 10, tzinfo=timezone.utc),
         )
         db_session.add(act)
@@ -1353,53 +1439,48 @@ class TestUnifiedActivityTimeline:
         resp = client.get(f"/v2/partials/customers/{co.id}/tab/activity")
         assert resp.status_code == 200
         html = resp.text
-        # Alpine x-data toggle must be present
-        assert "hideNoise" in html, "Alpine hideNoise toggle not in template"
-        assert "Hide routine" in html or "hide routine" in html.lower(), "Hide routine toggle label not found"
+        # Alpine hideOther (new name — section-level toggle)
+        assert "hideOther" in html, "Alpine hideOther toggle not in template"
 
-    def test_events_are_sorted_newest_first(self, client: TestClient, db_session: Session, test_user: User):
-        """Timeline events appear in descending chronological order (newest first)."""
-        from decimal import Decimal
-
+    def test_events_within_section_sorted_newest_first(self, client: TestClient, db_session: Session, test_user: User):
+        """Within a type section, activities appear newest-first (date groups
+        descending)."""
         from app.models.intelligence import ActivityLog
-        from app.models.quotes import Quote
 
         co = self._make_company(db_session, "SortTest Co")
-        req = self._make_requisition(db_session, co)
 
-        # Older quote
-        q = Quote(
-            requisition_id=req.id,
-            quote_number="QT-SORT-OLD",
-            subtotal=Decimal("100.00"),
-            status="draft",
-            created_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
-        )
-        db_session.add(q)
-
-        # Newer activity
-        act = ActivityLog(
+        # Two notes: older and newer
+        older = ActivityLog(
             user_id=test_user.id,
-            activity_type="sales_note",
+            activity_type="note",
             channel="manual",
             company_id=co.id,
-            notes="Follow-up call done",
-            is_meaningful=True,
+            notes="Older note from June 1",
+            created_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
+        )
+        newer = ActivityLog(
+            user_id=test_user.id,
+            activity_type="note",
+            channel="manual",
+            company_id=co.id,
+            notes="Newer note from June 5",
             created_at=datetime(2026, 6, 5, tzinfo=timezone.utc),
         )
-        db_session.add(act)
+        db_session.add_all([older, newer])
         db_session.commit()
 
         resp = client.get(f"/v2/partials/customers/{co.id}/tab/activity")
         assert resp.status_code == 200
         html = resp.text
 
-        # The newer activity should appear before (lower index) the older quote
-        act_pos = html.find("Follow-up call done")
-        quote_pos = html.find("QT-SORT-OLD")
-        assert act_pos != -1, "Activity note not found in timeline"
-        assert quote_pos != -1, "Quote not found in timeline"
-        assert act_pos < quote_pos, "Newer activity should appear before older quote (newest-first order)"
+        # Notes section present
+        assert ">Notes<" in html, "Notes section header not rendered"
+        # Newer note appears before older note (newest-first within section)
+        newer_pos = html.find("Newer note from June 5")
+        older_pos = html.find("Older note from June 1")
+        assert newer_pos != -1, "Newer note not found in timeline"
+        assert older_pos != -1, "Older note not found in timeline"
+        assert newer_pos < older_pos, "Newer note should appear before older note (newest-first)"
 
     def test_no_separate_rfq_history_section(self, client: TestClient, db_session: Session, test_user: User):
         """The old 'RFQ History' section heading is gone — replaced by unified
@@ -1517,100 +1598,24 @@ class TestUnifiedTimelineHelper:
 
 
 class TestActivityTabTruncation:
-    """Test that the activity timeline indicates when results are truncated."""
+    """Test that the activity tab indicates when ActivityLog results are truncated.
 
-    def test_activity_tab_shows_truncation_footer_when_rfq_limit_hit(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
-        """When >30 RFQ contacts exist, the timeline shows the truncation footer."""
-        from app.models.offers import Contact as RfqContact
-        from app.models.sourcing import Requisition
-
-        company = Company(name="Busy Corp", is_active=True)
-        db_session.add(company)
-        db_session.flush()
-
-        # Create a requisition for the company
-        req = Requisition(name="RFQ-001", customer_name=company.name, company_id=company.id, status="active")
-        db_session.add(req)
-        db_session.flush()
-
-        # Create 31 RFQ contacts (exceeds .limit(30))
-        base_ts = datetime.now(timezone.utc)
-        for i in range(31):
-            contact = RfqContact(
-                requisition_id=req.id,
-                user_id=test_user.id,
-                contact_type="rfq",
-                vendor_name=f"Vendor {i:02d}",
-                vendor_contact="test@example.com",
-                subject=f"RFQ {i}",
-                status="sent",
-                created_at=base_ts - timedelta(hours=i),
-            )
-            db_session.add(contact)
-        db_session.commit()
-
-        resp = client.get(f"/v2/partials/customers/{company.id}/tab/activity")
-        assert resp.status_code == 200
-        assert "Showing most recent activity" in resp.text
-
-    def test_activity_tab_shows_truncation_footer_when_quote_limit_hit(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
-        """When >20 quotes exist, the timeline shows the truncation footer."""
-        from decimal import Decimal
-
-        from app.models.crm import CustomerSite
-        from app.models.quotes import Quote
-        from app.models.sourcing import Requisition
-
-        company = Company(name="Quote Busy Corp", is_active=True)
-        db_session.add(company)
-        db_session.flush()
-
-        # Create a site for the company
-        site = CustomerSite(company_id=company.id, site_name="Main")
-        db_session.add(site)
-        db_session.flush()
-
-        # Create a requisition for the company to link quotes
-        req = Requisition(name="QT-REQ-001", company_id=company.id, customer_site_id=site.id, status="active")
-        db_session.add(req)
-        db_session.flush()
-
-        # Create 21 quotes (exceeds .limit(20))
-        base_ts = datetime.now(timezone.utc)
-        for i in range(21):
-            quote = Quote(
-                requisition_id=req.id,
-                customer_site_id=site.id,
-                quote_number=f"Q-{i:03d}",
-                status="sent",
-                subtotal=Decimal("1000.00"),
-                total_cost=Decimal("1000.00"),
-                created_at=base_ts - timedelta(hours=i),
-            )
-            db_session.add(quote)
-        db_session.commit()
-
-        resp = client.get(f"/v2/partials/customers/{company.id}/tab/activity")
-        assert resp.status_code == 200
-        assert "Showing most recent activity" in resp.text
+    The redesign fetches only ActivityLog rows (limit=50) — no RFQ contacts or quotes.
+    """
 
     def test_activity_tab_shows_truncation_footer_when_activity_limit_hit(
         self, client: TestClient, db_session: Session, test_user: User
     ):
-        """When >30 activities exist, the timeline shows the truncation footer."""
+        """When >=50 activities exist, the tab shows the truncation footer."""
         from app.models.intelligence import ActivityLog
 
         company = Company(name="Active Corp", is_active=True)
         db_session.add(company)
         db_session.flush()
 
-        # Create 31 activity logs (exceeds .limit(30))
+        # Create 51 activity logs (exceeds .limit(50))
         base_ts = datetime.now(timezone.utc)
-        for i in range(31):
+        for i in range(51):
             activity = ActivityLog(
                 company_id=company.id,
                 activity_type="sales_note",
@@ -1624,19 +1629,19 @@ class TestActivityTabTruncation:
 
         resp = client.get(f"/v2/partials/customers/{company.id}/tab/activity")
         assert resp.status_code == 200
-        assert "Showing most recent activity" in resp.text
+        assert "Showing most recent 50 activities" in resp.text
 
-    def test_activity_tab_no_truncation_footer_when_under_limits(
+    def test_activity_tab_no_truncation_footer_when_under_limit(
         self, client: TestClient, db_session: Session, test_user: User
     ):
-        """When all sources are under their limits, no truncation footer appears."""
+        """When under 50 activities, no truncation footer appears."""
         from app.models.intelligence import ActivityLog
 
         company = Company(name="Small Corp", is_active=True)
         db_session.add(company)
         db_session.flush()
 
-        # Create just 5 activities (well under .limit(30))
+        # Create just 5 activities (well under .limit(50))
         base_ts = datetime.now(timezone.utc)
         for i in range(5):
             activity = ActivityLog(
@@ -1653,7 +1658,7 @@ class TestActivityTabTruncation:
         resp = client.get(f"/v2/partials/customers/{company.id}/tab/activity")
         assert resp.status_code == 200
         # Truncation footer should NOT appear
-        assert "Showing most recent activity" not in resp.text
+        assert "Showing most recent" not in resp.text
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1946,8 +1951,8 @@ class TestSegmentTagViews:
       GET  /v2/partials/customers/{company_id}/segment-tags   (chips partial)
     """
 
-    def _make_company(self, db_session: Session, name: str = "SegView Co") -> Company:
-        co = Company(name=name, is_active=True)
+    def _make_company(self, db_session: Session, name: str = "SegView Co", owner: User | None = None) -> Company:
+        co = Company(name=name, is_active=True, account_owner_id=owner.id if owner else None)
         db_session.add(co)
         db_session.commit()
         db_session.refresh(co)
@@ -1964,7 +1969,7 @@ class TestSegmentTagViews:
         """POST assign creates the EntityTag and re-renders the chips partial."""
         from app.services.tagging import get_or_create_segment_tag
 
-        co = self._make_company(db_session, "AssignSeg Co")
+        co = self._make_company(db_session, "AssignSeg Co", owner=test_user)
         tag = get_or_create_segment_tag("OEM", db_session)
         db_session.commit()
 
@@ -1983,7 +1988,7 @@ class TestSegmentTagViews:
         """
         from app.services.tagging import assign_segment_tag, get_or_create_segment_tag
 
-        co = self._make_company(db_session, "UnassignSeg Co")
+        co = self._make_company(db_session, "UnassignSeg Co", owner=test_user)
         tag = get_or_create_segment_tag("At-risk", db_session)
         assign_segment_tag(company_id=co.id, tag_id=tag.id, db=db_session)
         db_session.commit()
@@ -2034,7 +2039,7 @@ class TestSegmentTagViews:
     def test_create_new_segment_tag_via_name_param(self, client: TestClient, db_session: Session, test_user: User):
         """POST with tag_name= (instead of tag_id=) creates a new segment tag and
         assigns it."""
-        co = self._make_company(db_session, "NewTag Co")
+        co = self._make_company(db_session, "NewTag Co", owner=test_user)
 
         resp = client.post(
             f"/v2/partials/customers/{co.id}/segment-tags",
@@ -2067,7 +2072,7 @@ class TestTierSetter:
 
     def test_set_tier_updates_db(self, client: TestClient, db_session: Session, test_user: User):
         """POST tier=core persists to Company.tier."""
-        co = self._make_company(db_session)
+        co = self._make_company(db_session, account_owner_id=test_user.id)
         resp = client.post(f"/v2/partials/customers/{co.id}/tier", data={"tier": "core"})
         assert resp.status_code == 200
         db_session.refresh(co)
@@ -2075,7 +2080,7 @@ class TestTierSetter:
 
     def test_set_tier_rerenders_cadence_hero(self, client: TestClient, db_session: Session, test_user: User):
         """POST tier=core re-renders the cadence hero with updated tier label."""
-        co = self._make_company(db_session)
+        co = self._make_company(db_session, account_owner_id=test_user.id)
         resp = client.post(f"/v2/partials/customers/{co.id}/tier", data={"tier": "core"})
         assert resp.status_code == 200
         # The re-rendered hero should show the tier word
@@ -2086,7 +2091,7 @@ class TestTierSetter:
         cadence from 'due' (standard 30d) to 'overdue' would NOT apply here but key
         target is 7d so 10d ago → 'due' badge → amber classes present."""
         outbound_10d_ago = datetime.now(timezone.utc) - timedelta(days=10)
-        co = self._make_company(db_session, last_outbound_at=outbound_10d_ago)
+        co = self._make_company(db_session, last_outbound_at=outbound_10d_ago, account_owner_id=test_user.id)
         # Before: standard tier → 10d is on_target (target=30)
         resp_before = client.get(f"/v2/partials/customers/{co.id}")
         assert "bg-emerald-100" in resp_before.text  # on_target
@@ -2098,13 +2103,13 @@ class TestTierSetter:
 
     def test_set_tier_invalid_value_returns_400(self, client: TestClient, db_session: Session, test_user: User):
         """POST with invalid tier value returns 400."""
-        co = self._make_company(db_session)
+        co = self._make_company(db_session, account_owner_id=test_user.id)
         resp = client.post(f"/v2/partials/customers/{co.id}/tier", data={"tier": "vip"})
         assert resp.status_code == 400
 
     def test_set_tier_blank_clears_tier(self, client: TestClient, db_session: Session, test_user: User):
         """POST with tier='' (blank/unset) clears Company.tier to None."""
-        co = self._make_company(db_session, tier="key")
+        co = self._make_company(db_session, tier="key", account_owner_id=test_user.id)
         resp = client.post(f"/v2/partials/customers/{co.id}/tier", data={"tier": ""})
         assert resp.status_code == 200
         db_session.refresh(co)
@@ -2113,7 +2118,7 @@ class TestTierSetter:
     def test_set_tier_all_valid_values_accepted(self, client: TestClient, db_session: Session, test_user: User):
         """All four valid tier values are accepted without 400."""
         for tier_val in ("key", "core", "standard", "prospect"):
-            co = self._make_company(db_session, name=f"TierSet {tier_val}")
+            co = self._make_company(db_session, name=f"TierSet {tier_val}", account_owner_id=test_user.id)
             resp = client.post(f"/v2/partials/customers/{co.id}/tier", data={"tier": tier_val})
             assert resp.status_code == 200, f"tier={tier_val} should be accepted"
 
@@ -2137,10 +2142,10 @@ class TestBuyingRoleSetter:
       POST /v2/partials/customers/{company_id}/contacts/{contact_id}/role
     """
 
-    def _make_company_with_contact(self, db_session: Session, **contact_kwargs):
+    def _make_company_with_contact(self, db_session: Session, owner_id=None, **contact_kwargs):
         from app.models.crm import CustomerSite, SiteContact
 
-        company = Company(name="RoleSet Co", is_active=True)
+        company = Company(name="RoleSet Co", is_active=True, account_owner_id=owner_id)
         db_session.add(company)
         db_session.flush()
         site = CustomerSite(company_id=company.id, site_name="HQ", is_active=True)
@@ -2161,7 +2166,7 @@ class TestBuyingRoleSetter:
     def test_set_role_updates_db(self, client: TestClient, db_session: Session, test_user: User):
         """POST contact_role=buyer_po persists to SiteContact.contact_role."""
 
-        company, site, contact = self._make_company_with_contact(db_session)
+        company, site, contact = self._make_company_with_contact(db_session, owner_id=test_user.id)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/contacts/{contact.id}/role",
             data={"contact_role": "buyer_po"},
@@ -2172,7 +2177,7 @@ class TestBuyingRoleSetter:
 
     def test_set_role_rerenders_chip(self, client: TestClient, db_session: Session, test_user: User):
         """POST role returns HTML containing the chip for the new role."""
-        company, site, contact = self._make_company_with_contact(db_session)
+        company, site, contact = self._make_company_with_contact(db_session, owner_id=test_user.id)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/contacts/{contact.id}/role",
             data={"contact_role": "specifier"},
@@ -2182,7 +2187,7 @@ class TestBuyingRoleSetter:
 
     def test_set_role_invalid_value_returns_400(self, client: TestClient, db_session: Session, test_user: User):
         """POST with unknown role value returns 400."""
-        company, site, contact = self._make_company_with_contact(db_session)
+        company, site, contact = self._make_company_with_contact(db_session, owner_id=test_user.id)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/contacts/{contact.id}/role",
             data={"contact_role": "wizard"},
@@ -2192,7 +2197,7 @@ class TestBuyingRoleSetter:
     def test_set_role_all_canonical_values_accepted(self, client: TestClient, db_session: Session, test_user: User):
         """All canonical buying-role values are accepted."""
         for role_val in ("specifier", "buyer_po", "ap_payer", "logistics", "exec", "other"):
-            company, site, contact = self._make_company_with_contact(db_session)
+            company, site, contact = self._make_company_with_contact(db_session, owner_id=test_user.id)
             resp = client.post(
                 f"/v2/partials/customers/{company.id}/contacts/{contact.id}/role",
                 data={"contact_role": role_val},
@@ -2201,7 +2206,7 @@ class TestBuyingRoleSetter:
 
     def test_set_role_nonexistent_contact_returns_404(self, client: TestClient, db_session: Session, test_user: User):
         """POST to unknown contact_id returns 404."""
-        company, _, _ = self._make_company_with_contact(db_session)
+        company, _, _ = self._make_company_with_contact(db_session, owner_id=test_user.id)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/contacts/99999/role",
             data={"contact_role": "buyer_po"},
@@ -2211,7 +2216,9 @@ class TestBuyingRoleSetter:
     def test_set_role_blank_clears_role(self, client: TestClient, db_session: Session, test_user: User):
         """POST with contact_role='' clears the role to None."""
 
-        company, site, contact = self._make_company_with_contact(db_session, contact_role="buyer")
+        company, site, contact = self._make_company_with_contact(
+            db_session, owner_id=test_user.id, contact_role="buyer"
+        )
         resp = client.post(
             f"/v2/partials/customers/{company.id}/contacts/{contact.id}/role",
             data={"contact_role": ""},
@@ -2219,6 +2226,25 @@ class TestBuyingRoleSetter:
         assert resp.status_code == 200
         db_session.refresh(contact)
         assert contact.contact_role is None
+
+    def test_chip_editor_select_contains_canonical_roles(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """Chip editor re-render contains all CANONICAL_ROLES as <option> values (driven
+        by ctx 'roles', not hardcoded HTML), so adding a role to CANONICAL_ROLES
+        automatically propagates to the select."""
+        company, site, contact = self._make_company_with_contact(db_session, owner_id=test_user.id)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/contacts/{contact.id}/role",
+            data={"contact_role": "specifier"},
+        )
+        assert resp.status_code == 200
+        html = resp.text
+        # All canonical values must appear as option values
+        for role in ("specifier", "buyer_po", "ap_payer", "logistics", "exec", "other"):
+            assert f"value='{role}'" in html or f'value="{role}"' in html, (
+                f"Expected role '{role}' as an <option> value in chip editor HTML"
+            )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2291,10 +2317,10 @@ class TestRoleChipLegacy:
 class TestEditSite:
     """P2c: Edit-site modal form (GET edit-form + POST edit)."""
 
-    def _make_company_with_site(self, db_session: Session):
+    def _make_company_with_site(self, db_session: Session, owner: User | None = None):
         from app.models.crm import CustomerSite
 
-        company = Company(name="Edit Site Co", is_active=True)
+        company = Company(name="Edit Site Co", is_active=True, account_owner_id=owner.id if owner else None)
         db_session.add(company)
         db_session.flush()
         site = CustomerSite(
@@ -2333,7 +2359,7 @@ class TestEditSite:
         new values."""
         from app.models.crm import CustomerSite
 
-        company, site = self._make_company_with_site(db_session)
+        company, site = self._make_company_with_site(db_session, owner=test_user)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/sites/{site.id}/edit",
             data={
@@ -2364,7 +2390,7 @@ class TestEditSite:
     def test_post_site_edit_re_renders_sites_tab(self, client: TestClient, db_session: Session, test_user: User):
         """POST edit response is the refreshed sites tab containing the updated site
         name."""
-        company, site = self._make_company_with_site(db_session)
+        company, site = self._make_company_with_site(db_session, owner=test_user)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/sites/{site.id}/edit",
             data={"site_name": "New HQ Name", "city": "Salem", "country": "US"},
@@ -2376,7 +2402,7 @@ class TestEditSite:
         self, client: TestClient, db_session: Session, test_user: User
     ):
         """POST edit with empty site_name returns 400."""
-        company, site = self._make_company_with_site(db_session)
+        company, site = self._make_company_with_site(db_session, owner=test_user)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/sites/{site.id}/edit",
             data={"site_name": "", "city": "Boston", "country": "US"},
@@ -2387,10 +2413,10 @@ class TestEditSite:
 class TestEditContact:
     """P2c: Edit-contact modal form (GET edit-form + POST edit)."""
 
-    def _make_company_with_contact(self, db_session: Session):
+    def _make_company_with_contact(self, db_session: Session, owner: User | None = None):
         from app.models.crm import CustomerSite, SiteContact
 
-        company = Company(name="Edit Contact Co", is_active=True)
+        company = Company(name="Edit Contact Co", is_active=True, account_owner_id=owner.id if owner else None)
         db_session.add(company)
         db_session.flush()
         site = CustomerSite(company_id=company.id, site_name="HQ", is_active=True)
@@ -2399,6 +2425,8 @@ class TestEditContact:
         contact = SiteContact(
             customer_site_id=site.id,
             full_name="Alice Smith",
+            first_name="Alice",
+            last_name="Smith",
             title="Buyer",
             email="alice@editco.com",
             phone="+16175550001",
@@ -2411,26 +2439,37 @@ class TestEditContact:
         return company, site, contact
 
     def test_get_contact_edit_form_returns_200(self, client: TestClient, db_session: Session, test_user: User):
-        """GET edit-form renders form pre-populated with contact fields."""
+        """GET edit-form renders form pre-populated with contact fields (company-scoped
+        route)."""
+        company, site, contact = self._make_company_with_contact(db_session)
+        # Company-scoped route (no site_id): replaces the retired site-scoped route.
+        resp = client.get(f"/v2/partials/customers/{company.id}/contacts/{contact.id}/edit-form")
+        assert resp.status_code == 200
+        # Step 4: form has first_name/last_name fields (not full_name)
+        assert "Alice" in resp.text
+        assert "alice@editco.com" in resp.text
+
+    def test_get_contact_edit_form_site_scoped_route_retired(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """The site-scoped edit-form GET route is retired → 404."""
         company, site, contact = self._make_company_with_contact(db_session)
         resp = client.get(f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit-form")
-        assert resp.status_code == 200
-        assert "Alice Smith" in resp.text
-        assert "alice@editco.com" in resp.text
+        assert resp.status_code == 404
 
     def test_get_contact_edit_form_404_on_missing_contact(
         self, client: TestClient, db_session: Session, test_user: User
     ):
         """GET edit-form for nonexistent contact returns 404."""
         company, site, _ = self._make_company_with_contact(db_session)
-        resp = client.get(f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/99999/edit-form")
+        resp = client.get(f"/v2/partials/customers/{company.id}/contacts/99999/edit-form")
         assert resp.status_code == 404
 
     def test_post_contact_edit_persists_title_and_phone(self, client: TestClient, db_session: Session, test_user: User):
         """POST edit saves title + phone; re-rendered contacts show new values."""
         from app.models.crm import SiteContact
 
-        company, site, contact = self._make_company_with_contact(db_session)
+        company, site, contact = self._make_company_with_contact(db_session, owner=test_user)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
             data={
@@ -2450,52 +2489,72 @@ class TestEditContact:
         assert updated.phone == "+16175550099"
         assert updated.notes == "updated note"
 
-    def test_post_contact_edit_does_not_touch_contact_role(
+    def test_post_contact_edit_sets_contact_role_canonical(
         self, client: TestClient, db_session: Session, test_user: User
     ):
-        """POST contact edit never modifies contact_role (owned by P2b role setter)."""
+        """POST contact edit with a canonical role persists it (role now writable via
+        edit form)."""
         from app.models.crm import SiteContact
 
-        company, site, contact = self._make_company_with_contact(db_session)
+        company, site, contact = self._make_company_with_contact(db_session, owner=test_user)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
             data={
                 "full_name": "Alice Smith",
-                "contact_role": "decision_maker",  # attacker tries to override role
+                "contact_role": "buyer_po",  # canonical value — should persist
                 "title": "Buyer",
                 "email": "alice@editco.com",
                 "phone": "+16175550001",
-                "wechat_id": "alice_wc",
-                "notes": "original note",
             },
         )
         assert resp.status_code == 200
         db_session.expire_all()
         updated = db_session.query(SiteContact).filter(SiteContact.id == contact.id).first()
         assert updated is not None
-        assert updated.contact_role == "buyer"  # unchanged
+        assert updated.contact_role == "buyer_po"
+
+    def test_post_contact_edit_legacy_role_returns_400(self, client: TestClient, db_session: Session, test_user: User):
+        """POST contact edit with legacy role 'decision_maker' returns 400."""
+        company, site, contact = self._make_company_with_contact(db_session, owner=test_user)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
+            data={
+                "full_name": "Alice Smith",
+                "contact_role": "decision_maker",  # legacy — must reject
+                "title": "Buyer",
+                "email": "alice@editco.com",
+            },
+        )
+        assert resp.status_code == 400
 
     def test_post_contact_edit_re_renders_contacts_panel(
         self, client: TestClient, db_session: Session, test_user: User
     ):
         """POST edit response contains the updated name in the re-rendered contacts
         panel."""
-        company, site, contact = self._make_company_with_contact(db_session)
+        company, site, contact = self._make_company_with_contact(db_session, owner=test_user)
+        # Step 4: use first_name + last_name (full_name is derived)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
-            data={"full_name": "Alice Updated", "title": "VP", "email": "alice@editco.com", "phone": ""},
+            data={
+                "first_name": "Alice",
+                "last_name": "Updated",
+                "title": "VP",
+                "email": "alice@editco.com",
+                "phone": "",
+            },
         )
         assert resp.status_code == 200
         assert "Alice Updated" in resp.text
 
-    def test_post_contact_edit_missing_full_name_returns_400(
+    def test_post_contact_edit_missing_first_and_last_name_returns_400(
         self, client: TestClient, db_session: Session, test_user: User
     ):
-        """POST edit with empty full_name returns 400."""
-        company, site, contact = self._make_company_with_contact(db_session)
+        """POST edit with both first_name and last_name empty returns 400."""
+        company, site, contact = self._make_company_with_contact(db_session, owner=test_user)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
-            data={"full_name": "", "title": "Buyer", "email": "alice@editco.com"},
+            data={"first_name": "", "last_name": "", "title": "Buyer", "email": "alice@editco.com"},
         )
         assert resp.status_code == 400
 
@@ -2503,7 +2562,7 @@ class TestEditContact:
         self, client: TestClient, db_session: Session, test_user: User
     ):
         """POST edit with malformed email returns 400."""
-        company, site, contact = self._make_company_with_contact(db_session)
+        company, site, contact = self._make_company_with_contact(db_session, owner=test_user)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
             data={"full_name": "Alice Smith", "email": "not-an-email"},
@@ -2520,14 +2579,19 @@ class TestManualCompanyMerge:
     - Guard: same id → 400, missing id → 400, no confirmation → 400
     """
 
-    def _make_pair(self, db_session):
+    def _make_pair(self, db_session, owner):
         """Return (keep, remove) companies with one site+contact+activity each on
-        remove."""
+        remove.
+
+        Both companies are owned by *owner* so the acting user passes the
+        can_manage_account gate the merge/preview routes enforce on BOTH the keeper and
+        the duplicate before reaching the 400/404/effect branches.
+        """
         from app.models.crm import CustomerSite, SiteContact
         from app.models.intelligence import ActivityLog
 
-        keep = Company(name="Keep Corp", is_active=True)
-        remove = Company(name="Remove Corp", is_active=True)
+        keep = Company(name="Keep Corp", is_active=True, account_owner_id=owner.id)
+        remove = Company(name="Remove Corp", is_active=True, account_owner_id=owner.id)
         db_session.add_all([keep, remove])
         db_session.flush()
 
@@ -2548,7 +2612,7 @@ class TestManualCompanyMerge:
 
     def test_preview_returns_200(self, client: TestClient, db_session: Session, test_user: User):
         """GET merge-preview returns 200 with preview HTML."""
-        keep, remove, *_ = self._make_pair(db_session)
+        keep, remove, *_ = self._make_pair(db_session, test_user)
         resp = client.get(
             f"/v2/partials/customers/{keep.id}/merge-preview",
             params={"remove_id": remove.id},
@@ -2558,7 +2622,7 @@ class TestManualCompanyMerge:
 
     def test_preview_shows_remove_company_name(self, client: TestClient, db_session: Session, test_user: User):
         """Preview names the company being removed."""
-        keep, remove, *_ = self._make_pair(db_session)
+        keep, remove, *_ = self._make_pair(db_session, test_user)
         resp = client.get(
             f"/v2/partials/customers/{keep.id}/merge-preview",
             params={"remove_id": remove.id},
@@ -2567,7 +2631,7 @@ class TestManualCompanyMerge:
 
     def test_preview_shows_site_count(self, client: TestClient, db_session: Session, test_user: User):
         """Preview reports number of sites that will be reassigned."""
-        keep, remove, *_ = self._make_pair(db_session)
+        keep, remove, *_ = self._make_pair(db_session, test_user)
         resp = client.get(
             f"/v2/partials/customers/{keep.id}/merge-preview",
             params={"remove_id": remove.id},
@@ -2578,7 +2642,7 @@ class TestManualCompanyMerge:
 
     def test_preview_missing_remove_id_returns_400(self, client: TestClient, db_session: Session, test_user: User):
         """Preview with nonexistent remove_id returns 400."""
-        keep, *_ = self._make_pair(db_session)
+        keep, *_ = self._make_pair(db_session, test_user)
         resp = client.get(
             f"/v2/partials/customers/{keep.id}/merge-preview",
             params={"remove_id": 999999},
@@ -2587,7 +2651,7 @@ class TestManualCompanyMerge:
 
     def test_preview_same_id_returns_400(self, client: TestClient, db_session: Session, test_user: User):
         """Preview with remove_id == keep_id returns 400."""
-        keep, *_ = self._make_pair(db_session)
+        keep, *_ = self._make_pair(db_session, test_user)
         resp = client.get(
             f"/v2/partials/customers/{keep.id}/merge-preview",
             params={"remove_id": keep.id},
@@ -2599,7 +2663,7 @@ class TestManualCompanyMerge:
     def test_merge_without_confirmation_returns_400(self, client: TestClient, db_session: Session, test_user: User):
         """POST merge without confirmed=true is rejected (guard against accidental
         calls)."""
-        keep, remove, *_ = self._make_pair(db_session)
+        keep, remove, *_ = self._make_pair(db_session, test_user)
         resp = client.post(
             f"/v2/partials/customers/{keep.id}/merge",
             data={"remove_id": str(remove.id)},
@@ -2608,7 +2672,7 @@ class TestManualCompanyMerge:
 
     def test_merge_same_id_returns_400(self, client: TestClient, db_session: Session, test_user: User):
         """POST merge with remove_id == keep_id returns 400."""
-        keep, *_ = self._make_pair(db_session)
+        keep, *_ = self._make_pair(db_session, test_user)
         resp = client.post(
             f"/v2/partials/customers/{keep.id}/merge",
             data={"remove_id": str(keep.id), "confirmed": "true"},
@@ -2617,7 +2681,7 @@ class TestManualCompanyMerge:
 
     def test_merge_missing_remove_returns_400(self, client: TestClient, db_session: Session, test_user: User):
         """POST merge with nonexistent remove_id returns 400."""
-        keep, *_ = self._make_pair(db_session)
+        keep, *_ = self._make_pair(db_session, test_user)
         resp = client.post(
             f"/v2/partials/customers/{keep.id}/merge",
             data={"remove_id": "999999", "confirmed": "true"},
@@ -2630,7 +2694,7 @@ class TestManualCompanyMerge:
         """After merge, the loser's site belongs to keeper."""
         from app.models.crm import CustomerSite
 
-        keep, remove, site, *_ = self._make_pair(db_session)
+        keep, remove, site, *_ = self._make_pair(db_session, test_user)
         resp = client.post(
             f"/v2/partials/customers/{keep.id}/merge",
             data={"remove_id": str(remove.id), "confirmed": "true"},
@@ -2645,7 +2709,7 @@ class TestManualCompanyMerge:
         """After merge, the loser's activity belongs to keeper."""
         from app.models.intelligence import ActivityLog
 
-        keep, remove, _site, _contact, activity = self._make_pair(db_session)
+        keep, remove, _site, _contact, activity = self._make_pair(db_session, test_user)
         client.post(
             f"/v2/partials/customers/{keep.id}/merge",
             data={"remove_id": str(remove.id), "confirmed": "true"},
@@ -2657,7 +2721,7 @@ class TestManualCompanyMerge:
 
     def test_merge_deletes_loser(self, client: TestClient, db_session: Session, test_user: User):
         """After merge, the removed company is gone from DB."""
-        keep, remove, *_ = self._make_pair(db_session)
+        keep, remove, *_ = self._make_pair(db_session, test_user)
         remove_id = remove.id
         resp = client.post(
             f"/v2/partials/customers/{keep.id}/merge",
@@ -2669,7 +2733,7 @@ class TestManualCompanyMerge:
 
     def test_merge_response_redirects_to_keeper(self, client: TestClient, db_session: Session, test_user: User):
         """Merge response carries HX-Redirect header pointing to keeper detail."""
-        keep, remove, *_ = self._make_pair(db_session)
+        keep, remove, *_ = self._make_pair(db_session, test_user)
         resp = client.post(
             f"/v2/partials/customers/{keep.id}/merge",
             data={"remove_id": str(remove.id), "confirmed": "true"},
@@ -2685,8 +2749,8 @@ class TestManualCompanyMerge:
         A keeper with markup in its name must produce escaped output so the browser
         renders it as text, not as live HTML.
         """
-        keep = Company(name="<b>Evil Corp</b>", is_active=True)
-        remove = Company(name="Victim Corp", is_active=True)
+        keep = Company(name="<b>Evil Corp</b>", is_active=True, account_owner_id=test_user.id)
+        remove = Company(name="Victim Corp", is_active=True, account_owner_id=test_user.id)
         db_session.add_all([keep, remove])
         db_session.commit()
         resp = client.post(
@@ -2895,15 +2959,16 @@ class TestCRMMacroDedup:
         assert "Last Reply" in html
         assert "Never" in html
 
-    def test_header_partial_uses_canonical_badge_and_clocks(
+    def test_multi_site_unified_detail_has_canonical_badge_and_clocks(
         self, client: TestClient, db_session: Session, test_user: User
     ):
-        """The multi-site company-header rollup (header.html) renders the canonical
-        account_type_badge + cadence_clocks (the third copy of those, now unified)."""
+        """A MULTI-site account now opens the SAME unified detail (the header-only
+        rollup is retired): the canonical account_type_badge + cadence_clocks render in
+        that one unified surface."""
         from app.models.crm import CustomerSite
 
         co = self._make_company(db_session, account_type="Prospect", last_outbound_at=None)
-        # Two active sites → multi-site accordion → header partial.
+        # Two active sites — previously routed to the header-only fork; now unified.
         db_session.add_all(
             [
                 CustomerSite(company_id=co.id, site_name="HQ", is_active=True),
@@ -2912,17 +2977,23 @@ class TestCRMMacroDedup:
         )
         db_session.commit()
 
-        resp = client.get(f"/v2/partials/customers/{co.id}/header")
+        resp = client.get(f"/v2/partials/customers/{co.id}")
         assert resp.status_code == 200
         html = resp.text
         assert "Prospect" in html
         assert "Last Out" in html
         assert "Last Reply" in html
         assert "Never" in html
+        # The unified detail carries the full tab strip (no header-only fork).
+        assert 'aria-label="Account detail sections"' in html
 
-    def test_activity_tab_quote_and_rfq_badges_render(self, client: TestClient, db_session: Session, test_user: User):
-        """The unified activity timeline renders quote + RFQ status via the shared
-        quote_status_badge and the canonical activity_icon — labels preserved."""
+    def test_activity_tab_renders_canonical_icon_for_email_activity(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """The activity tab renders ActivityLog rows via canonical activity_icon macro.
+
+        RFQ contacts appear in the Emails section; Quotes are absent.
+        """
         from decimal import Decimal
 
         from app.models.intelligence import ActivityLog
@@ -2934,6 +3005,7 @@ class TestCRMMacroDedup:
         req = Requisition(name="REQ-MD-AT", customer_name=co.name, company_id=co.id, status="active")
         db_session.add(req)
         db_session.flush()
+        # RFQ and quote — must NOT appear in activity tab
         rfq = RfqContact(
             requisition_id=req.id,
             user_id=test_user.id,
@@ -2965,10 +3037,2204 @@ class TestCRMMacroDedup:
         resp = client.get(f"/v2/partials/customers/{co.id}/tab/activity")
         assert resp.status_code == 200
         html = resp.text
-        assert "Badge Vendor" in html
-        assert "QT-MD-AT" in html
+        # ActivityLog entry renders
         assert "Email Received" in html
         # Canonical activity_icon emits the h-8 w-8 rounded icon circle.
         assert "h-8 w-8" in html
-        # 'sent' badge is brand (unified) — no amber drift on either row.
-        assert "bg-amber-50 text-amber-700" not in html
+        # RFQ contact appears in Emails section; Quote is absent (own tab)
+        assert "Badge Vendor" in html, "RFQ contact must appear in Emails section"
+        assert "QT-MD-AT" not in html, "Quote must not appear in activity tab"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TestContactsTabHome — C2: Contacts tab as management home (add/edit/role)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestContactsTabHome:
+    """C2 TDD: Unified add/edit form + editable role + tab wrapper.
+
+    Written FIRST (failing) per TDD — implement endpoints + templates to pass.
+
+    Routes tested:
+      GET  /v2/partials/customers/{company_id}/contacts/add-form
+      POST /v2/partials/customers/{company_id}/contacts
+      POST /v2/partials/customers/{company_id}/sites/{sid}/contacts/{cid}/edit
+           (with HX-Target branch)
+    """
+
+    def _make_company_with_hq(self, db_session: Session, name: str = "Tab Home Co", owner: User | None = None):
+        from app.models.crm import CustomerSite, SiteContact
+
+        company = Company(name=name, is_active=True, account_owner_id=owner.id if owner else None)
+        db_session.add(company)
+        db_session.flush()
+        site = CustomerSite(company_id=company.id, site_name="HQ", site_type="hq", is_active=True)
+        db_session.add(site)
+        db_session.flush()
+        contact = SiteContact(
+            customer_site_id=site.id,
+            full_name="Alice Prime",
+            email="alice@tabco.com",
+            contact_role="buyer",
+            is_primary=True,
+        )
+        db_session.add(contact)
+        db_session.commit()
+        return company, site, contact
+
+    def _make_zero_site_company(self, db_session: Session, owner: User | None = None):
+        company = Company(name="Zero Site Corp", is_active=True, account_owner_id=owner.id if owner else None)
+        db_session.add(company)
+        db_session.commit()
+        return company
+
+    # ── GET add-form ─────────────────────────────────────────────────────
+
+    def test_get_add_form_returns_200(self, client: TestClient, db_session: Session, test_user: User):
+        """GET add-form renders 200 with site select and role select."""
+        company, site, _ = self._make_company_with_hq(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/contacts/add-form")
+        assert resp.status_code == 200
+
+    def test_get_add_form_contains_site_select(self, client: TestClient, db_session: Session, test_user: User):
+        """GET add-form includes a site_id select with the company's sites."""
+        company, site, _ = self._make_company_with_hq(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/contacts/add-form")
+        assert resp.status_code == 200
+        # Template uses single-quote HTML attrs — check for either quoting style
+        assert "site_id" in resp.text
+        assert "HQ" in resp.text
+
+    def test_get_add_form_contains_role_select(self, client: TestClient, db_session: Session, test_user: User):
+        """GET add-form includes a contact_role select with canonical roles."""
+        company, site, _ = self._make_company_with_hq(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/contacts/add-form")
+        assert resp.status_code == 200
+        assert "contact_role" in resp.text
+        assert "buyer_po" in resp.text
+        assert "specifier" in resp.text
+
+    def test_get_add_form_new_site_option_present(self, client: TestClient, db_session: Session, test_user: User):
+        """GET add-form includes a '+ new site' option in the site select."""
+        company, site, _ = self._make_company_with_hq(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/contacts/add-form")
+        assert resp.status_code == 200
+        assert "__new__" in resp.text
+
+    def test_get_add_form_404_unknown_company(self, client: TestClient, db_session: Session, test_user: User):
+        """GET add-form for unknown company returns 404."""
+        resp = client.get("/v2/partials/customers/99999/contacts/add-form")
+        assert resp.status_code == 404
+
+    # ── contacts-tab header + wrapper ────────────────────────────────────
+
+    def test_contacts_tab_has_wrapper_div(self, client: TestClient, db_session: Session, test_user: User):
+        """Contacts tab HTML contains the #contacts-tab-list wrapper div."""
+        company, _, _ = self._make_company_with_hq(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        assert resp.status_code == 200
+        assert 'id="contacts-tab-list"' in resp.text
+
+    def test_contacts_tab_has_add_contact_button(self, client: TestClient, db_session: Session, test_user: User):
+        """Contacts tab header includes an '+ Add Contact' modal trigger."""
+        company, _, _ = self._make_company_with_hq(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        assert resp.status_code == 200
+        assert "Add Contact" in resp.text
+
+    def test_contacts_tab_shows_contact_count(self, client: TestClient, db_session: Session, test_user: User):
+        """The Contacts surface shows the per-site contact count in its section header.
+
+        (The redundant "Contacts (N)" heading was retired in the IA redesign — the
+        breadcrumb + tab strip name the surface; the section header carries the count.)
+        """
+        company, _, _ = self._make_company_with_hq(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        assert resp.status_code == 200
+        # The section header reports the count for that site.
+        assert "1 contact" in resp.text
+
+    # ── POST create (contacts-tab) ────────────────────────────────────────
+
+    def test_post_create_contact_on_existing_site(self, client: TestClient, db_session: Session, test_user: User):
+        """POST create with valid site_id creates a SiteContact and returns grouped
+        list."""
+        from app.models.crm import SiteContact
+
+        company, site, _ = self._make_company_with_hq(db_session, owner=test_user)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/contacts",
+            data={
+                "site_id": str(site.id),
+                "full_name": "New Bob",
+                "email": "newbob@tabco.com",
+                "title": "Manager",
+                "contact_role": "buyer_po",
+            },
+        )
+        assert resp.status_code == 200
+        db_session.expire_all()
+        new_contact = db_session.query(SiteContact).filter_by(email="newbob@tabco.com").first()
+        assert new_contact is not None
+        assert new_contact.full_name == "New Bob"
+        assert new_contact.customer_site_id == site.id
+        # Response is the grouped list
+        assert "New Bob" in resp.text
+
+    def test_post_create_per_site_email_dedup(self, client: TestClient, db_session: Session, test_user: User):
+        """POST create with duplicate email on same site returns 409 (visible error) and
+        does not create a new contact row."""
+        from app.models.crm import SiteContact
+
+        company, site, _ = self._make_company_with_hq(db_session, owner=test_user)
+        # alice@tabco.com already exists on site
+        count_before = db_session.query(SiteContact).filter_by(customer_site_id=site.id).count()
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/contacts",
+            data={
+                "site_id": str(site.id),
+                "full_name": "Alice Duplicate",
+                "email": "alice@tabco.com",  # same email as existing contact
+            },
+        )
+        assert resp.status_code == 409
+        db_session.expire_all()
+        count_after = db_session.query(SiteContact).filter_by(customer_site_id=site.id).count()
+        assert count_after == count_before  # no new row
+
+    def test_post_create_zero_site_auto_creates_hq(self, client: TestClient, db_session: Session, test_user: User):
+        """POST create for a zero-site company auto-creates 'HQ' site + contact
+        atomically."""
+        from app.models.crm import CustomerSite, SiteContact
+
+        company = self._make_zero_site_company(db_session, owner=test_user)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/contacts",
+            data={
+                "site_id": "",  # no site selected
+                "full_name": "First Contact",
+                "email": "first@zerocorp.com",
+            },
+        )
+        assert resp.status_code == 200
+        db_session.expire_all()
+        site = db_session.query(CustomerSite).filter_by(company_id=company.id).first()
+        assert site is not None
+        contact = db_session.query(SiteContact).filter_by(customer_site_id=site.id).first()
+        assert contact is not None
+        assert contact.full_name == "First Contact"
+
+    def test_post_create_new_site_option(self, client: TestClient, db_session: Session, test_user: User):
+        """POST create with site_id=__new__ + new_site_name creates site and contact."""
+        from app.models.crm import CustomerSite, SiteContact
+
+        company, _, _ = self._make_company_with_hq(db_session, owner=test_user)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/contacts",
+            data={
+                "site_id": "__new__",
+                "new_site_name": "Shanghai Branch",
+                "full_name": "Wei Li",
+                "email": "wei@tabco.com",
+            },
+        )
+        assert resp.status_code == 200
+        db_session.expire_all()
+        new_site = db_session.query(CustomerSite).filter_by(company_id=company.id, site_name="Shanghai Branch").first()
+        assert new_site is not None
+        wei = db_session.query(SiteContact).filter_by(customer_site_id=new_site.id).first()
+        assert wei is not None
+        assert wei.full_name == "Wei Li"
+
+    def test_post_create_new_site_blank_name_returns_400(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """POST create with site_id=__new__ but blank new_site_name returns 400."""
+        company, _, _ = self._make_company_with_hq(db_session, owner=test_user)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/contacts",
+            data={"site_id": "__new__", "new_site_name": "", "full_name": "Orphan Bob"},
+        )
+        assert resp.status_code == 400
+
+    def test_post_create_missing_full_name_returns_400(self, client: TestClient, db_session: Session, test_user: User):
+        """POST create without full_name returns 400."""
+        company, site, _ = self._make_company_with_hq(db_session, owner=test_user)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/contacts",
+            data={"site_id": str(site.id), "full_name": ""},
+        )
+        assert resp.status_code == 400
+
+    def test_post_create_returns_grouped_list(self, client: TestClient, db_session: Session, test_user: User):
+        """POST create response contains contacts-tab-list contents (grouped list)."""
+        company, site, _ = self._make_company_with_hq(db_session, owner=test_user)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/contacts",
+            data={"site_id": str(site.id), "full_name": "Carol New", "email": "carol@tabco.com"},
+        )
+        assert resp.status_code == 200
+        # grouped list has site accordion headers
+        assert "HQ" in resp.text
+
+    # ── edit_site_contact — HX-Target branching + role writing ───────────
+
+    def test_edit_sets_contact_role_canonical(self, client: TestClient, db_session: Session, test_user: User):
+        """POST edit with a canonical contact_role persists it to the DB."""
+        from app.models.crm import SiteContact
+
+        company, site, contact = self._make_company_with_hq(db_session, owner=test_user)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
+            data={
+                "full_name": "Alice Prime",
+                "email": "alice@tabco.com",
+                "contact_role": "buyer_po",
+            },
+        )
+        assert resp.status_code == 200
+        db_session.expire_all()
+        updated = db_session.get(SiteContact, contact.id)
+        assert updated.contact_role == "buyer_po"
+
+    def test_edit_invalid_role_returns_400(self, client: TestClient, db_session: Session, test_user: User):
+        """POST edit with legacy 'decision_maker' role returns 400."""
+        company, site, contact = self._make_company_with_hq(db_session, owner=test_user)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
+            data={
+                "full_name": "Alice Prime",
+                "email": "alice@tabco.com",
+                "contact_role": "decision_maker",
+            },
+        )
+        assert resp.status_code == 400
+
+    def test_edit_blank_role_clears_to_null(self, client: TestClient, db_session: Session, test_user: User):
+        """POST edit with blank contact_role clears the field to NULL."""
+        from app.models.crm import SiteContact
+
+        company, site, contact = self._make_company_with_hq(db_session, owner=test_user)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
+            data={
+                "full_name": "Alice Prime",
+                "email": "alice@tabco.com",
+                "contact_role": "",
+            },
+        )
+        assert resp.status_code == 200
+        db_session.expire_all()
+        updated = db_session.get(SiteContact, contact.id)
+        assert updated.contact_role is None
+
+    def test_edit_hx_target_contacts_tab_list_renders_grouped_list(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """POST edit with HX-Target=contacts-tab-list returns the grouped list
+        partial."""
+        company, site, contact = self._make_company_with_hq(db_session, owner=test_user)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
+            data={"full_name": "Alice Prime", "email": "alice@tabco.com"},
+            headers={"HX-Target": "contacts-tab-list"},
+        )
+        assert resp.status_code == 200
+        # grouped list renders site accordion headers
+        assert "HQ" in resp.text
+        # should NOT be the site_contacts inline form (no showAdd Alpine state)
+        assert "showAdd" not in resp.text
+
+    def test_edit_hx_target_default_renders_grouped_list(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """POST edit without HX-Target now always returns grouped list
+        (site_contacts.html path retired — the Sites tab no longer carries a contact
+        editor)."""
+        company, site, contact = self._make_company_with_hq(db_session, owner=test_user)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
+            data={"full_name": "Alice Prime", "email": "alice@tabco.com"},
+        )
+        assert resp.status_code == 200
+        # grouped list renders site section header — not the old showAdd site_contacts form
+        assert "HQ" in resp.text
+        assert "showAdd" not in resp.text
+
+    def test_edit_writes_linkedin_url(self, client: TestClient, db_session: Session, test_user: User):
+        """POST edit with linkedin_url persists it to the DB."""
+        from app.models.crm import SiteContact
+
+        company, site, contact = self._make_company_with_hq(db_session, owner=test_user)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
+            data={
+                "full_name": "Alice Prime",
+                "email": "alice@tabco.com",
+                "linkedin_url": "https://linkedin.com/in/alice-prime",
+            },
+        )
+        assert resp.status_code == 200
+        db_session.expire_all()
+        updated = db_session.get(SiteContact, contact.id)
+        assert updated.linkedin_url == "https://linkedin.com/in/alice-prime"
+
+    def test_edit_writes_is_priority(self, client: TestClient, db_session: Session, test_user: User):
+        """POST edit with is_priority=1 sets the flag."""
+        from app.models.crm import SiteContact
+
+        company, site, contact = self._make_company_with_hq(db_session, owner=test_user)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
+            data={
+                "full_name": "Alice Prime",
+                "email": "alice@tabco.com",
+                "is_priority": "1",
+            },
+        )
+        assert resp.status_code == 200
+        db_session.expire_all()
+        updated = db_session.get(SiteContact, contact.id)
+        assert updated.is_priority is True
+
+    # ── Company-scoped edit-form route ───────────────────────────────────
+
+    def test_contact_edit_form_company_scoped_returns_form(
+        self,
+        client: TestClient,
+        db_session: Session,
+        test_user: User,
+        test_company: Company,
+        test_site,
+        test_contact,
+    ):
+        """GET /v2/partials/customers/{id}/contacts/{cid}/edit-form returns
+        _contact_form with correct target and values."""
+        resp = client.get(f"/v2/partials/customers/{test_company.id}/contacts/{test_contact.id}/edit-form")
+        assert resp.status_code == 200
+        html = resp.text
+        # Form must target #contacts-tab-list (not any site-specific id)
+        assert "contacts-tab-list" in html
+        # Contact's email must appear (Step 4: form uses first_name/last_name, not full_name input)
+        assert test_contact.email in html
+        # Role options must be present
+        assert "buyer_po" in html
+
+    def test_contacts_tab_create_response_contains_roles(
+        self,
+        client: TestClient,
+        db_session: Session,
+        test_user: User,
+        test_company: Company,
+        test_site,
+    ):
+        """POST to create contact returns grouped list HTML with role options."""
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
+        resp = client.post(
+            f"/v2/partials/customers/{test_company.id}/contacts",
+            data={"full_name": "Role Test", "site_id": str(test_site.id)},
+            headers={"HX-Target": "contacts-tab-list"},
+        )
+        assert resp.status_code == 200
+        assert "buyer_po" in resp.text
+
+    def test_delete_contact_response_contains_roles(
+        self,
+        client: TestClient,
+        db_session: Session,
+        test_user: User,
+        test_company: Company,
+        test_site,
+        test_contact,
+    ):
+        """DELETE contact with HX-Target=contacts-tab-list returns grouped list with
+        role options.
+
+        A second contact is added so the list is non-empty after deletion.
+        """
+        from app.models.crm import SiteContact
+
+        test_company.account_owner_id = test_user.id
+        # Add a second contact so the grouped list is non-empty after the first is deleted
+        second = SiteContact(
+            customer_site_id=test_site.id,
+            full_name="Second Contact",
+            email="second@acme.com",
+            contact_role="buyer_po",
+        )
+        db_session.add(second)
+        db_session.commit()
+
+        resp = client.delete(
+            f"/v2/partials/customers/{test_company.id}/sites/{test_site.id}/contacts/{test_contact.id}",
+            headers={"HX-Target": "contacts-tab-list"},
+        )
+        assert resp.status_code == 200
+        assert "buyer_po" in resp.text
+
+    def test_set_primary_response_contains_roles(
+        self,
+        client: TestClient,
+        db_session: Session,
+        test_user: User,
+        test_company: Company,
+        test_site,
+        test_contact,
+    ):
+        """POST set-primary with HX-Target=contacts-tab-list returns grouped list with
+        role options."""
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
+        resp = client.post(
+            f"/v2/partials/customers/{test_company.id}/sites/{test_site.id}/contacts/{test_contact.id}/primary",
+            headers={"HX-Target": "contacts-tab-list"},
+        )
+        assert resp.status_code == 200
+        assert "buyer_po" in resp.text
+
+    def test_edit_contact_response_contains_roles(
+        self,
+        client: TestClient,
+        db_session: Session,
+        test_user: User,
+        test_company: Company,
+        test_site,
+        test_contact,
+    ):
+        """POST edit contact with HX-Target=contacts-tab-list returns grouped list with
+        role options."""
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
+        resp = client.post(
+            f"/v2/partials/customers/{test_company.id}/sites/{test_site.id}/contacts/{test_contact.id}/edit",
+            data={"full_name": test_contact.full_name, "contact_role": "buyer_po"},
+            headers={"HX-Target": "contacts-tab-list"},
+        )
+        assert resp.status_code == 200
+        assert "buyer_po" in resp.text
+
+
+class TestC3KebabActionsAndCadence:
+    """C3 TDD: kebab (Edit/Delete/Set-Primary) on Contacts tab + cadence badge/sort.
+
+    Written FIRST (failing) to drive implementation per Step C3.
+    """
+
+    def _make_two_contacts(self, db_session: Session, *, overdue_days: int = 0, owner: User | None = None):
+        """One company, one site, two contacts.
+
+        If overdue_days > 0 the first contact has last_outbound_at that many days in the
+        past (overdue threshold is 30d).
+        """
+        from app.models.crm import CustomerSite, SiteContact
+
+        company = Company(name="Kebab Co", is_active=True, account_owner_id=owner.id if owner else None)
+        db_session.add(company)
+        db_session.flush()
+        site = CustomerSite(company_id=company.id, site_name="HQ", is_active=True)
+        db_session.add(site)
+        db_session.flush()
+
+        overdue_ts = None
+        if overdue_days > 0:
+            overdue_ts = datetime.now(timezone.utc) - timedelta(days=overdue_days)
+
+        contact_a = SiteContact(
+            customer_site_id=site.id,
+            full_name="Alpha Contact",
+            email="alpha@kebab.com",
+            is_primary=False,
+            last_outbound_at=overdue_ts,
+        )
+        contact_b = SiteContact(
+            customer_site_id=site.id,
+            full_name="Beta Contact",
+            email="beta@kebab.com",
+            is_primary=True,
+            last_outbound_at=None,
+        )
+        db_session.add_all([contact_a, contact_b])
+        db_session.commit()
+        return company, site, contact_a, contact_b
+
+    # ── Kebab menu rendered ─────────────────────────────────────────────
+
+    def test_contacts_tab_renders_kebab_button(self, client: TestClient, db_session: Session, test_user: User):
+        """Contacts tab includes the three-dot kebab button for real contacts."""
+        company, site, ca, cb = self._make_two_contacts(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        assert resp.status_code == 200
+        # Kebab three-dot SVG path is a distinctive substring
+        assert "10 6a2 2 0 110-4" in resp.text or "aria-label" in resp.text
+
+    def test_contacts_tab_renders_edit_action(self, client: TestClient, db_session: Session, test_user: User):
+        """Contacts tab kebab contains an Edit option dispatching open-modal."""
+        company, site, ca, cb = self._make_two_contacts(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        assert resp.status_code == 200
+        assert "edit-form" in resp.text
+
+    def test_contacts_tab_renders_delete_action(self, client: TestClient, db_session: Session, test_user: User):
+        """Contacts tab kebab contains a Delete hx-delete button."""
+        company, site, ca, cb = self._make_two_contacts(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        assert resp.status_code == 200
+        assert "hx-delete" in resp.text
+
+    def test_contacts_tab_renders_set_primary_when_not_primary(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """Set-Primary kebab item only appears for non-primary contacts."""
+        company, site, ca, cb = self._make_two_contacts(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        assert resp.status_code == 200
+        # Set Primary option must appear (at least one non-primary contact)
+        assert "primary" in resp.text.lower()
+
+    # ── Set-Primary via tab ─────────────────────────────────────────────
+
+    def test_set_primary_via_tab_flips_flag(self, client: TestClient, db_session: Session, test_user: User):
+        """POST primary with HX-Target=contacts-tab-list flips is_primary and returns
+        the grouped list."""
+        from app.models.crm import SiteContact
+
+        company, site, ca, cb = self._make_two_contacts(db_session, owner=test_user)
+        # ca is not primary — make it primary via tab
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{ca.id}/primary",
+            headers={"HX-Target": "contacts-tab-list"},
+        )
+        assert resp.status_code == 200
+        db_session.expire_all()
+        updated_a = db_session.get(SiteContact, ca.id)
+        updated_b = db_session.get(SiteContact, cb.id)
+        assert updated_a.is_primary is True
+        # previous primary must be unset
+        assert updated_b.is_primary is False
+
+    def test_set_primary_via_tab_returns_grouped_list(self, client: TestClient, db_session: Session, test_user: User):
+        """POST primary with HX-Target=contacts-tab-list re-renders grouped list (not
+        site_contacts.html)."""
+        company, site, ca, cb = self._make_two_contacts(db_session, owner=test_user)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{ca.id}/primary",
+            headers={"HX-Target": "contacts-tab-list"},
+        )
+        assert resp.status_code == 200
+        # grouped list has site accordion, not the inline showAdd form
+        assert "HQ" in resp.text
+        assert "showAdd" not in resp.text
+
+    def test_set_primary_via_tab_both_contacts_in_response(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """Grouped list re-render after primary includes all contacts under the site."""
+        company, site, ca, cb = self._make_two_contacts(db_session, owner=test_user)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{ca.id}/primary",
+            headers={"HX-Target": "contacts-tab-list"},
+        )
+        assert resp.status_code == 200
+        assert "Alpha Contact" in resp.text
+        assert "Beta Contact" in resp.text
+
+    # ── Delete via tab ──────────────────────────────────────────────────
+
+    def test_delete_via_tab_removes_contact(self, client: TestClient, db_session: Session, test_user: User):
+        """DELETE with HX-Target=contacts-tab-list removes the contact and re-renders
+        the grouped list."""
+        from app.models.crm import SiteContact
+
+        company, site, ca, cb = self._make_two_contacts(db_session, owner=test_user)
+        resp = client.delete(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{ca.id}",
+            headers={"HX-Target": "contacts-tab-list"},
+        )
+        assert resp.status_code == 200
+        db_session.expire_all()
+        assert db_session.get(SiteContact, ca.id) is None
+
+    def test_delete_via_tab_returns_grouped_list_not_empty(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """DELETE via tab re-renders grouped list with remaining contact (not empty)."""
+        company, site, ca, cb = self._make_two_contacts(db_session, owner=test_user)
+        resp = client.delete(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{ca.id}",
+            headers={"HX-Target": "contacts-tab-list"},
+        )
+        assert resp.status_code == 200
+        assert "Beta Contact" in resp.text
+        # Alpha is gone
+        assert "Alpha Contact" not in resp.text
+
+    def test_delete_last_contact_renders_invitational_empty_state(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """Deleting the last contact via the tab renders the invitational empty state
+        with + Add Contact CTA."""
+        from app.models.crm import CustomerSite, SiteContact
+
+        company = Company(name="Solo Co", is_active=True, account_owner_id=test_user.id)
+        db_session.add(company)
+        db_session.flush()
+        site = CustomerSite(company_id=company.id, site_name="Main", is_active=True)
+        db_session.add(site)
+        db_session.flush()
+        contact = SiteContact(
+            customer_site_id=site.id,
+            full_name="Only One",
+            email="one@solo.com",
+        )
+        db_session.add(contact)
+        db_session.commit()
+
+        resp = client.delete(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}",
+            headers={"HX-Target": "contacts-tab-list"},
+        )
+        assert resp.status_code == 200
+        # invitational CTA
+        assert "Add" in resp.text
+        # contact gone
+        assert "Only One" not in resp.text
+
+    def test_delete_without_hx_target_renders_grouped_list(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """DELETE without HX-Target now always returns grouped list (site_contacts.html
+        path retired — the Sites tab no longer carries a contact editor)."""
+        from app.models.crm import SiteContact
+
+        company, site, ca, cb = self._make_two_contacts(db_session, owner=test_user)
+        resp = client.delete(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{ca.id}",
+        )
+        assert resp.status_code == 200
+        db_session.expire_all()
+        assert db_session.get(SiteContact, ca.id) is None
+        # Returns the grouped list (remaining contact visible, old inline form gone)
+        assert "Beta Contact" in resp.text
+        assert "showAdd" not in resp.text
+
+    # ── Cadence badge and sort ──────────────────────────────────────────
+
+    def test_overdue_contact_shows_badge(self, client: TestClient, db_session: Session, test_user: User):
+        """A contact with last_outbound_at 45d ago shows an overdue badge in the grouped
+        list."""
+        company, site, ca, cb = self._make_two_contacts(db_session, overdue_days=45)
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        assert resp.status_code == 200
+        # Badge text like "Overdue 45d" must appear
+        assert "verdue" in resp.text  # case-insensitive partial
+
+    def test_null_clock_shows_no_badge(self, client: TestClient, db_session: Session, test_user: User):
+        """Contact with NULL last_outbound_at shows no overdue badge (NULL honesty)."""
+        company, site, ca, cb = self._make_two_contacts(db_session, overdue_days=0)
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        assert resp.status_code == 200
+        # No "overdue" text when no clock is set
+        assert "verdue" not in resp.text.lower()
+
+    def test_overdue_contact_sorts_before_null_clock(self, client: TestClient, db_session: Session, test_user: User):
+        """Within a site group, overdue contacts appear before contacts with no clock
+        (secondary sort: overdue-first)."""
+        company, site, ca, cb = self._make_two_contacts(db_session, overdue_days=45)
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        assert resp.status_code == 200
+        # Alpha Contact (overdue) should appear before Beta Contact (no clock)
+        pos_alpha = resp.text.find("Alpha Contact")
+        pos_beta = resp.text.find("Beta Contact")
+        assert pos_alpha != -1
+        assert pos_beta != -1
+        assert pos_alpha < pos_beta
+
+    def test_service_contact_rows_has_cadence_field(self, db_session: Session):
+        """company_contact_rows returns rows where real contacts have a 'cadence'
+        key."""
+        from app.models.crm import CustomerSite, SiteContact
+        from app.services.crm_service import company_contact_rows
+
+        company = Company(name="Cadence Svc Co", is_active=True)
+        db_session.add(company)
+        db_session.flush()
+        site = CustomerSite(company_id=company.id, site_name="HQ", is_active=True)
+        db_session.add(site)
+        db_session.flush()
+        contact = SiteContact(
+            customer_site_id=site.id,
+            full_name="Has Cadence",
+            last_outbound_at=datetime.now(timezone.utc) - timedelta(days=45),
+        )
+        db_session.add(contact)
+        db_session.commit()
+
+        rows = company_contact_rows(db_session, company.id)
+        real_rows = [r for r in rows if not r["legacy"]]
+        assert len(real_rows) == 1
+        assert "cadence" in real_rows[0]
+        assert real_rows[0]["cadence"] == "overdue"
+
+    def test_service_null_clock_cadence_is_new(self, db_session: Session):
+        """company_contact_rows assigns cadence='new' for contacts with NULL
+        last_outbound_at."""
+        from app.models.crm import CustomerSite, SiteContact
+        from app.services.crm_service import company_contact_rows
+
+        company = Company(name="Null Clock Co", is_active=True)
+        db_session.add(company)
+        db_session.flush()
+        site = CustomerSite(company_id=company.id, site_name="HQ", is_active=True)
+        db_session.add(site)
+        db_session.flush()
+        contact = SiteContact(
+            customer_site_id=site.id,
+            full_name="No Clock",
+            last_outbound_at=None,
+        )
+        db_session.add(contact)
+        db_session.commit()
+
+        rows = company_contact_rows(db_session, company.id)
+        real_rows = [r for r in rows if not r["legacy"]]
+        assert len(real_rows) == 1
+        assert real_rows[0]["cadence"] == "new"
+
+
+class TestC4SuggestedContactsUI:
+    """C4 TDD: Suggested-contacts UI loop.
+
+    Written FIRST (failing) per TDD — implement endpoints + templates to pass.
+
+    Routes tested:
+      GET  /v2/partials/customers/{company_id}/suggested-contacts
+      POST /v2/partials/customers/{company_id}/suggested-contacts/add
+    """
+
+    def _make_company_with_hq(self, db_session: Session, *, domain: str = "acme.com", owner: User | None = None):
+        from app.models.crm import CustomerSite, SiteContact
+
+        company = Company(
+            name="Suggested Co", is_active=True, domain=domain, account_owner_id=owner.id if owner else None
+        )
+        db_session.add(company)
+        db_session.flush()
+        site = CustomerSite(company_id=company.id, site_name="HQ", site_type="hq", is_active=True)
+        db_session.add(site)
+        db_session.flush()
+        contact = SiteContact(
+            customer_site_id=site.id,
+            full_name="Existing Alice",
+            email="alice@acme.com",
+        )
+        db_session.add(contact)
+        db_session.commit()
+        return company, site, contact
+
+    # ── "Find contacts" button on the Contacts tab ────────────────────────
+
+    def test_contacts_tab_shows_find_contacts_when_domain_set(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """Contacts tab shows 'Find contacts' button when company.domain is set."""
+        company, site, contact = self._make_company_with_hq(db_session, domain="acme.com")
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        assert resp.status_code == 200
+        assert "Find contacts" in resp.text
+
+    def test_contacts_tab_no_find_contacts_when_no_domain(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """Contacts tab hides 'Find contacts' button when no domain/website is set."""
+        company, site, contact = self._make_company_with_hq(db_session, domain="")
+        # Remove domain/website
+        company.domain = None
+        company.website = None
+        db_session.commit()
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        assert resp.status_code == 200
+        assert "Find contacts" not in resp.text
+
+    # ── GET /suggested-contacts renders _suggested_contacts.html ─────────
+
+    @patch("app.enrichment_service.find_suggested_contacts_with_errors", new_callable=AsyncMock)
+    def test_get_suggested_contacts_renders_html(
+        self, mock_contacts, client: TestClient, db_session: Session, test_user: User
+    ):
+        """GET suggested contacts for a company renders an HTML partial (not JSON)."""
+        mock_contacts.return_value = (
+            [{"full_name": "Bob Buyer", "email": "bob@acme.com", "title": "VP Procurement"}],
+            [],  # no errored providers
+        )
+        company, site, _ = self._make_company_with_hq(db_session)
+        resp = client.get(
+            f"/v2/partials/customers/{company.id}/suggested-contacts",
+            params={"domain": "acme.com"},
+        )
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers.get("content-type", "")
+        assert "Bob Buyer" in resp.text
+
+    @patch("app.enrichment_service.find_suggested_contacts_with_errors", new_callable=AsyncMock)
+    def test_get_suggested_contacts_zero_results_neutral_state(
+        self, mock_contacts, client: TestClient, db_session: Session, test_user: User
+    ):
+        """Zero results + no provider error → neutral 'No contacts found' state."""
+        mock_contacts.return_value = ([], [])
+        company, site, _ = self._make_company_with_hq(db_session)
+        resp = client.get(
+            f"/v2/partials/customers/{company.id}/suggested-contacts",
+            params={"domain": "acme.com"},
+        )
+        assert resp.status_code == 200
+        # Neutral empty state — no provider error badge
+        assert "No contacts found" in resp.text
+        # Should NOT show an error/warning banner
+        assert "Couldn" not in resp.text
+
+    @patch("app.enrichment_service.find_suggested_contacts_with_errors", new_callable=AsyncMock)
+    def test_get_suggested_contacts_provider_error_amber_state(
+        self, mock_contacts, client: TestClient, db_session: Session, test_user: User
+    ):
+        """Zero results + provider errored → amber 'Couldn't reach <provider>' state."""
+        mock_contacts.return_value = ([], ["hunter"])
+        company, site, _ = self._make_company_with_hq(db_session)
+        resp = client.get(
+            f"/v2/partials/customers/{company.id}/suggested-contacts",
+            params={"domain": "acme.com"},
+        )
+        assert resp.status_code == 200
+        # Amber error banner mentioning the provider
+        assert "hunter" in resp.text.lower()
+        # Should indicate something went wrong (Couldn't reach or try again)
+        assert "try again" in resp.text.lower() or "couldn" in resp.text.lower()
+
+    @patch("app.enrichment_service.find_suggested_contacts_with_errors", new_callable=AsyncMock)
+    def test_get_suggested_contacts_add_button_per_row(
+        self, mock_contacts, client: TestClient, db_session: Session, test_user: User
+    ):
+        """Suggested contacts list has an Add button per row."""
+        mock_contacts.return_value = (
+            [{"full_name": "Bob Buyer", "email": "bob@acme.com", "title": "VP Procurement"}],
+            [],
+        )
+        company, site, _ = self._make_company_with_hq(db_session)
+        resp = client.get(
+            f"/v2/partials/customers/{company.id}/suggested-contacts",
+            params={"domain": "acme.com"},
+        )
+        assert resp.status_code == 200
+        # Each row should have an Add action targeting the add endpoint
+        assert "suggested-contacts/add" in resp.text
+
+    # ── POST /suggested-contacts/add creates SiteContact + returns grouped list ──
+
+    def test_post_add_suggested_creates_site_contact(self, client: TestClient, db_session: Session, test_user: User):
+        """POST add creates a real SiteContact and returns grouped list HTML."""
+        from app.models.crm import SiteContact
+
+        company, site, _ = self._make_company_with_hq(db_session, owner=test_user)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/suggested-contacts/add",
+            data={
+                "site_id": str(site.id),
+                "full_name": "New Suggested",
+                "email": "new@acme.com",
+                "title": "Director",
+                "source": "hunter",
+                "email_verified": "1",
+            },
+        )
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers.get("content-type", "")
+        db_session.expire_all()
+        sc = db_session.query(SiteContact).filter_by(email="new@acme.com").first()
+        assert sc is not None
+        assert sc.full_name == "New Suggested"
+        assert sc.enrichment_source == "hunter"
+        assert sc.email_verified is True
+
+    def test_post_add_suggested_returns_grouped_list(self, client: TestClient, db_session: Session, test_user: User):
+        """POST add returns the re-rendered grouped list (not JSON)."""
+        company, site, _ = self._make_company_with_hq(db_session, owner=test_user)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/suggested-contacts/add",
+            data={
+                "site_id": str(site.id),
+                "full_name": "List Check",
+                "email": "listcheck@acme.com",
+            },
+        )
+        assert resp.status_code == 200
+        # Grouped list has accordion site headers
+        assert "HQ" in resp.text
+        # New contact appears in list
+        assert "List Check" in resp.text
+
+    def test_post_add_suggested_emits_toast_on_success(self, client: TestClient, db_session: Session, test_user: User):
+        """POST add emits an HX-Trigger toast header on success."""
+        company, site, _ = self._make_company_with_hq(db_session, owner=test_user)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/suggested-contacts/add",
+            data={
+                "site_id": str(site.id),
+                "full_name": "Toast User",
+                "email": "toast@acme.com",
+            },
+        )
+        assert resp.status_code == 200
+        trigger = resp.headers.get("HX-Trigger", "")
+        assert "showToast" in trigger
+
+    def test_post_add_suggested_dedup_reports_already_on_file(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """POST add for an existing contact reports 'already on file' via toast, not
+        silent no-op or 409."""
+        company, site, existing = self._make_company_with_hq(db_session, owner=test_user)
+        # alice@acme.com already exists
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/suggested-contacts/add",
+            data={
+                "site_id": str(site.id),
+                "full_name": "Alice Dupe",
+                "email": "alice@acme.com",  # same as existing contact
+            },
+        )
+        assert resp.status_code == 200
+        # Returns grouped list (still valid HTML response)
+        assert "text/html" in resp.headers.get("content-type", "")
+        # Toast header present, mentioning "already" or "on file"
+        trigger = resp.headers.get("HX-Trigger", "")
+        assert "showToast" in trigger
+        import json
+
+        trigger_data = json.loads(trigger)
+        toast_msg = (trigger_data.get("showToast") or {}).get("message", "")
+        assert "already" in toast_msg.lower() or "file" in toast_msg.lower()
+
+    def test_post_add_suggested_404_on_bad_company(self, client: TestClient, db_session: Session, test_user: User):
+        """POST add for unknown company returns 404."""
+        resp = client.post(
+            "/v2/partials/customers/99999/suggested-contacts/add",
+            data={"site_id": "1", "full_name": "Ghost"},
+        )
+        assert resp.status_code == 404
+
+    # ── Add from the enrich panel (from_enrich) returns a self-contained row ──
+
+    def test_post_add_suggested_from_enrich_returns_row_fragment(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """from_enrich=1 returns a single confirmation <li> (+ toast), NOT the grouped
+        list.
+
+        The enrich panel lives outside the Contacts tab (no #contacts-tab-list), so its
+        Add button must self-swap the clicked row instead of re-rendering the whole
+        contacts list.
+        """
+        from app.models.crm import SiteContact
+
+        company, site, _ = self._make_company_with_hq(db_session)
+        company.account_owner_id = test_user.id  # owner passes can_manage_account gate
+        db_session.commit()
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/suggested-contacts/add",
+            data={
+                "site_id": str(site.id),
+                "full_name": "Panel Add",
+                "email": "paneladd@acme.com",
+                "from_enrich": "1",
+            },
+        )
+        assert resp.status_code == 200
+        # Self-contained confirmation row, not the grouped accordion list
+        assert "<li" in resp.text
+        assert "Added" in resp.text
+        # The grouped list would contain the pre-existing "Existing Alice"; the fragment must not
+        assert "Existing Alice" not in resp.text
+        # Toast still fires
+        assert "showToast" in resp.headers.get("HX-Trigger", "")
+        # The contact was actually created
+        db_session.expire_all()
+        sc = db_session.query(SiteContact).filter_by(email="paneladd@acme.com").first()
+        assert sc is not None
+
+
+class TestFullWidthContactsForwardLayout:
+    """Pin the full-width, contacts-forward customer + vendor detail reshape.
+
+    The detail panel was capped at max-w-3xl and centered; contacts sat below 3 stacked
+    meta cards. The reshape goes full width, slims the account header to one line (+ a
+    collapsible Account settings block), and renders contacts as the primary multi-
+    column grid. These tests lock that intent so a revert fails CI.
+    """
+
+    def _make_company_with_contact(self, db_session: Session):
+        from app.models.crm import CustomerSite, SiteContact
+
+        company = Company(name="FullWidth Co", is_active=True)
+        db_session.add(company)
+        db_session.flush()
+        site = CustomerSite(company_id=company.id, site_name="HQ", is_active=True)
+        db_session.add(site)
+        db_session.flush()
+        contact = SiteContact(
+            customer_site_id=site.id,
+            full_name="Gridcell Greta",
+            email="greta@fullwidth.com",
+            phone="+14155551234",
+            is_primary=True,
+        )
+        db_session.add(contact)
+        db_session.commit()
+        return company, site, contact
+
+    def test_customer_detail_drops_max_width_cap(self, client: TestClient, db_session: Session, test_user: User):
+        """Customer detail no longer caps content at max-w-3xl (full panel width)."""
+        company, _, _ = self._make_company_with_contact(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}")
+        assert resp.status_code == 200
+        assert "max-w-3xl" not in resp.text
+
+    def test_customer_detail_has_slim_header_actions(self, client: TestClient, db_session: Session, test_user: User):
+        """The slim header carries the primary Add Contact + a VISIBLE labeled "Cadence
+        & settings" trigger (no longer kebab-buried), and the coverage chip (N contacts
+        · N sites)."""
+        company, _, _ = self._make_company_with_contact(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}")
+        assert resp.status_code == 200
+        html = resp.text
+        assert "+ Add Contact" in html
+        # Visible labeled affordance for cadence/tier/disposition (was "Account settings"
+        # kebab-only); the collapsible state var still drives the block.
+        assert "Cadence &amp; settings" in html
+        assert "showAcctSettings" in html
+        # Coverage chip and commercial strip survive the collapse into one line.
+        assert "1 contact" in html
+        assert "1 site" in html
+
+    def test_customer_detail_preserves_cadence_controls(self, client: TestClient, db_session: Session, test_user: User):
+        """Cadence tier setter + disposition control + clocks remain (in the
+        collapsible)."""
+        company, _, _ = self._make_company_with_contact(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}")
+        html = resp.text
+        # Tier setter form, disposition control, dual clocks all still rendered.
+        assert f"/v2/partials/customers/{company.id}/tier" in html
+        assert "disposition-control" in html
+        assert "Last Out" in html
+
+    def test_contacts_grid_container_class_present(self, client: TestClient, db_session: Session, test_user: User):
+        """Contacts render in a compact table (compact-table class), not single-column
+        cards.
+
+        The table layout replaced the old sm:grid-cols-2 card grid.
+        """
+        company, _, _ = self._make_company_with_contact(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        assert resp.status_code == 200
+        html = resp.text
+        assert "compact-table" in html
+        # Contact name and outreach actions survive the table layout.
+        assert "Gridcell Greta" in html
+        assert "data-outreach-log" in html
+
+    def test_workspace_auto_select_marker_present(self, client: TestClient, db_session: Session, test_user: User):
+        """The workspace auto-selects the first account over the untouched empty state
+        only — gated on the [data-cdm-empty] marker and a null selectedId."""
+        c = Company(name="AutoSelect Co", is_active=True)
+        db_session.add(c)
+        db_session.commit()
+        resp = client.get("/v2/partials/customers")
+        assert resp.status_code == 200
+        html = resp.text
+        assert "autoSelectFirst" in html
+        assert "data-cdm-empty" in html
+
+    def test_vendor_detail_drops_max_width_cap(self, client: TestClient, db_session: Session, test_user: User):
+        """Vendor detail no longer caps content at max-w-5xl (full panel width)."""
+        from app.models.vendors import VendorCard
+
+        vendor = VendorCard(display_name="FullWidth Vendor", normalized_name="fullwidth vendor")
+        db_session.add(vendor)
+        db_session.commit()
+        resp = client.get(f"/v2/partials/vendors/{vendor.id}")
+        assert resp.status_code == 200
+        assert "max-w-5xl" not in resp.text
+        # The 4 stats survive the compression into a slim strip.
+        assert "Sightings" in resp.text
+        assert "Win Rate" in resp.text
+
+
+class TestNoCache:
+    """Stage C §6: full-page /v2/* responses carry Cache-Control: no-cache.
+
+    Browsers heuristically cache HTML pages with no Cache-Control header.  After
+    a deploy the stale shell would reference old hashed-CSS/JS bundles, forcing
+    users to hard-refresh.  The fix: page_response() sets
+    Cache-Control: no-cache, must-revalidate on every base_page render.
+
+    HTMX partials and /static/assets/* are intentionally unaffected.
+    """
+
+    def _authed_client(self, test_user, db_session):
+        """Return a TestClient that passes authentication for the full-page route.
+
+        The /v2/* full-page routes call get_user(request, db) directly (NOT the
+        require_user FastAPI dependency), so we must also patch that function to return
+        the test user.
+        """
+        from unittest.mock import patch
+
+        from app.database import get_db
+        from app.dependencies import require_admin, require_buyer, require_fresh_token, require_user
+        from app.main import app
+
+        overrides = {
+            get_db: lambda: (yield db_session),
+            require_user: lambda: test_user,
+            require_admin: lambda: test_user,
+            require_buyer: lambda: test_user,
+            require_fresh_token: lambda: "mock-token",
+        }
+
+        def _override_db():
+            yield db_session
+
+        app.dependency_overrides[get_db] = _override_db
+        app.dependency_overrides[require_user] = lambda: test_user
+        app.dependency_overrides[require_admin] = lambda: test_user
+        app.dependency_overrides[require_buyer] = lambda: test_user
+        app.dependency_overrides[require_fresh_token] = lambda: "mock-token"
+
+        with patch("app.routers.htmx_views.get_user", return_value=test_user):
+            with TestClient(app) as c:
+                yield c
+
+        for dep in overrides:
+            app.dependency_overrides.pop(dep, None)
+
+    def test_v2_crm_full_page_has_no_cache_header(self, db_session, test_user):
+        """GET /v2/crm (full-page shell) returns Cache-Control: no-cache."""
+        from unittest.mock import patch
+
+        from app.database import get_db
+        from app.dependencies import require_admin, require_buyer, require_fresh_token, require_user
+        from app.main import app
+
+        def _override_db():
+            yield db_session
+
+        app.dependency_overrides[get_db] = _override_db
+        app.dependency_overrides[require_user] = lambda: test_user
+        app.dependency_overrides[require_admin] = lambda: test_user
+        app.dependency_overrides[require_buyer] = lambda: test_user
+        app.dependency_overrides[require_fresh_token] = lambda: "mock-token"
+
+        try:
+            with patch("app.routers.htmx_views.get_user", return_value=test_user):
+                with TestClient(app) as c:
+                    resp = c.get("/v2/crm")
+            assert resp.status_code == 200
+            cc = resp.headers.get("cache-control", "")
+            assert "no-cache" in cc, f"Expected Cache-Control: no-cache on /v2/crm, got: {cc!r}"
+        finally:
+            for dep in [get_db, require_user, require_admin, require_buyer, require_fresh_token]:
+                app.dependency_overrides.pop(dep, None)
+
+    def test_v2_customers_full_page_has_no_cache_header(self, db_session, test_user):
+        """GET /v2/customers (full-page shell) returns Cache-Control: no-cache."""
+        from unittest.mock import patch
+
+        from app.database import get_db
+        from app.dependencies import require_admin, require_buyer, require_fresh_token, require_user
+        from app.main import app
+
+        def _override_db():
+            yield db_session
+
+        app.dependency_overrides[get_db] = _override_db
+        app.dependency_overrides[require_user] = lambda: test_user
+        app.dependency_overrides[require_admin] = lambda: test_user
+        app.dependency_overrides[require_buyer] = lambda: test_user
+        app.dependency_overrides[require_fresh_token] = lambda: "mock-token"
+
+        try:
+            with patch("app.routers.htmx_views.get_user", return_value=test_user):
+                with TestClient(app) as c:
+                    resp = c.get("/v2/customers")
+            assert resp.status_code == 200
+            cc = resp.headers.get("cache-control", "")
+            assert "no-cache" in cc, f"Expected Cache-Control: no-cache on /v2/customers, got: {cc!r}"
+        finally:
+            for dep in [get_db, require_user, require_admin, require_buyer, require_fresh_token]:
+                app.dependency_overrides.pop(dep, None)
+
+    def test_partial_does_not_carry_no_cache_header(self, client: TestClient, test_user):
+        """HTMX partial /v2/partials/customers does NOT carry Cache-Control: no-cache.
+
+        Only the full-page shell needs the no-cache guard.  Partials are lightweight and
+        already keyed by server state; adding no-cache would break browser back/forward
+        caching of fragments unnecessarily.
+        """
+        resp = client.get("/v2/partials/customers")
+        assert resp.status_code == 200
+        cc = resp.headers.get("cache-control", "")
+        # Partials should NOT carry the no-cache directive (either no header at
+        # all, or something like 'no-store' from the framework is acceptable,
+        # but 'no-cache' must not be the explicit page-response injection).
+        # We check that the page_response() wrapper was NOT applied.
+        assert "must-revalidate" not in cc, "HTMX partial should not carry the page-response Cache-Control header"
+
+
+# ── Phase-0 CRM Foundations: HTMX form field surfacing tests ─────────────────
+
+
+class TestCompanyPhase0FormFields:
+    """HTMX create/edit form render tests and HTMX handler persistence tests."""
+
+    # ── create form renders all Phase-0 input names ──────────────────────────
+
+    def test_create_form_renders_phase0_inputs(self, client: TestClient):
+        """GET create-form contains input[name] for every Phase-0 field."""
+        resp = client.get("/v2/partials/customers/create-form")
+        assert resp.status_code == 200
+        html = resp.text
+        for field in [
+            "legal_name",
+            "employee_size",
+            "revenue_range",
+            "phone",
+            "hq_city",
+            "hq_state",
+            "hq_country",
+            "credit_terms",
+            "tax_id",
+            "source",
+        ]:
+            assert f'name="{field}"' in html, f"create_form missing input[name={field}]"
+
+    # ── edit form renders all Phase-0 input names ────────────────────────────
+
+    def test_edit_form_renders_phase0_inputs(self, client: TestClient, db_session: Session, test_user: User):
+        """GET edit-form for an existing company contains inputs for all Phase-0
+        fields."""
+        co = Company(
+            name="EditFields Co",
+            is_active=True,
+            legal_name="EditFields Corporation",
+            employee_size="51-200",
+            revenue_range="$1M-$10M",
+            hq_city="Denver",
+            hq_state="CO",
+            hq_country="United States",
+            phone="+13035550000",
+            credit_terms="Net 30",
+            tax_id="55-1234567",
+            source="inbound",
+        )
+        db_session.add(co)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{co.id}/edit-form")
+        assert resp.status_code == 200
+        html = resp.text
+        for field in [
+            "legal_name",
+            "employee_size",
+            "revenue_range",
+            "phone",
+            "hq_city",
+            "hq_state",
+            "hq_country",
+            "credit_terms",
+            "tax_id",
+            "source",
+        ]:
+            assert f'name="{field}"' in html, f"edit_form missing input[name={field}]"
+
+    def test_edit_form_prefills_existing_values(self, client: TestClient, db_session: Session, test_user: User):
+        """Edit form pre-fills Phase-0 fields with existing DB values."""
+        co = Company(
+            name="Prefill Co",
+            is_active=True,
+            legal_name="Prefill Legal LLC",
+            hq_city="Portland",
+            credit_terms="Net 45",
+            source="referral",
+        )
+        db_session.add(co)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{co.id}/edit-form")
+        assert resp.status_code == 200
+        html = resp.text
+        assert "Prefill Legal LLC" in html
+        assert "Portland" in html
+        assert "Net 45" in html
+
+    # ── HTMX create handler persists Phase-0 fields ──────────────────────────
+
+    def test_htmx_create_persists_phase0_fields(self, client: TestClient, db_session: Session, test_user: User):
+        """POST /v2/partials/customers/create with Phase-0 fields saves them."""
+        resp = client.post(
+            "/v2/partials/customers/create",
+            data={
+                "name": "HTMXCreate P0 Co",
+                "legal_name": "HTMXCreate P0 Corporation",
+                "employee_size": "11-50",
+                "revenue_range": "$1M-$10M",
+                "hq_city": "Boulder",
+                "hq_state": "CO",
+                "hq_country": "United States",
+                "credit_terms": "Net 30",
+                "tax_id": "77-7654321",
+                "source": "outbound",
+            },
+        )
+        assert resp.status_code == 200
+        co = db_session.query(Company).filter(Company.name == "HTMXCreate P0 Co").first()
+        assert co is not None
+        assert co.legal_name == "HTMXCreate P0 Corporation"
+        assert co.employee_size == "11-50"
+        assert co.revenue_range == "$1M-$10M"
+        assert co.hq_city == "Boulder"
+        assert co.hq_state == "CO"
+        assert co.hq_country == "US"
+        assert co.credit_terms == "Net 30"
+        assert co.tax_id == "77-7654321"
+        assert co.source == "outbound"
+
+    # ── HTMX edit handler persists Phase-0 fields ────────────────────────────
+
+    def test_htmx_edit_persists_phase0_fields(self, client: TestClient, db_session: Session, test_user: User):
+        """POST /v2/partials/customers/{id}/edit with Phase-0 fields saves them."""
+        co = Company(name="HTMXEdit P0 Co", is_active=True, account_owner_id=test_user.id)
+        db_session.add(co)
+        db_session.commit()
+
+        resp = client.post(
+            f"/v2/partials/customers/{co.id}/edit",
+            data={
+                "name": "HTMXEdit P0 Co",
+                "legal_name": "HTMXEdit P0 LLC",
+                "employee_size": "201-500",
+                "revenue_range": "$50M-$200M",
+                "hq_city": "Chicago",
+                "hq_state": "IL",
+                "hq_country": "United States",
+                "credit_terms": "Net 60",
+                "tax_id": "33-9876543",
+                "source": "sfdc",
+            },
+        )
+        assert resp.status_code == 200
+        db_session.refresh(co)
+        assert co.legal_name == "HTMXEdit P0 LLC"
+        assert co.employee_size == "201-500"
+        assert co.revenue_range == "$50M-$200M"
+        assert co.hq_city == "Chicago"
+        assert co.hq_country == "US"
+        assert co.credit_terms == "Net 60"
+        assert co.tax_id == "33-9876543"
+        assert co.source == "sfdc"
+
+    # ── Normalization: phone E.164 via HTMX path ─────────────────────────────
+
+    def test_htmx_create_normalizes_phone_e164(self, client: TestClient, db_session: Session, test_user: User):
+        """HTMX create handler stores phone in E.164 format."""
+        resp = client.post(
+            "/v2/partials/customers/create",
+            data={
+                "name": "PhoneNorm Create Co",
+                "phone": "555-000-0001",
+            },
+        )
+        assert resp.status_code == 200
+        co = db_session.query(Company).filter(Company.name == "PhoneNorm Create Co").first()
+        assert co is not None
+        assert co.phone is not None
+        assert co.phone.startswith("+"), f"Expected E.164 (leading +), got {co.phone!r}"
+
+    def test_htmx_edit_normalizes_phone_e164(self, client: TestClient, db_session: Session, test_user: User):
+        """HTMX edit handler normalizes phone to E.164."""
+        co = Company(name="PhoneNorm Edit Co", is_active=True, account_owner_id=test_user.id)
+        db_session.add(co)
+        db_session.commit()
+
+        resp = client.post(
+            f"/v2/partials/customers/{co.id}/edit",
+            data={
+                "name": "PhoneNorm Edit Co",
+                "phone": "555-000-0002",
+            },
+        )
+        assert resp.status_code == 200
+        db_session.refresh(co)
+        assert co.phone is not None
+        assert co.phone.startswith("+"), f"Expected E.164 (leading +), got {co.phone!r}"
+
+    # ── Normalization: hq_country via HTMX path ──────────────────────────────
+
+    def test_htmx_create_normalizes_hq_country(self, client: TestClient, db_session: Session, test_user: User):
+        """HTMX create normalizes 'United States' → 'US'."""
+        resp = client.post(
+            "/v2/partials/customers/create",
+            data={
+                "name": "CountryNorm Create Co",
+                "hq_country": "United States",
+            },
+        )
+        assert resp.status_code == 200
+        co = db_session.query(Company).filter(Company.name == "CountryNorm Create Co").first()
+        assert co is not None
+        assert co.hq_country == "US"
+
+    def test_htmx_edit_normalizes_hq_country(self, client: TestClient, db_session: Session, test_user: User):
+        """HTMX edit normalizes 'United States' → 'US'."""
+        co = Company(name="CountryNorm Edit Co", is_active=True, account_owner_id=test_user.id)
+        db_session.add(co)
+        db_session.commit()
+
+        resp = client.post(
+            f"/v2/partials/customers/{co.id}/edit",
+            data={
+                "name": "CountryNorm Edit Co",
+                "hq_country": "United States",
+            },
+        )
+        assert resp.status_code == 200
+        db_session.refresh(co)
+        assert co.hq_country == "US"
+
+    # ── Source: out-of-list value is preserved on blank submit ───────────────
+
+    def test_htmx_edit_preserves_out_of_list_source(self, client: TestClient, db_session: Session, test_user: User):
+        """Submitting source='' (blank sentinel) keeps the current enrichment source."""
+        co = Company(name="SourcePreserve Co", is_active=True, source="apollo", account_owner_id=test_user.id)
+        db_session.add(co)
+        db_session.commit()
+
+        # Submit with blank source — simulates the blank sentinel option being selected
+        resp = client.post(
+            f"/v2/partials/customers/{co.id}/edit",
+            data={
+                "name": "SourcePreserve Co",
+                "source": "",
+            },
+        )
+        assert resp.status_code == 200
+        db_session.refresh(co)
+        assert co.source == "apollo", f"Expected source 'apollo' preserved, got {co.source!r}"
+
+
+class TestCustomerTabDeepLink:
+    """Phase-0 Task B: account-detail tabs are deep-linkable via ?tab= param.
+
+    Verifies that the server honours the tab query param, renders the correct
+    active tab in the Alpine state initialiser, and emits the push-URL on tab
+    buttons so round-tripping a shared URL lands on the right tab.
+    """
+
+    def _make_company(self, db_session: Session) -> "Company":
+        from app.models.crm import CustomerSite
+
+        co = Company(name="DeepLink Co", is_active=True)
+        db_session.add(co)
+        db_session.flush()
+        site = CustomerSite(company_id=co.id, site_name="HQ", is_active=True)
+        db_session.add(site)
+        db_session.commit()
+        return co
+
+    def test_default_tab_is_contacts(self, client: TestClient, db_session: Session, test_user: User):
+        """No ?tab param → contacts tab is active (Alpine x-data shows contacts)."""
+        co = self._make_company(db_session)
+        resp = client.get(f"/v2/partials/customers/{co.id}")
+        assert resp.status_code == 200
+        assert "activeTab: 'contacts'" in resp.text
+
+    def test_tab_contacts_explicit(self, client: TestClient, db_session: Session, test_user: User):
+        """?tab=contacts explicitly → same as default."""
+        co = self._make_company(db_session)
+        resp = client.get(f"/v2/partials/customers/{co.id}?tab=contacts")
+        assert resp.status_code == 200
+        assert "activeTab: 'contacts'" in resp.text
+
+    def test_tab_sites_activates_sites(self, client: TestClient, db_session: Session, test_user: User):
+        """?tab=sites → activeTab is 'sites'; sites tab lazy-loads via hx-
+        trigger=load."""
+        co = self._make_company(db_session)
+        resp = client.get(f"/v2/partials/customers/{co.id}?tab=sites")
+        assert resp.status_code == 200
+        html = resp.text
+        assert "activeTab: 'sites'" in html
+        # The tab content div uses a lazy hx-get for non-contacts initial tab.
+        assert f"/v2/partials/customers/{co.id}/tab/sites" in html
+        assert 'hx-trigger="load"' in html
+
+    def test_tab_files_activates_files(self, client: TestClient, db_session: Session, test_user: User):
+        """?tab=files → activeTab is 'files'; files tab lazy-loads."""
+        co = self._make_company(db_session)
+        resp = client.get(f"/v2/partials/customers/{co.id}?tab=files")
+        assert resp.status_code == 200
+        html = resp.text
+        assert "activeTab: 'files'" in html
+        assert f"/v2/partials/customers/{co.id}/tab/files" in html
+        assert 'hx-trigger="load"' in html
+
+    def test_invalid_tab_falls_back_to_contacts(self, client: TestClient, db_session: Session, test_user: User):
+        """?tab=bogus → falls back to contacts silently (no 422/500)."""
+        co = self._make_company(db_session)
+        resp = client.get(f"/v2/partials/customers/{co.id}?tab=bogus")
+        assert resp.status_code == 200
+        assert "activeTab: 'contacts'" in resp.text
+
+    def test_tab_buttons_emit_push_url(self, client: TestClient, db_session: Session, test_user: User):
+        """Every tab button carries hx-push-url so the browser URL updates on click."""
+        co = self._make_company(db_session)
+        resp = client.get(f"/v2/partials/customers/{co.id}")
+        assert resp.status_code == 200
+        html = resp.text
+        # Check a sample of tabs.
+        assert f'hx-push-url="/v2/customers/{co.id}?tab=contacts"' in html
+        assert f'hx-push-url="/v2/customers/{co.id}?tab=sites"' in html
+        assert f'hx-push-url="/v2/customers/{co.id}?tab=activity"' in html
+
+    def test_contacts_tab_inlines_content(self, client: TestClient, db_session: Session, test_user: User):
+        """Contacts tab (default) inlines the contacts partial immediately — no lazy
+        load."""
+        co = self._make_company(db_session)
+        resp = client.get(f"/v2/partials/customers/{co.id}")
+        assert resp.status_code == 200
+        html = resp.text
+        # The contacts_tab.html includes the people-search input.
+        assert "contacts_tab" not in html or "hx-trigger" not in html.split("company-tab-content")[1][:200]
+        # No load trigger on the tab content container (contacts are inlined).
+        # The dup-suggestion + name-suggestion divs DO have hx-trigger=load; we check
+        # the company-tab-content div specifically has no load trigger on itself.
+        import re
+
+        tab_content_block = re.search(r'id="company-tab-content"[^>]*>', html)
+        assert tab_content_block, "company-tab-content div not found"
+        assert "hx-trigger" not in tab_content_block.group(0)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TestDispositionFilter — P0-C disposition and has_open_reqs filters
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestDispositionFilter:
+    """Tests for the new disposition and has_open_reqs account-list filters.
+
+    Routes tested:
+      GET /v2/partials/customers/account-list (all filter params)
+    """
+
+    def _make_company(self, db_session: Session, name: str, **kwargs) -> Company:
+        co = Company(name=name, is_active=True, **kwargs)
+        db_session.add(co)
+        db_session.commit()
+        db_session.refresh(co)
+        return co
+
+    def test_disposition_active_excludes_bucket(self, client: TestClient, db_session: Session, test_user: User):
+        """Disposition=active returns active accounts and excludes bucketed ones."""
+        active = self._make_company(db_session, "Active Corp")
+        bucketed = self._make_company(db_session, "Bucket Corp", disposition="bucket")
+
+        html = client.get("/v2/partials/customers/account-list?disposition=active").text
+        assert "Active Corp" in html
+        assert "Bucket Corp" not in html
+
+    def test_disposition_bucket_returns_only_bucketed(self, client: TestClient, db_session: Session, test_user: User):
+        """Disposition=bucket returns only bucketed accounts."""
+        active = self._make_company(db_session, "Active Corp 2")
+        bucketed = self._make_company(db_session, "Bucket Corp 2", disposition="bucket")
+
+        html = client.get("/v2/partials/customers/account-list?disposition=bucket").text
+        assert "Bucket Corp 2" in html
+        assert "Active Corp 2" not in html
+
+    def test_disposition_default_hides_bucketed(self, client: TestClient, db_session: Session, test_user: User):
+        """Default view (no disposition param) still suppresses bucketed accounts."""
+        active = self._make_company(db_session, "Active Corp 3")
+        bucketed = self._make_company(db_session, "Bucket Corp 3", disposition="bucket")
+
+        html = client.get("/v2/partials/customers/account-list").text
+        assert "Active Corp 3" in html
+        assert "Bucket Corp 3" not in html
+
+    def test_disposition_null_treated_as_active(self, client: TestClient, db_session: Session, test_user: User):
+        """Companies with NULL disposition appear under disposition=active (NULL is
+        active)."""
+        null_disp = self._make_company(db_session, "Null Disposition Co")  # disposition=None
+
+        html = client.get("/v2/partials/customers/account-list?disposition=active").text
+        assert "Null Disposition Co" in html
+
+    def test_has_open_reqs_true_returns_only_companies_with_open_reqs(
+        self,
+        client: TestClient,
+        db_session: Session,
+        test_user: User,
+    ):
+        """has_open_reqs=1 returns only companies that have at least one open
+        requisition."""
+        from app.models.sourcing import Requisition
+
+        with_req = self._make_company(db_session, "HasReq Corp")
+        without_req = self._make_company(db_session, "NoReq Corp")
+
+        req = Requisition(
+            name="Open Req",
+            company_id=with_req.id,
+            status="active",
+        )
+        db_session.add(req)
+        db_session.commit()
+
+        html = client.get("/v2/partials/customers/account-list?has_open_reqs=1").text
+        assert "HasReq Corp" in html
+        assert "NoReq Corp" not in html
+
+    def test_has_open_reqs_excludes_terminal_requisitions(
+        self,
+        client: TestClient,
+        db_session: Session,
+        test_user: User,
+    ):
+        """A company whose only requisitions are terminal is excluded by
+        has_open_reqs=1."""
+        from app.models.sourcing import Requisition
+
+        only_terminal = self._make_company(db_session, "TerminalOnly Corp")
+        req = Requisition(
+            name="Won Req",
+            company_id=only_terminal.id,
+            status="won",
+        )
+        db_session.add(req)
+        db_session.commit()
+
+        html = client.get("/v2/partials/customers/account-list?has_open_reqs=1").text
+        assert "TerminalOnly Corp" not in html
+
+    def test_disposition_bucket_composes_with_has_open_reqs(
+        self,
+        client: TestClient,
+        db_session: Session,
+        test_user: User,
+    ):
+        """Disposition=bucket and has_open_reqs=1 compose: only bucketed companies with
+        open reqs."""
+        from app.models.sourcing import Requisition
+
+        bucketed_with_req = self._make_company(db_session, "BucketWithReq Corp", disposition="bucket")
+        bucketed_no_req = self._make_company(db_session, "BucketNoReq Corp", disposition="bucket")
+        req = Requisition(
+            name="Bucket Open Req",
+            company_id=bucketed_with_req.id,
+            status="sourcing",
+        )
+        db_session.add(req)
+        db_session.commit()
+
+        html = client.get("/v2/partials/customers/account-list?disposition=bucket&has_open_reqs=1").text
+        assert "BucketWithReq Corp" in html
+        assert "BucketNoReq Corp" not in html
+
+    def test_has_open_reqs_composes_with_my_only(
+        self,
+        client: TestClient,
+        db_session: Session,
+        test_user: User,
+    ):
+        """has_open_reqs=1 composes with my_only=1."""
+        from app.models.sourcing import Requisition
+
+        mine_with_req = self._make_company(db_session, "MyReq Corp", account_owner_id=test_user.id)
+        other_with_req = self._make_company(db_session, "OtherReq Corp")
+
+        for co in (mine_with_req, other_with_req):
+            req = Requisition(name="Req", company_id=co.id, status="active")
+            db_session.add(req)
+        db_session.commit()
+
+        html = client.get("/v2/partials/customers/account-list?has_open_reqs=1&my_only=1").text
+        assert "MyReq Corp" in html
+        assert "OtherReq Corp" not in html
+
+    def test_disposition_filter_ui_controls_rendered(self, client: TestClient, db_session: Session, test_user: User):
+        """The workspace filter bar renders the disposition select and has_open_reqs
+        checkbox."""
+        resp = client.get("/v2/partials/customers")
+        assert resp.status_code == 200
+        html = resp.text
+        assert 'name="disposition"' in html
+        assert "Bucketed only" in html
+        assert 'name="has_open_reqs"' in html
+
+    def test_disposition_select_reflects_active_state(self, client: TestClient, db_session: Session, test_user: User):
+        """Disposition=active is pre-selected in the dropdown when passed to the
+        workspace."""
+        resp = client.get("/v2/partials/customers?disposition=active")
+        assert resp.status_code == 200
+        assert 'value="active" selected' in resp.text
+
+    def test_has_open_reqs_checkbox_reflects_state(self, client: TestClient, db_session: Session, test_user: User):
+        """has_open_reqs=1 checkbox is pre-checked when passed to the workspace."""
+        resp = client.get("/v2/partials/customers?has_open_reqs=1")
+        assert resp.status_code == 200
+        assert 'name="has_open_reqs"' in resp.text
+        assert "checked" in resp.text
+
+
+class TestAccountActivityTab:
+    """Tests for the company Activity tab — type-sectioned feed (Step 1 of core-CRM
+    plan).
+
+    Verifies:
+      (a) Quote rows/markup are absent from the activity tab response.
+      (b) Type-section headers (Calls/Emails/Meetings/Notes) appear for accounts that
+          have activities of those types.
+      (c) Date headers (Today/Yesterday/date) appear within each section.
+      (d) Other/system activities are in the collapsible Other section (hideOther).
+    """
+
+    @pytest.fixture()
+    def _activity_company(self, db_session: Session) -> Company:
+        """A company specifically for Activity tab tests."""
+        c = Company(name="Activity Test Co", is_active=True)
+        db_session.add(c)
+        db_session.commit()
+        db_session.refresh(c)
+        return c
+
+    @pytest.fixture()
+    def _mixed_activities(self, db_session: Session, _activity_company: Company, test_user: User):
+        """ActivityLog rows spanning all sections plus a variety of types."""
+        from app.models.intelligence import ActivityLog
+
+        # Anchor to noon UTC of the current day, NOT the literal current instant.
+        # The rows below place "today" activities at now - 1/2/3 hours; with a
+        # literal now() those land on the PREVIOUS calendar day when the suite
+        # runs within ~3h after UTC midnight, so the "Today" date header never
+        # renders and this test flakes. Noon ± a few hours stays on today's date
+        # regardless of run time, making the date-grouping assertions deterministic.
+        now = datetime.now(timezone.utc).replace(hour=12, minute=0, second=0, microsecond=0)
+        rows = [
+            ActivityLog(
+                company_id=_activity_company.id,
+                activity_type="call_logged",
+                channel="manual",
+                summary="Called procurement",
+                occurred_at=now - timedelta(hours=1),
+                user_id=test_user.id,
+            ),
+            ActivityLog(
+                company_id=_activity_company.id,
+                activity_type="email_sent",
+                channel="email",
+                summary="Sent availability update",
+                occurred_at=now - timedelta(hours=2),
+                user_id=test_user.id,
+            ),
+            ActivityLog(
+                company_id=_activity_company.id,
+                activity_type="rfq_sent",
+                channel="email",
+                summary="RFQ batch #42",
+                occurred_at=now - timedelta(hours=3),
+                user_id=test_user.id,
+            ),
+            ActivityLog(
+                company_id=_activity_company.id,
+                activity_type="meeting",
+                channel="manual",
+                summary="Quarterly review",
+                occurred_at=now - timedelta(days=2),
+                user_id=test_user.id,
+            ),
+            ActivityLog(
+                company_id=_activity_company.id,
+                activity_type="note",
+                channel="manual",
+                summary="Noted preferred payment terms",
+                occurred_at=now - timedelta(days=3),
+                user_id=test_user.id,
+            ),
+            ActivityLog(
+                company_id=_activity_company.id,
+                activity_type="status_changed",
+                channel="system",
+                summary="Status updated to active",
+                occurred_at=now - timedelta(days=1),
+                user_id=test_user.id,
+            ),
+        ]
+        db_session.add_all(rows)
+        db_session.commit()
+        return rows
+
+    def test_activity_tab_returns_200(self, client: TestClient, _activity_company: Company, _mixed_activities):
+        """GET company activity tab returns 200."""
+        resp = client.get(f"/v2/partials/customers/{_activity_company.id}/tab/activity")
+        assert resp.status_code == 200
+
+    def test_no_quote_markup_in_activity_tab(self, client: TestClient, _activity_company: Company, _mixed_activities):
+        """(a) Quote rows and quote-specific markup are absent from the activity tab."""
+        resp = client.get(f"/v2/partials/customers/{_activity_company.id}/tab/activity")
+        html = resp.text
+        # No quote detail link patterns
+        assert "/v2/quotes/" not in html
+        assert "/v2/partials/quotes/" not in html
+        # No quote-number or quote status badge CSS classes used exclusively for quotes
+        assert "quote_number" not in html
+        assert "quote-status" not in html
+
+    def test_section_headers_rendered_for_present_types(
+        self, client: TestClient, _activity_company: Company, _mixed_activities
+    ):
+        """(b) Section headers Calls/Emails/Meetings/Notes appear for types that
+        exist."""
+        resp = client.get(f"/v2/partials/customers/{_activity_company.id}/tab/activity")
+        html = resp.text
+        assert ">Calls<" in html
+        assert ">Emails<" in html
+        assert ">Meetings<" in html
+        assert ">Notes<" in html
+
+    def test_date_headers_appear_within_sections(
+        self, client: TestClient, _activity_company: Company, _mixed_activities
+    ):
+        """(c) Date headers (Today / Yesterday / date string) appear in section
+        bodies."""
+        from datetime import datetime, timedelta, timezone
+
+        resp = client.get(f"/v2/partials/customers/{_activity_company.id}/tab/activity")
+        html = resp.text
+        # Today's activities exist (call_logged + email_sent + rfq_sent)
+        assert "Today" in html
+        # status_changed is 1 day ago → "Yesterday" appears in the Other section
+        assert "Yesterday" in html
+        # The 3-day-old note renders as a %b %d, %Y date string (day_delta >= 2)
+        three_days_ago = (datetime.now(timezone.utc) - timedelta(days=3)).strftime("%b %d, %Y")
+        assert three_days_ago in html
+
+    def test_other_section_hidden_by_default(self, client: TestClient, _activity_company: Company, _mixed_activities):
+        """(d) Other section exists but is toggled via Alpine hideOther (x-show not
+        rendered)."""
+        resp = client.get(f"/v2/partials/customers/{_activity_company.id}/tab/activity")
+        html = resp.text
+        # Other section header is present
+        assert ">Other<" in html
+        # It uses Alpine x-show for collapsible body
+        assert "hideOther" in html
+
+    def test_absent_sections_not_rendered(self, client: TestClient, db_session: Session, test_user: User):
+        """Sections with no activities are not rendered (no empty section headers)."""
+        from app.models.intelligence import ActivityLog
+
+        co = Company(name="Sparse Activity Co", is_active=True)
+        db_session.add(co)
+        db_session.commit()
+
+        # Only one note — only Notes section should appear
+        db_session.add(
+            ActivityLog(
+                company_id=co.id,
+                activity_type="note",
+                channel="manual",
+                summary="Just a note",
+                occurred_at=datetime.now(timezone.utc),
+                user_id=test_user.id,
+            )
+        )
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{co.id}/tab/activity")
+        html = resp.text
+        assert ">Notes<" in html
+        assert ">Calls<" not in html
+        assert ">Emails<" not in html
+        assert ">Meetings<" not in html
+
+    def test_empty_state_when_no_activities(self, client: TestClient, db_session: Session):
+        """Empty state is shown when the company has no activities at all."""
+        co = Company(name="No Activity Co", is_active=True)
+        db_session.add(co)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{co.id}/tab/activity")
+        assert resp.status_code == 200
+        html = resp.text
+        assert "No activity recorded" in html
+
+    def test_meeting_type_in_meetings_section(self, client: TestClient, db_session: Session, test_user: User):
+        """New 'meeting' ActivityType lands in the Meetings section."""
+        from app.models.intelligence import ActivityLog
+
+        co = Company(name="MeetingOnly Co", is_active=True)
+        db_session.add(co)
+        db_session.commit()
+
+        db_session.add(
+            ActivityLog(
+                company_id=co.id,
+                activity_type="meeting",
+                channel="manual",
+                summary="Board call",
+                occurred_at=datetime.now(timezone.utc),
+                user_id=test_user.id,
+            )
+        )
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{co.id}/tab/activity")
+        html = resp.text
+        assert ">Meetings<" in html
+        assert ">Calls<" not in html
+
+
+class TestKnownFieldGrid:
+    """WS2: account detail renders a known-field grid; empty fields show '+ Add <label>'."""
+
+    def test_empty_tax_id_shows_add_affordance(self, client: TestClient, db_session: Session):
+        """Company with no tax_id: account detail shows '+ Add Tax ID'."""
+        co = Company(name="Grid Test Co", is_active=True)
+        db_session.add(co)
+        db_session.commit()
+        db_session.refresh(co)
+
+        resp = client.get(f"/v2/partials/customers/{co.id}")
+        assert resp.status_code == 200
+        assert "Add Tax ID" in resp.text
+
+    def test_filled_industry_shows_value(self, client: TestClient, db_session: Session):
+        """Company with industry set: account detail shows the industry value."""
+        co = Company(name="Industry Co", is_active=True, industry="Aerospace")
+        db_session.add(co)
+        db_session.commit()
+        db_session.refresh(co)
+
+        resp = client.get(f"/v2/partials/customers/{co.id}")
+        assert resp.status_code == 200
+        assert "Aerospace" in resp.text
+
+    def test_notes_always_rendered(self, client: TestClient, db_session: Session):
+        """Notes grid cell renders even when notes is None (shows '+ Add Notes')."""
+        co = Company(name="No Notes Co", is_active=True)
+        co.notes = None
+        db_session.add(co)
+        db_session.commit()
+        db_session.refresh(co)
+
+        resp = client.get(f"/v2/partials/customers/{co.id}")
+        assert resp.status_code == 200
+        assert "Add Notes" in resp.text
+
+    def test_contact_empty_email_shows_row(self, client: TestClient, db_session: Session):
+        """Contact with no email still renders a row in the compact table.
+
+        The old card showed an '+ Add Email' inline affordance; the compact table omits
+        that affordance (email is surfaced as '—') but the contact still appears and the
+        edit affordance (kebab / edit-form deeplink) is present.
+        """
+        from app.models.crm import CustomerSite, SiteContact
+
+        co = Company(name="Contact Grid Co", is_active=True)
+        db_session.add(co)
+        db_session.flush()
+        site = CustomerSite(company_id=co.id, site_name="HQ", is_active=True)
+        db_session.add(site)
+        db_session.flush()
+        contact = SiteContact(customer_site_id=site.id, full_name="No Email Contact")
+        db_session.add(contact)
+        db_session.commit()
+        db_session.refresh(co)
+
+        resp = client.get(f"/v2/partials/customers/{co.id}")
+        assert resp.status_code == 200
+        assert "No Email Contact" in resp.text
+        # Edit affordance is still present (kebab menu points to edit-form)
+        assert f"contacts/{contact.id}/edit-form" in resp.text
+
+
+# ── WS4: modal edit-form coverage gaps ───────────────────────────────────────
+
+
+class TestWS4AccountModalFields:
+    """WS4: account edit modal renders domain/linkedin_url/account_type inputs and
+    persists them via apply_company_field."""
+
+    def _make_company(self, db_session: Session, **kwargs) -> Company:
+        co = Company(name="WS4 Acct Co", is_active=True, **kwargs)
+        db_session.add(co)
+        db_session.commit()
+        return co
+
+    def test_edit_form_renders_domain_input(self, client: TestClient, db_session: Session, test_user: User):
+        """GET edit-form contains input[name=domain]."""
+        co = self._make_company(db_session)
+        resp = client.get(f"/v2/partials/customers/{co.id}/edit-form")
+        assert resp.status_code == 200
+        assert 'name="domain"' in resp.text
+
+    def test_edit_form_renders_linkedin_url_input(self, client: TestClient, db_session: Session, test_user: User):
+        """GET edit-form contains input[name=linkedin_url]."""
+        co = self._make_company(db_session)
+        resp = client.get(f"/v2/partials/customers/{co.id}/edit-form")
+        assert resp.status_code == 200
+        assert 'name="linkedin_url"' in resp.text
+
+    def test_edit_form_renders_account_type_select(self, client: TestClient, db_session: Session, test_user: User):
+        """GET edit-form contains select[name=account_type] with canonical options."""
+        co = self._make_company(db_session)
+        resp = client.get(f"/v2/partials/customers/{co.id}/edit-form")
+        assert resp.status_code == 200
+        assert 'name="account_type"' in resp.text
+        for val in ["Customer", "Prospect", "Partner", "Competitor"]:
+            assert val in resp.text
+
+    def test_edit_form_prefills_domain(self, client: TestClient, db_session: Session, test_user: User):
+        """Edit form pre-fills domain with existing value."""
+        co = self._make_company(db_session, domain="prefill-domain.com")
+        resp = client.get(f"/v2/partials/customers/{co.id}/edit-form")
+        assert resp.status_code == 200
+        assert "prefill-domain.com" in resp.text
+
+    def test_modal_edit_persists_domain(self, client: TestClient, db_session: Session, test_user: User):
+        """POST edit with domain persists to DB."""
+        co = self._make_company(db_session, account_owner_id=test_user.id)
+        resp = client.post(
+            f"/v2/partials/customers/{co.id}/edit",
+            data={"name": co.name, "domain": "modal-domain.com"},
+        )
+        assert resp.status_code == 200
+        db_session.refresh(co)
+        assert co.domain == "modal-domain.com"
+
+    def test_modal_edit_persists_linkedin_url(self, client: TestClient, db_session: Session, test_user: User):
+        """POST edit with linkedin_url persists to DB."""
+        co = self._make_company(db_session, account_owner_id=test_user.id)
+        resp = client.post(
+            f"/v2/partials/customers/{co.id}/edit",
+            data={"name": co.name, "linkedin_url": "https://linkedin.com/company/ws4test"},
+        )
+        assert resp.status_code == 200
+        db_session.refresh(co)
+        assert co.linkedin_url == "https://linkedin.com/company/ws4test"
+
+    def test_modal_edit_persists_account_type(self, client: TestClient, db_session: Session, test_user: User):
+        """POST edit with account_type persists valid choice to DB."""
+        co = self._make_company(db_session, account_owner_id=test_user.id)
+        resp = client.post(
+            f"/v2/partials/customers/{co.id}/edit",
+            data={"name": co.name, "account_type": "Partner"},
+        )
+        assert resp.status_code == 200
+        db_session.refresh(co)
+        assert co.account_type == "Partner"
+
+    def test_modal_edit_blank_account_type_clears(self, client: TestClient, db_session: Session, test_user: User):
+        """POST edit with blank account_type clears it to None."""
+        co = self._make_company(db_session, account_type="Customer", account_owner_id=test_user.id)
+        resp = client.post(
+            f"/v2/partials/customers/{co.id}/edit",
+            data={"name": co.name, "account_type": ""},
+        )
+        assert resp.status_code == 200
+        db_session.refresh(co)
+        assert co.account_type is None
+
+
+class TestWS4SiteEditModal:
+    """WS4: site edit modal renders owner select and persists owner_id."""
+
+    def _make_company_with_site(self, db_session: Session):
+        from app.models.crm import CustomerSite
+
+        co = Company(name="WS4 Site Co", is_active=True)
+        db_session.add(co)
+        db_session.flush()
+        site = CustomerSite(company_id=co.id, site_name="HQ", site_type="hq", is_active=True)
+        db_session.add(site)
+        db_session.commit()
+        return co, site
+
+    def test_site_edit_modal_renders_owner_select(self, client: TestClient, db_session: Session, test_user: User):
+        """GET site edit-form contains select[name=owner_id]."""
+        co, site = self._make_company_with_site(db_session)
+        resp = client.get(f"/v2/partials/customers/{co.id}/sites/{site.id}/edit-form")
+        assert resp.status_code == 200
+        assert "name='owner_id'" in resp.text or 'name="owner_id"' in resp.text
+
+    def test_site_edit_persists_owner_id(self, client: TestClient, db_session: Session, test_user: User):
+        """POST site edit with owner_id persists it to DB."""
+
+        co, site = self._make_company_with_site(db_session)
+        co.account_owner_id = test_user.id
+        db_session.commit()
+        resp = client.post(
+            f"/v2/partials/customers/{co.id}/sites/{site.id}/edit",
+            data={"site_name": "HQ", "owner_id": str(test_user.id)},
+        )
+        assert resp.status_code == 200
+        db_session.refresh(site)
+        assert site.owner_id == test_user.id
+
+
+class TestWS4CreateCompanySiteType:
+    """WS4: create_company produces HQ site with site_type='hq' (not 'headquarters')."""
+
+    def test_create_company_hq_site_type_is_hq(self, client: TestClient, db_session: Session, test_user: User):
+        """POST create produces default site with site_type='hq'."""
+        from app.models.crm import CustomerSite
+
+        resp = client.post(
+            "/v2/partials/customers/create",
+            data={"name": "WS4 New Co HQ"},
+        )
+        assert resp.status_code == 200
+        co = db_session.query(Company).filter(Company.name == "WS4 New Co HQ").first()
+        assert co is not None
+        site = db_session.query(CustomerSite).filter(CustomerSite.company_id == co.id).first()
+        assert site is not None
+        assert site.site_type == "hq"
+
+
+class TestMultiSiteOwnership:
+    """Phase 1 ownership cleanup: one user may own multiple sites (rule removed)."""
+
+    def test_one_user_can_own_two_sites(self, client: TestClient, db_session: Session, test_user: User):
+        """POST create-site twice with the same owner_id must both succeed (200).
+
+        The old one-site-per-user rule has been removed so that ownership can be
+        modelled flexibly across sites under the same account.
+        """
+        from app.models.crm import CustomerSite
+
+        company = Company(name="Multi Site Owner Co", is_active=True, account_owner_id=test_user.id)
+        db_session.add(company)
+        db_session.commit()
+
+        resp1 = client.post(
+            f"/v2/partials/customers/{company.id}/sites",
+            data={"site_name": "Site A", "owner_id": str(test_user.id)},
+        )
+        assert resp1.status_code == 200, f"First site create failed: {resp1.text}"
+
+        resp2 = client.post(
+            f"/v2/partials/customers/{company.id}/sites",
+            data={"site_name": "Site B", "owner_id": str(test_user.id)},
+        )
+        assert resp2.status_code == 200, f"Second site create with same owner failed: {resp2.text}"
+
+        sites = db_session.query(CustomerSite).filter(CustomerSite.company_id == company.id).all()
+        owned = [s for s in sites if s.owner_id == test_user.id]
+        assert len(owned) == 2, f"Expected 2 sites owned by same user, got {len(owned)}"

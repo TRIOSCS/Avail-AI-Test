@@ -120,16 +120,6 @@
         "setup_notes": "Teams → Channel → Connectors → Incoming Webhook → copy URL. Team/Channel IDs from Teams admin or Graph API."
     },
     {
-        "name": "apollo_enrichment",
-        "display_name": "Apollo.io",
-        "category": "enrichment",
-        "source_type": "enrichment",
-        "description": "Contact and company enrichment — finds decision-maker emails, phone numbers, titles, and company firmographics for vendor outreach.",
-        "signup_url": "https://www.apollo.io",
-        "env_vars": ["APOLLO_API_KEY"],
-        "setup_notes": "Sign up at apollo.io → Settings → API Keys → Generate. Free tier: 10K enrichments/month. Used to enrich VendorCard contacts."
-    },
-    {
         "name": "explorium_enrichment",
         "display_name": "Explorium",
         "category": "enrichment",
@@ -164,10 +154,10 @@
         "display_name": "Clay",
         "category": "enrichment",
         "source_type": "enrichment",
-        "description": "AI-powered enrichment platform — waterfall contact lookup, intent signals, and automated outreach sequencing.",
+        "description": "Enrichment platform accessed via the Clay MCP connector (OAuth Connect). No API key required — authenticate via Settings → API Keys → Connect Clay.",
         "signup_url": "https://www.clay.com",
-        "env_vars": ["CLAY_API_KEY"],
-        "setup_notes": "Sign up at clay.com → Settings → API → Generate key. Credits-based pricing. Used for enrichment waterfalls and contact discovery."
+        "env_vars": [],
+        "setup_notes": "Connect via Settings → API Keys → 'Connect Clay' OAuth button. No API key or environment variable is needed; auth is handled via OAuth Connect."
     },
     {
         "name": "netcomponents",
@@ -208,5 +198,95 @@
         "signup_url": "https://developer.8x8.com",
         "env_vars": ["EIGHT_BY_EIGHT_API_KEY", "EIGHT_BY_EIGHT_PBX_ID", "EIGHT_BY_EIGHT_USERNAME", "EIGHT_BY_EIGHT_PASSWORD", "EIGHT_BY_EIGHT_TIMEZONE"],
         "setup_notes": "8x8 Admin Console → API Management → Create API key. PBX ID from your 8x8 account. Used for automatic call activity capture."
+    },
+    {
+        "name": "ai_live_web",
+        "display_name": "AI Web Search",
+        "category": "ai",
+        "source_type": "ai_search",
+        "description": "Claude-powered live web search for part availability.",
+        "signup_url": "https://console.anthropic.com",
+        "env_vars": [],
+        "setup_notes": "No key required. Uses your Anthropic key; on when that is configured."
+    },
+    {
+        "name": "sam_gov_enrichment",
+        "display_name": "SAM.gov",
+        "category": "enrichment",
+        "source_type": "enrichment",
+        "description": "Free U.S. federal supplier/contractor data.",
+        "signup_url": "https://sam.gov",
+        "env_vars": [],
+        "setup_notes": "No key required. Free public API."
+    },
+    {
+        "name": "findchips",
+        "display_name": "FindChips (Supplyframe)",
+        "category": "api",
+        "source_type": "aggregator",
+        "description": "Supplyframe aggregator — searches distributor inventory and pricing across authorized and independent channels.",
+        "signup_url": "https://www.findchips.com/developers",
+        "env_vars": [],
+        "setup_notes": "On the roadmap — connector not yet built. Watch for API access at findchips.com/developers."
+    },
+    {
+        "name": "future",
+        "display_name": "Future Electronics",
+        "category": "api",
+        "source_type": "authorized",
+        "description": "Authorized global distributor covering semiconductors, passives, and interconnects. Real-time pricing and inventory via their partner API.",
+        "signup_url": "https://www.futureelectronics.com",
+        "env_vars": [],
+        "setup_notes": "On the roadmap — connector not yet built. API access requires a Future Electronics distributor account."
+    },
+    {
+        "name": "heilind",
+        "display_name": "Heilind Electronics",
+        "category": "api",
+        "source_type": "authorized",
+        "description": "Authorized distributor specializing in connectors, relays, sensors, and wire/cable. Real-time stock and pricing.",
+        "signup_url": "https://www.heilind.com",
+        "env_vars": [],
+        "setup_notes": "On the roadmap — connector not yet built. API access requires a Heilind distributor account."
+    },
+    {
+        "name": "lcsc",
+        "display_name": "LCSC Electronics",
+        "category": "api",
+        "source_type": "authorized",
+        "description": "LCSC is a large Asian authorized distributor with 900K+ component SKUs. REST API provides real-time pricing and stock.",
+        "signup_url": "https://lcsc.com/api",
+        "env_vars": [],
+        "setup_notes": "On the roadmap — connector not yet built. LCSC offers a public API; register at lcsc.com for credentials."
+    },
+    {
+        "name": "rochester",
+        "display_name": "Rochester Electronics",
+        "category": "api",
+        "source_type": "authorized",
+        "description": "Authorized EOL and obsolete component specialist — 15B+ units of end-of-life semiconductors. Ideal for legacy and sustaining programs.",
+        "signup_url": "https://www.rocelec.com",
+        "env_vars": [],
+        "setup_notes": "On the roadmap — connector not yet built. API access requires a Rochester Electronics account."
+    },
+    {
+        "name": "thebrokersite",
+        "display_name": "The Broker Forum (TBF)",
+        "category": "scraper",
+        "source_type": "broker",
+        "description": "Independent broker marketplace with 500M+ line items from global independent distributors. Browser-automated search.",
+        "signup_url": "https://www.thebrokersite.com",
+        "env_vars": ["TBF_USERNAME", "TBF_PASSWORD"],
+        "setup_notes": "Browser automation with membership login. Runs as external tbf worker systemd service. Results ingested via shared DB."
+    },
+    {
+        "name": "verical",
+        "display_name": "Verical (Arrow Marketplace)",
+        "category": "scraper",
+        "source_type": "broker",
+        "description": "Arrow-owned excess and obsolete inventory marketplace with 600M+ components from 1,500+ suppliers worldwide.",
+        "signup_url": "https://www.verical.com",
+        "env_vars": [],
+        "setup_notes": "On the roadmap — connector not yet built. Browser-automated or REST API access via Verical/Arrow partner program."
     }
 ]

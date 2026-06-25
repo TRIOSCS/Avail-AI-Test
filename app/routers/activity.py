@@ -20,12 +20,25 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
-from ..constants import ActivityType, Channel, Direction, EventType, OutreachChannel
+from ..constants import (
+    MEANINGFUL_CALL_OUTCOMES,
+    ActivityType,
+    Channel,
+    Direction,
+    EventType,
+    OutreachChannel,
+)
 from ..database import get_db
 from ..dependencies import require_user
 from ..models import ActivityLog, Company, CustomerSite, SiteContact, User, VendorCard
-from ..schemas.activity import ActivityTimelineResponse, CallInitiatedRequest, OutreachInitiatedRequest
+from ..schemas.activity import (
+    ActivityTimelineResponse,
+    CallInitiatedRequest,
+    CallOutcomeRequest,
+    OutreachInitiatedRequest,
+)
 from ..services.activity_service import bump_company_site_activity, log_outreach_initiated
 from ..utils.phone_utils import format_phone_display, format_phone_e164
 
@@ -252,6 +265,53 @@ def outreach_initiated(
         logger.exception("outreach-initiated error")
         db.rollback()
         raise HTTPException(500, "Failed to record outreach")
+
+
+@router.post("/{activity_id}/call-outcome", status_code=200)
+def record_call_outcome(
+    activity_id: int,
+    body: CallOutcomeRequest,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Stamp a call outcome (connected/voicemail/no-answer/left-message) onto an
+    existing ActivityLog.
+
+    Called from the post-outreach outcome prompt in the CDM workspace. Returns 404 for
+    any lookup failure to avoid existence leaks. Rate-limited under its own
+    'call_outcome' bucket (separate from the outreach bucket — recording an outcome must
+    not spend outreach tokens).
+    """
+    try:
+        if not _check_rate_limit(user.id, bucket="call_outcome", limit=_OUTREACH_RATE_LIMIT):
+            raise HTTPException(429, "Too many requests — try again in a minute")
+
+        record = db.get(ActivityLog, activity_id)
+        if record is None or record.user_id != user.id or record.activity_type != ActivityType.CALL_LOGGED:
+            raise HTTPException(404, "Activity not found")
+
+        note = body.note.strip() if body.note else None
+        patch = {**(record.details or {}), "call_outcome": body.outcome.value}
+        if note:
+            patch["outcome_note"] = note
+        record.details = patch
+        flag_modified(record, "details")
+
+        if note:
+            existing = record.notes or ""
+            record.notes = (existing + "\n" + note).strip()
+
+        record.is_meaningful = body.outcome in MEANINGFUL_CALL_OUTCOMES
+
+        db.commit()
+        return {"ok": True, "outcome": body.outcome.value}
+
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("call-outcome error")
+        db.rollback()
+        raise HTTPException(500, "Failed to record call outcome")
 
 
 @router.get("/account/{company_id}", response_model=ActivityTimelineResponse)

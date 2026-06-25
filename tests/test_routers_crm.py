@@ -282,7 +282,9 @@ class TestCompanies:
         data = resp.json()
         assert len(data["matches"]) >= 1
 
-    def test_update_company(self, client, db_session, test_company):
+    def test_update_company(self, client, db_session, test_company, test_user):
+        test_company.account_owner_id = test_user.id  # owner passes can_manage_account gate
+        db_session.commit()
         resp = client.put(
             f"/api/companies/{test_company.id}",
             json={"notes": "Updated notes"},
@@ -781,8 +783,11 @@ class TestEnrichment:
     )
     @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
     @patch("app.enrichment_service.apply_enrichment_to_company")
-    def test_enrich_company_success(self, mock_apply, mock_enrich, mock_cred, client, db_session, test_company):
+    def test_enrich_company_success(
+        self, mock_apply, mock_enrich, mock_cred, client, db_session, test_company, test_user
+    ):
         test_company.domain = "acme.com"
+        test_company.account_owner_id = test_user.id  # owner passes can_manage_account gate
         db_session.commit()
         mock_enrich.return_value = {"industry": "Electronics"}
         mock_apply.return_value = ["industry"]
@@ -790,6 +795,9 @@ class TestEnrichment:
         resp = client.post(f"/api/enrich/company/{test_company.id}")
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
+        # The dead enrich_customer_account stub is no longer called from this endpoint,
+        # so its no_providers key must not appear in the JSON contract.
+        assert "customer_enrichment" not in resp.json()
 
     @patch(
         "app.routers.crm.enrichment.get_credential_cached",
@@ -805,10 +813,13 @@ class TestEnrichment:
     )
     @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
     @patch("app.enrichment_service.apply_enrichment_to_company")
-    def test_enrich_company_no_domain(self, mock_apply, mock_enrich, mock_cred, client, db_session, test_company):
+    def test_enrich_company_no_domain(
+        self, mock_apply, mock_enrich, mock_cred, client, db_session, test_company, test_user
+    ):
         """Company with no domain/website raises 400."""
         test_company.domain = None
         test_company.website = None
+        test_company.account_owner_id = test_user.id  # owner passes can_manage_account gate
         db_session.commit()
 
         resp = client.post(f"/api/enrich/company/{test_company.id}")
@@ -821,11 +832,13 @@ class TestEnrichment:
     @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
     @patch("app.enrichment_service.apply_enrichment_to_company")
     def test_enrich_company_with_override_domain(
-        self, mock_apply, mock_enrich, mock_cred, client, db_session, test_company
+        self, mock_apply, mock_enrich, mock_cred, client, db_session, test_company, test_user
     ):
         """Override domain in the payload."""
         mock_enrich.return_value = {}
         mock_apply.return_value = []
+        test_company.account_owner_id = test_user.id  # owner passes can_manage_account gate
+        db_session.commit()
 
         resp = client.post(
             f"/api/enrich/company/{test_company.id}",
@@ -978,7 +991,13 @@ class TestEnrichment:
         )
         assert resp.status_code == 404
 
-    def test_add_suggested_to_site_success(self, client, db_session, test_customer_site):
+    def test_add_suggested_to_site_success(self, client, db_session, test_customer_site, test_user):
+        """Creates a real SiteContact row; does NOT write legacy site.contact_*
+        fields."""
+        # Grant the acting user (client → test_user) ownership of the site's company so
+        # the can_manage_account gate on add-to-site passes.
+        db_session.get(Company, test_customer_site.company_id).account_owner_id = test_user.id
+        db_session.commit()
         resp = client.post(
             "/api/suggested-contacts/add-to-site",
             json={
@@ -989,14 +1008,259 @@ class TestEnrichment:
                     "phone": "+1-555-0100",
                     "title": "VP Sales",
                     "linkedin_url": "https://linkedin.com/in/suggested",
+                    "source": "hunter",
+                    "email_verified": True,
                 },
             },
         )
         assert resp.status_code == 200
-        assert resp.json()["ok"] is True
+        body = resp.json()
+        assert body["ok"] is True
+        assert body["added"] == 1
+        assert "contact_id" in body
+
+        sc = (
+            db_session.query(SiteContact)
+            .filter_by(customer_site_id=test_customer_site.id, email="suggested@acme.com")
+            .first()
+        )
+        assert sc is not None
+        assert sc.full_name == "Suggested Person"
+        assert sc.title == "VP Sales"
+        assert sc.phone == "+1-555-0100"
+        assert sc.linkedin_url == "https://linkedin.com/in/suggested"
+        assert sc.enrichment_source == "hunter"
+        assert sc.email_verified is True
+
+        # Legacy site.contact_* fields must NOT be overwritten — neither field may change
         db_session.refresh(test_customer_site)
-        assert test_customer_site.contact_name == "Suggested Person"
-        assert test_customer_site.contact_email == "suggested@acme.com"
+        assert test_customer_site.contact_name == "Jane Doe", "Legacy contact_name must not be overwritten"
+        assert test_customer_site.contact_email == "jane@acme-electronics.com", (
+            "Legacy contact_email must not be overwritten"
+        )
+
+    def test_add_suggested_to_site_dedup_same_email(self, client, db_session, test_customer_site, test_user):
+        """Posting the same email twice returns added:0 on the second call; only one row
+        exists."""
+        db_session.get(Company, test_customer_site.company_id).account_owner_id = test_user.id
+        db_session.commit()
+        payload = {
+            "site_id": test_customer_site.id,
+            "contact": {
+                "full_name": "First Post",
+                "email": "dedup@acme.com",
+            },
+        }
+        resp1 = client.post("/api/suggested-contacts/add-to-site", json=payload)
+        assert resp1.status_code == 200
+        assert resp1.json()["added"] == 1
+
+        resp2 = client.post("/api/suggested-contacts/add-to-site", json=payload)
+        assert resp2.status_code == 200
+        assert resp2.json()["added"] == 0
+
+        count = (
+            db_session.query(SiteContact)
+            .filter_by(customer_site_id=test_customer_site.id, email="dedup@acme.com")
+            .count()
+        )
+        assert count == 1
+
+    def test_add_suggested_to_site_lowercase_email_dedup(self, client, db_session, test_customer_site, test_user):
+        """Email dedup is case-insensitive (UPPER vs lower → still dedups)."""
+        db_session.get(Company, test_customer_site.company_id).account_owner_id = test_user.id
+        db_session.commit()
+        resp1 = client.post(
+            "/api/suggested-contacts/add-to-site",
+            json={
+                "site_id": test_customer_site.id,
+                "contact": {"full_name": "Alice", "email": "Alice@ACME.COM"},
+            },
+        )
+        assert resp1.json()["added"] == 1
+
+        resp2 = client.post(
+            "/api/suggested-contacts/add-to-site",
+            json={
+                "site_id": test_customer_site.id,
+                "contact": {"full_name": "Alice Again", "email": "alice@acme.com"},
+            },
+        )
+        assert resp2.json()["added"] == 0
+
+    def test_add_suggested_to_site_name_dedup_null_email(self, client, db_session, test_customer_site, test_user):
+        """When email is absent, dedup by case-insensitive full_name within the site."""
+        db_session.get(Company, test_customer_site.company_id).account_owner_id = test_user.id
+        db_session.commit()
+        resp1 = client.post(
+            "/api/suggested-contacts/add-to-site",
+            json={
+                "site_id": test_customer_site.id,
+                "contact": {"full_name": "No Email Person"},
+            },
+        )
+        assert resp1.json()["added"] == 1
+
+        resp2 = client.post(
+            "/api/suggested-contacts/add-to-site",
+            json={
+                "site_id": test_customer_site.id,
+                "contact": {"full_name": "no email person"},
+            },
+        )
+        assert resp2.json()["added"] == 0
+
+    # ── HTMX result panel (content negotiation on HX-Request) ─────────────
+
+    @patch(
+        "app.routers.crm.enrichment.get_credential_cached",
+        side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None,
+    )
+    @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
+    @patch("app.enrichment_service.apply_enrichment_to_company")
+    @patch("app.enrichment_service.find_suggested_contacts_with_errors", new_callable=AsyncMock)
+    def test_enrich_company_hx_returns_html(
+        self, mock_find, mock_apply, mock_enrich, mock_cred, client, db_session, test_company, test_user
+    ):
+        """HTMX request renders an HTML result panel (not raw JSON) with firmographics +
+        contacts."""
+        test_company.domain = "acme.com"
+        test_company.legal_name = "Acme Electronics Inc"
+        test_company.account_owner_id = test_user.id  # owner passes can_manage_account gate
+        db_session.commit()
+        mock_enrich.return_value = {"industry": "Electronics", "legal_name": "Acme Electronics Inc"}
+        mock_apply.return_value = ["industry"]
+        mock_find.return_value = (
+            [
+                {
+                    "full_name": "Jane Buyer",
+                    "title": "Procurement Mgr",
+                    "email": "jane@acme.com",
+                    "source": "hunter",
+                    "verified": True,
+                }
+            ],
+            [],
+        )
+
+        resp = client.post(f"/api/enrich/company/{test_company.id}", headers={"HX-Request": "true"})
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers.get("content-type", "")
+        assert not resp.text.lstrip().startswith("{")  # not raw JSON
+        # Firmographics rendered from the stored record
+        assert "Acme Electronics Inc" in resp.text
+        assert "Electronic Components" in resp.text
+        # Newly-updated field gets an "Updated" pill
+        assert "Updated" in resp.text
+        # Discovered contact surfaced with an Add form flagged from_enrich
+        assert "Jane Buyer" in resp.text
+        assert "suggested-contacts/add" in resp.text
+        assert "from_enrich" in resp.text
+
+    @patch(
+        "app.routers.crm.enrichment.get_credential_cached",
+        side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None,
+    )
+    @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
+    @patch("app.enrichment_service.apply_enrichment_to_company")
+    @patch("app.enrichment_service.find_suggested_contacts_with_errors", new_callable=AsyncMock)
+    def test_enrich_company_hx_website_javascript_uri_not_an_href(
+        self, mock_find, mock_apply, mock_enrich, mock_cred, client, db_session, test_company, test_user
+    ):
+        """A stored javascript:/data: website must never be emitted as a clickable href.
+
+        Guards against XSS: HTML-escaping the text doesn't neutralize a dangerous URL
+        scheme in an href, so the link must be scheme-validated (safe_url).
+        """
+        test_company.domain = "acme.com"
+        test_company.website = "javascript://%0aalert(document.cookie)"
+        test_company.account_owner_id = test_user.id  # owner passes can_manage_account gate
+        db_session.commit()
+        mock_enrich.return_value = {}
+        mock_apply.return_value = []
+        mock_find.return_value = ([], [])
+
+        resp = client.post(f"/api/enrich/company/{test_company.id}", headers={"HX-Request": "true"})
+        assert resp.status_code == 200
+        body = resp.text.lower()
+        # The dangerous scheme must not appear as the target of any href (single/double-quoted).
+        assert "href='javascript:" not in body
+        assert 'href="javascript:' not in body
+        assert "href='data:" not in body
+        assert 'href="data:' not in body
+
+    @patch(
+        "app.routers.crm.enrichment.get_credential_cached",
+        side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None,
+    )
+    @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
+    @patch("app.enrichment_service.apply_enrichment_to_company")
+    @patch("app.enrichment_service.find_suggested_contacts_with_errors", new_callable=AsyncMock)
+    def test_enrich_company_hx_graceful_degradation(
+        self, mock_find, mock_apply, mock_enrich, mock_cred, client, db_session, test_company, test_user
+    ):
+        """Contact discovery failure still renders firmographics; shows an amber
+        'couldn't reach' banner."""
+        test_company.domain = "acme.com"
+        test_company.account_owner_id = test_user.id  # owner passes can_manage_account gate
+        db_session.commit()
+        mock_enrich.return_value = {"industry": "Electronics"}
+        mock_apply.return_value = ["industry"]
+        mock_find.side_effect = RuntimeError("clay down")
+
+        resp = client.post(f"/api/enrich/company/{test_company.id}", headers={"HX-Request": "true"})
+        assert resp.status_code == 200
+        assert "Electronic Components" in resp.text  # firmographics still render
+        assert "Couldn" in resp.text  # amber "Couldn't reach" banner
+
+    @patch(
+        "app.routers.crm.enrichment.get_credential_cached",
+        side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None,
+    )
+    @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
+    @patch("app.enrichment_service.apply_enrichment_to_company")
+    @patch("app.enrichment_service.find_suggested_contacts_with_errors", new_callable=AsyncMock)
+    def test_enrich_company_hx_no_updates_shows_current(
+        self, mock_find, mock_apply, mock_enrich, mock_cred, client, db_session, test_company, test_user
+    ):
+        """Already-enriched company (empty updated_fields) shows 'Already up to date',
+        not raw JSON."""
+        test_company.domain = "acme.com"
+        test_company.account_owner_id = test_user.id  # owner passes can_manage_account gate
+        db_session.commit()
+        mock_enrich.return_value = {"industry": "Electronics"}
+        mock_apply.return_value = []  # nothing changed — the user's real scenario
+        mock_find.return_value = ([], [])
+
+        resp = client.post(f"/api/enrich/company/{test_company.id}", headers={"HX-Request": "true"})
+        assert resp.status_code == 200
+        assert "Already up to date" in resp.text
+        assert not resp.text.lstrip().startswith("{")
+
+    @patch(
+        "app.routers.crm.enrichment.get_credential_cached",
+        side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None,
+    )
+    @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
+    @patch("app.enrichment_service.apply_enrichment_to_vendor")
+    def test_enrich_vendor_hx_firmographics_only(
+        self, mock_apply, mock_enrich, mock_cred, client, db_session, test_vendor_card
+    ):
+        """Vendor HTMX request renders firmographics HTML with NO contact discovery this
+        pass."""
+        test_vendor_card.domain = "arrow.com"
+        test_vendor_card.legal_name = "Arrow Electronics Inc"
+        db_session.commit()
+        mock_enrich.return_value = {"legal_name": "Arrow Electronics Inc"}
+        mock_apply.return_value = ["legal_name"]
+
+        resp = client.post(f"/api/enrich/vendor/{test_vendor_card.id}", headers={"HX-Request": "true"})
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers.get("content-type", "")
+        assert "Arrow Electronics Inc" in resp.text
+        # Firmographics-only: no contact Add affordance for vendors
+        assert "from_enrich" not in resp.text
+        assert "suggested-contacts/add" not in resp.text
 
 
 # ── Sync logs ─────────────────────────────────────────────────────────
@@ -1235,6 +1499,38 @@ class TestOffersAdditional:
         for g in data["groups"]:
             if g.get("historical_offers"):
                 assert len(g["historical_offers"]) >= 1
+
+    def test_list_offers_attachment_uses_web_url_key(self, client, db_session, test_requisition, test_offer, test_user):
+        """Fix C: offer attachment dicts in list_offers use serialize(), emitting
+        'web_url' and 'kind' — not the old 'library_web_url' key."""
+        req_item = test_requisition.requirements[0]
+        test_offer.requirement_id = req_item.id
+        db_session.commit()
+
+        att = OfferAttachment(
+            offer_id=test_offer.id,
+            file_name="spec.pdf",
+            library_web_url="https://onedrive.example.com/spec.pdf",
+            content_type="application/pdf",
+            size_bytes=1024,
+            uploaded_by_id=test_user.id,
+        )
+        db_session.add(att)
+        db_session.commit()
+
+        resp = client.get(f"/api/requisitions/{test_requisition.id}/offers")
+        assert resp.status_code == 200
+        data = resp.json()
+        all_atts = []
+        for g in data.get("groups", []):
+            for o in g.get("offers", []):
+                all_atts.extend(o.get("attachments", []))
+
+        assert len(all_atts) >= 1
+        for a in all_atts:
+            assert "web_url" in a, "serialize() key 'web_url' must be present"
+            assert "kind" in a, "serialize() key 'kind' must be present"
+            assert "library_web_url" not in a, "old key 'library_web_url' must NOT be present"
 
 
 # ── Quotes: additional coverage ───────────────────────────────────────
@@ -1876,7 +2172,7 @@ class TestOneDrive:
         assert resp.status_code == 200
         data = resp.json()
         assert data["file_name"] == "test.pdf"
-        assert data["onedrive_url"] == "https://onedrive.com/file"
+        assert data["web_url"] == "https://onedrive.com/file"
 
     @patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fake-token")
     @patch("app.http_client.http.put", new_callable=AsyncMock)
@@ -1955,8 +2251,8 @@ class TestOneDrive:
         att = OfferAttachment(
             offer_id=test_offer.id,
             file_name="old.pdf",
-            onedrive_item_id="drive-item-999",
-            onedrive_url="https://onedrive.com/old",
+            library_item_id="drive-item-999",
+            library_web_url="https://onedrive.com/old",
             uploaded_by_id=test_user.id,
         )
         db_session.add(att)
@@ -1973,7 +2269,7 @@ class TestOneDrive:
         att = OfferAttachment(
             offer_id=test_offer.id,
             file_name="local.pdf",
-            onedrive_item_id=None,
+            library_item_id=None,
             uploaded_by_id=test_user.id,
         )
         db_session.add(att)
@@ -2055,40 +2351,6 @@ class TestCustomerImportErrors:
         data = resp.json()
         assert len(data["errors"]) >= 1
         assert "Row 2" in data["errors"][0]
-
-
-class TestEnrichCustomerWaterfallException:
-    """Test customer waterfall enrichment exception handling (lines 66-67)."""
-
-    @patch(
-        "app.routers.crm.enrichment.get_credential_cached",
-        side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None,
-    )
-    @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
-    @patch("app.enrichment_service.apply_enrichment_to_company")
-    def test_waterfall_exception_caught(
-        self, mock_apply, mock_enrich, mock_cred, client, db_session, test_company, monkeypatch
-    ):
-        """Customer waterfall enrichment exception is caught and doesn't break the
-        request."""
-        from app.config import settings
-
-        monkeypatch.setattr(settings, "customer_enrichment_enabled", True)
-        test_company.domain = "acme.com"
-        db_session.commit()
-        mock_enrich.return_value = {"industry": "Electronics"}
-        mock_apply.return_value = ["industry"]
-
-        with patch(
-            "app.services.customer_enrichment_service.enrich_customer_account",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("Waterfall API down"),
-        ):
-            resp = client.post(f"/api/enrich/company/{test_company.id}")
-        assert resp.status_code == 200
-        assert resp.json()["ok"] is True
-        # No customer_enrichment key since waterfall failed
-        assert "customer_enrichment" not in resp.json()
 
 
 # ── Requisition status transitions ────────────────────────────────────
@@ -2191,7 +2453,7 @@ class TestOneDriveDeleteError:
         att = OfferAttachment(
             offer_id=test_offer.id,
             file_name="fail-delete.pdf",
-            onedrive_item_id="drive-item-fail",
+            library_item_id="drive-item-fail",
             uploaded_by_id=test_user.id,
         )
         db_session.add(att)
@@ -2367,8 +2629,10 @@ class TestCompanyTags:
         "app.utils.claude_client.claude_json",
         new_callable=AsyncMock,
     )
-    def test_analyze_tags_endpoint(self, mock_claude, client, db_session, test_company):
+    def test_analyze_tags_endpoint(self, mock_claude, client, db_session, test_company, test_user):
         """POST /api/companies/{id}/analyze-tags triggers analysis."""
+        test_company.account_owner_id = test_user.id  # owner passes can_manage_account gate
+        db_session.commit()
         mock_claude.return_value = {
             "brands": ["IBM", "HP"],
             "commodities": ["Server", "Networking"],
@@ -2416,8 +2680,10 @@ class TestCompanyTags:
         "app.utils.claude_client.claude_json",
         new_callable=AsyncMock,
     )
-    def test_analyze_tags_no_requisitions(self, mock_claude, client, db_session, test_company):
+    def test_analyze_tags_no_requisitions(self, mock_claude, client, db_session, test_company, test_user):
         """Analysis with no requisition data should not call Claude."""
+        test_company.account_owner_id = test_user.id  # owner passes can_manage_account gate
+        db_session.commit()
         resp = client.post(f"/api/companies/{test_company.id}/analyze-tags")
         assert resp.status_code == 200
         # Claude should not have been called (no parts data)
@@ -2467,8 +2733,10 @@ class TestCompanyCreateDuplicates:
 
 class TestCompanySummarize:
     @patch("app.services.account_summary_service.generate_account_summary", new_callable=AsyncMock, return_value=None)
-    def test_summarize_returns_empty_when_none(self, mock_gen, client, db_session, test_company):
+    def test_summarize_returns_empty_when_none(self, mock_gen, client, db_session, test_company, test_user):
         """AI returns None -> empty defaults."""
+        test_company.account_owner_id = test_user.id  # owner passes can_manage_account gate
+        db_session.commit()
         resp = client.post(f"/api/companies/{test_company.id}/summarize")
         assert resp.status_code == 200
         data = resp.json()
@@ -2480,7 +2748,9 @@ class TestCompanySummarize:
         new_callable=AsyncMock,
         return_value={"situation": "Growing company", "development": "Expanding", "next_steps": ["Call"]},
     )
-    def test_summarize_returns_result(self, mock_gen, client, db_session, test_company):
+    def test_summarize_returns_result(self, mock_gen, client, db_session, test_company, test_user):
+        test_company.account_owner_id = test_user.id  # owner passes can_manage_account gate
+        db_session.commit()
         resp = client.post(f"/api/companies/{test_company.id}/summarize")
         assert resp.status_code == 200
         assert resp.json()["situation"] == "Growing company"
@@ -2605,3 +2875,72 @@ def test_pricing_history_scope_for_sales(db_session, sales_user, test_quote):
             app.dependency_overrides.pop(dep, None)
     assert resp.status_code == 200
     assert resp.json()["history"] == []
+
+
+# ── Phase-0 CRM Foundations: field persistence tests ─────────────────────────
+
+
+class TestCompanyPhase0Fields:
+    """API-level tests: create + update company with Phase-0 fields persist to DB."""
+
+    @patch("app.routers.crm.companies.get_credential_cached", return_value=None)
+    @patch("app.enrichment_service.normalize_company_input", new_callable=AsyncMock)
+    def test_create_company_with_phase0_fields(self, mock_normalize, mock_cred, client, db_session):
+        """POST /api/companies with Phase-0 fields stores them on the Company row."""
+        mock_normalize.return_value = ("FieldsTest Corp", "fieldstest.com")
+        resp = client.post(
+            "/api/companies",
+            json={
+                "name": "FieldsTest Corp",
+                "legal_name": "FieldsTest Corporation LLC",
+                "employee_size": "51-200",
+                "revenue_range": "$10M-$50M",
+                "hq_city": "Austin",
+                "hq_state": "TX",
+                "hq_country": "United States",
+                "credit_terms": "Net 30",
+                "tax_id": "12-3456789",
+                "source": "referral",
+            },
+        )
+        assert resp.status_code == 200
+        company_id = resp.json()["id"]
+        co = db_session.get(Company, company_id)
+        assert co.legal_name == "FieldsTest Corporation LLC"
+        assert co.employee_size == "51-200"
+        assert co.revenue_range == "$10M-$50M"
+        assert co.hq_city == "Austin"
+        assert co.hq_state == "TX"
+        assert co.credit_terms == "Net 30"
+        assert co.tax_id == "12-3456789"
+        assert co.source == "referral"
+
+    def test_update_company_with_phase0_fields(self, client, db_session, test_company, test_user):
+        """PUT /api/companies/{id} with Phase-0 fields stores them on the Company
+        row."""
+        test_company.account_owner_id = test_user.id  # owner passes can_manage_account gate
+        db_session.commit()
+        resp = client.put(
+            f"/api/companies/{test_company.id}",
+            json={
+                "legal_name": "Acme Electronics Inc.",
+                "employee_size": "201-500",
+                "revenue_range": "$50M-$200M",
+                "hq_city": "San Jose",
+                "hq_state": "CA",
+                "hq_country": "US",
+                "credit_terms": "Net 60",
+                "tax_id": "98-7654321",
+                "source": "sfdc",
+            },
+        )
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
+        db_session.refresh(test_company)
+        assert test_company.legal_name == "Acme Electronics Inc."
+        assert test_company.employee_size == "201-500"
+        assert test_company.revenue_range == "$50M-$200M"
+        assert test_company.hq_city == "San Jose"
+        assert test_company.credit_terms == "Net 60"
+        assert test_company.tax_id == "98-7654321"
+        assert test_company.source == "sfdc"

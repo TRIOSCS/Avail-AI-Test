@@ -45,7 +45,7 @@ def _make_company(db, name="Acme Electronics", domain="acme.com"):
     return co
 
 
-def _make_site(db, company_id, email="john@acme.com", phone="+15551234567"):
+def _make_site(db, company_id, email="john@acme.com", phone="+12025550143"):
     site = CustomerSite(
         company_id=company_id,
         site_name="HQ",
@@ -73,7 +73,7 @@ def _make_vendor_card(db, name="Arrow Electronics", domain="arrow.com"):
     return card
 
 
-def _make_vendor_contact(db, vendor_card_id, email="sales@arrow.com", phone="+15559876543"):
+def _make_vendor_contact(db, vendor_card_id, email="sales@arrow.com", phone="+12025550178"):
     vc = VendorContact(
         vendor_card_id=vendor_card_id,
         email=email,
@@ -151,19 +151,19 @@ class TestMatchEmailToEntity:
 class TestMatchPhoneToEntity:
     def test_match_customer_site_phone(self, db_session, test_user):
         co = _make_company(db_session)
-        _make_site(db_session, co.id, phone="+1-555-123-4567")
+        _make_site(db_session, co.id, phone="+1-202-555-0143")
         db_session.commit()
 
-        result = match_phone_to_entity("5551234567", db_session)
+        result = match_phone_to_entity("2025550143", db_session)
         assert result is not None
         assert result["type"] == "company"
 
     def test_match_vendor_contact_phone(self, db_session):
         card = _make_vendor_card(db_session)
-        _make_vendor_contact(db_session, card.id, phone="+1-555-987-6543")
+        _make_vendor_contact(db_session, card.id, phone="+1-202-555-0178")
         db_session.commit()
 
-        result = match_phone_to_entity("15559876543", db_session)
+        result = match_phone_to_entity("12025550178", db_session)
         assert result is not None
         assert result["type"] == "vendor"
 

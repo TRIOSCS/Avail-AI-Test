@@ -1,0 +1,12 @@
+{#
+  materials/tabs/files.html — Files tab for the material card detail.
+  User-attached files (POs, drawings, photos) — distinct from the system-captured
+  Datasheets shown in the specifications section.
+  Receives: card (MaterialCard).
+  Called by: htmx_views.py material_tab_partial endpoint (tab_name == "files").
+  Depends on: the shared attachments_panel macro.
+#}
+{% from "htmx/partials/shared/_attachments.html" import attachments_panel %}
+<div class="max-w-2xl">
+  {{ attachments_panel('material', card.id) }}
+</div>

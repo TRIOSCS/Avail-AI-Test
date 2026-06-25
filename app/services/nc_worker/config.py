@@ -26,3 +26,5 @@ class NcConfig:
         self.NC_BUSINESS_HOURS_START = int(os.environ.get("NC_BUSINESS_HOURS_START", "8"))
         self.NC_BUSINESS_HOURS_END = int(os.environ.get("NC_BUSINESS_HOURS_END", "18"))
         self.NC_BROWSER_PROFILE_DIR = os.environ.get("NC_BROWSER_PROFILE_DIR", "/root/nc_browser_profile")
+        # Circuit-breaker self-heal cooldown: auto-reset this long after a trip.
+        self.NC_BREAKER_COOLDOWN_MINUTES = int(os.environ.get("NC_BREAKER_COOLDOWN_MINUTES", "30"))

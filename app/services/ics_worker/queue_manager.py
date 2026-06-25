@@ -55,6 +55,16 @@ def get_next_queued_item(db: Session) -> IcsSearchQueue | None:
     return _qm.get_next_queued_item(db)
 
 
+def claim_next_queued_item(db: Session) -> IcsSearchQueue | None:
+    """Atomically claim the next queued item (mark 'searching'; skip-locked on PG)."""
+    return _qm.claim_next_queued_item(db)
+
+
+def reclaim_stuck_searches(db: Session, max_age_minutes: int | None = None) -> int:
+    """Reclaim items stuck in 'searching' past the timeout (crashed worker)."""
+    return _qm.reclaim_stuck_searches(db, max_age_minutes)
+
+
 def mark_status(db: Session, queue_item: IcsSearchQueue, new_status: str, error: str | None = None):
     """Update a queue item's status."""
     _qm.mark_status(db, queue_item, new_status, error)

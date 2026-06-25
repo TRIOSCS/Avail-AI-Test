@@ -7,11 +7,11 @@
 #}
 {%- from "htmx/partials/proactive/_macros.html" import company_header, empty_state %}
 
-<div class="max-w-7xl mx-auto" x-data="{ showScorecard: false }">
+<div class="page-fluid" x-data="{ showScorecard: false }">
   {# Header #}
   <div class="flex items-center justify-between mb-6">
     <div>
-      <p class="text-sm text-gray-500 mt-1">AI-matched vendor stock to customer purchase history</p>
+      <p class="text-sm text-gray-600 mt-1">AI-matched vendor stock to customer purchase history</p>
     </div>
     <button @click="showScorecard = !showScorecard"
             class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-brand-600 bg-brand-50 border border-brand-200 rounded-lg hover:bg-brand-100 transition-colors">
@@ -57,7 +57,7 @@
       </svg>
       Matches
       {% if match_count|default(0) > 0 %}
-      <span class="ml-auto px-1.5 py-0.5 text-[10px] font-bold text-white bg-emerald-500 rounded-full">{{ match_count }}</span>
+      <span class="ml-auto px-1.5 py-0.5 text-xs font-bold text-white bg-emerald-500 rounded-full">{{ match_count }}</span>
       {% endif %}
     </a>
     <a hx-get="/v2/partials/proactive?tab=sent" hx-target="#main-content"
@@ -105,7 +105,7 @@
         <span class="text-xs text-gray-400 mr-2">{{ group.matches|length }} match{{ 'es' if group.matches|length != 1 }}</span>
 
         {# Select all checkbox #}
-        <label class="flex items-center gap-1 text-xs text-gray-500 cursor-pointer mr-2">
+        <label class="flex items-center gap-1 text-xs text-gray-600 cursor-pointer mr-2">
           <input type="checkbox" @change="toggleAll()"
                  :checked="selectedCount === {{ group.matches|length }}"
                  class="rounded border-gray-300 text-brand-500 focus:ring-brand-500">
@@ -151,12 +151,12 @@
             <thead class="bg-gray-50/50">
               <tr>
                 <th class="w-10 px-3 py-2"></th>
-                <th class="px-3 py-2 text-left text-[10px] font-medium text-gray-500 uppercase tracking-wider">MPN</th>
-                <th class="px-3 py-2 text-left text-[10px] font-medium text-gray-500 uppercase tracking-wider w-[140px]">Vendor</th>
-                <th class="px-3 py-2 text-right text-[10px] font-medium text-gray-500 uppercase tracking-wider w-[80px]">Qty</th>
-                <th class="px-3 py-2 text-right text-[10px] font-medium text-gray-500 uppercase tracking-wider w-[90px]">Price</th>
-                <th class="px-3 py-2 text-left text-[10px] font-medium text-gray-500 uppercase tracking-wider w-[70px]">Margin</th>
-                <th class="px-3 py-2 text-left text-[10px] font-medium text-gray-500 uppercase tracking-wider w-[60px]">Score</th>
+                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">MPN</th>
+                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-[140px]">Vendor</th>
+                <th class="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-[80px]">Qty</th>
+                <th class="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-[90px]">Price</th>
+                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-[70px]">Margin</th>
+                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-[60px]">Score</th>
                 <th class="px-3 py-2 w-[90px]"></th>
               </tr>
             </thead>
@@ -171,7 +171,7 @@
     </div>
     {% endfor %}
   {% else %}
-  <div class="bg-white rounded-lg border border-brand-200 p-12 text-center">
+  <div class="bg-white rounded-lg border border-brand-200 p-6 sm:p-8 text-center">
     <svg class="mx-auto h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
       <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
     </svg>
@@ -181,7 +181,7 @@
             hx-target="#main-content"
             hx-swap="innerHTML"
             data-loading-disable
-            class="mt-6 inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600 transition-colors disabled:opacity-50">
+            class="mt-6 btn-primary">
       <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
         <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
       </svg>
@@ -206,12 +206,12 @@
         <table class="min-w-full divide-y divide-gray-200">
           <thead class="bg-gray-50/50">
             <tr>
-              <th class="px-4 py-2 text-left text-[10px] font-medium text-gray-500 uppercase tracking-wider">Parts</th>
-              <th class="px-4 py-2 text-left text-[10px] font-medium text-gray-500 uppercase tracking-wider">Sent To</th>
-              <th class="px-4 py-2 text-left text-[10px] font-medium text-gray-500 uppercase tracking-wider">Sent</th>
-              <th class="px-4 py-2 text-right text-[10px] font-medium text-gray-500 uppercase tracking-wider">Revenue</th>
-              <th class="px-4 py-2 text-left text-[10px] font-medium text-gray-500 uppercase tracking-wider">Status</th>
-              <th class="px-4 py-2 text-right text-[10px] font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+              <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Parts</th>
+              <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sent To</th>
+              <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sent</th>
+              <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Revenue</th>
+              <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+              <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-100">
@@ -236,10 +236,10 @@
                   {% endfor %}
                 </div>
               </td>
-              <td class="px-4 py-3 text-xs text-gray-500">
+              <td class="px-4 py-3 text-xs text-gray-600">
                 {{ offer.recipient_emails | join(', ') | truncate(40) }}
               </td>
-              <td class="px-4 py-3 text-xs text-gray-500">
+              <td class="px-4 py-3 text-xs text-gray-600">
                 {{ offer.sent_at | timeago }}
               </td>
               <td class="px-4 py-3 text-sm text-right tabular-nums">
@@ -249,7 +249,7 @@
               </td>
               <td class="px-4 py-3">
                 {% set status = offer.status | default('sent') %}
-                <span class="inline-flex px-2 py-0.5 text-[10px] font-semibold rounded-full
+                <span class="inline-flex px-2 py-0.5 text-xs font-semibold rounded-full
                   {{ 'bg-emerald-50 text-emerald-700' if status == 'converted' else
                      'bg-brand-50 text-brand-600' if status == 'sent' else
                      'bg-gray-100 text-gray-600' }}">

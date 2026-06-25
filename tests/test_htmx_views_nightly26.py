@@ -4,7 +4,6 @@ Target line ranges:
   - create_company          4384–4417  (~34 lines)
   - edit_company            5038–5057  (~20 lines)
   - edit_site               5074–5083  (~10 lines)
-  - add_site_contact_note   5108–5125  (~18 lines)
   - edit_quote_metadata     5315–5328  (~14 lines)
   - buy_plan_confirm_po     6098–6120  (~23 lines)
   - update_material_card    7359–7380  (~22 lines)
@@ -27,7 +26,7 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse
 
 from app.models import Requisition, User
-from app.models.crm import Company, CustomerSite, SiteContact
+from app.models.crm import Company, CustomerSite
 from app.models.intelligence import MaterialCard
 from app.models.quotes import Quote, QuoteLine
 
@@ -60,8 +59,8 @@ def _make_req(db: Session, user: User) -> Requisition:
     return req
 
 
-def _make_company(db: Session) -> Company:
-    co = Company(name="TestCo N26", is_active=True)
+def _make_company(db: Session, owner: User | None = None) -> Company:
+    co = Company(name="TestCo N26", is_active=True, account_owner_id=owner.id if owner else None)
     db.add(co)
     db.commit()
     db.refresh(co)
@@ -74,19 +73,6 @@ def _make_site(db: Session, company: Company) -> CustomerSite:
     db.commit()
     db.refresh(site)
     return site
-
-
-def _make_site_contact(db: Session, site: CustomerSite) -> SiteContact:
-    contact = SiteContact(
-        customer_site_id=site.id,
-        full_name="Jane Tester",
-        email="jane@testco.com",
-        is_active=True,
-    )
-    db.add(contact)
-    db.commit()
-    db.refresh(contact)
-    return contact
 
 
 def _make_quote(db: Session, req: Requisition, user: User) -> Quote:
@@ -179,7 +165,7 @@ class TestEditCompanyDirect:
         """Lines 5038–5057: POST form updates Company fields."""
         from app.routers.htmx_views import edit_company
 
-        company = _make_company(db_session)
+        company = _make_company(db_session, owner=test_user)
         mock_req = _mock_form_request(
             fields={"name": "Updated N26", "website": "https://updated.com", "industry": "Tech"}
         )
@@ -210,7 +196,7 @@ class TestEditSiteDirect:
         """Lines 5074–5083: POST form updates CustomerSite fields."""
         from app.routers.htmx_views import edit_site
 
-        company = _make_company(db_session)
+        company = _make_company(db_session, owner=test_user)
         site = _make_site(db_session, company)
         mock_req = _mock_form_request(fields={"site_name": "Branch Office", "city": "Austin", "country": "US"})
         with patch("app.routers.htmx_views.company_tab", new_callable=AsyncMock) as mock_tab:
@@ -237,52 +223,6 @@ class TestEditSiteDirect:
         with pytest.raises(HTTPException) as exc_info:
             await edit_site(request=mock_req, company_id=company.id, site_id=99999, user=test_user, db=db_session)
         assert exc_info.value.status_code == 404
-
-
-# ── add_site_contact_note (5108–5125) ────────────────────────────────────────
-
-
-class TestAddSiteContactNoteDirect:
-    async def test_add_note_success(self, db_session: Session, test_user: User):
-        """Lines 5108–5125: POST note → creates ActivityLog, returns notes."""
-        from app.routers.htmx_views import add_site_contact_note
-
-        company = _make_company(db_session)
-        site = _make_site(db_session, company)
-        contact = _make_site_contact(db_session, site)
-        mock_req = _mock_form_request(fields={"notes": "Called, left voicemail"})
-        with patch("app.routers.htmx_views.get_site_contact_notes", new_callable=AsyncMock) as mock_notes:
-            mock_notes.return_value = HTMLResponse("notes list")
-            result = await add_site_contact_note(
-                request=mock_req,
-                company_id=company.id,
-                site_id=site.id,
-                contact_id=contact.id,
-                user=test_user,
-                db=db_session,
-            )
-        assert result.status_code == 200
-
-    async def test_add_note_empty_raises_400(self, db_session: Session, test_user: User):
-        """Empty notes → 400."""
-        from fastapi import HTTPException
-
-        from app.routers.htmx_views import add_site_contact_note
-
-        company = _make_company(db_session)
-        site = _make_site(db_session, company)
-        contact = _make_site_contact(db_session, site)
-        mock_req = _mock_form_request(fields={"notes": ""})
-        with pytest.raises(HTTPException) as exc_info:
-            await add_site_contact_note(
-                request=mock_req,
-                company_id=company.id,
-                site_id=site.id,
-                contact_id=contact.id,
-                user=test_user,
-                db=db_session,
-            )
-        assert exc_info.value.status_code == 400
 
 
 # ── edit_quote_metadata (5315–5328) ──────────────────────────────────────────

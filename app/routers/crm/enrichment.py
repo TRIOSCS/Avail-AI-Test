@@ -3,14 +3,14 @@ from loguru import logger
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
 
-from ...config import settings
 from ...database import get_db
+from ...dependencies import can_manage_account, require_admin, require_buyer, require_user
 from ...dependencies import is_admin as _is_admin
-from ...dependencies import require_admin, require_buyer, require_user
-from ...models import Company, CustomerSite, SyncLog, User, VendorCard, VendorContact
+from ...models import Company, CustomerSite, SiteContact, SyncLog, User, VendorCard, VendorContact
 from ...rate_limit import limiter
 from ...schemas.crm import AddContactsToVendor, AddContactToSite, CustomerImportRow, EnrichDomainRequest
 from ...services.credential_service import get_credential_cached
+from ...template_env import template_response
 
 router = APIRouter()
 
@@ -18,6 +18,14 @@ router = APIRouter()
 def _normalize_domain(value: str) -> str:
     """Strip scheme, www, and any path from a domain/website string."""
     return value.replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0]
+
+
+def _wants_html(request: Request) -> bool:
+    """True for HTMX requests — the enrich button POSTs with the HX-Request header.
+
+    HTMX callers get a rendered result panel; programmatic/API callers get JSON.
+    """
+    return request.headers.get("HX-Request") == "true"
 
 
 def _require_enrichment_provider() -> None:
@@ -40,17 +48,25 @@ def _require_enrichment_provider() -> None:
 @router.post("/api/enrich/company/{company_id}")
 async def enrich_company(
     company_id: int,
+    request: Request,
     payload: EnrichDomainRequest = EnrichDomainRequest(),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Enrich a customer company with external data."""
+    """Enrich a customer company with external data.
+
+    Content-negotiates on the HX-Request header: HTMX callers (the Enrich button) get a
+    rendered result panel — firmographics found, what was updated vs already-current, and
+    discovered contacts with Add buttons; programmatic callers get JSON.
+    """
     _require_enrichment_provider()
     from ...enrichment_service import apply_enrichment_to_company, enrich_entity
 
     company = db.get(Company, company_id)
     if not company:
         raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "You do not have access to this company")
     domain = company.domain or company.website or ""
     if domain:
         domain = _normalize_domain(domain)
@@ -60,32 +76,62 @@ async def enrich_company(
         raise HTTPException(400, "No domain available — set company website or domain first")
     enrichment = await enrich_entity(domain, company.name)
     updated = apply_enrichment_to_company(company, enrichment)
-
-    # Also trigger customer enrichment waterfall for contact discovery
-    waterfall_result = None
-    if settings.customer_enrichment_enabled:
-        try:
-            from ...services.customer_enrichment_service import enrich_customer_account
-
-            waterfall_result = await enrich_customer_account(company_id, db)
-        except Exception as e:
-            logger.warning("Customer waterfall enrichment error: {}", e)
-
     db.commit()
-    result = {"ok": True, "updated_fields": updated, "enrichment": enrichment}
-    if waterfall_result:
-        result["customer_enrichment"] = waterfall_result
-    return result
+
+    if not _wants_html(request):
+        return {"ok": True, "updated_fields": updated, "enrichment": enrichment}
+
+    # HTMX path: discover contacts for the panel via the real Hunter/Clay waterfall.
+    # Firmographics are already committed, so a discovery failure degrades to an amber
+    # banner rather than blocking the panel.
+    suggested: list[dict] = []
+    errored: list[str] = []
+    try:
+        from ...enrichment_service import find_suggested_contacts_with_errors
+
+        suggested, errored = await find_suggested_contacts_with_errors(domain, company.name or "")
+    except Exception as e:
+        # Degrade to the amber "couldn't reach" banner rather than 500 the panel, but keep
+        # the traceback (exc_info) so a genuine bug here still reaches Sentry/logs.
+        logger.opt(exception=e).warning("enrich_company contact discovery failed for {}", company_id)
+        errored = ["all"]
+
+    active_sites = (
+        db.query(CustomerSite)
+        .filter(CustomerSite.company_id == company_id, CustomerSite.is_active.is_(True))
+        .order_by(CustomerSite.site_name)
+        .all()
+    )
+    return template_response(
+        "htmx/partials/shared/_enrich_result.html",
+        {
+            "request": request,
+            "entity": company,
+            "entity_type": "company",
+            "updated_fields": updated,
+            "show_contacts": True,
+            "suggested": suggested,
+            "errored_providers": errored,
+            "active_sites": active_sites,
+            "add_target": "closest li",
+            "add_swap": "outerHTML",
+        },
+    )
 
 
 @router.post("/api/enrich/vendor/{card_id}")
 async def enrich_vendor_card(
     card_id: int,
+    request: Request,
     payload: EnrichDomainRequest = EnrichDomainRequest(),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Enrich a vendor card with external data."""
+    """Enrich a vendor card with external data.
+
+    Content-negotiates on HX-Request: HTMX callers get the firmographics result panel
+    (contact discovery is company-only for now); programmatic callers get JSON.
+    """
     _require_enrichment_provider()
     from ...enrichment_service import apply_enrichment_to_vendor, enrich_entity
 
@@ -102,7 +148,20 @@ async def enrich_vendor_card(
     enrichment = await enrich_entity(domain, card.display_name)
     updated = apply_enrichment_to_vendor(card, enrichment)
     db.commit()
-    return {"ok": True, "updated_fields": updated, "enrichment": enrichment}
+
+    if not _wants_html(request):
+        return {"ok": True, "updated_fields": updated, "enrichment": enrichment}
+
+    return template_response(
+        "htmx/partials/shared/_enrich_result.html",
+        {
+            "request": request,
+            "entity": card,
+            "entity_type": "vendor",
+            "updated_fields": updated,
+            "show_contacts": False,
+        },
+    )
 
 
 @router.get("/api/suggested-contacts")
@@ -165,23 +224,81 @@ async def add_suggested_to_site(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Set a suggested contact as the primary contact on a customer site."""
+    """Add a suggested contact as a real SiteContact on a customer site.
+
+    Mirrors add_suggested_to_vendor: resolves the site (404 if missing),
+    deduplicates per-site by case-insensitive email (or by case-insensitive
+    full_name when email is absent), and creates a SiteContact with
+    enrichment_source tagged for provenance.
+
+    WARNING: this is a JSON-only endpoint. Do NOT call it from HTMX with
+    hx-target/hx-swap — the Contacts-tab flow uses the HTML endpoint at
+    /v2/partials/customers/{company_id}/suggested-contacts/add instead.
+    """
     site = db.get(CustomerSite, payload.site_id)
     if not site:
         raise HTTPException(404, "Customer site not found")
+    company = db.get(Company, site.company_id)
+    if not company or not can_manage_account(user, company, db):
+        raise HTTPException(403, "Not authorized to manage this account")
     c = payload.contact
-    if c.full_name:
-        site.contact_name = c.full_name
+    # Email-based dedup (case-insensitive, mirrors create_site_contact :6003)
     if c.email:
-        site.contact_email = c.email
-    if c.phone:
-        site.contact_phone = c.phone
-    if c.title:
-        site.contact_title = c.title
-    if c.linkedin_url:
-        site.contact_linkedin = c.linkedin_url
+        existing = (
+            db.query(SiteContact)
+            .filter(
+                SiteContact.customer_site_id == payload.site_id,
+                sqlfunc.lower(SiteContact.email) == c.email,  # already lowercased by schema validator
+            )
+            .first()
+        )
+        if existing:
+            logger.info(
+                "add_suggested_to_site: dedup by email for site_id={} email={}",
+                payload.site_id,
+                c.email,
+            )
+            return {"ok": True, "added": 0, "deduped": True}
+    else:
+        # Null-email dedup: case-insensitive full_name within the site
+        # (without this, PG allows multiple NULL-email rows — silent dupes)
+        if c.full_name:
+            existing_name = (
+                db.query(SiteContact)
+                .filter(
+                    SiteContact.customer_site_id == payload.site_id,
+                    SiteContact.email.is_(None),
+                    sqlfunc.lower(SiteContact.full_name) == c.full_name.strip().lower(),
+                )
+                .first()
+            )
+            if existing_name:
+                logger.info(
+                    "add_suggested_to_site: dedup by name for site_id={} name={}",
+                    payload.site_id,
+                    c.full_name,
+                )
+                return {"ok": True, "added": 0, "deduped": True}
+
+    sc = SiteContact(
+        customer_site_id=payload.site_id,
+        full_name=(c.full_name or "").strip() or "Unknown",
+        title=c.title,
+        email=c.email or None,
+        phone=c.phone,
+        linkedin_url=c.linkedin_url,
+        enrichment_source=c.source or "enrichment",
+        email_verified=c.email_verified,
+    )
+    db.add(sc)
     db.commit()
-    return {"ok": True}
+    db.refresh(sc)
+    logger.info(
+        "add_suggested_to_site: created SiteContact id={} for site_id={}",
+        sc.id,
+        payload.site_id,
+    )
+    return {"ok": True, "added": 1, "contact_id": sc.id}
 
 
 @router.get("/api/admin/sync-logs")

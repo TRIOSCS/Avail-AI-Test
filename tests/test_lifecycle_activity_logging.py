@@ -22,8 +22,14 @@ def _activity_rows(db, requisition_id, activity_type):
     )
 
 
-def test_complete_task_logs_task_completed(db_session, test_requisition, test_user):
-    """Completing a task writes a task_completed activity row on its requisition."""
+def test_complete_task_does_not_log_task_completed(db_session, test_requisition, test_user):
+    """Completing a task must NOT write an ActivityLog row.
+
+    Step 5 deliberately removed task_completed logging: task completion is a status
+    change on the task record, not a real contact activity. The completed_at timestamp
+    is the authoritative record. This test enforces the no-fake-logging invariant so
+    the removal cannot be silently re-introduced.
+    """
     from app.models import RequisitionTask
     from app.services.task_service import complete_task
 
@@ -45,7 +51,7 @@ def test_complete_task_logs_task_completed(db_session, test_requisition, test_us
     db_session.commit()
 
     rows = _activity_rows(db_session, test_requisition.id, ActivityType.TASK_COMPLETED)
-    assert len(rows) == 1
+    assert len(rows) == 0, "task completion must not produce an ActivityLog row (no-fake-logging)"
 
 
 def test_claim_requisition_logs_assignment_changed(db_session, test_requisition, test_user):
@@ -159,8 +165,13 @@ def test_update_requirement_sales_note_logs(client, db_session, test_requisition
     assert len(rows) == 1
 
 
-def test_reopen_task_logs_task_reopened(db_session, test_requisition, test_user):
-    """Reopening a task writes a task_reopened activity row on its requisition."""
+def test_reopen_task_does_not_log_task_reopened(db_session, test_requisition, test_user):
+    """Reopening a task must NOT write an ActivityLog row.
+
+    Step 5 deliberately removed task_reopened logging: task status changes are recorded
+    on the task row itself (status, completed_at), not in the activity log. This test
+    enforces the no-fake-logging invariant so the removal cannot be silently re-introduced.
+    """
     from app.constants import TaskStatus
     from app.models import RequisitionTask
     from app.services.task_service import reopen_task
@@ -183,13 +194,16 @@ def test_reopen_task_logs_task_reopened(db_session, test_requisition, test_user)
     db_session.commit()
 
     rows = _activity_rows(db_session, test_requisition.id, ActivityType.TASK_REOPENED)
-    assert len(rows) == 1
-    assert rows[0].user_id == test_user.id
-    assert rows[0].details["task_id"] == task.id
+    assert len(rows) == 0, "task reopen must not produce an ActivityLog row (no-fake-logging)"
 
 
-def test_mark_task_done_logs_task_completed(client, db_session, test_requisition, test_user):
-    """Marking a task done via the htmx route writes a task_completed row."""
+def test_mark_task_done_does_not_log_task_completed(client, db_session, test_requisition, test_user):
+    """Marking a task done via the htmx route must NOT write an ActivityLog row.
+
+    Step 5 deliberately removed task_completed logging from the htmx endpoint. Task
+    completion is a status change recorded on the task row (status, completed_at), not
+    real contact activity. This test enforces the no-fake-logging invariant.
+    """
     from app.models import RequisitionTask
 
     requirement = test_requisition.requirements[0]
@@ -206,4 +220,4 @@ def test_mark_task_done_logs_task_completed(client, db_session, test_requisition
     resp = client.post(f"/v2/partials/parts/tasks/{task.id}/done")
     assert resp.status_code == 200, resp.text
     rows = _activity_rows(db_session, test_requisition.id, ActivityType.TASK_COMPLETED)
-    assert len(rows) == 1
+    assert len(rows) == 0, "htmx mark-done must not produce an ActivityLog row (no-fake-logging)"

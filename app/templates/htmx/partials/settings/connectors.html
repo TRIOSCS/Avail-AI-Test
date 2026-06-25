@@ -1,0 +1,85 @@
+{#
+  settings/connectors.html — unified Connectors tab. One reconciled card per data
+  provider, grouped by category, with at-a-glance status + Test-all.
+  Receives: connector_groups (list of {key, label, sources:[enriched dict]}).
+  Called by: htmx_views.py settings_connectors_tab.
+  Depends on: _connector_macros.html, HTMX (loading-states ext), Alpine.js, Tailwind brand palette.
+#}
+<title hx-swap-oob="true">Connectors · Settings</title>
+{% import 'htmx/partials/settings/_connector_macros.html' as cm %}
+
+{%- set _all = [] -%}
+{%- for g in connector_groups %}{% for s in g.sources %}{{ _all.append(s) or '' }}{% endfor %}{% endfor -%}
+{%- set _live = _all | selectattr('state', 'equalto', 'live') | list | length -%}
+{%- set _needs = _all | rejectattr('state', 'in', ['live', 'off']) | list | length -%}
+
+<div id="connectors-root" class="space-y-8" hx-ext="loading-states">
+  <div class="flex items-start justify-between gap-4 mb-2">
+    <div>
+      <h2 class="text-lg font-semibold text-gray-900">Connectors</h2>
+      <p class="text-sm text-gray-500">Your data providers — search, enrichment, AI, and comms — in one place. See what's live and fix what isn't.</p>
+      <span class="inline-flex items-center gap-2 mt-2 text-xs font-medium text-gray-600">
+        <span class="inline-flex items-center gap-1">
+          <span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>{{ _live }} live
+        </span>
+        <span class="text-gray-300">·</span>
+        <span class="inline-flex items-center gap-1">
+          <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>{{ _needs }} need setup
+        </span>
+      </span>
+    </div>
+    <div class="flex flex-col items-end gap-1 flex-shrink-0">
+      <button class="btn-md inline-flex items-center gap-1.5"
+              type="button"
+              hx-post="/v2/partials/settings/connectors/test-all"
+              hx-target="#connectors-root"
+              hx-swap="none"
+              data-loading-disable>
+        <svg class="w-3.5 h-3.5 animate-spin motion-reduce:hidden" data-loading viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+        </svg>
+        <span>Test all</span>
+      </button>
+      {# Test-all aggregate result — OOB-swapped here after the sweep so it's visible
+         even when the cards that changed are far down a long page. #}
+      <div id="test-all-summary" class="text-xs text-gray-500" aria-live="polite"></div>
+    </div>
+  </div>
+
+  {% if not connector_groups %}
+  <div class="py-10 text-center">
+    <svg class="mx-auto h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+            d="M13 10V3L4 14h7v7l9-11h-7z"/>
+    </svg>
+    <p class="text-sm text-gray-600 mt-3">No connectors yet.</p>
+    <p class="text-xs text-gray-400 mt-1">Data providers appear here once they're configured for your workspace.</p>
+  </div>
+  {% endif %}
+
+  {% for group in connector_groups %}
+  {%- set g_live = group.sources | selectattr('state', 'equalto', 'live') | list | length -%}
+  {%- set g_needs = group.sources | rejectattr('state', 'in', ['live', 'off']) | list | length -%}
+  <section id="connector-group-{{ group.key }}" x-data="{ open: true }">
+    <button type="button" @click="open = !open"
+            class="w-full flex items-center justify-between gap-2 min-h-[2rem] text-left group">
+      <span class="flex items-center gap-2">
+        <svg class="w-4 h-4 text-gray-400 transition-transform" :class="open ? 'rotate-90' : ''"
+             fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+        </svg>
+        <span class="text-sm font-semibold text-gray-700 uppercase tracking-wide">{{ group.label }}</span>
+      </span>
+      <span class="text-xs text-gray-500">
+        {{ g_live }} live{% if g_needs %} · {{ g_needs }} need setup{% endif %}
+      </span>
+    </button>
+    <div x-show="open" x-collapse class="space-y-2 mt-2">
+      {% for s in group.sources %}
+        {{ cm.connector_card(s) }}
+      {% endfor %}
+    </div>
+  </section>
+  {% endfor %}
+</div>

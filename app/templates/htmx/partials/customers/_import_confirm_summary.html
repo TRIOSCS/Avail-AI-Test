@@ -1,0 +1,7 @@
+{# _import_confirm_summary.html — success banner after CSV import confirm.
+   Called by: import_companies_confirm, import_contacts_confirm (app/routers/htmx_views.py)
+   Context: summary (plain-text result message string built from integer counts).
+   Jinja auto-escapes the {{ summary }} interpolation. #}
+<div class="bg-emerald-50 border border-emerald-200 rounded p-3 text-sm text-emerald-700">
+  {{ summary }}.
+</div>

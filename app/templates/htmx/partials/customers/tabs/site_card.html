@@ -1,23 +1,29 @@
-{# site_card.html — Expandable site card with inline contacts.
-   Receives: s (CustomerSite), company (Company).
+{# site_card.html — Expandable site card: site info + CRUD only.
+   Contact management lives on the Contacts tab. A site card shows a contact
+   COUNT + a "View N contacts" link that switches to the Contacts tab with
+   that site's filter pre-applied.
+
+   Receives: s (CustomerSite with .site_contacts loaded), company (Company).
    Called by: sites_tab.html loop, and POST /v2/partials/customers/{id}/sites.
    Depends on: HTMX, Alpine.js.
 #}
-<div id="site-{{ s.id }}" class="bg-white rounded-lg border border-gray-200" x-data="{ expanded: false, editing: false }">
+<div id="site-{{ s.id }}" class="rounded-lg border {% if s.do_not_contact %}bg-gray-50 border-rose-200 opacity-75{% else %}bg-white border-gray-200{% endif %}" x-data="{ expanded: false, editing: false }">
   {# Collapsed header #}
-  <div class="px-4 py-3 flex items-center justify-between cursor-pointer" role="button" tabindex="0" @click="expanded = !expanded" @keydown.enter="expanded = !expanded" @keydown.space.prevent="expanded = !expanded" aria-expanded="expanded">
+  <div class="px-4 py-3 flex items-center justify-between cursor-pointer focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-inset" role="button" tabindex="0" @click="expanded = !expanded" @keydown.enter="expanded = !expanded" @keydown.space.prevent="expanded = !expanded" :aria-expanded="expanded">
     <div class="flex items-center gap-3">
       <svg class="h-5 w-5 text-gray-400 transition-transform" :class="{ 'rotate-90': expanded }" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
       </svg>
       <div>
-        <span class="text-sm font-medium text-gray-900">{{ s.site_name }}</span>
-        {% if s.site_type %}
-        <span class="ml-2 px-1.5 py-0.5 text-[10px] font-medium rounded bg-brand-50 text-brand-600 uppercase">{{ s.site_type }}</span>
+        <span class="text-sm font-medium {% if s.do_not_contact %}text-gray-600 line-through{% else %}text-gray-900{% endif %}">{{ s.site_name }}</span>
+        {% if s.do_not_contact %}
+        <span class="ml-2 px-1.5 py-0.5 text-xs font-medium rounded bg-rose-100 text-rose-600 uppercase">DNC</span>
+        {% elif s.site_type %}
+        <span class="ml-2 px-1.5 py-0.5 text-xs font-medium rounded bg-brand-50 text-brand-600 uppercase">{{ s.site_type }}</span>
         {% endif %}
       </div>
     </div>
-    <div class="flex items-center gap-3 text-xs text-gray-500">
+    <div class="flex items-center gap-3 text-xs text-gray-600">
       {% if s.city %}{{ s.city }}{% if s.country %}, {{ s.country }}{% endif %}{% endif %}
       {% if s.owner %}<span class="text-brand-500">{{ s.owner.name or s.owner.email }}</span>{% endif %}
     </div>
@@ -27,50 +33,59 @@
   <div x-show="expanded" x-cloak x-transition class="border-t border-gray-200">
     {# Site details #}
     <div class="px-4 py-3 bg-gray-50 grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+      {# Legacy primary contact fallback — read-only display; editing on Contacts tab #}
       {% if s.contact_name %}
-      <div><span class="text-gray-500">Primary:</span> {{ s.contact_name }}</div>
+      <div><span class="text-gray-600">Primary contact:</span> {{ s.contact_name }}</div>
       {% endif %}
       {% if s.contact_email %}
-      <div><span class="text-gray-500">Email:</span> <a href="mailto:{{ s.contact_email }}" class="text-brand-500">{{ s.contact_email }}</a></div>
+      <div><span class="text-gray-600">Email:</span> <a href="mailto:{{ s.contact_email }}" class="text-brand-500">{{ s.contact_email }}</a></div>
       {% endif %}
       {% if s.contact_phone %}
-      <div><span class="text-gray-500">Phone:</span> <a href="tel:{{ s.contact_phone }}" class="text-brand-500">{{ s.contact_phone }}</a></div>
+      <div><span class="text-gray-600">Phone:</span> <a href="tel:{{ s.contact_phone }}" class="text-brand-500">{{ s.contact_phone }}</a></div>
       {% endif %}
       {% if s.payment_terms %}
-      <div><span class="text-gray-500">Terms:</span> {{ s.payment_terms }}</div>
+      <div><span class="text-gray-600">Terms:</span> {{ s.payment_terms }}</div>
       {% endif %}
     </div>
 
-    {# Contacts section — loaded via HTMX on expand #}
-    <div class="px-4 py-3">
-      <div class="flex items-center justify-between mb-2">
-        <h4 class="text-xs font-semibold text-gray-700 uppercase">Contacts</h4>
-        <button hx-get="/v2/partials/customers/{{ company.id }}/sites/{{ s.id }}/contacts"
-                hx-target="#site-{{ s.id }}-contacts"
-                hx-swap="innerHTML"
-                hx-trigger="click once"
-                class="text-xs text-brand-500 hover:text-brand-600">
-          Load Contacts
-        </button>
-      </div>
-      <div id="site-{{ s.id }}-contacts">
-        <p class="text-xs text-gray-400">Click "Load Contacts" to see contacts for this site.</p>
-      </div>
+    {# Contact count + link to Contacts tab — NOT an inline editor #}
+    {% set active_contact_count = s.site_contacts | selectattr('is_active', 'equalto', True) | rejectattr('is_archived', 'equalto', True) | list | length %}
+    <div class="px-4 py-2 border-t border-gray-100 flex items-center justify-between">
+      <span class="text-xs text-gray-600">
+        {{ active_contact_count }}
+        {% if active_contact_count == 1 %}contact{% else %}contacts{% endif %}
+      </span>
+      {% if active_contact_count > 0 %}
+      <button type="button"
+              hx-get="/v2/partials/customers/{{ company.id }}/tab/contacts?site_id={{ s.id }}"
+              hx-target="#company-tab-content"
+              hx-swap="innerHTML"
+              @click="$dispatch('crm-switch-tab', {tab: 'contacts'})"
+              class="text-xs text-brand-500 hover:text-brand-600 font-medium">
+        View {{ active_contact_count }} contact{{ "s" if active_contact_count != 1 }} →
+      </button>
+      {% else %}
+      <button type="button"
+              @click="$dispatch('open-modal', {url: '/v2/partials/customers/{{ company.id }}/contacts/add-form?site_id={{ s.id }}'})"
+              class="text-xs text-brand-500 hover:text-brand-600 font-medium">
+        + Add first contact
+      </button>
+      {% endif %}
     </div>
 
     {# Site actions #}
     <div class="px-4 py-2 bg-gray-50 border-t border-gray-100 flex items-center gap-2">
       <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/customers/{{ company.id }}/sites/{{ s.id }}/edit-form'})"
-              class="text-xs text-brand-500 hover:text-brand-700">
+              class="text-xs text-brand-500 hover:text-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500 rounded">
         Edit Site
       </button>
-      <button hx-delete="/v2/partials/customers/{{ company.id }}/sites/{{ s.id }}"
+      <button hx-post="/v2/partials/customers/{{ company.id }}/sites/{{ s.id }}/mark-dnc"
               hx-target="#site-{{ s.id }}"
               hx-swap="outerHTML"
-              hx-confirm="Delete site '{{ s.site_name }}'? This cannot be undone."
+              hx-confirm="{% if s.do_not_contact %}Clear DNC status for '{{ s.site_name }}'?{% else %}Mark '{{ s.site_name }}' as Do Not Contact? It will be excluded from call lists.{% endif %}"
               data-loading-disable
-              class="text-xs text-rose-500 hover:text-rose-700">
-        Delete Site
+              class="text-xs {% if s.do_not_contact %}text-amber-600 hover:text-amber-800{% else %}text-rose-500 hover:text-rose-700{% endif %} focus:outline-none focus:ring-2 focus:ring-rose-500 rounded">
+        {% if s.do_not_contact %}Clear DNC{% else %}Mark DNC{% endif %}
       </button>
     </div>
   </div>

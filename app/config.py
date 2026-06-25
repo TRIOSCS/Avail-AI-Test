@@ -123,6 +123,11 @@ class Settings(BaseSettings):
     # --- Explorium / Vibe Prospecting ---
     explorium_api_key: str = ""
     explorium_api_base_url: str = "https://api.explorium.ai"
+    # Opt-in: Explorium only runs when explicitly enabled AND a key is configured.
+    # (Off by default — it was previously always-on, which wasted calls when the
+    # integration wasn't actually working.)
+    explorium_enrichment_enabled: bool = False
+    explorium_cooldown_minutes: int = 15  # quota/rate-limit circuit cooldown
 
     # --- Customer enrichment ---
     customer_enrichment_enabled: bool = True
@@ -198,6 +203,10 @@ class Settings(BaseSettings):
     # --- Email Intelligence ---
     email_mining_enabled: bool = False
     email_mining_lookback_days: int = 180
+    # Cap on how many mined domains (top N by inbox volume) get an eager Explorium
+    # match per batch. The long tail is created unenriched and enriched on demand later.
+    # This is the only metered-spend lever for the email-mining path.
+    email_mining_enrich_cap: int = 25
 
     # --- M365 Integration v2 ---
     inbox_scan_interval_min: int = 30
@@ -207,6 +216,9 @@ class Settings(BaseSettings):
 
     # --- Admin (CSV env var, parsed to list[str] by model_validator) ---
     admin_emails: str | list[str] = ""
+    # When true (go-live posture), an unknown email with no pre-provisioned user row is
+    # rejected at login instead of auto-provisioned. ADMIN_EMAILS always bypass.
+    enable_user_allowlist: bool = True
 
     # --- RFQ ---
     follow_up_days: int = 3
@@ -227,8 +239,6 @@ class Settings(BaseSettings):
     proactive_matching_enabled: bool = True
     proactive_throttle_days: int = 21
     proactive_scan_interval_hours: int = 4
-    excess_bid_scan_enabled: bool = True
-    excess_bid_parse_lookback_days: int = 14
     proactive_min_margin_pct: float = 10.0
     proactive_match_expiry_days: int = 30
 
@@ -287,13 +297,28 @@ class Settings(BaseSettings):
     eight_by_eight_enabled: bool = False
     eight_by_eight_poll_interval_minutes: int = 30
 
-    # --- Apollo Enrichment ---
-    apollo_api_key: str = ""
-
     # --- Lusha Enrichment (key via get_credential_cached, NOT a Settings field) ---
     lusha_enrichment_enabled: bool = False  # feature gate; off → chain == today
     lusha_cooldown_minutes: int = 15  # quota/rate-limit (402/429) circuit cooldown
     prospect_enrich_contacts_per_account: int = 5  # cap for paid contact pulls
+
+    # --- Hunter.io Enrichment ---
+    hunter_enrichment_enabled: bool = False  # feature gate; off → Hunter not triggered
+    hunter_cooldown_minutes: int = 15  # quota/rate-limit (402/429) circuit cooldown
+
+    # --- SAM.gov Enrichment ---
+    sam_gov_enrichment_enabled: bool = False  # feature gate; off → SAM.gov not triggered
+
+    # --- Worker liveness watchdog (scheduler job in the supervised app) ---
+    # Workers heartbeat every loop tick; this job alerts when one that should be
+    # running goes silent (hung/crashed) or trips its circuit breaker.
+    worker_liveness_check_minutes: int = 5
+    worker_heartbeat_stale_minutes: int = 15
+    worker_alert_debounce_minutes: int = 60
+
+    # --- Clay Enrichment (MCP connector; CLAY_API_KEY via credential store) ---
+    clay_enrichment_enabled: bool = False  # feature gate; off → Clay MCP not triggered
+    clay_cooldown_minutes: int = 15  # quota/rate-limit circuit cooldown
 
     # --- Azure Communication Services ---
     acs_connection_string: str = ""

@@ -43,38 +43,40 @@
         </thead>
         <tbody class="divide-y divide-gray-100">
           {% for r in results %}
-          <tr class="hover:bg-brand-50 cursor-pointer"
+          <tr class="hover:bg-brand-50 cursor-pointer focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-500"
               {% if r.vendor_id %}
+              role="button" tabindex="0"
               hx-get="/v2/partials/vendors/{{ r.vendor_id }}?mpn={{ mpn|urlencode }}"
               hx-target="{{ hx_target|default('#main-content') }}"
               hx-push-url="{{ push_url_base|default('/v2/vendors') }}/{{ r.vendor_id }}"
+              hx-trigger="click, keyup[key=='Enter']"
               {% endif %}>
             <td class="px-4 py-2.5 text-sm font-medium text-gray-900">
               {{ r.vendor_name }}
               {% if r.is_affinity %}
-              <span class="ml-1.5 inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-violet-50 text-violet-700">
+              <span class="ml-1.5 inline-flex px-1.5 py-0.5 text-xs font-medium rounded-full bg-violet-50 text-violet-700">
                 Vendor Match
               </span>
               {% endif %}
             </td>
-            <td class="px-4 py-2.5 text-sm text-right text-gray-500 tabular-nums">
+            <td class="px-4 py-2.5 text-sm text-right text-gray-600 tabular-nums">
               {% if r.is_affinity %}
               <span class="text-violet-600">{{ "%.0f%%"|format(r.affinity_confidence * 100) }}</span>
               {% else %}
               {{ r.times_seen }}
               {% endif %}
             </td>
-            <td class="px-4 py-2.5 text-sm text-right tabular-nums {{ 'text-emerald-700 font-medium' if r.last_price else 'text-gray-500' }}">
+            <td class="px-4 py-2.5 text-sm text-right tabular-nums {{ 'text-emerald-700 font-medium' if r.last_price else 'text-gray-600' }}">
               {{ "$%.4f"|format(r.last_price) if r.last_price else "—" }}
             </td>
-            <td class="px-4 py-2.5 text-sm text-right text-gray-500 tabular-nums">
+            <td class="px-4 py-2.5 text-sm text-right text-gray-600 tabular-nums">
               {{ "{:,}".format(r.last_qty) if r.last_qty else "—" }}
             </td>
-            <td class="px-4 py-2.5 text-sm text-gray-500">{{ r.last_seen|timeago if r.last_seen else "—" }}</td>
-            <td class="px-4 py-2.5 text-sm text-right text-gray-500">
+            <td class="px-4 py-2.5 text-sm text-gray-600">{{ r.last_seen|timeago if r.last_seen else "—" }}</td>
+            <td class="px-4 py-2.5 text-sm text-right text-gray-600">
               {% if r.win_rate is not none %}{{ "%.0f%%"|format(r.win_rate * 100) }}{% else %}—{% endif %}
             </td>
-            <td class="px-4 py-2.5 text-sm text-right text-gray-500">
+            <td class="px-4 py-2.5 text-sm text-right text-gray-600">
               {% if r.avg_response_hours is not none %}{{ "%.1fh"|format(r.avg_response_hours) }}{% else %}—{% endif %}
             </td>
           </tr>
@@ -85,12 +87,12 @@
   </div>
 
   {% elif mpn %}
-  <div class="text-center py-12 text-gray-400">
+  <div class="text-center py-6 sm:py-8 text-gray-400">
     <p class="text-sm">No vendors found for <span class="font-mono">{{ mpn }}</span></p>
   </div>
 
   {% else %}
-  <div class="text-center py-12 text-gray-400">
+  <div class="text-center py-6 sm:py-8 text-gray-400">
     <p class="text-sm">Enter MPN above to find vendors who carry that part</p>
   </div>
   {% endif %}

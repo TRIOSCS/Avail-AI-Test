@@ -1,53 +1,90 @@
-"""Smoke-test: columns exist post-upgrade, absent post-downgrade.
+"""Round-trip test for migration 122 (prospect_accounts AI score columns).
 
-Run against a real PostgreSQL instance only — SQLite does not support
-the reflection calls used here. The project test suite runs SQLite (conftest.py),
-so this test is marked skip unless TEST_PG_URL is set.
+What: revision metadata (id <= 32 vs PG VARCHAR(32), chains onto 121) plus an
+      executable upgrade -> downgrade -> upgrade pass on a scratch in-memory SQLite
+      engine via the shared hermetic harness (tests/migration_harness.run_ops).
+      The upgrade adds trio_match_score + opportunity_score (+ their indexes); the
+      downgrade removes them. All ops are portable SQLite DDL (plain int columns,
+      index create/drop, column drop), so the round trip runs in-process with no PG.
 
-Usage:
-    TEST_PG_URL=postgresql://... pytest tests/test_migration_120.py -v
+Called by: pytest
+Depends on: alembic/versions/122_prospect_ai_scores.py, tests/migration_harness.run_ops
 """
 
+from __future__ import annotations
+
+import importlib.util
 import os
 
-import pytest
+import sqlalchemy as sa
+from sqlalchemy import inspect
+from sqlalchemy.pool import StaticPool
 
-PG_URL = os.environ.get("TEST_PG_URL", "")
+from tests.migration_harness import run_ops
+
+_MIGRATION_PATH = os.path.join(os.path.dirname(__file__), "..", "alembic", "versions", "122_prospect_ai_scores.py")
+_spec = importlib.util.spec_from_file_location("migration_122", _MIGRATION_PATH)
+_mod = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_mod)
 
 
-@pytest.mark.skipif(not PG_URL, reason="TEST_PG_URL not set — PG required for migration tests")
-def test_migration_122_upgrade_downgrade():
-    """Upgrade adds columns; downgrade removes them; re-upgrade restores them."""
-    import subprocess
+class TestRevisionMetadata:
+    def test_revision_id(self):
+        assert _mod.revision == "122_prospect_ai_scores"
 
-    env = {**os.environ, "DATABASE_URL": PG_URL}
+    def test_revision_id_within_pg_version_num_limit(self):
+        # alembic_version.version_num is VARCHAR(32) on Postgres; SQLite ignores length.
+        assert len(_mod.revision) <= 32
 
-    def alembic(cmd: str) -> None:
-        result = subprocess.run(
-            f"alembic {cmd}",
-            shell=True,
-            env=env,
-            capture_output=True,
-            text=True,
-            cwd="/root/availai/.claude/worktrees/sp3-screening",
+    def test_down_revision(self):
+        assert _mod.down_revision == "121_datasheet_lib_col_rename"
+
+
+class TestExecution:
+    """Upgrade -> downgrade -> upgrade on a scratch SQLite engine."""
+
+    @staticmethod
+    def _engine() -> sa.engine.Engine:
+        engine = sa.create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+        meta = sa.MetaData()
+        sa.Table(
+            "prospect_accounts",
+            meta,
+            sa.Column("id", sa.Integer, primary_key=True),
+            sa.Column("name", sa.String(255)),
         )
-        assert result.returncode == 0, f"alembic {cmd} failed:\n{result.stderr}"
+        meta.create_all(engine)
+        return engine
 
-    alembic("upgrade 122_prospect_ai_scores")
+    def _columns(self, engine, table: str) -> set[str]:
+        return {c["name"] for c in inspect(engine).get_columns(table)}
 
-    from sqlalchemy import create_engine, inspect
+    def _indexes(self, engine, table: str) -> set[str]:
+        return {i["name"] for i in inspect(engine).get_indexes(table)}
 
-    engine = create_engine(PG_URL)
-    cols = {c["name"] for c in inspect(engine).get_columns("prospect_accounts")}
-    assert "trio_match_score" in cols
-    assert "opportunity_score" in cols
-    engine.dispose()
+    def test_upgrade_adds_columns_and_indexes(self):
+        engine = self._engine()
+        run_ops(engine, _mod.upgrade)
+        cols = self._columns(engine, "prospect_accounts")
+        assert "trio_match_score" in cols
+        assert "opportunity_score" in cols
+        idxs = self._indexes(engine, "prospect_accounts")
+        assert "ix_prospect_accounts_trio_match_score" in idxs
+        assert "ix_prospect_accounts_opportunity_score" in idxs
 
-    alembic("downgrade -1")
-    engine2 = create_engine(PG_URL)
-    cols2 = {c["name"] for c in inspect(engine2).get_columns("prospect_accounts")}
-    assert "trio_match_score" not in cols2
-    assert "opportunity_score" not in cols2
-    engine2.dispose()
+    def test_downgrade_removes_columns(self):
+        engine = self._engine()
+        run_ops(engine, _mod.upgrade)
+        run_ops(engine, _mod.downgrade)
+        cols = self._columns(engine, "prospect_accounts")
+        assert "trio_match_score" not in cols
+        assert "opportunity_score" not in cols
 
-    alembic("upgrade head")
+    def test_upgrade_downgrade_upgrade_round_trips(self):
+        engine = self._engine()
+        run_ops(engine, _mod.upgrade)
+        run_ops(engine, _mod.downgrade)
+        run_ops(engine, _mod.upgrade)
+        cols = self._columns(engine, "prospect_accounts")
+        assert "trio_match_score" in cols
+        assert "opportunity_score" in cols

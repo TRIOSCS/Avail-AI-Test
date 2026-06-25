@@ -1,5 +1,10 @@
-{# sites_tab.html — Sites tab for company detail with add/expand/contacts.
-   Receives: company (Company), sites (list[CustomerSite]), users (list[User]).
+{# sites_tab.html — Sites tab: site info + CRUD only.
+   Contact management lives exclusively on the Contacts tab. Each site card
+   shows a contact count + a "View N contacts" link that switches to the
+   Contacts tab with that site's filter pre-applied.
+
+   Receives: company (Company), sites (list[CustomerSite] with .site_contacts),
+             users (list[User]).
    Called by: company_tab route (tab=="sites") in htmx_views.py.
    Depends on: HTMX, Alpine.js, brand palette.
 #}
@@ -26,6 +31,7 @@
       <input aria-label="Site Name" type="text" name="site_name" required placeholder="Site Name"
              class="px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-brand-500">
       <select name="site_type"
+              aria-label="Site type"
               class="px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-brand-500">
         <option value="">Type</option>
         <option value="hq">HQ</option>
@@ -39,6 +45,7 @@
       <input aria-label="Country" type="text" name="country" placeholder="Country"
              class="px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-brand-500">
       <select name="owner_id"
+              aria-label="Account owner"
               class="px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-brand-500 col-span-2">
         <option value="">Owner (optional)</option>
         {% for u in users %}
@@ -63,8 +70,8 @@
       <svg class="mx-auto h-10 w-10 text-gray-300 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
       </svg>
-      <p class="text-sm text-gray-500 mb-1">No sites for this company.</p>
-      <p class="text-xs text-gray-400">Click "+ Add Site" above to add one.</p>
+      <p class="text-sm text-gray-600 mb-1">No sites yet.</p>
+      <p class="text-xs text-gray-400">Use "+ Add Site" above to add a location for this account.</p>
     </div>
     {% endif %}
   </div>

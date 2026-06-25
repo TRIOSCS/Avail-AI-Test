@@ -147,6 +147,40 @@ def validate_essentials(condition: str | None, data: dict) -> list[str]:
     return errors
 
 
+# Ask-the-vendor checklist: (label, prefill_key, conditions where shown). Rows with
+# prefill_key=None (usage, part condition, refurb fields) are never auto-filled by the
+# parser, so they are always pre-checked when relevant.
+_QUAL_CHECKLIST: list[tuple[str, str | None, set[str]]] = [
+    ("Manufacturer", "manufacturer", {"new"}),
+    ("Packaging", "packaging", {"new_no_pkg", "pulls"}),
+    ("Usage (boards/systems)", None, {"pulls"}),
+    ("Part condition", None, {"pulls"}),
+    ("Refurbished by", None, {"refurb"}),
+    ("Refurb process", None, {"refurb"}),
+    ("Date code", "date_code", {"new", "new_no_pkg", "pulls", "refurb"}),
+    ("MOQ", "moq", {"new", "new_no_pkg", "pulls", "refurb"}),
+]
+
+
+def compute_qual_gaps(prefill: dict, condition: str | None) -> list[dict]:
+    """Build the ask-the-vendor checklist for an offer's parsed condition.
+
+    Returns ordered rows ``[{label, key, prechecked}]``. A row is PRE-CHECKED when its
+    value is missing after pre-fill (a genuine gap); fields the parser can never fill are
+    always pre-checked. Only rows relevant to ``condition`` are returned; empty list when
+    condition is unset.
+    """
+    if not condition:
+        return []
+    rows: list[dict] = []
+    for label, key, conds in _QUAL_CHECKLIST:
+        if condition not in conds:
+            continue
+        value = prefill.get(key) if key else None
+        rows.append({"label": label, "key": key, "prechecked": value in (None, "", [])})
+    return rows
+
+
 def compose_note(condition: str | None, data: dict) -> str:
     from app.utils.normalization import normalize_packaging as _norm_pkg
 

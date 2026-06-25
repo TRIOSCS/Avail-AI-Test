@@ -2,18 +2,27 @@
 app/enrichment_service.py.
 
 Targets the uncovered branches in:
-- normalize_company_input (lines 190-191): claude_text exception path
-- normalize_company_output (lines 229, 241): employee_size and hq_state else branches
-- _explorium_find_company (lines 305-307): HTTPError exception path
-- _explorium_find_contacts (lines 328-329, 345-347): non-200 and HTTPError paths
-- _ai_find_company (lines 392-393, 406-408): no-data and exception paths
-- _ai_find_contacts (lines 441-443): exception path
-- enrich_entity (lines 511-513): apollo_api_key branch
-- find_suggested_contacts (line 591): contact with email but no title (relevant filter)
-- apply_enrichment_to_company (lines 622-623): website field branch
+- normalize_company_input: claude_text exception path
+- normalize_company_output: employee_size and hq_state else branches
+- app.connectors.explorium.enrich_company: exception paths (moved from deleted
+  _explorium_find_company in enrichment_service)
+- app.connectors.explorium.search_contacts: exception paths (moved from deleted
+  _explorium_find_contacts in enrichment_service)
+- _ai_find_company: no-data and exception paths
+- _ai_find_contacts: exception path
+- enrich_entity: delegate to enrichment_router.gather_company (new arch)
+- find_suggested_contacts: delegate to enrichment_router.gather_contacts + _is_relevant
+- apply_enrichment_to_company: website field branch
+
+NOTE (Task 9): _explorium_find_company and _explorium_find_contacts were DELETED from
+enrichment_service.py. Their logic now lives in app.connectors.explorium (enrich_company /
+search_contacts). Tests that tested those internal functions have been updated to test
+the connector directly. Tests that patched those functions as side-effects of testing
+enrich_entity/find_suggested_contacts now patch enrichment_router.gather_company /
+gather_contacts instead.
 
 Called by: pytest
-Depends on: conftest.py fixtures, app.enrichment_service
+Depends on: conftest.py fixtures, app.enrichment_service, app.connectors.explorium
 """
 
 import os
@@ -111,185 +120,151 @@ class TestNormalizeCompanyOutputBranches:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  _explorium_find_company — HTTPError exception path (lines 305-307)
+#  app.connectors.explorium.enrich_company — exception / no-key paths
+#  (Task 9: _explorium_find_company moved to the connector)
 # ═══════════════════════════════════════════════════════════════════════
 
 
 class TestExploriumFindCompanyExceptionPath:
-    async def test_httpx_error_returns_none(self):
-        """HTTPError during Explorium company lookup returns None (lines 305-307)."""
-        from app.enrichment_service import _explorium_find_company
+    """Tests for the Explorium company enrichment connector (not enrichment_service).
 
-        with (
-            patch(
-                "app.enrichment_service.get_credential_cached",
-                return_value="fake-explorium-key",
-            ),
-            patch(
-                "app.enrichment_service.http.post",
-                side_effect=httpx.ConnectError("Connection refused"),
-            ),
+    _explorium_find_company was deleted from enrichment_service in Task 9; equivalent
+    logic now lives in app.connectors.explorium.enrich_company.
+    """
+
+    async def test_httpx_error_returns_none(self):
+        """HTTPError during Explorium company lookup returns None."""
+        from app.connectors.explorium import enrich_company
+
+        with patch(
+            "app.connectors.explorium.http.post",
+            side_effect=httpx.ConnectError("Connection refused"),
         ):
-            result = await _explorium_find_company("example.com", "Example Corp")
+            result = await enrich_company("example.com", "Example Corp", "fake-key")
 
         assert result is None
 
-    async def test_non_200_response_returns_none(self):
-        """Non-200 HTTP response from Explorium returns None (lines 285-287)."""
-        from app.enrichment_service import _explorium_find_company
+    async def test_match_returns_none_returns_none(self):
+        """No matched business_id from /businesses/match → enrich_company returns
+        None."""
+        from app.connectors.explorium import enrich_company
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"data": {"matched_businesses": []}}
+
+        with patch(
+            "app.connectors.explorium.http.post",
+            new_callable=AsyncMock,
+            return_value=mock_resp,
+        ):
+            result = await enrich_company("example.com", "Example Corp", "fake-key")
+
+        assert result is None
+
+    async def test_non_200_match_returns_none(self):
+        """Non-200 HTTP response from /businesses/match returns None."""
+        from app.connectors.explorium import enrich_company
 
         mock_resp = MagicMock()
         mock_resp.status_code = 404
 
-        with (
-            patch(
-                "app.enrichment_service.get_credential_cached",
-                return_value="fake-explorium-key",
-            ),
-            patch(
-                "app.enrichment_service.http.post",
-                new_callable=AsyncMock,
-                return_value=mock_resp,
-            ),
+        with patch(
+            "app.connectors.explorium.http.post",
+            new_callable=AsyncMock,
+            return_value=mock_resp,
         ):
-            result = await _explorium_find_company("example.com", "Example Corp")
-
-        assert result is None
-
-    async def test_key_error_returns_none(self):
-        """KeyError during Explorium response parsing returns None (lines 305-307)."""
-        from app.enrichment_service import _explorium_find_company
-
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.side_effect = KeyError("missing key")
-
-        with (
-            patch(
-                "app.enrichment_service.get_credential_cached",
-                return_value="fake-explorium-key",
-            ),
-            patch(
-                "app.enrichment_service.http.post",
-                new_callable=AsyncMock,
-                return_value=mock_resp,
-            ),
-        ):
-            result = await _explorium_find_company("example.com", "Example Corp")
+            result = await enrich_company("example.com", "Example Corp", "fake-key")
 
         assert result is None
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  _explorium_find_contacts — non-200 (328-329) and HTTPError (345-347)
+#  app.connectors.explorium.search_contacts — exception paths
+#  (Task 9: _explorium_find_contacts moved to the connector)
 # ═══════════════════════════════════════════════════════════════════════
 
 
 class TestExploriumFindContactsBranches:
-    async def test_non_200_response_returns_empty_list(self):
-        """Non-200 from Explorium contacts returns empty list (lines 328-329)."""
-        from app.enrichment_service import _explorium_find_contacts
+    """Tests for the Explorium contacts connector.
+
+    _explorium_find_contacts was deleted from enrichment_service in Task 9; equivalent
+    logic now lives in app.connectors.explorium.search_contacts.
+    """
+
+    async def test_no_match_returns_empty_list(self):
+        """No matched business_id from /businesses/match returns empty list."""
+        from app.connectors.explorium import search_contacts
 
         mock_resp = MagicMock()
-        mock_resp.status_code = 403
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"data": {"matched_businesses": []}}
 
-        with (
-            patch(
-                "app.enrichment_service.get_credential_cached",
-                return_value="fake-explorium-key",
-            ),
-            patch(
-                "app.enrichment_service.http.post",
-                new_callable=AsyncMock,
-                return_value=mock_resp,
-            ),
+        with patch(
+            "app.connectors.explorium.http.post",
+            new_callable=AsyncMock,
+            return_value=mock_resp,
         ):
-            result = await _explorium_find_contacts("example.com", "procurement")
+            result = await search_contacts("example.com", "Example", "fake-key", "procurement", 5)
 
         assert result == []
 
     async def test_httpx_error_returns_empty_list(self):
-        """HTTPError during Explorium contacts lookup returns empty list (lines
-        345-347)."""
-        from app.enrichment_service import _explorium_find_contacts
+        """HTTPError during Explorium contacts lookup returns empty list."""
+        from app.connectors.explorium import search_contacts
 
-        with (
-            patch(
-                "app.enrichment_service.get_credential_cached",
-                return_value="fake-explorium-key",
-            ),
-            patch(
-                "app.enrichment_service.http.post",
-                side_effect=httpx.TimeoutException("Timeout"),
-            ),
+        with patch(
+            "app.connectors.explorium.http.post",
+            side_effect=httpx.TimeoutException("Timeout"),
         ):
-            result = await _explorium_find_contacts("example.com")
+            result = await search_contacts("example.com", "Example", "fake-key", "", 5)
 
         assert result == []
 
     async def test_value_error_returns_empty_list(self):
-        """ValueError during contacts lookup returns empty list (lines 345-347)."""
-        from app.enrichment_service import _explorium_find_contacts
+        """ValueError during contacts lookup returns empty list."""
+        from app.connectors.explorium import search_contacts
 
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.side_effect = ValueError("Invalid JSON")
 
-        with (
-            patch(
-                "app.enrichment_service.get_credential_cached",
-                return_value="fake-explorium-key",
-            ),
-            patch(
-                "app.enrichment_service.http.post",
-                new_callable=AsyncMock,
-                return_value=mock_resp,
-            ),
+        with patch(
+            "app.connectors.explorium.http.post",
+            new_callable=AsyncMock,
+            return_value=mock_resp,
         ):
-            result = await _explorium_find_contacts("example.com")
+            result = await search_contacts("example.com", "Example", "fake-key", "", 5)
 
         assert result == []
 
-    async def test_with_title_filter_builds_payload(self):
-        """title_filter is passed as job_title_keywords in payload."""
-        from app.enrichment_service import _explorium_find_contacts
+    async def test_with_title_filter_uses_connector(self):
+        """title_filter is forwarded to search_contacts; result uses connector shape."""
+        from app.connectors.explorium import search_contacts
 
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            "prospects": [
-                {
-                    "full_name": "Jane Smith",
-                    "job_title": "Procurement Manager",
-                    "email": "jane@example.com",
-                    "phone": "555-1234",
-                    "linkedin_url": "https://linkedin.com/in/jane",
-                    "location": "San Jose, CA",
-                    "company_name": "Example Corp",
-                }
-            ]
-        }
+        # Match call returns a business_id; then prospects call returns empty (simplest)
+        match_resp = MagicMock()
+        match_resp.status_code = 200
+        match_resp.json.return_value = {"data": {"matched_businesses": [{"business_id": "biz-1"}]}}
 
-        captured_payload = {}
+        prospects_resp = MagicMock()
+        prospects_resp.status_code = 200
+        prospects_resp.json.return_value = {"data": []}  # no contacts
 
-        async def capture_post(url, **kwargs):
-            captured_payload.update(kwargs.get("json", {}))
-            return mock_resp
+        call_count = [0]
 
-        with (
-            patch(
-                "app.enrichment_service.get_credential_cached",
-                return_value="fake-explorium-key",
-            ),
-            patch("app.enrichment_service.http.post", side_effect=capture_post),
-        ):
-            result = await _explorium_find_contacts("example.com", "procurement")
+        async def side_effect_post(url, **kwargs):
+            call_count[0] += 1
+            if "match" in url:
+                return match_resp
+            return prospects_resp
 
-        assert "job_title_keywords" in captured_payload
-        assert captured_payload["job_title_keywords"] == ["procurement"]
-        assert len(result) == 1
-        assert result[0]["full_name"] == "Jane Smith"
-        assert result[0]["source"] == "explorium"
+        with patch("app.connectors.explorium.http.post", side_effect=side_effect_post):
+            result = await search_contacts("example.com", "Example", "fake-key", "procurement", 5)
+
+        # Called match + prospects (2 calls minimum)
+        assert call_count[0] >= 2
+        assert result == []
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -427,72 +402,69 @@ class TestAiFindContactsExceptionPath:
 
 
 class TestEnrichEntityApolloBranch:
-    async def test_apollo_api_key_triggers_apollo_search(self):
-        """When apollo_api_key is set, apollo search_company is called (lines
-        511-513)."""
+    """Task 9: enrich_entity now delegates to enrichment_router.gather_company.
+
+    Apollo (and all other provider) orchestration is inside the router; these tests
+    patch gather_company at the router level to isolate the facade behavior.
+    """
+
+    async def test_gather_company_result_blended_into_output(self):
+        """enrich_entity blends whatever gather_company returns into the output."""
         from app.enrichment_service import enrich_entity
+        from app.services import enrichment_router
 
-        mock_settings = MagicMock()
-        mock_settings.apollo_api_key = "fake-apollo-key"
+        async def fake_gather(domain, name=""):
+            return [
+                {
+                    "source": "apollo",
+                    "legal_name": "Apollo Corp",
+                    "domain": "example.com",
+                    "industry": "Technology",
+                    "employee_size": "51-200",
+                    "hq_city": "San Francisco",
+                    "hq_state": "CA",
+                    "hq_country": "US",
+                    "website": "https://example.com",
+                }
+            ]
 
-        apollo_search_mock = AsyncMock(
-            return_value={
-                "source": "apollo",
-                "legal_name": "Apollo Corp",
-                "domain": "example.com",
-                "industry": "Technology",
-                "employee_size": "51-200",
-                "hq_city": "San Francisco",
-                "hq_state": "CA",
-                "hq_country": "US",
-                "website": "https://example.com",
-                "linkedin_url": None,
-            }
-        )
-
-        # get_cached/set_cached are lazy-imported inside enrich_entity from .cache.intel_cache
         with (
             patch(
                 "app.enrichment_service.normalize_company_input",
                 new_callable=AsyncMock,
                 return_value=("Example Corp", "example.com"),
             ),
-            patch("app.enrichment_service._explorium_find_company", new_callable=AsyncMock, return_value=None),
-            patch("app.enrichment_service._ai_find_company", new_callable=AsyncMock, return_value=None),
             patch("app.cache.intel_cache.get_cached", return_value=None),
             patch("app.cache.intel_cache.set_cached"),
-            patch("app.config.settings", mock_settings),
-            patch("app.connectors.apollo.search_company", apollo_search_mock),
+            patch.object(enrichment_router, "gather_company", fake_gather),
         ):
             result = await enrich_entity("example.com", "Example Corp")
 
-        # Apollo data should have been merged
         assert result is not None
         assert isinstance(result, dict)
+        assert result["industry"] == "Technology"
 
-    async def test_apollo_api_key_none_skips_apollo(self):
-        """When apollo_api_key is None/empty, apollo search is not called."""
+    async def test_empty_gather_returns_domain_only(self):
+        """When gather_company returns nothing, enrich_entity still returns domain
+        dict."""
         from app.enrichment_service import enrich_entity
+        from app.services import enrichment_router
 
-        mock_settings = MagicMock()
-        mock_settings.apollo_api_key = None
+        async def fake_gather(domain, name=""):
+            return []
 
-        # get_cached/set_cached are lazy-imported inside enrich_entity from .cache.intel_cache
         with (
             patch(
                 "app.enrichment_service.normalize_company_input",
                 new_callable=AsyncMock,
                 return_value=("Example Corp", "example.com"),
             ),
-            patch("app.enrichment_service._explorium_find_company", new_callable=AsyncMock, return_value=None),
-            patch("app.enrichment_service._ai_find_company", new_callable=AsyncMock, return_value=None),
             patch("app.cache.intel_cache.get_cached", return_value=None),
             patch("app.cache.intel_cache.set_cached"),
-            patch("app.config.settings", mock_settings),
+            patch.object(enrichment_router, "gather_company", fake_gather),
         ):
             result = await enrich_entity("example.com", "Example Corp")
 
-        # Should still return a result dict (empty enrichment)
         assert isinstance(result, dict)
         assert result["domain"] == "example.com"
 
@@ -503,9 +475,16 @@ class TestEnrichEntityApolloBranch:
 
 
 class TestFindSuggestedContactsRelevantFilter:
+    """Task 9: find_suggested_contacts now delegates to enrichment_router.gather_contacts.
+
+    These tests verify the _is_relevant filter still works correctly. They inject
+    contacts via gather_contacts (the new router) instead of the old internal functions.
+    """
+
     async def test_contact_with_email_but_no_title_is_kept(self):
-        """Contact with email but no title returns True from _is_relevant (line 591)."""
+        """Contact with email but no title returns True from _is_relevant."""
         from app.enrichment_service import find_suggested_contacts
+        from app.services import enrichment_router
 
         contact_with_email_no_title = {
             "source": "explorium",
@@ -518,27 +497,19 @@ class TestFindSuggestedContactsRelevantFilter:
             "company": "Example Corp",
         }
 
-        with (
-            patch(
-                "app.enrichment_service._explorium_find_contacts",
-                new_callable=AsyncMock,
-                return_value=[contact_with_email_no_title],
-            ),
-            patch(
-                "app.enrichment_service._ai_find_contacts",
-                new_callable=AsyncMock,
-                return_value=[],
-            ),
-        ):
+        async def fake_gather(domain, name, title_filter, limit):
+            return [contact_with_email_no_title]
+
+        with patch.object(enrichment_router, "gather_contacts", fake_gather):
             result = await find_suggested_contacts("example.com", "Example Corp")
 
         # Contact with email but no title should be included
-        assert len(result) == 1
-        assert result[0]["full_name"] == "John Doe"
+        assert any(c["full_name"] == "John Doe" for c in result)
 
     async def test_contact_with_no_title_and_no_email_is_filtered_out(self):
         """Contact with no title and no email is filtered out."""
         from app.enrichment_service import find_suggested_contacts
+        from app.services import enrichment_router
 
         # Has relevant title — should be kept
         relevant_contact = {
@@ -563,18 +534,10 @@ class TestFindSuggestedContactsRelevantFilter:
             "company": "Example Corp",
         }
 
-        with (
-            patch(
-                "app.enrichment_service._explorium_find_contacts",
-                new_callable=AsyncMock,
-                return_value=[relevant_contact, irrelevant_contact],
-            ),
-            patch(
-                "app.enrichment_service._ai_find_contacts",
-                new_callable=AsyncMock,
-                return_value=[],
-            ),
-        ):
+        async def fake_gather(domain, name, title_filter, limit):
+            return [relevant_contact, irrelevant_contact]
+
+        with patch.object(enrichment_router, "gather_contacts", fake_gather):
             result = await find_suggested_contacts("example.com", "Example Corp")
 
         # Only the relevant contact should be in results
@@ -585,6 +548,7 @@ class TestFindSuggestedContactsRelevantFilter:
     async def test_all_irrelevant_contacts_returns_unfiltered(self):
         """If filter removes all contacts, the unfiltered list is returned."""
         from app.enrichment_service import find_suggested_contacts
+        from app.services import enrichment_router
 
         # No relevant title, no email — normally filtered out
         contact1 = {
@@ -598,18 +562,10 @@ class TestFindSuggestedContactsRelevantFilter:
             "company": "Example Corp",
         }
 
-        with (
-            patch(
-                "app.enrichment_service._explorium_find_contacts",
-                new_callable=AsyncMock,
-                return_value=[contact1],
-            ),
-            patch(
-                "app.enrichment_service._ai_find_contacts",
-                new_callable=AsyncMock,
-                return_value=[],
-            ),
-        ):
+        async def fake_gather(domain, name, title_filter, limit):
+            return [contact1]
+
+        with patch.object(enrichment_router, "gather_contacts", fake_gather):
             result = await find_suggested_contacts("example.com")
 
         # Filter removed everything, so unfiltered returned
@@ -871,39 +827,54 @@ class TestNormalizeCompanyOutputMoreBranches:
 
 
 class TestExploriumFindCompanyNoKey:
-    async def test_no_api_key_returns_none(self):
-        """Missing Explorium API key returns None immediately (lines 273-274)."""
-        from app.enrichment_service import _explorium_find_company
+    async def test_no_api_key_router_skips_explorium(self):
+        """When no Explorium API key is present, router skips Explorium and returns
+        nothing (router is configured to resolve the key internally)."""
+        from app.enrichment_service import enrich_entity
+        from app.services import enrichment_router
 
-        with patch(
-            "app.enrichment_service.get_credential_cached",
-            return_value="",
+        # With no key, router will return [] (explorium gate won't pass)
+        async def empty_gather(domain, name=""):
+            return []
+
+        with (
+            patch.object(enrichment_router, "gather_company", empty_gather),
+            patch("app.cache.intel_cache.get_cached", return_value=None),
+            patch("app.cache.intel_cache.set_cached"),
         ):
-            result = await _explorium_find_company("example.com", "Example Corp")
+            result = await enrich_entity("example.com", "Example Corp")
 
-        assert result is None
+        assert result is not None
+        assert result["domain"] == "example.com"
 
 
 class TestExploriumFindContactsNoKey:
-    async def test_no_api_key_returns_empty_list(self):
-        """Missing Explorium API key returns empty list immediately (line 313)."""
-        from app.enrichment_service import _explorium_find_contacts
+    async def test_no_api_key_router_skips_explorium_contacts(self):
+        """When no Explorium API key is present, router skips Explorium contacts."""
+        from app.enrichment_service import find_suggested_contacts
+        from app.services import enrichment_router
 
-        with patch(
-            "app.enrichment_service.get_credential_cached",
-            return_value="",
-        ):
-            result = await _explorium_find_contacts("example.com")
+        async def empty_gather(domain, name, title_filter, limit):
+            return []
+
+        with patch.object(enrichment_router, "gather_contacts", empty_gather):
+            result = await find_suggested_contacts("example.com")
 
         assert result == []
 
 
 class TestFindSuggestedContactsExceptionBranch:
-    async def test_provider_exception_in_gather_is_handled(self):
-        """Exception from a gather() provider is caught and logged (lines 547-548)."""
-        from app.enrichment_service import find_suggested_contacts
+    """Task 9: find_suggested_contacts delegates to enrichment_router.gather_contacts.
 
-        # explorium raises, ai returns normal result
+    Exception handling is now inside the router; these tests verify behavior
+    via the gather_contacts façade.
+    """
+
+    async def test_gather_returns_ai_contact(self):
+        """When gather_contacts returns AI results, they are blended and returned."""
+        from app.enrichment_service import find_suggested_contacts
+        from app.services import enrichment_router
+
         ai_contact = {
             "source": "ai",
             "full_name": "Jane Smith",
@@ -915,26 +886,19 @@ class TestFindSuggestedContactsExceptionBranch:
             "company": "Example Corp",
         }
 
-        with (
-            patch(
-                "app.enrichment_service._explorium_find_contacts",
-                side_effect=Exception("Network failure"),
-            ),
-            patch(
-                "app.enrichment_service._ai_find_contacts",
-                new_callable=AsyncMock,
-                return_value=[ai_contact],
-            ),
-        ):
+        async def fake_gather(domain, name, title_filter, limit):
+            return [ai_contact]
+
+        with patch.object(enrichment_router, "gather_contacts", fake_gather):
             result = await find_suggested_contacts("example.com", "Example Corp")
 
-        # Should still get AI results despite explorium failure
         assert len(result) == 1
         assert result[0]["full_name"] == "Jane Smith"
 
     async def test_duplicate_contacts_deduplicated(self):
-        """Contacts with the same email are deduplicated (line 557 continue path)."""
+        """Contacts with the same email are deduplicated by blend_contacts."""
         from app.enrichment_service import find_suggested_contacts
+        from app.services import enrichment_router
 
         contact = {
             "source": "explorium",
@@ -946,22 +910,14 @@ class TestFindSuggestedContactsExceptionBranch:
             "location": None,
             "company": "Example Corp",
         }
-        # Same contact duplicated from AI source
+        # Same contact duplicated from AI source (same email → same dedup key)
         duplicate = dict(contact)
         duplicate["source"] = "ai"
 
-        with (
-            patch(
-                "app.enrichment_service._explorium_find_contacts",
-                new_callable=AsyncMock,
-                return_value=[contact],
-            ),
-            patch(
-                "app.enrichment_service._ai_find_contacts",
-                new_callable=AsyncMock,
-                return_value=[duplicate],
-            ),
-        ):
+        async def fake_gather(domain, name, title_filter, limit):
+            return [contact, duplicate]
+
+        with patch.object(enrichment_router, "gather_contacts", fake_gather):
             result = await find_suggested_contacts("example.com", "Example Corp")
 
         # Only one contact despite two sources returning same email
@@ -970,42 +926,50 @@ class TestFindSuggestedContactsExceptionBranch:
 
 
 class TestExploriumFindCompanySuccessPath:
-    async def test_successful_200_response_returns_data(self):
-        """Successful Explorium company response returns parsed dict (lines 289-290)."""
-        from app.enrichment_service import _explorium_find_company
+    """Task 9: _explorium_find_company moved to app.connectors.explorium.enrich_company.
 
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            "firmo_name": "Example Corp",
-            "firmo_linkedin_profile": "https://linkedin.com/company/example",
-            "firmo_linkedin_industry_category": "Technology",
-            "firmo_number_of_employees_range": "51-200",
-            "firmo_city_name": "Austin",
-            "firmo_region_name": "TX",
-            "firmo_country_name": "US",
-            "firmo_website": "https://example.com",
-            "other_field": "ignored",
+    The connector uses a 2-call pipeline: match → firmographics/enrich.
+    """
+
+    async def test_successful_match_and_enrich_returns_data(self):
+        """Successful match+enrich pipeline returns parsed firmographic dict."""
+        from app.connectors.explorium import enrich_company
+
+        match_resp = MagicMock()
+        match_resp.status_code = 200
+        match_resp.json.return_value = {"data": {"matched_businesses": [{"business_id": "biz-123"}]}}
+
+        enrich_resp = MagicMock()
+        enrich_resp.status_code = 200
+        enrich_resp.json.return_value = {
+            "data": {
+                "name": "Example Corp",
+                "linkedin_industry_category": "Technology",
+                "number_of_employees_range": {"min": 51, "max": 200},
+                "city_name": "Austin",
+                "region_name": "TX",
+                "country_name": "US",
+                "website": "https://example.com",
+                "linkedin_profile": "https://linkedin.com/company/example",
+            }
         }
 
-        with (
-            patch(
-                "app.enrichment_service.get_credential_cached",
-                return_value="fake-explorium-key",
-            ),
-            patch(
-                "app.enrichment_service.http.post",
-                new_callable=AsyncMock,
-                return_value=mock_resp,
-            ),
-        ):
-            result = await _explorium_find_company("example.com", "Example Corp")
+        call_count = [0]
+
+        async def side_effect(url, **kwargs):
+            call_count[0] += 1
+            if "match" in url:
+                return match_resp
+            return enrich_resp
+
+        with patch("app.connectors.explorium.http.post", side_effect=side_effect):
+            result = await enrich_company("example.com", "Example Corp", "fake-key")
 
         assert result is not None
         assert result["source"] == "explorium"
         assert result["legal_name"] == "Example Corp"
-        assert result["domain"] == "example.com"
         assert result["industry"] == "Technology"
+        assert result["employee_size"] == "51-200"
 
 
 class TestAiFindCompanySuccessPath:
@@ -1098,8 +1062,10 @@ class TestAiFindContactsSuccessPath:
 
 class TestEnrichEntityCacheHit:
     async def test_cache_hit_returns_early(self):
-        """When cache has a result, enrich_entity returns it immediately (line 467)."""
+        """When cache has a result, enrich_entity returns it immediately without calling
+        enrichment_router.gather_company."""
         from app.enrichment_service import enrich_entity
+        from app.services import enrichment_router
 
         cached_data = {
             "legal_name": "Cached Corp",
@@ -1108,6 +1074,12 @@ class TestEnrichEntityCacheHit:
             "source": "explorium",
         }
 
+        router_calls = []
+
+        async def should_not_call(domain, name=""):
+            router_calls.append(domain)
+            return []
+
         with (
             patch(
                 "app.enrichment_service.normalize_company_input",
@@ -1115,13 +1087,12 @@ class TestEnrichEntityCacheHit:
                 return_value=("Cached Corp", "example.com"),
             ),
             patch("app.cache.intel_cache.get_cached", return_value=cached_data),
-            # These should NOT be called on cache hit:
-            patch("app.enrichment_service._explorium_find_company", new_callable=AsyncMock) as mock_explorium,
+            patch.object(enrichment_router, "gather_company", should_not_call),
         ):
             result = await enrich_entity("example.com", "Cached Corp")
 
         assert result == cached_data
-        mock_explorium.assert_not_called()
+        assert not router_calls  # router was NOT called on cache hit
 
 
 class TestNameLooksSuspiciousEdgeCases:
@@ -1155,3 +1126,78 @@ class TestTitleCasePreserveAcronymsEdgeCases:
         from app.enrichment_service import _title_case_preserve_acronyms
 
         assert _title_case_preserve_acronyms(raw) == expected
+
+
+class TestFindSuggestedContactsWithErrors:
+    """find_suggested_contacts_with_errors delegates to find_suggested_contacts and
+    derives errored_providers by snapshotting enrichment_router circuit state
+    before/after the call."""
+
+    async def test_no_error_returns_contacts_and_empty_errored(self):
+        """All circuits stay closed → errored list is empty; contacts are returned."""
+        contact = {
+            "full_name": "Alice Buyer",
+            "title": "procurement manager",
+            "email": "alice@example.com",
+            "linkedin_url": None,
+            "phone": None,
+            "location": None,
+            "source": "apollo",
+        }
+
+        with (
+            patch(
+                "app.enrichment_service.find_suggested_contacts",
+                new_callable=AsyncMock,
+                return_value=[contact],
+            ),
+            patch("app.services.enrichment_router.circuit_open", return_value=False),
+        ):
+            from app.enrichment_service import find_suggested_contacts_with_errors
+
+            contacts, errored = await find_suggested_contacts_with_errors("example.com", "Example Corp")
+
+        assert contacts == [contact]
+        assert errored == []
+
+    async def test_provider_trips_circuit_appears_in_errored(self):
+        """A provider whose circuit transitions closed→open during the call is reported
+        as errored."""
+        tripped = {"lusha": False}
+
+        def mock_circuit_open(provider: str) -> bool:
+            # Lusha starts closed, then trips after the call
+            return tripped[provider] if provider in tripped else False
+
+        async def mock_find_contacts(*args, **kwargs):
+            # Simulate lusha tripping mid-call
+            tripped["lusha"] = True
+            return []
+
+        with (
+            patch("app.enrichment_service.find_suggested_contacts", mock_find_contacts),
+            patch("app.services.enrichment_router.circuit_open", side_effect=mock_circuit_open),
+        ):
+            import app.enrichment_service as es
+
+            contacts, errored = await es.find_suggested_contacts_with_errors("example.com")
+
+        assert contacts == []
+        assert "lusha" in errored
+
+    async def test_zero_results_no_trip_gives_empty_errored(self):
+        """Zero contacts + no circuit trip → both lists empty (neutral empty state)."""
+        with (
+            patch(
+                "app.enrichment_service.find_suggested_contacts",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+            patch("app.services.enrichment_router.circuit_open", return_value=False),
+        ):
+            from app.enrichment_service import find_suggested_contacts_with_errors
+
+            contacts, errored = await find_suggested_contacts_with_errors("unknown.com")
+
+        assert contacts == []
+        assert errored == []

@@ -17,8 +17,14 @@ from sqlalchemy.orm import Session
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
+from .audit_listeners import register_audit_listeners
 from .config import APP_VERSION, settings
 from .database import get_db
+
+# Register CRM audit-trail event listeners (before_insert / before_update).
+# Must run at import time, before any ORM session is used, so listeners
+# are in place for the first request.
+register_audit_listeners()
 
 # Schema managed by Alembic migrations — see alembic/ directory
 # To apply:  alembic upgrade head
@@ -243,6 +249,121 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 
+class AuditUserMiddleware:
+    """ASGI middleware that populates the request-scoped current_user_id contextvar.
+
+    Must be registered via add_middleware BEFORE SessionMiddleware is registered.
+    add_middleware() uses insert(0, ...), so adding Audit first and Session second
+    results in user_middleware = [Session, Audit].  build_middleware_stack() then
+    reverses and wraps: Audit is innermost, Session is outer — meaning Session runs
+    FIRST on the inbound path, populates scope["session"], and Audit reads it.
+
+    Inbound execution order: ... → Session (decodes cookie) → Audit (reads session) → router
+
+    Reads user_id from scope["session"] (same source as require_user) and sets the
+    contextvar for the duration of the request.  Resets in a finally block to prevent
+    cross-request leaks.  Background jobs have no request → contextvar stays None →
+    audit columns stay NULL (correct behaviour).
+    """
+
+    def __init__(self, app_inner):  # noqa: ANN001
+        self._app = app_inner
+
+    async def __call__(self, scope, receive, send):  # noqa: ANN001
+        if scope["type"] == "http":
+            from .request_context import current_user_id_var
+
+            uid = (scope.get("session") or {}).get("user_id")
+            token = current_user_id_var.set(uid)
+            try:
+                await self._app(scope, receive, send)
+            finally:
+                current_user_id_var.reset(token)
+        else:
+            await self._app(scope, receive, send)
+
+
+class ModuleAccessMiddleware:
+    """ASGI chokepoint enforcing per-user MODULE access on module-exclusive HTMX sub-
+    partials.
+
+    Each module's *entry* partial is already gated by ``require_access(<key>)``; this
+    closes the remaining gap where a user with a module revoked could still READ that
+    module's *sub*-partials by direct URL (those sub-partials carry only
+    ``require_user``). One chokepoint beats per-sub-partial gates.
+
+    Registration mirrors AuditUserMiddleware: it must be added via add_middleware
+    BEFORE SessionMiddleware so that after LIFO ordering Session is outer and this is
+    inner — Session decodes the cookie into scope["session"] first, then this reads it.
+
+    Inbound order: ... → Session (decodes cookie) → ModuleAccess (reads session) → router
+
+    Safety: only the EMPIRICALLY module-exclusive prefixes are guarded
+    (app.access_paths.module_key_for_path). SHARED partials — CRM data
+    (customers/contacts/vendors), the shared module entry-partials
+    (parts/sightings/materials/search/buy-plans), capability/global partials, and
+    global search — resolve to None and pass through untouched. The decision is
+    computed FIRST and a DB session is opened ONLY when a guarded prefix matches, so
+    the overwhelming majority of requests pay nothing. Logged-out requests (no
+    session user_id — covers x-agent-key auth and test DI overrides too) pass through;
+    the route's own deps still enforce auth. Admins are never blocked (user_has_access
+    returns True for admin).
+    """
+
+    # Methods that can render/mutate a fragment. HEAD/OPTIONS are harmless and skipped
+    # so preflight/probe traffic never opens a DB session.
+    _GUARDED_METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE"})
+
+    def __init__(self, app_inner):  # noqa: ANN001
+        self._app = app_inner
+
+    async def __call__(self, scope, receive, send):  # noqa: ANN001
+        if scope["type"] != "http" or scope.get("method") not in self._GUARDED_METHODS:
+            await self._app(scope, receive, send)
+            return
+
+        # Cheap path decision FIRST — no DB unless a guarded prefix matches.
+        from .access_paths import module_key_for_path
+
+        key = module_key_for_path(scope.get("path", ""))
+        if key is None:
+            await self._app(scope, receive, send)
+            return
+
+        user_id = (scope.get("session") or {}).get("user_id")
+        if not user_id:
+            # Logged out / agent key / test override — let the route's deps decide.
+            await self._app(scope, receive, send)
+            return
+
+        from .database import SessionLocal
+        from .dependencies import user_has_access
+        from .models import User
+
+        db = SessionLocal()
+        try:
+            user = db.get(User, user_id)
+            allowed = user is not None and user_has_access(user, key, db)
+        finally:
+            db.close()
+
+        if allowed:
+            await self._app(scope, receive, send)
+            return
+
+        # HTMX fragment request — a plain 403 body is all the client shows.
+        from starlette.responses import PlainTextResponse
+
+        await PlainTextResponse("Module access denied", status_code=403)(scope, receive, send)
+
+
+# Register AuditUserMiddleware and ModuleAccessMiddleware BEFORE SessionMiddleware so
+# that after LIFO ordering and reversal, Session is outermost — it populates
+# scope["session"] first, then both inner middlewares read it. ModuleAccess is added
+# after Audit (so it wraps inside Audit), which is irrelevant to correctness: both
+# only read the session Session already decoded.
+app.add_middleware(ModuleAccessMiddleware)
+app.add_middleware(AuditUserMiddleware)
 app.add_middleware(
     SessionMiddleware,
     secret_key=settings.secret_key,
@@ -411,6 +532,18 @@ async def request_id_middleware(request: Request, call_next):
                 response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
             else:
                 response.headers["Cache-Control"] = "public, max-age=3600"
+        # Full-page HTML loads (non-HTMX requests): no-cache so a new deploy's shell + hashed
+        # CSS/JS bundle is fetched fresh instead of a heuristically-cached stale shell. HTMX
+        # partials (HX-Request) and /static (above) are unaffected. Set HERE (outermost
+        # middleware) because header sets on the TemplateResponse itself are dropped by inner
+        # response processing before reaching the client.
+        elif (
+            request.headers.get("HX-Request") is None
+            and not path.startswith("/api")
+            and "/partials/" not in path
+            and "text/html" in (response.headers.get("content-type") or "")
+        ):
+            response.headers["Cache-Control"] = "no-cache, must-revalidate"
 
         # Skip noisy paths (static files, health checks)
         if not (path.startswith("/static") or path == "/health"):
@@ -538,12 +671,13 @@ from .routers.activity import router as activity_router
 from .routers.admin import router as admin_router
 from .routers.ai import router as ai_router
 from .routers.alerts import router as alerts_router
+from .routers.attachments_extra import router as attachments_extra_router
 from .routers.auth import router as auth_router
+from .routers.clay_oauth import router as clay_oauth_router
 from .routers.crm import router as crm_router
 from .routers.documents import router as documents_router
 from .routers.error_reports import router as error_reports_router
 from .routers.events import router as events_router
-from .routers.excess import router as excess_router
 from .routers.htmx_views import router as htmx_views_router
 from .routers.materials import router as materials_router
 from .routers.part_dossier import router as part_dossier_router
@@ -551,6 +685,7 @@ from .routers.proactive import router as proactive_router
 from .routers.quote_builder import router as quote_builder_router
 from .routers.requisitions import router as reqs_router
 from .routers.requisitions2 import router as requisitions2_router
+from .routers.resell import router as resell_router
 from .routers.sightings import router as sightings_router
 from .routers.sources import router as sources_router
 from .routers.tags import router as tags_router
@@ -559,7 +694,9 @@ from .routers.vendor_contacts import router as vendor_contacts_router
 from .routers.vendors_crud import router as vendors_crud_router
 
 # Core routers (always active)
+app.include_router(attachments_extra_router)
 app.include_router(auth_router)
+app.include_router(clay_oauth_router)
 app.include_router(admin_router)
 app.include_router(ai_router)
 app.include_router(alerts_router)
@@ -567,7 +704,6 @@ app.include_router(activity_router)
 app.include_router(crm_router)
 app.include_router(documents_router)
 app.include_router(events_router)
-app.include_router(excess_router)
 app.include_router(error_reports_router)
 app.include_router(materials_router)
 app.include_router(part_dossier_router)
@@ -577,6 +713,7 @@ app.include_router(requisitions2_router)
 app.include_router(sightings_router)
 app.include_router(sources_router)
 app.include_router(tags_router)
+app.include_router(resell_router)
 app.include_router(v13_router)
 app.include_router(vendor_contacts_router)
 app.include_router(vendors_crud_router)

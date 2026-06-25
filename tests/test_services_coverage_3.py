@@ -873,7 +873,14 @@ class TestEnrichEntity:
             assert result["legal_name"] == "Acme Corp"
 
     @pytest.mark.asyncio
-    async def test_explorium_then_ai_fallback(self):
+    async def test_router_returns_ai_result(self):
+        """Task 9: enrich_entity now delegates to enrichment_router.gather_company.
+        Patch the router to return an AI result and verify it is blended."""
+        from app.services import enrichment_router
+
+        async def fake_gather(domain, name=""):
+            return [{"source": "ai", "legal_name": "Acme Corp", "industry": "Electronics"}]
+
         with (
             patch(
                 "app.enrichment_service.normalize_company_input",
@@ -881,23 +888,20 @@ class TestEnrichEntity:
                 return_value=("Acme", "acme.com"),
             ),
             patch("app.cache.intel_cache.get_cached", return_value=None),
-            patch("app.enrichment_service._explorium_find_company", new_callable=AsyncMock, return_value=None),
-            patch(
-                "app.enrichment_service._ai_find_company",
-                new_callable=AsyncMock,
-                return_value={
-                    "legal_name": "Acme Corp",
-                    "industry": "Electronics",
-                    "source": "ai",
-                },
-            ),
             patch("app.cache.intel_cache.set_cached"),
+            patch.object(enrichment_router, "gather_company", fake_gather),
         ):
             result = await enrich_entity("acme.com", "Acme")
-            assert "ai" in result["source"]  # may be 'ai' or 'apollo+ai'
+            assert "ai" in result["source"]
 
     @pytest.mark.asyncio
     async def test_no_providers_return_empty(self):
+        """Task 9: when gather_company returns nothing, result is domain-only dict."""
+        from app.services import enrichment_router
+
+        async def empty_gather(domain, name=""):
+            return []
+
         with (
             patch(
                 "app.enrichment_service.normalize_company_input",
@@ -905,83 +909,78 @@ class TestEnrichEntity:
                 return_value=("Acme", "acme.com"),
             ),
             patch("app.cache.intel_cache.get_cached", return_value=None),
-            patch("app.enrichment_service._explorium_find_company", new_callable=AsyncMock, return_value=None),
-            patch("app.enrichment_service._ai_find_company", new_callable=AsyncMock, return_value=None),
             patch("app.cache.intel_cache.set_cached"),
+            patch.object(enrichment_router, "gather_company", empty_gather),
         ):
             result = await enrich_entity("acme.com", "Acme")
             assert result["domain"] == "acme.com"
-            # Apollo provider may still return data even when explorium+ai return None
-            assert result["legal_name"] is None or isinstance(result["legal_name"], str)
+            # legal_name may be absent or None when no providers contributed data
+            assert result.get("legal_name") is None or isinstance(result.get("legal_name"), str)
 
 
 class TestFindSuggestedContacts:
+    """Task 9: find_suggested_contacts delegates to enrichment_router.gather_contacts.
+
+    Tests patch gather_contacts at the router level instead of the old internal
+    _explorium_find_contacts / _ai_find_contacts.
+    """
+
     @pytest.mark.asyncio
     async def test_deduplication_by_email(self):
-        with (
-            patch(
-                "app.enrichment_service._explorium_find_contacts",
-                new_callable=AsyncMock,
-                return_value=[
-                    {
-                        "full_name": "John Doe",
-                        "title": "Procurement Manager",
-                        "email": "john@acme.com",
-                        "phone": None,
-                        "linkedin_url": None,
-                        "location": None,
-                        "company": "Acme",
-                    },
-                ],
-            ),
-            patch(
-                "app.enrichment_service._ai_find_contacts",
-                new_callable=AsyncMock,
-                return_value=[
-                    {
-                        "full_name": "John Doe",
-                        "title": "Procurement Manager",
-                        "email": "john@acme.com",
-                        "phone": None,
-                        "linkedin_url": None,
-                        "location": None,
-                        "company": "Acme",
-                    },
-                ],
-            ),
-        ):
+        """Same-email contacts from different sources are deduplicated by
+        blend_contacts."""
+        from app.services import enrichment_router
+
+        contact = {
+            "full_name": "John Doe",
+            "title": "Procurement Manager",
+            "email": "john@acme.com",
+            "phone": None,
+            "linkedin_url": None,
+            "location": None,
+            "company": "Acme",
+        }
+        # Two sources, same email → should deduplicate
+        explorium_c = {**contact, "source": "explorium"}
+        ai_c = {**contact, "source": "ai"}
+
+        async def fake_gather(domain, name, title_filter, limit):
+            return [explorium_c, ai_c]
+
+        with patch.object(enrichment_router, "gather_contacts", fake_gather):
             result = await find_suggested_contacts("acme.com", "Acme")
             assert len(result) == 1
 
     @pytest.mark.asyncio
     async def test_filters_irrelevant_titles(self):
-        with (
-            patch(
-                "app.enrichment_service._explorium_find_contacts",
-                new_callable=AsyncMock,
-                return_value=[
-                    {
-                        "full_name": "Jane Smith",
-                        "title": "Procurement Director",
-                        "email": "jane@acme.com",
-                        "phone": None,
-                        "linkedin_url": None,
-                        "location": None,
-                        "company": "Acme",
-                    },
-                    {
-                        "full_name": "Bob Intern",
-                        "title": "Janitor",
-                        "email": "bob@acme.com",
-                        "phone": None,
-                        "linkedin_url": None,
-                        "location": None,
-                        "company": "Acme",
-                    },
-                ],
-            ),
-            patch("app.enrichment_service._ai_find_contacts", new_callable=AsyncMock, return_value=[]),
-        ):
+        """_is_relevant keeps relevant titles; irrelevant ones are filtered."""
+        from app.services import enrichment_router
+
+        async def fake_gather(domain, name, title_filter, limit):
+            return [
+                {
+                    "source": "explorium",
+                    "full_name": "Jane Smith",
+                    "title": "Procurement Director",
+                    "email": "jane@acme.com",
+                    "phone": None,
+                    "linkedin_url": None,
+                    "location": None,
+                    "company": "Acme",
+                },
+                {
+                    "source": "explorium",
+                    "full_name": "Bob Intern",
+                    "title": "Janitor",
+                    "email": "bob@acme.com",
+                    "phone": None,
+                    "linkedin_url": None,
+                    "location": None,
+                    "company": "Acme",
+                },
+            ]
+
+        with patch.object(enrichment_router, "gather_contacts", fake_gather):
             result = await find_suggested_contacts("acme.com")
             # Jane should pass (procurement), Bob filtered (janitor)
             assert len(result) == 1
@@ -989,52 +988,48 @@ class TestFindSuggestedContacts:
 
     @pytest.mark.asyncio
     async def test_keeps_all_if_filter_removes_everything(self):
-        with (
-            patch(
-                "app.enrichment_service._explorium_find_contacts",
-                new_callable=AsyncMock,
-                return_value=[
-                    {
-                        "full_name": "Bob",
-                        "title": "Janitor",
-                        "email": "bob@acme.com",
-                        "phone": None,
-                        "linkedin_url": None,
-                        "location": None,
-                        "company": "Acme",
-                    },
-                ],
-            ),
-            patch("app.enrichment_service._ai_find_contacts", new_callable=AsyncMock, return_value=[]),
-        ):
+        """When all contacts fail _is_relevant, unfiltered list is returned."""
+        from app.services import enrichment_router
+
+        async def fake_gather(domain, name, title_filter, limit):
+            return [
+                {
+                    "source": "explorium",
+                    "full_name": "Bob",
+                    "title": "Janitor",
+                    "email": "bob@acme.com",
+                    "phone": None,
+                    "linkedin_url": None,
+                    "location": None,
+                    "company": "Acme",
+                },
+            ]
+
+        with patch.object(enrichment_router, "gather_contacts", fake_gather):
             result = await find_suggested_contacts("acme.com")
             # All filtered = return unfiltered
             assert len(result) == 1
 
     @pytest.mark.asyncio
-    async def test_handles_provider_exception(self):
-        with (
-            patch(
-                "app.enrichment_service._explorium_find_contacts",
-                new_callable=AsyncMock,
-                side_effect=Exception("API down"),
-            ),
-            patch(
-                "app.enrichment_service._ai_find_contacts",
-                new_callable=AsyncMock,
-                return_value=[
-                    {
-                        "full_name": "Jane",
-                        "title": "Buyer",
-                        "email": "jane@acme.com",
-                        "phone": None,
-                        "linkedin_url": None,
-                        "location": None,
-                        "company": "Acme",
-                    },
-                ],
-            ),
-        ):
+    async def test_gather_returns_single_valid_contact(self):
+        """When gather returns a valid contact, it is blended and returned."""
+        from app.services import enrichment_router
+
+        async def fake_gather(domain, name, title_filter, limit):
+            return [
+                {
+                    "source": "ai",
+                    "full_name": "Jane",
+                    "title": "Buyer",
+                    "email": "jane@acme.com",
+                    "phone": None,
+                    "linkedin_url": None,
+                    "location": None,
+                    "company": "Acme",
+                },
+            ]
+
+        with patch.object(enrichment_router, "gather_contacts", fake_gather):
             result = await find_suggested_contacts("acme.com")
             assert len(result) == 1
 
@@ -1909,88 +1904,121 @@ class TestGetUnifiedLeaderboardWithData:
 
 
 class TestEnrichmentServiceProviders:
-    """Test the Explorium and AI provider functions."""
+    """Test the Explorium and AI provider functions.
+
+    Task 9: _explorium_find_company and _explorium_find_contacts were DELETED from
+    enrichment_service.py. Their logic now lives in app.connectors.explorium.
+    The Explorium tests below test the connector directly.
+    """
 
     @pytest.mark.asyncio
     async def test_explorium_find_company_no_key(self):
-        from app.enrichment_service import _explorium_find_company
+        """enrich_company returns None when business_id match returns no results."""
+        from app.connectors.explorium import enrich_company
 
-        with patch("app.enrichment_service.get_credential_cached", return_value=None):
-            result = await _explorium_find_company("acme.com")
+        match_resp = MagicMock()
+        match_resp.status_code = 200
+        match_resp.json.return_value = {"data": {"matched_businesses": []}}
+
+        with patch("app.connectors.explorium.http.post", new_callable=AsyncMock, return_value=match_resp):
+            result = await enrich_company("acme.com", "Acme", "")
             assert result is None
 
     @pytest.mark.asyncio
     async def test_explorium_find_company_success(self):
-        from app.enrichment_service import _explorium_find_company
+        """enrich_company match+enrich pipeline returns parsed firmographic dict."""
+        from app.connectors.explorium import enrich_company
 
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            "firmo_name": "Acme Corp",
-            "firmo_linkedin_profile": "https://linkedin.com/company/acme",
-            "firmo_linkedin_industry_category": "Electronics",
-            "firmo_number_of_employees_range": "201-500",
-            "firmo_city_name": "Dallas",
-            "firmo_region_name": "TX",
-            "firmo_country_name": "US",
-            "firmo_website": "https://acme.com",
+        match_resp = MagicMock()
+        match_resp.status_code = 200
+        match_resp.json.return_value = {"data": {"matched_businesses": [{"business_id": "biz-1"}]}}
+
+        enrich_resp = MagicMock()
+        enrich_resp.status_code = 200
+        enrich_resp.json.return_value = {
+            "data": {
+                "name": "Acme Corp",
+                "linkedin_industry_category": "Electronics",
+                "number_of_employees_range": {"min": 201, "max": 500},
+            }
         }
 
-        with (
-            patch("app.enrichment_service.get_credential_cached", return_value="fake-key"),
-            patch("app.enrichment_service.http.post", new_callable=AsyncMock, return_value=mock_resp),
-        ):
-            result = await _explorium_find_company("acme.com", "Acme")
+        async def side(url, **kwargs):
+            return match_resp if "match" in url else enrich_resp
+
+        with patch("app.connectors.explorium.http.post", side_effect=side):
+            result = await enrich_company("acme.com", "Acme", "fake-key")
             assert result["source"] == "explorium"
             assert result["legal_name"] == "Acme Corp"
 
     @pytest.mark.asyncio
     async def test_explorium_find_company_http_error(self):
-        from app.enrichment_service import _explorium_find_company
+        """Non-200 from /businesses/match returns None."""
+        from app.connectors.explorium import enrich_company
 
         mock_resp = MagicMock()
         mock_resp.status_code = 500
 
-        with (
-            patch("app.enrichment_service.get_credential_cached", return_value="fake-key"),
-            patch("app.enrichment_service.http.post", new_callable=AsyncMock, return_value=mock_resp),
-        ):
-            result = await _explorium_find_company("acme.com")
+        with patch("app.connectors.explorium.http.post", new_callable=AsyncMock, return_value=mock_resp):
+            result = await enrich_company("acme.com", "Acme", "fake-key")
             assert result is None
 
     @pytest.mark.asyncio
     async def test_explorium_find_contacts_no_key(self):
-        from app.enrichment_service import _explorium_find_contacts
+        """search_contacts with no business_id match returns empty list."""
+        from app.connectors.explorium import search_contacts
 
-        with patch("app.enrichment_service.get_credential_cached", return_value=None):
-            result = await _explorium_find_contacts("acme.com")
+        match_resp = MagicMock()
+        match_resp.status_code = 200
+        match_resp.json.return_value = {"data": {"matched_businesses": []}}
+
+        with patch("app.connectors.explorium.http.post", new_callable=AsyncMock, return_value=match_resp):
+            result = await search_contacts("acme.com", "Acme", "", "", 5)
             assert result == []
 
     @pytest.mark.asyncio
     async def test_explorium_find_contacts_success(self):
-        from app.enrichment_service import _explorium_find_contacts
+        """search_contacts pipeline returns contacts from connector."""
+        from app.connectors.explorium import search_contacts
 
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            "prospects": [
+        match_resp = MagicMock()
+        match_resp.status_code = 200
+        match_resp.json.return_value = {"data": {"matched_businesses": [{"business_id": "biz-1"}]}}
+
+        prospects_resp = MagicMock()
+        prospects_resp.status_code = 200
+        prospects_resp.json.return_value = {
+            "data": [
                 {
+                    "prospect_id": "p1",
                     "full_name": "John Doe",
                     "job_title": "Procurement Manager",
-                    "email": "john@acme.com",
-                    "phone": "+1-555-0100",
-                    "linkedin_url": "https://linkedin.com/in/johndoe",
-                    "location": "Dallas, TX",
+                    "linkedin": "https://linkedin.com/in/johndoe",
+                    "city": "Dallas",
                     "company_name": "Acme Corp",
                 }
             ]
         }
 
-        with (
-            patch("app.enrichment_service.get_credential_cached", return_value="fake-key"),
-            patch("app.enrichment_service.http.post", new_callable=AsyncMock, return_value=mock_resp),
-        ):
-            result = await _explorium_find_contacts("acme.com", "procurement")
+        ci_resp = MagicMock()
+        ci_resp.status_code = 200
+        ci_resp.json.return_value = {
+            "data": {
+                "professional_email": "john@acme.com",
+                "professional_email_status": "valid",
+                "mobile_phone": "+1-555-0100",
+            }
+        }
+
+        async def side(url, **kwargs):
+            if "match" in url:
+                return match_resp
+            if "prospects/contacts" in url:
+                return ci_resp
+            return prospects_resp
+
+        with patch("app.connectors.explorium.http.post", side_effect=side):
+            result = await search_contacts("acme.com", "Acme", "fake-key", "procurement", 5)
             assert len(result) == 1
             assert result[0]["full_name"] == "John Doe"
 

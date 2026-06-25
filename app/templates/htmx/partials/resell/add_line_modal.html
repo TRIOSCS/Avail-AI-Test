@@ -1,0 +1,52 @@
+{#
+  resell/add_line_modal.html — Add-one-line modal (reuses the excess add-line shape).
+  Posts to /api/resell/{id}/lines which re-renders the Lines tab body.
+  Receives: list_id.
+  Called by: resell.resell_add_line_form.
+#}
+<div class="p-5">
+  <h3 class="text-lg font-semibold text-gray-900 mb-4">Add line</h3>
+  <form hx-post="/api/resell/{{ list_id }}/lines"
+        hx-target="#tab-lines-{{ list_id }}"
+        hx-swap="innerHTML"
+        data-loading-disable
+        @htmx:after-request.camel="if(event.detail.successful){ $dispatch('close-modal'); $store.toast.message='Line added'; $store.toast.type='success'; $store.toast.show=true; }"
+        class="space-y-4">
+    <div>
+      <label class="form-label">Part number <span class="text-rose-500">*</span></label>
+      <input type="text" name="part_number" required class="input" placeholder="e.g. LM358N">
+    </div>
+    <div class="grid grid-cols-2 gap-3">
+      <div>
+        <label class="form-label">Manufacturer</label>
+        <input type="text" name="manufacturer" class="input" placeholder="e.g. Texas Instruments">
+      </div>
+      <div>
+        <label class="form-label">Quantity <span class="text-rose-500">*</span></label>
+        <input type="number" name="quantity" required min="1" value="1" class="input">
+      </div>
+    </div>
+    <div class="grid grid-cols-3 gap-3">
+      <div>
+        <label class="form-label">Condition</label>
+        <select name="condition" class="input">
+          <option value="New" selected>New</option>
+          <option value="Used">Used</option>
+          <option value="Refurbished">Refurbished</option>
+        </select>
+      </div>
+      <div>
+        <label class="form-label">Date code</label>
+        <input type="text" name="date_code" class="input" placeholder="e.g. 2024+">
+      </div>
+      <div>
+        <label class="form-label">Asking price</label>
+        <input type="number" name="asking_price" step="0.01" min="0" class="input" placeholder="0.00">
+      </div>
+    </div>
+    <div class="flex justify-end gap-3 pt-2 border-t border-gray-100">
+      <button type="button" @click="$dispatch('close-modal')" class="btn btn-secondary">Cancel</button>
+      <button type="submit" class="btn btn-primary">Add line</button>
+    </div>
+  </form>
+</div>

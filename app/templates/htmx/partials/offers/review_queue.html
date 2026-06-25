@@ -5,10 +5,10 @@
   Depends on: HTMX, Tailwind CSS with brand palette.
 #}
 
-<div id="review-queue-content" class="max-w-7xl mx-auto">
+<div id="review-queue-content" class="page-fluid">
   <div class="flex items-center justify-between mb-6">
     <div>
-      <p class="text-sm text-gray-500 mt-1">
+      <p class="text-sm text-gray-600 mt-1">
         <span class="font-medium text-amber-600">{{ offers|length }}</span> offer{{ 's' if offers|length != 1 }} pending review
       </p>
     </div>
@@ -34,7 +34,7 @@
               <span class="text-amber-700 font-medium">{{ (o.parse_confidence * 100)|int }}%</span>
               {% else %}
               <span class="w-2 h-2 rounded-full bg-gray-400"></span>
-              <span class="text-gray-500">{{ (o.parse_confidence * 100)|int if o.parse_confidence else 0 }}%</span>
+              <span class="text-gray-600">{{ (o.parse_confidence * 100)|int if o.parse_confidence else 0 }}%</span>
               {% endif %}
             </span>
             {% endif %}
@@ -115,7 +115,7 @@
     {% endfor %}
   </div>
   {% else %}
-  <div class="bg-white rounded-lg border border-brand-200 p-12 text-center">
+  <div class="bg-white rounded-lg border border-brand-200 p-6 sm:p-8 text-center">
     <svg class="mx-auto h-12 w-12 text-emerald-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
       <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
     </svg>

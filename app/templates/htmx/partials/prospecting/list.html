@@ -8,7 +8,7 @@
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}
 
-<div class="max-w-7xl mx-auto">
+<div class="page-fluid">
 
   {# Stats KPI panel — lazy-loaded so the grid paints first; OOB-refreshed after grid actions.
      hx-target MUST be explicit: without it the div inherits #main-content's hx-target="this",
@@ -18,7 +18,7 @@
        hx-target="#prospect-stats" hx-swap="innerHTML"></div>
 
   <div class="flex items-center justify-between mb-4">
-    <span class="text-sm text-gray-500">
+    <span class="text-sm text-gray-600">
       {{ total }} {% if status %}{{ status }}{% endif %} prospect{{ "s" if total != 1 }}
       {% if q %}matching &ldquo;{{ q }}&rdquo;{% endif %}
     </span>
@@ -36,7 +36,7 @@
               hx-target="#add-prospect-result"
               hx-swap="innerHTML"
               hx-on::after-request="if(event.detail.successful) this.reset()">
-          <label class="block text-xs font-medium text-gray-500 mb-1" for="add-domain-input">Company domain</label>
+          <label class="block text-xs font-medium text-gray-600 mb-1" for="add-domain-input">Company domain</label>
           <div class="flex gap-2">
             <input id="add-domain-input" type="text" name="domain" placeholder="acme.com" required
                    class="flex-1 px-2.5 py-1.5 border border-brand-200 rounded-md text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
@@ -101,18 +101,18 @@
 
   {# Card grid — 3-col desktop, 2-col tablet, 1-col mobile #}
   {% if prospects %}
-  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
     {% for prospect in prospects %}
     {% include "htmx/partials/prospecting/_card.html" %}
     {% endfor %}
   </div>
   {% else %}
-  <div class="bg-white border border-brand-200 rounded-lg p-12 text-center">
+  <div class="bg-white border border-brand-200 rounded-lg p-6 sm:p-8 text-center">
     <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
             d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z"/>
     </svg>
-    <p class="mt-2 text-sm text-gray-500">No prospects found</p>
+    <p class="mt-2 text-sm text-gray-600">No prospects found</p>
     {% if q or status %}
     <p class="text-xs text-gray-400 mt-1">Try clearing the filter or searching for something else.</p>
     {% else %}
@@ -135,7 +135,7 @@
     <span class="px-3 py-1.5 text-sm text-gray-400 border border-gray-100 rounded-lg cursor-not-allowed">&larr; Prev</span>
     {% endif %}
 
-    <span class="px-3 py-1.5 text-sm text-gray-500">Page {{ page }} of {{ total_pages }}</span>
+    <span class="px-3 py-1.5 text-sm text-gray-600">Page {{ page }} of {{ total_pages }}</span>
 
     {% if page < total_pages %}
     <a hx-get="/v2/partials/prospecting?page={{ page + 1 }}&status={{ status|urlencode }}&sort={{ sort|urlencode }}&q={{ q|urlencode }}"

@@ -98,7 +98,7 @@ def main():
     from .circuit_breaker import CircuitBreaker
     from .config import NcConfig
     from .queue_manager import (
-        get_next_queued_item,
+        claim_next_queued_item,
         mark_completed,
         mark_status,
         recover_stale_searches,
@@ -111,7 +111,7 @@ def main():
 
     config = NcConfig()
     scheduler = SearchScheduler(config)
-    breaker = CircuitBreaker()
+    breaker = CircuitBreaker(cooldown_seconds=config.NC_BREAKER_COOLDOWN_MINUTES * 60)
     searches_today = 0
     sightings_today = 0
     last_stats_date = None
@@ -225,7 +225,9 @@ def main():
                 db = SessionLocal()
                 item = None
                 try:
-                    item = get_next_queued_item(db)
+                    # Atomically claim (marks 'searching'; skip-locked on PG) and
+                    # auto-reclaim any items a crashed worker left mid-search.
+                    item = claim_next_queued_item(db)
                     if not item:
                         logger.debug("NC worker: queue empty, sleeping 60s")
                         db.close()
@@ -240,8 +242,7 @@ def main():
                         time.sleep(5 * 60)
                         continue
 
-                    # Execute search (tries HTTP first, then browser)
-                    mark_status(db, item, "searching")
+                    # Execute search (already marked 'searching' by the claim)
                     logger.info("NC worker: searching '{}' (queue id={})", item.mpn, item.id)
 
                     search_result = search_part(session, item.mpn)

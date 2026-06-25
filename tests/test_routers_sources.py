@@ -924,9 +924,10 @@ def test_get_connector_for_keyed_source(source, connector_path, creds):
     [
         pytest.param("anthropic_ai", "_AnthropicTestConnector", id="anthropic_ai"),
         pytest.param("teams_notifications", "_TeamsTestConnector", id="teams_notifications"),
-        pytest.param("apollo_enrichment", "_ApolloTestConnector", id="apollo_enrichment"),
         pytest.param("explorium_enrichment", "_ExploriumTestConnector", id="explorium_enrichment"),
         pytest.param("azure_oauth", "_AzureOAuthTestConnector", id="azure_oauth"),
+        pytest.param("hunter_enrichment", "_HunterTestConnector", id="hunter_enrichment"),
+        pytest.param("clay_enrichment", "_ClayTestConnector", id="clay_enrichment"),
     ],
 )
 def test_get_connector_for_test_only_source(source, connector_attr):
@@ -952,6 +953,48 @@ def test_get_connector_no_db_env_fallback(monkeypatch):
 # ══════════════════════════════════════════════════════════════════════
 # NEW TESTS — Test connector search methods
 # ══════════════════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+async def test_clay_test_connector_search_success(monkeypatch):
+    """_ClayTestConnector succeeds when Clay is connected and the credits check
+    returns."""
+    from app.routers.sources import _ClayTestConnector
+
+    monkeypatch.setattr("app.services.clay_oauth.is_connected", lambda: True)
+
+    async def fake_call(tool, args):
+        assert tool == "get-credits-available"
+        return {"hasWorkspaceCredits": True}
+
+    monkeypatch.setattr("app.connectors.clay_mcp._mcp_call", fake_call)
+    results = await _ClayTestConnector().search("LM358N")
+    assert results and results[0]["status"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_clay_test_connector_raises_when_not_connected(monkeypatch):
+    """_ClayTestConnector raises (→ health 'error') when Clay OAuth isn't connected."""
+    from app.routers.sources import _ClayTestConnector
+
+    monkeypatch.setattr("app.services.clay_oauth.is_connected", lambda: False)
+    with pytest.raises(ValueError, match="not connected"):
+        await _ClayTestConnector().search("LM358N")
+
+
+@pytest.mark.asyncio
+async def test_clay_test_connector_raises_when_mcp_unhealthy(monkeypatch):
+    """_ClayTestConnector raises when the MCP session/credits call returns nothing."""
+    from app.routers.sources import _ClayTestConnector
+
+    monkeypatch.setattr("app.services.clay_oauth.is_connected", lambda: True)
+
+    async def fake_call(tool, args):
+        return {}
+
+    monkeypatch.setattr("app.connectors.clay_mcp._mcp_call", fake_call)
+    with pytest.raises(ValueError, match="health check failed"):
+        await _ClayTestConnector().search("LM358N")
 
 
 @pytest.mark.asyncio
@@ -1042,54 +1085,6 @@ async def test_teams_test_connector_202_accepted():
         results = await connector.search("LM358N")
     assert len(results) == 1
     assert results[0]["status"] == "ok"
-
-
-@pytest.mark.asyncio
-async def test_apollo_test_connector_success():
-    """_ApolloTestConnector succeeds when API returns 200."""
-    from app.routers.sources import _ApolloTestConnector
-
-    mock_resp = MagicMock()
-    mock_resp.status_code = 200
-    mock_resp.json.return_value = {"people": [{"name": "Test"}]}
-
-    connector = _ApolloTestConnector()
-    with (
-        patch("app.routers.sources.get_credential_cached", return_value="apollo_key"),
-        patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp),
-    ):
-        results = await connector.search("LM358N")
-    assert len(results) == 1
-    assert "1 result" in results[0]["mpn_matched"]
-
-
-@pytest.mark.asyncio
-async def test_apollo_test_connector_no_key():
-    """_ApolloTestConnector raises if no API key."""
-    from app.routers.sources import _ApolloTestConnector
-
-    connector = _ApolloTestConnector()
-    with patch("app.routers.sources.get_credential_cached", return_value=None):
-        with pytest.raises(ValueError, match="APOLLO_API_KEY not configured"):
-            await connector.search("LM358N")
-
-
-@pytest.mark.asyncio
-async def test_apollo_test_connector_api_error():
-    """_ApolloTestConnector raises on non-200 response."""
-    from app.routers.sources import _ApolloTestConnector
-
-    mock_resp = MagicMock()
-    mock_resp.status_code = 403
-    mock_resp.text = "Forbidden"
-
-    connector = _ApolloTestConnector()
-    with (
-        patch("app.routers.sources.get_credential_cached", return_value="apollo_key"),
-        patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp),
-    ):
-        with pytest.raises(ValueError, match="Apollo API returned 403"):
-            await connector.search("LM358N")
 
 
 @pytest.mark.asyncio

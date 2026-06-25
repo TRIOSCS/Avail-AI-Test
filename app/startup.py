@@ -38,11 +38,14 @@ def run_startup_migrations() -> None:
         _create_fts_triggers(conn)
         _backfill_fts(conn)
         _seed_system_config(conn)
+        _reconcile_system_config(conn)
         _seed_site_contacts(conn)
         _seed_manufacturers(conn)
         _create_count_triggers(conn)
         _backfill_company_counts(conn)
         _exec(conn, "UPDATE api_sources SET is_active = false WHERE status = 'disabled' AND is_active = true")
+        # Normalize legacy site_type 'headquarters' → 'hq' (idempotent)
+        _exec(conn, "UPDATE customer_sites SET site_type='hq' WHERE site_type='headquarters'")
         _exec(
             conn,
             "UPDATE trouble_tickets SET resolved_at = COALESCE(diagnosed_at, created_at) + INTERVAL '1 hour' "
@@ -58,6 +61,7 @@ def run_startup_migrations() -> None:
     _backfill_proactive_offer_qty()
     _backfill_ticket_defaults()
     _backfill_material_cards()
+    _backfill_sweep_cooldown()
     _seed_admin_user_if_env_set()
     _seed_agent_user()
     _seed_verification_group_from_admin_emails()
@@ -341,6 +345,35 @@ def _seed_system_config(conn) -> None:
             VALUES (:key, :value, :desc)
             ON CONFLICT (key) DO NOTHING""",
             {"key": key, "value": value, "desc": desc},
+        )
+
+
+def _reconcile_system_config(conn) -> None:
+    """No-surprise cutover: mirror the current env value into each flag's DB row.
+
+    Task 10 makes the system_config DB row authoritative for the 4 feature flags (the
+    UI toggle becomes real). To avoid behaviour flipping at the cutover deploy, point
+    each never-admin-edited row (``updated_by IS NULL``) at the value the background
+    jobs read today — the env-backed Pydantic setting. Rows an admin has deliberately
+    set (``updated_by IS NOT NULL``) are never touched. Idempotent: re-running rewrites
+    the same value. Runtime data op only — no DDL.
+    """
+    from .config import settings
+
+    # Serialize to the seed's string format so the resolver parses it identically.
+    env_values = {
+        "inbox_scan_interval_min": str(int(settings.inbox_scan_interval_min)),
+        "email_mining_enabled": "true" if settings.email_mining_enabled else "false",
+        "proactive_matching_enabled": "true" if settings.proactive_matching_enabled else "false",
+        "activity_tracking_enabled": "true" if settings.activity_tracking_enabled else "false",
+    }
+    for key, value in env_values.items():
+        _exec(
+            conn,
+            """UPDATE system_config
+            SET value = :value
+            WHERE key = :key AND updated_by IS NULL""",
+            {"key": key, "value": value},
         )
 
 
@@ -1026,6 +1059,53 @@ def _backfill_ticket_defaults() -> None:
         db.close()
 
 
+def _backfill_sweep_cooldown() -> None:
+    """Backfill reclaim_blocked_until for swept rows that are missing it.
+
+    Closes the two-commit crash window introduced in Phase 4: send_company_to_prospecting
+    commits first, then the sweep sets reclaim_blocked_until in a second commit. A crash
+    between them leaves swept rows with NULL cooldown, letting the former owner reclaim
+    immediately via claim (bypassing the 30-day block).
+
+    Idempotent: only touches rows where swept_at IS NOT NULL AND reclaim_blocked_until IS
+    NULL AND status != 'dismissed'. Computes the deadline in Python (swept_at + 30 days)
+    so it works on both PostgreSQL and the SQLite test path.
+
+    Called by: run_startup_migrations
+    Depends on: ProspectAccount model, RECLAIM_COOLDOWN_DAYS constant, SessionLocal
+    """
+    from datetime import timedelta
+
+    from .models.prospect_account import ProspectAccount
+    from .services.prospect_reclamation import RECLAIM_COOLDOWN_DAYS
+
+    db = SessionLocal()
+    try:
+        rows = (
+            db.query(ProspectAccount)
+            .filter(
+                ProspectAccount.swept_at.is_not(None),
+                ProspectAccount.reclaim_blocked_until.is_(None),
+                ProspectAccount.status != "dismissed",
+            )
+            .all()
+        )
+        if not rows:
+            return
+        for pa in rows:
+            pa.reclaim_blocked_until = pa.swept_at + timedelta(days=RECLAIM_COOLDOWN_DAYS)
+        db.commit()
+        logger.info(
+            "Backfilled reclaim_blocked_until on {} swept ProspectAccount(s) missing cooldown",
+            len(rows),
+        )
+    except Exception:
+        logger.exception("Failed backfilling sweep cooldown on ProspectAccounts")
+        db.rollback()
+    finally:
+        db.close()
+
+
 def seed_api_sources() -> None:
     """Seed the api_sources table with all known data sources.
 
@@ -1088,12 +1168,29 @@ def seed_api_sources() -> None:
             db.delete(old_newark)
             logger.info("Removed duplicate 'newark' source (merged into 'element14')")
 
+        # Prune dead providers no longer in the catalog (idempotent — safe to re-run)
+        _PRUNE_NAMES = (
+            "aliexpress",
+            "arrow",
+            "avnet",
+            "partfuse",
+            "rs_components",
+            "siliconexpert",
+            "winsource",
+            "rocketreach_enrichment",
+            "clearbit_enrichment",
+            "apollo_enrichment",
+        )
+        for dead in _PRUNE_NAMES:
+            row = db.query(ApiSource).filter_by(name=dead).first()
+            if row:
+                db.delete(row)
+                logger.info("Pruned retired source '{}'", dead)
+
         # Backfill known monthly quotas (only sets if currently NULL)
         quota_map = {
-            "apollo_enrichment": 10000,
             "hunter_enrichment": 500,
             "lusha_enrichment": 6400,
-            "clearbit_enrichment": 1000,
             "digikey": 1000,
             "mouser": 1000,
             "oemsecrets": 5000,
@@ -1113,9 +1210,10 @@ def seed_api_sources() -> None:
 
 
 def seed_browser_worker_sources(db) -> None:
-    """Flip icsource + netcomponents api_sources rows to live + active.
+    """Flip every BROWSER_WORKER_SOURCES api_sources row to live + active.
 
-    The browser workers (avail-ics-worker, avail-nc-worker) are queue-driven
+    (icsource + netcomponents + thebrokersite.) The browser workers
+    (avail-ics-worker, avail-nc-worker, avail-tbf-worker) are queue-driven
     so the dashboard surfaces them as 'live' rather than 'pending'/'disabled'.
     `health_monitor.run_health_checks` excludes BROWSER_WORKER_SOURCES so this
     seed survives the 15-min ping loop. Idempotent.
@@ -1169,6 +1267,25 @@ def seed_nc_worker_status_singleton(db) -> None:
     db.add(NcWorkerStatus(id=1, is_running=False))
 
 
+def seed_tbf_worker_status_singleton(db) -> None:
+    """Insert tbf_worker_status id=1 row if absent.
+
+    Same pattern as the ICS/NC singletons — the TBF worker's
+    update_worker_status() silently no-ops when the row is missing, dropping
+    every heartbeat. Migration 130 seeds the row at deploy; this is the
+    idempotent backup for fresh DBs/tests. Idempotent.
+
+    Called by: seed_browser_workers (lifespan)
+    Depends on: TbfWorkerStatus model
+    """
+    from .models import TbfWorkerStatus
+
+    existing = db.query(TbfWorkerStatus).filter_by(id=1).one_or_none()
+    if existing is not None:
+        return
+    db.add(TbfWorkerStatus(id=1, is_running=False))
+
+
 def seed_browser_workers() -> None:
     """Run all browser-worker seeds in a single SessionLocal transaction.
 
@@ -1179,6 +1296,7 @@ def seed_browser_workers() -> None:
         seed_browser_worker_sources(db)
         seed_ics_worker_status_singleton(db)
         seed_nc_worker_status_singleton(db)
+        seed_tbf_worker_status_singleton(db)
         db.commit()
     except (SQLAlchemyError, DBAPIError) as e:
         logger.warning("Browser worker seed error: {}", e)

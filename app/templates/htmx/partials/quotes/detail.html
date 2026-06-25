@@ -8,10 +8,10 @@
 {% from "htmx/partials/quotes/_macros.html" import loading_spinner, margin_text_color %}
 <title hx-swap-oob="true">{{ quote.quote_number }} — Quotes — AvailAI</title>
 
-<div class="max-w-7xl mx-auto" x-data="{ showMarkup: false, showHistory: false }">
+<div class="page-fluid" x-data="{ showMarkup: false, showHistory: false }">
 
   {# Header card #}
-  <div class="bg-white border border-brand-200 rounded-lg p-6 mb-6">
+  <div class="bg-white border border-brand-200 rounded-lg p-4 mb-6">
     <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
       <div>
         <div class="flex items-center gap-3">
@@ -106,7 +106,7 @@
             hx-target="#main-content"
             hx-confirm="Send this quote to the customer?"
             data-loading-disable
-            class="px-4 py-2 bg-brand-500 text-white text-sm font-medium rounded-md hover:bg-brand-600 flex items-center gap-1.5 transition-colors">
+            class="btn-primary btn-md">
       {{ loading_spinner("h-4 w-4 spinner") }}
       <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
       Send Quote
@@ -192,7 +192,7 @@
       <input type="number" name="markup_pct" step="0.1" value="25"
              class="w-24 px-3 py-1.5 border border-brand-200 rounded-md text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
       <button type="submit" data-loading-disable
-              class="px-4 py-1.5 bg-brand-500 text-white text-sm font-medium rounded-md hover:bg-brand-600 transition-colors">
+              class="btn-primary btn-sm">
         {{ loading_spinner("h-3 w-3 mr-1 spinner inline") }}
         Apply to All Lines
       </button>
@@ -204,7 +204,7 @@
   <div class="bg-white rounded-lg shadow border border-brand-200 overflow-hidden mb-6">
     <div class="px-4 py-3 bg-gray-50 border-b border-brand-200 flex items-center justify-between">
       <h2 class="text-lg font-semibold text-gray-900">Line Items
-        <span class="ml-1 text-sm font-normal text-gray-500">({{ lines|length }})</span>
+        <span class="ml-1 text-sm font-normal text-gray-600">({{ lines|length }})</span>
       </h2>
       <span class="text-xs text-gray-400">Double-click a row to edit</span>
     </div>
@@ -212,14 +212,14 @@
       <table class="min-w-full divide-y divide-gray-200">
         <thead class="bg-gray-50">
           <tr>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">MPN</th>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Manufacturer</th>
-            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Qty</th>
-            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Cost Price</th>
-            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Sell Price</th>
-            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Margin %</th>
-            <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+            <th class="table-cell--head text-left text-xs font-medium text-gray-500 uppercase tracking-wider">MPN</th>
+            <th class="table-cell--head text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
+            <th class="table-cell--head text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Manufacturer</th>
+            <th class="table-cell--head text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Qty</th>
+            <th class="table-cell--head text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Cost Price</th>
+            <th class="table-cell--head text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Sell Price</th>
+            <th class="table-cell--head text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Margin %</th>
+            <th class="table-cell--head text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
           </tr>
         </thead>
         <tbody id="quote-lines-body" class="divide-y divide-gray-200">
@@ -232,7 +232,7 @@
               <svg class="mx-auto h-8 w-8 text-gray-300 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
               </svg>
-              <p class="text-sm text-gray-500">No line items yet. Add one below or select from offers.</p>
+              <p class="text-sm text-gray-600">No line items yet. Add one below or select from offers.</p>
             </td>
           </tr>
           {% endif %}
@@ -250,32 +250,32 @@
             data-loading-disable
             class="flex flex-wrap gap-2 items-end">
         <div>
-          <label class="block text-xs text-gray-500 mb-1">MPN</label>
+          <label class="block text-xs text-gray-600 mb-1">MPN</label>
           <input type="text" name="mpn" required placeholder="LM317T"
                  class="w-32 px-2 py-1.5 text-sm border border-brand-200 rounded-md font-mono focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
         </div>
         <div>
-          <label class="block text-xs text-gray-500 mb-1">Manufacturer</label>
+          <label class="block text-xs text-gray-600 mb-1">Manufacturer</label>
           <input type="text" name="manufacturer" placeholder="TI"
                  class="w-28 px-2 py-1.5 text-sm border border-brand-200 rounded-md focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
         </div>
         <div>
-          <label class="block text-xs text-gray-500 mb-1">Qty</label>
+          <label class="block text-xs text-gray-600 mb-1">Qty</label>
           <input type="number" name="qty" value="1" min="1"
                  class="w-20 px-2 py-1.5 text-sm border border-brand-200 rounded-md focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
         </div>
         <div>
-          <label class="block text-xs text-gray-500 mb-1">Cost</label>
+          <label class="block text-xs text-gray-600 mb-1">Cost</label>
           <input type="number" name="cost_price" step="0.0001" placeholder="0.5000"
                  class="w-24 px-2 py-1.5 text-sm border border-brand-200 rounded-md focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
         </div>
         <div>
-          <label class="block text-xs text-gray-500 mb-1">Sell</label>
+          <label class="block text-xs text-gray-600 mb-1">Sell</label>
           <input type="number" name="sell_price" step="0.0001" placeholder="0.7500"
                  class="w-24 px-2 py-1.5 text-sm border border-brand-200 rounded-md focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
         </div>
         <button type="submit" data-loading-disable
-                class="px-3 py-1.5 bg-brand-500 text-white text-sm font-medium rounded-md hover:bg-brand-600 transition-colors flex items-center gap-1">
+                class="btn-primary btn-sm">
           {{ loading_spinner("h-3 w-3 spinner") }}
           <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
           Add Line
@@ -306,7 +306,7 @@
           <div hx-get="/v2/partials/quotes/pricing-history/{{ line.mpn }}"
                hx-trigger="revealed"
                hx-swap="innerHTML"
-               class="px-4 py-3 text-sm text-gray-500">
+               class="px-4 py-3 text-sm text-gray-600">
             <span class="htmx-indicator">Loading pricing history...</span>
           </div>
         </div>
@@ -319,7 +319,7 @@
 
   {# Offer gallery #}
   {% if offers %}
-  <div class="bg-white border border-brand-200 rounded-lg p-6 mb-6">
+  <div class="bg-white border border-brand-200 rounded-lg p-4 mb-6">
     <h2 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
       <svg class="w-5 h-5 text-brand-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
@@ -327,7 +327,7 @@
       Offers for this Requisition
       <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-brand-100 text-brand-600">{{ offers|length }}</span>
     </h2>
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+    <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
       {% for offer in offers %}
       {% include "htmx/partials/shared/offer_card.html" %}
       {% endfor %}
@@ -338,7 +338,7 @@
     <svg class="mx-auto h-10 w-10 text-gray-300 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/>
     </svg>
-    <p class="text-sm text-gray-500">No offers received yet for this requisition.</p>
+    <p class="text-sm text-gray-600">No offers received yet for this requisition.</p>
   </div>
   {% endif %}
 </div>

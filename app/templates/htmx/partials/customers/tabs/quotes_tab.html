@@ -7,7 +7,7 @@
 <div x-data="{ status: 'all' }">
   {% if quotes %}
   <div class="flex items-center gap-2 mb-4">
-    <p class="text-sm text-gray-500 mr-2">
+    <p class="text-sm text-gray-600 mr-2">
       <span class="font-semibold text-gray-900">{{ quotes|length }}</span> quote{{ "s" if quotes|length != 1 }}
     </p>
     {% for f_key, f_label in [('all','All'),('draft','Draft'),('sent','Sent'),('won','Won'),('lost','Lost'),('revised','Revised')] %}
@@ -33,13 +33,15 @@
       </thead>
       <tbody class="divide-y divide-gray-200">
         {% for q in quotes %}
-        <tr class="hover:bg-brand-50 cursor-pointer transition-colors"
+        <tr class="hover:bg-brand-50 cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-500"
+            role="button" tabindex="0"
             x-show="status === 'all' || status === '{{ q.status }}'"
             hx-get="/v2/partials/quotes/{{ q.id }}"
             hx-target="#main-content"
-            hx-push-url="/v2/quotes/{{ q.id }}">
+            hx-push-url="/v2/quotes/{{ q.id }}"
+            hx-trigger="click, keyup[key=='Enter']">
           <td class="px-4 py-2.5 text-sm font-medium text-brand-500 hover:text-brand-600">{{ q.quote_number or "Q-" ~ q.id }}</td>
-          <td class="px-4 py-2.5 text-sm text-gray-500">{{ q.requisition.name if q.requisition else "—" }}</td>
+          <td class="px-4 py-2.5 text-sm text-gray-600">{{ q.requisition.name if q.requisition else "—" }}</td>
           <td class="px-4 py-2.5 text-sm text-gray-900 font-medium text-right">{{ "${:,.2f}".format(q.subtotal) if q.subtotal else "—" }}</td>
           <td class="px-4 py-2.5 text-sm text-right">
             {% if q.total_margin_pct is not none %}
@@ -51,25 +53,25 @@
                 <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-rose-50 text-rose-700">{{ "%.1f%%"|format(q.total_margin_pct) }}</span>
               {% endif %}
             {% else %}
-              <span class="text-gray-500">—</span>
+              <span class="text-gray-600">—</span>
             {% endif %}
           </td>
           <td class="px-4 py-2.5">
             {{ quote_status_badge(q.status) }}
           </td>
-          <td class="px-4 py-2.5 text-sm text-gray-500">{{ q.created_at.strftime('%b %d, %Y') if q.created_at else "—" }}</td>
+          <td class="px-4 py-2.5 text-sm text-gray-600">{{ q.created_at.strftime('%b %d, %Y') if q.created_at else "—" }}</td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
   {% else %}
-  <div class="py-12 text-center">
+  <div class="py-6 sm:py-8 text-center">
     <svg class="mx-auto h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
             d="M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z"/>
     </svg>
-    <p class="text-sm font-medium text-gray-500 mt-3">No quotes for this account.</p>
+    <p class="text-sm font-medium text-gray-600 mt-3">No quotes for this account.</p>
     <p class="text-xs text-gray-400 mt-1">Quotes are created from a requirement's Offers tab.</p>
   </div>
   {% endif %}

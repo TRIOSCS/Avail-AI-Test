@@ -46,6 +46,10 @@ Caddy (reverse proxy, TLS termination, static files)
 FastAPI Middleware Stack (in order):
     ├── 1. GZipMiddleware (compress >= 500 bytes)
     ├── 2. SessionMiddleware (HTTP-only cookie, 15-min expiry)
+    │       Inner of Session (registered before it so Session is outer): AuditUserMiddleware
+    │       (sets current_user_id contextvar) and ModuleAccessMiddleware (per-user MODULE
+    │       access chokepoint on module-exclusive HTMX sub-partials — see INTERACTIONS
+    │       "Module SUB-partial chokepoint"; reads scope["session"] so Session must run first).
     ├── 3. CSRFMiddleware (double-submit cookie on mutations)
     ├── 4. PrometheusMiddleware (request count + duration histogram, app/prometheus_metrics.py)
     │       Note: fastapi 0.137 (PR #15745) made `app.routes` a tree — `include_router`'d
@@ -69,6 +73,67 @@ Route Handler
     ▼
 Response -> Caddy -> Browser -> HTMX swaps into DOM
 ```
+
+## Authorization & Access Control
+
+Three layers: **role gates** (who may reach an endpoint), **ownership scoping**
+(which records a user may act on), and **per-feature access** (which nav modules +
+capabilities a user is granted).
+
+- **Role gates** — FastAPI dependencies in `app/dependencies.py`: `require_user`
+  (any authenticated active user), `require_buyer` (BUYER_ROLES = buyer/sales/trader/
+  manager/admin), `require_admin`, `require_manager`. The non-interactive `agent`
+  account is excluded from buyer-tier actions.
+- **Ownership scoping (role-scoped model)** — `RESTRICTED_ROLES = {SALES, TRADER}`
+  (single source of truth in `app/constants.py`): sales/trader users may act only on
+  requisitions they created (`Requisition.created_by`); buyer/manager/admin are
+  unrestricted. Enforced through ONE chokepoint, not per-endpoint logic:
+  - `require_requisition_access(db, req_id, user, *, owner_id=None, label=...)` — pure
+    guard, raises 404 for a restricted non-owner. Used after loading a requisition or a
+    requisition-scoped child (Offer/Requirement/Contact/VendorResponse/SourcingLead;
+    `owner_id` covers scratch resources with a null `requisition_id`).
+  - `get_req_for_user` / `get_quote_for_user` — load-and-authorize helpers that return
+    the owned record or 404.
+
+  Every mutating or email-sending endpoint that touches a requisition-scoped resource
+  routes through one of these. Regression tests live in `tests/test_authz_*.py`
+  (a non-owner sales/trader user must get 404). 404 (not 403) is used so resource
+  existence isn't leaked.
+
+- **Per-feature access (user-management feature)** — an access registry gates both
+  nav-module visibility and discrete capabilities, administered from Settings > Users.
+  - **Access registry (`app/constants.py`)** — `AccessKey` StrEnum is the closed
+    vocabulary of grantable access: 10 module keys (`MODULE_ACCESS_KEYS` — requisitions/
+    sightings/materials/search/buy_plans/resell/crm/proactive/prospecting/my_day) + 5
+    capability keys (`CAPABILITY_ACCESS_KEYS` — send_rfq/approve_offers/export_data/
+    manage_connectors/ops_verification). `ROLE_ACCESS_DEFAULTS` maps each `UserRole` to
+    its default key set; defaults deliberately preserve prior behavior (every interactive
+    role gets all modules + all capabilities except `ops_verification`; admin → all; agent
+    → none), so turning the layer on is a no-op until an admin sets an override.
+    `UserAuditAction` StrEnum is the closed vocabulary for the audit trail.
+  - **Effective-access resolution (`app/dependencies.py`)** — `user_has_access(user,
+    key, db)`: admin → always True; `ops_verification` delegates to
+    `VerificationGroupMember` (single source of truth); otherwise an explicit per-user
+    override (`User.access_overrides`) wins, else the role default. `require_access(key)`
+    is a dependency factory (depends on `require_user`) that raises 403 unless the user
+    has `key` — applied to the 10 nav-module partial entry routes and the capability
+    actions (RFQ-send, offer approve/reject/reconfirm, CSV/quote exports, source-test).
+  - **Admin Users surface (`app/routers/admin/users.py`)** — admin-only CRUD: invite,
+    change role, activate/deactivate, a per-user access editor (module + capability
+    toggles; `ops_verification` writes `VerificationGroupMember`), and an audit-log
+    viewer. Self-protection invariants: no self-demote/deactivate, the last active admin
+    is row-locked-protected, the agent account is uneditable. Every mutation appends a
+    `UserAdminAudit` row via `services.user_admin.record_user_audit`. `module_access_map`
+    (here) builds the `{nav-id: bool}` map consumed by the nav gate.
+  - **Templates** — Settings > Users tab (`partials/settings/users.html` +
+    `user_access_panel.html` access editor + `users_audit.html` log; tab wired in
+    `settings/index.html`, GET tab `htmx_views.settings_users_tab`). Nav gating:
+    `_base_ctx` exposes the `{nav-id: bool}` `access` map and `shared/mobile_nav.html`
+    hides revoked sections; `v2_page` redirects a denied module to the first allowed one.
+  - **Config** — `ENABLE_USER_ALLOWLIST` (`app/config.py`, default True): when on, an
+    OAuth login by an unknown email (no pre-provisioned row) is rejected at the callback
+    unless the email is in `ADMIN_EMAILS`. See APP_MAP_INTERACTIONS for the allowlist +
+    invite-adoption flow.
 
 ## Frontend Architecture
 
@@ -109,7 +174,7 @@ authoritative reference. Static-analysis tests in
 | Vendors | 16 | partials/vendors/ |
 | Customers | 14 | partials/customers/ |
 | Materials | 13 | partials/materials/ |
-| Excess | 10 | partials/excess/ |
+| Resell | 11 | partials/resell/ — resell-brokerage workspace (replaced the removed `partials/excess/`; router `routers/resell.py`) |
 | Parts | 13 | partials/parts/ |
 | Quotes | 5 | partials/quotes/ — `list.html` removed (standalone Quotes tab retired); detail/macros/line_row/preview/pricing_history remain |
 | Sightings | 7 | partials/sightings/ |
@@ -118,8 +183,8 @@ authoritative reference. Static-analysis tests in
 | Proactive | 4 | partials/proactive/ |
 | Emails | 4 | partials/emails/ |
 | Tickets | 4 | partials/tickets/ |
-| Settings | 5 | partials/settings/ |
-| Shared | 16 | partials/shared/ |
+| Settings | 8 | partials/settings/ — tabs: **Connectors** (unified, replaces Sources + API Keys; admin-only), Profile, System, Data Ops, Ops Group, **Users** (admin-only); legacy `/sources` + `/api-keys` routes 302 → Connectors. Users tab = `users.html` (invite/role/activate table) + `user_access_panel.html` (per-user access editor modal) + `users_audit.html` (audit-log viewer); see Authorization & Access Control. |
+| Shared | 18 | partials/shared/ |
 | Buy Plans | 6 | partials/buy_plans/ — the **Deal Hub**, a role-lens shell at `/v2/buy-plans` (own primary-nav tab). `hub.html` is the shell (lens switcher + lazy `#bp-hub-body`); `_board.html` (sales "My Deals" stage board), `_orders_queue.html` (buyer "My Orders" PO-cut queue), `_supervise.html` (manager/ops "Supervise" triage strip + all-scope board) are the three lens bodies; `detail.html`/`_macros.html` are the single-plan view. Lens partial routes: `GET /v2/partials/buy-plans` (shell, `lens=` param → role-derived default), `/orders`, `/board?scope=`, `/supervise` (all in `routers/htmx_views.py`). Read models in `services/buyplan_hub.py` (`buyer_line_queue` / `deals_board` / `supervise_overview`). The retired `/v2/reporting` page folded its analytics in here (supervise strip) + the Sales Hub pipeline chip + the CRM coverage chip — `partials/reporting/` and the `reporting_dashboard` route are gone. |
 
 ### Shared Template Components
@@ -130,6 +195,8 @@ authoritative reference. Static-analysis tests in
 | `status_badge` macro | partials/shared/_macros.html | Unified status badge rendering used by all pages (requisitions, sightings, parts, etc.). Thin wrappers over it apply entity-specific color maps: `req_status_badge` (Requisition.status), `quote_status_badge` (Quote.status + RFQ Contact.status — one canonical map so "sent" is brand everywhere), `account_type_badge` (Company.account_type). |
 | `activity_icon` / `activity_row` macros | partials/shared/_macros.html | Canonical activity-timeline icon + row. Every entity timeline (requisitions, parts, sightings, vendors, customers) renders through these — the customer activity tab calls `activity_icon` directly rather than re-declaring an inline icon map. |
 | `cadence_hero` / `cadence_clocks` macros | partials/shared/_macros.html | Shared cadence card. `cadence_clocks(entity, now_utc)` is the dual-clock (Last Out / Last Reply) render used by both `cadence_hero` (vendor) and the customer Account Cadence card in `customers/detail.html` + `customers/header.html`. |
+| `suggested_contact_row` macro | partials/shared/_contact_row.html | Single source of truth for a discovered/suggested contact card + Add form. Consumed by the Contacts-tab `customers/tabs/_suggested_contacts.html` (Add → `#contacts-tab-list`, innerHTML) and the Enrich result panel `shared/_enrich_result.html` (Add → `closest li`, outerHTML, `from_enrich=1`). Target/swap are macro params. |
+| `_enrich_result.html` | partials/shared/ | Result panel swapped into `#enrich-results-{id}` by `enrich_company`/`enrich_vendor_card` (HTMX path). Firmographics grid (Updated/Current pills) + source/freshness + discovered contacts (companies). Replaced the old raw-JSON dump. |
 | `list.html` | partials/customers/ | CDM account workspace: split-panel layout (left = scrollable account list, right = `#cdm-detail`), resizable divider via the `splitPanel` Alpine component (panel id `cdm`). Modeled on the requisitions2 workspace. |
 | `_account_list.html` | partials/customers/ | Left-panel account list only — swapped in on filter/sort/pagination refreshes by `GET /v2/partials/customers/account-list`. |
 | `_detail_empty.html` | partials/customers/ | Right-panel placeholder shown before any account is selected in the CDM workspace. |
@@ -153,7 +220,7 @@ authoritative reference. Static-analysis tests in
      Auth & Comms    Supplier APIs        AI & Intel
           │                │                    │
    Azure AD          Nexar (Octopart)     Claude API
-   Graph API         BrokerBin            Apollo API
+   Graph API         BrokerBin            Clay MCP
    Teams API         DigiKey              Explorium API
    8x8 API           Mouser
                      Element14
@@ -194,6 +261,7 @@ authoritative reference. Static-analysis tests in
 | `ingest_source_data.py` | `python -m app.management.ingest_source_data [--files GLOB] [--ai-correct] [--apply] [--limit N]` | SP-Ingest CLI: parse → clean → consolidate → (ai_correct) → ingest TRIO source files (SFDC part master + inventory sheets) into `material_cards` via the SP2 tier ladder. DRY RUN by default; `--apply` writes. |
 | `reconcile_decoded_facets.py` | `python -m app.management.reconcile_decoded_facets [--apply] [--limit N]` | Facet-accuracy reconcile: re-run the fixed MPN decoder + desc extractor over cards with mpn_decode/desc_parse facet rows for capacity_gb/gpu_family/memory_gb; corrects changed values (same source, newer ladder timestamp) and DELETES keys the fixed extractor no longer yields. DRY RUN by default with per-failure-class tallies; `--apply` writes. |
 | `backfill_vendor_specs.py` | `python -m app.management.backfill_vendor_specs [--apply] [--limit N] [--daily-cap N] [--source mouser\|element14]` | Vendor-API parametric enrichment: select uncategorized cards demand-first (`sourced_qty_90d DESC NULLS LAST`), search the source for each within a date-keyed per-day call cap (`vendor_api:{source}:calls:{date}`), then the per-source writer enriches through the F1 ladder. `--source mouser` (default, cap 800) → `vendor_spec_enrich.enrich_card_from_mouser` (Mouser's rich DESCRIPTION → desc grammar at connector_desc/84; Mouser carries no structured parametrics). `--source element14` (cap 100 — Element14 rate-limits hard) → `enrich_card_from_element14` (Element14's structured `attributes` ARE parametrics; the connector maps them to seeded keys via `_vendor_spec_map`, written at element14_api/90). DRY RUN by default (counts/searches/writes nothing); `--apply` writes. |
+| `seed_sample_data.py` | `python -m app.management.seed_sample_data [--owner EMAIL] [--wipe]` | Populate staging with a realistic, interconnected sample dataset (companies/contacts/vendors, requisitions+requirements, offers across statuses, quotes incl. revised/won + chosen offers, buy plans, resell/excess lists with competing per-line + take-all broker offers and a customer bid-back, sightings, dated activities, account/contact tasks, outreach + buyer scores, material cards via the F1 ladder) so every workflow can be exercised end-to-end. Idempotent-additive (re-run creates 0 rows; get-or-create on natural keys), every sample row carries the `AVSAMPLE`/`avsample` marker, and `--wipe` deletes ONLY tagged sample rows (FK-safe) — never real data. `--owner EMAIL` assigns the deals to that user (redirecting the seeder/sales/buyer/trader roles) so they show in that user's own-work lenses (buy-plans "orders"/"deals", resell "Open to Me") not just admin "supervise"; re-owning needs `--wipe` first (rows are never UPDATEd), and an unknown email pre-provisions a real, never-wiped account. ORM-only, zero outbound effects. |
 
 ## TRIO Source Ingest (`app/services/source_ingest/`)
 

@@ -120,6 +120,24 @@ window.onunhandledrejection = function(e) {
     pushCappedLog('errorLog', { msg: String(e.reason) });
 };
 
+// Tee console.error/console.warn into the capped errorLog store so a trouble
+// report carries the app's own logged diagnostics (e.g. '[outreach-log] failed'),
+// not just uncaught errors. Originals still fire — logging never breaks logging.
+['error', 'warn'].forEach(function(level) {
+    const orig = console[level].bind(console);
+    console[level] = function(...args) {
+        try {
+            pushCappedLog('errorLog', {
+                level: level,
+                msg: args.map(function(a) {
+                    return (a instanceof Error) ? (a.stack || a.message) : String(a);
+                }).join(' ').slice(0, 1000),
+            });
+        } catch (_) { /* never let logging break logging */ }
+        orig(...args);
+    };
+});
+
 // ── Network log capture for trouble tickets ──────────────────
 Alpine.store('networkLog', { entries: [] });
 
@@ -129,6 +147,198 @@ htmx.on('htmx:afterRequest', function(evt) {
         method: evt.detail.requestConfig.verb.toUpperCase(),
         status: evt.detail.xhr.status,
     });
+});
+
+// ── Trouble-ticket capture & reporting ───────────────────────
+// Recent HTMX-pushed URLs — a breadcrumb trail for bug repro. Capped at 8.
+window._ttNavHistory = [];
+document.body.addEventListener('htmx:pushedIntoHistory', function(e) {
+    const path = e && e.detail && e.detail.path;
+    if (!path) return;
+    window._ttNavHistory.push({ path: path, ts: new Date().toISOString() });
+    if (window._ttNavHistory.length > 8) window._ttNavHistory.shift();
+});
+
+const TT_MAX_B64 = 1950000; // margin under the server's 2MB screenshot limit
+
+// Reject if `p` doesn't settle within `ms`; clears the timer on settle so no
+// stray timer/unhandled-rejection lingers after capture succeeds.
+function _ttWithTimeout(p, ms) {
+    return new Promise(function(resolve, reject) {
+        const id = setTimeout(function() { reject(new Error('screenshot timeout')); }, ms);
+        p.then(
+            function(v) { clearTimeout(id); resolve(v); },
+            function(e) { clearTimeout(id); reject(e); }
+        );
+    });
+}
+
+// Capture the underlying page as a PNG data URL. Returns Promise<string|null>;
+// null on any failure so the report form always opens. The screenshot lib is a
+// lazy import() chunk — shipped only to users who actually open a report.
+window.captureTroubleScreenshot = async function captureTroubleScreenshot() {
+    try {
+        const mod = await import('modern-screenshot');
+        const domToPng = mod.domToPng;
+        const ignoreSel = '#modal-content, [data-modal-root], nav[aria-label="Main navigation"], #page-loading-bar, [data-tt-ignore]';
+        const baseOpts = {
+            backgroundColor: '#ffffff',
+            width: window.innerWidth,
+            height: window.innerHeight,
+            filter: function(node) {
+                return !(node instanceof Element && node.closest(ignoreSel));
+            },
+        };
+        for (const scale of [1, 0.75, 0.5]) {
+            const opts = Object.assign({}, baseOpts, { scale: scale });
+            const url = await _ttWithTimeout(domToPng(document.body, opts), 3000);
+            if (url && url.length <= TT_MAX_B64) return url;
+        }
+        return null; // still too big at smallest scale — drop it, don't block submit
+    } catch (err) {
+        console.error('[trouble-ticket] screenshot capture failed', err);
+        return null;
+    }
+};
+
+// Cheap client-side context bundle for diagnosis. current_view is derived from
+// the URL so it stays correct across HTMX navigation.
+window.collectTroubleContext = function collectTroubleContext() {
+    const meta = document.querySelector('meta[name="app-build"]');
+    const m = window.location.pathname.match(/\/v2\/([^/?#]+)/);
+    let navTiming = null;
+    try {
+        const e = performance.getEntriesByType('navigation')[0];
+        if (e) navTiming = { dom_interactive: Math.round(e.domInteractive), load: Math.round(e.loadEventEnd) };
+    } catch (_) { navTiming = null; }
+    return {
+        nav_history: (window._ttNavHistory || []).slice(),
+        current_view: m ? m[1] : null,
+        app_build: meta ? meta.content : null,
+        timestamp: new Date().toISOString(),
+        referrer: document.referrer || null,
+        online: navigator.onLine,
+        nav_timing: navTiming,
+    };
+};
+
+// More-menu entry point: capture the page first (so neither menu nor modal is in
+// the shot), then open the report modal. Double-rAF guarantees the menu has
+// painted out before capture.
+window.openTroubleReport = async function openTroubleReport() {
+    await new Promise(function(r) {
+        requestAnimationFrame(function() { requestAnimationFrame(r); });
+    });
+    window._ttScreenshot = await window.captureTroubleScreenshot();
+    window._ttContext = window.collectTroubleContext();
+    window.dispatchEvent(new CustomEvent('open-modal', { detail: { url: '/api/trouble-tickets/form' } }));
+};
+
+// Submit the trouble report. Called from the form's @click as a single
+// expression (window.submitTroubleReport($data)) — Alpine's evaluator rejects
+// multi-statement var/if/return bodies, so the logic lives here. `data` is the
+// form's reactive $data so toggling data.submitting drives the button state.
+window.submitTroubleReport = function submitTroubleReport(data) {
+    const descEl = document.getElementById('tr-description');
+    const desc = descEl ? descEl.value.trim() : '';
+    if (!desc) return;
+    data.submitting = true;
+    const csrf = document.cookie.match(/csrftoken=([^;]+)/) ? RegExp.$1 : '';
+    fetch('/api/trouble-tickets/submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
+        body: JSON.stringify({
+            description: desc,
+            screenshot: window._ttScreenshot || null,
+            page_url: window.location.href,
+            user_agent: navigator.userAgent,
+            viewport: window.innerWidth + 'x' + window.innerHeight,
+            error_log: JSON.stringify(Alpine.store('errorLog').entries),
+            network_log: JSON.stringify(Alpine.store('networkLog').entries),
+            auto_captured_context: window._ttContext ? JSON.stringify(window._ttContext) : null,
+        }),
+    }).then(function(r) {
+        return r.text();
+    }).then(function(html) {
+        htmx.swap('#modal-content', html, { swapStyle: 'innerHTML' });
+        data.submitting = false;
+    }).catch(function() {
+        htmx.swap('#modal-content', '<div class="p-6 text-sm text-rose-600">Something went wrong. Please try again.</div>', { swapStyle: 'innerHTML' });
+        data.submitting = false;
+    });
+};
+
+// Admin bulk action on selected tickets ('diagnose-bulk' | 'bulk-status'). POSTs
+// the ids, toasts the outcome, and fires 'ticketsUpdated' so the list refreshes.
+window.ticketBulkAction = function ticketBulkAction(kind, ids, status) {
+    if (!ids || !ids.length) return Promise.resolve();
+    const csrf = document.cookie.match(/csrftoken=([^;]+)/) ? RegExp.$1 : '';
+    const payload = { ticket_ids: ids };
+    if (status) payload.status = status;
+    return fetch('/api/trouble-tickets/' + kind, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
+        body: JSON.stringify(payload),
+    }).then(function(r) {
+        const t = Alpine.store('toast');
+        if (r.ok) {
+            t.message = (kind === 'diagnose-bulk') ? 'Diagnosis started' : 'Tickets updated';
+            t.type = 'success';
+        } else {
+            t.message = 'Action failed (' + r.status + ')';
+            t.type = 'error';
+        }
+        t.show = true;
+        document.body.dispatchEvent(new CustomEvent('ticketsUpdated', { bubbles: true }));
+    }).catch(function(err) {
+        console.error('[ticket-bulk] failed', err);
+        const t = Alpine.store('toast');
+        t.message = 'Network error'; t.type = 'error'; t.show = true;
+    });
+};
+
+Alpine.store('callOutcome', {
+    show: false,
+    activityId: null,
+    contactName: '',
+    note: '',
+    chips: [
+        { value: 'connected', label: 'Connected' },
+        { value: 'left_message', label: 'Left message' },
+        { value: 'voicemail', label: 'Voicemail' },
+        { value: 'no_answer', label: 'No answer' },
+    ],
+    dismiss() {
+        this.show = false;
+        this.note = '';
+    },
+    submit(outcome) {
+        const id = this.activityId;
+        const note = this.note.trim() || null;
+        this.dismiss();
+        if (!outcome) return;
+        const headers = { 'Content-Type': 'application/json' };
+        const csrf = csrfToken();
+        if (csrf) headers['x-csrftoken'] = csrf;
+        fetch('/api/activity/' + id + '/call-outcome', {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify({ outcome: outcome, note: note }),
+        }).then((resp) => {
+            if (resp.ok) {
+                showToast('Call outcome logged', 'success');
+            } else {
+                console.error('[call-outcome] failed', resp.status);
+                const msg = resp.status === 429
+                    ? 'Outcome not saved — rate limit hit, wait a minute'
+                    : 'Outcome not saved (error ' + resp.status + ')';
+                showToast(msg, 'error');
+            }
+        }).catch((err) => {
+            console.error('[call-outcome] network error', err);
+            showToast('Outcome not saved — network error', 'error');
+        });
+    },
 });
 
 Alpine.store('shortlist', {
@@ -248,8 +458,10 @@ document.body.addEventListener('click', (evt) => {
         // rep-facing "NOT logged" message) only ever reports genuine fetch
         // rejections; a false "NOT logged" toast invites a duplicate re-click.
         let droppedLinks = [];
+        let body = {};
         try {
-            droppedLinks = (await resp.json()).dropped_links || [];
+            body = await resp.json();
+            droppedLinks = body.dropped_links || [];
         } catch (err) {
             console.error('[outreach-log] could not parse response body', err);
         }
@@ -270,6 +482,13 @@ document.body.addEventListener('click', (evt) => {
                 (labels[d.channel] || 'Outreach') + ' logged' + (d.contactName ? ' — ' + d.contactName : ''),
                 'success'
             );
+            if (payload.channel === 'phone' && body && body.id) {
+                const store = Alpine.store('callOutcome');
+                store.activityId = body.id;
+                store.contactName = d.contactName || '';
+                store.note = '';
+                store.show = true;
+            }
             refreshAccountList();
         } catch (err) {
             console.error('[outreach-log] post-success UI update failed', err);
@@ -282,7 +501,20 @@ document.body.addEventListener('click', (evt) => {
 
 // ── HTMX error handler — show toast on failed requests ──────
 htmx.on('htmx:responseError', (evt) => {
-    showToast('Request failed. Please try again.', 'error');
+    const status = evt.detail.xhr && evt.detail.xhr.status;
+    if (status >= 400 && status < 500) {
+        let msg = 'Request failed. Please try again.';
+        try {
+            const body = JSON.parse(evt.detail.xhr.responseText);
+            const msg_text = body.error || body.detail;
+            if (msg_text && typeof msg_text === 'string') {
+                msg = msg_text;
+            }
+        } catch (_) { /* not JSON — use fallback */ }
+        showToast(msg, 'error');
+    } else {
+        showToast('Request failed. Please try again.', 'error');
+    }
 });
 
 // ── Server-driven toast bridge ───────────────────────────────
@@ -592,6 +824,55 @@ Alpine.directive('chip-overflow', (el, _directive, { cleanup }) => {
     if (rafId) cancelAnimationFrame(rafId);
   });
 });
+
+/**
+ * contactsView — Alpine component for the CRM account Contacts surface
+ * (contacts_tab.html). Owns the people-search (`q`) + site filter (`siteFilter`)
+ * and filters the rendered contact rows CLIENT-SIDE by toggling a `hidden` class
+ * — no round-trip. The controls live OUTSIDE the #contacts-tab-list swap target,
+ * so a CRUD re-render replaces only the rows; re-applies on htmx:afterSettle.
+ */
+Alpine.data('contactsView', () => ({
+  q: '',
+  siteFilter: '',
+  init() {
+    // Pre-select site filter when the tab was opened via a "View N contacts →" link.
+    const initialSite = this.$root.getAttribute('data-initial-site');
+    if (initialSite) this.siteFilter = initialSite;
+    this.apply();
+    // Re-filter after a CRUD swap replaces the inner #contacts-tab-list rows.
+    this._onSettle = () => this.apply();
+    this.$root.addEventListener('htmx:afterSettle', this._onSettle);
+  },
+  destroy() {
+    if (this._onSettle) this.$root.removeEventListener('htmx:afterSettle', this._onSettle);
+  },
+  apply() {
+    this.$nextTick(() => {
+      const root = this.$root;
+      const needle = this.q.trim().toLowerCase();
+      const site = this.siteFilter;
+      let visible = 0;
+      root.querySelectorAll('[data-contact-row]').forEach((row) => {
+        const nameMatch = !needle || (row.getAttribute('data-contact-search') || '').includes(needle);
+        const siteMatch = !site || row.getAttribute('data-site-id') === site;
+        const show = nameMatch && siteMatch;
+        row.classList.toggle('hidden', !show);
+        if (show) visible += 1;
+      });
+      // Hide a whole site section when none of its rows survive the filter.
+      root.querySelectorAll('[data-contacts-section]').forEach((sec) => {
+        const anyVisible = sec.querySelector('[data-contact-row]:not(.hidden)');
+        sec.classList.toggle('hidden', !anyVisible);
+      });
+      const emptyHint = root.querySelector('[data-contacts-empty]');
+      if (emptyHint) {
+        const hasRows = root.querySelector('[data-contact-row]');
+        emptyHint.classList.toggle('hidden', visible > 0 || !hasRows);
+      }
+    });
+  },
+}));
 
 /**
  * rowActionRail — Alpine component for requisitions2 <tr>.
@@ -1755,6 +2036,129 @@ Alpine.data('quoteBuilder', (initialLines, reqId, hasCustomerSite, requirementId
   },
 }));
 
+// ── quoteBuilderTab: in-workspace Build-Quote tab (single-stage inline) ──
+// The simplified reshape of the full quoteBuilder modal for the requisition-detail tab.
+// `data` is a plain reactive object keyed by requirement id, seeded inline by the server
+// template (best cost, best-offer id, sell seed, qty, mpn/mfr/condition per line). Reuses
+// the same margin math as the modal (margin = (sell - cost) / sell) and the same blended
+// rollup, but as a single inline form: check a line -> sell-price seeds -> live margin +
+// guardrail -> Assemble posts a QuoteBuilderLine[] payload to the assemble endpoint.
+Alpine.data('quoteBuilderTab', (reqId, hasCustomerSite, minMarginPct, quoteExists, data) => ({
+  reqId,
+  hasCustomerSite,
+  minMarginPct: minMarginPct || 10,
+  quoteExists: !!quoteExists,
+  markupPct: 20,
+  data: data || {},
+
+  // ── Per-line getters (reuse the modal's margin definition) ──
+  _sell(id) {
+    const l = this.data[id];
+    const v = parseFloat(l && l.price);
+    return Number.isFinite(v) ? v : null;
+  },
+  marginPct(id) {
+    const l = this.data[id];
+    const sell = this._sell(id);
+    if (!l || sell === null || sell <= 0 || l.cost === null) return null;
+    return (sell - l.cost) / sell * 100;
+  },
+  marginClass(id) {
+    const m = this.marginPct(id);
+    if (m === null) return 'text-gray-300';
+    if (m >= 25) return 'text-emerald-600';
+    if (m >= this.minMarginPct) return 'text-amber-600';
+    return 'text-rose-600';
+  },
+  guardrail(id) {
+    const l = this.data[id];
+    const sell = this._sell(id);
+    if (!l || sell === null || sell <= 0 || l.cost === null) return null;
+    if (sell < l.cost) return 'below cost';
+    const m = (sell - l.cost) / sell * 100;
+    if (m < this.minMarginPct) return 'thin margin';
+    return null;
+  },
+
+  // ── Selection + blended rollup ──
+  _sellOf(l) {
+    const v = parseFloat(l.price);
+    return Number.isFinite(v) && v > 0 ? v : null;
+  },
+  _selected() { return Object.values(this.data).filter(l => l.sel && this._sellOf(l) !== null); },
+  anySelected() { return Object.values(this.data).some(l => l.sel); },
+  get selectedCount() { return Object.values(this.data).filter(l => l.sel).length; },
+  get totalSell() {
+    return this._selected().reduce((sum, l) => sum + this._sellOf(l) * (l.qty || 0), 0);
+  },
+  get totalCost() {
+    return this._selected().reduce((sum, l) => sum + (l.cost || 0) * (l.qty || 0), 0);
+  },
+  get blendedMargin() {
+    const sell = this.totalSell;
+    if (sell <= 0) return null;
+    return (sell - this.totalCost) / sell * 100;
+  },
+  get blendedMarginClass() {
+    const m = this.blendedMargin;
+    if (m === null) return 'text-gray-300';
+    if (m >= 25) return 'text-emerald-600';
+    if (m >= this.minMarginPct) return 'text-amber-600';
+    return 'text-rose-600';
+  },
+  get blendedWarning() {
+    const m = this.blendedMargin;
+    if (m === null) return null;
+    if (this.totalSell < this.totalCost) return 'Blended quote is below cost.';
+    if (m < this.minMarginPct) return `Blended margin ${m.toFixed(1)}% is below the ${this.minMarginPct}% floor.`;
+    return null;
+  },
+
+  // ── Actions ──
+  applyMarkup() {
+    const factor = 1 + (this.markupPct || 0) / 100;
+    Object.values(this.data).forEach(l => {
+      if (l.cost !== null) l.price = (l.cost * factor).toFixed(4);
+    });
+  },
+
+  // Pick WHICH offer this line uses (default = best). Sets the chosen offerId (persisted on
+  // the QuoteLine, and the buy-plan default at build time) and re-points cost to that
+  // offer's price so the live margin reflects the offer actually being quoted. Vendor
+  // identity never leaves the builder — the customer doc strips it (quote_export_context).
+  selectOffer(id, offerId) {
+    const l = this.data[id];
+    if (!l) return;
+    const oid = parseInt(offerId, 10);
+    l.offerId = Number.isFinite(oid) ? oid : null;
+    const chosen = (l.offers || []).find(o => o.id === l.offerId);
+    if (chosen) l.cost = chosen.cost;
+  },
+
+  payload() {
+    return JSON.stringify(
+      Object.entries(this.data)
+        .filter(([id, l]) => l.sel && this._sellOf(l) !== null)
+        .map(([id, l]) => {
+          const sell = this._sellOf(l);
+          const cost = l.cost || 0;
+          const margin = sell > 0 ? parseFloat(((sell - cost) / sell * 100).toFixed(2)) : 0;
+          return {
+            requirement_id: Number(id),
+            offer_id: l.offerId,
+            mpn: l.mpn,
+            manufacturer: l.mfr,
+            qty: l.qty || 0,
+            cost_price: cost,
+            sell_price: sell,
+            margin_pct: margin,
+            condition: l.cond,
+          };
+        })
+    );
+  },
+}));
+
 // ── rfqVendorModal: sightings "Send RFQ" vendor-selection + compose modal ──
 // Rendered by app/templates/htmx/partials/sightings/vendor_modal.html. The server
 // passes the pre-selected vendor normalized-names and the requirement ids through a
@@ -1768,6 +2172,9 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
   // object key add/delete reliably, Set mutations less so.
   selectedVendors: Object.fromEntries((suggestedNames || []).map((n) => [n, true])),
   requirementIds: requirementIds || [],
+  // Opt-in datasheet attachment ids (array of integers). Included in _form() so the
+  // send-inquiry route can resolve + fetch + encode them. Same list sent to EVERY vendor.
+  selectedDatasheetIds: [],
   emailBody: '',
   previewing: false,
   sending: false,
@@ -1796,6 +2203,13 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
   // they arrive CHECKED — runtime-added keys flow into vendor_names via _form().
   selectVendor(name) {
     this.selectedVendors[name] = true;
+  },
+
+  // Toggle a datasheet id in/out of selectedDatasheetIds (opt-in attachment list).
+  toggleDatasheet(id) {
+    const idx = this.selectedDatasheetIds.indexOf(id);
+    if (idx >= 0) this.selectedDatasheetIds.splice(idx, 1);
+    else this.selectedDatasheetIds.push(id);
   },
 
   // Debounced (template-side @input.debounce.300ms) lookup against the existing
@@ -2002,6 +2416,9 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
     this.requirementIds.forEach((id) => form.append('requirement_ids', id));
     Object.keys(this.selectedVendors).forEach((v) => form.append('vendor_names', v));
     form.append('email_body', this.emailBody);
+    // Opt-in datasheet attachment ids (integers). Empty selection → no fields posted
+    // → server treats as no attachments (regression-safe).
+    this.selectedDatasheetIds.forEach((id) => form.append('datasheet_ids', id));
     return form;
   },
 
@@ -2022,12 +2439,59 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
         indicator: this.$refs.previewContent,
         values: this._form(),
       });
+      // preview_inquiry.html contains Alpine x-data / x-model / @rfq-email-fixed.window
+      // directives for the inline fix-email mini-form. htmx.ajax swaps innerHTML but does
+      // not run Alpine on new nodes — the afterSwap handler only covers its hardcoded id
+      // allowlist (lead-drawer-content, rq2-table, rfq-affinity-section). previewContent
+      // has no id, so we must explicitly initTree here to bind the fix-email component.
+      if (this.$refs.previewContent && typeof Alpine !== 'undefined' && typeof Alpine.initTree === 'function') {
+        Alpine.initTree(this.$refs.previewContent);
+      }
       this.step = 'preview';
     } catch (err) {
       console.error('[rfqVendorModal] preview failed', err);
       this._toast('Preview failed — please try again', 'error');
     } finally {
       this.previewing = false;
+    }
+  },
+
+  // One-click skip remediation from the preview step: attach a contact email to a
+  // previously-skipped (no-email) vendor then re-run preview so the vendor resolves.
+  // POSTs to the existing composer-vendor endpoint (which creates/updates the
+  // VendorContact). On non-ok response, shows a toast and keeps the inline form open
+  // by NOT calling loadPreview(). On success, selectVendor() ensures the vendor is
+  // in selectedVendors, then loadPreview() refreshes the preview panel in-place
+  // (no modal close or wrapper re-init — the preview container is a stable-id swap).
+  async fixVendorEmail(vendorName, email) {
+    if (!email || !vendorName) return;
+    const form = new FormData();
+    form.append('vendor_name', vendorName);
+    form.append('email', email);
+    this.requirementIds.forEach((id) => form.append('requirement_ids', id));
+    try {
+      const resp = await fetch('/v2/partials/sightings/composer-vendor', {
+        method: 'POST',
+        headers: { 'x-csrftoken': csrfToken() },
+        body: form,
+      });
+      if (!resp.ok) {
+        let reason = '';
+        try { reason = (await resp.json()).error || ''; } catch { /* non-JSON body */ }
+        const msg = resp.status < 500 && reason
+          ? 'Could not add email: ' + reason
+          : 'Could not add email — please try again';
+        this._toast(msg, 'error');
+        return; // keep the form open with the typed value
+      }
+      // Ensure the vendor is in selectedVendors so it is included in the re-preview POST.
+      this.selectVendor(vendorName);
+      // Signal the nested x-data scope to clear its fixEmail input (success path only).
+      window.dispatchEvent(new CustomEvent('rfq-email-fixed'));
+      await this.loadPreview();
+    } catch (err) {
+      console.error('[rfqVendorModal] fixVendorEmail failed', err);
+      this._toast('Could not add email — please try again', 'error');
     }
   },
 
@@ -2053,7 +2517,9 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
       // They are NOT delivery failures — without subtracting them they'd be
       // misattributed to the 'failed' bucket (total - sent - skipped).
       const unavailable = parseInt(resp.headers.get('X-RFQ-Unavailable') || '0', 10);
-      const outcome = this._sendOutcome(sent, total, skipped, unavailable);
+      // X-RFQ-Datasheets-Dropped = oversized datasheets silently dropped before send.
+      const datasheetsDropped = parseInt(resp.headers.get('X-RFQ-Datasheets-Dropped') || '0', 10);
+      const outcome = this._sendOutcome(sent, total, skipped, unavailable, datasheetsDropped);
       this._toast(outcome.message, outcome.type);
       if (!outcome.delivered) return; // nothing sent — keep the modal open to retry
       this._refreshSightings();
@@ -2066,31 +2532,33 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
     }
   },
 
-  // Map the server's sent/total/skipped/unavailable counts to a toast. `delivered` is
-  // false only when nothing went out, so the caller can keep the modal open for a retry.
-  // `skipped` = vendors with no contact email; `unavailable` = vendors dropped by the
-  // send-time unavailability re-check — both reported distinctly from send failures so a
-  // correctly-blocked vendor is never miscounted as 'failed'.
-  _sendOutcome(sent, total, skipped = 0, unavailable = 0) {
+  // Map the server's sent/total/skipped/unavailable/datasheetsDropped counts to a toast.
+  // `delivered` is false only when nothing went out, so the caller can keep the modal open
+  // for a retry. `skipped` = vendors with no contact email; `unavailable` = vendors dropped
+  // by the send-time unavailability re-check; `datasheetsDropped` = attachments silently
+  // dropped for exceeding the ~3 MB Graph simple-send cap (largest-first).
+  _sendOutcome(sent, total, skipped = 0, unavailable = 0, datasheetsDropped = 0) {
     if (sent === 0) {
       return { type: 'error', delivered: false, message: 'Send failed — no RFQs were delivered' };
     }
+    let baseMsg;
     if (sent < total) {
       const failed = total - sent - skipped - unavailable;
       const reasons = [];
       if (failed > 0) reasons.push(failed + ' failed');
       if (skipped > 0) reasons.push(skipped + ' had no email');
       if (unavailable > 0) reasons.push(unavailable + ' marked unavailable');
-      return {
-        type: 'warning',
-        delivered: true,
-        message: 'Sent to ' + sent + ' of ' + total + ' vendors' + (reasons.length ? ' — ' + reasons.join(', ') : ''),
-      };
+      baseMsg = 'Sent to ' + sent + ' of ' + total + ' vendors' + (reasons.length ? ' — ' + reasons.join(', ') : '');
+    } else {
+      baseMsg = 'RFQ sent to ' + sent + ' vendor' + (sent === 1 ? '' : 's');
+    }
+    if (datasheetsDropped > 0) {
+      baseMsg += ' (' + datasheetsDropped + ' attachment' + (datasheetsDropped === 1 ? '' : 's') + ' dropped — too large)';
     }
     return {
-      type: 'success',
+      type: sent < total ? 'warning' : 'success',
       delivered: true,
-      message: 'RFQ sent to ' + sent + ' vendor' + (sent === 1 ? '' : 's'),
+      message: baseMsg,
     };
   },
 
@@ -2122,38 +2590,6 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
         swap: 'innerHTML',
         indicator: '#sightings-load-spinner',
       }).catch(onRefreshError);
-    }
-  },
-}));
-
-// ── solicitModal: excess bid-solicitation email composer ──
-// Rendered by app/templates/htmx/partials/excess/solicit_modal.html. Only the subject is
-// dynamic (the list title); it's passed via a SINGLE-quoted x-data attribute through
-// |tojson, so a list title containing a quote/apostrophe can't terminate the attribute
-// and break Alpine init (the inline object previously used |e in a double-quoted x-data,
-// which broke on apostrophe titles).
-Alpine.data('solicitModal', (subject) => ({
-  recipientEmail: '',
-  recipientName: '',
-  subject: subject || 'Bid Request',
-  bundled: true,
-  message: 'We have the following parts available and are seeking your best bid. Please reply with unit price, quantity, and lead time.',
-  polishing: false,
-  async polishEmail() {
-    if (!this.message.trim()) return;
-    this.polishing = true;
-    try {
-      const res = await fetch('/api/excess-lists/polish-email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: this.message }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        this.message = data.text;
-      }
-    } finally {
-      this.polishing = false;
     }
   },
 }));
@@ -2267,6 +2703,44 @@ Alpine.data('offerQualification', (prefill) => ({
   },
   meterTotal() { return this._items().length; },
   meterFilled() { return this._items().filter(Boolean).length; },
+}));
+
+/**
+ * attachmentsPanel — Alpine.js component for the unified file-attachments panel.
+ *
+ * Owns the dropzone hover state, a friendly busy state during upload, and the
+ * drop handler that assigns dropped files to the picker input and submits the
+ * form. The form itself is plain HTMX (multipart POST → attachments:changed);
+ * this factory only decorates it with interaction state.
+ *
+ * Called by: partials/shared/_attachments.html (attachments_panel macro)
+ * Depends on: Alpine.js, HTMX. Error toasts are surfaced by the global
+ *             htmx:responseError handler (reads body.error) — no per-panel wiring.
+ */
+Alpine.data('attachmentsPanel', () => ({
+  dragging: false,
+  busy: false,
+  busyLabel: 'Uploading…',
+
+  init() {
+    // The dropzone form is this component's root (<div> wraps it); listen on the
+    // root so both the upload form and the list container's requests are seen.
+    // Only the multipart upload toggles the busy state.
+    this.$el.addEventListener('htmx:beforeRequest', (e) => {
+      if (e.target && e.target.tagName === 'FORM') this.busy = true;
+    });
+    this.$el.addEventListener('htmx:afterRequest', (e) => {
+      if (e.target && e.target.tagName === 'FORM') this.busy = false;
+    });
+  },
+
+  onDrop(evt) {
+    this.dragging = false;
+    const files = evt.dataTransfer && evt.dataTransfer.files;
+    if (!files || !files.length) return;
+    this.$refs.fileInput.files = files;
+    this.$refs.fileInput.closest('form').requestSubmit();
+  },
 }));
 
 /* ────────────────────────────────────────────────────────────────────────

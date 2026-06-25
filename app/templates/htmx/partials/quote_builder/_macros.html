@@ -11,7 +11,7 @@
    is true the value uses the semibold variant (Qty Needed / Target Price). #}
 {%- macro spec_field(label, expr, emphasis=False) -%}
 <div>
-              <span class="text-[10px] text-gray-400 uppercase tracking-wide">{{ label }}</span>
+              <span class="text-xs text-gray-400 uppercase tracking-wide">{{ label }}</span>
               <p class="text-sm font-mono {% if emphasis %}font-semibold {% endif %}text-gray-900" x-text="{{ expr | safe }}"></p>
             </div>
 {%- endmacro -%}

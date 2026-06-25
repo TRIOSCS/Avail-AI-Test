@@ -2,6 +2,10 @@
 
 Finds companies matching ICP segments with firmographics + intent/hiring/event signals
 in a single API call. Normalizes results into ProspectAccountCreate schemas.
+
+For point-enrichment of a known domain (not discovery), use app.connectors.explorium
+directly: explorium.enrich_company(domain, name, api_key) /
+explorium.search_contacts(domain, name, api_key, title_filter, limit).
 """
 
 import asyncio
@@ -108,12 +112,16 @@ async def discover_companies_with_signals(segment_key: str, region_key: str) -> 
     }
 
     try:
+        # Use same header format as app.connectors.explorium (api_key: not Authorization: Bearer)
+        # NOTE: This /v1/businesses/search bulk-discovery endpoint is unverified against the
+        # current Explorium API and should be rewired to the documented /v1/businesses fetch
+        # in a follow-up (out of scope for the current prospecting feature).
         resp = await http.post(
             f"{EXPLORIUM_BASE}/v1/businesses/search",
             json=payload,
             headers={
                 "Content-Type": "application/json",
-                "Authorization": f"Bearer {api_key}",
+                "api_key": api_key,
             },
             timeout=60,
         )
@@ -288,13 +296,59 @@ def _build_location(raw: dict) -> str | None:
 
 
 def _detect_region(raw: dict) -> str | None:
-    """Detect region from country code."""
+    """Detect region from a country code OR full country name.
+
+    The Explorium connector emits the human-readable ``hq_country`` name (e.g. "Germany"),
+    while the discovery search API supplies ``country_code`` — so match on both.
+    """
     cc = (raw.get("country_code") or raw.get("hq_country") or "").upper()
     if cc in ("US", "USA", "UNITED STATES"):
         return "US"
-    if cc in ("DE", "GB", "FR", "NL", "SE", "IT", "ES", "CH", "AT", "BE"):
+    _EU = (
+        "DE",
+        "GB",
+        "FR",
+        "NL",
+        "SE",
+        "IT",
+        "ES",
+        "CH",
+        "AT",
+        "BE",
+        "GERMANY",
+        "UNITED KINGDOM",
+        "FRANCE",
+        "NETHERLANDS",
+        "SWEDEN",
+        "ITALY",
+        "SPAIN",
+        "SWITZERLAND",
+        "AUSTRIA",
+        "BELGIUM",
+    )
+    _ASIA = (
+        "CN",
+        "JP",
+        "KR",
+        "TW",
+        "SG",
+        "IN",
+        "TH",
+        "VN",
+        "MY",
+        "CHINA",
+        "JAPAN",
+        "SOUTH KOREA",
+        "TAIWAN",
+        "SINGAPORE",
+        "INDIA",
+        "THAILAND",
+        "VIETNAM",
+        "MALAYSIA",
+    )
+    if cc in _EU:
         return "EU"
-    if cc in ("CN", "JP", "KR", "TW", "SG", "IN", "TH", "VN", "MY"):
+    if cc in _ASIA:
         return "Asia"
     if cc:
         return cc
@@ -352,7 +406,6 @@ async def run_explorium_discovery_batch(
                     "naics_code": r.get("naics_code"),
                     "employee_count_range": r.get("employee_count_range"),
                     "region": r.get("region"),
-                    "has_procurement_staff": None,  # filled by Apollo in Phase 3B
                     "uses_brokers": None,
                 }
                 fit_score, fit_reasoning = calculate_fit_score(fit_data)

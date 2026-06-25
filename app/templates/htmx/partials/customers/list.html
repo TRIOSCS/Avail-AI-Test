@@ -2,7 +2,7 @@
    Modeled on the requisitions2 split-screen workspace. Default sort puts the
    longest-neglected accounts at the top (call-list order).
    Receives: companies, search, staleness, account_type, my_only, sort, total,
-             limit, offset, overdue_count, account_types.
+             limit, offset, overdue_count, account_types, disposition, has_open_reqs.
    Called by: companies_list_partial route (htmx_views.py).
    Depends on: splitPanel Alpine component (htmx_app.js), _account_list.html,
                _detail_empty.html, brand palette.
@@ -13,8 +13,8 @@
    swapped out — never add window listeners via x-init here (they leak across
    HTMX navigations). #}
 <div id="cdm-workspace" class="flex flex-col min-h-[420px]"
-     x-data="{ selectedId: null, selectedSiteId: null, fitHeight() { this.$el.style.height = Math.max(420, window.innerHeight - this.$el.getBoundingClientRect().top - 64) + 'px' } }"
-     x-init="$nextTick(() => fitHeight())"
+     x-data="{ selectedId: null, fitHeight() { this.$el.style.height = Math.max(420, window.innerHeight - this.$el.getBoundingClientRect().top - 64) + 'px' }, autoSelectFirst() { if (this.selectedId !== null) return; const detail = this.$el.querySelector('#cdm-detail'); if (!detail || !detail.querySelector('[data-cdm-empty]')) return; const first = this.$el.querySelector('#cdm-list [role=\'button\'][hx-get]'); if (first) first.click() } }"
+     x-init="$nextTick(() => { fitHeight(); autoSelectFirst() })"
      @resize.window.debounce.150ms="fitHeight()">
 
   {# ── Filter / sort bar ─────────────────────────────────────── #}
@@ -76,6 +76,19 @@
       My accounts
     </label>
 
+    <select name="disposition" aria-label="Filter by disposition"
+            class="px-2 py-1.5 text-sm border border-gray-200 rounded-lg">
+      <option value="">All accounts</option>
+      <option value="active" {{ "selected" if disposition == "active" }}>Active only</option>
+      <option value="bucket" {{ "selected" if disposition == "bucket" }}>Bucketed only</option>
+    </select>
+
+    <label class="inline-flex items-center gap-1.5 px-2 py-1.5 text-sm text-gray-600 cursor-pointer">
+      <input type="checkbox" name="has_open_reqs" value="1" {{ "checked" if has_open_reqs }}
+             class="rounded border-gray-300 text-brand-500 focus:ring-brand-500">
+      Has open reqs
+    </label>
+
     {% if overdue_count %}
     <button type="button"
             class="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 transition-colors"
@@ -88,6 +101,66 @@
 
     <span class="htmx-indicator text-gray-400 text-xs">Loading...</span>
   </form>
+
+  {# Export + cross-company contacts links + Import — below the filter bar, above the split workspace #}
+  <div class="flex justify-end gap-3 text-xs text-gray-600 mb-1" x-data="{ importOpen: false }">
+    <a hx-get="/v2/partials/contacts" hx-target="#main-content" hx-push-url="/v2/contacts"
+       class="hover:text-brand-600 hover:underline cursor-pointer">All contacts</a>
+    <a href="/v2/customers/export.csv" class="hover:text-brand-600 hover:underline">Export CSV</a>
+    <a href="/v2/customers/contacts/export.csv" class="hover:text-brand-600 hover:underline">Export contacts</a>
+    {# Import modal trigger #}
+    <button type="button" @click="importOpen = true"
+            class="hover:text-brand-600 hover:underline cursor-pointer">Import CSV</button>
+    {# Import modal — upload → server previews → confirm creates rows #}
+    <div x-show="importOpen" x-cloak
+         class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+         @keydown.escape.window="importOpen = false">
+      <div class="bg-white rounded-xl shadow-xl w-full max-w-2xl mx-4 p-6 space-y-4"
+           @click.stop>
+        <div class="flex items-center justify-between">
+          <h3 class="text-base font-semibold text-gray-900">Import Companies / Contacts</h3>
+          <button type="button" @click="importOpen = false"
+                  class="text-gray-400 hover:text-gray-600 text-lg leading-none">&times;</button>
+        </div>
+        <div class="space-y-3">
+          <div>
+            <p class="text-sm font-medium text-gray-700 mb-1">Import Companies</p>
+            <p class="text-xs text-gray-500 mb-2">CSV columns: <code>name</code> (required), <code>website</code>, <code>account_type</code></p>
+            <form hx-post="/v2/partials/customers/import/preview"
+                  hx-target="#import-result"
+                  hx-swap="innerHTML"
+                  hx-encoding="multipart/form-data">
+              <div class="flex gap-2">
+                <input type="file" name="file" accept=".csv"
+                       class="text-xs text-gray-600 border border-gray-200 rounded px-2 py-1 flex-1">
+                <button type="submit" class="btn btn-primary btn-sm whitespace-nowrap">
+                  Preview
+                </button>
+              </div>
+            </form>
+          </div>
+          <div>
+            <p class="text-sm font-medium text-gray-700 mb-1">Import Contacts</p>
+            <p class="text-xs text-gray-500 mb-2">CSV columns: <code>company_name</code>, <code>contact_name</code> (required), <code>email</code>, <code>phone</code>, <code>role</code></p>
+            <form hx-post="/v2/partials/customers/import/contacts/preview"
+                  hx-target="#import-result"
+                  hx-swap="innerHTML"
+                  hx-encoding="multipart/form-data">
+              <div class="flex gap-2">
+                <input type="file" name="file" accept=".csv"
+                       class="text-xs text-gray-600 border border-gray-200 rounded px-2 py-1 flex-1">
+                <button type="submit" class="btn btn-secondary btn-sm whitespace-nowrap">
+                  Preview contacts
+                </button>
+              </div>
+            </form>
+          </div>
+          {# Preview / confirm result lands here #}
+          <div id="import-result"></div>
+        </div>
+      </div>
+    </div>
+  </div>
 
   {# Error region — failed list refreshes / row loads land here instead of
      silently leaving stale rows behind (response-targets extension). #}

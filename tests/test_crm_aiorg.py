@@ -244,8 +244,11 @@ class TestNameSuggestionChip:
         assert resp.status_code == 200
         assert resp.text.strip() == ""
 
-    def test_apply_route_updates_name(self, client: TestClient, db_session: Session):
+    def test_apply_route_updates_name(self, client: TestClient, db_session: Session, test_user: User):
         c = _make_company(db_session, "Mouser Electronics, Inc.")
+        # apply-name is an account mutator gated by can_manage_account — the acting
+        # buyer must own the company to pass the gate.
+        c.account_owner_id = test_user.id
         db_session.commit()
         resp = client.post(
             f"/v2/partials/customers/{c.id}/apply-name",

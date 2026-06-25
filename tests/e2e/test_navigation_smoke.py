@@ -23,7 +23,7 @@ NAV_ITEMS = [
     ("buy-plans", "/v2/buy-plans", "/v2/partials/buy-plans"),
     ("follow-ups", "/v2/follow-ups", "/v2/partials/follow-ups"),
     ("proactive", "/v2/proactive", "/v2/partials/proactive"),
-    ("excess", "/v2/excess", "/v2/partials/excess"),
+    ("resell", "/v2/resell", "/v2/partials/resell/workspace"),
     ("settings", "/v2/settings", "/v2/partials/settings"),
 ]
 

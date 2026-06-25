@@ -2,8 +2,6 @@
 app/email_service.py.
 
 Covers:
-- _handle_excess_bid_reply: empty body (921-922), None parse result (958-959),
-  incomplete parse (971-972)
 - _auto_create_offers_from_parse: mpn_to_card_id assignment (1043),
   existing offer dedup continue (1059), task auto-gen exception (1107-1108),
   knowledge capture exception (1115-1116), tag propagation exception (1126-1127),
@@ -19,12 +17,11 @@ import os
 os.environ["TESTING"] = "1"
 
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
-import pytest
 from sqlalchemy.orm import Session
 
-from app.email_service import _auto_create_offers_from_parse, _handle_excess_bid_reply
+from app.email_service import _auto_create_offers_from_parse
 from app.models import (
     ActivityLog,
     Offer,
@@ -33,55 +30,9 @@ from app.models import (
     User,
     VendorResponse,
 )
-from app.models.excess import BidSolicitation, ExcessLineItem, ExcessList
 from tests.conftest import engine  # noqa: F401
 
 # ── Helpers ──────────────────────────────────────────────────────────
-
-
-def _make_excess_solicitation(db: Session, user: User) -> BidSolicitation:
-    """Create Company -> ExcessList -> ExcessLineItem -> BidSolicitation chain."""
-    from app.models import Company
-
-    co = Company(
-        name="Buyer Corp",
-        is_active=True,
-        created_at=datetime.now(timezone.utc),
-    )
-    db.add(co)
-    db.flush()
-
-    el = ExcessList(
-        company_id=co.id,
-        owner_id=user.id,
-        title="Surplus Lot A",
-        status="active",
-    )
-    db.add(el)
-    db.flush()
-
-    item = ExcessLineItem(
-        excess_list_id=el.id,
-        part_number="LM317T",
-        quantity=500,
-        asking_price=0.75,
-    )
-    db.add(item)
-    db.flush()
-
-    sol = BidSolicitation(
-        excess_line_item_id=item.id,
-        contact_id=1,
-        sent_by=user.id,
-        recipient_email="buyer@example.com",
-        recipient_name="Buyer Bob",
-        status="sent",
-        sent_at=datetime.now(timezone.utc),
-    )
-    db.add(sol)
-    db.commit()
-    db.refresh(sol)
-    return sol
 
 
 def _make_vendor_response(db: Session, user: User, requisition: Requisition, confidence: float = 0.6) -> VendorResponse:
@@ -100,103 +51,6 @@ def _make_vendor_response(db: Session, user: User, requisition: Requisition, con
     db.commit()
     db.refresh(vr)
     return vr
-
-
-# ── _handle_excess_bid_reply: empty body (lines 921-922) ─────────────
-
-
-class TestHandleExcessBidReplyEmptyBody:
-    @pytest.mark.asyncio
-    async def test_empty_body_skipped(self, db_session: Session, test_user: User):
-        """Whitespace-only body returns early without changing status (lines
-        921-922)."""
-        sol = _make_excess_solicitation(db_session, test_user)
-        msg = {"body": {"content": "   "}, "bodyPreview": "   "}
-
-        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock) as mock_claude:
-            await _handle_excess_bid_reply(msg, sol.id, db_session)
-            mock_claude.assert_not_called()
-
-        db_session.refresh(sol)
-        assert sol.status == "sent"
-
-    @pytest.mark.asyncio
-    async def test_empty_body_preview_skipped(self, db_session: Session, test_user: User):
-        """Msg with no 'body' key but empty bodyPreview also returns early."""
-        sol = _make_excess_solicitation(db_session, test_user)
-        msg = {"bodyPreview": ""}
-
-        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock) as mock_claude:
-            await _handle_excess_bid_reply(msg, sol.id, db_session)
-            mock_claude.assert_not_called()
-
-        db_session.refresh(sol)
-        assert sol.status == "sent"
-
-
-# ── _handle_excess_bid_reply: None parse result (lines 958-959) ──────
-
-
-class TestHandleExcessBidReplyNoneResult:
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize(
-        ("content", "parse_result"),
-        [
-            pytest.param("I have some parts, please advise.", None, id="none_result"),
-            pytest.param("We may be interested.", {}, id="empty_dict_falsy"),
-        ],
-    )
-    async def test_falsy_result_leaves_solicitation_unchanged(
-        self, content: str, parse_result, db_session: Session, test_user: User
-    ):
-        """claude_structured returning None or {} (falsy) leaves solicitation status
-        unchanged (lines 958-959)."""
-        sol = _make_excess_solicitation(db_session, test_user)
-        msg = {"body": {"content": content}}
-
-        # claude_structured is imported lazily from app.utils.claude_client inside the function
-        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock) as mock_claude:
-            mock_claude.return_value = parse_result
-            await _handle_excess_bid_reply(msg, sol.id, db_session)
-
-        db_session.refresh(sol)
-        assert sol.status == "sent"
-
-
-# ── _handle_excess_bid_reply: incomplete parse (lines 971-972) ───────
-
-
-class TestHandleExcessBidReplyIncomplete:
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize(
-        ("content", "result"),
-        [
-            pytest.param(
-                "We can supply 200 units.",
-                {"unit_price": None, "quantity_wanted": 200, "lead_time_days": 5, "notes": None},
-                id="missing_unit_price",
-            ),
-            pytest.param(
-                "Our unit price is $0.50.",
-                {"unit_price": 0.50, "quantity_wanted": None, "lead_time_days": None, "notes": None},
-                id="missing_quantity",
-            ),
-        ],
-    )
-    async def test_incomplete_parse_skips_bid_creation(
-        self, content: str, result: dict, db_session: Session, test_user: User
-    ):
-        """Parse result missing unit_price or quantity returns early without creating
-        bid (lines 971-972)."""
-        sol = _make_excess_solicitation(db_session, test_user)
-        msg = {"body": {"content": content}}
-
-        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock) as mock_claude:
-            mock_claude.return_value = result
-            await _handle_excess_bid_reply(msg, sol.id, db_session)
-
-        db_session.refresh(sol)
-        assert sol.status == "sent"
 
 
 # ── _auto_create_offers_from_parse: mpn_to_card_id path (line 1043) ──

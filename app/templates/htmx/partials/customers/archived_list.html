@@ -1,0 +1,42 @@
+{# archived_list.html — List of archived (DNC) companies.
+   Receives: companies (list[Company]), user (User), can_reactivate (bool).
+   Called by: GET /v2/partials/customers/archived.
+   Depends on: HTMX.
+#}
+<div class="space-y-1 p-4">
+  <div class="flex items-center justify-between mb-3">
+    <h2 class="text-sm font-semibold text-gray-700">Archived Accounts (Do Not Call)</h2>
+    {# Return to the active account list (same #cdm-list panel). #}
+    <a href="#" role="button"
+       hx-get="/v2/partials/customers/account-list"
+       hx-target="#cdm-list" hx-swap="innerHTML" hx-include="#cdm-filters" hx-push-url="false"
+       class="text-xs font-medium text-gray-600 hover:text-brand-700 hover:underline underline-offset-2 focus:outline-none focus:ring-2 focus:ring-brand-400 rounded px-1">← Back to accounts</a>
+  </div>
+  {% if not companies %}
+  <p class="text-sm text-gray-600">No archived accounts.</p>
+  {% else %}
+  {% for company in companies %}
+  <div class="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
+    <div class="min-w-0">
+      <div class="flex items-center gap-2">
+        <span class="font-medium text-gray-900 truncate">{{ company.name }}</span>
+        <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-rose-100 text-rose-700">Archived — DNC</span>
+      </div>
+      {% if company.disposition_reason %}
+      <p class="text-xs text-gray-600 mt-0.5 truncate">{{ company.disposition_reason }}</p>
+      {% endif %}
+    </div>
+    {% if can_reactivate %}
+    <button type="button"
+            hx-post="/v2/partials/customers/{{ company.id }}/reactivate?from_archived=true"
+            hx-target="closest div.space-y-1"
+            hx-swap="outerHTML"
+            hx-confirm="Restore {{ company.name }} to active status?"
+            class="btn btn-secondary btn-sm flex-shrink-0">
+      Reactivate
+    </button>
+    {% endif %}
+  </div>
+  {% endfor %}
+  {% endif %}
+</div>

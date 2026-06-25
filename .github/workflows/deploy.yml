@@ -24,10 +24,12 @@ jobs:
               --jq ".check_runs[] | select(.name==\"$1\") | (if .status!=\"completed\" then .status else .conclusion end)" \
               2>/dev/null | head -1
           }
+          # NOTE: check-runs are named after the JOB (test, security), not the
+          # workflow ("CI — Tests" / "Security Scanning"). Match the job names.
           for attempt in $(seq 1 40); do
-            T=$(check_state "CI — Tests")
-            S=$(check_state "Security Scanning")
-            echo "attempt $attempt — CI — Tests=${T:-missing}  Security Scanning=${S:-missing}"
+            T=$(check_state "test")
+            S=$(check_state "security")
+            echo "attempt $attempt — test=${T:-missing}  security=${S:-missing}"
             case "$T" in failure|cancelled|timed_out|action_required|stale)
               echo "ERROR: 'CI — Tests' for $SHA = $T — refusing to deploy." >&2; exit 1;; esac
             case "$S" in failure|cancelled|timed_out|action_required|stale)
@@ -55,70 +57,83 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           command_timeout: 10m
           script: |
-            set -e
-            TIMESTAMP=$(date +%Y%m%d_%H%M)
-
-            echo "=== Pre-flight: health check ==="
+            # NOTE: deliberately NOT `set -e` — failures are handled explicitly so the
+            # rollback block always runs. (A bare `set -e` aborted the old script at
+            # `docker compose up -d` before rollback and left prod down — incident
+            # 2026-06-20.) Deploys via git (the proven path), NOT a release zip:
+            # `git archive`/unzip builds were unreliable and took prod down twice.
+            set -uo pipefail
             cd /root/availai
-            if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
-              echo "Current deployment healthy"
-            else
-              echo "WARNING: Current deployment unhealthy — proceeding anyway"
-            fi
+            TS=$(date +%Y%m%d_%H%M%S)
+            TAG="${{ github.event.release.tag_name }}"
 
-            echo "=== Backing up database ==="
+            container_health() {
+              docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' \
+                "$(docker compose ps -q app)" 2>/dev/null || true
+            }
+
+            echo "=== Recording current commit + backing up DB ==="
+            PREV=$(git rev-parse HEAD)
+            echo "Current commit: $PREV"
             mkdir -p /root/backups
-            docker compose exec -T db pg_dump --clean --if-exists -U availai availai > /root/backups/avail_${TIMESTAMP}.sql
-            echo "DB backup: /root/backups/avail_${TIMESTAMP}.sql ($(du -h /root/backups/avail_${TIMESTAMP}.sql | cut -f1))"
+            echo "$PREV" > /root/backups/prev_commit_${TS}.txt
+            docker compose exec -T db pg_dump --clean --if-exists -U availai availai \
+              > /root/backups/avail_${TS}.sql \
+              && echo "DB backup: /root/backups/avail_${TS}.sql ($(du -h /root/backups/avail_${TS}.sql | cut -f1))" \
+              || echo "WARNING: DB backup failed — proceeding"
 
-            echo "=== Backing up code ==="
-            cp -r /root/availai /root/backups/code_${TIMESTAMP}
+            echo "=== Checking out release $TAG (.env / .venv preserved — git-tracked files only) ==="
+            git fetch origin --tags --prune
+            git checkout -f main
+            if ! git reset --hard "$TAG"; then
+              echo "ERROR: cannot reset to tag $TAG — aborting, prod untouched"; exit 1
+            fi
+            NEW=$(git rev-parse --short HEAD)
+            BC="${NEW}-$(date +%s)"
+            echo "Deploying $NEW  (BUILD_COMMIT=$BC)"
 
-            echo "=== Downloading release ${{ github.event.release.tag_name }} ==="
-            DOWNLOAD_URL=$(echo '${{ toJSON(github.event.release.assets) }}' | python3 -c "import sys,json; assets=json.load(sys.stdin); print(next((a['browser_download_url'] for a in assets if a.get('browser_download_url','').endswith('.zip')), assets[0]['browser_download_url'] if assets else ''))")
-            if [ -z "$DOWNLOAD_URL" ]; then echo "ERROR: No release asset found"; exit 1; fi
-            curl -L -o /tmp/release.zip "$DOWNLOAD_URL"
+            echo "=== Building (with BUILD_COMMIT cache-bust, like deploy.sh) ==="
+            if ! docker compose build --build-arg BUILD_COMMIT="$BC" app enrichment-worker; then
+              echo "ERROR: build failed — rolling back code to $PREV"
+              git reset --hard "$PREV"
+              exit 1
+            fi
+            docker compose up -d || echo "WARNING: up -d returned non-zero — health check decides"
 
-            echo "=== Extracting ==="
-            cd /root/availai
-            find /root/availai -mindepth 1 -maxdepth 1 ! -name ".env" ! -name "fix_queue" -exec rm -rf {} +
-            unzip -o /tmp/release.zip -d /root/availai
-
-            echo "=== Rebuilding ==="
-            docker compose build app
-            docker compose up -d
-
-            echo "=== Health check (waiting up to 60s) ==="
-            for i in $(seq 1 12); do
+            echo "=== Health check (container status, up to 90s) ==="
+            HEALTHY=""
+            for i in $(seq 1 18); do
               sleep 5
-              if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
-                echo "Health check passed after $((i*5))s"
-                rm -f /tmp/release.zip
-                # Prune backups older than 7 days
-                find /root/backups -name "avail_*.sql" -mtime +7 -delete 2>/dev/null || true
-                find /root/backups -maxdepth 1 -name "code_*" -mtime +7 -exec rm -rf {} + 2>/dev/null || true
-                echo "=== Deploy ${{ github.event.release.tag_name }} complete ==="
-                exit 0
-              fi
-              echo "  Attempt $i/12 — waiting..."
+              HS=$(container_health)
+              if [ "$HS" = healthy ]; then HEALTHY=1; echo "App healthy after $((i*5))s"; break; fi
+              echo "  Attempt $i/18 — app is '$HS'..."
             done
 
-            echo "ERROR: Health check failed after 60s — rolling back code + database"
-            rm -rf /root/availai
-            cp -r /root/backups/code_${TIMESTAMP} /root/availai
-            cd /root/availai
-            if docker compose exec -T db psql -U availai -d availai < /root/backups/avail_${TIMESTAMP}.sql; then
+            if [ -n "$HEALTHY" ]; then
+              echo "=== Refresh host systemd workers (no-op if not on this host) ==="
+              cp deploy/avail-ics-worker.service deploy/avail-nc-worker.service /etc/systemd/system/ 2>/dev/null || true
+              systemctl daemon-reload 2>/dev/null || true
+              systemctl restart avail-ics-worker avail-nc-worker 2>/dev/null || true
+              find /root/backups -name "avail_*.sql" -mtime +7 -delete 2>/dev/null || true
+              find /root/backups -maxdepth 1 -name "code_*" -mtime +7 -exec rm -rf {} + 2>/dev/null || true
+              find /root/backups -name "prev_commit_*.txt" -mtime +7 -delete 2>/dev/null || true
+              echo "=== Deploy $TAG complete ($BC) ==="
+              exit 0
+            fi
+
+            echo "ERROR: app not healthy — rolling back code + DB to $PREV"
+            git reset --hard "$PREV"
+            docker compose build --build-arg BUILD_COMMIT="rb-$(date +%s)" app enrichment-worker
+            docker compose up -d
+            if docker compose exec -T db psql -U availai -d availai < /root/backups/avail_${TS}.sql; then
               echo "Database restore completed"
             else
               echo "CRITICAL: Database restore failed"
             fi
-            docker compose build app
-            docker compose up -d
             sleep 10
-            if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
+            if [ "$(container_health)" = healthy ]; then
               echo "Rollback successful — previous version restored"
             else
-              echo "CRITICAL: Rollback also failed — manual intervention required"
+              echo "CRITICAL: Rollback also failed — manual intervention required (scripts/recover_prod.sh)"
             fi
-            rm -f /tmp/release.zip
             exit 1

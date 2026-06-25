@@ -34,6 +34,24 @@ from app.utils.normalization_helpers import (
 
 _WEBSITE_RE = re.compile(r"^https?://[a-zA-Z0-9][-a-zA-Z0-9.]*\.[a-zA-Z]{2,}")
 
+
+def normalize_website(v: str | None) -> str | None:
+    """Normalize + validate a website URL (shared by the schema validator and the
+    inline-edit path in routers/htmx_views.py).
+
+    Blank → None. Bare hosts get an `https://` prefix. Raises ValueError on a value
+    that still doesn't look like a URL so callers can surface a 400.
+    """
+    if not v or not v.strip():
+        return None
+    v = v.strip()
+    if not v.startswith(("http://", "https://")):
+        v = "https://" + v
+    if not _WEBSITE_RE.match(v):
+        raise ValueError("Please enter a valid website URL")
+    return v
+
+
 # ── Companies ────────────────────────────────────────────────────────
 
 
@@ -50,6 +68,13 @@ class CompanyCreate(BaseModel):
     tax_id: str | None = None
     currency: str | None = None
     preferred_carrier: str | None = None
+    legal_name: str | None = None
+    employee_size: str | None = None
+    revenue_range: str | None = None
+    hq_city: str | None = None
+    hq_state: str | None = None
+    hq_country: str | None = None
+    source: str | None = None
 
     @field_validator("name")
     @classmethod
@@ -62,14 +87,7 @@ class CompanyCreate(BaseModel):
     @field_validator("website")
     @classmethod
     def validate_website(cls, v: str | None) -> str | None:
-        if not v or not v.strip():
-            return None
-        v = v.strip()
-        if not v.startswith(("http://", "https://")):
-            v = "https://" + v
-        if not _WEBSITE_RE.match(v):
-            raise ValueError("Please enter a valid website URL")
-        return v
+        return normalize_website(v)
 
     @field_validator("phone")
     @classmethod
@@ -103,6 +121,8 @@ class CompanyUpdate(BaseModel):
     preferred_carrier: str | None = None
     is_strategic: bool | None = None
     account_owner_id: int | None = None
+    revenue_range: str | None = None
+    source: str | None = None
 
     @field_validator("hq_country")
     @classmethod
@@ -315,6 +335,18 @@ class SuggestedSiteContact(BaseModel):
     phone: str | None = None
     title: str | None = None
     linkedin_url: str | None = None
+    source: str = "enrichment"
+    email_verified: bool = False
+
+    @field_validator("email")
+    @classmethod
+    def email_lower_or_none(cls, v: str | None) -> str | None:
+        """Lowercase and strip the email, or return None if blank — must not raise on
+        missing email so that the not_found 404 path (no email posted) still works."""
+        if v is None:
+            return v
+        v = v.strip()
+        return v.lower() if v else None
 
 
 class AddContactToSite(BaseModel):

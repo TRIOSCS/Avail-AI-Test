@@ -26,10 +26,10 @@ from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from ..constants import (
+    AccessKey,
     ActivityType,
     AttributionStatus,
     BuyPlanStatus,
-    Channel,
     ContactStatus,
     OfferStatus,
     ProactiveMatchStatus,
@@ -39,18 +39,28 @@ from ..constants import (
     SourcingStatus,
     TaskStatus,
     TicketSource,
+    TicketStatus,
     UserRole,
 )
 from ..database import get_db
 from ..dependencies import (
+    can_manage_account,
+    can_manage_account_team,
+    get_buyplan_for_user,
     get_quote_for_user,
+    get_req_for_user,
     get_user,
     has_buyer_role,
+    is_manager_or_admin,
+    require_access,
     require_admin,
     require_buyer,
+    require_requisition_access,
     require_user,
+    user_has_access,
 )
 from ..models import (
+    AccountCollaborator,
     ApiSource,
     BuyPlan,
     BuyPlanLine,
@@ -75,7 +85,7 @@ from ..models.prospect_account import ProspectAccount
 from ..models.vendor_sighting_summary import VendorSightingSummary
 from ..models.vendors import VendorContact
 from ..scoring import classify_lead, explain_lead, score_unified
-from ..services import task_service
+from ..services import clay_oauth, task_service
 from ..services.activity_service import log_activity as _log_activity
 from ..services.commodity_registry import COMMODITY_TREE, get_display_name
 from ..services.faceted_search_service import (
@@ -99,7 +109,8 @@ from ..services.prospect_priority import build_priority_snapshot, build_signal_t
 from ..services.sighting_ingest import sighting_from_row
 from ..services.status_machine import require_valid_transition
 from ..services.vendor_unavailability import apply_to_fresh_sightings, maybe_release_on_offer
-from ..template_env import template_response, templates
+from ..template_env import page_response, template_response, templates
+from ..utils.normalization_helpers import normalize_country, normalize_phone_e164, normalize_us_state
 from ..utils.search_builder import SearchBuilder
 from ..utils.sql_helpers import escape_like
 from ._lookup_helpers import get_requisition_or_404, get_vendor_card_or_404
@@ -113,7 +124,9 @@ _DASH = "\u2014"  # em-dash for template fallbacks
 # Reporting surface was retired, so no view needs to borrow another tab's highlight.
 # Quote detail (/v2/quotes/{id}) falls through to "quotes", which matches no nav item —
 # correct, since it has no parent tab to highlight.
-_NAV_ID_ALIAS: dict[str, str] = {}
+# The global contact lists live under the CRM nav item (twins of Customers/Vendors),
+# so they borrow the "crm" highlight.
+_NAV_ID_ALIAS: dict[str, str] = {"contacts": "crm", "vendor-contacts": "crm"}
 
 # Vite manifest for asset fingerprinting — read once at import time.
 _MANIFEST_PATH = Path("app/static/dist/.vite/manifest.json")
@@ -253,15 +266,22 @@ def _parse_card_filter_params(
 
 def _base_ctx(request: Request, user: User, current_view: str = "") -> dict:
     """Shared template context for all views."""
+    from .admin.users import module_access_map
+
     assets = _vite_assets()
     return {
         "request": request,
         "user_name": user.name if user else "",
         "user_email": user.email if user else "",
         "is_admin": user.role == UserRole.ADMIN if user else False,
+        # Bottom-nav gate: {hyphenated-nav-id: bool}. None user → all True (shell never
+        # blanked). Module keys don't need db (user_has_access handles admin/role-default).
+        "access": module_access_map(user),
         "current_view": current_view,
         "vite_js": assets["js_file"],
         "vite_css": assets["css_files"],
+        "now_utc": datetime.now(timezone.utc),
+        "build_commit": os.environ.get("BUILD_COMMIT", "dev"),
     }
 
 
@@ -282,6 +302,43 @@ async def quotes_list_redirect():
     return RedirectResponse(url="/v2/requisitions", status_code=307)
 
 
+# Full-page module access gate (Phase 4b). Maps a resolved current_view to the AccessKey
+# that gates it. Views NOT present here (settings, quotes, follow-ups, trouble-tickets)
+# are never gated. CRM sub-views (customers/contacts/vendors/...) all gate on CRM.
+_VIEW_ACCESS: dict[str, AccessKey] = {
+    "requisitions": AccessKey.REQUISITIONS,
+    "sightings": AccessKey.SIGHTINGS,
+    "materials": AccessKey.MATERIALS,
+    "search": AccessKey.SEARCH,
+    "buy-plans": AccessKey.BUY_PLANS,
+    "resell": AccessKey.RESELL,
+    "crm": AccessKey.CRM,
+    "customers": AccessKey.CRM,
+    "contacts": AccessKey.CRM,
+    "vendors": AccessKey.CRM,
+    "vendor-contacts": AccessKey.CRM,
+    "proactive": AccessKey.PROACTIVE,
+    "prospecting": AccessKey.PROSPECTING,
+    "my-day": AccessKey.MY_DAY,
+}
+
+# Ordered (AccessKey, full-page url) list in MODULE order. When a user is denied the view
+# they requested, v2_page redirects to the FIRST module in this list they are allowed —
+# the target is always an allowed view, so no redirect loop is possible.
+_MODULE_ENTRY_URLS: tuple[tuple[AccessKey, str], ...] = (
+    (AccessKey.REQUISITIONS, "/v2/requisitions"),
+    (AccessKey.SIGHTINGS, "/v2/sightings"),
+    (AccessKey.MATERIALS, "/v2/materials"),
+    (AccessKey.SEARCH, "/v2/search"),
+    (AccessKey.BUY_PLANS, "/v2/buy-plans"),
+    (AccessKey.RESELL, "/v2/resell"),
+    (AccessKey.CRM, "/v2/crm"),
+    (AccessKey.PROACTIVE, "/v2/proactive"),
+    (AccessKey.PROSPECTING, "/v2/prospecting"),
+    (AccessKey.MY_DAY, "/v2/my-day"),
+)
+
+
 @router.get("/v2", response_class=HTMLResponse)
 @router.get("/v2/requisitions", response_class=HTMLResponse)
 @router.get("/v2/requisitions/{req_id:int}", response_class=HTMLResponse)
@@ -290,10 +347,12 @@ async def quotes_list_redirect():
 @router.get("/v2/vendors/{vendor_id:int}", response_class=HTMLResponse)
 @router.get("/v2/customers", response_class=HTMLResponse)
 @router.get("/v2/customers/{company_id:int}", response_class=HTMLResponse)
+@router.get("/v2/contacts", response_class=HTMLResponse)
+@router.get("/v2/vendor-contacts", response_class=HTMLResponse)
 @router.get("/v2/buy-plans", response_class=HTMLResponse)
 @router.get("/v2/buy-plans/{bp_id:int}", response_class=HTMLResponse)
-@router.get("/v2/excess", response_class=HTMLResponse)
-@router.get("/v2/excess/{list_id:int}", response_class=HTMLResponse)
+@router.get("/v2/resell", response_class=HTMLResponse)
+@router.get("/v2/resell/{list_id:int}", response_class=HTMLResponse)
 @router.get("/v2/quotes/{quote_id:int}", response_class=HTMLResponse)
 @router.get("/v2/settings", response_class=HTMLResponse)
 @router.get("/v2/prospecting", response_class=HTMLResponse)
@@ -306,6 +365,7 @@ async def quotes_list_redirect():
 @router.get("/v2/sightings", response_class=HTMLResponse)
 @router.get("/v2/trouble-tickets", response_class=HTMLResponse)
 @router.get("/v2/trouble-tickets/{ticket_id:int}", response_class=HTMLResponse)
+@router.get("/v2/my-day", response_class=HTMLResponse)
 async def v2_page(request: Request, db: Session = Depends(get_db)):
     """Full page load — serves base.html with initial content via HTMX."""
 
@@ -319,7 +379,7 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
     # /requisitions). Anything unmatched defaults to the requisitions view.
     _VIEW_SEGMENTS = (
         "buy-plans",
-        "excess",
+        "resell",
         "quotes",
         "prospecting",
         "proactive",
@@ -327,14 +387,42 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         "materials",
         "follow-ups",
         "trouble-tickets",
+        "my-day",
         "crm",
+        # "vendor-contacts" / "contacts" must precede "vendors" / "customers" — the
+        # match is a substring test and "/contacts" is contained in "/vendor-contacts".
+        "vendor-contacts",
         "vendors",
+        "contacts",
         "customers",
         "search",
         "sightings",
         "requisitions",
     )
     current_view = next((seg for seg in _VIEW_SEGMENTS if f"/{seg}" in path), "requisitions")
+
+    # Trouble-ticket console is admin-only — non-admins get a clean 403 instead of
+    # a page shell whose inner (admin-gated) partial would 403 on load.
+    if current_view == "trouble-tickets" and user.role != UserRole.ADMIN:
+        raise HTTPException(403, "Admin access required")
+
+    # Module access gate (Phase 4b). If the requested view maps to a module the user may
+    # not see, redirect to their first allowed module (admins always pass user_has_access
+    # so they never redirect). Only the REQUESTED view is checked — the redirect target is
+    # always an allowed view, so no loop is possible. Views absent from _VIEW_ACCESS
+    # (settings, quotes, follow-ups, trouble-tickets) are never gated.
+    gate_key = _VIEW_ACCESS.get(current_view)
+    if gate_key is not None and not user_has_access(user, gate_key, db):
+        from fastapi.responses import RedirectResponse
+
+        target = next((url for key, url in _MODULE_ENTRY_URLS if user_has_access(user, key, db)), None)
+        if target is not None:
+            return RedirectResponse(target, status_code=302)
+        return HTMLResponse(
+            "<p>You don't have access to any sections. Contact an administrator.</p>"
+            '<p><a href="/auth/logout">Log out</a></p>',
+            status_code=403,
+        )
 
     # Determine the correct partial URL for initial content load
     if current_view == "requisitions":
@@ -346,11 +434,21 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         partial_url = "/v2/partials/crm/shell"
     elif current_view == "sightings":
         partial_url = "/v2/partials/sightings/workspace"
+    elif current_view == "resell":
+        partial_url = "/v2/partials/resell/workspace"
+    elif current_view == "my-day":
+        partial_url = "/v2/partials/my-day"
     elif current_view == "search":
         # Deep-link the Part Dossier: ?mpn= rides along to /v2/partials/search so a
         # bookmarked /v2/search?mpn=<PN> paints the dossier on first load.
         mpn_qs = request.query_params.get("mpn", "").strip()
         partial_url = f"/v2/partials/search?mpn={quote(mpn_qs)}" if mpn_qs else "/v2/partials/search"
+    elif current_view == "settings":
+        # Thread ?tab= through so a deep-link / redirect (e.g. the legacy
+        # /v2/trouble-tickets → /v2/settings?tab=tickets) paints the right tab on
+        # first full-page load instead of defaulting to Connectors.
+        tab_qs = request.query_params.get("tab", "").strip()
+        partial_url = f"/v2/partials/settings?tab={quote(tab_qs)}" if tab_qs else "/v2/partials/settings"
     else:
         partial_url = f"/v2/partials/{current_view}"
     # Detail views: a trailing numeric id (/{view}/{id}) overrides the list partial with
@@ -360,7 +458,7 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         "vendors",
         "customers",
         "buy-plans",
-        "excess",
+        "resell",
         "quotes",
         "prospecting",
         "trouble-tickets",
@@ -369,11 +467,17 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         parts = path.split(f"/{current_view}/")
         if len(parts) > 1 and parts[1].isdigit():
             partial_url = f"/v2/partials/{current_view}/{parts[1]}"
+            # Thread ?tab= through for customer deep-links so the partial lands on
+            # the correct tab when the full page is (re)loaded from a pushed URL.
+            if current_view == "customers":
+                _tab_qs = request.query_params.get("tab", "").strip()
+                if _tab_qs:
+                    partial_url = f"{partial_url}?tab={quote(_tab_qs)}"
 
     nav_active = _NAV_ID_ALIAS.get(current_view, current_view)
     ctx = _base_ctx(request, user, nav_active)
     ctx["partial_url"] = partial_url
-    return template_response("htmx/base_page.html", ctx)
+    return page_response(ctx)
 
 
 # ── Global search ──────────────────────────────────────────────────────
@@ -436,7 +540,7 @@ async def search_results_page(
 @router.get("/v2/partials/parts/workspace", response_class=HTMLResponse)
 async def parts_workspace_partial(
     request: Request,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.REQUISITIONS)),
     db: Session = Depends(get_db),
 ):
     """Return the split-panel parts workspace shell."""
@@ -622,7 +726,7 @@ async def requisitions_list_partial(
             "offset": offset,
             "users": users,
             "user_role": user.role,
-            "inbox_status": get_inbox_sync_status(user),
+            "inbox_status": get_inbox_sync_status(db, user),
         }
     )
     return template_response("htmx/partials/requisitions/list.html", ctx)
@@ -1051,10 +1155,15 @@ async def customer_quick_create(
 async def requisition_detail_partial(
     request: Request,
     req_id: int,
+    tab: str | None = None,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Return requisition detail as HTML partial with tabs."""
+    """Return requisition detail as HTML partial with tabs.
+
+    ``tab`` deep-links a starting tab (e.g. ``build_quote`` from the list "Build Quote"
+    launch); it sets the Alpine active tab and auto-loads that tab's lazy body.
+    """
     req = (
         db.query(Requisition)
         .options(
@@ -1077,8 +1186,11 @@ async def requisition_detail_partial(
     # Fetch users for tasks tab assignee dropdown
     users = db.query(User).order_by(User.name).all()
 
+    allowed_initial_tabs = {"parts", "offers", "responses", "quotes", "build_quote", "buy_plans"}
+    initial_tab = tab if tab in allowed_initial_tabs else "parts"
+
     ctx = _base_ctx(request, user, "requisitions")
-    ctx.update({"req": req, "requirements": requirements, "users": users})
+    ctx.update({"req": req, "requirements": requirements, "users": users, "initial_tab": initial_tab})
     return template_response("htmx/partials/requisitions/detail.html", ctx)
 
 
@@ -1182,6 +1294,7 @@ async def add_requirement(
         raise HTTPException(422, "Manufacturer is required")
 
     req = get_requisition_or_404(db, req_id)
+    require_requisition_access(db, req_id, user)
 
     form_data = await request.form()
     sub_mpns = form_data.getlist("sub_mpn")
@@ -1238,6 +1351,7 @@ async def requisition_search_all(
     """Trigger search for all requirements in a requisition, then refresh parts
     table."""
     req = get_requisition_or_404(db, req_id)
+    require_requisition_access(db, req_id, user)
     requirements = db.query(Requirement).filter(Requirement.requisition_id == req_id).all()
     if not requirements:
         return HTMLResponse(
@@ -1481,6 +1595,7 @@ async def parse_email_action(
 ):
     """Parse vendor email and return editable offer cards."""
     req = get_requisition_or_404(db, req_id)
+    require_requisition_access(db, req_id, user)
 
     if not email_body.strip():
         return HTMLResponse(
@@ -1530,6 +1645,7 @@ async def parse_offer_action(
 ):
     """Parse freeform vendor text and return editable offer cards."""
     req = get_requisition_or_404(db, req_id)
+    require_requisition_access(db, req_id, user)
 
     if not raw_text.strip():
         return HTMLResponse(
@@ -1571,6 +1687,7 @@ async def save_parsed_offers(
 ):
     """Save user-edited parsed offers to the requisition."""
     req = get_requisition_or_404(db, req_id)
+    require_requisition_access(db, req_id, user)
 
     form = await request.form()
     vendor_name = form.get("vendor_name", "")
@@ -1726,6 +1843,8 @@ async def requisitions_bulk_action(
         raise HTTPException(400, f"Invalid action: {action}")
 
     reqs = db.query(Requisition).filter(Requisition.id.in_(ids)).all()
+    for r in reqs:
+        require_requisition_access(db, r.id, user)
 
     if action == "archive":
         for r in reqs:
@@ -1777,7 +1896,6 @@ async def requisition_inline_edit_cell(
         field: One of name, status, urgency, deadline, owner.
         context: 'row' for list view, 'header' for detail header.
     """
-    from ..dependencies import get_req_for_user
 
     valid_fields = {"name", "status", "urgency", "deadline", "owner"}
     if field not in valid_fields:
@@ -1807,7 +1925,6 @@ async def requisition_inline_save(
     For context='row', returns the full table row. For context='header', returns the
     updated header card.
     """
-    from ..dependencies import get_req_for_user
 
     req = get_req_for_user(db, user, req_id, options=[])
     if not req:
@@ -1896,6 +2013,89 @@ async def requisition_inline_save(
     return response
 
 
+@router.patch("/v2/partials/requisitions/{req_id}/win-probability", response_class=HTMLResponse)
+async def requisition_win_probability_save(
+    request: Request,
+    req_id: int,
+    win_probability: str = Form(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Set win_probability (0-100) on a requisition, or clear it (empty string → NULL).
+
+    Authz: same gate as other inline requisition edits (require_requisition_access).
+    Returns an inline display span with the new value.
+    """
+    from app.dependencies import require_requisition_access
+
+    req = db.get(Requisition, req_id)
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+    require_requisition_access(db, req_id, user)
+    stripped = win_probability.strip()
+    if stripped == "":
+        prob = None
+    else:
+        try:
+            prob = int(stripped)
+        except (ValueError, TypeError):
+            raise HTTPException(400, "win_probability must be an integer") from None
+        if not (0 <= prob <= 100):
+            raise HTTPException(400, "win_probability must be between 0 and 100")
+    req.win_probability = prob
+    req.updated_at = datetime.now(timezone.utc)
+    req.updated_by_id = user.id
+    db.commit()
+    db.refresh(req)
+    logger.info("Requisition {} win_probability set to {} by user {}", req_id, prob, user.id)
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx["req"] = req
+    return template_response("htmx/partials/requisitions/_win_probability.html", ctx)
+
+
+@router.patch("/v2/partials/requisitions/{req_id}/opportunity-value", response_class=HTMLResponse)
+async def requisition_opportunity_value_save(
+    request: Request,
+    req_id: int,
+    opportunity_value: str = Form(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Set opportunity_value (deal $) on a requisition, or clear it (empty string →
+    NULL).
+
+    Authz: same gate as other inline requisition edits (require_requisition_access).
+    Returns an inline display span with the new value.
+    """
+    from decimal import Decimal, InvalidOperation
+
+    from app.dependencies import require_requisition_access
+
+    req = db.get(Requisition, req_id)
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+    require_requisition_access(db, req_id, user)
+    stripped = opportunity_value.strip()
+    if stripped == "":
+        value = None
+    else:
+        try:
+            value = Decimal(stripped)
+        except (InvalidOperation, ValueError):
+            raise HTTPException(400, "opportunity_value must be a number") from None
+        if value < 0:
+            raise HTTPException(400, "opportunity_value must be >= 0")
+    req.opportunity_value = value
+    req.updated_at = datetime.now(timezone.utc)
+    req.updated_by_id = user.id
+    db.commit()
+    db.refresh(req)
+    logger.info("Requisition {} opportunity_value set to {} by user {}", req_id, value, user.id)
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx["req"] = req
+    return template_response("htmx/partials/requisitions/_opportunity_value.html", ctx)
+
+
 @router.post("/v2/partials/requisitions/{req_id}/action/{action_name}", response_class=HTMLResponse)
 async def requisition_row_action(
     request: Request,
@@ -1906,7 +2106,6 @@ async def requisition_row_action(
 ):
     """Execute a row-level action (archive, activate, claim, unclaim, won, lost,
     clone)."""
-    from ..dependencies import get_req_for_user
 
     valid_actions = {"archive", "activate", "claim", "unclaim", "won", "lost", "clone"}
     if action_name not in valid_actions:
@@ -1997,6 +2196,7 @@ async def create_quote_from_offers(
         raise HTTPException(400, "No offers selected")
 
     req = get_requisition_or_404(db, req_id)
+    require_requisition_access(db, req_id, user)
 
     offers = db.query(Offer).filter(Offer.id.in_(offer_ids), Offer.requisition_id == req_id).all()
     if not offers:
@@ -2072,6 +2272,7 @@ async def review_offer(
     if action not in ("approve", "reject"):
         raise HTTPException(400, "Invalid action")
 
+    require_requisition_access(db, req_id, user)
     offer = db.query(Offer).filter(Offer.id == offer_id, Offer.requisition_id == req_id).first()
     if not offer:
         raise HTTPException(404, "Offer not found")
@@ -2137,6 +2338,7 @@ async def add_offer(
 ):
     """Create a manual offer and return refreshed offers tab."""
     get_requisition_or_404(db, req_id)  # validates existence
+    require_requisition_access(db, req_id, user)
 
     form = await request.form()
     vendor_name = (form.get("vendor_name") or "").strip()
@@ -2231,6 +2433,7 @@ async def reconfirm_offer(
     db: Session = Depends(get_db),
 ):
     """Reconfirm an offer — resets TTL and increments reconfirm count."""
+    require_requisition_access(db, req_id, user)
     offer = db.query(Offer).filter(Offer.id == offer_id, Offer.requisition_id == req_id).first()
     if not offer:
         raise HTTPException(404, "Offer not found")
@@ -2282,6 +2485,7 @@ async def edit_offer(
     """Save edits to an offer and return refreshed offers tab."""
     from ..models.intelligence import ChangeLog
 
+    require_requisition_access(db, req_id, user)
     offer = db.query(Offer).filter(Offer.id == offer_id, Offer.requisition_id == req_id).first()
     if not offer:
         raise HTTPException(404, "Offer not found")
@@ -2389,6 +2593,7 @@ async def delete_offer_htmx(
     db: Session = Depends(get_db),
 ):
     """Delete an offer and return refreshed offers tab."""
+    require_requisition_access(db, req_id, user)
     offer = db.query(Offer).filter(Offer.id == offer_id, Offer.requisition_id == req_id).first()
     if not offer:
         raise HTTPException(404, "Offer not found")
@@ -2410,6 +2615,7 @@ async def mark_offer_sold_htmx(
     """Mark an offer as sold and return refreshed offers tab."""
     from ..models.intelligence import ChangeLog
 
+    require_requisition_access(db, req_id, user)
     offer = db.query(Offer).filter(Offer.id == offer_id, Offer.requisition_id == req_id).first()
     if not offer:
         raise HTTPException(404, "Offer not found")
@@ -2476,13 +2682,14 @@ async def offer_review_queue(
 async def promote_offer_htmx(
     request: Request,
     offer_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.APPROVE_OFFERS)),
     db: Session = Depends(get_db),
 ):
     """Promote a pending_review offer to active and return refreshed queue."""
     offer = db.get(Offer, offer_id)
     if not offer:
         raise HTTPException(404, "Offer not found")
+    require_requisition_access(db, offer.requisition_id, user, owner_id=offer.entered_by_id, label="Offer")
     if offer.status != "pending_review":
         raise HTTPException(400, "Only pending_review offers can be promoted")
 
@@ -2522,13 +2729,14 @@ async def promote_offer_htmx(
 async def reject_offer_htmx(
     request: Request,
     offer_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.APPROVE_OFFERS)),
     db: Session = Depends(get_db),
 ):
     """Reject a pending_review offer and return refreshed queue."""
     offer = db.get(Offer, offer_id)
     if not offer:
         raise HTTPException(404, "Offer not found")
+    require_requisition_access(db, offer.requisition_id, user, owner_id=offer.entered_by_id, label="Offer")
     if offer.status != "pending_review":
         raise HTTPException(400, "Only pending_review offers can be rejected")
 
@@ -2596,6 +2804,7 @@ async def log_activity(
     from ..models.intelligence import ActivityLog
 
     get_requisition_or_404(db, req_id)  # validates existence
+    require_requisition_access(db, req_id, user)
 
     form = await request.form()
     activity_type = form.get("activity_type", "note")
@@ -2696,6 +2905,7 @@ async def ai_cleanup_email(
 ):
     """Clean up user-written email — fix grammar, tone, and formatting."""
     get_requisition_or_404(db, req_id)  # validates existence
+    require_requisition_access(db, req_id, user)
 
     user_text = body.strip()
     if not user_text:
@@ -2730,11 +2940,41 @@ async def ai_cleanup_email(
     )
 
 
+@router.post("/v2/partials/requisitions/{req_id}/ai-rephrase-email", response_class=HTMLResponse)
+async def ai_rephrase_email(
+    request: Request,
+    req_id: int,
+    body: str = Form(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Rephrase the RFQ email so each send reads uniquely, keeping all parts intact."""
+    get_requisition_or_404(db, req_id)  # validates existence
+
+    user_text = body.strip()
+    if not user_text:
+        return HTMLResponse(
+            '<p class="text-xs text-amber-600 mt-1">Write your email first, then click AI Rephrase.</p>'
+        )
+
+    from app.services.email_drafting import draft_email
+
+    result = await draft_email("rfq_rephrase", {"body": user_text})
+    rephrased = (result or {}).get("body") or user_text
+
+    # Return a script that replaces the textarea content with the rephrased text.
+    escaped = rephrased.replace("\\", "\\\\").replace("`", "\\`").replace("$", "\\$").replace("</", "<\\/")
+    return HTMLResponse(
+        f'<script>document.getElementById("rfq-body-textarea").value = `{escaped}`;</script>'
+        '<p class="text-xs text-green-600 mt-1">Rephrased. Review and edit as needed.</p>'
+    )
+
+
 @router.post("/v2/partials/requisitions/{req_id}/rfq-send", response_class=HTMLResponse)
 async def rfq_send(
     request: Request,
     req_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.SEND_RFQ)),
     db: Session = Depends(get_db),
 ):
     """Send RFQs via Graph API, falling back to DB-only in test mode."""
@@ -2743,6 +2983,7 @@ async def rfq_send(
     from ..models.offers import Contact as RfqContact
 
     req = get_requisition_or_404(db, req_id)
+    require_requisition_access(db, req_id, user)
 
     form = await request.form()
     vendor_names = form.getlist("vendor_names")
@@ -2932,6 +3173,7 @@ async def send_follow_up_htmx(
     contact = db.get(RfqContact, contact_id)
     if not contact:
         raise HTTPException(404, "Contact not found")
+    require_requisition_access(db, contact.requisition_id, user, owner_id=contact.user_id, label="Contact")
 
     form = await request.form()
     body = (form.get("body") or "").strip()
@@ -2990,6 +3232,45 @@ async def send_follow_up_htmx(
     return template_response("htmx/partials/follow_ups/sent_success.html", ctx)
 
 
+@router.post("/v2/partials/follow-ups/{contact_id}/ai-draft", response_class=HTMLResponse)
+async def ai_draft_follow_up(
+    request: Request,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Draft a contextual follow-up body and fill the compose textarea."""
+    from datetime import timezone as tz
+
+    from ..models.offers import Contact as RfqContact
+
+    contact = db.get(RfqContact, contact_id)
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+    require_requisition_access(db, contact.requisition_id, user, owner_id=contact.user_id, label="Contact")
+
+    days_waiting = (datetime.now(tz.utc) - contact.created_at).days if contact.created_at else None
+
+    from app.services.email_drafting import draft_email
+
+    result = await draft_email(
+        "follow_up",
+        {
+            "vendor_name": contact.vendor_name,
+            "parts": contact.parts_included or [],
+            "days_waiting": days_waiting,
+            "subject": contact.subject,
+        },
+    )
+    drafted = (result or {}).get("body") or ""
+
+    escaped = drafted.replace("\\", "\\\\").replace("`", "\\`").replace("$", "\\$").replace("</", "<\\/")
+    return HTMLResponse(
+        f'<script>document.getElementById("follow-up-body-{contact_id}").value = `{escaped}`;</script>'
+        '<p class="text-xs text-green-600 mt-1">Draft ready. Review and edit before sending.</p>'
+    )
+
+
 @router.post("/v2/partials/requisitions/{req_id}/responses/{response_id}/review", response_class=HTMLResponse)
 async def review_response_htmx(
     request: Request,
@@ -3004,6 +3285,7 @@ async def review_response_htmx(
     """
     from ..models.offers import VendorResponse
 
+    require_requisition_access(db, req_id, user)
     vr = (
         db.query(VendorResponse)
         .filter(
@@ -3031,6 +3313,161 @@ async def review_response_htmx(
     return template_response("htmx/partials/requisitions/tabs/response_card.html", ctx)
 
 
+@router.post(
+    "/v2/partials/requisitions/{req_id}/responses/{response_id}/ai-draft-reply",
+    response_class=HTMLResponse,
+)
+async def ai_draft_reply(
+    request: Request,
+    req_id: int,
+    response_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Draft an AI reply to a vendor response and render an editable compose block."""
+    from ..models.offers import VendorResponse
+
+    require_requisition_access(db, req_id, user)
+
+    vr = (
+        db.query(VendorResponse)
+        .filter(
+            VendorResponse.id == response_id,
+            VendorResponse.requisition_id == req_id,
+        )
+        .first()
+    )
+    if not vr:
+        raise HTTPException(404, "Response not found")
+
+    parsed = vr.parsed_data or {}
+
+    from app.services.email_drafting import draft_email
+
+    result = await draft_email(
+        "vendor_reply",
+        {
+            "classification": vr.classification,
+            "vendor_name": vr.vendor_name,
+            "mpn": parsed.get("mpn"),
+            "qty": parsed.get("qty") or parsed.get("qty_available"),
+            "price": parsed.get("price") or parsed.get("unit_price"),
+            "lead_time": parsed.get("lead_time"),
+            "subject": vr.subject,
+        },
+    )
+
+    default_subject = vr.subject or "RFQ"
+    if not default_subject.lower().startswith("re:"):
+        default_subject = f"Re: {default_subject}"
+
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx["req_id"] = req_id
+    ctx["r"] = vr
+    ctx["reply_subject"] = (result or {}).get("subject") or default_subject
+    ctx["reply_body"] = (result or {}).get("body") or ""
+    ctx["ai_failed"] = result is None
+    return template_response("htmx/partials/requisitions/tabs/reply_compose.html", ctx)
+
+
+@router.post(
+    "/v2/partials/requisitions/{req_id}/responses/{response_id}/send-reply",
+    response_class=HTMLResponse,
+)
+async def send_reply_htmx(
+    request: Request,
+    req_id: int,
+    response_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Send a reply to a vendor response (as the signed-in user) and mark it
+    reviewed."""
+    import os
+
+    from ..models.offers import VendorResponse
+
+    require_requisition_access(db, req_id, user)
+
+    vr = (
+        db.query(VendorResponse)
+        .filter(
+            VendorResponse.id == response_id,
+            VendorResponse.requisition_id == req_id,
+        )
+        .first()
+    )
+    if not vr:
+        raise HTTPException(404, "Response not found")
+
+    form = await request.form()
+    subject = (form.get("subject") or "").strip() or f"Re: {vr.subject or 'RFQ'}"
+    body = (form.get("body") or "").strip()
+    if not body:
+        raise HTTPException(400, "Reply body is required")
+
+    # DNC hard-block — never email a do-not-contact vendor (checked in all modes).
+    if vr.vendor_email:
+        from sqlalchemy import func as _sqlfunc
+
+        dnc = (
+            db.query(SiteContact)
+            .filter(
+                _sqlfunc.lower(SiteContact.email) == vr.vendor_email.lower(),
+                SiteContact.do_not_contact.is_(True),
+            )
+            .first()
+        )
+        if dnc:
+            return HTMLResponse(
+                '<div class="rounded bg-rose-50 border border-rose-200 text-rose-700 text-xs px-2 py-1.5">'
+                "This vendor is on the do-not-contact list — reply not sent.</div>"
+            )
+
+    is_testing = os.environ.get("TESTING") == "1"
+    email_sent = False
+
+    if not is_testing and vr.vendor_email:
+        try:
+            from ..dependencies import require_fresh_token
+
+            token = await require_fresh_token(request, db)
+
+            from ..utils.graph_client import GraphClient
+
+            gc = GraphClient(token)
+            payload = {
+                "message": {
+                    "subject": subject,
+                    "body": {"contentType": "Text", "content": body},
+                    "toRecipients": [{"emailAddress": {"address": vr.vendor_email}}],
+                },
+                "saveToSentItems": "true",
+            }
+            await gc.post_json("/me/sendMail", payload)
+            email_sent = True
+        except Exception as exc:
+            logger.warning("Vendor reply send failed for response {}: {}", response_id, exc)
+
+    if email_sent or is_testing:
+        vr.status = "reviewed"
+        db.commit()
+
+    logger.info(
+        "Vendor reply {} for response {} (vendor: {}) by {}",
+        "sent" if email_sent or is_testing else "FAILED",
+        response_id,
+        vr.vendor_name,
+        user.email,
+    )
+
+    req = db.query(Requisition).filter(Requisition.id == req_id).first()
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx["r"] = vr
+    ctx["req"] = req
+    return template_response("htmx/partials/requisitions/tabs/response_card.html", ctx)
+
+
 @router.post("/v2/partials/requisitions/{req_id}/poll-inbox", response_class=HTMLResponse)
 async def poll_inbox_htmx(
     request: Request,
@@ -3041,6 +3478,7 @@ async def poll_inbox_htmx(
     """Trigger a FULL inbox scan for the current user (not requisition-scoped), then
     return the refreshed responses tab."""
     get_requisition_or_404(db, req_id)  # validates existence
+    require_requisition_access(db, req_id, user)
     logger.info("Inbox poll requested for req {} by {}", req_id, user.email)
     await _run_inbox_scan_now(user, db)
     return await requisition_tab(request=request, req_id=req_id, tab="responses", user=user, db=db)
@@ -3059,6 +3497,7 @@ async def delete_requirement(
     Returns empty response for hx-swap='delete'.
     """
     get_requisition_or_404(db, req_id)  # validates existence
+    require_requisition_access(db, req_id, user)
     item = db.query(Requirement).filter(Requirement.id == item_id, Requirement.requisition_id == req_id).first()
     if not item:
         raise HTTPException(404, "Requirement not found")
@@ -3101,6 +3540,7 @@ async def update_requirement(
         raise HTTPException(422, "Manufacturer is required")
 
     req = get_requisition_or_404(db, req_id)
+    require_requisition_access(db, req_id, user)
     item = db.query(Requirement).filter(Requirement.id == item_id, Requirement.requisition_id == req_id).first()
     if not item:
         raise HTTPException(404, "Requirement not found")
@@ -3159,7 +3599,7 @@ async def update_requirement(
 async def search_form_partial(
     request: Request,
     mpn: str = "",
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.SEARCH)),
     db: Session = Depends(get_db),
 ):
     """Search surface entry point.
@@ -3590,6 +4030,7 @@ async def add_to_requisition(
             '<div class="text-red-600 text-sm p-2">Requisition not found.</div>',
             status_code=404,
         )
+    require_requisition_access(db, int(requisition_id), user)
 
     # Find or create Requirement for this MPN
     requirement = (
@@ -3725,6 +4166,68 @@ async def vendors_list_partial(
     return template_response("htmx/partials/vendors/list.html", ctx)
 
 
+# ── Global vendor-contacts list ────────────────────────────────────────────
+# View-open (require_user) — vendor data is not tenant-scoped, mirroring the
+# /api/vendor-contacts/bulk endpoint this surfaces. Search/sort/paginate over all
+# structured VendorContacts (blacklisted vendors excluded, as in the bulk route).
+
+
+@router.get("/v2/partials/vendor-contacts", response_class=HTMLResponse)
+async def vendor_contacts_partial(
+    request: Request,
+    search: str = "",
+    sort: str = "name",
+    dir: str = "asc",
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the global vendor-contacts list as an HTML partial."""
+    from ..models import VendorCard
+
+    query = (
+        db.query(VendorContact)
+        .join(VendorCard, VendorContact.vendor_card_id == VendorCard.id)
+        .filter(VendorCard.is_blacklisted.is_(False))
+        .options(joinedload(VendorContact.vendor_card))
+    )
+    if search.strip():
+        sb = SearchBuilder(search.strip())
+        query = query.filter(
+            or_(
+                sb.ilike_filter(VendorContact.full_name, VendorContact.email),
+                sb.ilike_filter(VendorCard.display_name),
+            )
+        )
+
+    sort_col_map = {
+        "name": VendorContact.full_name,
+        "email": VendorContact.email,
+        "vendor": VendorCard.display_name,
+        "score": VendorContact.relationship_score,
+    }
+    sort_col = sort_col_map.get(sort, VendorContact.full_name)
+    order = sort_col.desc().nullslast() if dir == "desc" else sort_col.asc().nullslast()
+
+    total = query.count()
+    contacts = query.order_by(order, VendorContact.id).offset(offset).limit(limit).all()
+
+    ctx = _base_ctx(request, user, "crm")
+    ctx.update(
+        {
+            "contacts": contacts,
+            "search": search,
+            "sort": sort,
+            "dir": dir,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+    )
+    return template_response("htmx/partials/vendors/contacts_list.html", ctx)
+
+
 @router.get("/v2/partials/vendors/find-by-part", response_class=HTMLResponse)
 async def find_by_part_partial(
     request: Request,
@@ -3815,6 +4318,106 @@ async def find_by_part_partial(
     return template_response("htmx/partials/vendors/find_by_part.html", ctx)
 
 
+@router.get("/v2/partials/vendors/create-form", response_class=HTMLResponse)
+async def vendor_create_form_early(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the create-vendor form partial (early route to precede /{vendor_id})."""
+    return template_response(
+        "htmx/partials/vendors/create_form.html",
+        {"request": request},
+    )
+
+
+@router.post("/v2/partials/vendors/create", response_class=HTMLResponse)
+async def create_vendor_partial_early(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Create a new VendorCard from the HTMX form (early route to precede
+    /{vendor_id})."""
+    from ..models import VendorCard
+    from ..vendor_utils import normalize_vendor_name
+
+    form = await request.form()
+    display_name = form.get("display_name", "").strip()
+    if not display_name:
+        raise HTTPException(400, "Vendor name is required")
+
+    norm = normalize_vendor_name(display_name)
+    existing = db.query(VendorCard).filter_by(normalized_name=norm).first()
+    if existing:
+        raise HTTPException(409, f"Vendor '{existing.display_name}' already exists (ID {existing.id})")
+
+    emails_raw = form.get("emails", "").strip()
+    emails = [e.strip() for e in emails_raw.split(",") if e.strip() and "@" in e] if emails_raw else []
+    phones_raw = form.get("phones", "").strip()
+    phones = [p.strip() for p in phones_raw.split(",") if p.strip()] if phones_raw else []
+
+    card = VendorCard(
+        normalized_name=norm,
+        display_name=display_name,
+        website=form.get("website", "").strip() or None,
+        emails=emails,
+        phones=phones,
+        industry=form.get("industry", "").strip() or None,
+        hq_city=form.get("hq_city", "").strip() or None,
+        hq_country=form.get("hq_country", "").strip() or None,
+        employee_size=form.get("employee_size", "").strip() or None,
+        source="manual",
+        is_blacklisted=False,
+        is_new_vendor=True,
+        sighting_count=0,
+    )
+    db.add(card)
+    db.commit()
+    db.refresh(card)
+    logger.info("VendorCard {} created by {}", card.id, user.email)
+    return await vendor_detail_partial(request=request, vendor_id=card.id, user=user, db=db)
+
+
+@router.delete("/v2/partials/vendors/{vendor_id}", response_class=HTMLResponse)
+async def delete_vendor_partial(
+    request: Request,
+    vendor_id: int,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Delete a vendor (admin-only) and return the refreshed vendor list."""
+    from ..models import Offer, VendorCard
+
+    card = db.get(VendorCard, vendor_id)
+    if not card:
+        raise HTTPException(404, "Vendor not found")
+    active_offers = db.query(Offer).filter(Offer.vendor_card_id == card.id).count()
+    if active_offers > 0:
+        raise HTTPException(
+            400,
+            f"Cannot delete vendor with {active_offers} active offers. Archive instead.",
+        )
+    db.delete(card)
+    db.commit()
+    logger.info("VendorCard {} deleted by {}", vendor_id, user.email)
+    # Return the vendor list using safe defaults
+    return await vendors_list_partial(
+        request=request,
+        q="",
+        hide_blacklisted=True,
+        sort="sighting_count",
+        dir="desc",
+        my_only=False,
+        limit=30,
+        offset=0,
+        hx_target="#main-content",
+        push_url_base="/v2/vendors",
+        user=user,
+        db=db,
+    )
+
+
 @router.get("/v2/partials/vendors/{vendor_id}", response_class=HTMLResponse)
 async def vendor_detail_partial(
     request: Request,
@@ -3895,7 +4498,18 @@ async def vendor_tab(
     """Return a specific tab partial for vendor detail."""
     vendor = get_vendor_card_or_404(db, vendor_id)
 
-    valid_tabs = {"overview", "contacts", "find_contacts", "emails", "analytics", "offers", "reviews"}
+    valid_tabs = {
+        "overview",
+        "contacts",
+        "find_contacts",
+        "emails",
+        "analytics",
+        "offers",
+        "reviews",
+        "activity",
+        "tasks",
+        "files",
+    }
     if tab not in valid_tabs:
         raise HTTPException(404, f"Unknown tab: {tab}")
 
@@ -4042,6 +4656,70 @@ async def vendor_tab(
     elif tab == "reviews":
         return await vendor_reviews(request=request, vendor_id=vendor_id, user=user, db=db)
 
+    elif tab == "activity":
+        from ..models.intelligence import ActivityLog as _ActivityLog
+
+        activities = (
+            db.query(_ActivityLog)
+            .filter(_ActivityLog.vendor_card_id == vendor_id)
+            .order_by(_ActivityLog.created_at.desc())
+            .limit(50)
+            .all()
+        )
+        activities_truncated = len(activities) >= 50
+
+        # Bucket activities into type-sections (the template renders by section), mirroring
+        # the account Activity tab. Vendors have no RFQ-contact merge (account-only), so
+        # this is a straight type bucketing of the vendor's ActivityLog rows.
+        _CALLS = frozenset({ActivityType.CALL_LOGGED})
+        _EMAILS = frozenset({ActivityType.EMAIL_SENT, ActivityType.EMAIL_RECEIVED})
+        _MEETINGS = frozenset({ActivityType.TEAMS_MESSAGE, ActivityType.WECHAT_MESSAGE, ActivityType.MEETING})
+        _NOTES = frozenset({ActivityType.NOTE, ActivityType.SALES_NOTE, ActivityType.CONTACT_NOTE})
+
+        sections: dict[str, list] = {"Calls": [], "Emails": [], "Meetings": [], "Notes": [], "Other": []}
+        for a in activities:
+            at = a.activity_type
+            if at in _CALLS:
+                sections["Calls"].append(a)
+            elif at in _EMAILS:
+                sections["Emails"].append(a)
+            elif at in _MEETINGS:
+                sections["Meetings"].append(a)
+            elif at in _NOTES:
+                sections["Notes"].append(a)
+            else:
+                sections["Other"].append(a)
+
+        # has_any_activity: drives empty-state vs. sections in the template
+        has_any_activity = bool(activities)
+
+        ctx = _base_ctx(request, user, "vendors")
+        ctx.update(
+            {
+                "vendor": vendor,
+                "activities": activities,
+                "sections": sections,
+                "activities_truncated": activities_truncated,
+                "has_any_activity": has_any_activity,
+            }
+        )
+        return template_response("htmx/partials/vendors/tabs/activity_tab.html", ctx)
+
+    elif tab == "tasks":
+        from app.services.task_service import get_open_tasks_for_vendor_card
+
+        vendor_tasks = get_open_tasks_for_vendor_card(db, vendor_id)
+        ctx = _base_ctx(request, user, "vendors")
+        ctx["vendor"] = vendor
+        ctx["vendor_id"] = vendor_id
+        ctx["vendor_tasks"] = vendor_tasks
+        return template_response("htmx/partials/vendors/tabs/_vendor_tasks.html", ctx)
+
+    elif tab == "files":
+        ctx = _base_ctx(request, user, "vendors")
+        ctx["vendor"] = vendor
+        return template_response("htmx/partials/vendors/tabs/files_tab.html", ctx)
+
     else:  # offers
         offers = (
             db.query(Offer)
@@ -4111,8 +4789,15 @@ async def edit_vendor(
     vendor = get_vendor_card_or_404(db, vendor_id)
 
     form = await request.form()
-    display_name = form.get("display_name", "").strip()
-    if display_name:
+    # VendorCard.display_name is NOT NULL. The edit form always submits it (required
+    # input), so a submitted-but-blank value means the user cleared a required field —
+    # reject it. A field that is ABSENT entirely is a partial edit (website/emails-only),
+    # which must leave the existing name untouched.
+    display_name_raw = form.get("display_name")
+    if display_name_raw is not None:
+        display_name = display_name_raw.strip()
+        if not display_name:
+            raise HTTPException(400, "Vendor name is required.")
         vendor.display_name = display_name
         from ..vendor_utils import normalize_vendor_name
 
@@ -4123,7 +4808,13 @@ async def edit_vendor(
 
     emails_raw = form.get("emails", "").strip()
     if emails_raw:
-        vendor.emails = [e.strip() for e in emails_raw.split(",") if e.strip()]
+        emails = [e.strip() for e in emails_raw.split(",") if e.strip()]
+        # Reject anything that isn't a plausible address — an entry without an
+        # '@' is a data-entry mistake, not a contactable email.
+        invalid = [e for e in emails if "@" not in e]
+        if invalid:
+            raise HTTPException(400, f"Invalid email address: {', '.join(invalid)}")
+        vendor.emails = emails
 
     phones_raw = form.get("phones", "").strip()
     if phones_raw:
@@ -4190,6 +4881,322 @@ async def contact_timeline(
         "htmx/partials/vendors/contact_timeline.html",
         {"request": request, "contact": contact, "activities": activities, "vendor_id": vendor_id},
     )
+
+
+# ── Vendor Contact CRUD (HTMX, parity P1) ──────────────────────────────────
+
+
+def _render_vendor_contacts(request: Request, vendor, contacts, user):
+    """Re-render vendor contacts tab partial."""
+    return template_response(
+        "htmx/partials/vendors/tabs/contacts.html",
+        {"request": request, "vendor": vendor, "contacts": contacts, "user": user},
+    )
+
+
+def _render_contact_row(request: Request, c, vendor):
+    """Re-render a single vendor contact row partial."""
+    return template_response(
+        "htmx/partials/vendors/tabs/contact_row.html",
+        {"request": request, "c": c, "vendor": vendor},
+    )
+
+
+@router.post("/v2/partials/vendors/{vendor_id}/contacts", response_class=HTMLResponse)
+async def vendor_contact_add(
+    request: Request,
+    vendor_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Add a vendor contact (HTMX).
+
+    require_user gate — mirrors vendor edit.
+    """
+    from ..models.vendors import VendorContact as VC
+
+    vendor = get_vendor_card_or_404(db, vendor_id)
+    form = await request.form()
+    email = (form.get("email") or "").strip()
+    if not email:
+        raise HTTPException(400, "email is required")
+    full_name = (form.get("full_name") or "").strip()
+    title = (form.get("title") or "").strip()
+    phone = (form.get("phone") or "").strip()
+
+    # Deduplicate by (vendor_card_id, email)
+    existing = db.query(VC).filter(VC.vendor_card_id == vendor_id, VC.email == email).first()
+    if existing:
+        raise HTTPException(409, "A contact with that email already exists")
+
+    vc = VC(
+        vendor_card_id=vendor_id,
+        email=email,
+        full_name=full_name or None,
+        title=title or None,
+        phone=phone or None,
+        contact_type="individual" if full_name else "company",
+        source="manual",
+        is_verified=True,
+        confidence=100,
+        is_primary=False,
+    )
+    db.add(vc)
+    db.commit()
+    db.refresh(vc)
+    logger.info("VendorContact {} added to vendor {} by {}", vc.id, vendor_id, user.email)
+    return _render_contact_row(request, vc, vendor)
+
+
+@router.put("/v2/partials/vendors/{vendor_id}/contacts/{contact_id}", response_class=HTMLResponse)
+async def vendor_contact_edit(
+    request: Request,
+    vendor_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Edit a vendor contact (HTMX).
+
+    require_user gate.
+    """
+    from ..models.vendors import VendorContact as VC
+
+    vendor = get_vendor_card_or_404(db, vendor_id)
+    vc = db.query(VC).filter(VC.id == contact_id, VC.vendor_card_id == vendor_id).first()
+    if not vc:
+        raise HTTPException(404, "Contact not found")
+
+    form = await request.form()
+    full_name = (form.get("full_name") or "").strip()
+    title = (form.get("title") or "").strip()
+    email = (form.get("email") or "").strip()
+    phone = (form.get("phone") or "").strip()
+
+    if full_name:
+        vc.full_name = full_name
+        vc.contact_type = "individual"
+    if title:
+        vc.title = title
+    if email and email != vc.email:
+        collision = db.query(VC).filter(VC.vendor_card_id == vendor_id, VC.email == email, VC.id != contact_id).first()
+        if collision:
+            raise HTTPException(409, "Another contact already has that email")
+        vc.email = email
+    if phone:
+        vc.phone = phone
+
+    db.commit()
+    db.refresh(vc)
+    logger.info("VendorContact {} updated by {}", contact_id, user.email)
+    return _render_contact_row(request, vc, vendor)
+
+
+@router.delete("/v2/partials/vendors/{vendor_id}/contacts/{contact_id}", response_class=HTMLResponse)
+async def vendor_contact_delete(
+    request: Request,
+    vendor_id: int,
+    contact_id: int,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Delete a vendor contact (HTMX).
+
+    require_admin gate — matches vendor delete auth.
+    """
+    from ..models.vendors import VendorContact as VC
+
+    get_vendor_card_or_404(db, vendor_id)
+    vc = db.query(VC).filter(VC.id == contact_id, VC.vendor_card_id == vendor_id).first()
+    if not vc:
+        raise HTTPException(404, "Contact not found")
+
+    db.delete(vc)
+    db.commit()
+    logger.info("VendorContact {} deleted by {}", contact_id, user.email)
+    return HTMLResponse("")  # HTMX deletes the row via hx-swap="outerHTML"
+
+
+@router.post(
+    "/v2/partials/vendors/{vendor_id}/contacts/{contact_id}/set-primary",
+    response_class=HTMLResponse,
+)
+async def vendor_contact_set_primary(
+    request: Request,
+    vendor_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Mark a contact as primary; clears is_primary on all other contacts for this
+    vendor."""
+    from ..models.vendors import VendorContact as VC
+
+    vendor = get_vendor_card_or_404(db, vendor_id)
+    vc = db.query(VC).filter(VC.id == contact_id, VC.vendor_card_id == vendor_id).first()
+    if not vc:
+        raise HTTPException(404, "Contact not found")
+
+    # Clear all primaries for this vendor, then set this one
+    db.query(VC).filter(VC.vendor_card_id == vendor_id).update({"is_primary": False})
+    vc.is_primary = True
+    db.commit()
+    db.refresh(vc)
+    logger.info("VendorContact {} set as primary by {}", contact_id, user.email)
+
+    contacts = (
+        db.query(VC)
+        .filter(VC.vendor_card_id == vendor_id)
+        .order_by(VC.interaction_count.desc().nullslast())
+        .limit(50)
+        .all()
+    )
+    return _render_vendor_contacts(request, vendor, contacts, user)
+
+
+# ── Vendor Ownership UI (surface existing StrategicVendor) ─────────────────
+
+
+@router.post("/v2/partials/vendors/{vendor_id}/claim", response_class=HTMLResponse)
+async def vendor_claim(
+    request: Request,
+    vendor_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Claim this vendor as strategic for the current user."""
+    from ..services.strategic_vendor_service import claim_vendor, get_vendor_status
+
+    get_vendor_card_or_404(db, vendor_id)
+    _record, error = claim_vendor(db, user.id, vendor_id)
+    if error:
+        raise HTTPException(400, error)
+    status = get_vendor_status(db, vendor_id)
+    return _render_vendor_ownership_badge(request, vendor_id, status, user)
+
+
+@router.post("/v2/partials/vendors/{vendor_id}/release", response_class=HTMLResponse)
+async def vendor_release(
+    request: Request,
+    vendor_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Release this vendor from the current user's strategic list."""
+    from ..services.strategic_vendor_service import drop_vendor, get_vendor_status
+
+    get_vendor_card_or_404(db, vendor_id)
+    _ok, error = drop_vendor(db, user.id, vendor_id)
+    if error:
+        raise HTTPException(400, error)
+    status = get_vendor_status(db, vendor_id)
+    return _render_vendor_ownership_badge(request, vendor_id, status, user)
+
+
+def _render_vendor_ownership_badge(request: Request, vendor_id: int, status, user):
+    """Render the vendor ownership badge partial."""
+    return template_response(
+        "htmx/partials/vendors/_ownership_badge.html",
+        {"request": request, "vendor_id": vendor_id, "ownership": status, "user": user},
+    )
+
+
+@router.get("/v2/partials/vendors/{vendor_id}/ownership", response_class=HTMLResponse)
+async def vendor_ownership_badge(
+    request: Request,
+    vendor_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the strategic ownership badge for a vendor (lazy-loaded)."""
+    from ..services.strategic_vendor_service import get_vendor_status
+
+    get_vendor_card_or_404(db, vendor_id)
+    status = get_vendor_status(db, vendor_id)
+    return _render_vendor_ownership_badge(request, vendor_id, status, user)
+
+
+# ── Vendor Custom Fields (parity P1) ───────────────────────────────────────
+
+
+def _render_vendor_custom_fields(request: Request, vendor):
+    """Render vendor _custom_fields partial."""
+    return template_response(
+        "htmx/partials/vendors/_custom_fields.html",
+        {"request": request, "vendor": vendor},
+    )
+
+
+@router.post("/v2/partials/vendors/{vendor_id}/custom-fields", response_class=HTMLResponse)
+async def vendor_add_custom_field(
+    request: Request,
+    vendor_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Add or overwrite a custom field on a vendor card.
+
+    require_user gate.
+    """
+    from sqlalchemy.orm.attributes import flag_modified
+
+    from ..models.vendors import VendorCard as VC
+
+    vendor = db.get(VC, vendor_id)
+    if not vendor:
+        raise HTTPException(404, "Vendor not found")
+
+    form = await request.form()
+    label = (form.get("label") or "").strip()
+    value = (form.get("value") or "").strip()
+    if not label:
+        raise HTTPException(400, "label is required")
+
+    existing = vendor.custom_fields or {}
+    updated = {**existing, label: value}
+    try:
+        vendor.custom_fields = updated
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    flag_modified(vendor, "custom_fields")
+    db.commit()
+    db.refresh(vendor)
+    logger.info("Vendor {} custom field '{}' set by {}", vendor_id, label, user.email)
+    return _render_vendor_custom_fields(request, vendor)
+
+
+@router.delete(
+    "/v2/partials/vendors/{vendor_id}/custom-fields/{label:path}",
+    response_class=HTMLResponse,
+)
+async def vendor_delete_custom_field(
+    request: Request,
+    vendor_id: int,
+    label: str,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Remove a custom field from a vendor card.
+
+    require_user gate.
+    """
+    from sqlalchemy.orm.attributes import flag_modified
+
+    from ..models.vendors import VendorCard as VC
+
+    vendor = db.get(VC, vendor_id)
+    if not vendor:
+        raise HTTPException(404, "Vendor not found")
+
+    existing = dict(vendor.custom_fields or {})
+    existing.pop(label, None)
+    vendor.custom_fields = existing
+    flag_modified(vendor, "custom_fields")
+    db.commit()
+    db.refresh(vendor)
+    logger.info("Vendor {} custom field '{}' removed by {}", vendor_id, label, user.email)
+    return _render_vendor_custom_fields(request, vendor)
 
 
 @router.get("/v2/partials/vendors/{vendor_id}/contact-nudges", response_class=HTMLResponse)
@@ -4568,6 +5575,8 @@ async def companies_list_partial(
     my_only: bool = False,
     sort: str = "oldest",
     segment: int = Query(0, ge=0),
+    disposition: str = "",
+    has_open_reqs: bool = False,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     user: User = Depends(require_user),
@@ -4585,9 +5594,12 @@ async def companies_list_partial(
             my_only=my_only,
             sort=sort,
             segment=segment,
+            disposition=disposition or None,
+            has_open_reqs=has_open_reqs,
             limit=limit,
             offset=offset,
             include_overdue=True,
+            include_users=is_manager_or_admin(user),
         )
     )
     return template_response("htmx/partials/customers/list.html", ctx)
@@ -4602,6 +5614,8 @@ async def companies_account_list_partial(
     my_only: bool = False,
     sort: str = "oldest",
     segment: int = Query(0, ge=0),
+    disposition: str = "",
+    has_open_reqs: bool = False,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     user: User = Depends(require_user),
@@ -4623,11 +5637,676 @@ async def companies_account_list_partial(
             my_only=my_only,
             sort=sort,
             segment=segment,
+            disposition=disposition or None,
+            has_open_reqs=has_open_reqs,
+            limit=limit,
+            offset=offset,
+            include_users=is_manager_or_admin(user),
+        )
+    )
+    return template_response("htmx/partials/customers/_account_list.html", ctx)
+
+
+# ── Global customer-contacts list (cross-company, role-scoped) ─────────────
+# /v2/contacts is cross-tenant PII: SALES/TRADER reps see ONLY contacts in
+# accounts they can manage (shared company_visibility_predicate); MANAGER/ADMIN
+# see all. Scoping lives in crm_service.customer_contacts_query — this route is
+# thin HTTP glue.
+
+
+@router.get("/v2/partials/contacts", response_class=HTMLResponse)
+async def customer_contacts_partial(
+    request: Request,
+    search: str = "",
+    company_id: int = Query(0, ge=0),
+    contact_role: str = "",
+    cadence_state: str = "",
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the cross-company customer-contacts workspace as an HTML partial."""
+    from ..services.crm_service import customer_contacts_list_ctx
+
+    ctx = _base_ctx(request, user, "crm")
+    ctx.update(
+        customer_contacts_list_ctx(
+            db,
+            user,
+            search=search,
+            company_id=company_id,
+            contact_role=contact_role,
+            cadence_state=cadence_state,
             limit=limit,
             offset=offset,
         )
     )
-    return template_response("htmx/partials/customers/_account_list.html", ctx)
+    ctx["contact_roles"] = CANONICAL_ROLES
+    return template_response("htmx/partials/customers/contacts_list.html", ctx)
+
+
+# ── Bulk actions (static — must precede /{company_id}) ────────────────────
+# Every bulk action FILTERS selected ids to only those the caller can act on.
+# Sales/trader reps may only act on companies where can_manage_account() is True.
+# Manager/admin can act on all. "assign-owner" is MANAGER/ADMIN ONLY.
+# Non-manageable companies are silently skipped; the summary reports both counts.
+
+_VALID_BULK_COMPANY_ACTIONS = frozenset({"deactivate", "send-to-prospecting", "assign-owner"})
+_BULK_MAX_IDS = 200
+
+
+@router.post("/v2/partials/customers/bulk/{action}", response_class=HTMLResponse)
+async def customers_bulk_action(
+    request: Request,
+    action: str,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Apply a bulk action to selected companies.
+
+    Auth: deactivate + send-to-prospecting gate per-company via can_manage_account;
+    assign-owner is MANAGER/ADMIN ONLY (403 for reps).
+    Selected ids that the caller cannot act on are silently skipped; the returned
+    partial includes a summary of applied vs skipped counts.
+
+    Actions:
+    - deactivate: set is_active=False
+    - send-to-prospecting: clear ownership (ownership_cleared_at + account_owner_id=NULL)
+    - assign-owner: set account_owner_id to owner_id form param (MANAGER/ADMIN only)
+    """
+    from ..dependencies import can_manage_account, is_manager_or_admin
+
+    if action not in _VALID_BULK_COMPANY_ACTIONS:
+        raise HTTPException(400, f"Invalid action '{action}'. Allowed: {sorted(_VALID_BULK_COMPANY_ACTIONS)}")
+
+    # assign-owner is manager/admin only — 403 before reading IDs to avoid timing oracle
+    if action == "assign-owner" and not is_manager_or_admin(user):
+        raise HTTPException(403, "assign-owner requires MANAGER or ADMIN role")
+
+    form = await request.form()
+    ids_str = form.get("ids", "") or ""
+    try:
+        ids = [int(x.strip()) for x in ids_str.split(",") if x.strip().isdigit()]
+    except ValueError:
+        raise HTTPException(400, "Invalid ID list")
+
+    if len(ids) > _BULK_MAX_IDS:
+        raise HTTPException(400, f"Maximum {_BULK_MAX_IDS} companies per bulk action")
+
+    if not ids:
+        # No-op: return refreshed list
+        ctx = {"request": request, "user": user}
+        ctx.update(
+            _cdm_list_ctx(
+                db,
+                user,
+                search="",
+                staleness="",
+                account_type="",
+                my_only=False,
+                sort="oldest",
+                segment=0,
+                disposition=None,
+                has_open_reqs=False,
+                limit=50,
+                offset=0,
+                include_users=is_manager_or_admin(user),
+            )
+        )
+        return template_response("htmx/partials/customers/_account_list.html", ctx)
+
+    companies = db.query(Company).filter(Company.id.in_(ids)).all()
+
+    # Filter to only companies this user can act on
+    if is_manager_or_admin(user):
+        authorised = companies
+        skipped = 0
+    else:
+        authorised = [c for c in companies if can_manage_account(user, c, db)]
+        skipped = len(companies) - len(authorised)
+
+    applied = 0
+    if action == "deactivate":
+        for co in authorised:
+            co.is_active = False
+            applied += 1
+    elif action == "send-to-prospecting":
+        for co in authorised:
+            co.account_owner_id = None
+            co.ownership_cleared_at = datetime.now(timezone.utc)
+            applied += 1
+    elif action == "assign-owner":
+        owner_id_raw = form.get("owner_id")
+        if not owner_id_raw:
+            raise HTTPException(400, "owner_id is required for assign-owner")
+        try:
+            new_owner_id = int(owner_id_raw)
+        except (TypeError, ValueError):
+            raise HTTPException(400, "owner_id must be an integer")
+        new_owner = db.get(User, new_owner_id)
+        if not new_owner or not new_owner.is_active:
+            raise HTTPException(400, "owner_id does not correspond to an active user")
+        for co in authorised:
+            co.account_owner_id = new_owner_id
+            applied += 1
+
+    if applied:
+        db.commit()
+        logger.info(
+            "Bulk {} applied to {} companies ({} skipped) by {}",
+            action,
+            applied,
+            skipped,
+            user.email,
+        )
+
+    action_label = {
+        "deactivate": "Deactivated",
+        "send-to-prospecting": "Sent to prospecting",
+        "assign-owner": "Reassigned",
+    }.get(action, action.title())
+
+    if skipped:
+        msg = f"{action_label} {applied} of {applied + skipped} ({skipped} skipped — not yours)"
+    else:
+        msg = f"{action_label} {applied} account{'s' if applied != 1 else ''}"
+
+    ctx = {"request": request, "user": user}
+    ctx.update(
+        _cdm_list_ctx(
+            db,
+            user,
+            search="",
+            staleness="",
+            account_type="",
+            my_only=False,
+            sort="oldest",
+            segment=0,
+            disposition=None,
+            has_open_reqs=False,
+            limit=50,
+            offset=0,
+            include_users=is_manager_or_admin(user),
+        )
+    )
+    resp = template_response("htmx/partials/customers/_account_list.html", ctx)
+    resp.headers["HX-Trigger"] = json.dumps(
+        {
+            "showToast": {"message": msg},
+            "clearSelection": True,
+        }
+    )
+    return resp
+
+
+# ── Company / contact CSV import: preview + confirm ───────────────────────
+# Auth: require_user (same gate as all CDM mutations).
+# Preview: parse CSV → return table of rows with per-row status flags
+#          (valid / duplicate / invalid).
+# Confirm: create Company rows for non-duplicate valid rows; assign importer
+#          as account_owner_id.
+# Contact preview: parse CSV → flag emails that already exist in site_contacts.
+
+_IMPORT_MAX_ROWS = 1000
+
+
+@router.post("/v2/partials/customers/import/preview", response_class=HTMLResponse)
+async def import_companies_preview(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Parse company CSV and return a preview table (no writes).
+
+    Expected columns: name (required), website, account_type.
+    Flags: duplicate (normalized_name collision), invalid (missing name).
+    """
+    import csv
+    import io as _io
+
+    from ..vendor_utils import normalize_vendor_name
+
+    form = await request.form()
+    file = form.get("file")
+    if not file:
+        raise HTTPException(400, "A CSV file is required")
+
+    try:
+        content_bytes = await file.read() if hasattr(file, "read") else file.file.read()
+        text = content_bytes.decode("utf-8", errors="replace")
+        reader = csv.DictReader(_io.StringIO(text))
+        raw_rows = list(reader)
+    except Exception:
+        return HTMLResponse(
+            '<div class="text-rose-700 text-sm p-3 bg-rose-50 rounded border border-rose-200">'
+            "Could not parse CSV — please check the file format.</div>"
+        )
+
+    if len(raw_rows) > _IMPORT_MAX_ROWS:
+        raise HTTPException(400, f"CSV exceeds {_IMPORT_MAX_ROWS} row limit")
+
+    # Build set of existing normalized names for dedup check
+    existing_norm_names = {
+        row[0] for row in db.query(Company.normalized_name).filter(Company.normalized_name.isnot(None)).all()
+    }
+
+    rows = []
+    for raw in raw_rows:
+        name = (raw.get("name") or raw.get("Name") or "").strip()
+        website = (raw.get("website") or raw.get("Website") or "").strip()
+        account_type = (raw.get("account_type") or raw.get("Account Type") or "").strip()
+        norm = normalize_vendor_name(name) if name else None
+
+        if not name:
+            status = "invalid"
+            status_label = "Missing name"
+        elif norm and norm in existing_norm_names:
+            status = "duplicate"
+            status_label = "Already exists"
+        else:
+            status = "valid"
+            status_label = "OK"
+
+        rows.append(
+            {
+                "name": name,
+                "website": website,
+                "account_type": account_type,
+                "status": status,
+                "status_label": status_label,
+            }
+        )
+
+    valid_count = sum(1 for r in rows if r["status"] == "valid")
+    dup_count = sum(1 for r in rows if r["status"] == "duplicate")
+    invalid_count = sum(1 for r in rows if r["status"] == "invalid")
+
+    import json as _json
+
+    rows_json = _json.dumps(
+        [
+            {"name": r["name"], "website": r["website"], "account_type": r["account_type"]}
+            for r in rows
+            if r["status"] == "valid"
+        ]
+    )
+
+    return template_response(
+        "htmx/partials/customers/_import_preview.html",
+        {
+            "request": request,
+            "rows": rows,
+            "valid_count": valid_count,
+            "dup_count": dup_count,
+            "invalid_count": invalid_count,
+            "rows_json": rows_json,
+        },
+    )
+
+
+@router.post("/v2/partials/customers/import/confirm", response_class=HTMLResponse)
+async def import_companies_confirm(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Create Company rows from a confirmed import (validated rows_json payload).
+
+    Each row: {name, website?, account_type?}. Deduplicates by normalized_name.
+    Sets account_owner_id to the importing user.
+    """
+    import json as _json
+
+    from ..vendor_utils import normalize_vendor_name
+
+    form = await request.form()
+    rows_json_str = form.get("rows_json", "")
+    if not rows_json_str:
+        raise HTTPException(400, "rows_json is required")
+
+    try:
+        rows = _json.loads(rows_json_str)
+        if not isinstance(rows, list):
+            raise ValueError("Expected a list")
+    except (ValueError, TypeError):
+        raise HTTPException(400, "Invalid rows_json — must be a JSON array")
+
+    if len(rows) > _IMPORT_MAX_ROWS:
+        raise HTTPException(400, f"rows_json exceeds {_IMPORT_MAX_ROWS} row limit")
+
+    # Re-fetch existing normalized names to guard against race conditions
+    existing_norm = {
+        row[0] for row in db.query(Company.normalized_name).filter(Company.normalized_name.isnot(None)).all()
+    }
+
+    created = 0
+    skipped_dup = 0
+    skipped_invalid = 0
+    now = datetime.now(timezone.utc)
+
+    for row in rows:
+        name = str(row.get("name", "")).strip()
+        if not name:
+            skipped_invalid += 1
+            continue
+        norm = normalize_vendor_name(name)
+        if norm and norm in existing_norm:
+            skipped_dup += 1
+            continue
+
+        co = Company(
+            name=name,
+            website=str(row.get("website", "")).strip() or None,
+            account_type=str(row.get("account_type", "")).strip() or None,
+            account_owner_id=user.id,
+            is_active=True,
+            source="import",
+            created_at=now,
+        )
+        db.add(co)
+        if norm:
+            existing_norm.add(norm)  # prevent intra-batch duplicates
+        created += 1
+
+    if created:
+        db.commit()
+        logger.info("CSV import: {} companies created by {}", created, user.email)
+
+    parts = [f"Imported {created} compan{'y' if created == 1 else 'ies'}"]
+    if skipped_dup:
+        parts.append(f"{skipped_dup} duplicate{'s' if skipped_dup != 1 else ''} skipped")
+    if skipped_invalid:
+        parts.append(f"{skipped_invalid} invalid row{'s' if skipped_invalid != 1 else ''} skipped")
+    summary = "; ".join(parts)
+
+    resp = template_response(
+        "htmx/partials/customers/_import_confirm_summary.html",
+        {"request": request, "summary": summary},
+    )
+    resp.headers["HX-Trigger"] = json.dumps({"showToast": {"message": summary}})
+    return resp
+
+
+# ── Contact CSV import: preview ────────────────────────────────────────────
+# Parses a CSV with columns: company_name, contact_name, email, phone, role.
+# Flags email duplicates (already in site_contacts).
+
+
+@router.post("/v2/partials/customers/import/contacts/preview", response_class=HTMLResponse)
+async def import_contacts_preview(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Parse contact CSV and return a preview table (no writes).
+
+    Expected columns: company_name (required), contact_name (required), email, phone, role.
+    Flags: duplicate (email collision in site_contacts), invalid (missing required fields).
+    """
+    import csv
+    import io as _io
+
+    from ..models.crm import SiteContact
+
+    form = await request.form()
+    file = form.get("file")
+    if not file:
+        raise HTTPException(400, "A CSV file is required")
+
+    try:
+        content_bytes = await file.read() if hasattr(file, "read") else file.file.read()
+        text = content_bytes.decode("utf-8", errors="replace")
+        reader = csv.DictReader(_io.StringIO(text))
+        raw_rows = list(reader)
+    except Exception:
+        return HTMLResponse(
+            '<div class="text-rose-700 text-sm p-3 bg-rose-50 rounded border border-rose-200">'
+            "Could not parse CSV — please check the file format.</div>"
+        )
+
+    if len(raw_rows) > _IMPORT_MAX_ROWS:
+        raise HTTPException(400, f"CSV exceeds {_IMPORT_MAX_ROWS} row limit")
+
+    # Build set of existing contact emails for duplicate check
+    existing_emails = {
+        row[0].lower()
+        for row in db.query(SiteContact.email).filter(SiteContact.email.isnot(None), SiteContact.email != "").all()
+    }
+
+    # Build company lookup for authz check (same logic as confirm)
+    import re as _re
+
+    from ..vendor_utils import normalize_vendor_name as _normalize_vendor_name
+
+    all_companies = db.query(Company).filter(Company.is_active.is_(True)).all()
+    _norm_to_company: dict[str, Company] = {}
+    _domain_to_company: dict[str, Company] = {}
+    for _co in all_companies:
+        if _co.normalized_name:
+            _norm_to_company[_co.normalized_name] = _co
+        if _co.website:
+            _dom = _re.sub(r"^https?://", "", _co.website.strip().lower())
+            _dom = _re.sub(r"^www\.", "", _dom).split("/")[0].strip()
+            if _dom:
+                _domain_to_company[_dom] = _co
+
+    rows = []
+    for raw in raw_rows:
+        company_name = (raw.get("company_name") or "").strip()
+        contact_name = (raw.get("contact_name") or "").strip()
+        email = (raw.get("email") or "").strip().lower()
+        phone = (raw.get("phone") or "").strip()
+        role = (raw.get("role") or "").strip()
+
+        if not company_name or not contact_name:
+            status = "invalid"
+            status_label = "Missing required field"
+        elif email and email in existing_emails:
+            status = "duplicate"
+            status_label = "Email already exists"
+        else:
+            # Check if the matched company is manageable by this user
+            _norm = _normalize_vendor_name(company_name)
+            _matched_co = _norm_to_company.get(_norm) if _norm else None
+            if _matched_co is None and email and "@" in email:
+                _matched_co = _domain_to_company.get(email.split("@", 1)[1])
+            if _matched_co is not None and not (is_manager_or_admin(user) or can_manage_account(user, _matched_co, db)):
+                status = "unauthorized"
+                status_label = "Company not yours"
+            else:
+                status = "valid"
+                status_label = "OK"
+
+        rows.append(
+            {
+                "company_name": company_name,
+                "contact_name": contact_name,
+                "email": email,
+                "phone": phone,
+                "role": role,
+                "status": status,
+                "status_label": status_label,
+            }
+        )
+
+    valid_count = sum(1 for r in rows if r["status"] == "valid")
+    dup_count = sum(1 for r in rows if r["status"] == "duplicate")
+    invalid_count = sum(1 for r in rows if r["status"] == "invalid")
+    unauthorized_count = sum(1 for r in rows if r["status"] == "unauthorized")
+
+    import json as _json
+
+    contacts_rows_json = _json.dumps(
+        [
+            {
+                "company_name": r["company_name"],
+                "contact_name": r["contact_name"],
+                "email": r["email"],
+                "phone": r["phone"],
+                "role": r["role"],
+            }
+            for r in rows
+            if r["status"] == "valid"
+        ]
+    )
+
+    return template_response(
+        "htmx/partials/customers/_import_contacts_preview.html",
+        {
+            "request": request,
+            "rows": rows,
+            "valid_count": valid_count,
+            "dup_count": dup_count,
+            "invalid_count": invalid_count,
+            "unauthorized_count": unauthorized_count,
+            "rows_json": contacts_rows_json,
+        },
+    )
+
+
+@router.post("/v2/partials/customers/import/contacts/confirm", response_class=HTMLResponse)
+async def import_contacts_confirm(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Create SiteContact rows from a confirmed contacts import.
+
+    Per row: matches company by normalized_name or domain; attaches contact to
+    the company's first ACTIVE site (creates an HQ site if none exists);
+    deduplicates by email within the site; skips rows whose company isn't found.
+    Reports created, skipped_no_company, and skipped_dup counts.
+    """
+    import json as _json
+
+    from ..models.crm import CustomerSite, SiteContact
+    from ..utils.phone import normalize_e164
+    from ..vendor_utils import normalize_vendor_name
+
+    form = await request.form()
+    rows_json_str = form.get("rows_json", "")
+    if not rows_json_str:
+        raise HTTPException(400, "rows_json is required")
+
+    try:
+        rows = _json.loads(rows_json_str)
+        if not isinstance(rows, list):
+            raise ValueError("Expected a list")
+    except (ValueError, TypeError):
+        raise HTTPException(400, "Invalid rows_json — must be a JSON array")
+
+    if len(rows) > _IMPORT_MAX_ROWS:
+        raise HTTPException(400, f"rows_json exceeds {_IMPORT_MAX_ROWS} row limit")
+
+    # Build company lookup: normalized_name → Company (active preferred)
+    all_companies = db.query(Company).filter(Company.is_active.is_(True)).all()
+    norm_to_company: dict[str, Company] = {}
+    domain_to_company: dict[str, Company] = {}
+    for co in all_companies:
+        if co.normalized_name:
+            norm_to_company[co.normalized_name] = co
+        if co.website:
+            # extract domain: strip scheme + www
+            import re as _re
+
+            domain = _re.sub(r"^https?://", "", co.website.strip().lower())
+            domain = _re.sub(r"^www\.", "", domain).split("/")[0].strip()
+            if domain:
+                domain_to_company[domain] = co
+
+    now = datetime.now(timezone.utc)
+    created = 0
+    skipped_no_company = 0
+    skipped_dup = 0
+    skipped_unauthorized = 0
+
+    for row in rows:
+        company_name = str(row.get("company_name", "")).strip()
+        contact_name = str(row.get("contact_name", "")).strip()
+        email = str(row.get("email", "")).strip().lower() or None
+        phone = str(row.get("phone", "")).strip() or None
+        role = str(row.get("role", "")).strip() or None
+
+        if not company_name or not contact_name:
+            skipped_no_company += 1
+            continue
+
+        # Match company by normalized name, then by domain
+        norm = normalize_vendor_name(company_name)
+        co = norm_to_company.get(norm) if norm else None
+        if co is None and email and "@" in email:
+            email_domain = email.split("@", 1)[1]
+            co = domain_to_company.get(email_domain)
+
+        if co is None:
+            skipped_no_company += 1
+            continue
+
+        # AUTHZ: rep may only attach contacts to companies they manage
+        if not (is_manager_or_admin(user) or can_manage_account(user, co, db)):
+            skipped_unauthorized += 1
+            continue
+
+        # Find or create the first ACTIVE site for this company
+        site = (
+            db.query(CustomerSite)
+            .filter(CustomerSite.company_id == co.id, CustomerSite.is_active.is_(True))
+            .order_by(CustomerSite.id)
+            .first()
+        )
+        if site is None:
+            site = CustomerSite(
+                company_id=co.id,
+                site_name="HQ",
+                is_active=True,
+                created_at=now,
+            )
+            db.add(site)
+            db.flush()  # get site.id
+
+        # Deduplicate by email within the site
+        if email:
+            existing = (
+                db.query(SiteContact)
+                .filter(SiteContact.customer_site_id == site.id, SiteContact.email == email)
+                .first()
+            )
+            if existing:
+                skipped_dup += 1
+                continue
+
+        contact = SiteContact(
+            customer_site_id=site.id,
+            full_name=contact_name,
+            email=email,
+            phone=normalize_e164(phone) if phone else None,
+            contact_role=role,
+            is_active=True,
+            created_at=now,
+        )
+        db.add(contact)
+        created += 1
+
+    if created:
+        db.commit()
+        logger.info("Contact CSV import: {} contacts created by {}", created, user.email)
+
+    parts = [f"Imported {created} contact{'s' if created != 1 else ''}"]
+    if skipped_no_company:
+        parts.append(f"{skipped_no_company} skipped (company not found)")
+    if skipped_dup:
+        parts.append(f"{skipped_dup} duplicate{'s' if skipped_dup != 1 else ''} skipped")
+    if skipped_unauthorized:
+        parts.append(f"{skipped_unauthorized} skipped — not your account{'s' if skipped_unauthorized != 1 else ''}")
+    summary = "; ".join(parts)
+
+    resp = template_response(
+        "htmx/partials/customers/_import_confirm_summary.html",
+        {"request": request, "summary": summary},
+    )
+    resp.headers["HX-Trigger"] = json.dumps({"showToast": {"message": summary}})
+    return resp
 
 
 # ── Sprint 4: Company CRUD (static routes — must precede {company_id}) ──
@@ -4666,12 +6345,25 @@ async def create_company(
     if existing:
         raise HTTPException(409, f"Company '{existing.name}' already exists (ID {existing.id})")
 
+    raw_phone = form.get("phone", "").strip() or None
+    raw_hq_state = form.get("hq_state", "").strip() or None
+    raw_hq_country = form.get("hq_country", "").strip() or None
     company = Company(
         name=name,
         website=form.get("website", "").strip() or None,
         industry=form.get("industry", "").strip() or None,
         notes=form.get("notes", "").strip() or None,
         is_active=True,
+        legal_name=form.get("legal_name", "").strip() or None,
+        employee_size=form.get("employee_size", "").strip() or None,
+        revenue_range=form.get("revenue_range", "").strip() or None,
+        hq_city=form.get("hq_city", "").strip() or None,
+        hq_state=(normalize_us_state(raw_hq_state) or raw_hq_state) if raw_hq_state else None,
+        hq_country=(normalize_country(raw_hq_country) or raw_hq_country) if raw_hq_country else None,
+        phone=normalize_phone_e164(raw_phone) if raw_phone else None,
+        credit_terms=form.get("credit_terms", "").strip() or None,
+        tax_id=form.get("tax_id", "").strip() or None,
+        source=form.get("source", "").strip() or "manual",
     )
     owner_id = form.get("owner_id", "")
     if owner_id and owner_id.isdigit():
@@ -4683,7 +6375,7 @@ async def create_company(
     default_site = CustomerSite(
         company_id=company.id,
         site_name="HQ",
-        site_type="headquarters",
+        site_type="hq",
         is_active=True,
     )
     db.add(default_site)
@@ -4753,7 +6445,7 @@ def build_account_timeline(contacts, quotes, activities, *, req_map):
     Events are sorted descending by ``ts`` (newest first).
     ``raw`` carries the original ORM object for template use.
 
-    Called by: company_tab (activity branch) in htmx_views.py.
+    Called by: unit tests (TestUnifiedTimelineHelper) only; no longer called by the activity route.
     """
     from datetime import datetime, timezone
 
@@ -4915,6 +6607,8 @@ async def company_assign_segment_tag(
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Not authorized")
 
     form = await request.form()
     tag_id_raw = form.get("tag_id", "").strip()
@@ -4963,6 +6657,8 @@ async def company_unassign_segment_tag(
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Not authorized")
 
     _unassign_segment_tag(company_id=company_id, tag_id=tag_id, db=db)
     db.commit()
@@ -4980,6 +6676,187 @@ async def company_unassign_segment_tag(
     )
 
 
+# ── Contact tag routes ─────────────────────────────────────────────────────
+
+
+@router.post(
+    "/v2/partials/customers/{company_id}/contacts/{contact_id}/tags",
+    response_class=HTMLResponse,
+)
+async def contact_assign_tag(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Assign a segment tag to a site contact.
+
+    Accepts tag_id= (existing) or tag_name= (creates new tag_type='segment'). Returns
+    the contact tags chips partial.
+    """
+    from ..models.tags import EntityTag as _EntityTag
+    from ..models.tags import Tag as _Tag
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Not authorized to manage this account")
+    contact = (
+        db.query(SiteContact)
+        .join(CustomerSite, SiteContact.customer_site_id == CustomerSite.id)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+
+    form = await request.form()
+    tag_id_raw = (form.get("tag_id") or "").strip()
+    tag_name_raw = (form.get("tag_name") or "").strip()
+
+    if tag_name_raw:
+        tag = _get_or_create_segment_tag(tag_name_raw, db)
+    elif tag_id_raw:
+        try:
+            tag_id = int(tag_id_raw)
+        except ValueError:
+            raise HTTPException(400, "tag_id must be an integer")
+        tag = db.query(_Tag).filter_by(id=tag_id).first()
+        if not tag:
+            raise HTTPException(404, "Tag not found")
+    else:
+        raise HTTPException(400, "Provide tag_id or tag_name")
+
+    existing = db.query(_EntityTag).filter_by(entity_type="site_contact", entity_id=contact_id, tag_id=tag.id).first()
+    if existing:
+        existing.is_visible = True
+    else:
+        et = _EntityTag(
+            entity_type="site_contact",
+            entity_id=contact_id,
+            tag_id=tag.id,
+            is_visible=True,
+            interaction_count=0,
+            total_entity_interactions=0,
+        )
+        db.add(et)
+    db.commit()
+
+    contact_tags = (
+        db.query(_Tag)
+        .join(_EntityTag, _EntityTag.tag_id == _Tag.id)
+        .filter(
+            _EntityTag.entity_type == "site_contact",
+            _EntityTag.entity_id == contact_id,
+            _EntityTag.is_visible.is_(True),
+        )
+        .order_by(_Tag.name)
+        .all()
+    )
+    all_segment_tags = _list_all_segment_tags(db=db)
+    return template_response(
+        "htmx/partials/customers/_contact_tags.html",
+        {
+            "request": request,
+            "company": company,
+            "contact": contact,
+            "contact_tags": contact_tags,
+            "all_segment_tags": all_segment_tags,
+        },
+    )
+
+
+@router.delete(
+    "/v2/partials/customers/{company_id}/contacts/{contact_id}/tags/{tag_id}",
+    response_class=HTMLResponse,
+)
+async def contact_unassign_tag(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    tag_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Remove a segment tag from a site contact."""
+    from ..models.tags import EntityTag as _EntityTag
+    from ..models.tags import Tag as _Tag
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Not authorized to manage this account")
+    contact = (
+        db.query(SiteContact)
+        .join(CustomerSite, SiteContact.customer_site_id == CustomerSite.id)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+
+    et = db.query(_EntityTag).filter_by(entity_type="site_contact", entity_id=contact_id, tag_id=tag_id).first()
+    if et:
+        db.delete(et)
+        db.commit()
+
+    contact_tags = (
+        db.query(_Tag)
+        .join(_EntityTag, _EntityTag.tag_id == _Tag.id)
+        .filter(
+            _EntityTag.entity_type == "site_contact",
+            _EntityTag.entity_id == contact_id,
+            _EntityTag.is_visible.is_(True),
+        )
+        .order_by(_Tag.name)
+        .all()
+    )
+    all_segment_tags = _list_all_segment_tags(db=db)
+    return template_response(
+        "htmx/partials/customers/_contact_tags.html",
+        {
+            "request": request,
+            "company": company,
+            "contact": contact,
+            "contact_tags": contact_tags,
+            "all_segment_tags": all_segment_tags,
+        },
+    )
+
+
+@router.get("/v2/partials/customers/{company_id}/contacts/for-select")
+async def get_company_contacts_for_select(
+    company_id: int,
+    exclude_id: int | None = None,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return active site contacts for a company as JSON for the reports_to select.
+
+    Excludes the contact with exclude_id (self-exclusion for reports_to picker).
+    """
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Not authorized to manage this account")
+    q = (
+        db.query(SiteContact)
+        .join(CustomerSite, SiteContact.customer_site_id == CustomerSite.id)
+        .filter(
+            CustomerSite.company_id == company_id,
+            SiteContact.is_active.is_(True),
+        )
+    )
+    if exclude_id:
+        q = q.filter(SiteContact.id != exclude_id)
+    contacts = q.order_by(SiteContact.full_name).all()
+    return [{"id": c.id, "name": c.full_name or c.first_name or "—"} for c in contacts]
+
+
 _VALID_TIERS = frozenset({"key", "core", "standard", "prospect"})
 
 # Canonical buying-role taxonomy (P2b).  Legacy values (buyer/technical/
@@ -4987,6 +6864,200 @@ _VALID_TIERS = frozenset({"key", "core", "standard", "prospect"})
 # via the "— clear —" option; they are not in this set.
 CANONICAL_ROLES = ("specifier", "buyer_po", "ap_payer", "logistics", "exec", "other")
 _VALID_ROLES = frozenset(CANONICAL_ROLES)
+
+# ── Inline-editable field registry (WS1) ────────────────────────────────────
+# Each field maps to {label, kind, choices (for select)}. tier/disposition/owner
+# have dedicated controls and are excluded. owner inline deferred to WS2.
+
+EDITABLE_ACCOUNT_FIELDS: dict[str, dict] = {
+    "industry": {"label": "Industry", "kind": "text"},
+    "phone": {"label": "Phone", "kind": "text"},
+    "employee_size": {"label": "Employees", "kind": "text"},
+    "credit_terms": {"label": "Credit Terms", "kind": "text"},
+    "website": {"label": "Website", "kind": "text"},
+    "legal_name": {"label": "Legal Name", "kind": "text"},
+    "revenue_range": {"label": "Revenue Range", "kind": "text"},
+    "hq_city": {"label": "HQ City", "kind": "text"},
+    "hq_state": {"label": "HQ State", "kind": "text"},
+    "hq_country": {"label": "HQ Country", "kind": "text"},
+    "account_type": {
+        "label": "Account Type",
+        "kind": "select",
+        "choices": ["Customer", "Prospect", "Partner", "Competitor"],
+    },
+    "domain": {"label": "Domain", "kind": "text"},
+    "linkedin_url": {"label": "LinkedIn URL", "kind": "text"},
+    "tax_id": {"label": "Tax ID", "kind": "text"},
+    "source": {"label": "Source", "kind": "text"},
+    "notes": {"label": "Notes", "kind": "text"},
+}
+
+EDITABLE_CONTACT_FIELDS: dict[str, dict] = {
+    # first_name + last_name replace the old single full_name inline editor.
+    # apply_contact_field recomposes full_name when either is saved.
+    "first_name": {"label": "First Name", "kind": "text"},
+    "last_name": {"label": "Last Name", "kind": "text"},
+    "title": {"label": "Title", "kind": "text"},
+    "email": {"label": "Email", "kind": "text"},
+    "phone": {"label": "Phone", "kind": "text"},
+    "secondary_email": {"label": "Secondary Email", "kind": "text"},
+    "secondary_phone": {"label": "Secondary Phone", "kind": "text"},
+    "wechat_id": {"label": "WeChat ID", "kind": "text"},
+    "linkedin_url": {"label": "LinkedIn", "kind": "text"},
+    "contact_role": {
+        "label": "Role",
+        "kind": "select",
+        "choices": list(CANONICAL_ROLES),
+    },
+    # contact_owner_id is intentionally NOT listed here — ownership flows via
+    # site → account owner (per-contact picker removed in Phase 1).
+}
+
+# Ordered list: (field, label, kind, choices) — used by the detail template to render the
+# always-visible known-fields grid. Every field here MUST also be in EDITABLE_ACCOUNT_FIELDS
+# so the "Add <field>" affordance has a working edit endpoint behind it.
+KNOWN_ACCOUNT_FIELDS: list[tuple[str, str, str, list[str] | None]] = [
+    ("legal_name", "Legal Name", "text", None),
+    ("website", "Website", "text", None),
+    ("domain", "Domain", "text", None),
+    ("phone", "Phone", "text", None),
+    ("employee_size", "Employees", "text", None),
+    ("revenue_range", "Revenue Range", "text", None),
+    ("hq_city", "HQ City", "text", None),
+    ("hq_state", "HQ State", "text", None),
+    ("hq_country", "HQ Country", "text", None),
+    ("tax_id", "Tax ID", "text", None),
+    ("account_type", "Account Type", "select", ["Customer", "Prospect", "Partner", "Competitor"]),
+    ("source", "Source", "text", None),
+    ("notes", "Notes", "text", None),
+]
+
+
+def apply_company_field(company: Company, field: str, value: str) -> None:
+    """Apply a single inline-edited account field to *company* (does NOT commit).
+
+    Validates/normalizes each field the same way edit_company does. Raises
+    HTTPException(400) for invalid values, HTTPException(404) for unknown field. Called
+    by both the inline-edit POST endpoint and edit_company (DRY).
+    """
+    if field not in EDITABLE_ACCOUNT_FIELDS:
+        raise HTTPException(404, f"Unknown editable field: {field!r}")
+    v = value.strip()
+    if field == "phone":
+        company.phone = normalize_phone_e164(v) if v else None
+    elif field == "hq_state":
+        company.hq_state = (normalize_us_state(v) or v) if v else None
+    elif field == "hq_country":
+        company.hq_country = (normalize_country(v) or v) if v else None
+    elif field == "account_type":
+        choices = EDITABLE_ACCOUNT_FIELDS["account_type"]["choices"]
+        if v and v not in choices:
+            raise HTTPException(400, f"Invalid account_type '{v}'. Valid: {choices}")
+        company.account_type = v or None
+    elif field == "industry":
+        company.industry = v or None
+    elif field == "website":
+        # Reuse the Company schema's website validator so the inline-edit + edit_company
+        # paths reject bad URLs the same way the create form does.
+        from ..schemas.crm import normalize_website
+
+        try:
+            company.website = normalize_website(v)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+    else:
+        setattr(company, field, v or None)
+    company.updated_at = datetime.now(timezone.utc)
+
+
+def _recompose_full_name(contact: SiteContact) -> None:
+    """Recompose contact.full_name from first_name + last_name (in-place).
+
+    Rule: full_name is always derived from first_name/last_name when either is written
+    via the form or inline-edit path. Direct full_name writers (legacy) leave first/last
+    unchanged; this function is NOT called for those paths.
+    """
+    contact.full_name = f"{contact.first_name or ''} {contact.last_name or ''}".strip() or (contact.full_name or "")
+
+
+def apply_contact_field(
+    contact: SiteContact,
+    field: str,
+    value: str,
+    site_id: int,
+    db: Session,
+) -> None:
+    """Apply a single inline-edited contact field to *contact* (does NOT commit).
+
+    first_name / last_name edits recompose full_name automatically. At least one of
+    first_name / last_name must be non-empty (enforced here). Raises HTTPException for
+    invalid values. Called by both the inline-edit POST endpoint and edit_site_contact
+    (DRY).
+    """
+    if field not in EDITABLE_CONTACT_FIELDS:
+        raise HTTPException(404, f"Unknown editable contact field: {field!r}")
+    v = value.strip()
+    if field in ("first_name", "last_name"):
+        setattr(contact, field, v or None)
+        # After updating, verify at least one name part remains.
+        if not contact.first_name and not contact.last_name:
+            raise HTTPException(400, "At least one of first_name or last_name is required")
+        _recompose_full_name(contact)
+    elif field == "email":
+        if v and "@" not in v:
+            raise HTTPException(400, "Invalid email address")
+        if v:
+            dup = (
+                db.query(SiteContact)
+                .filter(
+                    SiteContact.customer_site_id == site_id,
+                    sqlfunc.lower(SiteContact.email) == v.lower(),
+                    SiteContact.id != contact.id,
+                )
+                .first()
+            )
+            if dup:
+                raise HTTPException(409, f"Another contact at this site already uses {v}")
+        contact.email = v or None
+    elif field == "phone":
+        contact.phone = v or None
+    elif field == "contact_role":
+        contact.contact_role = _validate_role(v)
+    else:
+        setattr(contact, field, v or None)
+    contact.updated_at = datetime.now(timezone.utc)
+
+
+def _validate_role(role_raw: str) -> str | None:
+    """Validate a contact_role value: blank → None, unknown → raises HTTPException 400.
+
+    Used by set_contact_role chip endpoint AND edit_site_contact form endpoint so
+    both paths share one source of truth for canonical-role enforcement.
+    """
+    cleaned = (role_raw or "").strip()
+    if not cleaned:
+        return None
+    if cleaned not in _VALID_ROLES:
+        raise HTTPException(400, f"Invalid contact_role '{cleaned}'. Valid: {sorted(_VALID_ROLES)}")
+    return cleaned
+
+
+def _render_contacts_list(request: Request, user: User, company: Company, db: Session) -> HTMLResponse:
+    """Build and return the contacts grouped-list partial for the Contacts tab.
+
+    Shared by create, add-suggested, delete, set-primary, and edit endpoints so the five
+    swap paths stay in sync with one another.
+    """
+    ctx = _base_ctx(request, user, "customers")
+    ctx.update(
+        {
+            "company": company,
+            "contact_rows": _company_contact_rows(db, company.id, viewer=user),
+            "now_utc": datetime.now(timezone.utc),
+            "roles": CANONICAL_ROLES,
+        }
+    )
+    return template_response("htmx/partials/customers/tabs/_contacts_grouped_list.html", ctx)
 
 
 @router.post("/v2/partials/customers/{company_id}/tier", response_class=HTMLResponse)
@@ -5004,6 +7075,8 @@ async def set_company_tier(
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Not authorized")
 
     form = await request.form()
     tier_raw = (form.get("tier") or "").strip()
@@ -5059,13 +7132,11 @@ async def set_contact_role(
     if not company:
         raise HTTPException(404, "Company not found")
 
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Only the owner or an admin can edit this contact")
+
     form = await request.form()
-    role_raw = (form.get("contact_role") or "").strip()
-
-    if role_raw and role_raw not in _VALID_ROLES:
-        raise HTTPException(400, f"Invalid contact_role '{role_raw}'. Valid: {sorted(_VALID_ROLES)}")
-
-    contact.contact_role = role_raw or None
+    contact.contact_role = _validate_role(form.get("contact_role") or "")
     db.commit()
     db.refresh(contact)
 
@@ -5076,14 +7147,7 @@ async def set_contact_role(
         user.email,
         company_id,
     )
-    return template_response(
-        "htmx/partials/customers/_role_chip_editor.html",
-        {
-            "request": request,
-            "company": company,
-            "contact": contact,
-        },
-    )
+    return _render_contacts_list(request, user, company, db)
 
 
 @router.post(
@@ -5115,6 +7179,9 @@ async def set_contact_dnc(
     if not company:
         raise HTTPException(404, "Company not found")
 
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Only the owner or an admin can edit this contact")
+
     form = await request.form()
     dnc_raw = (form.get("do_not_contact") or "").strip()
 
@@ -5129,14 +7196,7 @@ async def set_contact_dnc(
         user.email,
         company_id,
     )
-    return template_response(
-        "htmx/partials/customers/_dnc_toggle.html",
-        {
-            "request": request,
-            "company": company,
-            "contact": contact,
-        },
-    )
+    return _render_contacts_list(request, user, company, db)
 
 
 _VALID_DISPOSITIONS = frozenset({"active", "bucket"})
@@ -5160,8 +7220,7 @@ async def set_company_disposition(
     if not company:
         raise HTTPException(404, "Company not found")
 
-    is_admin = user.role == UserRole.ADMIN
-    if not is_admin and company.account_owner_id != user.id:
+    if not can_manage_account(user, company, db):
         raise HTTPException(403, "Only the owner or an admin can set disposition")
 
     form = await request.form()
@@ -5188,6 +7247,113 @@ async def set_company_disposition(
         "htmx/partials/customers/_disposition_control.html",
         {"request": request, "company": company},
     )
+
+
+@router.post("/v2/partials/customers/{company_id}/deactivate", response_class=HTMLResponse)
+async def deactivate_company(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Archive (soft-delete) a company — sets is_active=False, clears ownership, stores
+    reason.
+
+    Gate: can_manage_account_team — primary owner or manager/admin only.
+    On archive: unassigns account owner (ownership_cleared_at stamped) and stores
+    optional disposition_reason from the form.
+    Re-renders the full company detail partial so the archived banner appears immediately.
+
+    Called by: kebab menu "Archive (Do Not Call)" button in detail.html.
+    """
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+    if not can_manage_account_team(user, company):
+        raise HTTPException(403, "Not authorized to deactivate accounts")
+    form = await request.form()
+    disposition_reason = form.get("disposition_reason", "").strip() or None
+    company.is_active = False
+    company.account_owner_id = None
+    company.ownership_cleared_at = datetime.now(timezone.utc)
+    company.disposition_reason = disposition_reason
+    db.commit()
+    db.refresh(company)
+
+    from app.cache.decorators import invalidate_prefix
+
+    invalidate_prefix("company_list")
+    invalidate_prefix("companies_typeahead")
+
+    logger.info("Company {} archived (DNC) by {}, reason={!r}", company_id, user.email, disposition_reason)
+    return await company_detail_partial(request=request, company_id=company_id, user=user, db=db)
+
+
+@router.post("/v2/partials/customers/{company_id}/reactivate", response_class=HTMLResponse)
+async def reactivate_company(
+    request: Request,
+    company_id: int,
+    from_archived: bool = Query(False, alias="from_archived"),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Restore an archived company by setting is_active=True.
+
+    Gate: is_manager_or_admin only.
+
+    from_archived=true: called from the archived-list view → returns the refreshed
+    archived_list partial (so the reactivated row disappears from the list).
+    Default (false): called from the company detail banner → returns the detail
+    partial (banner disappears after reactivate).
+    """
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+    if not is_manager_or_admin(user):
+        raise HTTPException(403, "Only managers and admins may reactivate archived accounts")
+    company.is_active = True
+    db.commit()
+    db.refresh(company)
+    logger.info("Company {} reactivated by {}", company_id, user.email)
+
+    if from_archived:
+        # Return refreshed archived list — reactivated company will no longer appear.
+        companies = db.query(Company).filter(Company.is_active.is_(False)).order_by(Company.name).all()
+        ctx = _base_ctx(request, user, "customers")
+        ctx.update(
+            {
+                "companies": companies,
+                "can_reactivate": True,  # gate already passed above
+            }
+        )
+        return template_response("htmx/partials/customers/archived_list.html", ctx)
+
+    return await company_detail_partial(request=request, company_id=company_id, user=user, db=db)
+
+
+@router.get("/v2/partials/customers/archived", response_class=HTMLResponse)
+async def archived_companies_list(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the list of archived (DNC) companies.
+
+    Gate: require_user — any logged-in user may VIEW the archived list.
+    Reactivate button is only rendered for manager/admin.
+
+    Called by: a future "Archived" tab or "View Archived" link in the CDM workspace.
+    """
+    from ..dependencies import is_manager_or_admin as _is_mgr_admin
+
+    companies = db.query(Company).filter(Company.is_active.is_(False)).order_by(Company.name).all()
+    ctx = {
+        "request": request,
+        "user": user,
+        "companies": companies,
+        "can_reactivate": _is_mgr_admin(user),
+    }
+    return template_response("htmx/partials/customers/archived_list.html", ctx)
 
 
 @router.post("/v2/partials/customers/{company_id}/send-to-prospecting", response_class=HTMLResponse)
@@ -5253,6 +7419,9 @@ async def set_contact_priority(
     if not company:
         raise HTTPException(404, "Company not found")
 
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Only the owner or an admin can edit this contact")
+
     form = await request.form()
     contact.is_priority = bool((form.get("is_priority") or "").strip())
     db.commit()
@@ -5265,10 +7434,7 @@ async def set_contact_priority(
         user.email,
         company_id,
     )
-    return template_response(
-        "htmx/partials/customers/_priority_toggle.html",
-        {"request": request, "company": company, "contact": contact},
-    )
+    return _render_contacts_list(request, user, company, db)
 
 
 @router.post(
@@ -5301,6 +7467,9 @@ async def set_contact_archive(
     if not company:
         raise HTTPException(404, "Company not found")
 
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Only the owner or an admin can edit this contact")
+
     form = await request.form()
     contact.is_archived = bool((form.get("is_archived") or "").strip())
     db.commit()
@@ -5313,157 +7482,7 @@ async def set_contact_archive(
         user.email,
         company_id,
     )
-    return template_response(
-        "htmx/partials/customers/_archive_toggle.html",
-        {"request": request, "company": company, "contact": contact},
-    )
-
-
-# ── Increment 2: left-panel company→site IA partials ──────────────────────────
-# These three routes carry STATIC first segments after /customers/ (header,
-# sites-accordion) or a specific /sites/{site_id} shape, so they MUST be declared
-# ABOVE the GET /v2/partials/customers/{company_id} catch-all below. Each writes
-# the right panel and honors the response-targets contract (hx-target #cdm-detail,
-# hx-target-error #cdm-error) from the caller markup.
-
-
-@router.get("/v2/partials/customers/{company_id}/header", response_class=HTMLResponse)
-async def company_header_partial(
-    request: Request,
-    company_id: int,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Company-header-only partial — header card + cadence + commercial strip, WITHOUT
-    the per-tab strip.
-
-    Loaded into #cdm-detail when a multi-site account's accordion header is clicked (the
-    site children carry the per-site contacts + open reqs).
-    """
-    company = (
-        db.query(Company)
-        .options(joinedload(Company.account_owner), joinedload(Company.sites))
-        .filter(Company.id == company_id)
-        .first()
-    )
-    if not company:
-        raise HTTPException(404, "Company not found")
-
-    from datetime import timezone as _tz
-
-    sites = [s for s in (company.sites or []) if s.is_active]
-    contact_rows = _company_contact_rows(db, company_id, sites=sites)
-    _stats = _company_commercial_stats(db, [company.id]).get(company.id, {})
-
-    ctx = _base_ctx(request, user, "customers")
-    ctx.update(
-        {
-            "company": company,
-            "cadence_state": _cadence_state(company.tier, company.last_outbound_at),
-            "next_best_touch": _next_best_touch(company.tier, company.last_outbound_at),
-            "contact_count": len(contact_rows),
-            "site_count": len(sites),
-            "win_rate": _stats.get("win_rate"),
-            "revenue_90d": _stats.get("revenue_90d", 0.0),
-            "last_req_date": _stats.get("last_req_date"),
-            "now_utc": datetime.now(_tz.utc),
-        }
-    )
-    return template_response("htmx/partials/customers/header.html", ctx)
-
-
-@router.get("/v2/partials/customers/{company_id}/sites-accordion", response_class=HTMLResponse)
-async def company_sites_accordion_partial(
-    request: Request,
-    company_id: int,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Lazy-loaded list of a company's ACTIVE sites — the children rendered under the
-    left-panel account accordion header.
-
-    Each links to the site-detail view.
-    """
-    company = db.query(Company).filter(Company.id == company_id).first()
-    if not company:
-        raise HTTPException(404, "Company not found")
-
-    sites = (
-        db.query(CustomerSite)
-        .filter(CustomerSite.company_id == company_id, CustomerSite.is_active.is_(True))
-        .order_by(CustomerSite.site_name)
-        .all()
-    )
-    ctx = _base_ctx(request, user, "customers")
-    ctx.update({"company": company, "sites": sites})
-    return template_response("htmx/partials/customers/_sites_accordion.html", ctx)
-
-
-@router.get("/v2/partials/customers/{company_id}/sites/{site_id}", response_class=HTMLResponse)
-async def company_site_detail_partial(
-    request: Request,
-    company_id: int,
-    site_id: int,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Site-scoped detail (site fields + per-site clocks + Contacts + "Open requisitions
-    at this site").
-
-    IDOR-safe: the site must belong to the
-    company AND be active, else 404 (mirrors site_contacts_list).
-    """
-    site = (
-        db.query(CustomerSite)
-        .options(joinedload(CustomerSite.owner))
-        .filter(
-            CustomerSite.id == site_id,
-            CustomerSite.company_id == company_id,
-            CustomerSite.is_active.is_(True),
-        )
-        .first()
-    )
-    if not site:
-        raise HTTPException(404, "Site not found")
-
-    company = db.query(Company).filter(Company.id == company_id).first()
-    if not company:
-        raise HTTPException(404, "Company not found")
-
-    from datetime import timezone as _tz
-
-    now_utc = datetime.now(_tz.utc)
-    # Site-scoped contacts — pass this single site so the rows are filtered to it
-    # (keeps the is_active + Increment-1 priority/archive sort).
-    contact_rows = _company_contact_rows(db, company_id, sites=[site])
-
-    # Open requisitions AT THIS SITE — FK-scoped, non-terminal only (canonical
-    # TERMINAL set = archived/won/lost/cancelled, so CANCELLED doesn't read as open).
-    open_reqs = (
-        db.query(Requisition)
-        .filter(
-            Requisition.customer_site_id == site_id,
-            Requisition.status.notin_(RequisitionStatus.TERMINAL),
-        )
-        .order_by(Requisition.created_at.desc().nullslast())
-        .limit(50)
-        .all()
-    )
-
-    ctx = _base_ctx(request, user, "customers")
-    ctx.update(
-        {
-            "company": company,
-            "site": site,
-            "contact_rows": contact_rows,
-            "open_reqs": open_reqs,
-            "now_utc": now_utc,
-            # Per-site cadence (tier=None → standard 30d target, like contacts).
-            "site_cadence": _cadence_state(None, site.last_outbound_at, now_utc),
-            "site_next_best_touch": _next_best_touch(None, site.last_outbound_at, now_utc),
-        }
-    )
-    return template_response("htmx/partials/customers/site_detail.html", ctx)
+    return _render_contacts_list(request, user, company, db)
 
 
 # ── Increment 3: AI-organization surfaces (per-account) ───────────────────────
@@ -5563,6 +7582,8 @@ async def company_apply_name(
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Not authorized")
 
     new_name = (name or "").strip()
     if not new_name:
@@ -5579,14 +7600,30 @@ async def company_apply_name(
     return HTMLResponse("")
 
 
+_VALID_CUSTOMER_TABS = frozenset({"contacts", "sites", "requisitions", "activity", "quotes", "buy_plans", "files"})
+
+
+def _get_next_account_task(db: Session, company_id: int):
+    """Return the soonest open task for an account, or None."""
+    from app.services.task_service import get_next_task_for_company
+
+    return get_next_task_for_company(db, company_id)
+
+
 @router.get("/v2/partials/customers/{company_id}", response_class=HTMLResponse)
 async def company_detail_partial(
     request: Request,
     company_id: int,
+    tab: str = Query("contacts"),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Return company detail as HTML partial with tabs."""
+    """Return company detail as HTML partial with tabs.
+
+    ``tab`` deep-links to the specified tab on first load (default: contacts).
+    Invalid tab values silently fall back to contacts.
+    """
+    active_tab = tab if tab in _VALID_CUSTOMER_TABS else "contacts"
     company = (
         db.query(Company)
         .options(joinedload(Company.account_owner), joinedload(Company.sites))
@@ -5632,9 +7669,23 @@ async def company_detail_partial(
     _stats = _company_commercial_stats(db, [company.id]).get(company.id, {})
     _cadence = _cadence_state(company.tier, company.last_outbound_at)
     _nbt = _next_best_touch(company.tier, company.last_outbound_at)
-    contact_rows = _company_contact_rows(db, company_id, sites=sites)
+    contact_rows = _company_contact_rows(db, company_id, sites=sites, viewer=user)
     segment_tags = _list_company_segment_tags(company_id=company_id, db=db)
     all_segment_tags = _list_all_segment_tags(db=db)
+    # Active sites (name-sorted) for the inlined Contacts site filter — same source
+    # the /tab/contacts route uses, so the default surface and the tab match.
+    active_sites = sorted(sites, key=lambda s: (s.site_name or "").lower())
+
+    # Phase 3: collaborators for the header chip list
+    collaborators = (
+        db.query(AccountCollaborator, User)
+        .join(User, AccountCollaborator.user_id == User.id)
+        .filter(AccountCollaborator.company_id == company_id)
+        .order_by(User.name)
+        .all()
+    )
+    can_manage_team = can_manage_account_team(user, company)
+    all_users = db.query(User).filter(User.is_active.is_(True)).order_by(User.name).all() if can_manage_team else []
 
     ctx = _base_ctx(request, user, "customers")
     ctx.update(
@@ -5652,8 +7703,11 @@ async def company_detail_partial(
             # Cadence card
             "cadence_state": _cadence,
             "next_best_touch": _nbt,
-            "contact_count": len(contact_rows),
+            "contact_count": sum(1 for r in contact_rows if not (r.get("contact") and r["contact"].is_archived)),
             "site_count": len(sites),
+            # Inlined Contacts surface (default tab) needs the site filter + roles.
+            "active_sites": active_sites,
+            "roles": CANONICAL_ROLES,
             # Commercial strip
             "win_rate": _stats.get("win_rate"),
             "revenue_90d": _stats.get("revenue_90d", 0.0),
@@ -5663,6 +7717,20 @@ async def company_detail_partial(
             # Segment tags
             "segment_tags": segment_tags,
             "all_segment_tags": all_segment_tags,
+            # Deep-link: which tab to activate on first render (validated above).
+            "active_tab": active_tab,
+            # WS2: known-field grid for the account card.
+            "known_account_fields": KNOWN_ACCOUNT_FIELDS,
+            # Next open task for the "Next step" summary line.
+            "next_account_task": _get_next_account_task(db, company_id),
+            # Phase 3: account collaborators for the header chip list
+            "collaborators": collaborators,
+            "all_users": all_users,
+            "can_manage_team": can_manage_team,
+            # Gate for the "Reactivate" button in the archived banner.
+            # Computed server-side (mirrors archived_list.html pattern) so the
+            # template never inspects raw role strings.
+            "can_reactivate": is_manager_or_admin(user),
         }
     )
     return template_response("htmx/partials/customers/detail.html", ctx)
@@ -5673,6 +7741,7 @@ async def company_tab(
     request: Request,
     company_id: int,
     tab: str,
+    site_id: int | None = Query(None),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -5681,7 +7750,7 @@ async def company_tab(
     if not company:
         raise HTTPException(404, "Company not found")
 
-    valid_tabs = {"sites", "contacts", "requisitions", "activity", "quotes", "buy_plans"}
+    valid_tabs = {"sites", "contacts", "requisitions", "activity", "quotes", "buy_plans", "files"}
     if tab not in valid_tabs:
         raise HTTPException(404, f"Unknown tab: {tab}")
 
@@ -5690,7 +7759,7 @@ async def company_tab(
 
         sites = (
             db.query(CustomerSite)
-            .options(joinedload(CustomerSite.owner))
+            .options(joinedload(CustomerSite.owner), joinedload(CustomerSite.site_contacts))
             .filter(CustomerSite.company_id == company_id, CustomerSite.is_active.is_(True))
             .all()
         )
@@ -5702,14 +7771,23 @@ async def company_tab(
         return template_response("htmx/partials/customers/tabs/sites_tab.html", ctx)
 
     elif tab == "contacts":
-        from datetime import timezone as _tz
-
+        active_sites = (
+            db.query(CustomerSite)
+            .filter(CustomerSite.company_id == company_id, CustomerSite.is_active.is_(True))
+            .order_by(CustomerSite.site_name)
+            .all()
+        )
+        # IDOR-safe: only honor site_id when it belongs to this company's active sites.
+        preselect_site_id = site_id if site_id and any(s.id == site_id for s in active_sites) else None
         ctx = _base_ctx(request, user, "customers")
         ctx.update(
             {
                 "company": company,
-                "contact_rows": _company_contact_rows(db, company_id),
-                "now_utc": datetime.now(_tz.utc),
+                "contact_rows": _company_contact_rows(db, company_id, viewer=user),
+                "now_utc": datetime.now(timezone.utc),
+                "active_sites": active_sites,
+                "roles": CANONICAL_ROLES,
+                "preselect_site_id": preselect_site_id,
             }
         )
         return template_response("htmx/partials/customers/tabs/contacts_tab.html", ctx)
@@ -5771,6 +7849,11 @@ async def company_tab(
         ctx.update({"company": company, "buy_plans": buy_plans})
         return template_response("htmx/partials/customers/tabs/buy_plans_tab.html", ctx)
 
+    elif tab == "files":
+        ctx = _base_ctx(request, user, "customers")
+        ctx["company"] = company
+        return template_response("htmx/partials/customers/tabs/files_tab.html", ctx)
+
     else:  # activity
         from sqlalchemy import or_ as or_clause
 
@@ -5790,71 +7873,515 @@ async def company_tab(
             .all()
         ]
 
-        # RFQ contacts across company's requisitions
-        contacts = []
+        # RFQ contacts across company's requisitions (canonical RFQ source)
+        rfq_contacts: list = []
+        req_map: dict = {}
         if req_ids:
-            contacts = (
+            rfq_contacts = (
                 db.query(RfqContact)
                 .filter(RfqContact.requisition_id.in_(req_ids))
                 .order_by(RfqContact.created_at.desc())
                 .limit(30)
                 .all()
             )
-        # Build req_map for backlinks
-        req_map = {}
-        if contacts:
-            linked_req_ids = {c.requisition_id for c in contacts}
-            for r in db.query(Requisition).filter(Requisition.id.in_(linked_req_ids)).all():
-                req_map[r.id] = r
+            if rfq_contacts:
+                linked_req_ids = {c.requisition_id for c in rfq_contacts}
+                for r in db.query(Requisition).filter(Requisition.id.in_(linked_req_ids)).all():
+                    req_map[r.id] = r
 
-        # Quotes for this account — union of site-linked and requisition-linked
-        # (matches the Quotes tab; site link alone misses NULL-site quotes).
-        cq = _company_quotes_query(db, company)
-        quotes = cq.order_by(Quote.created_at.desc().nullslast()).limit(20).all() if cq is not None else []
-
-        # Direct activity logs on this company + its requisitions
+        # Direct activity logs on this company + its requisitions (newest-first).
+        # Exclude rfq_sent: RfqContact rows are the canonical source; showing both
+        # would double-show the same RFQ.
+        _RFQ_SENT = ActivityType.RFQ_SENT
         activity_filters = [ActivityLog.company_id == company.id]
         if req_ids:
             activity_filters.append(ActivityLog.requisition_id.in_(req_ids))
         activities = (
             db.query(ActivityLog)
             .filter(or_clause(*activity_filters))
+            .filter(ActivityLog.activity_type != _RFQ_SENT)
             .order_by(ActivityLog.created_at.desc())
-            .limit(30)
+            .limit(50)
             .all()
         )
 
-        # Merge all three sources into a single chronological timeline
-        timeline = build_account_timeline(contacts, quotes, activities, req_map=req_map)
+        activities_truncated = len(activities) >= 50
 
-        # Compute truncation flag: True if ANY source hit its limit
-        # (RFQ .limit(30), quotes .limit(20), activities .limit(30))
-        timeline_truncated = len(contacts) >= 30 or len(quotes) >= 20 or len(activities) >= 30
+        # Bucket activities into type-sections (template renders by section).
+        # Emails section also carries RFQ contact items (tagged with _is_rfq=True);
+        # they are merged and sorted newest-first in the template.
+        _CALLS = frozenset({ActivityType.CALL_LOGGED})
+        _EMAILS = frozenset({ActivityType.EMAIL_SENT, ActivityType.EMAIL_RECEIVED})
+        _MEETINGS = frozenset({ActivityType.TEAMS_MESSAGE, ActivityType.WECHAT_MESSAGE, ActivityType.MEETING})
+        _NOTES = frozenset({ActivityType.NOTE, ActivityType.SALES_NOTE, ActivityType.CONTACT_NOTE})
 
-        # Load email intelligence for email activities (retained for potential future use)
-        email_external_ids = [a.external_id for a in activities if a.external_id and a.channel == "email"]
-        email_intel_map: dict = {}
-        if email_external_ids:
-            from ..models.email_intelligence import EmailIntelligence
+        sections: dict[str, list] = {"Calls": [], "Emails": [], "Meetings": [], "Notes": [], "Other": []}
 
-            ei_records = db.query(EmailIntelligence).filter(EmailIntelligence.message_id.in_(email_external_ids)).all()
-            email_intel_map = {ei.message_id: ei for ei in ei_records}
+        # Wrap RFQ contacts as tagged dicts so the template can branch on _is_rfq
+        for c in rfq_contacts:
+            sections["Emails"].append({"_is_rfq": True, "raw": c, "req": req_map.get(c.requisition_id)})
+
+        for a in activities:
+            at = a.activity_type
+            if at in _CALLS:
+                sections["Calls"].append(a)
+            elif at in _EMAILS:
+                sections["Emails"].append(a)
+            elif at in _MEETINGS:
+                sections["Meetings"].append(a)
+            elif at in _NOTES:
+                sections["Notes"].append(a)
+            else:
+                sections["Other"].append(a)
+
+        # Sort Emails section: RFQ dicts use raw.created_at; ActivityLog uses created_at
+        import datetime as _dt_mod
+
+        _epoch = _dt_mod.datetime(1970, 1, 1, tzinfo=_dt_mod.timezone.utc)
+
+        def _email_ts(item):
+            if isinstance(item, dict):
+                c = item["raw"]
+                return c.created_at or _epoch
+            return item.created_at or _epoch
+
+        sections["Emails"].sort(key=_email_ts, reverse=True)
+
+        # has_any_activity: drives empty-state vs. sections in the template
+        has_any_activity = bool(activities) or any(sections.values())
 
         ctx = _base_ctx(request, user, "customers")
         ctx.update(
             {
                 "company": company,
-                "timeline": timeline,
-                "timeline_truncated": timeline_truncated,
-                # Keep raw lists available for summary counts
-                "contacts": contacts,
-                "quotes": quotes,
                 "activities": activities,
+                "sections": sections,
+                "activities_truncated": activities_truncated,
                 "req_map": req_map,
-                "email_intel_map": email_intel_map,
+                "has_any_activity": has_any_activity,
             }
         )
         return template_response("htmx/partials/customers/tabs/activity_tab.html", ctx)
+
+
+# ── Contacts-tab management (C2) ───────────────────────────────────────
+
+
+@router.get(
+    "/v2/partials/customers/{company_id}/contacts/add-form",
+    response_class=HTMLResponse,
+)
+async def contacts_tab_add_form(
+    request: Request,
+    company_id: int,
+    site_id: int | None = None,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the shared _contact_form.html in add mode for the Contacts tab modal.
+
+    Optional site_id pre-selects that site in the form's Site dropdown — set by the "+
+    add here" affordance on a per-site section header (Contacts surface).
+    """
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    active_sites = (
+        db.query(CustomerSite)
+        .filter(CustomerSite.company_id == company_id, CustomerSite.is_active.is_(True))
+        .order_by(CustomerSite.site_name)
+        .all()
+    )
+    # Only honor site_id when it belongs to THIS company's active sites (IDOR-safe).
+    preselect_site_id = site_id if any(s.id == site_id for s in active_sites) else None
+    users = db.query(User).order_by(User.name).all()
+    return template_response(
+        "htmx/partials/customers/tabs/_contact_form.html",
+        {
+            "request": request,
+            "mode": "add",
+            "company": company,
+            "contact": None,
+            "site": None,
+            "sites": active_sites,
+            "preselect_site_id": preselect_site_id,
+            "roles": CANONICAL_ROLES,
+            "users": users,
+        },
+    )
+
+
+@router.post(
+    "/v2/partials/customers/{company_id}/contacts",
+    response_class=HTMLResponse,
+)
+async def contacts_tab_create(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Create a contact from the Contacts tab modal and return the grouped list.
+
+    Site resolution order:
+      1. site_id == '__new__' + new_site_name → create site first using a single
+         SQLAlchemy transaction — db.flush() sends the site INSERT to PG but does
+         not commit; if db.commit() fails the entire transaction (site + contact)
+         rolls back atomically.
+      2. site_id valid int → use that site
+      3. site_id blank/missing → auto-create an 'HQ' site for zero-site companies;
+         for companies with sites default to the first active HQ-typed site.
+
+    After resolving the site, creates SiteContact with email dedup per-site.
+    Duplicate email on the same site returns HTTP 409 with a user-visible error.
+    Returns the grouped list HTML for swap into #contacts-tab-list.
+    """
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Not authorized")
+
+    form = await request.form()
+    # Step 4: accept first_name + last_name (new form) or full_name (legacy fallback).
+    first_name_val = (form.get("first_name") or "").strip() or None
+    last_name_val = (form.get("last_name") or "").strip() or None
+    full_name_legacy = (form.get("full_name") or "").strip()
+
+    if first_name_val or last_name_val:
+        # New form: compose full_name from parts
+        if not first_name_val and not last_name_val:
+            raise HTTPException(400, "At least one of first_name or last_name is required")
+        full_name = f"{first_name_val or ''} {last_name_val or ''}".strip()
+    elif full_name_legacy:
+        # Legacy: full_name submitted directly; split into parts
+        full_name = full_name_legacy
+        parts = full_name.split(" ", 1)
+        first_name_val = parts[0] or None
+        last_name_val = parts[1].strip() if len(parts) > 1 else None
+    else:
+        raise HTTPException(400, "full_name is required")
+
+    email_val = (form.get("email") or "").strip().lower() or None
+    if email_val and "@" not in email_val:
+        raise HTTPException(400, "Invalid email address")
+
+    site_id_raw = (form.get("site_id") or "").strip()
+    new_site_name = (form.get("new_site_name") or "").strip()
+
+    # ── Resolve or pre-validate the site (no writes yet) ───────────────
+    # For existing sites, resolve + validate before any writes so dedup
+    # can return cleanly without needing a rollback.
+    existing_site: CustomerSite | None = None  # already-persisted site
+
+    if site_id_raw == "__new__":
+        if not new_site_name:
+            raise HTTPException(400, "new_site_name is required when site_id=__new__")
+        # Site will be created in the commit below
+    elif site_id_raw:
+        try:
+            sid = int(site_id_raw)
+        except ValueError:
+            raise HTTPException(400, "Invalid site_id")
+        existing_site = (
+            db.query(CustomerSite).filter(CustomerSite.id == sid, CustomerSite.company_id == company_id).first()
+        )
+        if not existing_site:
+            raise HTTPException(404, "Site not found")
+    else:
+        # No site_id provided — resolve default or mark for auto-create
+        current_sites = (
+            db.query(CustomerSite)
+            .filter(CustomerSite.company_id == company_id, CustomerSite.is_active.is_(True))
+            .order_by(CustomerSite.site_name)
+            .all()
+        )
+        if current_sites:
+            hq_site = next((s for s in current_sites if (s.site_type or "") == "hq"), None)
+            existing_site = hq_site or current_sites[0]
+        # else: zero-site → will auto-create below
+
+    # ── Per-site email dedup (only possible for existing sites) ─────────
+    # For __new__ + zero-site cases the target site has no ID yet, so no dedup needed.
+    if email_val and existing_site:
+        dup = (
+            db.query(SiteContact)
+            .filter(
+                SiteContact.customer_site_id == existing_site.id,
+                sqlfunc.lower(SiteContact.email) == email_val,
+            )
+            .first()
+        )
+        if dup:
+            # Dedup: 409 so the user knows the contact was not created
+            raise HTTPException(409, f"A contact with email {email_val} already exists at this site")
+
+    # ── Create site if needed (inside one transaction with the contact) ──
+    if existing_site:
+        site = existing_site
+    elif site_id_raw == "__new__":
+        site = CustomerSite(company_id=company_id, site_name=new_site_name, is_active=True)
+        db.add(site)
+        db.flush()  # get site.id before creating contact
+    else:
+        # Zero-site auto-create HQ
+        site = CustomerSite(company_id=company_id, site_name="HQ", site_type="hq", is_active=True)
+        db.add(site)
+        db.flush()
+
+    # ── Validate role ───────────────────────────────────────────────────
+    role = _validate_role(form.get("contact_role") or "")
+    is_priority = bool((form.get("is_priority") or "").strip())
+
+    # SiteContact.wechat_id is String(100); SQLite (tests) ignores VARCHAR lengths
+    # but Postgres 500s on over-length. Reject here, matching the legacy
+    # create_site_contact guard so the canonical add path is consistent.
+    wechat_id_val = (form.get("wechat_id") or "").strip()
+    if len(wechat_id_val) > 100:
+        raise HTTPException(400, "WeChat ID must be 100 characters or fewer.")
+
+    # ── reports_to_id (self-FK — not in EDITABLE_CONTACT_FIELDS) ────────────
+    reports_to_id_raw = (form.get("reports_to_id") or "").strip()
+    reports_to_id = int(reports_to_id_raw) if reports_to_id_raw.isdigit() else None
+    if reports_to_id is not None:
+        mgr = (
+            db.query(SiteContact)
+            .join(CustomerSite, SiteContact.customer_site_id == CustomerSite.id)
+            .filter(SiteContact.id == reports_to_id, CustomerSite.company_id == company_id)
+            .first()
+        )
+        if not mgr:
+            raise HTTPException(400, "reports_to must be a contact in the same company")
+
+    # ── Create contact ──────────────────────────────────────────────────
+    # contact_owner_id is intentionally NOT read from the form — ownership
+    # flows via site → account owner (per-contact picker removed in Phase 1).
+    contact = SiteContact(
+        customer_site_id=site.id,
+        full_name=full_name,
+        first_name=first_name_val,
+        last_name=last_name_val,
+        email=email_val,
+        title=(form.get("title") or "").strip() or None,
+        phone=(form.get("phone") or "").strip() or None,
+        secondary_email=(form.get("secondary_email") or "").strip() or None,
+        secondary_phone=(form.get("secondary_phone") or "").strip() or None,
+        wechat_id=wechat_id_val or None,
+        notes=(form.get("notes") or "").strip() or None,
+        linkedin_url=(form.get("linkedin_url") or "").strip() or None,
+        contact_role=role,
+        is_priority=is_priority,
+        reports_to_id=reports_to_id,
+    )
+    db.add(contact)
+    db.commit()
+    logger.info(
+        "Contact created for company {} site {} by {}",
+        company_id,
+        site.id,
+        user.email,
+    )
+    return _render_contacts_list(request, user, company, db)
+
+
+# ── Suggested-contacts UI (account-building loop) ──────────────────────
+
+
+@router.get(
+    "/v2/partials/customers/{company_id}/suggested-contacts",
+    response_class=HTMLResponse,
+)
+async def contacts_tab_suggested(
+    request: Request,
+    company_id: int,
+    domain: str = "",
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return suggested-contacts partial for the Contacts tab.
+
+    Calls the enrichment waterfall and renders _suggested_contacts.html with:
+    - per-row Add buttons (hx-post to /suggested-contacts/add)
+    - zero results + no errors → neutral "No contacts found"
+    - zero results + provider errors → amber "Couldn't reach <provider>" state
+    """
+    from app.enrichment_service import find_suggested_contacts_with_errors
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    if not domain:
+        domain = company.domain or company.website or ""
+    if not domain:
+        raise HTTPException(400, "No domain available for this company")
+
+    # Normalize (strip scheme/www/path)
+    domain = domain.replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0]
+
+    active_sites = (
+        db.query(CustomerSite)
+        .filter(CustomerSite.company_id == company_id, CustomerSite.is_active.is_(True))
+        .order_by(CustomerSite.site_name)
+        .all()
+    )
+
+    try:
+        contacts, errored = await find_suggested_contacts_with_errors(domain, company.name or "")
+    except Exception as exc:
+        import httpx
+
+        if isinstance(exc, (httpx.ConnectError, httpx.TimeoutException, httpx.NetworkError)):
+            logger.warning("find_suggested_contacts_with_errors connectivity error for company {}: {}", company_id, exc)
+        else:
+            logger.error(
+                "find_suggested_contacts_with_errors unexpected error for company {}: {}",
+                company_id,
+                exc,
+                exc_info=True,
+            )
+        contacts = []
+        errored = ["all"]
+
+    ctx = _base_ctx(request, user, "customers")
+    ctx.update(
+        {
+            "company": company,
+            "suggested": contacts,
+            "errored_providers": errored,
+            "active_sites": active_sites,
+        }
+    )
+    return template_response("htmx/partials/customers/tabs/_suggested_contacts.html", ctx)
+
+
+@router.post(
+    "/v2/partials/customers/{company_id}/suggested-contacts/add",
+    response_class=HTMLResponse,
+)
+async def contacts_tab_add_suggested(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Add a single suggested contact to a site and return the grouped list with toast.
+
+    Form fields: site_id (int), full_name, email, title, phone, linkedin_url,
+    source (default "enrichment"), email_verified ("1" / "true" = True),
+    from_enrich ("1" when posted from the header Enrich result panel).
+
+    Dedup: if the email already exists on the site, returns a "already on file"
+    toast — never a silent no-op or 409 error.
+    Returns _contacts_grouped_list.html + HX-Trigger toast for the Contacts tab; when
+    from_enrich=1, returns a self-contained "✓ Added" <li> fragment (the enrich panel
+    lives outside the Contacts tab, so it self-swaps the clicked row via outerHTML).
+    """
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Not authorized")
+
+    form = await request.form()
+    full_name = (form.get("full_name") or "").strip()
+    if not full_name:
+        raise HTTPException(400, "full_name is required")
+
+    site_id_raw = (form.get("site_id") or "").strip()
+    email_val = (form.get("email") or "").strip().lower() or None
+    title_val = (form.get("title") or "").strip() or None
+    phone_val = (form.get("phone") or "").strip() or None
+    linkedin_val = (form.get("linkedin_url") or "").strip() or None
+    source_val = (form.get("source") or "").strip() or "enrichment"
+    email_verified = (form.get("email_verified") or "").strip().lower() in ("1", "true", "yes")
+
+    # Resolve site
+    if site_id_raw:
+        try:
+            sid = int(site_id_raw)
+        except ValueError:
+            raise HTTPException(400, "Invalid site_id")
+        site = db.query(CustomerSite).filter(CustomerSite.id == sid, CustomerSite.company_id == company_id).first()
+        if not site:
+            raise HTTPException(404, "Site not found")
+    else:
+        # Default to HQ site
+        sites = (
+            db.query(CustomerSite).filter(CustomerSite.company_id == company_id, CustomerSite.is_active.is_(True)).all()
+        )
+        hq = next((s for s in sites if (s.site_type or "") == "hq"), None)
+        site = hq or (sites[0] if sites else None)
+        if not site:
+            raise HTTPException(400, "No site available — create a site first")
+
+    # Per-site email dedup
+    deduped = False
+    if email_val:
+        existing = (
+            db.query(SiteContact)
+            .filter(
+                SiteContact.customer_site_id == site.id,
+                sqlfunc.lower(SiteContact.email) == email_val,
+            )
+            .first()
+        )
+        if existing:
+            deduped = True
+    elif full_name:
+        existing_name = (
+            db.query(SiteContact)
+            .filter(
+                SiteContact.customer_site_id == site.id,
+                SiteContact.email.is_(None),
+                sqlfunc.lower(SiteContact.full_name) == full_name.lower(),
+            )
+            .first()
+        )
+        if existing_name:
+            deduped = True
+
+    if not deduped:
+        sc = SiteContact(
+            customer_site_id=site.id,
+            full_name=full_name,
+            email=email_val,
+            title=title_val,
+            phone=phone_val,
+            linkedin_url=linkedin_val,
+            enrichment_source=source_val,
+            email_verified=email_verified,
+        )
+        db.add(sc)
+        db.commit()
+        logger.info(
+            "add_suggested: created SiteContact for company {} site {} by {}",
+            company_id,
+            site.id,
+            user.email,
+        )
+        toast_msg = f"Added {full_name}"
+        toast_kind = "success"
+    else:
+        toast_msg = f"{full_name} is already on file"
+        toast_kind = "info"
+
+    # Enrich-panel Add: the result panel lives outside the Contacts tab (no
+    # #contacts-tab-list to re-render), so when the post is flagged from_enrich return a
+    # self-contained confirmation row that swaps the clicked <li> in place (hx-swap=outerHTML).
+    if (form.get("from_enrich") or "") == "1":
+        return HTMLResponse(
+            '<li class="px-4 py-3 bg-emerald-50 text-sm text-emerald-700 flex items-center gap-2">'
+            '<svg class="h-4 w-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" '
+            'stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>'
+            f"{html_mod.escape(toast_msg)}</li>",
+            headers={"HX-Trigger": json.dumps({"showToast": {"message": toast_msg, "type": toast_kind}})},
+        )
+
+    response = _render_contacts_list(request, user, company, db)
+    response.headers["HX-Trigger"] = json.dumps({"showToast": {"message": toast_msg, "type": toast_kind}})
+    return response
 
 
 # ── Sites & Site Contacts CRUD (Phase 4) ───────────────────────────────
@@ -5876,29 +8403,16 @@ async def create_site(
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Not authorized to manage this account")
 
     if not site_name.strip():
         return HTMLResponse('<div class="p-2 text-xs text-rose-600">Site name is required.</div>')
 
-    # Enforce one-owner-per-site rule: each user can only own one site
     try:
         parsed_owner_id = int(owner_id) if owner_id else None
     except (ValueError, TypeError):
         parsed_owner_id = None
-    if parsed_owner_id:
-        existing = (
-            db.query(CustomerSite)
-            .filter(
-                CustomerSite.owner_id == parsed_owner_id,
-            )
-            .first()
-        )
-        if existing:
-            owner_user = db.get(User, parsed_owner_id)
-            owner_name = owner_user.display_name if owner_user else f"User #{parsed_owner_id}"
-            return HTMLResponse(
-                f'<div class="p-2 text-xs text-rose-600">{owner_name} already owns site "{existing.site_name}". Each user can only own one site.</div>'
-            )
 
     site = CustomerSite(
         company_id=company_id,
@@ -5917,6 +8431,9 @@ async def create_site(
     if site.owner_id:
         _ = site.owner
 
+    # Avoid lazy-load during render: new site has zero contacts by definition.
+    site.site_contacts = []
+
     ctx = _base_ctx(request, user, "customers")
     ctx["company"] = company
     ctx["s"] = site
@@ -5931,13 +8448,66 @@ async def delete_site(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Soft-delete a site (set is_active=False)."""
+    """Soft-delete a site (set is_active=False).
+
+    Gate: can_manage_account — mirrors edit_site.  Any authenticated user can hit
+    this route, so we must check ownership before mutating.
+    """
+    from ..dependencies import can_manage_account
+
+    company = db.get(Company, company_id)
+    if company is None or not can_manage_account(user, company, db):
+        raise HTTPException(403, "Not authorized to manage this account")
     site = db.query(CustomerSite).filter(CustomerSite.id == site_id, CustomerSite.company_id == company_id).first()
     if not site:
         raise HTTPException(404, "Site not found")
     site.is_active = False
     db.commit()
     return HTMLResponse("")
+
+
+@router.post(
+    "/v2/partials/customers/{company_id}/sites/{site_id}/mark-dnc",
+    response_class=HTMLResponse,
+)
+async def mark_site_dnc(
+    request: Request,
+    company_id: int,
+    site_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Toggle do_not_contact on a CustomerSite.
+
+    Gate: can_manage_account — account owner, collaborator, or manager/admin.
+    A DNC site is excluded from call-list surfaces but NOT deleted.
+    Returns an updated site_card partial.
+
+    Called by: "Mark DNC" / "Clear DNC" toggle in site_card.html.
+    """
+    from ..dependencies import can_manage_account
+
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Not authorized to manage this account")
+    site = db.get(CustomerSite, site_id)
+    if not site or site.company_id != company_id:
+        raise HTTPException(404, "Site not found")
+    site.do_not_contact = not site.do_not_contact
+    db.commit()
+    db.refresh(site)
+    logger.info(
+        "Site {} do_not_contact={} by {}",
+        site_id,
+        site.do_not_contact,
+        user.email,
+    )
+    return template_response(
+        "htmx/partials/customers/tabs/site_card.html",
+        {"request": request, "s": site, "company": company, "user": user},
+    )
 
 
 @router.get(
@@ -5951,23 +8521,19 @@ async def site_contacts_list(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Load contacts for a specific site."""
+    """Redirect site-scoped contact list to the canonical grouped contacts surface.
+
+    site_contacts.html has been retired — all contact management now lives on the
+    canonical #contacts-tab-list surface (contacts_tab.html /
+    _contacts_grouped_list.html).
+    """
     site = db.query(CustomerSite).filter(CustomerSite.id == site_id, CustomerSite.company_id == company_id).first()
     if not site:
         raise HTTPException(404, "Site not found")
-
-    contacts = (
-        db.query(SiteContact)
-        .filter(SiteContact.customer_site_id == site_id, SiteContact.is_active.is_(True))
-        .order_by(SiteContact.is_primary.desc(), SiteContact.full_name)
-        .all()
-    )
     company = db.query(Company).filter(Company.id == company_id).first()
-    ctx = _base_ctx(request, user, "customers")
-    ctx["site"] = site
-    ctx["contacts"] = contacts
-    ctx["company"] = company
-    return template_response("htmx/partials/customers/tabs/site_contacts.html", ctx)
+    if not company:
+        raise HTTPException(404, "Company not found")
+    return _render_contacts_list(request, user, company, db)
 
 
 @router.post(
@@ -5990,6 +8556,9 @@ async def create_site_contact(
     site = db.query(CustomerSite).filter(CustomerSite.id == site_id, CustomerSite.company_id == company_id).first()
     if not site:
         raise HTTPException(404, "Site not found")
+    company = db.get(Company, company_id)
+    if company is None or not can_manage_account(user, company, db):
+        raise HTTPException(403, "Not authorized to manage this account")
 
     if not full_name.strip():
         return HTMLResponse('<div class="p-2 text-xs text-rose-600">Name is required.</div>')
@@ -6012,8 +8581,14 @@ async def create_site_contact(
             .first()
         )
         if existing:
-            # Already exists — just return the list
-            pass
+            # Deprecated route: dedup silently returns the list; legacy path kept for
+            # backwards-compat only (contacts_tab_create is the canonical add endpoint).
+            logger.info(
+                "Dedup [legacy create_site_contact]: email {} already exists at site {} (company {})",
+                email,
+                site_id,
+                company_id,
+            )
         else:
             contact = SiteContact(
                 customer_site_id=site_id,
@@ -6036,19 +8611,9 @@ async def create_site_contact(
         db.add(contact)
         db.commit()
 
-    # Return refreshed contacts list
-    contacts = (
-        db.query(SiteContact)
-        .filter(SiteContact.customer_site_id == site_id, SiteContact.is_active.is_(True))
-        .order_by(SiteContact.is_primary.desc(), SiteContact.full_name)
-        .all()
-    )
+    # Return canonical grouped contacts list (site_contacts.html is retired).
     company = db.query(Company).filter(Company.id == company_id).first()
-    ctx = _base_ctx(request, user, "customers")
-    ctx["site"] = site
-    ctx["contacts"] = contacts
-    ctx["company"] = company
-    return template_response("htmx/partials/customers/tabs/site_contacts.html", ctx)
+    return _render_contacts_list(request, user, company, db)
 
 
 @router.delete(
@@ -6063,7 +8628,22 @@ async def delete_site_contact(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Delete a site contact."""
+    """Delete a site contact and re-render the Contacts tab grouped list.
+
+    The Sites tab no longer carries a contact editor — the only render target is
+    #contacts-tab-list (the canonical Contacts tab surface).
+    """
+    # Validate site belongs to company BEFORE mutating — closes IDOR gap and
+    # guarantees company is available for the contacts-tab-list render path.
+    site = db.query(CustomerSite).filter(CustomerSite.id == site_id, CustomerSite.company_id == company_id).first()
+    if not site:
+        raise HTTPException(404, "Site not found")
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Not authorized")
+
     contact = (
         db.query(SiteContact).filter(SiteContact.id == contact_id, SiteContact.customer_site_id == site_id).first()
     )
@@ -6071,7 +8651,9 @@ async def delete_site_contact(
         raise HTTPException(404, "Contact not found")
     db.delete(contact)
     db.commit()
-    return HTMLResponse("")
+    logger.info("Contact {} deleted by {}", contact_id, user.email)
+
+    return _render_contacts_list(request, user, company, db)
 
 
 @router.post(
@@ -6095,6 +8677,8 @@ async def set_primary_contact(
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Not authorized")
 
     contact = (
         db.query(SiteContact).filter(SiteContact.id == contact_id, SiteContact.customer_site_id == site_id).first()
@@ -6111,18 +8695,265 @@ async def set_primary_contact(
     contact.is_primary = True
     db.commit()
 
-    # Return refreshed contacts list
-    contacts = (
+    # The Sites tab no longer carries a contact editor — always render the
+    # canonical Contacts tab surface (#contacts-tab-list).
+    return _render_contacts_list(request, user, company, db)
+
+
+@router.post(
+    "/v2/partials/customers/{company_id}/primary-contact/{contact_id}",
+    response_class=HTMLResponse,
+)
+async def set_account_primary_contact(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Set Company.primary_contact_id to contact_id (account-level primary contact).
+
+    IDOR-safe: verifies contact belongs to a site under company_id.
+    Owner-or-admin gate. Returns refreshed company detail partial.
+    """
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Only the owner or an admin can edit this account")
+
+    # IDOR-safe: verify contact belongs to a site under this company.
+    contact = (
         db.query(SiteContact)
-        .filter(SiteContact.customer_site_id == site_id, SiteContact.is_active.is_(True))
-        .order_by(SiteContact.is_primary.desc(), SiteContact.full_name)
+        .join(CustomerSite)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+
+    company.primary_contact_id = contact_id
+    company.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(company)
+    logger.info("Company {} primary contact set to {} by {}", company_id, contact_id, user.email)
+
+    return await company_detail_partial(request=request, company_id=company_id, user=user, db=db)
+
+
+@router.post(
+    "/v2/partials/customers/{company_id}/parent",
+    response_class=HTMLResponse,
+)
+async def set_parent_company(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Set Company.parent_company_id; validates no cycle.
+
+    Accepts parent_company_id= form field (empty → clear).
+    Cycle guard: rejects self-parent and any descendant as parent.
+    Owner-or-admin gate.
+    """
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    if not (is_manager_or_admin(user) or company.account_owner_id == user.id):
+        raise HTTPException(403, "Only the account owner or a manager can change company hierarchy")
+
+    form = await request.form()
+    raw = (form.get("parent_company_id") or "").strip()
+
+    _set_parent_company(db, company, raw)
+    company.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(company)
+    logger.info("Company {} parent set to {} by {}", company_id, raw or "None", user.email)
+
+    return await company_detail_partial(request=request, company_id=company_id, user=user, db=db)
+
+
+# ── Shared helper — parent-company validation used by set_parent_company + edit_company ──
+
+
+def _set_parent_company(db: Session, company: Company, raw_parent_id: str) -> None:
+    """Validate and set company.parent_company_id from the raw form string.
+
+    ``raw_parent_id`` is the stripped string value from the submitted form:
+      - empty string → clear the parent (set to None)
+      - integer string → validate, cycle-check, then set
+
+    Raises HTTPException(400) for bad input or cycle; HTTPException(404) for missing
+    parent. Does NOT commit — caller owns the transaction.
+    """
+    if not raw_parent_id:
+        company.parent_company_id = None
+        return
+
+    if not raw_parent_id.isdigit():
+        raise HTTPException(400, "parent_company_id must be an integer")
+
+    parent_id = int(raw_parent_id)
+    if parent_id == company.id:
+        raise HTTPException(400, "A company cannot be its own parent (would create a cycle)")
+
+    parent = db.get(Company, parent_id)
+    if not parent:
+        raise HTTPException(404, "Parent company not found")
+
+    # Cycle guard: walk ancestor chain of proposed parent; reject if we reach company.id.
+    visited: set[int] = set()
+    cursor = parent
+    while cursor.parent_company_id is not None:
+        if cursor.parent_company_id in visited:
+            break  # existing cycle in DB — stop walking
+        visited.add(cursor.id)
+        if cursor.parent_company_id == company.id:
+            raise HTTPException(400, "Setting this parent would create a cycle in the company hierarchy")
+        cursor = db.get(Company, cursor.parent_company_id)
+        if cursor is None:
+            break
+
+    company.parent_company_id = parent_id
+
+
+# ── Phase 3: Account Collaborators (add/remove helpers) ──────────────────
+
+
+@router.post("/v2/partials/customers/{company_id}/collaborators", response_class=HTMLResponse)
+async def add_account_collaborator(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Add a helper collaborator to this account.
+
+    Gate: can_manage_account_team (primary owner OR manager/admin ONLY).
+    Helpers, site-owners, and unrelated reps are denied (403).
+    Validates: user_id exists, is not the primary owner, is not already a collaborator.
+    Returns the refreshed collaborators partial.
+    """
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    if not can_manage_account_team(user, company):
+        raise HTTPException(403, "Only the account owner or a manager can manage the team")
+
+    form = await request.form()
+    raw_user_id = (form.get("user_id") or "").strip()
+    if not raw_user_id or not raw_user_id.isdigit():
+        raise HTTPException(400, "user_id is required and must be an integer")
+
+    target_user_id = int(raw_user_id)
+    target_user = db.get(User, target_user_id)
+    if not target_user:
+        raise HTTPException(404, "User not found")
+
+    if target_user_id == company.account_owner_id:
+        raise HTTPException(400, "The primary account owner cannot be added as a collaborator")
+
+    existing = db.query(AccountCollaborator).filter_by(company_id=company_id, user_id=target_user_id).first()
+    if existing:
+        raise HTTPException(409, "This user is already a collaborator on this account")
+
+    collaborator = AccountCollaborator(company_id=company_id, user_id=target_user_id, role="helper")
+    db.add(collaborator)
+    db.commit()
+    logger.info(
+        "Collaborator added: company={} user={} by {}",
+        company_id,
+        target_user_id,
+        user.email,
+    )
+
+    return await _collaborators_partial(request, company_id=company_id, user=user, db=db, company=company)
+
+
+@router.delete(
+    "/v2/partials/customers/{company_id}/collaborators/{collab_user_id}",
+    response_class=HTMLResponse,
+)
+async def remove_account_collaborator(
+    request: Request,
+    company_id: int,
+    collab_user_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Remove a helper collaborator from this account.
+
+    Gate: can_manage_account_team (primary owner OR manager/admin ONLY).
+    Helpers and unrelated reps are denied (403).
+    Returns the refreshed collaborators partial.
+    """
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    if not can_manage_account_team(user, company):
+        raise HTTPException(403, "Only the account owner or a manager can manage the team")
+
+    # Validate the target user exists (prevents state-probing via silent 200 on garbage ids)
+    if not db.get(User, collab_user_id):
+        raise HTTPException(404, "User not found")
+
+    collaborator = db.query(AccountCollaborator).filter_by(company_id=company_id, user_id=collab_user_id).first()
+    if collaborator:
+        db.delete(collaborator)
+        db.commit()
+        logger.info(
+            "Collaborator removed: company={} user={} by {}",
+            company_id,
+            collab_user_id,
+            user.email,
+        )
+
+    return await _collaborators_partial(request, company_id=company_id, user=user, db=db, company=company)
+
+
+async def _collaborators_partial(
+    request: Request,
+    company_id: int,
+    user: User,
+    db: Session,
+    company: "Company | None" = None,
+):
+    """Render the collaborators partial for a given company.
+
+    *company* may be passed by callers that already hold the loaded object to avoid a
+    second DB fetch.  If omitted, it is fetched here.
+    """
+    if company is None:
+        company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    collaborators = (
+        db.query(AccountCollaborator, User)
+        .join(User, AccountCollaborator.user_id == User.id)
+        .filter(AccountCollaborator.company_id == company_id)
+        .order_by(User.name)
         .all()
     )
+    can_manage_team = can_manage_account_team(user, company)
+    all_users = db.query(User).filter(User.is_active.is_(True)).order_by(User.name).all() if can_manage_team else []
+
     ctx = _base_ctx(request, user, "customers")
-    ctx["site"] = site
-    ctx["contacts"] = contacts
-    ctx["company"] = company
-    return template_response("htmx/partials/customers/tabs/site_contacts.html", ctx)
+    ctx.update(
+        {
+            "company": company,
+            "collaborators": collaborators,
+            "all_users": all_users,
+            "can_manage_team": can_manage_team,
+        }
+    )
+    return template_response("htmx/partials/customers/_collaborators.html", ctx)
 
 
 # ── Sprint 4: Company CRUD (parameterized routes) ──────────────────────
@@ -6142,9 +8973,12 @@ async def company_edit_form(
     users = (
         db.query(User).filter(User.role.in_((UserRole.BUYER, UserRole.TRADER, UserRole.MANAGER, UserRole.ADMIN))).all()
     )
+    all_companies = (
+        db.query(Company).filter(Company.id != company_id, Company.is_active.is_(True)).order_by(Company.name).all()
+    )
     return template_response(
         "htmx/partials/customers/edit_form.html",
-        {"request": request, "company": company, "users": users},
+        {"request": request, "company": company, "users": users, "all_companies": all_companies},
     )
 
 
@@ -6159,28 +8993,433 @@ async def edit_company(
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Not authorized to manage this account")
 
     form = await request.form()
     name = form.get("name", "").strip()
     if name:
         company.name = name
-    website = form.get("website", "").strip()
-    if website:
-        company.website = website
-    industry = form.get("industry", "").strip()
-    company.industry = industry or company.industry
     notes = form.get("notes", "").strip()
     company.notes = notes or company.notes
-
+    source = form.get("source", "").strip()
+    company.source = source or company.source
+    tax_id = form.get("tax_id", "").strip()
+    company.tax_id = tax_id or None
     owner_id = form.get("owner_id", "")
     if owner_id and owner_id.isdigit():
         company.account_owner_id = int(owner_id)
 
+    parent_company_id_raw = form.get("parent_company_id", "").strip()
+    _set_parent_company(db, company, parent_company_id_raw)
+
+    # Registry fields — DRY via apply_company_field.
+    # source/notes/tax_id are handled explicitly above with blank-sentinel "preserve
+    # current value" semantics; skip them here so the registry loop's clear-on-blank
+    # behaviour doesn't clobber that (a blank source must keep the existing value).
+    _form_handled = {"notes", "source", "tax_id"}
+    for f in EDITABLE_ACCOUNT_FIELDS:
+        if f in _form_handled:
+            continue
+        raw = form.get(f)
+        if raw is not None:  # field was submitted
+            apply_company_field(company, f, raw)
+    # updated_at set inside apply_company_field; ensure it's set for non-registry writes too
     company.updated_at = datetime.now(timezone.utc)
     db.commit()
     logger.info("Company {} edited by {}", company_id, user.email)
 
     return await company_detail_partial(request=request, company_id=company_id, user=user, db=db)
+
+
+# ── Inline Field Edit — Account (WS1) ─────────────────────────────────────
+
+
+@router.get(
+    "/v2/partials/customers/{company_id}/field/edit/{field}",
+    response_class=HTMLResponse,
+)
+async def company_field_edit_form(
+    request: Request,
+    company_id: int,
+    field: str,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the inline edit widget for a single account field."""
+    if field not in EDITABLE_ACCOUNT_FIELDS:
+        raise HTTPException(404, f"Unknown editable field: {field!r}")
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+    meta = EDITABLE_ACCOUNT_FIELDS[field]
+    return template_response(
+        "htmx/partials/customers/_field_edit.html",
+        {
+            **_base_ctx(request, user),
+            "obj": company,
+            "field": field,
+            "entity": "company",
+            "meta": meta,
+            "post_url": f"/v2/partials/customers/{company_id}/field",
+            "display_url": f"/v2/partials/customers/{company_id}/field/display/{field}",
+        },
+    )
+
+
+@router.get(
+    "/v2/partials/customers/{company_id}/field/display/{field}",
+    response_class=HTMLResponse,
+)
+async def company_field_display(
+    request: Request,
+    company_id: int,
+    field: str,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the display span for a single account field (cancel path)."""
+    if field not in EDITABLE_ACCOUNT_FIELDS:
+        raise HTTPException(404, f"Unknown editable field: {field!r}")
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+    meta = EDITABLE_ACCOUNT_FIELDS[field]
+    return template_response(
+        "htmx/partials/customers/_field_display.html",
+        {
+            **_base_ctx(request, user),
+            "obj": company,
+            "field": field,
+            "entity": "company",
+            "meta": meta,
+            "edit_url": f"/v2/partials/customers/{company_id}/field/edit/{field}",
+        },
+    )
+
+
+@router.post(
+    "/v2/partials/customers/{company_id}/field",
+    response_class=HTMLResponse,
+)
+async def company_field_post(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Save a single inline-edited account field; return the display span."""
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Only the owner or an admin can edit this account")
+    form = await request.form()
+    field = (form.get("field") or "").strip()
+    if field not in EDITABLE_ACCOUNT_FIELDS:
+        raise HTTPException(404, f"Unknown editable field: {field!r}")
+    value = form.get("value") or ""
+    apply_company_field(company, field, value)
+    db.commit()
+    logger.info("Company {} field {} edited inline by {}", company_id, field, user.email)
+    meta = EDITABLE_ACCOUNT_FIELDS[field]
+    return template_response(
+        "htmx/partials/customers/_field_display.html",
+        {
+            **_base_ctx(request, user),
+            "obj": company,
+            "field": field,
+            "entity": "company",
+            "meta": meta,
+            "edit_url": f"/v2/partials/customers/{company_id}/field/edit/{field}",
+        },
+    )
+
+
+# ── Inline Field Edit — Contact (WS1) ──────────────────────────────────────
+
+
+@router.get(
+    "/v2/partials/customers/{company_id}/contacts/{contact_id}/field/edit/{field}",
+    response_class=HTMLResponse,
+)
+async def contact_field_edit_form(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    field: str,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the inline edit widget for a single contact field."""
+    if field not in EDITABLE_CONTACT_FIELDS:
+        raise HTTPException(404, f"Unknown editable contact field: {field!r}")
+    contact = (
+        db.query(SiteContact)
+        .join(CustomerSite)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+    meta = EDITABLE_CONTACT_FIELDS[field]
+    extra: dict = {}
+    return template_response(
+        "htmx/partials/customers/_field_edit.html",
+        {
+            **_base_ctx(request, user),
+            "obj": contact,
+            "field": field,
+            "entity": "contact",
+            "meta": meta,
+            "post_url": f"/v2/partials/customers/{company_id}/contacts/{contact_id}/field",
+            "display_url": f"/v2/partials/customers/{company_id}/contacts/{contact_id}/field/display/{field}",
+            **extra,
+        },
+    )
+
+
+@router.get(
+    "/v2/partials/customers/{company_id}/contacts/{contact_id}/field/display/{field}",
+    response_class=HTMLResponse,
+)
+async def contact_field_display(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    field: str,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the display span for a single contact field (cancel path)."""
+    if field not in EDITABLE_CONTACT_FIELDS:
+        raise HTTPException(404, f"Unknown editable contact field: {field!r}")
+    contact = (
+        db.query(SiteContact)
+        .join(CustomerSite)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+    meta = EDITABLE_CONTACT_FIELDS[field]
+    return template_response(
+        "htmx/partials/customers/_field_display.html",
+        {
+            **_base_ctx(request, user),
+            "obj": contact,
+            "field": field,
+            "entity": "contact",
+            "meta": meta,
+            "edit_url": f"/v2/partials/customers/{company_id}/contacts/{contact_id}/field/edit/{field}",
+        },
+    )
+
+
+@router.post(
+    "/v2/partials/customers/{company_id}/contacts/{contact_id}/field",
+    response_class=HTMLResponse,
+)
+async def contact_field_post(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Save a single inline-edited contact field; return the display span.
+
+    IDOR-safe: the contact must belong to a site under {company_id}. Owner-or-admin only.
+    """
+    contact = (
+        db.query(SiteContact)
+        .join(CustomerSite)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+    company = db.get(Company, company_id)
+    if company is None or not can_manage_account(user, company, db):
+        raise HTTPException(403, "Only the owner or an admin can edit this contact")
+    form = await request.form()
+    field = (form.get("field") or "").strip()
+    if field not in EDITABLE_CONTACT_FIELDS:
+        raise HTTPException(404, f"Unknown editable contact field: {field!r}")
+    value = form.get("value") or ""
+    apply_contact_field(contact, field, value, contact.customer_site_id, db)
+    db.commit()
+    logger.info("Contact {} field {} edited inline by {}", contact_id, field, user.email)
+    meta = EDITABLE_CONTACT_FIELDS[field]
+    return template_response(
+        "htmx/partials/customers/_field_display.html",
+        {
+            **_base_ctx(request, user),
+            "obj": contact,
+            "field": field,
+            "entity": "contact",
+            "meta": meta,
+            "edit_url": f"/v2/partials/customers/{company_id}/contacts/{contact_id}/field/edit/{field}",
+        },
+    )
+
+
+# ── Custom Fields — Account + Contact (WS3) ────────────────────────────────
+
+
+def _render_custom_fields(request: Request, entity: str, obj, company_id: int):
+    """Render the _custom_fields.html partial for a company or contact."""
+    return template_response(
+        "htmx/partials/customers/_custom_fields.html",
+        {"request": request, "entity": entity, "obj": obj, "company_id": company_id},
+    )
+
+
+@router.post("/v2/partials/customers/{company_id}/custom-fields", response_class=HTMLResponse)
+async def company_add_custom_field(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Add or overwrite a label:value pair in company.custom_fields."""
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Only the owner or an admin can edit this account")
+    form = await request.form()
+    label = (form.get("label") or "").strip()
+    value = (form.get("value") or "").strip()
+    if not label:
+        raise HTTPException(400, "label is required")
+    existing = company.custom_fields or {}
+    updated = {**existing, label: value}
+    try:
+        company.custom_fields = updated
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    from sqlalchemy.orm.attributes import flag_modified
+
+    flag_modified(company, "custom_fields")
+    db.commit()
+    db.refresh(company)
+    logger.info("Company {} custom field '{}' set by {}", company_id, label, user.email)
+    return _render_custom_fields(request, "company", company, company_id)
+
+
+@router.delete(
+    "/v2/partials/customers/{company_id}/custom-fields/{label:path}",
+    response_class=HTMLResponse,
+)
+async def company_delete_custom_field(
+    request: Request,
+    company_id: int,
+    label: str,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Remove a label from company.custom_fields."""
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Only the owner or an admin can edit this account")
+    existing = dict(company.custom_fields or {})
+    existing.pop(label, None)
+    company.custom_fields = existing
+    from sqlalchemy.orm.attributes import flag_modified
+
+    flag_modified(company, "custom_fields")
+    db.commit()
+    db.refresh(company)
+    logger.info("Company {} custom field '{}' removed by {}", company_id, label, user.email)
+    return _render_custom_fields(request, "company", company, company_id)
+
+
+@router.post(
+    "/v2/partials/customers/{company_id}/contacts/{contact_id}/custom-fields",
+    response_class=HTMLResponse,
+)
+async def contact_add_custom_field(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Add or overwrite a label:value pair in contact.custom_fields.
+
+    IDOR-safe: verifies the contact belongs to a site under the path company.
+    """
+    contact = (
+        db.query(SiteContact)
+        .join(CustomerSite)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+    company = db.get(Company, company_id)
+    if company is None or not can_manage_account(user, company, db):
+        raise HTTPException(403, "Only the owner or an admin can edit this contact")
+    form = await request.form()
+    label = (form.get("label") or "").strip()
+    value = (form.get("value") or "").strip()
+    if not label:
+        raise HTTPException(400, "label is required")
+    existing = contact.custom_fields or {}
+    updated = {**existing, label: value}
+    try:
+        contact.custom_fields = updated
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    from sqlalchemy.orm.attributes import flag_modified
+
+    flag_modified(contact, "custom_fields")
+    db.commit()
+    db.refresh(contact)
+    logger.info("Contact {} custom field '{}' set by {}", contact_id, label, user.email)
+    return _render_custom_fields(request, "contact", contact, company_id)
+
+
+@router.delete(
+    "/v2/partials/customers/{company_id}/contacts/{contact_id}/custom-fields/{label:path}",
+    response_class=HTMLResponse,
+)
+async def contact_delete_custom_field(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    label: str,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Remove a label from contact.custom_fields.
+
+    IDOR-safe: verifies the contact belongs to a site under the path company.
+    """
+    contact = (
+        db.query(SiteContact)
+        .join(CustomerSite)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+    company = db.get(Company, company_id)
+    if company is None or not can_manage_account(user, company, db):
+        raise HTTPException(403, "Only the owner or an admin can edit this contact")
+    existing = dict(contact.custom_fields or {})
+    existing.pop(label, None)
+    contact.custom_fields = existing
+    from sqlalchemy.orm.attributes import flag_modified
+
+    flag_modified(contact, "custom_fields")
+    db.commit()
+    db.refresh(contact)
+    logger.info("Contact {} custom field '{}' removed by {}", contact_id, label, user.email)
+    return _render_custom_fields(request, "contact", contact, company_id)
 
 
 # ── Merge Duplicate ─────────────────────────────────────────────────────────
@@ -6204,10 +9443,14 @@ async def company_merge_preview(
     keep = db.query(Company).filter(Company.id == company_id).first()
     if not keep:
         raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, keep, db):
+        raise HTTPException(403, "Not authorized to manage this account")
 
     remove = db.query(Company).filter(Company.id == remove_id).first()
     if not remove:
         raise HTTPException(400, "Duplicate company not found")
+    if not can_manage_account(user, remove, db):
+        raise HTTPException(403, "Not authorized to manage the duplicate company")
 
     if keep.id == remove.id:
         raise HTTPException(400, "Cannot merge a company with itself")
@@ -6259,6 +9502,8 @@ async def company_merge(
     keep = db.query(Company).filter(Company.id == company_id).first()
     if not keep:
         raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, keep, db):
+        raise HTTPException(403, "Not authorized to manage this account")
 
     if remove_id == company_id:
         raise HTTPException(400, "Cannot merge a company with itself")
@@ -6266,6 +9511,8 @@ async def company_merge(
     remove = db.query(Company).filter(Company.id == remove_id).first()
     if not remove:
         raise HTTPException(400, "Duplicate company not found")
+    if not can_manage_account(user, remove, db):
+        raise HTTPException(403, "Not authorized to manage the duplicate company")
 
     try:
         result = _merge(company_id, remove_id, db)
@@ -6307,9 +9554,406 @@ async def company_merge_form(
     keep = db.query(Company).filter(Company.id == company_id).first()
     if not keep:
         raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, keep, db):
+        raise HTTPException(403, "Not authorized to manage this account")
 
     ctx = {"request": request, "keep": keep}
     return template_response("htmx/partials/customers/_merge_form.html", ctx)
+
+
+# ── Contact Merge Duplicate ──────────────────────────────────────────────────
+
+
+@router.get("/v2/partials/customers/{company_id}/contacts/search", response_class=HTMLResponse)
+async def contact_search_typeahead(
+    request: Request,
+    company_id: int,
+    q: str = "",
+    exclude_id: int = 0,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return contacts for a company as clickable typeahead results.
+
+    Used by the contact merge form to pick the "loser" contact. Excludes the keeper
+    (exclude_id=) so a contact cannot be merged with itself.
+    """
+    if not q.strip() or len(q.strip()) < 2:
+        return HTMLResponse("")
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company or not can_manage_account(user, company, db):
+        return HTMLResponse("")
+
+    contacts = (
+        db.query(SiteContact)
+        .join(CustomerSite)
+        .filter(
+            CustomerSite.company_id == company_id,
+            SiteContact.id != exclude_id,
+            SiteContact.full_name.ilike(f"%{escape_like(q.strip())}%", escape="\\"),
+        )
+        .order_by(SiteContact.full_name)
+        .limit(10)
+        .all()
+    )
+    rows = [
+        f'<button type="button" data-contact-id="{c.id}" '
+        f'class="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">'
+        f"{html_mod.escape(c.full_name or '')}"
+        f"{'  (' + html_mod.escape(c.email) + ')' if c.email else ''}"
+        f"</button>"
+        for c in contacts
+    ]
+    return HTMLResponse("\n".join(rows))
+
+
+@router.get(
+    "/v2/partials/customers/{company_id}/contacts/{contact_id}/merge-form",
+    response_class=HTMLResponse,
+)
+async def contact_merge_form(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the merge-duplicate modal form for a contact."""
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    keep = (
+        db.query(SiteContact)
+        .join(CustomerSite)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
+    if not keep:
+        raise HTTPException(404, "Contact not found")
+
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Only the owner or an admin can merge contacts")
+
+    return template_response(
+        "htmx/partials/customers/_contact_merge_form.html",
+        {"request": request, "keep": keep, "company": company},
+    )
+
+
+@router.get(
+    "/v2/partials/customers/{company_id}/contacts/{contact_id}/merge-preview",
+    response_class=HTMLResponse,
+)
+async def contact_merge_preview(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    remove_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return a preview of what will happen when remove_id is merged into contact_id."""
+    from ..models.intelligence import ActivityLog as _AL
+    from ..models.task import RequisitionTask as _RT
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Only the owner or an admin can merge contacts")
+
+    keep = (
+        db.query(SiteContact)
+        .join(CustomerSite)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
+    if not keep:
+        raise HTTPException(404, "Contact not found")
+
+    remove = (
+        db.query(SiteContact)
+        .join(CustomerSite)
+        .filter(SiteContact.id == remove_id, CustomerSite.company_id == company_id)
+        .first()
+    )
+    if not remove:
+        raise HTTPException(400, "Duplicate contact not found or not in this company")
+
+    if keep.id == remove.id:
+        raise HTTPException(400, "Cannot merge a contact with itself")
+
+    activity_count = db.query(sqlfunc.count(_AL.id)).filter(_AL.site_contact_id == remove.id).scalar() or 0
+    task_count = db.query(sqlfunc.count(_RT.id)).filter(_RT.site_contact_id == remove.id).scalar() or 0
+    from ..models.crm import SiteContactAttachment as _SCA
+
+    attachment_count = db.query(sqlfunc.count(_SCA.id)).filter(_SCA.site_contact_id == remove.id).scalar() or 0
+
+    return template_response(
+        "htmx/partials/customers/_contact_merge_preview.html",
+        {
+            "request": request,
+            "keep": keep,
+            "remove": remove,
+            "company": company,
+            "activity_count": activity_count,
+            "task_count": task_count,
+            "attachment_count": attachment_count,
+        },
+    )
+
+
+@router.post(
+    "/v2/partials/customers/{company_id}/contacts/{contact_id}/merge",
+    response_class=HTMLResponse,
+)
+async def contact_merge(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    remove_id: int = Form(...),
+    confirmed: str = Form(default=""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Merge remove_id into contact_id (the keeper).
+
+    Requires confirmed="true". Calls merge_contacts() — no FK logic here.
+    """
+    from ..services.contact_merge_service import merge_contacts as _merge
+
+    if confirmed.lower() != "true":
+        raise HTTPException(400, "Merge requires explicit confirmation (confirmed=true)")
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Only the owner or an admin can merge contacts")
+
+    keep = (
+        db.query(SiteContact)
+        .join(CustomerSite)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
+    if not keep:
+        raise HTTPException(404, "Contact not found")
+
+    if remove_id == contact_id:
+        raise HTTPException(400, "Cannot merge a contact with itself")
+
+    remove = (
+        db.query(SiteContact)
+        .join(CustomerSite)
+        .filter(SiteContact.id == remove_id, CustomerSite.company_id == company_id)
+        .first()
+    )
+    if not remove:
+        raise HTTPException(400, "Duplicate contact not found or not in this company")
+
+    try:
+        result = _merge(contact_id, remove_id, db)
+        db.commit()
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    logger.info(
+        "Manual contact merge: kept {} ({}), removed {} by {}",
+        contact_id,
+        keep.full_name,
+        remove_id,
+        user.email,
+    )
+
+    safe_name = html_mod.escape(keep.full_name or "")
+    response = HTMLResponse(
+        f'<p class="text-sm text-emerald-600 py-2">Merged into <strong>{safe_name}</strong>. '
+        f"{int(result.get('reassigned', 0))} record(s) reassigned.</p>",
+        status_code=200,
+    )
+    response.headers["HX-Trigger"] = json.dumps(
+        {"showToast": {"message": "Contact merged successfully", "type": "success"}}
+    )
+    return response
+
+
+# ── Contact Move ─────────────────────────────────────────────────────────────
+
+
+@router.get("/v2/partials/customers/{company_id}/sites-options")
+async def company_sites_options(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return JSON list of active sites for a company for the move-contact site picker.
+
+    Used by Alpine.js in _contact_move_form.html to populate the site select on
+    company change. Returns [{"id": N, "name": "..."}].
+    """
+    from fastapi.responses import JSONResponse
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        return JSONResponse([])
+
+    if not can_manage_account(user, company, db):
+        return JSONResponse([])
+
+    sites = (
+        db.query(CustomerSite)
+        .filter(CustomerSite.company_id == company_id, CustomerSite.is_active.is_(True))
+        .order_by(CustomerSite.site_name)
+        .all()
+    )
+    return JSONResponse([{"id": s.id, "name": s.site_name or f"Site {s.id}"} for s in sites])
+
+
+@router.get("/v2/partials/customers/{company_id}/contacts/{contact_id}/move-form", response_class=HTMLResponse)
+async def contact_move_form(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the move-contact modal form.
+
+    Lists all companies the user can manage so they can pick a target.
+    """
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    contact = (
+        db.query(SiteContact)
+        .join(CustomerSite)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Only the owner or an admin can move this contact")
+
+    # Build list of companies the user can manage (for the target picker)
+    if is_manager_or_admin(user):
+        manageable = db.query(Company).filter(Company.is_active.is_(True)).order_by(Company.name).all()
+    else:
+        # owned companies + collaborator companies
+        owned = db.query(Company).filter(Company.is_active.is_(True), Company.account_owner_id == user.id).all()
+        collab_ids = [
+            row[0]
+            for row in db.query(AccountCollaborator.company_id).filter(AccountCollaborator.user_id == user.id).all()
+        ]
+        if collab_ids:
+            collab_cos = db.query(Company).filter(Company.id.in_(collab_ids)).all()
+        else:
+            collab_cos = []
+        seen = {c.id for c in owned}
+        manageable = list(owned)
+        for co in collab_cos:
+            if co.id not in seen:
+                manageable.append(co)
+                seen.add(co.id)
+        manageable.sort(key=lambda c: c.name or "")
+
+    return template_response(
+        "htmx/partials/customers/_contact_move_form.html",
+        {
+            "request": request,
+            "contact": contact,
+            "company": company,
+            "companies": manageable,
+        },
+    )
+
+
+@router.post(
+    "/v2/partials/customers/{company_id}/contacts/{contact_id}/move",
+    response_class=HTMLResponse,
+)
+async def contact_move(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    target_site_id: int = Form(...),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Move contact_id to target_site_id.
+
+    Validates: source company accessible, target site exists + is active,
+    target company accessible by the same user. Re-renders contacts-tab-list
+    for the SOURCE company (contact is gone from here now).
+    """
+    # Source authz
+    source_company = db.query(Company).filter(Company.id == company_id).first()
+    if not source_company:
+        raise HTTPException(404, "Company not found")
+
+    if not can_manage_account(user, source_company, db):
+        raise HTTPException(403, "Only the owner or an admin can move this contact")
+
+    contact = (
+        db.query(SiteContact)
+        .join(CustomerSite)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+
+    # Target site validation
+    target_site = db.query(CustomerSite).filter(CustomerSite.id == target_site_id).first()
+    if not target_site:
+        raise HTTPException(400, "Target site not found")
+    if not target_site.is_active:
+        raise HTTPException(400, "Target site is inactive")
+
+    # Target authz
+    target_company = db.query(Company).filter(Company.id == target_site.company_id).first()
+    if not target_company:
+        raise HTTPException(400, "Target company not found")
+
+    if not can_manage_account(user, target_company, db):
+        raise HTTPException(403, "You do not have access to the target company")
+
+    # Email collision guard: (customer_site_id, email) unique constraint
+    if contact.email:
+        collision = (
+            db.query(SiteContact)
+            .filter(
+                SiteContact.customer_site_id == target_site_id,
+                SiteContact.email == contact.email,
+            )
+            .first()
+        )
+        if collision:
+            raise HTTPException(400, "A contact with this email already exists at the target site")
+
+    # Execute move
+    old_site_id = contact.customer_site_id
+    contact.customer_site_id = target_site_id
+    db.commit()
+
+    logger.info(
+        "Contact move: contact {} ({}) moved from site {} → site {} by {}",
+        contact_id,
+        contact.full_name,
+        old_site_id,
+        target_site_id,
+        user.email,
+    )
+
+    return _render_contacts_list(request, user, source_company, db)
 
 
 @router.get("/v2/partials/customers/{company_id}/sites/{site_id}/edit-form", response_class=HTMLResponse)
@@ -6343,24 +9987,25 @@ async def edit_site(
     site = db.query(CustomerSite).filter(CustomerSite.id == site_id, CustomerSite.company_id == company_id).first()
     if not site:
         raise HTTPException(404, "Site not found")
+    company = db.get(Company, company_id)
+    if company is None or not can_manage_account(user, company, db):
+        raise HTTPException(403, "Not authorized to manage this account")
 
     form = await request.form()
     site_name = form.get("site_name", "").strip()
     if not site_name:
         raise HTTPException(400, "site_name is required")
     site.site_name = site_name
-    site.address_line1 = form.get("address_line1", "").strip() or site.address_line1
-    site.address_line2 = form.get("address_line2", "").strip() or site.address_line2
-    site.city = form.get("city", "").strip() or site.city
-    site.state = form.get("state", "").strip() or site.state
-    site.zip = form.get("zip", "").strip() or site.zip
-    site.country = form.get("country", "").strip() or site.country
-    site.site_type = form.get("site_type", "").strip() or site.site_type
-    site.payment_terms = form.get("payment_terms", "").strip() or site.payment_terms
-    site.shipping_terms = form.get("shipping_terms", "").strip() or site.shipping_terms
-    notes_val = form.get("notes", "").strip()
-    if notes_val:
-        site.notes = notes_val
+    site.address_line1 = form.get("address_line1", "").strip() or None
+    site.address_line2 = form.get("address_line2", "").strip() or None
+    site.city = form.get("city", "").strip() or None
+    site.state = form.get("state", "").strip() or None
+    site.zip = form.get("zip", "").strip() or None
+    site.country = form.get("country", "").strip() or None
+    site.site_type = form.get("site_type", "").strip() or None
+    site.payment_terms = form.get("payment_terms", "").strip() or None
+    site.shipping_terms = form.get("shipping_terms", "").strip() or None
+    site.notes = form.get("notes", "").strip() or None
     owner_id = form.get("owner_id", "")
     if owner_id and str(owner_id).isdigit():
         site.owner_id = int(owner_id)
@@ -6372,30 +10017,85 @@ async def edit_site(
 
 
 @router.get(
-    "/v2/partials/customers/{company_id}/sites/{site_id}/contacts/{contact_id}/edit-form",
+    "/v2/partials/customers/{company_id}/contacts/{contact_id}/edit-form",
     response_class=HTMLResponse,
 )
-async def contact_edit_form(
+async def contact_edit_form_company_scoped(
     request: Request,
     company_id: int,
-    site_id: int,
     contact_id: int,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Return modal edit form for a site contact."""
+    """Return the shared _contact_form.html in edit mode for the Contacts tab.
+
+    This company-scoped route (no site_id in path) is called from the Contacts-tab kebab
+    Edit button. It returns _contact_form.html in 'edit' mode so the form posts to
+    /contacts/{contact_id}/edit and targets #contacts-tab-list — the canonical swap
+    target for the Contacts tab. The former site-scoped edit-form route and
+    contact_edit_modal.html have been retired.
+    """
+    # Validate the contact belongs to a site that belongs to this company
     contact = (
-        db.query(SiteContact).filter(SiteContact.id == contact_id, SiteContact.customer_site_id == site_id).first()
+        db.query(SiteContact)
+        .join(CustomerSite, SiteContact.customer_site_id == CustomerSite.id)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
     )
     if not contact:
         raise HTTPException(404, "Contact not found")
-    # Verify site belongs to company
-    site = db.query(CustomerSite).filter(CustomerSite.id == site_id, CustomerSite.company_id == company_id).first()
-    if not site:
-        raise HTTPException(404, "Site not found")
+    site = db.get(CustomerSite, contact.customer_site_id)
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+    # Same-company contacts for reports_to select, excluding self
+    site_contacts_for_select = (
+        db.query(SiteContact)
+        .join(CustomerSite, SiteContact.customer_site_id == CustomerSite.id)
+        .filter(
+            CustomerSite.company_id == company_id,
+            SiteContact.is_active.is_(True),
+            SiteContact.id != contact_id,
+        )
+        .order_by(SiteContact.full_name)
+        .all()
+    )
     return template_response(
-        "htmx/partials/customers/tabs/contact_edit_modal.html",
-        {"request": request, "contact": contact, "site": site, "company_id": company_id},
+        "htmx/partials/customers/tabs/_contact_form.html",
+        {
+            "request": request,
+            "mode": "edit",
+            "company": company,
+            "contact": contact,
+            "site": site,
+            "sites": [],
+            "roles": CANONICAL_ROLES,
+            "site_contacts_for_select": site_contacts_for_select,
+        },
+    )
+
+
+@router.get("/v2/partials/contacts/{contact_id}/files-modal", response_class=HTMLResponse)
+async def contact_files_modal(
+    request: Request,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the global-modal body hosting the shared attachments panel for a contact.
+
+    Loaded by the contact-card kebab "Files" action via $dispatch('open-modal').
+    Access mirrors the contact attachment endpoints: contact → site → company.
+    """
+    contact = db.get(SiteContact, contact_id)
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+    site = db.get(CustomerSite, contact.customer_site_id)
+    if not site or not db.get(Company, site.company_id):
+        raise HTTPException(404, "Contact not found")
+    return template_response(
+        "htmx/partials/customers/_contact_files_modal.html",
+        {"request": request, "contact": contact},
     )
 
 
@@ -6411,8 +10111,12 @@ async def edit_site_contact(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Update editable contact fields (never contact_role) and return refreshed contacts
-    panel."""
+    """Update editable contact fields and return refreshed Contacts tab grouped list.
+
+    Writes contact_role (validated via _validate_role; blank→NULL, unknown→400),
+    is_priority, and linkedin_url. Always renders #contacts-tab-list — the Sites tab no
+    longer carries a contact editor.
+    """
     contact = (
         db.query(SiteContact).filter(SiteContact.id == contact_id, SiteContact.customer_site_id == site_id).first()
     )
@@ -6421,136 +10125,58 @@ async def edit_site_contact(
     site = db.query(CustomerSite).filter(CustomerSite.id == site_id, CustomerSite.company_id == company_id).first()
     if not site:
         raise HTTPException(404, "Site not found")
+    company = db.get(Company, company_id)
+    if company is None or not can_manage_account(user, company, db):
+        raise HTTPException(403, "Not authorized to manage this account")
 
     form = await request.form()
-    full_name = form.get("full_name", "").strip()
-    if not full_name:
-        raise HTTPException(400, "full_name is required")
 
-    email_val = form.get("email", "").strip()
-    if email_val and "@" not in email_val:
-        raise HTTPException(400, "Invalid email address")
+    # Name fields — apply atomically so the "at least one required" check
+    # sees both values together rather than one-at-a-time.
+    first_name_raw = form.get("first_name")
+    last_name_raw = form.get("last_name")
+    if first_name_raw is not None or last_name_raw is not None:
+        new_first = (first_name_raw or "").strip() or None
+        new_last = (last_name_raw or "").strip() or None
+        if not new_first and not new_last:
+            raise HTTPException(400, "At least one of first_name or last_name is required")
+        contact.first_name = new_first
+        contact.last_name = new_last
+        _recompose_full_name(contact)
 
-    contact.full_name = full_name
-    contact.title = form.get("title", "").strip() or contact.title
-    contact.email = email_val or contact.email
-    phone_val = form.get("phone", "").strip()
-    if phone_val:
-        contact.phone = phone_val
-    wechat_val = form.get("wechat_id", "").strip()
-    if wechat_val:
-        contact.wechat_id = wechat_val
-    notes_val = form.get("notes", "").strip()
-    if notes_val:
-        contact.notes = notes_val
-    # contact_role is intentionally NOT updated here — owned by the P2b role setter
+    # Remaining registry fields (skip first_name/last_name — handled above)
+    for f in EDITABLE_CONTACT_FIELDS:
+        if f in ("first_name", "last_name"):
+            continue
+        raw = form.get(f)
+        if raw is not None:  # field was submitted
+            apply_contact_field(contact, f, raw, site_id, db)
+
+    # Non-registry fields
+    contact.notes = (form.get("notes", "") or "").strip() or None
+    contact.is_priority = bool((form.get("is_priority", "") or "").strip())
+    # reports_to_id — self-FK, not in EDITABLE_CONTACT_FIELDS
+    reports_to_id_raw = form.get("reports_to_id")
+    if reports_to_id_raw is not None:
+        v = reports_to_id_raw.strip()
+        new_reports_to_id = int(v) if v.isdigit() else None
+        if new_reports_to_id is not None:
+            if new_reports_to_id == contact_id:
+                raise HTTPException(400, "reports_to must be a contact in the same company")
+            mgr = (
+                db.query(SiteContact)
+                .join(CustomerSite, SiteContact.customer_site_id == CustomerSite.id)
+                .filter(SiteContact.id == new_reports_to_id, CustomerSite.company_id == company_id)
+                .first()
+            )
+            if not mgr:
+                raise HTTPException(400, "reports_to must be a contact in the same company")
+        contact.reports_to_id = new_reports_to_id
     contact.updated_at = datetime.now(timezone.utc)
     db.commit()
     logger.info("Contact {} edited by {}", contact_id, user.email)
 
-    contacts = (
-        db.query(SiteContact)
-        .filter(SiteContact.customer_site_id == site_id, SiteContact.is_active.is_(True))
-        .order_by(SiteContact.is_primary.desc(), SiteContact.full_name)
-        .all()
-    )
-    company = db.query(Company).filter(Company.id == company_id).first()
-    ctx = _base_ctx(request, user, "customers")
-    ctx["site"] = site
-    ctx["contacts"] = contacts
-    ctx["company"] = company
-    return template_response("htmx/partials/customers/tabs/site_contacts.html", ctx)
-
-
-@router.post(
-    "/v2/partials/customers/{company_id}/sites/{site_id}/contacts/{contact_id}/notes",
-    response_class=HTMLResponse,
-)
-async def add_site_contact_note(
-    request: Request,
-    company_id: int,
-    site_id: int,
-    contact_id: int,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Add a note to a site contact and return updated notes list."""
-    from ..models.intelligence import ActivityLog
-
-    contact = (
-        db.query(SiteContact).filter(SiteContact.id == contact_id, SiteContact.customer_site_id == site_id).first()
-    )
-    if not contact:
-        raise HTTPException(404, "Contact not found")
-
-    form = await request.form()
-    notes_text = form.get("notes", "").strip()
-    if not notes_text:
-        raise HTTPException(400, "Notes cannot be empty")
-
-    log = ActivityLog(
-        user_id=user.id,
-        activity_type=ActivityType.CONTACT_NOTE,
-        channel=Channel.MANUAL,
-        contact_name=contact.full_name or "",
-        contact_email=contact.email or "",
-        notes=notes_text,
-    )
-    db.add(log)
-    db.commit()
-    logger.info("Note added for site contact {} by {}", contact_id, user.email)
-
-    # Return refreshed notes
-    return await get_site_contact_notes(
-        request=request,
-        company_id=company_id,
-        site_id=site_id,
-        contact_id=contact_id,
-        user=user,
-        db=db,
-    )
-
-
-@router.get(
-    "/v2/partials/customers/{company_id}/sites/{site_id}/contacts/{contact_id}/notes",
-    response_class=HTMLResponse,
-)
-async def get_site_contact_notes(
-    request: Request,
-    company_id: int,
-    site_id: int,
-    contact_id: int,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Return notes timeline for a site contact."""
-    from ..models.intelligence import ActivityLog
-
-    contact = (
-        db.query(SiteContact).filter(SiteContact.id == contact_id, SiteContact.customer_site_id == site_id).first()
-    )
-    if not contact:
-        raise HTTPException(404, "Contact not found")
-
-    notes = (
-        (
-            db.query(ActivityLog)
-            .filter(
-                ActivityLog.activity_type == "contact_note",
-                ActivityLog.contact_email == contact.email,
-            )
-            .order_by(ActivityLog.created_at.desc())
-            .limit(20)
-            .all()
-        )
-        if contact.email
-        else []
-    )
-
-    return template_response(
-        "htmx/partials/customers/contact_notes.html",
-        {"request": request, "contact": contact, "notes": notes, "company_id": company_id, "site_id": site_id},
-    )
+    return _render_contacts_list(request, user, company, db)
 
 
 # ── Sprint 5: Quote Workflow Completion ────────────────────────────────
@@ -6776,6 +10402,7 @@ async def log_phone_call(
 ):
     """Log a phone call to a vendor and return updated activity tab."""
     get_requisition_or_404(db, req_id)  # validates existence
+    require_requisition_access(db, req_id, user)
 
     form = await request.form()
     vendor_name = form.get("vendor_name", "").strip()
@@ -6902,6 +10529,7 @@ async def update_response_status(
     """Update vendor response status (reviewed/rejected/flagged)."""
     from ..models.offers import VendorResponse
 
+    require_requisition_access(db, req_id, user)
     vr = (
         db.query(VendorResponse)
         .filter(
@@ -7265,7 +10893,7 @@ def _default_lens(user: User, db: Session) -> str:
 async def buy_plans_list_partial(
     request: Request,
     lens: str = "",
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.BUY_PLANS)),
     db: Session = Depends(get_db),
 ):
     """Return the Buy Plan Deal Hub shell.
@@ -7383,9 +11011,11 @@ async def buy_plan_detail_partial(
     db: Session = Depends(get_db),
 ):
     """Return buy plan detail as HTML partial."""
-    bp = (
-        db.query(BuyPlan)
-        .options(
+    bp = get_buyplan_for_user(
+        db,
+        user,
+        plan_id,
+        options=[
             joinedload(BuyPlan.lines).joinedload(BuyPlanLine.offer),
             joinedload(BuyPlan.lines).joinedload(BuyPlanLine.requirement),
             joinedload(BuyPlan.lines).joinedload(BuyPlanLine.buyer),
@@ -7393,12 +11023,8 @@ async def buy_plan_detail_partial(
             joinedload(BuyPlan.requisition),
             joinedload(BuyPlan.submitted_by),
             joinedload(BuyPlan.approved_by),
-        )
-        .filter(BuyPlan.id == plan_id)
-        .first()
+        ],
     )
-    if not bp:
-        raise HTTPException(404, "Buy plan not found")
 
     ctx = _base_ctx(request, user, "buy-plans")
     ctx.update(
@@ -7426,6 +11052,9 @@ async def buy_plan_submit_partial(
         run_notify_bg,
     )
     from ..services.buyplan_workflow import submit_buy_plan
+
+    # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation.
+    get_buyplan_for_user(db, user, plan_id)
 
     form = await request.form()
     so = form.get("sales_order_number", "").strip()
@@ -7550,6 +11179,9 @@ async def buy_plan_confirm_po_partial(
     from ..services.buyplan_notifications import notify_po_confirmed, run_notify_bg
     from ..services.buyplan_workflow import confirm_po
 
+    # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation.
+    get_buyplan_for_user(db, user, plan_id)
+
     form = await request.form()
     po_number = form.get("po_number", "").strip()
     ship_date_str = form.get("estimated_ship_date", "")
@@ -7629,6 +11261,9 @@ async def buy_plan_flag_issue_partial(
     """Buyer flags issue on a line — returns refreshed detail."""
     from ..services.buyplan_workflow import flag_line_issue
 
+    # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation.
+    get_buyplan_for_user(db, user, plan_id)
+
     form = await request.form()
     issue_type = form.get("issue_type", "other")
     note = form.get("note", "")
@@ -7653,8 +11288,8 @@ async def buy_plan_cancel_partial(
     from ..services.buyplan_notifications import notify_cancelled, run_notify_bg
     from ..services.buyplan_workflow import cancel_buy_plan
 
-    if not db.get(BuyPlan, plan_id):
-        raise HTTPException(404, "Buy plan not found")
+    # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation.
+    get_buyplan_for_user(db, user, plan_id)
 
     form = await request.form()
     try:
@@ -7686,6 +11321,22 @@ async def settings_ops_group_tab(
     return template_response("htmx/partials/settings/ops_group.html", ctx)
 
 
+@router.get("/v2/partials/settings/users", response_class=HTMLResponse)
+async def settings_users_tab(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Users management tab (invite / role / activate) — admin only."""
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(403, "Admin only")
+    from .admin.users import users_context
+
+    ctx = _base_ctx(request, user, "settings")
+    ctx.update(users_context(db))
+    return template_response("htmx/partials/settings/users.html", ctx)
+
+
 @router.post("/v2/partials/buy-plans/{plan_id}/reset", response_class=HTMLResponse)
 async def buy_plan_reset_partial(
     request: Request,
@@ -7695,6 +11346,9 @@ async def buy_plan_reset_partial(
 ):
     """Reset halted/cancelled plan to draft — returns refreshed detail."""
     from ..services.buyplan_workflow import reset_buy_plan_to_draft
+
+    # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation.
+    get_buyplan_for_user(db, user, plan_id)
 
     try:
         reset_buy_plan_to_draft(plan_id, user, db)
@@ -7718,7 +11372,7 @@ async def v2_sourcing_page(request: Request, requirement_id: int, db: Session = 
         )
     ctx = _base_ctx(request, user, "requisitions")
     ctx["partial_url"] = f"/v2/partials/sourcing/{requirement_id}"
-    return template_response("htmx/base_page.html", ctx)
+    return page_response(ctx)
 
 
 @router.get("/v2/sourcing/leads/{lead_id}", response_class=HTMLResponse)
@@ -7731,7 +11385,7 @@ async def v2_lead_detail_page(request: Request, lead_id: int, db: Session = Depe
         )
     ctx = _base_ctx(request, user, "requisitions")
     ctx["partial_url"] = f"/v2/partials/sourcing/leads/{lead_id}"
-    return template_response("htmx/base_page.html", ctx)
+    return page_response(ctx)
 
 
 @router.get("/v2/partials/sourcing/{requirement_id}/stream")
@@ -8026,7 +11680,13 @@ async def lead_status_update(
     Returns updated lead card when called from results view (for OOB swap), or updated
     lead detail when called from lead detail page.
     """
+    from ..models.sourcing_lead import SourcingLead
     from ..services.sourcing_leads import update_lead_status
+
+    _lead = db.get(SourcingLead, lead_id)
+    if not _lead:
+        raise HTTPException(404, "Lead not found")
+    require_requisition_access(db, _lead.requisition_id, user, label="Lead")
 
     form = await request.form()
     status_val = form.get("status", "").strip()
@@ -8111,7 +11771,13 @@ async def lead_feedback(
 
     Returns updated lead detail.
     """
+    from ..models.sourcing_lead import SourcingLead
     from ..services.sourcing_leads import append_lead_feedback
+
+    _lead = db.get(SourcingLead, lead_id)
+    if not _lead:
+        raise HTTPException(404, "Lead not found")
+    require_requisition_access(db, _lead.requisition_id, user, label="Lead")
 
     form = await request.form()
     note = form.get("note", "").strip() or None
@@ -8145,7 +11811,7 @@ async def v2_sourcing_workspace_page(request: Request, requirement_id: int, db: 
         )
     ctx = _base_ctx(request, user, "requisitions")
     ctx["partial_url"] = f"/v2/partials/sourcing/{requirement_id}/workspace"
-    return template_response("htmx/base_page.html", ctx)
+    return page_response(ctx)
 
 
 @router.get("/v2/partials/sourcing/{requirement_id}/workspace", response_class=HTMLResponse)
@@ -8471,7 +12137,7 @@ async def materials_list_partial(
 @router.get("/v2/partials/materials/workspace", response_class=HTMLResponse)
 async def materials_workspace_partial(
     request: Request,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.MATERIALS)),
     db: Session = Depends(get_db),
 ):
     """Render the faceted search workspace layout."""
@@ -9185,6 +12851,8 @@ async def material_tab_partial(
             .all()
         )
         return template_response("htmx/partials/materials/tabs/price_history.html", ctx)
+    elif tab_name == "files":
+        return template_response("htmx/partials/materials/tabs/files.html", ctx)
     else:
         return HTMLResponse(
             "<p class='text-gray-400 text-sm py-4 text-center'>Unknown tab</p>",
@@ -9712,6 +13380,16 @@ def _prospect_toast(response, message: str, kind: str = "success") -> None:
     response.headers["HX-Trigger"] = json.dumps({"showToast": {"message": message, "type": kind}})
 
 
+def settings_toast(response, message: str, kind: str = "success") -> None:
+    """Attach a showToast HX-Trigger for settings mutation responses.
+
+    Called by settings mutation handlers to surface success/error feedback via the
+    Alpine $store.toast. Mirrors _prospect_toast but is scoped to settings so later
+    tasks can import it cleanly.
+    """
+    response.headers["HX-Trigger"] = json.dumps({"showToast": {"message": message, "type": kind}})
+
+
 def _wants_detail(request: Request) -> bool:
     """True when an action came from the detail view (targets #main-content) rather than
     from an in-grid card (targets #prospect-<id>) — so we return the right partial."""
@@ -9821,7 +13499,7 @@ async def prospecting_list_partial(
     sort: str = "ai_match_desc",
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.PROSPECTING)),
     db: Session = Depends(get_db),
 ):
     """Return the prospecting card grid as an HTML partial.
@@ -10254,13 +13932,67 @@ async def reclaim_prospect_htmx(
     )
 
 
+@router.post("/v2/partials/prospects/{prospect_id}/reassign", response_class=HTMLResponse)
+async def reassign_prospect_htmx(
+    request: Request,
+    prospect_id: int,
+    to_user_id: int = Form(...),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Manager/admin reassigns a swept prospect's company to another owner.
+
+    Overrides the Phase 4 reclaim cooldown: dismisses the swept prospect, sets the new
+    owner, and clears the cooldown. Manager/admin only. Returns the refreshed prospect
+    card/detail with a showToast trigger.
+    """
+    if not is_manager_or_admin(user):
+        raise HTTPException(403, "Only a manager or admin can reassign an account")
+
+    from ..services.prospect_reclamation import reassign_account
+
+    prospect = db.get(ProspectAccount, prospect_id)
+    if not prospect:
+        raise HTTPException(404, "Prospect not found")
+    if not prospect.company_id:
+        raise HTTPException(400, "Prospect is not linked to a company; nothing to reassign")
+
+    error = None
+    result = None
+    try:
+        result = reassign_account(prospect.company_id, to_user_id, user, db)
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
+    except LookupError:
+        raise HTTPException(404, "Company not found")
+    except ValueError as e:
+        error = str(e)
+
+    prospect = db.get(ProspectAccount, prospect_id)
+    if not prospect:
+        raise HTTPException(404, "Prospect not found")
+
+    form = await request.form()
+    flt_status = form.get("flt_status", "")
+    msg = error or f"Reassigned {result['company_name']}"
+    return _prospect_action_response(
+        request,
+        user,
+        db,
+        prospect,
+        message=msg,
+        kind="error" if error else "success",
+        flt_status=flt_status,
+    )
+
+
 # ── Settings partials ────────────────────────────────────────────────
 
 
 @router.get("/v2/partials/settings", response_class=HTMLResponse)
 async def settings_partial(
     request: Request,
-    tab: str = "sources",
+    tab: str = "connectors",
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -10277,11 +14009,10 @@ async def settings_sources_tab(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Sources tab content."""
-    sources = db.query(ApiSource).order_by(ApiSource.display_name).all()
-    ctx = _base_ctx(request, user, "settings")
-    ctx["sources"] = sources
-    return template_response("htmx/partials/settings/sources.html", ctx)
+    """Sources tab — redirects to unified Connectors tab."""
+    from fastapi.responses import RedirectResponse
+
+    return RedirectResponse("/v2/partials/settings/connectors", status_code=302)
 
 
 @router.get("/v2/partials/settings/system", response_class=HTMLResponse)
@@ -10290,14 +14021,47 @@ async def settings_system_tab(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """System config tab — admin only."""
+    """System config tab — admin only.
+
+    Renders the curated typed controls (3 toggles + 1 number input) for the four user-
+    facing flags. Effective values come from the Task-10 resolver (DB row wins, else the
+    env-backed default) so each control reflects reality. Internal watermark keys are
+    surfaced read-only in a collapsed "Job state" disclosure, never as editable
+    controls.
+    """
     if user.role != UserRole.ADMIN:
         raise HTTPException(403, "Admin only")
-    from ..services.admin_service import get_all_config
+    from ..config import settings as app_settings
+    from ..routers.admin.system import SYSTEM_JOB_STATE_KEYS, SYSTEM_SETTINGS_META
+    from ..services.admin_service import (
+        get_all_config,
+        get_effective_flag,
+        get_effective_int,
+    )
 
-    config = get_all_config(db)
+    # Resolve each curated setting's effective value, threading the env default so a
+    # missing DB row falls back to the same value the background jobs read today.
+    env_defaults = {
+        "email_mining_enabled": app_settings.email_mining_enabled,
+        "proactive_matching_enabled": app_settings.proactive_matching_enabled,
+        "activity_tracking_enabled": app_settings.activity_tracking_enabled,
+        "inbox_scan_interval_min": app_settings.inbox_scan_interval_min,
+    }
+    settings_view = []
+    for key, meta in SYSTEM_SETTINGS_META.items():
+        if meta["type"] == "bool":
+            value = get_effective_flag(db, key, env_defaults[key])
+        else:
+            value = get_effective_int(db, key, env_defaults[key])
+        settings_view.append({"key": key, "value": value, **meta})
+
+    # Read-only job-state watermark rows (collapsed disclosure).
+    all_config = get_all_config(db)
+    job_state = [row for row in all_config if row["key"] in SYSTEM_JOB_STATE_KEYS]
+
     ctx = _base_ctx(request, user, "settings")
-    ctx["config"] = config
+    ctx["system_settings"] = settings_view
+    ctx["job_state"] = job_state
     return template_response("htmx/partials/settings/system.html", ctx)
 
 
@@ -10312,7 +14076,7 @@ async def settings_profile_tab(
 
     ctx = _base_ctx(request, user, "settings")
     ctx["profile_user"] = user
-    ctx["inbox_status"] = get_inbox_sync_status(user)
+    ctx["inbox_status"] = get_inbox_sync_status(db, user)
     return template_response("htmx/partials/settings/profile.html", ctx)
 
 
@@ -10341,7 +14105,7 @@ async def settings_scan_now(
     await _run_inbox_scan_now(user, db)
     db.refresh(user)
     ctx = _base_ctx(request, user, "settings")
-    ctx["inbox_status"] = get_inbox_sync_status(user)
+    ctx["inbox_status"] = get_inbox_sync_status(db, user)
     return template_response("htmx/partials/settings/_mailbox_sync_card.html", ctx)
 
 
@@ -10361,6 +14125,113 @@ async def toggle_8x8(
     )
 
 
+@router.post("/api/user/profile", response_class=HTMLResponse)
+async def update_user_profile(
+    request: Request,
+    name: str = Form(""),
+    extension: str = Form(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Update the current user's display name and 8x8 extension.
+
+    Validates name (non-empty, ≤255 chars) and extension (≤20 chars). Returns 400 JSON
+    on bad input; on success commits and emits a showToast trigger.
+    """
+    from fastapi.responses import JSONResponse
+
+    name = name.strip()
+    extension = extension.strip()
+
+    if not name or len(name) > 255:
+        req_id = getattr(request.state, "request_id", "unknown")
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Name is required.", "status_code": 400, "request_id": req_id},
+        )
+    if len(extension) > 20:
+        req_id = getattr(request.state, "request_id", "unknown")
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Extension must be 20 characters or fewer.", "status_code": 400, "request_id": req_id},
+        )
+
+    user.name = name
+    user.eight_by_eight_extension = extension
+    db.commit()
+    logger.info("Profile updated", user_id=user.id)
+    response = HTMLResponse(status_code=200)
+    settings_toast(response, "Profile updated.")
+    return response
+
+
+@router.post("/api/user/toggle-buyplan-email", response_class=HTMLResponse)
+async def toggle_buyplan_email(
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Toggle buy-plan email notifications for the current user."""
+    user.notify_buyplan_email_enabled = not user.notify_buyplan_email_enabled
+    db.commit()
+    state = "enabled" if user.notify_buyplan_email_enabled else "disabled"
+    logger.info("Buy-plan email notifications toggled", user_id=user.id, enabled=user.notify_buyplan_email_enabled)
+    response = HTMLResponse(status_code=200)
+    settings_toast(response, f"Buy-plan email notifications {state}.")
+    return response
+
+
+@router.post("/api/user/toggle-new-offer-alert", response_class=HTMLResponse)
+async def toggle_new_offer_alert(
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Toggle new-offer alerts for the current user."""
+    user.notify_new_offer_alert_enabled = not user.notify_new_offer_alert_enabled
+    db.commit()
+    state = "enabled" if user.notify_new_offer_alert_enabled else "disabled"
+    logger.info("New-offer alerts toggled", user_id=user.id, enabled=user.notify_new_offer_alert_enabled)
+    response = HTMLResponse(status_code=200)
+    settings_toast(response, f"New-offer alerts {state}.")
+    return response
+
+
+def _render_data_ops(request: Request, user: User, db: Session):
+    """Render the Data Ops tab partial — vendor/company dedup suggestions.
+
+    Each scan is guarded independently. A scan that RAISES sets a per-scan
+    ``*_scan_failed`` flag so the template can render a distinct error block instead
+    of swallowing the failure into the reassuring "no duplicates found" empty state
+    (a crashed scan must never look like a clean dataset). Reused by the merge
+    endpoints so a successful merge re-renders the surrounding list and stale pairs
+    drop without a manual refresh.
+    """
+    vendor_dupes: list = []
+    company_dupes: list = []
+    vendor_scan_failed = False
+    company_scan_failed = False
+    try:
+        from ..vendor_utils import find_vendor_dedup_candidates
+
+        vendor_dupes = find_vendor_dedup_candidates(db, threshold=85, limit=30)
+    except Exception as e:
+        vendor_scan_failed = True
+        logger.warning(f"Vendor dedup scan failed: {e}")
+    try:
+        from ..company_utils import find_company_dedup_candidates
+
+        company_dupes = find_company_dedup_candidates(db, threshold=85, limit=30)
+    except Exception as e:
+        company_scan_failed = True
+        logger.warning(f"Company dedup scan failed: {e}")
+
+    ctx = _base_ctx(request, user, "settings")
+    ctx["vendor_dupes"] = vendor_dupes
+    ctx["company_dupes"] = company_dupes
+    ctx["vendor_scan_failed"] = vendor_scan_failed
+    ctx["company_scan_failed"] = company_scan_failed
+    return template_response("htmx/partials/settings/data_ops.html", ctx)
+
+
 @router.get("/v2/partials/settings/data-ops", response_class=HTMLResponse)
 async def settings_data_ops_tab(
     request: Request,
@@ -10373,25 +14244,7 @@ async def settings_data_ops_tab(
     if not is_admin(user):
         raise HTTPException(403, "Admin only")
 
-    vendor_dupes = []
-    company_dupes = []
-    try:
-        from ..vendor_utils import find_vendor_dedup_candidates
-
-        vendor_dupes = find_vendor_dedup_candidates(db, threshold=85, limit=30)
-    except Exception as e:
-        logger.warning(f"Vendor dedup scan failed: {e}")
-    try:
-        from ..company_utils import find_company_dedup_candidates
-
-        company_dupes = find_company_dedup_candidates(db, threshold=85, limit=30)
-    except Exception as e:
-        logger.warning(f"Company dedup scan failed: {e}")
-
-    ctx = _base_ctx(request, user, "settings")
-    ctx["vendor_dupes"] = vendor_dupes
-    ctx["company_dupes"] = company_dupes
-    return template_response("htmx/partials/settings/data_ops.html", ctx)
+    return _render_data_ops(request, user, db)
 
 
 @router.get("/v2/partials/settings/api-keys", response_class=HTMLResponse)
@@ -10400,40 +14253,205 @@ async def settings_api_keys_tab(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """API credentials management tab — admin only."""
+    """API keys tab — redirects to unified Connectors tab."""
+    from fastapi.responses import RedirectResponse
+
+    return RedirectResponse("/v2/partials/settings/connectors", status_code=302)
+
+
+# Retired data providers — excluded from the connectors tab and the Test-all sweep.
+# Single source of truth referenced by both _build_connector_groups and connectors_test_all.
+_DEAD_CONNECTORS = frozenset({"rocketreach_enrichment", "clearbit_enrichment"})
+
+
+def _build_connector_field(db, source_name: str, env_var: str) -> dict:
+    """Return {is_set, masked} for one env-var credential field."""
+    from ..services.credential_service import credential_is_set, get_credential, mask_value
+
+    is_set = credential_is_set(db, source_name, env_var)
+    masked = ""
+    if is_set:
+        plain = get_credential(db, source_name, env_var)
+        masked = mask_value(plain) if plain else "••••••••"
+    return {"is_set": is_set, "masked": masked}
+
+
+def _enrich_source(source, db) -> dict:
+    """Build the per-source context dict for the connectors tab."""
+    from ..services import connector_service
+
+    name = source.name
+    ct = connector_service.control_type(source)
+    keyless = connector_service.is_keyless(source)
+
+    # Credential fields
+    env_vars = source.env_vars or []
+    creds = {ev: _build_connector_field(db, name, ev) for ev in env_vars}
+    credential_set = any(c["is_set"] for c in creds.values())
+
+    # Clay OAuth state
+    if name == "clay_enrichment":
+        oauth_connected = clay_oauth.is_connected()
+        needs_reconnect = clay_oauth.needs_reconnect()
+    else:
+        oauth_connected = False
+        needs_reconnect = False
+
+    state = connector_service.connector_state(
+        source,
+        credential_set=credential_set,
+        oauth_connected=oauth_connected,
+        needs_reconnect=needs_reconnect,
+        keyless=keyless,
+    )
+
+    # Keyless note
+    if ct == "keyless":
+        if name == "ai_live_web":
+            keyless_note = "No key required — uses your Anthropic key."
+        else:
+            keyless_note = "No key required — switch it on to use it."
+    else:
+        keyless_note = ""
+
+    # Planned connectors are never testable — they have no implementation yet.
+    if ct == "planned":
+        testable = False
+    else:
+        # Testable = has some form of access
+        testable = bool(credential_set or oauth_connected or keyless)
+
+    return {
+        "id": source.id,
+        "name": name,
+        "display_name": source.display_name or name,
+        "description": source.description or "",
+        "is_active": source.is_active,
+        "state": state,
+        "control_type": ct,
+        "env_vars": env_vars,
+        "creds": creds,
+        "oauth_connected": oauth_connected,
+        "needs_reconnect": needs_reconnect,
+        "status": source.status or "pending",
+        "last_error": source.last_error or "",
+        "last_success": source.last_success,
+        "error_count_24h": getattr(source, "error_count_24h", 0) or 0,
+        "keyless_note": keyless_note,
+        "testable": testable,
+    }
+
+
+def _build_connector_groups(db, request) -> list[dict]:
+    """Return connector_groups list-of-group-dicts for the connectors tab context.
+
+    Each group: {key, label, sources: [enriched source dict]}.
+    Sources are bucketed by connector_service.connector_group, emitted in GROUP_ORDER,
+    empty groups are dropped. Dead providers (rocketreach, clearbit) are excluded.
+    """
+    from ..services import connector_service
+
+    sources = db.query(ApiSource).order_by(ApiSource.display_name).all()
+
+    buckets: dict[str, list[dict]] = {key: [] for key, _ in connector_service.GROUP_ORDER}
+
+    for src in sources:
+        if src.name in _DEAD_CONNECTORS:
+            continue
+        group_key = connector_service.connector_group(src)
+        if group_key not in buckets:
+            group_key = "part_sourcing"
+        buckets[group_key].append(_enrich_source(src, db))
+
+    groups = []
+    for key, label in connector_service.GROUP_ORDER:
+        members = buckets.get(key, [])
+        if members:
+            groups.append({"key": key, "label": label, "sources": members})
+
+    return groups
+
+
+@router.get("/v2/partials/settings/connectors", response_class=HTMLResponse)
+async def settings_connectors_tab(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Unified Connectors tab — admin only.
+
+    Replaces sources + api-keys tabs.
+    """
     if user.role != UserRole.ADMIN:
         raise HTTPException(403, "Admin only")
 
-    from ..config import GRAPH_SCOPES
-    from ..services.credential_service import credential_is_set, get_credential, mask_value
-
-    def _field(source: str, env_var: str) -> dict:
-        is_set = credential_is_set(db, source, env_var)
-        masked = ""
-        if is_set:
-            plain = get_credential(db, source, env_var)
-            masked = mask_value(plain) if plain else "••••••••"
-        return {"is_set": is_set, "masked": masked}
-
-    current_scopes = set(GRAPH_SCOPES.split())
-    needed_scopes = {"Calls.Read", "Calls.Initiate", "CallRecords.Read.All"}
-
     ctx = _base_ctx(request, user, "settings")
-    ctx.update(
-        {
-            "lusha_api_key": _field("lusha_enrichment", "LUSHA_API_KEY"),
-            "clay_api_key": _field("clay_enrichment", "CLAY_API_KEY"),
-            "eight_by_eight_api_key": _field("eight_by_eight", "EIGHT_BY_EIGHT_API_KEY"),
-            "eight_by_eight_pbx_id": _field("eight_by_eight", "EIGHT_BY_EIGHT_PBX_ID"),
-            "eight_by_eight_username": _field("eight_by_eight", "EIGHT_BY_EIGHT_USERNAME"),
-            "eight_by_eight_password": _field("eight_by_eight", "EIGHT_BY_EIGHT_PASSWORD"),
-            "eight_by_eight_timezone": _field("eight_by_eight", "EIGHT_BY_EIGHT_TIMEZONE"),
-            "current_scopes": sorted(current_scopes),
-            "missing_scopes": sorted(needed_scopes - current_scopes),
-            "teams_ready": not (needed_scopes - current_scopes),
-        }
-    )
-    return template_response("htmx/partials/settings/api_keys.html", ctx)
+    ctx["connector_groups"] = _build_connector_groups(db, request)
+    return template_response("htmx/partials/settings/connectors.html", ctx)
+
+
+@router.get("/v2/partials/settings/connector-card/{source_id}", response_class=HTMLResponse)
+async def connector_card_partial(
+    source_id: int,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Single connector card partial — used as the swap unit for toggle/test/save.
+
+    Returns the rendered card macro for one source, or 404 if not found.
+    """
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(403, "Admin only")
+
+    source = db.query(ApiSource).filter(ApiSource.id == source_id).first()
+    if not source:
+        raise HTTPException(404, f"Connector {source_id!r} not found")
+
+    enriched = _enrich_source(source, db)
+    ctx = _base_ctx(request, user, "settings")
+    ctx["s"] = enriched
+    return template_response("htmx/partials/settings/_connector_card_partial.html", ctx)
+
+
+@router.post("/v2/partials/settings/connectors/test-all", response_class=HTMLResponse)
+async def connectors_test_all(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Run Test for every credentialed + active source, sequentially (don't hammer
+    provider APIs), and return an OOB bundle of refreshed cards.
+
+    Sources without credentials / inactive are skipped. Per-source failures are
+    tolerated (recorded as Error) and never abort the sweep.
+    """
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(403, "Admin only")
+
+    from ..routers.sources import run_source_test
+
+    sources = db.query(ApiSource).order_by(ApiSource.display_name).all()
+
+    tested: list[dict] = []
+    for src in sources:
+        if src.name in _DEAD_CONNECTORS or not src.is_active:
+            continue
+        enriched = _enrich_source(src, db)
+        if not enriched["testable"]:
+            continue
+        try:
+            await run_source_test(src, db)
+        except Exception as e:  # defensive — run_source_test already swallows
+            logger.warning("Test-all probe failed for {}: {}", src.name, e)
+        tested.append(_enrich_source(src, db))
+
+    failed = sum(1 for s in tested if s["state"] == "error")
+    ctx = _base_ctx(request, user, "settings")
+    ctx["tested_sources"] = tested
+    ctx["tested_count"] = len(tested)
+    ctx["failed_count"] = failed
+    return template_response("htmx/partials/settings/_connectors_testall.html", ctx)
 
 
 @router.post("/v2/partials/admin/vendor-merge", response_class=HTMLResponse)
@@ -10455,12 +14473,18 @@ async def admin_vendor_merge(
     try:
         result = _merge(keep_id, remove_id, db)
         db.commit()
-        return HTMLResponse(
-            f'<p class="text-sm text-emerald-600 py-2">Merged into {html_mod.escape(str(result.get("kept_name", "vendor")))}. '
-            f"{result.get('reassigned', 0)} records reassigned.</p>"
-        )
     except ValueError as e:
-        return HTMLResponse(f'<p class="text-sm text-rose-600 py-2">Error: {html_mod.escape(str(e))}</p>')
+        db.rollback()
+        message, kind = f"Vendor merge failed: {e}", "error"
+    else:
+        kept = db.get(VendorCard, result.get("kept", keep_id))
+        kept_name = kept.display_name if kept and kept.display_name else "vendor"
+        message = f"Merged into {kept_name}. {result.get('reassigned', 0)} records reassigned."
+        kind = "success"
+
+    resp = _render_data_ops(request, user, db)
+    settings_toast(resp, message, kind=kind)
+    return resp
 
 
 @router.post("/v2/partials/admin/company-merge", response_class=HTMLResponse)
@@ -10482,11 +14506,17 @@ async def admin_company_merge(
     try:
         result = merge_companies(keep_id, remove_id, db)
         db.commit()
-        return HTMLResponse(
-            f'<p class="text-sm text-emerald-600 py-2">Merged into {html_mod.escape(str(result.get("kept_name", "company")))}.</p>'
-        )
-    except (ValueError, Exception) as e:
-        return HTMLResponse(f'<p class="text-sm text-rose-600 py-2">Error: {html_mod.escape(str(e))}</p>')
+    except Exception as e:
+        db.rollback()
+        message, kind = f"Company merge failed: {e}", "error"
+    else:
+        kept = db.get(Company, result.get("kept", keep_id))
+        kept_name = kept.name if kept and kept.name else "company"
+        message, kind = f"Merged into {kept_name}.", "success"
+
+    resp = _render_data_ops(request, user, db)
+    settings_toast(resp, message, kind=kind)
+    return resp
 
 
 # ── Proactive Part Match ─────────────────────────────────────────────
@@ -10496,7 +14526,7 @@ async def admin_company_merge(
 async def proactive_list_partial(
     request: Request,
     tab: str = "matches",
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.PROACTIVE)),
     db: Session = Depends(get_db),
 ):
     """Proactive matches list partial — shows matches and sent offers."""
@@ -11854,6 +15884,7 @@ async def part_header_save(
     req = db.get(Requirement, requirement_id)
     if not req:
         raise HTTPException(404, "Part not found")
+    require_requisition_access(db, req.requisition_id, user, label="Part")
 
     if field == "sourcing_status":
         from app.services.requirement_status import transition_requirement
@@ -11979,6 +16010,7 @@ async def part_cell_save(
     req = db.get(Requirement, requirement_id)
     if not req:
         raise HTTPException(404, "Part not found")
+    require_requisition_access(db, req.requisition_id, user, label="Part")
 
     if field == "sourcing_status":
         from app.services.requirement_status import transition_requirement
@@ -12061,6 +16093,7 @@ async def part_spec_save(
     req = db.get(Requirement, requirement_id)
     if not req:
         raise HTTPException(404, "Part not found")
+    require_requisition_access(db, req.requisition_id, user, label="Part")
 
     if req.sourcing_status == SourcingStatus.ARCHIVED:
         return HTMLResponse("Cannot edit archived part", status_code=403)
@@ -12172,6 +16205,7 @@ async def save_part_notes(
     req = db.get(Requirement, requirement_id)
     if not req:
         raise HTTPException(404, "Part not found")
+    require_requisition_access(db, req.requisition_id, user, label="Part")
     old_sale_notes = req.sale_notes
     req.sale_notes = sale_notes.strip() or None
     if (req.sale_notes or "") != (old_sale_notes or ""):
@@ -12201,6 +16235,7 @@ async def create_part_task(
     req = db.get(Requirement, requirement_id)
     if not req:
         raise HTTPException(404, "Part not found")
+    require_requisition_access(db, req.requisition_id, user, label="Part")
 
     form = await request.form()
     title = (form.get("title") or "").strip()
@@ -12297,6 +16332,7 @@ async def archive_single_part(
     part = db.get(Requirement, requirement_id)
     if not part:
         raise HTTPException(404, "Part not found")
+    require_requisition_access(db, part.requisition_id, user, label="Part")
 
     part.sourcing_status = SourcingStatus.ARCHIVED
     db.commit()
@@ -12318,6 +16354,7 @@ async def unarchive_single_part(
     part = db.get(Requirement, requirement_id)
     if not part:
         raise HTTPException(404, "Part not found")
+    require_requisition_access(db, part.requisition_id, user, label="Part")
 
     part.sourcing_status = SourcingStatus.OPEN
     db.commit()
@@ -12337,6 +16374,7 @@ async def archive_requisition(
     requisition = db.get(Requisition, req_id)
     if not requisition:
         raise HTTPException(404, "Requisition not found")
+    require_requisition_access(db, req_id, user)
 
     prior_status = requisition.status
     requisition.status = RequisitionStatus.ARCHIVED
@@ -12367,6 +16405,7 @@ async def unarchive_requisition(
     requisition = db.get(Requisition, req_id)
     if not requisition:
         raise HTTPException(404, "Requisition not found")
+    require_requisition_access(db, req_id, user)
 
     prior_status = requisition.status
     requisition.status = RequisitionStatus.ACTIVE
@@ -12400,6 +16439,13 @@ async def bulk_archive(
     body = await request.json()
     requirement_ids = body.get("requirement_ids", [])
     requisition_ids = body.get("requisition_ids", [])
+
+    # Ownership guard (no-op for buyer/manager/admin; 404 for a restricted non-owner)
+    for _rid in requisition_ids:
+        require_requisition_access(db, _rid, user)
+    if requirement_ids:
+        for _r in db.query(Requirement).filter(Requirement.id.in_(requirement_ids)).all():
+            require_requisition_access(db, _r.requisition_id, user, label="Requirement")
 
     # Bulk-update parts in a single query instead of N+1
     if requirement_ids:
@@ -12444,6 +16490,13 @@ async def bulk_unarchive(
     requirement_ids = body.get("requirement_ids", [])
     requisition_ids = body.get("requisition_ids", [])
 
+    # Ownership guard (no-op for buyer/manager/admin; 404 for a restricted non-owner)
+    for _rid in requisition_ids:
+        require_requisition_access(db, _rid, user)
+    if requirement_ids:
+        for _r in db.query(Requirement).filter(Requirement.id.in_(requirement_ids)).all():
+            require_requisition_access(db, _r.requisition_id, user, label="Requirement")
+
     # Bulk-update parts in a single query instead of N+1
     if requirement_ids:
         db.query(Requirement).filter(
@@ -12474,22 +16527,26 @@ async def bulk_unarchive(
 
 
 @router.get("/v2/partials/trouble-tickets/workspace", response_class=HTMLResponse)
-async def trouble_tickets_workspace(request: Request, user: User = Depends(require_user)):
-    """Trouble Tickets workspace — loaded into #main-content."""
+async def trouble_tickets_workspace(request: Request, user: User = Depends(require_admin)):
+    """Trouble Tickets workspace — loaded into #settings-content (admin-only
+    console)."""
     return template_response(
         "htmx/partials/tickets/workspace.html",
         {**_base_ctx(request, user, "tickets")},
     )
 
 
-@router.get("/v2/partials/trouble-tickets/list", response_class=HTMLResponse)
-async def trouble_tickets_list(
-    request: Request,
-    status: str = "",
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Trouble Tickets list partial — grouped by root cause, filterable by status."""
+def _build_ticket_list_context(db: Session, status: str | None) -> dict:
+    """Query + group report_button tickets for the list partial.
+
+    Shared by trouble_tickets_list and error_reports.analyze_tickets so both
+    render the same grouped view. A logical ``status == "open"`` expands to the
+    (submitted, in_progress) set so in-progress tickets stay visible under the
+    "Open" pill; any other truthy status is an exact match; falsy means "all".
+
+    Called by: trouble_tickets_list, error_reports.analyze_tickets.
+    Depends on: TroubleTicket / RootCauseGroup models.
+    """
     from app.models.root_cause_group import RootCauseGroup
     from app.models.trouble_ticket import TroubleTicket
 
@@ -12498,7 +16555,9 @@ async def trouble_tickets_list(
         .options(joinedload(TroubleTicket.root_cause_group), joinedload(TroubleTicket.submitter))
         .filter(TroubleTicket.source == TicketSource.REPORT_BUTTON)
     )
-    if status:
+    if status == "open":
+        q = q.filter(TroubleTicket.status.in_([TicketStatus.SUBMITTED, TicketStatus.IN_PROGRESS]))
+    elif status:
         q = q.filter(TroubleTicket.status == status)
     q = q.order_by(desc(TroubleTicket.created_at))
     tickets = q.limit(200).all()
@@ -12519,16 +16578,26 @@ async def trouble_tickets_list(
         else:
             ungrouped.append(t)
 
+    return {
+        "total": total,
+        "groups": groups,
+        "grouped": grouped,
+        "ungrouped": ungrouped,
+        "current_status": status or "",
+    }
+
+
+@router.get("/v2/partials/trouble-tickets/list", response_class=HTMLResponse)
+async def trouble_tickets_list(
+    request: Request,
+    status: str = "",
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Trouble Tickets list partial — grouped by root cause, filterable by status."""
     return template_response(
         "htmx/partials/tickets/list.html",
-        {
-            **_base_ctx(request, user, "tickets"),
-            "total": total,
-            "groups": groups,
-            "grouped": grouped,
-            "ungrouped": ungrouped,
-            "current_status": status,
-        },
+        {**_base_ctx(request, user, "tickets"), **_build_ticket_list_context(db, status)},
     )
 
 
@@ -12536,10 +16605,11 @@ async def trouble_tickets_list(
 async def trouble_ticket_detail(
     request: Request,
     ticket_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Trouble Ticket detail partial — swapped into #main-content."""
+    """Trouble Ticket detail partial — swapped into #main-content (admin-only
+    console)."""
     from app.models.trouble_ticket import TroubleTicket
 
     ticket = (
@@ -12554,3 +16624,885 @@ async def trouble_ticket_detail(
         "htmx/partials/tickets/detail.html",
         {**_base_ctx(request, user, "tickets"), "ticket": ticket},
     )
+
+
+# ── Step 5: Account/Contact Tasks ────────────────────────────────────────────
+
+
+@router.get("/v2/partials/customers/{company_id}/tasks", response_class=HTMLResponse)
+async def account_tasks_partial(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render the open-tasks list for an account."""
+    from app.services.task_service import get_open_tasks_for_company
+
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+    tasks = get_open_tasks_for_company(db, company_id)
+    ctx = _base_ctx(request, user, "customers")
+    ctx["company_id"] = company_id
+    ctx["company_tasks"] = tasks
+    return template_response("htmx/partials/customers/_account_tasks.html", ctx)
+
+
+@router.get("/v2/partials/customers/{company_id}/tasks/add-form", response_class=HTMLResponse)
+async def account_task_add_form(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render the inline add-task form for an account."""
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+    ctx = _base_ctx(request, user, "customers")
+    ctx["company_id"] = company_id
+    return template_response("htmx/partials/customers/_account_task_form.html", ctx)
+
+
+@router.post("/v2/partials/customers/{company_id}/tasks", response_class=HTMLResponse)
+async def create_account_task(
+    request: Request,
+    company_id: int,
+    title: str = Form(""),
+    due_at: str = Form(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Create a task scoped to an account; return refreshed task list."""
+    from datetime import date
+    from datetime import timezone as _tz
+
+    from app.services.task_service import create_company_task, get_open_tasks_for_company
+
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Only the account owner or an admin can create tasks for this account")
+    if not title.strip():
+        return HTMLResponse('<p class="text-xs text-rose-600">Title is required.</p>')
+    due_dt = None
+    if due_at.strip():
+        try:
+            d = date.fromisoformat(due_at.strip())
+            due_dt = datetime.combine(d, datetime.min.time()).replace(tzinfo=_tz.utc)
+        except ValueError:
+            return HTMLResponse('<p class="text-xs text-rose-600">Invalid date.</p>')
+    create_company_task(
+        db,
+        company_id=company_id,
+        title=title.strip(),
+        due_at=due_dt,
+        created_by=user.id,
+        assigned_to_id=user.id,
+    )
+    tasks = get_open_tasks_for_company(db, company_id)
+    ctx = _base_ctx(request, user, "customers")
+    ctx["company_id"] = company_id
+    ctx["company_tasks"] = tasks
+    return template_response("htmx/partials/customers/_account_tasks.html", ctx)
+
+
+@router.get(
+    "/v2/partials/customers/{company_id}/contacts/{contact_id}/tasks/add-form",
+    response_class=HTMLResponse,
+)
+async def contact_task_add_form(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render the inline add-task form for a contact."""
+    contact = (
+        db.query(SiteContact)
+        .join(CustomerSite, SiteContact.customer_site_id == CustomerSite.id)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+    ctx = _base_ctx(request, user, "customers")
+    ctx["company_id"] = company_id
+    ctx["contact_id"] = contact_id
+    return template_response("htmx/partials/customers/_contact_task_form.html", ctx)
+
+
+@router.post(
+    "/v2/partials/customers/{company_id}/contacts/{contact_id}/tasks",
+    response_class=HTMLResponse,
+)
+async def create_contact_task_endpoint(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    title: str = Form(""),
+    due_at: str = Form(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Create a task scoped to a contact; return refreshed contact task list."""
+    from datetime import date
+    from datetime import timezone as _tz
+
+    from app.services.task_service import create_contact_task, get_open_tasks_for_contact
+
+    # Scoped-join IDOR guard: contact must belong to this company
+    contact = (
+        db.query(SiteContact)
+        .join(CustomerSite, SiteContact.customer_site_id == CustomerSite.id)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+    company = db.get(Company, company_id)
+    if company:
+        if not can_manage_account(user, company, db):
+            raise HTTPException(403, "Only the account owner or an admin can create tasks for this account")
+    if not title.strip():
+        return HTMLResponse('<p class="text-xs text-rose-600">Title is required.</p>')
+    due_dt = None
+    if due_at.strip():
+        try:
+            d = date.fromisoformat(due_at.strip())
+            due_dt = datetime.combine(d, datetime.min.time()).replace(tzinfo=_tz.utc)
+        except ValueError:
+            return HTMLResponse('<p class="text-xs text-rose-600">Invalid date.</p>')
+    create_contact_task(
+        db,
+        site_contact_id=contact_id,
+        title=title.strip(),
+        due_at=due_dt,
+        created_by=user.id,
+        assigned_to_id=user.id,
+    )
+    tasks = get_open_tasks_for_contact(db, contact_id)
+    ctx = _base_ctx(request, user, "customers")
+    ctx["contact"] = contact
+    ctx["contact_tasks"] = tasks
+    ctx["company_id"] = company_id
+    ctx["site_id"] = contact.customer_site_id
+    return template_response("htmx/partials/customers/_contact_tasks.html", ctx)
+
+
+@router.get(
+    "/v2/partials/customers/{company_id}/contacts/{contact_id}/tasks",
+    response_class=HTMLResponse,
+)
+async def contact_tasks_partial(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render the open-tasks list for a contact (used as cancel target in edit form)."""
+    from app.services.task_service import get_open_tasks_for_contact
+
+    contact = (
+        db.query(SiteContact)
+        .join(CustomerSite, SiteContact.customer_site_id == CustomerSite.id)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+    tasks = get_open_tasks_for_contact(db, contact_id)
+    ctx = _base_ctx(request, user, "customers")
+    ctx["contact"] = contact
+    ctx["contact_tasks"] = tasks
+    ctx["company_id"] = company_id
+    ctx["site_id"] = contact.customer_site_id
+    return template_response("htmx/partials/customers/_contact_tasks.html", ctx)
+
+
+@router.post("/v2/partials/tasks/{task_id}/complete", response_class=HTMLResponse)
+async def complete_task_endpoint(
+    request: Request,
+    task_id: int,
+    from_my_day: bool = False,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Mark a CRM task done (CRM account/contact or vendor card/contact). No activity
+    log is created.
+
+    Permissive auth: the caller only needs require_user — any logged-in user may mark
+    a vendor task done (vendor tasks carry no ownership gate at complete time).
+
+    Returns the refreshed parent task list (account, contact, or vendor card). When
+    from_my_day=true, returns an empty fragment so the row removes itself via outerHTML
+    swap on the My Day worklist.
+    """
+    from app.services.task_service import (
+        complete_crm_task,
+        get_open_tasks_for_company,
+        get_open_tasks_for_contact,
+    )
+
+    task = db.get(RequisitionTask, task_id)
+    if not task:
+        raise HTTPException(404, "Task not found")
+    try:
+        complete_crm_task(db, task_id, user.id, is_admin=(user.role == UserRole.ADMIN))
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    # My Day context: caller handles its own row removal via outerHTML swap.
+    if from_my_day:
+        return HTMLResponse("")
+    # Re-render the appropriate parent container
+    if task.company_id:
+        tasks = get_open_tasks_for_company(db, task.company_id)
+        ctx = _base_ctx(request, user, "customers")
+        ctx["company_id"] = task.company_id
+        ctx["company_tasks"] = tasks
+        return template_response("htmx/partials/customers/_account_tasks.html", ctx)
+    if task.site_contact_id:
+        contact = db.get(SiteContact, task.site_contact_id)
+        tasks = get_open_tasks_for_contact(db, task.site_contact_id)
+        ctx = _base_ctx(request, user, "customers")
+        ctx["contact"] = contact
+        ctx["contact_tasks"] = tasks
+        ctx["company_id"] = contact.customer_site.company_id if contact and contact.customer_site else 0
+        ctx["site_id"] = task.site_contact_id
+        return template_response("htmx/partials/customers/_contact_tasks.html", ctx)
+    if task.vendor_card_id:
+        from app.services.task_service import get_open_tasks_for_vendor_card
+
+        vendor_tasks = get_open_tasks_for_vendor_card(db, task.vendor_card_id)
+        ctx = _base_ctx(request, user, "vendors")
+        ctx["vendor_id"] = task.vendor_card_id
+        ctx["vendor_tasks"] = vendor_tasks
+        return template_response("htmx/partials/vendors/tabs/_vendor_tasks.html", ctx)
+    if task.vendor_contact_id:
+        from app.models.vendors import VendorContact as _VendorContact
+        from app.services.task_service import get_open_tasks_for_vendor_card
+
+        vc = db.get(_VendorContact, task.vendor_contact_id)
+        if vc:
+            vendor_tasks = get_open_tasks_for_vendor_card(db, vc.vendor_card_id)
+            ctx = _base_ctx(request, user, "vendors")
+            ctx["vendor_id"] = vc.vendor_card_id
+            ctx["vendor_tasks"] = vendor_tasks
+            return template_response("htmx/partials/vendors/tabs/_vendor_tasks.html", ctx)
+        # VendorContact was deleted — return a safe non-blank acknowledgement.
+        return HTMLResponse('<p class="text-xs text-gray-400">Task updated.</p>')
+    # Fallback: requisition task — just return empty fragment
+    return HTMLResponse("")
+
+
+@router.delete("/v2/partials/tasks/{task_id}", response_class=HTMLResponse)
+async def delete_task_endpoint(
+    request: Request,
+    task_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Delete a CRM task. Same authz gate as complete_task_endpoint.
+
+    Returns the refreshed parent task list (account or contact).
+    """
+    from app.services.task_service import (
+        delete_task,
+        get_open_tasks_for_company,
+        get_open_tasks_for_contact,
+    )
+
+    task = db.get(RequisitionTask, task_id)
+    if not task:
+        raise HTTPException(404, "Task not found")
+    is_vendor_task = task.vendor_card_id is not None or task.vendor_contact_id is not None
+    is_crm_task = task.company_id is not None or task.site_contact_id is not None
+    if not is_crm_task and not is_vendor_task:
+        raise HTTPException(400, "Not a CRM task")
+    from app.services.task_service import _is_crm_task_authorized
+
+    # Vendor task delete requires admin; customer task uses the full authz gate.
+    if is_vendor_task and not is_crm_task:
+        if user.role != UserRole.ADMIN:
+            raise HTTPException(403, "Only admins can delete vendor tasks")
+    elif not _is_crm_task_authorized(db, task, user.id, is_admin=(user.role == UserRole.ADMIN)):
+        raise HTTPException(403, "You are not allowed to delete this task")
+    # Capture parent refs before deletion
+    company_id = task.company_id
+    site_contact_id = task.site_contact_id
+    vendor_card_id = task.vendor_card_id
+    vendor_contact_id = task.vendor_contact_id
+    delete_task(db, task_id)
+    logger.info("Task {} deleted by user {}", task_id, user.id)
+    if company_id:
+        tasks = get_open_tasks_for_company(db, company_id)
+        ctx = _base_ctx(request, user, "customers")
+        ctx["company_id"] = company_id
+        ctx["company_tasks"] = tasks
+        return template_response("htmx/partials/customers/_account_tasks.html", ctx)
+    if site_contact_id:
+        contact = db.get(SiteContact, site_contact_id)
+        tasks = get_open_tasks_for_contact(db, site_contact_id)
+        ctx = _base_ctx(request, user, "customers")
+        ctx["contact"] = contact
+        ctx["contact_tasks"] = tasks
+        ctx["company_id"] = contact.customer_site.company_id if contact and contact.customer_site else 0
+        ctx["site_id"] = site_contact_id
+        return template_response("htmx/partials/customers/_contact_tasks.html", ctx)
+    if vendor_card_id:
+        from app.services.task_service import get_open_tasks_for_vendor_card
+
+        vendor_tasks = get_open_tasks_for_vendor_card(db, vendor_card_id)
+        ctx = _base_ctx(request, user, "vendors")
+        ctx["vendor_id"] = vendor_card_id
+        ctx["vendor_tasks"] = vendor_tasks
+        return template_response("htmx/partials/vendors/tabs/_vendor_tasks.html", ctx)
+    if vendor_contact_id:
+        from app.models.vendors import VendorContact as _VendorContact
+        from app.services.task_service import get_open_tasks_for_vendor_card
+
+        vc = db.get(_VendorContact, vendor_contact_id)
+        if vc:
+            vendor_tasks = get_open_tasks_for_vendor_card(db, vc.vendor_card_id)
+            ctx = _base_ctx(request, user, "vendors")
+            ctx["vendor_id"] = vc.vendor_card_id
+            ctx["vendor_tasks"] = vendor_tasks
+            return template_response("htmx/partials/vendors/tabs/_vendor_tasks.html", ctx)
+        # VendorContact was deleted — return a safe non-blank acknowledgement.
+        return HTMLResponse('<p class="text-xs text-gray-400">Task deleted.</p>')
+    return HTMLResponse("")
+
+
+@router.get("/v2/partials/tasks/{task_id}/edit-form", response_class=HTMLResponse)
+async def task_edit_form(
+    request: Request,
+    task_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the inline edit form for an existing CRM task (prefilled)."""
+    task = db.get(RequisitionTask, task_id)
+    if not task:
+        raise HTTPException(404, "Task not found")
+    is_vendor_task = task.vendor_card_id is not None or task.vendor_contact_id is not None
+    if not task.company_id and not task.site_contact_id and not is_vendor_task:
+        raise HTTPException(400, "Not a CRM task")
+    from app.services.task_service import _is_crm_task_authorized
+
+    if not _is_crm_task_authorized(db, task, user.id, is_admin=(user.role == UserRole.ADMIN)):
+        raise HTTPException(403, "You are not allowed to edit this task")
+    # Vendor task: resolve vendor_id (vendor_card_id direct, or via vendor_contact)
+    if is_vendor_task:
+        from app.models.vendors import VendorContact as _VendorContact
+
+        vendor_id = task.vendor_card_id
+        if not vendor_id and task.vendor_contact_id:
+            vc = db.get(_VendorContact, task.vendor_contact_id)
+            if vc:
+                vendor_id = vc.vendor_card_id
+        ctx = _base_ctx(request, user, "vendors")
+        ctx["task"] = task
+        ctx["vendor_id"] = vendor_id or 0
+        return template_response("htmx/partials/vendors/tabs/_vendor_task_edit_form.html", ctx)
+    # Resolve the real company_id: account task has it directly; for a contact task
+    # we walk contact → site → company so the cancel button has a valid URL.
+    real_company_id = task.company_id
+    if not real_company_id and task.site_contact_id:
+        contact = db.get(SiteContact, task.site_contact_id)
+        if contact and contact.customer_site:
+            real_company_id = contact.customer_site.company_id
+    ctx = _base_ctx(request, user, "customers")
+    ctx["task"] = task
+    ctx["company_id"] = real_company_id or 0
+    return template_response("htmx/partials/customers/_task_edit_form.html", ctx)
+
+
+@router.post("/v2/partials/tasks/{task_id}/edit", response_class=HTMLResponse)
+async def edit_task_endpoint(
+    request: Request,
+    task_id: int,
+    title: str = Form(""),
+    due_at: str = Form(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Update title and/or due_at on a CRM task; return refreshed parent list.
+
+    Authz: same gate as complete/delete — assignee, creator, account owner, or admin.
+    """
+    from datetime import date
+    from datetime import timezone as _tz
+
+    from app.services.task_service import (
+        _is_crm_task_authorized,
+        get_open_tasks_for_company,
+        get_open_tasks_for_contact,
+    )
+
+    task = db.get(RequisitionTask, task_id)
+    if not task:
+        raise HTTPException(404, "Task not found")
+    _is_vendor = task.vendor_card_id is not None or task.vendor_contact_id is not None
+    if not task.company_id and not task.site_contact_id and not _is_vendor:
+        raise HTTPException(400, "Not a CRM task")
+    if not _is_crm_task_authorized(db, task, user.id, is_admin=(user.role == UserRole.ADMIN)):
+        raise HTTPException(403, "You are not allowed to edit this task")
+    if not title.strip():
+        return HTMLResponse('<p class="text-xs text-rose-600">Title is required.</p>')
+    # Parse due_at: empty string → explicit clear (None); non-empty → parse.
+    due_dt = None
+    if due_at.strip():
+        try:
+            d = date.fromisoformat(due_at.strip())
+            due_dt = datetime.combine(d, datetime.min.time()).replace(tzinfo=_tz.utc)
+        except ValueError:
+            return HTMLResponse('<p class="text-xs text-rose-600">Invalid date format.</p>')
+    # Set both controlled fields directly so an empty due_at clears the existing value.
+    # (update_task skips None values to avoid mass-assignment; bypass that for explicit edits.)
+    task.title = title.strip()
+    task.due_at = due_dt
+    db.commit()
+    db.refresh(task)
+    logger.info("Task {} edited by user {}", task_id, user.id)
+    # Re-render the parent container
+    task = db.get(RequisitionTask, task_id)
+    company_id = task.company_id if task else None
+    site_contact_id = task.site_contact_id if task else None
+    vendor_card_id_edit = task.vendor_card_id if task else None
+    vendor_contact_id_edit = task.vendor_contact_id if task else None
+    if company_id:
+        tasks = get_open_tasks_for_company(db, company_id)
+        ctx = _base_ctx(request, user, "customers")
+        ctx["company_id"] = company_id
+        ctx["company_tasks"] = tasks
+        return template_response("htmx/partials/customers/_account_tasks.html", ctx)
+    if site_contact_id:
+        contact = db.get(SiteContact, site_contact_id)
+        tasks = get_open_tasks_for_contact(db, site_contact_id)
+        ctx = _base_ctx(request, user, "customers")
+        ctx["contact"] = contact
+        ctx["contact_tasks"] = tasks
+        ctx["company_id"] = contact.customer_site.company_id if contact and contact.customer_site else 0
+        ctx["site_id"] = site_contact_id
+        return template_response("htmx/partials/customers/_contact_tasks.html", ctx)
+    if vendor_card_id_edit:
+        from app.services.task_service import get_open_tasks_for_vendor_card
+
+        vendor_tasks = get_open_tasks_for_vendor_card(db, vendor_card_id_edit)
+        ctx = _base_ctx(request, user, "vendors")
+        ctx["vendor_id"] = vendor_card_id_edit
+        ctx["vendor_tasks"] = vendor_tasks
+        return template_response("htmx/partials/vendors/tabs/_vendor_tasks.html", ctx)
+    if vendor_contact_id_edit:
+        from app.models.vendors import VendorContact as _VendorContact
+        from app.services.task_service import get_open_tasks_for_vendor_card
+
+        vc = db.get(_VendorContact, vendor_contact_id_edit)
+        if vc:
+            vendor_tasks = get_open_tasks_for_vendor_card(db, vc.vendor_card_id)
+            ctx = _base_ctx(request, user, "vendors")
+            ctx["vendor_id"] = vc.vendor_card_id
+            ctx["vendor_tasks"] = vendor_tasks
+            return template_response("htmx/partials/vendors/tabs/_vendor_tasks.html", ctx)
+    return HTMLResponse("")
+
+
+@router.post("/v2/partials/tasks/{task_id}/snooze", response_class=HTMLResponse)
+async def snooze_task_endpoint(
+    request: Request,
+    task_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Push a CRM task's due_at forward by one week (or set to tomorrow if no due_at).
+
+    Authz: same gate as edit/complete — assignee, creator, account owner, or admin.
+    Returns the refreshed parent task list (account, contact, or vendor card).
+    """
+    from app.services.task_service import (
+        _is_crm_task_authorized,
+        get_open_tasks_for_company,
+        get_open_tasks_for_contact,
+        snooze_task,
+    )
+
+    task = db.get(RequisitionTask, task_id)
+    if not task:
+        raise HTTPException(404, "Task not found")
+    _is_vendor = task.vendor_card_id is not None or task.vendor_contact_id is not None
+    if not task.company_id and not task.site_contact_id and not _is_vendor:
+        raise HTTPException(400, "Not a CRM task")
+    if not _is_crm_task_authorized(db, task, user.id, is_admin=(user.role == UserRole.ADMIN)):
+        raise HTTPException(403, "You are not allowed to snooze this task")
+    snooze_task(db, task_id)
+    logger.info("Task {} snoozed by user {}", task_id, user.id)
+    # Re-render the parent container (same logic as edit_task_endpoint)
+    task = db.get(RequisitionTask, task_id)
+    company_id = task.company_id if task else None
+    site_contact_id = task.site_contact_id if task else None
+    vendor_card_id_snooze = task.vendor_card_id if task else None
+    vendor_contact_id_snooze = task.vendor_contact_id if task else None
+    if company_id:
+        tasks = get_open_tasks_for_company(db, company_id)
+        ctx = _base_ctx(request, user, "customers")
+        ctx["company_id"] = company_id
+        ctx["company_tasks"] = tasks
+        return template_response("htmx/partials/customers/_account_tasks.html", ctx)
+    if site_contact_id:
+        contact = db.get(SiteContact, site_contact_id)
+        tasks = get_open_tasks_for_contact(db, site_contact_id)
+        ctx = _base_ctx(request, user, "customers")
+        ctx["contact"] = contact
+        ctx["contact_tasks"] = tasks
+        ctx["company_id"] = contact.customer_site.company_id if contact and contact.customer_site else 0
+        ctx["site_id"] = site_contact_id
+        return template_response("htmx/partials/customers/_contact_tasks.html", ctx)
+    if vendor_card_id_snooze:
+        from app.services.task_service import get_open_tasks_for_vendor_card
+
+        vendor_tasks = get_open_tasks_for_vendor_card(db, vendor_card_id_snooze)
+        ctx = _base_ctx(request, user, "vendors")
+        ctx["vendor_id"] = vendor_card_id_snooze
+        ctx["vendor_tasks"] = vendor_tasks
+        return template_response("htmx/partials/vendors/tabs/_vendor_tasks.html", ctx)
+    if vendor_contact_id_snooze:
+        from app.models.vendors import VendorContact as _VendorContact
+        from app.services.task_service import get_open_tasks_for_vendor_card
+
+        vc = db.get(_VendorContact, vendor_contact_id_snooze)
+        if vc:
+            vendor_tasks = get_open_tasks_for_vendor_card(db, vc.vendor_card_id)
+            ctx = _base_ctx(request, user, "vendors")
+            ctx["vendor_id"] = vc.vendor_card_id
+            ctx["vendor_tasks"] = vendor_tasks
+            return template_response("htmx/partials/vendors/tabs/_vendor_tasks.html", ctx)
+    return HTMLResponse("")
+
+
+# ---------------------------------------------------------------------------
+# Vendor task routes
+# ---------------------------------------------------------------------------
+
+
+@router.get("/v2/partials/vendors/{vendor_id}/tasks", response_class=HTMLResponse)
+async def vendor_tasks_partial(
+    request: Request,
+    vendor_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render the open-tasks list for a vendor card."""
+    from app.services.task_service import get_open_tasks_for_vendor_card
+
+    vendor = get_vendor_card_or_404(db, vendor_id)
+    tasks = get_open_tasks_for_vendor_card(db, vendor_id)
+    ctx = _base_ctx(request, user, "vendors")
+    ctx["vendor_id"] = vendor_id
+    ctx["vendor"] = vendor
+    ctx["vendor_tasks"] = tasks
+    return template_response("htmx/partials/vendors/tabs/_vendor_tasks.html", ctx)
+
+
+@router.get("/v2/partials/vendors/{vendor_id}/tasks/add-form", response_class=HTMLResponse)
+async def vendor_task_add_form(
+    request: Request,
+    vendor_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render the inline add-task form for a vendor card."""
+    get_vendor_card_or_404(db, vendor_id)
+    ctx = _base_ctx(request, user, "vendors")
+    ctx["vendor_id"] = vendor_id
+    return template_response("htmx/partials/vendors/tabs/_vendor_task_form.html", ctx)
+
+
+@router.post("/v2/partials/vendors/{vendor_id}/tasks", response_class=HTMLResponse)
+async def create_vendor_task_endpoint(
+    request: Request,
+    vendor_id: int,
+    title: str = Form(""),
+    due_at: str = Form(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Create a task scoped to a vendor; return refreshed task list."""
+    from datetime import date as _date
+    from datetime import timezone as _tz
+
+    from app.services.task_service import create_vendor_task, get_open_tasks_for_vendor_card
+
+    vendor = get_vendor_card_or_404(db, vendor_id)
+    if not title.strip():
+        return HTMLResponse('<p class="text-xs text-rose-600">Title is required.</p>')
+    due_dt = None
+    if due_at.strip():
+        try:
+            d = _date.fromisoformat(due_at.strip())
+            due_dt = datetime.combine(d, datetime.min.time()).replace(tzinfo=_tz.utc)
+        except ValueError:
+            return HTMLResponse('<p class="text-xs text-rose-600">Invalid date.</p>')
+    create_vendor_task(
+        db,
+        vendor_card_id=vendor_id,
+        title=title.strip(),
+        due_at=due_dt,
+        created_by=user.id,
+        assigned_to_id=user.id,
+    )
+    tasks = get_open_tasks_for_vendor_card(db, vendor_id)
+    ctx = _base_ctx(request, user, "vendors")
+    ctx["vendor_id"] = vendor_id
+    ctx["vendor"] = vendor
+    ctx["vendor_tasks"] = tasks
+    return template_response("htmx/partials/vendors/tabs/_vendor_tasks.html", ctx)
+
+
+@router.get(
+    "/v2/partials/customers/{company_id}/activity/add-note-form",
+    response_class=HTMLResponse,
+)
+async def activity_add_note_form(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render the inline add-note form for the account Activity tab."""
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "You are not allowed to add notes for this account")
+    ctx = _base_ctx(request, user, "customers")
+    ctx["company_id"] = company_id
+    return template_response("htmx/partials/customers/_add_note_form.html", ctx)
+
+
+@router.post(
+    "/v2/partials/customers/{company_id}/activity/add-note",
+    response_class=HTMLResponse,
+)
+async def activity_add_note(
+    request: Request,
+    company_id: int,
+    notes: str = Form(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Log a manual note against a company and return the refreshed Activity tab.
+
+    A note does NOT advance the outbound cadence clock (cadence-neutral: direction=None
+    → bump_clocks_from_activity early-returns without touching last_outbound_at).
+    """
+    from app.services.activity_service import log_company_note
+
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "You are not allowed to add notes for this account")
+    if not notes.strip():
+        return HTMLResponse('<p class="text-xs text-rose-600">Note text is required.</p>')
+    log_company_note(
+        user_id=user.id,
+        company_id=company_id,
+        contact_name=None,
+        notes=notes.strip(),
+        db=db,
+    )
+    db.commit()
+    # Re-render the full activity tab by delegating to the existing tab handler
+    return await company_tab(
+        request=request,
+        company_id=company_id,
+        tab="activity",
+        site_id=None,
+        user=user,
+        db=db,
+    )
+
+
+# ── Vendor activity add-note ─────────────────────────────────────────────
+
+
+@router.get(
+    "/v2/partials/vendors/{vendor_id}/activity/add-note-form",
+    response_class=HTMLResponse,
+)
+async def vendor_activity_add_note_form(
+    request: Request,
+    vendor_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render the inline add-note form for the vendor Activity tab."""
+    vendor = get_vendor_card_or_404(db, vendor_id)
+    ctx = _base_ctx(request, user, "vendors")
+    ctx["vendor_id"] = vendor.id
+    return template_response("htmx/partials/vendors/_add_note_form.html", ctx)
+
+
+@router.post(
+    "/v2/partials/vendors/{vendor_id}/activity/add-note",
+    response_class=HTMLResponse,
+)
+async def vendor_activity_add_note(
+    request: Request,
+    vendor_id: int,
+    notes: str = Form(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Log a manual note against a vendor and return the refreshed Activity tab.
+
+    Cadence-neutral: direction=None so bump_clocks_from_activity does not advance
+    last_outbound_at.
+    """
+    from app.services.activity_service import log_vendor_note
+
+    vendor = get_vendor_card_or_404(db, vendor_id)
+    if not notes.strip():
+        return HTMLResponse('<p class="text-xs text-rose-600">Note text is required.</p>')
+    log_vendor_note(
+        user_id=user.id,
+        vendor_card_id=vendor.id,
+        vendor_contact_id=None,
+        contact_name=None,
+        notes=notes.strip(),
+        db=db,
+        bump_last_activity=False,
+    )
+    db.commit()
+    # Re-render the full activity tab by delegating to the existing tab handler
+    return await vendor_tab(
+        request=request,
+        vendor_id=vendor_id,
+        tab="activity",
+        user=user,
+        db=db,
+    )
+
+
+# ── My Day ──────────────────────────────────────────────────────────────
+
+
+@router.get("/v2/partials/my-day", response_class=HTMLResponse)
+async def my_day_partial(
+    request: Request,
+    user: User = Depends(require_access(AccessKey.MY_DAY)),
+    db: Session = Depends(get_db),
+):
+    """My Day worklist — overdue/due accounts I own + my open tasks.
+
+    Overdue/due accounts: reuses cdm_company_query with staleness="needs_call"
+    and my_only=True, ordered stalest-first via the outbound clock.
+    Tasks: task_service.get_my_tasks filtered to open, due/overdue first.
+
+    Called by: /v2/my-day full-page shell and nav hx-get.
+    Depends on: crm_service.cdm_company_query, crm_service.cadence_state,
+                task_service.get_my_tasks.
+    """
+    from ..services.crm_service import (
+        cadence_state as _cadence_state,
+    )
+    from ..services.crm_service import (
+        cdm_company_query as _cdm_company_query,
+    )
+    from ..services.task_service import get_my_tasks as _get_my_tasks
+
+    now = datetime.now(timezone.utc)
+
+    # 1. Overdue / due follow-up accounts I own — reuse the shared _needs_call_filter
+    #    (staleness="needs_call") so the count and this list always agree with the CRM chip.
+    _accounts_q = _cdm_company_query(
+        db,
+        user,
+        search="",
+        staleness="needs_call",
+        account_type="",
+        my_only=True,
+        sort="outbound_asc",
+        now=now,
+    )
+    accounts = _accounts_q.limit(50).all()
+
+    # Annotate each account with its cadence_state (reused — not recomputed inline).
+    account_rows = []
+    for co in accounts:
+        state = _cadence_state(co.tier, co.last_outbound_at, now)
+        out_days = (now - co.last_outbound_at).days if co.last_outbound_at else None
+        account_rows.append({"company": co, "cadence_state": state, "out_days": out_days})
+
+    # 2. My open tasks — due/overdue first (get_my_tasks already excludes done).
+    all_tasks = _get_my_tasks(db, user.id)
+    # Surface due/overdue first (past due_at), then tasks with no due_at last.
+    due_tasks = [t for t in all_tasks if t.due_at is not None and t.due_at <= now]
+    no_due_tasks = [t for t in all_tasks if t.due_at is None or t.due_at > now]
+    tasks = due_tasks + no_due_tasks
+
+    ctx = _base_ctx(request, user, "my-day")
+    ctx["account_rows"] = account_rows
+    ctx["tasks"] = tasks
+    ctx["now_utc"] = now
+    return template_response("htmx/partials/my_day.html", ctx)
+
+
+@router.get("/v2/partials/tasks", response_class=HTMLResponse)
+async def tasks_queue_partial(
+    request: Request,
+    user: User = Depends(require_access(AccessKey.MY_DAY)),
+    db: Session = Depends(get_db),
+):
+    """Filterable Tasks queue — all tasks assigned to me, with status/priority/due
+    filters.
+
+    Reuses task_service.get_my_tasks (which supports the ``status`` filter and
+    excludes done by default); ``priority`` and ``due`` are applied here since the
+    helper does not support them. Renders the same task-row markup + complete-form as
+    My Day, plus a filter bar whose hx-get carries an EXPLICIT hx-target on the inner
+    results container (so it never inherits #main-content and replaces the whole page).
+
+    Called by: /v2/partials/tasks (filter-bar hx-get; full-list initial render).
+    Depends on: task_service.get_my_tasks.
+    """
+    from ..services.task_service import get_my_tasks as _get_my_tasks
+
+    now = datetime.now(timezone.utc)
+    status = request.query_params.get("status", "").strip()
+    priority = request.query_params.get("priority", "").strip()
+    due = request.query_params.get("due", "").strip()
+
+    # status flows through the helper (it filters at the query level + defaults to open).
+    tasks = _get_my_tasks(db, user.id, status=status or None)
+
+    # priority is an int 1-3 (3=high, 2=med, 1=low) — applied here (helper has no filter).
+    if priority in ("1", "2", "3"):
+        want = int(priority)
+        tasks = [t for t in tasks if t.priority == want]
+
+    # due bucket — helper has no due filter, so apply it here against now.
+    if due == "overdue":
+        tasks = [t for t in tasks if t.due_at is not None and t.due_at < now]
+    elif due == "today":
+        tasks = [t for t in tasks if t.due_at is not None and t.due_at.date() == now.date()]
+    elif due == "upcoming":
+        tasks = [t for t in tasks if t.due_at is not None and t.due_at >= now]
+    elif due == "none":
+        tasks = [t for t in tasks if t.due_at is None]
+
+    ctx = _base_ctx(request, user, "my-day")
+    ctx["tasks"] = tasks
+    ctx["now_utc"] = now
+    ctx["filter_status"] = status
+    ctx["filter_priority"] = priority
+    ctx["filter_due"] = due
+    # Filter-bar changes target the inner #tasks-results container — return the
+    # results-only fragment so the filter bar (and its selected values) stay put.
+    if request.headers.get("HX-Target") == "tasks-results":
+        return template_response("htmx/partials/tasks/_results.html", ctx)
+    return template_response("htmx/partials/tasks/list.html", ctx)

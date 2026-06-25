@@ -145,6 +145,7 @@ class MaterialCard(Base):
         cascade="all, delete-orphan",
         order_by="desc(MaterialCardDatasheet.captured_at)",
     )
+    attachments = relationship("MaterialCardAttachment", back_populates="material_card", cascade="all, delete-orphan")
 
     __table_args__ = (
         # Partial index for the review-queue filter (conflicted cards are a tiny
@@ -433,6 +434,10 @@ class ActivityLog(Base):
     site_contact_id = Column(Integer, ForeignKey("site_contacts.id", ondelete="SET NULL"))
 
     buy_plan_id = Column(Integer, ForeignKey("buy_plans_v3.id", ondelete="SET NULL"), nullable=True)
+    # Resell-outreach scope: outreach/touch events on an excess list write to the same
+    # immutable timeline + cadence clocks (resell-outreach Chunk A; CRM Phase 3 generalizes
+    # the activity layer). Nullable + SET NULL like the other polymorphic-scope FKs.
+    excess_list_id = Column(Integer, ForeignKey("excess_lists.id", ondelete="SET NULL"), nullable=True)
 
     # Contact snapshot
     contact_email = Column(String(255))
@@ -470,6 +475,7 @@ class ActivityLog(Base):
     requirement = relationship("Requirement", foreign_keys=[requirement_id])
     quote = relationship("Quote", foreign_keys=[quote_id])
     customer_site = relationship("CustomerSite", foreign_keys=[customer_site_id])
+    excess_list = relationship("ExcessList", foreign_keys=[excess_list_id])
 
     __table_args__ = (
         Index(
@@ -531,6 +537,12 @@ class ActivityLog(Base):
             "created_at",
             postgresql_where=Column("requirement_id").isnot(None),
         ),
+        Index(
+            "ix_activity_excess_list",
+            "excess_list_id",
+            "created_at",
+            postgresql_where=Column("excess_list_id").isnot(None),
+        ),
     )
 
 
@@ -571,3 +583,35 @@ class ActivityDigest(Base):
         return DigestStatusSignal(value).value if value is not None else None
 
     __table_args__ = (UniqueConstraint("entity_type", "entity_id", name="uq_activity_digest_entity"),)
+
+
+class MaterialCardAttachment(Base):
+    """User-uploaded file attachment on a material card part dossier.
+
+    Distinct from MaterialCardDatasheet (system-captured PDFs). These are user files:
+    drawings, test reports, photos, POs, anything the buyer wants to pin to the part.
+
+    library_drive_id NULL  → OneDrive fallback row (user token, item in /me/drive)
+    library_drive_id set   → company SharePoint library row (app token)
+
+    Called by: app/routers/attachments_extra.py, app/services/attachment_service.py
+    Depends on: MaterialCard, User
+    """
+
+    __tablename__ = "material_card_attachments"
+    id = Column(Integer, primary_key=True)
+    material_card_id = Column(Integer, ForeignKey("material_cards.id", ondelete="CASCADE"), nullable=False)
+    file_name = Column(String(500), nullable=False)
+    library_item_id = Column(String(500))
+    library_drive_id = Column(String(200))
+    library_web_url = Column(Text)
+    thumbnail_url = Column(Text)
+    content_type = Column(String(100))
+    size_bytes = Column(Integer)
+    uploaded_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+
+    material_card = relationship("MaterialCard", back_populates="attachments")
+    uploaded_by = relationship("User", foreign_keys=[uploaded_by_id])
+
+    __table_args__ = (Index("ix_material_card_attachments_card", "material_card_id"),)

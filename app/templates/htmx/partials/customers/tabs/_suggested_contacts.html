@@ -1,0 +1,68 @@
+{# _suggested_contacts.html — Suggested-contacts result list for the Contacts tab.
+   Rendered by contacts_tab_suggested (GET /v2/partials/customers/{id}/suggested-contacts)
+   and swapped into a transient target below the "Find contacts" button.
+
+   Receives:
+     company          — Company ORM object
+     suggested        — list[dict]  (each: full_name, title, email, source, …)
+     errored_providers— list[str]   provider names that errored (e.g. ["hunter"])
+     active_sites     — list[CustomerSite] for the site select on each Add form
+
+   States:
+     contacts present   → per-row Add form
+     zero + no errors   → neutral "No contacts found" message
+     zero + errors      → amber "Couldn't reach <provider> — try again" banner
+
+   Each Add hx-posts to /v2/partials/customers/{id}/suggested-contacts/add,
+   targets #contacts-tab-list (swap=innerHTML), and emits an HX-Trigger toast.
+
+   The per-row markup lives in shared/_contact_row.html (also used by the Enrich
+   result panel) — this file owns the list-level chrome (banners / empty states / count).
+#}
+{% from "htmx/partials/shared/_contact_row.html" import suggested_contact_row %}
+
+{# ── Provider-error banner (amber) ────────────────────────────────────── #}
+{% if not suggested and errored_providers %}
+<div class='rounded-md bg-amber-50 border border-amber-200 px-4 py-3 flex items-start gap-3'>
+  <svg class='h-5 w-5 text-amber-500 flex-shrink-0 mt-0.5' fill='none' viewBox='0 0 24 24' stroke='currentColor' stroke-width='2'>
+    <path stroke-linecap='round' stroke-linejoin='round' d='M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z'/>
+  </svg>
+  <div class='text-sm text-amber-800'>
+    <p class='font-medium'>Couldn't reach
+      {% for p in errored_providers %}{{ p }}{% if not loop.last %}, {% endif %}{% endfor %}
+      — try again.
+    </p>
+    <p class='text-xs text-amber-600 mt-0.5'>The provider may be temporarily unavailable.</p>
+  </div>
+</div>
+
+{# ── Neutral empty state (no errors, zero results) ─────────────────────── #}
+{% elif not suggested %}
+<div class='rounded-md bg-gray-50 border border-gray-200 px-4 py-3 text-center'>
+  <p class='text-sm text-gray-600'>No contacts found for this domain.</p>
+</div>
+
+{# ── Contact list with per-row Add forms ────────────────────────────────── #}
+{% else %}
+{# ── Partial-failure notice (some providers errored but results present) ─── #}
+{% if errored_providers %}
+<div x-data='{"shown": true}' x-show='shown' x-cloak
+     class='mb-2 rounded-md bg-amber-50 border border-amber-200 px-3 py-2 flex items-start justify-between gap-2'>
+  <p class='text-xs text-amber-800'>
+    Results may be incomplete — couldn't reach
+    {% for p in errored_providers %}{{ p }}{% if not loop.last %}, {% endif %}{% endfor %}.
+  </p>
+  <button @click='shown = false' type='button' class='text-amber-500 hover:text-amber-700 flex-shrink-0'>
+    <svg class='h-3.5 w-3.5' fill='none' viewBox='0 0 24 24' stroke='currentColor' stroke-width='2'>
+      <path stroke-linecap='round' stroke-linejoin='round' d='M6 18L18 6M6 6l12 12'/>
+    </svg>
+  </button>
+</div>
+{% endif %}
+<ul class='divide-y divide-gray-100 rounded-md border border-gray-200 overflow-hidden'>
+  {% for c in suggested %}
+  {{ suggested_contact_row(c, company, active_sites, '#contacts-tab-list', 'innerHTML') }}
+  {% endfor %}
+</ul>
+<p class='mt-1.5 text-[11px] text-gray-400 text-right'>{{ suggested | length }} suggestion{{ "s" if suggested | length != 1 }}</p>
+{% endif %}

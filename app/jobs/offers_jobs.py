@@ -16,9 +16,15 @@ from ..constants import ActivityType, OfferStatus, ProactiveMatchStatus, Proacti
 from ..scheduler import _traced_job
 
 
-def register_offers_jobs(scheduler, settings):
-    """Register offer-related jobs with the scheduler."""
-    if settings.proactive_matching_enabled:
+def register_offers_jobs(scheduler, settings, db=None):
+    """Register offer-related jobs with the scheduler.
+
+    *db* (when provided) lets proactive_matching_enabled resolve from the system_config
+    DB row (admin toggle) instead of only the env default.
+    """
+    from ..services.admin_service import get_effective_flag
+
+    if get_effective_flag(db, "proactive_matching_enabled", settings.proactive_matching_enabled):
         interval_h = max(1, settings.proactive_scan_interval_hours)
         scheduler.add_job(
             _job_proactive_matching,

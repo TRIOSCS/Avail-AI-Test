@@ -9,7 +9,7 @@
     </div>
     <div>
       <h3 class="text-lg font-semibold text-gray-900">Report a Problem</h3>
-      <p class="text-sm text-gray-500">Describe the issue — a screenshot has been captured automatically.</p>
+      <p class="text-sm text-gray-600">Describe the issue — a screenshot has been captured automatically.</p>
     </div>
   </div>
 
@@ -39,32 +39,7 @@
     </button>
     <button type="button"
             :disabled="submitting"
-            @click="
-              var desc = document.getElementById('tr-description').value.trim();
-              if (!desc) return;
-              submitting = true;
-              var csrf = document.cookie.match(/csrftoken=([^;]+)/) ? RegExp.$1 : '';
-              fetch('/api/trouble-tickets/submit', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrf},
-                body: JSON.stringify({
-                  description: desc,
-                  screenshot: window._ttScreenshot || null,
-                  page_url: window.location.href,
-                  user_agent: navigator.userAgent,
-                  viewport: window.innerWidth + 'x' + window.innerHeight,
-                  error_log: JSON.stringify(Alpine.store('errorLog').entries),
-                  network_log: JSON.stringify(Alpine.store('networkLog').entries)
-                })
-              }).then(function(r){ return r.text(); })
-              .then(function(html){
-                htmx.swap('#modal-content', html, {swapStyle: 'innerHTML'});
-                submitting = false;
-              }).catch(function(){
-                htmx.swap('#modal-content', '<div class=\'p-6 text-sm text-rose-600\'>Something went wrong. Please try again.</div>', {swapStyle: 'innerHTML'});
-                submitting = false;
-              });
-            "
+            @click="window.submitTroubleReport($data)"
             class="px-4 py-2 bg-rose-500 text-white text-sm font-medium rounded-md hover:bg-rose-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
       <span x-show="!submitting" x-cloak>Submit Report</span>
       <span x-show="submitting" x-cloak class="flex items-center gap-2">

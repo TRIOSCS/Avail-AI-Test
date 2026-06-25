@@ -295,3 +295,223 @@ async def test_screen_prospect_llm_error_is_fire_and_forget(db_session, monkeypa
     assert result["verdict"] == "error"
     db_session.refresh(p)
     assert (p.trio_match_score or 0) == 0  # scores NOT written on error
+
+
+# ── _assemble_context: branch coverage ───────────────────────────────────────
+
+
+def test_assemble_context_all_branches(db_session):
+    """Cover every conditional branch in _assemble_context."""
+    from app.services.prospect_screening import _assemble_context
+
+    p = _prospect(
+        db_session,
+        industry="Aerospace & Defense",
+        naics_code="336412",
+        employee_count_range="501-1000",
+        revenue_range="$100M-$500M",
+        hq_location="Denver, CO",
+        description="Manufacturer of avionics systems.",
+        enrichment_data={
+            "sam_gov": {
+                "purpose": "Manufacture avionics",
+                "naics_codes": [
+                    {"code": "336412", "description": "Aircraft Engine", "primary": True},
+                ],
+            },
+            "recent_news": [{"title": "Wins DoD contract"}, {"title": "Q3 revenue up"}],
+        },
+        readiness_signals={
+            "hiring": {"type": "growth"},
+            "events": [{"type": "acquisition"}, {"type": "funding"}],
+        },
+        contacts_preview=[{"name": "Jane VP", "title": "VP Procurement", "verified": False}],
+        historical_context={
+            "quote_count": 3,
+            "bought_before": True,
+            "last_activity": "2025-06-01",
+        },
+    )
+    db_session.commit()
+
+    ctx = _assemble_context(p)
+    assert "Aerospace" in ctx
+    assert "336412" in ctx
+    assert "501-1000" in ctx
+    assert "$100M" in ctx
+    assert "Denver" in ctx
+    assert "avionics" in ctx
+    assert "Manufacture avionics" in ctx
+    assert "Aircraft Engine" in ctx
+    assert "Wins DoD" in ctx
+    assert "growth" in ctx
+    assert "acquisition" in ctx
+    assert "3 quotes" in ctx
+    assert "prior customer" in ctx
+    assert "2025-06-01" in ctx
+
+
+def test_assemble_context_unverified_contacts(db_session):
+    """elif contacts branch: contacts exist but none are verified."""
+    from app.services.prospect_screening import _assemble_context
+
+    p = _prospect(
+        db_session,
+        industry="Electronics",
+        contacts_preview=[
+            {"name": "Bob", "title": "Buyer", "verified": False},
+            {"name": "Alice", "title": "Manager", "verified": False},
+        ],
+    )
+    db_session.commit()
+
+    ctx = _assemble_context(p)
+    assert "unverified" in ctx
+
+
+def test_assemble_context_historical_context_freeform(db_session):
+    """Freeform historical_context branch (no standard keys)."""
+    from app.services.prospect_screening import _assemble_context
+
+    p = _prospect(
+        db_session,
+        industry="Industrial",
+        historical_context={"notes": "Legacy SF account, high potential."},
+    )
+    db_session.commit()
+
+    ctx = _assemble_context(p)
+    assert "Historical context" in ctx
+
+
+def test_assemble_context_decision_makers(db_session):
+    """Contacts with seniority=decision_maker show DM summary."""
+    from app.services.prospect_screening import _assemble_context
+
+    p = _prospect(
+        db_session,
+        industry="Defense",
+        contacts_preview=[
+            {
+                "name": "Jane VP",
+                "title": "VP Procurement",
+                "verified": True,
+                "seniority": "decision_maker",
+            }
+        ],
+    )
+    db_session.commit()
+
+    ctx = _assemble_context(p)
+    assert "decision-maker" in ctx
+    assert "Jane VP" in ctx
+
+
+def test_assemble_context_verified_non_dm_contacts(db_session):
+    """Contacts verified but no decision_maker → verified count shown."""
+    from app.services.prospect_screening import _assemble_context
+
+    p = _prospect(
+        db_session,
+        industry="Tech",
+        contacts_preview=[
+            {"name": "Bob", "title": "Engineer", "verified": True, "seniority": "individual"},
+        ],
+    )
+    db_session.commit()
+
+    ctx = _assemble_context(p)
+    assert "verified contact" in ctx
+
+
+# ── _call_screen_llm: direct test ────────────────────────────────────────────
+
+
+async def test_call_screen_llm_calls_claude_structured(monkeypatch):
+    from app.services import prospect_screening as ps
+
+    fake_result = {
+        "trio_match_score": 75,
+        "opportunity_score": 60,
+        "excess_likelihood": 20,
+        "verdict": "pass",
+        "rationale": "Strong fit.",
+        "evidence": [],
+        "confidence": 80,
+    }
+
+    with patch("app.utils.claude_client.claude_structured", AsyncMock(return_value=fake_result)) as mock_cs:
+        result = await ps._call_screen_llm("Company: Test (test.com)")
+
+    mock_cs.assert_called_once()
+    assert result["verdict"] == "pass"
+
+
+async def test_call_screen_llm_returns_empty_dict_when_none(monkeypatch):
+    from app.services import prospect_screening as ps
+
+    with patch("app.utils.claude_client.claude_structured", AsyncMock(return_value=None)):
+        result = await ps._call_screen_llm("Company: Test (test.com)")
+
+    assert result == {}
+
+
+# ── screen_prospect: empty LLM response ──────────────────────────────────────
+
+
+async def test_screen_prospect_empty_llm_response_returns_error(db_session, monkeypatch):
+    from app.services import prospect_screening as ps
+
+    monkeypatch.setattr(ps.settings, "ai_screen_enabled", True)
+    monkeypatch.setattr(ps.settings, "ai_screen_daily_cap", 999)
+
+    p = _prospect(db_session, industry="Aerospace", enrichment_data={})
+    db_session.commit()
+
+    with (
+        patch.object(ps, "_call_screen_llm", new_callable=AsyncMock, return_value={}),
+        patch("app.cache.intel_cache.get_count", return_value=0),
+    ):
+        result = await ps.screen_prospect(p, db_session)
+
+    assert result["verdict"] == "error"
+
+
+# ── screen_prospect: insufficient_data from LLM (not early return) ────────────
+
+
+async def test_screen_prospect_llm_insufficient_data_sets_flag(db_session, monkeypatch):
+    """When LLM returns insufficient_data for a grounded prospect → sets
+    needs_more_enrichment."""
+    from app.services import prospect_screening as ps
+
+    monkeypatch.setattr(ps.settings, "ai_screen_enabled", True)
+    monkeypatch.setattr(ps.settings, "ai_screen_daily_cap", 999)
+    monkeypatch.setattr(ps.settings, "ai_screen_min_match", 40)
+
+    # Grounding IS sufficient (industry set) so we reach the LLM, not the early return
+    p = _prospect(db_session, industry="Aerospace & Defense", enrichment_data={})
+    db_session.commit()
+
+    verdict = {
+        "trio_match_score": 0,
+        "opportunity_score": 0,
+        "excess_likelihood": 0,
+        "verdict": "insufficient_data",
+        "rationale": "Thin data.",
+        "evidence": [],
+        "confidence": 10,
+    }
+
+    with (
+        patch.object(ps, "_call_screen_llm", new_callable=AsyncMock, return_value=verdict),
+        patch("app.cache.intel_cache.get_count", return_value=0),
+        patch("app.cache.intel_cache.incr_count", return_value=1),
+    ):
+        result = await ps.screen_prospect(p, db_session)
+
+    assert result["verdict"] == "insufficient_data"
+    db_session.refresh(p)
+    assert p.enrichment_data["ai_screen"]["needs_more_enrichment"] is True
+    # Scores NOT written for insufficient_data from LLM
+    assert (p.trio_match_score or 0) == 0

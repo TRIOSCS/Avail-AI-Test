@@ -1,4 +1,4 @@
-{# contacts.html — Vendor contacts tab with CRUD (add/edit/delete) and click-to-call.
+{# contacts.html — Vendor contacts tab with CRUD (add/edit/delete/set-primary).
    Receives: contacts (list[VendorContact]), vendor (VendorCard).
    Called by: vendor_tab_partial route (tab=="contacts") in htmx_views.py.
    Depends on: contact_row.html partial, HTMX, Alpine.js, brand palette.
@@ -20,7 +20,7 @@
           x-transition:enter="transition ease-out duration-200"
           x-transition:enter-start="opacity-0 -translate-y-2"
           x-transition:enter-end="opacity-100 translate-y-0"
-          hx-post="/api/vendors/{{ vendor.id }}/contacts"
+          hx-post="/v2/partials/vendors/{{ vendor.id }}/contacts"
           hx-target="#contacts-table-body"
           hx-swap="beforeend"
           data-loading-disable
@@ -42,7 +42,6 @@
   </div>
 
   {# ── Contacts Table ────────────────────────────────────── #}
-  {% if contacts %}
   <div class="overflow-x-auto bg-white rounded-xl border border-brand-200">
     <table class="min-w-full divide-y divide-gray-200">
       <thead class="bg-gray-50">
@@ -56,20 +55,23 @@
         </tr>
       </thead>
       <tbody id="contacts-table-body" class="divide-y divide-gray-200">
-        {% for c in contacts %}
-          {% include "htmx/partials/vendors/tabs/contact_row.html" %}
-        {% endfor %}
+        {% if contacts %}
+          {% for c in contacts %}
+            {% include "htmx/partials/vendors/tabs/contact_row.html" %}
+          {% endfor %}
+        {% else %}
+        <tr id="contacts-empty-state">
+          <td colspan="6" class="py-6 sm:py-8 text-center">
+            <svg class="mx-auto h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/>
+            </svg>
+            <p class="text-sm font-medium text-gray-600 mt-3">No contacts found for this vendor.</p>
+            <p class="text-xs text-gray-400 mt-1">Click "+ Add Contact" above or use "Find Contacts" to discover contacts via AI.</p>
+          </td>
+        </tr>
+        {% endif %}
       </tbody>
     </table>
   </div>
-  {% else %}
-  <div id="contacts-table-body" class="py-12 text-center">
-    <svg class="mx-auto h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/>
-    </svg>
-    <p class="text-sm font-medium text-gray-500 mt-3">No contacts found for this vendor.</p>
-    <p class="text-xs text-gray-400 mt-1">Click "+ Add Contact" above or use "Find Contacts" to discover contacts via AI.</p>
-  </div>
-  {% endif %}
 
 </div>

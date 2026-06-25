@@ -41,7 +41,7 @@ NAV_PAGES = [
     ("buy-plans", "/v2/buy-plans", "/v2/partials/buy-plans"),
     ("follow-ups", "/v2/follow-ups", "/v2/partials/follow-ups"),
     ("proactive", "/v2/proactive", "/v2/partials/proactive"),
-    ("excess", "/v2/excess", "/v2/partials/excess"),
+    ("trading", "/v2/trading", "/v2/partials/trading/workspace"),
     ("settings", "/v2/settings", "/v2/partials/settings"),
     ("trouble-tickets", "/v2/trouble-tickets", "/v2/partials/trouble-tickets/workspace"),
 ]

@@ -11,7 +11,6 @@ Depends on: app/routers/sightings.py, tests/conftest.py
 import asyncio
 import json
 import os
-import time
 
 os.environ["TESTING"] = "1"
 
@@ -120,34 +119,44 @@ def test_batch_refresh_valid_requirement(client, db_session, test_user):
 def test_batch_refresh_runs_searches_in_parallel(client, db_session, test_user):
     """Batch-refresh must run search_requirement calls concurrently.
 
-    With the serial loop, N requirements = N × wall_time. With gather, N requirements ≈
-    1 × wall_time. We verify this by giving each search a 0.2s sleep and asserting that
-    3 requirements complete in well under 0.6s.
+    A serial loop awaits each search before starting the next, so peak concurrency is 1.
+    With ``asyncio.gather`` all three are in flight at once, so peak concurrency is 3. We
+    assert that directly via a peak-in-flight counter — deterministic regardless of runner
+    speed (the old wall-clock threshold flaked on loaded CI runners where parallel work
+    still exceeded the serial-floor time budget).
     """
     _, req1 = _make_req_and_requirement(db_session, test_user.id)
     _, req2 = _make_req_and_requirement(db_session, test_user.id)
     _, req3 = _make_req_and_requirement(db_session, test_user.id)
     db_session.commit()
 
+    inflight = 0
+    peak_inflight = 0
+
     async def slow_search(req_obj, db):
-        await asyncio.sleep(0.2)
-        return None
+        nonlocal inflight, peak_inflight
+        inflight += 1
+        peak_inflight = max(peak_inflight, inflight)
+        try:
+            # A short sleep widens the overlap window so all gathered coroutines are
+            # genuinely in flight together; the assertion is on concurrency, not timing.
+            await asyncio.sleep(0.05)
+            return None
+        finally:
+            inflight -= 1
 
     with patch(
         "app.search_service.search_requirement",
         side_effect=slow_search,
     ):
-        start = time.perf_counter()
         resp = client.post(
             "/v2/partials/sightings/batch-refresh",
             data={"requirement_ids": json.dumps([req1.id, req2.id, req3.id])},
         )
-        elapsed = time.perf_counter() - start
 
     assert resp.status_code == 200
-    # Serial would be ≥0.6s. Parallel should be ~0.2s + overhead.
-    # Give generous headroom for CI jitter but stay under the serial floor.
-    assert elapsed < 0.5, f"batch-refresh still serial: {elapsed:.3f}s for 3 × 0.2s"
+    # Serial execution would peak at 1 concurrent search; gather peaks at all 3.
+    assert peak_inflight == 3, f"batch-refresh still serial: peak {peak_inflight} concurrent search(es), expected 3"
 
 
 # ── batch-assign ──────────────────────────────────────────────────

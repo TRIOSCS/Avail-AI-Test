@@ -609,8 +609,9 @@ class TestVendorRowThreeStates:
         # Expanded detail carries the What we learned entry
         assert "What we learned:" in body
         assert 'class="text-rose-600 font-medium"' in body
-        # Action trio hidden
-        assert "Build RFQ" not in body
+        # Vendor-row action trio hidden (the header always has "Build RFQ"; check
+        # the vendor-specific preselect dispatch is absent from the vendor-row pill)
+        assert "preselect=Good+Vendor" not in body
         assert "Mark Unavail" not in body
         assert "Convert to offer" not in body
 
@@ -652,7 +653,7 @@ class TestVendorRowThreeStates:
         assert "bg-rose-100 text-rose-700" in body  # Unavailable pill, not Contacted
         assert "We bought them" in body  # reason label renders
         assert "Mark available" in body  # state-1 action present
-        assert "Build RFQ" not in body  # action trio hidden
+        assert "preselect=Good+Vendor" not in body  # vendor-row RFQ pill hidden
         assert "Mark Unavail" not in body
 
     def test_state2_expired_record_renders_advisory_hint_and_verify(self, client, db_session):
@@ -2251,6 +2252,42 @@ class TestCrossRequisitionTracking:
         # The exact subject the send will produce — both tokens, ascending req id.
         assert f"RFQ — 2 parts [ref:{lo}] [ref:{hi}]" in resp.text
 
+    def test_cross_req_preview_groups_parts_by_requisition(self, client, db_session):
+        """Item 3: a cross-requisition preview groups the parts body under a REQ-{id}
+        subhead per requisition (ascending), so the buyer sees which parts belong to
+        which requisition."""
+        (req_a, r_a), (req_b, r_b) = _seed_two_requisitions(db_session)
+        resp = client.post(
+            "/v2/partials/sightings/preview-inquiry",
+            data={
+                "requirement_ids": [str(r_a.id), str(r_b.id)],
+                "vendor_names": ["Acme"],
+                "email_body": "Please quote.",
+            },
+        )
+        assert resp.status_code == 200
+        # Both requisition subheads are present, with each requisition's own part.
+        assert f"REQ-{req_a.id}" in resp.text
+        assert f"REQ-{req_b.id}" in resp.text
+        assert "CROSS-MPN-A (100 pcs)" in resp.text
+        assert "CROSS-MPN-B (200 pcs)" in resp.text
+
+    def test_single_req_preview_has_no_req_subhead(self, client, db_session):
+        """Item 3 regression: a single-requisition preview keeps the flat inline parts
+        list — no REQ-{id} subhead noise."""
+        _, r, _ = _seed_data(db_session)
+        resp = client.post(
+            "/v2/partials/sightings/preview-inquiry",
+            data={
+                "requirement_ids": str(r.id),
+                "vendor_names": ["Acme"],
+                "email_body": "Please quote.",
+            },
+        )
+        assert resp.status_code == 200
+        assert "TEST-MPN-001 (100 pcs)" in resp.text
+        assert "REQ-" not in resp.text
+
     def test_send_passes_per_requisition_parts_map(self, client, db_session, monkeypatch):
         (req_a, r_a), (req_b, r_b) = _seed_two_requisitions(db_session)
         captured = {}
@@ -2530,6 +2567,34 @@ class TestSightingsVendorModal:
         resp = client.get("/v2/partials/sightings/vendor-modal?requirement_ids=99999")
         assert resp.status_code == 200
 
+    def test_compose_step_shows_tagged_subject(self, client, db_session):
+        """Item 2: the compose step renders the tagged subject read-only so the buyer
+        sees exactly what will send (with the [ref:{requisition_id}] token) before
+        previewing — LOCKSTEP with the preview/send subject."""
+        req, r, _ = _seed_data(db_session)
+        resp = client.get(f"/v2/partials/sightings/vendor-modal?requirement_ids={r.id}")
+        assert resp.status_code == 200
+        assert f"RFQ — 1 part [ref:{req.id}]" in resp.text
+
+    def test_score_span_has_ranking_tooltip(self, client, db_session):
+        """Item 4: the score span carries a title attribute explaining vendors are
+        ranked by responsiveness, so the number isn't ambiguous."""
+        _, r, s = _seed_data(db_session)
+        card = VendorCard(
+            normalized_name="good vendor",
+            display_name="Good Vendor",
+            is_blacklisted=False,
+            engagement_score=50.0,
+        )
+        db_session.add(card)
+        db_session.flush()
+        db_session.add(VendorContact(vendor_card_id=card.id, email="rfq@good.com", source="email"))
+        s.vendor_card_id = card.id
+        db_session.commit()
+        resp = client.get(f"/v2/partials/sightings/vendor-modal?requirement_ids={r.id}")
+        assert resp.status_code == 200
+        assert "ranked by responsiveness" in resp.text
+
     def test_xdata_not_truncated_with_vendors(self, client, db_session):
         """Regression for the broken "Send RFQ" modal.
 
@@ -2576,6 +2641,152 @@ class TestSightingsVendorModal:
             "vendor name was truncated out of the x-data attribute — tojson double-quotes "
             "broke attribute tokenization (the original bug)."
         )
+
+
+class TestVendorRowLeadTime:
+    """Item 1: lead_time_days renders on EVERY vendor modal row, not just the
+    contactable non-DNC one. A VendorSightingSummary carries best_lead_time_days,
+    which flows through _coverage_ranked_vendor_rows → SuggestedVendor.lead_time_days.
+    """
+
+    def _requirement(self, db_session, mpn="LT-MPN-1"):
+        req = Requisition(name="Lead-time RFQ", status="active", customer_name="LT Co")
+        db_session.add(req)
+        db_session.flush()
+        r = Requirement(requisition_id=req.id, primary_mpn=mpn, target_qty=10, sourcing_status="open")
+        db_session.add(r)
+        db_session.flush()
+        return r
+
+    def test_lead_time_on_no_contact_row(self, client, db_session):
+        """A cardless coverage row (no VendorCard → "no contact on file") still shows
+        its lead time.
+
+        Before Item 1 the no-contact branch had NO lead_time display.
+        """
+        r = self._requirement(db_session)
+        db_session.add(
+            VendorSightingSummary(
+                requirement_id=r.id,
+                vendor_name="Cardless Lead Vendor",
+                listing_count=1,
+                score=50.0,
+                best_lead_time_days=14,
+            )
+        )
+        db_session.commit()
+        resp = client.get(f"/v2/partials/sightings/vendor-modal?requirement_ids={r.id}")
+        assert resp.status_code == 200
+        assert "Cardless Lead Vendor" in resp.text
+        assert "no contact on file" in resp.text  # confirms the no-contact branch rendered
+        assert "14d lead" in resp.text
+
+
+class TestCommoditySignalChip:
+    """Item 5: a read-only commodity-segmented engagement chip on the contactable
+    non-DNC vendor row. ONE bounded query over ActivityLog → Requirement → MaterialCard
+    counts the vendor's inbound/outbound activity FILTERED to the basket's commodity.
+    No schema change, no ranking change.
+    """
+
+    def _seed(self, db_session, category="capacitors", outbound=2, inbound=1):
+        """Requirement on a MaterialCard of the given commodity + a contactable carded
+        vendor with `outbound`/`inbound` ActivityLog rows scoped to that requirement."""
+        mc = MaterialCard(normalized_mpn="cs-mpn-1", display_mpn="CS-MPN-1", category=category)
+        db_session.add(mc)
+        db_session.flush()
+        req = Requisition(name="Commodity RFQ", status="active", customer_name="CS Co")
+        db_session.add(req)
+        db_session.flush()
+        r = Requirement(
+            requisition_id=req.id,
+            primary_mpn="CS-MPN-1",
+            target_qty=10,
+            sourcing_status="open",
+            material_card_id=mc.id,
+        )
+        db_session.add(r)
+        db_session.flush()
+        card = VendorCard(
+            normalized_name="signal vendor",
+            display_name="Signal Vendor",
+            is_blacklisted=False,
+            engagement_score=42.0,
+        )
+        db_session.add(card)
+        db_session.flush()
+        db_session.add(VendorContact(vendor_card_id=card.id, email="rfq@signal.com", source="email"))
+        db_session.add(
+            VendorSightingSummary(
+                requirement_id=r.id,
+                vendor_name="Signal Vendor",
+                listing_count=1,
+                score=50.0,
+                vendor_card_id=card.id,
+            )
+        )
+        for _ in range(outbound):
+            db_session.add(
+                ActivityLog(
+                    activity_type="rfq_sent",
+                    channel="email",
+                    direction="outbound",
+                    vendor_card_id=card.id,
+                    requirement_id=r.id,
+                )
+            )
+        for _ in range(inbound):
+            db_session.add(
+                ActivityLog(
+                    activity_type="email",
+                    channel="email",
+                    direction="inbound",
+                    vendor_card_id=card.id,
+                    requirement_id=r.id,
+                )
+            )
+        db_session.commit()
+        return r, card
+
+    def test_chip_rendered_with_commodity_counts(self, client, db_session):
+        """A vendor with prior outbound+inbound activity for the basket commodity shows
+        an "N/M {commodity}" chip with a reply/sent tooltip."""
+        r, _ = self._seed(db_session, category="capacitors", outbound=2, inbound=1)
+        resp = client.get(f"/v2/partials/sightings/vendor-modal?requirement_ids={r.id}")
+        assert resp.status_code == 200
+        assert "Signal Vendor" in resp.text
+        assert "1/2 capacitors" in resp.text
+        assert "For capacitors: 1 reply / 2 sent" in resp.text
+
+    def test_no_chip_when_no_outbound(self, client, db_session):
+        """No chip when the vendor has no outbound activity for the commodity (the chip
+        is suppressed at sig.outbound == 0)."""
+        r, _ = self._seed(db_session, category="capacitors", outbound=0, inbound=0)
+        resp = client.get(f"/v2/partials/sightings/vendor-modal?requirement_ids={r.id}")
+        assert resp.status_code == 200
+        assert "Signal Vendor" in resp.text
+        assert "capacitors" not in resp.text  # commodity chip absent
+
+    def test_no_chip_when_commodity_mixed(self, client, db_session):
+        """current_commodity is None when the basket spans >1 commodity, so the chip is
+        not rendered for any row even if activity exists."""
+        r, card = self._seed(db_session, category="capacitors", outbound=2, inbound=1)
+        # A second requirement on a DIFFERENT commodity → mixed basket → no chip.
+        mc2 = MaterialCard(normalized_mpn="cs-mpn-2", display_mpn="CS-MPN-2", category="connectors")
+        db_session.add(mc2)
+        db_session.flush()
+        r2 = Requirement(
+            requisition_id=r.requisition_id,
+            primary_mpn="CS-MPN-2",
+            target_qty=10,
+            sourcing_status="open",
+            material_card_id=mc2.id,
+        )
+        db_session.add(r2)
+        db_session.commit()
+        resp = client.get(f"/v2/partials/sightings/vendor-modal?requirement_ids={r.id},{r2.id}")
+        assert resp.status_code == 200
+        assert "1/2 capacitors" not in resp.text
 
 
 class TestSightingsBatchLimit:
@@ -3446,7 +3657,8 @@ class TestPreviewInquiry:
         assert "Please quote" in resp.text
 
     def test_preview_vendor_no_email_shows_warning(self, client, db_session):
-        """Vendor with no email shows amber warning in preview."""
+        """Vendor with no email shows amber no-email badge in preview
+        (skip_reason=no_email)."""
         _, r, _ = _seed_data(db_session)
         resp = client.post(
             "/v2/partials/sightings/preview-inquiry",
@@ -3457,7 +3669,8 @@ class TestPreviewInquiry:
             },
         )
         assert resp.status_code == 200
-        assert "No email found" in resp.text
+        # The amber badge now says "no email — will be skipped" (S3 skip-reason badges)
+        assert "no email" in resp.text.lower()
 
     def test_preview_400_empty_requirement_ids(self, client, db_session):
         """Empty requirement_ids returns 400."""

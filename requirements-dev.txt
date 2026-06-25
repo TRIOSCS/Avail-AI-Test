@@ -146,7 +146,7 @@ matplotlib-inline==0.2.2
     # via ipython
 mdurl==0.1.2
     # via markdown-it-py
-msgpack==1.1.2
+msgpack==1.2.1
     # via cachecontrol
 mypy==2.1.0
     # via
@@ -231,7 +231,7 @@ pyproject-hooks==1.2.0
     #   pip-tools
 pyrate-limiter==4.2.0
     # via schemathesis
-pytest==9.1.0
+pytest==9.1.1
     # via
     #   -r requirements-dev.in
     #   pytest-asyncio
@@ -290,9 +290,9 @@ rpds-py==2026.5.1
     # via
     #   jsonschema
     #   referencing
-ruff==0.15.17
+ruff==0.15.18
     # via -r requirements-dev.in
-schemathesis==4.21.6
+schemathesis==4.21.10
     # via -r requirements-dev.in
 six==1.17.0
     # via

@@ -1,23 +1,32 @@
 """test_sp4_reclamation.py — Unit tests for SP4 Account Reclamation feature.
 
-Covers: migration 123 round-trip (PG only), config defaults, get_last_activity_at,
+Covers: migration 123 hermetic round-trip, config defaults, get_last_activity_at,
         job_account_sweep, _send_sweep_notification, job_auto_surface_reactivation,
         reclaim_prospect_account.
 
 Called by: pytest
-Depends on: conftest.py fixtures.
+Depends on: conftest.py fixtures, tests/migration_harness.run_ops,
+            alembic/versions/123_sp4_park_provenance.py.
 
-Migration round-trip requires TEST_PG_URL — SQLite cannot run CREATE EXTENSION (migration 001).
-Set TEST_PG_URL=postgresql://... to include those tests.
+The migration round-trip runs in-process on a scratch in-memory SQLite engine via
+the shared hermetic harness — no PG, no alembic CLI, no subprocess. Migration 123's
+add_column uses inline FK references to users.id; SQLite cannot ALTER-add a constraint,
+so the FK clause is stripped during the test (a fresh FK-free column with the same
+name/type/nullability is added instead). That exercises the real column add/drop DDL;
+the FK semantics themselves are PG-only and are verified on live Postgres at deploy time.
 """
 
 import asyncio
+import importlib.util
 import os
-import subprocess
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
+import sqlalchemy as sa
+from alembic.operations import Operations
+from sqlalchemy import inspect
+from sqlalchemy.pool import StaticPool
 
 from app.constants import ProspectAccountStatus
 from app.models.auth import User
@@ -25,9 +34,7 @@ from app.models.crm import Company
 from app.models.intelligence import ActivityLog
 from app.models.prospect_account import ProspectAccount
 from app.models.sourcing import Requisition
-
-PG_URL = os.environ.get("TEST_PG_URL", "")
-
+from tests.migration_harness import run_ops
 
 # ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -41,15 +48,19 @@ def _make_company(db, *, owner_id=None, name="Acme Corp", domain="acme.com"):
     return co
 
 
-def _plant_activity(db, company_id, *, days_ago):
-    """Add an ActivityLog row `days_ago` days in the past."""
+def _plant_activity(db, company_id, *, days_ago, activity_type="email_sent"):
+    """Add an ActivityLog row `days_ago` days in the past.
+
+    Uses email_sent by default — notes are excluded from dormancy calc per Item 3 of the
+    CRM rubric (get_last_activity_at ignores note types).
+    """
     from datetime import timedelta
 
     ts = datetime.now(timezone.utc) - timedelta(days=days_ago)
     db.add(
         ActivityLog(
             company_id=company_id,
-            activity_type="note",
+            activity_type=activity_type,
             channel="system",
             created_at=ts,
         )
@@ -57,45 +68,75 @@ def _plant_activity(db, company_id, *, days_ago):
     db.commit()
 
 
-# ── Migration 123 ─────────────────────────────────────────────────────────────
+# ── Migration 123 (hermetic SQLite round-trip) ───────────────────────────────
+
+_MIGRATION_123_PATH = os.path.join(os.path.dirname(__file__), "..", "alembic", "versions", "123_sp4_park_provenance.py")
+_spec_123 = importlib.util.spec_from_file_location("migration_123", _MIGRATION_123_PATH)
+_mod_123 = importlib.util.module_from_spec(_spec_123)
+_spec_123.loader.exec_module(_mod_123)
+
+_PARK_COLS = {"swept_from_owner_id", "swept_at", "parked_by_id"}
+
+_orig_add_column = Operations.add_column
 
 
-@pytest.mark.skipif(not PG_URL, reason="TEST_PG_URL not set — PG required for migration tests")
-def test_migration_123_upgrade_downgrade():
-    """Upgrade adds park provenance columns; downgrade removes them."""
-    from sqlalchemy import create_engine, inspect
+def _add_column_no_fk(self, table_name, column, **kwargs):
+    """add_column that strips inline FK clauses so SQLite ADD COLUMN works.
 
-    env = {**os.environ, "DATABASE_URL": PG_URL}
+    SQLite has no ALTER-ADD-CONSTRAINT, so an inline ``sa.ForeignKey`` in the column
+    raises NotImplementedError. We add a fresh FK-free column with the same
+    name/type/nullability — exercising the real DDL while skipping the PG-only FK
+    (which is verified on live Postgres at deploy time).
+    """
+    fresh = sa.Column(column.name, column.type, nullable=column.nullable)
+    return _orig_add_column(self, table_name, fresh, **kwargs)
 
-    def alembic(cmd: str) -> None:
-        result = subprocess.run(
-            f"alembic {cmd}",
-            shell=True,
-            env=env,
-            capture_output=True,
-            text=True,
-            cwd="/root/availai/.claude/worktrees/sp4-reclamation",
-        )
-        assert result.returncode == 0, f"alembic {cmd} failed:\n{result.stderr}"
 
-    alembic("upgrade 123_sp4_park_provenance")
+def _engine_123() -> sa.engine.Engine:
+    engine = sa.create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    meta = sa.MetaData()
+    sa.Table("users", meta, sa.Column("id", sa.Integer, primary_key=True))
+    sa.Table(
+        "prospect_accounts",
+        meta,
+        sa.Column("id", sa.Integer, primary_key=True),
+        sa.Column("name", sa.String(255)),
+    )
+    meta.create_all(engine)
+    return engine
 
-    engine = create_engine(PG_URL)
-    cols = {c["name"] for c in inspect(engine).get_columns("prospect_accounts")}
-    assert "swept_from_owner_id" in cols, "swept_from_owner_id column missing after upgrade"
-    assert "swept_at" in cols, "swept_at column missing after upgrade"
-    assert "parked_by_id" in cols, "parked_by_id column missing after upgrade"
-    engine.dispose()
 
-    alembic("downgrade -1")
-    engine2 = create_engine(PG_URL)
-    cols2 = {c["name"] for c in inspect(engine2).get_columns("prospect_accounts")}
-    assert "swept_from_owner_id" not in cols2, "swept_from_owner_id still present after downgrade"
-    assert "swept_at" not in cols2, "swept_at still present after downgrade"
-    assert "parked_by_id" not in cols2, "parked_by_id still present after downgrade"
-    engine2.dispose()
+def _pa_cols(engine) -> set[str]:
+    return {c["name"] for c in inspect(engine).get_columns("prospect_accounts")}
 
-    alembic("upgrade head")
+
+class TestMigration123:
+    def test_revision_metadata(self):
+        assert _mod_123.revision == "123_sp4_park_provenance"
+        assert _mod_123.down_revision == "122_prospect_ai_scores"
+        # alembic_version.version_num is VARCHAR(32) on PG; SQLite ignores length.
+        assert len(_mod_123.revision) <= 32
+
+    def test_upgrade_adds_park_columns(self):
+        engine = _engine_123()
+        with patch.object(Operations, "add_column", _add_column_no_fk):
+            run_ops(engine, _mod_123.upgrade)
+        assert _PARK_COLS <= _pa_cols(engine)
+
+    def test_downgrade_removes_park_columns(self):
+        engine = _engine_123()
+        with patch.object(Operations, "add_column", _add_column_no_fk):
+            run_ops(engine, _mod_123.upgrade)
+            run_ops(engine, _mod_123.downgrade)
+        assert not (_PARK_COLS & _pa_cols(engine))
+
+    def test_upgrade_downgrade_upgrade_round_trips(self):
+        engine = _engine_123()
+        with patch.object(Operations, "add_column", _add_column_no_fk):
+            run_ops(engine, _mod_123.upgrade)
+            run_ops(engine, _mod_123.downgrade)
+            run_ops(engine, _mod_123.upgrade)
+        assert _PARK_COLS <= _pa_cols(engine)
 
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -124,7 +165,7 @@ def test_get_last_activity_at_no_activity(db_session):
 
 
 def test_get_last_activity_at_returns_latest(db_session):
-    """Returns the datetime of the latest ActivityLog row."""
+    """Returns the datetime of the latest non-note ActivityLog row."""
     from app.services.activity_service import get_last_activity_at
 
     co = _make_company(db_session)
@@ -134,7 +175,7 @@ def test_get_last_activity_at_returns_latest(db_session):
         db_session.add(
             ActivityLog(
                 company_id=co.id,
-                activity_type="note",
+                activity_type="email_sent",  # real activity (not a note)
                 channel="system",
                 created_at=t,
             )

@@ -7,11 +7,10 @@ Called by: pytest
 Depends on: conftest.py fixtures, app.routers.htmx_views
 """
 
-import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.models import Company, CustomerSite, SiteContact
+from app.models import Company, CustomerSite, User
 
 # ── Create Company ───────────────────────────────────────────────────
 
@@ -78,7 +77,9 @@ class TestEditCompany:
         assert "Edit Company" in resp.text
         assert test_company.name in resp.text
 
-    def test_edit_saves_changes(self, client: TestClient, test_company: Company, db_session: Session):
+    def test_edit_saves_changes(self, client: TestClient, test_company: Company, test_user: User, db_session: Session):
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/edit",
             data={"name": "Acme Global", "website": "https://acme-global.com"},
@@ -103,8 +104,15 @@ class TestEditCompany:
 
 class TestEditSite:
     def test_edit_site(
-        self, client: TestClient, test_company: Company, test_customer_site: CustomerSite, db_session: Session
+        self,
+        client: TestClient,
+        test_company: Company,
+        test_customer_site: CustomerSite,
+        test_user: User,
+        db_session: Session,
     ):
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}/edit",
             data={"site_name": "Branch Office", "city": "Dallas", "country": "US"},
@@ -164,62 +172,3 @@ class TestDuplicateCheck:
         )
         assert resp.status_code == 200
         assert resp.text == ""
-
-
-# ── Contact Notes ────────────────────────────────────────────────────
-
-
-class TestContactNotes:
-    @pytest.fixture()
-    def site_contact(self, db_session: Session, test_customer_site: CustomerSite):
-        """A site contact for testing notes."""
-        c = SiteContact(
-            customer_site_id=test_customer_site.id,
-            full_name="Jane Doe",
-            email="jane@acme-electronics.com",
-            title="Buyer",
-        )
-        db_session.add(c)
-        db_session.commit()
-        db_session.refresh(c)
-        return c
-
-    def test_get_notes_empty(
-        self, client: TestClient, test_company: Company, test_customer_site: CustomerSite, site_contact: SiteContact
-    ):
-        resp = client.get(
-            f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}/contacts/{site_contact.id}/notes",
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 200
-        assert "No notes yet" in resp.text
-
-    def test_add_note(
-        self, client: TestClient, test_company: Company, test_customer_site: CustomerSite, site_contact: SiteContact
-    ):
-        resp = client.post(
-            f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}/contacts/{site_contact.id}/notes",
-            data={"notes": "Called about RFQ, very responsive."},
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 200
-        assert "Called about RFQ" in resp.text
-
-    def test_add_empty_note_rejected(
-        self, client: TestClient, test_company: Company, test_customer_site: CustomerSite, site_contact: SiteContact
-    ):
-        resp = client.post(
-            f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}/contacts/{site_contact.id}/notes",
-            data={"notes": ""},
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 400
-
-    def test_notes_nonexistent_contact(
-        self, client: TestClient, test_company: Company, test_customer_site: CustomerSite
-    ):
-        resp = client.get(
-            f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}/contacts/99999/notes",
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 404

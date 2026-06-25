@@ -99,12 +99,32 @@
 
     {# ── Email Body + AI Clean Up ─────────────────────────── #}
     {% if vendors %}
-    <div class="bg-white rounded-lg border border-gray-200 p-4 mt-4" x-data="{ cleaning: false }">
+    <div class="bg-white rounded-lg border border-gray-200 p-4 mt-4" x-data="{ cleaning: false, rephrasing: false }">
       <div class="flex items-center justify-between mb-2">
         <div>
           <h3 class="text-sm font-semibold text-gray-900">Email Body</h3>
-          <p class="text-xs text-gray-600 mt-0.5">Write your email, then hit Clean Up to polish grammar and tone</p>
+          <p class="text-xs text-gray-600 mt-0.5">Write your email, then polish the tone or reword it so each send reads uniquely</p>
         </div>
+        <div class="flex items-center gap-2">
+        <button type="button"
+                hx-post="/v2/partials/requisitions/{{ req.id }}/ai-rephrase-email"
+                hx-target="#ai-draft-area"
+                hx-swap="innerHTML"
+                hx-include="[name='body']"
+                data-loading-disable
+                @htmx:before-request="rephrasing = true"
+                @htmx:after-request="rephrasing = false"
+                :disabled="rephrasing"
+                class="btn-sm font-medium text-brand-600 bg-brand-50 border border-brand-200 rounded-lg hover:bg-brand-100 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5">
+          <svg x-show="!rephrasing" x-cloak class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+          </svg>
+          <svg x-show="rephrasing" x-cloak class="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+          </svg>
+          <span x-text="rephrasing ? 'Rephrasing...' : 'AI Rephrase'"></span>
+        </button>
         <button type="button"
                 hx-post="/v2/partials/requisitions/{{ req.id }}/ai-cleanup-email"
                 hx-target="#ai-draft-area"
@@ -124,6 +144,7 @@
           </svg>
           <span x-text="cleaning ? 'Cleaning up...' : 'Clean Up'"></span>
         </button>
+        </div>
       </div>
 
       <div class="mt-3">

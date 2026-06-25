@@ -5,7 +5,7 @@
                admin/_macros.html (spec_code_th).
 #}
 {% from "htmx/partials/admin/_macros.html" import spec_code_th -%}
-<div class="max-w-7xl mx-auto">
+<div class="page-fluid">
   <header class="mb-6">
     <h2 class="text-lg font-bold text-gray-900">Pending OEM Spec-Code Mappings</h2>
     <p class="text-sm text-gray-600 mt-1">
@@ -35,23 +35,23 @@
           <tbody class="divide-y divide-gray-100" id="spec-codes-pending-tbody">
             {% for row in rows %}
             <tr id="spec-row-{{ row.id }}" class="align-top hover:bg-brand-50/30 transition-colors">
-              <td class="px-4 py-3 text-sm font-mono text-gray-900">{{ row.oem }}</td>
-              <td class="px-4 py-3 text-sm font-mono text-gray-900">{{ row.spec_code }}</td>
-              <td class="px-4 py-3 text-sm">
+              <td class="table-cell text-sm font-mono text-gray-900">{{ row.oem }}</td>
+              <td class="table-cell text-sm font-mono text-gray-900">{{ row.spec_code }}</td>
+              <td class="table-cell text-sm">
                 <ul class="space-y-1">
                   {% for entry in row.proposed_avl %}
                     <li>
                       <code class="text-gray-900">{{ entry.mpn }}</code>
-                      <span class="text-gray-500">— {{ entry.manufacturer }} (rank {{ entry.rank }})</span>
+                      <span class="text-gray-600">— {{ entry.manufacturer }} (rank {{ entry.rank }})</span>
                       {% if entry.notes %}
-                        <span class="block text-xs text-gray-500 pl-3">{{ entry.notes }}</span>
+                        <span class="block text-xs text-gray-600 pl-3">{{ entry.notes }}</span>
                       {% endif %}
                     </li>
                   {% endfor %}
                 </ul>
               </td>
-              <td class="px-4 py-3 text-sm text-gray-900">{{ "%.2f"|format(row.llm_confidence) }}</td>
-              <td class="px-4 py-3 text-sm">
+              <td class="table-cell text-sm text-gray-900">{{ "%.2f"|format(row.llm_confidence) }}</td>
+              <td class="table-cell text-sm">
                 {% if row.citations %}
                   {% for c in row.citations %}
                     {% if c.url and (c.url.startswith('http://') or c.url.startswith('https://')) %}
@@ -65,10 +65,10 @@
                   <span class="text-gray-400">—</span>
                 {% endif %}
               </td>
-              <td class="px-4 py-3 text-sm text-gray-600">
+              <td class="table-cell text-sm text-gray-600">
                 {{ (row.used_in_requirement_ids or [])|length }} req(s)
               </td>
-              <td class="px-4 py-3">
+              <td class="table-cell">
                 <div class="flex flex-wrap gap-2">
                   <button data-loading-disable
                           hx-post="/admin/spec-codes/pending/{{ row.id }}/approve"

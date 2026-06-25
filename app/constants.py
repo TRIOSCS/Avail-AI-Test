@@ -11,6 +11,28 @@ Depends on: nothing (leaf module)
 
 from enum import StrEnum, nonmember
 
+# ---------------------------------------------------------------------------
+# File attachment limits (applies to ALL entities uniformly)
+# ---------------------------------------------------------------------------
+
+MAX_ATTACHMENT_BYTES: int = 10 * 1024 * 1024  # 10 MB
+
+ALLOWED_ATTACHMENT_EXTENSIONS: frozenset[str] = frozenset(
+    {
+        ".pdf",
+        ".xlsx",
+        ".xls",
+        ".csv",
+        ".doc",
+        ".docx",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".txt",
+        ".zip",
+    }
+)
+
 
 class ProactiveMatchStatus(StrEnum):
     """Status lifecycle for ProactiveMatch records."""
@@ -116,13 +138,60 @@ class SourcingStatus(StrEnum):
 
 
 class ExcessListStatus(StrEnum):
-    """Status lifecycle for ExcessList records."""
+    """Status lifecycle for ExcessList records.
+
+    Resell (resell-brokerage) lifecycle: draft -> open -> collecting -> bid_out
+    -> awarded -> closed/expired. The new members are chosen to map onto existing
+    ``status_badge`` keys (open->sky, collecting/sourcing->amber, bid_out/quoted->
+    violet, awarded/won->emerald). ACTIVE / BIDDING are the pre-Resell members,
+    kept for backward-compat (additive reshape — a later cutover chunk retires them).
+    """
 
     DRAFT = "draft"
-    ACTIVE = "active"
-    BIDDING = "bidding"
+    OPEN = "open"
+    COLLECTING = "collecting"
+    BID_OUT = "bid_out"
+    AWARDED = "awarded"
     CLOSED = "closed"
     EXPIRED = "expired"
+    # --- Legacy (kept for backward-compat; retired in the cutover chunk) ---
+    ACTIVE = "active"
+    BIDDING = "bidding"
+
+
+class ExcessOfferStatus(StrEnum):
+    """Status lifecycle for inbound ExcessOffer records (a broker's offer to buy).
+
+    ``late`` flags an offer that landed after the list closed / bid went out — it is
+    accepted and queued for review, never dropped (spec §Resolved-for-v1 #3).
+    """
+
+    OPEN = "open"
+    WON = "won"
+    LOST = "lost"
+    EXPIRED = "expired"
+    WITHDRAWN = "withdrawn"
+    LATE = "late"
+
+
+class ExcessOfferScope(StrEnum):
+    """Whether an ExcessOffer binds individual lines or the whole list."""
+
+    PER_LINE = "per_line"
+    TAKE_ALL = "take_all"
+
+
+class OfferLineMatchStatus(StrEnum):
+    """Match result of an ExcessOfferLine against the posting's lines (part-number
+    only).
+
+    ``unmatched`` / ``ambiguous`` rows keep ``mpn_raw`` and queue for manual
+    resolution — never dropped (a dropped offer is a lost deal).
+    """
+
+    MATCHED = "matched"
+    UNMATCHED = "unmatched"
+    AMBIGUOUS = "ambiguous"
 
 
 class ExcessLineItemStatus(StrEnum):
@@ -134,24 +203,51 @@ class ExcessLineItemStatus(StrEnum):
     WITHDRAWN = "withdrawn"
 
 
-class BidStatus(StrEnum):
-    """Status lifecycle for Bid records."""
+class CustomerBidStatus(StrEnum):
+    """Status lifecycle for CustomerBid records (the outbound bid back to the seller).
 
-    PENDING = "pending"
+    The owner assembles selected inbound offers into a customer-facing bid priced from
+    the best-per-unit rollup, then sends it. ``draft`` while building, ``sent`` once the
+    clean PDF goes out, ``accepted`` / ``rejected`` on the seller's reply.
+    """
+
+    DRAFT = "draft"
+    SENT = "sent"
     ACCEPTED = "accepted"
     REJECTED = "rejected"
-    EXPIRED = "expired"
-    WITHDRAWN = "withdrawn"
 
 
-class BidSolicitationStatus(StrEnum):
-    """Status lifecycle for BidSolicitation records."""
+class ExcessOutreachChannel(StrEnum):
+    """Channel a resell outreach went out on (ExcessOutreach.channel).
 
-    PENDING = "pending"
+    The trader→buyer half of Resell: the medium used to offer excess to a buyer.
+    Distinct from the CDM click-to-contact ``OutreachChannel`` (which carries WECHAT
+    and drives the activity-panel buttons) — this set adds MARKETPLACE/OTHER for the
+    broker-marketplace and manual-log paths and is what ``ExcessOutreach.channel``
+    validates against.
+    """
+
+    EMAIL = "email"
+    PHONE = "phone"
+    TEAMS = "teams"
+    MARKETPLACE = "marketplace"
+    OTHER = "other"
+
+
+class ExcessOutreachStatus(StrEnum):
+    """Response lifecycle for a resell outreach (ExcessOutreach.status).
+
+    sent -> opened -> responded -> bid (the buyer submitted an ExcessOffer) or
+    declined; ``no_response`` is the terminal silence state used by the don't-forget
+    nudge. Advanced by the reply adapter (see resell_outreach_service in Chunk B).
+    """
+
     SENT = "sent"
+    OPENED = "opened"
     RESPONDED = "responded"
-    EXPIRED = "expired"
-    FAILED = "failed"
+    BID = "bid"
+    DECLINED = "declined"
+    NO_RESPONSE = "no_response"
 
 
 class QuoteStatus(StrEnum):
@@ -184,6 +280,108 @@ class UserRole(StrEnum):
     # Non-interactive service account (x-agent-key auth). Least privilege:
     # deliberately excluded from require_buyer's allowed set and never admin.
     AGENT = "agent"
+
+
+# Roles scoped to requisitions they own (created_by). Single source of truth for the
+# role-scoped access model: sales/trader act only on their own requisitions; buyer/
+# manager/admin are unrestricted. Read by dependencies.require_requisition_access,
+# get_req_for_user, get_quote_for_user, and the bulk/batch handlers.
+RESTRICTED_ROLES = frozenset({UserRole.SALES, UserRole.TRADER})
+
+
+# ---------------------------------------------------------------------------
+# Access registry (user-management feature, Phase 1 foundation)
+# ---------------------------------------------------------------------------
+
+
+class AccessKey(StrEnum):
+    """Per-feature access keys — the closed vocabulary of grantable access.
+
+    Single source of truth for both nav-module visibility and capability gating. A
+    user's effective access is: admin → everything; otherwise an explicit per-user
+    override (User.access_overrides) wins, else the role default (ROLE_ACCESS_DEFAULTS).
+    ops_verification is special-cased — it delegates to VerificationGroupMember (see
+    dependencies.user_has_access).
+    """
+
+    # App-section (nav module) access
+    REQUISITIONS = "requisitions"
+    SIGHTINGS = "sightings"
+    MATERIALS = "materials"
+    SEARCH = "search"
+    BUY_PLANS = "buy_plans"
+    RESELL = "resell"
+    CRM = "crm"
+    PROACTIVE = "proactive"
+    PROSPECTING = "prospecting"
+    MY_DAY = "my_day"
+    # Capability access
+    SEND_RFQ = "send_rfq"
+    APPROVE_OFFERS = "approve_offers"
+    EXPORT_DATA = "export_data"
+    MANAGE_CONNECTORS = "manage_connectors"
+    OPS_VERIFICATION = "ops_verification"
+
+
+# Partition of AccessKey into the two families above. Module keys gate nav-section
+# visibility; capability keys gate discrete actions. Kept beside the enum so callers
+# iterate the right subset (e.g. building the nav vs. the capabilities admin panel).
+MODULE_ACCESS_KEYS = (
+    AccessKey.REQUISITIONS,
+    AccessKey.SIGHTINGS,
+    AccessKey.MATERIALS,
+    AccessKey.SEARCH,
+    AccessKey.BUY_PLANS,
+    AccessKey.RESELL,
+    AccessKey.CRM,
+    AccessKey.PROACTIVE,
+    AccessKey.PROSPECTING,
+    AccessKey.MY_DAY,
+)
+CAPABILITY_ACCESS_KEYS = (
+    AccessKey.SEND_RFQ,
+    AccessKey.APPROVE_OFFERS,
+    AccessKey.EXPORT_DATA,
+    AccessKey.MANAGE_CONNECTORS,
+    AccessKey.OPS_VERIFICATION,
+)
+
+
+class UserAuditAction(StrEnum):
+    """Closed vocabulary for UserAdminAudit.action — what an admin did to a user."""
+
+    INVITE = "invite"
+    ROLE_CHANGE = "role_change"
+    ACTIVATE = "activate"
+    DEACTIVATE = "deactivate"
+    ACCESS_GRANT = "access_grant"
+    ACCESS_REVOKE = "access_revoke"
+
+
+# Default access granted to every interactive (non-admin) role. This deliberately
+# preserves TODAY'S behavior: the nav is fully visible to all interactive roles, and
+# RFQ / approve-offers / export / manage-connectors are allowed for every buyer-tier
+# role. ops_verification is INTENTIONALLY excluded — it is curated through the
+# verification group (VerificationGroupMember), never via a blanket role default, so
+# turning the access model on grants nobody new ops-verification rights.
+_INTERACTIVE_DEFAULTS = frozenset(MODULE_ACCESS_KEYS) | {
+    AccessKey.SEND_RFQ,
+    AccessKey.APPROVE_OFFERS,
+    AccessKey.EXPORT_DATA,
+    AccessKey.MANAGE_CONNECTORS,
+}
+
+# Role → default access set. Defaults exactly preserve current behavior so that
+# introducing the access layer is a no-op until an admin sets explicit overrides.
+# ADMIN gets every key; AGENT (non-interactive service account) gets none.
+ROLE_ACCESS_DEFAULTS: dict[UserRole, frozenset] = {
+    UserRole.BUYER: _INTERACTIVE_DEFAULTS,
+    UserRole.SALES: _INTERACTIVE_DEFAULTS,
+    UserRole.TRADER: _INTERACTIVE_DEFAULTS,
+    UserRole.MANAGER: _INTERACTIVE_DEFAULTS,
+    UserRole.ADMIN: frozenset(AccessKey),  # admin has everything
+    UserRole.AGENT: frozenset(),  # service account: no interactive access
+}
 
 
 class ProactiveOfferStatus(StrEnum):
@@ -371,14 +569,23 @@ class SpecCodeSource(StrEnum):
     CSV_IMPORT = "csv_import"
 
 
-BROWSER_WORKER_SOURCES = frozenset({"icsource", "netcomponents"})
+class RfqAttachmentStatus(StrEnum):
+    """Per-datasheet status in the RFQ attachment pipeline."""
+
+    ATTACHED = "attached"
+    MISSING = "missing"
+    OVERSIZED = "oversized"
+    FETCH_ERROR = "fetch_error"
+
+
+BROWSER_WORKER_SOURCES = frozenset({"icsource", "netcomponents", "thebrokersite"})
 """api_sources rows backed by queue-driven browser workers, not request/response
 connectors.
 
 These have no entry in `_get_connector_for_source`, so `health_monitor.ping_source` would
 flip them to DISABLED on every 15-min run. Skip them in `run_health_checks` so the seed
 applied at startup (`seed_browser_worker_sources`) survives. Their actual health is
-tracked via `IcsWorkerStatus`/`NcWorkerStatus` heartbeats.
+tracked via `IcsWorkerStatus`/`NcWorkerStatus`/`TbfWorkerStatus` heartbeats.
 """
 
 
@@ -422,9 +629,27 @@ class ActivityType(StrEnum):
     PART_STATUS_CHANGE = "part_status_change"
     TEAMS_MESSAGE = "teams_message"
     WECHAT_MESSAGE = "wechat_message"
+    MEETING = "meeting"
     # Vendor+part unavailability knowledge (vendor_unavailability service)
     VENDOR_UNAVAILABLE = "vendor_unavailable"  # 18 chars — fits String(20)
     VENDOR_AVAILABLE = "vendor_available"
+
+
+class CallOutcome(StrEnum):
+    """Outcome values for a phone call, stamped into ActivityLog.details."""
+
+    CONNECTED = "connected"
+    LEFT_MESSAGE = "left_message"
+    VOICEMAIL = "voicemail"
+    NO_ANSWER = "no_answer"
+
+
+# Outcomes that constitute a meaningful outreach touch (cadence clock advances).
+# CONNECTED: live conversation confirmed. LEFT_MESSAGE: human voicemail recorded.
+# VOICEMAIL / NO_ANSWER are not meaningful (no human contact made).
+# NOTE: 8x8 CDR only emits CONNECTED and NO_ANSWER — adding LEFT_MESSAGE here
+# does not change 8x8 behaviour; it makes manually-picked LEFT_MESSAGE consistent.
+MEANINGFUL_CALL_OUTCOMES: frozenset[str] = frozenset({CallOutcome.CONNECTED, CallOutcome.LEFT_MESSAGE})
 
 
 class Channel(StrEnum):
@@ -457,6 +682,7 @@ class EventType(StrEnum):
     EMAIL = "email"
     CALL = "call"
     MESSAGE = "message"
+    MEETING = "meeting"
     API_SOURCE_DOWN = "api_source_down"
     API_QUOTA_WARNING = "api_quota_warning"
     API_QUOTA_CRITICAL = "api_quota_critical"
@@ -655,3 +881,26 @@ class AlertKind(StrEnum):
     INBOUND_CUSTOMER = "inbound_customer"
     INBOUND_VENDOR = "inbound_vendor"
     BUYPLAN_ACTION = "buyplan_action"
+    TASKS_ACTION = "tasks_action"
+
+
+class SightingsSkipReason(StrEnum):
+    """Advisory skip-reason for a vendor in the sightings RFQ modal / preview.
+
+    Computed up-front so the compose and preview steps can show WHY a vendor will be
+    skipped. The authoritative skip stays in send_batch_rfq (TOCTOU guard) — this enum
+    is advisory only and never gates the actual send.
+
+    Unavailable vendors are partitioned out *before* the per-entry skip_reason loop
+    and placed in a separate ``unavailable_vendors`` list, so they never reach the
+    previews list and this enum never carries an UNAVAILABLE value.
+
+    READY          — vendor has a resolvable email and is not DNC (green / no badge).
+    NO_EMAIL       — no resolvable VendorContact email (amber badge).
+    DO_NOT_CONTACT — vendor contact email matches a do_not_contact SiteContact
+                     (rose badge).
+    """
+
+    READY = "ready"
+    NO_EMAIL = "no_email"
+    DO_NOT_CONTACT = "do_not_contact"

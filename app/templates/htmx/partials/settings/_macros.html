@@ -9,16 +9,18 @@
 
 {# Settings tab button. `tab` is the Alpine tab id + the @click/:class token; `url`
    is the hx-get target; `label` the visible text; `icon_paths` a list of SVG path
-   `d` strings (the wrapper <svg> is identical across tabs). `extra_attrs` is appended
-   raw to the <button> (e.g. the System tab's hx-indicator + data-loading-disable). #}
-{% macro tab_button(tab, url, label, icon_paths, extra_attrs='') -%}
+   `d` strings (the wrapper <svg> is identical across tabs). `target` is the hx-target
+   selector (defaults to the in-shell content area so drill-in stays inside Settings).
+   `extra_attrs` is appended raw to the <button> (e.g. the System tab's hx-indicator
+   + data-loading-disable). #}
+{% macro tab_button(tab, url, label, icon_paths, extra_attrs='', target='#settings-content') -%}
 <button @click="tab = '{{ tab }}'"
             :class="tab === '{{ tab }}'
               ? 'border-b-2 border-brand-500 text-brand-600 bg-brand-50'
-              : 'text-gray-500 hover:text-brand-600 hover:bg-brand-50'"
-            class="px-4 py-2.5 text-sm font-medium rounded-t-lg transition-colors"
+              : 'text-gray-600 hover:text-brand-600 hover:bg-brand-50'"
+            class="shrink-0 whitespace-nowrap px-4 py-2.5 text-sm font-medium rounded-t-lg transition-colors"
             hx-get="{{ url }}"
-            hx-target="#settings-content"{{ extra_attrs|safe }}>
+            hx-target="{{ target }}"{{ extra_attrs|safe }}>
       <span class="flex items-center gap-1.5">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">{% for d in icon_paths %}
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="{{ d }}"/>{% endfor %}
@@ -34,15 +36,18 @@
    that same leading whitespace, used to re-indent the continuation/closing lines to
    pad+8 / pad+2 / pad, matching the original hand-indented markup. `keep_id`/`drop_id`
    are the ids kept/removed, `keep`/`drop` the names, `endpoint` the hx-post URL,
-   `target` the hx-target selector. #}
-{% macro merge_button(pad, endpoint, target, keep_id, drop_id, keep, drop) -%}
+   `target` the hx-target selector. `is_keeper` styles the suggested-keep direction as a
+   filled brand/primary chip and the drop direction as a neutral outline, so two
+   similar-prefixed names never render as two identical buttons. The name truncation is
+   wide (40 chars) for the same reason. #}
+{% macro merge_button(pad, endpoint, target, keep_id, drop_id, keep, drop, is_keeper=false) -%}
 <button data-loading-disable
 {{ pad }}        hx-post="{{ endpoint }}"
 {{ pad }}        hx-vals='{"keep_id": {{ keep_id }}, "remove_id": {{ drop_id }}}'
 {{ pad }}        hx-target="{{ target }}"
 {{ pad }}        hx-swap="innerHTML"
 {{ pad }}        hx-confirm="Merge '{{ drop }}' into '{{ keep }}'?"
-{{ pad }}        class="px-2 py-1 text-xs bg-brand-50 text-brand-600 border border-brand-200 rounded hover:bg-brand-100">
-{{ pad }}  Keep "{{ keep|truncate(20) }}"
+{{ pad }}        class="px-2 py-1 text-xs rounded {% if is_keeper %}bg-brand-500 text-white border border-brand-500 font-medium hover:bg-brand-600{% else %}bg-white text-gray-600 border border-gray-300 hover:bg-gray-50{% endif %}">
+{{ pad }}  Keep "{{ keep|truncate(40) }}"
 {{ pad }}</button>
 {%- endmacro %}
