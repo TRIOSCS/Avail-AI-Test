@@ -45,6 +45,11 @@ class Quote(Base):
 
     status = Column(String(20), default="draft")
     sent_at = Column(UTCDateTime)
+    # Microsoft Graph identifiers of the outbound quote email (captured at send time so
+    # customer replies can be threaded back to this quote). Nullable: drafts and legacy
+    # rows have no send, and Graph propagation can occasionally fail the Sent-Items lookup.
+    graph_message_id = Column(String(255), nullable=True)
+    graph_conversation_id = Column(String(255), nullable=True)
     followup_alert_sent_at = Column(UTCDateTime(timezone=True), nullable=True)
     result = Column(String(20))
     result_reason = Column(String(255))

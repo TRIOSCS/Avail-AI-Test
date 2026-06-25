@@ -236,6 +236,9 @@ Written by `services.user_admin.record_user_audit` (caller commits); surfaced by
 | status | String 20 | draft\|sent\|accepted\|rejected |
 | result | String 20 | won\|lost |
 | won_revenue | Numeric 12,2 | |
+| sent_at | UTCDateTime | Set when the quote is emailed |
+| graph_message_id | String 255, nullable | Migration 153 — Graph id of the outbound quote email (reply threading) |
+| graph_conversation_id | String 255, nullable | Migration 153 — Graph conversation id; NULL-safe when the Sent-Items lookup misses |
 
 **`quote_lines`** — Individual parts in a quote
 | Column | Type | Notes |

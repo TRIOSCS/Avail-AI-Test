@@ -698,13 +698,17 @@ class TestQuotesPartials:
         line = db_session.query(QuoteLine).filter_by(quote_id=q.id, offer_id=offer.id).first()
         assert line is None
 
-    def test_send_quote(self, client, db_session: Session, test_user: User):
+    def test_send_quote(self, client, db_session: Session, test_user: User, test_customer_site):
+        # send now actually emails (S1 fix): give the quote a site with a recipient so the
+        # canonical service can resolve a customer and mark it sent under TESTING.
         req = _req(db_session, test_user)
-        q = _quote(db_session, req, test_user, status=QuoteStatus.DRAFT)
+        q = _quote(db_session, req, test_user, status=QuoteStatus.DRAFT, customer_site_id=test_customer_site.id)
         db_session.commit()
 
         resp = client.post(f"/v2/partials/quotes/{q.id}/send")
         assert resp.status_code == 200
+        db_session.refresh(q)
+        assert q.status == QuoteStatus.SENT
 
     def test_send_quote_not_found(self, client, db_session: Session):
         resp = client.post("/v2/partials/quotes/999999/send")
