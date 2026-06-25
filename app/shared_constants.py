@@ -115,6 +115,12 @@ JUNK_VENDORS: set[str] = {
     "no seller",
 }
 
+# ── Junk manufacturer names ──────────────────────────────────────────────
+# Union of enrichment.py._IGNORED_MANUFACTURERS and tagging_backfill.py._JUNK_MANUFACTURERS.
+# Used to skip placeholder/noise values when harvesting manufacturer data from sightings or
+# connector payloads. Stored as frozenset for fast membership tests and immutability.
+JUNK_MANUFACTURERS: frozenset[str] = frozenset({"", "unknown", "n/a", "various", "none", "other", "generic", "-", "na"})
+
 # ── RFQ subject tags ────────────────────────────────────────────────────
 # Extracts the requisition ID from an RFQ email subject tag. Matches both
 # [ref:123] (current, written by email_service.send_batch_rfq) and
