@@ -52,7 +52,7 @@
     <button hx-get="/v2/partials/sightings?status={{ val }}&q={{ q }}&group_by={{ group_by }}&manufacturer={{ manufacturer|default('') }}"
             hx-target="#sightings-table" hx-swap="innerHTML"
             class="px-2 py-0.5 rounded text-[11px] font-medium transition-colors
-                   {{ 'bg-brand-100 text-brand-700' if status == val else 'text-gray-400 hover:text-gray-600' }}">
+                   {{ 'bg-accent-100 text-accent-700' if status == val else 'text-gray-400 hover:text-gray-600' }}">
       {{ label }} <span class="text-[11px]">{{ count }}</span>
     </button>
     {% endfor %}
@@ -310,7 +310,7 @@
        x-transition:leave="transition ease-in duration-150"
        x-transition:leave-start="translate-y-0 opacity-100"
        x-transition:leave-end="translate-y-full opacity-0"
-       class="sticky bottom-0 bg-white border-t border-brand-200 px-3 py-2 flex items-center gap-3 shadow-lg">
+       class="sticky bottom-0 bg-white border-t border-accent-200 px-3 py-2 flex items-center gap-3 shadow-lg">
     <span class="text-xs font-medium text-gray-600" x-text="$store.sightingSelection.count + ' selected'"></span>
     <span x-show="$store.sightingSelection.count > visibleSelectedCount && visibleSelectedCount > 0"
           x-cloak

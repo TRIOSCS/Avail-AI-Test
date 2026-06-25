@@ -49,7 +49,7 @@
         <label class="flex items-center gap-2 px-2 py-1 rounded hover:bg-gray-50 cursor-pointer">
           <input type="radio" name="reason" value="{{ reason.value }}" required
                  {% if current and current.reason == reason.value %}checked{% endif %}
-                 class="border-gray-300 text-brand-600 focus:ring-brand-500">
+                 class="border-gray-300 text-accent-600 focus:ring-accent-500">
           <span class="text-sm text-gray-700">{{ reason.label }}</span>
         </label>
         {% endfor %}

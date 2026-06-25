@@ -707,7 +707,9 @@ class TestVendorRowThreeStates:
         # Normal row, NO tint; bordered emerald-50 chip (distinct from offer-in solid 100)
         assert "bg-rose-50/60" not in body
         assert "Possible restock" in body
-        assert "bg-emerald-50 text-emerald-700 border border-emerald-200" in body
+        # F9 sweep moved badge to .chip primitive; border is applied via @apply in .chip CSS.
+        # The HTML class attr is: chip bg-emerald-50 text-emerald-700 border-emerald-200
+        assert "chip bg-emerald-50 text-emerald-700 border-emerald-200" in body
         # qty delta old → new in emerald mono + compressed history echo
         assert "100 → 200" in body
         assert 'class="font-mono text-emerald-600"' in body
