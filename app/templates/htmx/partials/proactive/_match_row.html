@@ -6,16 +6,17 @@
 #}
 <tr id="match-row-{{ match.id }}"
     class="hover:bg-gray-50 transition-colors"
-    :class="selected[{{ match.id }}] && 'bg-brand-50'">
-  {# Checkbox #}
-  <td class="w-10 px-3 py-2.5">
+    :class="selected[{{ match.id }}] && 'bg-blue-50'">
+  {# Checkbox — accent via accent-color + input-focus ring (not brand-500) #}
+  <td class="w-10">
     <input aria-label="Select match {{ match.mpn | default('') }}" type="checkbox"
            :checked="selected[{{ match.id }}]"
            @change="toggle({{ match.id }})"
-           class="rounded border-gray-300 text-brand-500 focus:ring-brand-500">
+           class="rounded border-gray-300 input-focus"
+           style="accent-color:var(--accent)">
   </td>
   {# MPN + Manufacturer #}
-  <td class="px-3 py-2.5">
+  <td>
     <p class="text-sm font-medium text-gray-900 font-mono">{{ match.mpn | default('--') }}</p>
     {% if match.manufacturer %}
     <p class="text-xs text-gray-400 mt-0.5">{{ match.manufacturer }}</p>
@@ -29,7 +30,7 @@
     {% endif %}
   </td>
   {# Vendor + reliability #}
-  <td class="px-3 py-2.5 text-sm text-gray-700">
+  <td class="text-sm text-gray-700">
     {{ match.vendor_name | default('--') }}
     {% if match.ghost_rate is not none and match.ghost_rate > 30 %}
     <span class="ml-1 text-xs text-rose-500 font-medium">unreliable</span>
@@ -38,30 +39,30 @@
     {% endif %}
   </td>
   {# Qty #}
-  <td class="px-3 py-2.5 text-sm text-gray-700 text-right tabular-nums">
+  <td class="text-sm text-gray-700 text-right tabular-nums">
     {{ "{:,}".format(match.qty_available|int) if match.qty_available else '--' }}
   </td>
   {# Unit Price #}
-  <td class="px-3 py-2.5 text-sm text-gray-700 text-right tabular-nums">
+  <td class="text-sm text-gray-700 text-right tabular-nums">
     {% if match.unit_price %}${{ "%.4f"|format(match.unit_price) }}{% else %}--{% endif %}
   </td>
-  {# Margin pill #}
-  <td class="px-3 py-2.5">
+  {# Margin pill — .badge-mini via semantic color map #}
+  <td>
     {% if match.margin_pct is not none %}
-    <span class="inline-flex px-1.5 py-0.5 text-xs font-semibold rounded
+    <span class="badge-mini
       {{ 'bg-emerald-50 text-emerald-700' if match.margin_pct >= 20 else
          'bg-amber-50 text-amber-700' if match.margin_pct >= 10 else
          'bg-rose-50 text-rose-700' }}">
       {{ "%.0f"|format(match.margin_pct) }}%
     </span>
     {% else %}
-    <span class="inline-flex px-1.5 py-0.5 text-xs font-medium rounded bg-gray-100 text-gray-400">N/A</span>
+    <span class="badge-mini bg-gray-100 text-gray-400">N/A</span>
     {% endif %}
   </td>
-  {# Score pill #}
-  <td class="px-3 py-2.5">
+  {# Score pill — .badge-mini #}
+  <td>
     {% set score = match.match_score|default(0) %}
-    <span class="inline-flex px-1.5 py-0.5 text-xs font-bold rounded
+    <span class="badge-mini
       {{ 'bg-emerald-50 text-emerald-700' if score >= 75 else
          'bg-amber-50 text-amber-700' if score >= 50 else
          'bg-gray-100 text-gray-600' }}">
@@ -69,7 +70,7 @@
     </span>
   </td>
   {# Do-Not-Offer button #}
-  <td class="px-3 py-2.5 text-right" id="dno-cell-{{ match.id }}">
+  <td class="text-right" id="dno-cell-{{ match.id }}">
     <form hx-post='/v2/partials/proactive/do-not-offer'
           hx-target='#match-row-{{ match.id }}'
           hx-swap='outerHTML'
@@ -79,7 +80,7 @@
       <input type='hidden' name='company_id' value='{{ group.company_id | default("") }}'>
       <button type='submit'
               title="Never offer this part to this customer"
-              class='text-xs text-gray-400 hover:text-rose-500 transition-colors px-1.5 py-0.5 rounded hover:bg-rose-50'>
+              class='text-xs text-gray-400 hover:text-rose-500 transition-colors px-1.5 py-0.5 rounded hover:bg-rose-50 focus:outline-none focus:ring-2' style='--tw-ring-color:var(--accent-ring)'>
         Don&rsquo;t offer
       </button>
     </form>

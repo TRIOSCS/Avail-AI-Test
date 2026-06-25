@@ -42,44 +42,45 @@
   </div>
   {% endif %}
 
-  {# Selected Parts #}
-  <div class="bg-white rounded-lg border border-gray-200 mb-6 overflow-hidden">
-    <div class="px-4 py-3 bg-gray-50 border-b border-gray-200">
+  {# Selected Parts — .data-table for unified density + line tokens #}
+  <div class="bg-white rounded-lg border border-line-base mb-6 overflow-hidden">
+    <div class="px-4 py-3 bg-gray-50 border-b border-line-base">
       <h2 class="text-sm font-semibold text-gray-900">Selected Parts ({{ matches|length }})</h2>
     </div>
     <div class="overflow-x-auto">
-      <table class="min-w-full divide-y divide-gray-200">
-        <thead class="bg-gray-50/50">
+      <table class="data-table w-full">
+        <thead>
           <tr>
-            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">MPN</th>
-            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Vendor</th>
-            <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Qty</th>
-            <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Cost</th>
-            <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Sell Price</th>
-            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Margin</th>
+            <th class="text-left">MPN</th>
+            <th class="text-left">Vendor</th>
+            <th class="text-right">Qty</th>
+            <th class="text-right">Cost</th>
+            <th class="text-right">Sell Price</th>
+            <th class="text-left">Margin</th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-gray-100">
+        <tbody>
           {% for m in matches %}
           {# Compute suggested sell price: cost * 1.3, rounded to 4dp #}
           {% set suggested_sell = "%.4f"|format((m.unit_price * 1.3) if m.unit_price else 0) %}
           <tr class="hover:bg-gray-50" x-data='{ sell: {{ suggested_sell }} }'>
-            <td class="px-4 py-2.5">
+            <td>
               <span class="text-sm font-medium text-gray-900 font-mono">{{ m.mpn }}</span>
               {% if m.manufacturer %}
               <span class="text-xs text-gray-400 ml-1">{{ m.manufacturer }}</span>
               {% endif %}
             </td>
-            <td class="px-4 py-2.5 text-sm text-gray-700">{{ m.vendor_name }}</td>
-            <td class="px-4 py-2.5 text-sm text-gray-700 text-right tabular-nums">
+            <td class="text-sm text-gray-700">{{ m.vendor_name }}</td>
+            <td class="text-sm text-gray-700 text-right tabular-nums">
               {{ "{:,}".format(m.qty_available|int) if m.qty_available else '--' }}
             </td>
-            <td class="px-4 py-2.5 text-sm text-gray-700 text-right tabular-nums">
+            <td class="text-sm text-gray-700 text-right tabular-nums">
               {% if m.unit_price %}${{ "%.4f"|format(m.unit_price) }}{% else %}--{% endif %}
             </td>
-            <td class="px-4 py-2.5 text-right">
+            <td class="text-right">
               <div class="flex items-center justify-end gap-1">
                 <span class="text-xs text-gray-400">$</span>
+                {# .input .input-sm: accent focus ring, consistent with subject/body inputs #}
                 <input type='number'
                        name='sell_price_{{ m.id }}'
                        form='send-form'
@@ -87,19 +88,20 @@
                        min='0'
                        x-model='sell'
                        value='{{ suggested_sell }}'
-                       class='w-24 text-right rounded border-gray-300 text-sm tabular-nums focus:border-brand-500 focus:ring-brand-500 py-1 px-2'>
+                       class='input input-sm w-24 text-right tabular-nums'>
               </div>
             </td>
-            <td class="px-4 py-2.5">
+            <td>
               {% if m.margin_pct is not none %}
-              <span class="inline-flex px-1.5 py-0.5 text-xs font-semibold rounded
+              {# .badge-mini — consistent with _match_row.html #}
+              <span class="badge-mini
                 {{ 'bg-emerald-50 text-emerald-700' if m.margin_pct >= 20 else
                    'bg-amber-50 text-amber-700' if m.margin_pct >= 10 else
                    'bg-rose-50 text-rose-700' }}">
                 {{ "%.0f"|format(m.margin_pct) }}%
               </span>
               {% else %}
-              <span class="text-xs text-gray-400">N/A</span>
+              <span class="badge-mini bg-gray-100 text-gray-400">N/A</span>
               {% endif %}
             </td>
           </tr>
@@ -110,8 +112,8 @@
   </div>
 
   {# Send To — Contact Picker #}
-  <div class="bg-white rounded-lg border border-gray-200 mb-6">
-    <div class="px-4 py-3 bg-gray-50 border-b border-gray-200">
+  <div class="bg-white rounded-lg border border-line-base mb-6">
+    <div class="px-4 py-3 bg-gray-50 border-b border-line-base">
       <h2 class="text-sm font-semibold text-gray-900">Send To</h2>
     </div>
     <div class="p-4 space-y-2">
@@ -119,18 +121,20 @@
         {% for c in contacts %}
         <label class="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 cursor-pointer {{ 'opacity-50' if not c.has_email }}"
                {% if not c.has_email %}title="No email address"{% endif %}>
+          {# Checkbox — accent via accent-color + input-focus (not brand-500) #}
           <input type="checkbox"
                  {% if not c.has_email %}disabled{% endif %}
                  :checked="selectedContacts[{{ c.id }}]"
                  @change="toggleContact({{ c.id }})"
-                 class="rounded border-gray-300 text-brand-500 focus:ring-brand-500 disabled:opacity-40">
+                 class="rounded border-gray-300 input-focus disabled:opacity-40"
+                 style="accent-color:var(--accent)">
           <div class="flex-1 min-w-0">
             <p class="text-sm font-medium text-gray-900">{{ c.full_name or '(unnamed)' }}</p>
             <p class="text-xs text-gray-600">
               {{ c.email or '(no email)' }}
               {% if c.title %} &middot; {{ c.title }}{% endif %}
               {% if c.is_primary %}
-              <span class="ml-1 px-1.5 py-0.5 text-[9px] font-semibold bg-brand-50 text-brand-600 rounded">Primary</span>
+              <span class="badge-mini bg-brand-50 text-brand-600 ml-1">Primary</span>
               {% endif %}
             </p>
           </div>
@@ -149,8 +153,8 @@
         hx-post="/v2/proactive/send"
         hx-target="#main-content"
         data-loading-disable
-        class="bg-white rounded-lg border border-gray-200 mb-6">
-    <div class="px-4 py-3 bg-gray-50 border-b border-gray-200">
+        class="bg-white rounded-lg border border-line-base mb-6">
+    <div class="px-4 py-3 bg-gray-50 border-b border-line-base">
       <h2 class="text-sm font-semibold text-gray-900">Email</h2>
     </div>
     <div class="p-4 space-y-4">
@@ -179,19 +183,19 @@
                   class="input"></textarea>
       </div>
 
-      {# AI Draft button #}
+      {# AI Draft button — .btn-secondary (neutral chrome, accent focus ring) #}
       <div id="draft-status" class="flex items-center gap-2">
         <button type="button"
                 hx-post="/v2/partials/proactive/draft"
                 hx-target="#draft-status"
                 hx-include="[name='match_ids'],[name='contact_ids'],[name^='sell_price_']"
                 hx-indicator="#draft-spinner"
-                class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-brand-600 bg-brand-50 border border-brand-200 rounded-lg hover:bg-brand-100 transition-colors">
+                class="btn-secondary btn-sm inline-flex items-center gap-1.5">
           <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
           </svg>
           Generate AI Draft
-          <svg id="draft-spinner" class="htmx-indicator animate-spin h-3.5 w-3.5 text-brand-400" fill="none" viewBox="0 0 24 24">
+          <svg id="draft-spinner" class="htmx-indicator animate-spin h-3.5 w-3.5 text-gray-400" fill="none" viewBox="0 0 24 24">
             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
           </svg>
@@ -200,14 +204,16 @@
     </div>
 
     {# Footer actions #}
-    <div class="flex items-center justify-end gap-3 px-4 py-3 bg-gray-50 border-t border-gray-200">
+    <div class="flex items-center justify-end gap-3 px-4 py-3 bg-gray-50 border-t border-line-base">
+      {# Cancel — .btn-ghost for consistent secondary action treatment #}
       <a hx-get="/v2/partials/proactive?tab=matches" hx-target="#main-content"
-         class="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-800 transition-colors cursor-pointer">
+         class="btn-ghost btn-sm cursor-pointer">
         Cancel
       </a>
+      {# Send — .btn-primary: resolves to accent, replacing bespoke brand-500 #}
       <button type="submit"
               :disabled="contactCount === 0"
-              class="px-4 py-2 text-sm font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+              class="btn-primary disabled:opacity-40 disabled:cursor-not-allowed">
         Send to <span x-text="contactCount">0</span> Contact<span x-show="contactCount !== 1" x-cloak>s</span>
       </button>
     </div>
