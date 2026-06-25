@@ -3,7 +3,7 @@
    workspace-level Alpine selectedId. Checkboxes enable bulk select for bulk actions.
    Receives: companies, total, limit, offset (filters come from #cdm-filters via hx-include).
    Called by: list.html (initial include) and companies_account_list_partial route (refresh).
-   Depends on: workspace x-data (selectedId), brand palette, timeago filter.
+   Depends on: workspace x-data (selectedId), accent palette (post-PR0), timeago filter.
    Bulk actions: POST /v2/partials/customers/bulk/{action} with ids (comma-separated).
 #}
 {% from "htmx/partials/shared/_alert_macros.html" import alert_row_attrs %}
@@ -29,7 +29,7 @@
      data-offset="{{ offset }}" data-limit="{{ limit }}">
   <div class="flex items-center justify-between px-3 py-1.5 text-[11px] font-medium text-gray-600">
     <label class="flex items-center gap-2 cursor-pointer select-none">
-      <input type="checkbox" class="rounded border-gray-300 text-brand-500 focus:ring-brand-500"
+      <input type="checkbox" class="rounded border-gray-300 input-focus text-accent-500"
              :checked="allSelected"
              @change="toggleAll($event.target.checked)"
              aria-label="Select all accounts on this page">
@@ -44,14 +44,14 @@
       <a href="#" role="button"
          hx-get="/v2/partials/customers/archived"
          hx-target="#cdm-list" hx-swap="innerHTML" hx-push-url="false"
-         class="font-medium text-gray-600 hover:text-brand-700 hover:underline underline-offset-2 focus:outline-none focus:ring-2 focus:ring-brand-400 rounded px-1"
+         class="font-medium text-gray-600 hover:text-accent-700 hover:underline underline-offset-2 focus:outline-none focus:ring-2 focus:ring-accent-500 rounded px-1"
          title="View archived (Do Not Call) accounts">Archive (DNC)</a>
     </div>
   </div>
 
   {# Bulk action bar — visible only when ≥1 row is checked #}
   <div x-show="count > 0" x-cloak class="px-3 pb-2 flex items-center gap-2 flex-wrap">
-    <span class="text-xs font-medium text-brand-700" x-text="count + ' selected'"></span>
+    <span class="text-xs font-medium text-accent-700" x-text="count + ' selected'"></span>
     {# Deactivate #}
     <form hx-post="/v2/partials/customers/bulk/deactivate"
           hx-target="#cdm-list" hx-swap="innerHTML"
@@ -77,7 +77,7 @@
         Assign owner ▾
       </button>
       <div x-show="open" x-cloak @click.outside="open = false"
-           class="absolute left-0 top-full mt-1 z-20 bg-white border border-gray-200 rounded-lg shadow-lg p-2 w-48">
+           class="absolute left-0 top-full mt-1 z-20 bg-white border border-line-base rounded-lg shadow-lg p-2 w-48">
         <form hx-post="/v2/partials/customers/bulk/assign-owner"
               hx-target="#cdm-list" hx-swap="innerHTML"
               hx-include="#cdm-filters"
@@ -108,15 +108,15 @@
        is a flat picker — no accordion, no per-site drill-down navigation. #}
   <div id="cdm-row-{{ c.id }}"{{ alert_row_attrs(alert_markers, 'company-' ~ c.id) }}
        class="flex items-center gap-2 px-2 py-2.5 hover:bg-gray-50 transition-colors border-l-2"
-       :class="selectedId === {{ c.id }} ? 'bg-brand-50 border-l-brand-500' : 'border-l-transparent'">
+       :class="selectedId === {{ c.id }} ? 'bg-accent-50 border-l-accent-500' : 'border-l-transparent'">
     {# Checkbox — stops click propagation so ticking a checkbox doesn't also load the detail #}
-    <input type="checkbox" class="rounded border-gray-300 text-brand-500 focus:ring-brand-500 flex-shrink-0"
+    <input type="checkbox" class="rounded border-gray-300 input-focus text-accent-500 flex-shrink-0"
            :checked="selectedIds['{{ c.id }}']"
            @click.stop="toggle('{{ c.id }}')"
            aria-label="Select {{ c.name }}">
     {# Row body — the actual click-to-detail area #}
     <div role="button" tabindex="0"
-         class="flex items-center gap-2 flex-1 min-w-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-500"
+         class="flex items-center gap-2 flex-1 min-w-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-inset focus:ring-accent-500"
          hx-get="/v2/partials/customers/{{ c.id }}"
          hx-target="#cdm-detail"
          hx-swap="innerHTML"
@@ -162,7 +162,7 @@
      hx-target-error="#cdm-error"
      hx-include="#cdm-filters"
      hx-trigger="click, keyup[key=='Enter']"
-     class="px-2.5 py-1 text-xs bg-white border border-gray-200 rounded-lg hover:bg-brand-50 cursor-pointer focus:outline-none focus:ring-2 focus:ring-brand-500">Prev</a>
+     class="px-2.5 py-1 text-xs bg-white border border-line-base rounded-lg hover:bg-accent-50 cursor-pointer focus:outline-none focus:ring-2 focus:ring-accent-500">Prev</a>
   {% endif %}
   <span class="px-2 py-1 text-xs text-gray-600">{{ offset + 1 }}&ndash;{{ [offset + limit, total]|min }} of {{ total }}</span>
   {% if offset + limit < total %}
@@ -173,7 +173,7 @@
      hx-target-error="#cdm-error"
      hx-include="#cdm-filters"
      hx-trigger="click, keyup[key=='Enter']"
-     class="px-2.5 py-1 text-xs bg-white border border-gray-200 rounded-lg hover:bg-brand-50 cursor-pointer focus:outline-none focus:ring-2 focus:ring-brand-500">Next</a>
+     class="px-2.5 py-1 text-xs bg-white border border-line-base rounded-lg hover:bg-accent-50 cursor-pointer focus:outline-none focus:ring-2 focus:ring-accent-500">Next</a>
   {% endif %}
 </div>
 {% endif %}
