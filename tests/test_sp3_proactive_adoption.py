@@ -232,7 +232,7 @@ class TestProactiveRefreshRoute:
             )
 
         assert resp.status_code == 200
-        # The matches tab is active (bg-brand-500)
+        # The matches tab is active (accent CSS var, not brand-500)
         assert "No proactive matches yet" in resp.text or "Matches" in resp.text
 
     def test_refresh_shows_new_match_after_scan(
