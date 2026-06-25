@@ -9,12 +9,21 @@
      open value, and stage-weighted forecast, near the requisitions they summarize. The
      split-panel height below subtracts this 26px strip so the layout doesn't overflow. #}
 {% if pipeline %}
-<div class="h-[26px] flex items-center gap-4 px-3 text-xs text-gray-500 bg-gray-50 border-b border-gray-200">
-  <span><span class="font-medium text-gray-700">{{ pipeline.open_count }}</span> open deal{{ "" if pipeline.open_count == 1 else "s" }}</span>
+{# border-line-base replaces border-gray-200 (finding 12) #}
+<div class="h-[26px] flex items-center gap-4 px-3 text-xs text-gray-500 bg-gray-50 border-b border-line-base">
+  {# Page eyebrow answers "Where am I?" (finding 9) #}
+  <span class="font-semibold text-gray-700 mr-1">Sales Hub</span>
   <span class="text-gray-300">·</span>
-  <span><span class="font-medium text-gray-700">${{ "{:,.0f}".format(pipeline.open_value) }}</span> open value</span>
+  <span><span class="figure-accent">{{ pipeline.open_count }}</span> open deal{{ "" if pipeline.open_count == 1 else "s" }}</span>
   <span class="text-gray-300">·</span>
-  <span><span class="font-medium text-gray-700">${{ "{:,.0f}".format(pipeline.weighted_value) }}</span> weighted forecast</span>
+  <span><span class="figure-accent">${{ "{:,.0f}".format(pipeline.open_value) }}</span> open value</span>
+  <span class="text-gray-300">·</span>
+  <span><span class="figure-accent">${{ "{:,.0f}".format(pipeline.weighted_value) }}</span> weighted forecast</span>
+</div>
+{% else %}
+{# No pipeline data: still render the page identity eyebrow (finding 9) #}
+<div class="h-[26px] flex items-center gap-2 px-3 text-xs bg-gray-50 border-b border-line-base">
+  <span class="font-semibold text-gray-700">Sales Hub</span>
 </div>
 {% endif %}
 
@@ -61,7 +70,8 @@
      @htmx:after-swap.window="if ($event.detail.target && $event.detail.target.id === 'parts-list') $nextTick(() => clearPartIfGone())">
 
   {# ── Left Panel: Parts Table ──────────────────────────────── #}
-  <div class="flex flex-col min-w-0 border-r border-gray-200" :style="'width: ' + (splitRatio * 100) + '%'">
+  {# border-line-base replaces border-gray-200 (finding 12) #}
+  <div class="flex flex-col min-w-0 border-r border-line-base" :style="'width: ' + (splitRatio * 100) + '%'">
     <div id="parts-list" class="flex-1 flex flex-col min-h-0"
          hx-get="/v2/partials/parts"
          hx-trigger="load"
@@ -72,9 +82,9 @@
     </div>
   </div>
 
-  {# ── Drag Handle ──────────────────────────────────────────── #}
-  <div class="w-[3px] cursor-col-resize bg-gray-200 hover:bg-brand-400 transition-colors flex-shrink-0 relative group"
-       :class="dragging ? 'bg-brand-500' : ''"
+  {# ── Drag Handle — accent hover/active (finding 12) ──────── #}
+  <div class="w-[3px] cursor-col-resize bg-gray-200 hover:bg-accent-400 transition-colors flex-shrink-0 relative group"
+       :class="dragging ? 'bg-accent-500' : ''"
        @mousedown="startDrag($event)">
     <div class="absolute inset-y-0 -left-2 -right-2"></div>
     <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -96,9 +106,9 @@
         <div id="part-header-wrap"
              x-effect="if (selectedPartId) htmx.ajax('GET', '/v2/partials/parts/' + selectedPartId + '/header', {target: '#part-header-wrap', swap: 'innerHTML'})">
         </div>
-        {# Tab bar #}
-        <div class="border-b-2 border-brand-200 bg-white px-2 flex-shrink-0">
-          <nav class="flex -mb-[2px] overflow-x-auto">
+        {# Tab bar — border-line-base replaces border-brand-200 (finding 4) #}
+        <div class="border-b border-line-base bg-white px-2 flex-shrink-0">
+          <nav class="flex -mb-[1px] overflow-x-auto">
             {% for tab_key, tab_label in [('offers', 'Offers'), ('sourcing', 'Sightings'), ('notes', 'Sales Notes'), ('activity', 'Activity'), ('comms', 'Tasks'), ('req-details', 'REQ Detail'), ('quotes', 'Quotes')] %}
             <button @click="activeTab = '{{ tab_key }}'; htmx.ajax('GET', '/v2/partials/parts/' + selectedPartId + '/tab/{{ tab_key }}', {target: '#part-detail'})"
                     :class="activeTab === '{{ tab_key }}' ? 'ws-tab-active' : ''"
@@ -136,14 +146,12 @@
 
 {# ── Scroll sync script ──────────────────────────────────────── #}
 <script>
-  // Sync top scrollbar ↔ content for both panels
   function initScrollSync() {
     requestAnimationFrame(function() {
       document.querySelectorAll('.top-scroll-bar').forEach(function(bar) {
         var contentId = bar.dataset.syncTarget;
         var content = document.getElementById(contentId);
         if (!content) return;
-        // Measure widest child (table or any overflow content)
         var scrollW = content.scrollWidth;
         var spacer = bar.querySelector('.scroll-spacer');
         if (spacer && scrollW > content.clientWidth) {

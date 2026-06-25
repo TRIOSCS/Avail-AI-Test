@@ -561,8 +561,8 @@ table {
   background: rgba(58, 66, 82, 0.04);
 }
 .ws-tab-active {
-  color: #3A4252;
-  border-bottom-color: #3A4252;
+  color: var(--accent);
+  border-bottom-color: var(--accent);
 }
 
 /* ── Source progress chips ────────────────────────────────────────── */

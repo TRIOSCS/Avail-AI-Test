@@ -227,3 +227,16 @@ def rebuild_vendor_summaries_from_sightings(
             rebuild_vendor_summaries(db, requirement_id)
     except Exception:
         logger.warning("Vendor summary rebuild failed for requirement {}", requirement_id, exc_info=True)
+
+
+def get_vendor_tier_map(
+    db: Session,
+    requirement_id: int,
+) -> dict[str, str | None]:
+    """Return vendor_name → tier for all VendorSightingSummary rows.
+
+    Used by part_tab_offers and part_tab_sourcing to render vendor-trust chips without
+    duplicating the VendorSightingSummary query at each call site.
+    """
+    summaries = db.query(VendorSightingSummary).filter(VendorSightingSummary.requirement_id == requirement_id).all()
+    return {s.vendor_name: s.tier for s in summaries}

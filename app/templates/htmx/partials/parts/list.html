@@ -18,17 +18,17 @@
          overflowing the page (the search input goes full-width on its own line). #}
       <div class="flex flex-wrap gap-2 items-center">
 
-        {# Add Req button #}
+        {# Add Req button — .btn-primary .btn-sm (findings 2, 5) #}
         <button type="button"
                 @click="$dispatch('open-modal', {wide: true, url: '/v2/partials/requisitions/import-form'})"
-                class="px-2 py-0.5 text-[10px] font-semibold rounded bg-brand-500 text-white hover:bg-brand-600 transition-colors flex-shrink-0 inline-flex items-center gap-1">
+                class="btn-primary btn-sm flex-shrink-0 inline-flex items-center gap-1">
           <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
             <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/>
           </svg>
           Req
         </button>
 
-        {# Search input — searches MPN, brand, req name, customer #}
+        {# Search input — .input .input-sm + accent focus ring (findings 1, 3) #}
         <div class="relative flex-shrink-0 w-full sm:w-[180px]">
           <svg class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
             <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
@@ -39,17 +39,18 @@
                  hx-swap="morph:innerHTML"
                  hx-trigger="input delay:300ms"
                  :hx-vals="filterVals"
-                 class="w-full pl-7 pr-2 py-0.5 text-[10px] border border-gray-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 placeholder:text-gray-400">
+                 class="input input-sm w-full pl-7 pr-2">
         </div>
 
+        {# Status filter pills — accent active state, .chip pattern (findings 1, 2, 5) #}
         {% for s_val, s_label in [('', 'All'), ('open', 'Open'), ('sourcing', 'Src'), ('offered', 'Ofd'), ('quoted', 'Qtd'), ('archived', 'Arc')] %}
         <button type="button"
                 @click="pStatus = '{{ s_val }}'"
                 hx-get="/v2/partials/parts"
                 hx-target="#parts-list"
                 :hx-vals="_fp({status: '{{ s_val }}'})"
-                class="px-2 py-0.5 text-[10px] font-semibold rounded transition-colors flex-shrink-0
-                       {{ 'bg-brand-500 text-white' if status == s_val else 'bg-white text-gray-500 border border-gray-300 hover:bg-brand-50 hover:text-brand-600' }}">
+                class="chip flex-shrink-0
+                       {{ 'bg-accent-500 text-white border-accent-500' if status == s_val else 'bg-white text-gray-500 border-line-base hover:bg-accent-50 hover:text-accent-600' }}">
           {{ s_label }}
         </button>
         {% endfor %}
@@ -62,23 +63,23 @@
     </div>
   </div>
 
-  {# ── Bulk action bar (visible when items selected) ─────── #}
+  {# ── Bulk action bar (visible when items selected) — accent colors (finding 2) ─── #}
   <div x-show="selectedIds.length > 0" x-cloak
-       class="px-3 py-1.5 bg-brand-50 border-b border-brand-200 flex items-center gap-2 flex-shrink-0">
-    <span class="text-[10px] font-semibold text-brand-700" x-text="selectedIds.length + ' selected'"></span>
+       class="px-3 py-1.5 bg-accent-50 border-b border-accent-200 flex items-center gap-2 flex-shrink-0">
+    <span class="text-[11px] font-semibold text-accent-700" x-text="selectedIds.length + ' selected'"></span>
     {% if status == 'archived' %}
     <button type="button" @click="bulkUnarchive()"
-            class="px-2 py-0.5 text-[10px] font-semibold bg-brand-500 text-white rounded hover:bg-brand-600">
+            class="px-2 py-0.5 text-[11px] font-semibold bg-accent-500 text-white rounded hover:bg-accent-600">
       Unarchive
     </button>
     {% else %}
     <button type="button" @click="bulkArchive()"
-            class="px-2 py-0.5 text-[10px] font-semibold bg-gray-500 text-white rounded hover:bg-gray-600">
+            class="px-2 py-0.5 text-[11px] font-semibold bg-gray-500 text-white rounded hover:bg-gray-600">
       Archive
     </button>
     {% endif %}
     <button type="button" @click="clearSelection()"
-            class="px-2 py-0.5 text-[10px] font-semibold text-gray-500 hover:text-gray-700">
+            class="px-2 py-0.5 text-[11px] font-semibold text-gray-500 hover:text-gray-700">
       Clear
     </button>
   </div>
@@ -90,7 +91,8 @@
         <thead>
           <tr>
             <th class="w-6">
-              <input aria-label="Select all parts" type="checkbox" class="h-3 w-3 rounded border-gray-300 text-brand-500"
+              {# Checkbox accent color (finding 2) #}
+              <input aria-label="Select all parts" type="checkbox" class="h-3 w-3 rounded border-line-base text-accent-500"
                      @change="toggleAll($event)" :checked="allSelected">
             </th>
             {% set col_defs = {
@@ -116,7 +118,7 @@
                 <a hx-get="/v2/partials/parts"
                    hx-target="#parts-list"
                    :hx-vals="_fp({sort: '{{ sort_key }}', dir: '{{ 'asc' if sort == sort_key and dir == 'desc' else 'desc' }}'})"
-                   class="cursor-pointer hover:text-brand-600 inline-flex items-center gap-0.5">
+                   class="cursor-pointer hover:text-accent-600 inline-flex items-center gap-0.5">
                   {{ label }}
                   {% if sort == sort_key %}
                   <svg class="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
@@ -139,7 +141,8 @@
               :class="selectedPartId === {{ req.id }} ? 'row-selected' : ''"
               @click="selectPart({{ req.id }}); htmx.ajax('GET', '/v2/partials/parts/{{ req.id }}/tab/' + activeTab, {target: '#part-detail'})">
             <td class="w-6" @click.stop>
-              <input aria-label="Select part {{ req.primary_mpn }}" type="checkbox" class="h-3 w-3 rounded border-gray-300 text-brand-500"
+              {# Checkbox accent color (finding 2) #}
+              <input aria-label="Select part {{ req.primary_mpn }}" type="checkbox" class="h-3 w-3 rounded border-line-base text-accent-500"
                      :checked="selectedIds.includes({{ req.id }})"
                      @change="toggleId({{ req.id }}, $event)">
             </td>
@@ -173,21 +176,34 @@
                     {% if stats.get('best_price') %}<span class="text-emerald-600">${{ '{:,.4f}'.format(stats.get('best_price')) }}</span>{% else %}—{% endif %}
                   {% elif col_key == 'owner' %}
                     {% if req.requisition and req.requisition.claimed_by %}
-                      <span class="inline-flex items-center justify-center h-5 w-5 rounded-full bg-brand-100 text-brand-600 text-[9px] font-bold" title="{{ req.requisition.claimed_by.name }}">{{ req.requisition.claimed_by.name[:1] }}</span>
+                      {# Avatar initial — text-[10px] floor preserved for single-initial avatars (finding 1) #}
+                      <span class="inline-flex items-center justify-center h-5 w-5 rounded-full bg-accent-100 text-accent-600 text-[10px] font-bold" title="{{ req.requisition.claimed_by.name }}">{{ req.requisition.claimed_by.name[:1] }}</span>
                     {% else %}—{% endif %}
                   {% elif col_key == 'created' %}
                     {{ req.created_at.strftime('%m/%d') if req.created_at else '—' }}
                   {% elif col_key == 'specs' %}
                     {% set spec_count = [req.customer_pn, req.condition, req.date_codes, req.packaging, req.firmware, req.hardware_codes]|reject('none')|reject('equalto', '')|list|length %}
                     {% if spec_count > 0 %}
-                      <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium rounded-md border
+                      {# Spec badge — raised to text-[11px] readability floor; neutral border via border-line-base (findings 1, 6) #}
+                      <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[11px] font-medium rounded-md border
                                    {% if spec_count == 6 %}bg-emerald-50 text-emerald-600 border-emerald-200
                                    {% elif spec_count >= 4 %}bg-sky-50 text-sky-600 border-sky-200
-                                   {% else %}bg-gray-50 text-gray-500 border-gray-200{% endif %}"
-                            title="Cust PN, Condition, Date Codes, Packaging, Firmware, Hardware">{{ spec_count }}<span class="text-[9px] opacity-60">/6</span></span>
+                                   {% else %}bg-gray-50 text-gray-500 border-line-base{% endif %}"
+                            title="Cust PN, Condition, Date Codes, Packaging, Firmware, Hardware">{{ spec_count }}<span class="text-[10px] opacity-60">/6</span></span>
                     {% else %}<span class="text-gray-300">—</span>{% endif %}
                   {% elif col_key == 'need_by_date' %}
-                    {{ req.need_by_date or '—' }}
+                    {# Bid Due urgency treatment: overdue=rose, <=2 days=amber, else neutral (finding 8) #}
+                    {% if req.need_by_date %}
+                      {% set today = now_utc.date() %}
+                      {% set delta_days = (req.need_by_date - today).days %}
+                      {% if delta_days < 0 %}
+                        <span class="text-rose-600 font-semibold" title="Overdue by {{ delta_days|abs }} day{{ 's' if delta_days|abs != 1 else '' }}">{{ req.need_by_date }}</span>
+                      {% elif delta_days <= 2 %}
+                        <span class="text-amber-600 font-semibold" title="Due in {{ delta_days }} day{{ 's' if delta_days != 1 else '' }}">{{ req.need_by_date }}</span>
+                      {% else %}
+                        {{ req.need_by_date }}
+                      {% endif %}
+                    {% else %}—{% endif %}
                   {% endif %}
                 </td>
               {% endif %}
@@ -198,31 +214,37 @@
       </table>
   </div>
   {% else %}
+  {# Empty state — Add Req primary CTA answers "What next?" (finding 13) #}
   <div class="flex-1 flex flex-col items-center justify-center text-gray-400 py-6 sm:py-8">
     <svg class="h-10 w-10 text-gray-300 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
       <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
     </svg>
     <p class="text-xs font-medium">No parts found</p>
     <p class="text-xs mt-0.5 text-gray-300">Adjust filters or add requirements</p>
+    <button type="button"
+            @click="$dispatch('open-modal', {wide: true, url: '/v2/partials/requisitions/import-form'})"
+            class="btn-primary btn-sm mt-3">
+      Add Requisition
+    </button>
   </div>
   {% endif %}
 
-  {# ── Pagination ──────────────────────────────────────────── #}
+  {# ── Pagination — .btn-secondary .btn-sm, border-line-base strip (findings 1, 4, 5, 6) ─── #}
   {% if total > limit %}
-  <div class="px-3 py-1.5 border-t-2 border-brand-200 bg-gray-50 flex-shrink-0 flex items-center justify-between">
-    <span class="text-[10px] text-gray-400 font-data">{{ offset + 1 }}\u2013{{ [offset + limit, total]|min }} / {{ total }}</span>
+  <div class="px-3 py-1.5 border-t border-line-base bg-gray-50 flex-shrink-0 flex items-center justify-between">
+    <span class="text-[11px] text-gray-400 font-data">{{ offset + 1 }}–{{ [offset + limit, total]|min }} / {{ total }}</span>
     <div class="flex gap-1">
       {% if offset > 0 %}
       <button hx-get="/v2/partials/parts"
               hx-target="#parts-list"
               :hx-vals="_fp({offset: {{ offset - limit }}})"
-              class="px-2 py-0.5 text-[10px] font-semibold bg-white border border-gray-300 rounded hover:bg-brand-50 text-gray-600">Prev</button>
+              class="btn-secondary btn-sm">Prev</button>
       {% endif %}
       {% if offset + limit < total %}
       <button hx-get="/v2/partials/parts"
               hx-target="#parts-list"
               :hx-vals="_fp({offset: {{ offset + limit }}})"
-              class="px-2 py-0.5 text-[10px] font-semibold bg-white border border-gray-300 rounded hover:bg-brand-50 text-gray-600">Next</button>
+              class="btn-secondary btn-sm">Next</button>
       {% endif %}
     </div>
   </div>
@@ -233,8 +255,8 @@
        x-show="visible" x-cloak
        class="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-gray-800 text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-3 text-xs">
     <span x-text="message"></span>
-    <button @click="undo()" class="font-semibold text-brand-300 hover:text-brand-100 underline">Undo</button>
-    <span class="text-gray-400 text-[10px]" x-text="countdown + 's'"></span>
+    <button @click="undo()" class="font-semibold text-accent-300 hover:text-accent-100 underline">Undo</button>
+    <span class="text-gray-400 text-[11px]" x-text="countdown + 's'"></span>
   </div>
 </div>
 

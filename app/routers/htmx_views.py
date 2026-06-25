@@ -106,6 +106,7 @@ from ..services.part_history_service import (
     sightings_for_card,
 )
 from ..services.prospect_priority import build_priority_snapshot, build_signal_tags, contacts_summary
+from ..services.sighting_aggregation import get_vendor_tier_map
 from ..services.sighting_ingest import sighting_from_row
 from ..services.status_machine import require_valid_transition
 from ..services.vendor_unavailability import apply_to_fresh_sightings, maybe_release_on_offer
@@ -15582,8 +15583,10 @@ async def part_tab_offers(
 
     offers = db.query(Offer).filter(Offer.requirement_id == requirement_id).order_by(Offer.created_at.desc()).all()
 
+    vendor_tier_map = get_vendor_tier_map(db, requirement_id)
+
     ctx = _base_ctx(request, user, "requisitions")
-    ctx.update({"requirement": req, "offers": offers})
+    ctx.update({"requirement": req, "offers": offers, "vendor_tier_map": vendor_tier_map})
     return template_response("htmx/partials/parts/tabs/offers.html", ctx)
 
 
@@ -15605,6 +15608,7 @@ async def part_tab_sourcing(
         .order_by(VendorSightingSummary.score.desc(), VendorSightingSummary.id.desc())
         .all()
     )
+    vendor_tier_map = get_vendor_tier_map(db, requirement_id)
 
     # Raw sightings grouped by vendor for popover breakdowns
     raw_sightings = (
@@ -15625,6 +15629,7 @@ async def part_tab_sourcing(
         {
             "requirement": req,
             "summaries": summaries,
+            "vendor_tier_map": vendor_tier_map,
             "raw_sightings_by_vendor": raw_by_vendor,
             "vendor_statuses": vendor_statuses,
         }
