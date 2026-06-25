@@ -9,6 +9,7 @@ Depends on: database.py (engine), models.py (Base)
 """
 
 import os
+from pathlib import Path
 
 from loguru import logger
 from sqlalchemy import text as sqltext
@@ -16,6 +17,32 @@ from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 
 from .database import SessionLocal, engine
 from .utils.normalization import normalize_mpn_key as _norm_key
+
+
+def ensure_screenshot_storage() -> None:
+    """Guarantee the trouble-ticket screenshot dir exists and is writable.
+
+    Trouble-ticket screenshots (filed from the report button on any page, e.g.
+    /v2/search) are written to ``error_reports.UPLOAD_DIR``, which lives on the
+    ``uploads`` Docker named volume. An existing/upgraded volume can be
+    root-owned while the app runs as the non-root ``appuser``, so writes fail at
+    runtime with PermissionError. Create the dir and fail fast at boot — a clear
+    RuntimeError here beats silently dropping screenshots later.
+
+    Unlike most ops here this is NOT gated by run_startup_migrations' TESTING
+    short-circuit: it is called directly from the main.py lifespan so the guard
+    runs on every real boot. No DDL — a filesystem mkdir/writability check only.
+
+    Called by: main.py lifespan (real boots), tests (directly)
+    Depends on: app/routers/error_reports.py (UPLOAD_DIR)
+    """
+    from .routers.error_reports import UPLOAD_DIR
+
+    path = Path(UPLOAD_DIR)
+    path.mkdir(parents=True, exist_ok=True)
+    if not os.access(path, os.W_OK):
+        raise RuntimeError(f"Screenshot storage {path} is not writable by the app process")
+    logger.info("Screenshot storage ready and writable: {}", path)
 
 
 def run_startup_migrations() -> None:

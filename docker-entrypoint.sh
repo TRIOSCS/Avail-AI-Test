@@ -16,6 +16,15 @@ if [ "$SESSION_SECRET" = "change-me-to-random-string" ]; then
     exit 1
 fi
 
+# Ensure the trouble-ticket screenshot dir on the `uploads` named volume is
+# owned by appuser (TT-0002). The Dockerfile chowns it at build time, but Docker
+# seeds a *fresh* volume from the image dir only — an EXISTING (e.g. root-owned,
+# pre-this-fix) volume keeps its old ownership across deploys/restarts, so the
+# non-root app process can't write screenshots. Re-asserting it here (as root,
+# before we drop to appuser below) makes the fix durable on every container start.
+mkdir -p /app/uploads/tickets
+chown -R appuser:appuser /app/uploads
+
 # Copy static files to shared volume for Caddy direct serving (runs as root)
 if [ -d /srv/static ]; then
     # Clean stale files from previous builds (hashed names change each build)
