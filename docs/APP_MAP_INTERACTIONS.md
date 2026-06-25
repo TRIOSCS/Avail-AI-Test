@@ -1181,6 +1181,24 @@ via `normalize_mpn`, is not among the requisition's requirement MPNs). The Build
 (`quote_builder._build_quote_tab_context`) surfaces them as an amber banner above Send; it never
 disables Send. Also exposed at `GET /api/quotes/{id}/preflight` (`{warnings, count}`).
 
+**Quote send (canonical service).** `services/quote_send.py::send_quote_email(db, quote,
+user, *, token, override_email=None, override_name=None, testing=False)` is the SINGLE place
+that emails a quote. Both routes call it: the htmx Send button
+(`htmx_views.send_quote_htmx`, `POST /v2/partials/quotes/{id}/send`) and the JSON route
+(`crm/quotes.send_quote`, `POST /api/quotes/{id}/send`). It resolves the recipient (override
+else `CustomerSite.contact_email`), **hard-blocks DNC** (site-level or a matching DNC
+`SiteContact`) raising `QuoteSendDNCBlocked`, builds the branded HTML via
+`_build_quote_email_html` (whose single home is now this module — re-exported from
+`crm/_helpers.py` for the preview route), POSTs `/me/sendMail`, then captures the sent
+message's Graph ids via `email_service._find_sent_message` into `quote.graph_message_id` /
+`graph_conversation_id` (NULL-safe). It then transitions the quote→SENT, advances the
+requisition→QUOTED (unless WON/LOST/ARCHIVED), writes an OUTBOUND email `ActivityLog` via
+`activity_service.log_email_activity`, and commits, returning a frozen `SendQuoteResult`.
+Under `TESTING=1` the Graph POST + Sent-Items lookup are skipped but the quote is still
+marked sent. `QuoteSendError` (no/invalid recipient → 400; Graph error → 502) and
+`QuoteSendDNCBlocked` (→ 409 JSON / rose partial on htmx) are the typed failures. This fixes
+the prior S1 bug where the htmx Send button set status=SENT WITHOUT emailing.
+
 `quoteBuilderTab` (in `htmx_app.js`) is the single-stage simplification of the
 modal's `quoteBuilder` (same `(sell-cost)/sell` margin math + blended rollup, no
 two-panel decision flow). The list-toolbar "Build Quote" action re-points a SINGLE

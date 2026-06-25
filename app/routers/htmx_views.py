@@ -106,6 +106,11 @@ from ..services.part_history_service import (
     sightings_for_card,
 )
 from ..services.prospect_priority import build_priority_snapshot, build_signal_tags, contacts_summary
+from ..services.quote_send import (
+    QuoteSendDNCBlocked,
+    QuoteSendError,
+    send_quote_email,
+)
 from ..services.sighting_aggregation import get_vendor_tier_map
 from ..services.sighting_ingest import sighting_from_row
 from ..services.status_machine import require_valid_transition
@@ -13157,14 +13162,33 @@ async def send_quote_htmx(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Mark quote as sent — returns refreshed detail partial."""
+    """Send the quote to the customer (real email) — returns refreshed detail partial.
 
+    Delegates to the canonical quote-send service so this button actually emails the
+    customer (captures Graph ids, writes an outbound ActivityLog, hard-blocks DNC). In
+    TESTING the service skips the real Graph call but still marks the quote sent.
+    """
     quote = get_quote_for_user(db, user, quote_id)
-    require_valid_transition("quote", quote.status, QuoteStatus.SENT)
-    quote.status = QuoteStatus.SENT
-    quote.sent_at = datetime.now(timezone.utc)
-    db.commit()
-    logger.info("Quote {} marked as sent by {}", quote.quote_number, user.email)
+    testing = os.environ.get("TESTING") == "1"
+    # Only acquire a real M365 token outside TESTING — the service skips the Graph send in
+    # TESTING, and require_fresh_token (called directly, not via Depends) would 401 in tests.
+    token = ""
+    if not testing:
+        from ..dependencies import require_fresh_token
+
+        token = await require_fresh_token(request, db)
+    try:
+        await send_quote_email(db, quote, user, token=token, testing=testing)
+    except QuoteSendDNCBlocked:
+        return HTMLResponse(
+            '<div class="rounded bg-rose-50 border border-rose-200 text-rose-700 text-xs px-2 py-1.5">'
+            "This recipient is do-not-contact — quote not sent.</div>"
+        )
+    except QuoteSendError as exc:
+        return HTMLResponse(
+            '<div class="rounded bg-rose-50 border border-rose-200 text-rose-700 text-xs px-2 py-1.5">'
+            f"{html_mod.escape(exc.detail)}</div>"
+        )
     return await quote_detail_partial(request, quote_id, user, db)
 
 

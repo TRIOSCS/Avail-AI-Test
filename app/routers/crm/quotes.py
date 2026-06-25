@@ -400,62 +400,41 @@ async def send_quote(
     db: Session = Depends(get_db),
 ):
     from ...dependencies import get_quote_for_user, require_fresh_token
+    from ...services.quote_send import QuoteSendDNCBlocked, QuoteSendError, send_quote_email
 
     quote = get_quote_for_user(db, user, quote_id)
     if not quote:
         raise HTTPException(404, "Quote not found")
 
     # Allow caller to override recipient email/name
-    override_email = ((body.to_email if body else None) or "").strip()
-    override_name = ((body.to_name if body else None) or "").strip()
+    override_email = (body.to_email if body else None) or None
+    override_name = (body.to_name if body else None) or None
 
-    site = db.get(CustomerSite, quote.customer_site_id)
-    to_email = override_email or (site.contact_email if site else None)
-    if not to_email:
-        raise HTTPException(400, "No recipient email — select a contact or enter one manually")
-    if "@" not in to_email:
-        raise HTTPException(400, f"Invalid email address: {to_email}")
-
-    to_name = override_name or (site.contact_name if site else "") or ""
-    company_name = site.company.name if site and site.company else ""
-
-    # Build the HTML quote email
-    html = _build_quote_email_html(quote, to_name, company_name, user)
-
-    subject = f"Quote {quote.quote_number} — Trio Supply Chain Solutions"
-
-    # Send via Graph API
     token = await require_fresh_token(request, db)
-    from app.utils.graph_client import GraphClient
+    try:
+        result = await send_quote_email(
+            db,
+            quote,
+            user,
+            token=token,
+            override_email=override_email,
+            override_name=override_name,
+        )
+    except QuoteSendDNCBlocked:
+        raise HTTPException(409, "Recipient is on the do-not-contact list — clear DNC to send.")
+    except QuoteSendError as exc:
+        # No/invalid recipient is a 400 (caller can fix the address); a Graph send failure
+        # is a 502 (upstream). Match the legacy status codes.
+        detail = exc.detail
+        status_code = 502 if detail.startswith("Failed to send quote email") else 400
+        raise HTTPException(status_code, detail)
 
-    gc = GraphClient(token)
-    payload = {
-        "message": {
-            "subject": subject,
-            "body": {"contentType": "HTML", "content": html},
-            "toRecipients": [{"emailAddress": {"address": to_email, "name": to_name}}],
-        },
-        "saveToSentItems": "true",
-    }
-    result = await gc.post_json("/me/sendMail", payload)
-    if "error" in result:
-        raise HTTPException(502, f"Failed to send quote email: {result.get('detail', '')}")
-
-    require_valid_transition("quote", quote.status, QuoteStatus.SENT)
-    quote.status = QuoteStatus.SENT
-    quote.sent_at = datetime.now(timezone.utc)
-    req = db.get(Requisition, quote.requisition_id)
-    old_status = req.status if req else None
-    if req and req.status not in (RequisitionStatus.WON, RequisitionStatus.LOST, RequisitionStatus.ARCHIVED):
-        req.status = RequisitionStatus.QUOTED
-
-    db.commit()
     return {
         "ok": True,
-        "status": "sent",
-        "sent_to": to_email,
-        "req_status": req.status if req else None,
-        "status_changed": req and req.status != old_status,
+        "status": result.status,
+        "sent_to": result.sent_to,
+        "req_status": result.req_status,
+        "status_changed": result.status_changed,
     }
 
 

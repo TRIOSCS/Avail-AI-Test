@@ -1712,11 +1712,23 @@ class TestQuotesAdditional:
         resp = client.post("/api/quotes/99999/preview")
         assert resp.status_code == 404
 
+    @patch("app.email_service._find_sent_message", new_callable=AsyncMock)
     @patch("app.dependencies.require_fresh_token", new_callable=AsyncMock)
     @patch("app.utils.graph_client.GraphClient.post_json", new_callable=AsyncMock)
     def test_send_quote_success(
-        self, mock_graph_post, mock_token, client, db_session, test_requisition, test_customer_site, test_user
+        self,
+        mock_graph_post,
+        mock_token,
+        mock_find,
+        client,
+        db_session,
+        test_requisition,
+        test_customer_site,
+        test_user,
     ):
+        # The canonical send service now captures Graph ids via _find_sent_message — mock
+        # it so no real Sent-Items lookup (network + retry sleeps) happens.
+        mock_find.return_value = {"id": "MSG-OK", "conversationId": "CONV-OK"}
         mock_token.return_value = "fake-token"
         mock_graph_post.return_value = {}  # No error
 
@@ -1746,8 +1758,15 @@ class TestQuotesAdditional:
         resp = client.post("/api/quotes/99999/send")
         assert resp.status_code == 404
 
-    def test_send_quote_no_email(self, client, db_session, test_requisition, test_company, test_user):
-        """Sending a quote with no contact email raises 400."""
+    @patch("app.dependencies.require_fresh_token", new_callable=AsyncMock)
+    def test_send_quote_no_email(self, mock_token, client, db_session, test_requisition, test_company, test_user):
+        """Sending a quote with no contact email raises 400.
+
+        The canonical send service validates the recipient, so the route acquires the
+        M365 token first — patch it so this reaches the 400 (not a 401) the way the
+        other send tests in this class do.
+        """
+        mock_token.return_value = "fake-token"
         site = CustomerSite(
             company_id=test_company.id,
             site_name="No Email Site",
