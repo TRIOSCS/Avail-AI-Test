@@ -726,17 +726,30 @@ th.resizable { position: relative; }
   min-height: 0;
   overflow: auto;
 }
-/* Transparent grab strip across the top of the panel (the modal title shows under it). */
-.modal-drag-bar {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 32px;
+/* Visible drag-to-move grip — a flex child at the top of .modal-shell (NOT an absolute
+   overlay), so it occupies its own space and the modal's title/controls sit cleanly below
+   it. The centered pill is the affordance; the whole bar is the grab zone. Desktop-only
+   (x-show="isDesktop"). */
+.modal-grip {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 20px;
   cursor: move;
-  z-index: 10;
+  touch-action: none;
+  background: #F4F6F8;
+  border-bottom: 1px solid #E5E8EC;
   border-radius: 0.5rem 0.5rem 0 0;
 }
+.modal-grip:hover { background: #ECEFF3; }
+.modal-grip-handle {
+  width: 36px;
+  height: 4px;
+  border-radius: 9999px;
+  background: #C2C8D0;
+}
+.modal-grip:hover .modal-grip-handle { background: #A9B0BA; }
 
 /* Edge + corner resize handles — desktop only (rendered under x-if="isDesktop").
    Sit just over the panel border with a generous hit area and directional cursors. */

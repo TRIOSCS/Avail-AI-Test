@@ -10,8 +10,11 @@
  */
 
 // Smallest the user can shrink a modal to (px). Below this, shrinking stops.
+// MIN_H is 400 (not 240) so a shrunk panel keeps room for a modal's header + first
+// interactive rows — at 240 the New-Requisition customer-picker dropdown was clipped
+// by the panel's overflow:auto when the panel was dragged near minimum height.
 export const MIN_W = 360;
-export const MIN_H = 240;
+export const MIN_H = 400;
 
 /** Clamp `v` into the inclusive range [lo, hi]. */
 export function clamp(v, lo, hi) {

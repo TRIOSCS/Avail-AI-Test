@@ -710,8 +710,10 @@ Alpine.data('resizableModal', () => ({
     _drag: null,
     _mq: null,
     _onMQ: null,
+    _onResize: null,
     _boundMove: null,
     _boundUp: null,
+    _boundCancel: null,
 
     get bucket() {
         return this.wide ? 'wide' : 'lg';
@@ -724,10 +726,24 @@ Alpine.data('resizableModal', () => ({
             if (!e.matches) this.custom = false;  // drop floating geometry on shrink to mobile
         };
         this._mq.addEventListener('change', this._onMQ);
+        // Re-clamp a custom (floating) panel when the window itself shrinks, so a panel
+        // sized/positioned on a larger viewport can't end up partly or fully off-screen
+        // while still desktop-width. _restore() only clamps on open; this covers live resize.
+        this._onResize = () => {
+            if (!this.custom || !this.isDesktop) return;
+            const g = clampToViewport(
+                { w: this.width, h: this.height, l: this.left, t: this.top },
+                window.innerWidth,
+                window.innerHeight,
+            );
+            this.width = g.w; this.height = g.h; this.left = g.l; this.top = g.t;
+        };
+        window.addEventListener('resize', this._onResize);
     },
 
     destroy() {
         if (this._mq && this._onMQ) this._mq.removeEventListener('change', this._onMQ);
+        if (this._onResize) window.removeEventListener('resize', this._onResize);
         this._teardownDrag();
     },
 
@@ -811,8 +827,12 @@ Alpine.data('resizableModal', () => ({
         document.body.style.userSelect = 'none';
         this._boundMove = (ev) => this._onMove(ev);
         this._boundUp = () => this._onUp();
+        this._boundCancel = () => this._onUp();
         document.addEventListener('pointermove', this._boundMove);
         document.addEventListener('pointerup', this._boundUp);
+        // pointercancel (touch interrupted, capture lost, context menu, etc.) fires INSTEAD
+        // of pointerup — without this the move/up listeners and user-select:none would leak.
+        document.addEventListener('pointercancel', this._boundCancel);
     },
 
     _onMove(e) {
@@ -841,8 +861,10 @@ Alpine.data('resizableModal', () => ({
     _teardownDrag() {
         if (this._boundMove) document.removeEventListener('pointermove', this._boundMove);
         if (this._boundUp) document.removeEventListener('pointerup', this._boundUp);
+        if (this._boundCancel) document.removeEventListener('pointercancel', this._boundCancel);
         this._boundMove = null;
         this._boundUp = null;
+        this._boundCancel = null;
         this._drag = null;
         document.body.style.userSelect = '';
     },

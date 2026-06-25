@@ -71,11 +71,15 @@
            :style="panelStyle()"
            x-trap.noscroll="open">
 
-        {# Drag-to-move strip (desktop only) — a transparent grab zone across the top.
-           Each modal partial still renders its own visible title underneath. #}
-        <div class="modal-drag-bar" x-show="isDesktop"
+        {# Drag-to-move grip (desktop only) — a VISIBLE slim bar with its OWN space at the
+           top of the panel (a flex child, not an overlay), so it never sits over the modal
+           title, back-arrow, or top-row controls the way the old transparent strip did. The
+           centered pill signals draggability. #}
+        <div class="modal-grip" x-show="isDesktop"
              @pointerdown="startMove($event)" @dblclick="reset()"
-             title="Drag to move · double-click to reset" aria-hidden="true"></div>
+             title="Drag to move · double-click to reset" aria-hidden="true">
+          <span class="modal-grip-handle"></span>
+        </div>
 
         {# modal-title id is set on the heading inside each loaded modal partial #}
         {# Persistent close affordance — every modal can be dismissed even if the
