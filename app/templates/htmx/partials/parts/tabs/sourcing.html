@@ -9,8 +9,9 @@
   </div>
 
   {% if summaries %}
-  <div class="overflow-x-auto rounded-lg border border-gray-200">
-    <table class="min-w-full divide-y divide-gray-200 text-sm">
+  {# border-line-base replaces border-gray-200; .compact-table carries the divide token (finding 6) #}
+  <div class="overflow-x-auto rounded-lg border border-line-base">
+    <table class="compact-table">
       <thead class="bg-gray-50">
         <tr>
           <th class="compact-cell--head text-left text-xs font-medium text-gray-500 uppercase">Vendor</th>
@@ -49,7 +50,7 @@
           </th>
         </tr>
       </thead>
-      <tbody class="divide-y divide-gray-100">
+      <tbody>
         {% for s in summaries %}
         <tr class="hover:bg-gray-50">
           <td class="compact-cell font-medium text-gray-900 whitespace-nowrap">{{ s.vendor_name or '—' }}</td>
@@ -116,7 +117,8 @@
               </table>
             </div>
           </td>
-          <td class="px-3 py-2 whitespace-nowrap">
+          {# compact-cell replaces inline px-3 py-2 (finding 7) #}
+          <td class="compact-cell whitespace-nowrap">
             {% if s.score is not none %}
               {% set score_pct = s.score|int %}
               <span class="{{ 'text-green-600' if score_pct >= 70 else 'text-amber-600' if score_pct >= 40 else 'text-gray-500' if score_pct >= 20 else 'text-red-500' }}">
@@ -124,7 +126,8 @@
               </span>
             {% else %}—{% endif %}
           </td>
-          <td class="px-3 py-2 whitespace-nowrap">
+          {# compact-cell replaces inline px-3 py-2 (finding 7) #}
+          <td class="compact-cell whitespace-nowrap">
             {% if s.tier %}
               <span class="px-1.5 py-0.5 text-xs font-medium rounded
                 {{ 'bg-green-50 text-green-700' if s.tier == 'Excellent' else

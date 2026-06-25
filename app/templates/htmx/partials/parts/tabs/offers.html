@@ -1,6 +1,6 @@
 {# Offers tab — all offers for a specific part number.
    Called by: GET /v2/partials/parts/{id}/tab/offers
-   Depends on: requirement, offers
+   Depends on: requirement, offers, vendor_tier_map (dict[vendor_name, tier])
 #}
 
 <div>
@@ -9,49 +9,62 @@
   </div>
 
   {% if offers %}
-  <div class="overflow-x-auto rounded-lg border border-gray-200">
-    <table class="min-w-full divide-y divide-gray-200 text-sm">
+  {# border-line-base replaces border-gray-200 hairlines (finding 6) #}
+  <div class="overflow-x-auto rounded-lg border border-line-base">
+    <table class="compact-table">
       <thead class="bg-gray-50">
         <tr>
-          <th class="table-cell--head text-left text-xs font-medium text-gray-500 uppercase">Vendor</th>
-          <th class="table-cell--head text-left text-xs font-medium text-gray-500 uppercase">Price</th>
-          <th class="table-cell--head text-left text-xs font-medium text-gray-500 uppercase">Qty</th>
-          <th class="table-cell--head text-left text-xs font-medium text-gray-500 uppercase">Date Code</th>
-          <th class="table-cell--head text-left text-xs font-medium text-gray-500 uppercase">Condition</th>
-          <th class="table-cell--head text-left text-xs font-medium text-gray-500 uppercase">Lead Time</th>
-          <th class="table-cell--head text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-          <th class="table-cell--head text-left text-xs font-medium text-gray-500 uppercase">Created</th>
+          <th class="compact-cell--head text-left text-xs font-medium text-gray-500 uppercase">Vendor</th>
+          <th class="compact-cell--head text-left text-xs font-medium text-gray-500 uppercase">Price</th>
+          <th class="compact-cell--head text-left text-xs font-medium text-gray-500 uppercase">Qty</th>
+          <th class="compact-cell--head text-left text-xs font-medium text-gray-500 uppercase">Date Code</th>
+          <th class="compact-cell--head text-left text-xs font-medium text-gray-500 uppercase">Condition</th>
+          <th class="compact-cell--head text-left text-xs font-medium text-gray-500 uppercase">Lead Time</th>
+          <th class="compact-cell--head text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+          <th class="compact-cell--head text-left text-xs font-medium text-gray-500 uppercase">Created</th>
         </tr>
       </thead>
-      <tbody class="divide-y divide-gray-100">
+      <tbody>
         {% for offer in offers %}
         <tr class="hover:bg-gray-50">
-          <td class="table-cell font-medium text-gray-900 whitespace-nowrap">{{ offer.vendor_name or '—' }}</td>
-          <td class="table-cell whitespace-nowrap">{{ '${:,.4f}'.format(offer.unit_price) if offer.unit_price else '—' }}</td>
-          <td class="table-cell whitespace-nowrap">{{ '{:,}'.format(offer.qty_available) if offer.qty_available else '—' }}</td>
-          <td class="table-cell whitespace-nowrap">{{ offer.date_code or '—' }}</td>
-          <td class="table-cell whitespace-nowrap">{{ offer.condition or '—' }}</td>
-          <td class="table-cell whitespace-nowrap">{{ offer.lead_time or '—' }}</td>
-          <td class="table-cell whitespace-nowrap">
-            {% if offer.status == 'active' %}
-              <span class="badge bg-green-100 text-green-700">Active</span>
-            {% elif offer.status == 'sold' %}
-              <span class="badge bg-blue-100 text-blue-700">Sold</span>
-            {% else %}
-              <span class="badge bg-gray-100 text-gray-600">{{ offer.status or 'active' }}</span>
-            {% endif %}
-            {% if offer.is_stale %}
-              <span class="ml-1 px-1.5 py-0.5 text-xs rounded bg-amber-50 text-amber-600" title="Over 14 days old">Stale</span>
+          <td class="compact-cell font-medium text-gray-900 whitespace-nowrap">
+            {{ offer.vendor_name or '—' }}
+            {# Vendor-trust chip reusing tier from VendorSightingSummary (finding 10) #}
+            {% set tier = vendor_tier_map.get(offer.vendor_name) if offer.vendor_name else none %}
+            {% if tier == 'Excellent' or tier == 'Good' %}
+              <span class="badge-success ml-1" title="Tier: {{ tier }} — vendor has prior sightings">Known</span>
+            {% elif tier == 'Fair' %}
+              <span class="badge ml-1 text-gray-500" title="Tier: {{ tier }} — limited sighting history">New</span>
+            {% elif tier %}
+              <span class="badge ml-1 text-gray-400" title="Tier: {{ tier }}">New</span>
             {% endif %}
           </td>
-          <td class="table-cell text-gray-600 whitespace-nowrap">{{ offer.created_at.strftime('%m/%d/%y') if offer.created_at else '—' }}</td>
+          <td class="compact-cell whitespace-nowrap">{{ '${:,.4f}'.format(offer.unit_price) if offer.unit_price else '—' }}</td>
+          <td class="compact-cell whitespace-nowrap">{{ '{:,}'.format(offer.qty_available) if offer.qty_available else '—' }}</td>
+          <td class="compact-cell whitespace-nowrap">{{ offer.date_code or '—' }}</td>
+          <td class="compact-cell whitespace-nowrap">{{ offer.condition or '—' }}</td>
+          <td class="compact-cell whitespace-nowrap">{{ offer.lead_time or '—' }}</td>
+          <td class="compact-cell whitespace-nowrap">
+            {# Offer status via .badge-* shared vocabulary (finding 11) #}
+            {% if offer.status == 'active' %}
+              <span class="badge-success">Active</span>
+            {% elif offer.status == 'sold' %}
+              <span class="badge-info">Sold</span>
+            {% else %}
+              <span class="badge">{{ offer.status or 'active' }}</span>
+            {% endif %}
+            {% if offer.is_stale %}
+              <span class="badge-warning ml-1" title="Over 14 days old">Stale</span>
+            {% endif %}
+          </td>
+          <td class="compact-cell text-gray-600 whitespace-nowrap">{{ offer.created_at.strftime('%m/%d/%y') if offer.created_at else '—' }}</td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
   {% else %}
-  <div class="p-8 text-center text-gray-400 border border-dashed border-gray-200 rounded-lg">
+  <div class="p-8 text-center text-gray-400 border border-dashed border-line-subtle rounded-lg">
     <p class="text-sm">No offers yet for this part</p>
   </div>
   {% endif %}

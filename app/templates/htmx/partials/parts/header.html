@@ -5,7 +5,8 @@
 
 {% from "htmx/partials/shared/_macros.html" import status_badge %}
 
-<div class="px-3 py-2 border-b border-gray-200 bg-white flex-shrink-0">
+{# border-line-base replaces border-gray-200 hairline (finding 6) #}
+<div class="px-3 py-2 border-b border-line-base bg-white flex-shrink-0">
   <div class="flex items-center justify-between gap-4">
 
     {# Left: MPN chips + Brand + Requisition context #}

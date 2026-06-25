@@ -15582,8 +15582,16 @@ async def part_tab_offers(
 
     offers = db.query(Offer).filter(Offer.requirement_id == requirement_id).order_by(Offer.created_at.desc()).all()
 
+    # Build vendor-trust map (name → tier) from VendorSightingSummary for trust chips
+    summaries = (
+        db.query(VendorSightingSummary)
+        .filter(VendorSightingSummary.requirement_id == requirement_id)
+        .all()
+    )
+    vendor_tier_map: dict[str, str | None] = {s.vendor_name: s.tier for s in summaries}
+
     ctx = _base_ctx(request, user, "requisitions")
-    ctx.update({"requirement": req, "offers": offers})
+    ctx.update({"requirement": req, "offers": offers, "vendor_tier_map": vendor_tier_map})
     return template_response("htmx/partials/parts/tabs/offers.html", ctx)
 
 
