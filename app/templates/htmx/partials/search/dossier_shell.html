@@ -19,11 +19,12 @@
     <form class="flex flex-1 items-center gap-2"
           x-data="{ q: '{{ mpn|default('') }}' }"
           @submit.prevent="const v=q.trim(); if(v){ const u='/v2/partials/search?mpn='+encodeURIComponent(v); htmx.ajax('GET', u, {target:'#main-content', indicator:'#ds-bar-spin'}); history.pushState({},'','/v2/search?mpn='+encodeURIComponent(v)); }">
+      {# input-focus adds accent ring on keyboard focus — a11y fix for the bare bg-transparent bar #}
       <input x-model="q" name="mpn" type="text" aria-label="Part number"
              placeholder="Enter a part number…"
-             class="flex-1 bg-transparent px-1 py-1 text-sm font-mono tracking-tight text-brand-900 placeholder:text-gray-400 outline-none">
+             class="flex-1 bg-transparent px-1 py-1 text-sm font-mono tracking-tight text-brand-900 placeholder:text-gray-400 input-focus rounded-md">
       <span id="ds-bar-spin" class="htmx-indicator"><svg class="inline h-4 w-4 animate-spin text-brand-500" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg></span>
-      <button type="submit" class="px-3 py-1.5 bg-brand-600 text-white text-xs font-semibold rounded-lg hover:bg-brand-700 transition-colors">Search</button>
+      <button type="submit" class="btn-primary btn-sm">Search</button>
     </form>
     <span class="hidden md:inline text-[11px] text-gray-400 ml-1">Nexar · BrokerBin · DigiKey · Mouser · eBay · OEMSecrets…</span>
   </div>
@@ -39,11 +40,11 @@
       <span class="font-mono text-sm font-bold text-brand-900 truncate">{{ mpn }}</span>
       <div class="ml-auto flex items-center gap-2">
         <button @click="$dispatch('dossier-send-rfq')"
-                class="px-3 py-1.5 rounded-lg bg-brand-600 text-white text-xs font-semibold hover:bg-brand-700 inline-flex items-center gap-1.5">
+                class="btn-primary btn-sm inline-flex items-center gap-1.5">
           <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M3 11l18-8-8 18-2-7-8-3z"/></svg><span class="hidden sm:inline">Send RFQ</span>
         </button>
-        <button @click="$dispatch('dossier-add-offer')" class="hidden sm:inline-flex px-3 py-1.5 rounded-lg bg-white border border-brand-300 text-brand-700 text-xs font-medium hover:bg-brand-50">Add Offer</button>
-        <button @click="$dispatch('dossier-add-to-req')" class="hidden sm:inline-flex px-3 py-1.5 rounded-lg bg-white border border-brand-300 text-brand-700 text-xs font-medium hover:bg-brand-50">Add to Req</button>
+        <button @click="$dispatch('dossier-add-offer')" class="hidden sm:inline-flex btn-secondary btn-sm">Add Offer</button>
+        <button @click="$dispatch('dossier-add-to-req')" class="hidden sm:inline-flex btn-secondary btn-sm">Add to Req</button>
       </div>
     </div>
   </div>
@@ -56,8 +57,10 @@
   <div id="dossier-hero"
        hx-get="/v2/partials/search/dossier/hero?mpn={{ mpn|urlencode }}"
        hx-trigger="load" hx-target="this" hx-swap="outerHTML">
+    {# Skeleton header matches the resolved hero geometry: title + pill row + freshness placeholder #}
     <section class="rounded-xl bg-white border border-brand-200 shadow-sm p-5 animate-pulse">
       <div class="h-7 w-56 bg-brand-100 rounded"></div>
+      <div class="mt-2 h-4 w-32 bg-brand-100 rounded"></div>
       <div class="mt-3 h-3 w-72 bg-brand-100 rounded"></div>
       <div class="mt-4 flex gap-3">
         <div class="h-9 w-24 bg-brand-100 rounded"></div>
@@ -79,15 +82,21 @@
       <div id="dossier-market"
            hx-get="/v2/partials/search/dossier/market?mpn={{ mpn|urlencode }}"
            hx-trigger="load" hx-target="this" hx-swap="innerHTML">
-        <div class="divide-y divide-brand-100 border-t border-brand-100">
-          {% for _ in range(3) %}
-          <div class="px-4 py-3 flex items-center gap-4 animate-pulse">
-            <div class="h-8 w-1 rounded bg-brand-100"></div>
+        {# Skeleton: ~py-2.5 freshness header placeholder + row stubs matches resolved dossier_market layout #}
+        <div class="border-t border-line-subtle">
+          <div class="px-4 py-2.5 animate-pulse">
             <div class="h-3 w-40 rounded bg-brand-100"></div>
-            <div class="ml-auto h-3 w-16 rounded bg-brand-100"></div>
-            <div class="h-3 w-20 rounded bg-brand-100"></div>
           </div>
-          {% endfor %}
+          <div class="divide-y divide-brand-100">
+            {% for _ in range(3) %}
+            <div class="px-4 py-3 flex items-center gap-4 animate-pulse">
+              <div class="h-8 w-1 rounded bg-brand-100"></div>
+              <div class="h-3 w-40 rounded bg-brand-100"></div>
+              <div class="ml-auto h-3 w-16 rounded bg-brand-100"></div>
+              <div class="h-3 w-20 rounded bg-brand-100"></div>
+            </div>
+            {% endfor %}
+          </div>
         </div>
       </div>
     </div>
@@ -106,7 +115,7 @@
       <div id="dossier-history" class="px-4 pb-4"
            hx-get="/v2/partials/search/history?mpn={{ mpn|urlencode }}"
            hx-trigger="load" hx-target="this" hx-swap="innerHTML">
-        <div class="rounded-xl bg-white p-6 border border-gray-100 shadow-sm animate-pulse">
+        <div class="rounded-xl bg-white p-6 border border-line-subtle shadow-sm animate-pulse">
           <div class="h-4 w-2/3 bg-gray-100 rounded"></div>
           <div class="mt-3 h-3 w-1/2 bg-gray-100 rounded"></div>
         </div>
@@ -159,7 +168,7 @@
        x-transition:enter-start="translate-x-full" x-transition:enter-end="translate-x-0"
        x-transition:leave="transition ease-in duration-150 transform"
        x-transition:leave-start="translate-x-0" x-transition:leave-end="translate-x-full"
-       class="fixed inset-y-0 right-0 w-full max-w-lg bg-white shadow-2xl border-l border-gray-200 z-50"
+       class="fixed inset-y-0 right-0 w-full max-w-lg bg-white shadow-2xl border-l border-line-subtle z-50"
        x-cloak>
     <div id="lead-drawer-content" class="h-full" @htmx:after-swap="drawerOpen = true"></div>
   </div>
@@ -168,10 +177,11 @@
 {# ── MOBILE bottom action sheet (above the fixed bottom nav). ── #}
 <div class="sm:hidden fixed left-0 right-0 bottom-[52px] z-30 bg-white border-t border-brand-200 px-3 py-2 flex items-center gap-2"
      x-data="{ sheet: false }">
-  <button @click="$dispatch('dossier-send-rfq')" class="flex-1 px-3 py-2.5 rounded-lg bg-brand-600 text-white text-sm font-semibold inline-flex items-center justify-center gap-2">
+  {# Mobile Send RFQ — primary CTA migrated to .btn-primary flex-1 #}
+  <button @click="$dispatch('dossier-send-rfq')" class="btn-primary flex-1 inline-flex items-center justify-center gap-2">
     <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M3 11l18-8-8 18-2-7-8-3z"/></svg>Send RFQ
   </button>
-  <button @click="sheet=true" class="px-4 py-2.5 rounded-lg bg-white border border-brand-300 text-brand-700 text-sm font-medium">Actions</button>
+  <button @click="sheet=true" class="btn-secondary">Actions</button>
   <div x-show="sheet" x-cloak @click="sheet=false" class="fixed inset-0 bg-black/40 z-40"></div>
   <div x-show="sheet" x-cloak x-transition:enter="transition ease-out duration-200" x-transition:enter-start="translate-y-full" x-transition:enter-end="translate-y-0"
        class="fixed left-0 right-0 bottom-0 z-50 bg-white rounded-t-2xl border-t border-brand-200 p-4 space-y-1">

@@ -63,8 +63,8 @@
   {# region / lead #}
   <div class="text-[11px] text-gray-600 mt-0.5 lg:mt-0">{{ card.lead_quality|default('')|title }}{% if card.reason %} · {{ card.reason }}{% endif %}</div>
 
-  {# actions (reveal on hover desktop, always visible on mobile/touch) #}
-  <div class="flex lg:justify-end items-center gap-1 mt-2 lg:mt-0 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
+  {# actions — low-emphasis on desktop, full on hover/focus; always visible on mobile/touch #}
+  <div class="flex lg:justify-end items-center gap-1 mt-2 lg:mt-0 lg:opacity-60 lg:group-hover:opacity-100 lg:focus-within:opacity-100 transition-opacity">
     <button type="button" title="RFQ this vendor"
             hx-post="/v2/partials/search/quick-source/rfq"
             hx-vals='{"mpn": "{{ card.mpn_matched|e }}", "vendor_name": "{{ card.vendor_name|e }}"}'
@@ -85,17 +85,17 @@
     <button @click="expanded = !expanded" class="text-[11px] text-brand-600 hover:text-brand-700">
       <span x-text="expanded ? 'Hide offers' : '{{ card.offer_count|default(card.sub_offers|length) }} offers'"></span>
     </button>
-    <div x-show="expanded" x-cloak x-transition class="mt-2 border-t border-gray-200 pt-2">
-      <table class="w-full text-xs">
-        <thead><tr class="text-gray-500">
-          <th class="text-left py-1">Source</th>
-          <th class="text-right py-1">Price</th>
-          <th class="text-right py-1">Qty</th>
+    <div x-show="expanded" x-cloak x-transition class="mt-2 border-t border-line-subtle pt-2">
+      <table class="compact-table w-full">
+        <thead><tr>
+          <th class="text-left">Source</th>
+          <th class="text-right">Price</th>
+          <th class="text-right">Qty</th>
         </tr></thead>
         <tbody>
         {% for offer in card.sub_offers %}
-          <tr class="text-gray-700 border-t border-gray-100">
-            <td class="py-1">{{ offer.source_type|default('') }}</td>
+          <tr class="border-t border-line-subtle">
+            <td>{{ offer.source_type|default('') }}</td>
             <td class="text-right font-mono">{% if offer.unit_price %}${{ "%.4f"|format(offer.unit_price) }}{% else %}-{% endif %}</td>
             <td class="text-right font-mono">{{ "{:,}".format(offer.qty_available) if offer.qty_available else '-' }}</td>
           </tr>

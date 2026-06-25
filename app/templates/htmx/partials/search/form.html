@@ -13,9 +13,7 @@
       <div class="flex gap-2">
         <input aria-label="Part number search" type="text" name="mpn" x-model="q"
                placeholder="Enter part number (e.g. LM317T, STM32F407VG)"
-               class="flex-1 px-3 py-2 text-sm font-mono border border-brand-200 rounded-lg
-                      focus:ring-2 focus:ring-brand-500 focus:border-brand-500
-                      placeholder:text-gray-400 tracking-tight"
+               class="input flex-1 font-mono tracking-tight"
                required>
         <button type="submit" :disabled="!q.trim()"
                 class="btn-primary whitespace-nowrap">
