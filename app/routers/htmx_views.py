@@ -17509,85 +17509,18 @@ async def my_day_partial(
     user: User = Depends(require_access(AccessKey.MY_DAY)),
     db: Session = Depends(get_db),
 ):
-    """My Day worklist — overdue/due accounts I own + my open tasks.
+    """Tasks page — a filterable worklist of every system task assigned to me.
 
-    Overdue/due accounts: reuses cdm_company_query with staleness="needs_call"
-    and my_only=True, ordered stalest-first via the outbound clock.
-    Tasks: task_service.get_my_tasks filtered to open, due/overdue first.
+    (Formerly "My Day", which also carried a follow-up-accounts call-down section;
+    that account cadence now lives in CRM, so this page is tasks-only.)
 
-    Called by: /v2/my-day full-page shell and nav hx-get.
-    Depends on: crm_service.cdm_company_query, crm_service.cadence_state,
-                task_service.get_my_tasks.
-    """
-    from ..services.crm_service import (
-        cadence_state as _cadence_state,
-    )
-    from ..services.crm_service import (
-        cdm_company_query as _cdm_company_query,
-    )
-    from ..services.task_service import get_my_tasks as _get_my_tasks
-
-    now = datetime.now(timezone.utc)
-
-    # 1. Overdue / due follow-up accounts I own — reuse the shared _needs_call_filter
-    #    (staleness="needs_call") so the count and this list always agree with the CRM chip.
-    #    Eager-load primary_contact so each row can render the one-click call/email
-    #    outreach action without an N+1 lazy-load per account (up to 50 rows).
-    _accounts_q = _cdm_company_query(
-        db,
-        user,
-        search="",
-        staleness="needs_call",
-        account_type="",
-        my_only=True,
-        sort="outbound_asc",
-        now=now,
-    ).options(joinedload(Company.primary_contact))
-    accounts = _accounts_q.limit(50).all()
-
-    # Annotate each account with its cadence_state (reused — not recomputed inline).
-    # attention_count = accounts the page exists to action: overdue (clock blown) or
-    # never-contacted ("new"). Surfaced as the header's single key figure.
-    account_rows = []
-    attention_count = 0
-    for co in accounts:
-        state = _cadence_state(co.tier, co.last_outbound_at, now)
-        out_days = (now - co.last_outbound_at).days if co.last_outbound_at else None
-        if state in ("overdue", "new"):
-            attention_count += 1
-        account_rows.append({"company": co, "cadence_state": state, "out_days": out_days})
-
-    # 2. My open tasks — due/overdue first (get_my_tasks already excludes done).
-    all_tasks = _get_my_tasks(db, user.id)
-    # Surface due/overdue first (past due_at), then tasks with no due_at last.
-    due_tasks = [t for t in all_tasks if t.due_at is not None and t.due_at <= now]
-    no_due_tasks = [t for t in all_tasks if t.due_at is None or t.due_at > now]
-    tasks = due_tasks + no_due_tasks
-
-    ctx = _base_ctx(request, user, "my-day")
-    ctx["account_rows"] = account_rows
-    ctx["attention_count"] = attention_count
-    ctx["tasks"] = tasks
-    ctx["now_utc"] = now
-    return template_response("htmx/partials/my_day.html", ctx)
-
-
-@router.get("/v2/partials/tasks", response_class=HTMLResponse)
-async def tasks_queue_partial(
-    request: Request,
-    user: User = Depends(require_access(AccessKey.MY_DAY)),
-    db: Session = Depends(get_db),
-):
-    """Filterable Tasks queue — all tasks assigned to me, with status/priority/due
-    filters.
-
-    Reuses task_service.get_my_tasks (which supports the ``status`` filter and
-    excludes done by default); ``priority`` and ``due`` are applied here since the
-    helper does not support them. Renders the same task-row markup + complete-form as
-    My Day, plus a filter bar whose hx-get carries an EXPLICIT hx-target on the inner
+    Reuses task_service.get_my_tasks (which supports the ``status`` filter and excludes
+    done by default); ``priority`` and ``due`` are applied here since the helper does not
+    support them. The template groups the rows by urgency (Overdue → Due soon → Later →
+    No due date). The filter bar's hx-get carries an EXPLICIT hx-target on the inner
     results container (so it never inherits #main-content and replaces the whole page).
 
-    Called by: /v2/partials/tasks (filter-bar hx-get; full-list initial render).
+    Called by: /v2/my-day full-page shell and nav hx-get, plus the filter-bar selects.
     Depends on: task_service.get_my_tasks.
     """
     from ..services.task_service import get_my_tasks as _get_my_tasks
@@ -17598,6 +17531,7 @@ async def tasks_queue_partial(
     due = request.query_params.get("due", "").strip()
 
     # status flows through the helper (it filters at the query level + defaults to open).
+    # get_my_tasks already orders due_at-asc (nulls last), then created_at — soonest first.
     tasks = _get_my_tasks(db, user.id, status=status or None)
 
     # priority is an int 1-3 (3=high, 2=med, 1=low) — applied here (helper has no filter).

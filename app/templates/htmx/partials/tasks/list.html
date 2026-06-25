@@ -1,8 +1,12 @@
-{# tasks/list.html — filterable Tasks queue: all tasks assigned to me.
+{# tasks/list.html — filterable Tasks page: every task assigned to me.
+   This is the "Tasks" page (formerly "My Day"): a system-task worklist, grouped and
+   ordered by urgency, with status / priority / due filters. It replaced the old
+   follow-up-accounts + tasks split — accounts cadence lives in CRM now.
+
    Receives: tasks (list[RequisitionTask], already filtered), now_utc (datetime),
              filter_status / filter_priority / filter_due (str, the active filters).
-   Called by: /v2/partials/tasks (tasks_queue_partial route). On a filter change the
-              route returns tasks/_results.html (results-only) which swaps into
+   Called by: /v2/partials/my-day (my_day_partial route). On a filter change the route
+              returns tasks/_results.html (results-only) which swaps into
               #tasks-results; the initial load returns this full template.
    Depends on: tasks/_results.html, task_due_state global, the existing complete route.
 #}
@@ -25,7 +29,7 @@
     <label class="flex items-center gap-1.5 text-xs font-medium text-gray-600">
       Status
       <select name="status"
-              hx-get="/v2/partials/tasks"
+              hx-get="/v2/partials/my-day"
               hx-trigger="change"
               hx-target="#tasks-results"
               hx-swap="innerHTML"
@@ -41,7 +45,7 @@
     <label class="flex items-center gap-1.5 text-xs font-medium text-gray-600">
       Priority
       <select name="priority"
-              hx-get="/v2/partials/tasks"
+              hx-get="/v2/partials/my-day"
               hx-trigger="change"
               hx-target="#tasks-results"
               hx-swap="innerHTML"
@@ -57,7 +61,7 @@
     <label class="flex items-center gap-1.5 text-xs font-medium text-gray-600">
       Due
       <select name="due"
-              hx-get="/v2/partials/tasks"
+              hx-get="/v2/partials/my-day"
               hx-trigger="change"
               hx-target="#tasks-results"
               hx-swap="innerHTML"
