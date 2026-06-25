@@ -35,7 +35,7 @@
                 var t = Alpine.store('toast');
                 t.message = 'Could not update status'; t.type = 'error'; t.show = true;
               })"
-              class="text-sm border border-gray-300 rounded-md px-3 py-1.5 focus:border-brand-500 focus:ring-1 focus:ring-brand-500">
+              class="input input-sm">
         <option value="submitted">Submitted</option>
         <option value="in_progress">In Progress</option>
         <option value="resolved">Resolved</option>
@@ -44,12 +44,13 @@
     </div>
   </div>
 
-  {# AI Summary #}
+  {# AI Summary — the one hero AI callout per view. Sparkle + label carry the
+     design-system accent (state marker); the panel chrome is a neutral hairline. #}
   {% if ticket.ai_summary %}
-  <div class="bg-brand-50 border border-brand-200 rounded-lg p-4 mb-6">
+  <div class="bg-gray-50 border border-line-base rounded-lg p-4 mb-6">
     <div class="flex items-center gap-2 mb-1">
-      {{ sparkle_icon("w-4 h-4 text-brand-500") }}
-      <span class="text-xs font-medium text-brand-600">AI Summary</span>
+      {{ sparkle_icon("w-4 h-4 figure-accent") }}
+      <span class="text-xs font-medium figure-accent">AI Summary</span>
     </div>
     <p class="text-sm text-gray-700">{{ ticket.ai_summary }}</p>
   </div>
