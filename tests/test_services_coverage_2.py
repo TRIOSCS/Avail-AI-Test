@@ -194,7 +194,7 @@ class TestProspectDiscoveryEmail:
         from app.services.prospect_discovery_email import mine_unknown_domains
 
         graph_client = AsyncMock()
-        graph_client.list_messages = AsyncMock(
+        graph_client.get_all_pages = AsyncMock(
             return_value=[
                 {
                     "from": {"emailAddress": {"address": "a@newcompany.com", "name": "Alice"}},
@@ -216,13 +216,22 @@ class TestProspectDiscoveryEmail:
         assert len(result) == 1
         assert result[0]["domain"] == "newcompany.com"
         assert result[0]["email_count"] == 2
+        # S10 regression: the inbox is listed via the REAL GraphClient API
+        # (get_all_pages on /me/mailFolders/inbox/messages), not the nonexistent
+        # list_messages. Guard against the dead reference returning.
+        graph_client.get_all_pages.assert_awaited_once()
+        path_arg = graph_client.get_all_pages.await_args.args[0]
+        assert path_arg == "/me/mailFolders/inbox/messages"
+        from app.utils.graph_client import GraphClient
+
+        assert not hasattr(GraphClient, "list_messages")
 
     def test_mine_unknown_domains_excludes_freemail(self, db_session: Session):
         """Freemail domains (gmail.com etc.) are excluded."""
         from app.services.prospect_discovery_email import mine_unknown_domains
 
         graph_client = AsyncMock()
-        graph_client.list_messages = AsyncMock(
+        graph_client.get_all_pages = AsyncMock(
             return_value=[
                 {"from": {"emailAddress": {"address": "x@gmail.com", "name": "X"}}, "receivedDateTime": "2026-03-01"},
                 {"from": {"emailAddress": {"address": "y@gmail.com", "name": "Y"}}, "receivedDateTime": "2026-03-02"},
@@ -237,7 +246,7 @@ class TestProspectDiscoveryEmail:
         from app.services.prospect_discovery_email import mine_unknown_domains
 
         graph_client = AsyncMock()
-        graph_client.list_messages = AsyncMock(side_effect=Exception("API down"))
+        graph_client.get_all_pages = AsyncMock(side_effect=Exception("API down"))
 
         result = _run(mine_unknown_domains(graph_client, db_session, days_back=90))
         assert result == []
@@ -272,7 +281,7 @@ class TestProspectDiscoveryEmail:
         from app.services.prospect_discovery_email import run_email_mining_batch
 
         graph_client = AsyncMock()
-        graph_client.list_messages = AsyncMock(return_value=[])
+        graph_client.get_all_pages = AsyncMock(return_value=[])
 
         result = _run(run_email_mining_batch("batch-1", graph_client, db_session))
         assert result == []

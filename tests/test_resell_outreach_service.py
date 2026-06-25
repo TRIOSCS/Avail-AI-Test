@@ -369,6 +369,59 @@ class TestSubmitOutreachEmail:
         assert outreach[0].status == "no_response"
         assert outreach[0].graph_message_id is None
 
+    @pytest.mark.asyncio
+    async def test_dnc_buyer_skipped_end_to_end_not_emailed(
+        self,
+        db_session: Session,
+        excess_list: ExcessList,
+        line_item: ExcessLineItem,
+        trader: User,
+        buyer_card: VendorCard,
+    ):
+        """S3.3: a real DNC SiteContact on the buyer's email is skipped at send time.
+
+        Unlike test_email_skipped_recipient_flagged_not_dropped (which stubs
+        send_batch_rfq), this exercises the REAL send_batch_rfq DNC query: a do-not-
+        contact SiteContact whose email matches the buyer card means the recipient is
+        never passed to GraphClient.post_json, and the row is recorded no_response.
+        Proves the resell vendor-send path inherits the DNC block.
+        """
+        from app.models.crm import CustomerSite, SiteContact
+
+        site = CustomerSite(company_id=excess_list.company_id, site_name="Buyer Site", is_active=True)
+        db_session.add(site)
+        db_session.flush()
+        db_session.add(
+            SiteContact(
+                customer_site_id=site.id,
+                full_name="Blocked Buyer",
+                email="sales@buyerone.com",  # matches buyer_card.emails
+                do_not_contact=True,
+            )
+        )
+        db_session.commit()
+
+        mock_gc = AsyncMock()
+        with (
+            patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+            patch("app.email_service.get_credential_cached", return_value=None),
+        ):
+            outreach = await svc.submit_outreach_email(
+                db_session,
+                list_id=excess_list.id,
+                owner=trader,
+                buyers=[{"vendor_card_id": buyer_card.id, "email": "sales@buyerone.com"}],
+                scope="whole_list",
+                token="fake-token",
+                subject="Excess available",
+                body="surplus",
+            )
+
+        assert len(outreach) == 1
+        assert outreach[0].status == "no_response"
+        # The DNC recipient must never reach Graph sendMail.
+        mock_gc.post_json.assert_not_called()
+
 
 # ── record_response: reply adapter ───────────────────────────────────
 

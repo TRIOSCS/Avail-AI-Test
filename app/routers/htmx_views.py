@@ -3184,6 +3184,28 @@ async def send_follow_up_htmx(
     form = await request.form()
     body = (form.get("body") or "").strip()
 
+    # DNC hard-block — never email a do-not-contact vendor (checked in all modes,
+    # before the TESTING gate), mirroring send_reply_htmx / send_batch_rfq.
+    if contact.vendor_contact:
+        dnc = (
+            db.query(SiteContact)
+            .filter(
+                sqlfunc.lower(SiteContact.email) == contact.vendor_contact.lower(),
+                SiteContact.do_not_contact.is_(True),
+            )
+            .first()
+        )
+        if dnc:
+            logger.warning(
+                "Follow-up skipped — do-not-contact flag set for vendor '{}' ({})",
+                contact.vendor_name,
+                contact.vendor_contact,
+            )
+            return HTMLResponse(
+                '<div class="rounded bg-rose-50 border border-rose-200 text-rose-700 text-xs px-2 py-1.5">'
+                "This vendor is on the do-not-contact list — follow-up not sent.</div>"
+            )
+
     is_testing = os.environ.get("TESTING") == "1"
     email_sent = False
 
@@ -10611,6 +10633,23 @@ async def send_email_reply(
 
     if not to or not body:
         raise HTTPException(400, "Recipient and message body are required")
+
+    # DNC hard-block — never email a do-not-contact recipient (checked before any
+    # send attempt), mirroring send_reply_htmx / send_batch_rfq.
+    dnc = (
+        db.query(SiteContact)
+        .filter(
+            sqlfunc.lower(SiteContact.email) == to.lower(),
+            SiteContact.do_not_contact.is_(True),
+        )
+        .first()
+    )
+    if dnc:
+        logger.warning("Email reply skipped — do-not-contact flag set for recipient ({})", to)
+        return HTMLResponse(
+            '<div class="rounded bg-rose-50 border border-rose-200 text-rose-700 text-xs px-2 py-1.5">'
+            "This recipient is on the do-not-contact list — reply not sent.</div>"
+        )
 
     error = None
     try:
