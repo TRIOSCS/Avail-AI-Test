@@ -29,8 +29,8 @@ def _make_req_attachment(db, requisition_id, user_id, *, onedrive_item_id="od-re
     att = RequisitionAttachment(
         requisition_id=requisition_id,
         file_name="test.pdf",
-        onedrive_item_id=onedrive_item_id,
-        onedrive_url="https://od.example.com/test.pdf",
+        library_item_id=onedrive_item_id,
+        library_web_url="https://od.example.com/test.pdf",
         content_type="application/pdf",
         size_bytes=1024,
         uploaded_by_id=user_id,
@@ -46,8 +46,8 @@ def _make_att_no_onedrive(db, requisition_id, user_id):
     att = RequisitionAttachment(
         requisition_id=requisition_id,
         file_name="local.pdf",
-        onedrive_item_id=None,
-        onedrive_url=None,
+        library_item_id=None,
+        library_web_url=None,
         content_type="application/pdf",
         size_bytes=512,
         uploaded_by_id=user_id,
@@ -75,8 +75,8 @@ def _make_reqmt_attachment(db, requirement_id, user_id, *, onedrive_item_id="od-
     att = RequirementAttachment(
         requirement_id=requirement_id,
         file_name="spec.pdf",
-        onedrive_item_id=onedrive_item_id,
-        onedrive_url="https://od.example.com/spec.pdf",
+        library_item_id=onedrive_item_id,
+        library_web_url="https://od.example.com/spec.pdf",
         content_type="application/pdf",
         size_bytes=2048,
         uploaded_by_id=user_id,
@@ -91,8 +91,8 @@ def _make_reqmt_att_no_onedrive(db, requirement_id, user_id):
     att = RequirementAttachment(
         requirement_id=requirement_id,
         file_name="local_spec.pdf",
-        onedrive_item_id=None,
-        onedrive_url=None,
+        library_item_id=None,
+        library_web_url=None,
         content_type="application/pdf",
         size_bytes=256,
         uploaded_by_id=user_id,
@@ -207,7 +207,7 @@ class TestUploadRequisitionAttachment:
         assert resp.status_code == 200
         data = resp.json()
         assert data["file_name"] == "doc.pdf"
-        assert data["onedrive_url"] == "https://od.example.com/doc.pdf"
+        assert data["web_url"] == "https://od.example.com/doc.pdf"
 
     def test_not_found_requisition_returns_404(self, client):
         resp = client.post(
@@ -479,7 +479,8 @@ class TestDeleteRequirementAttachmentExtra:
         assert resp.status_code == 200
         assert "warning" in resp.json()
 
-    def test_delete_graph_403_returns_403(self, client, db_session, test_requisition, test_user):
+    def test_delete_graph_403_returns_warning(self, client, db_session, test_requisition, test_user):
+        """Cloud 403 on delete is best-effort: DB row is removed and warning is returned."""
         requirement = _make_requirement(db_session, test_requisition.id)
         att = _make_reqmt_attachment(db_session, requirement.id, test_user.id)
         with (
@@ -495,4 +496,7 @@ class TestDeleteRequirementAttachmentExtra:
             ),
         ):
             resp = client.delete(f"/api/requirement-attachments/{att.id}")
-        assert resp.status_code == 403
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+        assert "warning" in data

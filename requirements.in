@@ -1,7 +1,7 @@
 # Production dependency SOURCE (hand-authored). Edit this file, then regenerate the
 # pinned lock with:  pip-compile --no-header requirements.in
 # Do NOT edit requirements.txt by hand — it is the compiled, fully-pinned output.
-fastapi==0.137.1
+fastapi==0.138.0
 uvicorn[standard]==0.49.0
 sqlalchemy==2.0.51
 psycopg2-binary==2.9.12
@@ -24,7 +24,7 @@ starlette>=1.3.1,<2.0
 # Replaced prometheus-fastapi-instrumentator (hard-pinned starlette<1.0.0) with a small
 # ASGI middleware in app/prometheus_metrics.py that uses prometheus_client directly.
 prometheus_client>=0.25.0,<1.0
-sentry-sdk[fastapi]==2.62.0
+sentry-sdk[fastapi]==2.63.0
 # Rate limiting
 slowapi==0.1.10
 # Fuzzy matching
@@ -45,14 +45,16 @@ starlette-csrf==3.0.0
 # NetComponents integration
 beautifulsoup4==4.15.0
 patchright==1.60.1
+# Phone number parsing / E.164 normalization (Google libphonenumber Python port)
+phonenumbers==9.0.33
 # Typed settings from env vars (fail-fast validation at startup)
 pydantic-settings==2.14.2
 # SSE streaming for HTMX sourcing progress
-sse-starlette>=3.4.4,<4.0
+sse-starlette>=3.4.5,<4.0
 # Anthropic Claude API (used by claude_client, enrichment, batch extraction)
-anthropic>=0.109.2,<1.0
+anthropic>=0.111.0,<1.0
 # HTML sanitization for untrusted email content (XSS prevention)
-nh3==0.3.5
+nh3==0.3.6
 # Safe XML parsing (XXE prevention)
 defusedxml>=0.7.1
 # Azure Communication Services (click-to-call)

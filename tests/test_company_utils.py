@@ -124,3 +124,67 @@ class TestFindCompanyDedupCandidates:
         candidates = find_company_dedup_candidates(db_session, threshold=80)
         # Should not match inactive company
         assert len(candidates) == 0
+
+
+# ── suggest_clean_company_name ───────────────────────────────────────────────
+
+
+class TestSuggestCleanCompanyName:
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            ("", ""),
+            ("Arrow Electronics, Inc.", "Arrow Electronics"),
+            ("The Phoenix Company LLC", "Phoenix"),
+            ("Acme Corp.", "Acme"),
+            ("  DigiKey   ", "DigiKey"),
+            ("Solutions, LLC,", "Solutions"),
+            ("X Corp--", "X"),
+        ],
+    )
+    def test_suggest(self, raw, expected):
+        from app.company_utils import suggest_clean_company_name
+
+        assert suggest_clean_company_name(raw) == expected
+
+    def test_pure_none_returns_empty(self):
+        from app.company_utils import suggest_clean_company_name
+
+        assert suggest_clean_company_name("") == ""
+
+
+# ── pg path / dispatcher ─────────────────────────────────────────────────────
+
+
+def test_find_company_dedup_candidates_uses_pg_path():
+    """Dispatcher routes to PG path when dialect is postgresql."""
+    from unittest.mock import MagicMock, patch
+
+    from app.company_utils import find_company_dedup_candidates
+
+    mock_db = MagicMock()
+    mock_db.bind = MagicMock()
+    mock_db.bind.dialect.name = "postgresql"
+
+    with patch("app.company_utils._find_company_dedup_candidates_pg", return_value=[]) as mock_pg:
+        find_company_dedup_candidates(mock_db)
+
+    mock_pg.assert_called_once_with(mock_db, 85, 50)
+
+
+def test_find_company_dedup_candidates_pg_empty_pairs():
+    """PG path returns [] when no similar pairs are found."""
+    from unittest.mock import MagicMock
+
+    from app.company_utils import _find_company_dedup_candidates_pg
+
+    mock_db = MagicMock()
+    mock_q = mock_db.query.return_value
+    mock_q.filter.return_value = mock_q
+    mock_q.order_by.return_value = mock_q
+    mock_q.limit.return_value = mock_q
+    mock_q.all.return_value = []
+
+    result = _find_company_dedup_candidates_pg(mock_db, 85, 50)
+
+    assert result == []

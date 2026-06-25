@@ -1,0 +1,76 @@
+{# _contact_merge_form.html — Step-1 of contact merge flow: search for the duplicate.
+   The rep picks the "loser" (remove) here; keep = this contact.
+   Receives: keep (SiteContact), company (Company).
+   Called by: contact_merge_form route in htmx_views.py.
+   Depends on: HTMX, Alpine.js, Tailwind CSS, /v2/partials/customers/typeahead.
+#}
+<div class="space-y-5 p-1">
+  <div>
+    <h2 class="text-lg font-bold text-gray-900">Merge Contact: {{ keep.full_name }}</h2>
+    <p class="mt-1 text-sm text-gray-600">
+      Search for the duplicate contact to merge away. The duplicate will be
+      <strong>deleted</strong> and its data merged into
+      <strong>{{ keep.full_name }}</strong>.
+    </p>
+  </div>
+
+  <div x-data="{ removeId: '', removeName: '' }">
+    <label class="block text-sm font-medium text-gray-700 mb-1">
+      Duplicate contact to remove
+    </label>
+
+    <input type="hidden" name="exclude_id" value="{{ keep.id }}">
+
+    <div class="relative">
+      <input type="text"
+             id="contact-merge-search"
+             name="q"
+             placeholder="Type contact name…"
+             autocomplete="off"
+             class="input w-full"
+             hx-get="/v2/partials/customers/{{ company.id }}/contacts/search"
+             hx-trigger="input changed delay:250ms"
+             hx-target="#contact-merge-results"
+             hx-swap="innerHTML"
+             hx-include="[name='exclude_id']">
+      <div id="contact-merge-results"
+           class="absolute z-30 w-full bg-white border border-gray-200 rounded-md shadow-lg mt-1 hidden">
+      </div>
+    </div>
+
+    <div id="contact-merge-preview-area" class="mt-4"></div>
+
+    <script>
+      (function () {
+        const inp = document.getElementById('contact-merge-search');
+        const res = document.getElementById('contact-merge-results');
+        if (!inp || !res) return;
+        res.addEventListener('htmx:afterSwap', function () {
+          res.classList.toggle('hidden', !res.textContent.trim());
+        });
+        res.addEventListener('click', function (e) {
+          const btn = e.target.closest('[data-contact-id]');
+          if (!btn) return;
+          const rid = btn.dataset.contactId;
+          inp.value = btn.textContent.trim();
+          res.classList.add('hidden');
+          htmx.ajax('GET',
+            '/v2/partials/customers/{{ company.id }}/contacts/{{ keep.id }}/merge-preview?remove_id=' + rid,
+            { target: '#contact-merge-preview-area', swap: 'innerHTML', indicator: '#contact-merge-preview-area' }
+          );
+        });
+        document.addEventListener('click', function (e) {
+          if (!res.contains(e.target) && e.target !== inp) res.classList.add('hidden');
+        });
+      })();
+    </script>
+  </div>
+
+  <div class="flex justify-end">
+    <button type="button"
+            @click="$dispatch('close-modal')"
+            class="btn btn-ghost">
+      Cancel
+    </button>
+  </div>
+</div>

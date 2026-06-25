@@ -9,13 +9,15 @@
    The vendor-name list and requirement ids are passed via |tojson inside a SINGLE-quoted
    x-data attribute — tojson emits double quotes, which would close a double-quoted
    attribute and break Alpine init (CLAUDE.md Alpine-quoting anti-pattern).
-   Seed selectedVendors from ONLY the CONTACTABLE rows (has_contact): non-contactable rows
-   render a DISABLED checkbox with no @change, so the buyer can't deselect them — seeding
-   their names would force-count and force-post a vendor the send path then silently skips.
-   Cardless vendors enter the selection only via the explicit Add-contact → createVendor
-   path. #}
+   Seed selectedVendors from ONLY the CONTACTABLE, NON-DNC rows (has_contact and not dnc):
+   non-contactable/DNC rows render a DISABLED checkbox with no @change, so the buyer can't
+   deselect them — seeding their names would force-count and force-post a vendor the send
+   path then silently skips. Cardless vendors enter the selection only via the explicit
+   Add-contact → createVendor path.
+   dnc_norms: set of normalized_names whose contact email is do_not_contact (server-computed).
+   contactable_non_dnc: list of normalized_names for the Alpine selectedVendors seed. #}
 <div class="p-4"
-     x-data='rfqVendorModal({{ suggested_vendors|selectattr("has_contact")|map(attribute="normalized_name")|list|tojson }}, {{ requirement_ids|tojson }})'>
+     x-data='rfqVendorModal({{ contactable_non_dnc|tojson }}, {{ requirement_ids|tojson }})'>
 
   {# ── Step 1: Compose ─────────────────────────────────────────── #}
   <div x-show="step === 'compose'" x-cloak>
@@ -30,8 +32,9 @@
       </label>
       <div class="max-h-56 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-100">
         {% for v in suggested_vendors %}
-        {% if v.has_contact %}
-        {# Contactable row — enabled checkbox + engagement/response badges (unchanged). #}
+        {% set is_dnc = v.normalized_name in dnc_norms %}
+        {% if v.has_contact and not is_dnc %}
+        {# Contactable, non-DNC row — enabled checkbox + engagement/response badges. #}
         <label class="flex items-center gap-3 px-3 py-2 hover:bg-gray-50 cursor-pointer">
           <input type="checkbox"
                  :checked='isSelected({{ v.normalized_name|tojson }})'
@@ -47,10 +50,50 @@
             {% if v.response_rate %}
             <span class="ml-2 text-xs text-gray-400">{{ (v.response_rate * 100)|round|int }}% response</span>
             {% endif %}
+            {# Lead time discrete span — own span, never middot-concatenated #}
+            {% if v.lead_time_days is not none %}
+            <span class="ml-2 text-xs text-gray-400">{{ v.lead_time_days }}d lead</span>
+            {% else %}
+            <span class="ml-2 text-xs text-gray-400">—</span>
+            {% endif %}
           </div>
           {% if v.engagement_score %}
-          <span class="text-xs text-gray-400">Score: {{ v.engagement_score|round|int }}</span>
+          <span class="text-xs text-gray-400" title="Vendors ranked by responsiveness (engagement score = reply rate × recency). This number is their engagement score.">Score: {{ v.engagement_score|round|int }}</span>
+          {% elif v.vendor_score is not none %}
+          <span class="text-xs text-gray-400" title="Vendors ranked by responsiveness. This is the overall vendor quality score (no engagement data yet).">Score: {{ v.vendor_score|round|int }}</span>
           {% endif %}
+          {# Commodity signal chip — only when current commodity is known and vendor has history #}
+          {% if current_commodity and v.card and commodity_signals.get(v.id) %}
+          {% set sig = commodity_signals.get(v.id) %}
+          {% if sig.outbound > 0 %}
+          <span class="ml-2 text-xs text-gray-400"
+                title="For {{ current_commodity }}: {{ sig.inbound }} reply{{ 's' if sig.inbound != 1 }} / {{ sig.outbound }} sent">
+            {{ sig.inbound }}/{{ sig.outbound }} {{ current_commodity }}
+          </span>
+          {% endif %}
+          {% endif %}
+        </label>
+        {% elif v.has_contact and is_dnc %}
+        {# DNC row — has an email but it is do-not-contact flagged. Disabled checkbox +
+           rose "do-not-contact" chip. The @click is single-quoted (CLAUDE.md landmine). #}
+        <label class="flex items-center gap-3 px-3 py-2">
+          <input type="checkbox" disabled class="rounded border-gray-300 cursor-not-allowed">
+          <div class="flex-1 min-w-0">
+            <span class="text-sm font-medium text-gray-500">{{ v.display_name }}</span>
+            {% set cov = coverage.get(v.id) %}
+            {% if cov %}
+            <span class="ml-2 inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-indigo-50 text-indigo-700"
+                  title="Covers: {{ cov.mpns }}">{{ cov.count }}/{{ parts|length }} parts</span>
+            {% endif %}
+            {# Shared color-coded badge component — rose for DNC (compliance: must not send) #}
+            <span class="ml-2 inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-rose-50 text-rose-700">
+              <svg class="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M13.477 14.89A6 6 0 015.11 6.524L13.477 14.89zm1.414-1.414L6.524 5.11A6 6 0 0114.89 13.476zM18 10a8 8 0 11-16 0 8 8 0 0116 0z" clip-rule="evenodd"/>
+              </svg>
+              do-not-contact
+            </span>
+            {% if v.lead_time_days is not none %}<span class="ml-2 text-xs text-gray-400">{{ v.lead_time_days }}d lead</span>{% endif %}
+          </div>
         </label>
         {% else %}
         {# Non-contactable row (cardless OR carded-but-no-resolvable-email): coverage chip
@@ -67,7 +110,9 @@
             <span class="ml-2 inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-indigo-50 text-indigo-700"
                   title="Covers: {{ cov.mpns }}">{{ cov.count }}/{{ parts|length }} parts</span>
             {% endif %}
+            {# Amber badge for no-email — shared badge component vocabulary #}
             <span class="ml-2 inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-gray-100 text-gray-500">no contact on file</span>
+            {% if v.lead_time_days is not none %}<span class="ml-2 text-xs text-gray-400">{{ v.lead_time_days }}d lead</span>{% endif %}
           </div>
           <button type="button" @click='addContactFor({{ v.display_name|tojson }})'
                   class="text-xs font-semibold text-brand-600 hover:text-brand-700">
@@ -172,11 +217,50 @@
     {# Parts reference (read-only) #}
     <div class="mb-4">
       <label class="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Parts</label>
+      {% if requisition_count is defined and requisition_count > 1 %}
+      <p class="text-xs text-brand-600 mt-0.5 mb-1">Spanning {{ requisition_count }} requisitions</p>
+      {% endif %}
       <div class="text-xs text-gray-600 bg-gray-50 rounded-lg p-2 max-h-24 overflow-y-auto font-mono">
         {% for p in parts %}
         <div>{{ p.mpn }} — {{ p.qty }} pcs{{ ' @ $%.2f'|format(p.target_price) if p.target_price else '' }}</div>
         {% endfor %}
       </div>
+    </div>
+
+    {# Attachments (opt-in, collapsed when >3 available) — only shown when datasheets exist.
+       Alpine selectedDatasheetIds (array) is included via _form() → datasheet_ids fields.
+       Collapsed by default when available count > 3 to keep the modal uncluttered. #}
+    {% if available_datasheets %}
+    <div class="mb-4" x-data='{"attachOpen": {{ (available_datasheets|length <= 3)|tojson }}}'>
+      <button type="button" @click="attachOpen = !attachOpen"
+              class="flex items-center gap-1.5 text-xs font-medium text-gray-600 uppercase tracking-wider hover:text-gray-800">
+        <svg :class='{"rotate-90": attachOpen}' class="w-3.5 h-3.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+        </svg>
+        Attachments ({{ available_datasheets|length }} available)
+      </button>
+      <div x-show="attachOpen" x-cloak class="mt-2 space-y-1 pl-1">
+        {% for ds in available_datasheets %}
+        <label class="flex items-center gap-2 text-xs text-gray-600 cursor-pointer hover:text-gray-800">
+          <input type="checkbox"
+                 :checked='selectedDatasheetIds.includes({{ ds.id }})'
+                 @change='toggleDatasheet({{ ds.id }})'
+                 class="rounded border-gray-300">
+          <span class="font-mono truncate max-w-xs" title="{{ ds.file_name }}">{{ ds.file_name }}</span>
+          {% if ds.size_bytes %}
+          <span class="text-gray-400 shrink-0">{{ (ds.size_bytes / 1024)|round|int }} KB</span>
+          {% endif %}
+        </label>
+        {% endfor %}
+        <p class="text-xs text-gray-400 mt-1">Same files attached to every vendor email. Each email: ~3 MB combined attachment limit. Larger files will be dropped.</p>
+      </div>
+    </div>
+    {% endif %}
+
+    {# Compose subject — read-only display showing exactly what will be sent #}
+    <div class="mb-3">
+      <label class="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Subject</label>
+      <p class="text-xs text-gray-600 bg-gray-50 rounded-lg px-3 py-2 font-mono">{{ compose_subject }}</p>
     </div>
 
     {# Email compose #}

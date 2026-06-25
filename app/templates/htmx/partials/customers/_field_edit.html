@@ -1,0 +1,45 @@
+{# Inline field edit widget (WS1) — text input or select.
+   Text: saves on blur or Enter; Escape cancels back to display partial.
+   Select: saves on change (onchange requestSubmit); Escape cancels.
+
+   Receives: obj (Company|SiteContact ORM object), field (str), entity ('company'|'contact'),
+             meta {label, kind, choices?}, post_url (str), display_url (str).
+   Called by: field/edit/{field} GET endpoints (htmx_views.py).
+#}
+{% set _val = obj | attr(field) or '' %}
+{% set _span_id = 'field-' ~ entity ~ '-' ~ obj.id ~ '-' ~ field %}
+
+{% if meta.kind == 'select' %}
+<span id='{{ _span_id }}'>
+  <form hx-post='{{ post_url }}'
+        hx-target='#{{ _span_id }}'
+        hx-swap='outerHTML'>
+    <input type='hidden' name='field' value='{{ field }}'>
+    <select name='value'
+            onchange='this.form.requestSubmit()'
+            @keydown.escape.prevent="htmx.ajax('GET', '{{ display_url }}', {target: '#{{ _span_id }}', swap: 'outerHTML', indicator: 'none'})"
+            class='text-sm border border-brand-300 rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-brand-500 bg-white'
+            x-init='$el.focus()'>
+      <option value=''>— clear —</option>
+      {% for c in meta.choices %}
+      <option value='{{ c }}' {% if _val == c %}selected{% endif %}>{{ c }}</option>
+      {% endfor %}
+    </select>
+  </form>
+</span>
+{% else %}
+<span id='{{ _span_id }}'>
+  <input type='text'
+         name='value'
+         value='{{ _val }}'
+         aria-label='Edit {{ meta.label }}'
+         hx-post='{{ post_url }}'
+         hx-vals='{"field": "{{ field }}"}'
+         hx-target='#{{ _span_id }}'
+         hx-swap='outerHTML'
+         hx-trigger="blur, keyup[key=='Enter']"
+         @keydown.escape.prevent="htmx.ajax('GET', '{{ display_url }}', {target: '#{{ _span_id }}', swap: 'outerHTML', indicator: 'none'})"
+         x-init='$el.focus(); $el.select()'
+         class='text-sm border border-brand-300 rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-brand-500 min-w-0 w-40'>
+</span>
+{% endif %}

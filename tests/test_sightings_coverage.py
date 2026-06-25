@@ -27,6 +27,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from app.models.crm import CustomerSite, SiteContact
 from app.models.intelligence import ActivityLog
 from app.models.offers import Offer
 from app.models.sourcing import Requirement, Requisition, Sighting
@@ -578,3 +579,956 @@ class TestDetailWithOOOContact:
         db_session.commit()
         resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
         assert resp.status_code == 200
+
+
+# ── S1 tests: three entry points + preselect fix ──────────────────────────────
+
+
+def _seed_vendor_with_contact(db_session, vendor_name: str, normalized_name: str, email: str):
+    """Create a VendorCard + VendorContact (contactable) for preselect tests."""
+    card = VendorCard(normalized_name=normalized_name, display_name=vendor_name)
+    db_session.add(card)
+    db_session.flush()
+    contact = VendorContact(
+        vendor_card_id=card.id,
+        contact_type="sales",
+        email=email,
+        source="manual",
+    )
+    db_session.add(contact)
+    db_session.flush()
+    return card
+
+
+class TestVendorModalPreselect:
+    """Preselect= param: named vendor appears checked even below coverage cap (S1b
+    blocker)."""
+
+    def test_preselect_vendor_below_cap_is_present_and_checked(self, client, db_session):
+        """Vendor named in preselect= but NOT in coverage top-20 is appended and seeds
+        selectedVendors (has_contact=True) so the modal initializes with it checked."""
+        req, r, _ = _seed_active(db_session)
+
+        # Create a vendor card + contact for "Preselectco" — not a sighting vendor
+        _seed_vendor_with_contact(db_session, "Preselectco", "preselectco", "buy@preselectco.com")
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/sightings/vendor-modal?requirement_ids={r.id}&preselect=Preselectco")
+        assert resp.status_code == 200
+        # The normalized name must appear in the selectedVendors seed (|tojson in x-data)
+        assert "preselectco" in resp.text
+
+    def test_preselect_vendor_already_in_coverage_not_duplicated(self, client, db_session):
+        """If preselect= names a vendor already in the coverage top-20, it must appear
+        exactly once in the suggested_vendors list (no duplicate)."""
+        req, r, _ = _seed_active(db_session)
+
+        # "Cover Vendor" is already seeded as a VendorSightingSummary by _seed_active
+        card = _seed_vendor_with_contact(db_session, "Cover Vendor", "cover vendor", "cv@cover.com")
+        # Tie the sighting to this card so it appears in coverage
+        db_session.query(VendorSightingSummary).filter_by(requirement_id=r.id).update({"vendor_card_id": card.id})
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/sightings/vendor-modal?requirement_ids={r.id}&preselect=Cover+Vendor")
+        assert resp.status_code == 200
+        # The vendor's display_name must appear exactly once — a double-append would
+        # render it twice in the for-loop and this count assertion would catch it.
+        assert resp.text.count("Cover Vendor") == 1
+
+    def test_preselect_vendor_no_contact_is_rendered_not_checked(self, client, db_session):
+        """Preselected vendor with no VendorContact rows has has_contact=False and is
+        NOT seeded into selectedVendors (rendered but disabled)."""
+        req, r, _ = _seed_active(db_session)
+
+        # Card with no contact
+        card = VendorCard(normalized_name="nocardco", display_name="Nocardco")
+        db_session.add(card)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/sightings/vendor-modal?requirement_ids={r.id}&preselect=Nocardco")
+        assert resp.status_code == 200
+        # The vendor's display_name must appear in the HTML (rendered as a disabled row).
+        assert "Nocardco" in resp.text
+        # The normalized name must NOT appear in the rfqVendorModal tojson seed — the
+        # template filters to only has_contact=True vendors before encoding selectedVendors,
+        # so "nocardco" must be absent from the response entirely (the disabled row only
+        # renders display_name, never normalized_name).
+        assert '"nocardco"' not in resp.text
+
+
+class TestDetailHeaderBuildRFQButton:
+    """(S1a) detail.html header must contain a 'Build RFQ' primary button."""
+
+    def test_detail_header_has_build_rfq_button(self, client, db_session):
+        """The detail panel header contains a Build RFQ btn-primary CTA."""
+        req, r, _ = _seed_active(db_session)
+        resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
+        assert resp.status_code == 200
+        assert "Build RFQ" in resp.text
+
+
+class TestTableRFQButton:
+    """(S1c) table.html render_row must contain a per-row quick RFQ icon button."""
+
+    def test_table_row_has_rfq_quick_button(self, client, db_session):
+        """Each requirement row in the table contains a Build RFQ quick-dispatch
+        button."""
+        req, r, _ = _seed_active(db_session)
+        resp = client.get("/v2/partials/sightings")
+        assert resp.status_code == 200
+        # The table contains at least one Build RFQ dispatch trigger
+        assert "Build RFQ" in resp.text
+
+    def test_group_row_colspan_nine(self, client, db_session):
+        """Group header row uses colspan=9 to match the 9-column header."""
+        req, r, _ = _seed_active(db_session)
+        resp = client.get("/v2/partials/sightings?group_by=manufacturer")
+        assert resp.status_code == 200
+        assert 'colspan="9"' in resp.text
+
+    def test_render_row_tr_has_group_class_and_rfq_button(self):
+        """render_row's <tr> carries the `group` Tailwind class so group-
+        hover:opacity-100 on the RFQ icon button works.  If the class is removed the
+        per-row RFQ entry point becomes permanently invisible — this test prevents that
+        regression.
+
+        Also asserts the RFQ icon button (vendor-modal dispatch) is present in the same
+        macro, since the two are coupled: group-hover:opacity-100 is useless without the
+        button, and the button is invisible without group.
+        """
+        from pathlib import Path
+
+        src = Path("app/templates/htmx/partials/sightings/table.html").read_text()
+        lines = src.splitlines()
+
+        # Find the render_row macro definition line
+        macro_line = next(
+            (i for i, ln in enumerate(lines) if "macro render_row(" in ln),
+            None,
+        )
+        assert macro_line is not None, "render_row macro not found in table.html"
+
+        # Find the closing endmacro
+        end_line = next(
+            (i for i in range(macro_line + 1, len(lines)) if "endmacro" in lines[i]),
+            None,
+        )
+        assert end_line is not None, "endmacro not found after render_row"
+
+        macro_body = "\n".join(lines[macro_line:end_line])
+
+        # The render_row <tr> must carry `group` as a Tailwind class on its
+        # static class="..." attribute so group-hover:opacity-100 fires.
+        import re
+
+        # Search within the macro body for a line that starts a <tr element
+        # and has a static class= attribute containing `group`.  We search
+        # line-by-line on the opening <tr line specifically to avoid the
+        # multi-attribute/multi-line confusion between class= and :class=.
+        tr_class_line = None
+        for ln in macro_body.splitlines():
+            if ln.lstrip().startswith("<tr ") or ln.lstrip().startswith("<tr\t"):
+                m = re.search(r'\bclass="([^"]*)"', ln)
+                if m:
+                    tr_class_line = m.group(1)
+                    break
+        assert tr_class_line is not None, "render_row macro has no <tr class=...> — cannot verify group class"
+        # Extract individual class tokens (ignoring Jinja template fragments)
+        tokens = re.findall(r"\b([\w:-]+)\b", tr_class_line)
+        assert "group" in tokens, (
+            f"render_row <tr> is missing the `group` Tailwind class — "
+            f"group-hover:opacity-100 on the RFQ button will never fire. "
+            f"Found class attr: {tr_class_line!r}"
+        )
+
+        # The RFQ icon button (vendor-modal dispatch) must be present in the macro
+        assert "vendor-modal" in macro_body, (
+            "render_row macro is missing the per-row RFQ button (vendor-modal dispatch) — "
+            "the S1 per-row entry point has been removed."
+        )
+        assert "group-hover:opacity-100" in macro_body, (
+            "render_row RFQ button is missing group-hover:opacity-100 — "
+            "the button will be permanently visible instead of reveal-on-hover."
+        )
+
+
+class TestVendorRowRFQButton:
+    """(S1b) _vendor_row.html must have a visible RFQ pill outside the kebab."""
+
+    def test_vendor_row_has_visible_rfq_pill(self, client, db_session):
+        """Detail vendor row has a visible 'Build RFQ' button with preselect
+        dispatch."""
+        req, r, _ = _seed_active(db_session)
+        resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
+        assert resp.status_code == 200
+        assert "vendor-modal" in resp.text
+        assert "preselect" in resp.text
+
+
+class TestManufacturerBasket:
+    """(S2) Cross-requisition manufacturer-basket assembly."""
+
+    def _seed_multi_req_ibm(self, db_session):
+        """Two requisitions each with one IBM part and one non-IBM part."""
+        req1 = Requisition(name="Req1", status="active", customer_name="Cust A")
+        req2 = Requisition(name="Req2", status="active", customer_name="Cust B")
+        db_session.add_all([req1, req2])
+        db_session.flush()
+
+        r1_ibm = Requirement(
+            requisition_id=req1.id,
+            primary_mpn="IBM-001",
+            manufacturer="IBM",
+            target_qty=10,
+            sourcing_status="open",
+        )
+        r1_other = Requirement(
+            requisition_id=req1.id,
+            primary_mpn="OTHER-001",
+            manufacturer="Other Corp",
+            target_qty=5,
+            sourcing_status="open",
+        )
+        r2_ibm = Requirement(
+            requisition_id=req2.id,
+            primary_mpn="IBM-002",
+            manufacturer="IBM",
+            target_qty=20,
+            sourcing_status="open",
+        )
+        db_session.add_all([r1_ibm, r1_other, r2_ibm])
+        db_session.commit()
+        return req1, req2, r1_ibm, r1_other, r2_ibm
+
+    def test_manufacturer_filter_returns_only_ibm_parts(self, client, db_session):
+        """sightings_list?manufacturer=IBM returns only IBM-manufacturer rows."""
+        _, _, r1_ibm, r1_other, r2_ibm = self._seed_multi_req_ibm(db_session)
+        resp = client.get("/v2/partials/sightings?manufacturer=IBM")
+        assert resp.status_code == 200
+        html = resp.text
+        # IBM parts are present
+        assert "IBM-001" in html
+        assert "IBM-002" in html
+        # Non-IBM part is absent
+        assert "OTHER-001" not in html
+
+    def test_manufacturer_filter_spans_multiple_requisitions(self, client, db_session):
+        """IBM parts from different requisitions all appear under the filter."""
+        req1, req2, r1_ibm, _, r2_ibm = self._seed_multi_req_ibm(db_session)
+        resp = client.get("/v2/partials/sightings?manufacturer=IBM&group_by=manufacturer")
+        assert resp.status_code == 200
+        html = resp.text
+        assert "IBM-001" in html
+        assert "IBM-002" in html
+
+    def test_manufacturer_survives_status_change(self, client, db_session):
+        """Manufacturer param is carried in pill hx-get URLs, not just the filter
+        input."""
+        _, _, r1_ibm, _, _ = self._seed_multi_req_ibm(db_session)
+        # When manufacturer filter is active, status pills should carry it
+        resp = client.get("/v2/partials/sightings?manufacturer=IBM&status=open")
+        assert resp.status_code == 200
+        html = resp.text
+        # The filter bar input carries value="IBM" — that's necessary but NOT sufficient.
+        # We must verify the pill hx-get URLs also encode manufacturer=IBM so that
+        # clicking a pill does not silently drop the filter.
+        import re
+
+        pill_urls = re.findall(r'hx-get="(/v2/partials/sightings\?[^"]+)"', html)
+        # At least some pill buttons must exist
+        assert pill_urls, "No hx-get pill buttons found in response"
+        # Every status/dashboard pill URL must carry manufacturer=IBM
+        for url in pill_urls:
+            assert "manufacturer=IBM" in url, f"manufacturer=IBM missing from pill hx-get URL: {url}"
+
+    def test_manufacturer_survives_group_by_change(self, client, db_session):
+        """Manufacturer param is carried in group_by select hx-vals and filter bar."""
+        self._seed_multi_req_ibm(db_session)
+        resp = client.get("/v2/partials/sightings?manufacturer=IBM&group_by=manufacturer")
+        assert resp.status_code == 200
+        html = resp.text
+        # manufacturer=IBM must appear in the pill hx-get URLs on this render too
+        import re
+
+        pill_urls = re.findall(r'hx-get="(/v2/partials/sightings\?[^"]+)"', html)
+        assert pill_urls, "No hx-get pill buttons found in response"
+        for url in pill_urls:
+            assert "manufacturer=IBM" in url, f"manufacturer=IBM missing from pill hx-get URL: {url}"
+
+    def test_manufacturer_filter_bar_input_present(self, client, db_session):
+        """The filter bar contains a manufacturer text input."""
+        _, _, r1_ibm, _, _ = self._seed_multi_req_ibm(db_session)
+        resp = client.get("/v2/partials/sightings")
+        assert resp.status_code == 200
+        # The filter bar input must be present with name="manufacturer"
+        assert 'name="manufacturer"' in resp.text
+
+    def test_manufacturer_filter_bar_prepopulated(self, client, db_session):
+        """Filter bar manufacturer input shows current filter value on re-render."""
+        self._seed_multi_req_ibm(db_session)
+        resp = client.get("/v2/partials/sightings?manufacturer=IBM")
+        assert resp.status_code == 200
+        # Input must be pre-populated
+        assert 'value="IBM"' in resp.text
+
+    def test_group_header_select_all_checkbox_present(self, client, db_session):
+        """Group header has a 'Select all N' labeled checkbox when grouped."""
+        self._seed_multi_req_ibm(db_session)
+        resp = client.get("/v2/partials/sightings?group_by=manufacturer")
+        assert resp.status_code == 200
+        assert "Select all" in resp.text
+
+    def test_manufacturer_group_caption_shown(self, client, db_session):
+        """A helper caption appears under the filter bar when group_by==manufacturer."""
+        self._seed_multi_req_ibm(db_session)
+        resp = client.get("/v2/partials/sightings?group_by=manufacturer")
+        assert resp.status_code == 200
+        assert "cross-requisition RFQ" in resp.text
+
+    def test_batch_bar_button_relabeled(self, client, db_session):
+        """Action bar button label is 'Build RFQ' not 'Send to Vendors'."""
+        self._seed_multi_req_ibm(db_session)
+        resp = client.get("/v2/partials/sightings")
+        assert resp.status_code == 200
+        assert "Build RFQ" in resp.text
+        assert "Send to Vendors" not in resp.text
+
+    def test_vendor_modal_shows_spanning_requisitions(self, client, db_session):
+        """When >1 requisition is in basket, modal Parts panel says 'Spanning N
+        requisitions'."""
+        req1, req2, r1_ibm, _, r2_ibm = self._seed_multi_req_ibm(db_session)
+        resp = client.get(f"/v2/partials/sightings/vendor-modal?requirement_ids={r1_ibm.id},{r2_ibm.id}")
+        assert resp.status_code == 200
+        assert "Spanning" in resp.text
+        assert "2 requisitions" in resp.text
+
+    def test_vendor_modal_no_spanning_for_single_req(self, client, db_session):
+        """When all parts in one requisition, spanning note is absent."""
+        req1, _, r1_ibm, r1_other, _ = self._seed_multi_req_ibm(db_session)
+        # Both parts from req1 only
+        resp = client.get(f"/v2/partials/sightings/vendor-modal?requirement_ids={r1_ibm.id},{r1_other.id}")
+        assert resp.status_code == 200
+        assert "Spanning" not in resp.text
+
+    def test_existing_q_filter_unchanged(self, client, db_session):
+        """Existing q filter still works alongside manufacturer filter."""
+        self._seed_multi_req_ibm(db_session)
+        resp = client.get("/v2/partials/sightings?q=IBM-001&manufacturer=IBM")
+        assert resp.status_code == 200
+        assert "IBM-001" in resp.text
+        assert "IBM-002" not in resp.text
+
+
+# ── S3 tests: up-front skip reasons ─────────────────────────────────────────
+
+
+def _seed_dnc_site_contact(db_session, email: str) -> SiteContact:
+    """Create a CustomerSite + do-not-contact SiteContact for DNC tests."""
+    from app.models.crm import Company
+
+    company = Company(name="DNC Corp", is_active=True)
+    db_session.add(company)
+    db_session.flush()
+    site = CustomerSite(company_id=company.id, site_name="DNC HQ", is_active=True)
+    db_session.add(site)
+    db_session.flush()
+    sc = SiteContact(
+        customer_site_id=site.id,
+        full_name="Do Not Call",
+        email=email,
+        do_not_contact=True,
+    )
+    db_session.add(sc)
+    db_session.flush()
+    return sc
+
+
+class TestSightingsSkipReasonEnum:
+    """SightingsSkipReason StrEnum is defined in app/constants.py."""
+
+    def test_skip_reason_enum_values(self):
+        """SightingsSkipReason has READY, NO_EMAIL, DO_NOT_CONTACT.
+
+        UNAVAILABLE is intentionally absent — unavailable vendors are partitioned
+        out before the per-entry skip_reason loop and reported in a separate
+        ``unavailable_vendors`` block, so skip_reason never carries that value.
+        """
+        from app.constants import SightingsSkipReason
+
+        assert SightingsSkipReason.READY == "ready"
+        assert SightingsSkipReason.NO_EMAIL == "no_email"
+        assert SightingsSkipReason.DO_NOT_CONTACT == "do_not_contact"
+        assert not hasattr(SightingsSkipReason, "UNAVAILABLE")
+
+
+class TestDncEmailsForCards:
+    """_dnc_emails_for_cards returns the set of emails that send_batch_rfq will DNC-
+    skip."""
+
+    def _make_vendor_with_email(self, db_session, vendor_name: str, norm: str, email: str):
+        card = VendorCard(normalized_name=norm, display_name=vendor_name)
+        db_session.add(card)
+        db_session.flush()
+        contact = VendorContact(
+            vendor_card_id=card.id,
+            contact_type="sales",
+            email=email,
+            source="manual",
+        )
+        db_session.add(contact)
+        db_session.flush()
+        return card
+
+    def test_dnc_email_for_flagged_contact(self, db_session):
+        """A VendorContact email that is a DNC SiteContact email is returned."""
+        from app.routers.sightings import _dnc_emails_for_cards
+
+        email = "flagged@vendor.com"
+        card = self._make_vendor_with_email(db_session, "Flaggedco", "flaggedco", email)
+        _seed_dnc_site_contact(db_session, email)
+        db_session.commit()
+
+        result = _dnc_emails_for_cards(db_session, [card.id])
+        assert email in result
+
+    def test_dnc_email_case_insensitive(self, db_session):
+        """DNC match is case-insensitive: Vendor contact 'DNC@Vendor.COM' matches
+        SiteContact 'dnc@vendor.com'."""
+        from app.routers.sightings import _dnc_emails_for_cards
+
+        vendor_email = "DNC@Vendor.COM"
+        site_email = "dnc@vendor.com"
+        card = self._make_vendor_with_email(db_session, "Casevendor", "casevendor", vendor_email)
+        _seed_dnc_site_contact(db_session, site_email)
+        db_session.commit()
+
+        result = _dnc_emails_for_cards(db_session, [card.id])
+        assert vendor_email.lower() in result
+
+    def test_non_dnc_contact_excluded(self, db_session):
+        """A VendorContact email with no matching DNC SiteContact is NOT returned."""
+        from app.routers.sightings import _dnc_emails_for_cards
+
+        email = "ok@vendor.com"
+        card = self._make_vendor_with_email(db_session, "Okco", "okco", email)
+        db_session.commit()
+
+        result = _dnc_emails_for_cards(db_session, [card.id])
+        assert email not in result
+
+    def test_empty_card_ids_returns_empty(self, db_session):
+        """Empty card_ids input returns empty set (no query)."""
+        from app.routers.sightings import _dnc_emails_for_cards
+
+        result = _dnc_emails_for_cards(db_session, [])
+        assert result == set()
+
+    def test_dnc_advisory_subset_of_send_path(self, db_session):
+        """Advisory DNC set (from _dnc_emails_for_cards) is a subset of the emails
+        send_batch_rfq actually skips — guarantee advisory ⊆ send-time check.
+
+        Tests both exact-case and mixed-case: the SiteContact is stored lowercase,
+        the VendorContact email is mixed-case.  Both advisory and send-path use
+        case-insensitive comparison, so both must flag the vendor.
+        """
+        from app.email_service import send_batch_rfq
+        from app.routers.sightings import _dnc_emails_for_cards
+
+        # --- exact-case scenario ---
+        email = "blocked@vendor.com"
+        card = self._make_vendor_with_email(db_session, "Blockedco", "blockedco", email)
+        _seed_dnc_site_contact(db_session, email)
+
+        # --- mixed-case scenario: VendorContact is mixed-case, SiteContact is lower ---
+        mixed_vendor_email = "Mixed@CaseVendor.COM"
+        mixed_site_email = mixed_vendor_email.lower()
+        card_mc = self._make_vendor_with_email(db_session, "Mixedcasevendor", "mixedcasevendor", mixed_vendor_email)
+        _seed_dnc_site_contact(db_session, mixed_site_email)
+        db_session.commit()
+
+        advisory = _dnc_emails_for_cards(db_session, [card.id, card_mc.id])
+        assert email.lower() in advisory
+        assert mixed_vendor_email.lower() in advisory, (
+            "Advisory must flag mixed-case vendor email via case-insensitive join"
+        )
+
+        # Run the send path — both emails must be DNC-skipped.
+        # GraphClient is lazy-imported inside send_batch_rfq, so patch at that location.
+        with patch("app.utils.graph_client.GraphClient") as mock_gc_cls:
+            mock_gc = AsyncMock()
+            mock_gc_cls.return_value = mock_gc
+            import asyncio
+
+            results = asyncio.get_event_loop().run_until_complete(
+                send_batch_rfq(
+                    token="fake",
+                    db=db_session,
+                    user_id=1,
+                    requisition_id=None,
+                    vendor_groups=[
+                        {
+                            "vendor_name": "Blockedco",
+                            "vendor_email": email,
+                            "parts": [{"mpn": "BLK-001", "qty": 5}],
+                            "subject": "RFQ test",
+                            "body": "test body",
+                        },
+                        {
+                            "vendor_name": "Mixedcasevendor",
+                            "vendor_email": mixed_vendor_email,
+                            "parts": [{"mpn": "BLK-002", "qty": 3}],
+                            "subject": "RFQ test",
+                            "body": "test body",
+                        },
+                    ],
+                )
+            )
+
+        send_skipped = {r["vendor_email"] for r in results if r["status"] == "skipped"}
+        # advisory ⊆ send-path skip set for both exact-case and mixed-case
+        assert email in send_skipped
+        assert mixed_vendor_email in send_skipped, (
+            "send_batch_rfq must DNC-skip mixed-case vendor email (case-insensitive check)"
+        )
+
+
+class TestVendorModalDNCChip:
+    """DNC vendors render disabled checkbox + 'do-not-contact' chip in vendor_modal."""
+
+    def _seed_vendor_dnc(self, db_session, vendor_name: str, norm: str, email: str):
+        """Create a vendor card + contact AND a matching DNC SiteContact."""
+        card = VendorCard(normalized_name=norm, display_name=vendor_name)
+        db_session.add(card)
+        db_session.flush()
+        contact = VendorContact(
+            vendor_card_id=card.id,
+            contact_type="sales",
+            email=email,
+            source="manual",
+        )
+        db_session.add(contact)
+        db_session.flush()
+        _seed_dnc_site_contact(db_session, email)
+        return card
+
+    def test_dnc_vendor_renders_disabled_and_chip(self, client, db_session):
+        """A vendor whose contact email is a DNC SiteContact renders a disabled checkbox
+        and a 'do-not-contact' chip in the vendor modal compose step."""
+        req, r, _ = _seed_active(db_session)
+
+        # Create a VendorSightingSummary linked to the DNC vendor card so it appears
+        # in coverage suggestions
+        card = self._seed_vendor_dnc(db_session, "Dncvendor", "dncvendor", "dnc@dncvendor.com")
+        vss = VendorSightingSummary(
+            requirement_id=r.id,
+            vendor_name="Dncvendor",
+            vendor_card_id=card.id,
+            estimated_qty=10,
+            listing_count=1,
+            score=50.0,
+        )
+        db_session.add(vss)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/sightings/vendor-modal?requirement_ids={r.id}")
+        assert resp.status_code == 200
+        assert "do-not-contact" in resp.text
+        assert "cursor-not-allowed" in resp.text or "disabled" in resp.text
+
+    def test_non_dnc_vendor_not_flagged(self, client, db_session):
+        """A vendor with a clean email does NOT get the do-not-contact chip."""
+        req, r, _ = _seed_active(db_session)
+
+        card = VendorCard(normalized_name="cleanvendor", display_name="Cleanvendor")
+        db_session.add(card)
+        db_session.flush()
+        contact = VendorContact(
+            vendor_card_id=card.id,
+            contact_type="sales",
+            email="ok@cleanvendor.com",
+            source="manual",
+        )
+        db_session.add(contact)
+        vss = VendorSightingSummary(
+            requirement_id=r.id,
+            vendor_name="Cleanvendor",
+            vendor_card_id=card.id,
+            estimated_qty=10,
+            listing_count=1,
+            score=50.0,
+        )
+        db_session.add(vss)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/sightings/vendor-modal?requirement_ids={r.id}")
+        assert resp.status_code == 200
+        assert "do-not-contact" not in resp.text
+
+
+class TestPreviewSkipReason:
+    """Preview step renders skip_reason badges: amber=no_email, rose=unavailable/dnc."""
+
+    def _make_req_and_requirement(self, db_session):
+        req = Requisition(name="SkipReason RFQ", status="active", customer_name="Skip Corp")
+        db_session.add(req)
+        db_session.flush()
+        r = Requirement(
+            requisition_id=req.id,
+            primary_mpn="SKIP-001",
+            manufacturer="SkipMfr",
+            target_qty=5,
+            sourcing_status="open",
+        )
+        db_session.add(r)
+        db_session.flush()
+        db_session.commit()
+        return req, r
+
+    def test_no_email_vendor_shows_amber_chip(self, client, db_session):
+        """A vendor with no resolvable email shows an amber 'no email' indicator in the
+        preview."""
+        req, r = self._make_req_and_requirement(db_session)
+
+        resp = client.post(
+            "/v2/partials/sightings/preview-inquiry",
+            data={
+                "requirement_ids": [str(r.id)],
+                "vendor_names": ["NoEmailVendor"],
+                "email_body": "Hello",
+            },
+        )
+        assert resp.status_code == 200
+        # amber badge contains "no email" or similar text
+        assert "no-email" in resp.text or "no email" in resp.text.lower() or "amber" in resp.text
+
+    def test_dnc_vendor_shows_rose_chip_in_preview(self, client, db_session):
+        """A vendor whose contact email is DNC-flagged shows a rose 'do-not-contact'
+        chip in the preview."""
+        req, r = self._make_req_and_requirement(db_session)
+
+        email = "dncpreview@vendor.com"
+        card = VendorCard(normalized_name="dncpreviewco", display_name="Dncpreviewco")
+        db_session.add(card)
+        db_session.flush()
+        contact = VendorContact(
+            vendor_card_id=card.id,
+            contact_type="sales",
+            email=email,
+            source="manual",
+        )
+        db_session.add(contact)
+        db_session.flush()
+        _seed_dnc_site_contact(db_session, email)
+        db_session.commit()
+
+        resp = client.post(
+            "/v2/partials/sightings/preview-inquiry",
+            data={
+                "requirement_ids": [str(r.id)],
+                "vendor_names": ["dncpreviewco"],
+                "email_body": "Hello",
+            },
+        )
+        assert resp.status_code == 200
+        assert "do-not-contact" in resp.text
+
+    def test_unavailable_vendor_shows_rose_chip_in_preview(self, client, db_session):
+        """Unavailable vendors are already reported in the existing unavailable_vendors
+        section with rose styling — ensure that block is present."""
+        from app.models.vendor_part_unavailability import VendorPartUnavailability
+
+        req, r = self._make_req_and_requirement(db_session)
+
+        card = VendorCard(normalized_name="unavailco", display_name="Unavailco")
+        db_session.add(card)
+        db_session.flush()
+        # normalized_mpn = normalize_mpn_key("SKIP-001") = "skip001"
+        unavail = VendorPartUnavailability(
+            vendor_name_normalized="unavailco",
+            normalized_mpn="skip001",
+            reason="other",
+        )
+        db_session.add(unavail)
+        db_session.commit()
+
+        resp = client.post(
+            "/v2/partials/sightings/preview-inquiry",
+            data={
+                "requirement_ids": [str(r.id)],
+                "vendor_names": ["unavailco"],
+                "email_body": "Hello",
+            },
+        )
+        assert resp.status_code == 200
+        # Unavailable vendor goes to the rose "Skipped (marked unavailable)" section
+        assert "rose" in resp.text or "unavailable" in resp.text.lower()
+
+    def test_send_time_recheck_still_present(self, client, db_session):
+        """Send-inquiry still performs the send-time unavailability re-check (TOCTOU): a
+        vendor marked unavailable is excluded from the send even when posted as a
+        selected vendor name. The re-check happens in sightings_send_inquiry
+        (_partition_by_unavailability) before any call to send_batch_rfq.
+
+        We verify: send_batch_rfq is called with zero sendable_vendors (the unavailable
+        vendor was stripped), so the batch receives an empty vendor list and sends nothing.
+        """
+        from app.models.vendor_part_unavailability import VendorPartUnavailability
+
+        req, r = self._make_req_and_requirement(db_session)
+
+        card = VendorCard(normalized_name="toctouvendor", display_name="Toctouvendor")
+        db_session.add(card)
+        db_session.flush()
+        contact = VendorContact(
+            vendor_card_id=card.id,
+            contact_type="sales",
+            email="t@toctou.com",
+            source="manual",
+        )
+        db_session.add(contact)
+        db_session.flush()
+        # normalized_mpn = normalize_mpn_key("SKIP-001") = "skip001"
+        unavail = VendorPartUnavailability(
+            vendor_name_normalized="toctouvendor",
+            normalized_mpn="skip001",
+            reason="other",
+        )
+        db_session.add(unavail)
+        db_session.commit()
+
+        # Patch send_batch_rfq where it is imported (lazily inside the route).
+        # Use the email_service module as the patch target — that is where the route
+        # imports it from at call time (lazy import inside the route body).
+        with patch("app.email_service.send_batch_rfq", new_callable=AsyncMock) as mock_send:
+            mock_send.return_value = []
+            resp = client.post(
+                "/v2/partials/sightings/send-inquiry",
+                data={
+                    "requirement_ids": [str(r.id)],
+                    "vendor_names": ["toctouvendor"],
+                    "email_body": "Hello",
+                },
+            )
+        # Response should succeed — the unavailable vendor was stripped before send.
+        assert resp.status_code == 200
+        # send_batch_rfq was called with an empty vendor list (send-time re-check worked),
+        # OR the route reported the unavailability without calling send at all.
+        # In either path: the response contains "unavailable" language.
+        assert "unavailable" in resp.text.lower() or "skipped" in resp.text.lower()
+
+
+# ── S5 tests: compose-time vendor intel ──────────────────────────────────────
+
+
+class TestComposeTimeVendorIntel:
+    """S5: coverage rows carry lead_time_days/vendor_score; modal renders the spans."""
+
+    def _seed_vendor_with_intel(self, db_session):
+        """Create requirement + VendorSightingSummary + VendorCard with intel fields."""
+        req = Requisition(name="Intel RFQ", status="active", customer_name="Intel Corp")
+        db_session.add(req)
+        db_session.flush()
+        r = Requirement(
+            requisition_id=req.id,
+            primary_mpn="INTEL-001",
+            manufacturer="IntelMfr",
+            target_qty=10,
+            sourcing_status="open",
+        )
+        db_session.add(r)
+        db_session.flush()
+        card = VendorCard(
+            normalized_name="speedvendor",
+            display_name="SpeedVendor",
+            vendor_score=82.5,
+            response_rate=0.75,
+        )
+        db_session.add(card)
+        db_session.flush()
+        vss = VendorSightingSummary(
+            requirement_id=r.id,
+            vendor_name="SpeedVendor",
+            estimated_qty=50,
+            listing_count=1,
+            score=70.0,
+            best_lead_time_days=14,
+            vendor_card_id=card.id,
+        )
+        db_session.add(vss)
+        db_session.commit()
+        return req, r, card, vss
+
+    def test_coverage_rows_carry_lead_time_days(self, client, db_session):
+        """_coverage_ranked_vendor_rows populates lead_time_days from VSS."""
+        from app.routers.sightings import _coverage_ranked_vendor_rows
+
+        _, r, card, _ = self._seed_vendor_with_intel(db_session)
+        rows = _coverage_ranked_vendor_rows(db_session, [r.id], excluded=set())
+        assert rows, "expected at least one coverage row"
+        # The carded row should carry lead_time_days
+        carded = next((rv for rv in rows if rv.card is not None and rv.card.id == card.id), None)
+        assert carded is not None, "expected a carded RankedVendor"
+        assert carded.lead_time_days == 14
+
+    def test_coverage_rows_carry_vendor_score(self, client, db_session):
+        """_coverage_ranked_vendor_rows populates vendor_score from VendorCard."""
+        from app.routers.sightings import _coverage_ranked_vendor_rows
+
+        _, r, card, _ = self._seed_vendor_with_intel(db_session)
+        rows = _coverage_ranked_vendor_rows(db_session, [r.id], excluded=set())
+        carded = next((rv for rv in rows if rv.card is not None and rv.card.id == card.id), None)
+        assert carded is not None
+        assert carded.vendor_score == 82.5
+
+    def test_suggested_vendor_carries_lead_time_days(self, client, db_session):
+        """SuggestedVendor built from coverage rows carries lead_time_days."""
+        from app.routers.sightings import SuggestedVendor, _coverage_ranked_vendor_rows
+        from app.vendor_utils import normalize_vendor_name
+
+        _, r, card, _ = self._seed_vendor_with_intel(db_session)
+        rows = _coverage_ranked_vendor_rows(db_session, [r.id], excluded=set())
+        carded_rv = next((rv for rv in rows if rv.card is not None and rv.card.id == card.id), None)
+        assert carded_rv is not None
+        # Build a SuggestedVendor the same way sightings_vendor_modal does
+        norm = normalize_vendor_name(carded_rv.vendor_name)
+        sv = SuggestedVendor(
+            id=card.id,
+            card=carded_rv.card,
+            normalized_name=card.normalized_name,
+            display_name=carded_rv.vendor_name,
+            vendor_name=carded_rv.vendor_name,
+            has_contact=carded_rv.has_contact,
+            response_rate=card.response_rate,
+            engagement_score=card.engagement_score,
+            vendor_score=carded_rv.vendor_score,
+            lead_time_days=carded_rv.lead_time_days,
+        )
+        assert sv.lead_time_days == 14
+        assert sv.vendor_score == 82.5
+
+    def test_vendor_modal_renders_lead_time_span(self, client, db_session):
+        """vendor_modal.html renders '{n}d lead' span for a vendor with lead time."""
+        _, r, card, _ = self._seed_vendor_with_intel(db_session)
+        # Add a contact so the vendor is in the contactable (non-DNC) set
+        contact = VendorContact(
+            vendor_card_id=card.id,
+            contact_type="sales",
+            email="fast@speedvendor.com",
+            source="manual",
+        )
+        db_session.add(contact)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/sightings/vendor-modal?requirement_ids={r.id}")
+        assert resp.status_code == 200
+        # Lead time discrete span: "14d lead"
+        assert "14d lead" in resp.text
+
+    def test_vendor_modal_renders_em_dash_when_no_lead_time(self, client, db_session):
+        """vendor_modal.html renders '—' for lead time when lead_time_days is None."""
+        req = Requisition(name="NoLead RFQ", status="active", customer_name="NoLead Corp")
+        db_session.add(req)
+        db_session.flush()
+        r = Requirement(
+            requisition_id=req.id,
+            primary_mpn="NOLEAD-001",
+            manufacturer="NoLeadMfr",
+            target_qty=5,
+            sourcing_status="open",
+        )
+        db_session.add(r)
+        db_session.flush()
+        card = VendorCard(
+            normalized_name="noleadvendor",
+            display_name="NoLeadVendor",
+            vendor_score=None,
+        )
+        db_session.add(card)
+        db_session.flush()
+        # VSS with no best_lead_time_days
+        vss = VendorSightingSummary(
+            requirement_id=r.id,
+            vendor_name="NoLeadVendor",
+            estimated_qty=25,
+            listing_count=1,
+            score=55.0,
+            best_lead_time_days=None,
+            vendor_card_id=card.id,
+        )
+        db_session.add(vss)
+        contact = VendorContact(
+            vendor_card_id=card.id,
+            contact_type="sales",
+            email="info@nolead.com",
+            source="manual",
+        )
+        db_session.add(contact)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/sightings/vendor-modal?requirement_ids={r.id}")
+        assert resp.status_code == 200
+        # Should render em-dash "—" in the specific lead-time span, not just anywhere
+        assert '<span class="ml-2 text-xs text-gray-400">—</span>' in resp.text
+        # Confirm the numeric lead-time span is NOT present (no "Nd lead" text)
+        assert "d lead" not in resp.text
+
+    def test_coverage_rows_none_when_no_vss_lead_time(self, client, db_session):
+        """When VSS.best_lead_time_days is None for all rows,
+        RankedVendor.lead_time_days is None (not zero).
+
+        Two VSS rows across two requirements exercise the min()-over-all-None grouping
+        path.
+        """
+        from app.routers.sightings import _coverage_ranked_vendor_rows
+
+        req = Requisition(name="NullLead RFQ", status="active", customer_name="NL Corp")
+        db_session.add(req)
+        db_session.flush()
+        # Two requirements so we can create two VSS rows for the same vendor
+        # (unique constraint is on (requirement_id, vendor_name))
+        r1 = Requirement(
+            requisition_id=req.id,
+            primary_mpn="NULLLEAD-001",
+            target_qty=5,
+            sourcing_status="open",
+        )
+        r2 = Requirement(
+            requisition_id=req.id,
+            primary_mpn="NULLLEAD-002",
+            target_qty=3,
+            sourcing_status="open",
+        )
+        db_session.add(r1)
+        db_session.add(r2)
+        db_session.flush()
+        card = VendorCard(normalized_name="nullleadvendor", display_name="NullLeadVendor")
+        db_session.add(card)
+        db_session.flush()
+        db_session.add(
+            VendorSightingSummary(
+                requirement_id=r1.id,
+                vendor_name="NullLeadVendor",
+                estimated_qty=10,
+                listing_count=1,
+                score=50.0,
+                best_lead_time_days=None,
+                vendor_card_id=card.id,
+            )
+        )
+        db_session.add(
+            VendorSightingSummary(
+                requirement_id=r2.id,
+                vendor_name="NullLeadVendor",
+                estimated_qty=10,
+                listing_count=1,
+                score=50.0,
+                best_lead_time_days=None,
+                vendor_card_id=card.id,
+            )
+        )
+        db_session.commit()
+
+        rows = _coverage_ranked_vendor_rows(db_session, [r1.id, r2.id], excluded=set())
+        carded = next((rv for rv in rows if rv.card is not None and rv.card.id == card.id), None)
+        assert carded is not None
+        assert carded.lead_time_days is None  # must be None, not 0

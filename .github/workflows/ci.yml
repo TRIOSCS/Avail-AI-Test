@@ -150,6 +150,10 @@ jobs:
           SECRET_KEY: ci-secret-key
           SESSION_SECRET: ci-session-secret
           TESTING: "0"
+          # check_schema_matches_models.py does `from app.models import Base`, so the repo
+          # root must be importable (python runs the script with sys.path[0]=scripts/, not
+          # the cwd). Without this the schema-drift gate dies on ModuleNotFoundError.
+          PYTHONPATH: ${{ github.workspace }}
           # Allow chain-replay downgrade-base to cascade-drop tables. The 001
           # explicit-DDL baseline + incremental 002+ chain don't share a clean
           # reverse drop ordering, so unwinding to base needs cascade. Production
@@ -158,7 +162,24 @@ jobs:
           ALEMBIC_ALLOW_CASCADE: "1"
         run: |
           alembic upgrade head
+          python scripts/check_schema_matches_models.py
           alembic downgrade base
+          alembic upgrade head
+
+      - name: Alembic single-step downgrade smoke test (no cascade)
+        env:
+          DATABASE_URL: postgresql://availai:availai@localhost:5432/availai
+          SECRET_KEY: ci-secret-key
+          SESSION_SECRET: ci-session-secret
+          TESTING: "0"
+          # Deliberately NOT setting ALEMBIC_ALLOW_CASCADE: a single-step
+          # downgrade must use plain DROP (no CASCADE) so any FK-dependency
+          # error in the head migration's downgrade surfaces here. The
+          # cascade-to-base smoke test above masks those because it drops the
+          # whole chain with CASCADE. Scope is -1 (one revision), not base.
+        run: |
+          alembic upgrade head
+          alembic downgrade -1
           alembic upgrade head
 
       - name: Frontend build

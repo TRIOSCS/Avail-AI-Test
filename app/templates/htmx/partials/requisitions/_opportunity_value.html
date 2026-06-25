@@ -1,0 +1,34 @@
+{# _opportunity_value.html — Inline display + edit for Requisition.opportunity_value.
+   Receives: req (Requisition)
+   Called by: requisition_opportunity_value_save route, included in detail_header.html
+   Depends on: PATCH /v2/partials/requisitions/{req_id}/opportunity-value
+#}
+<span id="req-deal-value-{{ req.id }}"
+      class="inline-flex items-center gap-1 text-sm text-gray-600"
+      x-data="{ editing: false }">
+  <span x-show="!editing" class="cursor-pointer hover:bg-brand-50 rounded px-1 transition-colors"
+        @click="editing = true"
+        title="Click to edit deal value">
+    {% if req.opportunity_value is not none %}
+      <span class="font-medium text-gray-900">Deal: ${{ '{:,.0f}'.format(req.opportunity_value) }}</span>
+    {% else %}
+      <span class="text-gray-400 italic">Deal: —</span>
+    {% endif %}
+  </span>
+  <form x-show="editing"
+        hx-patch="/v2/partials/requisitions/{{ req.id }}/opportunity-value"
+        hx-target="#req-deal-value-{{ req.id }}"
+        hx-swap="outerHTML"
+        class="inline-flex items-center gap-1">
+    <input type="number"
+           name="opportunity_value"
+           min="0"
+           step="0.01"
+           value="{{ req.opportunity_value if req.opportunity_value is not none else '' }}"
+           placeholder="0"
+           class="w-24 text-xs border border-gray-300 rounded px-1 py-0.5 focus:outline-none focus:ring-2 focus:ring-brand-400"
+           @keydown.escape="editing = false">
+    <button type="submit" class="text-xs text-brand-600 hover:text-brand-800 font-medium">Save</button>
+    <button type="button" @click="editing = false" class="text-xs text-gray-400 hover:text-gray-600">Cancel</button>
+  </form>
+</span>

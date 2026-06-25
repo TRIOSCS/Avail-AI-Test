@@ -1,0 +1,74 @@
+{# tasks/_results.html — inner results list for the Tasks queue (task rows only).
+   Receives: tasks (list[RequisitionTask], filtered), now_utc (datetime).
+   Called by: tasks/list.html (initial include) and the /v2/partials/tasks route
+              directly when the filter bar requests a results-only swap (HX-Target
+              == "tasks-results").
+   Depends on: task_due_state global, the existing complete route
+               (/v2/partials/tasks/{id}/complete).
+#}
+{% if tasks %}
+<ul id="tasks-list" class="space-y-2">
+  {% for t in tasks %}
+  {% set _due_state = task_due_state(t, now_utc) %}
+  {% set is_overdue = _due_state[0] %}
+  {% set is_due_today = _due_state[1] %}
+  <li id="my-day-task-{{ t.id }}"
+      class="flex items-start gap-3 rounded-lg border border-brand-200 bg-white px-4 py-3">
+
+    {# Complete checkbox — posts to the EXISTING complete route with from_my_day=true
+       so it returns an empty fragment, removing this row via outerHTML swap. #}
+    <form hx-post="/v2/partials/tasks/{{ t.id }}/complete?from_my_day=true"
+          hx-target="#my-day-task-{{ t.id }}"
+          hx-swap="outerHTML"
+          class="flex-shrink-0 pt-0.5">
+      <button type="submit"
+              class="w-4 h-4 rounded border border-gray-300 hover:border-brand-400
+                     focus:outline-none focus:ring-2 focus:ring-brand-500"
+              title="Mark done"
+              aria-label="Complete: {{ t.title }}"></button>
+    </form>
+
+    <div class="min-w-0 flex-1">
+      <span class="text-sm font-medium text-gray-900">{{ t.title }}</span>
+
+      {# Priority indicator (3=high, 1=low) — mirrors the requisition task list. #}
+      {% if t.priority == 3 %}
+        <span class="ml-2 inline-flex px-2 py-0.5 text-xs font-semibold uppercase tracking-wider rounded-full
+                     bg-rose-100 text-rose-700">High</span>
+      {% elif t.priority == 1 %}
+        <span class="ml-2 inline-flex px-2 py-0.5 text-xs font-semibold uppercase tracking-wider rounded-full
+                     bg-gray-100 text-gray-600">Low</span>
+      {% endif %}
+
+      {# Due date with overdue/due-today/future badge #}
+      {% if t.due_at %}
+        <span class="ml-2 text-xs {% if is_overdue %}text-rose-600 font-semibold{% elif is_due_today %}text-amber-600 font-semibold{% else %}text-gray-600{% endif %}">
+          {% if is_overdue %}&middot; Overdue ({{ t.due_at.strftime('%b %-d') }}){% elif is_due_today %}&middot; Due today{% else %}&middot; due {{ t.due_at.strftime('%b %-d') }}{% endif %}
+        </span>
+      {% endif %}
+
+      {# Linked entity #}
+      <div class="mt-0.5 flex flex-wrap gap-x-2 text-xs text-gray-600">
+        {% if t.company %}
+          <a href="/v2/customers/{{ t.company.id }}"
+             hx-get="/v2/partials/customers/{{ t.company.id }}"
+             hx-target="#main-content"
+             hx-push-url="/v2/customers/{{ t.company.id }}"
+             class="text-brand-500 hover:text-brand-700">{{ t.company.name }}</a>
+        {% elif t.site_contact %}
+          <span>{{ t.site_contact.full_name }}</span>
+        {% elif t.requisition %}
+          <a href="/v2/requisitions/{{ t.requisition.id }}"
+             hx-get="/v2/partials/requisitions/{{ t.requisition.id }}"
+             hx-target="#main-content"
+             hx-push-url="/v2/requisitions/{{ t.requisition.id }}"
+             class="text-brand-500 hover:text-brand-700">{{ t.requisition.name or ('REQ-' ~ t.requisition.id) }}</a>
+        {% endif %}
+      </div>
+    </div>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="text-sm text-gray-600 italic">No tasks match these filters.</p>
+{% endif %}

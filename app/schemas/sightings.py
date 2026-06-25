@@ -14,6 +14,7 @@ class SightingsListParams(BaseModel):
     sales_person: str = ""
     assigned: str = ""  # "mine" or "" for all
     q: str = ""
+    manufacturer: str = Field(default="", max_length=255)
     group_by: str = ""  # "" (flat), "brand", "manufacturer"
     sort: str = "priority"
     dir: str = "desc"

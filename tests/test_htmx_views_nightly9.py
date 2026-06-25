@@ -340,7 +340,10 @@ class TestCompanyCRUD:
         client: TestClient,
         db_session: Session,
         test_company: Company,
+        test_user: User,
     ):
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/edit",
             data={
@@ -373,7 +376,10 @@ class TestSiteCRUD:
         client: TestClient,
         db_session: Session,
         test_company: Company,
+        test_user: User,
     ):
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/sites",
             data={
@@ -393,8 +399,12 @@ class TestSiteCRUD:
     def test_create_site_no_name_returns_error_html(
         self,
         client: TestClient,
+        db_session: Session,
         test_company: Company,
+        test_user: User,
     ):
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/sites",
             data={"site_name": ""},
@@ -414,8 +424,11 @@ class TestSiteCRUD:
         client: TestClient,
         db_session: Session,
         test_company: Company,
+        test_user: User,
     ):
         # Create a site with no owner_id — skips the owner-conflict branch
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/sites",
             data={"site_name": "Branch Office"},
@@ -430,7 +443,10 @@ class TestSiteCRUD:
         db_session: Session,
         test_company: Company,
         test_customer_site: CustomerSite,
+        test_user: User,
     ):
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         resp = client.delete(f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}")
         assert resp.status_code == 200
         assert resp.text == ""
@@ -440,8 +456,12 @@ class TestSiteCRUD:
     def test_delete_site_not_found(
         self,
         client: TestClient,
+        db_session: Session,
         test_company: Company,
+        test_user: User,
     ):
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         resp = client.delete(f"/v2/partials/customers/{test_company.id}/sites/99999")
         assert resp.status_code == 404
 
@@ -451,7 +471,10 @@ class TestSiteCRUD:
         db_session: Session,
         test_company: Company,
         test_customer_site: CustomerSite,
+        test_user: User,
     ):
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}/edit",
             data={"site_name": "Renamed HQ", "city": "New York", "country": "US"},
@@ -477,8 +500,7 @@ class TestSiteCRUD:
 
 
 class TestSiteContactCRUD:
-    """Covers create_site_contact, delete_site_contact, set_primary_contact,
-    add_site_contact_note, get_site_contact_notes."""
+    """Covers create_site_contact, delete_site_contact, set_primary_contact."""
 
     def test_create_site_contact_success(
         self,
@@ -486,7 +508,10 @@ class TestSiteContactCRUD:
         db_session: Session,
         test_company: Company,
         test_customer_site: CustomerSite,
+        test_user: User,
     ):
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}/contacts",
             data={
@@ -507,9 +532,13 @@ class TestSiteContactCRUD:
     def test_create_site_contact_no_name_returns_error(
         self,
         client: TestClient,
+        db_session: Session,
         test_company: Company,
         test_customer_site: CustomerSite,
+        test_user: User,
     ):
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}/contacts",
             data={"full_name": "", "email": "x@x.com"},
@@ -534,7 +563,9 @@ class TestSiteContactCRUD:
         db_session: Session,
         test_company: Company,
         test_customer_site: CustomerSite,
+        test_user: User,
     ):
+        test_company.account_owner_id = test_user.id
         # Create contact first
         email = f"dup-{uuid.uuid4().hex[:6]}@site.com"
         _site_contact(db_session, test_customer_site, email=email)
@@ -552,24 +583,58 @@ class TestSiteContactCRUD:
         db_session: Session,
         test_company: Company,
         test_customer_site: CustomerSite,
+        test_user: User,
     ):
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         contact = _site_contact(db_session, test_customer_site)
+        contact_id = contact.id
+        contact_email = contact.email
         resp = client.delete(
-            f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}/contacts/{contact.id}"
+            f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}/contacts/{contact_id}"
         )
         assert resp.status_code == 200
-        assert resp.text == ""
-        gone = db_session.get(SiteContact, contact.id)
+        # IA redesign retired the per-site Sites-tab contact list: delete now re-renders
+        # the canonical contacts list, so the contact is gone from both the DB and the list.
+        gone = db_session.get(SiteContact, contact_id)
         assert gone is None
+        assert contact_email not in resp.text
 
     def test_delete_site_contact_not_found(
         self,
         client: TestClient,
+        db_session: Session,
+        test_company: Company,
+        test_customer_site: CustomerSite,
+        test_user: User,
+    ):
+        # Gate fires before the contact lookup, so the acting user must own the
+        # company to reach the 404 (contact-not-found) branch.
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
+        resp = client.delete(f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}/contacts/99999")
+        assert resp.status_code == 404
+
+    def test_delete_site_contact_site_from_other_company_404_no_mutation(
+        self,
+        client: TestClient,
+        db_session: Session,
         test_company: Company,
         test_customer_site: CustomerSite,
     ):
-        resp = client.delete(f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}/contacts/99999")
+        """A mismatched URL (site belonging to a different company) must 404 BEFORE
+        deleting — the contact must not be removed."""
+        contact = _site_contact(db_session, test_customer_site)
+        other_company = Company(name="Other Delete Co", is_active=True)
+        db_session.add(other_company)
+        db_session.commit()
+
+        resp = client.delete(
+            f"/v2/partials/customers/{other_company.id}/sites/{test_customer_site.id}/contacts/{contact.id}"
+        )
         assert resp.status_code == 404
+        # Contact must still exist — no mutation before auth check
+        assert db_session.get(SiteContact, contact.id) is not None
 
     def test_set_primary_contact_success(
         self,
@@ -577,7 +642,10 @@ class TestSiteContactCRUD:
         db_session: Session,
         test_company: Company,
         test_customer_site: CustomerSite,
+        test_user: User,
     ):
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         contact = _site_contact(db_session, test_customer_site)
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}/contacts/{contact.id}/primary"
@@ -592,7 +660,9 @@ class TestSiteContactCRUD:
         db_session: Session,
         test_company: Company,
         test_customer_site: CustomerSite,
+        test_user: User,
     ):
+        test_company.account_owner_id = test_user.id
         c1 = _site_contact(db_session, test_customer_site, email="c1@s.com", full_name="C1")
         c2 = _site_contact(db_session, test_customer_site, email="c2@s.com", full_name="C2")
         c1.is_primary = True
@@ -610,9 +680,15 @@ class TestSiteContactCRUD:
     def test_set_primary_contact_not_found(
         self,
         client: TestClient,
+        db_session: Session,
         test_company: Company,
         test_customer_site: CustomerSite,
+        test_user: User,
     ):
+        # Gate fires before the contact lookup, so the acting user must own the
+        # company to reach the 404 (contact-not-found) branch.
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}/contacts/99999/primary"
         )
@@ -638,70 +714,6 @@ class TestSiteContactCRUD:
         assert resp.status_code == 404
         db_session.refresh(contact)
         assert contact.is_primary is False
-
-    def test_add_site_contact_note_success(
-        self,
-        client: TestClient,
-        db_session: Session,
-        test_company: Company,
-        test_customer_site: CustomerSite,
-    ):
-        contact = _site_contact(db_session, test_customer_site)
-        resp = client.post(
-            f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}/contacts/{contact.id}/notes",
-            data={"notes": "This is a test note."},
-        )
-        assert resp.status_code == 200
-
-    def test_add_site_contact_note_empty_raises_400(
-        self,
-        client: TestClient,
-        db_session: Session,
-        test_company: Company,
-        test_customer_site: CustomerSite,
-    ):
-        contact = _site_contact(db_session, test_customer_site)
-        resp = client.post(
-            f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}/contacts/{contact.id}/notes",
-            data={"notes": ""},
-        )
-        assert resp.status_code == 400
-
-    def test_add_site_contact_note_contact_not_found(
-        self,
-        client: TestClient,
-        test_company: Company,
-        test_customer_site: CustomerSite,
-    ):
-        resp = client.post(
-            f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}/contacts/99999/notes",
-            data={"notes": "hello"},
-        )
-        assert resp.status_code == 404
-
-    def test_get_site_contact_notes_success(
-        self,
-        client: TestClient,
-        db_session: Session,
-        test_company: Company,
-        test_customer_site: CustomerSite,
-    ):
-        contact = _site_contact(db_session, test_customer_site)
-        resp = client.get(
-            f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}/contacts/{contact.id}/notes"
-        )
-        assert resp.status_code == 200
-
-    def test_get_site_contact_notes_not_found(
-        self,
-        client: TestClient,
-        test_company: Company,
-        test_customer_site: CustomerSite,
-    ):
-        resp = client.get(
-            f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}/contacts/99999/notes"
-        )
-        assert resp.status_code == 404
 
 
 # ── Section 6: Quote Metadata Edit ───────────────────────────────────────

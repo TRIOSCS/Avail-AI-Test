@@ -84,6 +84,11 @@ class ProspectAccount(Base):
     swept_at = Column(UTCDateTime, nullable=True)
     parked_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
+    # SP4 Phase 4 — compliance cooldown: a former owner cannot reclaim a swept account
+    # until this timestamp passes (managers/admins bypass it via reassign). Set at sweep
+    # time to swept_at + 30 days; cleared on manager reassign.
+    reclaim_blocked_until = Column(UTCDateTime, nullable=True)
+
     # Relationships
     company = relationship("Company", foreign_keys=[company_id])
     claimed_by_user = relationship("User", foreign_keys=[claimed_by])

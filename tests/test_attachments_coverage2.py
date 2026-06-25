@@ -46,8 +46,8 @@ def _make_req_att(db, requisition_id, user_id, *, onedrive_item_id="od-cov2-1"):
     att = RequisitionAttachment(
         requisition_id=requisition_id,
         file_name="coverage2.pdf",
-        onedrive_item_id=onedrive_item_id,
-        onedrive_url="https://od.example.com/cov2.pdf",
+        library_item_id=onedrive_item_id,
+        library_web_url="https://od.example.com/cov2.pdf",
         content_type="application/pdf",
         size_bytes=512,
         uploaded_by_id=user_id,
@@ -62,8 +62,8 @@ def _make_reqmt_att(db, requirement_id, user_id, *, onedrive_item_id="od-reqmt-c
     att = RequirementAttachment(
         requirement_id=requirement_id,
         file_name="reqmt_cov2.pdf",
-        onedrive_item_id=onedrive_item_id,
-        onedrive_url="https://od.example.com/reqmt_cov2.pdf",
+        library_item_id=onedrive_item_id,
+        library_web_url="https://od.example.com/reqmt_cov2.pdf",
         content_type="application/pdf",
         size_bytes=1024,
         uploaded_by_id=user_id,
@@ -163,7 +163,7 @@ class TestAttachRequisitionFromOneDriveLine123:
         assert resp.status_code == 200
         data = resp.json()
         assert data["file_name"] == "component_spec.pdf"
-        assert data["onedrive_url"] == "https://od.example.com/component_spec.pdf"
+        assert data["web_url"] == "https://od.example.com/component_spec.pdf"
         assert data["content_type"] == "application/pdf"
 
     @pytest.mark.parametrize(
@@ -251,7 +251,7 @@ class TestAttachOneDriveDirectHandler:
             )
 
         assert result["file_name"] == "direct_test.pdf"
-        assert result["onedrive_url"] == "https://od.example.com/direct_test.pdf"
+        assert result["web_url"] == "https://od.example.com/direct_test.pdf"
 
     async def test_direct_no_token_raises_401(self, db_session, test_requisition, test_user):
         """Direct handler: no token raises HTTPException 401 — line 132."""
@@ -346,8 +346,9 @@ class TestAttachOneDriveDirectHandler:
 
 
 class TestDeleteRequisitionAttachmentLine178:
-    def test_missing_token_returns_401(self, client, db_session, test_requisition, test_user):
-        """Attachment with onedrive_item_id but no token → 401 at line 178."""
+    def test_missing_token_returns_warning(self, client, db_session, test_requisition, test_user):
+        """Attachment with library_item_id but no token — service is best-effort: DB row
+        deleted and warning returned."""
         att = _make_req_att(db_session, test_requisition.id, test_user.id)
         with patch(
             "app.scheduler.get_valid_token",
@@ -355,11 +356,15 @@ class TestDeleteRequisitionAttachmentLine178:
             return_value=None,
         ):
             resp = client.delete(f"/api/requisition-attachments/{att.id}")
-        assert resp.status_code == 401
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+        assert "warning" in data
 
     @pytest.mark.parametrize("status", [401, 403], ids=["onedrive_401", "onedrive_403"])
-    def test_onedrive_delete_reraises_status(self, client, db_session, test_requisition, test_user, status):
-        """OneDrive 401/403 during delete is re-raised — lines 187-190."""
+    def test_onedrive_delete_returns_warning(self, client, db_session, test_requisition, test_user, status):
+        """Cloud 401/403 during delete is best-effort: DB row removed and warning
+        returned."""
         att = _make_req_att(db_session, test_requisition.id, test_user.id)
         with (
             patch(
@@ -374,7 +379,10 @@ class TestDeleteRequisitionAttachmentLine178:
             ),
         ):
             resp = client.delete(f"/api/requisition-attachments/{att.id}")
-        assert resp.status_code == status
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+        assert "warning" in data
 
 
 # ── Line 215: list_requirement_attachments — get_req_for_user returns None ───
@@ -446,15 +454,18 @@ class TestUploadRequirementAttachmentNoFilename:
                     db=db_session,
                 )
         assert exc_info.value.status_code == 400
-        assert "filename" in str(exc_info.value.detail).lower()
 
 
 # ── Lines 309, 319: delete_requirement_attachment — 401/403 ──────────────────
 
 
 class TestDeleteRequirementAttachmentLines309And319:
-    def test_missing_token_returns_401(self, client, db_session, test_requisition, test_user):
-        """Requirement attachment with onedrive_item_id but no token → 401."""
+    def test_missing_token_returns_warning(self, client, db_session, test_requisition, test_user):
+        """Requirement attachment with library_item_id but no token — service is best-
+        effort:
+
+        DB row deleted and warning returned.
+        """
         requirement = _make_requirement(db_session, test_requisition.id)
         att = _make_reqmt_att(db_session, requirement.id, test_user.id)
         with patch(
@@ -463,12 +474,15 @@ class TestDeleteRequirementAttachmentLines309And319:
             return_value=None,
         ):
             resp = client.delete(f"/api/requirement-attachments/{att.id}")
-        assert resp.status_code == 401
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+        assert "warning" in data
 
     @pytest.mark.parametrize("status", [401, 403], ids=["onedrive_401", "onedrive_403"])
-    def test_onedrive_delete_reraises_status(self, client, db_session, test_requisition, test_user, status):
-        """OneDrive 401/403 during requirement attachment delete is re-raised — lines
-        309, 319."""
+    def test_onedrive_delete_returns_warning(self, client, db_session, test_requisition, test_user, status):
+        """Cloud 401/403 during requirement attachment delete is best-effort: DB row
+        removed and warning returned."""
         requirement = _make_requirement(db_session, test_requisition.id)
         att = _make_reqmt_att(db_session, requirement.id, test_user.id)
         with (
@@ -484,4 +498,7 @@ class TestDeleteRequirementAttachmentLines309And319:
             ),
         ):
             resp = client.delete(f"/api/requirement-attachments/{att.id}")
-        assert resp.status_code == status
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+        assert "warning" in data

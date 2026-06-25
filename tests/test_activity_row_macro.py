@@ -42,6 +42,8 @@ def _vendor_activity(**overrides):
         vendor_card=SimpleNamespace(display_name="Arrow Electronics"),
         summary="Sent RFQ for STM32F407 to vendor",
         notes=None,
+        direction=None,
+        details=None,
         occurred_at=UTC_NOW,
         created_at=UTC_NOW,
     )
@@ -149,3 +151,115 @@ def test_contact_timeline_keeps_empty_state():
     contact = SimpleNamespace(full_name="Dana Vendor", email="dana@arrow.com")
     html = tmpl.render(activities=[], contact=contact, vendor_id=1)
     assert "No activity recorded for this contact." in html
+
+
+# ── Direction pill + call-outcome badge (little-thing #4) ──────────────────
+
+
+def test_direction_pill_outbound_shows_out():
+    """Outbound call_logged row renders an 'Out' direction pill (slate)."""
+    a = _vendor_activity(
+        activity_type="call_logged",
+        channel="phone",
+        direction="outbound",
+        details={"call_outcome": "connected"},
+    )
+    html = _render_row(a)
+    assert "Out" in html
+    assert "bg-slate-100" in html
+    assert "text-slate-600" in html
+
+
+def test_direction_pill_outbound_with_connected_outcome():
+    """Outbound call_logged row with connected outcome renders both 'Out' pill and
+    'Connected' badge."""
+    a = _vendor_activity(
+        activity_type="call_logged",
+        channel="phone",
+        direction="outbound",
+        details={"call_outcome": "connected"},
+    )
+    html = _render_row(a)
+    assert "Out" in html
+    assert "Connected" in html
+    assert "bg-emerald-100" in html
+
+
+def test_direction_pill_inbound_shows_in():
+    """Inbound call row renders an 'In' direction pill (emerald)."""
+    a = _vendor_activity(
+        activity_type="call_logged",
+        channel="phone",
+        direction="inbound",
+        details=None,
+    )
+    html = _render_row(a)
+    assert "In" in html
+    # inbound direction uses emerald
+    assert "bg-emerald-100" in html
+
+
+def test_call_outcome_left_message():
+    """left_message outcome renders 'Left msg' badge (sky)."""
+    a = _vendor_activity(
+        activity_type="call_logged",
+        direction="outbound",
+        details={"call_outcome": "left_message"},
+    )
+    html = _render_row(a)
+    assert "Left msg" in html
+    assert "bg-sky-100" in html
+
+
+def test_call_outcome_voicemail():
+    """Voicemail outcome renders 'Voicemail' badge (amber)."""
+    a = _vendor_activity(
+        activity_type="call_logged",
+        direction="outbound",
+        details={"call_outcome": "voicemail"},
+    )
+    html = _render_row(a)
+    assert "Voicemail" in html
+    assert "bg-amber-100" in html
+
+
+def test_call_outcome_no_answer():
+    """no_answer outcome renders 'No answer' badge (gray)."""
+    a = _vendor_activity(
+        activity_type="call_logged",
+        direction="outbound",
+        details={"call_outcome": "no_answer"},
+    )
+    html = _render_row(a)
+    assert "No answer" in html
+    assert "bg-gray-100" in html
+
+
+def test_no_direction_no_details_renders_cleanly():
+    """A row with no direction and None details renders no direction pill and no outcome
+    badge."""
+    a = _vendor_activity(direction=None, details=None)
+    html = _render_row(a)
+    # Must not crash and must not emit direction/outcome markup
+    assert "bg-slate-100" not in html
+    assert "Connected" not in html
+    assert "Left msg" not in html
+    assert "Voicemail" not in html
+    assert "No answer" not in html
+    # The row itself renders normally
+    assert "Arrow Electronics" in html
+
+
+def test_meeting_row_outbound_shows_out_pill():
+    """A meeting activity with direction outbound surfaces the 'Out' direction pill."""
+    a = _vendor_activity(
+        activity_type="meeting_logged",
+        channel="manual",
+        direction="outbound",
+        details=None,
+    )
+    html = _render_row(a)
+    assert "Out" in html
+    assert "bg-slate-100" in html
+    # No outcome badge when details is None
+    assert "Connected" not in html

@@ -430,6 +430,7 @@ class TestSearchLeadDetailAndAddToReq:
 
 class TestCustomerSites:
     def test_create_site(self, client, db_session: Session, test_user: User, test_company):
+        test_company.account_owner_id = test_user.id
         db_session.commit()
 
         resp = client.post(
@@ -438,7 +439,8 @@ class TestCustomerSites:
         )
         assert resp.status_code == 200
 
-    def test_create_site_missing_name(self, client, db_session: Session, test_company):
+    def test_create_site_missing_name(self, client, db_session: Session, test_user: User, test_company):
+        test_company.account_owner_id = test_user.id
         db_session.commit()
 
         resp = client.post(
@@ -449,6 +451,7 @@ class TestCustomerSites:
 
     def test_delete_site(self, client, db_session: Session, test_user: User, test_company):
         site = _company_site(db_session, test_company)
+        test_company.account_owner_id = test_user.id
         db_session.commit()
 
         resp = client.delete(f"/v2/partials/customers/{test_company.id}/sites/{site.id}")
@@ -462,6 +465,7 @@ class TestCustomerSites:
         assert resp.status_code == 200
 
     def test_create_site_contact(self, client, db_session: Session, test_user: User, test_company):
+        test_company.account_owner_id = test_user.id
         site = _company_site(db_session, test_company)
         db_session.commit()
 
@@ -473,6 +477,7 @@ class TestCustomerSites:
 
     def test_delete_site_contact(self, client, db_session: Session, test_user: User, test_company):
         site = _company_site(db_session, test_company)
+        test_company.account_owner_id = test_user.id
         contact = SiteContact(
             customer_site_id=site.id,
             full_name="John Doe",

@@ -1,0 +1,37 @@
+{#
+  resell/create_modal.html — New-list modal (reuses the excess create-modal shape).
+  Posts to /api/resell/lists which re-renders the My-Lists list partial.
+  Receives: companies.
+  Called by: resell.resell_create_form.
+#}
+<div class="p-5">
+  <h2 class="text-lg font-semibold text-gray-900 mb-5">New excess list</h2>
+
+  <form hx-post="/api/resell/lists"
+        hx-target="#resell-list-body"
+        hx-swap="innerHTML"
+        data-loading-disable
+        @htmx:after-request.camel="if(event.detail.successful){ $dispatch('close-modal'); $store.toast.message='List created'; $store.toast.type='success'; $store.toast.show=true; }"
+        class="space-y-4">
+    <div>
+      <label class="form-label">Title <span class="text-rose-500">*</span></label>
+      <input type="text" name="title" required placeholder="e.g. Q1 2026 surplus — Acme Corp" class="input">
+    </div>
+    <div>
+      <label class="form-label">Customer <span class="text-rose-500">*</span></label>
+      <select name="company_id" required class="input">
+        <option value="">Select company…</option>
+        {% for c in companies %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+      </select>
+      <p class="text-xs text-gray-400 mt-1">The customer is owner-only — never shown to brokers.</p>
+    </div>
+    <div>
+      <label class="form-label">Notes</label>
+      <textarea name="notes" rows="2" class="input" placeholder="Optional…"></textarea>
+    </div>
+    <div class="flex justify-end gap-3 pt-2 border-t border-gray-100">
+      <button type="button" @click="$dispatch('close-modal')" class="btn btn-secondary">Cancel</button>
+      <button type="submit" class="btn btn-primary">Create list</button>
+    </div>
+  </form>
+</div>

@@ -1,5 +1,11 @@
-{# contacts_tab.html — Company contacts grouped by site (accordion), with role chips
-   and per-contact cadence clocks.
+{# contacts_tab.html — THE canonical contact-management surface for an account.
+
+   The default + primary right-panel content under the slim account header.
+   Contacts are grouped under light per-site section headers; a people-search and
+   a site filter (shown only when the account has >1 active site) narrow the list
+   client-side. This is the ONLY contact surface and carries the full feature set
+   (role / priority / archive / DNC / cadence / edit / delete / set-primary /
+   suggested-contacts).
 
    Each Call / Email / Teams / WeChat action opens the native handler (tel:,
    mailto:, Teams deep link, weixin:) AND logs an outbound ActivityLog via the
@@ -7,211 +13,83 @@
    /api/activity/outreach-initiated), which bumps both the company AND the
    contact's last_outbound_at via bump_clocks_from_activity → SiteContact clock.
 
-   Receives: company, contact_rows ([{contact, site, legacy}]), now_utc.
+   Receives: company, contact_rows ([{contact, site, legacy, cadence}]), now_utc,
+             active_sites (list[CustomerSite], name-sorted), roles (CANONICAL_ROLES).
    Called by: company_tab route (tab=contacts) and detail.html (inline default tab).
    Depends on: htmx_app.js outreach logger, brand palette, Alpine.js.
 
-   Clock honesty rule: NULL last_outbound_at means "not yet logged" (email activity
-   is not yet universally attributed to site_contact_id). Render "—" / "no logged touch"
-   — NEVER "never replied" (which implies the contact was ignored, not that the log
-   is missing).
+   Filtering: client-side via the contactsView Alpine.data component (htmx_app.js).
+   The search box and site <select> live OUTSIDE the #contacts-tab-list swap target
+   (a CRUD re-render replaces only the list, not the controls). contactsView reads
+   data-contact-search / data-site-id off the rendered rows + section wrappers and
+   toggles a `hidden` class — robust across HTMX innerHTML swaps because it re-runs
+   on htmx:afterSettle.
+
+   Clock honesty rule: NULL last_outbound_at means "not yet logged". Render "—" /
+   "no logged touch" — NEVER "never replied".
 #}
 
-{# ── helpers ─────────────────────────────────────────────────────────────── #}
+{% set _multi_site = active_sites is defined and active_sites and active_sites|length > 1 %}
 
-{% macro outreach_btn(label, href, channel, value, company_id, site_id, contact_id, contact_name, icon_path, new_tab=False) %}
-<a href="{{ href }}"
-   {% if new_tab %}target="_blank" rel="noopener noreferrer"{% endif %}
-   class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-lg border border-gray-200 text-gray-700 hover:bg-brand-50 hover:text-brand-600 hover:border-brand-200 transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-1"
-   data-outreach-log
-   data-channel="{{ channel }}"
-   data-value="{{ value }}"
-   data-company-id="{{ company_id }}"
-   data-site-id="{{ site_id or '' }}"
-   data-contact-id="{{ contact_id or '' }}"
-   data-contact-name="{{ contact_name or '' }}"
-   title="{{ label }} {{ contact_name or value }} (logs activity)">
-  <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-    <path stroke-linecap="round" stroke-linejoin="round" d="{{ icon_path }}"/>
-  </svg>
-  {{ label }}
-</a>
-{% endmacro %}
+<div x-data="contactsView"
+     {% if preselect_site_id is defined and preselect_site_id %}data-initial-site="{{ preselect_site_id }}"{% endif %}>
 
-{# Per-contact clock row — outbound + reply with honest empty states. #}
-{% macro contact_clocks(contact, now_utc) %}
-{% set out_ts = contact.last_outbound_at %}
-{% set rep_ts = contact.last_reply_at %}
-{% if out_ts %}
-  {# Compute days since last outbound #}
-  {% set out_days = (now_utc - out_ts).days %}
-  {# Cadence state from crm_service — pass tier=None (contact-level = standard) #}
-  {% set cstate = cadence_state(none, out_ts, now_utc) %}
-  {% if cstate == 'overdue' %}
-    {% set clock_cls = 'text-rose-600' %}
-  {% elif cstate == 'due' %}
-    {% set clock_cls = 'text-amber-600' %}
-  {% else %}
-    {% set clock_cls = 'text-emerald-600' %}
-  {% endif %}
-<div class="mt-1.5 flex items-center gap-3 text-[11px]">
-  <span class="text-gray-400">Out:</span>
-  <span class="{{ clock_cls }} font-medium">{{ out_days }}d ago</span>
-  <span class="text-gray-400">Reply:</span>
-  {% if rep_ts %}
-    {% set rep_days = (now_utc - rep_ts).days %}
-    <span class="text-gray-600">{{ rep_days }}d ago</span>
-  {% else %}
-    <span class="text-gray-300">—</span>
-  {% endif %}
-</div>
-{% else %}
-<div class="mt-1.5 flex items-center gap-3 text-[11px]">
-  <span class="text-gray-400">Out:</span>
-  <span class="text-gray-300" title="no logged touch">—</span>
-  <span class="text-gray-400">Reply:</span>
-  <span class="text-gray-300">—</span>
-</div>
-{% endif %}
-{% endmacro %}
-
-{# Full contact card — SiteContact row. #}
-{% macro contact_card(company, contact, site, legacy) %}
-{% if legacy %}
-  {# Legacy site-level contact (contact is None, fields live on site) #}
-  <div class="bg-white rounded-lg border border-gray-200 p-3 hover:border-brand-200 transition-colors">
-    <div class="flex items-start justify-between gap-3 flex-wrap">
-      <div class="min-w-0">
-        <div class="flex items-center gap-2">
-          <span class="text-sm font-medium text-gray-900">{{ site.contact_name or "—" }}</span>
-          <span class="text-[9px] text-gray-400">legacy</span>
-        </div>
-        <p class="text-[11px] text-gray-600">
-          {{ site.contact_title or "—" }}
-        </p>
-        <div class="mt-1 flex items-center gap-3 text-[11px] text-gray-600 flex-wrap">
-          {% if site.contact_email %}<span class="truncate">{{ site.contact_email }}</span>{% endif %}
-          {% if site.contact_phone %}<span>{{ site.contact_phone }}</span>{% endif %}
-        </div>
-      </div>
-      <div class="flex items-center gap-1.5 flex-wrap flex-shrink-0">
-        {% if site.contact_phone %}
-        {{ outreach_btn("Call", "tel:" ~ site.contact_phone, "phone", site.contact_phone, company.id, site.id, none, site.contact_name,
-                        "M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z") }}
-        {% endif %}
-        {% if site.contact_email %}
-        {{ outreach_btn("Email", "mailto:" ~ site.contact_email, "email", site.contact_email, company.id, site.id, none, site.contact_name,
-                        "M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z") }}
-        {% endif %}
-      </div>
-    </div>
-  </div>
-{% else %}
-  {# Real SiteContact row #}
-  <div class="bg-white rounded-lg border border-gray-200 p-3 hover:border-brand-200 transition-colors">
-    <div class="flex items-start justify-between gap-3 flex-wrap">
-      <div class="min-w-0 flex-1">
-        <div class="flex items-center gap-2 flex-wrap">
-          <span class="text-sm font-medium text-gray-900">{{ contact.full_name or "—" }}</span>
-          {% if contact.is_primary %}
-          <span class="px-1 py-0.5 text-[9px] font-medium rounded bg-emerald-50 text-emerald-700">Primary</span>
-          {% endif %}
-          {% include 'htmx/partials/customers/_role_chip_editor.html' %}
-          {% include 'htmx/partials/customers/_priority_toggle.html' %}
-          {% include 'htmx/partials/customers/_archive_toggle.html' %}
-          {% include 'htmx/partials/customers/_dnc_toggle.html' %}
-        </div>
-        <p class="text-[11px] text-gray-600 mt-0.5">{{ contact.title or "—" }}</p>
-        <div class="mt-1 flex items-center gap-3 text-[11px] text-gray-600 flex-wrap">
-          {% if contact.email %}<span class="truncate">{{ contact.email }}</span>{% endif %}
-          {% if contact.phone %}<span>{{ contact.phone }}</span>{% endif %}
-          {% if contact.wechat_id %}<span>WeChat: {{ contact.wechat_id }}</span>{% endif %}
-        </div>
-        {# Per-contact cadence clocks — honest empty states for NULL timestamps #}
-        {{ contact_clocks(contact, now_utc) }}
-      </div>
-      <div class="flex items-center gap-1.5 flex-wrap flex-shrink-0">
-        {% if contact.do_not_contact %}
-        {# DNC: outreach buttons are suppressed — the DNC badge in the header
-           communicates the block; the buttons are simply absent so the UI
-           gives no false affordance. Server enforces independently. #}
-        {% else %}
-        {% if contact.phone %}
-        {{ outreach_btn("Call", "tel:" ~ contact.phone, "phone", contact.phone, company.id, contact.customer_site_id, contact.id, contact.full_name,
-                        "M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z") }}
-        {% endif %}
-        {% if contact.email %}
-        {{ outreach_btn("Email", "mailto:" ~ contact.email, "email", contact.email, company.id, contact.customer_site_id, contact.id, contact.full_name,
-                        "M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z") }}
-        {{ outreach_btn("Teams", "https://teams.microsoft.com/l/chat/0/0?users=" ~ contact.email|urlencode, "teams", contact.email, company.id, contact.customer_site_id, contact.id, contact.full_name,
-                        "M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z", new_tab=True) }}
-        {% endif %}
-        {% if contact.wechat_id %}
-        {{ outreach_btn("WeChat", "weixin://dl/chat?" ~ contact.wechat_id|urlencode, "wechat", contact.wechat_id, company.id, contact.customer_site_id, contact.id, contact.full_name,
-                        "M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z") }}
-        {% endif %}
-        {% endif %}
-      </div>
-    </div>
-  </div>
-{% endif %}
-{% endmacro %}
-
-{# ── Group rows by site ────────────────────────────────────────────────────── #}
-{#
-   Build a site-keyed structure: site_id → {site, rows: [...]}
-   Rows with no site (edge case) fall into an "unknown" bucket.
-   Legacy rows always have a site.
-#}
-{% set site_groups = namespace(data={}, order=[]) %}
-{% for row in contact_rows %}
-  {% set sk = row.site.id if row.site else 0 %}
-  {% if sk not in site_groups.data %}
-    {% set _ = site_groups.data.update({sk: {'site': row.site, 'rows': []}}) %}
-    {% set _ = site_groups.order.append(sk) %}
-  {% endif %}
-  {% set _ = site_groups.data[sk]['rows'].append(row) %}
-{% endfor %}
-
-{# ── Render ────────────────────────────────────────────────────────────────── #}
-{% if not contact_rows %}
-<div class="p-8 text-center">
-  <p class="text-sm text-gray-600">No contacts found. Add contacts via the Sites tab.</p>
-</div>
-{% else %}
-<div class="space-y-3">
-  {% for sk in site_groups.order %}
-    {% set group = site_groups.data[sk] %}
-    {% set grp_site = group['site'] %}
-    {% set grp_rows = group['rows'] %}
-    {# Expand HQ / primary site by default (first group) — all others start closed #}
-    {% set is_first = loop.first %}
-    <div x-data='{"open": {{ "true" if is_first else "false" }}}' class="rounded-lg border border-gray-200">
-      {# Site accordion header #}
-      <button type='button'
-              @click='open = !open'
-              class='w-full flex items-center justify-between px-3 py-2 bg-gray-50 hover:bg-gray-100 rounded-t-lg transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-inset'
-              :aria-expanded='open'>
-        <div class='flex items-center gap-2'>
-          <svg class='h-4 w-4 text-gray-400 transition-transform' :class='{ "rotate-90": open }'
-               fill='none' viewBox='0 0 24 24' stroke='currentColor' stroke-width='2'>
-            <path stroke-linecap='round' stroke-linejoin='round' d='M9 5l7 7-7 7'/>
+  {# ── Controls bar — people-search · site filter · Find / + Add Contact ──────── #}
+  <div class="bg-white pb-3 border-b border-gray-100">
+    <div class="flex flex-wrap items-center justify-between gap-2">
+      <div class="flex flex-wrap items-center gap-2 min-w-0 flex-1">
+        {# People search — client-side filter over the rendered contacts. #}
+        <div class="relative min-w-[180px] flex-1 max-w-xs">
+          <svg class="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M11 19a8 8 0 100-16 8 8 0 000 16z"/>
           </svg>
-          <span class='text-xs font-semibold text-gray-700'>
-            {{ grp_site.site_name if grp_site else "Unknown Site" }}
-          </span>
+          <input type="text" x-model="q" @input="apply()"
+                 aria-label="Search people"
+                 placeholder="Search people"
+                 class="w-full pl-8 pr-2 py-1.5 text-xs border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
         </div>
-        <span class='text-[11px] text-gray-400'>
-          {{ grp_rows|length }} contact{{ "s" if grp_rows|length != 1 }}
-        </span>
-      </button>
-      {# Contacts list — shown/hidden via Alpine #}
-      <div x-show='open' x-cloak x-transition class='space-y-2 p-2'>
-        {% for row in grp_rows %}
-          {{ contact_card(company, row.contact, row.site, row.legacy) }}
-        {% endfor %}
+        {% if _multi_site %}
+        {# Site filter — only when the account has >1 active site. #}
+        <select x-model="siteFilter" @change="apply()"
+                aria-label="Filter contacts by site"
+                class="px-2 py-1.5 text-xs border border-gray-200 rounded-lg text-gray-600 focus:ring-2 focus:ring-brand-500">
+          <option value="">All sites</option>
+          {% for s in active_sites %}
+          <option value="{{ s.id }}">{{ s.site_name }}{% if s.city %} · {{ s.city }}{% endif %}</option>
+          {% endfor %}
+        </select>
+        {% endif %}
+      </div>
+      <div class="flex items-center gap-2 flex-shrink-0">
+        {# "Find contacts" — only shown when a domain/website is available #}
+        {% set company_domain = company.domain or company.website %}
+        {% if company_domain %}
+        <button hx-get='/v2/partials/customers/{{ company.id }}/suggested-contacts?domain={{ company_domain | urlencode }}'
+                hx-target='#suggested-contacts-panel'
+                hx-swap='innerHTML'
+                hx-indicator='#suggested-contacts-spinner'
+                class='px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-brand-500'>
+          Find contacts
+        </button>
+        {% endif %}
+        <button @click="$dispatch('open-modal', {url: '/v2/partials/customers/{{ company.id }}/contacts/add-form'})"
+                class="px-3 py-1.5 text-xs font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500">
+          + Add Contact
+        </button>
       </div>
     </div>
-  {% endfor %}
+    {# "No matches" hint — shown by filterContacts() when the live filter empties the list. #}
+    <p data-contacts-empty class="hidden mt-2 text-xs text-gray-600" x-cloak>
+      No people match <span class="font-medium" x-text="q ? '&quot;' + q + '&quot;' : 'this site'"></span>. Clear the filter to see all.
+    </p>
+  </div>
+
+  {# ── Suggested contacts panel (hidden until "Find contacts" clicked) ─────── #}
+  <div id="suggested-contacts-spinner" class="htmx-indicator mt-2 text-xs text-gray-400 py-2">Finding contacts…</div>
+  <div id="suggested-contacts-panel" class="mt-2"></div>
+
+  {# ── Grouped list wrapped in stable swap target ──────────────────────────── #}
+  <div id="contacts-tab-list" class="mt-3">
+    {% include 'htmx/partials/customers/tabs/_contacts_grouped_list.html' %}
+  </div>
 </div>
-{% endif %}

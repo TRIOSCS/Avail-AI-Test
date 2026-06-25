@@ -8,7 +8,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from ..constants import OutreachChannel
+from ..constants import CallOutcome, OutreachChannel
 
 
 class CallInitiatedRequest(BaseModel):
@@ -40,6 +40,13 @@ class OutreachInitiatedRequest(BaseModel):
     site_contact_id: int | None = None
     contact_name: str | None = Field(default=None, max_length=255)
     origin: str | None = Field(default=None, max_length=100)
+
+
+class CallOutcomeRequest(BaseModel):
+    """Request body for POST /api/activity/{activity_id}/call-outcome."""
+
+    outcome: CallOutcome
+    note: str | None = Field(default=None, max_length=500)
 
 
 # ── Timeline filter / response schemas ────────────────────────────────

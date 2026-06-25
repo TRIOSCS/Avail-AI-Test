@@ -89,23 +89,30 @@ docker compose up -d
 
 echo
 echo "=== 5) Health check (up to 120s) ==="
+# The app container does NOT publish port 8000 to the host (Caddy fronts it on
+# 443), so a host `curl localhost:8000` would always fail even when the app is
+# fine. Check the container's OWN healthcheck status instead — that is the truth
+# `docker compose up` itself waits on. Fall back to a Caddy-fronted curl.
+CID=$(docker compose ps -q app 2>/dev/null)
 for i in $(seq 1 24); do
   sleep 5
-  if curl -sf -m 8 "$HEALTH_URL" >/dev/null 2>&1; then
+  HS=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CID" 2>/dev/null)
+  if [ "$HS" = healthy ] || [ "$HS" = running ] || curl -skf -m 8 https://localhost/health >/dev/null 2>&1; then
     echo
-    echo "  ✅ RESTORED — app healthy after $((i*5))s."
+    echo "  ✅ RESTORED — app container is '$HS'."
     docker compose ps 2>&1 | sed 's/^/    /' || true
     echo
-    echo "  NEXT: send me $LOG so I can fix the v2.5.1 startup bug on main."
-    echo "        Do NOT cut another release / run update.sh until that fix lands —"
-    echo "        main still has the code that crashed prod."
+    echo "  Confirm externally: curl -s https://app.availai.net/health"
+    echo "  The new features (Clay/Explorium/workers) are NOT deployed — prod is on"
+    echo "  last-good code. Don't cut a release until the deploy pipeline is fixed."
     exit 0
   fi
-  echo "    waiting... ($((i*5))s)"
+  echo "    waiting... container='${HS:-?}' ($((i*5))s)"
 done
 
 echo
-echo "  ❌ Still unhealthy after restore. The failure may be environmental (DB/redis/disk)."
-echo "     Send me both:  $LOG   and:  docker compose logs --tail=120"
+echo "  ⚠ Container not reporting healthy after 120s. Check directly:"
+echo "     docker compose ps    and:    docker compose logs --tail=120 app"
+echo "     curl -s https://app.availai.net/health"
 echo "     The broken v2.5.1 tree is preserved at $BACKUPS/failed_v2.5.1_${STAMP}."
 exit 1

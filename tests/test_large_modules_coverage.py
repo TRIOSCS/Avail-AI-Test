@@ -68,9 +68,15 @@ class TestRegisterEmailJobs:
         [
             pytest.param(
                 {},
-                ["contact_status_compute", "email_health_update", "calendar_scan", "scan_sent_folders"],
-                ["contacts_sync", "ownership_sweep", "contact_scoring", "email_reverification"],
+                ["contact_status_compute", "email_health_update", "scan_sent_folders"],
+                ["contacts_sync", "ownership_sweep", "contact_scoring", "email_reverification", "calendar_scan"],
                 id="always_on_jobs",
+            ),
+            pytest.param(
+                {"activity_tracking_enabled": True},
+                ["calendar_scan"],
+                [],
+                id="calendar_scan_when_tracking_enabled",
             ),
             pytest.param(
                 {"contacts_sync_enabled": True},
@@ -212,13 +218,6 @@ class TestAvailTagRegex:
         from app.shared_constants import RFQ_SUBJECT_TAG_RE
 
         assert RFQ_SUBJECT_TAG_RE.search("Regular email subject") is None
-
-    def test_matches_excess_bid_tag(self):
-        from app.jobs.email_jobs import _EXCESS_BID_RE
-
-        match = _EXCESS_BID_RE.search("Re: [EXCESS-BID-456] Bid response")
-        assert match is not None
-        assert match.group(1) == "456"
 
 
 class TestJobContactsSync:
@@ -440,89 +439,6 @@ class TestScanSentFolder:
         assert result == []
 
 
-class TestScanExcessBidResponses:
-    """Test _scan_excess_bid_responses()."""
-
-    @pytest.mark.asyncio
-    async def test_skips_when_disabled(self):
-        from app.jobs.email_jobs import _scan_excess_bid_responses
-
-        mock_user = MagicMock()
-        mock_db = MagicMock()
-
-        mock_settings = MagicMock()
-        mock_settings.excess_bid_scan_enabled = False
-
-        with patch("app.config.settings", mock_settings):
-            await _scan_excess_bid_responses(mock_user, mock_db)
-
-        # Should return early, no graph calls
-        mock_db.query.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_skips_when_no_pending_solicitations(self):
-        from app.jobs.email_jobs import _scan_excess_bid_responses
-
-        mock_user = MagicMock()
-        mock_user.id = 1
-        mock_db = MagicMock()
-        # The query chain: db.query(BidSolicitation.id).filter(...).filter(...).filter(...).count()
-        mock_db.query.return_value.filter.return_value.filter.return_value.filter.return_value.count.return_value = 0
-
-        mock_settings = MagicMock()
-        mock_settings.excess_bid_scan_enabled = True
-        mock_settings.excess_bid_parse_lookback_days = 30
-
-        with (
-            patch("app.config.settings", mock_settings),
-            patch("app.utils.token_manager.get_valid_token", AsyncMock(return_value=None)),
-        ):
-            await _scan_excess_bid_responses(mock_user, mock_db)
-
-    @pytest.mark.asyncio
-    async def test_parses_bid_responses(self):
-        from app.jobs.email_jobs import _scan_excess_bid_responses
-
-        mock_user = MagicMock()
-        mock_user.id = 1
-
-        mock_db = MagicMock()
-        mock_db.query.return_value.filter.return_value.filter.return_value.filter.return_value.count.return_value = 1
-
-        mock_solicitation = MagicMock()
-        mock_solicitation.status = "sent"
-        mock_db.get.return_value = mock_solicitation
-
-        mock_settings = MagicMock()
-        mock_settings.excess_bid_scan_enabled = True
-        mock_settings.excess_bid_parse_lookback_days = 30
-
-        mock_gc = MagicMock()
-        mock_gc.get_json = AsyncMock(
-            return_value={
-                "value": [
-                    {
-                        "subject": "Re: [EXCESS-BID-42] Request for bid",
-                        "body": {"content": "We can offer $5.00 per unit"},
-                        "receivedDateTime": "2026-03-20T10:00:00Z",
-                    }
-                ]
-            }
-        )
-
-        mock_parse = AsyncMock(return_value=MagicMock())
-
-        with (
-            patch("app.config.settings", mock_settings),
-            patch("app.utils.token_manager.get_valid_token", AsyncMock(return_value="token")),
-            patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
-            patch("app.services.excess_service.parse_bid_from_email", mock_parse),
-        ):
-            await _scan_excess_bid_responses(mock_user, mock_db)
-
-        mock_parse.assert_called_once()
-
-
 class TestScanUserInbox:
     """Test _scan_user_inbox() — orchestrator for inbox scanning sub-ops."""
 
@@ -542,7 +458,6 @@ class TestScanUserInbox:
             patch("app.jobs.inventory_jobs._scan_stock_list_attachments", AsyncMock()),
             patch("app.jobs.email_jobs._mine_vendor_contacts", AsyncMock()),
             patch("app.jobs.email_jobs._scan_outbound_rfqs", AsyncMock()),
-            patch("app.jobs.email_jobs._scan_excess_bid_responses", AsyncMock()),
         ):
             await _scan_user_inbox(mock_user, mock_db)
 
@@ -563,7 +478,6 @@ class TestScanUserInbox:
             patch("app.jobs.inventory_jobs._scan_stock_list_attachments", AsyncMock()),
             patch("app.jobs.email_jobs._mine_vendor_contacts", AsyncMock()),
             patch("app.jobs.email_jobs._scan_outbound_rfqs", AsyncMock()),
-            patch("app.jobs.email_jobs._scan_excess_bid_responses", AsyncMock()),
         ):
             await _scan_user_inbox(mock_user, mock_db)
 
@@ -589,14 +503,12 @@ class TestScanUserInbox:
             ),
             patch("app.jobs.email_jobs._mine_vendor_contacts", AsyncMock()) as mock_mine,
             patch("app.jobs.email_jobs._scan_outbound_rfqs", AsyncMock()) as mock_outbound,
-            patch("app.jobs.email_jobs._scan_excess_bid_responses", AsyncMock()) as mock_excess,
         ):
             await _scan_user_inbox(mock_user, mock_db)
 
         # Other sub-ops still called despite stock_scan failure
         mock_mine.assert_called_once()
         mock_outbound.assert_called_once()
-        mock_excess.assert_called_once()
 
 
 class TestJobScanSentFolders:

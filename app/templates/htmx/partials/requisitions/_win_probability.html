@@ -1,0 +1,34 @@
+{# _win_probability.html — Inline display + edit for Requisition.win_probability.
+   Receives: req (Requisition)
+   Called by: requisition_win_probability_save route, included in detail_header.html
+   Depends on: PATCH /v2/partials/requisitions/{req_id}/win-probability
+#}
+<span id="req-win-prob-{{ req.id }}"
+      class="inline-flex items-center gap-1 text-sm text-gray-600"
+      x-data="{ editing: false }">
+  <span x-show="!editing" class="cursor-pointer hover:bg-brand-50 rounded px-1 transition-colors"
+        @click="editing = true"
+        title="Click to edit win probability">
+    {% if req.win_probability is not none %}
+      <span class="font-medium text-gray-900">Win: {{ req.win_probability }}%</span>
+    {% else %}
+      <span class="text-gray-400 italic">Win: —</span>
+    {% endif %}
+  </span>
+  <form x-show="editing"
+        hx-patch="/v2/partials/requisitions/{{ req.id }}/win-probability"
+        hx-target="#req-win-prob-{{ req.id }}"
+        hx-swap="outerHTML"
+        class="inline-flex items-center gap-1">
+    <input type="number"
+           name="win_probability"
+           min="0"
+           max="100"
+           value="{{ req.win_probability if req.win_probability is not none else '' }}"
+           placeholder="0–100"
+           class="w-16 text-xs border border-gray-300 rounded px-1 py-0.5 focus:outline-none focus:ring-2 focus:ring-brand-400"
+           @keydown.escape="editing = false">
+    <button type="submit" class="text-xs text-brand-600 hover:text-brand-800 font-medium">Save</button>
+    <button type="button" @click="editing = false" class="text-xs text-gray-400 hover:text-gray-600">Cancel</button>
+  </form>
+</span>

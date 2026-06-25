@@ -31,17 +31,26 @@ from sqlalchemy.orm import Session, joinedload
 
 from ..config import settings
 from ..constants import (
+    AccessKey,
     ActivityType,
     OfferStatus,
     ReleaseTrigger,
     RequisitionStatus,
+    RfqAttachmentStatus,
+    SightingsSkipReason,
     SourcingStatus,
     UnavailabilityReason,
 )
 from ..database import get_db
-from ..dependencies import require_buyer, require_fresh_token, require_user
+from ..dependencies import (
+    require_access,
+    require_buyer,
+    require_fresh_token,
+    require_requisition_access,
+    require_user,
+)
 from ..models import User
-from ..models.intelligence import ActivityLog, MaterialCard
+from ..models.intelligence import ActivityLog, MaterialCard, MaterialCardDatasheet
 from ..models.offers import Offer
 from ..models.sourcing import Requirement, Requisition, Sighting
 from ..models.vendor_sighting_summary import VendorSightingSummary
@@ -50,6 +59,7 @@ from ..schemas.sightings import SightingsListParams
 from ..services.activity_service import log_rfq_activity
 from ..services.offer_qualification import prefill_from_vendor
 from ..services.part_offers import part_offers_for
+from ..services.rfq_attachments import trim_datasheet_names_to_cap
 from ..services.sighting_status import compute_vendor_statuses
 from ..services.sse_broker import broker
 from ..services.status_machine import SOURCING_TRANSITIONS, require_valid_transition
@@ -136,6 +146,7 @@ RFQ_SENT_HEADER = "X-RFQ-Sent"
 RFQ_TOTAL_HEADER = "X-RFQ-Total"
 RFQ_SKIPPED_HEADER = "X-RFQ-Skipped"  # vendors with no contact email (not a delivery failure)
 RFQ_UNAVAILABLE_HEADER = "X-RFQ-Unavailable"  # vendors dropped by the active-only unavailability re-check
+RFQ_DATASHEETS_DROPPED_HEADER = "X-RFQ-Datasheets-Dropped"  # oversized datasheets dropped before send
 
 
 def _render_offers_panel(request: Request, requirement: Requirement, db: Session) -> HTMLResponse:
@@ -273,7 +284,7 @@ def _mpn_link_map(db: Session, requirements) -> dict[str, int]:
 async def sightings_workspace(
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.SIGHTINGS)),
 ):
     """Return the split-panel workspace layout.
 
@@ -312,6 +323,9 @@ async def sightings_list(
             | Requisition.customer_name.ilike(f"%{safe_q}%")
             | Requirement.substitutes_text.ilike(f"%{safe_q}%")
         )
+    if filters.manufacturer:
+        safe_mfr = escape_like(filters.manufacturer)
+        query = query.filter(Requirement.manufacturer.ilike(f"%{safe_mfr}%"))
 
     total = query.count()
 
@@ -500,6 +514,7 @@ async def sightings_list(
         "groups": groups,
         "link_map": link_map,
         "user": user,
+        "manufacturer": filters.manufacturer,
     }
     return template_response("htmx/partials/sightings/table.html", ctx)
 
@@ -750,6 +765,7 @@ async def sightings_refresh(
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
         raise HTTPException(status_code=404, detail="Requirement not found")
+    require_requisition_access(db, requirement.requisition_id, user)
 
     is_sse = source == "sse"
     refresh_failed = False
@@ -824,6 +840,8 @@ async def sightings_batch_refresh(
     reqs_by_id = {}
     if requirement_ids:
         reqs = db.query(Requirement).filter(Requirement.id.in_([int(rid) for rid in requirement_ids])).all()
+        for r in reqs:
+            require_requisition_access(db, r.requisition_id, user, label="Requirement")
         reqs_by_id = {r.id: r for r in reqs}
 
     success = 0
@@ -894,6 +912,8 @@ async def sightings_batch_assign(
 
     int_ids = [int(rid) for rid in requirement_ids]
     reqs = db.query(Requirement).filter(Requirement.id.in_(int_ids)).all()
+    for r in reqs:
+        require_requisition_access(db, r.requisition_id, user, label="Requirement")
 
     buyer_name = "nobody"
     if buyer_id:
@@ -937,6 +957,8 @@ async def sightings_batch_status(
 
     int_ids = [int(rid) for rid in requirement_ids]
     reqs = db.query(Requirement).filter(Requirement.id.in_(int_ids)).all()
+    for r in reqs:
+        require_requisition_access(db, r.requisition_id, user, label="Requirement")
 
     updated = 0
     skipped = 0
@@ -992,6 +1014,8 @@ async def sightings_batch_notes(
 
     int_ids = [int(rid) for rid in requirement_ids]
     reqs = db.query(Requirement).filter(Requirement.id.in_(int_ids)).all()
+    for r in reqs:
+        require_requisition_access(db, r.requisition_id, user, label="Requirement")
 
     for r in reqs:
         activity = ActivityLog(
@@ -1093,6 +1117,7 @@ async def sightings_mark_unavailable(
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
         raise HTTPException(status_code=404, detail="Requirement not found")
+    require_requisition_access(db, requirement.requisition_id, user)
 
     try:
         record_unavailability(db, requirement, vendor_name, reason, note, user)
@@ -1128,6 +1153,7 @@ async def sightings_mark_available(
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
         raise HTTPException(status_code=404, detail="Requirement not found")
+    require_requisition_access(db, requirement.requisition_id, user)
 
     try:
         clear_unavailability(db, requirement, vendor_name, user)
@@ -1160,6 +1186,7 @@ async def sightings_assign_buyer(
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
         raise HTTPException(status_code=404, detail="Requirement not found")
+    require_requisition_access(db, requirement.requisition_id, user)
 
     requirement.assigned_buyer_id = buyer_id
     db.commit()
@@ -1186,6 +1213,7 @@ async def sightings_advance_status(
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
         raise HTTPException(status_code=404, detail="Requirement not found")
+    require_requisition_access(db, requirement.requisition_id, user)
 
     current = requirement.sourcing_status or SourcingStatus.OPEN
 
@@ -1235,6 +1263,7 @@ async def sightings_log_activity(
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
         raise HTTPException(status_code=404, detail="Requirement not found")
+    require_requisition_access(db, requirement.requisition_id, user)
 
     activity_type_map = {
         "note": "note",
@@ -1332,6 +1361,8 @@ class RankedVendor(NamedTuple):
     covered_count: int
     avg_score: float | None
     has_contact: bool
+    lead_time_days: int | None = None
+    vendor_score: float | None = None
 
 
 class CoverageEntry(TypedDict):
@@ -1371,6 +1402,8 @@ class SuggestedVendor(NamedTuple):
     has_contact: bool
     response_rate: float | None
     engagement_score: float | None
+    vendor_score: float | None = None
+    lead_time_days: int | None = None
 
 
 def _cards_with_resolvable_email(db: Session, card_ids: list[int]) -> set[int]:
@@ -1395,6 +1428,44 @@ def _cards_with_resolvable_email(db: Session, card_ids: list[int]) -> set[int]:
         .all()
     )
     return {cid for (cid,) in rows}
+
+
+def _dnc_emails_for_cards(db: Session, card_ids: list[int]) -> set[str]:
+    """Return the lowercased email addresses (from VendorContact) that will be DNC-
+    skipped by send_batch_rfq for the given vendor card ids.
+
+    Mirrors the send-time DNC check in email_service.send_batch_rfq (line ~181):
+    join VendorContact → SiteContact by func.lower(email), filtered on
+    SiteContact.do_not_contact.is_(True). Uses func.lower on BOTH sides so the
+    advisory set is consistent with the case-insensitive send-time check.
+
+    Returns a set of lowercased emails — the caller compares contact.email.lower()
+    against this set. Advisory only; the authoritative skip stays in send_batch_rfq
+    (TOCTOU guard — a SiteContact can be flagged after the modal opens).
+
+    Called by: sightings_vendor_modal, sightings_preview_inquiry.
+    """
+    if not card_ids:
+        return set()
+
+    from ..models.crm import SiteContact
+
+    rows = (
+        db.query(VendorContact.email)
+        .join(
+            SiteContact,
+            sqlfunc.lower(VendorContact.email) == sqlfunc.lower(SiteContact.email),
+        )
+        .filter(
+            VendorContact.vendor_card_id.in_(card_ids),
+            VendorContact.email.isnot(None),
+            VendorContact.email != "",
+            SiteContact.do_not_contact.is_(True),
+        )
+        .distinct()
+        .all()
+    )
+    return {email.lower() for (email,) in rows}
 
 
 def _coverage_ranked_vendor_rows(db: Session, req_id_list: list[int], excluded: set[str]) -> list[RankedVendor]:
@@ -1444,13 +1515,15 @@ def _coverage_ranked_vendor_rows(db: Session, req_id_list: list[int], excluded: 
                 continue  # un-normalizable cardless name — nothing to suggest
         g = groups.get(key)
         if g is None:
-            g = {"card": None, "req_ids": set(), "scores": [], "raw_names": []}
+            g = {"card": None, "req_ids": set(), "scores": [], "raw_names": [], "lead_times": []}
             groups[key] = g
         g["req_ids"].add(vss.requirement_id)
         if vss.score is not None:
             g["scores"].append(vss.score)
         if vss.vendor_name:
             g["raw_names"].append(vss.vendor_name)
+        if vss.best_lead_time_days is not None:
+            g["lead_times"].append(vss.best_lead_time_days)
         if g["card"] is None and card is not None:
             g["card"] = card
 
@@ -1474,6 +1547,7 @@ def _coverage_ranked_vendor_rows(db: Session, req_id_list: list[int], excluded: 
         dst["req_ids"].update(src["req_ids"])
         dst["scores"].extend(src["scores"])
         dst["raw_names"].extend(src["raw_names"])
+        dst["lead_times"].extend(src["lead_times"])
 
     # has_contact: one batched VendorContact lookup over all representative card ids.
     contactable_card_ids = _cards_with_resolvable_email(db, [g["card"].id for g in groups.values() if g["card"]])
@@ -1495,12 +1569,16 @@ def _coverage_ranked_vendor_rows(db: Session, req_id_list: list[int], excluded: 
         scores = g["scores"]
         avg_score = (sum(scores) / len(scores)) if scores else None
         has_contact = card is not None and card.id in contactable_card_ids
+        lead_times = g["lead_times"]
+        lead_time_days = min(lead_times) if lead_times else None
         rv = RankedVendor(
             card=card,
             vendor_name=display,
             covered_count=covered,
             avg_score=avg_score,
             has_contact=has_contact,
+            lead_time_days=lead_time_days,
+            vendor_score=(card.vendor_score if card is not None else None),
         )
         engagement = card.engagement_score if (card is not None and card.engagement_score is not None) else None
         # Stable, deterministic tiebreak (F-L1): carded ties keep NUMERIC card.id order
@@ -1546,6 +1624,7 @@ def _find_affinity_in_thread(mpn: str) -> list[dict]:
 async def sightings_vendor_modal(
     request: Request,
     requirement_ids: str = "",
+    preselect: str = "",
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
 ):
@@ -1591,6 +1670,8 @@ async def sightings_vendor_modal(
                     has_contact=r.has_contact,
                     response_rate=(r.card.response_rate if r.card is not None else None),
                     engagement_score=(r.card.engagement_score if r.card is not None else None),
+                    vendor_score=r.vendor_score,
+                    lead_time_days=r.lead_time_days,
                 )
             )
             coverage[key] = CoverageEntry(
@@ -1626,12 +1707,164 @@ async def sightings_vendor_modal(
             for cov_key, mpns in mpns_by_key.items():
                 coverage[cov_key]["mpns"] = ", ".join(sorted(mpns))
 
+    # ── Preselect union: append any named vendor not already in coverage ────────
+    # Split on comma, normalize each name, skip blanks, dedup against the
+    # already-suggested set (keyed by normalized_name to match the Alpine selection
+    # key). `has_contact` is resolved via the same _cards_with_resolvable_email
+    # helper used for coverage rows — so the Alpine seed stays consistent.
+    if preselect.strip():
+        existing_norms = {sv.normalized_name for sv in suggested_vendors}
+        preselect_names = [n.strip() for n in preselect.split(",") if n.strip()]
+        for raw_name in preselect_names:
+            norm = normalize_vendor_name(raw_name)
+            if not norm or norm in existing_norms:
+                continue
+            # Resolve against VendorCard by normalized_name
+            card = db.query(VendorCard).filter(VendorCard.normalized_name == norm).first()
+            if card is not None:
+                contactable = _cards_with_resolvable_email(db, [card.id])
+                has_contact = card.id in contactable
+                sv = SuggestedVendor(
+                    id=card.id,
+                    card=card,
+                    normalized_name=card.normalized_name,
+                    display_name=card.display_name or raw_name,
+                    vendor_name=card.display_name or raw_name,
+                    has_contact=has_contact,
+                    response_rate=card.response_rate,
+                    engagement_score=card.engagement_score,
+                    vendor_score=card.vendor_score,
+                    lead_time_days=None,  # preselect-only: no VSS context to compute min
+                )
+            else:
+                # No matching card — cardless synthetic row, no contact resolvable
+                sv = SuggestedVendor(
+                    id=norm,
+                    card=None,
+                    normalized_name=norm,
+                    display_name=raw_name,
+                    vendor_name=raw_name,
+                    has_contact=False,
+                    response_rate=None,
+                    engagement_score=None,
+                    vendor_score=None,
+                    lead_time_days=None,
+                )
+            suggested_vendors.append(sv)
+            existing_norms.add(norm)
+
+    # Compute how many distinct requisitions the basket spans (for the "Spanning N
+    # requisitions" note in the Parts panel). Only shown when >1 to keep the modal quiet
+    # for the single-requirement case.
+    requisition_count = len({r.requisition_id for r in requirements})
+
+    # Advisory DNC computation — determine which suggested vendors have a DNC-flagged
+    # contact email. Two steps:
+    # 1. Collect the card ids of all carded suggested vendors.
+    # 2. _dnc_emails_for_cards returns the lowercased DNC emails for those cards.
+    # 3. Fetch each carded vendor's best contact (same ordering as the send path), then
+    #    cross-reference: if the resolved email is in dnc_emails → vendor is advisory DNC.
+    # Result is `dnc_norms`: set of normalized_names passed to the template so it can
+    # disable the checkbox and render the rose chip WITHOUT lazy-loading relationships.
+    carded_ids = [sv.card.id for sv in suggested_vendors if sv.card is not None]
+    dnc_emails: set[str] = _dnc_emails_for_cards(db, carded_ids) if carded_ids else set()
+
+    dnc_norms: set[str] = set()
+    if dnc_emails and carded_ids:
+        # Best-contact-per-card (same ordering as send path) to determine which vendor's
+        # resolved email is in dnc_emails.
+        best_contacts = _best_contacts_by_card(db, carded_ids)
+        card_best_contact: dict[int, VendorContact] = {c.vendor_card_id: c for c in best_contacts}
+        for sv in suggested_vendors:
+            if sv.card is not None:
+                contact = card_best_contact.get(sv.card.id)
+                if contact and contact.email and contact.email.lower() in dnc_emails:
+                    dnc_norms.add(sv.normalized_name)
+
+    # Contactable, non-DNC normalized names for the Alpine selectedVendors seed.
+    # Passed explicitly so the template doesn't need Jinja2 set-member filtering.
+    contactable_non_dnc = [
+        sv.normalized_name for sv in suggested_vendors if sv.has_contact and sv.normalized_name not in dnc_norms
+    ]
+
+    # Resolve available datasheets for the basket's material cards — passed to the
+    # compose step as an opt-in checkbox list ("Attachments (N available)").
+    # Collapsed in the template when >3. No bytes fetched here; send-time only.
+    available_datasheets: list[dict] = []
+    if requirements:
+        mc_ids = [r.material_card_id for r in requirements if r.material_card_id]
+        if mc_ids:
+            ds_rows = (
+                db.query(MaterialCardDatasheet)
+                .filter(
+                    MaterialCardDatasheet.material_card_id.in_(mc_ids),
+                    MaterialCardDatasheet.library_item_id.isnot(None),
+                    MaterialCardDatasheet.library_drive_id.isnot(None),
+                )
+                .all()
+            )
+            available_datasheets = [
+                {"id": ds.id, "file_name": ds.file_name, "size_bytes": ds.size_bytes} for ds in ds_rows
+            ]
+
+    # Build the tagged subject shown read-only in the compose step — LOCKSTEP with the
+    # preview/send path (sightings_preview_inquiry / send_batch_rfq): one [ref:{id}] token
+    # per involved requisition, ascending requisition id, prefixed by the part count. So
+    # the buyer sees exactly what will be sent before previewing, even after a modal refresh.
+    requisition_ids_sorted = sorted({r.requisition_id for r in requirements}) if requirements else []
+    num_parts = len(parts)
+    avail_token_display = " ".join(f"[ref:{rid}]" for rid in requisition_ids_sorted)
+    raw_subject_display = f"RFQ — {num_parts} part{'s' if num_parts != 1 else ''}"
+    compose_subject = f"{raw_subject_display} {avail_token_display}" if avail_token_display else raw_subject_display
+
+    # Commodity-segmented engagement signal — read-only, NO schema change, NO ranking
+    # change. ONE bounded query over ActivityLog → Requirement → MaterialCard counts
+    # this vendor's outbound/inbound activity FILTERED to the current commodity, so the
+    # compose chip can say "have they replied to us about THIS kind of part?".
+    # Only runs when (a) all selected requirements share one commodity and (b) at least
+    # one suggested vendor is carded — otherwise it is skipped entirely (empty dicts).
+    commodity_signals: dict[int, dict] = {}  # card_id → {"outbound": N, "inbound": N}
+    current_commodity: str | None = None
+    if requirements:
+        cats = {r.material_card.category for r in requirements if r.material_card_id and r.material_card}
+        current_commodity = cats.pop() if len(cats) == 1 else None  # only when all reqs share one commodity
+
+    carded_signal_ids = [sv.id for sv in suggested_vendors if sv.card is not None]
+    if carded_signal_ids and current_commodity:
+        signal_rows = (
+            db.query(
+                ActivityLog.vendor_card_id,
+                ActivityLog.direction,
+                sqlfunc.count().label("cnt"),
+            )
+            .join(Requirement, ActivityLog.requirement_id == Requirement.id)
+            .join(MaterialCard, Requirement.material_card_id == MaterialCard.id)
+            .filter(
+                ActivityLog.vendor_card_id.in_(carded_signal_ids),
+                ActivityLog.direction.in_(["outbound", "inbound"]),
+                ActivityLog.requirement_id.isnot(None),
+                MaterialCard.category == current_commodity,
+            )
+            .group_by(ActivityLog.vendor_card_id, ActivityLog.direction)
+            .all()
+        )
+        for card_id, direction, cnt in signal_rows:
+            sig = commodity_signals.setdefault(card_id, {"outbound": 0, "inbound": 0})
+            sig[direction] = cnt
+
     ctx = {
         "request": request,
         "suggested_vendors": suggested_vendors,
         "coverage": coverage,
         "requirement_ids": req_id_list,
         "parts": parts,
+        "requisition_count": requisition_count,
+        "dnc_norms": dnc_norms,
+        "contactable_non_dnc": contactable_non_dnc,
+        "available_datasheets": available_datasheets,
+        "compose_subject": compose_subject,
+        "commodity_signals": commodity_signals,
+        "current_commodity": current_commodity,
     }
     return template_response("htmx/partials/sightings/vendor_modal.html", ctx)
 
@@ -1898,7 +2131,7 @@ def _best_contacts_by_card(db: Session, card_ids: list[int]) -> list[VendorConta
     the BEST contact per vendor.
 
     VendorContact has no is_primary flag, and a vendor can hold several contacts (an
-    rfq_manual row added inline via the composer alongside an Apollo-enriched row). An
+    rfq_manual row added inline via the composer alongside an enriched row). An
     unordered ``{c.vendor_card_id: c for c in contacts}`` lets an arbitrary (possibly
     EMPTY-email) row win, which would silently skip the vendor as "had no email". Ordering
     a usable email LAST (then verified, then higher confidence) makes the real email win.
@@ -1948,6 +2181,8 @@ async def sightings_preview_inquiry(
         raise HTTPException(status_code=400, detail="requirement_ids and vendor_names required")
 
     requirements = db.query(Requirement).filter(Requirement.id.in_(requirement_ids)).all()
+    for r in requirements:
+        require_requisition_access(db, r.requisition_id, user, label="Requirement")
 
     # Request-time re-validation against ACTIVE unavailability records (the modal
     # filter alone leaves a TOCTOU hole): excluded vendors are dropped from the
@@ -1967,7 +2202,7 @@ async def sightings_preview_inquiry(
     card_ids = [c.id for c in cards]
     # Order worst-first so the dict's last-wins keeps the BEST contact per vendor: a
     # vendor with multiple contacts (e.g. an rfq_manual row added via the composer plus
-    # an Apollo-enriched row) must not pick a NULL-email contact over one that has the
+    # an enriched row) must not pick a NULL-email contact over one that has the
     # real email — that would silently skip the vendor as "had no email".
     contacts = _best_contacts_by_card(db, card_ids)
     contact_map = {c.vendor_card_id: c for c in contacts}
@@ -1977,6 +2212,22 @@ async def sightings_preview_inquiry(
     avail_token = " ".join(f"[ref:{rid}]" for rid in requisition_ids)
     parts_list = [{"mpn": r.primary_mpn, "qty": r.target_qty} for r in requirements]
 
+    # Per-requisition grouped parts for the preview body — when the basket spans more
+    # than one requisition the preview shows a REQ-{id} subhead per group so the buyer
+    # can see which parts belong to which requisition. requisition_ids is already sorted
+    # ascending (lockstep with the subject tokens). The flat parts_list stays for the
+    # single-requisition case (is_cross_req False).
+    requisition_parts_grouped: list[dict] = []
+    for rid in requisition_ids:
+        req_parts = [{"mpn": r.primary_mpn, "qty": r.target_qty} for r in requirements if r.requisition_id == rid]
+        if req_parts:
+            requisition_parts_grouped.append({"req_id": rid, "parts": req_parts})
+    is_cross_req = len(requisition_ids) > 1
+
+    # Advisory DNC set — look up which resolved emails are flagged do_not_contact.
+    # This mirrors the send-time check in email_service.py so preview ≈ what sends.
+    preview_dnc_emails: set[str] = _dnc_emails_for_cards(db, card_ids) if card_ids else set()
+
     previews = []
     for vn in vendor_names:
         card = card_map.get(normalize_vendor_name(vn))
@@ -1985,6 +2236,14 @@ async def sightings_preview_inquiry(
             contact = contact_map.get(card.id)
             if contact and contact.email:
                 vendor_email = contact.email
+
+        # Compute advisory skip reason for the badge in the preview template.
+        if not vendor_email:
+            skip_reason = SightingsSkipReason.NO_EMAIL
+        elif vendor_email.lower() in preview_dnc_emails:
+            skip_reason = SightingsSkipReason.DO_NOT_CONTACT
+        else:
+            skip_reason = SightingsSkipReason.READY
 
         raw_subject = f"RFQ — {len(requirements)} part{'s' if len(requirements) != 1 else ''}"
         tagged_subject = f"{raw_subject} {avail_token}" if avail_token else raw_subject
@@ -1997,8 +2256,32 @@ async def sightings_preview_inquiry(
                 "subject": tagged_subject,
                 "html_body": html_body,
                 "parts": parts_list,
+                "skip_reason": skip_reason,
+                "normalized_name": normalize_vendor_name(vn),
             }
         )
+
+    # Resolve selected datasheet names for the preview attachment list — apply the same
+    # ~3 MB combined cap + largest-first drop used at send time so preview == what sends.
+    datasheet_ids_raw = form.getlist("datasheet_ids")
+    selected_ds_ids = [int(x) for x in datasheet_ids_raw if x.isdigit()]
+    preview_attachments: list[dict] = []
+    if selected_ds_ids:
+        mc_ids = [r.material_card_id for r in requirements if r.material_card_id]
+        if mc_ids:
+            ds_rows = (
+                db.query(MaterialCardDatasheet)
+                .filter(
+                    MaterialCardDatasheet.id.in_(selected_ds_ids),
+                    MaterialCardDatasheet.material_card_id.in_(mc_ids),
+                )
+                .all()
+            )
+            # Build (id, file_name, size_bytes) tuples — use size_bytes when available,
+            # fall back to 0 so un-sized datasheets are always kept (conservative).
+            names_with_sizes = [(ds.id, ds.file_name, ds.size_bytes or 0) for ds in ds_rows]
+            kept, _dropped = trim_datasheet_names_to_cap(names_with_sizes)
+            preview_attachments = [{"id": ds_id, "file_name": fname} for ds_id, fname in kept]
 
     ctx = {
         "request": request,
@@ -2007,6 +2290,9 @@ async def sightings_preview_inquiry(
         "vendor_names": vendor_names,
         "email_body": email_body,
         "unavailable_vendors": unavailable_vendors,
+        "preview_attachments": preview_attachments,
+        "requisition_parts_grouped": requisition_parts_grouped,
+        "is_cross_req": is_cross_req,
     }
     return template_response("htmx/partials/sightings/preview_inquiry.html", ctx)
 
@@ -2016,7 +2302,7 @@ async def sightings_send_inquiry(
     request: Request,
     source: Literal["user", "sse"] = Query(default="user"),
     db: Session = Depends(get_db),
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.SEND_RFQ)),
     token: str = Depends(require_fresh_token),
 ):
     """Send batch RFQ to selected vendors for selected requirements.
@@ -2040,6 +2326,12 @@ async def sightings_send_inquiry(
         # Without this guard the send would proceed with NO requisition at all —
         # emails out, zero Contact tracking — instead of telling the user.
         raise HTTPException(status_code=400, detail="selected requirements no longer exist — refresh and retry")
+
+    # IDOR guard: a restricted (SALES/TRADER) user may only send RFQs for parts on
+    # requisitions they own. Enforce per distinct requisition_id in the basket — any
+    # non-owned requisition 404s the whole send rather than emailing on its behalf.
+    for _req_id in {r.requisition_id for r in requirements}:
+        require_requisition_access(db, _req_id, user)
 
     # Send-time re-validation (closes the TOCTOU the modal filter alone leaves open):
     # vendors with an ACTIVE unavailability record on the selected parts are dropped
@@ -2084,6 +2376,34 @@ async def sightings_send_inquiry(
             }
         )
 
+    # Collect datasheet attachments in their own guard: a fetch error DEGRADES to
+    # send-without-attachments (never a 500). The buyer opts in per send via
+    # datasheet_ids posted from the compose form.
+    attachments = None
+    dropped_datasheet_count = 0
+    datasheet_ids_raw = form.getlist("datasheet_ids")
+    selected_ds_ids = [int(x) for x in datasheet_ids_raw if x.isdigit()]
+    if selected_ds_ids:
+        material_card_ids = [r.material_card_id for r in requirements if r.material_card_id]
+        try:
+            from ..services.rfq_attachments import collect_rfq_attachments
+
+            attachments, ds_statuses = await collect_rfq_attachments(
+                db=db,
+                material_card_ids=material_card_ids,
+                selected_ids=selected_ds_ids,
+            )
+            dropped_datasheet_count = sum(1 for s in ds_statuses if s["status"] != RfqAttachmentStatus.ATTACHED)
+            if dropped_datasheet_count:
+                logger.warning(
+                    "RFQ datasheet attachment: {} datasheet(s) dropped (oversized)",
+                    dropped_datasheet_count,
+                )
+        except Exception:
+            logger.warning("RFQ datasheet attachment collection failed — sending without attachments", exc_info=True)
+            attachments = None
+            dropped_datasheet_count = len(selected_ds_ids)
+
     sent_count = 0
     progressed_count = 0
     failed_vendors: list[str] = []
@@ -2098,6 +2418,7 @@ async def sightings_send_inquiry(
                 user_id=user.id,
                 vendor_groups=vendor_groups,
                 requisition_parts_map=requisition_parts_map,
+                attachments=attachments,
             )
         else:
             results = []  # every requested vendor was dropped by the unavailability re-check
@@ -2172,6 +2493,7 @@ async def sightings_send_inquiry(
     resp.headers[RFQ_TOTAL_HEADER] = str(total)
     resp.headers[RFQ_SKIPPED_HEADER] = str(len(no_email_vendors))
     resp.headers[RFQ_UNAVAILABLE_HEADER] = str(len(unavailable_vendors))
+    resp.headers[RFQ_DATASHEETS_DROPPED_HEADER] = str(dropped_datasheet_count)
     return resp
 
 
@@ -2380,6 +2702,7 @@ async def sightings_create_offer(
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
         raise HTTPException(404, "Requirement not found")
+    require_requisition_access(db, requirement.requisition_id, user)
 
     # Build (and structurally validate) the payload FIRST so a bad numeric/date is
     # reported as a 422 (not masked by the essentials gate below or crashed as a 500).
@@ -2487,7 +2810,7 @@ async def sightings_review_offer(
     offer_id: int,
     action: str = Form(...),
     db: Session = Depends(get_db),
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.APPROVE_OFFERS)),
 ):
     """Approve or reject a pending_review offer, then re-render the offers panel."""
     from ..routers.crm.offers import approve_offer, reject_offer
@@ -2495,6 +2818,7 @@ async def sightings_review_offer(
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
         raise HTTPException(404, "Requirement not found")
+    require_requisition_access(db, requirement.requisition_id, user)
     # Scope the offer to the path requirement (IDOR guard — prevents a guessed offer_id
     # from a different requirement from being approved/rejected).
     offer = db.get(Offer, offer_id)
@@ -2514,7 +2838,7 @@ async def sightings_reconfirm_offer(
     requirement_id: int,
     offer_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.APPROVE_OFFERS)),
 ):
     """Reconfirm an offer, then re-render the offers panel."""
     from ..routers.crm.offers import reconfirm_offer
@@ -2522,6 +2846,7 @@ async def sightings_reconfirm_offer(
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
         raise HTTPException(404, "Requirement not found")
+    require_requisition_access(db, requirement.requisition_id, user)
     # Scope the offer to the path requirement (IDOR guard).
     offer = db.get(Offer, offer_id)
     if offer is None or offer.requirement_id != requirement_id:
@@ -2545,6 +2870,7 @@ async def sightings_mark_offer_sold(
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
         raise HTTPException(404, "Requirement not found")
+    require_requisition_access(db, requirement.requisition_id, user)
     # Scope the offer to the path requirement (IDOR guard).
     offer = db.get(Offer, offer_id)
     if offer is None or offer.requirement_id != requirement_id:
@@ -2568,6 +2894,7 @@ async def sightings_delete_offer(
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
         raise HTTPException(404, "Requirement not found")
+    require_requisition_access(db, requirement.requisition_id, user)
     # Scope the offer to the path requirement (IDOR guard).
     offer = db.get(Offer, offer_id)
     if offer is None or offer.requirement_id != requirement_id:
@@ -2644,6 +2971,166 @@ async def sightings_offer_edit_form(
     return template_response("htmx/partials/sightings/offer_form_modal.html", ctx)
 
 
+def _offer_for_requirement_or_404(db: Session, requirement_id: int, offer_id: int):
+    requirement = db.get(Requirement, requirement_id)
+    offer = db.get(Offer, offer_id)
+    if not requirement or not offer or offer.requirement_id != requirement_id:
+        raise HTTPException(404, "Not found")
+    return requirement, offer
+
+
+@router.get(
+    "/v2/partials/sightings/{requirement_id}/offers/{offer_id}/qualify-ai",
+    response_class=HTMLResponse,
+)
+async def sightings_qualify_ai(
+    request: Request,
+    requirement_id: int,
+    offer_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    """Qualify-with-AI modal: parse the linked vendor email, pre-fill the offer form,
+    and compute the ask-the-vendor gap checklist. Read-only; nothing is sent or saved."""
+    from ..models.offers import VendorResponse
+    from ..services.offer_qualification import compute_qual_gaps, normalize_offer_condition
+    from ..services.response_parser import extract_draft_offers, parse_vendor_response
+
+    requirement, offer = _offer_for_requirement_or_404(db, requirement_id, offer_id)
+    require_requisition_access(db, offer.requisition_id, user, owner_id=offer.entered_by_id, label="Offer")
+
+    vr = db.get(VendorResponse, offer.vendor_response_id) if offer.vendor_response_id else None
+    if not vr:
+        raise HTTPException(404, "No linked vendor email for this offer")
+
+    def _json_safe(v: object) -> object:
+        if v is None:
+            return ""
+        if isinstance(v, Decimal):
+            return str(v)
+        if isinstance(v, (date, datetime)):
+            return v.isoformat()
+        return v
+
+    fields = [
+        "vendor_name",
+        "mpn",
+        "manufacturer",
+        "qty_available",
+        "unit_price",
+        "lead_time",
+        "date_code",
+        "condition",
+        "packaging",
+        "firmware",
+        "hardware_code",
+        "moq",
+        "spq",
+        "warranty",
+        "country_of_origin",
+        "notes",
+    ]
+    prefill = {f: _json_safe(getattr(offer, f, None)) for f in fields}
+    _q = offer.qualification or {}
+    for _qk in (
+        "usage",
+        "refurbished_by",
+        "refurb_process",
+        "cert_doc",
+        "part_condition",
+        "provenance_story",
+        "terms",
+        "lead_time_reason",
+    ):
+        prefill[_qk] = _json_safe(_q.get(_qk))
+
+    rfq_context = {"mpn": requirement.primary_mpn, "qty": requirement.target_qty}
+    try:
+        parsed = await parse_vendor_response(vr.body or "", vr.subject or "", vr.vendor_name or "", rfq_context)
+    except Exception as exc:  # parse must never break the modal
+        logger.warning("qualify-ai parse failed for offer {}: {}", offer_id, exc)
+        parsed = None
+
+    confidence = None
+    ai_extract: dict = {}
+    if parsed:
+        confidence = parsed.get("confidence")
+        drafts = extract_draft_offers(parsed, vr.vendor_name or "")
+        if drafts:
+            ai_extract = next(
+                (d for d in drafts if (d.get("mpn") or "").lower() == (offer.mpn or "").lower()),
+                drafts[0],
+            )
+    # Overlay AI values onto EMPTY offer fields only — never clobber saved values.
+    for f in ("manufacturer", "qty_available", "unit_price", "lead_time", "date_code", "condition", "packaging", "moq"):
+        if prefill.get(f) in (None, "") and ai_extract.get(f) not in (None, ""):
+            prefill[f] = _json_safe(ai_extract.get(f))
+
+    condition = normalize_offer_condition(prefill.get("condition")) or prefill.get("condition")
+    gap_items = compute_qual_gaps(prefill, condition)
+
+    ctx = {
+        "request": request,
+        "requirement": requirement,
+        "offer": offer,
+        "prefill": prefill,
+        "gap_items": gap_items,
+        "confidence": confidence,
+        "vr": vr,
+    }
+    return template_response("htmx/partials/sightings/qual_request_modal.html", ctx)
+
+
+@router.post(
+    "/v2/partials/sightings/{requirement_id}/offers/{offer_id}/qualify-ai/draft-request",
+    response_class=HTMLResponse,
+)
+async def sightings_qualify_ai_draft(
+    request: Request,
+    requirement_id: int,
+    offer_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    """Draft a vendor reply asking for the chosen qualification items (AI-suggested gaps
+    the user kept, plus any custom items the user added).
+
+    Renders the editable compose box; sending goes through the existing send-reply path.
+    """
+    from ..models.offers import VendorResponse
+    from ..services.email_drafting import draft_email
+
+    requirement, offer = _offer_for_requirement_or_404(db, requirement_id, offer_id)
+    require_requisition_access(db, offer.requisition_id, user, owner_id=offer.entered_by_id, label="Offer")
+
+    vr = db.get(VendorResponse, offer.vendor_response_id) if offer.vendor_response_id else None
+    if not vr:
+        raise HTTPException(404, "No linked vendor email for this offer")
+
+    form = await request.form()
+    checked = [c.strip() for c in form.getlist("checked_items") if c and c.strip()]
+    custom = [c.strip() for c in form.getlist("custom_items") if c and c.strip()]
+    items_requested = checked + custom
+
+    result = await draft_email(
+        "qual_request",
+        {"vendor_name": vr.vendor_name, "subject": vr.subject, "mpn": offer.mpn, "items_requested": items_requested},
+    )
+
+    default_subject = vr.subject or "RFQ"
+    if not default_subject.lower().startswith("re:"):
+        default_subject = f"Re: {default_subject}"
+    ctx = {
+        "request": request,
+        "req_id": offer.requisition_id,
+        "r": vr,
+        "reply_subject": (result or {}).get("subject") or default_subject,
+        "reply_body": (result or {}).get("body") or "",
+        "ai_failed": result is None,
+    }
+    return template_response("htmx/partials/requisitions/tabs/reply_compose.html", ctx)
+
+
 @router.post("/v2/partials/sightings/{requirement_id}/offers/{offer_id}", response_class=HTMLResponse)
 async def sightings_update_offer(
     request: Request,
@@ -2685,6 +3172,7 @@ async def sightings_update_offer(
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
         raise HTTPException(404, "Requirement not found")
+    require_requisition_access(db, requirement.requisition_id, user)
 
     # Load the offer FIRST and scope it to the path requirement (prevents cross-requirement
     # IDOR via a guessed offer_id; 404 if missing or owned by another requirement).
@@ -2835,6 +3323,7 @@ async def sightings_offer_request(
     # guessed offer_id); 404 if the offer is missing or belongs to another requirement.
     if offer is None or offer.requirement_id != requirement_id:
         raise HTTPException(status_code=404, detail={"error": "offer not found for this requirement"})
+    require_requisition_access(db, offer.requisition_id, user, owner_id=offer.entered_by_id, label="Offer")
     draft = request_template(kind, offer.mpn)
     q = dict(offer.qualification or {})
     reqs = list(q.get("requests") or [])
@@ -2892,6 +3381,7 @@ async def sightings_offer_request_send(
     # guessed offer_id); 404 if the offer is missing or belongs to another requirement.
     if offer is None or offer.requirement_id != requirement_id:
         raise HTTPException(status_code=404, detail={"error": "offer not found for this requirement"})
+    require_requisition_access(db, offer.requisition_id, user, owner_id=offer.entered_by_id, label="Offer")
 
     q = dict(offer.qualification or {})
     reqs = list(q.get("requests") or [])

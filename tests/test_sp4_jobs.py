@@ -134,3 +134,20 @@ def test_both_sweep_jobs_register_when_both_flags_true(scheduler_db):
     ids = [j.id for j in scheduler.get_jobs()]
     assert "account_sweep" in ids
     assert "auto_surface_reactivation" in ids
+
+
+# ── Settings-derived job name ────────────────────────────────────────────────
+
+
+def test_account_sweep_job_name_reflects_inactivity_setting(scheduler_db):
+    """account_sweep job name is derived from account_sweep_inactivity_days, not
+    hardcoded to 90 — so a configured threshold shows the real number."""
+    from app.config import Settings
+    from app.jobs.prospecting_jobs import register_sweep_jobs
+
+    s = Settings(account_sweep_enabled=True, account_sweep_inactivity_days=45)
+    register_sweep_jobs(scheduler, s)
+    job = scheduler.get_job("account_sweep")
+    assert job is not None
+    assert str(s.account_sweep_inactivity_days) in job.name
+    assert job.name == "45-day account hardline sweep"

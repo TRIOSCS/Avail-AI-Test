@@ -1,5 +1,5 @@
 # Stage 1: Build frontend with Vite
-FROM node:26-alpine@sha256:3ad34ca6292aec4a91d8ddeb9229e29d9c2f689efd0dd242860889ac71842eba AS builder
+FROM node:26-alpine@sha256:a2dc166a387cc6ca1e62d0c8e265e49ca985d6e60abc9fe6e6c3d6ce8e63f606 AS builder
 WORKDIR /build
 COPY package.json package-lock.json ./
 RUN npm ci
@@ -68,7 +68,12 @@ RUN chmod +x docker-entrypoint.sh enrichment-entrypoint.sh
 RUN useradd -r -u 1000 -m appuser \
     && chown -R appuser:appuser /app \
     && mkdir -p /var/log/avail && chown appuser:appuser /var/log/avail \
-    && mkdir -p /app/fix_queue && chown appuser:appuser /app/fix_queue
+    && mkdir -p /app/fix_queue && chown appuser:appuser /app/fix_queue \
+    && mkdir -p /app/uploads/tickets && chown -R appuser:appuser /app/uploads
+# NOTE: /app/uploads is a named volume (see docker-compose.yml). Docker seeds a
+# *fresh* volume from this image dir, so creating it appuser-owned here makes new
+# volumes writable by the runtime user (trouble-ticket screenshots). An EXISTING
+# root-owned volume must be chowned once: docker exec -u 0 <app> chown -R appuser:appuser /app/uploads
 
 ENTRYPOINT ["tini", "--", "./docker-entrypoint.sh"]
 # No --forwarded-allow-ips here: uvicorn safe-defaults to 127.0.0.1 when the

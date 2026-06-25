@@ -51,12 +51,12 @@
     {% for li in line_items %}
       <tr>
         <td>{{ loop.index }}</td>
-        <td>{{ li.get('mpn', '—') | e }}</td>
-        <td>{{ li.get('manufacturer', '—') | e }}</td>
-        <td>{{ '{:,}'.format(li.get('qty', 0)) }}</td>
-        <td>{{ '${:,.4f}'.format(li.get('cost_each', 0)|float) }}</td>
-        <td>{{ '${:,.4f}'.format(li.get('sell_each', 0)|float) }}</td>
-        <td>{{ '{:.1f}%'.format(li.get('margin_pct', 0)|float) }}</td>
+        <td>{{ (li.get('part_number') or '—') | e }}</td>
+        <td>{{ (li.get('manufacturer') or '—') | e }}</td>
+        <td>{{ '{:,}'.format(li.get('quantity', 0)) }}</td>
+        <td>{{ '${:,.4f}'.format(li.get('cost', 0)|float) }}</td>
+        <td>{{ '${:,.4f}'.format(li.get('sell', 0)|float) }}</td>
+        <td>{{ '{:.1f}%'.format(li.get('margin', 0)|float) }}</td>
       </tr>
     {% endfor %}
     </tbody>

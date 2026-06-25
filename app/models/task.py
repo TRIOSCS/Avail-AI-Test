@@ -1,16 +1,20 @@
-"""RequisitionTask — pipeline-style task board per requisition.
+"""General CRM task — scoped to a requisition, company, contact, or vendor.
+
+Table stays named requisition_tasks for backwards compatibility. At least one
+parent FK must be set (enforced by CHECK ck_task_has_parent).
 
 Tracks sourcing, sales, and general tasks through pipeline stages.
 Auto-generated from system events (offers, RFQs, quotes) and manually
 by buyers. AI priority scoring and risk alerts for task management.
 
 Called by: services/task_service.py, routers/task.py
-Depends on: models/base.py, models/auth.py, models/sourcing.py
+Depends on: models/base.py, models/auth.py, models/sourcing.py, models/vendors.py
 """
 
 from datetime import datetime, timezone
 
 from sqlalchemy import (
+    CheckConstraint,
     Column,
     Float,
     ForeignKey,
@@ -29,8 +33,12 @@ class RequisitionTask(Base):
     __tablename__ = "requisition_tasks"
 
     id = Column(Integer, primary_key=True, index=True)
-    requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False)
+    requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=True)
     requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="SET NULL"), nullable=True)
+    company_id = Column(Integer, ForeignKey("companies.id", ondelete="CASCADE"), nullable=True)
+    site_contact_id = Column(Integer, ForeignKey("site_contacts.id", ondelete="CASCADE"), nullable=True)
+    vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id", ondelete="CASCADE"), nullable=True)
+    vendor_contact_id = Column(Integer, ForeignKey("vendor_contacts.id", ondelete="CASCADE"), nullable=True)
     title = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
 
@@ -71,6 +79,10 @@ class RequisitionTask(Base):
     requirement = relationship("Requirement", foreign_keys=[requirement_id])
     assignee = relationship("User", foreign_keys=[assigned_to_id])
     creator = relationship("User", foreign_keys=[created_by])
+    company = relationship("Company", foreign_keys=[company_id])
+    site_contact = relationship("SiteContact", foreign_keys=[site_contact_id])
+    vendor_card = relationship("VendorCard", foreign_keys=[vendor_card_id])
+    vendor_contact = relationship("VendorContact", foreign_keys=[vendor_contact_id])
 
     __table_args__ = (
         Index("ix_rt_req_status", "requisition_id", "status"),
@@ -78,4 +90,14 @@ class RequisitionTask(Base):
         Index("ix_rt_status_due", "status", "due_at"),
         Index("ix_rt_creator_status", "created_by", "status"),
         Index("ix_rt_requirement", "requirement_id"),
+        Index("ix_rt_company_status", "company_id", "status"),
+        Index("ix_rt_contact_status", "site_contact_id", "status"),
+        Index("ix_rt_vendor_card_status", "vendor_card_id", "status"),
+        Index("ix_rt_vendor_contact_status", "vendor_contact_id", "status"),
+        CheckConstraint(
+            "requisition_id IS NOT NULL OR company_id IS NOT NULL"
+            " OR site_contact_id IS NOT NULL"
+            " OR vendor_card_id IS NOT NULL OR vendor_contact_id IS NOT NULL",
+            name="ck_task_has_parent",
+        ),
     )

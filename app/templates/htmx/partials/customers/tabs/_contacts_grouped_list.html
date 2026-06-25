@@ -1,0 +1,107 @@
+{# _contacts_grouped_list.html — Contacts grouped under light per-site section
+   headers, re-renderable as a standalone fragment into #contacts-tab-list.
+
+   Section header = site name · city · per-site cadence dot · "+ add here".
+   A single-site account renders one section with minimal chrome. Each contact
+   row carries data-site-id + data-contact-search so the parent contactsView
+   (contacts_tab.html) can filter client-side without a round-trip.
+
+   Receives: company, contact_rows ([{contact, site, legacy, cadence}]), now_utc.
+   Called by:
+     - {% include %} from contacts_tab.html (inside #contacts-tab-list)
+     - template_response() in endpoints that branch on HX-Target=contacts-tab-list
+   Depends on: _contact_macros.html, cadence_state Jinja global.
+
+   Cadence sort: within each site group, overdue contacts are shown first
+   (secondary sort key after is_primary/is_priority from the service).
+#}
+
+{% from 'htmx/partials/customers/_contact_macros.html' import contact_row, site_cadence_dot %}
+{# roles may be passed from parent template context or from the router ctx #}
+{% set _roles = roles if roles is defined else none %}
+
+{# ── Group rows by site (preserve first-seen order; legacy rows always have a site) ── #}
+{% set site_groups = namespace(data={}, order=[]) %}
+{% for row in contact_rows %}
+  {% set sk = row.site.id if row.site else 0 %}
+  {% if sk not in site_groups.data %}
+    {% set _ = site_groups.data.update({sk: {'site': row.site, 'rows': []}}) %}
+    {% set _ = site_groups.order.append(sk) %}
+  {% endif %}
+  {% set _ = site_groups.data[sk]['rows'].append(row) %}
+{% endfor %}
+
+{% if not contact_rows %}
+{% with
+   message='No contacts on file yet. Add your first contact to start tracking outreach.',
+   action_alpine_click='$dispatch(\'open-modal\', {url: \'/v2/partials/customers/' ~ company.id ~ '/contacts/add-form\'})',
+   action_label='+ Add contact'
+%}
+{% include 'htmx/partials/shared/empty_state.html' %}
+{% endwith %}
+{% else %}
+<div class="space-y-4">
+  {% for sk in site_groups.order %}
+    {% set group = site_groups.data[sk] %}
+    {% set grp_site = group['site'] %}
+    {% set grp_rows = group['rows'] %}
+    {# Secondary sort within group: overdue first, then the rest. #}
+    {% set overdue_rows = grp_rows | selectattr('cadence', 'eq', 'overdue') | list %}
+    {% set other_rows   = grp_rows | rejectattr('cadence', 'eq', 'overdue') | list %}
+    {% set sorted_rows  = overdue_rows + other_rows %}
+    <section data-contacts-section data-site-id="{{ grp_site.id if grp_site else 0 }}" aria-label="{{ grp_site.site_name if grp_site else 'Unknown site' }}">
+      {# ── Light site section header — name · city · cadence dot · + add here ── #}
+      <div class="flex items-center justify-between gap-2 px-1 pb-1.5 mb-1 border-b border-gray-100">
+        <div class="flex items-center gap-2 min-w-0">
+          {{ site_cadence_dot(grp_site, now_utc) }}
+          <span class="text-xs font-semibold text-gray-700 truncate">{{ grp_site.site_name if grp_site else "Unknown site" }}</span>
+          {% if grp_site and grp_site.city %}
+          <span class="text-xs text-gray-400 truncate">· {{ grp_site.city }}</span>
+          {% endif %}
+          {%- set grp_active_count = grp_rows | rejectattr('contact.is_archived', 'equalto', True) | list | length -%}
+          <span class="text-gray-300 text-[11px]">·</span>
+          <span class="text-[11px] text-gray-400 flex-shrink-0 tabular-nums">{{ grp_active_count }} contact{{ "s" if grp_active_count != 1 }}</span>
+        </div>
+        {% if grp_site %}
+        <button type="button"
+                @click="$dispatch('open-modal', {url: '/v2/partials/customers/{{ company.id }}/contacts/add-form?site_id={{ grp_site.id }}'})"
+                class="text-[11px] font-medium text-brand-500 hover:text-brand-600 flex-shrink-0 focus:outline-none focus:ring-2 focus:ring-brand-500 rounded px-1">
+          + add here
+        </button>
+        {% endif %}
+      </div>
+
+      {# Compact table. When the live filter hides every row the whole section
+         collapses (contactsView toggles `hidden`) and the parent surfaces
+         the "no matches" hint. #}
+      <div class="overflow-x-auto">
+        <table class="compact-table w-full">
+          <thead>
+            <tr>
+              <th class="text-left">Name</th>
+              <th class="text-left">Title</th>
+              <th class="text-left">Phone</th>
+              <th class="text-left">Email</th>
+              <th class="text-left">Last Contact</th>
+              <th class="w-14"></th>
+            </tr>
+          </thead>
+          {# Each contact gets its own <tbody> so contactsView JS can toggle it via
+             classList.toggle('hidden') on the data-contact-row element.
+             Multiple <tbody> per table is valid HTML5.
+             data-contact-search must be lowercase (JS does .includes(needle) on it).
+             data-site-id enables the per-site dropdown filter. #}
+          {% for row in sorted_rows %}
+            {% set _cname = (row.contact.full_name if row.contact else row.site.contact_name) or '' %}
+            <tbody data-contact-row
+                   data-site-id="{{ grp_site.id if grp_site else 0 }}"
+                   data-contact-search="{{ _cname | lower }}">
+              {{ contact_row(company, row.contact, row.site, row.legacy, now_utc, row.cadence if not row.legacy else 'new', _roles) }}
+            </tbody>
+          {% endfor %}
+        </table>
+      </div>
+    </section>
+  {% endfor %}
+</div>
+{% endif %}

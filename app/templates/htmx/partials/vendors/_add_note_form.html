@@ -1,0 +1,21 @@
+{# _add_note_form.html — Add-note form on the vendor Activity tab.
+   Receives: vendor_id (int)
+   Called by: GET /v2/partials/vendors/{vendor_id}/activity/add-note-form
+   Depends on: POST /v2/partials/vendors/{vendor_id}/activity/add-note
+#}
+<div class="bg-white rounded-lg border border-gray-200 p-4 mt-3" id="vendor-add-note-form-{{ vendor_id }}">
+  <h3 class="text-sm font-semibold text-gray-700 mb-2">Add note</h3>
+  <form hx-post="/v2/partials/vendors/{{ vendor_id }}/activity/add-note"
+        hx-target="#vendor-activity-tab-{{ vendor_id }}"
+        hx-swap="outerHTML"
+        class="space-y-2">
+    <textarea name="notes" rows="3" required
+              placeholder="Write a note…"
+              class="w-full px-3 py-2 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-brand-500"
+              aria-label="Note text"></textarea>
+    <div class="flex gap-2">
+      <button type="submit"
+              class="btn btn-primary btn-sm">Save note</button>
+    </div>
+  </form>
+</div>

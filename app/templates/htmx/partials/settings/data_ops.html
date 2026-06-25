@@ -1,6 +1,9 @@
 {# data_ops.html — Admin data operations: vendor and company dedup/merge.
-   Receives: vendor_dupes (list[dict]), company_dupes (list[dict]).
-   Called by: htmx_views.py settings_data_ops endpoint.
+   Receives: vendor_dupes (list[dict]), company_dupes (list[dict]),
+   vendor_scan_failed (bool), company_scan_failed (bool).
+   Called by: htmx_views.py _render_data_ops (settings_data_ops_tab + the two merge
+   endpoints — a successful merge re-renders this whole partial into #settings-content
+   so stale pairs referencing the merged entity drop without a manual refresh).
    Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}
 {% from "htmx/partials/settings/_macros.html" import merge_button -%}
@@ -37,25 +40,39 @@
       </button>
     </div>
 
-    {% if vendor_dupes %}
+    {% if vendor_scan_failed %}
+    {# Distinct from the clean empty state — a crashed scan must NOT read as "no dupes". #}
+    <div class="px-4 py-8 text-center">
+      <p class="text-sm text-rose-600">Couldn't check for duplicate vendors right now &mdash; try Refresh.</p>
+    </div>
+    {% elif vendor_dupes %}
     <div class="divide-y divide-gray-100">
+      {# find_vendor_dedup_candidates returns NESTED pairs: pair.vendor_a/vendor_b
+         each {id, name, sightings}, plus pair.score. The suggested keeper is the side
+         with more sightings (more evidence → richer card); ties keep vendor_a. Both
+         buttons wire to the admin vendor-merge endpoint, which re-renders this whole
+         partial into #settings-content so the merged pair drops. #}
       {% for pair in vendor_dupes %}
+      {% set keep_first = (pair.vendor_a.sightings or 0) >= (pair.vendor_b.sightings or 0) %}
+      {% set keeper = pair.vendor_a if keep_first else pair.vendor_b %}
+      {% set loser = pair.vendor_b if keep_first else pair.vendor_a %}
       <div class="px-4 py-3 flex items-center gap-4" x-data="{ merged: false }">
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-2 text-sm">
-            <span class="font-medium text-gray-900">{{ pair.name_a }}</span>
+            <span class="font-medium text-gray-900">{{ pair.vendor_a.name }}</span>
             <span class="text-gray-400">&harr;</span>
-            <span class="font-medium text-gray-900">{{ pair.name_b }}</span>
+            <span class="font-medium text-gray-900">{{ pair.vendor_b.name }}</span>
           </div>
           <p class="text-xs text-gray-600 mt-0.5">
             Score: {{ pair.score }}% match
-            &middot; {{ pair.sightings_a or 0 }} vs {{ pair.sightings_b or 0 }} sightings
+            &middot; {{ pair.vendor_a.sightings or 0 }} vs {{ pair.vendor_b.sightings or 0 }} sightings
+            &middot; suggested keep: <span class="font-medium text-gray-700">{{ keeper.name|truncate(24) }}</span>
           </p>
         </div>
         <template x-if="!merged" x-cloak>
           <div class="flex gap-2">
-            {{ merge_button('            ', '/v2/partials/admin/vendor-merge', 'closest div[x-data]', pair.id_a, pair.id_b, pair.name_a, pair.name_b) }}
-            {{ merge_button('            ', '/v2/partials/admin/vendor-merge', 'closest div[x-data]', pair.id_b, pair.id_a, pair.name_b, pair.name_a) }}
+            {{ merge_button('            ', '/v2/partials/admin/vendor-merge', '#settings-content', keeper.id, loser.id, keeper.name, loser.name, true) }}
+            {{ merge_button('            ', '/v2/partials/admin/vendor-merge', '#settings-content', loser.id, keeper.id, loser.name, keeper.name, false) }}
           </div>
         </template>
       </div>
@@ -74,18 +91,24 @@
       <h2 class="text-lg font-semibold text-gray-900">Company Duplicates</h2>
     </div>
 
-    {% if company_dupes %}
+    {% if company_scan_failed %}
+    {# Distinct from the clean empty state — a crashed scan must NOT read as "no dupes". #}
+    <div class="px-4 py-8 text-center">
+      <p class="text-sm text-rose-600">Couldn't check for duplicate companies right now &mdash; try Refresh.</p>
+    </div>
+    {% elif company_dupes %}
     <div class="divide-y divide-gray-100">
       {# find_company_dedup_candidates returns NESTED pairs: pair.company_a/company_b
          each {id, name, site_count, has_owner}, plus pair.score + pair.auto_keep_id.
          The default-direction button keeps auto_keep_id (more sites → has owner →
          strategic → older); the second button keeps the other side. Both wire to the
-         admin company-merge endpoint, swapping the row in place. #}
+         admin company-merge endpoint, which re-renders this whole partial into
+         #settings-content so the merged pair drops. #}
       {% for pair in company_dupes %}
       {% set keep_first = (pair.auto_keep_id == pair.company_a.id) %}
       {% set keeper = pair.company_a if keep_first else pair.company_b %}
       {% set loser = pair.company_b if keep_first else pair.company_a %}
-      <div class="px-4 py-3 flex items-center gap-4">
+      <div class="px-4 py-3 flex items-center gap-4" x-data="{ merged: false }">
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-2 text-sm">
             <span class="font-medium text-gray-900">{{ pair.company_a.name }}</span>
@@ -98,16 +121,18 @@
             &middot; suggested keep: <span class="font-medium text-gray-700">{{ keeper.name|truncate(24) }}</span>
           </p>
         </div>
-        <div class="flex gap-2">
-          {{ merge_button('          ', '/v2/partials/admin/company-merge', 'closest div.flex.items-center', keeper.id, loser.id, keeper.name, loser.name) }}
-          {{ merge_button('          ', '/v2/partials/admin/company-merge', 'closest div.flex.items-center', loser.id, keeper.id, loser.name, keeper.name) }}
-        </div>
+        <template x-if="!merged" x-cloak>
+          <div class="flex gap-2">
+            {{ merge_button('            ', '/v2/partials/admin/company-merge', '#settings-content', keeper.id, loser.id, keeper.name, loser.name, true) }}
+            {{ merge_button('            ', '/v2/partials/admin/company-merge', '#settings-content', loser.id, keeper.id, loser.name, keeper.name, false) }}
+          </div>
+        </template>
       </div>
       {% endfor %}
     </div>
     {% else %}
     <div class="px-4 py-8 text-center">
-      <p class="text-sm text-gray-600">No duplicate customers found at the current threshold.</p>
+      <p class="text-sm text-gray-600">No duplicate companies found at the current threshold.</p>
     </div>
     {% endif %}
   </div>

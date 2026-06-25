@@ -78,7 +78,7 @@ class EntityTag(Base):
 
     __tablename__ = "entity_tags"
     id = Column(Integer, primary_key=True)
-    entity_type = Column(String(20), nullable=False)  # vendor_card, customer_site, company
+    entity_type = Column(String(20), nullable=False)  # vendor_card, customer_site, company, site_contact
     entity_id = Column(Integer, nullable=False)
     tag_id = Column(Integer, ForeignKey("tags.id", ondelete="CASCADE"), nullable=False)
     interaction_count = Column(Float, nullable=False, default=0)

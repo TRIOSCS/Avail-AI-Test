@@ -1,0 +1,110 @@
+{#
+  resell/_lists.html — Left list partial: stage filters + search + opportunity rows.
+  Each row swaps the detail panel and pushes /v2/resell/{id}. Status pills map
+  onto EXISTING status_badge keys (open→sky, collecting→sourcing, bid_out→quoted,
+  awarded→won, draft→muted) — no new colors (spec §"Design consistency").
+  Receives: cards [{list, customer_name, coverage_filled, coverage_total,
+            offer_count, hours_until}], lens, stage, q, can_post, user.
+  Called by: resell.resell_lists.
+#}
+{% from "htmx/partials/shared/_macros.html" import status_badge, coverage_meter, time_text, filter_pill %}
+
+{# Map list statuses onto existing status_badge palette keys. #}
+{% set status_pill_map = {
+  'draft': 'draft', 'open': 'open', 'collecting': 'sourcing',
+  'bid_out': 'quoted', 'awarded': 'won', 'closed': 'completed', 'expired': 'expired'
+} %}
+
+<div class="flex flex-col h-full">
+
+  {# ── Filters + search ─────────────────────────────────────────── #}
+  <div class="px-3 py-2.5 border-b border-brand-200 bg-gray-50 flex-shrink-0 space-y-2">
+    <div class="flex flex-wrap gap-1.5">
+      {% set stages = [('', 'All'), ('open', 'Open'), ('collecting', 'Collecting'), ('bid_out', 'Bid out'), ('awarded', 'Awarded')] %}
+      {% for value, label in stages %}
+        {{ filter_pill(label, value, stage, {
+          'hx-get': '/v2/partials/resell/lists?lens=' ~ lens ~ '&stage=' ~ value,
+          'hx-target': '#resell-list-body',
+          'hx-swap': 'innerHTML'
+        }) }}
+      {% endfor %}
+    </div>
+    <input type="search" name="q" value="{{ q }}" placeholder="Search lists…"
+           aria-label="Search resell lists"
+           hx-get="/v2/partials/resell/lists?lens={{ lens }}&stage={{ stage }}"
+           hx-target="#resell-list-body"
+           hx-swap="innerHTML"
+           hx-trigger="input changed delay:300ms, search"
+           class="w-full px-3 py-1.5 text-sm border border-brand-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+  </div>
+
+  {# ── Rows ─────────────────────────────────────────────────────── #}
+  <div class="flex-1 overflow-auto">
+    {% if cards %}
+    {% for c in cards %}
+    {% set el = c.list %}
+    <a hx-get="/v2/partials/resell/{{ el.id }}"
+       hx-target="#split-right-resell"
+       hx-swap="innerHTML"
+       hx-push-url="/v2/resell/{{ el.id }}"
+       class="block px-3 py-2.5 border-b border-gray-100 cursor-pointer hover:bg-brand-50/60 transition-colors">
+      <div class="flex items-start justify-between gap-2">
+        <div class="min-w-0 flex-1">
+          <p class="text-sm font-semibold text-gray-900 truncate">{{ el.title }}</p>
+          {% if c.customer_name %}
+          <p class="text-xs text-gray-500 truncate mt-0.5">{{ c.customer_name }}</p>
+          {% else %}
+          <p class="text-xs text-gray-400 truncate mt-0.5 italic">Anonymized posting</p>
+          {% endif %}
+        </div>
+        {{ status_badge(el.status, status_map={
+          'draft': 'bg-slate-50 text-slate-500 border-slate-200',
+          'open': 'bg-sky-50 text-sky-600 border-sky-200',
+          'collecting': 'bg-amber-50 text-amber-600 border-amber-200',
+          'bid_out': 'bg-violet-50 text-violet-600 border-violet-200',
+          'awarded': 'bg-emerald-50 text-emerald-700 border-emerald-300',
+          'closed': 'bg-gray-50 text-gray-400 border-gray-200',
+          'expired': 'bg-gray-50 text-gray-400 border-gray-200'
+        }) }}
+      </div>
+      <div class="mt-1.5 flex items-center gap-3 text-xs text-gray-500">
+        <span class="inline-flex items-center gap-1.5" title="Offer coverage: {{ c.coverage_filled }} of {{ c.coverage_total }} lines have an offer">
+          {{ coverage_meter(c.coverage_filled, c.coverage_total) }}
+          <span class="tabular-nums">{{ c.coverage_filled }}/{{ c.coverage_total }}</span>
+        </span>
+        {% if c.offer_count %}
+        <span class="inline-flex items-center gap-1 text-amber-600 font-medium">
+          <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+          {{ c.offer_count }}
+        </span>
+        {% endif %}
+        {% if c.hours_until is not none %}
+        <span class="ml-auto">{{ time_text(c.hours_until) }}</span>
+        {% endif %}
+      </div>
+    </a>
+    {% endfor %}
+    {% else %}
+    <div class="p-6">
+      <div class="mx-auto max-w-xs text-center text-sm text-gray-500 py-6">
+        <svg class="mx-auto mb-3 h-10 w-10 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
+        </svg>
+        {% if lens == 'open' %}
+          No postings are open to you right now.
+        {% elif stage or q %}
+          No lists match this filter.
+        {% else %}
+          <p>You haven't posted any excess lists yet.</p>
+          {% if can_post %}
+          <button @click="$dispatch('open-modal')"
+                  hx-get="/v2/partials/resell/create-form"
+                  hx-target="#modal-content"
+                  class="mt-4 btn-primary btn-sm">Post a list</button>
+          {% endif %}
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</div>

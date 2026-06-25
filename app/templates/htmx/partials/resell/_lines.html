@@ -1,0 +1,130 @@
+{#
+  resell/_lines.html — Lines tab body (adaptive).
+  Density scales to line count (spec §"Flexible detail"):
+    • ≥2 lines → compact table (compact-cell).
+    • exactly 1 line → one .card, no table chrome.
+  Each line surfaces qty / condition / best-offer$ / offer-count (▸N → opens the
+  per-line comparison). Owner draft lists get the Paste/Upload/+Add affordance.
+  Receives: list, line_items, line_count, shape, can_see_customer, can_post, user.
+  Called by: resell.resell_lines + detail.html (default tab) + add-line/import re-render.
+#}
+{% set el = list %}
+{% set is_owner = can_see_customer %}
+{% set is_draft = el.status == 'draft' %}
+
+{# Reusable best-offer / offer-count chip → opens the per-line comparison modal. #}
+{% macro _line_offer_badge(el, item) %}
+  {% if (item.offer_count or 0) > 0 %}
+  <button hx-get="/v2/partials/resell/{{ el.id }}/lines/{{ item.id }}/offers"
+          hx-target="#modal-content"
+          @click="$dispatch('open-modal', { wide: true })"
+          class="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-amber-100 text-amber-700 hover:bg-amber-200 transition-colors whitespace-nowrap">
+    ▸ {{ item.offer_count }} offer{{ 's' if item.offer_count != 1 }}
+  </button>
+  {% else %}
+  <span class="text-xs text-gray-400">—</span>
+  {% endif %}
+{% endmacro %}
+
+<div class="space-y-4">
+
+  {# ── Easy entry (owner, draft only — lines lock on post) ──────── #}
+  {% if is_owner and is_draft %}
+  <div id="import-area" class="rounded-lg border border-dashed border-brand-200 bg-gray-50 p-3"
+       x-data="{ uploading: false }">
+    <div class="flex items-center justify-between gap-2">
+      <p class="text-xs text-gray-500">Add parts — drop a file, or add one line.</p>
+      <button @click="$dispatch('open-modal')"
+              hx-get="/v2/partials/resell/{{ el.id }}/add-line-form"
+              hx-target="#modal-content"
+              class="btn-secondary btn-sm">
+        <svg class="h-3.5 w-3.5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+        Add line
+      </button>
+    </div>
+    <form hx-post="/api/resell/{{ el.id }}/import-preview"
+          hx-encoding="multipart/form-data"
+          hx-target="#import-area"
+          hx-swap="innerHTML"
+          @htmx:before-request.camel="uploading = true"
+          @htmx:after-request.camel="uploading = false"
+          class="mt-2">
+      <label class="flex items-center justify-center gap-2 px-3 py-2 text-xs text-brand-600 bg-white border border-brand-200 rounded-lg cursor-pointer hover:bg-brand-50 transition-colors">
+        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+        <span x-show="!uploading">Upload CSV / Excel</span>
+        <span x-show="uploading" x-cloak>Processing…</span>
+        <input type="file" name="file" accept=".csv,.tsv,.xlsx,.xls" class="hidden"
+               aria-label="Upload excess inventory file"
+               @change="if ($el.files.length) $el.closest('form').requestSubmit()">
+      </label>
+    </form>
+  </div>
+  {% endif %}
+
+  {% if not line_items %}
+  <div class="mx-auto max-w-xs text-center text-sm text-gray-500 py-8">
+    <svg class="mx-auto mb-3 h-10 w-10 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
+    No line items yet.{% if is_owner and is_draft %} Upload a file or add a line above.{% endif %}
+  </div>
+
+  {% elif shape == 'single' %}
+  {# ── Single one-off → one card, no table chrome ──────────────── #}
+  {% set item = line_items[0] %}
+  <div class="card">
+    <div class="flex items-start justify-between gap-3">
+      <div class="min-w-0">
+        <p class="text-base font-semibold text-gray-900 font-mono">{{ item.part_number }}</p>
+        {% set desc = item|part_description %}
+        {% if desc %}<p class="text-sm text-gray-500 mt-0.5">{{ desc }}</p>{% endif %}
+        {% if item.manufacturer %}<p class="text-xs text-gray-400 mt-0.5">{{ item.manufacturer }}</p>{% endif %}
+      </div>
+      {{ _line_offer_badge(el, item) }}
+    </div>
+    <div class="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+      <div><span class="block text-xs text-gray-400 uppercase tracking-wide">Qty</span><span class="font-medium tabular-nums">{{ "{:,}".format(item.quantity) }}</span></div>
+      <div><span class="block text-xs text-gray-400 uppercase tracking-wide">Condition</span><span class="font-medium">{{ item.condition or '—' }}</span></div>
+      <div><span class="block text-xs text-gray-400 uppercase tracking-wide">Date code</span><span class="font-medium">{{ item.date_code or '—' }}</span></div>
+      <div>
+        <span class="block text-xs text-gray-400 uppercase tracking-wide">Best offer</span>
+        {% if item.best_offer_unit_price is not none %}
+        <span class="font-semibold text-emerald-600 tabular-nums">${{ "{:,.4f}".format(item.best_offer_unit_price|float) }}</span>
+        {% else %}<span class="text-gray-400">—</span>{% endif %}
+      </div>
+    </div>
+  </div>
+
+  {% else %}
+  {# ── Multi-line → compact table ──────────────────────────────── #}
+  <div class="rounded-lg border border-brand-200 overflow-hidden">
+    <table class="compact-table min-w-full">
+      <thead>
+        <tr>
+          <th class="text-left">Part</th>
+          <th class="text-right">Qty</th>
+          <th class="text-left">Condition</th>
+          <th class="text-right">Best offer</th>
+          <th class="text-center">Offers</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in line_items %}
+        <tr>
+          <td>
+            <span class="font-mono font-medium text-gray-900">{{ item.part_number }}</span>
+            {% if item.manufacturer %}<span class="block text-xs text-gray-400">{{ item.manufacturer }}</span>{% endif %}
+          </td>
+          <td class="text-right tabular-nums">{{ "{:,}".format(item.quantity) }}</td>
+          <td>{{ item.condition or '—' }}</td>
+          <td class="text-right tabular-nums">
+            {% if item.best_offer_unit_price is not none %}
+            <span class="font-semibold text-emerald-600">${{ "{:,.4f}".format(item.best_offer_unit_price|float) }}</span>
+            {% else %}<span class="text-gray-400">—</span>{% endif %}
+          </td>
+          <td class="text-center">{{ _line_offer_badge(el, item) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>

@@ -1,0 +1,84 @@
+{#
+  resell/_outreach.html — Outreach tracker tab body (owner-only).
+  The unified board for the trader→buyer half of Resell: one row per buyer×line
+  touch (buyer · when · by-whom · channel · status), under a one-glance summary
+  reading "offered N · M responded · K bid". Reuses the compact-table + status_badge
+  vocabulary so it reads native. Refreshed after every offer-to-buyers submit.
+  Receives: list, rows (ExcessOutreach[]), summary {offered, responded, bid}, user.
+  Called by: resell.resell_outreach_tracker + the submit re-render.
+  Depends on: shared/_macros.html.
+#}
+{% from "htmx/partials/shared/_macros.html" import status_badge %}
+{% set el = list %}
+
+<div class="space-y-4">
+
+  {# ── Glance summary + the primary action ───────────────────────── #}
+  <div class="flex items-center justify-between gap-3">
+    <p class="text-sm text-gray-600">
+      Offered to <span class="font-semibold text-gray-900">{{ summary.offered }}</span>
+      buyer{{ 's' if summary.offered != 1 }}
+      · <span class="font-medium text-gray-700">{{ summary.responded }}</span> responded
+      · <span class="font-medium text-emerald-700">{{ summary.bid }}</span> bid
+    </p>
+    <button @click="$dispatch('open-modal')"
+            hx-get="/v2/partials/resell/{{ el.id }}/offer-buyers-form"
+            hx-target="#modal-content"
+            class="btn-primary btn-sm">
+      <svg class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+      Offer to buyers
+    </button>
+  </div>
+
+  {% if not rows %}
+  {# Honest empty state — an invitation to act, not a blank table. #}
+  <div class="mx-auto max-w-sm text-center text-sm text-gray-500 py-10">
+    <svg class="mx-auto mb-3 h-10 w-10 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+    <p class="font-medium text-gray-600">This list hasn't been offered to anyone yet.</p>
+    <p class="text-xs text-gray-400 mt-1">Use "Offer to buyers" to send or log your first touch.</p>
+  </div>
+
+  {% else %}
+  {# ── Touch table ─────────────────────────────────────────────── #}
+  <div class="rounded-lg border border-brand-200 overflow-hidden">
+    <table class="compact-table min-w-full">
+      <thead>
+        <tr>
+          <th class="text-left">Buyer</th>
+          <th class="text-left">Lines</th>
+          <th class="text-left">Channel</th>
+          <th class="text-left">By</th>
+          <th class="text-left">When</th>
+          <th class="text-left">Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td>
+            <span class="font-medium text-gray-900">{{ row.target_vendor_card.display_name if row.target_vendor_card else 'Unknown buyer' }}</span>
+          </td>
+          <td class="text-gray-500">
+            {% if row.excess_line_item %}<span class="font-mono text-xs">{{ row.excess_line_item.part_number }}</span>
+            {% else %}<span class="text-xs">Whole list</span>{% endif %}
+          </td>
+          <td class="capitalize text-gray-600">{{ row.channel }}</td>
+          <td class="text-gray-500">{{ row.submitted_by_user.name if row.submitted_by_user else '—' }}</td>
+          <td class="text-gray-500 text-xs">{{ (row.sent_at or row.created_at).strftime('%b %d, %H:%M') if (row.sent_at or row.created_at) else '—' }}</td>
+          <td>
+            {{ status_badge(row.status, status_map={
+              'sent': 'bg-sky-50 text-sky-600 border-sky-200',
+              'opened': 'bg-indigo-50 text-indigo-600 border-indigo-200',
+              'responded': 'bg-amber-50 text-amber-600 border-amber-200',
+              'bid': 'bg-emerald-50 text-emerald-700 border-emerald-300',
+              'declined': 'bg-rose-50 text-rose-500 border-rose-200',
+              'no_response': 'bg-gray-50 text-gray-400 border-gray-200'
+            }) }}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>

@@ -13,12 +13,13 @@ Depends on: app/models (Company, CustomerSite, SiteContact, Quote),
 
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import and_, func, or_
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy import case as sa_case
 from sqlalchemy.orm import Session, joinedload
 
 from ..constants import RequisitionStatus
-from ..models import Company, CustomerSite, Quote, Requisition, SiteContact
+from ..dependencies import is_manager_or_admin
+from ..models import AccountCollaborator, Company, CustomerSite, Quote, Requisition, SiteContact
 from ..models.auth import User
 from ..models.tags import EntityTag
 from ..models.vendors import VendorCard
@@ -158,6 +159,24 @@ def _needs_call_filter(now: datetime):
     )
 
 
+def company_visibility_predicate(user: User):
+    """Predicate restricting Company rows to those *user* (a rep) can manage: account-
+    owner OR owner of at least one site OR named collaborator.
+
+    Single source of truth for rep-scoped account visibility — used by
+    cdm_company_query's my_only branch, cdm_overdue_count, and the global customer-
+    contacts list. Callers must themselves skip it for managers/admins
+    (is_manager_or_admin), who see everything.
+    """
+    site_company_ids = select(CustomerSite.company_id).where(CustomerSite.owner_id == user.id)
+    collab_company_ids = select(AccountCollaborator.company_id).where(AccountCollaborator.user_id == user.id)
+    return or_(
+        Company.account_owner_id == user.id,
+        Company.id.in_(site_company_ids),
+        Company.id.in_(collab_company_ids),
+    )
+
+
 def cdm_company_query(
     db: Session,
     user: User,
@@ -169,6 +188,8 @@ def cdm_company_query(
     sort: str,
     now: datetime | None = None,
     segment: int = 0,
+    disposition: str | None = None,
+    has_open_reqs: bool = False,
 ):
     """Build the filtered + sorted CDM account list query.
 
@@ -180,6 +201,13 @@ def cdm_company_query(
     drop out of the call-list everywhere, EXCEPT when the "bucket" facet is
     explicitly requested (so they stay findable + un-bucketable). The needs_call
     branch inherits its exclusion from the shared _needs_call_filter (count==list).
+
+    disposition: None/"" = default suppression behaviour (bucket hidden unless staleness="bucket");
+    "active" = only non-bucket accounts; "bucket" = only bucket accounts (overrides staleness
+    bucket-suppression so the caller can combine disposition="bucket" with any staleness band).
+
+    has_open_reqs: when True, restrict to companies that have at least one requisition whose
+    status is NOT in RequisitionStatus.TERMINAL (mirrors the open_req_count PG trigger).
     """
     query = db.query(Company).filter(Company.is_active.is_(True)).options(joinedload(Company.account_owner))
 
@@ -187,13 +215,21 @@ def cdm_company_query(
         sb = SearchBuilder(search.strip())
         query = query.filter(sb.ilike_filter(Company.name))
 
-    # Bucket suppression at the query layer (never in materialize_all_clocks).
-    # "bucket" facet reveals ONLY bucketed accounts; every other view hides them.
-    if staleness == "bucket":
+    # Disposition filter: explicit param takes full precedence over staleness-driven
+    # bucket suppression so "Active only" and "Bucket only" can compose with any
+    # staleness band. When disposition is unset, the legacy staleness-driven rules apply.
+    if disposition == "bucket":
         query = query.filter(Company.disposition == "bucket")
-    elif staleness != "needs_call":
-        # needs_call already carries _not_bucketed() via _needs_call_filter.
+    elif disposition == "active":
         query = query.filter(_not_bucketed())
+    else:
+        # Legacy bucket suppression: "bucket" staleness facet reveals only bucketed;
+        # every other view (including needs_call) hides them.
+        if staleness == "bucket":
+            query = query.filter(Company.disposition == "bucket")
+        elif staleness != "needs_call":
+            # needs_call already carries _not_bucketed() via _needs_call_filter.
+            query = query.filter(_not_bucketed())
 
     now = now or datetime.now(timezone.utc)
     overdue_cutoff = now - timedelta(days=STALENESS_OVERDUE_DAYS)
@@ -202,7 +238,15 @@ def cdm_company_query(
         query = query.filter(Company.last_activity_at < overdue_cutoff)
     elif staleness == "needs_call":
         # The "N need a call" chip — must match cdm_overdue_count exactly.
-        query = query.filter(_needs_call_filter(now))
+        # Also exclude companies where they HAVE active sites but ALL of them are
+        # marked do_not_contact (nothing to call).  Companies with no sites at all
+        # still appear — the cadence obligation lives at the company level.
+        active_site_exists, non_dnc_site_exists = _dnc_site_subqueries()
+        # Exclude only when: there IS at least one active site AND none are reachable.
+        query = query.filter(
+            _needs_call_filter(now),
+            or_(~active_site_exists, non_dnc_site_exists),
+        )
     elif staleness == "due_soon":
         query = query.filter(
             Company.last_activity_at >= overdue_cutoff,
@@ -215,8 +259,11 @@ def cdm_company_query(
 
     if account_type in CDM_ACCOUNT_TYPES:
         query = query.filter(Company.account_type == account_type)
-    if my_only:
-        query = query.filter(Company.account_owner_id == user.id)
+    if my_only and not is_manager_or_admin(user):
+        # Reps see accounts they own directly, where they own at least one site,
+        # OR where they are a named collaborator (Phase 3: helper role).
+        # Managers/admins always see everything — my_only is ignored for them.
+        query = query.filter(company_visibility_predicate(user))
     if segment:
         query = query.filter(
             db.query(EntityTag)
@@ -225,6 +272,17 @@ def cdm_company_query(
                 EntityTag.entity_id == Company.id,
                 EntityTag.tag_id == segment,
                 EntityTag.is_visible.is_(True),
+            )
+            .correlate(Company)
+            .exists()
+        )
+    if has_open_reqs:
+        # Mirrors the open_req_count PG trigger: open = NOT in TERMINAL statuses.
+        query = query.filter(
+            db.query(Requisition)
+            .filter(
+                Requisition.company_id == Company.id,
+                Requisition.status.notin_(RequisitionStatus.TERMINAL),
             )
             .correlate(Company)
             .exists()
@@ -240,22 +298,57 @@ def cdm_company_query(
     return query.order_by(CDM_SORTS.get(sort, CDM_SORTS["oldest"]))
 
 
+def _dnc_site_subqueries():
+    """Return (active_site_exists, non_dnc_site_exists) correlated EXISTS subqueries.
+
+    Shared by cdm_company_query (staleness="needs_call") and cdm_overdue_count so the
+    two apply identical DNC-site suppression and count == list is guaranteed. A company
+    with no sites at all passes the filter (the cadence obligation lives at the company
+    level, not the site level).
+    """
+    active_site_exists = (
+        select(CustomerSite.id)
+        .where(CustomerSite.company_id == Company.id, CustomerSite.is_active.is_(True))
+        .correlate(Company)
+        .exists()
+    )
+    non_dnc_site_exists = (
+        select(CustomerSite.id)
+        .where(
+            CustomerSite.company_id == Company.id,
+            CustomerSite.is_active.is_(True),
+            CustomerSite.do_not_contact.is_(False),
+        )
+        .correlate(Company)
+        .exists()
+    )
+    return active_site_exists, non_dnc_site_exists
+
+
 def cdm_overdue_count(db: Session, user: User, now: datetime | None = None) -> int:
     """Count this user's accounts needing a call (overdue or never contacted).
 
     Sales/trader only — others get 0 (no chip rendered). Uses the same
-    _needs_call_filter predicate as the chip's click-through query
-    (staleness="needs_call") so count and list never diverge.
+    _needs_call_filter predicate AND the same DNC-site filter as the chip's
+    click-through query (staleness="needs_call") so count == list at all times.
+
+    Mirrors the my_only visibility rule in cdm_company_query: rep sees accounts
+    they own (account_owner_id) OR where they own a site.
     """
     if user.role not in ("sales", "trader"):
         return 0
     now = now or datetime.now(timezone.utc)
+    active_site_exists, non_dnc_site_exists = _dnc_site_subqueries()
     return (
         db.query(func.count(Company.id))
         .filter(
             Company.is_active.is_(True),
-            Company.account_owner_id == user.id,
+            company_visibility_predicate(user),
             _needs_call_filter(now),
+            # Mirror cdm_company_query(staleness="needs_call"): exclude companies
+            # where every active site is DNC (nothing to call).  Companies with no
+            # active sites at all are kept — cadence obligation is at company level.
+            or_(~active_site_exists, non_dnc_site_exists),
         )
         .scalar()
         or 0
@@ -274,7 +367,10 @@ def cdm_list_ctx(
     limit: int,
     offset: int,
     segment: int = 0,
+    disposition: str | None = None,
+    has_open_reqs: bool = False,
     include_overdue: bool = False,
+    include_users: bool = False,
 ) -> dict:
     """Shared context for the CDM workspace shell and its account-list partial.
 
@@ -282,7 +378,12 @@ def cdm_list_ctx(
     "needs a call" chip, an extra COUNT query) AND account_types (the type
     dropdown options). The account-list refresh route re-renders neither, so
     it omits both and skips the COUNT query.
+    include_users: adds "users" — the active-user list (name-sorted) that backs
+    the bulk "Assign owner" <select>. Carried ONLY for managers/admins (the
+    bulk assign-owner action is manager/admin-only server-side); reps omit it.
     segment: when non-zero, filter companies carrying that segment tag_id.
+    disposition: None/"" = default; "active" = active only; "bucket" = bucket only.
+    has_open_reqs: when True, restrict to companies with at least one open requisition.
     """
     from .tagging import list_all_segment_tags
 
@@ -297,12 +398,26 @@ def cdm_list_ctx(
         sort=sort,
         now=now,
         segment=segment,
+        disposition=disposition,
+        has_open_reqs=has_open_reqs,
     )
     total = query.count()
     companies = query.offset(offset).limit(limit).all()
     for c in companies:
         c.staleness = staleness_tier(c.last_activity_at)
         c.cadence_state = cadence_state(c.tier, c.last_outbound_at, now)
+
+    # When a search term is provided, also surface archived (DNC) companies that match.
+    archived_search_results: list[Company] = []
+    if search.strip():
+        archived_search_results = (
+            db.query(Company)
+            .filter(Company.is_active.is_(False))
+            .filter(SearchBuilder(search.strip()).ilike_filter(Company.name))
+            .order_by(Company.name)
+            .limit(10)
+            .all()
+        )
 
     # Spotlight markers: accounts with new, unseen inbound customer comms (the owner's).
     from app.services.alerts import markers_for_tab
@@ -318,18 +433,137 @@ def cdm_list_ctx(
         "my_only": my_only,
         "sort": sort,
         "segment": segment,
+        "disposition": disposition or "",
+        "has_open_reqs": has_open_reqs,
         "total": total,
         "limit": limit,
         "offset": offset,
         "all_segment_tags": list_all_segment_tags(db),
+        "archived_search_results": archived_search_results,
     }
     if include_overdue:
         ctx["overdue_count"] = cdm_overdue_count(db, user, now=now)
         ctx["account_types"] = CDM_ACCOUNT_TYPES
+    if include_users:
+        ctx["users"] = db.query(User).filter(User.is_active.is_(True)).order_by(User.name).all()
     return ctx
 
 
-def company_contact_rows(db: Session, company_id: int, sites: list[CustomerSite] | None = None) -> list[dict]:
+# Same keys as the cadence-dot map in the customers _account_list / vendor list.
+CONTACT_CADENCE_DOTS = ("new", "on_target", "due", "overdue")
+
+
+def customer_contacts_query(
+    db: Session,
+    user: User,
+    *,
+    search: str = "",
+    company_id: int = 0,
+    contact_role: str = "",
+):
+    """Cross-company customer-contacts query, role-scoped + filtered.
+
+    Joins SiteContact → CustomerSite → Company and restricts to active rows.
+    SALES/TRADER reps see ONLY contacts in companies they can manage (the shared
+    company_visibility_predicate — account-owner OR site-owner OR collaborator);
+    MANAGER/ADMIN see all. This is the cross-tenant-PII gate for /v2/contacts.
+
+    Filters: search (name OR email), company_id, contact_role. cadence_state is a
+    derived value (not a column) so it is filtered in Python by the caller, not here.
+    Ordered newest-activity-first to surface the most recently touched contacts.
+    """
+    query = (
+        db.query(SiteContact)
+        .join(CustomerSite, SiteContact.customer_site_id == CustomerSite.id)
+        .join(Company, CustomerSite.company_id == Company.id)
+        .filter(
+            SiteContact.is_active.is_(True),
+            CustomerSite.is_active.is_(True),
+            Company.is_active.is_(True),
+        )
+        .options(joinedload(SiteContact.customer_site).joinedload(CustomerSite.company))
+    )
+    if not is_manager_or_admin(user):
+        query = query.filter(company_visibility_predicate(user))
+    if search.strip():
+        sb = SearchBuilder(search.strip())
+        query = query.filter(or_(sb.ilike_filter(SiteContact.full_name), sb.ilike_filter(SiteContact.email)))
+    if company_id:
+        query = query.filter(Company.id == company_id)
+    if contact_role:
+        query = query.filter(SiteContact.contact_role == contact_role)
+    return query.order_by(SiteContact.last_activity_at.desc().nullslast(), SiteContact.id.desc())
+
+
+def customer_contacts_list_ctx(
+    db: Session,
+    user: User,
+    *,
+    search: str = "",
+    company_id: int = 0,
+    contact_role: str = "",
+    cadence_state: str = "",
+    limit: int = 50,
+    offset: int = 0,
+) -> dict:
+    """Template context for the global customer-contacts list (/v2/contacts).
+
+    Applies the role-scoped query, derives each contact's cadence_state, then
+    (optionally) filters on it in Python — cadence_state is computed, not stored. The
+    company dropdown is built from the same visibility scope so a rep can only filter
+    within accounts they can see.
+    """
+    now = datetime.now(timezone.utc)
+    base = customer_contacts_query(db, user, search=search, company_id=company_id, contact_role=contact_role)
+
+    if cadence_state in CONTACT_CADENCE_DOTS:
+        # cadence_state is derived → fetch the filtered set, compute, then slice.
+        rows = base.all()
+        for c in rows:
+            c.cadence_state = cadence_state_of(c, now)
+        rows = [c for c in rows if c.cadence_state == cadence_state]
+        total = len(rows)
+        contacts = rows[offset : offset + limit]
+    else:
+        total = base.count()
+        contacts = base.offset(offset).limit(limit).all()
+        for c in contacts:
+            c.cadence_state = cadence_state_of(c, now)
+
+    # Company filter options: distinct companies within the viewer's scope.
+    company_q = (
+        db.query(Company.id, Company.name)
+        .join(CustomerSite, CustomerSite.company_id == Company.id)
+        .filter(Company.is_active.is_(True), CustomerSite.is_active.is_(True))
+    )
+    if not is_manager_or_admin(user):
+        company_q = company_q.filter(company_visibility_predicate(user))
+    companies = company_q.distinct().order_by(Company.name).all()
+
+    return {
+        "contacts": contacts,
+        "companies": companies,
+        "search": search,
+        "company_id": company_id,
+        "contact_role": contact_role,
+        "cadence_state": cadence_state,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+def cadence_state_of(contact: SiteContact, now: datetime) -> str:
+    """Contact-level cadence dot — standard 30d outbound clock (tier=None)."""
+    return cadence_state(None, contact.last_outbound_at, now)
+
+
+def company_contact_rows(
+    db: Session,
+    company_id: int,
+    sites: list[CustomerSite] | None = None,
+    viewer: User | None = None,
+) -> list[dict]:
     """Active contacts for a company across its ACTIVE sites, plus legacy site-level
     contacts.
 
@@ -343,17 +577,37 @@ def company_contact_rows(db: Session, company_id: int, sites: list[CustomerSite]
     site.contact_* (contacts_tab.html branches on row.legacy and relies on this).
     For legacy rows site is always set; for contact rows site is the contact's site
     (None only if the lookup misses).
+
+    viewer (optional): When set, applies the Phase 2b site-scope rule:
+      - manager/admin → all sites
+      - account owner (company.account_owner_id == viewer.id) → all sites
+      - else → only sites where CustomerSite.owner_id == viewer.id
+    viewer=None retains legacy behaviour (no scoping).
     """
     if sites is None:
         sites = (
             db.query(CustomerSite).filter(CustomerSite.company_id == company_id, CustomerSite.is_active.is_(True)).all()
         )
+
+    if viewer is not None:
+        # Resolve account_owner_id for this company without an extra round-trip when
+        # sites is pre-loaded; fall back to a targeted scalar if not available.
+        if sites and hasattr(sites[0], "company") and sites[0].company is not None:
+            account_owner_id = sites[0].company.account_owner_id
+        else:
+            account_owner_id = db.scalar(select(Company.account_owner_id).where(Company.id == company_id))
+
+        sees_all = is_manager_or_admin(viewer) or account_owner_id == viewer.id
+        if not sees_all:
+            # Sites with no owner (owner_id=None) are accessible to all viewers.
+            # Sites with an explicit owner are restricted to that owner.
+            sites = [s for s in sites if s.owner_id is None or s.owner_id == viewer.id]
     site_map = {s.id: s for s in sites}
     contacts: list[SiteContact] = []
     if site_map:
         contacts = (
             db.query(SiteContact)
-            .filter(SiteContact.customer_site_id.in_(list(site_map)), SiteContact.is_active.is_(True))
+            .filter(SiteContact.customer_site_id.in_(list(site_map)), SiteContact.is_active.isnot(False))
             .order_by(
                 SiteContact.is_archived.asc(),
                 SiteContact.is_priority.desc(),
@@ -362,10 +616,27 @@ def company_contact_rows(db: Session, company_id: int, sites: list[CustomerSite]
             )
             .all()
         )
-    rows = [{"contact": c, "site": site_map.get(c.customer_site_id), "legacy": False} for c in contacts]
+    now_utc = datetime.now(timezone.utc)
+    rows = [
+        {
+            "contact": c,
+            "site": site_map.get(c.customer_site_id),
+            "legacy": False,
+            "cadence": cadence_state(None, c.last_outbound_at, now_utc),
+        }
+        for c in contacts
+    ]
+    # Build a set of lowercased emails already covered by real SiteContacts so that
+    # legacy site.contact_* rows with the same email are suppressed (dedup a migrated
+    # site that now has a real SiteContact for the same person).
+    real_emails: set[str] = {c.email.lower() for c in contacts if c.email}
     for s in sites:
         if s.contact_name or s.contact_email:
-            rows.append({"contact": None, "site": s, "legacy": True})
+            legacy_email = (s.contact_email or "").strip().lower()
+            if legacy_email and legacy_email in real_emails:
+                # A real SiteContact already covers this address — suppress the legacy row.
+                continue
+            rows.append({"contact": None, "site": s, "legacy": True, "cadence": "new"})
     return rows
 
 

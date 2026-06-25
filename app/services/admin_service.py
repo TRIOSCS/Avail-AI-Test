@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from loguru import logger
 from sqlalchemy import func as sqlfunc
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from ..config import APP_VERSION
@@ -147,11 +148,90 @@ def set_config_value(db: Session, key: str, value: str, admin_email: str) -> dic
     row.updated_by = admin_email
     row.updated_at = datetime.now(timezone.utc)
     db.commit()
-    # Invalidate in-memory cache so next read picks up the change
-    global _config_cache_ts
-    _config_cache_ts = 0
+    # Invalidate the in-memory cache so the next resolver read reflects this write
+    # immediately rather than serving the stale value until the 5-min TTL lapses.
+    _invalidate_config_cache()
     logger.info(f"Config {key} changed: {old_value} -> {value} by {admin_email}")
     return {"key": row.key, "value": row.value, "updated_by": row.updated_by}
+
+
+def _invalidate_config_cache() -> None:
+    """Force the next config read to reload from the DB.
+
+    Resetting the cache timestamp makes _ensure_config_cache_fresh treat the cache as
+    stale on the next access, so a freshly-written value is picked up promptly.
+    """
+    global _config_cache_ts
+    _config_cache_ts = 0
+
+
+# ── Effective-flag resolver (DB row overrides env default) ──────────────
+#
+# The System settings tab edits system_config DB rows; these resolvers make that row
+# authoritative for the 4 feature flags. The env-backed Pydantic setting is the
+# fallback default used only when the DB row is absent or unparseable. Consumers pass
+# their existing settings.<flag> value as env_default, so behaviour is unchanged until
+# an admin deliberately flips a toggle (see app/startup.py no-surprise reconcile).
+
+_TRUE_STRINGS = frozenset({"true", "1", "yes", "on"})
+_FALSE_STRINGS = frozenset({"false", "0", "no", "off"})
+
+
+def _safe_config_value(db: Session | None, key: str) -> str | None:
+    """Read a config value, returning None on a missing session or any DB read error.
+
+    The resolver contract is "DB row wins, else env default" — a transient DB failure or
+    an unprovisioned schema must degrade to the env default, never crash a consumer
+    (e.g. scheduler registration reading flags before the table exists in some
+    contexts).
+    """
+    if db is None:
+        return None
+    try:
+        return get_config_value(db, key)
+    except SQLAlchemyError as e:
+        logger.warning("Config read for '{}' failed; falling back to env default: {}", key, e)
+        # Clear any aborted-transaction state so later reads on this session can proceed.
+        try:
+            db.rollback()
+        except SQLAlchemyError:
+            pass
+        return None
+
+
+def get_effective_flag(db: Session | None, key: str, env_default: bool) -> bool:
+    """Resolve a boolean feature flag: DB row wins, else env_default.
+
+    Returns the parsed DB value (case-insensitive "true"/"false" family) when the
+    system_config row exists and holds a valid bool string; otherwise env_default.
+    A missing session (db is None), a DB read error, or a malformed/absent row falls
+    back to env_default and never raises.
+    """
+    raw = _safe_config_value(db, key)
+    if raw is None:
+        return env_default
+    normalized = raw.strip().lower()
+    if normalized in _TRUE_STRINGS:
+        return True
+    if normalized in _FALSE_STRINGS:
+        return False
+    return env_default
+
+
+def get_effective_int(db: Session | None, key: str, env_default: int) -> int:
+    """Resolve an integer config value: DB row wins, else env_default.
+
+    Returns int(DB value) when the system_config row exists and parses as an int;
+    otherwise env_default. A missing session, a DB read error, an absent row, or a
+    non-integer value falls back to env_default and never raises.
+    """
+    raw = _safe_config_value(db, key)
+    if raw is None:
+        return env_default
+    try:
+        return int(raw.strip())
+    except (ValueError, TypeError):
+        return env_default
 
 
 # ── System Health ────────────────────────────────────────────────────

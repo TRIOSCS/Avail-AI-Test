@@ -1,0 +1,184 @@
+{# my_day.html — "My Day" worklist: overdue/due accounts + my open tasks.
+   Receives: account_rows (list of {company, cadence_state, out_days}),
+             tasks (list[RequisitionTask], due/overdue first),
+             now_utc (datetime).
+   Called by: /v2/partials/my-day (my_day_partial route in htmx_views.py).
+   Depends on: crm_service cadence model, task_service.get_my_tasks.
+#}
+{% set cadence_dot = {
+  'new':       'bg-gray-300',
+  'on_target': 'bg-emerald-400',
+  'due':       'bg-amber-400',
+  'overdue':   'bg-rose-500'
+} %}
+{% set cadence_label = {
+  'new':       'New',
+  'on_target': 'On Target',
+  'due':       'Due',
+  'overdue':   'Overdue'
+} %}
+{% set cadence_badge = {
+  'new':       'bg-gray-100 text-gray-600',
+  'on_target': 'bg-emerald-100 text-emerald-700',
+  'due':       'bg-amber-100 text-amber-700',
+  'overdue':   'bg-rose-100 text-rose-700'
+} %}
+
+<title hx-swap-oob="true">My Day — AvailAI</title>
+
+<div class="page-readable space-y-6 py-4">
+
+  {# ── Page header ─────────────────────────────────────────────────── #}
+  <div>
+    <h1 class="text-xl font-bold text-gray-900">My Day</h1>
+    <p class="text-sm text-gray-500 mt-0.5">Accounts needing a call + your open tasks.</p>
+  </div>
+
+  {% if not account_rows and not tasks %}
+  {# ── Empty state ─────────────────────────────────────────────────── #}
+  <div class="rounded-xl border border-brand-100 bg-brand-50 px-6 py-10 text-center">
+    <svg xmlns="http://www.w3.org/2000/svg" class="mx-auto h-10 w-10 text-brand-300 mb-3"
+         fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"
+         stroke-linecap="round" stroke-linejoin="round">
+      <path d="M5 13l4 4L19 7"/>
+    </svg>
+    <p class="text-sm font-semibold text-gray-700">All caught up — nothing due today.</p>
+    <p class="text-xs text-gray-400 mt-1">Check back later or head to CRM to explore your accounts.</p>
+  </div>
+
+  {% else %}
+
+  {# ── Section 1: Follow up ─────────────────────────────────────────── #}
+  <section>
+    <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
+      Follow up
+      {% if account_rows %}
+      <span class="ml-1.5 inline-flex items-center justify-center h-5 min-w-[20px] px-1.5
+                   rounded-full bg-rose-100 text-rose-700 text-xs font-bold">{{ account_rows|length }}</span>
+      {% endif %}
+    </h2>
+
+    {% if account_rows %}
+    <ul class="space-y-2">
+      {% for row in account_rows %}
+      {% set co = row.company %}
+      {% set state = row.cadence_state %}
+      <li>
+        <a href="/v2/customers/{{ co.id }}"
+           hx-get="/v2/partials/customers/{{ co.id }}"
+           hx-target="#main-content"
+           hx-push-url="/v2/customers/{{ co.id }}"
+           class="flex items-center gap-3 rounded-lg border border-brand-200 bg-white px-4 py-3
+                  hover:border-brand-400 hover:bg-brand-50 transition-colors group">
+
+          {# Cadence dot #}
+          <span class="flex-shrink-0 w-2.5 h-2.5 rounded-full {{ cadence_dot.get(state, 'bg-gray-300') }}"
+                role="img" aria-label="{{ cadence_label.get(state, state|title) }}"></span>
+
+          {# Company name + owner #}
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-2 min-w-0">
+              <span class="text-sm font-semibold text-gray-900 truncate group-hover:text-brand-700">{{ co.name }}</span>
+              <span class="flex-shrink-0 px-2 py-0.5 text-xs font-medium rounded-full
+                           {{ cadence_badge.get(state, 'bg-gray-100 text-gray-600') }}">
+                {{ cadence_label.get(state, state|title) }}
+              </span>
+            </div>
+            <div class="flex items-center gap-2 text-xs text-gray-400 mt-0.5">
+              {% if co.account_owner %}
+                <span>{{ co.account_owner.name }}</span>
+                <span>&middot;</span>
+              {% endif %}
+              {% if row.out_days is not none %}
+                <span>Last outbound {{ row.out_days }}d ago</span>
+              {% else %}
+                <span>Never contacted</span>
+              {% endif %}
+            </div>
+          </div>
+
+          {# Chevron #}
+          <svg xmlns="http://www.w3.org/2000/svg" class="flex-shrink-0 h-4 w-4 text-gray-300 group-hover:text-brand-400"
+               fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/>
+          </svg>
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="text-sm text-gray-400 italic">No accounts need a call right now.</p>
+    {% endif %}
+  </section>
+
+  {# ── Section 2: My tasks ──────────────────────────────────────────── #}
+  <section>
+    <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
+      My tasks
+      {% if tasks %}
+      <span class="ml-1.5 inline-flex items-center justify-center h-5 min-w-[20px] px-1.5
+                   rounded-full bg-amber-100 text-amber-700 text-xs font-bold">{{ tasks|length }}</span>
+      {% endif %}
+    </h2>
+
+    {% if tasks %}
+    <ul id="my-day-tasks" class="space-y-2">
+      {% for t in tasks %}
+      {% set _due_state = task_due_state(t, now_utc) %}
+      {% set is_overdue = _due_state[0] %}
+      {% set is_due_today = _due_state[1] %}
+      <li id="my-day-task-{{ t.id }}"
+          class="flex items-start gap-3 rounded-lg border border-brand-200 bg-white px-4 py-3">
+
+        {# Complete checkbox — posts to step 5 endpoint with from_my_day=true so it
+           returns an empty fragment, removing this row via outerHTML swap. #}
+        <form hx-post="/v2/partials/tasks/{{ t.id }}/complete?from_my_day=true"
+              hx-target="#my-day-task-{{ t.id }}"
+              hx-swap="outerHTML"
+              class="flex-shrink-0 pt-0.5">
+          <button type="submit"
+                  class="w-4 h-4 rounded border border-gray-300 hover:border-brand-400
+                         focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  title="Mark done"
+                  aria-label="Complete: {{ t.title }}"></button>
+        </form>
+
+        <div class="min-w-0 flex-1">
+          <span class="text-sm font-medium text-gray-900">{{ t.title }}</span>
+
+          {# Due date with overdue/due-today/future badge #}
+          {% if t.due_at %}
+            <span class="ml-2 text-xs {% if is_overdue %}text-rose-600 font-semibold{% elif is_due_today %}text-amber-600 font-semibold{% else %}text-gray-400{% endif %}">
+              {% if is_overdue %}&middot; Overdue ({{ t.due_at.strftime('%b %-d') }}){% elif is_due_today %}&middot; Due today{% else %}&middot; due {{ t.due_at.strftime('%b %-d') }}{% endif %}
+            </span>
+          {% endif %}
+
+          {# Linked entity #}
+          <div class="mt-0.5 flex flex-wrap gap-x-2 text-xs text-gray-400">
+            {% if t.company %}
+              <a href="/v2/customers/{{ t.company.id }}"
+                 hx-get="/v2/partials/customers/{{ t.company.id }}"
+                 hx-target="#main-content"
+                 hx-push-url="/v2/customers/{{ t.company.id }}"
+                 class="text-brand-500 hover:text-brand-700">{{ t.company.name }}</a>
+            {% elif t.site_contact %}
+              <span>{{ t.site_contact.full_name }}</span>
+            {% elif t.requisition %}
+              <a href="/v2/requisitions/{{ t.requisition.id }}"
+                 hx-get="/v2/partials/requisitions/{{ t.requisition.id }}"
+                 hx-target="#main-content"
+                 hx-push-url="/v2/requisitions/{{ t.requisition.id }}"
+                 class="text-brand-500 hover:text-brand-700">{{ t.requisition.name or ('REQ-' ~ t.requisition.id) }}</a>
+            {% endif %}
+          </div>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="text-sm text-gray-400 italic">No open tasks assigned to you.</p>
+    {% endif %}
+  </section>
+
+  {% endif %}{# end if not account_rows and not tasks #}
+</div>

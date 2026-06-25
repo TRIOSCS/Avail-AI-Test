@@ -1,6 +1,13 @@
 {# Email preview partial — shows rendered emails per vendor before sending.
    Called by: preview-inquiry endpoint via HTMX POST from vendor_modal.html
-   Depends on: previews context (vendor_name, vendor_email, subject, html_body, parts)
+   Depends on: previews context (vendor_name, vendor_email, subject, html_body, parts,
+               skip_reason, normalized_name), unavailable_vendors list.
+   skip_reason values: "ready" | "no_email" | "do_not_contact"
+   Badge color: amber = no_email; rose = do_not_contact.
+   Unavailable vendors are reported separately in the unavailable_vendors block above.
+   Inline fix-email form: rendered below the subject row when skip_reason == no_email.
+     Calls rfqVendorModal.fixVendorEmail(normalizedName, email) which posts to
+     composer-vendor then calls loadPreview() to refresh this panel.
 #}
 
 <div class="space-y-4">
@@ -12,6 +19,18 @@
     <h3 class="text-lg font-semibold text-gray-900">Email Preview</h3>
     <span class="text-xs text-gray-400 ml-auto">{{ previews|length }} vendor{{ 's' if previews|length != 1 else '' }}</span>
   </div>
+
+  {# Attachment names — shown in preview so the buyer confirms what will attach.
+     These are post-trim: the server already applied the same ~3 MB combined cap +
+     largest-first drop as send time, so the list here exactly matches what will send. #}
+  {% if preview_attachments %}
+  <div class="flex items-center gap-1.5 text-xs text-gray-400">
+    <svg class="w-3 h-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
+    </svg>
+    <span>{{ preview_attachments|map(attribute='file_name')|join(', ') }}</span>
+  </div>
+  {% endif %}
 
   {# Vendors dropped by the active-only unavailability re-check — reported visibly,
      never a silent drop (mirrors the send-time skipped-vendor reporting). #}
@@ -28,20 +47,46 @@
       <div class="px-3 py-2 bg-gray-50 border-b border-gray-100">
         <div class="flex items-center justify-between">
           <span class="text-sm font-semibold text-gray-800">{{ p.vendor_name }}</span>
-          {% if p.vendor_email %}
-          <span class="text-xs text-gray-600">{{ p.vendor_email }}</span>
-          {% else %}
+          {# Shared color-coded skip-reason badge: rose=do_not_contact/unavailable, amber=no_email #}
+          {% if p.skip_reason == "do_not_contact" %}
+          <span class="inline-flex items-center gap-1 text-xs text-rose-700 bg-rose-50 px-2 py-0.5 rounded-full">
+            <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M13.477 14.89A6 6 0 015.11 6.524L13.477 14.89zm1.414-1.414L6.524 5.11A6 6 0 0114.89 13.476zM18 10a8 8 0 11-16 0 8 8 0 0116 0z" clip-rule="evenodd"/>
+            </svg>
+            do-not-contact
+          </span>
+          {% elif p.skip_reason == "no_email" %}
           <span class="inline-flex items-center gap-1 text-xs text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">
             <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
               <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
             </svg>
-            No email found for {{ p.vendor_name }}
+            no email — will be skipped
           </span>
+          {% elif p.vendor_email %}
+          <span class="text-xs text-gray-600">{{ p.vendor_email }}</span>
           {% endif %}
         </div>
         <div class="text-xs text-gray-600 mt-1">
           <span class="font-medium text-gray-600">Subject:</span> {{ p.subject }}
         </div>
+        {# Inline email-fix form — rendered on its own line below the subject when the
+           vendor has no email on file. Posts to composer-vendor via fixVendorEmail()
+           which then calls loadPreview() to refresh this panel without closing the modal. #}
+        {% if p.skip_reason == "no_email" %}
+        <div class='mt-2 flex items-center gap-2' x-data='{"fixEmail": ""}' @rfq-email-fixed.window='fixEmail = ""'>
+          <input
+            type="email"
+            x-model='fixEmail'
+            placeholder='Add contact email…'
+            class='flex-1 text-xs border border-amber-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-amber-400'
+          />
+          <button
+            type='button'
+            @click='if (fixEmail) { fixVendorEmail({{ p.normalized_name|tojson }}, fixEmail); }'
+            class='text-xs px-2 py-1 rounded bg-amber-100 text-amber-800 border border-amber-300 hover:bg-amber-200 whitespace-nowrap'
+          >Add and re-check</button>
+        </div>
+        {% endif %}
       </div>
       {# Body #}
       <div class="px-3 py-2 text-sm text-gray-700 bg-white">
@@ -49,13 +94,24 @@
           {{ p.html_body | sanitize_html | safe }}
         </div>
       </div>
-      {# Parts summary #}
+      {# Parts summary — cross-req sends group parts under a REQ-{id} subhead so the
+         buyer sees which parts belong to which requisition; single-req keeps the flat
+         inline list. #}
       {% if p.parts %}
       <div class="px-3 py-1.5 bg-gray-50 border-t border-gray-100">
         <span class="text-xs text-gray-400 uppercase tracking-wider">Parts:</span>
+        {% if is_cross_req %}
+        {% for group in requisition_parts_grouped %}
+        <div class="font-medium text-gray-500 text-[11px] uppercase mt-1">REQ-{{ group.req_id }}</div>
+        <span class="text-xs text-gray-600 ml-1">
+          {% for part in group.parts %}{{ part.mpn }} ({{ part.qty }} pcs){{ ', ' if not loop.last else '' }}{% endfor %}
+        </span>
+        {% endfor %}
+        {% else %}
         <span class="text-xs text-gray-600 ml-1">
           {% for part in p.parts %}{{ part.mpn }} ({{ part.qty }} pcs){{ ', ' if not loop.last else '' }}{% endfor %}
         </span>
+        {% endif %}
       </div>
       {% endif %}
     </div>

@@ -22,7 +22,7 @@
 | email | String 255, unique | |
 | name | String 255 | |
 | role | String 20 | buyer\|sales\|trader\|manager\|admin |
-| is_active | Boolean | default True |
+| is_active | Boolean NOT NULL (server_default true) | Migration 149 hardened it (was nullable): a NULL `is_active` made `require_user` 403-lock the user. `companies.is_active` + `customer_sites.is_active` were hardened identically in the same migration (backfill NULL→true + NOT NULL + server_default), closing the same silent-vanish/lockout class as migration 139 did for `site_contacts`. |
 | azure_id | String 255, unique | |
 | refresh_token | EncryptedText | For Graph API offline access |
 | access_token | EncryptedText | |
@@ -31,6 +31,24 @@
 | commodity_tags | JSON | User specialties |
 | timezone | String 100 | |
 | eight_by_eight_extension | String 20 | Phone system |
+| eight_by_eight_enabled | Boolean | default False |
+| notify_buyplan_email_enabled | Boolean NOT NULL | default True; Profile-tab toggle — suppress buy-plan email notifications (migration 151) |
+| notify_new_offer_alert_enabled | Boolean NOT NULL | default True; Profile-tab toggle — suppress new-offer alert notifications (migration 151) |
+| last_login_at | UTCDateTime, nullable | Migration 148. Stamped on every successful OAuth callback. NULL + no azure_id ⇒ an "Invited" (pre-provisioned, never-logged-in) row. |
+| access_overrides | JSON, default `{}` | Migration 148. **Explicit per-user access overrides only**: `{access_key: bool}` keyed by `constants.AccessKey`. An *absent* key means "use the role default" (`constants.ROLE_ACCESS_DEFAULTS`) — the dict never stores the role default, so it stays empty until an admin grants/revokes a specific key. Read by `dependencies.user_has_access` (override wins over role default; admin → all). `ops_verification` is NOT stored here (it lives in `verification_group_members`). |
+| invited_by_id | FK -> users (SET NULL), nullable | Migration 148. The admin who invited this user (set by the Users-tab invite flow); SET NULL so the row survives the inviter's deletion. |
+
+**`user_admin_audit`** — Append-only trail of admin actions against users (Migration 148)
+| Column | Type | Notes |
+|--------|------|-------|
+| id | Integer PK | |
+| actor_id | FK -> users (SET NULL), nullable | The admin who performed the action; SET NULL so the trail survives the actor's deletion (renders as "system"). |
+| target_user_id | FK -> users (CASCADE), indexed, NOT NULL | The user acted upon; CASCADE so a user's audit rows are removed with the user. |
+| action | String 32 | `constants.UserAuditAction`: invite \| role_change \| activate \| deactivate \| access_grant \| access_revoke. |
+| detail | JSON, default `{}` | Action context, e.g. `{"from": "buyer", "to": "manager"}` (role change) or `{"key": "send_rfq", "value": "off"}` (access). |
+| created_at | UTCDateTime, indexed | |
+
+Written by `services.user_admin.record_user_audit` (caller commits); surfaced by the Settings > Users audit-log viewer (admin only).
 
 ---
 
@@ -47,6 +65,7 @@
 | status | String 50 | active\|archived\|completed |
 | urgency | String 20 | normal\|hot\|critical |
 | opportunity_value | Numeric 12,2 | |
+| win_probability | Integer, nullable | 0-100; deal win % (migration 146) |
 | claimed_by_id | FK -> users | |
 | created_by | FK -> users | |
 | **Relationships** | requirements, attachments, contacts, offers, quotes |
@@ -141,6 +160,36 @@
 | classification | String 50 | offer\|stock_list\|ooo\|spam |
 | message_id | String 255, unique | |
 
+**`requisition_attachments`** — Files attached to a requisition (Migration 126: renamed `onedrive_item_id`→`library_item_id`, `onedrive_url`→`library_web_url`; added `library_drive_id`)
+| Column | Type | Notes |
+|--------|------|-------|
+| id | Integer PK | |
+| requisition_id | FK -> requisitions (CASCADE), indexed | |
+| file_name | String 500, not null | |
+| library_item_id | String 500, nullable | Graph item id (`NULL` = not yet uploaded) |
+| library_drive_id | String 200, nullable | `NULL` → user OneDrive fallback; non-NULL → company SharePoint library |
+| library_web_url | Text, nullable | Shareable URL |
+| thumbnail_url | Text, nullable | |
+| content_type | String 100, nullable | |
+| size_bytes | Integer, nullable | |
+| uploaded_by_id | FK -> users (SET NULL) | |
+| created_at | UTCDateTime | |
+
+**`requirement_attachments`** — Files attached to a requirement line (Migration 126: same column renames + `library_drive_id` as above)
+| Column | Type | Notes |
+|--------|------|-------|
+| id | Integer PK | |
+| requirement_id | FK -> requirements (CASCADE), indexed | |
+| file_name | String 500, not null | |
+| library_item_id | String 500, nullable | |
+| library_drive_id | String 200, nullable | `NULL` → user OneDrive; non-NULL → company SharePoint library |
+| library_web_url | Text, nullable | |
+| thumbnail_url | Text, nullable | |
+| content_type | String 100, nullable | |
+| size_bytes | Integer, nullable | |
+| uploaded_by_id | FK -> users (SET NULL) | |
+| created_at | UTCDateTime | |
+
 ---
 
 ### Offers & Quotes
@@ -202,6 +251,21 @@
 | sell_price | Numeric 12,4 | |
 | margin_pct | Numeric 5,2 | |
 
+**`offer_attachments`** — Files attached to a vendor offer (Migration 126: renamed `onedrive_item_id`→`library_item_id`, `onedrive_url`→`library_web_url`; added `library_drive_id`)
+| Column | Type | Notes |
+|--------|------|-------|
+| id | Integer PK | |
+| offer_id | FK -> offers (CASCADE), indexed (`ix_offer_attachments_offer`) | |
+| file_name | String 500, not null | |
+| library_item_id | String 500, nullable | |
+| library_drive_id | String 200, nullable | `NULL` → user OneDrive; non-NULL → company SharePoint library |
+| library_web_url | Text, nullable | |
+| thumbnail_url | Text, nullable | |
+| content_type | String 100, nullable | |
+| size_bytes | Integer, nullable | |
+| uploaded_by_id | FK -> users (SET NULL) | |
+| created_at | UTCDateTime | |
+
 ---
 
 ### Buy Plans (Fulfillment)
@@ -260,7 +324,7 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 | employee_size | String 50 | |
 | hq_city / hq_state / hq_country | String | |
 | brand_tags / commodity_tags | JSON | |
-| enrichment_source | String 50 | explorium\|apollo\|manual |
+| enrichment_source | String 50 | explorium|lusha|clay|manual |
 | is_strategic | Boolean | |
 | sf_account_id | String 255, unique | Salesforce link |
 | last_activity_at | UTCDateTime, nullable | Bumped by `log_outreach_initiated()` on every click-to-contact event; used by the CDM account workspace `staleness` sort (oldest = longest since activity first). |
@@ -270,6 +334,13 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 | disposition_set_at | UTCDateTime, nullable | When the disposition was last set. |
 | normalized_name | String 255, indexed (btree + Postgres GIN pg_trgm), **nullable, NOT unique** | Migration 120 (Increment 3, AI-org). Suffix-stripped/lowercased dedup match key, kept in lockstep with `name` by `Company._sync_normalized_name` (`@validates("name")`) using `vendor_utils.normalize_vendor_name` — the SAME normalizer the dedup scanner scores with. Mirrors VendorCard but is **nullable + non-unique** on purpose (companies legitimately share a normalized form across the dedup window; the policy keeps different-owner accounts separate). The `ix_companies_normalized_name_trgm` GIN index is Postgres-guarded (`dialect.name == 'postgresql'`); SQLite gets only the btree and the scanner falls back to rapidfuzz. |
 | alternate_names | JSON (default []) | Migration 120. Names this company has been known by. `merge_companies` appends the loser's `name` (+ its own `alternate_names`, deduped, never keep's display name) so a re-import of the old name fuzzy-matches the survivor instead of recreating the duplicate (mirrors `VendorCard._record_alternate_name`). |
+| ticker | String 20, nullable | Migration 125. Stock ticker symbol (e.g. `INTC`). Written by `apply_enrichment_to_company` via the `firmo_tiers` blending ladder; Explorium is the highest-authority source (tier 90). |
+| naics | String 20, nullable | Migration 125. NAICS industry code. SAM.gov is authoritative (tier 95); Explorium second (tier 85). |
+| revenue_range | String 50, nullable | Migration 125. Annual revenue band (e.g. `1000000-5000000`), formatted from a `{min, max}` range by the Explorium connector. Explorium is the highest-authority source (tier 90). |
+| enrichment_provenance | JSONB, nullable, server_default `{}` | Migration 125. Per-field provenance store written by `_apply_enrichment` (enrichment_service.py). Shape: `{field: {source, tier, confidence}}`. Guards the provenance-aware overwrite rule: a field with no stored provenance is treated as manual/legacy and is never clobbered by an automated source; a field with provenance is overwritten only when the incoming (tier, confidence) pair strictly beats the stored one. |
+| created_by_id | FK -> users (SET NULL), nullable | Migration 147. Set automatically by `app/audit_listeners.py` (`before_insert` event) from `current_user_id_var` on every authenticated request; NULL for background/import writes. |
+| modified_by_id | FK -> users (SET NULL), nullable | Migration 147. Set automatically by `app/audit_listeners.py` (`before_update` event) from `current_user_id_var`; NULL for background/import writes. |
+| **Relationships** | customer_sites, requisitions, attachments (`CompanyAttachment`), entity_tags, created_by (`User`), modified_by (`User`) | Migration 126 adds `attachments`. Migration 147 adds audit trail. |
 
 **`customer_sites`** — Delivery/contact locations for a company
 | Column | Type | Notes |
@@ -283,22 +354,64 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 | site_type | String 50 | HQ\|Branch\|Warehouse\|Manufacturing |
 | payment_terms / shipping_terms | String 100 | |
 | last_activity_at | UTCDateTime, nullable | Bumped by `log_outreach_initiated()` alongside `companies.last_activity_at`. |
+| created_by_id | FK -> users (SET NULL), nullable | Migration 147. Set automatically by `app/audit_listeners.py` on authenticated request; NULL for background/import writes. |
+| modified_by_id | FK -> users (SET NULL), nullable | Migration 147. Set automatically by `app/audit_listeners.py` on authenticated request; NULL for background/import writes. |
+| do_not_contact | Boolean NOT NULL (server_default false) | Migration 148. When True, site is excluded from `staleness=needs_call` call-list and the DNC badge renders in `site_card.html`. Toggled via `POST /v2/partials/customers/{cid}/sites/{sid}/mark-dnc` (`can_manage_account` gate). Replaces the "Delete Site" action — DNC preserves the site record while hiding it from call surfaces. |
 
 **`site_contacts`** — Individual people at customer sites
 | Column | Type | Notes |
 |--------|------|-------|
 | id | Integer PK | |
 | customer_site_id | FK -> customer_sites (CASCADE) | |
-| full_name | String 255 | |
+| full_name | String 255 | Derived field — recomposed from first_name + last_name on every form/inline-edit write (migration 134 seeded via backfill). |
+| first_name | String 120, nullable | Migration 134. Editable source of truth; recomposed into full_name on write. |
+| last_name | String 120, nullable | Migration 134. Editable source of truth; recomposed into full_name on write. |
+| contact_owner_id | FK -> users (SET NULL), indexed | Migration 134. Override contact owner; falls back to company.account_owner when NULL. |
 | email | String 255 | Unique per site |
 | phone | String 100 | |
+| secondary_email | String 255, nullable | Migration 144. Second email address (e.g. personal or backup). Inline-editable via `EDITABLE_CONTACT_FIELDS`. |
+| secondary_phone | String 100, nullable | Migration 144. Second phone number. Inline-editable via `EDITABLE_CONTACT_FIELDS`. |
+| reports_to_id | FK -> site_contacts (SET NULL), indexed | Migration 144. Self-referential org-chart link. Rendered in contact card as "Reports to: X". |
 | wechat_id | String 100, nullable | WeChat handle for click-to-message outreach (migration 095_wechat_id). Written by the site-contact create form; rendered in `tabs/contacts_tab.html` as a `weixin://` deep link with `data-outreach-log`. |
 | contact_role | String 50 | buyer\|technical\|decision_maker\|operations |
 | do_not_contact | Boolean NOT NULL (server_default false) | Migration 116. Suppresses outreach affordances; toggled via `POST .../contacts/{id}/do-not-contact` (`_dnc_toggle.html`). |
 | is_priority | Boolean NOT NULL (server_default false) | Migration 118. Surfaces the contact to the TOP of the roster (`company_contact_rows` order_by). Toggled via `POST .../contacts/{id}/priority` (`_priority_toggle.html`). Mirrors `do_not_contact`. |
 | is_archived | Boolean NOT NULL (server_default false) | Migration 118. Sorts the contact to the BOTTOM of the roster but keeps it visible (NOT `is_active`, which would hide it). Toggled via `POST .../contacts/{id}/archive` (`_archive_toggle.html`). |
 | email_verified | Boolean | |
-| enrichment_source | String 50 | lusha\|apollo\|hunter\|manual |
+| enrichment_source | String 50 | lusha|clay|hunter|explorium|manual |
+| created_by_id | FK -> users (SET NULL), nullable | Migration 147. Set automatically by `app/audit_listeners.py` on authenticated request; NULL for background/import writes. |
+| modified_by_id | FK -> users (SET NULL), nullable | Migration 147. Set automatically by `app/audit_listeners.py` on authenticated request; NULL for background/import writes. |
+| **Relationships** | customer_site, attachments (`SiteContactAttachment`), contact_owner (`User`), reports_to (`SiteContact`, self-ref), created_by (`User`), modified_by (`User`) | Migration 126 adds `attachments`. Migration 134 adds `contact_owner`. Migration 144 adds `reports_to` self-reference. Migration 147 adds audit trail. |
+
+**`company_attachments`** — Files attached to a CRM company (Migration 126, new table)
+| Column | Type | Notes |
+|--------|------|-------|
+| id | Integer PK | |
+| company_id | FK -> companies (CASCADE), indexed (`ix_company_attachments_company`) | |
+| file_name | String 500, not null | |
+| library_item_id | String 500, nullable | |
+| library_drive_id | String 200, nullable | `NULL` → user OneDrive; non-NULL → company SharePoint library |
+| library_web_url | Text, nullable | |
+| thumbnail_url | Text, nullable | |
+| content_type | String 100, nullable | |
+| size_bytes | Integer, nullable | |
+| uploaded_by_id | FK -> users (SET NULL) | |
+| created_at | UTCDateTime | |
+
+**`site_contact_attachments`** — Files attached to a site contact (Migration 126, new table)
+| Column | Type | Notes |
+|--------|------|-------|
+| id | Integer PK | |
+| site_contact_id | FK -> site_contacts (CASCADE), indexed (`ix_site_contact_attachments_contact`) | |
+| file_name | String 500, not null | |
+| library_item_id | String 500, nullable | |
+| library_drive_id | String 200, nullable | `NULL` → user OneDrive; non-NULL → company SharePoint library |
+| library_web_url | Text, nullable | |
+| thumbnail_url | Text, nullable | |
+| content_type | String 100, nullable | |
+| size_bytes | Integer, nullable | |
+| uploaded_by_id | FK -> users (SET NULL) | |
+| created_at | UTCDateTime | |
 
 ---
 
@@ -319,6 +432,11 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 | brand_tags / commodity_tags | JSONB | |
 | search_vector | TSVECTOR | Full-text search |
 | is_blacklisted | Boolean | |
+| ticker | String 20, nullable | Migration 125. Stock ticker symbol. Written by `apply_enrichment_to_vendor` via the `firmo_tiers` blending ladder; mirrors the `companies` column. |
+| naics | String 20, nullable | Migration 125. NAICS industry code; mirrors `companies.naics`. |
+| revenue_range | String 50, nullable | Migration 125. Annual revenue band; mirrors `companies.revenue_range`. |
+| enrichment_provenance | JSONB, nullable, server_default `{}` | Migration 125. Per-field provenance store; same shape and semantics as `companies.enrichment_provenance` — written by `apply_enrichment_to_vendor` via `_apply_enrichment`. |
+| custom_fields | JSONB, nullable, server_default `{}` | Migration 145 (P1). Arbitrary key:value "Additional details" store. Validator: max 30 keys, key ≤60 chars, value ≤500 chars. Mirrors `Company.custom_fields`. Managed via `POST/DELETE /v2/partials/vendors/{id}/custom-fields`. |
 
 **`vendor_contacts`** — People at vendor companies
 | Column | Type | Notes |
@@ -330,10 +448,43 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 | confidence | Integer 0-100 | |
 | relationship_score | Float 0-100 | |
 | activity_trend | String 20 | warming\|stable\|cooling\|dormant |
+| is_primary | Boolean NOT NULL, server_default false | Migration 145 (P1). Designates the primary contact for this vendor. `POST /v2/partials/vendors/{id}/contacts/{cid}/set-primary` clears all others atomically. |
 
 **`vendor_reviews`** — Team feedback on vendors (1-5 rating)
 
 **`strategic_vendors`** — Claimed vendor-buyer relationships with expiry
+
+**`vendor_card_attachments`** — Files attached to a vendor card (vendor parity with `company_attachments`)
+| Column | Type | Notes |
+|--------|------|-------|
+| id | Integer PK | |
+| vendor_card_id | FK -> vendor_cards (CASCADE), indexed | |
+| file_name | String 500, not null | |
+| library_item_id | String 500, nullable | Graph item id (`NULL` = not yet uploaded) |
+| library_drive_id | String 200, nullable | `NULL` → user OneDrive fallback; non-NULL → company SharePoint library |
+| library_web_url | Text, nullable | Shareable URL |
+| content_type | String 100, nullable | |
+| size_bytes | Integer, nullable | |
+| uploaded_by_id | FK -> users (SET NULL) | |
+| created_at | UTCDateTime | |
+
+Model: `VendorCardAttachment` (`app/models/vendors.py`).
+
+**`vendor_contact_attachments`** — Files attached to a vendor contact (same column shape as `vendor_card_attachments`)
+| Column | Type | Notes |
+|--------|------|-------|
+| id | Integer PK | |
+| vendor_contact_id | FK -> vendor_contacts (CASCADE), indexed | |
+| file_name | String 500, not null | |
+| library_item_id | String 500, nullable | |
+| library_drive_id | String 200, nullable | `NULL` → user OneDrive; non-NULL → company SharePoint library |
+| library_web_url | Text, nullable | |
+| content_type | String 100, nullable | |
+| size_bytes | Integer, nullable | |
+| uploaded_by_id | FK -> users (SET NULL) | |
+| created_at | UTCDateTime | |
+
+Model: `VendorContactAttachment` (`app/models/vendors.py`).
 
 ---
 
@@ -370,6 +521,7 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 | validation_conflicts | JSONB, nullable | List of conflicts where a tier≥80 authoritative source contradicted a `manual` (tier 100) value — the ladder KEPT the manual value, `spec_tiers.record_validation_conflict` persisted the contradiction. Entries: `{"key": <spec_key\|"category"\|"brand"\|"manufacturer">, "manual": {value, updated_at}, "evidence": {source, tier, confidence, value, observed_at}}`; de-duped per `(key, evidence.source)`, newest evidence replaces. Cleared per-key by a PUT re-assertion of the field or the conflict-accept route. Migration 099. |
 | has_validation_conflict | Boolean NOT NULL default false | `true` iff `validation_conflicts` is non-empty — the "Needs review" review-queue filter predicate (`has_validation_conflict=true` on the faceted route). Migration 099. |
 | search_vector | TSVECTOR | Trigger-maintained FTS (weighted: MPN=A, manufacturer=B, description/category=C) |
+| **Relationships** | requirements, sightings, offers, attachments (`MaterialCardAttachment`) | Migration 126 adds `attachments`. |
 
 > **Startup backfill:** `_backfill_material_cards()` in `startup.py` runs at boot to ensure every MPN in requirements has a corresponding material card.
 
@@ -389,6 +541,21 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 >   - `ix_mc_last_searched` — partial btree `(last_searched_at) WHERE last_searched_at IS NOT NULL` (`searched_within` buckets)
 >   - Plain (non-CONCURRENT) builds per repo alembic pattern: each takes a write-blocking ShareLock on `material_cards` (~25s total for the migration on the live-size heap); reads unaffected.
 >   - Downgrade drops only the eight 098-owned indexes + the statistics object; the two `eabe89205d07`-owned names survive (only that revision's own downgrade may remove them).
+
+**`material_card_attachments`** — User-uploaded files attached to a material card part dossier (Migration 126, new table; distinct from system-captured `material_card_datasheets`)
+| Column | Type | Notes |
+|--------|------|-------|
+| id | Integer PK | |
+| material_card_id | FK -> material_cards (CASCADE), indexed (`ix_material_card_attachments_card`) | |
+| file_name | String 500, not null | |
+| library_item_id | String 500, nullable | |
+| library_drive_id | String 200, nullable | `NULL` → user OneDrive; non-NULL → company SharePoint library |
+| library_web_url | Text, nullable | |
+| thumbnail_url | Text, nullable | |
+| content_type | String 100, nullable | |
+| size_bytes | Integer, nullable | |
+| uploaded_by_id | FK -> users (SET NULL) | |
+| created_at | UTCDateTime | |
 
 **`material_vendor_history`** — Which vendors sell which parts (deduplicated)
 
@@ -449,20 +616,107 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 
 ---
 
-### Excess Inventory
+### Excess Inventory / Resell (resell-brokerage)
 
-**`excess_lists`** — Customer surplus inventory batches
+> Migration 126 added the inbound-offer tables + rollup columns; migration 127 added the
+> bid-back tables + posting window; **migration 128 (the CUTOVER) dropped the old
+> `bids`/`bid_solicitations` tables** — the legacy outbound email-RFQ "Bid"/"BidSolicitation"
+> concept is fully replaced by `excess_offers`/`customer_bids` and is GONE (models, constants
+> `Bid*`, schemas, the `app/routers/excess.py` router + `partials/excess/*` templates, the
+> `email_service`/`email_jobs` inbox-RFQ callers, and the `create_bid`/`accept_bid`/
+> `send_bid_solicitation`/`match_excess_demand` service methods). `ExcessListStatus` keeps the
+> Resell lifecycle members (open/collecting/bid_out/awarded); the pre-Resell active/bidding
+> members remain (not in the cutover's removal scope).
+>
+> Service logic lives in `app/services/excess_service.py`:
+> `can_post`/`can_offer` (role-derived capabilities), `submit_offer` (per_line/take_all;
+> part-number-only matching via `normalize_mpn_key`; unmatched/ambiguous rows queued),
+> `recompute_line_rollup`/`withdraw_offer` (min priced active offer -> best_offer_*),
+> `close_list`, `get_excess_stats` (offer counts), list/line CRUD + import, and
+> `material_card_id` resolution on the import path. The thin router is `app/routers/resell.py`
+> (templates under `app/templates/htmx/partials/resell/*`).
+>
+> Sighting live-mirror lives in `app/services/excess_mirror.py` (Chunk C, additive):
+> `sync_list_mirror`/`publish_list` are the dual-write owners — every active posted
+> `excess_line_items` row mirrors into a `sightings` row (`source_type='customer_excess'`,
+> `source_company_id=excess_lists.company_id`, synthesized `vendor_name`="Customer Excess",
+> NOT the seller) so the existing matcher sees it for free. `Sighting.requirement_id`
+> (NOT NULL) hangs on a per-list system-owned **virtual requirement** — a single
+> `is_scratch=True` "Customer Excess (list N)" requisition+requirement (found by the
+> deterministic name; hidden from sales views by the existing
+> `Requisition.is_scratch.is_(False)` filter). The mirror upserts by
+> `(source_company_id, material_card_id)` — NOT the connector-aware
+> delete-by-`(requirement_id, source_type)` path — so a re-publish updates the row and
+> never wipes a sibling list's `customer_excess` sightings. `retire_line` deletes the
+> mirror on award / withdraw / qty->0. Lines whose MPN won't resolve to a MaterialCard
+> are skipped (the upsert key needs the card), never raised.
+>
+> Bid-back assembly lives in `app/services/bid_back_service.py` (Chunk E, additive):
+> `build_bid_back` (owner-only) assembles selected lines into a draft `customer_bids`
+> header + `customer_bid_lines`, seeding each `customer_unit_price` from the line's
+> `best_offer_unit_price` rollup (trader override per line); the chosen offer ids are
+> recorded INTERNALLY (`selected_offer_id`/`selected_offer_line_id`) for audit and are
+> NEVER exported. `bid_back_export_context` is a PURE WHITELIST — line dicts carry only
+> part/mfr/qty/condition/unit+extended price and the header carries no seller identity,
+> so customer-doc cleanliness is enforced at ASSEMBLY, not by template omission. The
+> clean PDF (`generate_bid_report_pdf` -> `app/templates/documents/bid_report.html`,
+> cloned from `quote_report.html`, WeasyPrint) renders only that context. Migration 127
+> (ADDITIVE) adds the two `customer_bids*` tables and the `open_at`/`close_at` posting
+> window on `excess_lists`; `excess_mirror.publish_list` now stamps `open_at` and
+> `excess_service.close_list` (owner-only) flips to `bid_out` + stamps `close_at` (which
+> drives the "closes in Xd" header chip).
+
+**`excess_lists`** — Customer surplus inventory batches (the posting)
 - company_id -> companies, owner_id -> users
-- Status: draft -> active -> bidding -> closed -> expired
+- Status: draft -> open -> collecting -> bid_out -> awarded -> closed/expired (legacy: active, bidding)
+- version (int, default 1) — lock-on-post; a revision bumps version
+- open_at (stamped on publish), close_at (stamped on close_list) — posting window (Chunk E)
 
 **`excess_line_items`** — Individual parts in an excess list
 - part_number, description, manufacturer, quantity, asking_price, demand_match_count
+- material_card_id -> material_cards (SET NULL) — resolved on create for the Sighting mirror
+- best_offer_unit_price, best_offer_id (plain int, not a hard FK), offer_count — best-price rollup
 
-**`bids`** — Vendor bids on excess items
-- bidder_company_id, bidder_vendor_card_id, unit_price, quantity_wanted, status
+**`excess_offers`** — Inbound broker offer to BUY a posted list (the Resell offer model; replaced the dropped `bids`)
+- excess_list_id -> excess_lists (CASCADE), submitted_by -> users
+- offerer_company_id -> companies / offerer_vendor_card_id -> vendor_cards (both SET NULL)
+- scope: per_line | take_all; take_all_total_price (lump, take_all only); valid_until
+- status: open -> won -> lost -> expired -> withdrawn (late = post-close, queued)
 
-**`bid_solicitations`** — Outbound emails soliciting bids
-- graph_message_id for email tracking
+**`excess_offer_lines`** — Per-line rows of a per_line offer (incl. the unmatched queue)
+- offer_id -> excess_offers (CASCADE), excess_line_item_id -> excess_line_items (nullable, SET NULL)
+- mpn_raw, quantity, unit_price (nullable), lead_time_days, terms_text
+- match_status: matched | unmatched | ambiguous (unmatched/ambiguous = held for manual resolution)
+
+**`customer_bids`** — Outbound bid back to the seller (Trio's offer to BUY their excess; Chunk E)
+- excess_list_id -> excess_lists (CASCADE), owner_id -> users
+- status: draft -> sent -> accepted/rejected; revision (int, default 1); notes
+- One per assembly; the clean PDF + summary render from `bid_back_export_context`
+
+**`customer_bid_lines`** — Per-line priced rows of a customer bid (Chunk E)
+- customer_bid_id -> customer_bids (CASCADE), excess_line_item_id -> excess_line_items (SET NULL)
+- customer_unit_price (seeded from best_offer_unit_price, overridable), quantity
+- selected_offer_id -> excess_offers / selected_offer_line_id -> excess_offer_lines (SET NULL)
+  — INTERNAL provenance only; NEVER exported to the customer doc
+
+**`excess_outreach`** — Outbound record: who the trader OFFERED a list to + the response (Resell Outreach; migration 133)
+- excess_list_id -> excess_lists (CASCADE), excess_line_item_id -> excess_line_items (nullable, SET NULL — per buyer×line)
+- target_vendor_card_id -> vendor_cards (SET NULL, the canonical buyer), submitted_by -> users
+- channel: email | phone | teams | marketplace | other (ExcessOutreachChannel)
+- status: sent -> opened -> responded -> bid | declined | no_response (ExcessOutreachStatus)
+- graph_message_id / graph_conversation_id (email only), parts_included (JSON), sent_at
+- No DB (buyer×line) uniqueness — re-offers are legitimate; overlap is advisory (buyer_affinity_service.overlap_warning)
+
+**`buyer_scores`** — Per-buyer "good bidder" rollup (migration 133; inverts the vendor scorecard)
+- vendor_card_id -> vendor_cards (UNIQUE index)
+- offers_received, wins, avg_bid_pct_of_ask, response_rate, median_response_hours, last_offered_at
+- commodity_affinity (JSON, per-commodity counts) — fed from excess_offers + excess_outreach; recompute on offer-win + nightly
+- `activity_log` gains a nullable `excess_list_id` scope (migration 133) so outreach events join the unified timeline + cadence clocks
+
+> **Dropped in migration 128 (cutover):** `bids` (vendor bids on excess items) and
+> `bid_solicitations` (outbound bid-request emails). The Resell module's
+> `excess_offers`/`excess_offer_lines` + `customer_bids`/`customer_bid_lines` replace them;
+> the migration's downgrade recreates both tables structure-only (schema-reversible).
 
 ---
 
@@ -566,6 +820,7 @@ Key columns:
 | swept_from_owner_id | INT FK users (SET NULL) | owner whose account was auto-swept by the daily 90-day sweep (SP4) |
 | swept_at | UTCDateTime | when the account was swept into the pool (SP4) |
 | parked_by_id | INT FK users (SET NULL) | user who manually parked the account via the sales-park flow (SP4) |
+| reclaim_blocked_until | UTCDateTime | SP4 Phase 4 compliance cooldown: former owner cannot reclaim until this passes (set at sweep = swept_at + 30d; managers bypass via reassign, which clears it) |
 
 `enrichment_data['ai_screen']` (JSONB) holds the full AI screen verdict:
 `{trio_match_score, opportunity_score, excess_likelihood, verdict, rationale, evidence, confidence, model, screened_at, grounding_fingerprint, needs_more_enrichment?}`.
@@ -591,8 +846,21 @@ Verdict values: `pass`, `screened_out`, `insufficient_data`, `disabled`, `cap_re
 
 ### Tasks & Tickets
 
-**`requisition_tasks`** — Tasks tied to requisitions (manual, system, or AI-generated)
-**`trouble_tickets`** — Bug reports with screenshots, AI diagnosis
+**`requisition_tasks`** — Tasks tied to requisitions, CRM accounts, or vendor cards (manual, system, or AI-generated). The `CHECK ck_requisition_task_scope` constraint requires exactly one of five scope columns to be non-NULL: `requisition_id` (req task), `company_id` (CRM account task), `site_contact_id` (CRM contact task), `vendor_card_id` (vendor card task), or `vendor_contact_id` (vendor contact task).
+
+New columns (vendor parity):
+| Column | Type | Notes |
+|--------|------|-------|
+| vendor_card_id | FK -> vendor_cards (CASCADE), nullable, indexed (`ix_requisition_tasks_vendor_card`) | Scope: task belongs to a vendor card |
+| vendor_contact_id | FK -> vendor_contacts (CASCADE), nullable, indexed (`ix_requisition_tasks_vendor_contact`) | Scope: task belongs to a vendor contact |
+
+> Previously the CHECK constraint covered 3 scope columns (requisition_id, company_id, site_contact_id); it now extends to all 5. Tasks scoped to `vendor_contact_id` only are **not** surfaced by `get_open_tasks_for_vendor_card` (which queries by `vendor_card_id`); see `# NOTE` in `app/services/task_service.py`.
+
+**`trouble_tickets`** — Bug reports with screenshots, captured runtime context
+(`console_errors`, `network_errors`, `browser_info`, `auto_captured_context`,
+`current_view`), and AI diagnosis (`diagnosis` JSON, `generated_prompt`, `diagnosed_at`,
+`cost_tokens`, `cost_usd`) populated by `ticket_diagnosis_service`. See APP_MAP_INTERACTIONS
+"Trouble Tickets — Report capture + AI diagnosis".
 **`root_cause_groups`** — Grouped similar tickets
 **`notifications`** — User notification queue
 
@@ -601,7 +869,15 @@ Verdict values: `pass`, `screened_out`, `insufficient_data`, `disabled`, `cap_re
 ### System & Config
 
 **`api_sources`** — Supplier connector config (credentials, quotas, health)
-**`system_config`** — Key-value app settings
+**`system_config`** — Key-value app settings. **DB row is authoritative over env** for
+the 4 System-tab feature flags (`email_mining_enabled`, `proactive_matching_enabled`,
+`activity_tracking_enabled`, `inbox_scan_interval_min`): consumers resolve via
+`admin_service.get_effective_flag/get_effective_int(db, key, env_default)` — the row's
+value wins when present/parseable, else the env-backed `settings.<flag>` is the fallback.
+A startup reconcile (`startup._reconcile_system_config`) mirrors the env value into each
+never-admin-edited row (`updated_by IS NULL`) so behaviour doesn't flip at cutover;
+`set_config_value` invalidates the 5-min in-memory config cache so a toggle takes effect
+promptly. `updated_by IS NULL` == never edited via the UI.
 
 SP4 Account Reclamation config keys (sourced from `.env` / `app/config.py`):
 | Key | Type | Default | Description |
@@ -624,6 +900,7 @@ SP4 Account Reclamation config keys (sourced from `.env` / `app/config.py`):
 
 **`ics_search_queue`** — ICS browser automation queue (priority, status, gate_decision). Dedup keyed on `(requirement_id, normalized_mpn)` — backed by a composite UNIQUE (`uq_ics_queue_requirement_mpn`) that replaced the legacy per-requirement UNIQUE — so the spec-code resolver can enqueue multiple AVL MPNs per requirement while concurrent enqueues still can't double-insert (the app-layer check in `QueueManager.enqueue_search` catches the resulting `IntegrityError` and returns the winning row); carries `resolved_via_spec_code` lineage.
 **`nc_search_queue`** — NetComponents browser automation queue (same structure + same composite-UNIQUE dedup `uq_nc_queue_requirement_mpn` / lineage change)
+**`tbf_search_queue`** — The Broker Forum (thebrokersite.com) browser automation queue (same structure + same composite-UNIQUE dedup `uq_tbf_queue_requirement_mpn` / lineage change). Backed by the `avail-tbf-worker` host worker (ACTIVE: authenticates with member creds and records the real seller `vendor_name` + `vendor_phone` per listing). Sister tables `tbf_search_log` (per-search audit) + `tbf_worker_status` (singleton id=1 heartbeat row, seeded by migration 130 / `seed_tbf_worker_status_singleton`).
 
 ### OEM Spec-Code Resolver
 

@@ -1161,3 +1161,94 @@ class TestWarnNonCanonicalCategories:
 
         warnings = self._capture_warnings(lambda: _warn_non_canonical_categories(db_session))
         assert not any("non-canonical" in w for w in warnings), warnings
+
+
+# ── Fix 4: startup sweep-cooldown backfill ───────────────────────────
+
+
+class TestBackfillSweepCooldown:
+    """_backfill_sweep_cooldown fills reclaim_blocked_until on swept rows that are
+    missing it (crash window between the two commits in Phase 4 sweep)."""
+
+    def test_null_cooldown_on_swept_row_gets_backfilled(self, db_session):
+        """A swept ProspectAccount with NULL reclaim_blocked_until is backfilled."""
+        from datetime import timedelta
+
+        from app.models.prospect_account import ProspectAccount
+        from app.startup import _backfill_sweep_cooldown
+
+        now = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
+        pa = ProspectAccount(
+            name="Swept Backfill",
+            domain="backfill-sweep.com",
+            discovery_source="auto_sweep",
+            status="suggested",
+            fit_score=0,
+            readiness_score=0,
+            swept_at=now,
+            reclaim_blocked_until=None,
+        )
+        db_session.add(pa)
+        db_session.commit()
+
+        with patch("app.startup.SessionLocal", return_value=db_session), patch.object(db_session, "close"):
+            _backfill_sweep_cooldown()
+
+        db_session.refresh(pa)
+        assert pa.reclaim_blocked_until is not None
+        delta = pa.reclaim_blocked_until - pa.swept_at
+        assert abs(delta - timedelta(days=30)) < timedelta(seconds=5)
+
+    def test_already_set_cooldown_is_not_modified(self, db_session):
+        """Rows with an existing reclaim_blocked_until are left untouched."""
+        from datetime import timedelta
+
+        from app.models.prospect_account import ProspectAccount
+        from app.startup import _backfill_sweep_cooldown
+
+        now = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
+        future = now + timedelta(days=30)
+        pa = ProspectAccount(
+            name="Already Set",
+            domain="already-set-sweep.com",
+            discovery_source="auto_sweep",
+            status="suggested",
+            fit_score=0,
+            readiness_score=0,
+            swept_at=now,
+            reclaim_blocked_until=future,
+        )
+        db_session.add(pa)
+        db_session.commit()
+
+        with patch("app.startup.SessionLocal", return_value=db_session), patch.object(db_session, "close"):
+            _backfill_sweep_cooldown()
+
+        db_session.refresh(pa)
+        # Should be unchanged — the filter only touches NULL rows
+        assert pa.reclaim_blocked_until == future
+
+    def test_dismissed_rows_are_skipped(self, db_session):
+        """Dismissed rows with NULL cooldown are not touched."""
+        from app.models.prospect_account import ProspectAccount
+        from app.startup import _backfill_sweep_cooldown
+
+        now = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
+        pa = ProspectAccount(
+            name="Dismissed",
+            domain="dismissed-sweep.com",
+            discovery_source="auto_sweep",
+            status="dismissed",
+            fit_score=0,
+            readiness_score=0,
+            swept_at=now,
+            reclaim_blocked_until=None,
+        )
+        db_session.add(pa)
+        db_session.commit()
+
+        with patch("app.startup.SessionLocal", return_value=db_session), patch.object(db_session, "close"):
+            _backfill_sweep_cooldown()
+
+        db_session.refresh(pa)
+        assert pa.reclaim_blocked_until is None

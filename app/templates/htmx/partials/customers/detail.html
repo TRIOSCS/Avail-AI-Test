@@ -1,7 +1,9 @@
-{# Company detail partial — tabbed layout with enrich, quick info, stats, and click-to-contact.
+{# Company detail partial — full-width, contacts-forward layout.
    Renders inside the CDM workspace right panel (#cdm-detail) or full-page (#main-content).
-   Contacts tab is default and inlined so phones/emails/Teams/WeChat actions are
-   immediately available for call-list workflows.
+   A slim one-line account header sits above the tabs; CONTACTS is the default
+   inlined tab so phones/emails/Teams/WeChat actions are immediately available for
+   call-list workflows. Account cadence/disposition/clocks live in a collapsible
+   "Account settings" block to keep contacts front-and-center.
    Receives: company, sites, open_req_count, contact_rows, user.
    Called by: company_detail_partial route in htmx_views.py.
    Depends on: brand palette, partials/shared/enrich_button.html, tabs/contacts_tab.html.
@@ -10,8 +12,40 @@
 
 <title hx-swap-oob="true">{{ company.name }} — Companies — AvailAI</title>
 
-{# max-w-3xl: must fit the CDM right panel (~60% viewport), not just full-page #}
-<div class="max-w-3xl mx-auto space-y-6">
+{# Full panel width — no max-w cap; the slim header + multi-column contacts use it all. #}
+<div class="space-y-4 page-fluid">
+
+  {# ── Breadcrumb — "Customers › {Account}" (you-are-here for the right panel).
+     Reuses the treatment from the retired site_detail.html. "Customers" is the
+     section eyebrow (the left list IS the account picker, so it has no separate
+     destination); the account name is the current node. #}
+  <nav class="flex items-center gap-1.5 text-xs text-gray-600" aria-label="Breadcrumb">
+    <span>Customers</span>
+    <span class="text-gray-300">&rsaquo;</span>
+    <span class="text-gray-700 font-medium truncate">{{ company.name }}</span>
+  </nav>
+
+  {# ── Archived account banner — shown when company.is_active is False ── #}
+  {% if not company.is_active %}
+  <div class="flex items-center justify-between gap-3 rounded-lg border border-rose-300 bg-rose-50 px-4 py-2.5 text-sm text-rose-800">
+    <div class="min-w-0">
+      <span><strong>Archived — Do Not Call.</strong> This account is unassigned and hidden from all active lists.</span>
+      {% if company.disposition_reason %}
+      <span class="ml-2 text-rose-600">Reason: {{ company.disposition_reason }}</span>
+      {% endif %}
+    </div>
+    {% if can_reactivate %}
+    <button type="button"
+            hx-post="/v2/partials/customers/{{ company.id }}/reactivate"
+            hx-target="#cdm-detail"
+            hx-swap="innerHTML"
+            hx-confirm="Restore this account to active status?"
+            class="btn btn-secondary btn-sm flex-shrink-0">
+      Reactivate
+    </button>
+    {% endif %}
+  </div>
+  {% endif %}
 
   {# Possible-duplicate banner — lazy (hx-target=this avoids inheriting the
      #main-content hx-target). Renders nothing when there is no near-dup. #}
@@ -21,139 +55,291 @@
        hx-swap="innerHTML"
        class="empty:hidden"></div>
 
-  {# ── Header Card ─────────────────────────────────────────── #}
-  <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-6">
-    <div class="flex items-start justify-between">
-      <div class="flex items-start gap-4">
-        {# Initial avatar circle #}
-        <div class="flex-shrink-0 h-12 w-12 rounded-full bg-brand-100 flex items-center justify-center">
-          <span class="text-lg font-bold text-brand-600">{{ company.name[:1]|upper }}</span>
+  {# ── Slim account header ─────────────────────────────────────────────────
+     One compact card: identity (left) · commercial/cadence chip strip (middle) ·
+     actions (right). Account cadence/disposition/clocks collapse below. #}
+  {% set cadence_dot = {'new': 'bg-gray-300', 'on_target': 'bg-emerald-400', 'due': 'bg-amber-400', 'overdue': 'bg-rose-500'} %}
+  {% set cadence_label = {'new': 'New', 'on_target': 'On Target', 'due': 'Due', 'overdue': 'Overdue'} %}
+  <div x-data="{ showAcctSettings: false }"
+       class="bg-white rounded-xl border border-brand-200 px-4 py-3">
+    <div class="flex items-center justify-between gap-x-3 gap-y-1 flex-wrap">
+
+      {# LEFT: avatar + name + muted identity line #}
+      <div class="flex items-center gap-2.5 min-w-0">
+        <div class="flex-shrink-0 h-9 w-9 rounded-full bg-brand-100 flex items-center justify-center">
+          <span class="text-base font-bold text-brand-600">{{ company.name[:1]|upper }}</span>
         </div>
-        <div>
-          <h1 class="text-2xl font-bold text-gray-900">{{ company.name }}</h1>
-          {# Suggest-only name-normalization chip — lazy, renders nothing when clean. #}
-          <div hx-get="/v2/partials/customers/{{ company.id }}/name-suggestion"
-               hx-target="this"
-               hx-trigger="load"
-               hx-swap="innerHTML"
-               class="mt-1 empty:hidden"></div>
-          <div class="mt-1 flex flex-wrap items-center gap-2 text-sm text-gray-600">
+        <div class="min-w-0">
+          <div class="flex items-center gap-2 min-w-0">
+            <h1 class="text-lg font-bold text-gray-900 truncate">{{ company.name }}</h1>
+            {# Suggest-only name-normalization chip — lazy, renders nothing when clean. #}
+            <div hx-get="/v2/partials/customers/{{ company.id }}/name-suggestion"
+                 hx-target="this"
+                 hx-trigger="load"
+                 hx-swap="innerHTML"
+                 class="empty:hidden"></div>
+          </div>
+          <div class="flex flex-wrap items-center gap-x-1.5 text-xs text-gray-600">
             {% if company.domain %}
               <a href="https://{{ company.domain }}" target="_blank" rel="noopener noreferrer" class="text-brand-500 hover:text-brand-600">{{ company.domain }}</a>
             {% endif %}
-            {% if company.industry %}
-              <span class="text-gray-300">|</span>
-              <span>{{ company.industry }}</span>
-            {% endif %}
+            {# Industry — inline-editable (WS1) #}
+            {% if company.domain %}<span class="text-gray-300">·</span>{% endif %}
+            {% with obj=company, field='industry', entity='company',
+                    meta={'label': 'Industry', 'kind': 'text'},
+                    edit_url='/v2/partials/customers/' ~ company.id ~ '/field/edit/industry' %}
+              {% include 'htmx/partials/customers/_field_display.html' %}
+            {% endwith %}
             {% if company.hq_city %}
-              <span class="text-gray-300">|</span>
+              {% if company.domain or company.industry %}<span class="text-gray-300">·</span>{% endif %}
               <span>{{ company.hq_city }}{% if company.hq_country %}, {{ company.hq_country }}{% endif %}</span>
+            {% endif %}
+            {# Primary contact — account-level #}
+            {% if company.primary_contact %}
+              {% if company.domain or company.industry or company.hq_city %}<span class="text-gray-300">·</span>{% endif %}
+              <span>Primary: <span class="font-medium text-gray-700">{{ company.primary_contact.full_name }}</span></span>
+            {% else %}
+              {% if company.domain or company.industry or company.hq_city %}<span class="text-gray-300">·</span>{% endif %}
+              <span class="text-gray-400 italic">+ Add primary contact</span>
+            {% endif %}
+            {# Parent company #}
+            {% if company.parent_company %}
+              <span class="text-gray-300">·</span>
+              <span>Parent: <span class="font-medium text-gray-700">{{ company.parent_company.name }}</span></span>
+            {% endif %}
+            {# Child accounts count #}
+            {% if company.child_companies %}
+              <span class="text-gray-300">·</span>
+              <span class="font-medium text-gray-700">{{ company.child_companies|length }} child account{{ 's' if company.child_companies|length != 1 else '' }}</span>
             {% endif %}
           </div>
         </div>
       </div>
-      <div class="flex items-center gap-3">
+
+      {# MIDDLE: commercial + cadence chip strip (·-separated, wraps) #}
+      <div class="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-gray-600 min-w-0">
+        <span>Owner:
+          {% if company.account_owner %}<span class="font-medium text-gray-700">{{ company.account_owner.name }}</span>{% else %}<span class="text-gray-400">Unassigned</span>{% endif %}
+        </span>
+        {# Phase 3: Collaborators chip list (helper access; add/remove only for manager/owner) #}
+        {% if collaborators or can_manage_team %}
+        <span class="text-gray-300">·</span>
+        <span class="inline-flex items-center gap-1 text-gray-600">Helpers:
+          {% include 'htmx/partials/customers/_collaborators.html' %}
+        </span>
+        {% endif %}
+        <span class="text-gray-300">·</span>
+        <span>Terms:
+          {% with obj=company, field='credit_terms', entity='company',
+                  meta={'label': 'Credit Terms', 'kind': 'text'},
+                  edit_url='/v2/partials/customers/' ~ company.id ~ '/field/edit/credit_terms' %}
+            {% include 'htmx/partials/customers/_field_display.html' %}
+          {% endwith %}
+        </span>
+        <span class="text-gray-300">·</span>
+        <span class="inline-flex items-center gap-1">
+          <span class="w-2 h-2 rounded-full {{ cadence_dot.get(cadence_state, 'bg-gray-300') }}"
+                role="img" aria-label="{{ cadence_label.get(cadence_state, cadence_state|title) }}"></span>
+          <span class="font-medium text-gray-700">{{ cadence_label.get(cadence_state, cadence_state|title) }}</span>
+        </span>
+        <span class="text-gray-300">·</span>
+        <span>Win <span class="font-semibold text-gray-900">{% if win_rate is not none %}{{ win_rate }}%{% else %}—{% endif %}</span></span>
+        <span class="text-gray-300">·</span>
+        <span>Rev 90d <span class="font-semibold text-gray-900">{% if revenue_90d %}${{ "{:,.0f}".format(revenue_90d) }}{% else %}—{% endif %}</span></span>
+        <span class="text-gray-300">·</span>
+        <span>Last req <span class="font-semibold text-gray-900">{% if last_req_date %}{{ last_req_date[:10] }}{% else %}—{% endif %}</span></span>
+        <span class="text-gray-300">·</span>
+        <span class="font-medium text-gray-700">{{ contact_count }} contact{{ 's' if contact_count != 1 else '' }} · {{ site_count }} site{{ 's' if site_count != 1 else '' }}</span>
+      </div>
+
+      {# RIGHT: type badge + enrich + Add Contact + kebab #}
+      <div class="flex items-center gap-2 flex-shrink-0">
         {% if company.account_type %}
         {{ account_type_badge(company.account_type) }}
         {% endif %}
         {% set entity_type = "company" %}
         {% set entity_id = company.id %}
         {% include "htmx/partials/shared/enrich_button.html" %}
-        {# Merge duplicate — opens modal with search + confirm flow #}
+        {# Cadence & settings — VISIBLE labeled affordance (no longer kebab-buried).
+           Toggles the collapsible cadence/tier/disposition block below; aria-expanded
+           reflects state for assistive tech. #}
         <button type="button"
-                title="Merge duplicate into this account"
-                class="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white
-                       px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50
-                       focus:outline-none focus:ring-2 focus:ring-brand-500"
-                hx-get="/v2/partials/customers/{{ company.id }}/merge-form"
-                hx-target="#modal-content"
-                hx-swap="innerHTML"
-                @click="$dispatch('open-modal')">
-          Merge duplicate
+                @click="showAcctSettings = !showAcctSettings"
+                :aria-expanded="showAcctSettings"
+                aria-controls="acct-settings-{{ company.id }}"
+                aria-label="Cadence &amp; settings"
+                title="Cadence &amp; settings"
+                :class="showAcctSettings ? 'bg-brand-50 text-brand-600 border-brand-200' : 'text-gray-600 border-gray-200 hover:bg-gray-50'"
+                class="inline-flex items-center rounded-lg border p-1.5 transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500">
+          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+            <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+          </svg>
+          <span class="sr-only">Cadence &amp; settings</span>
         </button>
+        {# Kebab — overflow actions (Merge duplicate) #}
+        <div class="relative inline-block" x-data="{ open: false }" @click.outside="open = false">
+          <button @click.stop="open = !open" type="button"
+                  class="p-1.5 text-gray-400 hover:text-gray-600 rounded transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  aria-label="More account actions"
+                  :aria-expanded="open ? 'true' : 'false'"
+                  aria-haspopup="menu">
+            <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
+              <path d="M10 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4z"/>
+            </svg>
+          </button>
+          <div x-show="open" x-cloak
+               role="menu"
+               class="absolute right-0 top-full mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-lg z-20 py-1 text-xs text-left">
+            {# Merge duplicate — opens modal with search + confirm flow #}
+            <button type="button"
+                    hx-get="/v2/partials/customers/{{ company.id }}/merge-form"
+                    hx-target="#modal-content"
+                    hx-swap="innerHTML"
+                    @click.stop="$dispatch('open-modal'); open = false"
+                    role="menuitem"
+                    class="w-full text-left px-3 py-1.5 text-gray-700 hover:bg-gray-50">Merge duplicate</button>
+            {# Archive / restore — only shown to users who can manage the team #}
+            {% if can_manage_team %}
+              {% if company.is_active %}
+            <button type="button"
+                    hx-post="/v2/partials/customers/{{ company.id }}/deactivate"
+                    hx-target="#cdm-detail"
+                    hx-swap="innerHTML"
+                    hx-confirm="Archive (Do Not Call)? This will unassign the account and hide it from all active lists. Are you sure?"
+                    @click.stop="open = false"
+                    role="menuitem"
+                    class="w-full text-left px-3 py-1.5 text-rose-600 hover:bg-rose-50">Archive (Do Not Call)</button>
+              {% endif %}
+            {% endif %}
+          </div>
+        </div>
       </div>
     </div>
 
-    {# Quick info grid — 2 cols: the md: viewport breakpoint lies inside a
-       split panel (panel is far narrower than the viewport) #}
-    <div class="mt-6 grid grid-cols-2 gap-4">
-      <div class="p-3 rounded-lg bg-gray-50">
-        <p class="text-xs font-medium text-gray-500 uppercase tracking-wider">Account Owner</p>
-        <p class="mt-1 text-sm font-medium text-gray-900">
-          {% if company.account_owner %}
-            <span class="inline-flex items-center gap-1.5">
-              <span class="inline-flex items-center justify-center h-5 w-5 rounded-full bg-brand-100 text-brand-600 text-xs font-bold">{{ company.account_owner.name[:1]|upper }}</span>
-              {{ company.account_owner.name }}
-            </span>
-          {% else %}
-            <span class="text-gray-400">Unassigned</span>
-          {% endif %}
-        </p>
-      </div>
-      <div class="p-3 rounded-lg bg-gray-50">
-        <p class="text-xs font-medium text-gray-500 uppercase tracking-wider">Credit Terms</p>
-        <p class="mt-1 text-sm font-medium text-gray-900">{{ company.credit_terms or "—" }}</p>
-      </div>
-      <div class="p-3 rounded-lg bg-gray-50">
-        <p class="text-xs font-medium text-gray-500 uppercase tracking-wider">Phone</p>
-        <p class="mt-1 text-sm font-medium">
-          {% if company.phone %}
-            <a href="tel:{{ company.phone }}" class="text-brand-500 hover:text-brand-600"
-               data-outreach-log data-channel="phone" data-value="{{ company.phone }}"
-               data-company-id="{{ company.id }}" data-contact-name="{{ company.name }}">{{ company.phone }}</a>
-          {% else %}
-            <span class="text-gray-400">—</span>
-          {% endif %}
-        </p>
-      </div>
-      <div class="p-3 rounded-lg bg-gray-50">
-        <p class="text-xs font-medium text-gray-500 uppercase tracking-wider">Employees</p>
-        <p class="mt-1 text-sm font-medium text-gray-900">{{ company.employee_size or "—" }}</p>
-      </div>
-    </div>
-  </div>
+    {# ── Collapsible Account settings — cadence/disposition/clocks + phone/employees ── #}
+    <div id="acct-settings-{{ company.id }}" x-show="showAcctSettings" x-cloak x-collapse class="mt-3 pt-3 border-t border-gray-100 space-y-3">
+      {# Hero row: cadence badge + settable tier + next-best-touch.
+         _cadence_hero.html is the HTMX swap target for tier updates. #}
+      {% include 'htmx/partials/customers/_cadence_hero.html' %}
 
-  {# ── Account Cadence Card ──────────────────────────────── #}
-  <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-4">
-    {# Hero row: cadence badge + settable tier + next-best-touch.
-       _cadence_hero.html is the HTMX swap target for tier updates. #}
-    {% include 'htmx/partials/customers/_cadence_hero.html' %}
+      {# Disposition control: Active / Bucket + Send to Prospecting. #}
+      {% include 'htmx/partials/customers/_disposition_control.html' %}
 
-    {# Disposition control: Active / Bucket + Send to Prospecting. #}
-    {% include 'htmx/partials/customers/_disposition_control.html' %}
+      {# ── Next step: soonest open account task #}
+      {% if next_account_task %}
+      <div class="text-xs text-gray-700">
+        <span class="font-medium">Next:</span>
+        {{ next_account_task.title }}
+        {% if next_account_task.due_at %}
+          <span class="text-gray-600">(due {{ next_account_task.due_at.strftime('%b %-d') }})</span>
+        {% endif %}
+      </div>
+      {% endif %}
 
-    {# Dual clocks: Outbound + Reply — canonical cadence_clocks macro (shared/_macros.html) #}
-    <div class="mb-3">
+      {# ── Account tasks ── lazy-loaded #}
+      <div hx-get="/v2/partials/customers/{{ company.id }}/tasks"
+           hx-trigger="load"
+           hx-target="this"
+           hx-swap="outerHTML"
+           class="empty:hidden"></div>
+
+      {# Dual clocks: Outbound + Reply — canonical cadence_clocks macro (shared/_macros.html) #}
       {{ cadence_clocks(company, now_utc) }}
-    </div>
 
-    {# Coverage badge #}
-    <p class="text-xs text-gray-600">
-      <span class="font-medium text-gray-700">{{ contact_count }} contact{{ 's' if contact_count != 1 else '' }}</span>
-      <span class="text-gray-300 mx-1">·</span>
-      <span class="font-medium text-gray-700">{{ site_count }} site{{ 's' if site_count != 1 else '' }}</span>
-    </p>
+      {# ── Known-fields grid — all account fields (filled + empty); empties show "+ Add <label>" #}
+      <div class="grid grid-cols-2 gap-x-4 gap-y-2.5">
+        {% for field_info in known_account_fields %}
+          {% set fname = field_info[0] %}
+          {% set flabel = field_info[1] %}
+          {% set fkind = field_info[2] %}
+          {% set fchoices = field_info[3] %}
+          <div class="min-w-0">
+            <p class="text-xs font-medium text-gray-600 uppercase tracking-wide mb-0.5">{{ flabel }}</p>
+            {% with obj=company, field=fname, entity='company',
+                    meta={'label': flabel, 'kind': fkind, 'choices': fchoices or []},
+                    edit_url='/v2/partials/customers/' ~ company.id ~ '/field/edit/' ~ fname %}
+              {% include 'htmx/partials/customers/_field_display.html' %}
+            {% endwith %}
+          </div>
+        {% endfor %}
+      </div>
+
+      {# ── Segment Tags — inside account-settings collapsible (less weight on other tabs) #}
+      <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-4">
+        <h2 class="text-sm font-semibold text-gray-900 mb-2">Segments</h2>
+        {% include "htmx/partials/customers/_segment_tags.html" %}
+      </div>
+
+      {# ── Additional Details — custom key:value fields (WS3) #}
+      <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-4">
+        <h2 class="text-sm font-semibold text-gray-900 mb-2">Additional details</h2>
+        {% with entity='company', obj=company, company_id=company.id %}
+          {% include "htmx/partials/customers/_custom_fields.html" %}
+        {% endwith %}
+      </div>
+
+      {# ── Audit trail — created / modified by ─────────────────────── #}
+      <p class="text-xs text-gray-400 mt-1">
+        Created by <span class="text-gray-600 font-medium">{{ company.created_by.name if company.created_by else '—' }}</span>
+        &middot;
+        Updated by <span class="text-gray-600 font-medium">{{ company.modified_by.name if company.modified_by else '—' }}</span>
+      </p>
+    </div>
   </div>
 
-  {# ── Commercial Context Strip ────────────────────────────── #}
-  <div class="bg-white rounded-xl shadow-sm border border-brand-200 px-4 py-3">
-    <div class="flex items-center gap-4 flex-wrap text-sm">
-      <span class="text-xs font-medium text-gray-400 uppercase tracking-wider mr-2">Commercial</span>
-      <span class="text-gray-600">
-        Win rate:
-        <span class="font-semibold text-gray-900">{% if win_rate is not none %}{{ win_rate }}%{% else %}—{% endif %}</span>
-      </span>
-      <span class="text-gray-300">·</span>
-      <span class="text-gray-600">
-        Rev 90d:
-        <span class="font-semibold text-gray-900">{% if revenue_90d %}${{ "{:,.0f}".format(revenue_90d) }}{% else %}—{% endif %}</span>
-      </span>
-      <span class="text-gray-300">·</span>
-      <span class="text-gray-600">
-        Last deal:
-        <span class="font-semibold text-gray-900">{% if last_req_date %}{{ last_req_date[:10] }}{% else %}—{% endif %}</span>
-      </span>
+  {# ── Tabs — Contacts first + inlined (front-and-center call-list workflow) ── #}
+  <div x-data="{ activeTab: '{{ active_tab }}' }" @crm-switch-tab.window="activeTab = $event.detail.tab">
+    <div class="border-b border-gray-200">
+      <nav class="flex gap-6 -mb-px overflow-x-auto" role="tablist" aria-label="Account detail sections"
+           @keydown.arrow-right.prevent="const tabs=$el.querySelectorAll('[role=tab]');const i=[...tabs].indexOf(document.activeElement);tabs[(i+1)%tabs.length].focus();tabs[(i+1)%tabs.length].click()"
+           @keydown.arrow-left.prevent="const tabs=$el.querySelectorAll('[role=tab]');const i=[...tabs].indexOf(document.activeElement);tabs[(i-1+tabs.length)%tabs.length].focus();tabs[(i-1+tabs.length)%tabs.length].click()">
+        {% for tab_id, tab_label, tab_count in [
+          ('contacts', 'Contacts', contact_count if contact_count is defined else none),
+          ('sites', 'Sites', sites|length),
+          ('requisitions', 'Requisitions', open_req_count),
+          ('activity', 'Activity', none),
+          ('quotes', 'Quotes', quote_count if quote_count is defined else none),
+          ('buy_plans', 'Buy Plans', buy_plan_count if buy_plan_count is defined else none),
+          ('files', 'Files', file_count if file_count is defined else none)
+        ] %}
+        <button @click="if (activeTab === '{{ tab_id }}') { $event.preventDefault(); } else { activeTab = '{{ tab_id }}'; }"
+                id="tab-{{ tab_id }}"
+                role="tab"
+                :aria-selected="activeTab === '{{ tab_id }}' ? 'true' : 'false'"
+                aria-controls="company-tab-content"
+                hx-get="/v2/partials/customers/{{ company.id }}/tab/{{ tab_id }}"
+                hx-target="#company-tab-content"
+                hx-swap="innerHTML"
+                hx-push-url="/v2/customers/{{ company.id }}?tab={{ tab_id }}"
+                :class="activeTab === '{{ tab_id }}' ? 'border-brand-500 text-brand-600 font-semibold' : 'border-transparent text-gray-600 hover:text-gray-700 hover:border-gray-300'"
+                class="shrink-0 whitespace-nowrap py-3 px-1 text-sm font-medium border-b-2 transition-colors inline-flex items-center gap-1.5">
+          {{ tab_label }}
+          {% if tab_count is not none and tab_count > 0 %}
+            <span class="inline-flex items-center justify-center h-5 min-w-[20px] px-1 text-xs font-bold rounded-full bg-brand-100 text-brand-600">{{ tab_count }}</span>
+          {% endif %}
+        </button>
+        {% endfor %}
+      </nav>
     </div>
+
+    {# Tab content — contacts inlined on first load for fast call-list workflows;
+       other deep-linked tabs lazy-load via hx-trigger="load" with explicit
+       hx-target="this" (prevents inheriting #main-content hx-target). #}
+    {% if active_tab == 'contacts' %}
+    <div id="company-tab-content" class="mt-4" role="tabpanel" :aria-labelledby="'tab-' + activeTab">
+      {% include "htmx/partials/customers/tabs/contacts_tab.html" %}
+    </div>
+    {% else %}
+    <div id="company-tab-content"
+         class="mt-4"
+         role="tabpanel"
+         :aria-labelledby="'tab-' + activeTab"
+         hx-get="/v2/partials/customers/{{ company.id }}/tab/{{ active_tab }}"
+         hx-trigger="load"
+         hx-target="this"
+         hx-swap="innerHTML"></div>
+    {% endif %}
   </div>
 
   {# Enrich results placeholder #}
@@ -170,56 +356,5 @@
       <svg class="h-5 w-5 text-gray-400 animate-spin" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/></svg>
     </div>
   </div>
-
-  {# ── Tabs — Contacts first (CDM call-list workflow) ───────── #}
-  <div x-data="{ activeTab: 'contacts' }">
-    <div class="border-b border-gray-200">
-      <nav class="flex gap-6 -mb-px" role="tablist" aria-label="Account detail sections">
-        {% for tab_id, tab_label, tab_count in [
-          ('contacts', 'Contacts', contact_rows|length if contact_rows is defined else none),
-          ('sites', 'Sites', sites|length),
-          ('requisitions', 'Requisitions', open_req_count),
-          ('activity', 'Activity', none),
-          ('quotes', 'Quotes', quote_count if quote_count is defined else none),
-          ('buy_plans', 'Buy Plans', buy_plan_count if buy_plan_count is defined else none)
-        ] %}
-        <button @click="activeTab = '{{ tab_id }}'"
-                role="tab"
-                :aria-selected="activeTab === '{{ tab_id }}' ? 'true' : 'false'"
-                aria-controls="company-tab-content"
-                hx-get="/v2/partials/customers/{{ company.id }}/tab/{{ tab_id }}"
-                hx-target="#company-tab-content"
-                hx-trigger="click"
-                hx-swap="innerHTML"
-                :class="activeTab === '{{ tab_id }}' ? 'border-brand-500 text-brand-600 font-semibold' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
-                class="py-3 px-1 text-sm font-medium border-b-2 transition-colors inline-flex items-center gap-1.5">
-          {{ tab_label }}
-          {% if tab_count is not none and tab_count > 0 %}
-            <span class="inline-flex items-center justify-center h-5 min-w-[20px] px-1 text-xs font-bold rounded-full bg-brand-100 text-brand-600">{{ tab_count }}</span>
-          {% endif %}
-        </button>
-        {% endfor %}
-      </nav>
-    </div>
-
-    {# Tab content — contacts loaded inline on first load (click-to-contact panel) #}
-    <div id="company-tab-content" class="mt-4" role="tabpanel">
-      {% include "htmx/partials/customers/tabs/contacts_tab.html" %}
-    </div>
-  </div>
-
-  {# ── Segment Tags ────────────────────────────────────────── #}
-  <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-4">
-    <h2 class="text-sm font-semibold text-gray-900 mb-2">Segments</h2>
-    {% include "htmx/partials/customers/_segment_tags.html" %}
-  </div>
-
-  {# ── Notes ───────────────────────────────────────────────── #}
-  {% if company.notes %}
-  <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-4">
-    <h2 class="text-sm font-semibold text-gray-900 mb-2">Notes</h2>
-    <p class="text-sm text-gray-600 whitespace-pre-wrap leading-relaxed">{{ company.notes }}</p>
-  </div>
-  {% endif %}
 
 </div>

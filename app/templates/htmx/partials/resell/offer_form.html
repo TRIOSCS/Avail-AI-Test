@@ -1,0 +1,79 @@
+{#
+  resell/offer_form.html — Submit-offer modal (per-line / take-all scope toggle).
+  Single-line quick-add path this slice; the paste/upload funnel reuses the same
+  import_preview grid. Price is OPTIONAL (a broker may bid "take-all, price TBD").
+  The service enforces can_offer + the self-offer guard.
+  Receives: list (ExcessList).
+  Called by: resell.resell_offer_form.
+#}
+{% set el = list %}
+<div class="p-5" x-data="{ scope: 'per_line' }">
+  <h2 class="text-lg font-semibold text-gray-900 mb-1">Submit offer</h2>
+  <p class="text-sm text-gray-500 mb-4">On <span class="font-medium text-gray-700">{{ el.title }}</span></p>
+
+  <form hx-post="/api/resell/{{ el.id }}/offers"
+        hx-target="#tab-offers-{{ el.id }}"
+        hx-swap="innerHTML"
+        data-loading-disable
+        @htmx:after-request.camel="if(event.detail.successful){ $dispatch('close-modal'); $store.toast.message='Offer submitted'; $store.toast.type='success'; $store.toast.show=true; }"
+        class="space-y-4">
+
+    {# Scope toggle #}
+    <input type="hidden" name="scope" :value="scope">
+    <div class="flex rounded-lg border border-brand-200 overflow-hidden text-sm">
+      <button type="button" @click="scope = 'per_line'"
+              :class="scope === 'per_line' ? 'bg-brand-500 text-white' : 'bg-white text-gray-600 hover:bg-brand-50'"
+              class="flex-1 py-2 font-medium transition-colors">Per-line</button>
+      <button type="button" @click="scope = 'take_all'"
+              :class="scope === 'take_all' ? 'bg-brand-500 text-white' : 'bg-white text-gray-600 hover:bg-brand-50'"
+              class="flex-1 py-2 font-medium transition-colors border-l border-brand-200">Take the whole list</button>
+    </div>
+
+    {# Per-line fields #}
+    <div x-show="scope === 'per_line'" class="space-y-3">
+      <div>
+        <label class="form-label">Part number <span class="text-rose-500">*</span></label>
+        <input type="text" name="mpn_raw" :required="scope === 'per_line'" class="input" placeholder="e.g. XCVU9P-2FLGA2104I">
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="form-label">Quantity <span class="text-rose-500">*</span></label>
+          <input type="number" name="quantity" min="1" :required="scope === 'per_line'" class="input">
+        </div>
+        <div>
+          <label class="form-label">Unit price</label>
+          <input type="number" name="unit_price" step="0.0001" min="0" class="input" placeholder="optional">
+        </div>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="form-label">Lead time (days)</label>
+          <input type="number" name="lead_time_days" min="0" class="input" placeholder="optional">
+        </div>
+        <div>
+          <label class="form-label">Terms</label>
+          <input type="text" name="terms_text" class="input" placeholder="packaging / date-code…">
+        </div>
+      </div>
+    </div>
+
+    {# Take-all field #}
+    <div x-show="scope === 'take_all'" x-cloak class="space-y-3">
+      <div>
+        <label class="form-label">Lump price for the whole list</label>
+        <input type="number" name="take_all_total_price" step="0.01" min="0" class="input" placeholder="optional — leave blank for price TBD">
+      </div>
+      <p class="text-xs text-gray-400">A take-all offer binds every line, all-or-nothing — it pins above the lines as the headline.</p>
+    </div>
+
+    <div>
+      <label class="form-label">Notes</label>
+      <textarea name="notes" rows="2" class="input" placeholder="Optional notes for the trader…"></textarea>
+    </div>
+
+    <div class="flex justify-end gap-3 pt-2 border-t border-gray-100">
+      <button type="button" @click="$dispatch('close-modal')" class="btn btn-secondary">Cancel</button>
+      <button type="submit" class="btn btn-primary">Submit offer</button>
+    </div>
+  </form>
+</div>

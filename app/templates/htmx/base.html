@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="app-build" content="{{ build_commit|default('') }}">
   <title>{% block title %}AvailAI{% endblock %}</title>
   <!-- Aptos (Office 365/Win11) → Segoe UI → system fallbacks -->
   {% for css_file in vite_css|default([]) %}
@@ -65,7 +66,7 @@
            role="dialog" aria-modal="true" aria-labelledby="modal-title"
            :class="wide ? 'max-w-[calc(100vw-2rem)]' : 'max-w-lg'"
            x-trap.noscroll="open">
-        <h2 id="modal-title" class="sr-only">Dialog</h2>
+        {# modal-title id is set on the heading inside each loaded modal partial #}
         {# Persistent close affordance — every modal can be dismissed even if the
            loaded content template provides no close control of its own. #}
         <button type="button" @click="$dispatch('close-modal')" aria-label="Close"
@@ -92,6 +93,9 @@
        }">
     <span x-text="$store.toast.message"></span>
   </div>
+
+  {# ── Call outcome prompt (post-phone-outreach, non-blocking) ────── #}
+  {% include "htmx/partials/shared/call_outcome_prompt.html" %}
 
   {# Icon templates for SSE progress (cloned by Alpine sourcingProgress component) #}
   <template id="tpl-icon-check">

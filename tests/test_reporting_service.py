@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Company, User
 
-NOW = datetime(2026, 6, 18, 12, 0, 0, tzinfo=timezone.utc)
+NOW = datetime.now(timezone.utc)
 
 
 # ─── helpers ────────────────────────────────────────────────────────────────

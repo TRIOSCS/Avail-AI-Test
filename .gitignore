@@ -1,8 +1,10 @@
 # Never commit these — exact .env and any `.env.*` variant (backups, workers,
-# timestamped edit snapshots). `!.env.example` re-allows the committed template.
+# timestamped edit snapshots). `!.env.example` re-allows the committed templates;
+# the real per-worker .env.<worker> files (with credentials) stay ignored.
 .env
 .env.*
 !.env.example
+!.env.tbf-worker.example
 __pycache__/
 *.pyc
 *.pyo

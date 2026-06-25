@@ -102,8 +102,8 @@ class TestShellPageRouting:
         "path",
         [
             "/v2/buy-plans/42",
-            "/v2/excess",
-            "/v2/excess/7",
+            "/v2/resell",
+            "/v2/resell/7",
             "/v2/quotes",
             "/v2/quotes/99",
             "/v2/settings",

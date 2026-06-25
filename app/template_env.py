@@ -29,6 +29,32 @@ def template_response(name: str, context: dict[str, Any], **kwargs: Any) -> Resp
     return templates.TemplateResponse(request, name, context, **kwargs)
 
 
+# Cache-Control header for full HTML page responses (the base_page shell).
+# Browsers heuristically cache responses with no Cache-Control, so a normal
+# reload can serve a stale shell pointing at old hashed-CSS/JS bundles after
+# a deploy.  "no-cache" means "revalidate before serving from cache" — the
+# browser may still store it but must check with the server first.
+_PAGE_NO_CACHE_HEADERS: dict[str, str] = {"Cache-Control": "no-cache, must-revalidate"}
+
+
+def page_response(context: dict[str, Any]) -> Response:
+    """Render htmx/base_page.html with Cache-Control: no-cache, must-revalidate.
+
+    All /v2/* full-page routes (the base_page shell) use this helper so that a normal
+    browser reload picks up a newly deployed CSS/JS bundle instead of serving the stale
+    shell from heuristic cache.  HTMX partial responses and /static/assets/* (Vite-
+    hashed, immutable) are intentionally unaffected.
+    """
+    request = context.get("request")
+    if request is None:
+        raise ValueError("page_response: 'request' must be present in the context dict")
+    # NOTE: the no-cache Cache-Control for full pages is applied in the security-headers
+    # middleware (app/main.py) — the OUTERMOST middleware. Header sets on THIS TemplateResponse
+    # are dropped by inner response processing before reaching the client (verified live), so
+    # they must be applied at the middleware level. This helper is the single full-page entry.
+    return templates.TemplateResponse(request, "htmx/base_page.html", context)
+
+
 # ── Shared Helpers ─────────────────────────────────────────────────────
 
 
@@ -261,6 +287,23 @@ def _part_description(obj) -> str:
 templates.env.filters["part_description"] = _part_description
 
 
+def _safe_url_filter(value: str | None, fallback: str = "#") -> str:
+    """Return value only when it starts with http:// or https://, else fallback.
+
+    Prevents stored javascript:/vbscript:/data: URLs from executing on click.
+    Used in templates wherever a user-supplied URL is rendered as an href.
+    """
+    if not value:
+        return fallback
+    lowered = value.strip().lower()
+    if lowered.startswith("https://") or lowered.startswith("http://"):
+        return value
+    return fallback
+
+
+templates.env.filters["safe_url"] = _safe_url_filter
+
+
 # ── Jinja2 Globals ──────────────────────────────────────────────────
 
 
@@ -272,6 +315,30 @@ def _now() -> datetime:
 
 templates.env.globals["now"] = _now
 
+
+def _task_due_state(task, now_utc: datetime) -> tuple[bool, bool]:
+    """Return (is_overdue, is_due_today) for a task row, coercing naive due_at to UTC.
+
+    Centralises the comparison so templates never do datetime arithmetic directly, which
+    would TypeError under SQLite when due_at is naive and now_utc is aware.
+    """
+    if task.due_at is None:
+        return (False, False)
+    due = task.due_at if task.due_at.tzinfo is not None else task.due_at.replace(tzinfo=timezone.utc)
+    is_overdue = due <= now_utc
+    is_due_today = not is_overdue and due.date() == now_utc.date()
+    return (is_overdue, is_due_today)
+
+
+templates.env.globals["task_due_state"] = _task_due_state
+
 from .services.crm_service import cadence_state  # noqa: E402
 
 templates.env.globals["cadence_state"] = cadence_state
+# Canonical buying-role taxonomy exposed as a Jinja2 global so _role_chip_editor.html
+# can iterate roles inside macros (which don't inherit template context).
+# Context-level "roles" passed by set_contact_role / contacts_tab endpoints takes
+# precedence; this global is the fallback for the macro-include path.
+# Must stay in sync with CANONICAL_ROLES in app/routers/htmx_views.py.
+_CANONICAL_ROLES = ("specifier", "buyer_po", "ap_payer", "logistics", "exec", "other")
+templates.env.globals["roles"] = _CANONICAL_ROLES

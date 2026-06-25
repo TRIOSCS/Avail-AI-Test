@@ -118,8 +118,29 @@ def test_cadence_hero_delegates_to_cadence_clocks():
 
 
 def test_activity_tab_uses_canonical_activity_icon():
-    """The customer activity tab imports activity_icon and no longer carries an inline
-    icon_map dict (the old hand-rolled copy)."""
+    """The customer activity tab uses the canonical activity_row macro (which itself
+    uses activity_icon) and no longer carries an inline icon_map dict (the old hand-
+    rolled copy).
+
+    The import line must reference both macros.
+    """
     src = templates.env.loader.get_source(templates.env, "htmx/partials/customers/tabs/activity_tab.html")[0]
-    assert "import activity_icon" in src
+    # activity_row is the canonical row macro — it wraps activity_icon internally
+    assert "import activity_row" in src, "template must import the canonical activity_row macro"
+    # activity_icon must also be imported (used for section headers); it appears on the
+    # same {% from ... import activity_row, activity_icon %} line, so check as a token.
+    assert "activity_icon" in src, "template must reference activity_icon (for section headers)"
     assert "icon_map" not in src, "inline icon_map duplicate should be gone"
+
+
+def test_vendor_activity_tab_is_type_sectioned():
+    """The vendor activity tab mirrors the account tab: it imports both canonical macros
+    (activity_row for rows, activity_icon for the per-type section headers) and iterates
+    the pre-bucketed `sections` dict rather than a single flat `activities` loop."""
+    src = templates.env.loader.get_source(templates.env, "htmx/partials/vendors/tabs/activity_tab.html")[0]
+    assert "import activity_row" in src, "template must import the canonical activity_row macro"
+    assert "activity_icon" in src, "template must reference activity_icon (for section headers)"
+    # Type-sectioned: drives off the route-built `sections` dict + _section_meta loop.
+    assert "sections[section_label]" in src, "template must render per-type sections from the sections dict"
+    assert "_section_meta" in src, "template must use the section metadata loop (Calls/Emails/...)"
+    assert "icon_map" not in src, "no inline icon_map duplicate"

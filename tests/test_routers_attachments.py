@@ -25,8 +25,8 @@ def _make_req_attachment(db: Session, requisition_id: int, user_id: int, *, oned
     att = RequisitionAttachment(
         requisition_id=requisition_id,
         file_name="test.pdf",
-        onedrive_item_id=onedrive_item_id,
-        onedrive_url="https://onedrive.example.com/test.pdf",
+        library_item_id=onedrive_item_id,
+        library_web_url="https://onedrive.example.com/test.pdf",
         content_type="application/pdf",
         size_bytes=1024,
         uploaded_by_id=user_id,
@@ -56,8 +56,8 @@ def _make_reqmt_attachment(db: Session, requirement_id: int, user_id: int, *, on
     att = RequirementAttachment(
         requirement_id=requirement_id,
         file_name="spec.pdf",
-        onedrive_item_id=onedrive_item_id,
-        onedrive_url="https://onedrive.example.com/spec.pdf",
+        library_item_id=onedrive_item_id,
+        library_web_url="https://onedrive.example.com/spec.pdf",
         content_type="application/pdf",
         size_bytes=2048,
         uploaded_by_id=user_id,
@@ -108,7 +108,7 @@ class TestDeleteRequisitionAttachment:
     """DELETE /api/requisition-attachments/{att_id}"""
 
     def test_uses_refreshed_token(self, client, req_att, db_session):
-        """Delete endpoint must call get_valid_token and use the refreshed token."""
+        """Delete endpoint calls get_valid_token and uses the refreshed token."""
         with (
             _patch_valid_token("refreshed-token-abc") as mock_gvt,
             _patch_graph_delete(204) as mock_delete,
@@ -121,35 +121,41 @@ class TestDeleteRequisitionAttachment:
             call_headers = mock_delete.call_args.kwargs.get("headers", {})
             assert call_headers["Authorization"] == "Bearer refreshed-token-abc"
 
-    def test_expired_token_returns_401(self, client, req_att):
-        """When get_valid_token returns None, endpoint must return 401."""
+    def test_expired_token_returns_warning(self, client, req_att):
+        """When get_valid_token returns None, service is best-effort: DB row deleted and
+        warning returned."""
         with _patch_valid_token(None):
             resp = client.delete(f"/api/requisition-attachments/{req_att.id}")
-            assert resp.status_code == 401
-            assert "token expired" in resp.json()["error"].lower()
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["ok"] is True
+            assert "warning" in data
 
     @pytest.mark.parametrize(
-        "graph_status,expected_status,error_substr",
+        "graph_status",
         [
-            pytest.param(401, 401, "token expired", id="graph_401"),
-            pytest.param(403, 403, "access denied", id="graph_403"),
+            pytest.param(401, id="graph_401"),
+            pytest.param(403, id="graph_403"),
         ],
     )
-    def test_graph_auth_error_surfaced(self, client, req_att, graph_status, expected_status, error_substr):
-        """Graph API 401/403 responses must be surfaced to the caller."""
+    def test_graph_auth_error_returns_warning(self, client, req_att, graph_status):
+        """Cloud 401/403 during delete is best-effort: DB row removed, warning
+        returned."""
         with _patch_valid_token("some-token"), _patch_graph_delete(graph_status):
             resp = client.delete(f"/api/requisition-attachments/{req_att.id}")
-            assert resp.status_code == expected_status
-            assert error_substr in resp.json()["error"].lower()
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["ok"] is True
+            assert "warning" in data
 
-    def test_db_record_not_deleted_on_auth_failure(self, client, req_att, db_session):
-        """On 401/403 from Graph, the DB record must NOT be deleted (prevent data
-        leak)."""
+    def test_db_record_deleted_after_cloud_auth_failure(self, client, req_att, db_session):
+        """Service is best-effort: DB row is removed even on cloud auth failure."""
         with _patch_valid_token("some-token"), _patch_graph_delete(401):
-            client.delete(f"/api/requisition-attachments/{req_att.id}")
-            # Record should still exist
+            resp = client.delete(f"/api/requisition-attachments/{req_att.id}")
+            assert resp.status_code == 200
+            # Record should be gone — best-effort means the user's goal is met
             att = db_session.get(RequisitionAttachment, req_att.id)
-            assert att is not None
+            assert att is None
 
 
 # ── Delete Requirement Attachment ────────────────────────────────────
@@ -165,7 +171,7 @@ class TestDeleteRequirementAttachment:
     """DELETE /api/requirement-attachments/{att_id}"""
 
     def test_uses_refreshed_token(self, client, reqmt_att, db_session):
-        """Delete endpoint must call get_valid_token and use the refreshed token."""
+        """Delete endpoint calls get_valid_token and uses the refreshed token."""
         with (
             _patch_valid_token("refreshed-token-xyz") as mock_gvt,
             _patch_graph_delete(204) as mock_delete,
@@ -177,18 +183,24 @@ class TestDeleteRequirementAttachment:
             call_headers = mock_delete.call_args.kwargs.get("headers", {})
             assert call_headers["Authorization"] == "Bearer refreshed-token-xyz"
 
-    def test_expired_token_returns_401(self, client, reqmt_att):
-        """When get_valid_token returns None, endpoint must return 401."""
+    def test_expired_token_returns_warning(self, client, reqmt_att):
+        """When get_valid_token returns None, service is best-effort: warning
+        returned."""
         with _patch_valid_token(None):
             resp = client.delete(f"/api/requirement-attachments/{reqmt_att.id}")
-            assert resp.status_code == 401
-            assert "token expired" in resp.json()["error"].lower()
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["ok"] is True
+            assert "warning" in data
 
-    def test_graph_401_returns_401(self, client, reqmt_att):
-        """When Graph API returns 401, endpoint must surface 401 to caller."""
+    def test_graph_401_returns_warning(self, client, reqmt_att):
+        """Cloud 401 during requirement delete is best-effort: warning returned."""
         with _patch_valid_token("some-token"), _patch_graph_delete(401):
             resp = client.delete(f"/api/requirement-attachments/{reqmt_att.id}")
-            assert resp.status_code == 401
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["ok"] is True
+            assert "warning" in data
 
 
 # ── OneDrive Link Endpoint ───────────────────────────────────────────

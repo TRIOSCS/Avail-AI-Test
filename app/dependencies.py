@@ -21,11 +21,12 @@ from datetime import datetime, timezone
 
 from fastapi import Depends, HTTPException, Request
 from loguru import logger
+from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from .constants import UserRole
+from .constants import RESTRICTED_ROLES, ROLE_ACCESS_DEFAULTS, AccessKey, UserRole
 from .database import get_db
-from .models import Quote, Requisition, User
+from .models import AccountCollaborator, BuyPlan, Company, CustomerSite, Quote, Requisition, User
 
 # Non-interactive service account seeded by startup.py. It authenticates via the
 # x-agent-key header and is barred from admin/settings/buyer (RFQ) endpoints.
@@ -74,6 +75,70 @@ def is_admin(user: User) -> bool:
     return bool(user.role == UserRole.ADMIN)
 
 
+def is_manager_or_admin(user: User) -> bool:
+    """True for MANAGER or ADMIN roles (the supervisor/oversight tier).
+
+    Use this to gate visibility and management actions that a supervisor should always
+    be able to perform regardless of account ownership.
+    """
+    return user.role in (UserRole.MANAGER, UserRole.ADMIN)
+
+
+def can_manage_account(user: User, company: Company, db: "Session") -> bool:  # noqa: F821
+    """True if *user* may act on *company* as an account manager.
+
+    Allowed when ANY of the following holds:
+    - is_manager_or_admin(user)  — supervisors see/manage everything
+    - company.account_owner_id == user.id  — primary account owner
+    - user owns at least one CustomerSite under this company
+    - user is an AccountCollaborator (helper role) on this company  [Phase 3]
+
+    NOTE: this does NOT gate team-management actions (add/remove collaborators,
+    reassign ownership). Use can_manage_account_team() for those.
+    """
+    if is_manager_or_admin(user):
+        return True
+    if company.account_owner_id is not None and company.account_owner_id == user.id:
+        return True
+    # Site-owner check: efficient exists() subquery — index-backed via ix_cs_owner/ix_cs_company
+    site_exists = (
+        select(CustomerSite.id)
+        .where(
+            CustomerSite.company_id == company.id,
+            CustomerSite.owner_id == user.id,
+        )
+        .exists()
+    )
+    if bool(db.scalar(select(site_exists))):
+        return True
+    # Collaborator check (Phase 3): helper collaborators can view + work the account.
+    collab_exists = (
+        select(AccountCollaborator.id)
+        .where(
+            AccountCollaborator.company_id == company.id,
+            AccountCollaborator.user_id == user.id,
+        )
+        .exists()
+    )
+    return bool(db.scalar(select(collab_exists)))
+
+
+def can_manage_account_team(user: User, company: Company) -> bool:
+    """True if *user* may add/remove collaborators or change the primary owner.
+
+    This is a STRICTER gate than can_manage_account. Helper collaborators and
+    site-owners are excluded — only the primary account owner and manager/admin
+    may alter the team roster.
+
+    Allowed when:
+    - is_manager_or_admin(user)  — supervisors manage all teams
+    - company.account_owner_id == user.id  — primary owner manages their own team
+
+    Intentionally does NOT accept collaborators, site-owners, or buyers.
+    """
+    return is_manager_or_admin(user) or (company.account_owner_id is not None and company.account_owner_id == user.id)
+
+
 def _require_admin_user(request: Request, db: Session, *, agent_msg: str, role_msg: str) -> User:
     """Resolve an admin-only user, blocking the agent service account.
 
@@ -114,6 +179,32 @@ def require_settings_access(request: Request, db: Session = Depends(get_db)) -> 
 BUYER_ROLES = frozenset({UserRole.BUYER, UserRole.SALES, UserRole.TRADER, UserRole.MANAGER, UserRole.ADMIN})
 
 
+def require_requisition_access(
+    db: Session,
+    req_id: int | None,
+    user: User,
+    *,
+    owner_id: int | None = None,
+    label: str = "Requisition",
+) -> None:
+    """Enforce role-scoped ownership for an action on a requisition-scoped resource.
+
+    No-op for unrestricted roles (buyer/manager/admin). For SALES/TRADER, allows the
+    action only when the user owns the requisition (created_by) or, for unscoped/scratch
+    resources where ``req_id`` is None, when ``owner_id`` matches the user. Raises
+    HTTPException(404) otherwise (404 not 403 so existence isn't leaked).
+    """
+    if getattr(user, "role", None) not in RESTRICTED_ROLES:
+        return
+    if req_id is not None:
+        req = db.get(Requisition, req_id)
+        if req is not None and req.created_by == user.id:
+            return
+    if owner_id is not None and owner_id == user.id:
+        return
+    raise HTTPException(status_code=404, detail=f"{label} not found")
+
+
 def has_buyer_role(user: User | None) -> bool:
     """True when *user* holds a buyer-tier role (require_buyer's allowed set)."""
     return user is not None and user.role in BUYER_ROLES
@@ -132,6 +223,52 @@ def require_buyer(request: Request, db: Session = Depends(get_db)) -> User:
     return user
 
 
+# ── Per-feature access (user-management foundation) ───────────────────
+
+
+def user_has_access(user: User, key, db: Session | None = None) -> bool:
+    """True if *user* may use the access *key* (an AccessKey or its str value).
+
+    admin → always True. ops_verification delegates to VerificationGroupMember (single
+    source of truth). Otherwise: explicit per-user override wins, else role default. An
+    unknown key (not in AccessKey) is denied.
+    """
+    if user.role == UserRole.ADMIN:
+        return True
+    key_str = str(key)
+    if key_str == AccessKey.OPS_VERIFICATION:
+        if db is None:
+            return False
+        from .models.buy_plan import VerificationGroupMember
+
+        m = db.query(VerificationGroupMember).filter_by(user_id=user.id).first()
+        return bool(m and m.is_active)
+    overrides = user.access_overrides or {}
+    if key_str in overrides:
+        return bool(overrides[key_str])
+    try:
+        ak = AccessKey(key_str)
+    except ValueError:
+        return False
+    return ak in ROLE_ACCESS_DEFAULTS.get(user.role, frozenset())
+
+
+def require_access(key):
+    """Dependency factory: 403 unless the current user has *key*.
+
+    Depends on ``require_user`` via ``Depends`` (not a direct call) so that test
+    ``dependency_overrides[require_user]`` — and any future require_user wrapper —
+    flow through to the access check unchanged.
+    """
+
+    def _dep(user: User = Depends(require_user), db: Session = Depends(get_db)) -> User:
+        if not user_has_access(user, key, db):
+            raise HTTPException(403, "You don't have access to this feature")
+        return user
+
+    return _dep
+
+
 # ── Query Helpers ─────────────────────────────────────────────────────
 
 
@@ -144,7 +281,7 @@ def get_req_for_user(db: Session, user: User, req_id: int, options=None) -> Requ
     """
     load_opts = options or [selectinload(Requisition.requirements)]
     q = db.query(Requisition).options(*load_opts).filter_by(id=req_id)
-    if user.role == UserRole.SALES:
+    if user.role in RESTRICTED_ROLES:
         q = q.filter_by(created_by=user.id)
     req = q.first()
     if not req:
@@ -161,12 +298,33 @@ def get_quote_for_user(db: Session, user: User, quote_id: int, options=None) -> 
         .join(Requisition, Quote.requisition_id == Requisition.id)
         .filter(Quote.id == quote_id)
     )
-    if user.role == UserRole.SALES:
+    if user.role in RESTRICTED_ROLES:
         q = q.filter(Requisition.created_by == user.id)
     quote = q.first()
     if not quote:
         raise HTTPException(status_code=404, detail="Quote not found")
     return quote
+
+
+def get_buyplan_for_user(db: Session, user: User, plan_id: int, options=None) -> BuyPlan:
+    """Get a single buy plan with role-based requisition ownership checks.
+
+    Ownership derives through the parent Requisition (BuyPlan.requisition_id is NOT
+    NULL).
+    """
+    load_opts = options or []
+    q = (
+        db.query(BuyPlan)
+        .options(*load_opts)
+        .join(Requisition, BuyPlan.requisition_id == Requisition.id)
+        .filter(BuyPlan.id == plan_id)
+    )
+    if user.role in RESTRICTED_ROLES:
+        q = q.filter(Requisition.created_by == user.id)
+    plan = q.first()
+    if not plan:
+        raise HTTPException(status_code=404, detail="Buy plan not found")
+    return plan
 
 
 # ── Token Management ──────────────────────────────────────────────────

@@ -197,14 +197,20 @@ class Offer(Base):
 
 
 class OfferAttachment(Base):
-    """File attachment on a vendor offer (stored in OneDrive)."""
+    """File attachment on a vendor offer (stored in OneDrive or company SharePoint
+    library).
+
+    library_drive_id NULL  → OneDrive fallback row (user token, item in /me/drive)
+    library_drive_id set   → company SharePoint library row (app token)
+    """
 
     __tablename__ = "offer_attachments"
     id = Column(Integer, primary_key=True)
     offer_id = Column(Integer, ForeignKey("offers.id", ondelete="CASCADE"), nullable=False)
     file_name = Column(String(500), nullable=False)
-    onedrive_item_id = Column(String(500))
-    onedrive_url = Column(Text)
+    library_item_id = Column(String(500))
+    library_drive_id = Column(String(200))
+    library_web_url = Column(Text)
     thumbnail_url = Column(Text)
     content_type = Column(String(100))
     size_bytes = Column(Integer)

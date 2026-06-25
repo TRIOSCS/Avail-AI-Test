@@ -1,6 +1,6 @@
 """Lusha API connector for company + contact enrichment (Lusha API v2).
 
-Mirrors apollo.py but uses the shared app/http_client.py `http` singleton (connection
+Uses the shared app/http_client.py `http` singleton (connection
 pooling) instead of a per-call httpx.AsyncClient. On HTTP 402/429 (quota/rate-limit)
 raises ProviderQuotaError so the caller trips the cooldown circuit; other transport/parse
 errors degrade to None / [].

@@ -24,9 +24,11 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.constants import ProactiveMatchStatus
+from app.constants import BuyPlanStatus, ProactiveMatchStatus, RequisitionStatus
 from app.models import Company, CustomerSite, Offer, Requisition, User, VendorCard
+from app.models.buy_plan import BuyPlan
 from app.models.intelligence import MaterialCard, ProactiveMatch
+from app.models.quotes import Quote
 
 # ── Admin client fixture ──────────────────────────────────────────────
 
@@ -95,6 +97,47 @@ def _make_offer(db: Session, req: Requisition, user: User, mpn: str = "LM317T") 
     db.commit()
     db.refresh(offer)
     return offer
+
+
+def _make_owned_buy_plan(db: Session, user: User) -> BuyPlan:
+    """Build a requisition → quote → buy plan chain owned by `user` (via
+    Requisition.created_by).
+
+    A real owned plan lets get_buyplan_for_user resolve the plan so the route reaches
+    the sales-order validation branch instead of 404-ing on a non-existent plan id.
+    """
+    import uuid
+
+    req = Requisition(
+        name="N6-REQ",
+        customer_name="N6 Corp",
+        status=RequisitionStatus.ACTIVE,
+        created_by=user.id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(req)
+    db.flush()
+
+    quote = Quote(
+        requisition_id=req.id,
+        quote_number=f"Q-N6-{uuid.uuid4().hex[:6]}",
+        status="draft",
+        created_by_id=user.id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(quote)
+    db.flush()
+
+    plan = BuyPlan(
+        quote_id=quote.id,
+        requisition_id=req.id,
+        status=BuyPlanStatus.DRAFT.value,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(plan)
+    db.commit()
+    db.refresh(plan)
+    return plan
 
 
 def _make_company(db: Session, name: str = "Acme Corp") -> Company:
@@ -312,10 +355,17 @@ class TestProactiveDraft:
 class TestBuyPlanWorkflow:
     """Tests for buy-plan submit / approve routes."""
 
-    def test_submit_missing_so_raises_400(self, client, db_session):
-        """POST submit without sales_order_number → 400."""
+    def test_submit_missing_so_raises_400(self, client, db_session, test_user):
+        """POST submit without sales_order_number → 400.
+
+        Uses a REAL plan owned via its requisition (Requisition.created_by =
+        test_user.id) so the get_buyplan_for_user ownership gate resolves the plan and
+        the route reaches the sales-order validation branch (which raises 400 on an
+        empty SO number) instead of 404-ing on a non-existent plan id.
+        """
+        plan = _make_owned_buy_plan(db_session, test_user)
         resp = client.post(
-            "/v2/partials/buy-plans/999/submit",
+            f"/v2/partials/buy-plans/{plan.id}/submit",
             data={"sales_order_number": ""},
         )
         assert resp.status_code == 400
@@ -383,14 +433,17 @@ class TestAdminRoutes:
         db_session.refresh(vc2)
 
         with patch("app.services.vendor_merge_service.merge_vendor_cards") as mock_merge:
-            mock_merge.return_value = {"kept_name": "Arrow Electronics", "reassigned": 3}
+            mock_merge.return_value = {"ok": True, "kept": test_vendor_card.id, "reassigned": 3}
             resp = admin_client.post(
                 "/v2/partials/admin/vendor-merge",
                 data={"keep_id": str(test_vendor_card.id), "remove_id": str(vc2.id)},
             )
 
+        # The endpoint re-renders the whole Data Ops list (so stale pairs drop) and
+        # surfaces the merge result via the showToast HX-Trigger header.
         assert resp.status_code == 200
-        assert "Merged" in resp.text or "Arrow" in resp.text
+        assert "Vendor Duplicates" in resp.text
+        assert "Merged" in resp.headers.get("HX-Trigger", "")
 
     def test_vendor_merge_value_error_returns_error_html(self, admin_client, db_session, test_vendor_card):
         """merge_vendor_cards raises ValueError → error HTML, no 500."""
@@ -404,8 +457,11 @@ class TestAdminRoutes:
                 },
             )
 
+        # On failure the list still re-renders (no 500) and the error surfaces via the
+        # showToast HX-Trigger header.
         assert resp.status_code == 200
-        assert "Error" in resp.text or "error" in resp.text.lower()
+        assert "Vendor Duplicates" in resp.text
+        assert "failed" in resp.headers.get("HX-Trigger", "").lower()
 
     def test_vendor_merge_non_admin_raises_403(self, client, db_session, test_vendor_card):
         """Non-admin user calling vendor-merge → 403."""
@@ -450,14 +506,17 @@ class TestAdminRoutes:
         co2 = _make_company(db_session, "Acme B")
 
         with patch("app.services.company_merge_service.merge_companies") as mock_merge:
-            mock_merge.return_value = {"kept_name": "Acme A"}
+            mock_merge.return_value = {"ok": True, "kept": co1.id}
             resp = admin_client.post(
                 "/v2/partials/admin/company-merge",
                 data={"keep_id": str(co1.id), "remove_id": str(co2.id)},
             )
 
+        # The endpoint re-renders the whole Data Ops list and surfaces the merge result
+        # via the showToast HX-Trigger header.
         assert resp.status_code == 200
-        assert "Merged" in resp.text or "Acme" in resp.text
+        assert "Company Duplicates" in resp.text
+        assert "Merged" in resp.headers.get("HX-Trigger", "")
 
     def test_company_merge_error_returns_error_html(self, admin_client, db_session):
         """merge_companies raises → error HTML returned."""
@@ -471,8 +530,11 @@ class TestAdminRoutes:
                 data={"keep_id": str(co1.id), "remove_id": str(co2.id)},
             )
 
+        # On failure the list still re-renders (no 500) and the error surfaces via the
+        # showToast HX-Trigger header.
         assert resp.status_code == 200
-        assert "Error" in resp.text or "error" in resp.text.lower()
+        assert "Company Duplicates" in resp.text
+        assert "failed" in resp.headers.get("HX-Trigger", "").lower()
 
     def test_company_merge_non_admin_raises_403(self, client, db_session):
         """Non-admin calling company-merge → 403."""

@@ -8,7 +8,7 @@ Or from submodules: from app.models.auth import User
 from .alert_seen import AlertSeen  # noqa: F401
 
 # Auth & Users
-from .auth import User  # noqa: F401
+from .auth import User, UserAdminAudit  # noqa: F401
 from .base import Base  # noqa: F401
 
 # Buy Plans (unified V4 — structured lines, dual approval tracks)
@@ -18,7 +18,14 @@ from .buy_plan import BuyPlan, BuyPlanLine, VerificationGroupMember  # noqa: F40
 from .config import ApiSource, ApiUsageLog, GraphSubscription, SystemConfig  # noqa: F401
 
 # CRM: Companies & Sites
-from .crm import Company, CustomerSite, SiteContact  # noqa: F401
+from .crm import (  # noqa: F401
+    AccountCollaborator,
+    Company,
+    CompanyAttachment,
+    CustomerSite,
+    SiteContact,
+    SiteContactAttachment,
+)
 
 # Discovery / Prospecting
 from .discovery_batch import DiscoveryBatch  # noqa: F401
@@ -41,8 +48,17 @@ from .enrichment_run import EnrichmentRun  # noqa: F401
 # Enrichment Worker Status
 from .enrichment_worker_status import EnrichmentWorkerStatus  # noqa: F401
 
-# Excess Inventory & Bid Collection
-from .excess import Bid, BidSolicitation, ExcessLineItem, ExcessList  # noqa: F401
+# Excess Inventory / Resell (resell-brokerage) offers
+from .excess import (  # noqa: F401
+    BuyerScore,
+    CustomerBid,
+    CustomerBidLine,
+    ExcessLineItem,
+    ExcessList,
+    ExcessOffer,
+    ExcessOfferLine,
+    ExcessOutreach,
+)
 
 # Faceted Search
 from .faceted_search import CommoditySpecSchema, MaterialSpecFacet  # noqa: F401
@@ -59,6 +75,7 @@ from .intelligence import (  # noqa: F401
     ActivityLog,
     ChangeLog,
     MaterialCard,
+    MaterialCardAttachment,
     MaterialCardAudit,
     MaterialCardDatasheet,
     MaterialVendorHistory,
@@ -75,6 +92,10 @@ from .knowledge import KnowledgeConfig, KnowledgeEntry  # noqa: F401
 from .nc_search_log import NcSearchLog  # noqa: F401
 from .nc_search_queue import NcSearchQueue  # noqa: F401
 from .nc_worker_status import NcWorkerStatus  # noqa: F401
+
+# In-app notifications (registered so the table is in Base.metadata; the model file's
+# docstring claimed this but the import was missing — schema-drift gate flagged it)
+from .notification import Notification  # noqa: F401
 
 # OEM web-resolution crosswalk (PartSurfer/PSREF spare → canonical MPN cache)
 from .oem_crosswalk import OemCrosswalk  # noqa: F401
@@ -129,6 +150,11 @@ from .tags import EntityTag, MaterialTag, Tag, TagThresholdConfig  # noqa: F401
 # Task Board (pipeline tasks per requisition)
 from .task import RequisitionTask  # noqa: F401
 
+# The Broker Forum (TBF) Search
+from .tbf_search_log import TbfSearchLog  # noqa: F401
+from .tbf_search_queue import TbfSearchQueue  # noqa: F401
+from .tbf_worker_status import TbfWorkerStatus  # noqa: F401
+
 # Trust telemetry (durable reconcile tallies + facet-audit verdicts)
 from .telemetry import FacetAudit, ReconcileRun  # noqa: F401
 from .trouble_ticket import TroubleTicket  # noqa: F401
@@ -143,4 +169,10 @@ from .vendor_part_unavailability import VendorPartUnavailability  # noqa: F401
 from .vendor_sighting_summary import VendorSightingSummary  # noqa: F401
 
 # Vendors
-from .vendors import VendorCard, VendorContact, VendorReview  # noqa: F401
+from .vendors import (  # noqa: F401
+    VendorCard,
+    VendorCardAttachment,
+    VendorContact,
+    VendorContactAttachment,
+    VendorReview,
+)

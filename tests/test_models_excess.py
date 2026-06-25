@@ -1,6 +1,7 @@
-"""Tests for Excess Inventory & Bid Collection models and schemas.
+"""Tests for Excess Inventory (Resell) models and schemas.
 
-Verifies model creation, defaults, cascade deletes, and Pydantic validation.
+Verifies ExcessList / ExcessLineItem model creation, defaults, cascade deletes,
+and Pydantic validation.
 
 Called by: pytest
 Depends on: app.models.excess, app.schemas.excess, tests.conftest
@@ -13,10 +14,8 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.models import Company, User
-from app.models.excess import Bid, BidSolicitation, ExcessLineItem, ExcessList
+from app.models.excess import ExcessLineItem, ExcessList
 from app.schemas.excess import (
-    BidCreateRequest,
-    BidUpdate,
     ExcessLineItemCreate,
     ExcessListCreate,
     ExcessListResponse,
@@ -110,48 +109,6 @@ class TestExcessLineItemModel:
         assert line_item.condition == "New"
 
 
-class TestBidSolicitationModel:
-    def test_create_solicitation(self, db_session: Session, line_item: ExcessLineItem, trader: User):
-        sol = BidSolicitation(
-            excess_line_item_id=line_item.id,
-            contact_id=99,
-            sent_by=trader.id,
-        )
-        db_session.add(sol)
-        db_session.commit()
-        db_session.refresh(sol)
-        assert sol.id is not None
-        assert sol.status == "pending"
-
-
-class TestBidModel:
-    def test_create_bid(self, db_session: Session, line_item: ExcessLineItem, trader: User):
-        bid = Bid(
-            excess_line_item_id=line_item.id,
-            unit_price=Decimal("0.3500"),
-            quantity_wanted=200,
-            created_by=trader.id,
-        )
-        db_session.add(bid)
-        db_session.commit()
-        db_session.refresh(bid)
-        assert bid.id is not None
-        assert bid.status == "pending"
-        assert bid.source == "manual"
-
-    def test_bid_links_to_line_item(self, db_session: Session, line_item: ExcessLineItem, trader: User):
-        bid = Bid(
-            excess_line_item_id=line_item.id,
-            unit_price=Decimal("0.5000"),
-            quantity_wanted=100,
-            created_by=trader.id,
-        )
-        db_session.add(bid)
-        db_session.commit()
-        db_session.refresh(bid)
-        assert bid.excess_line_item_id == line_item.id
-
-
 class TestCascadeDelete:
     def test_deleting_list_removes_line_items(
         self, db_session: Session, excess_list: ExcessList, line_item: ExcessLineItem
@@ -160,37 +117,6 @@ class TestCascadeDelete:
         db_session.delete(excess_list)
         db_session.commit()
         remaining = db_session.query(ExcessLineItem).filter_by(excess_list_id=list_id).all()
-        assert remaining == []
-
-    def test_deleting_line_item_removes_bids(self, db_session: Session, line_item: ExcessLineItem, trader: User):
-        bid = Bid(
-            excess_line_item_id=line_item.id,
-            unit_price=Decimal("1.0000"),
-            quantity_wanted=50,
-            created_by=trader.id,
-        )
-        db_session.add(bid)
-        db_session.commit()
-        li_id = line_item.id
-        db_session.delete(line_item)
-        db_session.commit()
-        remaining = db_session.query(Bid).filter_by(excess_line_item_id=li_id).all()
-        assert remaining == []
-
-    def test_deleting_line_item_removes_solicitations(
-        self, db_session: Session, line_item: ExcessLineItem, trader: User
-    ):
-        sol = BidSolicitation(
-            excess_line_item_id=line_item.id,
-            contact_id=42,
-            sent_by=trader.id,
-        )
-        db_session.add(sol)
-        db_session.commit()
-        li_id = line_item.id
-        db_session.delete(line_item)
-        db_session.commit()
-        remaining = db_session.query(BidSolicitation).filter_by(excess_line_item_id=li_id).all()
         assert remaining == []
 
 
@@ -240,44 +166,3 @@ class TestExcessLineItemSchemas:
         schema = ExcessLineItemCreate(part_number="SN74HC595N", quantity=1)
         assert schema.condition == "New"
         assert schema.asking_price is None
-
-
-class TestBidSchemas:
-    def test_create_valid(self):
-        schema = BidCreateRequest(unit_price=0.50, quantity_wanted=100)
-        assert schema.source == "manual"
-
-    @pytest.mark.parametrize(
-        "kwargs",
-        [
-            pytest.param({"quantity_wanted": 100}, id="missing_unit_price"),
-            pytest.param({"unit_price": 0.50}, id="missing_quantity"),
-        ],
-    )
-    def test_create_missing_required_rejected(self, kwargs):
-        with pytest.raises(ValidationError):
-            BidCreateRequest(**kwargs)
-
-    def test_update_valid(self):
-        schema = BidUpdate(status="accepted", unit_price=0.60)
-        assert schema.status == "accepted"
-
-    def test_update_invalid_status_rejected(self):
-        with pytest.raises(ValidationError):
-            BidUpdate(status="bogus")
-
-
-class TestBidSolicitationSchemas:
-    def test_response_from_attributes(self):
-        """BidSolicitationCreate was removed; verify the Response schema instead."""
-        from app.schemas.excess import BidSolicitationResponse
-
-        # Validate it can be instantiated with required fields
-        schema = BidSolicitationResponse(
-            id=1,
-            excess_line_item_id=1,
-            contact_id=42,
-            sent_by=1,
-            status="pending",
-        )
-        assert schema.contact_id == 42

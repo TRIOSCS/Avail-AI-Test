@@ -1,18 +1,17 @@
-"""File attachment endpoints for requisitions and requirements (OneDrive).
+"""File attachment endpoints for requisitions and requirements (OneDrive/SharePoint).
 
 Business Rules:
-- Attachments are uploaded to OneDrive via Microsoft Graph API
-- Max file size: 10 MB
+- Attachments are stored via attachment_service (OneDrive or SharePoint library)
+- Max file size: 10 MB (enforced by service)
 - Files stored under /AvailAI/Requisitions/{id}/ or /AvailAI/Requirements/{id}/
-- Deleting an attachment also removes it from OneDrive (best-effort)
+- Deleting an attachment also removes it from cloud storage (best-effort)
 - Existing OneDrive files can be linked without re-uploading
 
 Called by: requisitions.__init__ (sub-router)
-Depends on: models, dependencies, http_client, graph_client
+Depends on: models, dependencies, services/attachment_service
 """
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
-from loguru import logger
 from sqlalchemy.orm import Session
 
 from ...database import get_db
@@ -23,62 +22,24 @@ from ...models import (
     RequisitionAttachment,
     User,
 )
+from ...services import attachment_service
+from ...services.attachment_service import attachment_list_response
 
 router = APIRouter(tags=["requisitions"])
-
-MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024  # 10 MB
-
-
-def _serialize_attachment(a) -> dict:
-    """Full JSON shape for an attachment list entry."""
-    return {
-        "id": a.id,
-        "file_name": a.file_name,
-        "onedrive_url": a.onedrive_url,
-        "content_type": a.content_type,
-        "size_bytes": a.size_bytes,
-        "uploaded_by": a.uploaded_by.name if a.uploaded_by else None,
-        "created_at": a.created_at.isoformat() if a.created_at else None,
-    }
-
-
-def _attachment_created_response(att) -> dict:
-    """Compact JSON shape returned after creating/linking an attachment."""
-    return {
-        "id": att.id,
-        "file_name": att.file_name,
-        "onedrive_url": att.onedrive_url,
-        "content_type": att.content_type,
-    }
-
-
-async def _delete_onedrive_item(item_id: str, token: str) -> None:
-    """Best-effort DELETE of a OneDrive item; raises HTTPException only on auth
-    errors."""
-    from ...http_client import http
-
-    resp = await http.delete(
-        f"https://graph.microsoft.com/v1.0/me/drive/items/{item_id}",
-        headers={"Authorization": f"Bearer {token}"},
-        timeout=15,
-    )
-    if resp.status_code == 401:
-        raise HTTPException(401, "Microsoft token expired — please re-authenticate")
-    if resp.status_code == 403:
-        raise HTTPException(403, "Access denied to OneDrive item")
 
 
 @router.get("/api/requisitions/{req_id}/attachments")
 async def list_requisition_attachments(
     req_id: int,
+    request: Request,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """List all file attachments on a requisition."""
+    """List all file attachments on a requisition (HTML for HTMX, JSON otherwise)."""
     req = get_req_for_user(db, user, req_id)
     if not req:
         raise HTTPException(404, "Requisition not found")
-    return [_serialize_attachment(a) for a in req.attachments]
+    return attachment_list_response(request, kind="requisition", entity_id=req_id, rows=req.attachments)
 
 
 @router.post("/api/requisitions/{req_id}/attachments")
@@ -88,51 +49,20 @@ async def upload_requisition_attachment(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Upload a file to OneDrive and attach it to a requisition."""
+    """Upload a file to OneDrive/SharePoint and attach it to a requisition."""
     req = get_req_for_user(db, user, req_id)
     if not req:
         raise HTTPException(404, "Requisition not found")
-    content = await file.read()
-    if len(content) > MAX_ATTACHMENT_BYTES:
-        raise HTTPException(400, "File too large (max 10 MB)")
-    from ...scheduler import get_valid_token
-
-    token = await get_valid_token(user, db)
-    if not token:
-        raise HTTPException(401, "Microsoft account not connected — please re-login")
-    from ...http_client import http
-
-    safe_name = (file.filename or "unnamed_file").replace("/", "_").replace("\\", "_")
-    drive_path = f"/me/drive/root:/AvailAI/Requisitions/{req_id}/{safe_name}:/content"
-    resp = await http.put(
-        f"https://graph.microsoft.com/v1.0{drive_path}",
-        content=content,
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Content-Type": file.content_type or "application/octet-stream",
-        },
-        timeout=30,
+    att = await attachment_service.store_and_attach(
+        db,
+        model=RequisitionAttachment,
+        fk_field="requisition_id",
+        entity_label="Requisitions",
+        entity_id=req_id,
+        file=file,
+        user=user,
     )
-    if resp.status_code == 401:
-        raise HTTPException(401, "Microsoft token expired — please re-authenticate")
-    if resp.status_code == 403:
-        raise HTTPException(403, "Access denied to OneDrive item")
-    if resp.status_code not in (200, 201):
-        logger.error(f"OneDrive upload failed: {resp.status_code} {resp.text[:300]}")
-        raise HTTPException(502, "Failed to upload to OneDrive")
-    result = resp.json()
-    att = RequisitionAttachment(
-        requisition_id=req_id,
-        file_name=safe_name,
-        onedrive_item_id=result.get("id"),
-        onedrive_url=result.get("webUrl"),
-        content_type=file.content_type,
-        size_bytes=len(content),
-        uploaded_by_id=user.id,
-    )
-    db.add(att)
-    db.commit()
-    return _attachment_created_response(att)
+    return attachment_service.serialize(att)
 
 
 @router.post("/api/requisitions/{req_id}/attachments/onedrive")
@@ -169,15 +99,16 @@ async def attach_requisition_from_onedrive(
     att = RequisitionAttachment(
         requisition_id=req_id,
         file_name=item.get("name", "file"),
-        onedrive_item_id=item_id,
-        onedrive_url=item.get("webUrl"),
+        library_item_id=item_id,
+        library_web_url=item.get("webUrl"),
         content_type=item.get("file", {}).get("mimeType"),
         size_bytes=item.get("size"),
         uploaded_by_id=user.id,
     )
     db.add(att)
     db.commit()
-    return _attachment_created_response(att)
+    db.refresh(att)
+    return attachment_service.serialize(att)
 
 
 @router.delete("/api/requisition-attachments/{att_id}")
@@ -186,44 +117,30 @@ async def delete_requisition_attachment(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Delete a requisition attachment (and remove from OneDrive)."""
+    """Delete a requisition attachment (and remove from cloud storage)."""
     att = db.get(RequisitionAttachment, att_id)
     if not att:
         raise HTTPException(404, "Attachment not found")
-    if att.onedrive_item_id:
-        from ...scheduler import get_valid_token
-
-        token = await get_valid_token(user, db)
-        if not token:
-            raise HTTPException(401, "Microsoft token expired — please re-authenticate")
-        try:
-            await _delete_onedrive_item(att.onedrive_item_id, token)
-        except HTTPException:
-            raise
-        except (ConnectionError, TimeoutError, OSError) as e:
-            logger.error(f"Failed to delete OneDrive item {att.onedrive_item_id}: {e}")
-            db.delete(att)
-            db.commit()
-            return {"ok": True, "warning": "DB record deleted but cloud file may need manual cleanup"}
-    db.delete(att)
-    db.commit()
-    return {"ok": True}
+    if not get_req_for_user(db, user, att.requisition_id):
+        raise HTTPException(404, "Attachment not found")
+    return await attachment_service.remove_attachment(db, att, user)
 
 
 @router.get("/api/requirements/{req_id}/attachments")
 async def list_requirement_attachments(
     req_id: int,
+    request: Request,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """List all file attachments on a requirement."""
+    """List all file attachments on a requirement (HTML for HTMX, JSON otherwise)."""
     requirement = db.get(Requirement, req_id)
     if not requirement:
         raise HTTPException(404, "Requirement not found")
     parent_req = get_req_for_user(db, user, requirement.requisition_id)
     if not parent_req:
         raise HTTPException(403, "Not authorized")
-    return [_serialize_attachment(a) for a in requirement.attachments]
+    return attachment_list_response(request, kind="requirement", entity_id=req_id, rows=requirement.attachments)
 
 
 @router.post("/api/requirements/{req_id}/attachments")
@@ -233,56 +150,23 @@ async def upload_requirement_attachment(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Upload a file to OneDrive and attach it to a requirement."""
+    """Upload a file to OneDrive/SharePoint and attach it to a requirement."""
     requirement = db.get(Requirement, req_id)
     if not requirement:
         raise HTTPException(404, "Requirement not found")
     parent_req = get_req_for_user(db, user, requirement.requisition_id)
     if not parent_req:
         raise HTTPException(403, "Not authorized")
-    content = await file.read()
-    if len(content) > MAX_ATTACHMENT_BYTES:
-        raise HTTPException(400, "File too large (max 10 MB)")
-    from ...scheduler import get_valid_token
-
-    token = await get_valid_token(user, db)
-    if not token:
-        raise HTTPException(401, "Microsoft account not connected — please re-login")
-    from ...http_client import http
-
-    if not file.filename:
-        raise HTTPException(400, "Uploaded file has no filename")
-    safe_name = file.filename.replace("/", "_").replace("\\", "_")
-    drive_path = f"/me/drive/root:/AvailAI/Requirements/{req_id}/{safe_name}:/content"
-    resp = await http.put(
-        f"https://graph.microsoft.com/v1.0{drive_path}",
-        content=content,
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Content-Type": file.content_type or "application/octet-stream",
-        },
-        timeout=30,
+    att = await attachment_service.store_and_attach(
+        db,
+        model=RequirementAttachment,
+        fk_field="requirement_id",
+        entity_label="Requirements",
+        entity_id=req_id,
+        file=file,
+        user=user,
     )
-    if resp.status_code == 401:
-        raise HTTPException(401, "Microsoft token expired — please re-authenticate")
-    if resp.status_code == 403:
-        raise HTTPException(403, "Access denied to OneDrive item")
-    if resp.status_code not in (200, 201):
-        logger.error(f"OneDrive upload failed: {resp.status_code} {resp.text[:300]}")
-        raise HTTPException(502, "Failed to upload to OneDrive")
-    result = resp.json()
-    att = RequirementAttachment(
-        requirement_id=req_id,
-        file_name=safe_name,
-        onedrive_item_id=result.get("id"),
-        onedrive_url=result.get("webUrl"),
-        content_type=file.content_type,
-        size_bytes=len(content),
-        uploaded_by_id=user.id,
-    )
-    db.add(att)
-    db.commit()
-    return _attachment_created_response(att)
+    return attachment_service.serialize(att)
 
 
 @router.delete("/api/requirement-attachments/{att_id}")
@@ -291,25 +175,11 @@ async def delete_requirement_attachment(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Delete a requirement attachment (and remove from OneDrive)."""
+    """Delete a requirement attachment (and remove from cloud storage)."""
     att = db.get(RequirementAttachment, att_id)
     if not att:
         raise HTTPException(404, "Attachment not found")
-    if att.onedrive_item_id:
-        from ...scheduler import get_valid_token
-
-        token = await get_valid_token(user, db)
-        if not token:
-            raise HTTPException(401, "Microsoft token expired — please re-authenticate")
-        try:
-            await _delete_onedrive_item(att.onedrive_item_id, token)
-        except HTTPException:
-            raise
-        except (ConnectionError, TimeoutError, OSError) as e:
-            logger.error(f"Failed to delete OneDrive item {att.onedrive_item_id}: {e}")
-            db.delete(att)
-            db.commit()
-            return {"ok": True, "warning": "DB record deleted but cloud file may need manual cleanup"}
-    db.delete(att)
-    db.commit()
-    return {"ok": True}
+    req_id = att.requirement.requisition_id if att.requirement else None
+    if req_id is None or not get_req_for_user(db, user, req_id):
+        raise HTTPException(404, "Attachment not found")
+    return await attachment_service.remove_attachment(db, att, user)

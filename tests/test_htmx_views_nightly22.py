@@ -501,7 +501,11 @@ class TestUpdateResponseStatus:
 
 
 class TestEditCompany:
-    def test_edit_company_success(self, client: TestClient, db_session: Session, test_company: Company):
+    def test_edit_company_success(
+        self, client: TestClient, db_session: Session, test_company: Company, test_user: User
+    ):
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/edit",
             data={"name": "Acme Corp Updated", "website": "https://acme-corp.com"},
@@ -522,7 +526,8 @@ class TestEditCompany:
 
 
 class TestEditSite:
-    def test_edit_site_success(self, client: TestClient, db_session: Session, test_company: Company):
+    def test_edit_site_success(self, client: TestClient, db_session: Session, test_company: Company, test_user: User):
+        test_company.account_owner_id = test_user.id
         site = CustomerSite(
             company_id=test_company.id,
             site_name="Main HQ",

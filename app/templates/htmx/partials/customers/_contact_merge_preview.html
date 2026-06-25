@@ -1,0 +1,58 @@
+{# _contact_merge_preview.html — Step-2 of contact merge flow: preview + confirm.
+   Shows both contacts; confirms what will be kept.
+   Receives: keep (SiteContact), remove (SiteContact), company (Company),
+             activity_count, task_count, attachment_count.
+   Called by: contact_merge_preview route in htmx_views.py.
+   Depends on: HTMX, Tailwind CSS, brand palette.
+#}
+<div class="space-y-5 p-1">
+  <div>
+    <h2 class="text-lg font-bold text-gray-900">Confirm Contact Merge</h2>
+    <p class="mt-1 text-sm text-gray-600">
+      Review what will change. This action is <strong>irreversible</strong>.
+    </p>
+  </div>
+
+  <div class="rounded-lg border border-rose-200 bg-rose-50 p-4 space-y-1">
+    <p class="text-sm font-semibold text-rose-800">Will be deleted</p>
+    <p class="text-base font-bold text-gray-900">{{ remove.full_name }}</p>
+    {% if remove.email %}<p class="text-xs text-gray-600">{{ remove.email }}</p>{% endif %}
+    {% if remove.title %}<p class="text-xs text-gray-500">{{ remove.title }}</p>{% endif %}
+  </div>
+
+  <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-4 space-y-2">
+    <p class="text-sm font-semibold text-emerald-800">Will be kept ({{ keep.full_name }})</p>
+    <ul class="mt-2 space-y-1 text-sm text-gray-700">
+      <li class="flex justify-between">
+        <span>Activity entries</span>
+        <span class="font-semibold">{{ activity_count }}</span>
+      </li>
+      <li class="flex justify-between">
+        <span>Tasks</span>
+        <span class="font-semibold">{{ task_count }}</span>
+      </li>
+      <li class="flex justify-between">
+        <span>Attachments</span>
+        <span class="font-semibold">{{ attachment_count }}</span>
+      </li>
+    </ul>
+  </div>
+
+  <div id="contact-merge-result"></div>
+
+  <form hx-post="/v2/partials/customers/{{ company.id }}/contacts/{{ keep.id }}/merge"
+        hx-target="#contact-merge-result"
+        hx-swap="innerHTML"
+        class="flex items-center gap-3">
+    <input type="hidden" name="remove_id" value="{{ remove.id }}">
+    <input type="hidden" name="confirmed" value="true">
+    <button type="submit" class="btn btn-danger flex-1">
+      Merge and delete {{ remove.full_name }}
+    </button>
+    <button type="button"
+            @click="$dispatch('close-modal')"
+            class="btn btn-ghost">
+      Cancel
+    </button>
+  </form>
+</div>

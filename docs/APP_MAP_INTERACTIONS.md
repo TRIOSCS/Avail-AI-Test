@@ -209,6 +209,7 @@ sightings.py (router) → search_requirement(req, db)
     |
     +---> enqueue_for_ics_search(requirement_id, db)   # browser worker queue
     +---> enqueue_for_nc_search(requirement_id, db)    # browser worker queue
+    +---> enqueue_for_tbf_search(requirement_id, db)   # browser worker queue (The Broker Forum)
     |
     +---> _save_sightings + scoring + material card upsert
     |
@@ -328,10 +329,10 @@ Page-level + per-row RFQ/offer actions (the quick-source endpoints) are wired.
 **Degraded-source banner** — `search_service.get_market_source_health(db)` reuses
 `_build_connectors` to partition the live-market connectors into available / `down`
 (health_monitor flagged ERROR — auth/quota, operator must rotate credentials in Settings
-→ Sources) / `unconfigured` (no API key). `dossier_market` passes the result as
+→ Connectors) / `unconfigured` (no API key). `dossier_market` passes the result as
 `market_health`; the banner names each down source with its specific error as a hover
-tooltip and deep-links `/v2/settings`. Best-effort: a health lookup failure leaves
-`market_health=None` and never breaks the market section.
+tooltip and deep-links `/v2/settings` (→ Settings → Connectors tab). Best-effort: a
+health lookup failure leaves `market_health=None` and never breaks the market section.
 
 **Relevance guard** — `stream_search_mpn` keeps only hits whose `mpn_matched`
 `fuzzy_mpn_match`es the searched MPN (handles dash/case + ≤2-char revision suffixes,
@@ -489,7 +490,7 @@ type-specific `last_error` message:
 
 | Exception | last_error prefix | Operator action |
 |---|---|---|
-| `ConnectorAuthError` | "Auth error — rotate credentials: ..." | Rotate API key in Admin > API Sources |
+| `ConnectorAuthError` | "Auth error — rotate credentials: ..." | Rotate API key in Settings → Connectors |
 | `ConnectorRateLimitError` | "Rate limited — auto-recovers when window expires: ..." | Usually none |
 | `ConnectorQuotaError` | "Quota exhausted — upgrade plan or wait for cycle: ..." | Upgrade plan or wait |
 
@@ -521,8 +522,9 @@ eliminate; it has been removed.
 
 ### Browser-worker carve-out
 
-`icsource` and `netcomponents` are queue-driven via `avail-ics-worker` /
-`avail-nc-worker` rather than request/response connectors. They have no
+`icsource`, `netcomponents`, and `thebrokersite` are queue-driven via
+`avail-ics-worker` / `avail-nc-worker` / `avail-tbf-worker` rather than
+request/response connectors. They have no
 entry in `_get_connector_for_source`, so the 15-min ping loop would flip
 them to DISABLED on every run. `app.constants.BROWSER_WORKER_SOURCES`
 holds this set, and `run_health_checks` excludes those names from the
@@ -775,6 +777,7 @@ policy behavior for free — in its OWN session, right where the rows are create
    follows the connector-aware delete (inside search's separate write session).
 2. `app/services/ics_worker/sighting_writer.py` — async ICS browser-worker save loop.
 3. `app/services/nc_worker/sighting_writer.py` — same, NetComponents worker.
+   `app/services/tbf_worker/sighting_writer.py` — same, The Broker Forum worker (ACTIVE: logs in with member creds and captures the real seller `vendor_name` + `vendor_phone` from the authenticated listing — logged-out, TBF anonymizes the seller to "TBS Member"). The session/circuit-breaker key on a POSITIVE, fail-safe logged-in marker (the "Sign out" control present, `session_manager.LOGGED_IN_MARKER`); never on "TBS Member" text, which is the logged-OUT anonymized company label.
 4. `app/routers/sources.py` — email-attachment import (ALSO the HUMAN_DIRECT/O3
    release path: a buyer-routed attachment with qty > 0 releases instead of
    stamping). A RE-SENT attachment that hits the dedup key refreshes the
@@ -880,6 +883,13 @@ was not touched.
 **Preview/send lockstep.** `sightings_preview_inquiry` renders the exact
 multi-token subject the send will produce — one `[ref:{id}]` per involved
 requisition, ascending requisition id — so preview and send can never diverge.
+The **compose step** also displays this tagged subject read-only
+(`compose_subject` in the modal context, built with the same token logic) so the
+buyer sees exactly what sends before previewing, even after a modal refresh. The
+preview **parts body** groups by requisition when the basket is cross-req:
+`requisition_parts_grouped` ({req_id, parts}, ascending) + `is_cross_req`
+(`len(requisition_ids) > 1`) drive a `REQ-{id}` subhead per requisition; single-req
+keeps the flat inline list (`parts_list` retained for that path).
 
 **Subject-token single source of truth.** `shared_constants.RFQ_SUBJECT_TAG_RE`
 (`[ref:{id}]` current, `[AVAIL-{id}]` legacy) is the ONE pattern; the duplicate
@@ -951,8 +961,27 @@ the `rfqVendorModal` section below) is fed from four sources:
      "Add new vendor" form (source 4 below) with the vendor's display name and focuses
      the email input — the buyer types the known email and the existing `composer-vendor`
      POST creates the card + `VendorContact`. **No new endpoint, no schema change, no
-     bulk CRM writes.** Contactable rows are unchanged (enabled checkbox + engagement/
-     response badges).
+     bulk CRM writes.** Contactable rows carry an enabled checkbox + engagement/
+     response badges.
+   - **Lead time on EVERY row.** `SuggestedVendor.lead_time_days` (min of
+     `VendorSightingSummary.best_lead_time_days` across the group, computed in
+     `_coverage_ranked_vendor_rows`) now renders a `{N}d lead` span on **all three**
+     row variants — contactable non-DNC, DNC, and no-contact — not just the
+     contactable one (`{% if v.lead_time_days is not none %}`). Template-only on the
+     DNC/no-contact branches (the data already flowed through).
+   - **Score tooltip.** The contactable-row `Score:` span carries a `title=`
+     explaining vendors are **ranked by responsiveness** (engagement score = reply
+     rate × recency when present, else the overall vendor quality score) — native
+     HTML attribute, no new Tailwind class.
+   - **Commodity-segmented engagement chip.** When all selected requirements share
+     ONE `material_card.category` (`current_commodity`), `sightings_vendor_modal`
+     runs **one bounded query** `ActivityLog → Requirement → MaterialCard` grouped by
+     `(vendor_card_id, direction)` filtered to that commodity, producing
+     `commodity_signals` ({card_id: {outbound, inbound}}). The contactable row then
+     shows an `{inbound}/{outbound} {commodity}` chip (rendered only when
+     `outbound > 0`) with a "For {commodity}: N reply / M sent" tooltip. Read-only —
+     **no schema change, no ranking change**; the query is skipped entirely when no
+     vendor is carded or the basket spans >1 commodity.
    - **Deferred follow-up (tracked, not built):** `vendor_email` is 100% NULL on
      sightings — contact emails live only on cards. Capturing vendor contact emails at
      **scrape/enrich time** is the real long-tail lever that would make most cardless
@@ -1099,6 +1128,63 @@ crm/quotes.py + quote_builder_service.py
     +---> activity_service.py --> DB: INSERT activity_log
 ```
 
+**Build-Quote service layer (in-workspace tab — Chunk A).** Three additive,
+compute-on-read helpers in `quote_builder_service.py` back the reshaped
+Build-Quote tab (no schema change):
+
+- `best_cost_for(db, requirement_id)` / `best_costs_for(db, requirement_ids)`
+  — the MIN `unit_price` across a requirement's ACTIVE offers plus the offer
+  that provided it (`{"unit_cost", "offer_id"}`). Buyer-side mirror of the
+  resell `ExcessLineItem.best_offer_unit_price` rollup, computed at read time.
+- `margin_guardrail(cost, sell, *, min_margin_pct=10.0)` — pure helper
+  returning a short warning when a line sells below cost or under the margin
+  floor (matches `proactive_min_margin_pct` / `buyplan_min_margin_pct`).
+- `quote_export_context(quote)` — the CLEAN customer-facing whitelist
+  (`lines` of part_number/manufacturer/quantity/condition/cost/sell/margin/
+  extended + header). Mirrors `bid_back_service.bid_back_export_context`:
+  vendor / offer / source identity is stripped at ASSEMBLY, never by template
+  omission. `document_service.generate_quote_report_pdf` now renders
+  `quote_report.html` from this context, so the customer PDF cannot leak a
+  vendor name.
+
+**Build-Quote tab (in-workspace single-stage assembly — Chunk B).** The sales
+quote-builder modal is reshaped into a **Build Quote** tab on the requisition
+detail (`requisitions/detail.html` tab strip, sibling to the Quotes list tab),
+mirroring the resell **Build Bid** tab. The tab is lazy (`hx-trigger="click"`,
+explicit `hx-target="#tab-content"`) and owner/buyer-gated.
+
+```
+Browser (Build Quote tab) ──click──> GET /v2/partials/requisitions/{id}/build-quote
+    |                                      (require_requisition_access; quote_builder.py)
+    v
+build_quote_tab_data(db, id) ──> per line: best_costs_for ref + ACTIVE offers
+    |                            + sell seed (last-quoted -> else best-cost x 20% markup)
+    v
+requisitions/tabs/build_quote.html  (quoteBuilderTab Alpine: live margin + guardrail,
+    |                                 blended total, markup-% reseed; single-quoted x-data
+    |                                 + |tojson seed blob)
+    +-- check line -> sell-price field seeds -> live margin chip + guardrail
+    +-- "Assemble" --POST--> /v2/partials/requisitions/{id}/build-quote/assemble
+              |                  (parses QuoteBuilderLine[]; delegates to
+              v                   save_quote_from_builder -> revision lifecycle preserved)
+        re-render tab with inline clean summary (quote_export_context) +
+        Download PDF (existing /export/pdf) / Send (existing /quotes/{id}/send)
+```
+
+`quoteBuilderTab` (in `htmx_app.js`) is the single-stage simplification of the
+modal's `quoteBuilder` (same `(sell-cost)/sell` margin math + blended rollup, no
+two-panel decision flow). The list-toolbar "Build Quote" action re-points a SINGLE
+selected requisition to this tab via `?tab=build_quote` (the detail partial deep-links
++ auto-opens it); 2+ selections keep the cross-req bulk modal (`/quote-builder/multi`).
+
+**Per-line offer selection (Chunk B2).** Each line with 2+ ACTIVE offers shows a
+compact per-line `<select>` (progressive disclosure; default = best/cheapest) so the
+salesperson picks WHICH offer is used, not just the auto-best. The `selectOffer`
+Alpine action sets the line's `offerId` and re-points its `cost` so the live margin
+reflects the chosen offer. The choice rides the existing assemble payload
+(`offer_id`) through `save_quote_from_builder` onto `QuoteLine.offer_id`. Vendor
+identity stays internal — the customer doc/export strips it (`quote_export_context`).
+
 ## 6. Buy Plan Workflow
 
 ```
@@ -1108,6 +1194,10 @@ Quote accepted (status='won')
 buyplan_builder.py
     |
     +---> DB: INSERT buy_plans_v3 (DRAFT, linked to quote + requisition)
+    +---> _quote_chosen_offers: requirement_id -> QuoteLine.offer_id (one QuoteLine->Offer
+    |       join). Each line DEFAULTS to the offer the salesperson quoted (Chunk B2); when
+    |       that offer is stale/inactive or can't cover qty, falls back to the re-score /
+    |       auto-split path (mirrors resell CustomerBidLine.selected_offer_id provenance).
     +---> DB: INSERT buy_plan_lines (buyer assigned via ownership_service)
     +---> buyplan_scoring.py (ai_score per line)
     |
@@ -1123,6 +1213,9 @@ buyplan_workflow.py (state machine)
     |  Ops SO track:       so_status: pending --verify_so(ops)--> approved / rejected
     |  Completion gate:    all lines terminal AND so_status=approved. verify_so/verify_po require a
     |                      VerificationGroupMember (manage via Settings > Ops Group; seeded from ADMIN_EMAILS).
+    |                      admin/buy_plan_ops.toggle_ops_member guards the toggle: it refuses to
+    |                      deactivate the LAST active member or to let the acting admin deactivate
+    |                      themselves (both -> 400 JSON, auto-toasted); success fires a showToast.
     |
     +---> buyplan_notifications.py (submit/approve/reject/SO/PO/completed/cancelled + buyer/ops nudges)
     |       +---> teams_notifications.py --> Teams webhook / DM
@@ -1159,12 +1252,68 @@ GET /v2/partials/buy-plans?lens=          (shell: switcher + lazy #bp-hub-body)
                              so the action re-renders THIS body into #bp-hub-body.
 ```
 
+**Resell workspace — resell/excess split-panel (Chunk F, ADDITIVE).** `/v2/resell` is
+its own primary-nav tab (9th item in `mobile_nav.html`) served by the `v2_page` shell →
+`GET /v2/partials/resell/workspace` (router `app/routers/resell.py`, mounted alongside the
+OLD `excess` router which a later cutover chunk removes). The workspace is a `splitPanel('resell')`
+shell: lens pills (My Lists / Open to Me, buy-plans-hub pattern) + a `stat_card` triage strip
+(Open · Offers to review · Take-all · Bids out · Awarded — each card a one-click stage filter) +
+a lazy left list and a right detail. Logic stays in `excess_service` (offers/import) +
+`excess_mirror` (publish); the router is thin (request → context → partial).
+
+```
+GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + splitPanel)
+    |
+    +-- GET /v2/partials/resell/lists?lens=&stage=&q=   (left list; rows → detail)
+    |        lens=mine  → lists OWNED by user (seller name VISIBLE)
+    |        lens=open  → posted lists owned by OTHERS, customer-ANONYMIZED (pure whitelist)
+    +-- GET /v2/partials/resell/{id}                    (right detail: breadcrumb + chips +
+    |        lazy tabs Lines · Offers · Build Bid · Outreach(owner) · Activity; customer chip owner-only)
+    |        +-- GET .../{id}/lines    (adaptive: 1 line → .card, ≥2 → compact-table)
+    |        +-- GET .../{id}/offers   (owner-only stack: pinned take-all banner +
+    |        |     per-line offer tables + unmatched queue; non-owner sees nothing)
+    |        +-- GET .../{id}/lines/{line_id}/offers  (per-line comparison: best emerald +
+    |        |     price-spread bar, cloned from quote_builder/modal.html, NO auto-select)
+    |        +-- GET .../{id}/offer-buyers-form  (owner-only buyer panel: ranked suggestions
+    |        |     [buyer_affinity_service.rank_buyers_for] + advisory overlap flag
+    |        |     [overlap_warning] + no-contact history rows + scope + channel)
+    |        +-- GET .../{id}/outreach           (owner-only Outreach tab: tracker rows +
+    |        |     'offered N · M responded · K bid' summary; lazy, explicit hx-target)
+    |        +-- GET .../{id}/not-yet-strip      (owner-only nudge: not_yet_offered_strip;
+    |              # TODO(crm-phase2) My-Day Task seam lives in resell_not_yet_strip)
+    +-- POST /api/resell/lists                          (create → excess_service.create_excess_list)
+    +-- POST /api/resell/{id}/lines                     (add line; resolves MaterialCard)
+    +-- POST /api/resell/{id}/import-preview|import-confirm  (reuse excess parsers + preview grid)
+    +-- POST /api/resell/{id}/publish                   (excess_mirror.publish_list → Sighting mirror)
+    +-- POST /api/resell/{id}/offers                    (excess_service.submit_offer; scope
+    |     per_line|take_all; service enforces can_offer + the self-offer guard)
+    +-- POST /api/resell/{id}/outreach                  (owner-only; channel=email →
+          resell_outreach_service.submit_outreach_email [RFQ send engine], else
+          submit_outreach [manual log]; re-renders the Outreach tracker)
+```
+
+Adaptive-detail rule (spec "density scales to line count, placement follows offer scope"):
+`shape='single'` (1 line → one `.card`, no table chrome) vs `'table'` (≥2 → `compact-table`);
+any take-all offer pins as a violet banner above the lines. Status pills reuse existing
+`status_badge` keys — no new colors (open→sky, collecting→sourcing/amber, bid_out→quoted/violet,
+awarded→won/emerald, draft→muted). Customer hiding is view discipline (single-tenant): the
+offerer-facing list + non-owner detail project ONLY MPN/qty/condition, never the seller company.
+Demo seed: `python -m app.management.seed_resell_demo` (idempotent; `--reset` to clear) creates
+three deal shapes (40-line collecting w/ per-line + unmatched + take-all offers, a single-line
+one-off w/ 2 offers, an awarded list).
+
 **Notification tiers (`buyplan_notifications.py`).** Two tiers gate which channels fire:
 - **Urgent → email + Teams DM + in-app**: SO kickback (`notify_so_rejected`), PO kickback
   (`notify_po_rejected`, fired from the verify-po reject path), new assignment / approval
   (`notify_approved`, per assigned buyer).
 - **Routine → in-app only**: plan completion (`notify_completed`) — no email, no Teams.
 All tiers write an `activity_log` row linked via `buy_plan_id` (+ `requisition_id`).
+
+**Per-user email opt-out (Task 9).** `_send_email(user, ...)` early-returns (no token
+fetch, no Graph client) when the recipient's `notify_buyplan_email_enabled` is False —
+the Profile-tab toggle. Suppression is at the firing site only: the calling `notify_*`
+function still writes the recipient's in-app `activity_log` row, so nothing is lost
+in-app — only the email channel is silenced for that user.
 
 **Reporting fold.** The retired `/v2/reporting` page's analytics now live where the work
 happens: the **Supervise** lens strip (open value / avg margin / approvals / halted /
@@ -1250,6 +1399,53 @@ proactive matches surface on the Proactive tab without waiting for the daily cro
 Bounded to 5 offers per card (per_card_limit); the engine's own dedup prevents
 duplicate matches.
 
+### Unified AI Email Drafting (RFQ rephrase · vendor reply · follow-up)
+
+```
+app/services/email_drafting.py :: draft_email(kind, context)
+    kind="rfq_rephrase" --> ai_service.rephrase_rfq (Haiku) ; fallback = original body
+    kind="follow_up"    --> claude_text (Haiku)            ; fallback = template string
+    kind="vendor_reply" --> claude_json (Haiku)            ; fallback = None (blank box)
+
+Surfaces (all human-edit-before-send; nothing auto-sends):
+  RFQ compose  "AI Rephrase" button
+    POST /v2/partials/requisitions/{req_id}/ai-rephrase-email
+      --> draft_email("rfq_rephrase") --> <script> sets #rfq-body-textarea
+  Vendor response card  "AI Draft Reply" button
+    POST /v2/partials/requisitions/{req_id}/responses/{response_id}/ai-draft-reply
+      --> draft_email("vendor_reply") --> reply_compose.html into #reply-area-{id}
+    POST /v2/partials/requisitions/{req_id}/responses/{response_id}/send-reply
+      --> Graph /me/sendMail (as user; TESTING bypass) ; marks response reviewed
+  Follow-up compose  "AI Draft" button
+    POST /v2/partials/follow-ups/{contact_id}/ai-draft
+      --> draft_email("follow_up") --> <script> sets #follow-up-body-{id}
+```
+
+Gives `rephrase_rfq` and `VendorResponse.classification` their first live consumers.
+All paths degrade gracefully when Claude is unavailable (cost_bucket="email_drafting").
+
+### Qualify-with-AI (offer pre-fill + ask-the-vendor for what's missing)
+
+```
+Offer row kebab "Qualify with AI" (shown only when offer.vendor_response_id set)
+  GET /v2/partials/sightings/{requirement_id}/offers/{offer_id}/qualify-ai
+    --> parse_vendor_response(linked email) --> extract_draft_offers
+        --> pre-fill the offer form (AI fills EMPTY fields only; saved values win)
+    --> offer_qualification.compute_qual_gaps(prefill, condition)
+        --> condition-aware checklist (genuine gaps pre-checked)
+    --> qual_request_modal.html : pre-filled offer form (same save path as edit) +
+        _qual_checklist.html (gap checkboxes + user-addable custom items via "+ Add item")
+  POST .../offers/{offer_id}/qualify-ai/draft-request
+    checked_items[] (AI gaps kept) + custom_items[] (user's own, not AI-suggested)
+    --> draft_email("qual_request") --> reply_compose.html in #qual-compose-{offer_id}
+  Send → existing send-reply path (Graph as user; TESTING bypass)
+    --> NEW: DNC hard-block in send_reply_htmx (SiteContact.do_not_contact) — never emails DNC vendors
+```
+
+Ownership-guarded via require_requisition_access (offer.requisition_id, owner_id=entered_by_id).
+Read-only pre-fill; never auto-saves or auto-sends. Loop-closes: a vendor's reply becomes a new
+linked VendorResponse, so re-opening Qualify-with-AI fills the remaining fields.
+
 ## 8. Activity Digest (AI Timeline Summary)
 
 ```
@@ -1318,7 +1514,10 @@ Two surfaces:
     1. Requisitions list: shared/inbox_disconnected_banner.html
        (shown when health=error or is_stale=True; included at top of list.html)
     2. Settings → Profile: settings/_mailbox_sync_card.html
-       (always shows sync status + "Scan now" button)
+       (connected: friendly sync status + "Scan now" button + last-checked
+        timeago; not connected: a "Mailbox not connected" empty state with a
+        reconnect hint and no Scan-now button. m365_error_reason is rendered as
+        friendly text, not a raw string.)
 
 "Scan now" button:
     POST /v2/partials/settings/inbox/scan-now
@@ -1338,6 +1537,246 @@ Two surfaces:
 `poll_inbox_htmx` (`POST /v2/partials/requisitions/{req_id}/poll-inbox`) also calls
 `_run_inbox_scan_now` and returns the refreshed responses tab; the scan is user-scoped,
 not requisition-scoped.
+
+### Profile mutation endpoints (any logged-in user)
+
+Settings → Profile lets a user edit their own display name, 8x8 extension, and
+notification preferences. All three handlers live in `htmx_views.py`, take
+`require_user` (the current user, NOT admin-only), commit, and emit a `showToast`
+HX-Trigger via the shared `settings_toast()` helper.
+
+```
+POST /api/user/profile            (form: name, extension)
+    htmx_views.update_user_profile()
+    +---> name.strip(): empty OR >255 chars -> 400 JSON {error, status_code, request_id}
+    +---> extension.strip(): >20 chars       -> 400 JSON {error, ...}
+    +---> sets user.name + user.eight_by_eight_extension (empty extension clears it)
+    +---> db.commit(); settings_toast("Profile updated.") -> 200 (empty body + HX-Trigger)
+
+POST /api/user/toggle-buyplan-email
+    htmx_views.toggle_buyplan_email()
+    +---> flips user.notify_buyplan_email_enabled; toast "...enabled/disabled."
+          When False, buyplan_notifications._send_email skips the Graph send (in-app
+          activity_log row still written — see §8 notification tiers).
+
+POST /api/user/toggle-new-offer-alert
+    htmx_views.toggle_new_offer_alert()
+    +---> flips user.notify_new_offer_alert_enabled; toast "New-offer alerts enabled/disabled."
+          When False, alerts.sources.offers.OfferConfirmedSource.count_for_user /
+          new_items_for_user return 0/empty, suppressing the FYI nav badge for that user.
+```
+
+These clone the existing `toggle_8x8` (`POST /api/user/toggle-8x8`) pattern but route
+their toast through `settings_toast()`.
+
+---
+
+## 9a. Settings → Connectors Tab (admin only)
+
+Unified credential + health management surface. Replaces the old **Sources** tab and
+the orphaned **API Keys** tab: both legacy routes (`/v2/partials/settings/sources` and
+`/v2/partials/settings/api-keys`) 302 → `/v2/partials/settings/connectors`.
+
+```
+GET /v2/partials/settings/connectors
+    |
+    v
+htmx_views.settings_connectors_tab  (admin-only; 403 for non-admin)
+    |
+    +---> _build_connector_groups(db, request)
+    |       |
+    |       +---> db.query(ApiSource).order_by(display_name).all()
+    |       |     (dead rows excluded in-process via the shared module-level
+    |       |      htmx_views._DEAD_CONNECTORS frozenset — single source of truth
+    |       |      referenced by both _build_connector_groups and connectors_test_all:
+    |       |      rocketreach_enrichment / clearbit_enrichment)
+    |       |
+    |       +---> per source: _enrich_source(source, db)
+    |       |       |
+    |       |       +---> connector_service.control_type(source)
+    |       |       |       → "key" | "oauth_clay" | "multi_field" | "browser_login"
+    |       |       |         | "scopes" | "keyless" | "planned"
+    |       |       |
+    |       |       +---> credential_service.credential_is_set / get_credential
+    |       |       |       (masked display only)
+    |       |       |
+    |       |       +---> clay_oauth.is_connected() / needs_reconnect()
+    |       |       |       (clay_enrichment only)
+    |       |       |
+    |       |       +---> connector_service.connector_state(source, ...)
+    |       |               → "live" | "error" | "off" | "needs_setup" | "untested"
+    |       |                 | "needs_reconnect" | "planned"
+    |       |
+    |       +---> connector_service.connector_group(source) → group key
+    |       |     Buckets emitted in GROUP_ORDER:
+    |       |       Part Sourcing / Enrichment / AI / Communications /
+    |       |       Browser Workers / Manual
+    |       |     7 planned connectors (findchips/future/heilind/lcsc/rochester/
+    |       |       thebrokersite/verical) render as read-only "Planned" cards
+    |       |       (no credential form, no toggle, no Test button)
+    |       |
+    |       v
+    |     connector_groups: [{key, label, sources: [enriched_dict]}]
+    |
+    v
+settings/connectors.html  (grouped card grid)
+```
+
+**Per-card controls (by `control_type`):**
+
+| `control_type` | UI |
+|---|---|
+| `key` | API key input (masked), Save via `hx-ext="json-enc"` |
+| `oauth_clay` | Connect / Reconnect / Disconnect buttons (Clay OAuth) |
+| `multi_field` | 4-field form (8×8: API key + username + password + PBX id) |
+| `keyless` | Enable toggle only (no credential; e.g. `ai_live_web`) |
+| `browser_login` | Status-only (ICS/NC workers — managed by browser-worker containers) |
+| `scopes` | Status-only (Azure AD / Teams — managed by Azure AD admin) |
+| `planned` | Read-only label, no controls |
+
+Every non-planned card has an **enable toggle** (`POST /api/sources/{id}/activate`) and a
+**Test** button (disabled if untestable). Both return JSON; the swap unit is a refreshed
+card partial:
+
+```
+PUT  /api/sources/{id}/activate          → JSON {ok, is_active} + showToast HX-Trigger
+POST /api/sources/{id}/test              → JSON {ok, error}
+PUT  /api/sources/{name}/credentials     → JSON {saved} + showToast HX-Trigger
+GET  /v2/partials/settings/connector-card/{id}  → single card HTML (swap target)
+POST /v2/partials/settings/connectors/test-all  → OOB bundle of refreshed cards
+     + an OOB summary line ("Tested N · M failed") into #test-all-summary
+     (skips inactive / untestable; per-source failures tolerated, never abort)
+```
+
+Credential save uses `hx-ext="json-enc"` to PUT a nested JSON body
+(`{credentials:{ENV:val}}`) to `PUT /api/sources/{name}/credentials` (HTMX json-enc
+extension — not a standard form POST). On success the card re-fetches via
+`GET /v2/partials/settings/connector-card/{id}`.
+
+**Feedback & safety polish (Task 5):**
+- **Success toasts** — `activate` and `credentials` handlers attach a `showToast`
+  HX-Trigger via `htmx_views.settings_toast` (lazy import to avoid a circular import):
+  "Key saved." / "Credentials saved." / "<name> enabled/disabled." Clay `disconnect`
+  (router `clay_oauth.py`) sets the same HX-Trigger on its 302 ("Clay disconnected.").
+- **Destructive confirms** (`hx-confirm`, client-side) — Clay **Disconnect** ("Disconnect
+  Clay enrichment for everyone? …"); the enable toggle gains a confirm **only when the
+  card state is `live`** (Jinja-conditional, single-quoted, name `|e`-escaped) since
+  disabling a live source reduces search/enrichment app-wide.
+- **Empty state** — when `connector_groups` is empty (no `ApiSource` rows) the tab renders
+  a house-style ghost-icon empty block ("No connectors yet.") instead of a bare header.
+- **Unified status vocabulary** — header counter and group counts both read "N need setup"
+  (was "need attention" / inconsistent singular); the per-card pill labels remain canonical.
+
+The degraded-source banner on the Part Dossier (`§ 2a-bis`) deep-links
+`/v2/settings` when live-market connectors are down — that link now routes to the
+Connectors tab (default tab is `connectors`).
+
+---
+
+## 9b. User Management (allowlist login, per-user access, audit)
+
+Admin-administered identity + access, surfaced at **Settings → Users** (admin only).
+Three intertwined flows: the login allowlist gate (with invite adoption), the per-user
+access model and its enforcement, and the audit trail.
+
+### Allowlist login gate + invite adoption
+
+The OAuth callback (`app/routers/auth.py callback`) is the single choke point. Gated by
+`ENABLE_USER_ALLOWLIST` (`app/config.py`, default True):
+
+```
+Azure AD OAuth callback (email normalized to lowercase)
+    |
+    +-- no users row for this email?
+    |       allowed = (email in ADMIN_EMAILS) or (not ENABLE_USER_ALLOWLIST)
+    |       |
+    |       +-- allowed     → auto-provision a User row (legacy posture / admin)
+    |       +-- NOT allowed → 302 /auth/access-denied  ("Access not provisioned")
+    |
+    +-- users row exists, but is_active = False
+    |       → 302 /auth/access-denied?reason=disabled  ("Account disabled")
+    |
+    +-- users row exists, azure_id is NULL (an INVITED, pre-provisioned row)
+    |       → INVITE ADOPTION: bind profile.id onto user.azure_id on this first login.
+    |         The invited role is left untouched (an invited trader stays a trader).
+    |
+    +-- (always) stamp user.last_login_at = now
+```
+
+`/auth/access-denied` is a self-contained branded page (no app shell, renders with no
+session); `?reason=disabled` switches the copy. An invited row is created by an admin via
+the Users tab (azure_id NULL, last_login_at NULL) and shows status **Invited** until its
+first OAuth login adopts the azure_id.
+
+### Per-user access model + enforcement
+
+Access is a layered resolution computed by `dependencies.user_has_access(user, key, db)`
+over `constants.AccessKey` (10 module keys + 5 capability keys):
+
+```
+admin role?                       → ALWAYS granted (every key)
+key == ops_verification?          → VerificationGroupMember.is_active  (single source of truth)
+explicit override present?        → User.access_overrides[key]         (override wins)
+otherwise                         → key in ROLE_ACCESS_DEFAULTS[role]   (role default)
+```
+
+`access_overrides` stores *only* explicit grants/revokes — an absent key falls through to
+the role default (defaults preserve prior behavior, so the model is a no-op until an admin
+sets an override). `ops_verification` is special: it is never stored in `access_overrides`,
+and the access editor writes `VerificationGroupMember` instead (default acts as off —
+membership is curated, never "follow role"). Enforced at four points:
+
+| Where | Mechanism |
+|---|---|
+| **Bottom nav** (hide revoked sections) | `_base_ctx` calls `admin.users.module_access_map(user)` → `{nav-id: bool}` `access` map; `shared/mobile_nav.html` skips any section where `access[id]` is False (default-show if absent). |
+| **Module full-page route** | `v2_page` maps the resolved `current_view` to its module `AccessKey` (`_VIEW_ACCESS`; CRM sub-views all gate on CRM); a denied view 302-redirects to the user's FIRST allowed module (`_MODULE_ENTRY_URLS` order) — target is always allowed, so no loop. No-access-at-all → 403 with logout link. Un-gated views: settings/quotes/follow-ups/tickets. |
+| **Module partial entry route** | `require_access(<module>)` dependency on each of the 10 nav-module partial routes (parts/sightings/materials/search/buy-plans/resell/crm/proactive/prospecting/my-day workspaces). |
+| **Module SUB-partial chokepoint** | `ModuleAccessMiddleware` (`app/main.py`, inner of `SessionMiddleware`) closes the gap where a revoked user could still READ a module's *sub*-partials by direct URL (those carry only `require_user`). It resolves the request path through the pure `app.access_paths.module_key_for_path` and, if a guarded prefix matches and the session user lacks the key, returns a plain 403. **Only EMPIRICALLY module-exclusive prefixes are guarded: `crm`, `resell`, `proactive`, `prospecting`, `my-day`.** The other five entry-prefixes (`parts`, `sightings`, `materials`, `search`, `buy-plans`) are SHARED cross-module (embedded by other modules' templates) and DELIBERATELY un-gated, as are all CRM *data* partials (customers/contacts/vendors/vendor-contacts) and capability/global/global-search partials — gating them would over-block. Admins and logged-out requests pass through; a DB session opens only when a guarded prefix matches. |
+| **Capability action** | `require_access(<capability>)` on: RFQ-send (`htmx_views.rfq_send`, `sightings.sightings_send_inquiry`); offer approve/reject/reconfirm (`crm/offers.py` + the Sightings `review_offer`/`reconfirm_offer` wrappers); CSV + quote exports (`crm/export.py`, `quote_builder.py`); source-test (`sources.test_api_source`). |
+
+`require_access(key)` is a factory returning a dependency that depends on `require_user`
+and raises 403 unless `user_has_access` passes (admins always pass). The
+`ModuleAccessMiddleware` SUB-partial chokepoint enforces the SAME `user_has_access`
+decision one layer earlier (at the ASGI level) for module-exclusive fragment URLs that
+have no per-route `require_access`, so module revocation is airtight without a gate on
+every sub-partial. CRM data partials (customers/contacts/vendors) remain reachable by
+design — they are shared cross-module, so revocation hides the CRM section/nav and blocks
+crm-prefixed partials only.
+
+### Admin Users tab (CRUD + access editor)
+
+`app/routers/admin/users.py` (admin-only via `require_admin`; the agent service account is
+404/uneditable). Every mutation appends a `UserAdminAudit` row
+(`services.user_admin.record_user_audit`) and re-renders the relevant partial; validation
+failures re-render with an inline error banner at HTTP 400.
+
+```
+GET  /v2/partials/settings/users            → users.html table (htmx_views.settings_users_tab; 403 non-admin)
+POST /api/admin/users/invite                → create interactive user (status Invited)
+POST /api/admin/users/{id}/role             → change role
+POST /api/admin/users/{id}/active           → activate / deactivate
+GET  /api/admin/users/{id}/access-panel     → user_access_panel.html (per-user access editor modal)
+POST /api/admin/users/{id}/access           → grant/revoke/reset ONE key (value ∈ on|off|default)
+GET  /api/admin/users/audit                 → users_audit.html (audit-log viewer modal)
+```
+
+Each user row shows a derived status (**Invited** | **Active** | **Disabled**). The access
+editor renders module + capability rows, each with state `on`/`off` (explicit override) or
+`default` (follow role) plus the resolved effective value. **Self-protection invariants**
+(never lock everyone out): an admin can't demote or deactivate themselves, and the last
+active admin can't be demoted or deactivated by anyone — the last-admin guard counts active
+admins `FOR UPDATE` (row-locked) so concurrent demote/deactivate requests can't race past it.
+
+### Audit trail
+
+Every Users-tab mutation writes one append-only `user_admin_audit` row recording
+`actor_id` (the admin), `target_user_id`, `action` (`constants.UserAuditAction`:
+invite/role_change/activate/deactivate/access_grant/access_revoke), a JSON `detail`
+(e.g. `{"from","to"}` for a role change, `{"key","value"}` for an access change), and
+`created_at`. The viewer (`GET /api/admin/users/audit`) loads the latest 200 rows
+newest-first, batch-resolving actor + target users in one query (no N+1); a SET-NULL'd
+actor renders as "system". `actor_id` is SET NULL (trail survives the admin's deletion);
+`target_user_id` CASCADEs with the user.
 
 ---
 
@@ -1417,6 +1856,19 @@ contacts on active sites) and passes it to
 full_name` — priority contacts surface to the top, archived sink to the bottom
 (still shown). Legacy rows (`contact is None`) are appended after, never sorted.
 
+**Per-entity authz hardening (Phase 1, multi-user go-live).** Every state-changing
+entity-by-id route is gated on per-entity ownership BEFORE mutating (the gate precedes
+404/400/validation branches and any AI-spend/side-effect). Company/site/contact mutations
+use `can_manage_account(user, company, db)` (owner OR site-owner OR collaborator OR
+manager/admin); company_merge/merge-preview/merge-form gate BOTH the keeper and the
+duplicate. Requisitions/quotes/buy-plans/offers scope to the parent **Requisition.created_by**
+via `get_req_for_user` / `get_quote_for_user` / `get_buyplan_for_user` (BuyPlan→Requisition
+join; 404-not-403 so existence isn't leaked) and `require_requisition_access`; owner
+*reassignment* is `is_manager_or_admin`-only. Requisition list/detail visibility uses
+`RESTRICTED_ROLES` (SALES+TRADER see only own), not SALES alone. The `attachments_extra`
+company-access helper performs a real `can_manage_account` check (was a no-op). Restricted
+roles get 403 (company routes) or 404 (requisition-derived) on entities they don't own.
+
 **Disposition (Increment 1, migration 118).** Salespeople dispose of accounts +
 contacts via setter routes in `htmx_views.py` (all owner-or-admin where they touch
 ownership/disposition; `is_admin = user.role == UserRole.ADMIN`, mirroring
@@ -1439,38 +1891,50 @@ Bucket suppression is QUERY-LAYER only (never in `cadence_service.materialize_al
 the NULL-safe exclusion lives in the shared `_needs_call_filter` (count==list invariant)
 + `cdm_company_query`'s base, with `staleness='bucket'` the lone escape hatch.
 
-**Left-panel company→site IA (Increment 2, no migration).** The CDM left list
-(`_account_list.html`) branches on `c.site_count` (trigger-maintained on `Company`):
-- `site_count <= 1` → today's behavior: the row hx-gets `GET .../{company_id}`
-  (full company detail) into `#cdm-detail`, setting `selectedId` (+ clearing
-  `selectedSiteId`).
-- `site_count > 1` → the row becomes an Alpine accordion header
-  (`x-data="{expanded}"`, chevron, no window-level listeners). Clicking the name
-  toggles expand AND hx-gets the **company-header partial** into `#cdm-detail`;
-  the site children lazy-load on first expand (`intersect once`) from the
-  **sites-accordion partial**. Each site child hx-gets the **site-detail** route
-  and sets `selectedId` + `selectedSiteId`.
-
-Three additive routes in `htmx_views.py` (declared ABOVE the
-`GET /v2/partials/customers/{company_id}` catch-all):
-- `GET .../{company_id}/header` (`company_header_partial`) → `customers/header.html`
-  — header card + `_cadence_hero.html` + `_disposition_control.html` + dual clocks
-  + commercial strip, WITHOUT the per-tab strip (the company-level rollup that
-  stays visible while drilling into sites).
-- `GET .../{company_id}/sites-accordion` (`company_sites_accordion_partial`) →
-  `customers/_sites_accordion.html` — a `<ul>` of the company's ACTIVE sites
-  (name + type + city), each linking to the site-detail route.
-- `GET .../{company_id}/sites/{site_id}` (`company_site_detail_partial`) →
-  `customers/site_detail.html` — IDOR-safe (`CustomerSite.id == site_id AND
-  company_id == company_id AND is_active`, else 404; mirrors `site_contacts_list`).
-  Renders site fields + per-site clocks (tier=None standard target) + a mini tab
-  strip: **Contacts** (`company_contact_rows(db, company_id, sites=[this_site])`,
-  reusing the `contacts_tab.html` `contact_card` macro `with context`) and **Open
-  requisitions at this site** (`Requisition.customer_site_id == site_id`, open
-  statuses only). The **Notes tab is deferred** pending the ActivityLog FK scoping
-  fix. The `#cdm-workspace` x-data gains `selectedSiteId` for site-row highlight.
-The legacy in-panel **Sites tab** (`tabs/sites_tab.html` / `site_card.html`) is
-left intact (harmlessly redundant) — its retirement is a follow-up.
+**Unified account workspace + Contacts canonical surface (IA redesign, no
+migration).** The single-vs-multi-site fork is RETIRED — every account row in the
+CDM left list (`_account_list.html`), regardless of `site_count`, hx-gets the SAME
+`GET .../{company_id}` (`company_detail_partial`) into `#cdm-detail`, setting
+`selectedId`. The left list is now a flat account picker (multi-site rows keep an
+"N sites" hint badge, no accordion). Sites are reached INSIDE that unified detail
+(Sites tab + the Contacts site sections), never via a left-panel drill-down.
+- **Retired** (deleted): `company_header_partial`/`customers/header.html`,
+  `company_sites_accordion_partial`/`customers/_sites_accordion.html`,
+  `company_site_detail_partial`/`customers/site_detail.html`, and the
+  `#cdm-workspace` `selectedSiteId` state. The `GET .../{company_id}/sites/{id}`
+  path now resolves only to the surviving POST/DELETE site-contact CRUD routes (a
+  GET → 405).
+- **Breadcrumb** `Customers › {Account}` (`<nav aria-label="Breadcrumb">`) sits at
+  the top of `detail.html` (reused from the retired `site_detail.html`).
+- **Contacts is the default + primary right-panel surface.** `contacts_tab.html`
+  (the ONLY contact-management surface, full feature set) wraps the
+  `contactsView` Alpine.data component (`htmx_app.js`): a people-search + a site
+  filter (`active_sites|length > 1` only) that filter the rendered rows
+  CLIENT-SIDE (toggle `hidden` by `data-contact-search`/`data-site-id`, re-applied
+  on `htmx:afterSettle` so a CRUD swap of the inner `#contacts-tab-list` keeps the
+  filter). `_contacts_grouped_list.html` renders light per-site section headers
+  (name · city · per-site cadence dot via the `site_cadence_dot` macro · `+ add
+  here` → add-form with `?site_id=`); single-site → one section, no filter chrome.
+  `company_detail_partial` passes `active_sites` (name-sorted) + `roles` so the
+  inlined default tab matches the standalone `/tab/contacts` render.
+- **Compact column layout (replaced the card grid).** Each per-site section renders
+  a `<table class="compact-table">` of `contact_row` rows (`_contact_macros.html`):
+  columns **Name · Title · Phone · Email · Last Contact** (primary contact ★).
+  Phone is a `tel:` link and Email an Outlook-web compose deeplink — both carry the
+  `data-outreach-log` attrs so `htmx_app.js` logs the touch (same path as the old
+  `outreach_btn`). Each row has an Alpine `x-data='{open:false}'` **expand drawer**
+  (chevron) revealing Teams deeplink, WeChat copy-id, secondary email/phone,
+  LinkedIn, reports-to, notes, the inline role editor and cadence clocks. Row-level
+  management (edit, set-primary, priority, archive, DNC, merge, move, delete) lives
+  in a per-row kebab so the row stays scannable. Cell padding uses the locked
+  `.compact-table`/`.td-label` utilities (no inline `px-`/`py-` on `<td>`). The old
+  `contact_card` macro is retained in `_contact_macros.html` but no longer rendered
+  by the contacts tab.
+- The contact edit modal (`_contact_form.html`) always renders **every** known
+  contact field as a labeled input (blank → empty field), so a user sees all the
+  fields they could fill in.
+The in-panel **Sites tab** (`tabs/sites_tab.html` / `site_card.html`) is left intact
+pending its CRUD-only rework (separate stage).
 
 **AI organization (Increment 3, migration 120).** Durable company-dedup foundation +
 review/banner surfaces — the merge engine (`company_merge_service.merge_companies`) and
@@ -1492,6 +1956,27 @@ merges different-`account_owner_id` accounts) are reused AS-IS.
   blank + emitted empty merge ids; dead). Default keep/remove direction follows
   `pair.auto_keep_id`; both buttons POST `/v2/partials/admin/company-merge`. Reached via
   `GET /v2/partials/settings/data-ops` (`require_user` + explicit `is_admin` gate).
+- **Vendor-Duplicates loop (same template) had the identical flat-field bug** — it read
+  `pair.name_a/id_a/sightings_a` while `vendor_utils.find_vendor_dedup_candidates` returns
+  NESTED `{vendor_a:{id,name,sightings}, vendor_b:{…}, score}` → vendor rows rendered blank
+  with empty `hx-vals` ids. Now rewritten against the nested shape, with a "suggested keep"
+  hint (keeper = higher-sighting side, ties→`vendor_a`), matching the Company loop.
+- **Honest scan-error state:** the data-ops route runs each dedup scan inside its own
+  `try/except` via the shared `_render_data_ops(request, user, db)` helper, which sets a
+  per-scan `vendor_scan_failed`/`company_scan_failed` flag. A scan that RAISES renders a
+  distinct rose error block ("Couldn't check for duplicate vendors/companies right now —
+  try Refresh.") instead of swallowing the failure into the reassuring "No duplicate …
+  found" clean empty state. The empty state copy now says "companies" (matched to the
+  card title), not "customers".
+- **Merge-button styling + post-merge refresh:** the `merge_button` macro takes an
+  `is_keeper` flag — the suggested-keep direction is a filled brand chip, the drop
+  direction a neutral outline (name truncation widened to 40 chars so similar-prefixed
+  names never render as twin buttons). Both merge endpoints now re-render the whole
+  Data Ops partial via `_render_data_ops` into `#settings-content` (so pairs referencing
+  the just-merged entity drop without a manual refresh) and surface the kept-name /
+  failure message via a `settings_toast` `HX-Trigger` rather than swapping a `<p>` into
+  the row. Both vendor and company rows carry the Alpine `x-data="{ merged: false }"`
+  guard for consistent post-merge behavior.
 - **Per-account banner:** `GET .../{company_id}/dup-suggestion` (`company_dup_suggestion`,
   declared ABOVE the catch-all) → lazy `hx-trigger=load` panel in `detail.html` →
   `_dup_suggestion.html`. Shows the top dedup match INVOLVING this company + a "Review &
@@ -1506,6 +1991,72 @@ merges different-`account_owner_id` accounts) are reused AS-IS.
   clean. **create_company no longer silently stores the AI-typo-corrected name** — it
   keeps the rep's typed name (the AI fix still strengthens the duplicate check), making
   naming suggest-only end-to-end.
+
+### 10a. Global contact lists + vendor CSV import UI
+
+Two cross-entity contact workspaces sit alongside the CDM account workspace, plus a
+UI for the previously-headless vendor CSV import. All three are thin routes in
+`htmx_views.py`; the scoping logic lives in `crm_service.py`.
+
+- **`GET /v2/contacts`** (`customer_contacts_partial` → `customers/contacts_list.html`)
+  — cross-company customer-contacts workspace. **Cross-tenant PII**: the role-scope is
+  the SAME predicate as the CDM `my_only` branch, factored into the shared
+  `crm_service.company_visibility_predicate(user)` (account-owner OR site-owner OR
+  named collaborator). SALES/TRADER reps see ONLY contacts in accounts they can manage;
+  MANAGER/ADMIN see all (the predicate is skipped for `is_manager_or_admin`).
+  `customer_contacts_query` joins `SiteContact → CustomerSite → Company` (all
+  `is_active`), filters search (name OR email) / company / role; `cadence_state` is a
+  DERIVED dot (not a column) so it is computed via `cadence_state_of` and filtered in
+  Python by `customer_contacts_list_ctx`. The company-filter dropdown is built from the
+  same visibility scope. `require_user`. Reached via the "All contacts" link in
+  `customers/list.html`.
+- **`GET /v2/vendor-contacts`** (`vendor_contacts_partial` → `vendors/contacts_list.html`)
+  — global vendor-contacts list, the HTML twin of `GET /api/vendor-contacts/bulk`
+  (`vendor_contacts.py`). View-open (`require_user`; vendor data is not tenant-scoped);
+  blacklisted vendors excluded, mirroring the bulk route. Search (contact name/email or
+  vendor name) + sort (name/vendor/email/relationship score) + pagination. Reached via
+  the "Contacts" link in `vendors/list.html`.
+- **Vendor CSV import UI** — `vendors/list.html` now carries an "Import Vendors" button
+  + Alpine modal that POSTs `multipart/form-data` to the existing
+  `POST /v2/partials/admin/import/vendors` (`import_vendors_csv`, `require_admin`). CSV
+  header `name,email,phone,website`; existing vendors (matched by normalized name) are
+  skipped; the result HTML swaps into `#vendor-import-result`. The button renders for
+  all users; the endpoint enforces admin.
+
+Both `/v2/contacts` and `/v2/vendor-contacts` are full-page entry points wired into
+`v2_page` (segments precede `customers`/`vendors` — `/contacts` is a substring of
+`/vendor-contacts`) and borrow the CRM nav highlight via `_NAV_ID_ALIAS` +
+`mobile_nav.html`'s `urlToNav` map.
+
+---
+
+## 10a. CRM Audit Trail (created_by / modified_by)
+
+Migration 147 adds `created_by_id` + `modified_by_id` (FK → `users.id`, `ondelete=SET NULL`,
+nullable) to `companies`, `customer_sites`, and `site_contacts`.
+
+Mechanism — three-layer:
+
+1. **`app/request_context.py`** — `current_user_id_var: ContextVar[int | None]` (default
+   `None`). Single module, no circular deps. Background jobs and imports never set it.
+
+2. **`app/main.py` `audit_user_middleware`** (L3 HTTP middleware) — on every request,
+   reads `user_id` from the Starlette session scope and calls
+   `current_user_id_var.set(uid)`.  Resets the token in a `finally` block so cross-request
+   leak is impossible even under async cancellation.
+
+3. **`app/audit_listeners.py` `register_audit_listeners()`** — registers
+   `before_insert` / `before_update` SQLAlchemy event listeners on `Company`,
+   `CustomerSite`, `SiteContact`.  On insert: sets `created_by_id` and `modified_by_id`
+   if the contextvar is non-None and the column is not already explicitly set.  On update:
+   sets only `modified_by_id`.  Called once at module load from `app/main.py`.
+
+Invariants:
+- Authenticated request writes → both columns populated.
+- Background job / APScheduler / import writes → both columns NULL.
+- No cross-request contamination — `ContextVar.reset()` in `finally`.
+- Company detail template (`htmx/partials/customers/detail.html`) renders
+  "Created by {name} · Updated by {name}" inside the collapsible account-settings panel.
 
 ---
 
@@ -1552,8 +2103,19 @@ Mark-seen (per row, background, no spinner):
   `InboundCustomerSource` (CRM — new inbound comms on a Customer account the user owns).
 - **ACTION** — clears on *act*. The count derives PURELY from work-state
   (`BuyplanActionSource`: the user's open buy-plan steps — buyer PO line / manager
-  approval / ops SO-verify). `alert_seen` does NOT change the count — it only gates
-  the cosmetic one-time pulse; the row keeps its rail until the underlying work is done.
+  approval / ops SO-verify; `TasksActionSource`: open tasks assigned to me, registered
+  under the `my-day` tab — wires `task_service.get_my_tasks_summary`). `alert_seen` does
+  NOT change the count — it only gates the cosmetic one-time pulse; the row keeps its rail
+  until the underlying work is done.
+
+**Tasks queue + core-basic gaps (Phase 3).** `GET /v2/partials/tasks` (gated
+`require_access(AccessKey.MY_DAY)`) is a filterable queue of tasks assigned to me
+(`status`/`priority`/`due`; reuses `get_my_tasks`, filters priority/due in-route) rendered
+under the My-Day nav key; its filter bar carries an EXPLICIT `hx-target="#tasks-results"`
+(never inherits `#main-content`). The My-Day nav badge is the `TasksActionSource` above.
+Bulk "Assign owner" on the account list now uses a name+role `<select>` (`cdm_list_ctx(include_users=…)`,
+manager/admin only) instead of a raw User-ID box. All clickable `<tr hx-get>` list rows
+are keyboard-accessible (`role=button` + `tabindex=0` + `keyup[Enter]` + `focus:ring-2`).
 
 `recency_floor()` keeps FYI badges from lighting up for the pre-launch backlog:
 an item only counts if newer than `max(now - alert_recency_days, ALERTS_EPOCH)`.
@@ -1570,8 +2132,197 @@ OUTBOUND email is not captured — that would need a Sent-folder scan.)
 
 ## Enrichment Pipeline
 
+### CRM / Vendor Firmographic + Contact Enrichment
+
+`enrich_entity` and `find_suggested_contacts` in `app/enrichment_service.py` delegate
+to two new modules:
+
+- **`app/services/enrichment_router.py`** — cost-tiered, gap-gated provider
+  orchestration. For company firmographics, providers run in ascending cost order; each
+  metered provider is only called when at least one of the eight `_GAP_FIELDS`
+  (`legal_name`, `industry`, `employee_size`, `hq_city`, `hq_state`, `hq_country`,
+  `website`, `linkedin_url`) is still missing, the provider's feature gate is enabled,
+  and its circuit breaker is closed. Provider order:
+
+  | Tier | Provider | Cost | Notes |
+  |------|----------|------|-------|
+  | Free | SAM.gov | zero | `sam_gov_enrichment_enabled`; legal name + NAICS + HQ |
+  | Metered | Clay | per-credit | MCP-only; gap-gated; `clay_enrichment_enabled` |
+  | Metered | Explorium | per-call | gap-gated; `explorium_enrichment_enabled` |
+  | Metered | Lusha | per-call | gap-gated; `lusha_enrichment_enabled` |
+  | Last resort | AI | Claude API | only when gaps remain after all above |
+
+  For contacts: Phase 1 runs Hunter + Clay concurrently (cheap/free); Phase 2
+  escalates sequentially to Lusha → Explorium only when the verified-contact count is
+  below the requested limit.
+
+- **`app/services/firmo_tiers.py`** — per-field source-authority ladder (ported from
+  the materials F1 `spec_tiers` pattern). `blend_company` and `blend_contacts` iterate
+  the raw provider results and keep, for each field, the value from the highest-tier
+  source (tie broken by confidence). Unknown source → tier 0 (loses every conflict).
+  The blended result carries a `_provenance` dict `{field: {source, tier, confidence}}`
+  used by the apply functions.
+
+**Firmographic authority ladder (key fields):**
+
+| Field | Highest tier | Runner-up |
+|-------|-------------|-----------|
+| `legal_name` | SAM.gov (95) | Explorium (85) |
+| `naics` | SAM.gov (95) | Explorium (85) |
+| `ticker` | Explorium (90) | Clay (75) |
+| `revenue_range` | Explorium (90) | Clay (75) |
+| `employee_size` | Explorium (85) | Lusha (70) |
+| `linkedin_url` | Explorium (85) | Lusha (80) |
+| `hq_city/state/country` | Explorium (85) | SAM.gov (80) |
+
+**Contact authority ladder (key fields):**
+
+| Field | Highest tier | Runner-up |
+|-------|-------------|-----------|
+| `email` | Lusha (95) | Hunter (85) |
+| `phone` | Lusha (95) | Explorium (65) |
+| `title` | Explorium (80) | Lusha (70) |
+
+**Provenance-aware apply.** `apply_enrichment_to_company` / `apply_enrichment_to_vendor`
+in `enrichment_service.py` call the shared `_apply_enrichment` function, which writes
+with three rules:
+
+1. Empty field → always write.
+2. Existing value with no stored provenance (manual / legacy) → protect; never clobber.
+3. Existing value with stored provenance → overwrite only when incoming (tier, confidence)
+   strictly beats the stored pair.
+
+Provenance is persisted in the new `enrichment_provenance` JSONB column on both
+`companies` and `vendor_cards` (migration 125).
+
+**Enrich button → result panel (content negotiation).** `POST /api/enrich/company/{id}`
+and `/api/enrich/vendor/{id}` (`app/routers/crm/enrichment.py`) content-negotiate on the
+`HX-Request` header: HTMX callers (the shared `partials/shared/enrich_button.html`) get a
+rendered `partials/shared/_enrich_result.html` panel — firmographics found, each field badged
+**Updated** (in `updated_fields`) vs **Current**, source badge + "enriched X ago", and (for
+companies) contacts discovered via `find_suggested_contacts_with_errors` with per-row Add
+buttons; programmatic callers still get JSON `{ok, updated_fields, enrichment}`. The contact
+rows reuse the shared `partials/shared/_contact_row.html` macro (also used by the Contacts-tab
+`_suggested_contacts.html`); their Add posts to the existing
+`POST /v2/partials/customers/{id}/suggested-contacts/add` with a hidden `from_enrich=1` flag,
+which makes that endpoint return a self-contained "✓ Added" `<li>` (`hx-swap=outerHTML`,
+`hx-target="closest li"`) instead of re-rendering the Contacts-tab list. The dead
+`enrich_customer_account` stub (returns `no_providers`) is no longer called from the enrich
+endpoint — it stays wired to `companies.py` bulk-create + the `customer_enrichment_batch`
+scheduler. Contact discovery degrades gracefully: a provider failure renders an amber
+"couldn't reach" banner, never a 500.
+
+**Connectors:**
+
+- `app/connectors/explorium.py` — 2-call pipeline: `/businesses/match` → business_id,
+  then `/businesses/firmographics/enrich`; contacts via `/prospects` +
+  `/prospects/contacts_information/enrich`. Auth: `api_key:` header (NOT
+  `Authorization: Bearer`). 402/403/429 → `ProviderQuotaError`.
+- `app/connectors/clay_mcp.py` — backend MCP client (JSON-RPC 2.0 over HTTPS to
+  `https://api.clay.com/v3/mcp`). Clay speaks **MCP Streamable HTTP**: every
+  `tools/call` requires a session, so the connector first runs the handshake
+  (`initialize` → read the `Mcp-Session-Id` response header → `notifications/initialized`)
+  and **caches that session per access token** (reused across calls; a bare sessionless
+  call returns `400 "Missing Mcp-Session-Id header"`). `tools/call` responses are
+  **server-sent events** (`content-type: text/event-stream`), parsed from the `data:`
+  line — not plain JSON. Authenticates with an OAuth access token
+  (`Authorization: Bearer <token>`); on 401 it refreshes the token + re-initializes the
+  session then retries once; on 400/404 (expired session) it re-initializes + retries
+  once. Not connected → returns `None`/`[]` (fail-soft; blend continues without Clay).
+  Company: `find-and-enrich-company` (sync; `result.structuredContent.companies[domain]`).
+  Contacts: `find-and-enrich-contacts-at-company` (`.contacts[]`); emails polled via
+  `get-task-context` (bounded: 5 polls × 3 s). 402/429 → `ProviderQuotaError`. Protocol
+  verified live 2026-06-23. Health: `_ClayTestConnector` (in `routers/sources.py`,
+  registered for `clay_enrichment`) probes `get-credits-available` so
+  `health_monitor.ping_source` reports Clay's true state (live/error) instead of leaving
+  it `disabled` — without it, `startup.py`'s `is_active=false WHERE status='disabled'`
+  reconciliation keeps flipping the connector card off. **The old Clay WEBHOOK path
+  (`clay_service.py` + `POST /api/webhooks/clay`) has been removed; Clay is now MCP-only.**
+
+  **Clay OAuth Connect flow.** `api.clay.com/v3/mcp` is OAuth-gated
+  (authorization_code + PKCE S256, scope=`mcp`; no client_credentials grant).
+
+  - `app/services/clay_oauth.py` — token lifecycle: dynamic client registration
+    (DCR, reuses an existing `CLIENT_ID` when already registered), PKCE S256 code
+    challenge, code exchange, `get_access_token()` (auto-refresh with 5-min buffer,
+    rotation-aware), `refresh()` (sets `NEEDS_RECONNECT` marker on failure),
+    `is_connected()`, `disconnect()`. Tokens stored **encrypted** in
+    `ApiSource('clay_enrichment').credentials` JSONB:
+    `CLAY_OAUTH_ACCESS_TOKEN` / `REFRESH_TOKEN` / `EXPIRES_AT` / `CLIENT_ID` /
+    `NEEDS_RECONNECT`. No DB migration — reuses the existing `ApiSource.credentials`
+    column.
+
+  - `app/routers/clay_oauth.py` — admin-only routes, mounted in `app/main.py`:
+    - `GET /auth/clay/connect` — DCR-or-reuse → generate PKCE verifier + `state`
+      (stored in `intel_cache`) → redirect to `app.clay.com/oauth/authorize`.
+    - `GET /auth/clay/callback` — validate single-use `state` → exchange code →
+      store encrypted tokens → redirect to Settings.
+    - `POST /auth/clay/disconnect` — clears stored credentials.
+
+  - **Settings → Connectors** — the Clay card renders as `control_type=oauth_clay`:
+    a **Connect / Reconnect / Disconnect** card (no API-key input field). The
+    `NEEDS_RECONNECT` marker surfaces a "Reconnect" prompt when the refresh token has
+    expired; `connector_state` returns `needs_reconnect` in that case. Clay OAuth
+    callbacks redirect to `/v2/partials/settings/connectors`.
+
+  Mirrors the Azure AD OAuth pattern in `app/routers/auth.py`.
+- `app/connectors/sam_gov_company.py` — name→firmographics adapter wrapping the public
+  SAM.gov entity-information API (`api.sam.gov/entity-information/v3/entities`).
+
+**Config flags** (all boolean, default `False` unless noted; set in `.env`):
+`hunter_enrichment_enabled`, `sam_gov_enrichment_enabled`,
+`clay_enrichment_enabled`, `explorium_enrichment_enabled`, `lusha_enrichment_enabled`.
+Each metered provider also has a `*_cooldown_minutes` knob used by the circuit breaker.
+Hunter, Clay, Explorium, and Lusha raise `ProviderQuotaError` on 402/429 (circuit-guarded).
+
 ```
-Trigger: user click OR background job OR bulk import
+Trigger: user click ("Enrich" on CRM account / vendor) OR background prospect scan
+    |
+    v
+enrichment_service.enrich_entity(domain, name)
+    |
+    +---> enrichment_router.gather_company(domain, name)
+    |       +---> sam_gov_company.enrich_company()       [free, always]
+    |       +---> clay_mcp.enrich_company()              [metered, gap-gated]
+    |       +---> explorium.enrich_company()             [metered, gap-gated]
+    |       +---> lusha.enrich_company()                 [metered, gap-gated]
+    |       +---> ai fallback                            [last resort]
+    |
+    +---> firmo_tiers.blend_company(results)   → blended dict + _provenance
+    |
+    +---> normalize_company_output()
+    |
+    +---> IntelCache (14-day TTL, keyed by domain)
+    |
+    v
+apply_enrichment_to_company(company, blended)  OR
+apply_enrichment_to_vendor(card, blended)
+    |
+    +---> _apply_enrichment: tier-arbitrated field writes
+    +---> companies/vendor_cards.enrichment_provenance = updated provenance store
+    +---> companies/vendor_cards.enrichment_source = blended source string
+```
+
+```
+Trigger: "Find Contacts" on CRM account
+    |
+    v
+enrichment_service.find_suggested_contacts(domain, name, title_filter, limit)
+    |
+    +---> enrichment_router.gather_contacts()
+    |       Phase 1 (concurrent): Hunter + clay_mcp.find_contacts()
+    |       Phase 2 (escalation): Lusha → Explorium (only if verified < limit)
+    |
+    +---> firmo_tiers.blend_contacts(raw)   → deduped by email→linkedin→name,
+    |                                          per-field highest contact_tier wins
+    +---> relevance filter (_RELEVANT_KEYWORDS title check)
+    +---> returns list[dict], capped at limit
+```
+
+### Prospect Enrichment (legacy path)
+
+```
+Trigger: prospect scan OR background job
     |
     v
 enrichment_service.py (orchestrator)
@@ -1579,13 +2330,6 @@ enrichment_service.py (orchestrator)
     +---> Phase 1a: Free enrichment
     |       +---> prospect_free_enrichment.py (web search)
     |       +---> signature_parser.py (from email_signature_extracts)
-    |
-    +---> Phase 1b: API enrichment (ordered: Explorium → Lusha → Apollo → AI; gap-gated)
-    |       +---> prospect_discovery_explorium.py --> Explorium API
-    |       +---> lusha.py --> Lusha API v2 (contacts + firmographics; gated by
-    |       |       lusha_enrichment_enabled + LUSHA_API_KEY; 402/429 → credit-guard
-    |       |       circuit cooldown via enrichment_credit_guard.py)
-    |       +---> apollo.py --> Apollo.io API (gap-gated: skipped if Lusha filled all gaps)
     |
     +---> Phase 2: AI analysis
     |       +---> ai_service.py --> Claude API (company intel, ICP fit)
@@ -3126,6 +3870,37 @@ APScheduler (scheduler.py)
             +---> Ping each connector -> update api_sources
 ```
 
+**Feature-flag resolution at job registration.** `register_all_jobs()` opens one
+short-lived `SessionLocal()` (closed in `finally`) and passes it to the three
+flag-reading registrars — `register_core_jobs`, `register_email_jobs`,
+`register_offers_jobs` — which resolve `inbox_scan_interval_min`,
+`activity_tracking_enabled`, and `proactive_matching_enabled` via
+`admin_service.get_effective_flag/get_effective_int(db, key, settings.<flag>)`. So the
+System-tab toggles are read at scheduler-config time (after
+`run_startup_migrations()` has seeded + reconciled the rows); a deliberate admin flip
+takes effect at the next scheduler reconfigure/restart. The interval/flag is also
+re-resolved per run inside `_job_inbox_scan` (uses its own session). The resolver
+degrades to the env default when the session is absent (`db=None`) or the DB read
+fails, so registration never crashes.
+
+**System settings tab (curated typed UI).** `settings_system_tab`
+(`/v2/partials/settings/system`, admin-only) renders curated typed controls instead of
+a raw key/value table. The catalog `SYSTEM_SETTINGS_META` (owned in
+`app/routers/admin/system.py`) maps each of the four user-facing keys to
+`{type: bool|int, label, help, restart, min}`: three toggle switches
+(`email_mining_enabled`, `proactive_matching_enabled`, `activity_tracking_enabled`) and
+one number input (`inbox_scan_interval_min`, min 5). Each control's displayed value is
+the effective resolver value (`get_effective_flag/get_effective_int` with the env
+default). Controls `PUT /api/admin/config/{key}` (hx-swap="none"); `api_set_config`
+validates curated keys via `_validate_typed_value` — booleans accept only true/false,
+the interval rejects `< 5` with a 400 `{"error": "Inbox scan interval must be at least 5
+minutes."}` (the global handler toasts it) — and on success returns an HX-Trigger
+`showToast`. The three scheduler-read settings carry an inline "Applies after the next
+restart." note (`email_mining_enabled` resolves per-request, so it has none). Internal
+watermark keys (`teams_calls_last_poll`, `8x8_last_poll`, `proactive_last_scan`,
+`SYSTEM_JOB_STATE_KEYS`) are never editable — surfaced read-only in a collapsed
+"Job state (read-only)" disclosure.
+
 ---
 
 ## Frontend <-> Backend Pattern
@@ -3134,8 +3909,10 @@ APScheduler (scheduler.py)
 BROWSER (HTMX + Alpine.js)
 
   0. Bottom navigation (mobile_nav.html):
-     Reqs | Sightings | Materials | Search | ...
+     Reqs | Sightings | Materials | Search | Buy Plans | Resell | CRM | ...
      "Materials" tab links to /v2/materials, loads /v2/partials/materials/workspace
+     "Resell" tab links to /v2/resell, loads /v2/partials/resell/workspace
+     (resell/excess split-panel — see § Resell workspace).
      Quotes has NO top-level nav tab — surfaced via the Reqs and CRM account
      tab strips (see § 5 Quote Building).
 
@@ -3378,22 +4155,22 @@ the current implementation.
 | Auth | 7 | OAuth login/callback/logout, status |
 | Requisitions | 47 | CRUD, search, bulk archive/assign, claim; requisitions2 split-panel detail with lazy-loaded Offers/Activity tabs (`GET /requisitions2/{id}/offers` + `/activity`, reusing the shared activity timeline) |
 | Requirements | 23 | Add parts, CSV upload, search, leads, tasks |
-| Vendors | 35 | CRUD, contacts, stock history, reviews, tags |
-| Companies/CRM | 42 | CRUD, sites, contacts, enrichment, import; CDM workspace (`/v2/partials/customers`, `/v2/partials/customers/account-list`); outreach logging (`POST /api/activity/outreach-initiated`) |
+| Vendors | 57 | CRUD, contacts, stock history, reviews, tags; new create: `POST /api/vendors` (201, 409 dup), `GET /v2/partials/vendors/create-form`, `POST /v2/partials/vendors/create`; delete UI: `DELETE /v2/partials/vendors/{id}` (admin, 400 if active offers) — both returning vendor detail/list HTML; CRM parity: activity tab, add-note, tasks tab + CRUD, attachments; **migration 145 (P1)**: HTMX vendor contact CRUD (`POST /v2/partials/vendors/{id}/contacts` require_user, `PUT .../contacts/{cid}` require_user, `DELETE .../contacts/{cid}` require_admin, `POST .../contacts/{cid}/set-primary` require_user — clears all others atomically); ownership badge (`GET/POST .../claim` require_user, `POST .../release` require_user — wraps `strategic_vendor_service.claim_vendor`/`drop_vendor`); custom fields (`POST/DELETE /v2/partials/vendors/{id}/custom-fields[/{label}]` require_user, mirrors company custom-fields); is_primary column on vendor_contacts; custom_fields JSONB on vendor_cards |
+| Companies/CRM | 47 | CRUD, sites, contacts, enrichment, import; CDM workspace (`/v2/partials/customers`, `/v2/partials/customers/account-list`); outreach logging (`POST /api/activity/outreach-initiated`); CRM task CRUD: `DELETE /v2/partials/tasks/{id}` (delete), `GET /v2/partials/tasks/{id}/edit-form` + `POST /v2/partials/tasks/{id}/edit` (edit); account add-note: `GET /v2/partials/customers/{id}/activity/add-note-form` + `POST /v2/partials/customers/{id}/activity/add-note` (cadence-neutral, direction=None → no last_outbound_at bump); all three gates reuse `_is_crm_task_authorized` (task) or `can_manage_account` (note); contact merge (dedup): `GET /v2/partials/customers/{cid}/contacts/{ctid}/merge-form` + preview + `POST .../merge` (can_manage_account on source company, merge_contacts service); contact move: `GET .../move-form` + `POST .../move` (can_manage_account on BOTH source+target companies, target site must be active); **migration 144**: contact secondary fields (secondary_email, secondary_phone in EDITABLE_CONTACT_FIELDS), reports_to_id self-FK in create+edit; contact tag routes: `POST /v2/partials/customers/{cid}/contacts/{ctid}/tags` (assign segment tag by tag_id or tag_name), `DELETE /v2/partials/customers/{cid}/contacts/{ctid}/tags/{tag_id}` (unassign), `GET /v2/partials/customers/{cid}/contacts/for-select` (JSON list for reports_to picker, exclude_id param); EntityTag entity_type='site_contact' now valid; **bulk actions**: `POST /v2/partials/customers/bulk/{action}` (deactivate, send-to-prospecting, assign-owner) — auth-scoped: deactivate+send-to-prospecting gate per-company via `can_manage_account` (skips non-manageable; summary), assign-owner is MANAGER/ADMIN ONLY (403 for reps); **CSV import**: `POST /v2/partials/customers/import/preview` (parse+flag dupes/invalid, no writes) + `POST /v2/partials/customers/import/confirm` (create Companies, dedup by normalized_name, sets importer as account_owner_id); **contact CSV import**: `POST /v2/partials/customers/import/contacts/preview` (parse+flag duplicate emails) |
 | Offers | 30 | CRUD, line items, accept/reject, changelog |
 | Quotes | 25 | CRUD, send, PDF, e-signature, pricing history; bare `/v2/quotes` 307→`/v2/requisitions`; list partial removed; detail `/v2/quotes/{id}` unchanged; surfaced via Reqs workspace + CRM account Quotes tabs |
 | Buy Plans | 10 | submit/approve, SO+PO verify, confirm-PO, flag-issue, cancel (service + line cascade), reset; ops-group admin tab |
 | Materials | 20 | CRUD, substitutes, stock levels, price history |
 | Sightings | 27 | CRUD, RFQ send, batch RFQ, inquiry (cross-requisition composer: vendor-affinity GET + composer-vendor POST), vendor+part unavailability (mark/clear/reason modal) |
-| Excess | 30 | Lists, line items, bids, solicitations, import |
+| Resell | 20 | Resell-brokerage workspace (`routers/resell.py`): lists, line items, import, inbound offers (per_line/take_all + unmatched queue), best-price rollup, build/close bid-back + PDF. Replaced the removed old-excess router (bids/solicitations gone) |
 | AI | 18 | Parse email, normalize, find contacts, draft RFQ |
 | Proactive | 12 | Matches, refresh, dismiss, send, scorecard |
 | Prospects | 9 | HTMX tab only (JSON `/api/prospects/*` removed, consolidated): list, stats, add-domain, detail, claim, dismiss, release, enrich (background — spawns run_enrichment_job; pulls real contacts + firmographics via Lusha chain: enrich_entity + find_suggested_contacts, fill-only onto prospect columns; recomputes both fit_score and readiness_score; 24h gate prevents repeat paid pulls), enrich-status (poll; HTTP 286 stops) |
-| Sources | 35 | Connector config, test, stocklist, webhooks |
+| Sources | 35 | Connector config, test, stocklist, webhooks; Settings Connectors tab (`GET /v2/partials/settings/connectors`, card partial, test-all); legacy `/sources` + `/api-keys` 302 → connectors |
 | Tags | 4 | List, entity tags |
 | Activity | 14 | Log calls, timeline, dashboards |
 | Admin | 15 | Users, config, diagnostics, maintenance |
-| Tickets | 12 | Error reports, trouble tickets, AI analysis |
+| Tickets | 12 | Error reports, trouble tickets, AI analysis; **admin-gated triage vs. open submission**: the maintainer triage console (`GET /v2/partials/trouble-tickets/workspace`, `.../list`, `.../{id}` and screenshot `GET /api/trouble-tickets/{id}/screenshot`) is `require_admin` (also hidden behind `{% if is_admin %}` Tickets tab in settings/index.html — non-admins can't see or reach it, closing the cross-user report leak), while the floating "Report a Problem" submission flow stays open to any login: `GET /api/trouble-tickets/form`, `POST /api/trouble-tickets/submit`, `POST /api/trouble-tickets` + `POST /api/error-reports` remain `require_user`. **In-shell triage wiring**: the Tickets console lives inside the Settings shell — `_build_ticket_list_context(db, status)` (in htmx_views) is the single list query+grouping helper shared by `GET .../list` and `POST /api/trouble-tickets/analyze` (analyze renders+returns the freshly-grouped `list.html` so the `innerHTML` swap into `#ticket-list` shows results — no more empty body + dead `HX-Trigger: ticketsUpdated`). The logical `status="open"` filter expands to `(submitted, in_progress)` so in-progress tickets stay under the workspace's "Open" pill. Drill-in rows/detail target `#settings-content` (no `#main-content`, no `hx-push-url`); the legacy full-page `GET /v2/trouble-tickets` route redirects 303 → `/v2/settings?tab=tickets` (registered before the generic `v2_page` catch-all; `v2_page` threads `?tab=` through for settings and `settings/index.html` maps the active tab to its first-paint content URL so `tab=tickets` lazy-loads the workspace, not a non-existent `/settings/tickets`). The detail status `<select>` gates its "Status updated" toast on `r.ok` (+`.catch`) so a failed PATCH shows an error toast |
 | Documents | 2 | Requisition PDF, quote PDF |
 | Quote Builder | 5 | Draft, save, send, signature |
 | Events | 1 | SSE stream |
@@ -3407,7 +4184,7 @@ the current implementation.
 | Category | Count | Key Modules |
 |----------|-------|-------------|
 | AI & NLP | 9 | ai_service, ai_email_parser, ai_offer_service, tagging_ai |
-| Search & Prospecting | 30+ | search_worker_base/, ics_worker/, nc_worker/, sourcing_leads |
+| Search & Prospecting | 30+ | search_worker_base/, ics_worker/, nc_worker/, tbf_worker/, sourcing_leads |
 | Email & Communication | 10 | email_threads, contact_intelligence, signature_parser |
 | Scoring & Matching | 10+ | unified_score, avail_score, multiplier_score, proactive_matching |
 | CRM & Data | 20+ | company_merge, vendor_merge, auto_dedup, enrichment |
@@ -3433,25 +4210,25 @@ deploy.sh
     |       +---> Scan templates for Tailwind color classes
     |       +---> Grep CSS bundle for each class
     |       +---> Warn on any MISSING classes (safelist gap)
-    +---> Step 6b: Host worker venv refresh + restart (nc/ics)
+    +---> Step 6b: Host worker venv refresh + restart (nc/ics/tbf)
     |       +---> pip install -r requirements.txt into /root/availai/.venv
-    |       +---> systemctl restart avail-nc-worker avail-ics-worker
+    |       +---> systemctl restart avail-nc-worker avail-ics-worker avail-tbf-worker
     |       +---> WARN (re-surfaced after logs) if venv/restart fails
     +---> Step 7: Tail logs for errors
 ```
 
 **Host worker dependencies (pinned-lockfile venv).** The `avail-nc-worker`
-/ `avail-ics-worker` systemd units run on the HOST (outside docker, from
+/ `avail-ics-worker` / `avail-tbf-worker` systemd units run on the HOST (outside docker, from
 `/root/availai`, `User=root`) and execute
-`/root/availai/.venv/bin/python -m app.services.{nc,ics}_worker.worker`.
+`/root/availai/.venv/bin/python -m app.services.{nc,ics,tbf}_worker.worker`.
 That venv is built from the SAME pinned `requirements.txt` as the docker
 app/enrichment images (not ad-hoc `pip install patchright beautifulsoup4`),
 so the host workers carry identical pinned deps — notably `patchright`,
 which they use to drive **system Google Chrome** via `channel="chrome"`
 (the bundled Chromium is unused). `deploy.sh` Step 6b refreshes the venv
-from the lockfile and restarts both units on every deploy;
-`scripts/setup_nc_worker.sh` bootstraps the venv on a fresh host. The
-unit files live in `deploy/avail-{nc,ics}-worker.service`.
+from the lockfile and restarts all three units on every deploy;
+`scripts/setup_nc_worker.sh` / `scripts/setup_tbf_worker.sh` bootstrap the venv on a fresh host. The
+unit files live in `deploy/avail-{nc,ics,tbf}-worker.service`.
 
 ---
 
@@ -3542,21 +4319,40 @@ headers and toasts via `$store.toast`: full success, partial (warning, distingui
 "N failed" from "N had no email"), or total failure (error — modal stays open to retry);
 it never infers success from the HTTP status alone.
 
-### solicitModal  (htmx_app.js, Alpine.data)
+### attachmentsPanel  (htmx_app.js, Alpine.data)
 
-Backs `excess/solicit_modal.html` — the "Solicit Bids" email composer opened from an
-excess list. Only the email **subject** (derived from the list title) is dynamic, so the
-factory takes that one argument: `x-data='solicitModal({{ (("Bid Request: " ~ list.title)
-if list else "Bid Request")|tojson }})'`. It lives in JS (not inline) for the same reason
-as `rfqVendorModal`: the title may contain `'`/`"`, and the old inline **double-quoted**
-`x-data` interpolated it with `|e` — which HTML-escapes but emits an invalid JS string
-literal, so an apostrophe/quote title broke `Alpine.init()` and left the whole modal inert
-(spinner/"AI Clean Up" never un-cloaked, submit dead). The **single-quoted** `x-data` +
-`|tojson` is immune. State: `recipientEmail`, `recipientName`, `subject`, `bundled`
-(one bundled email vs one per item), `message`, `polishing`. Method: `polishEmail()` →
-`POST /api/excess-lists/polish-email` ({text} in, {text} out) replaces the body with an
-AI-cleaned version. The form itself posts via HTMX to
-`/v2/partials/excess/{list_id}/solicit` and closes the modal on success.
+Backs the one shared file-attachments component
+(`templates/htmx/partials/shared/_attachments.html`, macro
+`attachments_panel(kind, entity_id)`) used identically on **eight** surfaces:
+Company "Files" tab, MaterialCard "Files" tab, the contact-card kebab "Files" modal,
+the requisition Parts-tab per-requirement Files drawer, the offer card, the vendor card
+"Files" tab, and vendor contact. The macro maps
+`kind ∈ {requisition,requirement,offer,company,contact,material,vendor_card,vendor_contact}`
+→ the per-kind list/upload/delete URL family internally; download/open is always
+`GET /api/attachments/{kind}/{att_id}/content`.
+
+Flow (HTMX-native, no JSON-then-client-render):
+- The list container lazy-loads via `hx-get` the per-kind list URL on `load` and
+  re-fetches on the internal `attachments:refresh` trigger (explicit `hx-target="this"`).
+- The **eight list endpoints** branch on `HX-Request`: present → render
+  `shared/_attachment_list.html` (HTML rows); absent → the legacy JSON array
+  (back-compat — existing tests assert the array). The branch is centralized in
+  `attachment_service.attachment_list_response(request, kind, entity_id, rows)`, which
+  also owns the kind→delete-base map.
+- Upload form (`hx-post` the list URL, `hx-encoding="multipart/form-data"`, `name="file"`,
+  `hx-swap="none"`) and each delete button (`hx-delete`) dispatch a bubbling
+  `attachments:changed` DOM event on success; the panel root catches it and fires
+  `attachments:refresh` on the list (distinct names avoid a re-fetch→re-fire loop).
+- The Alpine factory owns only interaction state: `dragging` (dropzone hover), `busy`
+  (upload spinner, toggled off the form's `htmx:beforeRequest`/`htmx:afterRequest`), and
+  `onDrop()` (assigns dropped files to the picker input → `requestSubmit()`).
+- Upload failures surface the server `{"error": …}` via the global `htmx:responseError`
+  toast handler — no per-panel error wiring.
+
+The Parts-tab drawer is a **sibling `<tr>`** (tables can't nest rows) synced to the row's
+paperclip toggle via a per-requirement `files-toggle-{id}` window event, so the drawer
+spans the full table width without breaking the column grid. The offer card and contact
+modal wrap the panel in `<template x-if>` so it only mounts (and lazy-loads) when expanded.
 
 ---
 
@@ -3618,8 +4414,8 @@ Three inflows that feed idle CRM accounts into the prospecting pool.
 - Delegates to: `app/services/prospect_reclamation.py::job_account_sweep_with_db(db)`
 - Query: Company WHERE account_owner_id IS NOT NULL AND last ActivityLog.created_at > 90 days ago (or no activity)
 - Idempotency: skips if ProspectAccount.swept_at IS NOT NULL already
-- On match: calls `send_company_to_prospecting()` (clears ownership), sets `swept_from_owner_id`/`swept_at`/`discovery_source="auto_sweep"` on ProspectAccount
-- Notification: `_send_sweep_notification()` → Graph `/me/sendMail` TO rep CC manager (falls back to admin_emails[0])
+- On match: calls `send_company_to_prospecting()` (clears ownership), sets `swept_from_owner_id`/`swept_at`/`reclaim_blocked_until = swept_at + 30d`/`discovery_source="auto_sweep"` on ProspectAccount
+- Notification: `_send_sweep_notification()` → Graph `/me/sendMail`, ONE message per recipient (each in its own try/except so one bad address can't break the sweep). Recipients = rep + every ACTIVE user with role MANAGER/ADMIN + `settings.account_sweep_manager_email`, deduped case-insensitively by `_sweep_notification_recipients()`
 - Token: `get_valid_token(owner, db)` from `app.utils.token_manager`; skips email on missing token (no failure)
 
 ### Daily unassigned past-customer surface (2AM UTC)
@@ -3637,7 +4433,185 @@ Three inflows that feed idle CRM accounts into the prospecting pool.
 
 ### Reclaim: reclaim_prospect_account()
 - Service: `app/services/prospect_reclamation.py::reclaim_prospect_account(prospect_id, user_id, db, *, is_admin)`
-- Permission: swept_from_owner_id == user_id OR is_admin OR user.email == account_sweep_manager_email
+- Permission: swept_from_owner_id == user_id OR is_admin OR `is_manager_or_admin(user)` OR user.email == account_sweep_manager_email
+- Phase 4 cooldown: a former owner is DENIED with "This account is in a 30-day cooldown; ask a manager to reassign it." while `reclaim_blocked_until` is in the future; managers/admins (the supervisor set above) bypass it
 - Actions: dismisses ProspectAccount, re-assigns Company.account_owner_id, logs ActivityLog(activity_type="reclaim")
 - HTMX endpoint: `POST /v2/partials/prospects/{prospect_id}/reclaim` (require_user)
 - Returns: {prospect_id, company_id, company_name, status: "reclaimed"}
+
+### Manager reassign (Phase 4): reassign_account() — cooldown override
+- Service: `app/services/prospect_reclamation.py::reassign_account(company_id, to_user_id, by_user, db)`
+- Gate: `is_manager_or_admin(by_user)` else `HTTPException(403)`
+- Actions: sets `Company.account_owner_id = to_user_id` (clears ownership_cleared_at); if a swept (non-dismissed) ProspectAccount exists for the company, dismisses it (`dismiss_reason="reassigned"`) and clears `reclaim_blocked_until`; logs ActivityLog(activity_type="reassign")
+- HTMX endpoint: `POST /v2/partials/prospects/{prospect_id}/reassign` with `to_user_id` form param (require_user + in-route `is_manager_or_admin` gate)
+- Returns: {company_id, company_name, to_user_id, prospect_id|None, status: "reassigned"}
+
+---
+
+## CRM Rubric Batch A — 2026-06-24
+
+### Account Archive (DNC) / reactivate (migration 148)
+- `POST /v2/partials/customers/{id}/deactivate` — Archive (DNC): sets `is_active=False`, clears `account_owner_id=None`, stamps `ownership_cleared_at`, stores optional `disposition_reason` from form; gate: `can_manage_account_team`; re-renders company detail partial with rose "Archived — Do Not Call" banner
+- `POST /v2/partials/customers/{id}/reactivate` — sets `is_active=True`; gate: `is_manager_or_admin` (STRICTER than deactivate — owner cannot reactivate own account); banner disappears
+- `GET /v2/partials/customers/archived` — lists all archived (`is_active=False`) companies; gate: `require_user`; shows DNC badge + reason; Reactivate button gated on `is_manager_or_admin` (template: `archived_list.html`)
+- `POST /v2/partials/customers/{company_id}/sites/{site_id}/mark-dnc` — toggle `CustomerSite.do_not_contact`; gate: `can_manage_account`; returns updated `site_card.html` partial; DNC sites excluded from `staleness=needs_call` call-list (when company has active sites and ALL are DNC)
+- Template `detail.html`: rose "Archived — Do Not Call" banner (replaces amber); Reactivate button gated on `user.role in ('manager','admin')` (not `can_manage_team`); kebab "Archive (Do Not Call)" with updated confirm text
+- Template `site_card.html`: "Mark DNC" / "Clear DNC" toggle replaces deleted "Delete Site" action; DNC site shows `opacity-75 border-rose-200` + strikethrough name + DNC badge; `do_not_contact` field on `CustomerSite` (migration 148)
+- Name search: `cdm_list_ctx` also queries `is_active=False` companies when `search` is non-empty; `archived_search_results` in template context shows them with "Archived" badge in account list
+
+### CRM CSV export
+- `GET /v2/customers/export.csv` — StreamingResponse, companies visible to the requesting user; managers/admins see all, reps see owned only (mirrors `cdm_company_query`)
+- `GET /v2/customers/contacts/export.csv` — StreamingResponse, contacts under those companies
+- Both set `Content-Disposition: attachment` and `text/csv`
+- Registered in `app/routers/crm/export.py` → included in `app/routers/crm/__init__.py`
+- Export links added to `list.html` below the filter form
+
+### Notes excluded from dormancy
+- `app/services/activity_service.get_last_activity_at()` now excludes `NOTE`, `SALES_NOTE`, `CONTACT_NOTE` from the `func.max(created_at)` query
+- `_NOTE_TYPES` frozenset defined at module level for clarity
+- Effect: a company with only note activities is treated as dormant; real activity (email, call, quote, etc.) still resets the 90-day clock
+
+---
+
+## Vendor CRM Parity — Activity, Tasks, Attachments
+
+Customer-parity feature giving vendor cards the same activity timeline, tasks, and file
+attachments that CRM accounts have. All routes live in `app/routers/vendors/` and are
+registered under `/v2/partials/vendors` (HTMX partials) and `/api/vendors` (JSON/upload).
+
+### Vendor Activity Tab
+
+```
+GET /v2/partials/vendors/{id}/tabs?tab=activity
+    |
+    v
+vendor_tabs() in app/routers/vendors/tabs.py
+    |
+    +---> activity_service.get_vendor_activities(db, vendor_card_id)
+    |       Returns ActivityLog rows scoped to vendor_card_id, newest-first.
+    |       Same timeline renderer as CRM account activity tab.
+    |
+    +---> renders vendors/tabs/activity.html (date-grouped timeline)
+```
+
+```
+POST /v2/partials/vendors/{id}/activity/add-note   (require_user)
+    |
+    v
+vendor_add_note() in app/routers/vendors/activity.py
+    |
+    +---> log_vendor_note(db, vendor_card_id, user_id, note_text, bump_last_activity=False)
+    |       Writes ActivityLog(activity_type=NOTE, vendor_card_id=...) — cadence-neutral.
+    |       Does NOT update last_activity_at on VendorCard (this is intentional —
+    |       log_vendor_note(bump_last_activity=False) preserves the cadence clock for
+    |       real outreach events only; notes are internal team annotations).
+    |
+    +---> re-renders the activity tab partial (OOB swap)
+```
+
+**Contract note:** `log_vendor_note(bump_last_activity=False)` from the UI add-note route
+is cadence-neutral — it does NOT update `vendor_card.last_activity_at`. Real outreach
+events (email, call) remain the sole drivers of the cadence clock.
+
+### Vendor Tasks Tab
+
+```
+GET /v2/partials/vendors/{id}/tabs?tab=tasks
+    |
+    +---> get_open_tasks_for_vendor_card(db, vendor_card_id)
+    |       Query: RequisitionTask WHERE vendor_card_id=? AND status!=DONE
+    |       NOTE: Tasks scoped to vendor_contact_id only are NOT surfaced here.
+    |
+    +---> renders vendors/tabs/tasks.html (task list + add-form toggle)
+
+POST /v2/partials/vendors/{id}/tasks   (require_user)
+    |
+    +---> create_vendor_task(db, vendor_card_id, title, due_at, user_id)
+    |       Writes RequisitionTask(vendor_card_id=..., scope=vendor_card)
+    |
+    +---> re-renders tasks tab partial
+
+POST /v2/partials/tasks/{id}/complete  (require_user)
+    — already existed for CRM tasks; now also handles vendor tasks
+    — _is_crm_task_authorized() gate covers vendor_card_id and vendor_contact_id scope
+
+DELETE /v2/partials/tasks/{id}         (require_admin for vendor tasks)
+    — already existed for CRM tasks; same handler covers vendor tasks
+
+POST /v2/partials/tasks/{id}/snooze    (require_user; _is_crm_task_authorized gate)
+    — pushes due_at forward 1 week; if no due_at sets to tomorrow (midnight UTC)
+    — same authz as edit/complete: assignee, creator, account owner, or admin
+    — re-renders the parent task list (account, contact, or vendor card)
+    — returns 403 if not authorized, 404 if task not found
+
+PATCH /v2/partials/requisitions/{id}/win-probability  (require_user; require_requisition_access)
+    — sets win_probability (0-100) on a requisition; 400 on out-of-range
+    — returns _win_probability.html inline span for HTMX swap
+    — migration 146 adds the column to requisitions
+```
+
+### Vendor Attachments
+
+```
+GET  /api/vendors/{id}/attachments      (require_user)
+    |
+    +---> attachment_service.list_vendor_card_attachments(db, vendor_card_id)
+    |       Returns VendorCardAttachment rows for the vendor.
+    |       HX-Request present → shared/_attachment_list.html HTML rows
+    |       HX-Request absent  → legacy JSON array (back-compat)
+
+POST /api/vendors/{id}/attachments      (require_user, multipart/form-data)
+    |
+    +---> attachment_service.upload_vendor_card_attachment(db, vendor_card_id, file, user_id)
+    |       Uploads to SharePoint/OneDrive library, inserts VendorCardAttachment row.
+
+DELETE /api/vendor-attachments/{id}     (require_admin)
+    |
+    +---> attachment_service.delete_vendor_card_attachment(db, att_id, user_id)
+            Deletes VendorCardAttachment row + removes from library if library_item_id set.
+```
+
+All three endpoints are consumed by the shared `attachmentsPanel` Alpine component via
+`kind="vendor_card"`. Vendor contact attachments use `kind="vendor_contact"` with
+analogous routes under `/api/vendor-contacts/{id}/attachments` and
+`/api/vendor-contact-attachments/{id}`.
+
+## Trouble Tickets — Report capture + AI diagnosis (2026-06-24)
+
+User-facing report (any authenticated user) and an admin-only management console with
+AI diagnosis. No DB migration — uses existing `trouble_tickets` columns.
+
+```
+Report capture (frontend, app/static/htmx_app.js):
+  More menu "Report a problem" → window.openTroubleReport()
+    |  double-rAF (menu paints out) → captureTroubleScreenshot()
+    |     lazy import('modern-screenshot') → domToPng(document.body)
+    |     viewport-clamped PNG, 2MB downscale ladder (scale 1→0.75→0.5), null on any failure
+    |  collectTroubleContext() → {nav_history, current_view (URL-derived), app_build, ...}
+    +→ $dispatch('open-modal', /api/trouble-tickets/form)
+  Capture stores: errorLog (window.onerror + console.error/warn tee), networkLog (htmx:afterRequest)
+
+POST /api/trouble-tickets/submit   (require_user)
+    +→ _create_ticket(): persists description, screenshot (disk), console_errors,
+       network_errors, browser_info, auto_captured_context (JSON), current_view
+    +→ BackgroundTask _generate_ai_summary (claude_text, fast tier)
+
+Admin console (require_admin):  Settings → Tickets  (tab admin-gated)
+  GET  /v2/partials/trouble-tickets/{workspace,list,{id}}   (require_admin)
+  GET  /api/trouble-tickets/{id}/screenshot                 (require_admin — closes IDOR)
+  POST /api/trouble-tickets/analyze         → claude_structured groups into RootCauseGroup
+  POST /api/trouble-tickets/{id}/diagnose   → ticket_diagnosis_service.diagnose_ticket
+  POST /api/trouble-tickets/diagnose-bulk   → diagnose_tickets_bulk (Semaphore(4), one commit)
+  POST /api/trouble-tickets/bulk-status     → bulk resolve/wont_fix/in_progress
+       (all set HX-Trigger "ticketsUpdated"; #ticket-list reloads on it)
+
+ticket_diagnosis_service.diagnose_ticket:
+  _build_diagnosis_prompt (text-only — claude_client has no vision; console/network truncated)
+  → claude_structured_with_usage(schema=DIAGNOSIS_SCHEMA, model_tier="smart")
+  → persists diagnosis (JSON), generated_prompt (paste-ready Claude Code prompt),
+    diagnosed_at, cost_tokens, cost_usd
+```
+
+Bulk selection state lives on the workspace Alpine component (`selected` array); row
+checkboxes bind to it; `window.ticketBulkAction(kind, ids, status)` POSTs and fires
+`ticketsUpdated`. The "Copy fix prompt" button reads the `<pre x-ref="fixprompt">` text.

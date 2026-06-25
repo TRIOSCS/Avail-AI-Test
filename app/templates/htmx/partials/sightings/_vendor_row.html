@@ -147,49 +147,56 @@
     {# 4 · Score #}
     <td class="px-2 py-1.5 text-right font-mono text-xs {{ score_color }}">{{ (s.score|round|int ~ '%') if s.score is not none else '—' }}</td>
 
-    {# 5 · Actions (kebab) — @click.stop on the cell keeps menu clicks off the row #}
-    <td class="px-2 py-1.5 text-center w-8" @click.stop>
-      {% if has_actions %}
-      <div class="relative inline-block" x-data="{ open: false }" @click.outside="open = false">
-        <button @click.stop="open = !open" type="button"
-                class="p-1 text-gray-300 hover:text-gray-600 rounded transition-colors"
-                aria-label="Vendor actions">
-          <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
-            <path d="M10 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4z"/>
-          </svg>
-        </button>
-        <div x-show="open" x-cloak
-             class="absolute right-0 top-full mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-lg z-20 py-1 text-xs text-left">
-          {# ── State 1 (suppressed): Mark available is the only action ── #}
-          {% if is_unavailable %}
-          <button hx-post="/v2/partials/sightings/{{ requirement.id }}/mark-available"
-                  hx-vals='{{ {"vendor_name": s.vendor_name}|tojson }}'
-                  hx-target="#sightings-detail" hx-swap="innerHTML"
-                  hx-confirm="Mark {{ s.vendor_name }} available again for this part?"
-                  data-loading-disable
-                  @click.stop="open = false"
-                  class="w-full text-left px-3 py-1.5 font-medium text-gray-400 hover:text-emerald-600">Mark available</button>
-          {% endif %}
-          {# ── Available / advisory / restock: full action set ── #}
-          {% if vs != 'blacklisted' and not is_unavailable %}
-          <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/sightings/vendor-modal?requirement_ids={{ requirement.id }}&preselect={{ s.vendor_name|urlencode }}'}); open = false"
-                  class="w-full text-left px-3 py-1.5 font-medium text-brand-600 hover:bg-brand-50">Build RFQ</button>
-          {% if unav_advisory %}
-          <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/sightings/{{ requirement.id }}/unavailable-form?vendor_name={{ s.vendor_name|urlencode }}'}); open = false"
-                  class="w-full text-left px-3 py-1.5 font-medium text-amber-600 hover:text-amber-800">Verify availability</button>
-          {% endif %}
-          {% if unav_restock %}
-          <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/sightings/{{ requirement.id }}/unavailable-form?vendor_name={{ s.vendor_name|urlencode }}'}); open = false"
-                  class="w-full text-left px-3 py-1.5 font-medium text-emerald-700 hover:text-emerald-900">Verify restock</button>
-          {% endif %}
-          <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/sightings/{{ requirement.id }}/offer-form?vendor_name={{ s.vendor_name|urlencode }}&unit_price={{ s.best_price or '' }}&qty={{ s.estimated_qty or '' }}&moq={{ s.min_moq or '' }}&lead_days={{ s.best_lead_time_days or '' }}'}); open = false"
-                  class="w-full text-left px-3 py-1.5 text-emerald-700 hover:bg-emerald-50">Convert to offer</button>
-          <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/sightings/{{ requirement.id }}/unavailable-form?vendor_name={{ s.vendor_name|urlencode }}'}); open = false"
-                  class="w-full text-left px-3 py-1.5 text-gray-500 hover:bg-rose-50 hover:text-rose-600 border-t border-gray-100">Mark Unavail</button>
-          {% endif %}
+    {# 5 · Actions — visible RFQ pill + kebab. @click.stop on the cell keeps
+         menu clicks off the row expander. #}
+    <td class="px-2 py-1.5 text-center w-16" @click.stop>
+      <div class="flex items-center justify-end gap-1">
+        {# Visible "Build RFQ" compact pill — shown when the vendor can receive RFQs #}
+        {% if vs != 'blacklisted' and not is_unavailable %}
+        <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/sightings/vendor-modal?requirement_ids={{ requirement.id }}&preselect={{ s.vendor_name|urlencode }}'})"
+                class="inline-flex items-center px-2 py-0.5 text-xs font-semibold rounded border border-brand-200 text-brand-600 hover:bg-brand-50 transition-colors"
+                title="Build RFQ with {{ s.vendor_name }} preselected">Build RFQ</button>
+        {% endif %}
+        {% if has_actions %}
+        <div class="relative inline-block" x-data="{ open: false }" @click.outside="open = false">
+          <button @click.stop="open = !open" type="button"
+                  class="p-1 text-gray-300 hover:text-gray-600 rounded transition-colors"
+                  aria-label="Vendor actions">
+            <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
+              <path d="M10 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4z"/>
+            </svg>
+          </button>
+          <div x-show="open" x-cloak
+               class="absolute right-0 top-full mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-lg z-20 py-1 text-xs text-left">
+            {# ── State 1 (suppressed): Mark available is the only action ── #}
+            {% if is_unavailable %}
+            <button hx-post="/v2/partials/sightings/{{ requirement.id }}/mark-available"
+                    hx-vals='{{ {"vendor_name": s.vendor_name}|tojson }}'
+                    hx-target="#sightings-detail" hx-swap="innerHTML"
+                    hx-confirm="Mark {{ s.vendor_name }} available again for this part?"
+                    data-loading-disable
+                    @click.stop="open = false"
+                    class="w-full text-left px-3 py-1.5 font-medium text-gray-400 hover:text-emerald-600">Mark available</button>
+            {% endif %}
+            {# ── Available / advisory / restock: Verify + Convert + Mark Unavail ── #}
+            {% if vs != 'blacklisted' and not is_unavailable %}
+            {% if unav_advisory %}
+            <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/sightings/{{ requirement.id }}/unavailable-form?vendor_name={{ s.vendor_name|urlencode }}'}); open = false"
+                    class="w-full text-left px-3 py-1.5 font-medium text-amber-600 hover:text-amber-800">Verify availability</button>
+            {% endif %}
+            {% if unav_restock %}
+            <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/sightings/{{ requirement.id }}/unavailable-form?vendor_name={{ s.vendor_name|urlencode }}'}); open = false"
+                    class="w-full text-left px-3 py-1.5 font-medium text-emerald-700 hover:text-emerald-900">Verify restock</button>
+            {% endif %}
+            <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/sightings/{{ requirement.id }}/offer-form?vendor_name={{ s.vendor_name|urlencode }}&unit_price={{ s.best_price or '' }}&qty={{ s.estimated_qty or '' }}&moq={{ s.min_moq or '' }}&lead_days={{ s.best_lead_time_days or '' }}'}); open = false"
+                    class="w-full text-left px-3 py-1.5 text-emerald-700 hover:bg-emerald-50">Convert to offer</button>
+            <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/sightings/{{ requirement.id }}/unavailable-form?vendor_name={{ s.vendor_name|urlencode }}'}); open = false"
+                    class="w-full text-left px-3 py-1.5 text-gray-500 hover:bg-rose-50 hover:text-rose-600 border-t border-gray-100">Mark Unavail</button>
+            {% endif %}
+          </div>
         </div>
+        {% endif %}
       </div>
-      {% endif %}
     </td>
   </tr>
 

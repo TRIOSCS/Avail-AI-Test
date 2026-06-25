@@ -138,7 +138,10 @@ def fast_search(query: str, db: Session) -> dict:
     all_results = []
 
     # --- Requisitions ---
-    q = db.query(Requisition).filter(sb.ilike_filter(Requisition.name, Requisition.customer_name))
+    q = db.query(Requisition).filter(
+        Requisition.is_scratch.is_(False),
+        sb.ilike_filter(Requisition.name, Requisition.customer_name),
+    )
     if use_pg:
         q = q.order_by(
             func.greatest(
@@ -368,6 +371,10 @@ def _run_intent_query(search_op: dict, db: Session) -> tuple[str, list[dict]]:
         return (group_key, [])
 
     q = db.query(model).filter(sb_intent.ilike_filter(*columns))
+
+    # Exclude virtual/scratch requisitions from user-facing search results.
+    if entity_type == "requisition":
+        q = q.filter(model.is_scratch.is_(False))
 
     # Apply structured filters
     for filter_name, filter_value in (filters or {}).items():
