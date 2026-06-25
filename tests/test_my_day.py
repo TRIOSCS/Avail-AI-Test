@@ -27,7 +27,40 @@ from sqlalchemy.orm import Session
 from starlette.testclient import TestClient
 
 from app.models import ActivityLog, Company
+from app.models.crm import CustomerSite, SiteContact
 from app.models.task import RequisitionTask
+
+
+def _add_primary_contact(
+    db_session: Session,
+    company: Company,
+    *,
+    phone: str = "+15551234567",
+    email: str = "buyer@acme.test",
+    do_not_contact: bool = False,
+) -> SiteContact:
+    """Attach a primary SiteContact (via a CustomerSite) to ``company``.
+
+    Used to exercise the My Day one-click outreach rail (Call / Email), which reads
+    ``company.primary_contact``.
+    """
+    site = CustomerSite(company_id=company.id, site_name="HQ", is_active=True)
+    db_session.add(site)
+    db_session.flush()
+    contact = SiteContact(
+        customer_site_id=site.id,
+        full_name="Pat Buyer",
+        phone=phone,
+        email=email,
+        do_not_contact=do_not_contact,
+    )
+    db_session.add(contact)
+    db_session.flush()
+    company.primary_contact_id = contact.id
+    db_session.commit()
+    db_session.refresh(company)
+    return contact
+
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
@@ -250,6 +283,61 @@ class TestMyDayCompleteTask:
         client.post(f"/v2/partials/tasks/{my_open_task.id}/complete?from_my_day=true")
         after = db_session.query(ActivityLog).count()
         assert after == before
+
+
+class TestMyDayAttentionHeader:
+    def test_attention_count_shown_for_overdue_account(
+        self, client: TestClient, db_session: Session, overdue_owned_company
+    ):
+        """The header surfaces a 'needs a call today' attention figure for an overdue
+        account."""
+        resp = client.get("/v2/partials/my-day")
+        assert resp.status_code == 200
+        assert "need" in resp.text and "a call today" in resp.text
+        # The accent key-figure container is present (figure-accent token).
+        assert "figure-accent" in resp.text
+
+    def test_no_attention_figure_when_no_accounts(self, client: TestClient, db_session: Session, my_open_task):
+        """With tasks but no overdue accounts, the call-today figure is absent."""
+        resp = client.get("/v2/partials/my-day")
+        assert resp.status_code == 200
+        assert "a call today" not in resp.text
+
+
+class TestMyDayOutreach:
+    def test_call_and_email_actions_render_for_reachable_contact(
+        self, client: TestClient, db_session: Session, overdue_owned_company
+    ):
+        """A reachable primary contact yields one-click Call (tel:) + Email links."""
+        _add_primary_contact(db_session, overdue_owned_company)
+        resp = client.get("/v2/partials/my-day")
+        assert resp.status_code == 200
+        assert "tel:+15551234567" in resp.text
+        assert "buyer@acme.test" in resp.text
+        # Outreach auto-logging hook is wired on the action.
+        assert "data-outreach-log" in resp.text
+
+    def test_outreach_suppressed_for_do_not_contact(
+        self, client: TestClient, db_session: Session, overdue_owned_company
+    ):
+        """A do_not_contact primary contact gets no Call/Email affordance."""
+        _add_primary_contact(db_session, overdue_owned_company, do_not_contact=True)
+        resp = client.get("/v2/partials/my-day")
+        assert resp.status_code == 200
+        assert "tel:+15551234567" not in resp.text
+        assert "buyer@acme.test" not in resp.text
+
+    def test_no_call_link_when_account_has_no_contact(
+        self, client: TestClient, db_session: Session, overdue_owned_company
+    ):
+        """An overdue account with no primary contact still renders (no tel: link), and
+        the row's Log action remains available."""
+        resp = client.get("/v2/partials/my-day")
+        assert resp.status_code == 200
+        assert overdue_owned_company.name in resp.text
+        assert "tel:" not in resp.text
+        # The manual log affordance is always present on a follow-up row.
+        assert "activity/add-note-form" in resp.text
 
 
 class TestMyDayFullPage:
