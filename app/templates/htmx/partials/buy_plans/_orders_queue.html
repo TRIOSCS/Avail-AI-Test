@@ -21,23 +21,24 @@
 </div>
 
 {% if queue %}
+{# Finding #1: convert to data-table; drop per-cell px-4 py-3 and per-th text-xs font-medium text-gray-500 uppercase tracking-wider #}
 <div class="overflow-x-auto bg-white rounded-lg shadow border border-brand-200">
-  <table class="min-w-full divide-y divide-gray-200">
-    <thead class="bg-gray-50">
+  <table class="data-table w-full">
+    <thead>
       <tr>
-        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
-        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Part</th>
-        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vendor</th>
-        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Qty</th>
-        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Unit Cost</th>
-        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
+        <th class="text-left">Customer</th>
+        <th class="text-left">Part</th>
+        <th class="text-left">Vendor</th>
+        <th class="text-right">Qty</th>
+        <th class="text-right">Unit Cost</th>
+        <th class="text-left">Action</th>
       </tr>
     </thead>
-    <tbody class="divide-y divide-gray-200">
+    <tbody>
       {% for row in queue %}
-      <tr id="bp-line-{{ row.line_id }}" class="transition-colors {% if row.kicked_back %}bg-rose-50{% else %}hover:bg-brand-50/40{% endif %}">
+      <tr id="bp-line-{{ row.line_id }}" class="transition-colors {% if row.kicked_back %}bg-rose-50{% endif %}">
         {# Customer (links to the deal detail) #}
-        <td class="px-4 py-3">
+        <td>
           <a hx-get="/v2/partials/buy-plans/{{ row.plan_id }}"
              hx-target="#main-content"
              hx-push-url="/v2/buy-plans/{{ row.plan_id }}"
@@ -53,20 +54,20 @@
           {% endif %}
         </td>
         {# Part (MPN + description) #}
-        <td class="px-4 py-3">
-          <div class="text-sm font-mono font-medium text-gray-900">{{ row.mpn or '-' }}</div>
+        <td>
+          <div class="font-mono font-medium text-gray-900">{{ row.mpn or '-' }}</div>
           {% if row.description %}
           <div class="text-xs text-gray-400 truncate max-w-[220px]" title="{{ row.description }}">{{ row.description }}</div>
           {% endif %}
         </td>
         {# Vendor #}
-        <td class="px-4 py-3 text-sm text-gray-900">{{ row.vendor_name or '-' }}</td>
+        <td>{{ row.vendor_name or '-' }}</td>
         {# Qty #}
-        <td class="px-4 py-3 text-sm text-gray-600 text-right">{{ '{:,}'.format(row.quantity) if row.quantity is not none else '-' }}</td>
+        <td class="text-right">{{ '{:,}'.format(row.quantity) if row.quantity is not none else '-' }}</td>
         {# Unit cost #}
-        <td class="px-4 py-3 text-sm text-gray-600 text-right">${{ '{:,.4f}'.format(row.unit_cost|float) if row.unit_cost else '-' }}</td>
+        <td class="text-right">${{ '{:,.4f}'.format(row.unit_cost|float) if row.unit_cost else '-' }}</td>
         {# Action: inline confirm-PO form (origin=queue) + flag issue #}
-        <td class="px-4 py-3">
+        <td>
           <div x-data="{ showPo: false }">
             <a @click="showPo = !showPo" class="text-sm text-brand-500 hover:text-brand-600 font-medium cursor-pointer">
               {{ 'Re-cut PO' if row.kicked_back else 'Enter PO' }} &rarr;
@@ -77,13 +78,14 @@
                     hx-swap="innerHTML"
                     class="space-y-1.5">
                 <input type="hidden" name="origin" value="queue">
+                {# Finding #3: bespoke border+focus-ring → .input .input-sm #}
                 <input aria-label="PO#" name="po_number" type="text" placeholder="PO#" required
-                       class="w-28 px-2 py-1 text-xs border border-brand-200 rounded-md focus:ring-brand-500">
+                       class="input input-sm w-28">
                 <input aria-label="Estimated ship date" name="estimated_ship_date" type="date"
-                       class="w-28 px-2 py-1 text-xs border border-brand-200 rounded-md focus:ring-brand-500">
+                       class="input input-sm w-28">
                 <div class="flex gap-1">
                   <button type="submit" data-loading-disable
-                          class="px-2 py-1 text-xs bg-brand-500 text-white rounded-md hover:bg-brand-600 transition-colors">
+                          class="btn btn-primary btn-sm">
                     Confirm
                   </button>
                   <button type="button"
@@ -92,7 +94,7 @@
                           hx-swap="innerHTML"
                           hx-vals='{"issue_type": "other"}'
                           hx-confirm="Flag an issue on this line?"
-                          class="px-2 py-1 text-xs text-rose-600 border border-rose-200 rounded-md hover:bg-rose-50 transition-colors">
+                          class="btn btn-danger btn-sm">
                     Issue
                   </button>
                 </div>
@@ -121,20 +123,21 @@
     <h3 class="text-xs uppercase tracking-wide text-gray-400 font-medium">Team Orders</h3>
     <p class="text-xs text-gray-400">What other buyers are working on (read-only).</p>
   </div>
-  <div class="overflow-x-auto bg-gray-50/60 rounded-lg border border-gray-200">
-    <table class="min-w-full divide-y divide-gray-200 text-sm">
-      <tbody class="divide-y divide-gray-100">
+  {# Finding #5: border-gray-200 → border-line-base #}
+  <div class="overflow-x-auto bg-gray-50/60 rounded-lg border border-line-base">
+    <table class="data-table w-full text-sm">
+      <tbody>
         {% set ns = namespace(prev=None) %}
         {% for row in team %}
         {% if row.buyer_name != ns.prev %}
         <tr class="bg-gray-100/60">
-          <td colspan="4" class="px-4 py-1.5 text-xs font-medium text-gray-600">{{ row.buyer_name or 'Unassigned' }}</td>
+          <td colspan="4" class="text-xs font-medium text-gray-600">{{ row.buyer_name or 'Unassigned' }}</td>
         </tr>
         {% set ns.prev = row.buyer_name %}
         {% endif %}
-        <tr class="{% if row.kicked_back %}bg-rose-50/50{% else %}hover:bg-gray-100/50{% endif %} transition-colors">
+        <tr class="{% if row.kicked_back %}bg-rose-50/50{% endif %} transition-colors">
           {# Customer (read-only link to the plan detail) #}
-          <td class="px-4 py-2">
+          <td>
             <a hx-get="/v2/partials/buy-plans/{{ row.plan_id }}"
                hx-target="#main-content"
                hx-push-url="/v2/buy-plans/{{ row.plan_id }}"
@@ -143,16 +146,16 @@
             </a>
           </td>
           {# Part #}
-          <td class="px-4 py-2 font-mono text-xs text-gray-600">{{ row.mpn or '-' }}</td>
+          <td class="font-mono text-xs text-gray-600">{{ row.mpn or '-' }}</td>
           {# Vendor #}
-          <td class="px-4 py-2 text-gray-600">{{ row.vendor_name or '-' }}</td>
-          {# Qty + status badge #}
-          <td class="px-4 py-2 text-right whitespace-nowrap">
+          <td class="text-gray-600">{{ row.vendor_name or '-' }}</td>
+          {# Qty + status badge (Finding #7: inline pills → .badge primitive) #}
+          <td class="text-right whitespace-nowrap">
             <span class="text-gray-600">{{ '{:,}'.format(row.quantity) if row.quantity is not none else '-' }}</span>
             {% if row.status == 'awaiting_po' %}
-            <span class="ml-2 inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-700">PO to cut</span>
+            <span class="ml-2 badge bg-amber-50 text-amber-700 border-amber-200">PO to cut</span>
             {% elif row.status == 'pending_verify' %}
-            <span class="ml-2 inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">verifying</span>
+            <span class="ml-2 badge bg-blue-50 text-blue-700 border-blue-200">verifying</span>
             {% endif %}
           </td>
         </tr>

@@ -19,14 +19,15 @@
     {# Highlight is Alpine-reactive (:class on lens) so the active pill updates the
        instant a lens is clicked — before the server swap returns — and stays correct
        after the re-rendered hub re-inits x-data with the server lens. Mirrors the
-       settings tab_button pattern (partials/settings/_macros.html). #}
+       settings tab_button pattern (partials/settings/_macros.html).
+       Active state uses accent-600 (PR0 single-accent rule); inactive chrome stays brand-*. #}
     <button hx-get="/v2/partials/buy-plans?lens={{ l }}"
             hx-target="#main-content"
             hx-swap="innerHTML"
             hx-push-url="/v2/buy-plans?lens={{ l }}"
             @click="lens = '{{ l }}'"
             :class="lens === '{{ l }}'
-                    ? 'bg-brand-500 text-white shadow-sm'
+                    ? 'bg-accent-600 text-white shadow-sm'
                     : 'bg-brand-100 text-brand-600 hover:bg-brand-200'"
             class="px-3.5 py-1.5 text-sm font-medium rounded-full transition-colors">
       {{ label }}
@@ -46,6 +47,13 @@
        hx-trigger="load"
        hx-target="#bp-hub-body"
        hx-swap="innerHTML">
-    <div class="p-8 text-center text-gray-400 text-sm">Loading…</div>
+    {# Finding #8: spinner consistent with other lazy bodies in the app #}
+    <div class="p-4 text-center text-gray-400 text-sm flex items-center justify-center gap-2">
+      <svg class="h-5 w-5 text-gray-400 animate-spin" viewBox="0 0 24 24" fill="none">
+        <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"
+                stroke-dasharray="31.4" stroke-dashoffset="10"/>
+      </svg>
+      <span>Loading…</span>
+    </div>
   </div>
 </div>
