@@ -4,7 +4,7 @@
 
 /* ── Design System: Clean, high-contrast utility ──────────────────────
    Font: Aptos → Segoe UI → system-ui
-   Border color: unified #D5D8DF
+   Hairlines: --line #BFC4CE (base) · --line-subtle #D5D8DF (see :root)
    Body text: #1e293b (slate-800), secondary: #4B5463 (brand-600)
    Min interactive font: 11px, body: 13px, headings: 15px
    ──────────────────────────────────────────────────────────────────── */
@@ -53,9 +53,9 @@
      it can reference the var; --tw-ring-color feeds the @apply'd focus:ring-2. */
   .btn-primary   { @apply btn; background-color: var(--accent); color: var(--accent-contrast); --tw-ring-color: var(--accent-ring); }
   .btn-primary:hover { background-color: var(--accent-hover); }
-  .btn-secondary { @apply btn bg-white text-gray-700 border border-gray-200 hover:bg-gray-50 focus:ring-brand-500; }
+  .btn-secondary { @apply btn bg-white text-gray-700 border border-gray-200 hover:bg-gray-50; --tw-ring-color: var(--accent-ring); }
   .btn-danger    { @apply btn bg-rose-500 text-white hover:bg-rose-600 focus:ring-rose-500; }
-  .btn-ghost     { @apply btn bg-transparent text-gray-600 hover:bg-gray-100 focus:ring-brand-500; }
+  .btn-ghost     { @apply btn bg-transparent text-gray-600 hover:bg-gray-100; --tw-ring-color: var(--accent-ring); }
   /* size overrides — defined last so they beat the variant's baked-in md size */
   .btn-sm { @apply px-2.5 py-1 text-xs; }
   .btn-md { @apply px-3.5 py-1.5 text-sm; }
@@ -132,13 +132,15 @@
   }
 }
 
-/* ── Accent + line tokens — single source of truth ────────────────────
+/* ── Accent + line tokens — canonical source ──────────────────────────
    --accent drives every interactive accent (primary buttons, active nav,
-   focus rings, key figures). Sourced from the Trio brand azure (trioscs.com:
-   theme primary #127FBF; #007DBD is the AA-safe step used here). Swap these
-   values to re-theme the whole app; kept in sync with the Tailwind `accent-*`
-   family in tailwind.config.js. --line/--line-subtle are the two canonical
-   hairline colors the .border-line-* classes resolve to. ──────────────── */
+   focus rings, key figures). Sourced from the Trio brand azure (trioscs.com
+   theme primary #127FBF). --accent #007DBD ≈ 4.5:1 on white — AA for normal
+   text at the threshold and AA for large/UI; primary buttons render semibold.
+   Swap these to re-theme; MUST stay in sync with the Tailwind `accent-*`
+   family in tailwind.config.js (accent-500 = --accent, accent-600 = --accent-hover).
+   --line/--line-subtle are the canonical hairline colors .border-line-* resolve
+   to (raw-hex table hairlines migrate onto them in PR2). ──────────────── */
 :root {
   --accent:          #007DBD;
   --accent-hover:    #0B6699;
@@ -178,7 +180,7 @@
   --opp-text-primary: #1C2130;
   --opp-text-secondary: #4B5463;
   --opp-text-tertiary: #838B9B;
-  --opp-sep: #D5D8DF;
+  --opp-sep: var(--line-subtle);
 }
 
 .opp-row {

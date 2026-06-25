@@ -44,8 +44,8 @@ module.exports = {
           900: '#1C2130',
         },
         // Trio brand azure (trioscs.com) — the single interactive accent.
-        // Mirrors --accent* in styles.css; 500 is the AA-safe base used for
-        // primary buttons / active nav / key figures.
+        // Mirror of --accent* in styles.css (keep in sync: 500 = --accent,
+        // 600 = --accent-hover). 500 #007DBD ≈ 4.5:1 on white — AA at threshold.
         accent: {
           50: '#E7F3FA',
           100: '#C9E6F4',
