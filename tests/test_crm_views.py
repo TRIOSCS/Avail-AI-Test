@@ -4170,14 +4170,17 @@ class TestFullWidthContactsForwardLayout:
 
 
 class TestNoCache:
-    """Stage C §6: full-page /v2/* responses carry Cache-Control: no-cache.
+    """Every text/html /v2/* response — full-page shell AND HTMX partial — carries
+    Cache-Control: no-store/no-cache.
 
-    Browsers heuristically cache HTML pages with no Cache-Control header.  After
-    a deploy the stale shell would reference old hashed-CSS/JS bundles, forcing
-    users to hard-refresh.  The fix: page_response() sets
-    Cache-Control: no-cache, must-revalidate on every base_page render.
+    Browsers heuristically cache HTML responses with no Cache-Control header.  After a
+    deploy the stale shell would reference old hashed-CSS/JS bundles and stale partials
+    would keep swapping into in-app navigation, forcing users to hard-refresh.  The fix:
+    the outermost request_id_middleware sets Cache-Control: no-store, no-cache,
+    must-revalidate (+ Pragma: no-cache) on every text/html response.
 
-    HTMX partials and /static/assets/* are intentionally unaffected.
+    /static/assets/* (Vite-hashed) keeps its immutable long cache; JSON/SSE/downloads
+    are intentionally unaffected.
     """
 
     def _authed_client(self, test_user, db_session):
@@ -4273,21 +4276,21 @@ class TestNoCache:
             for dep in [get_db, require_user, require_admin, require_buyer, require_fresh_token]:
                 app.dependency_overrides.pop(dep, None)
 
-    def test_partial_does_not_carry_no_cache_header(self, client: TestClient, test_user):
-        """HTMX partial /v2/partials/customers does NOT carry Cache-Control: no-cache.
+    def test_partial_carries_no_store_header(self, client: TestClient, test_user):
+        """HTMX partial /v2/partials/customers carries Cache-Control: no-store/no-cache.
 
-        Only the full-page shell needs the no-cache guard.  Partials are lightweight and
-        already keyed by server state; adding no-cache would break browser back/forward
-        caching of fragments unnecessarily.
+        Browsers heuristically cache partial GETs too, so without this an in-app HTMX
+        navigation keeps swapping in stale fragments after a deploy until a hard-
+        refresh. Every text/html response (full-page shell AND partial) is made non-
+        cacheable by the outermost request_id_middleware.
         """
         resp = client.get("/v2/partials/customers")
         assert resp.status_code == 200
         cc = resp.headers.get("cache-control", "")
-        # Partials should NOT carry the no-cache directive (either no header at
-        # all, or something like 'no-store' from the framework is acceptable,
-        # but 'no-cache' must not be the explicit page-response injection).
-        # We check that the page_response() wrapper was NOT applied.
-        assert "must-revalidate" not in cc, "HTMX partial should not carry the page-response Cache-Control header"
+        assert "no-store" in cc, f"HTMX partial should carry no-store, got: {cc!r}"
+        assert "no-cache" in cc
+        assert "must-revalidate" in cc
+        assert resp.headers.get("pragma") == "no-cache"
 
 
 # ── Phase-0 CRM Foundations: HTMX form field surfacing tests ─────────────────
