@@ -110,7 +110,6 @@
              "rohs": (Alpine.evaluate(document.querySelector("#materials-workspace"), "rohs") || []).join(","),
              "condition": (Alpine.evaluate(document.querySelector("#materials-workspace"), "condition") || []).join(","),
              "has_datasheet": Alpine.evaluate(document.querySelector("#materials-workspace"), "hasDatasheet") || false,
-             "has_validation_conflict": Alpine.evaluate(document.querySelector("#materials-workspace"), "needsReview") || false,
              "has_stock": Alpine.evaluate(document.querySelector("#materials-workspace"), "hasStock") || false,
              "has_price": Alpine.evaluate(document.querySelector("#materials-workspace"), "hasPrice") || false,
              "has_crosses": Alpine.evaluate(document.querySelector("#materials-workspace"), "hasCrosses") || false,
@@ -243,7 +242,6 @@
                  "rohs": (Alpine.evaluate(document.querySelector("#materials-workspace"), "rohs") || []).join(","),
                  "condition": (Alpine.evaluate(document.querySelector("#materials-workspace"), "condition") || []).join(","),
                  "has_datasheet": Alpine.evaluate(document.querySelector("#materials-workspace"), "hasDatasheet") || false,
-                 "has_validation_conflict": Alpine.evaluate(document.querySelector("#materials-workspace"), "needsReview") || false,
                  "has_stock": Alpine.evaluate(document.querySelector("#materials-workspace"), "hasStock") || false,
                  "has_price": Alpine.evaluate(document.querySelector("#materials-workspace"), "hasPrice") || false,
                  "has_crosses": Alpine.evaluate(document.querySelector("#materials-workspace"), "hasCrosses") || false,
@@ -274,7 +272,7 @@
   <div class="flex-1 min-w-0 relative">
 
     {# ── Compact page header — Three-Second-Rule anchor ─────────────────
-       "Where am I?" — title + active-commodity breadcrumb + Needs review attention chip.
+       "Where am I?" — title + active-commodity breadcrumb.
        Sits above the search bar so it's always visible without scrolling. #}
     <div class="px-3 pt-3 pb-1 flex items-center justify-between border-b border-line-subtle">
       <div class="flex items-center gap-2 min-w-0">
@@ -288,15 +286,6 @@
           </span>
         </template>
       </div>
-      {# Needs-review attention chip — surfaces validation-conflict queue as glanceable one-click action #}
-      <button @click="needsReview = !needsReview; applyFilters()"
-              :class="needsReview ? 'bg-amber-100 text-amber-800 border-amber-300' : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'"
-              class="flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium border rounded-full transition-colors flex-shrink-0">
-        <svg class="w-3 h-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-          <path fill-rule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd"/>
-        </svg>
-        Needs review
-      </button>
     </div>
 
     {# Search bar + mobile filter button #}
@@ -356,7 +345,7 @@
       <div id="ai-script-container"></div>
 
       {# Active filter chips #}
-      <template x-if="commodity || q || Object.keys(subFilters).length > 0 || confidenceNarrowed || lifecycle.length > 0 || rohs.length > 0 || condition.length > 0 || hasDatasheet || needsReview || sourcingActiveCount > 0" x-cloak>
+      <template x-if="commodity || q || Object.keys(subFilters).length > 0 || confidenceNarrowed || lifecycle.length > 0 || rohs.length > 0 || condition.length > 0 || hasDatasheet || sourcingActiveCount > 0" x-cloak>
         <div class="flex flex-wrap gap-1.5 mt-2">
           <template x-if="q" x-cloak>
             {{ removable_chip('Search: <span x-text="q"></span>', 'blue', "q = ''; applyFilters()") }}
@@ -380,10 +369,6 @@
           {# Has-datasheet chip #}
           <template x-if="hasDatasheet" x-cloak>
             {{ removable_chip('Has datasheet', 'gray', 'hasDatasheet = false; applyFilters()') }}
-          </template>
-          {# Needs-review chip — validation-conflict review queue #}
-          <template x-if="needsReview" x-cloak>
-            {{ removable_chip('Needs review', 'amber', 'needsReview = false; applyFilters()') }}
           </template>
           {# Sourcing-signal chips #}
           <template x-if="hasStock" x-cloak>
@@ -439,7 +424,6 @@
            "rohs": (Alpine.evaluate(document.querySelector("#materials-workspace"), "rohs") || []).join(","),
            "condition": (Alpine.evaluate(document.querySelector("#materials-workspace"), "condition") || []).join(","),
            "has_datasheet": Alpine.evaluate(document.querySelector("#materials-workspace"), "hasDatasheet") || false,
-           "has_validation_conflict": Alpine.evaluate(document.querySelector("#materials-workspace"), "needsReview") || false,
            "has_stock": Alpine.evaluate(document.querySelector("#materials-workspace"), "hasStock") || false,
            "has_price": Alpine.evaluate(document.querySelector("#materials-workspace"), "hasPrice") || false,
            "has_crosses": Alpine.evaluate(document.querySelector("#materials-workspace"), "hasCrosses") || false,

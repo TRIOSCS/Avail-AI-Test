@@ -393,6 +393,101 @@ class TestUsersAuditEndpoint:
             app.dependency_overrides.pop(get_db, None)
 
 
+# ── Prepayment approver toggle + limit ───────────────────────────────
+
+
+class TestPrepaymentApprover:
+    def test_grant_prepayment_right(self, admin_client, db_session, test_user):
+        """Admin can grant prepayment approval right; audit row written."""
+        r = admin_client.post(
+            f"/api/admin/users/{test_user.id}/prepayment-approver",
+            data={"can_approve": "true", "limit": ""},
+        )
+        assert r.status_code == 200
+        db_session.refresh(test_user)
+        assert test_user.can_approve_prepayments is True
+        assert test_user.prepayment_approval_limit is None
+        assert len(_audit_rows(db_session, UserAuditAction.APPROVAL_GRANT)) == 1
+
+    def test_grant_with_dollar_limit(self, admin_client, db_session, test_user):
+        """Admin can grant prepayment approval with a capped limit."""
+        r = admin_client.post(
+            f"/api/admin/users/{test_user.id}/prepayment-approver",
+            data={"can_approve": "true", "limit": "1000.00"},
+        )
+        assert r.status_code == 200
+        db_session.refresh(test_user)
+        assert test_user.can_approve_prepayments is True
+        from decimal import Decimal
+
+        assert test_user.prepayment_approval_limit == Decimal("1000.00")
+
+    def test_revoke_prepayment_right(self, admin_client, db_session, test_user):
+        """Admin can revoke prepayment approval right; audit row written."""
+        test_user.can_approve_prepayments = True
+        db_session.commit()
+
+        r = admin_client.post(
+            f"/api/admin/users/{test_user.id}/prepayment-approver",
+            data={"can_approve": "false", "limit": ""},
+        )
+        assert r.status_code == 200
+        db_session.refresh(test_user)
+        assert test_user.can_approve_prepayments is False
+        assert len(_audit_rows(db_session, UserAuditAction.APPROVAL_REVOKE)) == 1
+
+    def test_invalid_limit_returns_400(self, admin_client, db_session, test_user):
+        """Non-numeric limit returns 400."""
+        r = admin_client.post(
+            f"/api/admin/users/{test_user.id}/prepayment-approver",
+            data={"can_approve": "true", "limit": "abc"},
+        )
+        assert r.status_code == 400
+
+    def test_negative_limit_returns_400(self, admin_client, db_session, test_user):
+        """Zero or negative limit returns 400."""
+        r = admin_client.post(
+            f"/api/admin/users/{test_user.id}/prepayment-approver",
+            data={"can_approve": "true", "limit": "-50"},
+        )
+        assert r.status_code == 400
+
+    def test_noop_no_audit(self, admin_client, db_session, test_user):
+        """No-op (state unchanged) does not write an audit row."""
+        # default: can_approve_prepayments=False, limit=None
+        r = admin_client.post(
+            f"/api/admin/users/{test_user.id}/prepayment-approver",
+            data={"can_approve": "false", "limit": ""},
+        )
+        assert r.status_code == 200
+        assert len(_audit_rows(db_session, UserAuditAction.APPROVAL_GRANT)) == 0
+        assert len(_audit_rows(db_session, UserAuditAction.APPROVAL_REVOKE)) == 0
+
+    def test_admin_gated(self, db_session, monkeypatch, test_user):
+        """Non-admin gets 403."""
+        user = _make_user(db_session, email="buyer2@gate.test", role="buyer")
+        client, get_db = _non_admin_client(db_session, user, monkeypatch)
+        try:
+            r = client.post(
+                f"/api/admin/users/{test_user.id}/prepayment-approver",
+                data={"can_approve": "true", "limit": ""},
+            )
+            assert r.status_code == 403
+        finally:
+            from app.main import app
+
+            app.dependency_overrides.pop(get_db, None)
+
+    def test_404_for_agent_account(self, admin_client, db_session):
+        """Agent service account returns 404."""
+        agent = _make_user(db_session, email=_AGENT_EMAIL, role="agent")
+        r = admin_client.post(
+            f"/api/admin/users/{agent.id}/prepayment-approver",
+            data={"can_approve": "true", "limit": ""},
+        )
+        assert r.status_code == 404
+
+
 def test_users_audit_template_renders():
     """Smoke-render users_audit.html with a hand-built context (no DB)."""
     from types import SimpleNamespace

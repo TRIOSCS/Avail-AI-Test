@@ -1,7 +1,21 @@
 # tests/test_connector_service.py
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from app.services import connector_service as cs
+
+
+def _worker_row(**kw):
+    """A worker-status singleton row (TbfWorkerStatus-shaped) for worker_health()."""
+    base = dict(
+        is_running=True,
+        last_heartbeat=datetime.now(timezone.utc),
+        last_search_at=None,
+        circuit_breaker_open=False,
+        circuit_breaker_reason=None,
+    )
+    base.update(kw)
+    return SimpleNamespace(**base)
 
 
 def _src(**kw):
@@ -202,3 +216,139 @@ def test_connector_state_planned_ignores_active_flag():
         keyless=False,
     )
     assert result == "planned"
+
+
+# ── Worker-aware status (TBF / NetComponents / ICsource browser workers) ──────
+
+
+def test_worker_backed_sources_mapping():
+    """The three browser-worker sources map to their worker keys; others don't."""
+    for name in ("thebrokersite", "netcomponents", "icsource"):
+        assert cs.is_worker_backed(_src(name=name))
+        assert name in cs.WORKER_BACKED_SOURCES
+    assert not cs.is_worker_backed(_src(name="nexar"))
+    assert not cs.is_worker_backed(_src(name="mouser"))
+    assert cs.WORKER_BACKED_SOURCES == {"thebrokersite": "tbf", "netcomponents": "nc", "icsource": "ics"}
+
+
+def test_worker_health_healthy_recent_heartbeat():
+    """Running worker with a fresh heartbeat and closed breaker is healthy."""
+    v = cs.worker_health(_worker_row(last_heartbeat=datetime.now(timezone.utc) - timedelta(seconds=30)))
+    assert v["healthy"] is True
+    assert v["problem"] is None
+    assert v["heartbeat_age_secs"] is not None and v["heartbeat_age_secs"] < 120
+
+
+def test_worker_health_stale_heartbeat_unhealthy():
+    """A heartbeat older than the stale threshold is unhealthy with a 'stalled'
+    reason."""
+    old = datetime.now(timezone.utc) - timedelta(minutes=40)
+    v = cs.worker_health(_worker_row(last_heartbeat=old))
+    assert v["healthy"] is False
+    assert "stalled" in v["problem"].lower()
+
+
+def test_worker_health_not_running_unhealthy():
+    v = cs.worker_health(_worker_row(is_running=False))
+    assert v["healthy"] is False
+    assert "not running" in v["problem"].lower()
+
+
+def test_worker_health_circuit_breaker_open_unhealthy():
+    v = cs.worker_health(_worker_row(circuit_breaker_open=True, circuit_breaker_reason="Blocked by site"))
+    assert v["healthy"] is False
+    assert v["problem"] == "Blocked by site"
+
+
+def test_worker_health_missing_row_unhealthy():
+    v = cs.worker_health(None)
+    assert v["healthy"] is False
+    assert v["problem"]
+    assert v["heartbeat_age_secs"] is None
+
+
+def test_worker_health_no_heartbeat_unhealthy():
+    v = cs.worker_health(_worker_row(last_heartbeat=None))
+    assert v["healthy"] is False
+    assert v["heartbeat_age_secs"] is None
+
+
+def test_worker_health_naive_datetime_is_treated_as_utc():
+    """A naive (tz-less) heartbeat must not crash — it's coerced to UTC."""
+    naive = (datetime.now(timezone.utc) - timedelta(seconds=20)).replace(tzinfo=None)
+    v = cs.worker_health(_worker_row(last_heartbeat=naive))
+    assert v["healthy"] is True
+
+
+def test_state_worker_active_when_worker_healthy():
+    """A worker-backed source with a healthy worker reads 'worker_active', not
+    'live'/'error'."""
+    src = _src(name="thebrokersite", env_vars=["TBF_USERNAME", "TBF_PASSWORD"], status="live", is_active=True)
+    state = cs.connector_state(
+        src,
+        credential_set=False,  # no direct key — must NOT matter
+        oauth_connected=False,
+        needs_reconnect=False,
+        keyless=False,
+        worker={"healthy": True},
+    )
+    assert state == "worker_active"
+
+
+def test_state_worker_down_when_worker_unhealthy():
+    """A worker-backed source whose worker is stalled reads 'worker_down', never
+    'live'."""
+    src = _src(name="netcomponents", env_vars=["NC_USERNAME"], status="live", is_active=True)
+    state = cs.connector_state(
+        src,
+        credential_set=True,
+        oauth_connected=False,
+        needs_reconnect=False,
+        keyless=False,
+        worker={"healthy": False, "problem": "No heartbeat for 40 min — worker stalled"},
+    )
+    assert state == "worker_down"
+
+
+def test_state_worker_backed_never_needs_setup_without_key():
+    """A keyless worker-backed source must NEVER read 'needs_setup' just for lacking a
+    key."""
+    src = _src(name="icsource", env_vars=[], status="pending", is_active=True)
+    state = cs.connector_state(
+        src,
+        credential_set=False,
+        oauth_connected=False,
+        needs_reconnect=False,
+        keyless=True,
+        worker={"healthy": True},
+    )
+    assert state == "worker_active"
+    assert state != "needs_setup"
+
+
+def test_state_worker_backed_off_when_inactive():
+    """An operator-disabled worker source reads 'off' (not worker_down)."""
+    src = _src(name="thebrokersite", status="live", is_active=False)
+    state = cs.connector_state(
+        src,
+        credential_set=True,
+        oauth_connected=False,
+        needs_reconnect=False,
+        keyless=False,
+        worker={"healthy": True},
+    )
+    assert state == "off"
+
+
+def test_keyless_direct_api_still_needs_setup_without_access():
+    """Regression guard: a NON-worker keyless/keyed source still surfaces needs_setup
+    when it has no access — the worker carve-out must not leak to direct APIs."""
+    src = _src(name="mouser", env_vars=["MOUSER_API_KEY"], status="pending", is_active=False)
+    state = cs.connector_state(
+        src,
+        credential_set=False,
+        oauth_connected=False,
+        needs_reconnect=False,
+        keyless=False,
+    )
+    assert state == "needs_setup"

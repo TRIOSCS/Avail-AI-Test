@@ -13,24 +13,6 @@
     {{ data_ops_count_card("Materials", material_count) }}
   </div>
 
-  {# Vendor CSV Import #}
-  <div class="bg-white rounded-lg shadow border border-gray-200 p-4 mb-4">
-    <h3 class="text-sm font-semibold text-gray-900 mb-3">Import Vendors (CSV)</h3>
-    <form hx-post="/v2/partials/admin/import/vendors"
-          hx-target="#import-result"
-          hx-encoding="multipart/form-data"
-          data-loading-disable
-          class="flex items-center gap-3">
-      <input aria-label="Upload vendor CSV file" type="file" name="file" accept=".csv"
-             class="text-sm text-gray-600 file:mr-2 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:font-medium file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200">
-      <button type="submit"
-              class="btn btn-sm btn-primary">
-        Import
-      </button>
-    </form>
-    <div id="import-result" class="mt-2"></div>
-  </div>
-
   {# API Health (hx-target=this avoids inheriting <main#main-content hx-target="this">) #}
   <div hx-get="/v2/partials/admin/api-health"
        hx-target="this"

@@ -1,6 +1,6 @@
 """test_htmx_views_nightly4.py — Fourth nightly coverage boost for htmx_views.py.
 
-Targets: follow-ups list, find-by-part, vendor detail/tabs/edit/reviews/nudges,
+Targets: follow-ups list, vendor detail/tabs/edit/reviews/nudges,
          vendor contact timeline, part header/cell/spec inline editing,
          part tab routes (activity, comms, notes), error branches.
 
@@ -123,28 +123,6 @@ class TestFollowUpsListPartial:
         db_session.commit()
 
         resp = client.get("/v2/partials/follow-ups")
-        assert resp.status_code == 200
-
-
-# ── Tests: Find by part ───────────────────────────────────────────────
-
-
-class TestFindByPartPartial:
-    def test_no_mpn_returns_200(self, client: TestClient):
-        resp = client.get("/v2/partials/vendors/find-by-part")
-        assert resp.status_code == 200
-
-    def test_with_mpn_no_results(self, client: TestClient):
-        resp = client.get("/v2/partials/vendors/find-by-part?mpn=ZZZNOMATCH999")
-        assert resp.status_code == 200
-
-    def test_with_mpn_and_affinity_error(self, client: TestClient, db_session: Session):
-        """Affinity lookup exception is caught and logged — should still return 200."""
-        with patch(
-            "app.services.vendor_affinity_service.find_vendor_affinity",
-            side_effect=RuntimeError("affinity service down"),
-        ):
-            resp = client.get("/v2/partials/vendors/find-by-part?mpn=LM317T")
         assert resp.status_code == 200
 
 
@@ -648,28 +626,6 @@ class TestVendorTabWithMpnFilter:
     def test_detail_with_mpn_no_match(self, client: TestClient, db_session: Session, test_vendor_card: VendorCard):
         """Covers normalize_mpn branch in vendor_detail_partial (lines 3586-3590)."""
         resp = client.get(f"/v2/partials/vendors/{test_vendor_card.id}?mpn=LM317T")
-        assert resp.status_code == 200
-
-
-# ── Tests: Vendor affinity success path ──────────────────────────────
-
-
-class TestVendorAffinitySuccess:
-    def test_find_by_part_with_affinity_results(self, client: TestClient, db_session: Session):
-        """Covers affinity match insertion into results (lines 3530-3549)."""
-        affinity_data = [
-            {
-                "vendor_name": "AffinityVendorABC",
-                "vendor_id": None,
-                "confidence": 0.8,
-                "reasoning": "historical match",
-            }
-        ]
-        with patch(
-            "app.services.vendor_affinity_service.find_vendor_affinity",
-            return_value=affinity_data,
-        ):
-            resp = client.get("/v2/partials/vendors/find-by-part?mpn=LM317T")
         assert resp.status_code == 200
 
 

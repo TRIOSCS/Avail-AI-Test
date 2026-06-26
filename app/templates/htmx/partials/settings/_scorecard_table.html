@@ -1,0 +1,55 @@
+{#
+  settings/_scorecard_table.html — the ranked leaderboard table fragment.
+  Swapped into #scorecard-table on time-range change (and included on first paint).
+
+  Receives: rows (list[ScorecardRow]), time_range_labels (dict), time_range (str).
+  Called by: settings/scorecard.html (include) and htmx_views.settings_scorecard_tab
+             (HX-Request fragment render).
+  Depends on: the user_avatar macro, .data-table styles.
+#}
+{% from "htmx/partials/shared/_macros.html" import user_avatar %}
+
+{% if not rows %}
+<div class="rounded-lg border border-dashed border-line-base bg-white px-6 py-10 text-center">
+  <p class="text-sm font-medium text-gray-700">No activity recorded for {{ time_range_labels[time_range]|lower }}.</p>
+  <p class="text-xs text-gray-600 mt-1">Calls, emails, IMs, and new accounts/contacts will appear here as the team works.</p>
+</div>
+{% else %}
+<div class="overflow-x-auto rounded-lg border border-line-base bg-white">
+  <table class="data-table w-full">
+    <thead>
+      <tr>
+        <th class="text-right w-12">#</th>
+        <th class="text-left">User</th>
+        <th class="text-right">Calls</th>
+        <th class="text-right">Talk time</th>
+        <th class="text-right">Emails</th>
+        <th class="text-right">IMs</th>
+        <th class="text-right">Accounts added</th>
+        <th class="text-right">Contacts added</th>
+        <th class="text-right">Score</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td class="text-right font-semibold text-gray-600 tabular-nums">{{ row.rank }}</td>
+        <td class="text-left">
+          <div class="flex items-center gap-2">
+            {{ user_avatar(row.user, size='sm') }}
+            <span class="font-medium text-gray-900">{{ row.user.name or row.user.email }}</span>
+          </div>
+        </td>
+        <td class="text-right tabular-nums">{{ row.calls }}</td>
+        <td class="text-right tabular-nums">{{ row.talk_time_hms }}</td>
+        <td class="text-right tabular-nums">{{ row.emails_sent }}</td>
+        <td class="text-right tabular-nums">{{ row.ims_sent }}</td>
+        <td class="text-right tabular-nums">{{ row.accounts_added }}</td>
+        <td class="text-right tabular-nums">{{ row.contacts_added }}</td>
+        <td class="text-right font-semibold text-accent-700 tabular-nums">{{ row.score }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}

@@ -445,6 +445,27 @@ def test_quote(
 
 
 @pytest.fixture()
+def test_buy_plan(
+    db_session: Session,
+    test_quote: Quote,
+    test_requisition: Requisition,
+):  # -> BuyPlan (local import; type annotation omitted to satisfy ruff F821)
+    """A minimal BuyPlan linked to the test quote and requisition."""
+    from app.models.buy_plan import BuyPlan
+
+    bp = BuyPlan(
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status="draft",
+        so_status="pending",
+    )
+    db_session.add(bp)
+    db_session.commit()
+    db_session.refresh(bp)
+    return bp
+
+
+@pytest.fixture()
 def test_offer(
     db_session: Session,
     test_requisition: Requisition,

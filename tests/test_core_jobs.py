@@ -218,7 +218,12 @@ class TestJobTokenRefresh:
             await _job_token_refresh.__wrapped__()
 
         db_session.refresh(test_user)
-        assert "Token endpoint down" in (test_user.m365_error_reason or "")
+        # The raw exception text must NOT leak into the user-facing reason; a
+        # non-auth failure surfaces as the friendly self-healing message.
+        from app.services.m365_status import REASON_TRANSIENT
+
+        assert test_user.m365_error_reason == REASON_TRANSIENT
+        assert "Token endpoint down" not in (test_user.m365_error_reason or "")
 
     @pytest.mark.asyncio
     async def test_works_without_redis(self, db_session: Session, test_user: User):
@@ -373,7 +378,9 @@ class TestJobInboxScan:
             await _job_inbox_scan.__wrapped__()
 
         db_session.refresh(test_user)
-        assert test_user.m365_error_reason == "Inbox scan timed out"
+        from app.services.m365_status import REASON_TRANSIENT
+
+        assert test_user.m365_error_reason == REASON_TRANSIENT
 
     @pytest.mark.asyncio
     async def test_handles_scan_exception(self, db_session: Session, test_user: User):
@@ -396,7 +403,11 @@ class TestJobInboxScan:
             await _job_inbox_scan.__wrapped__()
 
         db_session.refresh(test_user)
-        assert "Graph API error" in (test_user.m365_error_reason or "")
+        # Raw Graph exception text must not reach the user-facing reason.
+        from app.services.m365_status import REASON_TRANSIENT
+
+        assert test_user.m365_error_reason == REASON_TRANSIENT
+        assert "Graph API error" not in (test_user.m365_error_reason or "")
 
     @pytest.mark.asyncio
     async def test_selector_error_reraises(self):

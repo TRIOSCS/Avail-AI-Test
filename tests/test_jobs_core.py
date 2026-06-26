@@ -239,7 +239,9 @@ def test_get_valid_token_sets_error_when_refresh_fails(db_session, test_user):
 
         token = asyncio.run(get_valid_token(test_user, db_session))
         assert token is None
-        assert test_user.m365_error_reason == "Token refresh failed"
+        from app.services.m365_status import REASON_AUTH
+
+        assert test_user.m365_error_reason == REASON_AUTH
 
 
 def test_get_valid_token_no_token_no_expiry(db_session, test_user):
@@ -497,8 +499,10 @@ def test_inbox_scan_handles_timeout(scheduler_db, test_user):
         from app.jobs.core_jobs import _job_inbox_scan
 
         asyncio.run(_job_inbox_scan())
-        # User should have an error set
-        assert test_user.m365_error_reason == "Inbox scan timed out"
+        # A timeout is transient — surfaced as the self-healing reason.
+        from app.services.m365_status import REASON_TRANSIENT
+
+        assert test_user.m365_error_reason == REASON_TRANSIENT
 
 
 def test_inbox_scan_error_in_user_gathering(scheduler_db):
@@ -548,7 +552,9 @@ def test_inbox_scan_safe_scan_timeout(scheduler_db, test_user):
             asyncio.run(_job_inbox_scan())
 
     scheduler_db.refresh(test_user)
-    assert test_user.m365_error_reason == "Inbox scan timed out"
+    from app.services.m365_status import REASON_TRANSIENT
+
+    assert test_user.m365_error_reason == REASON_TRANSIENT
 
 
 def test_inbox_scan_safe_scan_exception(scheduler_db, test_user):

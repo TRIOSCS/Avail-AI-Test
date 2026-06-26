@@ -89,6 +89,7 @@ from ..models.vendors import VendorContact
 from ..scoring import classify_lead, explain_lead, score_unified
 from ..services import clay_oauth, task_service
 from ..services.activity_service import log_activity as _log_activity
+from ..services.buyplan_naming import summarize_top_flag
 from ..services.commodity_registry import COMMODITY_TREE, get_display_name
 from ..services.faceted_search_service import (
     INTERNAL_FILTER_VALUES,
@@ -4250,96 +4251,6 @@ async def vendor_contacts_partial(
         }
     )
     return template_response("htmx/partials/vendors/contacts_list.html", ctx)
-
-
-@router.get("/v2/partials/vendors/find-by-part", response_class=HTMLResponse)
-async def find_by_part_partial(
-    request: Request,
-    mpn: str = "",
-    hx_target: str = Query("#main-content", alias="hx_target"),
-    push_url_base: str = Query("/v2/vendors", alias="push_url_base"),
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Search vendors by MPN via MaterialVendorHistory."""
-    from ..models.intelligence import MaterialCard, MaterialVendorHistory
-    from ..utils.normalization import normalize_mpn
-
-    hx_target, push_url_base = _sanitize_hx_params(hx_target, push_url_base, "/v2/vendors")
-
-    results = []
-    norm_mpn = normalize_mpn(mpn) if mpn.strip() else None
-
-    if norm_mpn:
-        rows = (
-            db.query(MaterialVendorHistory, VendorCard)
-            .join(MaterialCard, MaterialVendorHistory.material_card_id == MaterialCard.id)
-            .outerjoin(VendorCard, VendorCard.normalized_name == MaterialVendorHistory.vendor_name_normalized)
-            .filter(MaterialCard.normalized_mpn == norm_mpn)
-            .order_by(
-                MaterialVendorHistory.times_seen.desc(),
-                VendorCard.response_rate.desc().nullslast(),
-                VendorCard.total_pos.desc().nullslast(),
-                VendorCard.avg_response_hours.asc().nullslast(),
-            )
-            .limit(30)
-            .all()
-        )
-        for mvh, vc in rows:
-            results.append(
-                {
-                    "vendor_name": mvh.vendor_name,
-                    "vendor_id": vc.id if vc else None,
-                    "times_seen": mvh.times_seen or 0,
-                    "last_price": mvh.last_price,
-                    "last_qty": mvh.last_qty,
-                    "last_seen": mvh.last_seen,
-                    "win_rate": vc.overall_win_rate if vc else None,
-                    "avg_response_hours": vc.avg_response_hours if vc else None,
-                    "is_affinity": False,
-                }
-            )
-
-    # If few MVH results, try vendor affinity matching
-    if norm_mpn and len(results) < 10:
-        try:
-            from app.services.vendor_affinity_service import find_vendor_affinity
-
-            affinity_matches = find_vendor_affinity(norm_mpn, db)
-
-            # Add affinity matches that aren't already in results
-            existing_vendors = {r["vendor_name"].lower() for r in results}
-            for match in affinity_matches:
-                vname = match.get("vendor_name", "")
-                if vname.lower() not in existing_vendors:
-                    results.append(
-                        {
-                            "vendor_name": vname,
-                            "vendor_id": match.get("vendor_id"),
-                            "times_seen": 0,
-                            "last_price": None,
-                            "last_qty": None,
-                            "last_seen": None,
-                            "win_rate": None,
-                            "avg_response_hours": None,
-                            "is_affinity": True,
-                            "affinity_confidence": match.get("confidence", 0),
-                            "affinity_reasoning": match.get("reasoning", ""),
-                        }
-                    )
-        except Exception:
-            logger.warning(f"Vendor affinity lookup failed for {norm_mpn}", exc_info=True)
-
-    ctx = _base_ctx(request, user, "vendors")
-    ctx.update(
-        {
-            "mpn": mpn.strip().upper() if mpn.strip() else None,
-            "results": results,
-            "hx_target": hx_target,
-            "push_url_base": push_url_base,
-        }
-    )
-    return template_response("htmx/partials/vendors/find_by_part.html", ctx)
 
 
 @router.get("/v2/partials/vendors/create-form", response_class=HTMLResponse)
@@ -11117,6 +11028,8 @@ async def buy_plan_detail_partial(
             "lines": bp.lines or [],
             "is_ops_member": _is_ops_member(user, db),
             "user": user,
+            # Most-urgent flag reason so the indicator states the issue at first glance.
+            "top_flag": summarize_top_flag(bp.ai_flags),
         }
     )
     return template_response("htmx/partials/buy_plans/detail.html", ctx)
@@ -11424,6 +11337,52 @@ async def settings_users_tab(
     ctx = _base_ctx(request, user, "settings")
     ctx.update(users_context(db))
     return template_response("htmx/partials/settings/users.html", ctx)
+
+
+@router.get("/v2/partials/settings/scorecard", response_class=HTMLResponse)
+async def settings_scorecard_tab(
+    request: Request,
+    time_range: str = "this_month",
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Activity Scorecard tab — per-user activity leaderboard. Manager/admin only.
+
+    A leaderboard of all users' activity is oversight/performance data, so it is gated
+    to the supervisor tier (MANAGER + ADMIN) via is_manager_or_admin — buyers/sales/
+    traders never see it. On an HX-Request triggered by the time-range selector only the
+    table fragment is swapped; the first paint (and a direct hit) renders the full tab.
+    """
+    if not is_manager_or_admin(user):
+        raise HTTPException(403, "Managers and admins only")
+    from ..services.activity_scorecard import (
+        DEFAULT_TIME_RANGE,
+        TALK_TIME_BUCKET_SECONDS,
+        TIME_RANGE_LABELS,
+        TIME_RANGES,
+        compute_scorecard,
+        scoring_formula_parts,
+    )
+
+    if time_range not in TIME_RANGES:
+        time_range = DEFAULT_TIME_RANGE
+
+    ctx = _base_ctx(request, user, "settings")
+    ctx.update(
+        {
+            "rows": compute_scorecard(db, time_range),
+            "time_range": time_range,
+            "time_ranges": TIME_RANGES,
+            "time_range_labels": TIME_RANGE_LABELS,
+            "formula_parts": scoring_formula_parts(),
+            "talk_bucket_min": TALK_TIME_BUCKET_SECONDS // 60,
+        }
+    )
+
+    # Time-range selector swaps only the table fragment; full-tab on first paint.
+    if request.headers.get("HX-Request") == "true" and request.headers.get("HX-Trigger-Name") == "time_range":
+        return template_response("htmx/partials/settings/_scorecard_table.html", ctx)
+    return template_response("htmx/partials/settings/scorecard.html", ctx)
 
 
 @router.post("/v2/partials/buy-plans/{plan_id}/reset", response_class=HTMLResponse)
@@ -13454,6 +13413,7 @@ async def build_buy_plan_htmx(
     ctx["lines"] = bp_lines
     ctx["user"] = user
     ctx["is_ops_member"] = _is_ops_member(user, db)
+    ctx["top_flag"] = summarize_top_flag(plan.ai_flags)
     return template_response("htmx/partials/buy_plans/detail.html", ctx)
 
 
@@ -14108,6 +14068,8 @@ async def settings_partial(
     ctx = _base_ctx(request, user, "settings")
     ctx["active_tab"] = tab
     ctx["is_admin"] = user.role == UserRole.ADMIN
+    # Supervisor-tier flag — gates the Activity Scorecard tab (manager + admin).
+    ctx["is_manager"] = is_manager_or_admin(user)
     return template_response("htmx/partials/settings/index.html", ctx)
 
 
@@ -14384,6 +14346,22 @@ def _build_connector_field(db, source_name: str, env_var: str) -> dict:
     return {"is_set": is_set, "masked": masked}
 
 
+def _worker_status_row(source_name: str, db):
+    """Return the worker-status singleton for a worker-backed source (or None).
+
+    Maps an ApiSource.name (thebrokersite/netcomponents/icsource) to its heartbeat model
+    via connector_service.WORKER_BACKED_SOURCES, reading the id=1 singleton.
+    """
+    from ..models import IcsWorkerStatus, NcWorkerStatus, TbfWorkerStatus
+    from ..services import connector_service
+
+    worker_key = connector_service.WORKER_BACKED_SOURCES.get(source_name)
+    model = {"tbf": TbfWorkerStatus, "nc": NcWorkerStatus, "ics": IcsWorkerStatus}.get(worker_key)
+    if model is None:
+        return None
+    return db.get(model, 1)
+
+
 def _enrich_source(source, db) -> dict:
     """Build the per-source context dict for the connectors tab."""
     from ..services import connector_service
@@ -14405,12 +14383,18 @@ def _enrich_source(source, db) -> dict:
         oauth_connected = False
         needs_reconnect = False
 
+    # Worker-backed sources: derive status from the worker heartbeat, not a direct API.
+    worker = None
+    if connector_service.is_worker_backed(source):
+        worker = connector_service.worker_health(_worker_status_row(name, db))
+
     state = connector_service.connector_state(
         source,
         credential_set=credential_set,
         oauth_connected=oauth_connected,
         needs_reconnect=needs_reconnect,
         keyless=keyless,
+        worker=worker,
     )
 
     # Keyless note
@@ -14422,11 +14406,14 @@ def _enrich_source(source, db) -> dict:
     else:
         keyless_note = ""
 
-    # Planned connectors are never testable — they have no implementation yet.
-    if ct == "planned":
+    # Testability:
+    #  - planned: never (no implementation yet)
+    #  - worker-backed: never via the API-probe Test button — health is the heartbeat,
+    #    not a synchronous search (the worker runs out-of-process on a schedule)
+    #  - else: has some form of access
+    if ct == "planned" or worker is not None:
         testable = False
     else:
-        # Testable = has some form of access
         testable = bool(credential_set or oauth_connected or keyless)
 
     return {
@@ -14447,6 +14434,8 @@ def _enrich_source(source, db) -> dict:
         "error_count_24h": getattr(source, "error_count_24h", 0) or 0,
         "keyless_note": keyless_note,
         "testable": testable,
+        # Worker-backed health (None for direct-API/keyless/oauth sources).
+        "worker": worker,
     }
 
 
@@ -15582,49 +15571,72 @@ async def admin_api_health(
     )
 
 
-@router.post("/v2/partials/admin/import/vendors", response_class=HTMLResponse)
-async def import_vendors_csv(
+@router.post("/v2/partials/vendors/import-stock", response_class=HTMLResponse)
+async def import_vendor_stock_list(
     request: Request,
-    user: User = Depends(require_admin),
+    user: User = Depends(require_buyer),
     db: Session = Depends(get_db),
 ):
-    """Import vendors from CSV upload."""
+    """Ingest a vendor stock-list upload (CSV/TSV/XLSX) from the Vendors-page modal.
+
+    Thin wrapper over the shared ``stock_list_ingest`` service (same ingest the JSON
+    ``POST /api/materials/import-stock`` endpoint uses). Returns an HTML result banner that
+    HTMX swaps into ``#vendor-stock-result``.
+    """
+    from ..services.stock_list_ingest import (
+        StockListValidationError,
+        ingest_stock_list,
+        maybe_trigger_vendor_enrichment,
+        validate_metadata,
+    )
+
     form = await request.form()
     file = form.get("file")
     if not file:
-        raise HTTPException(400, "CSV file is required")
+        return template_response(
+            "htmx/partials/vendors/stock_import_result.html",
+            {"request": request, "error": "A stock-list file is required."},
+        )
 
-    import csv
-    import io
+    filename = file.filename or "upload.csv"
+    vendor_name = form.get("vendor_name") or ""
+    try:
+        # Cheap checks (type + vendor) first — reject before buffering the body.
+        validate_metadata(filename, vendor_name)
+        content = await file.read()
+        result = ingest_stock_list(
+            db,
+            filename=filename,
+            content=content,
+            vendor_name=vendor_name,
+            vendor_website=(form.get("vendor_website") or ""),
+        )
+    except StockListValidationError as exc:
+        return template_response(
+            "htmx/partials/vendors/stock_import_result.html",
+            {"request": request, "error": exc.message},
+        )
 
-    content = await file.read()
-    reader = csv.DictReader(io.StringIO(content.decode("utf-8")))
-    count = 0
-    for row in reader:
-        name = row.get("name", "").strip()
-        if not name:
-            continue
-        from ..vendor_utils import normalize_vendor_name
+    await maybe_trigger_vendor_enrichment(db, result)
+    logger.info(
+        "Vendor stock-list upload by {}: vendor={!r} imported={} skipped={}",
+        user.email,
+        result.vendor_name,
+        result.imported_rows,
+        result.skipped_rows,
+    )
 
-        norm = normalize_vendor_name(name)
-        existing = db.query(VendorCard).filter(VendorCard.normalized_name == norm).first()
-        if not existing:
-            vc = VendorCard(
-                display_name=name,
-                normalized_name=norm,
-                emails=[row.get("email", "")] if row.get("email") else [],
-                phones=[row.get("phone", "")] if row.get("phone") else [],
-                website=row.get("website", ""),
-                sighting_count=0,
-            )
-            db.add(vc)
-            count += 1
-    db.commit()
-    logger.info("Vendor CSV import: {} new vendors by {}", count, user.email)
-
-    return HTMLResponse(
-        f'<div class="bg-emerald-50 border border-emerald-200 rounded p-3 text-sm text-emerald-700">'
-        f"Imported {count} new vendors from CSV.</div>"
+    return template_response(
+        "htmx/partials/vendors/stock_import_result.html",
+        {
+            "request": request,
+            "error": None,
+            "vendor_name": result.vendor_name,
+            "imported_rows": result.imported_rows,
+            "skipped_rows": result.skipped_rows,
+            "total_rows": result.total_rows,
+            "warnings": result.warnings,
+        },
     )
 
 

@@ -10,7 +10,6 @@ Target line ranges:
   - search_run             2995–3030  (~36 lines)
   - search_filter          3105–3131  (~27 lines)
   - requisition_picker     3285–3296  (~12 lines)
-  - find_by_part_partial   3485–3562  (~78 lines)
 
 Called by: pytest autodiscovery (asyncio_mode = auto)
 Depends on: conftest.py fixtures, app.routers.htmx_views
@@ -444,49 +443,6 @@ class TestRequisitionPickerDirect:
                 mpn="LM317T",
                 items="[]",
                 action="add",
-                user=test_user,
-                db=db_session,
-            )
-        assert result.status_code == 200
-
-
-# ── find_by_part_partial (3485–3562) ──────────────────────────────────────────
-
-
-class TestFindByPartPartialDirect:
-    async def test_find_by_part_no_mpn(self, db_session: Session, test_user: User):
-        """Lines 3490–3491: blank mpn → no results, renders template."""
-        from app.routers.htmx_views import find_by_part_partial
-
-        mock_req = _mock_get_request("/v2/partials/vendors/find-by-part")
-        with patch("app.routers.htmx_views.template_response") as mock_tpl:
-            mock_tpl.return_value = HTMLResponse("find by part")
-            result = await find_by_part_partial(
-                request=mock_req,
-                mpn="",
-                hx_target="#main-content",
-                push_url_base="/v2/vendors",
-                user=test_user,
-                db=db_session,
-            )
-        assert result.status_code == 200
-
-    async def test_find_by_part_with_mpn(self, db_session: Session, test_user: User):
-        """Lines 3493–3561: valid mpn → MVH query, affinity fallback, renders
-        template."""
-        from app.routers.htmx_views import find_by_part_partial
-
-        mock_req = _mock_get_request("/v2/partials/vendors/find-by-part")
-        with (
-            patch("app.routers.htmx_views.template_response") as mock_tpl,
-            patch("app.services.vendor_affinity_service.find_vendor_affinity", return_value=[]),
-        ):
-            mock_tpl.return_value = HTMLResponse("find by part mpn")
-            result = await find_by_part_partial(
-                request=mock_req,
-                mpn="LM317T",
-                hx_target="#main-content",
-                push_url_base="/v2/vendors",
                 user=test_user,
                 db=db_session,
             )

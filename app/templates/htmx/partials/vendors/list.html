@@ -24,7 +24,7 @@
       </a>
       <button type="button" @click="importOpen = true" class="btn btn-secondary btn-sm">
         <svg class="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
-        Import Vendors
+        Upload stock list
       </button>
       <button hx-get="/v2/partials/vendors/create-form"
               hx-target="#main-content"
@@ -36,34 +36,48 @@
     </div>
   </div>
 
-  {# Import Vendors modal — uploads a CSV to the existing admin import endpoint.
-     Result HTML is swapped into #vendor-import-result. CSV header: name,email,phone,website. #}
+  {# Upload stock list modal — uploads a vendor's stock list (CSV/TSV/XLSX) for a named
+     vendor and ingests the rows (MPN, qty, price, condition…) via the shared stock-list
+     ingest. Result HTML is swapped into #vendor-stock-result. #}
   <div x-show="importOpen" x-cloak
        class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
        @keydown.escape.window="importOpen = false">
     <div class="bg-white rounded-xl shadow-xl w-full max-w-md relative" @click.outside="importOpen = false">
       <div class="modal-header">
-        <h3 class="h4">Import Vendors</h3>
+        <h3 class="h4">Upload stock list</h3>
         <button type="button" class="modal-close" @click="importOpen = false" aria-label="Close">&times;</button>
       </div>
       <form class="modal-body space-y-3"
-            hx-post="/v2/partials/admin/import/vendors"
-            hx-target="#vendor-import-result"
+            hx-post="/v2/partials/vendors/import-stock"
+            hx-target="#vendor-stock-result"
             hx-swap="innerHTML"
             hx-encoding="multipart/form-data">
-        <p class="text-sm text-gray-600">Upload a CSV with a header row of <code>name,email,phone,website</code>. Existing vendors (matched by normalized name) are skipped.</p>
-        <input type="file" name="file" accept=".csv,text/csv" required
+        <p class="text-sm text-gray-600">Upload a vendor's stock list (CSV, TSV, or Excel) with a header row including columns like <code>mpn</code>, <code>qty</code>, <code>price</code>, <code>manufacturer</code>, <code>condition</code>. Rows are ingested as parts with this vendor's stock.</p>
+        <div>
+          <label class="block text-xs font-medium text-gray-600 mb-1" for="stock-vendor-name">Vendor name</label>
+          <input id="stock-vendor-name" type="text" name="vendor_name" required maxlength="255"
+                 placeholder="e.g. Acme Components"
+                 class="input w-full">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-600 mb-1" for="stock-vendor-website">Vendor website <span class="text-gray-400">(optional)</span></label>
+          <input id="stock-vendor-website" type="text" name="vendor_website"
+                 placeholder="e.g. acme-components.com"
+                 class="input w-full">
+        </div>
+        <input type="file" name="file" accept=".csv,.tsv,.xlsx,.xls" required
                class="block w-full text-sm text-gray-600 file:mr-3 file:rounded file:border-0 file:bg-accent-50 file:px-3 file:py-1.5 file:text-sm file:text-accent-700">
-        <div id="vendor-import-result"></div>
+        <div id="vendor-stock-result"></div>
         <div class="modal-footer">
+          <span class="htmx-indicator text-xs text-gray-400 mr-auto">Uploading…</span>
           <button type="button" class="btn btn-secondary btn-sm" @click="importOpen = false">Close</button>
-          <button type="submit" class="btn btn-primary btn-sm" data-loading-disable>Import</button>
+          <button type="submit" class="btn btn-primary btn-sm" data-loading-disable>Upload</button>
         </div>
       </form>
     </div>
   </div>
 
-  {# Sub-tab bar: All Vendors / My Vendors / Find by Part
+  {# Sub-tab bar: All Vendors / My Vendors
      Active state: accent underline + accent-700 text (mirrors the CRM shell tab bar). #}
   <div class="flex gap-1 mb-4 border-b border-line-base">
     <a href="/v2/vendors"
@@ -81,13 +95,6 @@
        class="px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-[2px]
               {{ 'text-accent-700 border-accent-500' if my_only else 'text-gray-600 border-transparent hover:text-gray-700 hover:border-gray-300' }}">
       My Vendors
-    </a>
-    <a hx-get="/v2/partials/vendors/find-by-part?hx_target={{ hx_target|default('#main-content')|urlencode }}&push_url_base={{ push_url_base|default('/v2/vendors')|urlencode }}"
-       hx-target="{{ hx_target|default('#main-content') }}"
-       hx-push-url="{{ push_url_base|default('/v2/vendors') }}?view=find"
-       class="px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-[2px]
-              text-gray-600 border-transparent hover:text-gray-700 hover:border-gray-300">
-      Find by Part
     </a>
   </div>
 

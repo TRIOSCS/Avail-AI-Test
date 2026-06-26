@@ -250,32 +250,3 @@ class TestVendorContactsList:
         resp = client.get("/v2/partials/vendor-contacts?search=zzz-no-match-zzz")
         assert resp.status_code == 200
         assert test_vendor_contact.full_name not in resp.text
-
-
-# ── Part 2.3 — Vendor CSV import UI ───────────────────────────────────────────
-
-
-class TestVendorImportUI:
-    def test_import_button_renders_on_vendor_list(self, client):
-        resp = client.get("/v2/partials/vendors")
-        assert resp.status_code == 200
-        assert "Import Vendors" in resp.text
-        # The button/modal must wire to the existing import endpoint.
-        assert "/v2/partials/admin/import/vendors" in resp.text
-
-    def test_import_endpoint_posts_csv(self, db_session, admin_user):
-        client, overrides = _client_for(db_session, admin_user)
-        from app.main import app
-
-        try:
-            csv_bytes = b"name,email,phone,website\nNewCo Imports,sales@newco.com,,https://newco.com\n"
-            resp = client.post(
-                "/v2/partials/admin/import/vendors",
-                files={"file": ("vendors.csv", csv_bytes, "text/csv")},
-            )
-            assert resp.status_code == 200
-            assert "Imported" in resp.text
-            assert db_session.query(VendorCard).filter(VendorCard.display_name == "NewCo Imports").first() is not None
-        finally:
-            for dep in overrides:
-                app.dependency_overrides.pop(dep, None)

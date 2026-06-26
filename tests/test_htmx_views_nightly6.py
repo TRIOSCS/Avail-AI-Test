@@ -587,25 +587,3 @@ class TestProactiveScorecardBadge:
         resp = client.get("/v2/partials/proactive/badge")
         assert resp.status_code == 200
         assert "span" in resp.text and "1" in resp.text
-
-
-# ── Section 8: Vendor import CSV ─────────────────────────────────────
-
-
-class TestVendorImportCSV:
-    """Tests for POST /v2/partials/admin/import/vendors."""
-
-    def test_missing_file_raises_400(self, client, db_session):
-        resp = client.post("/v2/partials/admin/import/vendors", data={})
-        assert resp.status_code == 400
-
-    def test_valid_csv_imports_vendors(self, client, db_session):
-        import io
-
-        csv_content = b"name,email,website\nTestVendorImport,tv@example.com,https://tv.com\n"
-        resp = client.post(
-            "/v2/partials/admin/import/vendors",
-            files={"file": ("vendors.csv", io.BytesIO(csv_content), "text/csv")},
-        )
-        assert resp.status_code == 200
-        assert "Imported" in resp.text

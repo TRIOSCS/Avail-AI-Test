@@ -679,6 +679,7 @@ from .routers.activity import router as activity_router
 from .routers.admin import router as admin_router
 from .routers.ai import router as ai_router
 from .routers.alerts import router as alerts_router
+from .routers.approvals import router as approvals_router
 from .routers.attachments_extra import router as attachments_extra_router
 from .routers.auth import router as auth_router
 from .routers.avatars import router as avatars_router
@@ -690,7 +691,9 @@ from .routers.events import router as events_router
 from .routers.htmx_views import router as htmx_views_router
 from .routers.materials import router as materials_router
 from .routers.part_dossier import router as part_dossier_router
+from .routers.prepayments import router as prepayments_router
 from .routers.proactive import router as proactive_router
+from .routers.quality_plans import router as quality_plans_router
 from .routers.quote_builder import router as quote_builder_router
 from .routers.requisitions import router as reqs_router
 from .routers.requisitions2 import router as requisitions2_router
@@ -725,6 +728,9 @@ app.include_router(sources_router)
 app.include_router(tags_router)
 app.include_router(resell_router)
 app.include_router(v13_router)
+app.include_router(approvals_router)
+app.include_router(prepayments_router)
+app.include_router(quality_plans_router)
 app.include_router(vendor_contacts_router)
 app.include_router(vendors_crud_router)
 app.include_router(quote_builder_router)

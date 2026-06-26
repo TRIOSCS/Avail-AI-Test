@@ -1809,13 +1809,14 @@ class TestVendorListCadence:
         assert "outbound_asc" in resp.text
 
     def test_vendor_list_discovery_tabs_still_present(self, client: TestClient, db_session: Session, test_user: User):
-        """All Vendors, My Vendors, and Find by Part tabs still render."""
+        """All Vendors + My Vendors tabs still render; Find by Part removed (redundant
+        with Search/Sightings)."""
         self._make_vendor(db_session, "TabsCheck Vendor")
         resp = client.get("/v2/partials/vendors")
         assert resp.status_code == 200
         assert "All Vendors" in resp.text
         assert "My Vendors" in resp.text
-        assert "Find by Part" in resp.text
+        assert "Find by Part" not in resp.text
 
 
 class TestVendorDetailCadenceHero:

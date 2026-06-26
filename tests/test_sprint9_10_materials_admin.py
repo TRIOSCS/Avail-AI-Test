@@ -10,7 +10,7 @@ Depends on: conftest.py fixtures, app.routers.htmx_views
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.models import MaterialCard, User, VendorCard
+from app.models import MaterialCard, User
 
 # ── Material Enrichment ──────────────────────────────────────────────
 
@@ -130,29 +130,3 @@ class TestAdminDataOps:
         assert marker in resp.text
         start = resp.text.index(marker)
         assert 'hx-target="this"' in resp.text[start : start + 280]
-
-
-# ── Vendor CSV Import ────────────────────────────────────────────────
-
-
-class TestVendorImport:
-    def test_import_csv(self, client: TestClient, db_session: Session):
-        import io
-
-        csv_content = "name,email,phone,website\nNew Vendor Co,sales@newvendor.com,555-1234,https://newvendor.com\n"
-        resp = client.post(
-            "/v2/partials/admin/import/vendors",
-            files={"file": ("vendors.csv", io.BytesIO(csv_content.encode()), "text/csv")},
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 200
-        assert "Imported" in resp.text
-        v = db_session.query(VendorCard).filter(VendorCard.display_name == "New Vendor Co").first()
-        assert v is not None
-
-    def test_import_no_file(self, client: TestClient):
-        resp = client.post(
-            "/v2/partials/admin/import/vendors",
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 400

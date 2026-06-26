@@ -24,7 +24,7 @@ from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from .constants import RESTRICTED_ROLES, ROLE_ACCESS_DEFAULTS, AccessKey, UserRole
+from .constants import RESTRICTED_ROLES, ROLE_ACCESS_DEFAULTS, AccessKey, ApprovalRecipientStatus, UserRole
 from .database import get_db
 from .models import AccountCollaborator, BuyPlan, Company, CustomerSite, Quote, Requisition, User
 
@@ -247,6 +247,61 @@ def require_buyplan_approver(request: Request, db: Session = Depends(get_db)) ->
     if not can_approve_buy_plans(user):
         raise HTTPException(403, "Buy-plan approval right required for this action")
     return user
+
+
+def require_approval_gatekeeper(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+) -> User:
+    """Dependency: 403 unless the current user is a PENDING recipient on this request.
+
+    Resolves request_id from path param "id". Checks:
+      - Direct PENDING row: ApprovalStepRecipient.user_id == user.id
+      - Delegate row: ApprovalStepRecipient.reassigned_to_id == user.id (status PENDING)
+
+    Using Depends(require_user) so test overrides propagate correctly.
+    """
+    from .models.approvals import ApprovalStep, ApprovalStepRecipient
+
+    request_id_str = request.path_params.get("id")
+    if not request_id_str:
+        raise HTTPException(403, "No request id in path")
+
+    try:
+        request_id = int(request_id_str)
+    except (ValueError, TypeError):
+        raise HTTPException(403, "Invalid request id")
+
+    # Direct PENDING recipient
+    recipient = db.execute(
+        select(ApprovalStepRecipient)
+        .join(ApprovalStep, ApprovalStepRecipient.step_id == ApprovalStep.id)
+        .where(
+            ApprovalStep.request_id == request_id,
+            ApprovalStepRecipient.user_id == user.id,
+            ApprovalStepRecipient.status == ApprovalRecipientStatus.PENDING,
+        )
+    ).scalar_one_or_none()
+
+    if recipient is not None:
+        return user
+
+    # Delegate: another slot was reassigned_to_id == user.id and is still PENDING
+    delegate = db.execute(
+        select(ApprovalStepRecipient)
+        .join(ApprovalStep, ApprovalStepRecipient.step_id == ApprovalStep.id)
+        .where(
+            ApprovalStep.request_id == request_id,
+            ApprovalStepRecipient.reassigned_to_id == user.id,
+            ApprovalStepRecipient.status == ApprovalRecipientStatus.PENDING,
+        )
+    ).scalar_one_or_none()
+
+    if delegate is not None:
+        return user
+
+    raise HTTPException(403, "You are not a pending recipient of this approval request")
 
 
 # ── Per-feature access (user-management foundation) ───────────────────

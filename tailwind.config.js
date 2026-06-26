@@ -21,7 +21,20 @@ module.exports = {
   theme: {
     extend: {
       fontFamily: {
-        sans: ['Aptos', 'Segoe UI', 'system-ui', '-apple-system', 'sans-serif'],
+        // Aptos is the primary UI face — a Microsoft system font present on Win11
+        // and Office-enabled machines (the user's environment). Inter is a real,
+        // loaded web font (Google Fonts link in base.html/login.html) that acts
+        // as the cross-platform fallback for non-Aptos machines. Aptos cannot be
+        // web-loaded (Microsoft-licensed), so it sits first in the stack and wins
+        // on machines that have it; everyone else gets loaded Inter.
+        sans: [
+          'Aptos',
+          'Inter',
+          'Segoe UI',
+          'system-ui',
+          '-apple-system',
+          'sans-serif',
+        ],
       },
       // Two-tier shadow language: `card` for resting surfaces (≈ the old
       // shadow-sm, brand-tinted), `float` for modals/dropdowns/action rails.
