@@ -11347,6 +11347,52 @@ async def settings_users_tab(
     return template_response("htmx/partials/settings/users.html", ctx)
 
 
+@router.get("/v2/partials/settings/scorecard", response_class=HTMLResponse)
+async def settings_scorecard_tab(
+    request: Request,
+    time_range: str = "this_month",
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Activity Scorecard tab — per-user activity leaderboard. Manager/admin only.
+
+    A leaderboard of all users' activity is oversight/performance data, so it is gated
+    to the supervisor tier (MANAGER + ADMIN) via is_manager_or_admin — buyers/sales/
+    traders never see it. On an HX-Request triggered by the time-range selector only the
+    table fragment is swapped; the first paint (and a direct hit) renders the full tab.
+    """
+    if not is_manager_or_admin(user):
+        raise HTTPException(403, "Managers and admins only")
+    from ..services.activity_scorecard import (
+        DEFAULT_TIME_RANGE,
+        TALK_TIME_BUCKET_SECONDS,
+        TIME_RANGE_LABELS,
+        TIME_RANGES,
+        compute_scorecard,
+        scoring_formula_parts,
+    )
+
+    if time_range not in TIME_RANGES:
+        time_range = DEFAULT_TIME_RANGE
+
+    ctx = _base_ctx(request, user, "settings")
+    ctx.update(
+        {
+            "rows": compute_scorecard(db, time_range),
+            "time_range": time_range,
+            "time_ranges": TIME_RANGES,
+            "time_range_labels": TIME_RANGE_LABELS,
+            "formula_parts": scoring_formula_parts(),
+            "talk_bucket_min": TALK_TIME_BUCKET_SECONDS // 60,
+        }
+    )
+
+    # Time-range selector swaps only the table fragment; full-tab on first paint.
+    if request.headers.get("HX-Request") == "true" and request.headers.get("HX-Trigger-Name") == "time_range":
+        return template_response("htmx/partials/settings/_scorecard_table.html", ctx)
+    return template_response("htmx/partials/settings/scorecard.html", ctx)
+
+
 @router.post("/v2/partials/buy-plans/{plan_id}/reset", response_class=HTMLResponse)
 async def buy_plan_reset_partial(
     request: Request,
@@ -14030,6 +14076,8 @@ async def settings_partial(
     ctx = _base_ctx(request, user, "settings")
     ctx["active_tab"] = tab
     ctx["is_admin"] = user.role == UserRole.ADMIN
+    # Supervisor-tier flag — gates the Activity Scorecard tab (manager + admin).
+    ctx["is_manager"] = is_manager_or_admin(user)
     return template_response("htmx/partials/settings/index.html", ctx)
 
 

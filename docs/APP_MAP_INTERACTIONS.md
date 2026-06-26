@@ -4028,7 +4028,31 @@ PROSPECT SCORING:
         +---> fit_score (ICP match)
         +---> readiness_score (buying signals)
         +---> prospect_priority.py (rank order)
+
+ACTIVITY SCORECARD (per-user leaderboard, on-demand read):
+    activity_scorecard.py  (Settings -> Scorecard tab; manager/admin only)
+        +---> calls            = activity_log WHERE channel=PHONE (both directions)
+        +---> talk_time        = SUM(duration_seconds) over those PHONE rows
+        +---> emails_sent      = channel=EMAIL AND direction=OUTBOUND
+        +---> ims_sent         = channel IN (TEAMS,WECHAT) AND direction=OUTBOUND
+        +---> accounts_added   = COUNT(companies.created_by_id) per user
+        +---> contacts_added   = COUNT(site_contacts.created_by_id) per user
+        +---> score = weighted sum (WEIGHTS const: call=1, talk=1/5min,
+        |             email=1, im=0.5, account=5, contact=2) -> rank desc
+        +---> 4 GROUP BY queries total (no per-user N+1); range:
+              this_week / this_month (default) / this_quarter / all_time
 ```
+
+### Settings -> Activity Scorecard Tab (`/v2/partials/settings/scorecard`, manager/admin)
+
+`htmx_views.settings_scorecard_tab` gates on `is_manager_or_admin` (a leaderboard of
+all users' activity is oversight/performance data — buyers/sales/traders never see it),
+calls `activity_scorecard.compute_scorecard(db, time_range)`, and renders
+`settings/scorecard.html` (full tab) or `settings/_scorecard_table.html` (fragment) when
+the time-range `<select>` fires an `HX-Request` (`HX-Trigger-Name: time_range`). The tab
+button lives in `settings/index.html` behind `{% if is_manager %}` (set in
+`settings_partial`). The scoring formula is rendered transparently from
+`scoring_formula_parts()` so the weights stay in sync with the `WEIGHTS` constant.
 
 ---
 
