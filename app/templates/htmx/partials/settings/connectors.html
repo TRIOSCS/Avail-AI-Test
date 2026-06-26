@@ -8,10 +8,13 @@
 <title hx-swap-oob="true">Connectors · Settings</title>
 {% import 'htmx/partials/settings/_connector_macros.html' as cm %}
 
+{# "live" counts working connectors: direct-API live + worker-backed healthy.
+   "need setup" counts everything not working and not deliberately off (incl. worker_down). #}
+{%- set _ok_states = ['live', 'worker_active'] -%}
 {%- set _all = [] -%}
 {%- for g in connector_groups %}{% for s in g.sources %}{{ _all.append(s) or '' }}{% endfor %}{% endfor -%}
-{%- set _live = _all | selectattr('state', 'equalto', 'live') | list | length -%}
-{%- set _needs = _all | rejectattr('state', 'in', ['live', 'off']) | list | length -%}
+{%- set _live = _all | selectattr('state', 'in', _ok_states) | list | length -%}
+{%- set _needs = _all | rejectattr('state', 'in', _ok_states + ['off', 'planned']) | list | length -%}
 
 <div id="connectors-root" class="space-y-8" hx-ext="loading-states">
   <div class="flex items-start justify-between gap-4 mb-2">
@@ -59,8 +62,8 @@
   {% endif %}
 
   {% for group in connector_groups %}
-  {%- set g_live = group.sources | selectattr('state', 'equalto', 'live') | list | length -%}
-  {%- set g_needs = group.sources | rejectattr('state', 'in', ['live', 'off']) | list | length -%}
+  {%- set g_live = group.sources | selectattr('state', 'in', _ok_states) | list | length -%}
+  {%- set g_needs = group.sources | rejectattr('state', 'in', _ok_states + ['off', 'planned']) | list | length -%}
   <section id="connector-group-{{ group.key }}" x-data="{ open: true }">
     <button type="button" @click="open = !open"
             class="w-full flex items-center justify-between gap-2 min-h-[2rem] text-left group">
