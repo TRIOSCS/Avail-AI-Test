@@ -34,13 +34,14 @@ MAX_OUTBOX_FAIL_COUNT = 5
 def _mark_failed(db: Session, row: ApprovalOutbox, reason: str) -> None:
     """Record a permanent/recoverable failure on a row WITHOUT marking it sent.
 
-    Increments fail_count and stores last_error, then flushes. Once fail_count hits
+    Increments fail_count and stores last_error, then commits so the diagnosis is
+    durable on its own (independent of any other row's outcome). Once fail_count hits
     MAX_OUTBOX_FAIL_COUNT the row is no longer selected by dispatch_pending (dead-
     letter). Never sets sent_at — the row genuinely did not send.
     """
     row.fail_count = (row.fail_count or 0) + 1
     row.last_error = reason
-    db.flush()
+    db.commit()
 
 
 async def dispatch_pending(db: Session) -> int:
@@ -54,11 +55,18 @@ async def dispatch_pending(db: Session) -> int:
         incremented and last_error recorded (NOT marked sent), so the dead-letter cap
         retires the row instead of it retrying forever.
 
-    Each row's work runs inside a SAVEPOINT (db.begin_nested) so a partial failure
-    (e.g. an unflushed in_app Notification) is rolled back to the savepoint and cannot
-    poison the batch; the fail_count/last_error write then happens on the outer
-    transaction and is guaranteed to survive. Identical behavior on PostgreSQL and the
-    SQLite test DB (both support SAVEPOINT).
+    Each row is committed in its OWN transaction: on success
+    ``row.sent_at = now; db.commit()``; on any failure ``db.rollback()`` discards the
+    row's partial state (e.g. a dirty Notification) and ``_mark_failed`` records
+    fail_count/last_error in a fresh transaction that commits independently. This per-row
+    isolation — not a SAVEPOINT — is what keeps a failing row from poisoning the batch.
+
+    A SAVEPOINT (``db.begin_nested``) is deliberately NOT used: the email dispatch path
+    (``send_email`` → ``token_manager.get_valid_token``) commits the session mid-row when
+    it refreshes an expired Graph token, which ends any enclosing savepoint and made the
+    old ``savepoint.commit()`` raise ``ResourceClosedError`` — aborting the whole batch and
+    stranding the email row. A dispatch path that commits internally is fundamentally
+    incompatible with an enclosing savepoint, so each row owns its own commit instead.
 
     Returns the count of rows successfully dispatched.
     """
@@ -94,7 +102,6 @@ async def dispatch_pending(db: Session) -> int:
 
         payload: dict = row.payload or {}
 
-        savepoint = db.begin_nested()
         try:
             if row.channel == "email":
                 subject, html = _ns._build_email_html(payload)
@@ -110,15 +117,14 @@ async def dispatch_pending(db: Session) -> int:
                 raise ValueError(f"unknown channel '{row.channel}'")
 
             row.sent_at = datetime.now(timezone.utc)
-            db.flush()
-            savepoint.commit()
+            db.commit()
             dispatched += 1
 
         except Exception as exc:
-            # Roll back this row's partial state (e.g. a dirty Notification) to the
-            # savepoint so the outer transaction is clean; the fail_count/last_error
-            # write below then cannot re-raise the same error or be lost on rollback.
-            savepoint.rollback()
+            # Discard this row's partial state (e.g. a dirty Notification, or a session
+            # already committed/closed by the dispatch path) and record the failure in a
+            # fresh transaction so it survives independently of the rest of the batch.
+            db.rollback()
             _mark_failed(db, row, str(exc))
             logger.error(
                 "approval_outbox row {} dispatch failed (attempt {}): {}",
@@ -126,9 +132,6 @@ async def dispatch_pending(db: Session) -> int:
                 row.fail_count,
                 exc,
             )
-
-    if rows:
-        db.commit()
 
     return dispatched
 
