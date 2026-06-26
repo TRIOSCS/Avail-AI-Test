@@ -3,7 +3,7 @@
 Covers: POST /api/materials/add (manual/100 writes, blank=blank, inline deterministic
 passes, priority-lane stamp, V3 422 validation), bulk part-number / stock imports
 (inline passes, per-row warnings, NO stamp), the enrich-status badge route (HTTP 286
-stop), the add-form modal route, and the needs-review faceted filter.
+stop), the add-form modal route, and the has_validation_conflict faceted filter.
 Depends on: conftest.py (db_session, client), commodity_registry seeds.
 """
 
@@ -448,7 +448,25 @@ def test_detail_renders_conflict_badge_and_accept(client, db_session: Session):
 
     resp = client.get(f"/v2/partials/materials/{card.id}")
     assert resp.status_code == 200
-    assert "Needs review" in resp.text
-    assert "1 conflict" in resp.text
+    assert "Needs review" not in resp.text
     assert f"/v2/partials/materials/{card.id}/conflicts/category/accept" in resp.text
+    assert "Use this value" in resp.text
+
+
+def test_needs_review_badge_not_in_detail(client, db_session: Session):
+    """Confirm the 'Needs review' badge is not rendered even when
+    has_validation_conflict=True."""
+    card = _make_card(
+        db_session,
+        "review-003",
+        "REVIEW-003",
+        has_validation_conflict=True,
+        validation_conflicts=[_category_conflict()],
+    )
+    db_session.commit()
+
+    resp = client.get(f"/v2/partials/materials/{card.id}")
+    assert resp.status_code == 200
+    # Badge removed — conflict detail panel (Specs section) still renders
+    assert "Needs review" not in resp.text
     assert "Use this value" in resp.text
