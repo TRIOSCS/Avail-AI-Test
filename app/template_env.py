@@ -340,8 +340,11 @@ templates.env.globals["cadence_state"] = cadence_state
 # inherit template context). Context-level "roles" passed by set_contact_role /
 # contacts_tab endpoints takes precedence; this global is the fallback for the
 # macro-include path.
-# Must stay in sync with CANONICAL_ROLES in app/routers/htmx_views.py.
-_CANONICAL_ROLES = ("specifier", "buyer_po", "ap_payer", "logistics", "exec", "other")
+# Sourced from the ContactRole StrEnum (single source of truth in app/constants.py) —
+# the SAME tuple CANONICAL_ROLES in app/routers/htmx_views.py is built from.
+from .constants import ContactRole  # noqa: E402
+
+_CANONICAL_ROLES = tuple(ContactRole)
 templates.env.globals["roles"] = _CANONICAL_ROLES
 
 # Buy-plan approval right exposed as a Jinja2 global so templates hide the approve/reject

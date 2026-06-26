@@ -617,12 +617,14 @@ def company_contact_rows(
             .all()
         )
     now_utc = datetime.now(timezone.utc)
+    recent_notes = _latest_contact_notes(db, [c.id for c in contacts])
     rows = [
         {
             "contact": c,
             "site": site_map.get(c.customer_site_id),
             "legacy": False,
             "cadence": cadence_state(None, c.last_outbound_at, now_utc),
+            "recent_note": recent_notes.get(c.id),
         }
         for c in contacts
     ]
@@ -636,8 +638,37 @@ def company_contact_rows(
             if legacy_email and legacy_email in real_emails:
                 # A real SiteContact already covers this address — suppress the legacy row.
                 continue
-            rows.append({"contact": None, "site": s, "legacy": True, "cadence": "new"})
+            rows.append({"contact": None, "site": s, "legacy": True, "cadence": "new", "recent_note": None})
     return rows
+
+
+def _latest_contact_notes(db: Session, contact_ids: list[int]) -> dict[int, str]:
+    """Return {site_contact_id: latest manual-note text} for the given contacts.
+
+    One batched query (no N+1): picks each contact's newest ActivityLog NOTE so the
+    contact-row drawer can show a recent-note preview without a per-row round-trip. The
+    full note feed lives behind the notes modal (get_site_contact_notes).
+    """
+    if not contact_ids:
+        return {}
+    from ..models.intelligence import ActivityLog
+
+    rows = (
+        db.query(ActivityLog.site_contact_id, ActivityLog.notes, ActivityLog.created_at)
+        .filter(
+            ActivityLog.site_contact_id.in_(contact_ids),
+            ActivityLog.activity_type == "note",
+            ActivityLog.notes.isnot(None),
+        )
+        .order_by(ActivityLog.site_contact_id, ActivityLog.created_at.desc())
+        .all()
+    )
+    latest: dict[int, str] = {}
+    for site_contact_id, notes, _created in rows:
+        # Rows are ordered newest-first per contact; keep the first seen for each.
+        if site_contact_id not in latest and notes:
+            latest[site_contact_id] = notes
+    return latest
 
 
 # ═══════════════════════════════════════════════════════════════════════

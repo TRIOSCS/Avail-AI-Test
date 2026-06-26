@@ -688,6 +688,24 @@ class OutreachChannel(StrEnum):
     WECHAT = "wechat"
 
 
+class ContactRole(StrEnum):
+    """Canonical CRM site-contact buying-role taxonomy (Mike's vocabulary).
+
+    Single source of truth for the role dropdown on the customer-tab contact card.
+    `tuple(ContactRole)` drives both CANONICAL_ROLES (app/routers/htmx_views.py) and
+    the `roles` Jinja2 global fallback (app/template_env.py). Stored in
+    site_contacts.contact_role (String(50)); legacy DB values (buyer_po/specifier/
+    ap_payer/logistics/exec/technical/decision_maker/operations) are NOT in this set —
+    they render via the legacy display-label maps but can only be cleared, not re-saved.
+    """
+
+    BUYER = "buyer"
+    MANAGER = "manager"
+    ENGINEER = "engineer"
+    PLANNER = "planner"
+    OTHER = "other"
+
+
 class EventType(StrEnum):
     """Canonical activity_log.event_type values (Communication-Intelligence kind)."""
 
