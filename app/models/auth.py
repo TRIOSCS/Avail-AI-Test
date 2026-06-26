@@ -52,6 +52,10 @@ class User(Base):
     # Notification preferences (Profile tab toggles — Tasks 7-9 wire the UI)
     notify_buyplan_email_enabled = Column(Boolean, default=True, nullable=False)
     notify_new_offer_alert_enabled = Column(Boolean, default=True, nullable=False)
+    # Urgent "a deal needs re-sourcing" broadcast — honored only on the intrusive
+    # personal pushes (email + Teams DM); the in-app row + Teams channel card always
+    # fire regardless, so an opted-out buyer can still see and claim the line.
+    notify_resource_alert_enabled = Column(Boolean, nullable=False, default=True, server_default=text("true"))
 
     # Profile photo — stored basename of the file under avatars.AVATARS_DIR
     # (e.g. "user_12_a1b2c3d4.png"); NULL falls back to the initials avatar.

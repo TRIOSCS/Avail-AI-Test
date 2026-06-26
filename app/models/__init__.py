@@ -127,6 +127,9 @@ from .performance import (  # noqa: F401
 # Email Pipeline
 from .pipeline import ColumnMappingCache, PendingBatch, ProcessedMessage, SyncState  # noqa: F401
 
+# PO cancellations (immutable vendor-fall-down fact powering cancellation metrics)
+from .po_cancellation import POCancellation  # noqa: F401
+
 # Intelligence: Materials, Proactive, Activity, Price Snapshots
 from .price_snapshot import MaterialPriceSnapshot  # noqa: F401
 from .prospect_account import ProspectAccount  # noqa: F401

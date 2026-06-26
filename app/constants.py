@@ -443,6 +443,9 @@ class BuyPlanLineStatus(StrEnum):
     VERIFIED = "verified"
     ISSUE = "issue"
     CANCELLED = "cancelled"
+    # Open claim pool — a cut PO was cancelled (vendor fell down) and the line is
+    # back, unassigned, awaiting a NEW buyer/offer. See LineResourceReason.
+    RESOURCING = "resourcing"
 
 
 class LineIssueType(StrEnum):
@@ -451,6 +454,48 @@ class LineIssueType(StrEnum):
     SOLD_OUT = "sold_out"
     PRICE_CHANGED = "price_changed"
     LEAD_TIME_CHANGED = "lead_time_changed"
+    OTHER = "other"
+
+
+class LineResourceReason(StrEnum):
+    """Why a buyer is re-sourcing a line whose PO was cancelled.
+
+    This flow is VENDOR-fall-down only (customer cancellations are handled elsewhere and
+    never enter here), so every value here counts against the vendor's cancellation
+    performance.
+    """
+
+    SOLD_ELSEWHERE = "sold_elsewhere"  # vendor sold the part to someone else
+    CANNOT_DELIVER = "cannot_deliver"  # vendor can't fulfill the PO
+    NO_STOCK = "no_stock"  # stock evaporated after the PO was cut
+    PRICE_CHANGE = "price_change"  # vendor repriced / reneged
+    OTHER = "other"
+
+
+# Maps a re-source reason to the VendorPartUnavailability reason used when the
+# canceled vendor is auto-marked unavailable for the part. Most fall-downs read
+# as "vendor sold them"; explicit reasons map through where one exists.
+RESOURCE_TO_UNAVAILABILITY_REASON: dict[str, str] = {
+    LineResourceReason.SOLD_ELSEWHERE.value: "sold_elsewhere",
+    LineResourceReason.CANNOT_DELIVER.value: "not_really_there",
+    LineResourceReason.NO_STOCK.value: "not_really_there",
+    LineResourceReason.PRICE_CHANGE.value: "sold_elsewhere",
+    LineResourceReason.OTHER.value: "sold_elsewhere",
+}
+
+
+class POCancellationReason(StrEnum):
+    """Why a cut PO was cancelled — the immutable vocabulary stored on
+    POCancellation.reason_code.
+
+    Mirrors LineResourceReason (the UI dropdown); kept as a separate enum so the durable
+    record's vocabulary can evolve independently of the transient form.
+    """
+
+    SOLD_ELSEWHERE = "sold_elsewhere"
+    CANNOT_DELIVER = "cannot_deliver"
+    NO_STOCK = "no_stock"
+    PRICE_CHANGE = "price_change"
     OTHER = "other"
 
 
@@ -639,6 +684,8 @@ class ActivityType(StrEnum):
     # Vendor+part unavailability knowledge (vendor_unavailability service)
     VENDOR_UNAVAILABLE = "vendor_unavailable"  # 18 chars — fits String(20)
     VENDOR_AVAILABLE = "vendor_available"
+    # Re-source: a cut PO was cancelled (vendor fall-down) and the deal needs backfill
+    RESOURCE_REQUESTED = "resource_requested"  # 18 chars — fits String(20)
     # Approval lifecycle (approval engine — Task 5)
     APPROVAL_REQUESTED = "aprvl_requested"  # 15 chars
     APPROVAL_APPROVED = "aprvl_approved"  # 14 chars
@@ -913,6 +960,9 @@ class AlertKind(StrEnum):
     BUYPLAN_ACTION = "buyplan_action"
     TASKS_ACTION = "tasks_action"
     APPROVAL_ACTION = "approval_action"
+    # Open re-sourcing pool — ACTION temperament, count from work-state (unclaimed
+    # RESOURCING lines), seen-row only suppresses the in-tab spotlight pulse.
+    BUYPLAN_RESOURCING = "buyplan_resourcing"
 
 
 class SightingsSkipReason(StrEnum):

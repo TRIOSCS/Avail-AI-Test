@@ -30,6 +30,7 @@ class VendorMetricsSnapshot(Base):
     quote_accuracy = Column(Float)
     on_time_delivery = Column(Float)
     cancellation_rate = Column(Float)
+    avg_days_to_cancel = Column(Float)  # mean PO-cut→cancel days over the window
     rma_rate = Column(Float)
     lead_time_accuracy = Column(Float)
     quote_conversion = Column(Float)
