@@ -73,3 +73,62 @@ def test_name_with_quotes_does_not_break_alpine_attr(client, db_session, test_us
     block = html[start:end]
     assert "\\u0027" in block  # escaped apostrophe from O'Brien
     assert "editingName: false" in block
+
+
+# ── Pan/zoom face-centering cropper ───────────────────────────────────────────
+
+
+class TestAvatarCropper:
+    """The profile-photo card mounts the vanilla-Alpine pan/zoom cropper, which replaces
+    the old auto-submit-on-file-pick flow with a circular crop viewport that posts a
+    512² JPEG/PNG to the unchanged /api/user/avatar route."""
+
+    def test_mounts_cropper_component(self, client):
+        html = _html(client)
+        # The Alpine factory is wired with the existing upload URL + 2 MB cap.
+        assert "avatarCropper('/api/user/avatar'" in html
+
+    def test_file_pick_opens_cropper_not_autosubmit(self, client):
+        """Picking a file now calls openFile() (loads into the crop modal) instead of
+        requestSubmit() on a form (the pre-cropper auto-upload behavior)."""
+        html = _html(client)
+        assert 'x-ref="fileInput"' in html
+        assert '@change="openFile($event)"' in html
+        # The old auto-submit-on-change wiring is gone.
+        assert "requestSubmit()" not in html
+
+    def test_has_circular_crop_viewport_and_zoom(self, client):
+        html = _html(client)
+        # Canvas-backed circular viewport with the dimmed mask + a zoom range slider.
+        assert "avatar-crop-stage" in html
+        assert "avatar-crop-mask" in html
+        assert 'x-ref="canvas"' in html
+        assert 'type="range"' in html
+        assert 'x-model.number="zoomPct"' in html
+
+    def test_has_pan_and_pinch_handlers(self, client):
+        html = _html(client)
+        # Pan (mouse + touch) and zoom (wheel + pinch) are all wired on the stage.
+        assert "pointerDown($event)" in html
+        assert "wheel($event)" in html
+        assert "touchStart($event)" in html
+        assert "touchMove($event)" in html
+
+    def test_modal_has_save_and_cancel(self, client):
+        html = _html(client)
+        assert 'class="btn btn-sm btn-primary"' in html
+        assert '@click="save()"' in html
+        assert '@click="close()"' in html
+
+    def test_card_refreshes_on_avatar_updated_event(self, client):
+        """Cropper upload + Remove both dispatch the kebab `avatar-updated` event the
+        card listens for to refresh its preview (camelCase avatarUpdated never reaches
+        Alpine's @-binding)."""
+        html = _html(client)
+        assert "@avatar-updated.window=" in html
+        assert "applyAvatar(" in html
+
+    def test_upload_route_is_unchanged(self, client):
+        html = _html(client)
+        # The cropper posts to the same magic-byte-guarded endpoint; no new route.
+        assert "/api/user/avatar" in html
