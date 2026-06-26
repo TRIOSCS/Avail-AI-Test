@@ -531,14 +531,37 @@ holds this set, and `run_health_checks` excludes those names from the
 ping loop. Their `api_sources` row is seeded to `LIVE` + `is_active=True`
 once at startup by `seed_browser_worker_sources` (see `app/startup.py`)
 and the seed survives because the ping loop never touches them. Their
-actual health is tracked via `IcsWorkerStatus` / `NcWorkerStatus`
-heartbeats; both singletons are seeded at startup so
+actual health is tracked via `IcsWorkerStatus` / `NcWorkerStatus` /
+`TbfWorkerStatus` heartbeats; all three singletons are seeded at startup so
 `update_worker_status()` writes are not silently dropped. Each worker
-(ics, nc, and enrichment) refreshes `last_heartbeat` on **every** loop
+(ics, nc, tbf, and enrichment) refreshes `last_heartbeat` on **every** loop
 tick via `_record_heartbeat()` at the top of the loop — so the heartbeat
 reflects process liveness independent of work, and stays fresh on idle /
 cap-sleep / breaker-open / off-hours paths (a liveness monitor reading
 `last_heartbeat` won't false-alarm "DOWN" while a worker is merely paused).
+
+**Worker-aware Connectors-page status.** The Settings → Connectors page must
+NOT render a worker-backed source as "broken"/"no API"/"needs setup" just
+because it has no direct API key. `connector_service.is_worker_backed()` (the
+explicit `WORKER_BACKED_SOURCES` map: `thebrokersite`→tbf, `netcomponents`→nc,
+`icsource`→ics) routes these sources through `connector_service.worker_health()`
+instead of the key/credential ladder. `worker_health(row)` reads the heartbeat
+singleton and returns a verdict (`healthy`, `heartbeat_age_secs`,
+`last_search_at`, `problem`); a worker is **unhealthy** when the row is missing,
+the heartbeat is absent or older than `settings.worker_heartbeat_stale_minutes`
+(15 min, same threshold as `/api/admin/workers/status`), `is_running` is false,
+or the circuit breaker is open. `connector_state()` then yields two
+worker-specific states for active worker sources — `worker_active` (badge
+"Worker active" + heartbeat age + last search) and `worker_down` (badge "Worker
+down" + the specific problem) — or `off` when the operator has switched the
+source off. Worker-backed sources are never offered the synchronous API "Test"
+button (their health is the heartbeat, not a request/response probe). The
+header/group live-vs-need-setup counters treat `worker_active` as live and
+`worker_down` as needing attention. Logic in `app/services/connector_service.py`;
+heartbeat read + enrich in `htmx_views._enrich_source` /
+`_worker_status_row`; rendering in `settings/_connector_macros.html`
+(`worker_detail` macro). Tests: `tests/test_connector_service.py` (pure
+verdict/state) and `tests/test_connectors_settings.py` (rendered badges).
 
 ### Removed (2026-05-14)
 

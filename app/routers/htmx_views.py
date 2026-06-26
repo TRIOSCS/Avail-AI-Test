@@ -14396,6 +14396,22 @@ def _build_connector_field(db, source_name: str, env_var: str) -> dict:
     return {"is_set": is_set, "masked": masked}
 
 
+def _worker_status_row(source_name: str, db):
+    """Return the worker-status singleton for a worker-backed source (or None).
+
+    Maps an ApiSource.name (thebrokersite/netcomponents/icsource) to its heartbeat model
+    via connector_service.WORKER_BACKED_SOURCES, reading the id=1 singleton.
+    """
+    from ..models import IcsWorkerStatus, NcWorkerStatus, TbfWorkerStatus
+    from ..services import connector_service
+
+    worker_key = connector_service.WORKER_BACKED_SOURCES.get(source_name)
+    model = {"tbf": TbfWorkerStatus, "nc": NcWorkerStatus, "ics": IcsWorkerStatus}.get(worker_key)
+    if model is None:
+        return None
+    return db.get(model, 1)
+
+
 def _enrich_source(source, db) -> dict:
     """Build the per-source context dict for the connectors tab."""
     from ..services import connector_service
@@ -14417,12 +14433,18 @@ def _enrich_source(source, db) -> dict:
         oauth_connected = False
         needs_reconnect = False
 
+    # Worker-backed sources: derive status from the worker heartbeat, not a direct API.
+    worker = None
+    if connector_service.is_worker_backed(source):
+        worker = connector_service.worker_health(_worker_status_row(name, db))
+
     state = connector_service.connector_state(
         source,
         credential_set=credential_set,
         oauth_connected=oauth_connected,
         needs_reconnect=needs_reconnect,
         keyless=keyless,
+        worker=worker,
     )
 
     # Keyless note
@@ -14434,11 +14456,14 @@ def _enrich_source(source, db) -> dict:
     else:
         keyless_note = ""
 
-    # Planned connectors are never testable — they have no implementation yet.
-    if ct == "planned":
+    # Testability:
+    #  - planned: never (no implementation yet)
+    #  - worker-backed: never via the API-probe Test button — health is the heartbeat,
+    #    not a synchronous search (the worker runs out-of-process on a schedule)
+    #  - else: has some form of access
+    if ct == "planned" or worker is not None:
         testable = False
     else:
-        # Testable = has some form of access
         testable = bool(credential_set or oauth_connected or keyless)
 
     return {
@@ -14459,6 +14484,8 @@ def _enrich_source(source, db) -> dict:
         "error_count_24h": getattr(source, "error_count_24h", 0) or 0,
         "keyless_note": keyless_note,
         "testable": testable,
+        # Worker-backed health (None for direct-API/keyless/oauth sources).
+        "worker": worker,
     }
 
 
