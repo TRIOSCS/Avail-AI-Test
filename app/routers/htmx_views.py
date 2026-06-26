@@ -220,7 +220,7 @@ def _parse_card_filter_params(
     min_searches: str,
 ) -> dict:
     """Parse the card-level faceted filter params shared by the results-list route and
-    BOTH sidebar count routes (sub- filters + global), so the list and the counts can
+    BOTH sidebar count routes (sub-filters + global), so the list and the counts can
     never read the same query string differently.
 
     Unknown/invalid values (incl. non-numeric/negative min_searches and the boolean
@@ -6945,7 +6945,7 @@ def apply_contact_field(
     """Apply a single inline-edited contact field to *contact* (does NOT commit).
 
     first_name / last_name edits recompose full_name automatically. At least one of
-    first_name / last_name must be non- empty (enforced here). Raises HTTPException for
+    first_name / last_name must be non-empty (enforced here). Raises HTTPException for
     invalid values. Called by both the inline-edit POST endpoint and edit_site_contact
     (DRY).
     """
@@ -7166,8 +7166,9 @@ async def set_company_disposition(
 ):
     """Set Company.disposition (active|bucket); re-renders the disposition control.
 
-    Owner-or-admin only (mirrors release_prospect). Validates against the allowlist (invalid → 400). Writes disposition
-    + optional reason + audit fields (set_by/set_at). Reversible — set back to 'active'. Invalidates the cached
+    Owner-or-admin only (mirrors release_prospect). Validates against the allowlist
+    (invalid → 400). Writes disposition + optional reason + audit fields
+    (set_by/set_at). Reversible — set back to 'active'. Invalidates the cached
     company_list / typeahead so the bucketed account drops out of the call-list.
     """
     company = db.query(Company).filter(Company.id == company_id).first()
@@ -7455,7 +7456,7 @@ async def company_dup_suggestion(
     db: Session = Depends(get_db),
 ):
     """Lazy per-account duplicate banner — top dedup match for THIS company + a Merge
-    button reusing the merge- form/preview/merge flow.
+    button reusing the merge-form/preview/merge flow.
 
     Renders nothing (empty 200) when there is no near-duplicate.
     """
@@ -7934,7 +7935,7 @@ async def contacts_tab_add_form(
     """Return the shared _contact_form.html in add mode for the Contacts tab modal.
 
     Optional site_id pre-selects that site in the form's Site dropdown — set by the "+
-    add here" affordance on a per- site section header (Contacts surface).
+    add here" affordance on a per-site section header (Contacts surface).
     """
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
@@ -12545,7 +12546,7 @@ async def materials_filters_global_partial(
 
     Receives the FULL active filter set (same wire params as the results list) so the
     rendered counts match the visible results instead of overstating; each facet's own
-    selection is excluded inside get_global_facet_counts (self- exclusion).
+    selection is excluded inside get_global_facet_counts (self-exclusion).
     """
     parsed_filters = _parse_filter_json(sub_filters, coerce_numeric=True)
     filters = _parse_card_filter_params(

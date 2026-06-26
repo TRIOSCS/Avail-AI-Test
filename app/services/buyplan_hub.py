@@ -264,6 +264,11 @@ def resourcing_pool_queue(db: Session) -> list[dict]:
     for ln in lines:
         req = ln.requirement
         cancel = latest_cancel.get(ln.id)
+        canceled_vendor = None
+        if cancel:
+            canceled_vendor = (
+                cancel.vendor_card.display_name if cancel.vendor_card else None
+            ) or cancel.vendor_name_normalized
         rows.append(
             {
                 "line_id": ln.id,
@@ -272,11 +277,7 @@ def resourcing_pool_queue(db: Session) -> list[dict]:
                 "mpn": req.primary_mpn if req else None,
                 "description": req.description if req else None,
                 "quantity": ln.quantity,
-                "canceled_vendor": (
-                    (cancel.vendor_card.display_name if cancel.vendor_card else None) or cancel.vendor_name_normalized
-                    if cancel
-                    else None
-                ),
+                "canceled_vendor": canceled_vendor,
                 "reason_code": cancel.reason_code if cancel else None,
                 "cancelled_at": cancel.cancelled_at if cancel else None,
             }

@@ -762,6 +762,7 @@ def _resource_context(plan: BuyPlan, line: BuyPlanLine, db: Session, reason: str
         "req_label": req_label,
         "vendor": vendor,
         "reason": reason or "No reason given",
+        "plan_id": plan.id,
         "deep_link": f"{settings.app_url}/v2/buy-plans/{plan.id}",
     }
 
@@ -797,8 +798,7 @@ def _resource_card(rc: dict) -> dict:
             },
             {
                 "type": "TextBlock",
-                "text": f"A vendor PO was cancelled on Buy Plan #{rc['deep_link'].rsplit('/', 1)[-1]} \u2014 "
-                "backfill needed.",
+                "text": f"A vendor PO was cancelled on Buy Plan #{rc['plan_id']} \u2014 backfill needed.",
                 "isSubtle": True,
                 "wrap": True,
             },
