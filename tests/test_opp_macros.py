@@ -25,11 +25,11 @@ def render_macro(call_expr: str, **ctx) -> str:
 @pytest.mark.parametrize(
     "value,bucket,label",
     [
-        ("active", "open", "Open"),
-        ("sourcing", "sourcing", "Sourcing"),
-        ("offers", "offered", "Offered"),
-        ("quoting", "quoted", "Quoting"),
+        ("open", "open", "Open"),
+        ("rfqs_sent", "sourcing", "RFQs Sent"),
+        ("offers", "offered", "Offers"),
         ("quoted", "quoted", "Quoted"),
+        ("hotlist", "neutral", "Hotlist"),
         ("won", "neutral", "Won"),
     ],
 )
@@ -221,38 +221,38 @@ def render_status_cell(status, hours):
 
 
 def test_opp_status_cell_includes_dot_and_time_text():
-    html = render_status_cell("sourcing", 6)
+    html = render_status_cell("rfqs_sent", 6)
     assert "opp-status-dot--sourcing" in html
-    assert ">Sourcing<" in html
+    assert ">RFQs Sent<" in html
     assert "opp-time--24h" in html
     assert "6h" in html
 
 
 def test_opp_status_cell_no_time_text_when_hours_none():
-    html = render_status_cell("active", None)
+    html = render_status_cell("open", None)
     assert "opp-status-dot--open" in html
     assert "opp-time--" not in html
 
 
 def test_opp_status_cell_aria_label_combines_status_and_time():
-    html = render_status_cell("sourcing", 6)
-    assert 'aria-label="Sourcing, 6h"' in html
+    html = render_status_cell("rfqs_sent", 6)
+    assert 'aria-label="RFQs Sent, 6h"' in html
 
 
 def test_opp_status_cell_overdue_in_html_and_aria_label():
-    html = render_status_cell("sourcing", -2)
+    html = render_status_cell("rfqs_sent", -2)
     assert "Overdue" in html
-    assert 'aria-label="Sourcing, Overdue"' in html
+    assert 'aria-label="RFQs Sent, Overdue"' in html
 
 
 def test_opp_status_cell_days_formatting_in_html_and_aria_label():
-    html = render_status_cell("active", 120)
+    html = render_status_cell("open", 120)
     assert "5d" in html
     assert 'aria-label="Open, 5d"' in html
 
 
 def test_opp_status_cell_aria_label_has_no_comma_when_hours_none():
-    html = render_status_cell("active", None)
+    html = render_status_cell("open", None)
     assert 'aria-label="Open"' in html
     assert ", " not in (html.split('aria-label="')[1].split('"')[0])
 
@@ -260,11 +260,11 @@ def test_opp_status_cell_aria_label_has_no_comma_when_hours_none():
 @pytest.mark.parametrize(
     "status,bucket,label",
     [
-        ("active", "open", "Open"),
-        ("sourcing", "sourcing", "Sourcing"),
-        ("offers", "offered", "Offered"),
-        ("quoting", "quoted", "Quoting"),
+        ("open", "open", "Open"),
+        ("rfqs_sent", "sourcing", "RFQs Sent"),
+        ("offers", "offered", "Offers"),
         ("quoted", "quoted", "Quoted"),
+        ("hotlist", "neutral", "Hotlist"),
         ("won", "neutral", "Won"),
     ],
 )
@@ -357,8 +357,14 @@ def test_opp_name_cell_name_has_truncate_tip():
 # ── opp_row_action_rail ───────────────────────────────────────────────
 
 
-def _req(status="active", claimed_by_id=None, name="Acme", rid=1):
-    return {"id": rid, "name": name, "status": status, "claimed_by_id": claimed_by_id}
+def _req(status="open", claimed_by_id=None, name="Acme", rid=1, is_archived=False):
+    return {
+        "id": rid,
+        "name": name,
+        "status": status,
+        "claimed_by_id": claimed_by_id,
+        "is_archived": is_archived,
+    }
 
 
 def _user(uid=5, role="buyer"):
@@ -379,15 +385,26 @@ def render_rail(req, user):
 
 
 def test_rail_shows_archive_when_not_archived():
-    html = render_rail(_req(status="active"), _user())
+    html = render_rail(_req(status="open", is_archived=False), _user())
     assert "action/archive" in html
     assert "action/activate" not in html
 
 
 def test_rail_shows_activate_when_archived():
-    html = render_rail(_req(status="archived"), _user())
+    html = render_rail(_req(status="open", is_archived=True), _user())
     assert "action/activate" in html
     assert "action/archive" not in html
+
+
+def test_rail_shows_hotlist_for_open_req():
+    html = render_rail(_req(status="open", is_archived=False), _user())
+    assert "action/hotlist" in html
+    assert "Add Acme to Hotlist" in html
+
+
+def test_rail_hides_hotlist_for_hotlisted_req():
+    html = render_rail(_req(status="hotlist", is_archived=False), _user())
+    assert "action/hotlist" not in html
 
 
 def test_rail_shows_claim_when_unclaimed_and_role_allowed():

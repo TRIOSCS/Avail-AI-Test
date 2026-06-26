@@ -79,6 +79,7 @@ class RowActionName(str, Enum):
     activate = "activate"
     won = "won"
     lost = "lost"
+    hotlist = "hotlist"
     clone = "clone"
 
 

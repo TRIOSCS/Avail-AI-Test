@@ -393,10 +393,10 @@ async def row_action(
 
     msg = "Action completed"
 
-    # State transitions differ only by target state + message verb.
+    # Won/Lost are status transitions; archive/activate toggle the orthogonal
+    # is_archived boolean (no longer a pipeline status); hotlist puts the req on
+    # the Proactive monitor. Status moves differ only by target state + verb.
     transition_actions = {
-        RowActionName.archive: ("archived", f"'{req.name}' archived"),
-        RowActionName.activate: ("active", f"'{req.name}' activated"),
         RowActionName.won: ("won", f"'{req.name}' marked won"),
         RowActionName.lost: ("lost", f"'{req.name}' marked lost"),
     }
@@ -408,6 +408,27 @@ async def row_action(
         try:
             transition(req, target_state, user, db)
             msg = success_msg
+        except ValueError as e:
+            msg = str(e)
+
+    elif action_name == RowActionName.archive:
+        from ..services.requisition_state import set_archived
+
+        set_archived(req, True, user, db)
+        msg = f"'{req.name}' archived"
+
+    elif action_name == RowActionName.activate:
+        from ..services.requisition_state import set_archived
+
+        set_archived(req, False, user, db)
+        msg = f"'{req.name}' restored"
+
+    elif action_name == RowActionName.hotlist:
+        from ..services.requisition_state import set_hotlist
+
+        try:
+            set_hotlist(req, user, db)
+            msg = f"'{req.name}' added to Hotlist"
         except ValueError as e:
             msg = str(e)
 
@@ -481,38 +502,33 @@ async def bulk_action(
         reqs_q = reqs_q.filter(Requisition.created_by == user.id)
     reqs = reqs_q.all()
     count = 0
-    errors = []
 
-    bulk_target_state = {
-        BulkActionName.archive: "archived",
-        BulkActionName.activate: "active",
+    # Archive/Activate toggle the orthogonal is_archived boolean (archive is no
+    # longer a pipeline status). set_archived is a no-op when already in the
+    # target state, so re-archiving doesn't inflate the count.
+    archive_target = {
+        BulkActionName.archive: True,
+        BulkActionName.activate: False,
     }.get(action_name)
 
     for req in reqs:
-        if bulk_target_state is not None:
-            from ..services.requisition_state import transition
+        if archive_target is not None:
+            from ..services.requisition_state import set_archived
 
-            try:
-                transition(req, bulk_target_state, user, db)
+            if req.is_archived != archive_target:
+                set_archived(req, archive_target, user, db)
                 count += 1
-            except ValueError as e:
-                errors.append(f"REQ-{req.id}: {e}")
         elif action_name == BulkActionName.assign and owner_id:
             req.created_by = owner_id
             count += 1
 
     db.commit()
 
-    if errors:
-        logger.warning(f"Bulk {action_name.value} partial failure: {errors}")
-
     filters = _parse_filters(request)
     ctx = _table_context(request, filters, db, user)
     response = template_response("requisitions2/_table.html", ctx)
     word = action_name.value + ("d" if action_name.value.endswith("e") else "ed")
     msg = f"{count} requisition{'s' if count != 1 else ''} {word}"
-    if errors:
-        msg += f" ({len(errors)} failed)"
     response.headers["HX-Trigger"] = json.dumps(
         {
             "showToast": {"message": msg},

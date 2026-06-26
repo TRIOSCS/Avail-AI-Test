@@ -37,7 +37,7 @@ def active_req(db_session: Session, test_user: User) -> Requisition:
     req = Requisition(
         name="REQ2-COV-001",
         customer_name="CovCorp",
-        status="active",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -97,11 +97,11 @@ class TestInlineSave:
         assert resp.status_code == 422
 
     def test_status_field_valid_transition(self, client: TestClient, active_req: Requisition, db_session: Session):
-        """Lines 275-279: field=status with a valid target triggers transition."""
+        """field=status with a valid target triggers a transition."""
         with patch("app.services.requisition_state.transition") as mock_tr:
             resp = client.patch(
                 f"/requisitions2/{active_req.id}/inline",
-                data={"field": "status", "value": "archived"},
+                data={"field": "status", "value": "rfqs_sent"},
             )
         # Either success or 422 — just confirm the branch was entered
         assert resp.status_code in (200, 422)
@@ -192,11 +192,12 @@ class TestRowAction:
             resp = client.post(f"/requisitions2/{active_req.id}/action/unclaim")
         assert resp.status_code == 200  # returns table, not error
 
-    def test_archive_action(self, client: TestClient, active_req: Requisition):
-        """Archive action path."""
-        with patch("app.services.requisition_state.transition"):
-            resp = client.post(f"/requisitions2/{active_req.id}/action/archive")
+    def test_archive_action(self, client: TestClient, active_req: Requisition, db_session: Session):
+        """Archive action toggles is_archived via set_archived."""
+        resp = client.post(f"/requisitions2/{active_req.id}/action/archive")
         assert resp.status_code == 200
+        db_session.refresh(active_req)
+        assert active_req.is_archived is True
 
     def test_assign_action_with_owner(
         self, client: TestClient, active_req: Requisition, test_user: User, db_session: Session

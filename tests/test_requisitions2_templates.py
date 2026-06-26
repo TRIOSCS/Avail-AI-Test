@@ -71,12 +71,19 @@ def test_filter_form_htmx_trigger(client):
 
 @pytest.mark.parametrize(
     "status",
-    ["all", "active", "draft", "sourcing", "archived", "won", "lost"],
+    ["all", "open", "rfqs_sent", "offers", "quoted", "hotlist", "won", "lost", "archived"],
 )
 def test_filter_form_includes_status_option(client, status):
-    """Filter form has status dropdown with all options."""
+    """Filter form has status dropdown with all new pipeline options."""
     resp = client.get("/requisitions2")
     assert f'value="{status}"' in resp.text
+
+
+def test_filter_form_drops_legacy_status_options(client):
+    """Legacy pipeline values (active/sourcing) are gone from the status filter."""
+    resp = client.get("/requisitions2")
+    assert 'value="sourcing"' not in resp.text
+    assert 'value="active"' not in resp.text
 
 
 @pytest.mark.parametrize("urg", ["normal", "hot", "critical"])
@@ -175,11 +182,11 @@ def test_table_row_has_detail_link(client, test_requisition):
 
 def test_table_row_shows_status_badge(client, test_requisition, db_session):
     """Table rows display status as a badge."""
-    test_requisition.status = "active"
+    test_requisition.status = "open"
     db_session.commit()
 
-    resp = client.get("/requisitions2/table", params={"status": "active"})
-    assert "active" in resp.text
+    resp = client.get("/requisitions2/table", params={"status": "open"})
+    assert "Open" in resp.text
 
 
 def test_table_row_shows_urgency_badge(client, test_requisition, db_session, monkeypatch):
@@ -187,20 +194,38 @@ def test_table_row_shows_urgency_badge(client, test_requisition, db_session, mon
     class."""
     from app.config import settings as app_settings
 
-    test_requisition.status = "active"
+    test_requisition.status = "open"
     test_requisition.urgency = "critical"
     db_session.commit()
 
     # Legacy rendering shows CRIT text badge
     monkeypatch.setattr(app_settings, "avail_opp_table_v2", False)
-    resp = client.get("/requisitions2/table", params={"status": "active"})
+    resp = client.get("/requisitions2/table", params={"status": "open"})
     assert "CRIT" in resp.text
 
 
 def test_empty_table_shows_message(client):
     """Empty table shows 'No requisitions found' message."""
-    resp = client.get("/requisitions2/table", params={"status": "active"})
+    resp = client.get("/requisitions2/table", params={"status": "open"})
     assert "No requisitions found" in resp.text
+
+
+def test_table_row_action_rail_has_hotlist_button(client, test_requisition, db_session):
+    """The row action rail offers a Hotlist toggle for a non-terminal, un-archived req."""
+    test_requisition.status = "open"
+    db_session.commit()
+    resp = client.get("/requisitions2/table", params={"status": "open"})
+    assert f'hx-post="/requisitions2/{test_requisition.id}/action/hotlist"' in resp.text
+    assert f"Add {test_requisition.name} to Hotlist" in resp.text
+
+
+def test_table_row_hotlist_hides_hotlist_button(client, test_requisition, db_session):
+    """A req already on the Hotlist does not re-offer the Hotlist button."""
+    test_requisition.status = "hotlist"
+    db_session.commit()
+    resp = client.get("/requisitions2/table", params={"status": "hotlist"})
+    assert "REQ-TEST-001" in resp.text
+    assert f'hx-post="/requisitions2/{test_requisition.id}/action/hotlist"' not in resp.text
 
 
 def test_table_row_has_detail_click(client, test_requisition):
@@ -221,7 +246,7 @@ def test_compact_rows_have_detail_link(client, test_requisition):
 
 def test_detail_panel_has_action_buttons(client, test_requisition, db_session):
     """Detail panel has action buttons with hx-post."""
-    test_requisition.status = "active"
+    test_requisition.status = "open"
     db_session.commit()
 
     resp = client.get(f"/requisitions2/{test_requisition.id}/detail")
@@ -229,17 +254,18 @@ def test_detail_panel_has_action_buttons(client, test_requisition, db_session):
 
 
 def test_detail_archived_shows_activate_button(client, test_requisition, db_session):
-    """Archived detail panel shows Activate button instead of Archive."""
-    test_requisition.status = "archived"
+    """Archived detail panel shows Restore (activate) button instead of Archive."""
+    test_requisition.is_archived = True
     db_session.commit()
 
     resp = client.get(f"/requisitions2/{test_requisition.id}/detail")
     assert "action/activate" in resp.text
+    assert f'/requisitions2/{test_requisition.id}/action/archive' not in resp.text
 
 
 def test_detail_shows_claim_for_buyer(client, test_requisition, db_session):
     """Unclaimed detail panel shows Claim button for buyer users."""
-    test_requisition.status = "active"
+    test_requisition.status = "open"
     test_requisition.claimed_by_id = None
     db_session.commit()
 
@@ -249,7 +275,7 @@ def test_detail_shows_claim_for_buyer(client, test_requisition, db_session):
 
 def test_detail_shows_unclaim_for_claimer(client, test_requisition, test_user, db_session):
     """Detail panel for req claimed by current user shows Unclaim button."""
-    test_requisition.status = "active"
+    test_requisition.status = "open"
     test_requisition.claimed_by_id = test_user.id
     db_session.commit()
 
@@ -259,7 +285,7 @@ def test_detail_shows_unclaim_for_claimer(client, test_requisition, test_user, d
 
 def test_detail_panel_action_buttons_exist(client, test_requisition, db_session):
     """Detail panel has action buttons."""
-    test_requisition.status = "active"
+    test_requisition.status = "open"
     db_session.commit()
 
     resp = client.get(f"/requisitions2/{test_requisition.id}/detail")
@@ -267,13 +293,14 @@ def test_detail_panel_action_buttons_exist(client, test_requisition, db_session)
 
 
 def test_detail_panel_has_action_buttons_for_active(client, test_requisition, db_session):
-    """Detail panel for active req shows archive and won buttons."""
-    test_requisition.status = "active"
+    """Detail panel for an open req shows archive, won, and hotlist buttons."""
+    test_requisition.status = "open"
     db_session.commit()
 
     resp = client.get(f"/requisitions2/{test_requisition.id}/detail")
     assert "action/archive" in resp.text
     assert "action/won" in resp.text
+    assert "action/hotlist" in resp.text
 
 
 # ── Modal structure (GET /requisitions2/{id}/modal) ──────────────────
@@ -335,14 +362,14 @@ def test_pagination_page_2(client, db_session, test_user, prefix, expected):
         db_session.add(
             Requisition(
                 name=f"{prefix}-{i:03d}",
-                status="active",
+                status="open",
                 created_by=test_user.id,
                 created_at=datetime.now(timezone.utc),
             )
         )
     db_session.commit()
 
-    resp = client.get("/requisitions2/table", params={"status": "active", "per_page": "10", "page": "2"})
+    resp = client.get("/requisitions2/table", params={"status": "open", "per_page": "10", "page": "2"})
     assert expected in resp.text
 
 

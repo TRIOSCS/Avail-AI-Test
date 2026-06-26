@@ -160,9 +160,8 @@ def test_modal_404_for_missing_req(client):
 
 
 def test_row_action_archive(client, test_requisition, db_session):
-    """POST archive action changes status and returns updated table."""
-    # Set to active first (test_requisition starts as 'open')
-    test_requisition.status = "active"
+    """POST archive action sets is_archived and returns updated table."""
+    test_requisition.status = "open"
     db_session.commit()
 
     resp = client.post(f"/requisitions2/{test_requisition.id}/action/archive")
@@ -171,25 +170,30 @@ def test_row_action_archive(client, test_requisition, db_session):
     assert "rq2-rows" in resp.text or "No requisitions found" in resp.text
 
     db_session.refresh(test_requisition)
-    assert test_requisition.status == "archived"
+    assert test_requisition.is_archived is True
+    # Archive is orthogonal to the status pipeline — status is untouched.
+    assert test_requisition.status == "open"
 
 
 def test_row_action_activate(client, test_requisition, db_session):
-    """POST activate action restores from archived."""
-    test_requisition.status = "archived"
+    """POST activate action restores (un-archives) the requisition."""
+    test_requisition.status = "lost"
+    test_requisition.is_archived = True
     db_session.commit()
 
     resp = client.post(f"/requisitions2/{test_requisition.id}/action/activate")
     assert resp.status_code == 200
 
     db_session.refresh(test_requisition)
-    assert test_requisition.status == "active"
+    assert test_requisition.is_archived is False
+    # Status retained as-is (un-archive does not change the pipeline value).
+    assert test_requisition.status == "lost"
 
 
 def test_row_action_claim(client, test_requisition, db_session):
     """POST claim action sets claimed_by_id."""
     test_requisition.claimed_by_id = None
-    test_requisition.status = "active"
+    test_requisition.status = "open"
     db_session.commit()
 
     resp = client.post(f"/requisitions2/{test_requisition.id}/action/claim")
@@ -222,8 +226,8 @@ def test_row_action_404(client):
 
 
 def test_bulk_archive(client, test_requisition, db_session):
-    """Bulk archive action archives selected requisitions."""
-    test_requisition.status = "active"
+    """Bulk archive action archives (is_archived=True) selected requisitions."""
+    test_requisition.status = "open"
     db_session.commit()
 
     resp = client.post(
@@ -234,12 +238,12 @@ def test_bulk_archive(client, test_requisition, db_session):
     assert "rq2-rows" in resp.text or "No requisitions found" in resp.text
 
     db_session.refresh(test_requisition)
-    assert test_requisition.status == "archived"
+    assert test_requisition.is_archived is True
 
 
 def test_bulk_activate(client, test_requisition, db_session):
-    """Bulk activate action activates selected requisitions."""
-    test_requisition.status = "archived"
+    """Bulk activate action un-archives selected requisitions."""
+    test_requisition.is_archived = True
     db_session.commit()
 
     resp = client.post(
@@ -249,7 +253,7 @@ def test_bulk_activate(client, test_requisition, db_session):
     assert resp.status_code == 200
 
     db_session.refresh(test_requisition)
-    assert test_requisition.status == "active"
+    assert test_requisition.is_archived is False
 
 
 def test_bulk_empty_ids(client):
@@ -273,14 +277,14 @@ def test_sales_role_sees_only_own(client, db_session, test_user, sales_user):
     # Create req owned by sales_user
     req_sales = Requisition(
         name="SALES-REQ",
-        status="active",
+        status="open",
         created_by=sales_user.id,
         created_at=datetime.now(timezone.utc),
     )
     # Create req owned by test_user (buyer)
     req_buyer = Requisition(
         name="BUYER-REQ",
-        status="active",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -291,7 +295,7 @@ def test_sales_role_sees_only_own(client, db_session, test_user, sales_user):
     app.dependency_overrides[require_user] = lambda: sales_user
 
     try:
-        resp = client.get("/requisitions2/table", params={"status": "active"})
+        resp = client.get("/requisitions2/table", params={"status": "open"})
         assert resp.status_code == 200
         assert "SALES-REQ" in resp.text
         assert "BUYER-REQ" not in resp.text
@@ -317,12 +321,54 @@ def test_invalid_sort_falls_back(client, test_requisition):
     assert "rq2-rows" in resp.text or "No requisitions found" in resp.text
 
 
+# ── Row actions — hotlist ────────────────────────────────────────────
+
+
+def test_hotlist_action_sets_status(client, test_requisition, db_session):
+    """POST hotlist action moves an open requisition onto the Hotlist monitor."""
+    test_requisition.status = "open"
+    db_session.commit()
+
+    resp = client.post(f"/requisitions2/{test_requisition.id}/action/hotlist")
+    assert resp.status_code == 200
+    assert "rq2-rows" in resp.text or "No requisitions found" in resp.text
+
+    db_session.refresh(test_requisition)
+    assert test_requisition.status == "hotlist"
+    # The detail panel still loads for a hotlisted requisition.
+    assert client.get(f"/requisitions2/{test_requisition.id}/detail").status_code == 200
+
+
+def test_hotlist_action_toast(client, test_requisition, db_session):
+    """Hotlist action emits an 'added to Hotlist' toast."""
+    test_requisition.status = "open"
+    db_session.commit()
+
+    resp = client.post(f"/requisitions2/{test_requisition.id}/action/hotlist")
+    trigger = json.loads(resp.headers["HX-Trigger"])
+    assert "Hotlist" in trigger["showToast"]["message"]
+
+
+def test_hotlist_action_invalid_from_won(client, test_requisition, db_session):
+    """Won is terminal-ish — it cannot move to Hotlist (error toast, 200)."""
+    test_requisition.status = "won"
+    db_session.commit()
+
+    resp = client.post(f"/requisitions2/{test_requisition.id}/action/hotlist")
+    assert resp.status_code == 200
+    trigger = json.loads(resp.headers["HX-Trigger"])
+    assert "Invalid transition" in trigger["showToast"]["message"]
+
+    db_session.refresh(test_requisition)
+    assert test_requisition.status == "won"
+
+
 # ── Row actions — won / lost / assign ────────────────────────────────
 
 
 def test_row_action_won(client, test_requisition, db_session):
     """POST won action marks requisition as won."""
-    test_requisition.status = "active"
+    test_requisition.status = "open"
     db_session.commit()
 
     resp = client.post(f"/requisitions2/{test_requisition.id}/action/won")
@@ -348,7 +394,7 @@ def test_row_action_lost(client, test_requisition, db_session):
 def test_row_action_assign(client, test_requisition, db_session, test_user, sales_user):
     """POST assign action reassigns the requisition owner (manager-only action)."""
     test_user.role = "manager"  # owner reassignment is gated to manager/admin
-    test_requisition.status = "active"
+    test_requisition.status = "open"
     db_session.commit()
 
     resp = client.post(
@@ -364,7 +410,7 @@ def test_row_action_assign(client, test_requisition, db_session, test_user, sale
 def test_row_action_assign_without_owner_id(client, test_requisition, test_user, db_session):
     """POST assign without owner_id does not change owner (manager performing it)."""
     test_user.role = "manager"
-    test_requisition.status = "active"
+    test_requisition.status = "open"
     original_owner = test_requisition.created_by
     db_session.commit()
 
@@ -381,14 +427,14 @@ def test_row_action_assign_without_owner_id(client, test_requisition, test_user,
 @pytest.mark.parametrize(
     ("start_status", "action"),
     [
-        pytest.param("closed", "archive", id="archive_from_closed"),
-        pytest.param("offers", "activate", id="activate_from_offers"),
+        # "closed" is an unknown origin (no allowed targets) and "won" only
+        # permits → "open", so these status moves are genuinely illegal.
         pytest.param("closed", "won", id="won_from_closed"),
-        pytest.param("active", "lost", id="lost_from_active"),
+        pytest.param("won", "lost", id="lost_from_won"),
     ],
 )
 def test_row_action_invalid_state(client, test_requisition, db_session, start_status, action):
-    """Row actions that aren't valid transitions return 200 with an error toast."""
+    """Row actions that aren't valid status transitions return 200 with an error toast."""
     test_requisition.status = start_status
     db_session.commit()
 
@@ -402,7 +448,7 @@ def test_row_action_invalid_state(client, test_requisition, db_session, start_st
 
 def test_row_action_claim_already_claimed(client, test_requisition, db_session, sales_user):
     """Claim on already-claimed requisition returns 200 with error message."""
-    test_requisition.status = "active"
+    test_requisition.status = "open"
     test_requisition.claimed_by_id = sales_user.id
     test_requisition.claimed_at = datetime.now(timezone.utc)
     db_session.commit()
@@ -418,7 +464,7 @@ def test_row_action_claim_already_claimed(client, test_requisition, db_session, 
 def test_bulk_assign(client, test_requisition, db_session, test_user, sales_user):
     """Bulk assign changes owner on selected requisitions (manager-only action)."""
     test_user.role = "manager"  # owner reassignment is gated to manager/admin
-    test_requisition.status = "active"
+    test_requisition.status = "open"
     db_session.commit()
 
     resp = client.post(
@@ -435,7 +481,7 @@ def test_bulk_assign(client, test_requisition, db_session, test_user, sales_user
 def test_bulk_assign_no_owner_id(client, test_requisition, db_session, test_user):
     """Bulk assign without owner_id does not change owners (manager performing it)."""
     test_user.role = "manager"
-    test_requisition.status = "active"
+    test_requisition.status = "open"
     original_owner = test_requisition.created_by
     db_session.commit()
 
@@ -470,15 +516,18 @@ def test_bulk_nonexistent_ids(client):
 
 
 @pytest.mark.parametrize(
-    ("start_status", "action"),
+    ("is_archived", "action"),
     [
-        pytest.param("offers", "activate", id="activate_from_offers"),
-        pytest.param("closed", "archive", id="archive_from_closed"),
+        # activate on an already-active req and archive on an already-archived
+        # req are both no-ops, so 0 requisitions are affected.
+        pytest.param(False, "activate", id="activate_already_active"),
+        pytest.param(True, "archive", id="archive_already_archived"),
     ],
 )
-def test_bulk_action_invalid_state(client, test_requisition, db_session, start_status, action):
-    """Bulk actions on non-transitionable statuses skip gracefully (0 affected)."""
-    test_requisition.status = start_status
+def test_bulk_action_invalid_state(client, test_requisition, db_session, is_archived, action):
+    """Bulk archive/activate that are no-ops skip gracefully (0 affected)."""
+    test_requisition.status = "open"
+    test_requisition.is_archived = is_archived
     db_session.commit()
 
     resp = client.post(
@@ -497,7 +546,7 @@ def test_bulk_action_invalid_state(client, test_requisition, db_session, start_s
 
 def test_row_action_returns_toast_header(client, test_requisition, db_session):
     """Row actions include HX-Trigger header with toast message."""
-    test_requisition.status = "active"
+    test_requisition.status = "open"
     db_session.commit()
 
     resp = client.post(f"/requisitions2/{test_requisition.id}/action/archive")
@@ -510,7 +559,7 @@ def test_row_action_returns_toast_header(client, test_requisition, db_session):
 
 def test_bulk_action_returns_toast_and_clear(client, test_requisition, db_session):
     """Bulk actions include HX-Trigger with toast and clearSelection."""
-    test_requisition.status = "active"
+    test_requisition.status = "open"
     db_session.commit()
 
     resp = client.post(
@@ -529,49 +578,49 @@ def test_bulk_action_returns_toast_and_clear(client, test_requisition, db_sessio
 def test_filter_by_urgency(client, test_requisition, db_session):
     """Urgency filter works through the route."""
     test_requisition.urgency = "critical"
-    test_requisition.status = "active"
+    test_requisition.status = "open"
     db_session.commit()
 
-    resp = client.get("/requisitions2/table", params={"status": "active", "urgency": "critical"})
+    resp = client.get("/requisitions2/table", params={"status": "open", "urgency": "critical"})
     assert resp.status_code == 200
     assert "REQ-TEST-001" in resp.text
 
-    resp2 = client.get("/requisitions2/table", params={"status": "active", "urgency": "hot"})
+    resp2 = client.get("/requisitions2/table", params={"status": "open", "urgency": "hot"})
     assert "REQ-TEST-001" not in resp2.text
 
 
 def test_filter_by_owner(client, test_requisition, test_user, db_session):
     """Owner filter restricts to a specific user's requisitions."""
-    test_requisition.status = "active"
+    test_requisition.status = "open"
     db_session.commit()
 
-    resp = client.get("/requisitions2/table", params={"status": "active", "owner": str(test_user.id)})
+    resp = client.get("/requisitions2/table", params={"status": "open", "owner": str(test_user.id)})
     assert resp.status_code == 200
     assert "REQ-TEST-001" in resp.text
 
-    resp2 = client.get("/requisitions2/table", params={"status": "active", "owner": "99999"})
+    resp2 = client.get("/requisitions2/table", params={"status": "open", "owner": "99999"})
     assert "REQ-TEST-001" not in resp2.text
 
 
 def test_filter_by_date_range(client, test_requisition, db_session):
     """Date range filter narrows results."""
-    test_requisition.status = "active"
+    test_requisition.status = "open"
     db_session.commit()
 
     # Future date range should exclude
-    resp = client.get("/requisitions2/table", params={"status": "active", "date_from": "2099-01-01"})
+    resp = client.get("/requisitions2/table", params={"status": "open", "date_from": "2099-01-01"})
     assert "REQ-TEST-001" not in resp.text
 
     # Past date range should include
     resp2 = client.get(
-        "/requisitions2/table", params={"status": "active", "date_from": "2020-01-01", "date_to": "2099-12-31"}
+        "/requisitions2/table", params={"status": "open", "date_from": "2020-01-01", "date_to": "2099-12-31"}
     )
     assert resp2.status_code == 200
 
 
 def test_status_all(client, test_requisition, db_session):
-    """Status 'all' shows all requisitions regardless of status."""
-    test_requisition.status = "archived"
+    """Status 'all' shows non-archived requisitions regardless of pipeline status."""
+    test_requisition.status = "won"
     db_session.commit()
 
     resp = client.get("/requisitions2/table", params={"status": "all"})
@@ -602,14 +651,14 @@ def test_pagination_shows_controls(client, db_session, test_user):
     for i in range(30):
         req = Requisition(
             name=f"PAGINATE-{i:03d}",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(req)
     db_session.commit()
 
-    resp = client.get("/requisitions2/table", params={"status": "active", "per_page": "10"})
+    resp = client.get("/requisitions2/table", params={"status": "open", "per_page": "10"})
     assert resp.status_code == 200
     assert "Next" in resp.text
     # Compact pagination shows "1/N" format
@@ -628,11 +677,13 @@ def test_inline_edit_name_cell(client, test_requisition):
 
 
 def test_inline_edit_status_cell(client, test_requisition):
-    """GET edit/status returns a select form."""
+    """GET edit/status returns a select form with new pipeline options."""
     resp = client.get(f"/requisitions2/{test_requisition.id}/edit/status")
     assert resp.status_code == 200
     assert "<select" in resp.text
-    assert "active" in resp.text
+    assert 'value="open"' in resp.text
+    assert 'value="hotlist"' in resp.text
+    assert 'value="active"' not in resp.text
 
 
 def test_inline_edit_urgency_cell(client, test_requisition):
@@ -829,7 +880,7 @@ def test_bulk_scope_enforced_for_sales(db_session, sales_user, test_requisition)
     from app.dependencies import require_user
     from app.main import app
 
-    test_requisition.status = "active"
+    test_requisition.status = "open"
     db_session.commit()
 
     def _override_db():
@@ -848,7 +899,8 @@ def test_bulk_scope_enforced_for_sales(db_session, sales_user, test_requisition)
             app.dependency_overrides.pop(dep, None)
     assert resp.status_code == 200
     db_session.refresh(test_requisition)
-    assert test_requisition.status == "active"
+    # Bulk archive was scoped out (req owned by another user) — not archived.
+    assert test_requisition.is_archived is False
 
 
 # ── Detail panel (split-screen) ──────────────────────────────────────
