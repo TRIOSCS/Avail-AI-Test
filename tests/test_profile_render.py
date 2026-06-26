@@ -61,6 +61,47 @@ def test_mailbox_card_disconnected_empty_state(client, db_session, test_user):
     assert "Mailbox not connected" in html
 
 
+def test_mailbox_card_auth_error_shows_reconnect(client, db_session, test_user):
+    """A dead sign-in surfaces an actionable reconnect link, not a generic snag."""
+    from app.services.m365_status import REASON_AUTH
+
+    test_user.m365_connected = True
+    test_user.access_token = "tok"
+    test_user.token_expires_at = None
+    test_user.m365_error_reason = REASON_AUTH
+    db_session.commit()
+    html = _html(client)
+    assert 'href="/auth/login"' in html
+    assert "Reconnect Microsoft 365" in html
+    # the old generic copy is gone
+    assert "hit a snag" not in html.lower()
+
+
+def test_mailbox_card_transient_error_no_reconnect(client, db_session, test_user):
+    """A transient error reads as self-healing — no reconnect, no raw text, no snag."""
+    from app.services.m365_status import REASON_TRANSIENT
+
+    test_user.m365_connected = True
+    test_user.access_token = "tok"
+    test_user.token_expires_at = None
+    test_user.m365_error_reason = REASON_TRANSIENT
+    db_session.commit()
+    html = _html(client)
+    assert REASON_TRANSIENT in html
+    assert "hit a snag" not in html.lower()
+    # transient must not push the user to reconnect
+    assert "Reconnect Microsoft 365" not in html
+
+
+def test_mailbox_card_never_shows_generic_snag(client, db_session, test_user):
+    """Regression: the generic 'we hit a snag' banner is fully retired."""
+    test_user.m365_connected = True
+    test_user.m365_error_reason = "Inbox scan timed out"  # legacy raw value
+    db_session.commit()
+    html = _html(client)
+    assert "hit a snag" not in html.lower()
+
+
 def test_name_with_quotes_does_not_break_alpine_attr(client, db_session, test_user):
     # tojson escapes ' and " so a tricky name stays inside the single-quoted x-data.
     test_user.name = 'O\'Brien "Co"'

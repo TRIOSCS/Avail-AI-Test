@@ -443,6 +443,17 @@ async def _scan_user_inbox(user, db):
 
     if poll_succeeded:
         user.last_inbox_scan = datetime.now(timezone.utc)
+        # A successful poll proves the token + connectivity are healthy right
+        # now, so a stale token/scan error no longer reflects reality — clear it
+        # so the Settings card stops showing a resolved error. Leave the Graph
+        # subscription warning alone: webhooks are a separate channel with their
+        # own renewal lifecycle (webhook_service), and a mailbox poll says
+        # nothing about subscription health.
+        from ..services.m365_status import REASON_SUBSCRIPTION
+
+        if user.m365_error_reason and user.m365_error_reason != REASON_SUBSCRIPTION:
+            user.m365_error_reason = None
+        user.m365_last_healthy = datetime.now(timezone.utc)
         db.commit()
 
 
