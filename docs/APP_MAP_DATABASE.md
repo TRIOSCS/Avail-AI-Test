@@ -320,6 +320,16 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 
 ### Approvals Engine & Quality Plans (Migration 157)
 
+> **Migration 159 (`159_approval_subject_poly`)** — foundation cleanup before QP Phase C:
+> (1) `approval_requests` swaps the two nullable subject FK columns
+> (`subject_quality_plan_id`/`subject_prepayment_id` + their indexes) for a **polymorphic
+> `(subject_type, subject_id)` pair** (no cross-table FK; `ApprovalSubjectType` enum,
+> composite index `ix_approval_req_subject`); (2) `approval_outbox.channel` server_default
+> flips `email` → `in_app`; (3) `approval_events.note` (dead) is dropped — `payload` is the
+> comment sink. Reversible (the downgrade reconstructs the FK columns + indexes, EXISTS-
+> guarding the backfill so a since-deleted subject downgrades to a NULL FK instead of
+> violating it).
+
 **`approval_gate_configs`** — Per-gate configuration: which user is the approver and up to what amount.
 | Column | Type | Notes |
 |--------|------|-------|
@@ -367,10 +377,12 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 | currency | String 10, nullable | |
 | requested_by_id | FK -> users (SET NULL) | |
 | owner_id | FK -> users (SET NULL) | Indexed (`ix_approval_req_owner`) |
-| subject_quality_plan_id | FK -> quality_plans (SET NULL), nullable | Indexed (`ix_approval_req_subject_qp`) |
-| subject_prepayment_id | FK -> prepayments (SET NULL), nullable | Indexed (`ix_approval_req_subject_pp`) |
+| subject_type | String 50, nullable | `ApprovalSubjectType` (`quality_plan`\|`prepayment`; BUY_PLAN/QUOTE/RESELL_OFFER added by later QP-Phase-C phases). **Polymorphic** — no cross-table FK (mirrors `MaterialCardAudit.material_card_id`); survives subject deletion. Migration 159 replaced the two nullable subject FK columns with this pair. |
+| subject_id | Integer, nullable | The subject's PK. `(subject_type, subject_id)` composite-indexed (`ix_approval_req_subject`). |
 | resolved_at | UTCDateTime, nullable | |
 | expires_at | UTCDateTime, nullable | |
+
+> Set by `approvals.service.create_request` from the passed subject (Prepayment → `prepayment`, QualityPlan → `quality_plan`). The router `_serialize_request`/`_buy_plan_as_queue_item` JSON shapes do not expose these columns.
 
 **`approval_steps`** — Ordered stages within an ApprovalRequest.
 | Column | Type | Notes |
@@ -399,9 +411,8 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 | id | Integer PK | |
 | request_id | FK -> approval_requests (CASCADE) | |
 | actor_id | FK -> users (SET NULL), nullable | |
-| event_type | String 50 NOT NULL | e.g. `submitted`\|`approved`\|`step_advanced` |
-| note | Text, nullable | |
-| payload | JSON, nullable | Extra structured context |
+| event_type | String 50 NOT NULL | e.g. `submitted`\|`approved`\|`step_advanced`. The genesis `submitted` row is recorded by `create_request`. |
+| payload | JSON, nullable | Extra structured context — the comment sink (the decision `comment` rides here, NOT a `note` column). Migration 159 dropped the dead `note` column. |
 
 **`approval_outbox`** — Transactional outbox for notifications.
 | Column | Type | Notes |
@@ -409,7 +420,7 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 | id | Integer PK | |
 | request_id | FK -> approval_requests (CASCADE) | |
 | recipient_user_id | FK -> users (CASCADE) | |
-| channel | String 50 NOT NULL | `email`\|`in_app`; server_default `email` |
+| channel | String 50 NOT NULL | `email`\|`in_app`; server_default `in_app` (migration 159 flipped it from `email` so the channel is never implicit-and-wrong). `decide()` enqueues BOTH an `in_app` and an `email` row per decision (Mike's locked dual-channel notice). |
 | payload | JSON, nullable | |
 | sent_at | UTCDateTime, nullable | NULL = not yet dispatched |
 | fail_count | Integer NOT NULL | server_default 0; the drain skips rows at `MAX_OUTBOX_FAIL_COUNT` (dead-letter) — a deleted recipient or unknown channel is failed (fail_count++), never marked sent |

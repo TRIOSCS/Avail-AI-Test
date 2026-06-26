@@ -80,6 +80,7 @@ def create_prepayment(
         subject=prepayment,
         requested_by=created_by,
         owner=created_by,
+        currency=prepayment.currency,
     )
 
     return prepayment, request

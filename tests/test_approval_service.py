@@ -20,6 +20,7 @@ from app.constants import (
     ApprovalGateType,
     ApprovalRecipientStatus,
     ApprovalRequestStatus,
+    ApprovalSubjectType,
 )
 from app.models.approvals import (
     ApprovalEvent,
@@ -119,12 +120,13 @@ def prepayment_request_with_two_recipients(db_session, mike, marcus):
 
 
 def test_create_request_persists_and_routes(db_session, prepayment_request_with_two_recipients, mike, marcus):
-    """create_request persists the request, sets the subject FK, and routes to both."""
+    """create_request persists the request, sets the polymorphic subject, routes to
+    both."""
     req = prepayment_request_with_two_recipients
     assert req.id is not None
     assert req.status == ApprovalRequestStatus.REQUESTED
-    assert req.subject_prepayment_id is not None
-    assert req.subject_quality_plan_id is None
+    assert req.subject_type == ApprovalSubjectType.PREPAYMENT
+    assert req.subject_id is not None
 
     recipient_user_ids = {
         r.user_id
@@ -133,6 +135,50 @@ def test_create_request_persists_and_routes(db_session, prepayment_request_with_
         ).scalars()
     }
     assert recipient_user_ids == {mike.id, marcus.id}
+
+
+def test_create_request_carries_currency(db_session, mike):
+    """A non-USD currency passed to create_request lands on request.currency."""
+    requester = _make_user(db_session, "fx-buyer@trioscs.com")
+    mike.can_approve_prepayments = True
+    db_session.flush()
+
+    eur_req = create_request(
+        db_session,
+        gate_type=ApprovalGateType.PREPAYMENT,
+        amount=Decimal("5000.00"),
+        subject=_make_prepayment(db_session),
+        requested_by=requester,
+        owner=requester,
+        currency="EUR",
+    )
+    assert eur_req.currency == "EUR"
+
+
+def test_create_request_defaults_currency_to_usd(db_session, marcus):
+    """create_request with no currency arg defaults request.currency to USD."""
+    requester = _make_user(db_session, "usd-buyer@trioscs.com")
+    marcus.can_approve_prepayments = True
+    db_session.flush()
+
+    req = create_request(
+        db_session,
+        gate_type=ApprovalGateType.PREPAYMENT,
+        amount=Decimal("5000.00"),
+        subject=_make_prepayment(db_session),
+        requested_by=requester,
+        owner=requester,
+    )
+    assert req.currency == "USD"
+
+
+def test_create_request_records_submitted_genesis_event(db_session, prepayment_request_with_two_recipients):
+    """create_request writes the genesis 'submitted' audit event (the trail's first
+    row)."""
+    req = prepayment_request_with_two_recipients
+    events = db_session.execute(select(ApprovalEvent).where(ApprovalEvent.request_id == req.id)).scalars().all()
+    assert len(events) == 1
+    assert events[0].event_type == "submitted"
 
 
 # ── decide: first-responder-wins / idempotency ──────────────────────────────────
@@ -162,13 +208,14 @@ def test_decide_records_recipient_decision(db_session, prepayment_request_with_t
 
 
 def test_decide_enqueues_outbox_and_event(db_session, prepayment_request_with_two_recipients, mike):
-    """One 'decided' outbox row and an audit event are written on resolution."""
+    """Two 'decided' outbox rows (in_app + email) and an audit event on resolution."""
     req = prepayment_request_with_two_recipients
     decide(db_session, req.id, mike, "approve")
 
     outbox = db_session.execute(select(ApprovalOutbox).where(ApprovalOutbox.request_id == req.id)).scalars().all()
-    assert len(outbox) == 1
-    assert (outbox[0].payload or {}).get("event_type") == "decided"
+    assert len(outbox) == 2
+    assert {o.channel for o in outbox} == {"in_app", "email"}
+    assert all((o.payload or {}).get("event_type") == "decided" for o in outbox)
 
     events = db_session.execute(select(ApprovalEvent).where(ApprovalEvent.request_id == req.id)).scalars().all()
     assert any(e.event_type == "approved" for e in events)

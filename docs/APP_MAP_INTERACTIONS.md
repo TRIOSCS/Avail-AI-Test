@@ -4998,3 +4998,36 @@ ticket_diagnosis_service.diagnose_ticket:
 Bulk selection state lives on the workspace Alpine component (`selected` array); row
 checkboxes bind to it; `window.ticketBulkAction(kind, ids, status)` POSTs and fires
 `ticketsUpdated`. The "Copy fix prompt" button reads the `<pre x-ref="fixprompt">` text.
+
+### Approvals Engine — request lifecycle & notification flow (migration 159 cleanup)
+
+`approvals.service.create_request(db, *, gate_type, amount, subject, requested_by, owner,
+currency="USD")` is the single entry for spawning a routed approval:
+- Persists an `ApprovalRequest`, setting the **polymorphic** `(subject_type, subject_id)`
+  pair from the subject (`Prepayment` → `prepayment`, `QualityPlan` → `quality_plan`) — no
+  cross-table FK (mirrors `MaterialCardAudit`). `currency` (defaults USD) lands on
+  `request.currency`; `prepayment_service.create_prepayment` passes
+  `currency=prepayment.currency`, completing the currency contract.
+- Flushes, calls `routing.route_request`, then records the **genesis `submitted`**
+  `ApprovalEvent` + `ActivityLog` (`APPROVAL_REQUESTED`) — so every request's append-only
+  trail starts with a creation row (its `event_type` is `submitted`).
+
+`approvals.service.decide(db, request_id, user, action, comment=None)` resolves a request
+(first-responder-wins, row-locked). On resolution it records one `approved`/`rejected`
+`ApprovalEvent` and enqueues **two** `ApprovalOutbox` rows for the notify user
+(`owner_id` → `requested_by_id` → decider) — one `channel='in_app'` and one
+`channel='email'` (Mike's locked dual-channel notice). Both carry the same payload
+`{"event_type": "decided", "decision": <approved|rejected>, "comment": <comment>}`.
+
+`jobs.approval_outbox.dispatch_pending` drains the outbox (60s job):
+- `in_app` → `notifications.write_in_app`; the `Notification.body` now carries the decision
+  `comment` (`payload.get("comment")`; `None` when no comment was given).
+- `email` → `notifications.send_email` via Graph (`_build_email_html`) — **now a live path**
+  (previously dead: `decide()` only ever enqueued `in_app`). Send failure increments
+  `fail_count`/`last_error`; the dead-letter cap (`MAX_OUTBOX_FAIL_COUNT`) retires a broken row.
+- Channel server_default is `in_app` (migration 159) so an outbox row without an explicit
+  channel is never silently treated as email.
+
+Router JSON (`routers/approvals.py`): `_serialize_request(r)` is the single 9-field engine-item
+projection shared by `list_requests` + `get_request` (distinct from the read-only buy-plan
+bridge `_buy_plan_as_queue_item`, which is unchanged).

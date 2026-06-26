@@ -31,8 +31,8 @@ from app.models.approvals import (
     ApprovalStep,
     ApprovalStepRecipient,
 )
-from app.services.approvals import create_request, decide
 from app.services.approvals.events import cancel, reassign, record
+from app.services.approvals.service import create_request, decide
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -151,21 +151,27 @@ def test_record_passes_metadata_as_payload(db_session, open_request, actor):
 
 
 def test_decide_writes_exactly_one_event(db_session, open_request, approver):
-    """Decide() must write exactly one ApprovalEvent (not an extra inline one)."""
+    """Decide() writes exactly one new ApprovalEvent ('approved') on top of the genesis
+    'submitted' row create_request already recorded — no extra inline duplicate."""
     decide(db_session, open_request.id, approver, "approve")
     events = (
-        db_session.execute(select(ApprovalEvent).where(ApprovalEvent.request_id == open_request.id)).scalars().all()
+        db_session.execute(
+            select(ApprovalEvent).where(ApprovalEvent.request_id == open_request.id).order_by(ApprovalEvent.id)
+        )
+        .scalars()
+        .all()
     )
-    assert len(events) == 1
-    assert events[0].event_type == "approved"
+    assert [e.event_type for e in events] == ["submitted", "approved"]
 
 
 def test_decide_writes_exactly_one_activity_log(db_session, open_request, approver):
-    """Decide() must write exactly one ActivityLog row via events.record()."""
+    """Decide() writes exactly one new ActivityLog (the decision) on top of the genesis
+    'submitted' summary — two total, the decision being the approved/rejected member."""
     decide(db_session, open_request.id, approver, "approve")
-    logs = db_session.execute(select(ActivityLog)).scalars().all()
-    assert len(logs) == 1
-    assert logs[0].activity_type in (
+    logs = db_session.execute(select(ActivityLog).order_by(ActivityLog.id)).scalars().all()
+    assert len(logs) == 2
+    assert logs[0].activity_type == ActivityType.APPROVAL_REQUESTED  # genesis 'submitted'
+    assert logs[1].activity_type in (
         ActivityType.APPROVAL_APPROVED,
         ActivityType.APPROVAL_REJECTED,
     )

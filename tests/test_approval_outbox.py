@@ -88,6 +88,50 @@ async def test_dispatch_sets_sent_at_and_writes_notification(db_session):
 
 
 @pytest.mark.asyncio
+async def test_in_app_notification_body_carries_comment(db_session):
+    """The in-app Notification.body == the decision comment from the outbox payload."""
+    from app.jobs.approval_outbox import dispatch_pending
+
+    user = _make_user(db_session, "commenter@example.com")
+    req = _make_request(db_session, user)
+    row = ApprovalOutbox(
+        request_id=req.id,
+        recipient_user_id=user.id,
+        channel="in_app",
+        payload={"event_type": "decided", "decision": "rejected", "comment": "Vendor unverified"},
+    )
+    db_session.add(row)
+    db_session.commit()
+
+    await dispatch_pending(db_session)
+
+    notif = db_session.execute(select(Notification).where(Notification.user_id == user.id)).scalar_one()
+    assert notif.body == "Vendor unverified"
+
+
+@pytest.mark.asyncio
+async def test_in_app_notification_body_none_when_no_comment(db_session):
+    """No comment in the payload → the in-app Notification.body is None."""
+    from app.jobs.approval_outbox import dispatch_pending
+
+    user = _make_user(db_session, "nocomment@example.com")
+    req = _make_request(db_session, user)
+    row = ApprovalOutbox(
+        request_id=req.id,
+        recipient_user_id=user.id,
+        channel="in_app",
+        payload={"event_type": "decided", "decision": "approved", "comment": None},
+    )
+    db_session.add(row)
+    db_session.commit()
+
+    await dispatch_pending(db_session)
+
+    notif = db_session.execute(select(Notification).where(Notification.user_id == user.id)).scalar_one()
+    assert notif.body is None
+
+
+@pytest.mark.asyncio
 async def test_dispatch_idempotent_no_double_send(db_session):
     """Running dispatch_pending twice does NOT double-send (sent_at row is skipped)."""
     from app.jobs.approval_outbox import dispatch_pending

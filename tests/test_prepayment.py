@@ -19,7 +19,13 @@ from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
-from app.constants import ApprovalGateType, ApprovalRecipientStatus, ApprovalRequestStatus, PaymentMethod
+from app.constants import (
+    ApprovalGateType,
+    ApprovalRecipientStatus,
+    ApprovalRequestStatus,
+    ApprovalSubjectType,
+    PaymentMethod,
+)
 from app.models.approvals import ApprovalStep, ApprovalStepRecipient
 from app.models.auth import User
 
@@ -158,8 +164,11 @@ def test_create_prepayment_400_routes_to_all_three(db_session: Session, test_use
     assert request is not None
     assert request.gate_type == ApprovalGateType.PREPAYMENT
     assert request.status == ApprovalRequestStatus.REQUESTED
-    assert request.subject_prepayment_id == prepayment.id
+    assert request.subject_type == ApprovalSubjectType.PREPAYMENT
+    assert request.subject_id == prepayment.id
     assert request.amount == Decimal("400.00")
+    # Currency contract: defaults to the prepayment's USD.
+    assert request.currency == "USD"
 
     # Routed to all three (Myrna qualifies because 400 <= 1000)
     recipients = (

@@ -34,6 +34,27 @@ from ..template_env import template_response
 router = APIRouter(tags=["approvals"])
 
 
+def _serialize_request(r: ApprovalRequest) -> dict:
+    """Project an ApprovalRequest to its JSON shape (shared by list + detail).
+
+    The 9-field engine-item projection: id, gate_type, status, amount-as-str, currency,
+    requested_by_id, owner_id, resolved_at (iso), resolution_note, created_at (iso).
+    Distinct from `_buy_plan_as_queue_item` (the read-only buy-plan bridge contract).
+    """
+    return {
+        "id": r.id,
+        "gate_type": r.gate_type,
+        "status": r.status,
+        "amount": str(r.amount) if r.amount is not None else None,
+        "currency": r.currency,
+        "requested_by_id": r.requested_by_id,
+        "owner_id": r.owner_id,
+        "resolved_at": r.resolved_at.isoformat() if r.resolved_at else None,
+        "resolution_note": r.resolution_note,
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+    }
+
+
 def _buy_plan_as_queue_item(bp: BuyPlan) -> dict:
     """Serialize a pending BuyPlan as a unified-queue item.
 
@@ -157,21 +178,7 @@ def list_requests(
 
     rows = db.execute(q).scalars().all()
 
-    items = [
-        {
-            "id": r.id,
-            "gate_type": r.gate_type,
-            "status": r.status,
-            "amount": str(r.amount) if r.amount is not None else None,
-            "currency": r.currency,
-            "requested_by_id": r.requested_by_id,
-            "owner_id": r.owner_id,
-            "resolved_at": r.resolved_at.isoformat() if r.resolved_at else None,
-            "resolution_note": r.resolution_note,
-            "created_at": r.created_at.isoformat() if r.created_at else None,
-        }
-        for r in rows
-    ]
+    items = [_serialize_request(r) for r in rows]
 
     # Bridge: merge pending BuyPlan rows unless a non-buy_plan gate_type filter excludes them
     include_buy_plans = not gate_type or gate_type == "buy_plan"
@@ -224,15 +231,4 @@ def get_request(
     if request is None:
         return JSONResponse(status_code=404, content={"error": f"ApprovalRequest {id} not found"})
 
-    return {
-        "id": request.id,
-        "gate_type": request.gate_type,
-        "status": request.status,
-        "amount": str(request.amount) if request.amount is not None else None,
-        "currency": request.currency,
-        "requested_by_id": request.requested_by_id,
-        "owner_id": request.owner_id,
-        "resolved_at": request.resolved_at.isoformat() if request.resolved_at else None,
-        "resolution_note": request.resolution_note,
-        "created_at": request.created_at.isoformat() if request.created_at else None,
-    }
+    return _serialize_request(request)
