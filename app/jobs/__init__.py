@@ -10,6 +10,7 @@ from loguru import logger
 def register_all_jobs(scheduler, settings):
     """Register all background jobs from domain modules."""
     from ..database import SessionLocal
+    from .approval_outbox import register_approval_outbox_job
     from .cadence_jobs import register_cadence_jobs
     from .core_jobs import register_core_jobs
     from .eight_by_eight_jobs import register_eight_by_eight_jobs
@@ -47,6 +48,7 @@ def register_all_jobs(scheduler, settings):
         register_quality_jobs(scheduler, settings)
         register_teams_call_jobs(scheduler, settings)
         register_worker_liveness_jobs(scheduler, settings)
+        register_approval_outbox_job(scheduler)
     finally:
         db.close()
     job_count = len(scheduler.get_jobs())
