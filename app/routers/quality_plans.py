@@ -1,37 +1,80 @@
 """routers/quality_plans.py — HTMX router for Quality Plan views.
 
-Purpose: Exposes GET /v2/qp/{id} (QP detail partial) and
-         POST /v2/qp/{id}/submit (submit action, returns refreshed partial).
+Purpose: Exposes GET /v2/qp/{id} (QP detail partial),
+         POST /v2/qp/{id}/submit (submit-for-review action), and the QP Phase C2a
+         section gates POST /v2/qp/{id}/submit-sales + /submit-purchasing (open the
+         SALES_ORDER / PURCHASE_ORDER approval gate). All return the refreshed partial.
          Thin router: all business logic lives in app.services.quality_plan_service.
 
 Called by: app.main (router registration).
-Depends on: app.services.quality_plan_service (validate_complete, submit, IncompleteQPError),
+Depends on: app.services.quality_plan_service (validate_complete, submit, submit_section,
+            IncompleteQPError, NoSectionApproverError),
             app.models.quality_plan (QualityPlan), app.models.buy_plan (BuyPlan, BuyPlanLine),
+            app.models.approvals (ApprovalRequest),
+            app.constants (ApprovalGateType),
             app.dependencies (require_user), app.database (get_db),
             app.template_env (template_response).
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
+from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
+from ..constants import ApprovalGateType, ApprovalSubjectType
 from ..database import get_db
 from ..dependencies import require_requisition_access, require_user
+from ..models.approvals import ApprovalRequest
 from ..models.buy_plan import BuyPlan, BuyPlanLine
 from ..models.crm import CustomerSite
 from ..models.quality_plan import QualityPlan
 from ..models.quotes import Quote
-from ..services.quality_plan_service import IncompleteQPError, submit, validate_complete
+from ..services.quality_plan_service import (
+    IncompleteQPError,
+    NoSectionApproverError,
+    submit,
+    submit_section,
+    validate_complete,
+)
 from ..template_env import template_response
 
 router = APIRouter(tags=["quality_plans"])
 
 
-def _qp_detail_response(request: Request, user, db: Session, qp: QualityPlan) -> HTMLResponse:
+def _get_gate(db: Session, qp_id: int, gate_type: str) -> ApprovalRequest | None:
+    """Return the latest ApprovalRequest for this QP + gate, or None.
+
+    The QP is the polymorphic subject (subject_type=QUALITY_PLAN); gate_type
+    discriminates the section. Ordered by id descending so the most recent request wins
+    (a resubmit supersedes a prior rejected one in the section chip).
+    """
+    return db.execute(
+        select(ApprovalRequest)
+        .where(
+            ApprovalRequest.subject_type == ApprovalSubjectType.QUALITY_PLAN,
+            ApprovalRequest.subject_id == qp_id,
+            ApprovalRequest.gate_type == gate_type,
+        )
+        .order_by(ApprovalRequest.id.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+
+
+def _qp_detail_response(
+    request: Request,
+    user,
+    db: Session,
+    qp: QualityPlan,
+    *,
+    section_error: str | None = None,
+) -> HTMLResponse:
     """Build and render the QP detail partial.
 
     Loads the linked BuyPlan with its lines (eager), computes completeness errors for
-    inline display, and renders qp/detail.html.
+    inline display, resolves the latest approval-request per section gate (Sales /
+    Purchasing / Buy Plan / Prepayment) for the section chips, and renders
+    qp/detail.html. section_error surfaces an inline "no approver configured" banner
+    (C2a) without a 500.
     """
     bp = (
         db.get(
@@ -58,6 +101,11 @@ def _qp_detail_response(request: Request, user, db: Session, qp: QualityPlan) ->
         "bp": bp,
         "bp_lines": (bp.lines or []) if bp else [],
         "errors": errors,
+        "section_error": section_error,
+        "sales_gate": _get_gate(db, qp.id, ApprovalGateType.SALES_ORDER),
+        "purchasing_gate": _get_gate(db, qp.id, ApprovalGateType.PURCHASE_ORDER),
+        "buy_plan_gate": _get_gate(db, qp.id, ApprovalGateType.BUY_PLAN),
+        "prepayment_gate": _get_gate(db, qp.id, ApprovalGateType.PREPAYMENT),
     }
     return template_response("htmx/partials/qp/detail.html", ctx)
 
@@ -143,3 +191,63 @@ def qp_submit(
         raise HTTPException(status_code=404, detail="Quality plan not found")
 
     return _qp_detail_response(request, user, db, qp)
+
+
+def _submit_section_response(request: Request, qp_id: int, gate_type: str, db: Session, user) -> HTMLResponse:
+    """Open a section gate (SALES_ORDER / PURCHASE_ORDER) and refresh the QP detail.
+
+    On NoSectionApproverError surfaces an inline "no approver configured" banner (NOT a
+    500); on a concurrent delete (ValueError) returns 404. Shared by the sales and
+    purchasing submit endpoints.
+    """
+    qp = db.get(QualityPlan, qp_id)
+    if qp is None:
+        raise HTTPException(status_code=404, detail="Quality plan not found")
+    _require_qp_access(db, user, qp)
+
+    section_error: str | None = None
+    try:
+        submit_section(db, qp_id, gate_type, user)
+        db.commit()
+    except NoSectionApproverError as exc:
+        # No eligible approver holds the section toggle. create_request already removed
+        # the half-built request, so commit the (empty) transaction and show the banner.
+        db.commit()
+        section_error = f"No approver configured for the {exc.section} section. An admin must grant the right first."
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=404, detail="Quality plan not found") from exc
+
+    qp = db.get(QualityPlan, qp_id)
+    if qp is None:
+        raise HTTPException(status_code=404, detail="Quality plan not found")
+
+    return _qp_detail_response(request, user, db, qp, section_error=section_error)
+
+
+@router.post("/v2/qp/{qp_id}/submit-sales", response_class=HTMLResponse)
+def qp_submit_sales(
+    request: Request,
+    qp_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+) -> HTMLResponse:
+    """Submit the QP Sales section for approval (opens the SALES_ORDER gate).
+
+    Refreshes the detail partial. No eligible approver → inline banner, never a 500.
+    """
+    return _submit_section_response(request, qp_id, ApprovalGateType.SALES_ORDER, db, user)
+
+
+@router.post("/v2/qp/{qp_id}/submit-purchasing", response_class=HTMLResponse)
+def qp_submit_purchasing(
+    request: Request,
+    qp_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+) -> HTMLResponse:
+    """Submit the QP Purchasing section for approval (opens the PURCHASE_ORDER gate).
+
+    Refreshes the detail partial. No eligible approver → inline banner, never a 500.
+    """
+    return _submit_section_response(request, qp_id, ApprovalGateType.PURCHASE_ORDER, db, user)

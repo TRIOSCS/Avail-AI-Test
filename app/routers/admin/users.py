@@ -146,8 +146,9 @@ def users_context(db: Session) -> dict:
 
     rows: every real user (excluding the agent service account), ordered by
     name/email, each as {user, status, last_login_at, can_approve_buy_plans,
-    can_approve_prepayments, prepayment_approval_limit}. Shared by the GET tab
-    (htmx_views.settings_users_tab) and the mutation POSTs below.
+    can_approve_prepayments, prepayment_approval_limit, can_approve_sales_orders,
+    can_approve_pos}. Shared by the GET tab (htmx_views.settings_users_tab) and the
+    mutation POSTs below.
     """
     users = db.query(User).filter(User.email != _AGENT_EMAIL).order_by(User.name.is_(None), User.name, User.email).all()
     rows = [
@@ -158,6 +159,8 @@ def users_context(db: Session) -> dict:
             "can_approve_buy_plans": u.can_approve_buy_plans,
             "can_approve_prepayments": u.can_approve_prepayments,
             "prepayment_approval_limit": u.prepayment_approval_limit,
+            "can_approve_sales_orders": u.can_approve_sales_orders,
+            "can_approve_pos": u.can_approve_pos,
         }
         for u in users
     ]
@@ -384,6 +387,78 @@ async def set_prepayment_approver(
         new_limit,
         admin.email,
     )
+    return _render(db, request)
+
+
+@router.post("/api/admin/users/{user_id}/sales-order-approver", response_class=HTMLResponse)
+async def set_sales_order_approver(
+    request: Request,
+    user_id: int,
+    can_approve: str = Form(...),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Grant or revoke a user's QP Sales-Order approval right; returns the refreshed
+    Users partial.
+
+    The right is the per-user User.can_approve_sales_orders column; the QP Sales section
+    (SALES_ORDER gate) routes to its holders. Admin-only (require_admin); each change
+    writes an APPROVAL_GRANT / APPROVAL_REVOKE audit row. A no-op (state unchanged) re-
+    renders without auditing, mirroring set_buyplan_approver.
+    """
+    target = _editable_target(db, user_id)
+    grant = str(can_approve).strip().lower() in {"true", "1", "on", "yes"}
+
+    if target.can_approve_sales_orders == grant:
+        return _render(db, request)  # no-op, nothing to audit
+
+    target.can_approve_sales_orders = grant
+    action = UserAuditAction.APPROVAL_GRANT if grant else UserAuditAction.APPROVAL_REVOKE
+    record_user_audit(
+        db,
+        actor_id=admin.id,
+        target_user_id=target.id,
+        action=action,
+        detail={"gate": "sales_order"},
+    )
+    db.commit()
+    logger.info("User {} sales-order approval {} by {}", target.email, "granted" if grant else "revoked", admin.email)
+    return _render(db, request)
+
+
+@router.post("/api/admin/users/{user_id}/po-approver", response_class=HTMLResponse)
+async def set_po_approver(
+    request: Request,
+    user_id: int,
+    can_approve: str = Form(...),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Grant or revoke a user's QP Purchase-Order approval right; returns the refreshed
+    Users partial.
+
+    The right is the per-user User.can_approve_pos column; the QP Purchasing section
+    (PURCHASE_ORDER gate) routes to its holders. Admin-only (require_admin); each change
+    writes an APPROVAL_GRANT / APPROVAL_REVOKE audit row. A no-op (state unchanged) re-
+    renders without auditing, mirroring set_buyplan_approver.
+    """
+    target = _editable_target(db, user_id)
+    grant = str(can_approve).strip().lower() in {"true", "1", "on", "yes"}
+
+    if target.can_approve_pos == grant:
+        return _render(db, request)  # no-op, nothing to audit
+
+    target.can_approve_pos = grant
+    action = UserAuditAction.APPROVAL_GRANT if grant else UserAuditAction.APPROVAL_REVOKE
+    record_user_audit(
+        db,
+        actor_id=admin.id,
+        target_user_id=target.id,
+        action=action,
+        detail={"gate": "purchase_order"},
+    )
+    db.commit()
+    logger.info("User {} PO approval {} by {}", target.email, "granted" if grant else "revoked", admin.email)
     return _render(db, request)
 
 

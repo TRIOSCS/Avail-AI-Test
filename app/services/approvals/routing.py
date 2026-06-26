@@ -10,8 +10,10 @@ Purpose: Given an ApprovalRequest, queries active Users for the request's gate_t
          for the gate — caller must handle this (e.g. block the action or alert admins).
 
 Gate → column map:
-  buy_plan   → User.can_approve_buy_plans (no amount limit)
-  prepayment → User.can_approve_prepayments + optional prepayment_approval_limit
+  buy_plan       → User.can_approve_buy_plans (no amount limit)
+  prepayment     → User.can_approve_prepayments + optional prepayment_approval_limit
+  sales_order    → User.can_approve_sales_orders (no amount limit)
+  purchase_order → User.can_approve_pos (no amount limit)
 
 Called by: app.services.approvals (re-exported), ApprovalService (Task 4+)
 Depends on: app.models.approvals, app.models.auth, app.constants
@@ -81,6 +83,30 @@ def route_request(db: Session, request: ApprovalRequest) -> ApprovalStep:
             for u in candidates
             if u.prepayment_approval_limit is None or (amount is not None and amount <= u.prepayment_approval_limit)
         ]
+
+    elif gate == ApprovalGateType.SALES_ORDER:
+        # QP Sales section: route to every active user holding can_approve_sales_orders.
+        # No amount check (the SO gate approves the section, not a spend).
+        eligible = (
+            db.query(User)
+            .filter(
+                User.is_active.is_(True),
+                User.can_approve_sales_orders.is_(True),
+            )
+            .all()
+        )
+
+    elif gate == ApprovalGateType.PURCHASE_ORDER:
+        # QP Purchasing section: route to every active user holding can_approve_pos.
+        # No amount check (the PO gate approves the section, not a spend).
+        eligible = (
+            db.query(User)
+            .filter(
+                User.is_active.is_(True),
+                User.can_approve_pos.is_(True),
+            )
+            .all()
+        )
 
     else:
         raise NoEligibleApproverError(f"No routing rule defined for gate={gate!r}")
