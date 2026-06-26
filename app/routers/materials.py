@@ -4,7 +4,7 @@ Handles material card listing, detail, update, enrichment, soft-delete/restore,
 merge operations, and standalone stock list import.
 
 Called by: main.py (router mount)
-Depends on: models, dependencies, vendor_helpers, cache, normalization, audit_service
+Depends on: models, dependencies, stock_list_ingest, cache, normalization, audit_service
 """
 
 from datetime import datetime, timezone
@@ -13,7 +13,6 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from loguru import logger
 from sqlalchemy import func as sqlfunc
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..cache.decorators import cached_endpoint, invalidate_prefix
@@ -40,13 +39,16 @@ from ..services.material_card_service import (
 from ..services.material_card_service import (
     serialize_material_card as material_card_to_dict,
 )
-from ..services.price_snapshot_service import record_price_snapshot
 from ..services.spec_tiers import set_manufacturer
+from ..services.stock_list_ingest import (
+    StockListValidationError,
+    ingest_stock_list,
+    validate_metadata,
+)
 from ..utils.async_helpers import safe_background_task
 from ..utils.normalization import normalize_mpn_key
 from ..utils.search_builder import SearchBuilder
 from ..utils.vendor_helpers import _background_enrich_vendor
-from ..vendor_utils import normalize_vendor_name
 
 router = APIRouter(tags=["vendors"])
 
@@ -725,173 +727,63 @@ async def import_stock_list_standalone(
     request: Request, user: User = Depends(require_buyer), db: Session = Depends(get_db)
 ):
     """Import a vendor stock list -- stores ALL rows as MaterialCard +
-    MaterialVendorHistory."""
+    MaterialVendorHistory.
+
+    Thin wrapper over ``stock_list_ingest.ingest_stock_list`` (the shared ingest used by
+    both this JSON endpoint and the Vendors-page HTMX upload modal). Returns JSON.
+    """
     form = await request.form()
     file = form.get("file")
     if not file:
         raise HTTPException(400, "No file uploaded")
 
-    # Validate file type
-    import os as _os
-
-    ext = _os.path.splitext(file.filename or "")[1].lower()
-    allowed_extensions = {".csv", ".xlsx", ".xls", ".tsv"}
-    if ext not in allowed_extensions:
-        raise HTTPException(400, f"Invalid file type '{ext}'. Allowed: {', '.join(sorted(allowed_extensions))}")
-
-    # Sanitize vendor name — strip HTML before length check
-    import re as _re
-
-    vendor_name = (form.get("vendor_name") or "").strip()
-    vendor_name = _re.sub(r"<[^>]+>", "", vendor_name).strip()
-    if not vendor_name:
-        raise HTTPException(400, "Vendor name is required")
-    if len(vendor_name) > 255:
-        raise HTTPException(400, "Vendor name must be 255 characters or fewer")
-
-    content = await file.read()
-    if len(content) > 10_000_000:
-        raise HTTPException(413, "File too large -- 10MB maximum")
-
-    from ..file_utils import normalize_stock_row, parse_tabular_file
-
-    rows = parse_tabular_file(content, file.filename or "upload.csv")
-
-    # Upsert VendorCard
-    vendor_website = (form.get("vendor_website") or "").strip()
-    norm_vendor = normalize_vendor_name(vendor_name)
-    vendor_card = db.query(VendorCard).filter_by(normalized_name=norm_vendor).first()
-    new_vendor = False
-    if not vendor_card:
-        domain = ""
-        if vendor_website:
-            domain = (
-                vendor_website.replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0].lower()
-            )
-        vendor_card = VendorCard(
-            normalized_name=norm_vendor,
-            display_name=vendor_name,
-            domain=domain or None,
-            emails=[],
-            phones=[],
+    filename = file.filename or "upload.csv"
+    vendor_name = form.get("vendor_name") or ""
+    try:
+        # Cheap checks (type + vendor) first — reject before buffering the body.
+        validate_metadata(filename, vendor_name)
+        content = await file.read()
+        result = ingest_stock_list(
+            db,
+            filename=filename,
+            content=content,
+            vendor_name=vendor_name,
+            vendor_website=(form.get("vendor_website") or ""),
         )
-        db.add(vendor_card)
-        try:
-            db.flush()
-            new_vendor = True
-        except IntegrityError:
-            db.rollback()
-            vendor_card = db.query(VendorCard).filter_by(normalized_name=norm_vendor).first()
+    except StockListValidationError as exc:
+        raise HTTPException(exc.status_code, exc.message) from exc
 
-    imported = 0
-    skipped = 0
-    card_ids: list[int] = []
-    warnings: list[dict] = []
-
-    # row numbers are 1-based SOURCE-file rows (the header occupies file row 1) so a
-    # warning's `row` points at the spreadsheet line the user can actually open and fix.
-    for row_no, raw_row in enumerate(rows, start=2):
-        parsed = normalize_stock_row(raw_row)
-        if not parsed:
-            skipped += 1
-            warnings.append({"row": row_no, "field": "mpn", "reason": "no part number recognized in row"})
-            continue
-
-        from ..utils.normalization import normalize_mpn as _normalize_mpn
-
-        norm = normalize_mpn_key(parsed["mpn"])
-        if not norm or not _normalize_mpn(parsed["mpn"]):
-            # V3 normalization rejection — never silent: surface the row + reason.
-            # normalize_mpn (not the dedup key) owns the >=3-chars rule.
-            skipped += 1
-            warnings.append({"row": row_no, "field": "mpn", "reason": f"invalid MPN {parsed['mpn']!r} (min 3 chars)"})
-            continue
-
-        # Upsert MaterialCard
-        card = db.query(MaterialCard).filter_by(normalized_mpn=norm).first()
-        if not card:
-            card = MaterialCard(
-                normalized_mpn=norm,
-                display_mpn=parsed["mpn"].strip(),
-                manufacturer=parsed.get("manufacturer") or "",
-            )
-            db.add(card)
-            try:
-                db.flush()
-            except IntegrityError:
-                db.rollback()
-                card = db.query(MaterialCard).filter_by(normalized_mpn=norm).first()
-                if not card:
-                    skipped += 1
-                    warnings.append({"row": row_no, "field": "mpn", "reason": f"could not create card for {norm!r}"})
-                    continue
-        card_ids.append(card.id)
-
-        # Upsert MaterialVendorHistory
-        mvh = db.query(MaterialVendorHistory).filter_by(material_card_id=card.id, vendor_name=norm_vendor).first()
-        if mvh:
-            mvh.last_seen = datetime.now(timezone.utc)
-            mvh.times_seen = (mvh.times_seen or 0) + 1
-            if parsed.get("qty") is not None:
-                mvh.last_qty = parsed["qty"]
-            if parsed.get("price") is not None:
-                mvh.last_price = parsed["price"]
-                record_price_snapshot(
-                    db=db,
-                    material_card_id=card.id,
-                    vendor_name=norm_vendor,
-                    price=parsed.get("price"),
-                    source="stock_list",
-                )
-            if parsed.get("manufacturer"):
-                mvh.last_manufacturer = parsed["manufacturer"]
-            mvh.source_type = "stock_list"
-        else:
-            mvh = MaterialVendorHistory(
-                material_card_id=card.id,
-                vendor_name=norm_vendor,
-                vendor_name_normalized=norm_vendor,
-                source_type="stock_list",
-                source="stock_list",
-                last_qty=parsed.get("qty"),
-                last_price=parsed.get("price"),
-                last_manufacturer=parsed.get("manufacturer") or "",
-            )
-            db.add(mvh)
-            record_price_snapshot(
-                db=db, material_card_id=card.id, vendor_name=norm_vendor, price=parsed.get("price"), source="stock_list"
-            )
-
-        imported += 1
-
-    # Inline deterministic passes over every touched card — same session, committed
-    # together. NO enrich_requested_at stamp: stock imports ride the created_at fast
-    # lane (a large vendor list must not monopolize the worker's priority lane).
-    from ..search_service import run_deterministic_passes
-
-    run_deterministic_passes(db, card_ids)
-
-    vendor_card.sighting_count = (vendor_card.sighting_count or 0) + imported
-    db.commit()
-    invalidate_prefix("material_list")
-
-    # Trigger enrichment for new vendor with domain
-    enrich_triggered = False
-    if new_vendor and vendor_card.domain and not vendor_card.last_enriched_at:
-        if get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY") or get_credential_cached(
-            "anthropic_ai", "ANTHROPIC_API_KEY"
-        ):
-            await safe_background_task(
-                _background_enrich_vendor(vendor_card.id, vendor_card.domain, vendor_card.display_name),
-                task_name="enrich_vendor_bg",
-            )
-            enrich_triggered = True
+    enrich_triggered = await _maybe_enrich_vendor(db, result)
 
     return {
-        "imported_rows": imported,
-        "skipped_rows": skipped,
-        "total_rows": len(rows),
-        "vendor_name": vendor_name,
+        "imported_rows": result.imported_rows,
+        "skipped_rows": result.skipped_rows,
+        "total_rows": result.total_rows,
+        "vendor_name": result.vendor_name,
         "enrich_triggered": enrich_triggered,
-        "warnings": warnings,
+        "warnings": result.warnings,
     }
+
+
+async def _maybe_enrich_vendor(db: Session, result) -> bool:
+    """Fire background vendor enrichment when the ingest flagged a brand-new vendor with
+    a domain and an enrichment credential is configured.
+
+    Kept in the router (not the shared service) because background-task wiring + the
+    credential gate are HTTP-side-effect concerns; the service stays pure/sync.
+    """
+    if not result.enrich_vendor or result.vendor_card_id is None:
+        return False
+    if not (
+        get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY")
+        or get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY")
+    ):
+        return False
+    vendor_card = db.get(VendorCard, result.vendor_card_id)
+    if not vendor_card or not vendor_card.domain:
+        return False
+    await safe_background_task(
+        _background_enrich_vendor(vendor_card.id, vendor_card.domain, vendor_card.display_name),
+        task_name="enrich_vendor_bg",
+    )
+    return True

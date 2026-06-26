@@ -4258,96 +4258,6 @@ async def vendor_contacts_partial(
     return template_response("htmx/partials/vendors/contacts_list.html", ctx)
 
 
-@router.get("/v2/partials/vendors/find-by-part", response_class=HTMLResponse)
-async def find_by_part_partial(
-    request: Request,
-    mpn: str = "",
-    hx_target: str = Query("#main-content", alias="hx_target"),
-    push_url_base: str = Query("/v2/vendors", alias="push_url_base"),
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Search vendors by MPN via MaterialVendorHistory."""
-    from ..models.intelligence import MaterialCard, MaterialVendorHistory
-    from ..utils.normalization import normalize_mpn
-
-    hx_target, push_url_base = _sanitize_hx_params(hx_target, push_url_base, "/v2/vendors")
-
-    results = []
-    norm_mpn = normalize_mpn(mpn) if mpn.strip() else None
-
-    if norm_mpn:
-        rows = (
-            db.query(MaterialVendorHistory, VendorCard)
-            .join(MaterialCard, MaterialVendorHistory.material_card_id == MaterialCard.id)
-            .outerjoin(VendorCard, VendorCard.normalized_name == MaterialVendorHistory.vendor_name_normalized)
-            .filter(MaterialCard.normalized_mpn == norm_mpn)
-            .order_by(
-                MaterialVendorHistory.times_seen.desc(),
-                VendorCard.response_rate.desc().nullslast(),
-                VendorCard.total_pos.desc().nullslast(),
-                VendorCard.avg_response_hours.asc().nullslast(),
-            )
-            .limit(30)
-            .all()
-        )
-        for mvh, vc in rows:
-            results.append(
-                {
-                    "vendor_name": mvh.vendor_name,
-                    "vendor_id": vc.id if vc else None,
-                    "times_seen": mvh.times_seen or 0,
-                    "last_price": mvh.last_price,
-                    "last_qty": mvh.last_qty,
-                    "last_seen": mvh.last_seen,
-                    "win_rate": vc.overall_win_rate if vc else None,
-                    "avg_response_hours": vc.avg_response_hours if vc else None,
-                    "is_affinity": False,
-                }
-            )
-
-    # If few MVH results, try vendor affinity matching
-    if norm_mpn and len(results) < 10:
-        try:
-            from app.services.vendor_affinity_service import find_vendor_affinity
-
-            affinity_matches = find_vendor_affinity(norm_mpn, db)
-
-            # Add affinity matches that aren't already in results
-            existing_vendors = {r["vendor_name"].lower() for r in results}
-            for match in affinity_matches:
-                vname = match.get("vendor_name", "")
-                if vname.lower() not in existing_vendors:
-                    results.append(
-                        {
-                            "vendor_name": vname,
-                            "vendor_id": match.get("vendor_id"),
-                            "times_seen": 0,
-                            "last_price": None,
-                            "last_qty": None,
-                            "last_seen": None,
-                            "win_rate": None,
-                            "avg_response_hours": None,
-                            "is_affinity": True,
-                            "affinity_confidence": match.get("confidence", 0),
-                            "affinity_reasoning": match.get("reasoning", ""),
-                        }
-                    )
-        except Exception:
-            logger.warning(f"Vendor affinity lookup failed for {norm_mpn}", exc_info=True)
-
-    ctx = _base_ctx(request, user, "vendors")
-    ctx.update(
-        {
-            "mpn": mpn.strip().upper() if mpn.strip() else None,
-            "results": results,
-            "hx_target": hx_target,
-            "push_url_base": push_url_base,
-        }
-    )
-    return template_response("htmx/partials/vendors/find_by_part.html", ctx)
-
-
 @router.get("/v2/partials/vendors/create-form", response_class=HTMLResponse)
 async def vendor_create_form_early(
     request: Request,
@@ -15590,49 +15500,72 @@ async def admin_api_health(
     )
 
 
-@router.post("/v2/partials/admin/import/vendors", response_class=HTMLResponse)
-async def import_vendors_csv(
+@router.post("/v2/partials/vendors/import-stock", response_class=HTMLResponse)
+async def import_vendor_stock_list(
     request: Request,
-    user: User = Depends(require_admin),
+    user: User = Depends(require_buyer),
     db: Session = Depends(get_db),
 ):
-    """Import vendors from CSV upload."""
+    """Ingest a vendor stock-list upload (CSV/TSV/XLSX) from the Vendors-page modal.
+
+    Thin wrapper over the shared ``stock_list_ingest`` service (same ingest the JSON
+    ``POST /api/materials/import-stock`` endpoint uses). Returns an HTML result banner that
+    HTMX swaps into ``#vendor-stock-result``.
+    """
+    from ..services.stock_list_ingest import (
+        StockListValidationError,
+        ingest_stock_list,
+        maybe_trigger_vendor_enrichment,
+        validate_metadata,
+    )
+
     form = await request.form()
     file = form.get("file")
     if not file:
-        raise HTTPException(400, "CSV file is required")
+        return template_response(
+            "htmx/partials/vendors/stock_import_result.html",
+            {"request": request, "error": "A stock-list file is required."},
+        )
 
-    import csv
-    import io
+    filename = file.filename or "upload.csv"
+    vendor_name = form.get("vendor_name") or ""
+    try:
+        # Cheap checks (type + vendor) first — reject before buffering the body.
+        validate_metadata(filename, vendor_name)
+        content = await file.read()
+        result = ingest_stock_list(
+            db,
+            filename=filename,
+            content=content,
+            vendor_name=vendor_name,
+            vendor_website=(form.get("vendor_website") or ""),
+        )
+    except StockListValidationError as exc:
+        return template_response(
+            "htmx/partials/vendors/stock_import_result.html",
+            {"request": request, "error": exc.message},
+        )
 
-    content = await file.read()
-    reader = csv.DictReader(io.StringIO(content.decode("utf-8")))
-    count = 0
-    for row in reader:
-        name = row.get("name", "").strip()
-        if not name:
-            continue
-        from ..vendor_utils import normalize_vendor_name
+    await maybe_trigger_vendor_enrichment(db, result)
+    logger.info(
+        "Vendor stock-list upload by {}: vendor={!r} imported={} skipped={}",
+        user.email,
+        result.vendor_name,
+        result.imported_rows,
+        result.skipped_rows,
+    )
 
-        norm = normalize_vendor_name(name)
-        existing = db.query(VendorCard).filter(VendorCard.normalized_name == norm).first()
-        if not existing:
-            vc = VendorCard(
-                display_name=name,
-                normalized_name=norm,
-                emails=[row.get("email", "")] if row.get("email") else [],
-                phones=[row.get("phone", "")] if row.get("phone") else [],
-                website=row.get("website", ""),
-                sighting_count=0,
-            )
-            db.add(vc)
-            count += 1
-    db.commit()
-    logger.info("Vendor CSV import: {} new vendors by {}", count, user.email)
-
-    return HTMLResponse(
-        f'<div class="bg-emerald-50 border border-emerald-200 rounded p-3 text-sm text-emerald-700">'
-        f"Imported {count} new vendors from CSV.</div>"
+    return template_response(
+        "htmx/partials/vendors/stock_import_result.html",
+        {
+            "request": request,
+            "error": None,
+            "vendor_name": result.vendor_name,
+            "imported_rows": result.imported_rows,
+            "skipped_rows": result.skipped_rows,
+            "total_rows": result.total_rows,
+            "warnings": result.warnings,
+        },
     )
 
 

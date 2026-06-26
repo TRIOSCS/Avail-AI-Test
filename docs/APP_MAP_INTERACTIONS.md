@@ -2093,10 +2093,10 @@ merges different-`account_owner_id` accounts) are reused AS-IS.
   keeps the rep's typed name (the AI fix still strengthens the duplicate check), making
   naming suggest-only end-to-end.
 
-### 10a. Global contact lists + vendor CSV import UI
+### 10a. Global contact lists + vendor stock-list upload UI
 
 Two cross-entity contact workspaces sit alongside the CDM account workspace, plus a
-UI for the previously-headless vendor CSV import. All three are thin routes in
+UI for uploading a vendor's stock list. All three are thin routes in
 `htmx_views.py`; the scoping logic lives in `crm_service.py`.
 
 - **`GET /v2/contacts`** (`customer_contacts_partial` → `customers/contacts_list.html`)
@@ -2117,12 +2117,15 @@ UI for the previously-headless vendor CSV import. All three are thin routes in
   blacklisted vendors excluded, mirroring the bulk route. Search (contact name/email or
   vendor name) + sort (name/vendor/email/relationship score) + pagination. Reached via
   the "Contacts" link in `vendors/list.html`.
-- **Vendor CSV import UI** — `vendors/list.html` now carries an "Import Vendors" button
-  + Alpine modal that POSTs `multipart/form-data` to the existing
-  `POST /v2/partials/admin/import/vendors` (`import_vendors_csv`, `require_admin`). CSV
-  header `name,email,phone,website`; existing vendors (matched by normalized name) are
-  skipped; the result HTML swaps into `#vendor-import-result`. The button renders for
-  all users; the endpoint enforces admin.
+- **Vendor stock-list upload UI** — `vendors/list.html` carries an "Upload stock list"
+  button + Alpine modal that POSTs `multipart/form-data` (CSV/TSV/XLSX file for a named
+  vendor) to `POST /v2/partials/vendors/import-stock` (`import_vendor_stock_list`,
+  `require_buyer`). The handler is a thin wrapper over the shared
+  `app/services/stock_list_ingest.py::ingest_stock_list` service (the same ingest the JSON
+  `POST /api/materials/import-stock` endpoint uses), which ingests rows
+  (MPN, qty, price, manufacturer…) as `MaterialCard` + `MaterialVendorHistory` + price
+  snapshots. The result HTML banner (`htmx/partials/vendors/stock_import_result.html`)
+  swaps into `#vendor-stock-result`.
 
 Both `/v2/contacts` and `/v2/vendor-contacts` are full-page entry points wired into
 `v2_page` (segments precede `customers`/`vendors` — `/contacts` is a substring of
@@ -3250,6 +3253,10 @@ Bulk surfaces gain the same server-side pipeline (no UI changes):
   (search_requirement's write session) runs the passes over ALL searched card ids — a
   deliberate deviation from the original spec ("newly created ids only"): the passes are
   idempotent through the ladder and re-searching an old card backfills its decode.
+  The JSON `POST /api/materials/import-stock` route (`import_stock_list_standalone`) is now
+  a thin wrapper over the shared `app/services/stock_list_ingest.py::ingest_stock_list`
+  service (JSON contract unchanged); the Vendors-page HTMX route
+  `POST /v2/partials/vendors/import-stock` reuses the same `ingest_stock_list`.
 
 Worker priority lane + demand ordering (enrichment_worker/worker.py, migration 105):
   select_batch ORDER BY is `enrich_requested_at ASC NULLS LAST, (status=unenriched) DESC,
@@ -4321,7 +4328,7 @@ the current implementation.
 | Auth | 7 | OAuth login/callback/logout, status |
 | Requisitions | 47 | CRUD, search, bulk archive/assign, claim; requisitions2 split-panel detail with lazy-loaded Offers/Activity tabs (`GET /requisitions2/{id}/offers` + `/activity`, reusing the shared activity timeline) |
 | Requirements | 23 | Add parts, CSV upload, search, leads, tasks |
-| Vendors | 57 | CRUD, contacts, stock history, reviews, tags; new create: `POST /api/vendors` (201, 409 dup), `GET /v2/partials/vendors/create-form`, `POST /v2/partials/vendors/create`; delete UI: `DELETE /v2/partials/vendors/{id}` (admin, 400 if active offers) — both returning vendor detail/list HTML; CRM parity: activity tab, add-note, tasks tab + CRUD, attachments; **migration 145 (P1)**: HTMX vendor contact CRUD (`POST /v2/partials/vendors/{id}/contacts` require_user, `PUT .../contacts/{cid}` require_user, `DELETE .../contacts/{cid}` require_admin, `POST .../contacts/{cid}/set-primary` require_user — clears all others atomically); ownership badge (`GET/POST .../claim` require_user, `POST .../release` require_user — wraps `strategic_vendor_service.claim_vendor`/`drop_vendor`); custom fields (`POST/DELETE /v2/partials/vendors/{id}/custom-fields[/{label}]` require_user, mirrors company custom-fields); is_primary column on vendor_contacts; custom_fields JSONB on vendor_cards |
+| Vendors | 57 | CRUD, contacts, stock history, reviews, tags; new create: `POST /api/vendors` (201, 409 dup), `GET /v2/partials/vendors/create-form`, `POST /v2/partials/vendors/create`; delete UI: `DELETE /v2/partials/vendors/{id}` (admin, 400 if active offers) — both returning vendor detail/list HTML; stock-list upload UI: `POST /v2/partials/vendors/import-stock` (`import_vendor_stock_list`, require_buyer — thin wrapper over `stock_list_ingest.ingest_stock_list`, result banner into `#vendor-stock-result`); CRM parity: activity tab, add-note, tasks tab + CRUD, attachments; **migration 145 (P1)**: HTMX vendor contact CRUD (`POST /v2/partials/vendors/{id}/contacts` require_user, `PUT .../contacts/{cid}` require_user, `DELETE .../contacts/{cid}` require_admin, `POST .../contacts/{cid}/set-primary` require_user — clears all others atomically); ownership badge (`GET/POST .../claim` require_user, `POST .../release` require_user — wraps `strategic_vendor_service.claim_vendor`/`drop_vendor`); custom fields (`POST/DELETE /v2/partials/vendors/{id}/custom-fields[/{label}]` require_user, mirrors company custom-fields); is_primary column on vendor_contacts; custom_fields JSONB on vendor_cards |
 | Companies/CRM | 47 | CRUD, sites, contacts, enrichment, import; CDM workspace (`/v2/partials/customers`, `/v2/partials/customers/account-list`); outreach logging (`POST /api/activity/outreach-initiated`); CRM task CRUD: `DELETE /v2/partials/tasks/{id}` (delete), `GET /v2/partials/tasks/{id}/edit-form` + `POST /v2/partials/tasks/{id}/edit` (edit); account add-note: `GET /v2/partials/customers/{id}/activity/add-note-form` + `POST /v2/partials/customers/{id}/activity/add-note` (cadence-neutral, direction=None → no last_outbound_at bump); all three gates reuse `_is_crm_task_authorized` (task) or `can_manage_account` (note); contact merge (dedup): `GET /v2/partials/customers/{cid}/contacts/{ctid}/merge-form` + preview + `POST .../merge` (can_manage_account on source company, merge_contacts service); contact move: `GET .../move-form` + `POST .../move` (can_manage_account on BOTH source+target companies, target site must be active); **migration 144**: contact secondary fields (secondary_email, secondary_phone in EDITABLE_CONTACT_FIELDS), reports_to_id self-FK in create+edit; contact tag routes: `POST /v2/partials/customers/{cid}/contacts/{ctid}/tags` (assign segment tag by tag_id or tag_name), `DELETE /v2/partials/customers/{cid}/contacts/{ctid}/tags/{tag_id}` (unassign), `GET /v2/partials/customers/{cid}/contacts/for-select` (JSON list for reports_to picker, exclude_id param); EntityTag entity_type='site_contact' now valid; **bulk actions**: `POST /v2/partials/customers/bulk/{action}` (deactivate, send-to-prospecting, assign-owner) — auth-scoped: deactivate+send-to-prospecting gate per-company via `can_manage_account` (skips non-manageable; summary), assign-owner is MANAGER/ADMIN ONLY (403 for reps); **CSV import**: `POST /v2/partials/customers/import/preview` (parse+flag dupes/invalid, no writes) + `POST /v2/partials/customers/import/confirm` (create Companies, dedup by normalized_name, sets importer as account_owner_id); **contact CSV import**: `POST /v2/partials/customers/import/contacts/preview` (parse+flag duplicate emails) |
 | Offers | 30 | CRUD, line items, accept/reject, changelog |
 | Quotes | 25 | CRUD, send, PDF, e-signature, pricing history; bare `/v2/quotes` 307→`/v2/requisitions`; list partial removed; detail `/v2/quotes/{id}` unchanged; surfaced via Reqs workspace + CRM account Quotes tabs |
