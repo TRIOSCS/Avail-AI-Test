@@ -27,6 +27,7 @@ Depends on: app.models.quality_plan (QualityPlan),
             app.constants (QualityPlanStatus, QPOrderType, ActivityType, ApprovalGateType).
 """
 
+from datetime import datetime, timezone
 from typing import Any
 
 from loguru import logger
@@ -177,13 +178,75 @@ def submit(
     return qp
 
 
+# Sales-section completeness: the SO# plus the QC-required fields a vendor needs to
+# source against. (field, human-readable label) — a field is "missing" when its value is
+# None or an empty/whitespace string. Booleans only require an explicit answer.
+_SALES_REQUIRED: list[tuple[str, str]] = [
+    ("sales_so_number", "Sales Order #"),
+    ("sales_condition", "Condition"),
+    ("sales_quantity", "Quantity"),
+    ("sales_product_commodity", "Product Commodity"),
+    ("sales_testing_required", "Testing Required"),
+]
+
+# Purchasing-section completeness: the PO# plus the QC-required fields.
+_PURCHASING_REQUIRED: list[tuple[str, str]] = [
+    ("purchasing_po_number", "Purchase Order #"),
+    ("purchasing_condition", "Condition"),
+    ("purchasing_product_commodity", "Product Commodity"),
+    ("purchasing_testing_required", "Testing Required"),
+]
+
+
+def _missing_required(qp: QualityPlan, required: list[tuple[str, str]]) -> list[str]:
+    """Return human-readable labels for any required field that is blank/None.
+
+    A string field counts as present only when it has non-whitespace content; a Boolean
+    counts as present once it is explicitly True or False (an unanswered Y/N is None).
+    Integers count as present once set (including 0).
+    """
+    errors: list[str] = []
+    for field, label in required:
+        value = getattr(qp, field, None)
+        if value is None or (isinstance(value, str) and not value.strip()):
+            errors.append(f"{label} is required")
+    return errors
+
+
+def _validate_sales_section(qp: QualityPlan) -> list[str]:
+    """Return completeness errors for the Sales section; empty list == submittable."""
+    return _missing_required(qp, _SALES_REQUIRED)
+
+
+def _validate_purchasing_section(qp: QualityPlan) -> list[str]:
+    """Return completeness errors for the Purchasing section; empty list ==
+    submittable."""
+    return _missing_required(qp, _PURCHASING_REQUIRED)
+
+
+def validate_section(qp: QualityPlan, gate_type: str) -> list[str]:
+    """Dispatch to the per-section validator for the given gate_type.
+
+    Returns the Sales validator's errors for the SALES_ORDER gate and the Purchasing
+    validator's for the PURCHASE_ORDER gate; any other gate has no section fields to
+    validate (empty list). The router uses this to render server-driven section_errors
+    and to disable the submit button until the section is complete.
+    """
+    if str(gate_type) == "sales_order":
+        return _validate_sales_section(qp)
+    if str(gate_type) == "purchase_order":
+        return _validate_purchasing_section(qp)
+    return []
+
+
 def _on_section_approved(db: Session, qp_id: int, gate_type: str, approved: bool) -> None:
     """On-resolve hook for a QP section gate (SALES_ORDER / PURCHASE_ORDER).
 
     Called by the approval engine inside decide() (lazy import) when a section request
-    resolves. C2a scope: log one ActivityLog row recording the section decision. C2b
-    extends this to also stamp the QualityPlan's section-approved timestamp column (the
-    timestamp columns land in C2b — do not write them here yet).
+    resolves. On approval it stamps the QualityPlan's matching section-approved
+    timestamp (sales_section_approved_at / purchasing_section_approved_at) and logs one
+    ActivityLog row; on rejection it clears the stamp (a re-approval can re-set it) and
+    logs the rejection. Same session as decide() — the caller flushes/commits.
 
     Args:
         db: SQLAlchemy session (sync, 2.0 style).
@@ -198,6 +261,13 @@ def _on_section_approved(db: Session, qp_id: int, gate_type: str, approved: bool
     if qp is None:
         logger.warning("_on_section_approved: QualityPlan id={} not found; skipping", qp_id)
         return
+
+    # Stamp (or clear) the section's approved-at timestamp.
+    stamp = datetime.now(timezone.utc) if approved else None
+    if str(gate_type) == "sales_order":
+        qp.sales_section_approved_at = stamp
+    elif str(gate_type) == "purchase_order":
+        qp.purchasing_section_approved_at = stamp
 
     section = _SECTION_LABEL.get(str(gate_type), str(gate_type))
     verb = "approved" if approved else "rejected"
@@ -216,9 +286,9 @@ def submit_section(db: Session, qp_id: int, gate_type: str, user: Any) -> Any:
 
     The QualityPlan is the engine subject (subject_type=QUALITY_PLAN); the gate_type
     discriminates which section is being submitted. Routes to users holding the matching
-    per-user approval toggle (can_approve_sales_orders / can_approve_pos). C2a does not
-    yet enforce per-section field completeness (that lands in C2b) — it only opens the
-    gate request.
+    per-user approval toggle (can_approve_sales_orders / can_approve_pos). C2b enforces
+    per-section field completeness first: a blank SO#/PO# or any missing QC-required
+    field raises IncompleteQPError before any gate request is opened.
 
     Args:
         db: SQLAlchemy session (sync, 2.0 style).
@@ -231,6 +301,9 @@ def submit_section(db: Session, qp_id: int, gate_type: str, user: Any) -> Any:
 
     Raises:
         ValueError: If the QualityPlan is not found.
+        IncompleteQPError: If the section is missing a required field — carries the
+            field-level error list. The router re-renders with those section_errors and
+            no gate request is opened.
         NoSectionApproverError: If no eligible approver holds the section toggle — the
             router surfaces this as an inline banner (NOT a 500). The half-built request
             is removed by create_request, so no orphan engine state remains.
@@ -244,6 +317,10 @@ def submit_section(db: Session, qp_id: int, gate_type: str, user: Any) -> Any:
     qp = db.get(QualityPlan, qp_id)
     if qp is None:
         raise ValueError(f"QualityPlan {qp_id} not found")
+
+    section_errors = validate_section(qp, gate_type)
+    if section_errors:
+        raise IncompleteQPError(section_errors)
 
     try:
         request = create_request(

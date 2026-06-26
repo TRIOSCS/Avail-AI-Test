@@ -352,9 +352,43 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 | inspection_level | String 50, nullable | e.g. "AQL 1.5" |
 | sampling_rate | String 50, nullable | |
 | notes | Text, nullable | |
+| sales_* (18 cols) | String 255 / Text / Integer / Boolean, all nullable | § Sales "Quality Questions" (QP Phase C2b): `sales_so_number`, `sales_condition`, `sales_quantity` (Int), `sales_fw_hw_rev`, `sales_product_commodity`, `sales_testing_required`/`_option`/`_specifics`, `sales_test_location`, `sales_serial_preapproval_required`, `sales_authorized_ship_early`/`_partial`, `sales_routing_prescreening_whs`, `sales_vendor_rating`, `sales_third_party_pkg_ok`, `sales_pkg_requirements`, `sales_bom_matrix_links`, `sales_notes` (Boolean for Y/N). Completeness gate enforces the required subset at submit, not the DB. |
+| purchasing_* (10 cols) | String 255 / Text / Boolean, all nullable | § Purchasing "Quality Questions" (C2b): `purchasing_po_number`, `purchasing_condition`, `purchasing_fw_hw_rev`, `purchasing_product_commodity`, `purchasing_testing_required`/`_option`, `purchasing_routing_prescreening_whs`, `purchasing_packaging`, `purchasing_tpo_ship_complete` (Bool), `purchasing_tpo_notes`. |
+| sales_section_approved_at | UTCDateTime, nullable | Stamped by `_on_section_approved` when the SALES_ORDER gate approves (cleared on reject). |
+| purchasing_section_approved_at | UTCDateTime, nullable | Stamped when the PURCHASE_ORDER gate approves. |
 | created_by_id | FK -> users (SET NULL) | |
 | approved_by_id | FK -> users (SET NULL) | |
 | approved_at | UTCDateTime, nullable | |
+
+> Relationships: `serial_entries` (QpSerialEntry, delete-orphan) and `fru_lookups` (QpFruLookup, delete-orphan). Added by migration 161 (QP Phase C2b).
+
+**`qp_serial_entries`** — Serial-preapproval tracking rows on a QP's Serial section (QP Phase C2b).
+| Column | Type | Notes |
+|--------|------|-------|
+| id | Integer PK | |
+| qp_id | FK -> quality_plans (CASCADE) | Indexed (`ix_qp_serial_qp`) |
+| buyer_id | FK -> users (SET NULL), nullable | |
+| submitted_by_id | FK -> users (SET NULL), nullable | Defaults to the acting user on create |
+| buyer_date | Date, nullable | |
+| has_sn_prev_received | Boolean, nullable | Has SN previously been received? (Y/N) |
+| purchase_order / part_number / serial_number / seagate_sn / tso / customer_po | String 255, nullable | |
+| submitted_to_customer_date | Date, nullable | |
+| customer_approved | Boolean, nullable | Did customer approve? (Y/N) |
+| customer_approved_date | Date, nullable | |
+| ops_received | Boolean, nullable | OPS received (Y/N) |
+| created_at | UTCDateTime | |
+
+> Customer-side fields stay internal — the vendor share view (QP Phase C2c) excludes this whole section.
+
+**`qp_fru_lookups`** — FRU part numbers pinned to a QP's FRU crosswalk section (QP Phase C2b).
+| Column | Type | Notes |
+|--------|------|-------|
+| id | Integer PK | |
+| qp_id | FK -> quality_plans (CASCADE) | Indexed (`ix_qp_fru_qp`) |
+| fru_norm | String 64 NOT NULL | `normalize_mpn_key` of the FRU; the view live-joins `fru_links` by this key |
+| created_at | UTCDateTime | |
+
+> Unique `(qp_id, fru_norm)` (`uq_qp_fru_lookup`) — a FRU can't be pinned twice; the router checks-then-inserts so a re-pin is a no-op.
 
 **`prepayments`** — Upfront vendor payment records linked to a buy plan.
 | Column | Type | Notes |

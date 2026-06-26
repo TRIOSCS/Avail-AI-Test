@@ -1,14 +1,19 @@
 {#
   qp/detail.html — Quality Plan one-screen detail view.
   Renders the QP header (customer/owner/SO# derived from the linked BuyPlan) plus
-  collapsible sections: Sales, Purchasing, Buy Plan (populated), Serial (Phase 2).
-  Each section carries a per-section approval-status chip.
-  A Submit button calls POST /v2/qp/{id}/submit; IncompleteQPError errors show inline.
+  collapsible sections, each an {% include %} of its own partial (C2b):
+  Sales, Purchasing, Buy Plan (populated), Serial, FRU Crosswalk.
+  Each section carries a per-section approval-status chip + its own submit/edit forms.
+  The top-level Submit button calls POST /v2/qp/{id}/submit; IncompleteQPError shows inline.
 
-  Receives: qp (QualityPlan ORM), bp (BuyPlan ORM), bp_lines (list[BuyPlanLine]),
-            user (User), errors (list[str]), is_ops_member (bool).
-  Called by: routers/quality_plans.py qp_detail.
-  Depends on: HTMX, Alpine.js, Tailwind CSS, shared/_macros.html.
+  Receives: qp (QualityPlan ORM with serial_entries + fru_lookups eager-loaded),
+            bp (BuyPlan ORM), bp_lines (list[BuyPlanLine]), user (User),
+            errors (list[str]), section_error (str|None),
+            sales_errors / purchasing_errors (list[str]),
+            fru_rows (list of {"pin": QpFruLookup, "links": [FruLink]}),
+            sales_gate / purchasing_gate / buy_plan_gate / prepayment_gate (ApprovalRequest|None).
+  Called by: routers/quality_plans.py qp_detail / _qp_detail_response.
+  Depends on: HTMX, Alpine.js, Tailwind CSS, shared/_macros.html, the qp/_section_*.html partials.
 #}
 {% from "htmx/partials/shared/_macros.html" import status_badge, badge %}
 
@@ -48,7 +53,7 @@
 } %}
 
 <div class="page-fluid"
-     x-data="{ showSales: false, showPurchasing: false, showBuyPlan: true, showSerial: false }">
+     x-data="{ showSales: false, showPurchasing: false, showBuyPlan: true, showSerial: false, showFru: false }">
 
   {# ═══ 1. COMPACT HEADER ═══ #}
   <div class="mb-4">
@@ -134,13 +139,7 @@
       </svg>
     </div>
     <div x-show="showSales" x-collapse class="border-t border-gray-100 px-4 py-3">
-      <p class="text-xs text-gray-400 italic mb-2">Sales section fields — available in Phase 2 (C2b).</p>
-      {# Submit for approval — hidden once a non-rejected request exists. #}
-      {% if sales_gate is none or sales_gate.status == 'rejected' or sales_gate.status == 'cancelled' %}
-      <form hx-post="/v2/qp/{{ qp.id }}/submit-sales" hx-target="#main-content" hx-swap="innerHTML">
-        <button type="submit" data-loading-disable class="btn btn-secondary btn-sm">Submit Sales for Approval</button>
-      </form>
-      {% endif %}
+      {% include "htmx/partials/qp/_section_sales.html" %}
     </div>
   </div>
 
@@ -160,13 +159,7 @@
       </svg>
     </div>
     <div x-show="showPurchasing" x-collapse class="border-t border-gray-100 px-4 py-3">
-      <p class="text-xs text-gray-400 italic mb-2">Purchasing section fields — available in Phase 2 (C2b).</p>
-      {# Submit for approval — hidden once a non-rejected request exists. #}
-      {% if purchasing_gate is none or purchasing_gate.status == 'rejected' or purchasing_gate.status == 'cancelled' %}
-      <form hx-post="/v2/qp/{{ qp.id }}/submit-purchasing" hx-target="#main-content" hx-swap="innerHTML">
-        <button type="submit" data-loading-disable class="btn btn-secondary btn-sm">Submit Purchasing for Approval</button>
-      </form>
-      {% endif %}
+      {% include "htmx/partials/qp/_section_purchasing.html" %}
     </div>
   </div>
 
@@ -255,7 +248,7 @@
     </div>
   </div>
 
-  {# ── Section: Serial Numbers (Phase 2) ── #}
+  {# ── Section: Serial Numbers ── #}
   <div class="mb-3 rounded-lg border border-gray-200 bg-white">
     <div role="button" tabindex="0"
          @click="showSerial = !showSerial"
@@ -263,7 +256,7 @@
          class="flex w-full cursor-pointer items-center justify-between px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50">
       <div class="flex items-center gap-2">
         <span>Serial Numbers</span>
-        <span class="badge bg-gray-50 text-gray-400 border-gray-200">Phase 2</span>
+        <span class="text-xs text-gray-400 font-normal">{{ qp.serial_entries|length }} entr{{ 'ies' if qp.serial_entries|length != 1 else 'y' }}</span>
       </div>
       <svg class="h-4 w-4 text-gray-400 transition-transform" :class="showSerial ? 'rotate-180' : ''"
            fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -271,7 +264,27 @@
       </svg>
     </div>
     <div x-show="showSerial" x-collapse class="border-t border-gray-100 px-4 py-3">
-      <p class="text-xs text-gray-400 italic">Serial number tracking — available in Phase 2.</p>
+      {% include "htmx/partials/qp/_section_serial.html" %}
+    </div>
+  </div>
+
+  {# ── Section: FRU Crosswalk ── #}
+  <div class="mb-3 rounded-lg border border-gray-200 bg-white">
+    <div role="button" tabindex="0"
+         @click="showFru = !showFru"
+         @keydown.enter="showFru = !showFru"
+         class="flex w-full cursor-pointer items-center justify-between px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50">
+      <div class="flex items-center gap-2">
+        <span>FRU Crosswalk</span>
+        <span class="text-xs text-gray-400 font-normal">{{ fru_rows|length }} pinned</span>
+      </div>
+      <svg class="h-4 w-4 text-gray-400 transition-transform" :class="showFru ? 'rotate-180' : ''"
+           fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+      </svg>
+    </div>
+    <div x-show="showFru" x-collapse class="border-t border-gray-100 px-4 py-3">
+      {% include "htmx/partials/qp/_section_fru.html" %}
     </div>
   </div>
 

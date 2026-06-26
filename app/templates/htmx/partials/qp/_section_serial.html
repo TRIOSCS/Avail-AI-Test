@@ -1,0 +1,85 @@
+{#
+  qp/_section_serial.html — Quality Plan § Serial preapproval tracking (C2b).
+  A compact table of QpSerialEntry rows + an "add entry" form that POSTs
+  /v2/qp/{id}/serial and swaps this partial back. Each row has a delete button
+  (DELETE /v2/qp/{id}/serial/{entry_id}). Customer-side fields stay internal — the
+  vendor share view (C2c) excludes this whole section.
+
+  Receives: qp (QualityPlan ORM, serial_entries eager-loaded), user (User).
+  Called by: routers/quality_plans.py (_render_serial_section, _qp_detail_response) and
+             qp/detail.html ({% include %}).
+  Depends on: HTMX, Tailwind CSS. Swaps into its own #qp-section-serial wrapper.
+#}
+<div id="qp-section-serial">
+  {% if qp.serial_entries %}
+  <div class="overflow-x-auto">
+    <table class="compact-table w-full">
+      <thead>
+        <tr>
+          <th class="text-left">PO</th>
+          <th class="text-left">Part #</th>
+          <th class="text-left">Serial #</th>
+          <th class="text-left">Seagate SN</th>
+          <th class="text-left">TSO</th>
+          <th class="text-left">Submitted By</th>
+          <th class="text-left">Submitted</th>
+          <th class="text-left">Cust. Approved</th>
+          <th class="text-left">OPS Recv.</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for e in qp.serial_entries %}
+        <tr>
+          <td class="text-xs">{{ e.purchase_order or '—' }}</td>
+          <td class="font-mono text-xs">{{ e.part_number or '—' }}</td>
+          <td class="font-mono text-xs">{{ e.serial_number or '—' }}</td>
+          <td class="font-mono text-xs">{{ e.seagate_sn or '—' }}</td>
+          <td class="text-xs">{{ e.tso or '—' }}</td>
+          <td class="text-xs">{{ e.submitted_by.name if e.submitted_by else '—' }}</td>
+          <td class="text-xs">{{ e.submitted_to_customer_date.isoformat() if e.submitted_to_customer_date else '—' }}</td>
+          <td class="text-xs">{{ 'Yes' if e.customer_approved else ('No' if e.customer_approved is false else '—') }}</td>
+          <td class="text-xs">{{ 'Yes' if e.ops_received else ('No' if e.ops_received is false else '—') }}</td>
+          <td class="text-right">
+            <button type="button"
+                    hx-delete="/v2/qp/{{ qp.id }}/serial/{{ e.id }}"
+                    hx-target="#qp-section-serial"
+                    hx-swap="outerHTML"
+                    hx-confirm="Delete this serial entry?"
+                    class="text-rose-500 hover:text-rose-700 text-xs">Delete</button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="text-xs text-gray-400">No serial entries yet.</p>
+  {% endif %}
+
+  {# ── Add entry ── #}
+  <form hx-post="/v2/qp/{{ qp.id }}/serial"
+        hx-target="#qp-section-serial"
+        hx-swap="outerHTML"
+        class="mt-3 grid grid-cols-2 gap-2 md:grid-cols-4">
+    <input type="text" name="purchase_order" placeholder="PO" class="rounded border-gray-300 text-xs">
+    <input type="text" name="part_number" placeholder="Part #" class="rounded border-gray-300 text-xs">
+    <input type="text" name="serial_number" placeholder="Serial #" class="rounded border-gray-300 text-xs">
+    <input type="text" name="seagate_sn" placeholder="Seagate SN" class="rounded border-gray-300 text-xs">
+    <input type="text" name="tso" placeholder="TSO" class="rounded border-gray-300 text-xs">
+    <input type="text" name="customer_po" placeholder="Customer PO" class="rounded border-gray-300 text-xs">
+    <label class="text-xs text-gray-600">Submitted to Cust.
+      <input type="date" name="submitted_to_customer_date" class="mt-0.5 w-full rounded border-gray-300 text-xs">
+    </label>
+    <label class="text-xs text-gray-600">Cust. Approved
+      <select name="customer_approved" class="mt-0.5 w-full rounded border-gray-300 text-xs">
+        <option value="">—</option>
+        <option value="true">Yes</option>
+        <option value="false">No</option>
+      </select>
+    </label>
+    <div class="md:col-span-4">
+      <button type="submit" data-loading-disable class="btn btn-secondary btn-sm">Add Serial Entry</button>
+    </div>
+  </form>
+</div>

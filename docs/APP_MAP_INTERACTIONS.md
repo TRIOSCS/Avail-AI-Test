@@ -5070,11 +5070,32 @@ configured" banner (NEVER a 500), with no orphan request (`create_request` alrea
 the half-built row). On resolution, `decide()`'s on-resolve dispatch — after the BUY_PLAN
 block — runs for `subject_type=='quality_plan'` AND `gate_type ∈ {sales_order,
 purchase_order}`: a LAZY import (circular-safe) of
-`quality_plan_service._on_section_approved(db, qp_id, gate_type, approved)`, which C2a logs
-an `APPROVAL_APPROVED`/`APPROVAL_REJECTED` `ActivityLog` (the section-approved timestamp
-columns land in C2b). The QP detail renders a per-section gate-status chip from
-`_get_gate(db, qp_id, gate_type)` (latest `ApprovalRequest` for the QP + gate), and the
-"Submit … for Approval" button is hidden once a non-rejected request exists.
+`quality_plan_service._on_section_approved(db, qp_id, gate_type, approved)`, which logs
+an `APPROVAL_APPROVED`/`APPROVAL_REJECTED` `ActivityLog`. The QP detail renders a per-section
+gate-status chip from `_get_gate(db, qp_id, gate_type)` (latest `ApprovalRequest` for the QP
++ gate), and the "Submit … for Approval" button is hidden once a non-rejected request exists.
+
+**QP native sections (QP Phase C2b):** the QP detail (`qp/detail.html`) `{% include %}`s four
+section partials — `qp/_section_sales.html`, `_section_purchasing.html`, `_section_serial.html`,
+`_section_fru.html` — replacing the Phase-2 placeholders.
+- *Sales / Purchasing fields:* each is one `<form>` that `hx-patch`es `/v2/qp/{id}/sales` (or
+  `/purchasing`) `hx-trigger="change"` and swaps the section partial into itself. The router
+  writes only the whitelisted `_SALES_FIELDS`/`_PURCHASING_FIELDS` (so a stray form key can't set
+  an arbitrary column), coercing Y/N→tri-state Boolean, qty→int, else stripped string|None. A PATCH
+  is a no-op once the section is approved (read-only). The grid is read-only while a request is
+  `requested` or the section is approved.
+- *Completeness gate:* `validate_section(qp, gate_type)` → `_validate_sales_section`/
+  `_validate_purchasing_section` (required: the SO#/PO# + condition + product commodity + testing-
+  required, plus quantity for Sales). `submit_section` now calls it FIRST and raises
+  `IncompleteQPError` (no gate opened) when incomplete; the router re-renders with server-driven
+  `section_errors` that disable the submit button. `_on_section_approved` now stamps
+  `sales_section_approved_at`/`purchasing_section_approved_at` on approve (cleared on reject).
+- *Serial CRUD:* `POST /v2/qp/{id}/serial` adds a `QpSerialEntry` (submitted_by = acting user),
+  `DELETE …/serial/{entry_id}` removes it (404 if it belongs to another QP). Cascade with the QP.
+- *FRU pin/unpin:* `POST /v2/qp/{id}/fru` resolves `fru_norm` via `normalize_mpn_key`, checks the
+  `(qp_id, fru_norm)` unique constraint (re-pin = no-op), and the section live-joins `FruLink` by
+  `fru_norm` (`_fru_rows`) to show the related model/carrier/series edges; `DELETE …/fru/{lookup_id}`
+  unpins. All C2b mutation endpoints keep the `_require_qp_access` ownership scope (404 not 403).
 
 **Leaving PENDING outside `decide()` cancels the open engine request (no orphan, no
 resurrection):** a PENDING plan carries a live `REQUESTED` `BUY_PLAN` `ApprovalRequest`, so

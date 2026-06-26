@@ -135,7 +135,7 @@ from .prospect_account import ProspectAccount  # noqa: F401
 from .purchase_history import CustomerPartHistory  # noqa: F401
 
 # Quality Plans + Prepayments (QP workflow subjects)
-from .quality_plan import Prepayment, QualityPlan  # noqa: F401
+from .quality_plan import Prepayment, QpFruLookup, QpSerialEntry, QualityPlan  # noqa: F401
 
 # Quotes (V1 BuyPlan model removed — use BuyPlan from buy_plan module)
 from .quotes import Quote, QuoteLine  # noqa: F401
