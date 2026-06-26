@@ -196,6 +196,34 @@ def test_supervise_flagged(db_session, test_user, test_quote, test_requisition):
     assert "issue_type" in row
     assert row["issue_type"] == LineIssueType.LEAD_TIME_CHANGED
     assert row["plan_id"] == plan.id
+    # The flagged row states the ACTUAL reason (Part 4): humanised type code when no note.
+    assert row["issue_reason"] == "Lead time changed"
+
+
+def test_supervise_flagged_reason_prefers_note(db_session, test_user, test_quote, test_requisition):
+    """When a buyer left a free-text issue_note, the flagged reason shows that note."""
+    from app.services.buyplan_hub import supervise_overview
+
+    plan = _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.ACTIVE,
+    )
+    line = _make_line(
+        db_session,
+        buy_plan_id=plan.id,
+        buyer_id=test_user.id,
+        status=BuyPlanLineStatus.ISSUE,
+        issue_type=LineIssueType.OTHER,
+    )
+    line.issue_note = "Vendor MOQ doubled — needs reprice"
+    db_session.flush()
+
+    result = supervise_overview(db_session)
+    row = next(d for d in result["triage"]["flagged"] if d["line_id"] == line.id)
+    # The specific note wins over the generic type label.
+    assert row["issue_reason"] == "Vendor MOQ doubled — needs reprice"
 
 
 # ── 4. Overdue AWAITING_PO lines ─────────────────────────────────────
@@ -372,7 +400,10 @@ def test_supervise_so_pending(db_session, test_user, test_quote, test_requisitio
     assert plan.id in so_ids
 
     row = next(d for d in result["triage"]["so_pending"] if d["plan_id"] == plan.id)
-    assert set(row.keys()) == {"plan_id", "customer_name", "value", "submitted_by_name"}
+    assert set(row.keys()) == {"plan_id", "customer_name", "value", "submitted_by_name", "card_title"}
+    # SO-approval row carries the canonical title ending "- SO"; Owner = Account Manager.
+    assert row["card_title"].endswith(" - SO")
+    assert (test_user.name or test_user.email) in row["card_title"]
 
 
 def test_supervise_so_approved_not_pending(db_session, test_quote, test_requisition):
@@ -419,8 +450,11 @@ def test_supervise_po_pending_verify(db_session, test_user, test_quote, test_req
     assert line.id in pv_ids
 
     row = next(d for d in result["triage"]["po_pending_verify"] if d["line_id"] == line.id)
-    assert set(row.keys()) == {"line_id", "plan_id", "mpn", "vendor_name", "buyer_name"}
+    assert set(row.keys()) == {"line_id", "plan_id", "mpn", "vendor_name", "buyer_name", "card_title"}
     assert row["plan_id"] == plan.id
+    # PO-approval row carries the canonical title ending "- PO"; Owner = the Buyer.
+    assert row["card_title"].endswith(" - PO")
+    assert (test_user.name or test_user.email) in row["card_title"]
 
 
 def test_supervise_awaiting_po_not_pending_verify(db_session, test_user, test_quote, test_requisition):

@@ -89,6 +89,7 @@ from ..models.vendors import VendorContact
 from ..scoring import classify_lead, explain_lead, score_unified
 from ..services import clay_oauth, task_service
 from ..services.activity_service import log_activity as _log_activity
+from ..services.buyplan_naming import summarize_top_flag
 from ..services.commodity_registry import COMMODITY_TREE, get_display_name
 from ..services.faceted_search_service import (
     INTERNAL_FILTER_VALUES,
@@ -11125,6 +11126,8 @@ async def buy_plan_detail_partial(
             "lines": bp.lines or [],
             "is_ops_member": _is_ops_member(user, db),
             "user": user,
+            # Most-urgent flag reason so the indicator states the issue at first glance.
+            "top_flag": summarize_top_flag(bp.ai_flags),
         }
     )
     return template_response("htmx/partials/buy_plans/detail.html", ctx)
@@ -13462,6 +13465,7 @@ async def build_buy_plan_htmx(
     ctx["lines"] = bp_lines
     ctx["user"] = user
     ctx["is_ops_member"] = _is_ops_member(user, db)
+    ctx["top_flag"] = summarize_top_flag(plan.ai_flags)
     return template_response("htmx/partials/buy_plans/detail.html", ctx)
 
 

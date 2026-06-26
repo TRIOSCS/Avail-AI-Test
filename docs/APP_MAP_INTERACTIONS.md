@@ -1298,6 +1298,21 @@ GET /v2/partials/buy-plans?lens=          (shell: switcher + lazy #bp-hub-body)
                              THIS body into #bp-hub-body.
 ```
 
+**Deal-card naming + denser tiles.** `services/buyplan_naming.build_card_title` is the
+single shared title helper — every actionable surface derives the identical
+`{SalesOrder#} - {Customer} - {Owner} - {Type}` title (missing fields → em dash):
+deal-board cards end `- BP` (Owner = the Account Manager / `BuyPlan.submitted_by`),
+SO-approval triage rows end `- SO` (Owner = the Account Manager), PO-approval
+(`po_pending_verify`) triage rows end `- PO` (Owner = the Buyer / `BuyPlanLine.buyer`).
+`_deal_card` also exposes `tso` (`sales_order_number`), `po_numbers` (distinct
+`BuyPlanLine.po_number`s — OUR vendor POs, not `customer_po_number`) and `primary_mpn`
+so the tile shows the deal at a glance without opening it. **Flagged-issue honesty:**
+`supervise_overview` flagged rows carry `issue_reason` (`buyplan_hub._issue_reason`:
+buyer's `issue_note` when set, else the humanised `issue_type`); the detail page's
+"AI Insights" indicator shows the worst flag's verbatim reason via
+`buyplan_naming.summarize_top_flag(bp.ai_flags)` (critical → warning → info) — both state
+WHAT is wrong, not just a count.
+
 **Resell workspace — resell/excess split-panel (Chunk F, ADDITIVE).** `/v2/resell` is
 its own primary-nav tab (9th item in `mobile_nav.html`) served by the `v2_page` shell →
 `GET /v2/partials/resell/workspace` (router `app/routers/resell.py`, mounted alongside the
