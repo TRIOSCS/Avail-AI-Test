@@ -161,3 +161,122 @@ async def test_email_channel_graph_success_sets_sent_at(db_session):
     db_session.refresh(row)
     assert row.sent_at is not None, "sent_at should be set after successful email send"
     assert row.fail_count == 0
+
+
+@pytest.mark.asyncio
+async def test_deleted_recipient_increments_fail_count_not_sent(db_session):
+    """A row whose recipient no longer exists is failed (not silently skipped):
+
+    fail_count++, last_error set, sent_at stays NULL — so the dead-letter cap can retire
+    it. The deleted recipient is simulated by the User lookup returning None (in prod
+    the FK is ON DELETE SET NULL / the row outlives the user); patching the lookup is
+    the deterministic way to exercise the branch without fighting the test DB's cascade.
+    """
+    from unittest.mock import patch
+
+    from app.jobs.approval_outbox import dispatch_pending
+
+    user = _make_user(db_session, "ghost@example.com")
+    req = _make_request(db_session, user)
+    row = _pending_outbox(db_session, req, user, channel="in_app")
+    db_session.commit()
+
+    # Simulate the recipient being gone: db.get(User, ...) → None for this drain.
+    real_get = db_session.get
+
+    def _get(model, ident, **kw):
+        if getattr(model, "__name__", "") == "User":
+            return None
+        return real_get(model, ident, **kw)
+
+    with patch.object(db_session, "get", side_effect=_get):
+        await dispatch_pending(db_session)
+
+    db_session.refresh(row)
+    assert row.sent_at is None, "deleted-recipient row must NOT be marked sent"
+    assert row.fail_count == 1, "fail_count must increment for a deleted recipient"
+    assert "not found" in (row.last_error or "").lower()
+
+
+@pytest.mark.asyncio
+async def test_dead_letter_cap_stops_fetching_row(db_session):
+    """A row already at MAX_OUTBOX_FAIL_COUNT is not fetched (dead-lettered)."""
+    from app.jobs.approval_outbox import MAX_OUTBOX_FAIL_COUNT, dispatch_pending
+
+    user = _make_user(db_session, "capped@example.com")
+    req = _make_request(db_session, user)
+    row = _pending_outbox(db_session, req, user, channel="in_app")
+    row.fail_count = MAX_OUTBOX_FAIL_COUNT  # already at the cap
+    db_session.commit()
+
+    dispatched = await dispatch_pending(db_session)
+
+    assert dispatched == 0, "a capped row must not be dispatched"
+    db_session.refresh(row)
+    assert row.sent_at is None
+    # Untouched — the SELECT filtered it out, so fail_count did not change.
+    assert row.fail_count == MAX_OUTBOX_FAIL_COUNT
+
+
+@pytest.mark.asyncio
+async def test_unknown_channel_is_failed_not_marked_sent(db_session):
+    """An unknown channel is a permanent failure: fail_count++, last_error set,
+    sent_at stays NULL (FIX 5 — no longer silently marked sent)."""
+    from app.jobs.approval_outbox import dispatch_pending
+
+    user = _make_user(db_session, "weird@example.com")
+    req = _make_request(db_session, user)
+    row = _pending_outbox(db_session, req, user, channel="carrier_pigeon")
+    db_session.commit()
+
+    await dispatch_pending(db_session)
+
+    db_session.refresh(row)
+    assert row.sent_at is None, "unknown channel must NOT be marked sent"
+    assert row.fail_count == 1
+    assert "carrier_pigeon" in (row.last_error or "")
+
+    notifs = db_session.execute(select(Notification).where(Notification.user_id == user.id)).scalars().all()
+    assert notifs == [], "unknown channel must not write a Notification"
+
+
+@pytest.mark.asyncio
+async def test_in_app_failure_savepoint_does_not_poison_batch(db_session):
+    """If the in_app flush raises, the per-row SAVEPOINT rolls back the dirty
+    Notification and the fail_count/last_error write still survives; a healthy later row
+    in the same batch still dispatches (batch not poisoned)."""
+    from app.jobs import approval_outbox
+    from app.jobs.approval_outbox import dispatch_pending
+
+    user = _make_user(db_session, "mixed@example.com")
+    req = _make_request(db_session, user)
+    bad = _pending_outbox(db_session, req, user, channel="in_app")
+    good = _pending_outbox(db_session, req, user, channel="in_app")
+    db_session.commit()
+
+    # Make ONLY the first in_app write raise; the second proceeds normally.
+    calls = {"n": 0}
+    real_write = approval_outbox._ns.write_in_app
+
+    def _flaky_write(db, user_id, event_type, title, body=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            db.add(  # dirty object that must be rolled back to the savepoint
+                Notification(user_id=user_id, event_type=event_type, title=title, body=body, is_read=False)
+            )
+            raise RuntimeError("boom in_app")
+        return real_write(db, user_id, event_type, title, body)
+
+    with patch.object(approval_outbox._ns, "write_in_app", side_effect=_flaky_write):
+        dispatched = await dispatch_pending(db_session)
+
+    assert dispatched == 1, "the healthy row must still dispatch despite the bad row"
+
+    db_session.refresh(bad)
+    db_session.refresh(good)
+    assert bad.sent_at is None and bad.fail_count == 1 and "boom in_app" in (bad.last_error or "")
+    assert good.sent_at is not None, "the good row must be marked sent"
+
+    # Exactly one Notification — the bad row's dirty Notification was rolled back.
+    notifs = db_session.execute(select(Notification).where(Notification.user_id == user.id)).scalars().all()
+    assert len(notifs) == 1, "the failed row's Notification must have been rolled back to the savepoint"

@@ -14,11 +14,11 @@
 
 <title hx-swap-oob="true">Quality Plan #{{ qp.id }} — AvailAI</title>
 
-{# ── Derive header fields from the buy plan ── #}
-{% set owner = bp.submitted_by if bp.submitted_by else qp.created_by %}
-{% set customer_name = bp.requisition.customer_name if bp.requisition and bp.requisition.customer_name else
+{# ── Derive header fields from the buy plan (bp may be None on orphaned data) ── #}
+{% set owner = (bp.submitted_by if bp and bp.submitted_by else qp.created_by) %}
+{% set customer_name = bp.requisition.customer_name if bp and bp.requisition and bp.requisition.customer_name else
                        (bp.quote.customer_site.company.name if bp and bp.quote and bp.quote.customer_site and bp.quote.customer_site.company else '—') %}
-{% set so_number = bp.sales_order_number or '—' %}
+{% set so_number = (bp.sales_order_number if bp else None) or '—' %}
 
 {# ── QP status chip color map ── #}
 {% set QP_STATUS = {
@@ -66,10 +66,14 @@
       <span>SO#: <span class="font-mono text-gray-800">{{ so_number }}</span></span>
       <span>
         Buy Plan:
+        {% if bp %}
         <a hx-get="/v2/partials/buy-plans/{{ bp.id }}"
            hx-target="#main-content"
            hx-push-url="/v2/buy-plans/{{ bp.id }}"
            class="font-mono text-brand-600 hover:text-brand-500 cursor-pointer">#{{ bp.id }}</a>
+        {% else %}
+        <span class="text-gray-400 italic">unavailable</span>
+        {% endif %}
       </span>
     </div>
   </div>
@@ -136,7 +140,11 @@
          class="flex w-full cursor-pointer items-center justify-between px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50">
       <div class="flex items-center gap-2">
         <span>Buy Plan</span>
+        {% if bp %}
         {{ status_badge(bp.status, status_map=QP_STATUS) }}
+        {% else %}
+        <span class="badge bg-gray-50 text-gray-400 border-gray-200">unavailable</span>
+        {% endif %}
         <span class="text-xs text-gray-400 font-normal">{{ bp_lines|length }} line{{ 's' if bp_lines|length != 1 }}</span>
       </div>
       <svg class="h-4 w-4 text-gray-400 transition-transform" :class="showBuyPlan ? 'rotate-180' : ''"

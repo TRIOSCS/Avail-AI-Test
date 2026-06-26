@@ -104,6 +104,12 @@ def submit(
     sets status to IN_REVIEW and writes one ActivityLog row (activity_type=APPROVAL_REQUESTED,
     buy_plan_id linked when present).
 
+    Phase-1 scope note (intentional, not a gap): submit() deliberately does NOT create
+    an Approval Engine gate/ApprovalRequest here. It only transitions draft→in_review and
+    writes the ActivityLog. The only active approval gate in Phase 1 is the Buy-Plan
+    section, surfaced via the existing read-only buy-plan-approval bridge. The engine's
+    QP/buy_plan gate is wired in Phase 1.5 — do not add gate-routing to submit() until then.
+
     Args:
         db: SQLAlchemy session (sync, 2.0 style).
         qp_id: PK of the QualityPlan to submit.

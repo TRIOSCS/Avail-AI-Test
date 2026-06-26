@@ -113,13 +113,17 @@ def post_cancel(
 ):
     """Cancel an open ApprovalRequest.
 
-    Gate: require_user (any authenticated user). The service raises ValueError
-    if the request is already resolved.
+    Gate: require_user (any authenticated user), then the service enforces
+    ownership — only the requester, the owner, or a manager/admin may cancel
+    (PermissionError → 403). The service raises ValueError if the request is
+    already resolved (→ 400).
     Returns: {"cancelled": true}.
     """
     try:
         svc_cancel(db, id, actor=current_user)
         db.commit()
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
     except ValueError as exc:
         return JSONResponse(status_code=400, content={"error": str(exc)})
 

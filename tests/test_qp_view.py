@@ -148,6 +148,66 @@ def test_qp_detail_404(client):
     assert resp.status_code == 404
 
 
+def test_qp_submit_concurrent_delete_returns_404(client, db_session: Session, test_user, test_customer_site):
+    """POST submit when the QP is concurrently deleted → 404, not 500 (FIX 7).
+
+    submit() raises ValueError if the QP vanished between the router's existence check
+    and the service load. The router must translate that to a 404, not surface a 500.
+    """
+    from unittest.mock import patch
+
+    req = _make_requisition(db_session, test_user.id)
+    q = _make_quote(db_session, req.id, test_customer_site.id)
+    bp = _make_buy_plan(db_session, req.id, q.id, test_user.id)
+    qp = _make_qp(db_session, bp.id, test_user.id)
+    db_session.commit()
+
+    with patch(
+        "app.routers.quality_plans.submit",
+        side_effect=ValueError(f"QualityPlan {qp.id} not found"),
+    ):
+        resp = client.post(f"/v2/qp/{qp.id}/submit")
+
+    assert resp.status_code == 404
+
+
+def test_qp_submit_none_refetch_after_incomplete_returns_404(
+    client, db_session: Session, test_user, test_customer_site
+):
+    """If the post-IncompleteQPError re-fetch returns None (row deleted during the
+    rollback window), the router returns 404 instead of dereferencing None → 500."""
+    from unittest.mock import patch
+
+    from app.routers import quality_plans as qp_router
+    from app.services.quality_plan_service import IncompleteQPError
+
+    req = _make_requisition(db_session, test_user.id)
+    q = _make_quote(db_session, req.id, test_customer_site.id)
+    bp = _make_buy_plan(db_session, req.id, q.id, test_user.id)
+    qp = _make_qp(db_session, bp.id, test_user.id)
+    db_session.commit()
+
+    # submit() raises IncompleteQPError; the router rolls back and re-fetches the QP.
+    # Simulate a concurrent delete in that window: the SECOND QualityPlan db.get → None.
+    real_get = db_session.get
+    state = {"qp_gets": 0}
+
+    def _get(model, ident, **kw):
+        if model is qp_router.QualityPlan:
+            state["qp_gets"] += 1
+            if state["qp_gets"] >= 2:
+                return None  # re-fetch after rollback finds nothing
+        return real_get(model, ident, **kw)
+
+    with (
+        patch("app.routers.quality_plans.submit", side_effect=IncompleteQPError(["owner is required"])),
+        patch.object(db_session, "get", side_effect=_get),
+    ):
+        resp = client.post(f"/v2/qp/{qp.id}/submit")
+
+    assert resp.status_code == 404
+
+
 def test_qp_detail_unauthenticated(unauthenticated_client):
     """GET /v2/qp/1 without auth returns 401."""
     resp = unauthenticated_client.get("/v2/qp/1")

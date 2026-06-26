@@ -1,10 +1,13 @@
 """approval_outbox.py — Drains pending ApprovalOutbox rows.
 
-Purpose: Polls approval_outbox for rows where sent_at IS NULL and dispatches
-         each one: email via Graph API and/or writes an in-app Notification,
-         depending on the row's channel.  On success sets sent_at (idempotent —
-         a row already sent is skipped).  On failure increments fail_count and
-         records last_error without marking sent.
+Purpose: Polls approval_outbox for rows where sent_at IS NULL and fail_count is
+         below MAX_OUTBOX_FAIL_COUNT, dispatching each one: email via Graph API
+         and/or writes an in-app Notification, depending on the row's channel.  On
+         success sets sent_at (idempotent — a row already sent is skipped).  On any
+         failure (send error, deleted recipient, unknown channel) it increments
+         fail_count and records last_error WITHOUT marking sent; once fail_count
+         reaches the cap the row is dead-lettered (no longer fetched), so a
+         permanently-broken row can't retry forever and mask real failures.
 
 Called by: app/scheduler.py register_approval_outbox_job (periodic drain)
 Depends on: app.models.approvals.ApprovalOutbox, app.models.auth.User,
@@ -20,21 +23,56 @@ from sqlalchemy.orm import Session
 from app.models.approvals import ApprovalOutbox
 from app.services.approvals import notifications as _ns
 
+# A row that has failed this many times is "dead-lettered": it stops being fetched
+# by the drain so a permanently-broken row (deleted recipient, unknown channel,
+# repeated transient errors) can no longer clog the outbox or flood the logs every
+# 60s forever, masking real failures. The fail_count/last_error fields on the row
+# preserve the diagnosis for an operator.
+MAX_OUTBOX_FAIL_COUNT = 5
+
+
+def _mark_failed(db: Session, row: ApprovalOutbox, reason: str) -> None:
+    """Record a permanent/recoverable failure on a row WITHOUT marking it sent.
+
+    Increments fail_count and stores last_error, then flushes. Once fail_count hits
+    MAX_OUTBOX_FAIL_COUNT the row is no longer selected by dispatch_pending (dead-
+    letter). Never sets sent_at — the row genuinely did not send.
+    """
+    row.fail_count = (row.fail_count or 0) + 1
+    row.last_error = reason
+    db.flush()
+
 
 async def dispatch_pending(db: Session) -> int:
     """Drain all unsent ApprovalOutbox rows.
 
-    Processes rows where sent_at IS NULL in ascending id order.  For each row:
+    Processes rows where sent_at IS NULL and fail_count < MAX_OUTBOX_FAIL_COUNT in
+    ascending id order. For each row:
       - channel == "email": sends via Graph API using the recipient's token.
       - channel == "in_app": writes a Notification row.
-      - Any other channel: logs a warning and marks sent to avoid perpetual retry.
+      - recipient deleted / unknown channel: treated as a failure — fail_count is
+        incremented and last_error recorded (NOT marked sent), so the dead-letter cap
+        retires the row instead of it retrying forever.
+
+    Each row's work runs inside a SAVEPOINT (db.begin_nested) so a partial failure
+    (e.g. an unflushed in_app Notification) is rolled back to the savepoint and cannot
+    poison the batch; the fail_count/last_error write then happens on the outer
+    transaction and is guaranteed to survive. Identical behavior on PostgreSQL and the
+    SQLite test DB (both support SAVEPOINT).
 
     Returns the count of rows successfully dispatched.
     """
     from app.models import User
 
     rows = (
-        db.execute(select(ApprovalOutbox).where(ApprovalOutbox.sent_at.is_(None)).order_by(ApprovalOutbox.id))
+        db.execute(
+            select(ApprovalOutbox)
+            .where(
+                ApprovalOutbox.sent_at.is_(None),
+                ApprovalOutbox.fail_count < MAX_OUTBOX_FAIL_COUNT,
+            )
+            .order_by(ApprovalOutbox.id)
+        )
         .scalars()
         .all()
     )
@@ -43,11 +81,20 @@ async def dispatch_pending(db: Session) -> int:
     for row in rows:
         recipient = db.get(User, row.recipient_user_id)
         if recipient is None:
-            logger.warning("approval_outbox row {} — recipient {} not found; skipping", row.id, row.recipient_user_id)
+            reason = f"recipient_user_id {row.recipient_user_id} not found — user deleted"
+            _mark_failed(db, row, reason)
+            logger.error(
+                "approval_outbox row {} — {} (attempt {}); will retire after {} attempts",
+                row.id,
+                reason,
+                row.fail_count,
+                MAX_OUTBOX_FAIL_COUNT,
+            )
             continue
 
         payload: dict = row.payload or {}
 
+        savepoint = db.begin_nested()
         try:
             if row.channel == "email":
                 subject, html = _ns._build_email_html(payload)
@@ -58,16 +105,21 @@ async def dispatch_pending(db: Session) -> int:
                 _ns.write_in_app(db, recipient.id, event_type, title, body)
 
             else:
-                logger.warning("approval_outbox row {} — unknown channel '{}'; marking sent", row.id, row.channel)
+                # Unknown channel is a permanent code/data mismatch — fail it (no sent_at)
+                # so the dead-letter cap retires it, rather than silently marking it sent.
+                raise ValueError(f"unknown channel '{row.channel}'")
 
             row.sent_at = datetime.now(timezone.utc)
             db.flush()
+            savepoint.commit()
             dispatched += 1
 
         except Exception as exc:
-            row.fail_count = (row.fail_count or 0) + 1
-            row.last_error = str(exc)
-            db.flush()
+            # Roll back this row's partial state (e.g. a dirty Notification) to the
+            # savepoint so the outer transaction is clean; the fail_count/last_error
+            # write below then cannot re-raise the same error or be lost on rollback.
+            savepoint.rollback()
+            _mark_failed(db, row, str(exc))
             logger.error(
                 "approval_outbox row {} dispatch failed (attempt {}): {}",
                 row.id,

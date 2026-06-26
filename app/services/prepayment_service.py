@@ -3,7 +3,10 @@
 Purpose: Persists a Prepayment row and immediately spawns a routed
          ApprovalRequest (gate_type=PREPAYMENT) via ApprovalService.create_request.
          The approval request is routed to all Users with can_approve_prepayments=True
-         whose prepayment_approval_limit is NULL (unlimited) or >= total_incl_fees.
+         whose prepayment_approval_limit is NULL (unlimited) or high enough to cover
+         the amount — i.e. eligible when total_incl_fees <= prepayment_approval_limit
+         (matching the routing check request.amount <= limit). A limit *below* the
+         amount makes that approver ineligible.
 
 Called by: app.routers.prepayments (POST /v2/prepayments).
 Depends on: app.models.quality_plan (Prepayment),

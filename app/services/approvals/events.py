@@ -7,12 +7,14 @@ Purpose: Provides three public functions for the Approval Engine:
       Moves from_user's PENDING recipient to REASSIGNED (sets reassigned_to_id),
       adds a new PENDING recipient for to_user, records a 'reassigned' event.
   - cancel(db, request_id, actor)
-      Raises ValueError if the request is not in REQUESTED status; else sets
-      status CANCELLED and records a 'cancelled' event.
+      Raises PermissionError if the actor is neither the requester/owner nor a
+      manager/admin; raises ValueError if the request is not in REQUESTED status;
+      else sets status CANCELLED and records a 'cancelled' event.
 
 Called by: app.services.approvals.service (decide, reassign, cancel entrypoints),
            app.routers.approvals (future cancel/reassign endpoints).
 Depends on: app.models.approvals, app.services.activity_service.log_activity,
+            app.dependencies.is_manager_or_admin,
             app.constants (ActivityType, ApprovalRequestStatus, ApprovalRecipientStatus).
 """
 
@@ -139,7 +141,18 @@ def reassign(
     db.add(new_recipient)
     db.flush()
 
-    request = db.get(ApprovalRequest, request_id)
+    # Row-locked read (matches decide()): serializes against a concurrent decide()
+    # that could move the request to a terminal status, which would otherwise leave
+    # this new PENDING recipient orphaned on an already-resolved request. SQLite
+    # ignores FOR UPDATE; the status guard below is what enforces correctness there.
+    request = db.execute(
+        select(ApprovalRequest).where(ApprovalRequest.id == request_id).with_for_update()
+    ).scalar_one_or_none()
+    if request is None:
+        raise ValueError(f"ApprovalRequest {request_id} not found")
+    if request.status != ApprovalRequestStatus.REQUESTED:
+        raise ValueError(f"ApprovalRequest {request_id} is not open (status={request.status!r})")
+
     record(
         db,
         request,
@@ -166,11 +179,28 @@ def cancel(
         The updated ApprovalRequest with status CANCELLED.
 
     Raises:
-        ValueError: If the request is not in REQUESTED status (already decided/cancelled).
+        PermissionError: If *actor* is neither the requester nor the owner of the
+            request, and is not a manager/admin. (Authz/ownership — IDOR guard.)
+        ValueError: If the request is not found, or not in REQUESTED status
+            (already decided/cancelled).
     """
-    request = db.get(ApprovalRequest, request_id)
+    from ...dependencies import is_manager_or_admin
+
+    # Row-locked read (matches decide()): serializes against a concurrent decide()
+    # so a cancel can't race a committed decision into a contradictory status. SQLite
+    # ignores FOR UPDATE; the status guard below is what enforces correctness there.
+    request = db.execute(
+        select(ApprovalRequest).where(ApprovalRequest.id == request_id).with_for_update()
+    ).scalar_one_or_none()
     if request is None:
         raise ValueError(f"ApprovalRequest {request_id} not found")
+
+    # Ownership/authz: only the requester, the owner, or a manager/admin may cancel
+    # someone's open approval request (prevents the cross-user cancel IDOR).
+    actor_id = actor.id if actor is not None else None
+    is_requester_or_owner = actor_id is not None and actor_id in (request.requested_by_id, request.owner_id)
+    if not (is_requester_or_owner or (actor is not None and is_manager_or_admin(actor))):
+        raise PermissionError(f"User {actor_id} may not cancel approval request {request_id}")
 
     if request.status != ApprovalRequestStatus.REQUESTED:
         raise ValueError(f"ApprovalRequest {request_id} is not open (status={request.status!r})")

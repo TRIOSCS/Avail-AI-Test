@@ -75,7 +75,16 @@ def _make_prepayment(db):
 
 @pytest.fixture()
 def actor(db_session):
-    return _make_user(db_session, "actor@trioscs.com")
+    # role=manager so the actor is authorized to cancel any open request (the cancel()
+    # ownership guard permits the requester, the owner, or a manager/admin). The cancel
+    # tests below assert the transition/event behavior, not authz, so they need an
+    # actor that legitimately passes the guard.
+    from app.constants import UserRole
+
+    u = _make_user(db_session, "actor@trioscs.com")
+    u.role = UserRole.MANAGER
+    db_session.flush()
+    return u
 
 
 @pytest.fixture()

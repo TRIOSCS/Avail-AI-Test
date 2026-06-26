@@ -112,5 +112,15 @@ def qp_submit(
         # Refresh qp from DB so we render current state with errors
         db.rollback()
         qp = db.get(QualityPlan, qp_id)
+    except ValueError as exc:
+        # submit() raises ValueError if the QP was concurrently deleted — surface 404
+        # rather than a 500.
+        db.rollback()
+        raise HTTPException(status_code=404, detail="Quality plan not found") from exc
+
+    # Guard the re-fetch (and the success path): a concurrent delete can leave qp None,
+    # and _qp_detail_response would dereference qp.buy_plan_id → AttributeError 500.
+    if qp is None:
+        raise HTTPException(status_code=404, detail="Quality plan not found")
 
     return _qp_detail_response(request, user, db, qp)

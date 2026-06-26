@@ -244,3 +244,60 @@ class TestGetRequests:
         body = resp.json()
         assert body["id"] == ar.id
         assert body["gate_type"] == "buy_plan"
+
+
+class TestPostCancel:
+    """Ownership authz on POST /v2/approvals/requests/{id}/cancel (FIX 1, IDOR guard).
+
+    The request is created with requested_by_id == owner_id == the requester user.
+    cancel() permits only the requester, the owner, or a manager/admin.
+    """
+
+    def _seed_request(self, db_session: Session, requester: User) -> ApprovalRequest:
+        bp = _make_buy_plan(db_session, requester)
+        qp = _make_quality_plan(db_session, bp, requester)
+        ar, _, _ = _make_approval_chain(db_session, qp, requester)
+        return ar
+
+    def test_non_owner_non_manager_gets_403_and_request_unchanged(self, db_session: Session) -> None:
+        """An unrelated buyer (not requester/owner, not manager/admin) → 403, stays
+        REQUESTED."""
+        requester = _make_outsider(db_session)  # role=buyer, owns the request
+        attacker = _make_outsider(db_session)  # role=buyer, unrelated
+        ar = self._seed_request(db_session, requester)
+
+        for client in _build_client(db_session, attacker, override_gatekeeper=False):
+            resp = client.post(f"/v2/approvals/requests/{ar.id}/cancel")
+
+        assert resp.status_code == 403
+        assert "error" in resp.json()
+        db_session.expire(ar)
+        assert ar.status == "requested", "request must stay REQUESTED after a blocked cancel"
+
+    def test_requester_can_cancel(self, db_session: Session) -> None:
+        """The requester/owner → 200, request goes to CANCELLED."""
+        requester = _make_outsider(db_session)  # role=buyer, owns the request
+        ar = self._seed_request(db_session, requester)
+
+        for client in _build_client(db_session, requester, override_gatekeeper=False):
+            resp = client.post(f"/v2/approvals/requests/{ar.id}/cancel")
+
+        assert resp.status_code == 200
+        assert resp.json() == {"cancelled": True}
+        db_session.expire(ar)
+        assert ar.status == "cancelled"
+
+    def test_manager_can_cancel_others_request(self, db_session: Session) -> None:
+        """A manager/admin (not the requester/owner) → 200, request goes to
+        CANCELLED."""
+        requester = _make_outsider(db_session)  # role=buyer, owns the request
+        manager = _make_approver(db_session)  # role=admin, NOT the requester/owner
+        ar = self._seed_request(db_session, requester)
+
+        for client in _build_client(db_session, manager, override_gatekeeper=False):
+            resp = client.post(f"/v2/approvals/requests/{ar.id}/cancel")
+
+        assert resp.status_code == 200
+        assert resp.json() == {"cancelled": True}
+        db_session.expire(ar)
+        assert ar.status == "cancelled"

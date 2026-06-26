@@ -31,6 +31,10 @@ try:
     from app.utils.graph_client import GraphClient  # noqa: F401
     from app.utils.token_manager import get_valid_token  # noqa: F401
 except Exception:  # pragma: no cover
+    logger.warning(
+        "approvals.notifications: Graph imports unavailable — email dispatch disabled",
+        exc_info=True,
+    )
     GraphClient = None  # type: ignore[assignment,misc]
     get_valid_token = None  # type: ignore[assignment]
 

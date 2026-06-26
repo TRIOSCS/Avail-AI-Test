@@ -411,8 +411,8 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 | channel | String 50 NOT NULL | `email`\|`in_app`; server_default `email` |
 | payload | JSON, nullable | |
 | sent_at | UTCDateTime, nullable | NULL = not yet dispatched |
-| fail_count | Integer NOT NULL | server_default 0 |
-| last_error | Text, nullable | |
+| fail_count | Integer NOT NULL | server_default 0; the drain skips rows at `MAX_OUTBOX_FAIL_COUNT` (dead-letter) — a deleted recipient or unknown channel is failed (fail_count++), never marked sent |
+| last_error | Text, nullable | last failure reason; set on send error, deleted recipient, or unknown channel |
 
 ---
 
