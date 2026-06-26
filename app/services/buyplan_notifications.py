@@ -26,7 +26,7 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from ..config import settings
-from ..constants import UserRole
+from ..constants import ActivityType, UserRole
 from ..models import ActivityLog, User
 from ..models.buy_plan import BuyPlan, BuyPlanLine
 from ..utils.async_helpers import safe_background_task
@@ -142,19 +142,29 @@ def _wrap_email(title: str, body_inner: str) -> str:
     )
 
 
-async def _send_email(user: User, subject: str, html_body: str, db: Session):
+async def _send_email(
+    user: User,
+    subject: str,
+    html_body: str,
+    db: Session,
+    *,
+    pref_attr: str | None = "notify_buyplan_email_enabled",
+):
     """Send an email to a single user via Graph API.
 
-    Honors the recipient's per-user preference: when
-    ``notify_buyplan_email_enabled`` is False the Graph send is skipped entirely
-    (no token fetch, no client build). The caller's in-app ``ActivityLog`` row is
-    written separately and is unaffected — only the email channel is suppressed.
+    Honors the recipient's per-user opt-out preference named by *pref_attr*: when that
+    boolean column is False the Graph send is skipped entirely (no token fetch, no client
+    build). Defaults to ``notify_buyplan_email_enabled`` so every existing buy-plan caller
+    keeps its gate unchanged; the re-source broadcast passes
+    ``notify_resource_alert_enabled``. Pass ``pref_attr=None`` to bypass the gate. The
+    caller's in-app ``ActivityLog`` row is written separately and is unaffected — only the
+    email channel is suppressed.
     """
     from ..utils.graph_client import GraphClient
     from ..utils.token_manager import get_valid_token
 
-    if not getattr(user, "notify_buyplan_email_enabled", True):
-        logger.info("buy plan email suppressed (opted out) for {}", user.email)
+    if pref_attr and not getattr(user, pref_attr, True):
+        logger.info("email suppressed (opted out: {}) for {}", pref_attr, user.email)
         return
 
     try:
@@ -186,6 +196,14 @@ async def _teams_channel(message: str):
     from app.services.teams_notifications import post_teams_channel
 
     await post_teams_channel(message)
+
+
+async def _teams_channel_card(card: dict):
+    """Post a full Adaptive Card to the Teams channel (delegates to
+    teams_notifications)."""
+    from app.services.teams_notifications import post_teams_channel_card
+
+    await post_teams_channel_card(card)
 
 
 async def _teams_dm(user: User, message: str, db: Session):
@@ -720,3 +738,183 @@ async def notify_nudge_ops(plan: BuyPlan, line: BuyPlanLine, db: Session):
             )
         )
     return True
+
+
+# \u2500\u2500 Re-source (cut PO cancelled \u2192 deal needs backfill) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+
+
+def _resource_context(plan: BuyPlan, line: BuyPlanLine, db: Session, reason: str) -> dict:
+    """Common facts for the re-source broadcast (card + email + DM + in-app)."""
+    ctx = _plan_context(plan, db)
+    req = plan.requisition
+    offer = line.offer
+    requirement = line.requirement
+    mpn = (offer.mpn if offer else None) or (requirement.primary_mpn if requirement else None) or "\u2014"
+    description = (requirement.description if requirement else "") or ""
+    customer = ctx.get("customer_name") or (req.customer_name if req else "") or "\u2014"
+    req_label = (req.name if req else "") or f"Requisition #{plan.requisition_id}"
+    vendor = (offer.vendor_name if offer else None) or "\u2014"
+    return {
+        "mpn": mpn,
+        "description": description,
+        "qty": line.quantity or 0,
+        "customer": customer,
+        "req_label": req_label,
+        "vendor": vendor,
+        "reason": reason or "No reason given",
+        "deep_link": f"{settings.app_url}/v2/buy-plans/{plan.id}",
+    }
+
+
+def _resource_facts(rc: dict) -> list[tuple[str, str]]:
+    """Ordered (label, value) pairs shared by the card FactSet and the email table."""
+    part = rc["mpn"] + (f" \u2014 {rc['description']}" if rc["description"] else "")
+    return [
+        ("Part", part),
+        ("Quantity", f"{rc['qty']:,}"),
+        ("Customer", rc["customer"]),
+        ("Requisition", rc["req_label"]),
+        ("Canceled vendor", rc["vendor"]),
+        ("Reason", rc["reason"]),
+    ]
+
+
+def _resource_card(rc: dict) -> dict:
+    """Adaptive Card: Attention-colored header, FactSet, and a 'Claim this line' button."""
+    facts = [{"title": label, "value": str(value)} for label, value in _resource_facts(rc)]
+    return {
+        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+        "type": "AdaptiveCard",
+        "version": "1.4",
+        "body": [
+            {
+                "type": "TextBlock",
+                "text": "URGENT \u2014 Re-source needed",
+                "weight": "Bolder",
+                "size": "Large",
+                "color": "Attention",
+                "wrap": True,
+            },
+            {
+                "type": "TextBlock",
+                "text": f"A vendor PO was cancelled on Buy Plan #{rc['deep_link'].rsplit('/', 1)[-1]} \u2014 "
+                "backfill needed.",
+                "isSubtle": True,
+                "wrap": True,
+            },
+            {"type": "FactSet", "facts": facts},
+        ],
+        "actions": [{"type": "Action.OpenUrl", "title": "Claim this line", "url": rc["deep_link"]}],
+    }
+
+
+def _resource_email_html(rc: dict) -> str:
+    """Standard AVAIL email wrapper around the re-source facts table + claim button."""
+    rows = "".join(
+        f'<tr><td style="padding:6px 10px;border:1px solid #e5e7eb;font-weight:bold">{html_mod.escape(str(label))}</td>'
+        f'<td style="padding:6px 10px;border:1px solid #e5e7eb">{html_mod.escape(str(value))}</td></tr>'
+        for label, value in _resource_facts(rc)
+    )
+    body = (
+        '<p style="color:#b91c1c;font-weight:bold">A vendor PO was cancelled \u2014 '
+        "this deal needs to be re-sourced.</p>"
+        f'<table style="border-collapse:collapse;margin:16px 0">{rows}</table>'
+        f'<p><a href="{html_mod.escape(rc["deep_link"])}" '
+        'style="background:#dc2626;color:#fff;padding:10px 16px;border-radius:6px;'
+        'text-decoration:none;display:inline-block">Claim this line</a></p>'
+    )
+    return _wrap_email("URGENT \u2014 Re-source needed", body)
+
+
+def _resource_dm_text(rc: dict) -> str:
+    """Plain-text Teams DM body for the re-source broadcast."""
+    return (
+        "**URGENT \u2014 Re-source needed**\n\n"
+        f"{rc['mpn']} \u00d7 {rc['qty']:,} | Customer: {rc['customer']} | {rc['req_label']}\n"
+        f"Canceled vendor: {rc['vendor']} \u2014 {rc['reason']}\n"
+        f"Claim this line: {rc['deep_link']}"
+    )
+
+
+async def notify_resource_requested(
+    plan: BuyPlan,
+    db: Session,
+    *,
+    line_id: int,
+    actor_id: int,
+    reason: str = "",
+):
+    """Broadcast an URGENT re-source alert when a buyer cancels a vendor PO and re-
+    sources.
+
+    Recipients = every active buyer except the actor, plus the deal's salesperson
+    (``plan.submitted_by``, fallback the requisition creator). Channel policy:
+    - In-app ``ActivityLog`` row + Teams channel card: ALWAYS (delivery floor); the card is
+      gated only by webhook presence.
+    - Email + Teams DM: only to recipients whose ``notify_resource_alert_enabled`` is True.
+
+    Failure isolation: the in-app rows are committed BEFORE any Teams call, and each channel
+    swallows + logs its own errors, so Teams being down can't lose the in-app record or
+    block email. Dispatched fire-and-forget via ``run_notify_bg(notify_resource_requested,
+    plan_id, line_id=..., actor_id=..., reason=...)`` \u2014 re-derives everything from line_id.
+    """
+    line = db.get(BuyPlanLine, line_id)
+    if not line:
+        logger.warning("Re-source: line {} not found for plan {}, skipping notify", line_id, plan.id)
+        return
+
+    offer = line.offer
+    vendor_card_id = offer.vendor_card_id if offer else None
+    rc = _resource_context(plan, line, db, reason)
+
+    # \u2500\u2500 Recipients: active buyers (minus the actor) + the salesperson \u2500\u2500
+    recipients = db.query(User).filter(User.role == UserRole.BUYER, User.is_active.is_(True), User.id != actor_id).all()
+    seen = {u.id for u in recipients}
+    salesperson = plan.submitted_by or (plan.requisition.creator if plan.requisition else None)
+    if salesperson and salesperson.id != actor_id and salesperson.id not in seen:
+        recipients.append(salesperson)
+        seen.add(salesperson.id)
+
+    if not recipients:
+        logger.info("Re-source: no recipients for plan {} (actor {})", plan.id, actor_id)
+        return
+
+    # \u2500\u2500 In-app rows (ALWAYS, every recipient) \u2014 committed before Teams \u2500\u2500
+    subject = f"URGENT \u2014 Re-source needed: {rc['mpn']} (plan #{plan.id})"
+    notes = f"{rc['vendor']} PO cancelled: {rc['reason']} \u2014 {rc['deep_link']}"
+    for r in recipients:
+        db.add(
+            ActivityLog(
+                user_id=r.id,
+                activity_type=ActivityType.RESOURCE_REQUESTED,
+                channel="system",
+                requisition_id=plan.requisition_id,
+                requirement_id=line.requirement_id,
+                vendor_card_id=vendor_card_id,
+                buy_plan_id=plan.id,
+                subject=subject,
+                notes=notes,
+            )
+        )
+    db.commit()
+
+    # \u2500\u2500 Teams channel card (ALWAYS; gated only by webhook presence) \u2500\u2500
+    try:
+        await _teams_channel_card(_resource_card(rc))
+    except Exception as e:
+        logger.error("Re-source Teams channel card failed for plan {}: {}", plan.id, e)
+
+    # \u2500\u2500 Email + Teams DM: only to opted-in recipients \u2500\u2500
+    opted_in = [r for r in recipients if getattr(r, "notify_resource_alert_enabled", True)]
+    html_body = _resource_email_html(rc)
+    email_subject = f"[AVAIL] URGENT \u2014 Re-source needed: {rc['customer']}"
+    await asyncio.gather(
+        *[_send_email(r, email_subject, html_body, db, pref_attr="notify_resource_alert_enabled") for r in opted_in]
+    )
+
+    dm_text = _resource_dm_text(rc)
+    for r in opted_in:
+        try:
+            await _teams_dm(r, dm_text, db)
+        except Exception as e:
+            logger.error("Re-source Teams DM to {} failed: {}", r.email, e)
