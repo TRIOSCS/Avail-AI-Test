@@ -30,7 +30,7 @@ from app.models import Requisition, User
 # ── Helpers ──────────────────────────────────────────────────────────
 
 
-def _make_req(db_session, created_by, *, name="Req", status=RequisitionStatus.ACTIVE, **kw) -> Requisition:
+def _make_req(db_session, created_by, *, name="Req", status=RequisitionStatus.OPEN, **kw) -> Requisition:
     req = Requisition(
         name=name,
         customer_name="Test Co",
@@ -95,7 +95,7 @@ class TestRequisitionCounts:
         db_session.add(sales)
         db_session.commit()
 
-        _make_req(db_session, sales.id, name="Sales Req", status="active")
+        _make_req(db_session, sales.id, name="Sales Req", status="open")
         db_session.commit()
 
         with _client_as(db_session, sales) as c:
@@ -119,8 +119,8 @@ class TestListRequisitions:
         "query",
         [
             pytest.param("?q=REQ-TEST", id="search_query"),
-            pytest.param("?status=active", id="single_status"),
-            pytest.param("?status=active,draft", id="multiple_statuses"),
+            pytest.param("?status=open", id="single_status"),
+            pytest.param("?status=open,rfqs_sent", id="multiple_statuses"),
             pytest.param("?sort=name&order=asc", id="sort_asc"),
             pytest.param("?sort=invalid_col", id="sort_invalid_defaults_to_created_at"),
             pytest.param("?limit=10&offset=0", id="limit_offset"),
@@ -132,12 +132,14 @@ class TestListRequisitions:
         assert resp.status_code == 200
 
     def test_list_with_archive_status(self, client, db_session, test_user):
-        """GET /api/requisitions?status=archive returns archived reqs."""
-        _make_req(db_session, test_user.id, name="Archived Req", status=RequisitionStatus.ARCHIVED)
+        """GET /api/requisitions?status=archive returns is_archived reqs."""
+        _make_req(db_session, test_user.id, name="Archived Req", status="lost", is_archived=True)
         db_session.commit()
 
         resp = client.get("/api/requisitions?status=archive")
         assert resp.status_code == 200
+        names = [r["name"] for r in resp.json()["requisitions"]]
+        assert "Archived Req" in names
 
 
 # ── Get Requisition ──────────────────────────────────────────────────
@@ -265,19 +267,19 @@ class TestToggleArchive:
         assert resp.status_code == 404
 
     def test_archive_active_req(self, client, test_requisition):
-        """Archiving an active req sets status to archived."""
+        """Archiving a live req flips is_archived to True (status untouched)."""
         resp = client.put(f"/api/requisitions/{test_requisition.id}/archive")
         assert resp.status_code == 200
-        assert resp.json()["status"] == "archived"
+        assert resp.json()["is_archived"] is True
 
     def test_unarchive_archived_req(self, client, db_session, test_user):
-        """Unarchiving an archived req sets status back to active."""
-        req = _make_req(db_session, test_user.id, name="Archived to Restore", status=RequisitionStatus.ARCHIVED)
+        """Unarchiving an archived req flips is_archived back to False."""
+        req = _make_req(db_session, test_user.id, name="Archived to Restore", status="lost", is_archived=True)
         db_session.commit()
 
         resp = client.put(f"/api/requisitions/{req.id}/archive")
         assert resp.status_code == 200
-        assert resp.json()["status"] == RequisitionStatus.ACTIVE
+        assert resp.json()["is_archived"] is False
 
 
 # ── Bulk Archive ─────────────────────────────────────────────────────
@@ -345,7 +347,7 @@ class TestBatchArchive:
 
     def test_batch_archive_already_archived_ids(self, client, db_session, test_user):
         """Batch archive of already-archived req returns 0 archived."""
-        req = _make_req(db_session, test_user.id, name="Already Archived", status=RequisitionStatus.ARCHIVED)
+        req = _make_req(db_session, test_user.id, name="Already Archived", status="lost", is_archived=True)
         db_session.commit()
         resp = client.put(
             "/api/requisitions/batch-archive",

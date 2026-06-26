@@ -15,13 +15,14 @@ from pydantic import BaseModel, Field
 
 class ReqStatus(str, Enum):
     all = "all"
-    active = "active"
-    draft = "draft"
-    sourcing = "sourcing"
-    archived = "archived"
+    open = "open"
+    rfqs_sent = "rfqs_sent"
+    offers = "offers"
+    quoted = "quoted"
     won = "won"
     lost = "lost"
-    closed = "closed"
+    hotlist = "hotlist"
+    archived = "archived"
 
 
 class Urgency(str, Enum):
@@ -51,7 +52,7 @@ class ReqListFilters(BaseModel):
     """
 
     q: str = ""
-    status: ReqStatus = ReqStatus.active
+    status: ReqStatus = ReqStatus.open
     owner: int | None = None
     urgency: Urgency | None = None
     date_from: date | None = None

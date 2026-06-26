@@ -459,21 +459,18 @@ def list_requisitions(
             )
         )
     # ── Status filter ────────────────────────────────────────────────
-    elif filters.status.value == "all":
-        pass  # no status filter
+    # Archive is orthogonal to the status pipeline (hidden-but-retrievable):
+    # the "archived" filter shows archived rows; every other filter hides them.
     elif filters.status.value == "archived":
-        query = query.filter(
-            Requisition.status.in_(
-                [
-                    RequisitionStatus.ARCHIVED,
-                    RequisitionStatus.WON,
-                    RequisitionStatus.LOST,
-                    RequisitionStatus.CANCELLED,
-                ]
-            )
-        )
+        query = query.filter(Requisition.is_archived.is_(True))
     else:
-        query = query.filter(Requisition.status == filters.status.value)
+        query = query.filter(Requisition.is_archived.is_(False))
+        if filters.status.value == "all":
+            pass  # no status filter (still excludes archived)
+        elif filters.status.value == "open":
+            query = query.filter(Requisition.status.in_(list(RequisitionStatus.OPEN_PIPELINE)))
+        else:
+            query = query.filter(Requisition.status == filters.status.value)
 
     # ── Owner filter ─────────────────────────────────────────────────
     if filters.owner:
@@ -556,6 +553,7 @@ def list_requisitions(
                 "id": r.id,
                 "name": r.name,
                 "status": r.status,
+                "is_archived": r.is_archived,
                 "customer_site_id": r.customer_site_id,
                 "company_id": (r.customer_site.company_id if r.customer_site else None),
                 "customer_display": (

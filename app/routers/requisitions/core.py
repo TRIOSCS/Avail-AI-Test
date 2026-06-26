@@ -72,13 +72,14 @@ async def requisition_counts(
     open_cnt = db.scalar(
         select(sqlfunc.count(Requisition.id)).where(
             *base_filter,
-            Requisition.status.in_([RequisitionStatus.ACTIVE, RequisitionStatus.SOURCING, RequisitionStatus.DRAFT]),
+            Requisition.status.in_(list(RequisitionStatus.OPEN_PIPELINE)),
+            Requisition.is_archived.is_(False),
         )
     )
     archive_cnt = db.scalar(
         select(sqlfunc.count(Requisition.id)).where(
             *base_filter,
-            Requisition.status.in_(RequisitionStatus.TERMINAL),
+            Requisition.is_archived.is_(True),
         )
     )
     return {"total": total or 0, "open": open_cnt or 0, "archive": archive_cnt or 0}
@@ -357,15 +358,20 @@ def _build_requisition_list(q, status, sort, order, limit, offset, user, db):
             )
         )
     elif status == "archive":
-        query = query.filter(Requisition.status.in_(RequisitionStatus.TERMINAL))
+        query = query.filter(Requisition.is_archived.is_(True))
     elif status:
+        # Explicit status filter hides archived rows so they don't leak in.
+        query = query.filter(Requisition.is_archived.is_(False))
         statuses = [s.strip() for s in status.split(",") if s.strip()]
         if len(statuses) == 1:
             query = query.filter(Requisition.status == statuses[0])
         else:
             query = query.filter(Requisition.status.in_(statuses))
     else:
-        query = query.filter(Requisition.status.notin_(RequisitionStatus.TERMINAL))
+        query = query.filter(
+            Requisition.is_archived.is_(False),
+            Requisition.status.in_(list(RequisitionStatus.OPEN_PIPELINE)),
+        )
 
     # Resolve sort column — whitelist to prevent SQL injection
     allowed_sorts = {
@@ -557,39 +563,18 @@ async def mark_outcome(
 
 @router.put("/api/requisitions/{req_id}/archive")
 async def toggle_archive(req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
+    from ...services.requisition_state import set_archived
     from . import invalidate_prefix
 
     req = get_req_for_user(db, user, req_id)
     if not req:
         raise HTTPException(404, "Requisition not found")
-    if req.status in ("archived", "won", "lost"):
-        prior_status = req.status
-        req.status = RequisitionStatus.ACTIVE
-        if prior_status == "archived":
-            unarchive_type = ActivityType.REQ_UNARCHIVED
-            unarchive_desc = "Requisition unarchived"
-        else:
-            unarchive_type = ActivityType.STATUS_CHANGED
-            unarchive_desc = f"Requisition reopened from {prior_status} to active"
-        log_activity(
-            db,
-            activity_type=unarchive_type,
-            requisition_id=req.id,
-            user_id=user.id,
-            description=unarchive_desc,
-        )
-    else:
-        req.status = RequisitionStatus.ARCHIVED
-        log_activity(
-            db,
-            activity_type=ActivityType.REQ_ARCHIVED,
-            requisition_id=req.id,
-            user_id=user.id,
-            description="Requisition archived",
-        )
+    # Archive is an orthogonal boolean now (hidden-but-retrievable), not a status.
+    # set_archived flips it and logs REQ_ARCHIVED / REQ_UNARCHIVED.
+    set_archived(req, not req.is_archived, user, db)
     db.commit()
     invalidate_prefix("req_list")
-    return {"ok": True, "status": req.status}
+    return {"ok": True, "is_archived": req.is_archived}
 
 
 @router.put("/api/requisitions/bulk-archive", response_model=BulkArchiveResponse)
