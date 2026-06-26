@@ -536,7 +536,18 @@ class TestApplyFreeformRfq:
             )
         assert resp.status_code == 404
 
-    def test_applies_rfq_successfully(self, client, db_session):
+    def test_applies_rfq_successfully(self, client, db_session, test_user):
+        # The route now gates the site's account on can_manage_account, so the site must
+        # exist under a company the actor owns before the (mocked) service runs.
+        from app.models import Company
+
+        company = Company(name="Freeform RFQ Co", is_active=True, account_owner_id=test_user.id)
+        db_session.add(company)
+        db_session.flush()
+        site = CustomerSite(company_id=company.id, site_name="HQ")
+        db_session.add(site)
+        db_session.commit()
+        db_session.refresh(site)
         with (
             patch("app.services.ai_offer_service.apply_freeform_rfq") as mock_apply,
             patch("app.cache.decorators.invalidate_prefix"),
@@ -547,7 +558,7 @@ class TestApplyFreeformRfq:
                 json={
                     "name": "Test RFQ",
                     "customer_name": "Acme",
-                    "customer_site_id": 1,
+                    "customer_site_id": site.id,
                     "requirements": [{"mpn": "LM317T", "target_qty": 100}],
                 },
             )

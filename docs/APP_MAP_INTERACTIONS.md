@@ -1985,6 +1985,53 @@ join; 404-not-403 so existence isn't leaked) and `require_requisition_access`; o
 company-access helper performs a real `can_manage_account` check (was a no-op). Restricted
 roles get 403 (company routes) or 404 (requisition-derived) on entities they don't own.
 
+**Per-entity authz hardening (Phase 1b — `fix/authz-hardening`, code-only).** A second pass
+closed 13 remaining object-level / privilege-escalation gaps, deduped into 9 fix groups, each
+REUSING the helpers above (no new ad-hoc checks):
+- `edit_company` (`POST /v2/partials/customers/{id}/edit`) — primary-owner *reassignment* and
+  parent-company (hierarchy) edits now require `can_manage_account_team` (collaborators / site-
+  owners can no longer seize ownership), gated only when the value actually changes.
+- `create_company` (`POST /v2/partials/customers/create`) — assigning `owner_id != self` requires
+  `is_manager_or_admin` and validates the target is an active `User` (else 400), matching the bulk
+  assign-owner path.
+- `ai.py` site-linked prospect records — `save_prospect_contact`, `delete_prospect_contact`,
+  `promote_prospect_contact`, and `apply_freeform_rfq` resolve
+  `customer_site_id → CustomerSite.company_id → Company` and require `can_manage_account`;
+  vendor-linked prospects stay global. The site-prospect guard lives once as
+  `dependencies.require_prospect_site_access(db, user, pc)` (shared helper) — imported by both
+  `ai.py` and `htmx_views.py`, never duplicated.
+- `htmx_views` vendor-prospect twins — `vendor_prospect_save` / `vendor_prospect_promote` /
+  `vendor_prospect_delete` (`POST|DELETE /v2/partials/vendors/{vendor_id}/ai/prospect/{prospect_id}`
+  `[/save|/promote]`) are the HTMX siblings of the `ai.py` routes above and reach the same
+  `ProspectContact` mutate/delete; they call `require_prospect_site_access` after the 404 check,
+  before mutation, so a cross-account actor can no longer hijack a site-linked prospect by id.
+- `proactive.add_do_not_offer` (`POST /api/proactive/do-not-offer`) — each item's `Company` is
+  gated on `can_manage_account` before the DNO row is written, and the auto-dismiss UPDATE is
+  scoped to `ProactiveMatch.salesperson_id == user.id` (mirrors `/dismiss`) so it never wipes
+  another owner's open matches.
+- `htmx_views.proactive_do_not_offer` (`POST /v2/partials/proactive/do-not-offer`) — the HTMX
+  sibling of `add_do_not_offer`; resolves the form `company_id`/`customer_site_id` to a `Company`
+  and requires `can_manage_account` before inserting `ProactiveDoNotOffer`, so an arbitrary
+  form-supplied company can no longer be suppressed.
+- `sources.parse_response_attachments` (`POST /api/email-mining/parse-response-attachments/{id}`)
+  — `require_requisition_access(db, vr.requisition_id, user)` before any Sighting create/overwrite.
+- `prepayment_service.create_prepayment` — `get_buyplan_for_user(db, created_by, buy_plan_id)` (the
+  ownership check lives in the service so the router stays thin), so a Prepayment + routed
+  ApprovalRequest cannot be attached to a buy plan the actor can't access.
+- `htmx_views`: `sourcing_search_trigger` (connector spend) + `ai_rephrase_email` gated on
+  `require_requisition_access`; `send_batch_follow_up` and `follow_up_badge` scope the stale-
+  `RfqContact` query for `RESTRICTED_ROLES` (join `Requisition`, filter `created_by == user.id`)
+  so the badge matches what the batch acts on.
+- `crm.quotes.create_quote` (`POST /api/requisitions/{req_id}/quote`) — `offer_ids` filtered to
+  `Offer.requisition_id == req_id` (400 on any mismatch) and the `on_quote_built` requirement-
+  advance query filtered the same way, so foreign offers can't enter the quote or advance another
+  owner's requirement.
+- `quality_plans` `qp_detail` / `qp_submit` — `_require_qp_access` loads the parent BuyPlan and
+  calls `require_requisition_access(..., owner_id=qp.created_by_id, label="Quality plan")` (404 so
+  a QP's existence isn't leaked).
+Regression coverage: `tests/test_authz_hardening.py` (cross-account 403/404 + legitimate owner/
+manager/admin allowed + per-owner data-isolation asserts for proactive / follow-ups / quote).
+
 **Disposition (Increment 1, migration 118).** Salespeople dispose of accounts +
 contacts via setter routes in `htmx_views.py` (all owner-or-admin where they touch
 ownership/disposition; `is_admin = user.role == UserRole.ADMIN`, mirroring

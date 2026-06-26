@@ -466,8 +466,11 @@ class TestDoNotOffer:
         resp = client.post("/api/proactive/do-not-offer", json={"items": []})
         assert resp.status_code == 400
 
-    def test_do_not_offer_success(self, client, db_session, test_company):
+    def test_do_not_offer_success(self, client, db_session, test_company, test_user):
         """Suppresses MPNs and returns count."""
+        # do-not-offer is now an account action (can_manage_account); grant ownership.
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         resp = client.post(
             "/api/proactive/do-not-offer",
             json={
@@ -495,8 +498,11 @@ class TestDoNotOffer:
         assert resp.status_code == 200
         assert resp.json()["suppressed"] == 0
 
-    def test_do_not_offer_duplicate_ignored(self, client, db_session, test_company):
+    def test_do_not_offer_duplicate_ignored(self, client, db_session, test_company, test_user):
         """Second suppression of same MPN+company is not counted again."""
+        # do-not-offer is now an account action (can_manage_account); grant ownership.
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         payload = {"items": [{"mpn": "LM317T", "company_id": test_company.id}]}
         resp1 = client.post("/api/proactive/do-not-offer", json=payload)
         assert resp1.json()["suppressed"] == 1
@@ -507,6 +513,9 @@ class TestDoNotOffer:
         self, client, db_session, test_company, test_user, test_requisition, test_offer, test_customer_site
     ):
         """Suppression auto-dismisses open proactive matches."""
+        # do-not-offer is now an account action (can_manage_account); grant ownership.
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         match = _make_match(
             db_session, test_user, test_requisition, test_offer, test_customer_site, company_id=test_company.id
         )

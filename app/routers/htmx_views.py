@@ -26,6 +26,7 @@ from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from ..constants import (
+    RESTRICTED_ROLES,
     AccessKey,
     ActivityType,
     AttributionStatus,
@@ -57,6 +58,7 @@ from ..dependencies import (
     require_admin,
     require_buyer,
     require_buyplan_approver,
+    require_prospect_site_access,
     require_requisition_access,
     require_user,
     user_has_access,
@@ -2959,6 +2961,7 @@ async def ai_rephrase_email(
 ):
     """Rephrase the RFQ email so each send reads uniquely, keeping all parts intact."""
     get_requisition_or_404(db, req_id)  # validates existence
+    require_requisition_access(db, req_id, user)
 
     user_text = body.strip()
     if not user_text:
@@ -5347,6 +5350,7 @@ async def vendor_prospect_save(
     pc = db.query(ProspectContact).filter(ProspectContact.id == prospect_id).first()
     if not pc:
         raise HTTPException(404, "Prospect contact not found")
+    require_prospect_site_access(db, user, pc)
 
     pc.is_saved = True
     pc.saved_by_id = user.id
@@ -5374,6 +5378,7 @@ async def vendor_prospect_promote(
     pc = db.query(ProspectContact).filter(ProspectContact.id == prospect_id).first()
     if not pc:
         raise HTTPException(404, "Prospect contact not found")
+    require_prospect_site_access(db, user, pc)
 
     # Dedup: check if email already exists on this vendor
     existing = None
@@ -5431,6 +5436,7 @@ async def vendor_prospect_delete(
     pc = db.query(ProspectContact).filter(ProspectContact.id == prospect_id).first()
     if not pc:
         raise HTTPException(404, "Prospect contact not found")
+    require_prospect_site_access(db, user, pc)
     db.delete(pc)
     db.commit()
     # Return empty string to remove the card from DOM
@@ -6307,9 +6313,19 @@ async def create_company(
         tax_id=form.get("tax_id", "").strip() or None,
         source=form.get("source", "").strip() or "manual",
     )
+    # Assigning a NEW account to someone other than yourself is a manager action, and the
+    # target must be a real active user (mirrors the bulk assign-owner path). A plain rep
+    # assigning to self / leaving it blank keeps the current behaviour.
     owner_id = form.get("owner_id", "")
     if owner_id and owner_id.isdigit():
-        company.account_owner_id = int(owner_id)
+        new_owner_id = int(owner_id)
+        if new_owner_id != user.id:
+            if not is_manager_or_admin(user):
+                raise HTTPException(403, "Only a manager can assign an account to another user")
+            target = db.get(User, new_owner_id)
+            if not target or not target.is_active:
+                raise HTTPException(400, "Owner must be an active user")
+        company.account_owner_id = new_owner_id
     db.add(company)
     db.flush()
 
@@ -8948,11 +8964,23 @@ async def edit_company(
     company.source = source or company.source
     tax_id = form.get("tax_id", "").strip()
     company.tax_id = tax_id or None
+    # Owner reassignment is a TEAM action — only the primary owner / a manager may seize
+    # primary ownership (can_manage_account admits collaborators + site-owners, who must
+    # NOT be able to lock out the real owner). Gate only when the value actually changes.
     owner_id = form.get("owner_id", "")
     if owner_id and owner_id.isdigit():
-        company.account_owner_id = int(owner_id)
+        new_owner_id = int(owner_id)
+        if new_owner_id != company.account_owner_id:
+            if not can_manage_account_team(user, company):
+                raise HTTPException(403, "Only the account owner or a manager can change the primary owner")
+            company.account_owner_id = new_owner_id
 
     parent_company_id_raw = form.get("parent_company_id", "").strip()
+    # Parent-company (hierarchy) edits are also a team action — match set_parent_company,
+    # which gates on owner/manager — so a collaborator can't restructure the hierarchy.
+    if parent_company_id_raw != (str(company.parent_company_id or "")):
+        if not can_manage_account_team(user, company):
+            raise HTTPException(403, "Only the account owner or a manager can change company hierarchy")
     _set_parent_company(db, company, parent_company_id_raw)
 
     # Registry fields — DRY via apply_company_field.
@@ -10408,16 +10436,17 @@ async def send_batch_follow_up(
     threshold_days = getattr(cfg, "follow_up_days", 2) if cfg else 2
     threshold = datetime.now(timezone.utc) - timedelta(days=threshold_days)
 
-    stale = (
-        db.query(RfqContact)
-        .filter(
-            RfqContact.contact_type == "email",
-            RfqContact.status.in_(["sent", "opened"]),
-            RfqContact.created_at < threshold,
-        )
-        .limit(50)
-        .all()
+    q = db.query(RfqContact).filter(
+        RfqContact.contact_type == "email",
+        RfqContact.status.in_(["sent", "opened"]),
+        RfqContact.created_at < threshold,
     )
+    # Restricted roles act only on contacts under their own requisitions; buyer/manager/admin
+    # stay global. Keep this in lockstep with follow_up_badge so the badge counts what the
+    # batch acts on.
+    if user.role in RESTRICTED_ROLES:
+        q = q.join(Requisition, RfqContact.requisition_id == Requisition.id).filter(Requisition.created_by == user.id)
+    stale = q.limit(50).all()
 
     sent_count = 0
     for contact in stale:
@@ -10443,16 +10472,15 @@ async def follow_up_badge(
     from ..models.offers import Contact as RfqContact
 
     threshold = datetime.now(timezone.utc) - timedelta(days=2)
-    count = (
-        db.query(sqlfunc.count(RfqContact.id))
-        .filter(
-            RfqContact.contact_type == "email",
-            RfqContact.status.in_(["sent", "opened"]),
-            RfqContact.created_at < threshold,
-        )
-        .scalar()
-        or 0
+    q = db.query(sqlfunc.count(RfqContact.id)).filter(
+        RfqContact.contact_type == "email",
+        RfqContact.status.in_(["sent", "opened"]),
+        RfqContact.created_at < threshold,
     )
+    # Same per-owner scope as send_batch_follow_up so the badge matches the batch.
+    if user.role in RESTRICTED_ROLES:
+        q = q.join(Requisition, RfqContact.requisition_id == Requisition.id).filter(Requisition.created_by == user.id)
+    count = q.scalar() or 0
     if count > 0:
         return HTMLResponse(
             f'<span class="ml-auto px-1.5 py-0.5 text-[10px] font-bold text-white bg-amber-500 rounded-full">{count}</span>'
@@ -11497,6 +11525,8 @@ async def sourcing_search_trigger(
     req = db.query(Requirement).filter(Requirement.id == requirement_id).first()
     if not req:
         raise HTTPException(404, "Requirement not found")
+    # Search triggers connector SPEND + cross-owner disclosure — scope to the owner.
+    require_requisition_access(db, req.requisition_id, user, label="Requirement")
 
     mpn = req.primary_mpn or ""
     sources = ["brokerbin", "nexar", "digikey", "mouser", "oemsecrets", "element14"]
@@ -15309,6 +15339,14 @@ async def proactive_do_not_offer(
         cid = int(company_id)
     except (ValueError, TypeError):
         raise HTTPException(400, "company_id must be an integer")
+
+    # Authz: a do-not-offer rule is scoped to a customer account, so the actor must be
+    # able to manage that account — otherwise a cross-account actor could suppress offers
+    # for any company by passing an arbitrary company_id in the form.
+    company = db.get(Company, cid)
+    if not company or not can_manage_account(user, company, db):
+        raise HTTPException(403, "Not authorized to manage this account")
+
     if not is_do_not_offer(db, mpn, cid):
         dno = ProactiveDoNotOffer(
             mpn=mpn.upper(),
