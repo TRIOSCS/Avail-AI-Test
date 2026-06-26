@@ -20,6 +20,8 @@ from sqlalchemy.orm import Session, joinedload
 from ..config import settings
 from ..constants import BuyPlanLineStatus, BuyPlanStatus, SOVerificationStatus
 from ..models.buy_plan import BuyPlan, BuyPlanLine
+from ..models.crm import CustomerSite
+from ..models.quotes import Quote
 from .buyplan_naming import (
     CARD_KIND_BUY_PLAN,
     CARD_KIND_PO,
@@ -100,7 +102,10 @@ def buyer_line_queue(db: Session, user: object) -> list[dict]:
             BuyPlan.status == BuyPlanStatus.ACTIVE,
         )
         .options(
-            joinedload(BuyPlanLine.buy_plan).joinedload(BuyPlan.quote),
+            joinedload(BuyPlanLine.buy_plan)
+            .joinedload(BuyPlan.quote)
+            .joinedload(Quote.customer_site)
+            .joinedload(CustomerSite.company),
             joinedload(BuyPlanLine.requirement),
             joinedload(BuyPlanLine.offer),
         )
@@ -169,7 +174,10 @@ def team_line_queue(db: Session, user: object) -> list[dict]:
             BuyPlanLine.buyer_id != user.id,
         )
         .options(
-            joinedload(BuyPlanLine.buy_plan).joinedload(BuyPlan.quote),
+            joinedload(BuyPlanLine.buy_plan)
+            .joinedload(BuyPlan.quote)
+            .joinedload(Quote.customer_site)
+            .joinedload(CustomerSite.company),
             joinedload(BuyPlanLine.requirement),
             joinedload(BuyPlanLine.offer),
             joinedload(BuyPlanLine.buyer),
@@ -398,8 +406,8 @@ def deals_board(db: Session, user: object, *, scope: str) -> dict[str, list[dict
             )
         )
         .options(
-            # Eager-load quote + lines; customer_site/company lazy-loaded within session
-            joinedload(BuyPlan.quote),
+            # Eager-load quote → customer_site → company (eliminates N+1 per card)
+            joinedload(BuyPlan.quote).joinedload(Quote.customer_site).joinedload(CustomerSite.company),
             joinedload(BuyPlan.submitted_by),
             # lines + their requirement feed _primary_mpn / _our_po_numbers on the card
             joinedload(BuyPlan.lines).joinedload(BuyPlanLine.requirement),
@@ -469,7 +477,8 @@ def completed_archive(
 
     plans = (
         base.options(
-            joinedload(BuyPlan.quote),
+            # Eager-load quote → customer_site → company (eliminates N+1 per card)
+            joinedload(BuyPlan.quote).joinedload(Quote.customer_site).joinedload(CustomerSite.company),
             joinedload(BuyPlan.submitted_by),
             joinedload(BuyPlan.lines).joinedload(BuyPlanLine.requirement),
         )
@@ -560,7 +569,10 @@ def supervise_overview(db: Session) -> dict:
             BuyPlan.status == BuyPlanStatus.PENDING,
             BuyPlan.approved_by_id.is_(None),
         )
-        .options(joinedload(BuyPlan.quote), joinedload(BuyPlan.submitted_by))
+        .options(
+            joinedload(BuyPlan.quote).joinedload(Quote.customer_site).joinedload(CustomerSite.company),
+            joinedload(BuyPlan.submitted_by),
+        )
         .order_by(BuyPlan.created_at.asc())
         .all()
     )
@@ -572,7 +584,10 @@ def supervise_overview(db: Session) -> dict:
             BuyPlan.status == BuyPlanStatus.ACTIVE,
             BuyPlan.so_status == SOVerificationStatus.PENDING,
         )
-        .options(joinedload(BuyPlan.quote), joinedload(BuyPlan.submitted_by))
+        .options(
+            joinedload(BuyPlan.quote).joinedload(Quote.customer_site).joinedload(CustomerSite.company),
+            joinedload(BuyPlan.submitted_by),
+        )
         .order_by(BuyPlan.created_at.asc())
         .all()
     )
@@ -581,7 +596,10 @@ def supervise_overview(db: Session) -> dict:
     halted_plans = (
         db.query(BuyPlan)
         .filter(BuyPlan.status == BuyPlanStatus.HALTED)
-        .options(joinedload(BuyPlan.quote), joinedload(BuyPlan.submitted_by))
+        .options(
+            joinedload(BuyPlan.quote).joinedload(Quote.customer_site).joinedload(CustomerSite.company),
+            joinedload(BuyPlan.submitted_by),
+        )
         .order_by(BuyPlan.created_at.asc())
         .all()
     )
@@ -601,7 +619,10 @@ def supervise_overview(db: Session) -> dict:
             func.coalesce(BuyPlanLine.last_nudge_at, BuyPlan.approved_at) < nudge_threshold,
         )
         .options(
-            joinedload(BuyPlanLine.buy_plan).joinedload(BuyPlan.quote),
+            joinedload(BuyPlanLine.buy_plan)
+            .joinedload(BuyPlan.quote)
+            .joinedload(Quote.customer_site)
+            .joinedload(CustomerSite.company),
             joinedload(BuyPlanLine.offer),
             joinedload(BuyPlanLine.buyer),
         )
@@ -614,7 +635,10 @@ def supervise_overview(db: Session) -> dict:
         db.query(BuyPlanLine)
         .filter(BuyPlanLine.status == BuyPlanLineStatus.PENDING_VERIFY)
         .options(
-            joinedload(BuyPlanLine.buy_plan).joinedload(BuyPlan.quote),
+            joinedload(BuyPlanLine.buy_plan)
+            .joinedload(BuyPlan.quote)
+            .joinedload(Quote.customer_site)
+            .joinedload(CustomerSite.company),
             joinedload(BuyPlanLine.offer),
             joinedload(BuyPlanLine.buyer),
         )
@@ -627,7 +651,10 @@ def supervise_overview(db: Session) -> dict:
         db.query(BuyPlanLine)
         .filter(BuyPlanLine.status == BuyPlanLineStatus.ISSUE)
         .options(
-            joinedload(BuyPlanLine.buy_plan).joinedload(BuyPlan.quote),
+            joinedload(BuyPlanLine.buy_plan)
+            .joinedload(BuyPlan.quote)
+            .joinedload(Quote.customer_site)
+            .joinedload(CustomerSite.company),
             joinedload(BuyPlanLine.offer),
             joinedload(BuyPlanLine.buyer),
         )
