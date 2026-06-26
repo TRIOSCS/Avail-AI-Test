@@ -71,6 +71,8 @@
             <th class="table-cell--head text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
             <th class="table-cell--head text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Approve buy plans</th>
             <th class="table-cell--head text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Approve prepayments</th>
+            <th class="table-cell--head text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Approve SOs</th>
+            <th class="table-cell--head text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Approve POs</th>
             <th class="table-cell--head text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
             <th class="table-cell--head text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last login</th>
             <th class="table-cell--head"></th>
@@ -133,6 +135,34 @@
                   </div>
                 </div>
               </form>
+            </td>
+            <td class="table-cell">
+              {# Per-user QP Sales-Order approval right (routes the Sales section gate).
+                 Hidden 'false' field ensures an unchecked box still submits a revoke. #}
+              <label class="inline-flex items-center cursor-pointer">
+                <input type="hidden" name="can_approve" value="false">
+                <input type="checkbox" name="can_approve" value="true"
+                       class="h-4 w-4 rounded border-gray-300 text-accent-600 focus:ring-accent-500"
+                       {{ 'checked' if row.can_approve_sales_orders else '' }}
+                       hx-post="/api/admin/users/{{ row.user.id }}/sales-order-approver"
+                       hx-target="#users-content" hx-swap="outerHTML"
+                       hx-trigger="change">
+                <span class="ml-2 text-xs text-gray-600">{{ 'Yes' if row.can_approve_sales_orders else 'No' }}</span>
+              </label>
+            </td>
+            <td class="table-cell">
+              {# Per-user QP Purchase-Order approval right (routes the Purchasing section
+                 gate). Hidden 'false' field ensures an unchecked box still submits a revoke. #}
+              <label class="inline-flex items-center cursor-pointer">
+                <input type="hidden" name="can_approve" value="false">
+                <input type="checkbox" name="can_approve" value="true"
+                       class="h-4 w-4 rounded border-gray-300 text-accent-600 focus:ring-accent-500"
+                       {{ 'checked' if row.can_approve_pos else '' }}
+                       hx-post="/api/admin/users/{{ row.user.id }}/po-approver"
+                       hx-target="#users-content" hx-swap="outerHTML"
+                       hx-trigger="change">
+                <span class="ml-2 text-xs text-gray-600">{{ 'Yes' if row.can_approve_pos else 'No' }}</span>
+              </label>
             </td>
             <td class="table-cell">
               {% if row.status == 'Active' %}

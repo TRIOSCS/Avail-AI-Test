@@ -40,6 +40,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ...constants import (
+    ApprovalGateType,
     ApprovalRecipientStatus,
     ApprovalRequestStatus,
     ApprovalSubjectType,
@@ -243,5 +244,21 @@ def decide(
             else:
                 _run_reject_side_effects(plan, user, db, reason=comment or "Rejected")
             db.flush()
+
+    # QP section gates (C2a). The QP is the subject (subject_type=QUALITY_PLAN); the
+    # gate_type discriminates which section resolved. On resolution, dispatch the section
+    # side effect (C2a: log an activity; C2b writes the section timestamp). Lazy import:
+    # quality_plan_service imports approvals.service, so a top-level import here would be
+    # circular. Mirrors the BUY_PLAN block — no swallowing try/except so a side-effect
+    # failure rolls the whole decision back atomically.
+    if (
+        request.subject_type == ApprovalSubjectType.QUALITY_PLAN
+        and request.gate_type in (ApprovalGateType.SALES_ORDER, ApprovalGateType.PURCHASE_ORDER)
+        and request.subject_id is not None
+    ):
+        from ..quality_plan_service import _on_section_approved
+
+        _on_section_approved(db, request.subject_id, request.gate_type, approved)
+        db.flush()
 
     return request

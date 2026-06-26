@@ -14,6 +14,25 @@
 
 <title hx-swap-oob="true">Quality Plan #{{ qp.id }} — AvailAI</title>
 
+{# ── Section gate-status chip ──────────────────────────────────────────────────
+   Renders the latest ApprovalRequest state for a QP section (Sales / Purchasing).
+   gate is an ApprovalRequest row or None (no submission yet). #}
+{% macro gate_chip(gate) %}
+  {% if gate is none %}
+  <span class="badge bg-slate-50 text-slate-500 border-slate-200">Not submitted</span>
+  {% elif gate.status == 'requested' %}
+  <span class="badge bg-amber-50 text-amber-700 border-amber-200">Pending approval</span>
+  {% elif gate.status == 'approved' %}
+  <span class="badge bg-emerald-50 text-emerald-700 border-emerald-200">Approved</span>
+  {% elif gate.status == 'rejected' %}
+  <span class="badge bg-rose-50 text-rose-700 border-rose-200">Rejected</span>
+  {% elif gate.status == 'cancelled' %}
+  <span class="badge bg-slate-50 text-slate-500 border-slate-200">Cancelled</span>
+  {% else %}
+  <span class="badge bg-slate-50 text-slate-500 border-slate-200">{{ gate.status|replace('_', ' ')|title }}</span>
+  {% endif %}
+{% endmacro %}
+
 {# ── Derive header fields from the buy plan (bp may be None on orphaned data) ── #}
 {% set owner = (bp.submitted_by if bp and bp.submitted_by else qp.created_by) %}
 {% set customer_name = bp.requisition.customer_name if bp and bp.requisition and bp.requisition.customer_name else
@@ -90,9 +109,16 @@
   </div>
   {% endif %}
 
+  {# ═══ 2b. SECTION SUBMIT ERROR (inline "no approver configured", non-500) ═══ #}
+  {% if section_error %}
+  <div class="mb-4 rounded-lg border border-rose-200 bg-rose-50 p-3">
+    <p class="text-xs font-semibold text-rose-700">{{ section_error }}</p>
+  </div>
+  {% endif %}
+
   {# ═══ 3. COLLAPSIBLE SECTIONS ═══ #}
 
-  {# ── Section: Sales (Phase 2) ── #}
+  {# ── Section: Sales (SALES_ORDER gate) ── #}
   <div class="mb-3 rounded-lg border border-gray-200 bg-white">
     <div role="button" tabindex="0"
          @click="showSales = !showSales"
@@ -100,7 +126,7 @@
          class="flex w-full cursor-pointer items-center justify-between px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50">
       <div class="flex items-center gap-2">
         <span>Sales</span>
-        <span class="badge bg-gray-50 text-gray-400 border-gray-200">Phase 2</span>
+        {{ gate_chip(sales_gate) }}
       </div>
       <svg class="h-4 w-4 text-gray-400 transition-transform" :class="showSales ? 'rotate-180' : ''"
            fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -108,11 +134,17 @@
       </svg>
     </div>
     <div x-show="showSales" x-collapse class="border-t border-gray-100 px-4 py-3">
-      <p class="text-xs text-gray-400 italic">Sales section — available in Phase 2.</p>
+      <p class="text-xs text-gray-400 italic mb-2">Sales section fields — available in Phase 2 (C2b).</p>
+      {# Submit for approval — hidden once a non-rejected request exists. #}
+      {% if sales_gate is none or sales_gate.status == 'rejected' or sales_gate.status == 'cancelled' %}
+      <form hx-post="/v2/qp/{{ qp.id }}/submit-sales" hx-target="#main-content" hx-swap="innerHTML">
+        <button type="submit" data-loading-disable class="btn btn-secondary btn-sm">Submit Sales for Approval</button>
+      </form>
+      {% endif %}
     </div>
   </div>
 
-  {# ── Section: Purchasing (Phase 2) ── #}
+  {# ── Section: Purchasing (PURCHASE_ORDER gate) ── #}
   <div class="mb-3 rounded-lg border border-gray-200 bg-white">
     <div role="button" tabindex="0"
          @click="showPurchasing = !showPurchasing"
@@ -120,7 +152,7 @@
          class="flex w-full cursor-pointer items-center justify-between px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50">
       <div class="flex items-center gap-2">
         <span>Purchasing</span>
-        <span class="badge bg-gray-50 text-gray-400 border-gray-200">Phase 2</span>
+        {{ gate_chip(purchasing_gate) }}
       </div>
       <svg class="h-4 w-4 text-gray-400 transition-transform" :class="showPurchasing ? 'rotate-180' : ''"
            fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -128,7 +160,13 @@
       </svg>
     </div>
     <div x-show="showPurchasing" x-collapse class="border-t border-gray-100 px-4 py-3">
-      <p class="text-xs text-gray-400 italic">Purchasing section — available in Phase 2.</p>
+      <p class="text-xs text-gray-400 italic mb-2">Purchasing section fields — available in Phase 2 (C2b).</p>
+      {# Submit for approval — hidden once a non-rejected request exists. #}
+      {% if purchasing_gate is none or purchasing_gate.status == 'rejected' or purchasing_gate.status == 'cancelled' %}
+      <form hx-post="/v2/qp/{{ qp.id }}/submit-purchasing" hx-target="#main-content" hx-swap="innerHTML">
+        <button type="submit" data-loading-disable class="btn btn-secondary btn-sm">Submit Purchasing for Approval</button>
+      </form>
+      {% endif %}
     </div>
   </div>
 

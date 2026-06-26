@@ -11,10 +11,20 @@ Purpose:
 
 Phase-1 required fields: created_by_id (owner), order_type, buy_plan_id.
 
-Called by: app.routers.quality_plans (Task 9+).
+QP Phase C2a adds the per-section approval-gate submit/resolve helpers:
+  - submit_section: open a SALES_ORDER / PURCHASE_ORDER ApprovalRequest for the QP
+    (the QP is the subject; the gate_type discriminates the section). A missing approver
+    surfaces NoSectionApproverError so the router can show an inline banner, not a 500.
+  - _on_section_approved: the on-resolve hook the engine calls inside decide() (C2a logs
+    an activity; C2b writes the section timestamp).
+
+Called by: app.routers.quality_plans (Task 9+), app.services.approvals.service (decide,
+           lazy import of _on_section_approved).
 Depends on: app.models.quality_plan (QualityPlan),
             app.services.activity_service (log_activity),
-            app.constants (QualityPlanStatus, QPOrderType, ActivityType).
+            app.services.approvals.service (create_request),
+            app.services.approvals.routing (NoEligibleApproverError),
+            app.constants (QualityPlanStatus, QPOrderType, ActivityType, ApprovalGateType).
 """
 
 from typing import Any
@@ -25,6 +35,12 @@ from sqlalchemy.orm import Session
 from ..constants import ActivityType, QualityPlanStatus
 from ..models.quality_plan import QualityPlan
 from ..services.activity_service import log_activity
+
+# Human-readable section name per gate_type, used in activity descriptions / banners.
+_SECTION_LABEL: dict[str, str] = {
+    "sales_order": "Sales",
+    "purchase_order": "Purchasing",
+}
 
 
 class IncompleteQPError(Exception):
@@ -37,6 +53,21 @@ class IncompleteQPError(Exception):
     def __init__(self, missing_fields: list[str]) -> None:
         self.missing_fields = missing_fields
         super().__init__(f"Quality plan is incomplete: {missing_fields}")
+
+
+class NoSectionApproverError(Exception):
+    """Raised by submit_section() when no eligible approver exists for the section gate.
+
+    The router catches this and re-renders the QP detail with an inline "no approver
+    configured" banner — never a 500. Carries the section label for the message.
+
+    Attributes:
+        section: Human-readable section name (e.g. "Sales", "Purchasing").
+    """
+
+    def __init__(self, section: str) -> None:
+        self.section = section
+        super().__init__(f"No approver configured for the {section} section")
 
 
 def create_qp(
@@ -144,3 +175,90 @@ def submit(
     db.flush()
     logger.info("QualityPlan id={} submitted by user={}", qp.id, user.id if user else None)
     return qp
+
+
+def _on_section_approved(db: Session, qp_id: int, gate_type: str, approved: bool) -> None:
+    """On-resolve hook for a QP section gate (SALES_ORDER / PURCHASE_ORDER).
+
+    Called by the approval engine inside decide() (lazy import) when a section request
+    resolves. C2a scope: log one ActivityLog row recording the section decision. C2b
+    extends this to also stamp the QualityPlan's section-approved timestamp column (the
+    timestamp columns land in C2b — do not write them here yet).
+
+    Args:
+        db: SQLAlchemy session (sync, 2.0 style).
+        qp_id: PK of the QualityPlan whose section resolved.
+        gate_type: The section gate (ApprovalGateType.SALES_ORDER / .PURCHASE_ORDER).
+        approved: True if the section was approved, False if rejected.
+
+    Returns:
+        None. A missing QP (concurrently deleted) is a no-op warning, not an error.
+    """
+    qp = db.get(QualityPlan, qp_id)
+    if qp is None:
+        logger.warning("_on_section_approved: QualityPlan id={} not found; skipping", qp_id)
+        return
+
+    section = _SECTION_LABEL.get(str(gate_type), str(gate_type))
+    verb = "approved" if approved else "rejected"
+    log_activity(
+        db,
+        activity_type=ActivityType.APPROVAL_APPROVED if approved else ActivityType.APPROVAL_REJECTED,
+        buy_plan_id=qp.buy_plan_id,
+        description=f"Quality plan #{qp.id} {section} section {verb}",
+    )
+    db.flush()
+    logger.info("QualityPlan id={} {} section {}", qp.id, section, verb)
+
+
+def submit_section(db: Session, qp_id: int, gate_type: str, user: Any) -> Any:
+    """Open a section approval request (SALES_ORDER / PURCHASE_ORDER) for the QP.
+
+    The QualityPlan is the engine subject (subject_type=QUALITY_PLAN); the gate_type
+    discriminates which section is being submitted. Routes to users holding the matching
+    per-user approval toggle (can_approve_sales_orders / can_approve_pos). C2a does not
+    yet enforce per-section field completeness (that lands in C2b) — it only opens the
+    gate request.
+
+    Args:
+        db: SQLAlchemy session (sync, 2.0 style).
+        qp_id: PK of the QualityPlan to submit.
+        gate_type: ApprovalGateType.SALES_ORDER or .PURCHASE_ORDER.
+        user: The authenticated User submitting the section (requester + owner).
+
+    Returns:
+        The flushed ApprovalRequest (already routed to eligible approvers).
+
+    Raises:
+        ValueError: If the QualityPlan is not found.
+        NoSectionApproverError: If no eligible approver holds the section toggle — the
+            router surfaces this as an inline banner (NOT a 500). The half-built request
+            is removed by create_request, so no orphan engine state remains.
+    """
+    # Lazy import: approvals.service -> quality_plan_service (decide()'s lazy import of
+    # _on_section_approved), so a top-level import here would be circular. The package
+    # exposes no re-exports — import from the concrete submodules.
+    from .approvals.routing import NoEligibleApproverError
+    from .approvals.service import create_request
+
+    qp = db.get(QualityPlan, qp_id)
+    if qp is None:
+        raise ValueError(f"QualityPlan {qp_id} not found")
+
+    try:
+        request = create_request(
+            db,
+            gate_type=gate_type,
+            amount=None,
+            subject=qp,
+            requested_by=user,
+            owner=user,
+        )
+    except NoEligibleApproverError as exc:
+        section = _SECTION_LABEL.get(str(gate_type), str(gate_type))
+        logger.warning("QualityPlan id={} {} section submit: no eligible approver", qp_id, section)
+        raise NoSectionApproverError(section) from exc
+
+    db.flush()
+    logger.info("QualityPlan id={} {} section submitted by user={}", qp.id, gate_type, user.id if user else None)
+    return request

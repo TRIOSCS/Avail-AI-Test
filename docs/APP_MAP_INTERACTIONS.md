@@ -1900,6 +1900,9 @@ POST /api/admin/users/invite                → create interactive user (status 
 POST /api/admin/users/{id}/role             → change role
 POST /api/admin/users/{id}/active           → activate / deactivate
 POST /api/admin/users/{id}/buyplan-approver → grant/revoke the per-user buy-plan approval right (User.can_approve_buy_plans); APPROVAL_GRANT/APPROVAL_REVOKE audit
+POST /api/admin/users/{id}/prepayment-approver  → grant/revoke prepayment approval + optional dollar limit (User.can_approve_prepayments / prepayment_approval_limit)
+POST /api/admin/users/{id}/sales-order-approver → grant/revoke QP Sales-section approval right (User.can_approve_sales_orders); APPROVAL_GRANT/APPROVAL_REVOKE audit (QP Phase C2a)
+POST /api/admin/users/{id}/po-approver          → grant/revoke QP Purchasing-section approval right (User.can_approve_pos); APPROVAL_GRANT/APPROVAL_REVOKE audit (QP Phase C2a)
 GET  /api/admin/users/{id}/access-panel     → user_access_panel.html (per-user access editor modal)
 POST /api/admin/users/{id}/access           → grant/revoke/reset ONE key (value ∈ on|off|default)
 GET  /api/admin/users/audit                 → users_audit.html (audit-log viewer modal)
@@ -5053,6 +5056,25 @@ approver configured → `NoEligibleApproverError` is caught, logged WARNING, pla
 open request exists — a plan that went `PENDING` before C1 deployed — it falls back to the
 legacy `approve_buy_plan` and logs a WARNING (RISK 3, transition window, removed in a
 follow-up).
+
+**QP section gates — Sales / Purchasing (QP Phase C2a):** the QualityPlan is the engine
+subject (`subject_type='quality_plan'`); the `gate_type` discriminates the section.
+`routing.route_request` gains `SALES_ORDER` → every active `can_approve_sales_orders` holder
+and `PURCHASE_ORDER` → every active `can_approve_pos` holder (no amount check, like
+`BUY_PLAN`). `quality_plan_service.submit_section(db, qp_id, gate_type, user)` calls
+`create_request(gate_type, amount=None, subject=qp, requested_by=owner=user)`; a missing
+approver raises `NoEligibleApproverError`, which `submit_section` re-raises as
+`NoSectionApproverError` — the router (`POST /v2/qp/{id}/submit-sales`,
+`/submit-purchasing`) catches it and re-renders the QP detail with an inline "no approver
+configured" banner (NEVER a 500), with no orphan request (`create_request` already deleted
+the half-built row). On resolution, `decide()`'s on-resolve dispatch — after the BUY_PLAN
+block — runs for `subject_type=='quality_plan'` AND `gate_type ∈ {sales_order,
+purchase_order}`: a LAZY import (circular-safe) of
+`quality_plan_service._on_section_approved(db, qp_id, gate_type, approved)`, which C2a logs
+an `APPROVAL_APPROVED`/`APPROVAL_REJECTED` `ActivityLog` (the section-approved timestamp
+columns land in C2b). The QP detail renders a per-section gate-status chip from
+`_get_gate(db, qp_id, gate_type)` (latest `ApprovalRequest` for the QP + gate), and the
+"Submit … for Approval" button is hidden once a non-rejected request exists.
 
 **Leaving PENDING outside `decide()` cancels the open engine request (no orphan, no
 resurrection):** a PENDING plan carries a live `REQUESTED` `BUY_PLAN` `ApprovalRequest`, so
