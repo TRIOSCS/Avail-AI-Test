@@ -65,7 +65,9 @@ def test_single_head_after_migration():
     assert len(heads) == 1, (
         f"Expected single head, got {len(heads)}: {sorted(heads)}. Run: alembic merge heads -m 'merge heads'"
     )
-    assert heads[0] == _MIGRATION_ID, f"Expected head to be {_MIGRATION_ID!r}, got {heads[0]!r}"
+    # Don't pin the head to a specific revision — later migrations (e.g. 158_req_pipeline_hotlist)
+    # legitimately chain on top, so the single-head invariant above is the durable check. Chain
+    # integrity for 157_qp_approvals is verified by test_migration_chains_onto_156.
 
 
 def test_migration_chains_onto_156():

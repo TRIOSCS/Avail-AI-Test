@@ -73,7 +73,6 @@ def test_htmx_ajax_calls_have_indicator():
         ("app/templates/htmx/partials/parts/list.html", 142),
         ("app/templates/htmx/partials/parts/list.html", 301),
         ("app/templates/htmx/partials/parts/list.html", 348),
-        ("app/templates/htmx/partials/parts/tabs/req_details.html", 209),
     }
 
     failures: list[str] = []
