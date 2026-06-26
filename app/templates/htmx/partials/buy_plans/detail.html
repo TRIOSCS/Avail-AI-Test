@@ -51,6 +51,17 @@
         </span>
         <span class="text-xs text-gray-400">{{ lines|length }} line{{ 's' if lines|length != 1 }}</span>
         <span class="text-xs text-gray-400">{{ unique_vendors|length }} vendor{{ 's' if unique_vendors|length != 1 }}</span>
+        {# Quality Plan front door — get-or-create this buy plan's QP and open its native
+           view. Always shown (independent of the action banner) so the owner can always
+           reach the QP. #}
+        <button hx-get="/v2/qp/for-buy-plan/{{ bp.id }}"
+                hx-target="#main-content"
+                hx-push-url="true"
+                data-loading-disable
+                class="btn btn-secondary btn-sm inline-flex items-center gap-1">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+          Quality Plan
+        </button>
         {# Cancel/Reset only shown here when NOT in action banner #}
         {% if not has_action_banner %}
           {% if bp.status in ('halted', 'cancelled') %}
