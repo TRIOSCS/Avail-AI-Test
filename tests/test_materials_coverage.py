@@ -114,7 +114,7 @@ class TestListMaterialsWithBrandAndOfferStats:
         # Add an offer for the second card
         from app.models import Requirement, Requisition
 
-        req = Requisition(name="Test", status="active", customer_name="Cust")
+        req = Requisition(name="Test", status="open", customer_name="Cust")
         db_session.add(req)
         db_session.flush()
         r = Requirement(requisition_id=req.id, primary_mpn="MC1COVERAGE", target_qty=10)

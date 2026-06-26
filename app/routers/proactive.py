@@ -12,8 +12,8 @@ from sqlalchemy.orm import Session, joinedload
 
 from ..cache.decorators import cached_endpoint
 from ..database import get_db
-from ..dependencies import require_user
-from ..models import ProactiveDoNotOffer, ProactiveMatch, SiteContact, User
+from ..dependencies import can_manage_account, require_user
+from ..models import Company, ProactiveDoNotOffer, ProactiveMatch, SiteContact, User
 from ..scheduler import get_valid_token
 from ..schemas.proactive import (
     DismissMatches,
@@ -106,6 +106,11 @@ async def add_do_not_offer(
         mpn = (item.mpn or "").strip().upper()
         if not mpn or not item.company_id:
             continue
+        # A do-not-offer suppression is an account action — only someone who manages the
+        # company may add it. Without this, any user could suppress MPNs for any account.
+        company = db.get(Company, item.company_id)
+        if not company or not can_manage_account(user, company, db):
+            raise HTTPException(403, "Not authorized to manage this account")
         existing = (
             db.query(ProactiveDoNotOffer)
             .filter(
@@ -125,10 +130,12 @@ async def add_do_not_offer(
             )
             suppressed += 1
 
-        # Auto-dismiss any open matches for this mpn + company
+        # Auto-dismiss this user's open matches for this mpn + company. Scope to
+        # salesperson_id (mirrors /dismiss) so we never wipe another owner's open matches.
         db.query(ProactiveMatch).filter(
             ProactiveMatch.mpn == mpn,
             ProactiveMatch.company_id == item.company_id,
+            ProactiveMatch.salesperson_id == user.id,
             ProactiveMatch.status == "new",
         ).update(
             {"status": "dismissed", "dismiss_reason": "do_not_offer"},

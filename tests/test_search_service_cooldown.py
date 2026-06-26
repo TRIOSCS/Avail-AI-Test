@@ -34,7 +34,7 @@ def _mk_requirement(db: Session, test_user, *, req_name, primary_mpn, now, custo
     req = Requisition(
         name=req_name,
         customer_name=customer_name,
-        status="active",
+        status="open",
         created_by=test_user.id,
         created_at=now,
     )

@@ -78,7 +78,7 @@ def _make_chain(
 
     requisition = Requisition(
         name="REQ-NIGHTLY",
-        status="active",
+        status="open",
         created_by=user.id,
         customer_site_id=site.id,
         created_at=datetime.now(timezone.utc),
@@ -164,7 +164,7 @@ class TestBuildBuyPlanNoRequirements:
 
         requisition = Requisition(
             name="REQ-EMPTY",
-            status="active",
+            status="open",
             created_by=user.id,
             customer_site_id=site.id,
             created_at=datetime.now(timezone.utc),
@@ -196,7 +196,7 @@ class TestNoOffersForRequirement:
         user = _make_user(db_session, email="no-offer@test.com", azure_id="az-no-offer")
         requisition = Requisition(
             name="REQ-NOOFFER",
-            status="active",
+            status="open",
             created_by=user.id,
             created_at=datetime.now(timezone.utc),
         )

@@ -47,7 +47,7 @@ def _mock_form_request(path: str = "/v2/test", fields: dict | None = None) -> Ma
 
 
 def _make_req(db: Session, user: User) -> Requisition:
-    req = Requisition(name="N27 Test Req", status="active", created_by=user.id)
+    req = Requisition(name="N27 Test Req", status="open", created_by=user.id)
     db.add(req)
     db.commit()
     db.refresh(req)

@@ -20,6 +20,46 @@ from sqlalchemy.orm import Session, joinedload
 from ..config import settings
 from ..constants import BuyPlanLineStatus, BuyPlanStatus, SOVerificationStatus
 from ..models.buy_plan import BuyPlan, BuyPlanLine
+from ..models.crm import CustomerSite
+from ..models.quotes import Quote
+from .buyplan_naming import (
+    CARD_KIND_BUY_PLAN,
+    CARD_KIND_PO,
+    CARD_KIND_SALES_ORDER,
+    build_card_title,
+)
+
+
+def _user_name(user: object | None) -> str | None:
+    """Display name for a User (``name`` preferred, ``email`` fallback), or ``None``.
+
+    The single owner-name derivation reused by every Deal Hub read model so the
+    Account Manager (``submitted_by``) and the Buyer (``line.buyer``) format
+    identically wherever they appear in a card title.
+    """
+    if user is None:
+        return None
+    name: str | None = getattr(user, "name", None) or getattr(user, "email", None)
+    return name
+
+
+def _issue_reason(line: BuyPlanLine) -> str:
+    """Human-readable reason a buyer flagged this line, for at-a-glance triage.
+
+    Buyers raise a line issue via ``buyplan_workflow.flag_line_issue`` which records
+    an ``issue_type`` code (``sold_out`` / ``price_changed`` / ``lead_time_changed``
+    / ``other``) plus an optional free-text ``issue_note``. The note is the most
+    specific signal, so it wins; otherwise the type code is humanised
+    (``lead_time_changed`` → ``Lead time changed``). Falls back to ``"Issue"`` when
+    neither is set (legacy rows).
+    """
+    note = (line.issue_note or "").strip()
+    if note:
+        return note
+    code = (line.issue_type or "").strip()
+    if code:
+        return code.replace("_", " ").capitalize()
+    return "Issue"
 
 
 def _customer_name(plan: BuyPlan) -> str | None:
@@ -62,7 +102,10 @@ def buyer_line_queue(db: Session, user: object) -> list[dict]:
             BuyPlan.status == BuyPlanStatus.ACTIVE,
         )
         .options(
-            joinedload(BuyPlanLine.buy_plan).joinedload(BuyPlan.quote),
+            joinedload(BuyPlanLine.buy_plan)
+            .joinedload(BuyPlan.quote)
+            .joinedload(Quote.customer_site)
+            .joinedload(CustomerSite.company),
             joinedload(BuyPlanLine.requirement),
             joinedload(BuyPlanLine.offer),
         )
@@ -131,7 +174,10 @@ def team_line_queue(db: Session, user: object) -> list[dict]:
             BuyPlanLine.buyer_id != user.id,
         )
         .options(
-            joinedload(BuyPlanLine.buy_plan).joinedload(BuyPlan.quote),
+            joinedload(BuyPlanLine.buy_plan)
+            .joinedload(BuyPlan.quote)
+            .joinedload(Quote.customer_site)
+            .joinedload(CustomerSite.company),
             joinedload(BuyPlanLine.requirement),
             joinedload(BuyPlanLine.offer),
             joinedload(BuyPlanLine.buyer),
@@ -229,8 +275,12 @@ def _compute_blocker(plan: BuyPlan) -> str:
         return "SO needs verification"
 
     if status == BuyPlanStatus.DRAFT:
-        rejected = so_status == SOVerificationStatus.REJECTED or bool(
-            plan.approval_notes and "reject" in plan.approval_notes.lower()
+        # A DRAFT that carries an approval decision timestamp was sent back by an approver
+        # (approve_buy_plan stamps approved_at on reject) → distinguish it from a fresh draft.
+        rejected = (
+            plan.approved_at is not None
+            or so_status == SOVerificationStatus.REJECTED
+            or bool(plan.approval_notes and "reject" in plan.approval_notes.lower())
         )
         if rejected:
             return "rejected — resubmit"
@@ -240,12 +290,52 @@ def _compute_blocker(plan: BuyPlan) -> str:
     return ""
 
 
+def _primary_mpn(plan: BuyPlan) -> str | None:
+    """The plan's headline part number for at-a-glance scanning.
+
+    Returns the first non-cancelled line's requirement MPN (lines are id-ordered),
+    i.e. the part the deal leads with. ``None`` when no line carries a requirement
+    MPN (e.g. a fresh plan with unlinked lines).
+    """
+    for ln in plan.lines:
+        if ln.status == BuyPlanLineStatus.CANCELLED:
+            continue
+        req = ln.requirement
+        if req and req.primary_mpn:
+            return req.primary_mpn
+    return None
+
+
+def _our_po_numbers(plan: BuyPlan) -> list[str]:
+    """Distinct purchase-order numbers we've cut on this plan's lines, in line order.
+
+    These are *our* POs to vendors (``BuyPlanLine.po_number``) — distinct from
+    ``BuyPlan.customer_po_number`` (the customer's PO to us). Cancelled lines are
+    skipped. Order is preserved (id-ordered lines) and duplicates collapse, so a
+    reviewer sees exactly which POs the deal involves.
+    """
+    seen: list[str] = []
+    for ln in plan.lines:
+        if ln.status == BuyPlanLineStatus.CANCELLED:
+            continue
+        po = (ln.po_number or "").strip()
+        if po and po not in seen:
+            seen.append(po)
+    return seen
+
+
 def _deal_card(plan: BuyPlan, user: object) -> dict:
     """Build the shared deal-card read dict for one plan.
 
     Used by both the active board (``deals_board``) and the completed archive
     (``completed_archive``) so a card looks identical wherever it renders. The
     ``completed_at`` field is meaningful only for archived (COMPLETED) plans.
+
+    ``card_title`` is the canonical ``{SO#} - {Customer} - {Owner} - BP`` title
+    (Owner = the Account Manager / sales owner) built by the shared
+    :func:`buyplan_naming.build_card_title` helper. ``tso``, ``po_numbers`` and
+    ``primary_mpn`` give the denser tile the sales-order #, the POs involved and
+    the headline part without opening the deal.
     """
     # po_progress: (verified_count, total_non_cancelled_count)
     active_lines = [ln for ln in plan.lines if ln.status != BuyPlanLineStatus.CANCELLED]
@@ -254,9 +344,23 @@ def _deal_card(plan: BuyPlan, user: object) -> dict:
     # needs_my_action: sales owner must act when plan is DRAFT
     needs_my_action = plan.status == BuyPlanStatus.DRAFT and plan.submitted_by_id == user.id
 
+    customer_name = _customer_name(plan)
+    # Owner on a Buy-Plan card is the Account Manager (sales owner = submitted_by).
+    owner_name = _user_name(plan.submitted_by)
+
     return {
         "plan_id": plan.id,
-        "customer_name": _customer_name(plan),
+        "card_title": build_card_title(
+            sales_order_number=plan.sales_order_number,
+            customer_name=customer_name,
+            owner_name=owner_name,
+            kind=CARD_KIND_BUY_PLAN,
+        ),
+        "customer_name": customer_name,
+        "owner_name": owner_name,
+        "tso": plan.sales_order_number,
+        "po_numbers": _our_po_numbers(plan),
+        "primary_mpn": _primary_mpn(plan),
         "value": plan.total_cost,
         "margin_pct": plan.total_margin_pct,
         "stage_label": _STAGE_LABELS.get(plan.status, plan.status),
@@ -302,9 +406,11 @@ def deals_board(db: Session, user: object, *, scope: str) -> dict[str, list[dict
             )
         )
         .options(
-            # Eager-load quote + lines; customer_site/company lazy-loaded within session
-            joinedload(BuyPlan.quote),
-            joinedload(BuyPlan.lines),
+            # Eager-load quote → customer_site → company (eliminates N+1 per card)
+            joinedload(BuyPlan.quote).joinedload(Quote.customer_site).joinedload(CustomerSite.company),
+            joinedload(BuyPlan.submitted_by),
+            # lines + their requirement feed _primary_mpn / _our_po_numbers on the card
+            joinedload(BuyPlan.lines).joinedload(BuyPlanLine.requirement),
         )
         .order_by(BuyPlan.created_at.desc())
     )
@@ -370,7 +476,12 @@ def completed_archive(
     total = base.with_entities(func.count(BuyPlan.id)).scalar() or 0
 
     plans = (
-        base.options(joinedload(BuyPlan.quote), joinedload(BuyPlan.lines))
+        base.options(
+            # Eager-load quote → customer_site → company (eliminates N+1 per card)
+            joinedload(BuyPlan.quote).joinedload(Quote.customer_site).joinedload(CustomerSite.company),
+            joinedload(BuyPlan.submitted_by),
+            joinedload(BuyPlan.lines).joinedload(BuyPlanLine.requirement),
+        )
         .order_by(BuyPlan.completed_at.desc().nullslast(), BuyPlan.created_at.desc())
         .limit(limit)
         .offset(offset)
@@ -458,7 +569,10 @@ def supervise_overview(db: Session) -> dict:
             BuyPlan.status == BuyPlanStatus.PENDING,
             BuyPlan.approved_by_id.is_(None),
         )
-        .options(joinedload(BuyPlan.quote), joinedload(BuyPlan.submitted_by))
+        .options(
+            joinedload(BuyPlan.quote).joinedload(Quote.customer_site).joinedload(CustomerSite.company),
+            joinedload(BuyPlan.submitted_by),
+        )
         .order_by(BuyPlan.created_at.asc())
         .all()
     )
@@ -470,7 +584,10 @@ def supervise_overview(db: Session) -> dict:
             BuyPlan.status == BuyPlanStatus.ACTIVE,
             BuyPlan.so_status == SOVerificationStatus.PENDING,
         )
-        .options(joinedload(BuyPlan.quote), joinedload(BuyPlan.submitted_by))
+        .options(
+            joinedload(BuyPlan.quote).joinedload(Quote.customer_site).joinedload(CustomerSite.company),
+            joinedload(BuyPlan.submitted_by),
+        )
         .order_by(BuyPlan.created_at.asc())
         .all()
     )
@@ -479,7 +596,10 @@ def supervise_overview(db: Session) -> dict:
     halted_plans = (
         db.query(BuyPlan)
         .filter(BuyPlan.status == BuyPlanStatus.HALTED)
-        .options(joinedload(BuyPlan.quote), joinedload(BuyPlan.submitted_by))
+        .options(
+            joinedload(BuyPlan.quote).joinedload(Quote.customer_site).joinedload(CustomerSite.company),
+            joinedload(BuyPlan.submitted_by),
+        )
         .order_by(BuyPlan.created_at.asc())
         .all()
     )
@@ -499,7 +619,10 @@ def supervise_overview(db: Session) -> dict:
             func.coalesce(BuyPlanLine.last_nudge_at, BuyPlan.approved_at) < nudge_threshold,
         )
         .options(
-            joinedload(BuyPlanLine.buy_plan).joinedload(BuyPlan.quote),
+            joinedload(BuyPlanLine.buy_plan)
+            .joinedload(BuyPlan.quote)
+            .joinedload(Quote.customer_site)
+            .joinedload(CustomerSite.company),
             joinedload(BuyPlanLine.offer),
             joinedload(BuyPlanLine.buyer),
         )
@@ -512,7 +635,10 @@ def supervise_overview(db: Session) -> dict:
         db.query(BuyPlanLine)
         .filter(BuyPlanLine.status == BuyPlanLineStatus.PENDING_VERIFY)
         .options(
-            joinedload(BuyPlanLine.buy_plan).joinedload(BuyPlan.quote),
+            joinedload(BuyPlanLine.buy_plan)
+            .joinedload(BuyPlan.quote)
+            .joinedload(Quote.customer_site)
+            .joinedload(CustomerSite.company),
             joinedload(BuyPlanLine.offer),
             joinedload(BuyPlanLine.buyer),
         )
@@ -525,7 +651,10 @@ def supervise_overview(db: Session) -> dict:
         db.query(BuyPlanLine)
         .filter(BuyPlanLine.status == BuyPlanLineStatus.ISSUE)
         .options(
-            joinedload(BuyPlanLine.buy_plan).joinedload(BuyPlan.quote),
+            joinedload(BuyPlanLine.buy_plan)
+            .joinedload(BuyPlan.quote)
+            .joinedload(Quote.customer_site)
+            .joinedload(CustomerSite.company),
             joinedload(BuyPlanLine.offer),
             joinedload(BuyPlanLine.buyer),
         )
@@ -534,32 +663,53 @@ def supervise_overview(db: Session) -> dict:
     )
 
     # ── Helpers ──────────────────────────────────────────────────────
-    def _submitted_by_name(plan: BuyPlan) -> str | None:
-        sub = plan.submitted_by
-        if sub:
-            return sub.name or sub.email
-        return None
+    def _plan_dict(plan: BuyPlan, *, kind: str | None = None) -> dict:
+        """Plan triage row.
 
-    def _plan_dict(plan: BuyPlan) -> dict:
-        return {
+        With ``kind`` set (e.g. "SO"), include the canonical
+        ``{SO#} - {Customer} - {Owner} - {kind}`` title; Owner is the Account Manager.
+        """
+        customer_name = _customer_name(plan)
+        owner_name = _user_name(plan.submitted_by)
+        row = {
             "plan_id": plan.id,
-            "customer_name": _customer_name(plan),
+            "customer_name": customer_name,
             "value": plan.total_cost,
-            "submitted_by_name": _submitted_by_name(plan),
+            "submitted_by_name": owner_name,
         }
+        if kind is not None:
+            row["card_title"] = build_card_title(
+                sales_order_number=plan.sales_order_number,
+                customer_name=customer_name,
+                owner_name=owner_name,
+                kind=kind,
+            )
+        return row
 
-    def _line_dict(ln: BuyPlanLine, *, include_issue_type: bool = False) -> dict:
+    def _line_dict(ln: BuyPlanLine, *, include_issue_type: bool = False, kind: str | None = None) -> dict:
         offer = ln.offer
         buyer = ln.buyer
+        plan = ln.buy_plan
         row = {
             "line_id": ln.id,
             "plan_id": ln.buy_plan_id,
             "mpn": offer.mpn if offer else None,
             "vendor_name": offer.vendor_name if offer else None,
-            "buyer_name": (buyer.name or buyer.email) if buyer else None,
+            "buyer_name": _user_name(buyer),
         }
         if include_issue_type:
+            # Human-readable issue reason: the buyer's free-text note when present,
+            # else the issue-type label (underscores → spaces). Falls back to "issue".
             row["issue_type"] = ln.issue_type
+            row["issue_reason"] = _issue_reason(ln)
+        if kind is not None:
+            # PO approval row: Owner is the Buyer (per-line procurement owner).
+            row["card_title"] = build_card_title(
+                sales_order_number=plan.sales_order_number if plan else None,
+                customer_name=_customer_name(plan) if plan else None,
+                owner_name=_user_name(buyer),
+                kind=kind,
+            )
         return row
 
     return {
@@ -575,10 +725,12 @@ def supervise_overview(db: Session) -> dict:
         },
         "triage": {
             "approvals": [_plan_dict(p) for p in approval_plans],
-            "so_pending": [_plan_dict(p) for p in so_pending_plans],
+            # SO-approval rows carry the "{SO#} - {Customer} - {AcctMgr} - SO" title.
+            "so_pending": [_plan_dict(p, kind=CARD_KIND_SALES_ORDER) for p in so_pending_plans],
             "halted": [_plan_dict(p) for p in halted_plans],
             "overdue_pos": [_line_dict(ln) for ln in overdue_lines],
-            "po_pending_verify": [_line_dict(ln) for ln in po_pending_verify_lines],
+            # PO-approval rows carry the "{SO#} - {Customer} - {Buyer} - PO" title.
+            "po_pending_verify": [_line_dict(ln, kind=CARD_KIND_PO) for ln in po_pending_verify_lines],
             "flagged": [_line_dict(ln, include_issue_type=True) for ln in flagged_lines],
         },
     }

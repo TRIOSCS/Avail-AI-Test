@@ -132,7 +132,7 @@ def test_clone_requisition_duplicate_mpn_preserves_offer_mapping(db_session, tes
     src = Requisition(
         name="SRC-REQ",
         customer_name="Acme",
-        status="active",
+        status="open",
         created_by=test_user.id,
     )
     db_session.add(src)
@@ -161,7 +161,7 @@ class TestCloneEdgeCases:
     def test_clone_with_zero_requirements(self, db_session, test_user):
         from app.models import Requisition
 
-        source = Requisition(name="empty", status="active", created_by=test_user.id)
+        source = Requisition(name="empty", status="open", created_by=test_user.id)
         db_session.add(source)
         db_session.flush()
         clone = clone_requisition(db_session, source, test_user.id)
@@ -171,7 +171,7 @@ class TestCloneEdgeCases:
     def test_clone_preserves_name_prefix(self, db_session, test_user):
         from app.models import Requisition
 
-        source = Requisition(name="Original RFQ", status="active", created_by=test_user.id)
+        source = Requisition(name="Original RFQ", status="open", created_by=test_user.id)
         db_session.add(source)
         db_session.flush()
         clone = clone_requisition(db_session, source, test_user.id)

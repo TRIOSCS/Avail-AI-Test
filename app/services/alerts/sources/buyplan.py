@@ -17,7 +17,7 @@ elsewhere); the item leaves the count only when the underlying work is done. Hen
 Called by: services/alerts/registry.py (registered centrally by the parent).
 Depends on: services/alerts/base.AlertSource, models/buy_plan.{BuyPlan,BuyPlanLine,
             VerificationGroupMember}, constants.{AlertKind,BuyPlanStatus,
-            BuyPlanLineStatus,SOVerificationStatus,UserRole}.
+            BuyPlanLineStatus,SOVerificationStatus}, dependencies.can_approve_buy_plans.
 """
 
 from __future__ import annotations
@@ -29,18 +29,12 @@ from app.constants import (
     BuyPlanLineStatus,
     BuyPlanStatus,
     SOVerificationStatus,
-    UserRole,
 )
+from app.dependencies import can_approve_buy_plans
 from app.models.auth import User
 from app.models.buy_plan import BuyPlan, BuyPlanLine, VerificationGroupMember
 
 from ..base import AlertItem, AlertSource, Temperament
-
-# Roles permitted to approve a pending buy plan. Single source of truth mirrors
-# buyplan_workflow.approve_buy_plan's allowed set ({"manager", "admin"}) — if the
-# approval rule changes there, change it here too so the badge can never count a
-# step the user could not actually act on.
-_APPROVER_ROLES = frozenset({UserRole.MANAGER, UserRole.ADMIN})
 
 
 class BuyplanActionSource(AlertSource):
@@ -86,8 +80,11 @@ class BuyplanActionSource(AlertSource):
         )
         items.extend(AlertItem(ref_id=line_id, anchor=f"bp-{plan_id}") for (line_id, plan_id) in po_lines)
 
-        # 2. Manager approval — pending plans with no approver, if my role can approve.
-        if user.role in _APPROVER_ROLES:
+        # 2. Approval — pending plans with no approver, if I hold the buy-plan approval
+        #    right. Single source of truth: can_approve_buy_plans (the per-user column the
+        #    approve route + service enforce), NOT a role set — so the badge never counts a
+        #    step the user could not actually act on, and always counts one they can.
+        if can_approve_buy_plans(user):
             approval_plans = (
                 db.query(BuyPlan.id)
                 .filter(

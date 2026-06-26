@@ -28,7 +28,16 @@
       {% if inbox_status.last_scan_at %}{{ inbox_status.last_scan_at|timeago }}{% else %}not yet{% endif %}
     </div>
     {% if inbox_status.error_reason %}
-    <div class="text-rose-600">We hit a snag syncing your mailbox: {{ inbox_status.error_reason }}. Try reconnecting from the sign-in screen.</div>
+      {% if inbox_status.error_action == 'reconnect' %}
+      {# Sign-in/token is dead — reconnect is the real fix. #}
+      <div class="text-rose-600">
+        {{ inbox_status.error_reason }}
+        <a href="/auth/login" class="font-medium underline">Reconnect Microsoft 365</a>.
+      </div>
+      {% else %}
+      {# Transient / subscription degradation — self-heals or is informational. #}
+      <div class="text-amber-600">{{ inbox_status.error_reason }}</div>
+      {% endif %}
     {% elif inbox_status.is_stale %}
     <div class="text-amber-600">Sync is running behind — the next check should catch it up.</div>
     {% endif %}
@@ -39,8 +48,12 @@
     <p class="text-sm font-medium text-gray-700">Mailbox not connected</p>
     <p class="mt-1 text-xs text-gray-500">Sign in with Microsoft 365 to let AvailAI read replies and keep your requisitions up to date.</p>
     {% if inbox_status.error_reason %}
-    <p class="mt-2 text-xs text-rose-600">Last error: {{ inbox_status.error_reason }}.</p>
+    <p class="mt-2 text-xs text-rose-600">{{ inbox_status.error_reason }}</p>
     {% endif %}
+    <a href="/auth/login"
+       class="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-accent-600 rounded-lg hover:bg-accent-700">
+      Connect Microsoft 365
+    </a>
   </div>
   {% endif %}
 </div>

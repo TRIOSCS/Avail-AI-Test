@@ -53,7 +53,7 @@ def _make_quote_and_requisition(db: Session):
     req = Requisition(
         name=f"REQ-BP-{datetime.now().timestamp()}",
         customer_name="BPCo",
-        status="active",
+        status="open",
         created_by=user.id,
         created_at=datetime.now(timezone.utc),
     )

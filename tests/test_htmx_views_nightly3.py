@@ -71,7 +71,7 @@ def _req(db: Session, user: User, **kw) -> Requisition:
     defaults = dict(
         name="N3-REQ",
         customer_name="N3 Corp",
-        status=RequisitionStatus.ACTIVE,
+        status=RequisitionStatus.OPEN,
         created_by=user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -520,19 +520,29 @@ class TestBuyPlanWorkflow:
         resp = client.post(f"/v2/partials/buy-plans/{plan.id}/cancel")
         assert resp.status_code == 400
 
-    def test_buy_plan_approve_as_admin(self, admin_client, db_session: Session, admin_user: User):
+    def test_buy_plan_approve_as_approver(self, admin_client, db_session: Session, admin_user: User):
+        """A user holding the buy-plan approval right can POST approve (gate is the
+        can_approve_buy_plans right, not the admin role)."""
+        from app.dependencies import require_buyplan_approver
+        from app.main import app
+
         req = _req(db_session, admin_user)
         quote = _quote(db_session, req, admin_user)
         plan = _buy_plan(db_session, quote, req, status=BuyPlanStatus.PENDING.value)
+        admin_user.can_approve_buy_plans = True
         db_session.commit()
 
-        with patch("app.services.buyplan_workflow.approve_buy_plan", return_value=plan):
-            with patch("app.services.buyplan_notifications.run_notify_bg", AsyncMock(return_value=None)):
-                resp = admin_client.post(
-                    f"/v2/partials/buy-plans/{plan.id}/approve",
-                    data={"action": "approve"},
-                )
-        assert resp.status_code == 200
+        app.dependency_overrides[require_buyplan_approver] = lambda: admin_user
+        try:
+            with patch("app.services.buyplan_workflow.approve_buy_plan", return_value=plan):
+                with patch("app.services.buyplan_notifications.run_notify_bg", AsyncMock(return_value=None)):
+                    resp = admin_client.post(
+                        f"/v2/partials/buy-plans/{plan.id}/approve",
+                        data={"action": "approve"},
+                    )
+            assert resp.status_code == 200
+        finally:
+            app.dependency_overrides.pop(require_buyplan_approver, None)
 
     def test_buy_plan_submit(self, client, db_session: Session, test_user: User):
         req = _req(db_session, test_user)

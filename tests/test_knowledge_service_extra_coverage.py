@@ -63,7 +63,7 @@ def requisition(db_session: Session, test_user: User) -> Requisition:
     req = Requisition(
         name="EXTRA-KNOW-REQ",
         customer_name="Test Co",
-        status="active",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -268,7 +268,7 @@ class TestBuildContextExtended:
         req = Requisition(
             name="COMP-CTX-REQ",
             customer_name="Acme Electronics",
-            status="active",
+            status="open",
             created_by=test_user.id,
             company_id=test_company.id,
             created_at=datetime.now(timezone.utc),
@@ -488,7 +488,7 @@ class TestBuildPipelineContextExtended:
         req = Requisition(
             name="STALE-REQ-001",
             customer_name="Old Customer",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=stale_time,
             updated_at=stale_time,
@@ -504,7 +504,7 @@ class TestBuildPipelineContextExtended:
         req = Requisition(
             name="DEADLINE-REQ",
             customer_name="Urgent Co",
-            status="active",
+            status="open",
             created_by=test_user.id,
             deadline=datetime.now(timezone.utc) + timedelta(days=7),
             created_at=datetime.now(timezone.utc),
@@ -516,8 +516,8 @@ class TestBuildPipelineContextExtended:
         assert "DEADLINE-REQ" in ctx or "active" in ctx.lower()
 
     def test_includes_sourcing_and_quoting_status(self, db_session: Session, test_user: User):
-        """Requisitions in sourcing/quoting status appear in the active list."""
-        for status in ("sourcing", "quoting"):
+        """Requisitions in in-flight sourcing statuses appear in the active list."""
+        for status in ("rfqs_sent", "quoted"):
             req = Requisition(
                 name=f"{status.upper()}-REQ",
                 customer_name="Test Co",
@@ -529,7 +529,7 @@ class TestBuildPipelineContextExtended:
         db_session.commit()
 
         ctx = knowledge_service.build_pipeline_context(db_session)
-        assert "sourcing" in ctx.lower() or "quoting" in ctx.lower() or "Active" in ctx
+        assert "rfqs_sent" in ctx.lower() or "quoted" in ctx.lower() or "Active" in ctx
 
     def test_stale_req_naive_updated_at(self, db_session: Session, test_user: User):
         """Stale check handles naive updated_at timestamps."""
@@ -537,7 +537,7 @@ class TestBuildPipelineContextExtended:
         req = Requisition(
             name="STALE-NAIVE-REQ",
             customer_name="Naive Co",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
             updated_at=stale_naive,
@@ -614,7 +614,7 @@ class TestBuildCompanyContextExtended:
         req = Requisition(
             name="SITE-LINKED-REQ",
             customer_name="Acme Electronics",
-            status="active",
+            status="open",
             created_by=test_user.id,
             customer_site_id=test_customer_site.id,
             created_at=datetime.now(timezone.utc),
@@ -792,7 +792,7 @@ class TestGeneratePipelineInsightsClaudeError:
         req = Requisition(
             name=req_name,
             customer_name="Test",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -815,7 +815,7 @@ class TestGeneratePipelineInsightsClaudeError:
         req = Requisition(
             name="PIPE-REPLACE-REQ",
             customer_name="Test",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )

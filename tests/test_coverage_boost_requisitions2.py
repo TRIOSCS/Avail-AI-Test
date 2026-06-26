@@ -37,7 +37,7 @@ def active_req(db_session: Session, test_user: User) -> Requisition:
     req = Requisition(
         name="REQ2-COV-001",
         customer_name="CovCorp",
-        status="active",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -97,11 +97,11 @@ class TestInlineSave:
         assert resp.status_code == 422
 
     def test_status_field_valid_transition(self, client: TestClient, active_req: Requisition, db_session: Session):
-        """Lines 275-279: field=status with a valid target triggers transition."""
+        """Field=status with a valid target triggers a transition."""
         with patch("app.services.requisition_state.transition") as mock_tr:
             resp = client.patch(
                 f"/requisitions2/{active_req.id}/inline",
-                data={"field": "status", "value": "archived"},
+                data={"field": "status", "value": "rfqs_sent"},
             )
         # Either success or 422 — just confirm the branch was entered
         assert resp.status_code in (200, 422)
@@ -170,7 +170,7 @@ class TestInlineSave:
 class TestRowAction:
     def test_missing_req_returns_404(self, client: TestClient):
         """get_req_for_user raises HTTPException 404 for unknown req in row_action."""
-        resp = client.post("/requisitions2/999999/action/archive")
+        resp = client.post("/requisitions2/999999/action/claim")
         assert resp.status_code == 404
 
     def test_clone_action(self, client: TestClient, active_req: Requisition):
@@ -191,12 +191,6 @@ class TestRowAction:
         ):
             resp = client.post(f"/requisitions2/{active_req.id}/action/unclaim")
         assert resp.status_code == 200  # returns table, not error
-
-    def test_archive_action(self, client: TestClient, active_req: Requisition):
-        """Archive action path."""
-        with patch("app.services.requisition_state.transition"):
-            resp = client.post(f"/requisitions2/{active_req.id}/action/archive")
-        assert resp.status_code == 200
 
     def test_assign_action_with_owner(
         self, client: TestClient, active_req: Requisition, test_user: User, db_session: Session

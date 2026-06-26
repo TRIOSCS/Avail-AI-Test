@@ -517,7 +517,7 @@ class TestFetchThreadsTier4VendorCard:
         req = Requisition(
             name="REQ-SHORT",
             customer_name="Test",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )

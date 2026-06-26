@@ -49,7 +49,7 @@ def req_and_item(db_session: Session, test_user: User):
     req = Requisition(
         name="VEL-EXTRA-REQ",
         customer_name="Test Co",
-        status="active",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )

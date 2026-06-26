@@ -89,7 +89,10 @@ class TestGetValidToken:
             result = await get_valid_token(user, db)
 
         assert result is None
-        assert user.m365_error_reason == "Token refresh failed"
+        # A dead refresh token → actionable "reconnect" reason, not a raw string.
+        from app.services.m365_status import REASON_AUTH
+
+        assert user.m365_error_reason == REASON_AUTH
 
 
 class TestRefreshUserToken:

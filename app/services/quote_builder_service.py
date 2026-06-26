@@ -483,16 +483,16 @@ def save_quote_from_builder(
     else:
         quote_number = next_quote_number(db)
 
-    # Advance requisition status to "quoting" if appropriate
+    # Advance requisition status to "quoted" if appropriate
     from app.constants import RequisitionStatus
 
-    if req.status in (RequisitionStatus.ACTIVE, RequisitionStatus.SOURCING, RequisitionStatus.OFFERS):
+    if req.status in (RequisitionStatus.OPEN, RequisitionStatus.OFFERS):
         try:
             from app.services.requisition_state import transition as req_transition
 
-            req_transition(req, "quoting", user, db)
+            req_transition(req, RequisitionStatus.QUOTED, user, db)
         except ValueError:
-            pass  # already in quoting or later state
+            pass  # already in quoted or later state
 
     # Load customer site for default payment/shipping terms
     from app.models import CustomerSite

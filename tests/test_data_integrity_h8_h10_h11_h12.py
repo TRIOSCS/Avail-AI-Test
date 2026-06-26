@@ -81,7 +81,7 @@ class TestH10RefreshWarning:
     def _make_requirement(self, db_session, primary_mpn):
         from app.models.sourcing import Requirement, Requisition
 
-        req = Requisition(name="Test RFQ", status="active", customer_name="Test Co")
+        req = Requisition(name="Test RFQ", status="open", customer_name="Test Co")
         db_session.add(req)
         db_session.flush()
         r = Requirement(

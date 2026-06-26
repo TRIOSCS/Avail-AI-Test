@@ -75,7 +75,7 @@ def _make_company_site(db, owner_id, company_name, site_name):
 def _make_req(db, user_id, created_at=None):
     r = Requisition(
         name=f"REQ-{user_id}-{id(created_at)}",
-        status="active",
+        status="open",
         created_by=user_id,
         created_at=created_at or NOW,
     )

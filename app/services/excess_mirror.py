@@ -86,7 +86,7 @@ def ensure_virtual_requirement(db: Session, excess_list: ExcessList) -> Requirem
         req = Requisition(
             name=name,
             customer_name=None,
-            status=RequisitionStatus.ACTIVE,
+            status=RequisitionStatus.OPEN,
             is_scratch=True,
             created_by=excess_list.owner_id,
         )

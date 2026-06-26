@@ -217,13 +217,27 @@ class TestSubmitBuyPlan:
 # ── Approve Buy Plan ─────────────────────────────────────────────────
 
 
+def _grant_approver(db: Session, user: User) -> User:
+    """Grant the per-user buy-plan approval right (the canonical gate is the column, not
+    the role — see app.dependencies.can_approve_buy_plans)."""
+    user.can_approve_buy_plans = True
+    db.add(user)
+    db.flush()
+    return user
+
+
 class TestApproveBuyPlan:
-    """Tests for approve_buy_plan()."""
+    """Tests for approve_buy_plan().
+
+    Approval is gated by the per-user ``can_approve_buy_plans`` right (admin-toggled),
+    NOT by role — so each authorising test grants the flag explicitly.
+    """
 
     def test_approve(
         self, db_session: Session, manager_user: User, test_user: User, test_quote: Quote, test_requisition: Requisition
     ):
-        """Manager can approve a pending plan."""
+        """A user holding the approval right can approve a pending plan."""
+        _grant_approver(db_session, manager_user)
         plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.PENDING.value)
         _make_line(db_session, plan)
         db_session.refresh(plan)
@@ -239,7 +253,8 @@ class TestApproveBuyPlan:
     def test_reject(
         self, db_session: Session, manager_user: User, test_user: User, test_quote: Quote, test_requisition: Requisition
     ):
-        """Manager can reject a pending plan back to draft."""
+        """An approver can reject a pending plan back to draft (reason recorded)."""
+        _grant_approver(db_session, manager_user)
         plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.PENDING.value)
         _make_line(db_session, plan)
         db_session.refresh(plan)
@@ -248,6 +263,67 @@ class TestApproveBuyPlan:
 
         assert result.status == BuyPlanStatus.DRAFT.value
         assert result.approval_notes == "Needs changes"
+        assert result.approved_by_id == manager_user.id
+        assert result.approved_at is not None
+
+    def test_reject_requires_reason(
+        self, db_session: Session, manager_user: User, test_user: User, test_quote: Quote, test_requisition: Requisition
+    ):
+        """Reject with no reason (None or whitespace) is refused; plan stays pending."""
+        _grant_approver(db_session, manager_user)
+        plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.PENDING.value)
+        _make_line(db_session, plan)
+        db_session.refresh(plan)
+
+        for bad in (None, "", "   "):
+            with pytest.raises(ValueError, match="rejection reason is required"):
+                approve_buy_plan(plan.id, "reject", manager_user, db_session, notes=bad)
+        db_session.refresh(plan)
+        assert plan.status == BuyPlanStatus.PENDING.value
+
+    def test_approve_records_activity_log(
+        self, db_session: Session, manager_user: User, test_user: User, test_quote: Quote, test_requisition: Requisition
+    ):
+        """Approve writes a BUYPLAN_APPROVED ActivityLog scoped to the plan; reject
+        writes a BUYPLAN_REJECTED row."""
+        from app.constants import ActivityType
+        from app.models.intelligence import ActivityLog
+
+        _grant_approver(db_session, manager_user)
+        plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.PENDING.value)
+        _make_line(db_session, plan)
+        db_session.refresh(plan)
+
+        with patch("app.services.buyplan_workflow._generate_buyer_tasks"):
+            approve_buy_plan(plan.id, "approve", manager_user, db_session, notes="ok")
+
+        row = (
+            db_session.query(ActivityLog)
+            .filter(ActivityLog.buy_plan_id == plan.id, ActivityLog.activity_type == str(ActivityType.BUYPLAN_APPROVED))
+            .one()
+        )
+        assert row.user_id == manager_user.id
+        assert row.requisition_id == plan.requisition_id
+
+    def test_reject_records_activity_log(
+        self, db_session: Session, manager_user: User, test_user: User, test_quote: Quote, test_requisition: Requisition
+    ):
+        from app.constants import ActivityType
+        from app.models.intelligence import ActivityLog
+
+        _grant_approver(db_session, manager_user)
+        plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.PENDING.value)
+        _make_line(db_session, plan)
+        db_session.refresh(plan)
+
+        approve_buy_plan(plan.id, "reject", manager_user, db_session, notes="too expensive")
+
+        row = (
+            db_session.query(ActivityLog)
+            .filter(ActivityLog.buy_plan_id == plan.id, ActivityLog.activity_type == str(ActivityType.BUYPLAN_REJECTED))
+            .one()
+        )
+        assert row.user_id == manager_user.id
 
     def test_approve_with_line_overrides(
         self,
@@ -258,7 +334,8 @@ class TestApproveBuyPlan:
         test_requisition: Requisition,
         test_offer: Offer,
     ):
-        """Manager can approve with line overrides."""
+        """An approver can approve with line overrides."""
+        _grant_approver(db_session, manager_user)
         plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.PENDING.value)
         line = _make_line(db_session, plan, unit_sell=3.00)
         db_session.refresh(plan)
@@ -271,41 +348,48 @@ class TestApproveBuyPlan:
         assert result.status == BuyPlanStatus.ACTIVE.value
 
     def test_approve_not_found(self, db_session: Session, manager_user: User):
+        _grant_approver(db_session, manager_user)
         with pytest.raises(ValueError, match="not found"):
             approve_buy_plan(9999, "approve", manager_user, db_session)
 
     def test_approve_not_pending(
         self, db_session: Session, manager_user: User, test_user: User, test_quote: Quote, test_requisition: Requisition
     ):
+        _grant_approver(db_session, manager_user)
         plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.ACTIVE.value)
         with pytest.raises(ValueError, match="Can only approve/reject pending"):
             approve_buy_plan(plan.id, "approve", manager_user, db_session)
 
-    def test_approve_wrong_role(
-        self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
+    def test_approve_without_right(
+        self, db_session: Session, manager_user: User, test_user: User, test_quote: Quote, test_requisition: Requisition
     ):
-        """Non-manager/admin cannot approve."""
+        """Even a manager WITHOUT the can_approve_buy_plans right is refused — the
+        column, not the role, is the single source of truth."""
         plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.PENDING.value)
-        with pytest.raises(PermissionError, match="Only managers/admins"):
-            approve_buy_plan(plan.id, "approve", test_user, db_session)
+        for actor in (test_user, manager_user):  # neither has the flag granted
+            with pytest.raises(PermissionError, match="approval right required"):
+                approve_buy_plan(plan.id, "approve", actor, db_session)
 
     def test_approve_invalid_action(
         self, db_session: Session, manager_user: User, test_user: User, test_quote: Quote, test_requisition: Requisition
     ):
+        _grant_approver(db_session, manager_user)
         plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.PENDING.value)
         with pytest.raises(ValueError, match="Invalid action"):
             approve_buy_plan(plan.id, "bogus", manager_user, db_session)
 
-    def test_admin_can_approve(
-        self, db_session: Session, admin_user: User, test_user: User, test_quote: Quote, test_requisition: Requisition
+    def test_right_grants_access_regardless_of_role(
+        self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
     ):
-        """Admin role can also approve."""
+        """A buyer-role user holding the right CAN approve (right is role-
+        independent)."""
+        _grant_approver(db_session, test_user)  # test_user is role="buyer"
         plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.PENDING.value)
         _make_line(db_session, plan)
         db_session.refresh(plan)
 
         with patch("app.services.buyplan_workflow._generate_buyer_tasks"):
-            result = approve_buy_plan(plan.id, "approve", admin_user, db_session)
+            result = approve_buy_plan(plan.id, "approve", test_user, db_session)
 
         assert result.status == BuyPlanStatus.ACTIVE.value
 

@@ -17,14 +17,16 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.constants import RequisitionStatus
 from app.models import Requirement, Sighting
 from app.models.sourcing import Requisition
 from app.services.vendor_unavailability import apply_to_fresh_sightings
 
 from .mpn_normalizer import strip_packaging_suffixes
 
-# Requisition statuses that indicate active sourcing work
-_ACTIVE_STATUSES = {"active", "sourcing", "offers", "quoting", "reopened"}
+# Requisition statuses that indicate active sourcing work (Sales Hub open pipeline:
+# open/rfqs_sent/offers/quoted). "open" automatically means sourcing.
+_ACTIVE_STATUSES = set(RequisitionStatus.OPEN_PIPELINE)
 
 
 class QueueManager:

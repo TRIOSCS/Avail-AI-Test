@@ -12,7 +12,7 @@ from app.models.offers import Contact
 def _rfq_requisition(db_session, test_user):
     from app.models import Requirement, Requisition
 
-    req = Requisition(name="RFQ Test Req", status="active", created_by=test_user.id)
+    req = Requisition(name="RFQ Test Req", status="open", created_by=test_user.id)
     db_session.add(req)
     db_session.flush()
     part = Requirement(requisition_id=req.id, primary_mpn="TEST-MPN-001")
@@ -241,7 +241,7 @@ def _make_offer(db_session, *, mpn, status):
     from app.models.offers import Offer
     from app.models.sourcing import Requirement, Requisition
 
-    req = Requisition(name="Test Req", customer_name="Test", status="active")
+    req = Requisition(name="Test Req", customer_name="Test", status="open")
     db_session.add(req)
     db_session.flush()
     reqmt = Requirement(requisition_id=req.id, primary_mpn=mpn)

@@ -41,7 +41,7 @@ def _requisition(db: Session, user: User, **kw) -> Requisition:
     r = Requisition(
         name="REQ-DEEP",
         customer_name="Deep Corp",
-        status=RequisitionStatus.ACTIVE,
+        status=RequisitionStatus.OPEN,
         created_by=user.id,
         created_at=datetime.now(timezone.utc),
         **kw,
@@ -547,6 +547,7 @@ class TestProactiveRoutes:
 
     def test_proactive_do_not_offer_valid(self, client: TestClient, db_session: Session, test_user: User):
         co = _company(db_session)
+        co.account_owner_id = test_user.id  # actor must manage the account (authz gate)
         db_session.commit()
         with patch("app.services.proactive_helpers.is_do_not_offer", return_value=True):
             resp = client.post(
@@ -784,8 +785,8 @@ class TestRfqRoutes:
         assert resp.status_code == 400
 
     def test_action_valid_but_404(self, client: TestClient):
-        # "archive" is valid but req 99999 doesn't exist → 404
-        resp = client.post("/v2/partials/requisitions/99999/action/archive")
+        # "clone" is a valid action but req 99999 doesn't exist → 404
+        resp = client.post("/v2/partials/requisitions/99999/action/clone")
         assert resp.status_code == 404
 
     def test_rfq_prepare_404(self, client: TestClient):

@@ -485,7 +485,7 @@ class TestSendInquiryDatasheetDroppedHeader:
         from app.services.rfq_attachments import RfqAttachment
 
         # Seed a minimal requisition + requirement so the endpoint can resolve them.
-        req = Requisition(name="DS Test Req", status="active", customer_name="DS Corp")
+        req = Requisition(name="DS Test Req", status="open", customer_name="DS Corp")
         db_session.add(req)
         db_session.flush()
         r = Requirement(
@@ -536,7 +536,7 @@ class TestSendInquiryDatasheetDroppedHeader:
         fetch_error status entry (not just oversized)."""
         from app.models.sourcing import Requirement, Requisition
 
-        req = Requisition(name="DS FE Req", status="active", customer_name="DS Corp")
+        req = Requisition(name="DS FE Req", status="open", customer_name="DS Corp")
         db_session.add(req)
         db_session.flush()
         r = Requirement(
@@ -582,7 +582,7 @@ class TestSendInquiryDatasheetDroppedHeader:
         missing status entry."""
         from app.models.sourcing import Requirement, Requisition
 
-        req = Requisition(name="DS Miss Req", status="active", customer_name="DS Corp")
+        req = Requisition(name="DS Miss Req", status="open", customer_name="DS Corp")
         db_session.add(req)
         db_session.flush()
         r = Requirement(
@@ -629,7 +629,7 @@ class TestSendInquiryDatasheetDroppedHeader:
         selected count (degrade-to-send-without + honest reporting)."""
         from app.models.sourcing import Requirement, Requisition
 
-        req = Requisition(name="DS Exc Req", status="active", customer_name="DS Corp")
+        req = Requisition(name="DS Exc Req", status="open", customer_name="DS Corp")
         db_session.add(req)
         db_session.flush()
         r = Requirement(

@@ -26,7 +26,7 @@ def req_pair(db_session: Session, test_user: User) -> tuple:
     req = Requisition(
         name="SL-TEST-REQ",
         customer_name="Test Co",
-        status="active",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )

@@ -43,7 +43,7 @@ def _make_requisition(db: Session, user: User, name: str = "REQ-N7-001") -> Requ
     req = Requisition(
         name=name,
         customer_name="Test Customer",
-        status=RequisitionStatus.ACTIVE,
+        status=RequisitionStatus.OPEN,
         created_by=user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -830,14 +830,15 @@ class TestBulkArchive:
 
     def test_archive_requisitions_returns_200(self, client, db_session, test_user):
         req = _make_requisition(db_session, test_user)
+        req_item = req.requirements[0]
 
         resp = client.post(
             "/v2/partials/parts/bulk-archive",
             json={"requirement_ids": [], "requisition_ids": [req.id]},
         )
         assert resp.status_code == 200
-        db_session.refresh(req)
-        assert req.status == RequisitionStatus.ARCHIVED
+        db_session.refresh(req_item)
+        assert req_item.sourcing_status == SourcingStatus.ARCHIVED
 
     def test_archive_empty_body_returns_200(self, client, db_session):
         resp = client.post(

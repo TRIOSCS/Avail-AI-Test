@@ -205,26 +205,6 @@ def _assert_count_matches(count_label: str, count: int, ids_label: str, ids: lis
         raise ValueError(f"{count_label} ({count}) != len({ids_label}) ({len(ids)})")
 
 
-class BulkArchiveResponse(BaseModel):
-    """Response shape for `/api/requisitions/bulk-archive` and `/batch-archive`.
-
-    Returned by both the admin "archive everything not mine" endpoint and the
-    role-narrowed "archive these IDs" endpoint. `archived_ids` always matches
-    `archived_count` in length — the field exists so callers can reconcile
-    a requested-ID set against the actually-updated set (covers auth filtering,
-    already-terminal status, and missing rows in one diff).
-    """
-
-    ok: bool = True
-    archived_count: int = 0
-    archived_ids: list[int] = Field(default_factory=list)
-
-    @model_validator(mode="after")
-    def _count_matches_ids(self) -> Self:
-        _assert_count_matches("archived_count", self.archived_count, "archived_ids", self.archived_ids)
-        return self
-
-
 class BatchAssignResponse(BaseModel):
     """Response shape for `/api/requisitions/batch-assign` (admin only)."""
 

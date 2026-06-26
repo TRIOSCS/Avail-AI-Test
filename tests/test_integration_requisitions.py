@@ -73,21 +73,6 @@ def test_list_requisitions_search_filter(client):
     assert "REQ-ALPHA" in names
 
 
-def test_archive_requisition(client):
-    req_id = _create_req(client, name="REQ-ARCH", customer_name="ArchCo")
-    resp = client.put(f"/api/requisitions/{req_id}/archive")
-    assert resp.status_code == 200
-    assert resp.json()["status"] == "archived"
-    # Toggle back
-    resp2 = client.put(f"/api/requisitions/{req_id}/archive")
-    assert resp2.json()["status"] == "active"
-
-
-def test_archive_nonexistent(client):
-    resp = client.put("/api/requisitions/99999/archive")
-    assert resp.status_code == 404
-
-
 # -- Requirement CRUD -----------------------------------------------------
 
 

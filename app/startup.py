@@ -45,6 +45,31 @@ def ensure_screenshot_storage() -> None:
     logger.info("Screenshot storage ready and writable: {}", path)
 
 
+def ensure_avatar_storage() -> None:
+    """Guarantee the profile-avatar dir exists and is writable.
+
+    Profile photos (uploaded from the Settings → Profile tab) are written to
+    ``avatars.AVATARS_DIR``, a parallel subdir of the same ``uploads`` Docker
+    named volume as trouble-ticket screenshots. The same root-owned-volume
+    failure mode applies (the non-root ``appuser`` can't write), so this mirrors
+    ``ensure_screenshot_storage`` exactly: create the dir and fail fast at boot
+    with a clear RuntimeError rather than silently dropping uploads later.
+
+    Called from the main.py lifespan on every real boot (not gated by the
+    TESTING short-circuit). No DDL — a filesystem mkdir/writability check only.
+
+    Called by: main.py lifespan (real boots), tests (directly)
+    Depends on: app/routers/avatars.py (AVATARS_DIR)
+    """
+    from .routers.avatars import AVATARS_DIR
+
+    path = Path(AVATARS_DIR)
+    path.mkdir(parents=True, exist_ok=True)
+    if not os.access(path, os.W_OK):
+        raise RuntimeError(f"Avatar storage {path} is not writable by the app process")
+    logger.info("Avatar storage ready and writable: {}", path)
+
+
 def run_startup_migrations() -> None:
     """Execute all idempotent startup operations.
 
@@ -780,7 +805,7 @@ def _create_count_triggers(conn) -> None:
                         SELECT COUNT(*) FROM requisitions r
                         JOIN customer_sites cs2 ON r.customer_site_id = cs2.id
                         WHERE cs2.company_id = v_company_id
-                          AND r.status NOT IN ('archived', 'won', 'lost', 'cancelled')
+                          AND r.status NOT IN ('won', 'lost', 'cancelled')
                     ) WHERE id = v_company_id;
                 END IF;
             END IF;
@@ -792,7 +817,7 @@ def _create_count_triggers(conn) -> None:
                         SELECT COUNT(*) FROM requisitions r
                         JOIN customer_sites cs2 ON r.customer_site_id = cs2.id
                         WHERE cs2.company_id = v_company_id
-                          AND r.status NOT IN ('archived', 'won', 'lost', 'cancelled')
+                          AND r.status NOT IN ('won', 'lost', 'cancelled')
                     ) WHERE id = v_company_id;
                 END IF;
             END IF;
@@ -837,13 +862,13 @@ def _backfill_company_counts(conn) -> None:
             SELECT COUNT(*) FROM requisitions r
             JOIN customer_sites cs ON r.customer_site_id = cs.id
             WHERE cs.company_id = c.id
-              AND r.status NOT IN ('archived', 'won', 'lost', 'cancelled')
+              AND r.status NOT IN ('won', 'lost', 'cancelled')
         )
         WHERE c.open_req_count != (
             SELECT COUNT(*) FROM requisitions r
             JOIN customer_sites cs ON r.customer_site_id = cs.id
             WHERE cs.company_id = c.id
-              AND r.status NOT IN ('archived', 'won', 'lost', 'cancelled')
+              AND r.status NOT IN ('won', 'lost', 'cancelled')
         )
     """,
     )

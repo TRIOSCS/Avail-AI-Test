@@ -60,7 +60,7 @@ def _make_user(db, name, role, email_prefix):
 def _make_req(db, user_id, created_at=None):
     r = Requisition(
         name=f"REQ-{user_id}-{id(created_at)}",
-        status="active",
+        status="open",
         created_by=user_id,
         created_at=created_at or NOW,
     )
@@ -814,7 +814,7 @@ class TestAvailScoreCoverageGaps:
         buyer = _make_user(db_session, "NoDt Buyer", "buyer", "nodt")
         reqn = Requisition(
             name="REQ-NODT",
-            status="active",
+            status="open",
             created_by=buyer.id,
             created_at=NOW,
         )

@@ -1,0 +1,111 @@
+{#
+  approvals/_queue.html — Unified approvals queue: engine prepayment requests + pending buy-plan approvals.
+
+  Purpose: Single view for approvers to see all pending approval items.
+           Engine ApprovalRequest rows are actioned inline; BuyPlan rows are read-only
+           links to the existing buy-plan detail partial (which has the gated approve/reject).
+           No behavior change to buy-plan approval — read-only bridge only.
+
+  Receives:
+    engine_requests (list[ApprovalRequest]) — engine approval requests (any status).
+    buy_plan_rows   (list[BuyPlan])         — pending buy-plan approvals (status=pending only).
+    current_user    (User)                  — authenticated user.
+    request         (Request)               — FastAPI request (required by template_response).
+
+  Called by: routers/approvals.py → GET /v2/approvals/queue.
+  Depends on: Tailwind CSS, HTMX, app accent palette, .compact-table from styles.css.
+#}
+
+<div id="approvals-queue" class="page-fluid">
+  <div class="flex items-center justify-between mb-5">
+    <div>
+      <h2 class="text-lg font-semibold text-gray-900">Approvals Queue</h2>
+      <p class="text-sm text-gray-600 mt-0.5">
+        {{ engine_requests|length + buy_plan_rows|length }} item{{ 's' if (engine_requests|length + buy_plan_rows|length) != 1 }} pending
+      </p>
+    </div>
+  </div>
+
+  {% set total = engine_requests|length + buy_plan_rows|length %}
+  {% if total == 0 %}
+  <div class="rounded-lg border border-gray-200 bg-white px-6 py-10 text-center">
+    <p class="text-sm text-gray-600">No pending approvals.</p>
+  </div>
+  {% else %}
+  <div class="rounded-lg border border-gray-200 bg-white overflow-hidden">
+    <table class="compact-table">
+      <thead>
+        <tr>
+          <th class="text-left">Type</th>
+          <th class="text-left">Subject</th>
+          <th class="text-left">Amount</th>
+          <th class="text-left">Status</th>
+          <th class="text-left">Created</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+
+        {# ── Engine ApprovalRequest rows ── #}
+        {% for ar in engine_requests %}
+        <tr>
+          <td class="td-label">
+            <span class="inline-flex items-center rounded-full bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700 ring-1 ring-inset ring-brand-200">
+              {{ ar.gate_type | replace('_', ' ') | title }}
+            </span>
+          </td>
+          <td class="td-label text-gray-700">Request #{{ ar.id }}</td>
+          <td>{% if ar.amount %}${{ "{:,.2f}".format(ar.amount) }}{% else %}—{% endif %}</td>
+          <td class="td-label">
+            <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium
+              {% if ar.status == 'approved' %}bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-200
+              {% elif ar.status == 'rejected' %}bg-red-50 text-red-700 ring-1 ring-inset ring-red-200
+              {% else %}bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-200{% endif %}">
+              {{ ar.status | title }}
+            </span>
+          </td>
+          <td>{{ ar.created_at.strftime('%Y-%m-%d') if ar.created_at else '—' }}</td>
+          <td class="td-label text-right">
+            <a href="/v2/approvals/requests/{{ ar.id }}"
+               class="text-xs font-medium text-brand-600 hover:text-brand-800">View</a>
+          </td>
+        </tr>
+        {% endfor %}
+
+        {# ── Buy-Plan bridge rows (read-only; link to existing detail partial) ── #}
+        {% for bp in buy_plan_rows %}
+        <tr>
+          <td class="td-label">
+            <span class="inline-flex items-center rounded-full bg-purple-50 px-2 py-0.5 text-xs font-medium text-purple-700 ring-1 ring-inset ring-purple-200">
+              Buy Plan
+            </span>
+          </td>
+          <td class="td-label">
+            Plan #{{ bp.id }}
+            {% if bp.requisition %}
+            <span class="text-gray-600 text-xs ml-1">· {{ bp.requisition.name }}</span>
+            {% endif %}
+          </td>
+          <td>{% if bp.total_cost %}${{ "{:,.2f}".format(bp.total_cost) }}{% else %}—{% endif %}</td>
+          <td class="td-label">
+            <span class="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700 ring-1 ring-inset ring-amber-200">
+              Pending
+            </span>
+          </td>
+          <td>{{ bp.created_at.strftime('%Y-%m-%d') if bp.created_at else '—' }}</td>
+          <td class="td-label text-right">
+            {# Link to existing buy-plan detail partial — approve/reject already gated there #}
+            <a href="/v2/partials/buy-plans/{{ bp.id }}"
+               hx-get="/v2/partials/buy-plans/{{ bp.id }}"
+               hx-target="#main-content"
+               hx-push-url="false"
+               class="text-xs font-medium text-brand-600 hover:text-brand-800">Review</a>
+          </td>
+        </tr>
+        {% endfor %}
+
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>

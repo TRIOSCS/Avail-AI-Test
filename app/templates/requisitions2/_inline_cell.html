@@ -17,13 +17,29 @@
          autofocus>
 
   {% elif field == 'status' %}
-  <select name="value"
-          class="w-full px-2 py-1 text-sm border border-brand-300 rounded focus:ring-2 focus:ring-brand-500"
-          @change="this.form.requestSubmit()">
-    {% for s in ['draft', 'active', 'sourcing', 'offers', 'quoting', 'quoted', 'reopened', 'won', 'lost', 'archived'] %}
-    <option value="{{ s }}" {{ 'selected' if req.status == s }}>{{ s|title }}</option>
-    {% endfor %}
-  </select>
+  {# Won/Lost need a required close reason before the status change submits;
+     other statuses auto-submit on change (mirrors the buy-plan reason capture). #}
+  <div x-data="{ pending: '', get needsReason(){ return this.pending === 'won' || this.pending === 'lost'; } }">
+    <select name="value" x-model="pending"
+            class="w-full px-2 py-1 text-sm border border-brand-300 rounded focus:ring-2 focus:ring-brand-500"
+            @change="if (!needsReason) this.form.requestSubmit()">
+      {% for s in ['draft', 'open', 'rfqs_sent', 'offers', 'quoted', 'hotlist', 'won', 'lost'] %}
+      <option value="{{ s }}" {{ 'selected' if req.status == s }}>{{ s|title }}</option>
+      {% endfor %}
+    </select>
+    <div x-show="needsReason" x-cloak class="mt-1">
+      <textarea name="reason" rows="2" aria-label="Close reason"
+                class="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-brand-500"
+                placeholder="Reason (required)"
+                x-ref="reasonBox"></textarea>
+      <div class="mt-1 flex justify-end">
+        <button type="button"
+                class="px-2 py-1 text-xs font-medium rounded bg-brand-500 text-white hover:bg-brand-600 disabled:opacity-40 disabled:cursor-not-allowed"
+                :disabled="$refs.reasonBox.value.trim().length === 0"
+                @click="this.$root.closest('form').requestSubmit()">Confirm</button>
+      </div>
+    </div>
+  </div>
 
   {% elif field == 'urgency' %}
   <select name="value"

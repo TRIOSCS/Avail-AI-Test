@@ -77,7 +77,7 @@ def _make_requisition(db: Session, user: User, name: str | None = None) -> Requi
     req = Requisition(
         name=name or f"REQ-{uuid.uuid4().hex[:6]}",
         customer_name="TestCo",
-        status="active",
+        status="open",
         created_by=user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -665,22 +665,25 @@ class TestBuyPlanApproveDirect:
             result = await buy_plan_approve_partial(request=mock_req, plan_id=bp.id, user=manager, db=db_session)
         assert result.status_code == 200
 
-    async def test_buy_plan_approve_non_manager_raises_403(self, db_session: Session, test_user: User):
-        """Lines 6030–6031: non-manager role → HTTPException 403."""
+    async def test_buy_plan_approve_non_approver_raises_403(self, db_session: Session, test_user: User, monkeypatch):
+        """Approval is gated by require_buyplan_approver (the route's dependency): a
+        user WITHOUT the can_approve_buy_plans right → HTTPException 403.
+
+        Role is irrelevant — even a manager without the flag is refused.
+        """
         from fastapi import HTTPException
 
-        from app.routers.htmx_views import buy_plan_approve_partial
+        from app.dependencies import require_buyplan_approver
 
-        req = _make_requisition(db_session, test_user)
-        bp = _make_buy_plan(db_session, req, test_user)
-        # Create a non-manager user
-        buyer = User(email=f"buyer-{uuid.uuid4().hex[:6]}@test.com", name="Buyer", role="buyer", is_active=True)
-        db_session.add(buyer)
+        # Manager role but NO approval right → still 403 (column is the source of truth).
+        mgr = User(email=f"mgr-{uuid.uuid4().hex[:6]}@test.com", name="Mgr", role="manager", is_active=True)
+        db_session.add(mgr)
         db_session.commit()
-        db_session.refresh(buyer)
-        mock_req = _mock_form_request(fields={"action": "approve"})
+        db_session.refresh(mgr)
+
+        monkeypatch.setattr("app.dependencies.require_user", lambda request, db: mgr)
         with pytest.raises(HTTPException) as exc_info:
-            await buy_plan_approve_partial(request=mock_req, plan_id=bp.id, user=buyer, db=db_session)
+            require_buyplan_approver(request=None, db=db_session)
         assert exc_info.value.status_code == 403
 
 

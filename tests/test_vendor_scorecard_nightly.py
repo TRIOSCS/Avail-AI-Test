@@ -57,7 +57,7 @@ def _make_req_and_item(db: Session, user: User) -> tuple:
     req = Requisition(
         name="VS-REQ",
         customer_name="C",
-        status="active",
+        status="open",
         created_by=user.id,
         created_at=datetime.now(timezone.utc),
     )

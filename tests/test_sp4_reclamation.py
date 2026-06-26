@@ -300,7 +300,7 @@ def _make_requisition(db, *, company_id: int) -> Requisition:
     """Create a minimal Requisition linked to a company."""
     req = Requisition(
         name="Test Req",
-        status="active",
+        status="open",
         company_id=company_id,
     )
     db.add(req)

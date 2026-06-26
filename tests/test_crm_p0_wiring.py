@@ -575,7 +575,7 @@ def requisition_task(db_session: Session, test_user: User):
 
     req = Requisition(
         name="Test Req",
-        status="active",
+        status="open",
         created_by=test_user.id,
     )
     db_session.add(req)

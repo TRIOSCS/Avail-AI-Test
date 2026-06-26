@@ -1,7 +1,7 @@
-"""test_jobs_core.py — Tests for core background jobs (auto-archive, token refresh,
-batch results, inbox scan, webhooks)
+"""test_jobs_core.py — Tests for core background jobs (token refresh, batch results,
+inbox scan, webhooks)
 
-Tests cover: _job_auto_archive, _job_token_refresh, _job_batch_results, _job_inbox_scan,
+Tests cover: _job_token_refresh, _job_batch_results, _job_inbox_scan,
 _job_webhook_subscriptions, plus get_valid_token, refresh_user_token, and _refresh_access_token
 helper functions.
 
@@ -16,7 +16,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from sqlalchemy.orm import Session
 
-from app.models import Requisition
 from app.scheduler import scheduler
 
 # ── Fixtures ───────────────────────────────────────────────────────────
@@ -40,96 +39,6 @@ def _clear_scheduler_jobs():
     yield
     for job in scheduler.get_jobs():
         job.remove()
-
-
-# ── _job_auto_archive() ───────────────────────────────────────────────
-
-
-@pytest.mark.parametrize(
-    ("name", "last_searched_at", "expected_status"),
-    [
-        pytest.param(
-            "OLD-001",
-            datetime.now(timezone.utc) - timedelta(days=45),
-            "archived",
-            id="stale_gets_archived",
-        ),
-        pytest.param(
-            "RECENT-001",
-            datetime.now(timezone.utc) - timedelta(days=5),
-            "active",
-            id="recent_skipped",
-        ),
-        pytest.param(
-            "UNSEARCHED-001",
-            None,
-            "active",
-            id="never_searched_skipped",
-        ),
-    ],
-)
-def test_auto_archive_by_last_searched(scheduler_db, test_user, name, last_searched_at, expected_status):
-    """Active requisitions are archived only when last searched >30 days ago."""
-    req = Requisition(
-        name=name,
-        status="active",
-        created_by=test_user.id,
-        last_searched_at=last_searched_at,
-    )
-    scheduler_db.add(req)
-    scheduler_db.commit()
-
-    from app.jobs.core_jobs import _job_auto_archive
-
-    asyncio.run(_job_auto_archive())
-
-    scheduler_db.refresh(req)
-    assert req.status == expected_status
-
-
-def test_auto_archive_only_archives_active_status(scheduler_db, test_user):
-    """Only requisitions with status='active' are archived; other statuses are
-    untouched."""
-    already_archived = Requisition(
-        name="ALREADY-ARCHIVED",
-        status="archived",
-        created_by=test_user.id,
-        last_searched_at=datetime.now(timezone.utc) - timedelta(days=60),
-    )
-    active_stale = Requisition(
-        name="ACTIVE-STALE",
-        status="active",
-        created_by=test_user.id,
-        last_searched_at=datetime.now(timezone.utc) - timedelta(days=60),
-    )
-    draft_stale = Requisition(
-        name="DRAFT-STALE",
-        status="draft",
-        created_by=test_user.id,
-        last_searched_at=datetime.now(timezone.utc) - timedelta(days=60),
-    )
-    scheduler_db.add_all([already_archived, active_stale, draft_stale])
-    scheduler_db.commit()
-
-    from app.jobs.core_jobs import _job_auto_archive
-
-    asyncio.run(_job_auto_archive())
-
-    scheduler_db.refresh(already_archived)
-    scheduler_db.refresh(active_stale)
-    scheduler_db.refresh(draft_stale)
-    assert already_archived.status == "archived"  # unchanged
-    assert active_stale.status == "archived"  # stale active → archived
-    assert draft_stale.status == "draft"  # non-active status untouched
-
-
-def test_auto_archive_error_handling(scheduler_db):
-    """Auto-archive logs and re-raises DB errors for _traced_job/Sentry capture."""
-    with patch.object(scheduler_db, "query", side_effect=Exception("DB locked")):
-        from app.jobs.core_jobs import _job_auto_archive
-
-        with pytest.raises(Exception, match="DB locked"):
-            asyncio.run(_job_auto_archive())
 
 
 # ── _job_token_refresh() ──────────────────────────────────────────────
@@ -330,7 +239,9 @@ def test_get_valid_token_sets_error_when_refresh_fails(db_session, test_user):
 
         token = asyncio.run(get_valid_token(test_user, db_session))
         assert token is None
-        assert test_user.m365_error_reason == "Token refresh failed"
+        from app.services.m365_status import REASON_AUTH
+
+        assert test_user.m365_error_reason == REASON_AUTH
 
 
 def test_get_valid_token_no_token_no_expiry(db_session, test_user):
@@ -588,8 +499,10 @@ def test_inbox_scan_handles_timeout(scheduler_db, test_user):
         from app.jobs.core_jobs import _job_inbox_scan
 
         asyncio.run(_job_inbox_scan())
-        # User should have an error set
-        assert test_user.m365_error_reason == "Inbox scan timed out"
+        # A timeout is transient — surfaced as the self-healing reason.
+        from app.services.m365_status import REASON_TRANSIENT
+
+        assert test_user.m365_error_reason == REASON_TRANSIENT
 
 
 def test_inbox_scan_error_in_user_gathering(scheduler_db):
@@ -639,7 +552,9 @@ def test_inbox_scan_safe_scan_timeout(scheduler_db, test_user):
             asyncio.run(_job_inbox_scan())
 
     scheduler_db.refresh(test_user)
-    assert test_user.m365_error_reason == "Inbox scan timed out"
+    from app.services.m365_status import REASON_TRANSIENT
+
+    assert test_user.m365_error_reason == REASON_TRANSIENT
 
 
 def test_inbox_scan_safe_scan_exception(scheduler_db, test_user):

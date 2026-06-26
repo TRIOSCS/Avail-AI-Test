@@ -60,7 +60,7 @@ def card_with_sightings(db_session: Session, material_cards, test_user: User):
     # Create a requisition and requirement for the sighting FK
     req = Requisition(
         name="Sighting Test Req",
-        status="active",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )

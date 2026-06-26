@@ -100,6 +100,113 @@
     </div>
   </div>
 
+  {# Profile photo uploader with pan/zoom face-centering. Picking a file opens a
+     circular crop viewport (avatarCropper, htmx_app.js): drag to pan, slider /
+     scroll / pinch to zoom, then Save renders the positioned disc into a 512²
+     canvas and POSTs that JPEG/PNG to /api/user/avatar (clears the magic-byte
+     gate). The card's outer Alpine state (hasAvatar/src) tracks the preview; it
+     refreshes from the avatarUpdated event the route fires — whether from the
+     cropper's fetch upload OR the HTMX Remove button. applyAvatar() cache-busts
+     the src. The card listens for avatarUpdated via addEventListener because the
+     event name is camelCase (HTML attributes lowercase, so @avatarUpdated.window
+     would not match). #}
+  <div class="bg-white border border-line-base rounded-lg p-4 mb-6"
+       x-data='{
+         hasAvatar: {{ "true" if profile_user.avatar_path else "false" }},
+         src: {{ (("/api/user/avatar/" ~ profile_user.avatar_path) if profile_user.avatar_path else "")|tojson }},
+         applyAvatar(filename) {
+           if (filename) { this.hasAvatar = true; this.src = "/api/user/avatar/" + filename + "?t=" + Date.now(); }
+           else { this.hasAvatar = false; this.src = ""; }
+         }
+       }'
+       @avatar-updated.window="applyAvatar($event.detail && $event.detail.filename)">
+    <h3 class="text-sm font-semibold text-gray-900 mb-4">Profile photo</h3>
+
+    {# Cropper owns the file picker + modal; the card preview + Remove sit alongside. #}
+    <div x-data="avatarCropper('/api/user/avatar', {{ 2 * 1024 * 1024 }})" class="flex items-center gap-4">
+      {# Current photo / initials fallback (outer card state) #}
+      <template x-if="hasAvatar">
+        <img :src="src" alt="Profile photo"
+             class="w-16 h-16 rounded-full object-cover bg-gray-100 flex-shrink-0">
+      </template>
+      <template x-if="!hasAvatar">
+        <span class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-brand-100 text-brand-600 text-xl font-bold flex-shrink-0">{{ profile_user.name[0]|upper if profile_user.name else '?' }}</span>
+      </template>
+
+      <div class="min-w-0">
+        <p class="text-xs text-gray-600 mb-2">PNG, JPEG, WEBP, or GIF up to 2&nbsp;MB. You can reposition and zoom before saving.</p>
+        <div class="flex items-center gap-2">
+          {# Hidden file input → openFile() loads the image and opens the crop modal. #}
+          <input type="file" name="file" x-ref="fileInput"
+                 accept="image/png,image/jpeg,image/webp,image/gif" class="hidden"
+                 @change="openFile($event)">
+          <button type="button" @click="$refs.fileInput.click()"
+                  class="px-3 py-1.5 text-xs font-medium text-accent-600 bg-accent-50 border border-accent-200 rounded-lg hover:bg-accent-100">
+            <span x-text="hasAvatar ? 'Change photo' : 'Upload photo'">{{ 'Change photo' if profile_user.avatar_path else 'Upload photo' }}</span>
+          </button>
+          {# Remove posts hx-delete; the route's showToast fires via HTMX's body bridge.
+             The card refresh listens for the kebab `avatar-updated`, so re-dispatch it
+             here on success (HTMX's own camelCase `avatarUpdated` doesn't reach Alpine). #}
+          <button type="button" x-show="hasAvatar"
+                  hx-delete="/api/user/avatar"
+                  hx-swap="none"
+                  @htmx:after-request="if ($event.detail.successful) window.dispatchEvent(new CustomEvent('avatar-updated', { detail: { filename: null } }))"
+                  class="px-3 py-1.5 text-xs font-medium text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50">
+            Remove
+          </button>
+        </div>
+        <p x-show="error" x-cloak x-text="error" class="mt-2 text-xs text-rose-600"></p>
+      </div>
+
+      {# ── Crop modal: circular pan/zoom viewport (inline fixed overlay, the
+           house pattern from requisition_picker_modal.html) ─────────────── #}
+      <div x-show="open" x-cloak
+           class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+           role="dialog" aria-modal="true" aria-label="Position your profile photo"
+           x-trap.noscroll="open"
+           @keydown.escape="close()" @click.self="close()">
+          <div class="bg-white rounded-xl border border-brand-200 shadow-2xl w-full max-w-sm">
+            <div class="modal-header">
+              <h3 class="text-base font-semibold text-brand-900">Position your photo</h3>
+              <button type="button" class="modal-close" @click="close()" aria-label="Cancel">
+                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+              </button>
+            </div>
+            <div class="modal-body">
+              <p class="text-xs text-gray-600 mb-3">Drag to move your face into the circle. Use the slider, scroll, or pinch to zoom.</p>
+              {# Square canvas + circular mask. Pointer/touch/wheel drive pan and zoom. #}
+              <div class="avatar-crop-stage"
+                   @mousedown="pointerDown($event)"
+                   @mousemove.window="pointerMove($event)"
+                   @mouseup.window="pointerUp()"
+                   @wheel.prevent="wheel($event)"
+                   @touchstart.prevent="touchStart($event)"
+                   @touchmove.prevent="touchMove($event)"
+                   @touchend="touchEnd($event)">
+                <canvas x-ref="canvas" aria-label="Profile photo crop preview"></canvas>
+                <div class="avatar-crop-mask" aria-hidden="true"></div>
+              </div>
+              {# Zoom control — a lens slider paired with scroll/pinch. #}
+              <div class="flex items-center gap-3 mt-4">
+                <svg class="h-4 w-4 text-gray-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path stroke-linecap="round" d="M21 21l-4.35-4.35M8 11h6"/></svg>
+                <input type="range" min="0" max="100" step="1" x-model.number="zoomPct"
+                       class="flex-1 accent-accent-500" aria-label="Zoom">
+                <svg class="h-4 w-4 text-gray-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path stroke-linecap="round" d="M21 21l-4.35-4.35M11 8v6M8 11h6"/></svg>
+              </div>
+              <p x-show="error" x-cloak x-text="error" class="mt-3 text-xs text-rose-600"></p>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-sm btn-secondary" @click="close()" :disabled="busy">Cancel</button>
+              <button type="button" class="btn btn-sm btn-primary" @click="save()" :disabled="busy">
+                <span x-show="!busy">Save photo</span>
+                <span x-show="busy" x-cloak>Saving…</span>
+              </button>
+            </div>
+          </div>
+      </div>
+    </div>
+  </div>
+
   {# 8x8 click-to-call enable/disable #}
   <div class="bg-white border border-line-base rounded-lg p-4 mb-6"
        x-data="{ enabled: {{ 'true' if profile_user.eight_by_eight_enabled is defined and profile_user.eight_by_eight_enabled else 'false' }} }">

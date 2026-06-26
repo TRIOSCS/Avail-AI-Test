@@ -32,7 +32,7 @@ def req_with_item(db_session: Session, test_user: User) -> tuple:
     req = Requisition(
         name="STRUCT-FIX-REQ",
         customer_name="Struct Fix Co",
-        status="active",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -325,14 +325,14 @@ class TestCrossMpnSightingVisibility:
         req1 = Requisition(
             name="R1",
             customer_name="C",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
         req2 = Requisition(
             name="R2",
             customer_name="C",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -413,7 +413,7 @@ class TestRefreshPerMpnToast:
         r = Requisition(
             name="R",
             customer_name="C",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=now,
         )
@@ -458,7 +458,7 @@ class TestRefreshPerMpnToast:
         r = Requisition(
             name="R",
             customer_name="C",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=now,
         )
@@ -510,7 +510,7 @@ class TestPreviewInlineEmailFix:
         req = Requisition(
             name="FIX-EMAIL-REQ",
             customer_name="Fix Co",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )

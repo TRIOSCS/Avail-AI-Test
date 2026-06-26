@@ -494,7 +494,7 @@ class TestIcsSightingWriter:
         MagicMock pointing at the new requirement."""
         from app.models import MaterialCard, Requirement, Requisition
 
-        req = Requisition(name=f"Test Req {normalized_mpn}", status="active")
+        req = Requisition(name=f"Test Req {normalized_mpn}", status="open")
         db.add(req)
         db.flush()
 

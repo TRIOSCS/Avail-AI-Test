@@ -534,7 +534,7 @@ def _mk_requisition(
     defaults = {
         "company_id": co.id,
         "customer_site_id": site_id,
-        "status": RequisitionStatus.ACTIVE.value,
+        "status": RequisitionStatus.OPEN.value,
         "urgency": urgency,
         "opportunity_value": Decimal(value),
         "created_by": u.id,

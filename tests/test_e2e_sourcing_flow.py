@@ -64,6 +64,8 @@ def _full_setup(db: Session):
         name="Manager",
         role="manager",
         azure_id="az-mgr-e2e",
+        # Approval is gated by the per-user right (not role), so grant it to the approver.
+        can_approve_buy_plans=True,
         created_at=datetime.now(timezone.utc),
     )
     buyer = User(
@@ -152,15 +154,15 @@ class TestRequisitionLifecycle:
     def test_draft_to_active(self, db_session):
         data = _full_setup(db_session)
         req = data["requisition"]
-        req_transition(req, "active", data["sales"], db_session)
-        assert req.status == "active"
+        req_transition(req, "open", data["sales"], db_session)
+        assert req.status == "open"
 
     def test_active_to_sourcing(self, db_session):
         data = _full_setup(db_session)
         req = data["requisition"]
-        req_transition(req, "active", data["sales"], db_session)
-        req_transition(req, "sourcing", data["sales"], db_session)
-        assert req.status == "sourcing"
+        req_transition(req, "open", data["sales"], db_session)
+        req_transition(req, "rfqs_sent", data["sales"], db_session)
+        assert req.status == "rfqs_sent"
 
     def test_illegal_transition_rejected(self, db_session):
         data = _full_setup(db_session)
@@ -168,14 +170,19 @@ class TestRequisitionLifecycle:
         with pytest.raises(ValueError, match="Invalid transition"):
             req_transition(req, "completed", data["sales"], db_session)
 
-    def test_won_to_active_allowed(self, db_session):
-        """Regression: toggle archive from won back to active must work."""
+    def test_won_can_be_reopened_to_open(self, db_session):
+        """Regression: a won requisition (closed WITH a reason) can be reopened to open.
+
+        Reopening clears the stale outcome_reason.
+        """
         data = _full_setup(db_session)
         req = data["requisition"]
-        req_transition(req, "active", data["sales"], db_session)
-        req_transition(req, "won", data["sales"], db_session)
-        req_transition(req, "active", data["sales"], db_session)
-        assert req.status == "active"
+        req_transition(req, "open", data["sales"], db_session)
+        req_transition(req, "won", data["sales"], db_session, reason="PO received")
+        assert req.outcome_reason == "PO received"
+        req_transition(req, "open", data["sales"], db_session)
+        assert req.status == "open"
+        assert req.outcome_reason is None
 
 
 # ── Requirement sourcing status ───────────────────────────────────────
@@ -352,14 +359,14 @@ class TestBuyPlanFullLifecycle:
         assert plan.status == BuyPlanStatus.ACTIVE.value  # not completed
 
     def test_buyer_cannot_approve(self, db_session):
-        """Non-manager/admin users cannot approve buy plans."""
+        """A user without the can_approve_buy_plans right cannot approve buy plans."""
         ctx = self._setup_plan(db_session, total_cost=10000.0)
         plan = ctx["plan"]
 
         plan = submit_buy_plan(plan.id, "SO-005", ctx["sales"], db_session)
         assert plan.status == BuyPlanStatus.PENDING.value
 
-        with pytest.raises(PermissionError, match="Only managers/admins"):
+        with pytest.raises(PermissionError, match="approval right required"):
             approve_buy_plan(plan.id, "approve", ctx["buyer"], db_session)
 
     def test_po_reject_resubmit_cycle(self, db_session):
@@ -394,7 +401,7 @@ class TestBuildBuyPlanIntegration:
     def test_build_from_won_quote(self, db_session):
         """Building a buy plan from a won quote with valid offers."""
         data = _full_setup(db_session)
-        req_transition(data["requisition"], "active", data["sales"], db_session)
+        req_transition(data["requisition"], "open", data["sales"], db_session)
 
         offer = Offer(
             requisition_id=data["requisition"].id,

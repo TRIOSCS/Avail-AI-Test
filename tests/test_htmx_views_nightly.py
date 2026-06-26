@@ -39,7 +39,7 @@ def _req(db: Session, user: User, **kw) -> Requisition:
     defaults = dict(
         name="NIGHTLY-REQ",
         customer_name="Nightly Corp",
-        status=RequisitionStatus.ACTIVE,
+        status=RequisitionStatus.OPEN,
         created_by=user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -250,27 +250,6 @@ class TestRfqSend:
 
 
 class TestBulkAction:
-    def test_bulk_archive(self, client, db_session: Session, test_user: User):
-        r1 = _req(db_session, test_user)
-        r2 = _req(db_session, test_user, name="NIGHTLY-REQ2")
-        db_session.commit()
-
-        resp = client.post(
-            "/v2/partials/requisitions/bulk/archive",
-            data={"ids": f"{r1.id},{r2.id}"},
-        )
-        assert resp.status_code == 200
-
-    def test_bulk_activate(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user, status=RequisitionStatus.ARCHIVED)
-        db_session.commit()
-
-        resp = client.post(
-            "/v2/partials/requisitions/bulk/activate",
-            data={"ids": str(req.id)},
-        )
-        assert resp.status_code == 200
-
     def test_bulk_invalid_action_raises_400(self, client, db_session: Session, test_user: User):
         req = _req(db_session, test_user)
         db_session.commit()
@@ -282,7 +261,7 @@ class TestBulkAction:
         assert resp.status_code == 400
 
     def test_bulk_no_ids_raises_400(self, client, db_session: Session, test_user: User):
-        resp = client.post("/v2/partials/requisitions/bulk/archive", data={})
+        resp = client.post("/v2/partials/requisitions/bulk/assign", data={})
         assert resp.status_code == 400
 
 

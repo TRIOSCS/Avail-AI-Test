@@ -18,7 +18,7 @@ def test_requisition_for_mfr(db_session: Session, test_user: User) -> Requisitio
     """A minimal requisition for manufacturer validation tests."""
     req = Requisition(
         name="Mfr-Test-Req",
-        status="active",
+        status="open",
         created_by=test_user.id,
         claimed_by_id=test_user.id,
     )

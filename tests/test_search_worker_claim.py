@@ -23,7 +23,7 @@ def requisition(db_session, test_user):
     r = Requisition(
         name="wq-req",
         customer_name="Acme",
-        status="active",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )

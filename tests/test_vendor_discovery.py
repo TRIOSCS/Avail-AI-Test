@@ -11,7 +11,6 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.models import User
-from app.models.intelligence import MaterialCard, MaterialVendorHistory
 from app.models.sourcing import Requirement, Requisition, Sighting
 from app.models.vendors import VendorCard
 from tests.conftest import engine  # noqa: F401
@@ -72,54 +71,6 @@ class TestEnhancedBrowseSearch:
         assert "Memory House" in resp.text
 
 
-class TestFindByPart:
-    """Test MPN-to-vendor lookup."""
-
-    def test_find_by_part_returns_200(self, client: TestClient):
-        """GET /v2/partials/vendors/find-by-part returns 200."""
-        resp = client.get("/v2/partials/vendors/find-by-part")
-        assert resp.status_code == 200
-        assert "text/html" in resp.headers.get("content-type", "")
-
-    def test_find_by_part_with_mpn(self, client: TestClient, db_session: Session):
-        """MPN search returns matching vendors from MaterialVendorHistory."""
-        card = MaterialCard(
-            normalized_mpn="LM317T",
-            display_mpn="LM317T",
-            manufacturer="TI",
-        )
-        db_session.add(card)
-        db_session.flush()
-
-        vendor = VendorCard(
-            normalized_name="acme parts",
-            display_name="Acme Parts",
-        )
-        db_session.add(vendor)
-        db_session.flush()
-
-        mvh = MaterialVendorHistory(
-            material_card_id=card.id,
-            vendor_name="Acme Parts",
-            vendor_name_normalized="acme parts",
-            times_seen=5,
-            last_price=Decimal("1.50"),
-            last_qty=1000,
-        )
-        db_session.add(mvh)
-        db_session.commit()
-
-        resp = client.get("/v2/partials/vendors/find-by-part?mpn=LM317T")
-        assert resp.status_code == 200
-        assert "Acme Parts" in resp.text
-
-    def test_find_by_part_empty_shows_prompt(self, client: TestClient):
-        """Empty MPN shows the search prompt."""
-        resp = client.get("/v2/partials/vendors/find-by-part")
-        assert resp.status_code == 200
-        assert "Enter MPN" in resp.text
-
-
 class TestVendorDetailMpnContext:
     """Test vendor detail shows MPN-specific sightings when mpn param passed."""
 
@@ -137,7 +88,7 @@ class TestVendorDetailMpnContext:
         req = Requisition(
             name="Test Req",
             created_by=test_user.id,
-            status="active",
+            status="open",
         )
         db_session.add(req)
         db_session.flush()
@@ -167,23 +118,3 @@ class TestVendorDetailMpnContext:
         resp = client.get(f"/v2/partials/vendors/{vendor.id}?mpn=LM317T")
         assert resp.status_code == 200
         assert "LM317T" in resp.text
-
-
-class TestFindByPartAffinity:
-    """Test vendor affinity suggestions in Find by Part."""
-
-    def test_affinity_badge_shown_for_affinity_results(self, client: TestClient, db_session: Session):
-        """Affinity results show a 'Vendor Match' badge."""
-        # With no MVH data, affinity should be attempted
-        # Create a MaterialCard so the MPN is recognized
-        card = MaterialCard(
-            normalized_mpn="RARE123",
-            display_mpn="RARE123",
-            manufacturer="TI",
-        )
-        db_session.add(card)
-        db_session.commit()
-
-        resp = client.get("/v2/partials/vendors/find-by-part?mpn=RARE123")
-        assert resp.status_code == 200
-        # Even with no affinity results, the page should render without error

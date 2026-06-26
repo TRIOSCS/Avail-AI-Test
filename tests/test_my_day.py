@@ -30,6 +30,7 @@ os.environ["TESTING"] = "1"
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from freezegun import freeze_time
 from sqlalchemy.orm import Session
 from starlette.testclient import TestClient
 
@@ -186,6 +187,7 @@ class TestTasksPageNoFollowUpSection:
 
 
 class TestTasksPageGrouping:
+    @freeze_time("2026-06-25 12:00:00")
     def test_urgency_group_headers_render(self, client: TestClient, db_session: Session, test_user, test_company):
         """Overdue / Due soon / Later / No due date headers appear for matching
         tasks."""

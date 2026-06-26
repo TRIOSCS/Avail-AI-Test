@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 /* ── Design System: Clean, high-contrast utility ──────────────────────
-   Font: Aptos → Segoe UI → system-ui
+   Font: Aptos (system, Win11/Office) → Inter (loaded web font) → Segoe UI → system-ui
    Hairlines: --line #BFC4CE (base) · --line-subtle #D5D8DF (see :root)
    Body text: #1e293b (slate-800), secondary: #4B5463 (brand-600)
    Min interactive font: 11px, body: 13px, headings: 15px
@@ -11,7 +11,7 @@
 
 @layer base {
   body {
-    @apply text-[14px] text-gray-900 leading-normal antialiased;
+    @apply font-sans text-[14px] text-gray-900 leading-normal antialiased;
   }
 }
 
@@ -302,6 +302,21 @@ tr:focus-within .opp-action-rail {
 .opp-action-rail button:hover { background: var(--opp-sep); color: var(--opp-text-primary); }
 .opp-action-rail button:focus-visible { outline: 2px solid var(--opp-status-open); outline-offset: 1px; }
 
+/* Won/Lost close-reason popover anchored under the row action rail. */
+.opp-outcome-prompt {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 8px;
+  width: 240px;
+  padding: 8px;
+  background: #fff;
+  border: 1px solid var(--opp-sep);
+  border-radius: 8px;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.12);
+  z-index: 20;
+  text-align: left;
+}
+
 .opp-col-header {
   font-family: inherit;
   font-size: 10px;
@@ -418,7 +433,7 @@ hr { border-color: #BFC4CE; }
   font-size: 13px;
 }
 .compact-table th {
-  font-family: 'Aptos', 'Segoe UI', system-ui, sans-serif;
+  font-family: 'Aptos', 'Inter', 'Segoe UI', system-ui, sans-serif;
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.05em;
@@ -442,7 +457,7 @@ hr { border-color: #BFC4CE; }
   font-size: 12px;
 }
 .compact-table td.td-label {
-  font-family: 'Aptos', 'Segoe UI', system-ui, sans-serif;
+  font-family: 'Aptos', 'Inter', 'Segoe UI', system-ui, sans-serif;
   font-size: 13px;
 }
 .compact-table tbody tr {
@@ -524,7 +539,7 @@ table {
   letter-spacing: 0.03em;
   text-transform: uppercase;
   border-radius: 4px;
-  font-family: 'Aptos', 'Segoe UI', system-ui, sans-serif;
+  font-family: 'Aptos', 'Inter', 'Segoe UI', system-ui, sans-serif;
 }
 /* ── Panel chrome — workspace panels ──────────────────────────────── */
 .panel-header {
@@ -537,7 +552,7 @@ table {
   flex-shrink: 0;
 }
 .panel-title {
-  font-family: 'Aptos', 'Segoe UI', system-ui, sans-serif;
+  font-family: 'Aptos', 'Inter', 'Segoe UI', system-ui, sans-serif;
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.06em;
@@ -554,7 +569,7 @@ table {
   border-bottom: 2px solid transparent;
   transition: all 0.15s;
   white-space: nowrap;
-  font-family: 'Aptos', 'Segoe UI', system-ui, sans-serif;
+  font-family: 'Aptos', 'Inter', 'Segoe UI', system-ui, sans-serif;
 }
 .ws-tab:hover {
   color: #4B5463;
@@ -833,6 +848,52 @@ th.resizable { position: relative; }
    Emerald accent rail on rows carrying new/actionable items (same palette as
    the proactive badge). FYI rows pulse once then fade after being seen; ACTION
    rows keep the rail. Applied by the tab-alerts module in htmx_app.js. */
+
+/* ── Avatar cropper: circular face-centering viewport ─────────────────
+   The square <canvas> paints the live pan/zoom preview; .avatar-crop-mask
+   overlays it with a circular cut-out so everything OUTSIDE the circle reads as
+   dimmed — the bright disc is exactly what lands in the saved 512² avatar.
+   Behavior in avatarCropper() (htmx_app.js); markup in settings/profile.html. */
+.avatar-crop-stage {
+  position: relative;
+  width: 100%;
+  max-width: 18rem; /* 288px — matches the JS viewport default */
+  margin-inline: auto;
+  aspect-ratio: 1 / 1;
+  touch-action: none; /* we own pan/pinch; suppress the browser's gestures */
+  user-select: none;
+  -webkit-user-select: none;
+}
+.avatar-crop-stage canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 0.5rem;
+  background: #0f172a; /* slate-900 letterbox behind transparent PNGs */
+  cursor: grab;
+}
+.avatar-crop-stage canvas:active { cursor: grabbing; }
+/* The mask: transparent inside the disc, a translucent scrim outside, and a crisp
+   ring marking the boundary. pointer-events:none so drags reach the canvas. */
+.avatar-crop-mask {
+  position: absolute;
+  inset: 0;
+  border-radius: 0.5rem;
+  pointer-events: none;
+  background: radial-gradient(circle at center,
+    transparent 0,
+    transparent calc(50% - 1px),
+    rgba(15, 23, 42, 0.55) calc(50% - 1px),
+    rgba(15, 23, 42, 0.55) 100%);
+}
+.avatar-crop-mask::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.85);
+}
+
 .alert-rail {
   box-shadow: inset 3px 0 0 0 #10b981; /* emerald-500 left rail */
   background-color: rgb(16 185 129 / 0.06);

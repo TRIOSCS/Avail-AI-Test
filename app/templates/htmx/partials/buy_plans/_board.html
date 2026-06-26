@@ -37,10 +37,12 @@
       <span class="text-xs font-semibold text-gray-600 uppercase tracking-wider">{{ label }}</span>
       <span class="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full bg-gray-200 text-gray-600 text-xs font-medium">{{ board[key]|length }}</span>
     </div>
-    <div class="p-2 space-y-2 flex-1">
+    <div class="p-2 space-y-1.5 flex-1">
       {% for d in cards %}
       {% set m = d.margin_pct|float if d.margin_pct is not none else 0 %}
       {# Finding #9: keyboard navigation — real focusable element with accent focus ring and role=link #}
+      {# Denser tile: canonical "{SO#} - {Customer} - {Owner} - BP" title, then a tight
+         line of deal facts (TSO / POs / part) so a reviewer reads the deal without opening it. #}
       <div hx-get="/v2/partials/buy-plans/{{ d.plan_id }}"
            hx-target="#main-content"
            hx-push-url="/v2/buy-plans/{{ d.plan_id }}"
@@ -49,31 +51,43 @@
            role="link"
            @keydown.enter.prevent="$el.click()"
            @keydown.space.prevent="$el.click()"
-           class="bg-white rounded-md border border-line-base p-3 cursor-pointer hover:shadow-sm transition-shadow
+           class="bg-white rounded-md border border-line-base px-2.5 py-2 cursor-pointer hover:shadow-sm transition-shadow
                   focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:outline-none
                   {% if d.needs_my_action %}ring-2 ring-amber-400{% endif %}">
-        {# Customer + stock badge #}
+        {# Canonical card title + stock badge #}
         <div class="flex items-start justify-between gap-2">
-          <span class="text-sm font-bold text-gray-900 leading-tight">{{ d.customer_name or '-' }}</span>
+          <span class="text-sm font-bold text-gray-900 leading-tight truncate" title="{{ d.card_title }}">{{ d.card_title }}</span>
           {% if d.is_stock_sale %}
           {# Finding #7: bespoke stock tag → .chip primitive #}
           <span class="chip bg-purple-50 text-purple-700 border-purple-200 flex-shrink-0">stock</span>
           {% endif %}
         </div>
-        {# Value + margin #}
-        <div class="mt-1.5 flex items-center justify-between gap-2">
+        {# Value + margin (primary money row) #}
+        <div class="mt-1 flex items-center justify-between gap-2">
           <span class="text-sm font-semibold text-gray-900">${{ '{:,.2f}'.format(d.value|float) if d.value else '0.00' }}</span>
           <span class="{% if m >= 30 %}badge-success{% elif m >= 15 %}badge-warning{% else %}badge-danger{% endif %}">
             {{ '{:.1f}'.format(m) }}%
           </span>
         </div>
+        {# Deal-fact line: SO# / our PO(s) / primary part — denser signal, no wasted rows #}
+        <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-gray-600">
+          <span title="Sales order #">SO <span class="font-mono text-gray-700">{{ d.tso or '—' }}</span></span>
+          {% if d.primary_mpn %}
+          <span class="text-gray-300" aria-hidden="true">·</span>
+          <span class="font-mono text-gray-700 truncate max-w-[10rem]" title="Primary part {{ d.primary_mpn }}">{{ d.primary_mpn }}</span>
+          {% endif %}
+          {% if d.po_numbers %}
+          <span class="text-gray-300" aria-hidden="true">·</span>
+          <span title="PO(s): {{ d.po_numbers|join(', ') }}">PO <span class="font-mono text-gray-700">{{ d.po_numbers|join(', ') }}</span></span>
+          {% endif %}
+        </div>
         {# Blocker #}
         {% if d.blocker %}
-        <div class="mt-1.5 text-xs text-gray-600">{{ d.blocker }}</div>
+        <div class="mt-1 text-xs text-gray-600">{{ d.blocker }}</div>
         {% endif %}
         {# PO progress bar #}
         {% if d.po_progress[1] %}
-        <div class="mt-2">
+        <div class="mt-1.5">
           <div class="flex items-center justify-between text-[11px] text-gray-400 mb-0.5">
             <span>POs</span>
             <span>{{ d.po_progress[0] }}/{{ d.po_progress[1] }}</span>

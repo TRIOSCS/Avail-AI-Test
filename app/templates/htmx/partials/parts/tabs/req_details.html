@@ -6,7 +6,8 @@
 {% from "htmx/partials/shared/_macros.html" import status_badge, urgency_badge %}
 
 {% set req = requisition %}
-{% set is_archived = req.status == 'archived' or requirement.sourcing_status == 'archived' %}
+{# Part-level archive only — a requisition has no archive status (it ends Won/Lost). #}
+{% set is_archived = requirement.sourcing_status == 'archived' %}
 
 {# ── Part detail + Requisition fields ──────────────────────── #}
 <div id="req-details-fields"
@@ -206,7 +207,7 @@
           {% for part in sibling_parts %}
           <tr class="{{ 'bg-brand-50 font-medium' if part.id == requirement.id else 'cursor-pointer hover:bg-gray-50 transition-colors' }}"
               {% if part.id != requirement.id %}
-              @click="selectPart({{ part.id }}); htmx.ajax('GET', '/v2/partials/parts/{{ part.id }}/tab/' + activeTab, {target: '#part-detail'})"
+              @click="selectPart({{ part.id }}); htmx.ajax('GET', '/v2/partials/parts/{{ part.id }}/tab/' + activeTab, {target: '#part-detail', indicator: '#part-detail'})"
               {% endif %}>
             <td @click.stop>
               <input aria-label="Select part {{ part.primary_mpn or '' }}" type="checkbox"

@@ -123,7 +123,9 @@ class TestProactiveBadge:
 
 
 class TestDoNotOffer:
-    def test_suppress(self, client: TestClient, test_company):
+    def test_suppress(self, client: TestClient, db_session: Session, test_company, test_user: User):
+        test_company.account_owner_id = test_user.id  # actor must manage the account (authz gate)
+        db_session.commit()
         resp = client.post(
             "/v2/partials/proactive/do-not-offer",
             data={"mpn": "LM317T", "customer_site_id": str(test_company.id)},

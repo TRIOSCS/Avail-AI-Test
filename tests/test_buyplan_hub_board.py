@@ -293,7 +293,12 @@ def test_deals_board_dict_fields(db_session, test_user, test_quote, test_requisi
 
     required_keys = {
         "plan_id",
+        "card_title",
         "customer_name",
+        "owner_name",
+        "tso",
+        "po_numbers",
+        "primary_mpn",
         "value",
         "margin_pct",
         "stage_label",
@@ -305,6 +310,62 @@ def test_deals_board_dict_fields(db_session, test_user, test_quote, test_requisi
     assert required_keys.issubset(deal.keys())
     assert deal["plan_id"] == plan.id
     assert deal["is_stock_sale"] is True
+
+
+# ── 10. Card title (BP) + denser-tile deal facts ─────────────────────
+
+
+def test_deals_board_card_title_is_buy_plan(db_session, test_user, test_quote, test_requisition):
+    """Buy-Plan card title = '{SO#} - {Customer} - {Owner} - BP'; Owner = Account Manager."""
+    from app.services.buyplan_hub import deals_board
+
+    plan = _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.ACTIVE,
+        submitted_by_id=test_user.id,
+    )
+    plan.sales_order_number = "TSO-9001"
+    db_session.flush()
+
+    board = deals_board(db_session, test_user, scope="all")
+    deal = next(d for d in board["active"] if d["plan_id"] == plan.id)
+
+    # Owner on a BP card is the sales owner (submitted_by), NOT a buyer.
+    owner = test_user.name or test_user.email
+    assert deal["card_title"].endswith(" - BP")
+    assert deal["card_title"].startswith("TSO-9001 - ")
+    assert owner in deal["card_title"]
+    assert deal["owner_name"] == owner
+    assert deal["tso"] == "TSO-9001"
+
+
+def test_deals_board_po_numbers_dedup_and_exclude_cancelled(db_session, test_user, test_quote, test_requisition):
+    """Tile po_numbers = distinct line po_number values, cancelled lines excluded."""
+    from app.services.buyplan_hub import deals_board
+
+    plan = _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.ACTIVE,
+        submitted_by_id=test_user.id,
+    )
+    l1 = _make_line(db_session, buy_plan_id=plan.id, status=BuyPlanLineStatus.VERIFIED)
+    l2 = _make_line(db_session, buy_plan_id=plan.id, status=BuyPlanLineStatus.VERIFIED)
+    l3 = _make_line(db_session, buy_plan_id=plan.id, status=BuyPlanLineStatus.PENDING_VERIFY)
+    cancelled = _make_line(db_session, buy_plan_id=plan.id, status=BuyPlanLineStatus.CANCELLED)
+    l1.po_number = "PO-100"
+    l2.po_number = "PO-100"  # duplicate collapses
+    l3.po_number = "PO-200"
+    cancelled.po_number = "PO-DEAD"  # excluded (line cancelled)
+    db_session.flush()
+
+    board = deals_board(db_session, test_user, scope="all")
+    deal = next(d for d in board["active"] if d["plan_id"] == plan.id)
+
+    assert deal["po_numbers"] == ["PO-100", "PO-200"]
 
 
 # ── 8. needs_my_action for DRAFT ─────────────────────────────────────

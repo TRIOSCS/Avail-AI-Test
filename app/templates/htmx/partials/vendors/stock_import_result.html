@@ -1,0 +1,29 @@
+{# stock_import_result.html — result banner after a vendor stock-list upload.
+   Called by: import_vendor_stock_list (app/routers/htmx_views.py).
+   Context: error (str|None); on success: vendor_name, imported_rows, skipped_rows,
+            total_rows, warnings (list of {row, field, reason}).
+   Swapped into #vendor-stock-result. Jinja auto-escapes all interpolations. #}
+{% if error %}
+<div class="bg-rose-50 border border-rose-200 rounded p-3 text-sm text-rose-700">
+  {{ error }}
+</div>
+{% else %}
+<div class="bg-emerald-50 border border-emerald-200 rounded p-3 text-sm text-emerald-700">
+  Imported {{ imported_rows }} stock row{{ "s" if imported_rows != 1 }} for
+  <span class="font-medium">{{ vendor_name }}</span>
+  {% if skipped_rows %}<span class="text-emerald-600">({{ skipped_rows }} skipped)</span>{% endif %}.
+</div>
+{% if warnings %}
+<div class="mt-2 max-h-40 overflow-y-auto rounded border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
+  <p class="font-medium mb-1">{{ warnings|length }} row{{ "s" if warnings|length != 1 }} skipped:</p>
+  <ul class="space-y-0.5">
+    {% for w in warnings[:25] %}
+    <li>Row {{ w.row }}: {{ w.reason }}</li>
+    {% endfor %}
+    {% if warnings|length > 25 %}
+    <li class="text-amber-600">…and {{ warnings|length - 25 }} more.</li>
+    {% endif %}
+  </ul>
+</div>
+{% endif %}
+{% endif %}

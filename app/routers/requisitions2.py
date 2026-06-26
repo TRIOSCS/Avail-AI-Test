@@ -303,6 +303,7 @@ async def inline_save(
     req_id: int,
     field: str = Form(...),
     value: str = Form(default=""),
+    reason: str = Form(default=""),
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
 ):
@@ -326,11 +327,13 @@ async def inline_save(
         msg = f"Renamed to '{clean}'"
 
     elif field == "status":
-        from ..services.requisition_state import transition
+        from ..services.requisition_state import OutcomeReasonRequired, transition
 
         try:
-            transition(req, value, user, db)
+            transition(req, value, user, db, reason=reason)
             msg = f"Status changed to {value}"
+        except OutcomeReasonRequired as e:
+            return HTMLResponse(html.escape(str(e)), status_code=400)
         except ValueError as e:
             return HTMLResponse(html.escape(str(e)), status_code=422)
 
@@ -383,6 +386,7 @@ async def row_action(
     req_id: int,
     action_name: RowActionName,
     owner_id: int = Form(default=None),
+    reason: str = Form(default=""),
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
 ):
@@ -393,21 +397,31 @@ async def row_action(
 
     msg = "Action completed"
 
-    # State transitions differ only by target state + message verb.
+    # Won/Lost are status transitions that require a close reason; hotlist puts
+    # the req on the Proactive monitor. Status moves differ only by target/verb.
     transition_actions = {
-        RowActionName.archive: ("archived", f"'{req.name}' archived"),
-        RowActionName.activate: ("active", f"'{req.name}' activated"),
         RowActionName.won: ("won", f"'{req.name}' marked won"),
         RowActionName.lost: ("lost", f"'{req.name}' marked lost"),
     }
 
     if action_name in transition_actions:
-        from ..services.requisition_state import transition
+        from ..services.requisition_state import OutcomeReasonRequired, transition
 
         target_state, success_msg = transition_actions[action_name]
         try:
-            transition(req, target_state, user, db)
+            transition(req, target_state, user, db, reason=reason)
             msg = success_msg
+        except OutcomeReasonRequired as e:
+            return HTMLResponse(html.escape(str(e)), status_code=400)
+        except ValueError as e:
+            msg = str(e)
+
+    elif action_name == RowActionName.hotlist:
+        from ..services.requisition_state import set_hotlist
+
+        try:
+            set_hotlist(req, user, db)
+            msg = f"'{req.name}' added to Hotlist"
         except ValueError as e:
             msg = str(e)
 
@@ -481,38 +495,19 @@ async def bulk_action(
         reqs_q = reqs_q.filter(Requisition.created_by == user.id)
     reqs = reqs_q.all()
     count = 0
-    errors = []
-
-    bulk_target_state = {
-        BulkActionName.archive: "archived",
-        BulkActionName.activate: "active",
-    }.get(action_name)
 
     for req in reqs:
-        if bulk_target_state is not None:
-            from ..services.requisition_state import transition
-
-            try:
-                transition(req, bulk_target_state, user, db)
-                count += 1
-            except ValueError as e:
-                errors.append(f"REQ-{req.id}: {e}")
-        elif action_name == BulkActionName.assign and owner_id:
+        if action_name == BulkActionName.assign and owner_id:
             req.created_by = owner_id
             count += 1
 
     db.commit()
-
-    if errors:
-        logger.warning(f"Bulk {action_name.value} partial failure: {errors}")
 
     filters = _parse_filters(request)
     ctx = _table_context(request, filters, db, user)
     response = template_response("requisitions2/_table.html", ctx)
     word = action_name.value + ("d" if action_name.value.endswith("e") else "ed")
     msg = f"{count} requisition{'s' if count != 1 else ''} {word}"
-    if errors:
-        msg += f" ({len(errors)} failed)"
     response.headers["HX-Trigger"] = json.dumps(
         {
             "showToast": {"message": msg},

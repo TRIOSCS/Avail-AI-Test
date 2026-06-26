@@ -180,7 +180,7 @@ def test_ownership_unassigned_created_by_other_user(
     """
     req = Requisition(
         name="REQ-OTHER-001",
-        status="active",
+        status="open",
         created_by=sales_user.id,
         created_at=datetime.now(timezone.utc),
     )

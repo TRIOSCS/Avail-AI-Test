@@ -38,7 +38,7 @@ def _make_user(db: Session, email="b1@trioscs.com", name="Buyer One") -> User:
     return u
 
 
-def _make_requisition(db: Session, status="active", customer="ACME") -> Requisition:
+def _make_requisition(db: Session, status="open", customer="ACME") -> Requisition:
     r = Requisition(name="R", customer_name=customer, status=status)
     db.add(r)
     db.commit()

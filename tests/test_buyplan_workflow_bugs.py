@@ -190,23 +190,26 @@ class TestCheckCompletionIdempotency:
 
 
 class TestApproveBuyPlanRoleCheck:
-    def test_buyer_cannot_approve(self, db_session):
-        """Buyer role should be rejected from approving buy plans."""
+    """Approval is gated by the per-user can_approve_buy_plans right, NOT by role."""
+
+    def test_user_without_right_cannot_approve(self, db_session):
+        """A user lacking the approval right is rejected even with a manager role."""
         plan, user = _make_plan_with_lines(
             db_session,
             status=BuyPlanStatus.PENDING.value,
         )
-        # user has role="sales", should fail
-        with pytest.raises(PermissionError, match="Only managers/admins"):
+        user.role = "manager"  # role alone no longer qualifies
+        db_session.flush()
+        with pytest.raises(PermissionError, match="approval right required"):
             approve_buy_plan(plan.id, "approve", user, db_session)
 
-    def test_manager_can_approve(self, db_session):
-        """Manager should be allowed to approve buy plans."""
+    def test_approver_right_can_approve(self, db_session):
+        """A user holding the approval right can approve buy plans."""
         plan, user = _make_plan_with_lines(
             db_session,
             status=BuyPlanStatus.PENDING.value,
         )
-        user.role = "manager"
+        user.can_approve_buy_plans = True
         db_session.flush()
 
         result = approve_buy_plan(plan.id, "approve", user, db_session)
@@ -214,26 +217,27 @@ class TestApproveBuyPlanRoleCheck:
         assert result.status == BuyPlanStatus.ACTIVE.value
         assert result.approved_by_id == user.id
 
-    def test_admin_can_approve(self, db_session):
-        """Admin should be allowed to approve buy plans."""
+    def test_approver_right_independent_of_role(self, db_session):
+        """The right grants access regardless of the user's role string."""
         plan, user = _make_plan_with_lines(
             db_session,
             status=BuyPlanStatus.PENDING.value,
         )
-        user.role = "admin"
+        user.role = "buyer"
+        user.can_approve_buy_plans = True
         db_session.flush()
 
         result = approve_buy_plan(plan.id, "approve", user, db_session)
 
         assert result.status == BuyPlanStatus.ACTIVE.value
 
-    def test_manager_can_reject(self, db_session):
-        """Manager should be allowed to reject buy plans back to draft."""
+    def test_approver_can_reject(self, db_session):
+        """An approver can reject buy plans back to draft (with a reason)."""
         plan, user = _make_plan_with_lines(
             db_session,
             status=BuyPlanStatus.PENDING.value,
         )
-        user.role = "manager"
+        user.can_approve_buy_plans = True
         db_session.flush()
 
         result = approve_buy_plan(plan.id, "reject", user, db_session, notes="Needs revision")

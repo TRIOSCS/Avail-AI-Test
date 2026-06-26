@@ -11,7 +11,7 @@ from app.models.sourcing import Requirement, Requisition
 
 
 def _make_requisition(db_session, test_user) -> Requisition:
-    req = Requisition(name="Test", status="active", created_by=test_user.id)
+    req = Requisition(name="Test", status="open", created_by=test_user.id)
     db_session.add(req)
     db_session.flush()
     return req

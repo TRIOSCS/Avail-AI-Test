@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, Boolean, Column, ForeignKey, Integer, String, Text, text
+from sqlalchemy import JSON, Boolean, Column, ForeignKey, Integer, Numeric, String, Text, text
 from sqlalchemy.orm import relationship, validates
 
 from ..database import UTCDateTime
@@ -52,6 +52,22 @@ class User(Base):
     # Notification preferences (Profile tab toggles — Tasks 7-9 wire the UI)
     notify_buyplan_email_enabled = Column(Boolean, default=True, nullable=False)
     notify_new_offer_alert_enabled = Column(Boolean, default=True, nullable=False)
+
+    # Profile photo — stored basename of the file under avatars.AVATARS_DIR
+    # (e.g. "user_12_a1b2c3d4.png"); NULL falls back to the initials avatar.
+    avatar_path = Column(String(255), nullable=True)
+    # ── Approval rights (per-gate per-user toggles, admin-managed) ────────────────
+    # Independent of role: admins do NOT auto-qualify — these columns are the single
+    # source of truth, so the toggle UI reflects exactly who can approve each gate.
+
+    # Buy-plan gate: no dollar limit — approves any amount.
+    can_approve_buy_plans = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+
+    # Prepayment gate: requires both the toggle AND an amount check.
+    # prepayment_approval_limit=NULL means unlimited (applies to any amount).
+    # e.g. limit=1000 → only routes prepayments ≤ $1,000 to this user.
+    can_approve_prepayments = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    prepayment_approval_limit = Column(Numeric(12, 2), nullable=True)
 
     created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
 

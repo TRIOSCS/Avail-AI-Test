@@ -75,7 +75,7 @@ class TestBuyerLeaderboard:
         req = Requisition(
             name="REQ-LB-001",
             customer_name="Test Co",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -139,7 +139,7 @@ class TestBuyerLeaderboard:
         req = Requisition(
             name="REQ-GRACE",
             customer_name="Test Co",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -527,7 +527,7 @@ class TestAiGate:
         req = Requisition(
             name="REQ-GATE",
             customer_name="Test",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -578,7 +578,7 @@ class TestAiGate:
         req = Requisition(
             name="REQ-FAIL",
             customer_name="Test",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -1652,7 +1652,7 @@ class TestAiGateExtra:
         req = Requisition(
             name="REQ-CLASS",
             customer_name="Test",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -1715,7 +1715,7 @@ class TestAiGateExtra:
         req = Requisition(
             name="REQ-SKIP",
             customer_name="Test",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -1770,7 +1770,7 @@ class TestAiGateExtra:
         req = Requisition(
             name="REQ-MISS",
             customer_name="Test",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )

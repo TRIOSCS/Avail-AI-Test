@@ -52,7 +52,7 @@ def _make_req(db: Session, user: User, name: str | None = None) -> Requisition:
     req = Requisition(
         name=name or f"REQ-{uuid.uuid4().hex[:6]}",
         customer_name="TestCo",
-        status="active",
+        status="open",
         created_by=user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -743,7 +743,9 @@ class TestBuyPlanCancel:
 
 
 class TestRequisitionsBulkAction:
-    @pytest.mark.parametrize("action", ["archive", "activate"])
+    # Archive/activate bulk actions were removed (a req ends Won/Lost); the only
+    # valid bulk action is owner re-assignment.
+    @pytest.mark.parametrize("action", ["assign"])
     def test_bulk_action_success(self, client: TestClient, db_session: Session, test_user: User, action: str):
         req = _make_req(db_session, test_user)
         resp = client.post(
@@ -754,14 +756,14 @@ class TestRequisitionsBulkAction:
 
     def test_bulk_action_invalid_ids(self, client: TestClient):
         resp = client.post(
-            "/v2/partials/requisitions/bulk/archive",
+            "/v2/partials/requisitions/bulk/assign",
             data={"ids": "not-an-int"},
         )
         assert resp.status_code == 400
 
     def test_bulk_action_no_ids(self, client: TestClient):
         resp = client.post(
-            "/v2/partials/requisitions/bulk/archive",
+            "/v2/partials/requisitions/bulk/assign",
             data={},
         )
         assert resp.status_code == 400

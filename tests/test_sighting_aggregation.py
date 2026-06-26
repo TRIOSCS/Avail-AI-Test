@@ -32,7 +32,7 @@ def _make_requisition_and_requirement(db: Session, user_id: int) -> tuple[Requis
     req = Requisition(
         name="REQ-AGG-001",
         customer_name="Test Co",
-        status="active",
+        status="open",
         created_by=user_id,
         created_at=datetime.now(timezone.utc),
     )

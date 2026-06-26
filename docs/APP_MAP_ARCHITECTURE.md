@@ -92,6 +92,15 @@ capabilities a user is granted).
   (any authenticated active user), `require_buyer` (BUYER_ROLES = buyer/sales/trader/
   manager/admin), `require_admin`, `require_manager`. The non-interactive `agent`
   account is excluded from buyer-tier actions.
+- **Per-user buy-plan approval right** — `require_buyplan_approver(request, db)` 403s
+  unless `User.can_approve_buy_plans` is set (predicate: `can_approve_buy_plans(user)`).
+  Role-independent (admins do NOT auto-qualify); the column is the single source of truth,
+  admin-toggled in the Users settings tab. Wired on all three layers of the buy-plan
+  approve/reject action: the `POST /v2/partials/buy-plans/{id}/approve` route depends on
+  `require_buyplan_approver`, the `approve_buy_plan` service re-checks the predicate, and
+  the detail/supervise templates hide the approve/reject UI via the `can_approve_buy_plans`
+  Jinja global. Reject requires a reason (service-enforced); approve/reject both write a
+  `BUYPLAN_APPROVED`/`BUYPLAN_REJECTED` ActivityLog scoped to the plan.
 - **Ownership scoping (role-scoped model)** — `RESTRICTED_ROLES = {SALES, TRADER}`
   (single source of truth in `app/constants.py`): sales/trader users may act only on
   requisitions they created (`Requisition.created_by`); buyer/manager/admin are

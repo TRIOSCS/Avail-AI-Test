@@ -12,7 +12,7 @@ import pytest
 def _make_requisition(db_session, test_user):
     from app.models.sourcing import Requisition
 
-    req = Requisition(name="Test", status="active", created_by=test_user.id, claimed_by_id=test_user.id)
+    req = Requisition(name="Test", status="open", created_by=test_user.id, claimed_by_id=test_user.id)
     db_session.add(req)
     db_session.flush()
     return req

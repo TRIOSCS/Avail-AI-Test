@@ -112,14 +112,14 @@ Usage:
 
 {% macro req_status_badge(value) %}
 {%- set req_map = {
-  "active": "bg-emerald-50 text-emerald-600 border-emerald-200",
-  "open": "bg-sky-50 text-sky-600 border-sky-200",
   "draft": "bg-slate-50 text-slate-500 border-slate-200",
-  "sourcing": "bg-sky-50 text-sky-600 border-sky-200",
+  "open": "bg-sky-50 text-sky-600 border-sky-200",
+  "rfqs_sent": "bg-amber-50 text-amber-600 border-amber-200",
+  "offers": "bg-emerald-50 text-emerald-600 border-emerald-200",
+  "quoted": "bg-violet-50 text-violet-600 border-violet-200",
+  "hotlist": "bg-orange-50 text-orange-600 border-orange-200",
   "won": "bg-emerald-50 text-emerald-700 border-emerald-300",
   "lost": "bg-rose-50 text-rose-500 border-rose-200",
-  "archived": "bg-gray-50 text-gray-600 border-gray-200",
-  "awarded": "bg-emerald-50 text-emerald-600 border-emerald-200",
   "cancelled": "bg-gray-50 text-gray-400 border-gray-200"
 } -%}
 {{ status_badge(value, status_map=req_map) }}
@@ -201,12 +201,12 @@ Usage:
 
 {% macro status_dot(value) %}
 {%- set bucket_map = {
-  'active': 'open', 'sourcing': 'sourcing', 'offers': 'offered',
-  'quoting': 'quoted', 'quoted': 'quoted'
+  'open': 'open', 'rfqs_sent': 'sourcing', 'offers': 'offered',
+  'quoted': 'quoted', 'hotlist': 'neutral'
 } -%}
 {%- set label_map = {
-  'active': 'Open', 'sourcing': 'Sourcing', 'offers': 'Offered',
-  'quoting': 'Quoting', 'quoted': 'Quoted'
+  'open': 'Open', 'rfqs_sent': 'RFQs Sent', 'offers': 'Offers',
+  'quoted': 'Quoted', 'hotlist': 'Hotlist'
 } -%}
 {%- set bucket = bucket_map.get(value, 'neutral') -%}
 {%- set label = label_map.get(value, value|replace('_', ' ')|capitalize) -%}
@@ -460,10 +460,10 @@ Usage:
 
 
 {# ── Opportunity Table v2 — Status Cell (dot + label + time text) ── #}
-{% macro opp_status_cell(status, hours) %}
+{% macro opp_status_cell(status, hours, reason=None) %}
 {%- set label_map = {
-  'active': 'Open', 'sourcing': 'Sourcing', 'offers': 'Offered',
-  'quoting': 'Quoting', 'quoted': 'Quoted'
+  'open': 'Open', 'rfqs_sent': 'RFQs Sent', 'offers': 'Offers',
+  'quoted': 'Quoted', 'hotlist': 'Hotlist'
 } -%}
 {%- set label = label_map.get(status, status|replace('_', ' ')|capitalize) -%}
 {%- set time_label = '' -%}
@@ -471,7 +471,9 @@ Usage:
 {%- elif hours is not none and hours <= 72 -%}{%- set time_label = (hours|round(0)|int ~ 'h') -%}
 {%- elif hours is not none -%}{%- set time_label = ((hours/24)|round(0)|int ~ 'd') -%}
 {%- endif -%}
-<span class="opp-status-cell inline-flex items-center gap-1.5" aria-label="{{ label }}{% if time_label %}, {{ time_label }}{% endif %}">
+{# Won/Lost carry a close reason — surfaced as a hover tooltip on the badge. #}
+<span class="opp-status-cell inline-flex items-center gap-1.5" aria-label="{{ label }}{% if time_label %}, {{ time_label }}{% endif %}{% if reason and status in ('won', 'lost') %} — {{ reason }}{% endif %}"
+      {% if reason and status in ('won', 'lost') %}title="{{ status|capitalize }} reason: {{ reason }}"{% endif %}>
   {{ status_dot(status) }}
   {%- if hours is not none -%}
     <span class="opp-status-sep" aria-hidden="true">·</span>
@@ -506,8 +508,6 @@ Usage:
   'sales_note':           {'accent': 'bg-gray-100 text-gray-600',       'path': 'M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10'},
   'task_completed':       {'accent': 'bg-emerald-100 text-emerald-600', 'path': 'M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z'},
   'assignment_changed':   {'accent': 'bg-gray-100 text-gray-600',       'path': 'M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z'},
-  'req_archived':         {'accent': 'bg-gray-100 text-gray-600',       'path': 'M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z'},
-  'req_unarchived':       {'accent': 'bg-gray-100 text-gray-600',       'path': 'M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5'},
   'meeting':              {'accent': 'bg-violet-100 text-violet-600',   'path': 'M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5'}
 } -%}
 {%- set fallback = {'accent': 'bg-gray-100 text-gray-600', 'path': 'M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z'} -%}
@@ -541,6 +541,8 @@ Usage:
   {{ activity_icon(a.activity_type) }}
   <div class="flex-1 min-w-0">
     <div class="flex items-center gap-2 flex-wrap">
+      {# Actor avatar — the user who performed this activity (eager-loaded as a.user). #}
+      {% if a.user %}{{ user_avatar(a.user) }}{% endif %}
       <p class="text-sm font-medium text-gray-900">{{ a.activity_type|replace('_', ' ')|title }}</p>
       {% set who = a.vendor_card.display_name if a.vendor_card_id and a.vendor_card else a.contact_name %}
       {% if who %}
@@ -673,29 +675,6 @@ Usage:
        role="toolbar"
        aria-label="Row actions"
        @click.stop>
-    {% if req.status != 'archived' %}
-      <button type="button"
-              hx-post="/requisitions2/{{ req.id }}/action/archive"
-              hx-target="#rq2-table"
-              hx-include="#rq2-filters"
-              hx-swap="outerHTML"
-              hx-confirm="Archive '{{ req.name }}'?"
-              aria-label="Archive {{ req.name }}"
-              @click.stop>
-        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 8h14M5 8l1 12a2 2 0 002 2h8a2 2 0 002-2l1-12M9 12h6"/></svg>
-      </button>
-    {% else %}
-      <button type="button"
-              hx-post="/requisitions2/{{ req.id }}/action/activate"
-              hx-target="#rq2-table"
-              hx-include="#rq2-filters"
-              hx-swap="outerHTML"
-              aria-label="Activate {{ req.name }}"
-              @click.stop>
-        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 15l7-7 7 7"/></svg>
-      </button>
-    {% endif %}
-
     {% if not req.claimed_by_id and user and user.role in ('buyer','trader','manager','admin') %}
       <button type="button"
               hx-post="/requisitions2/{{ req.id }}/action/claim"
@@ -718,27 +697,31 @@ Usage:
       </button>
     {% endif %}
 
-    {% if req.status in ('active','sourcing','offers','quoting','quoted','open','reopened') %}
+    {% if req.status in ('open','rfqs_sent','offers','quoted','hotlist') %}
       <button type="button"
-              hx-post="/requisitions2/{{ req.id }}/action/won"
-              hx-target="#rq2-table"
-              hx-include="#rq2-filters"
-              hx-swap="outerHTML"
               aria-label="Mark {{ req.name }} won"
               class="text-emerald-600"
-              @click.stop>
+              @click.stop="openOutcome('won')">
         <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 20 20"><path d="M10 15l-5.878 3.09 1.123-6.545L.489 6.91l6.572-.955L10 0l2.939 5.955 6.572.955-4.756 4.635 1.123 6.545z"/></svg>
       </button>
       <button type="button"
-              hx-post="/requisitions2/{{ req.id }}/action/lost"
+              aria-label="Mark {{ req.name }} lost"
+              class="text-rose-600"
+              @click.stop="openOutcome('lost')">
+        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    {% endif %}
+
+    {% if req.status not in ('hotlist','won','lost','cancelled') %}
+      <button type="button"
+              hx-post="/requisitions2/{{ req.id }}/action/hotlist"
               hx-target="#rq2-table"
               hx-include="#rq2-filters"
               hx-swap="outerHTML"
-              hx-confirm="Mark '{{ req.name }}' as lost?"
-              aria-label="Mark {{ req.name }} lost"
-              class="text-rose-600"
+              aria-label="Add {{ req.name }} to Hotlist"
+              class="text-orange-600"
               @click.stop>
-        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+        <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.196-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118L2.07 9.4c-.783-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"/></svg>
       </button>
     {% endif %}
 
@@ -751,6 +734,75 @@ Usage:
             @click.stop>
       <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2"/></svg>
     </button>
+
+    {# Won/Lost close-reason popover — required textarea + confirm (mirrors the
+       buy-plan cancel modal). Submits the reason alongside the status change. #}
+    <div x-show="outcomePrompt" x-cloak
+         class="opp-outcome-prompt"
+         @click.stop
+         @keydown.escape.stop="closeOutcome()">
+      <p class="text-xs font-semibold text-gray-700 mb-1">
+        <span x-text="outcomePrompt === 'won' ? 'Why won?' : 'Why lost?'"></span>
+        <span class="text-rose-500">*</span>
+      </p>
+      <textarea x-model="outcomeReason" rows="2"
+                aria-label="Close reason"
+                class="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-brand-500"
+                placeholder="Reason (required)"></textarea>
+      <div class="mt-1 flex justify-end gap-1">
+        <button type="button" class="px-2 py-1 text-xs text-gray-500 hover:text-gray-700"
+                @click.stop="closeOutcome()">Cancel</button>
+        <button type="button"
+                hx-post="/requisitions2/{{ req.id }}/action/won"
+                :hx-post="'/requisitions2/{{ req.id }}/action/' + outcomePrompt"
+                hx-target="#rq2-table"
+                hx-include="#rq2-filters"
+                hx-swap="outerHTML"
+                :hx-vals="JSON.stringify({reason: outcomeReason})"
+                data-loading-disable
+                :disabled="!outcomeReady"
+                class="px-2 py-1 text-xs font-medium rounded bg-brand-500 text-white hover:bg-brand-600 disabled:opacity-40 disabled:cursor-not-allowed"
+                @click.stop="if (outcomeReady) closeOutcome()">Confirm</button>
+      </div>
+    </div>
   </div>
 </td>
 {% endmacro %}
+
+
+{# ── User Avatar ──────────────────────────────────────────────────── #}
+{#
+  Purpose:     The one user-icon every surface reaches for. Renders `user`'s
+               uploaded profile photo when `user.avatar_path` is set, else the
+               accent-tinted initials fallback (house pattern: bg-brand-100 +
+               text-brand-600 circle, first letter of the name).
+  Depends on:  GET /api/user/avatar/{filename} (app/routers/avatars.py) to serve
+               the photo; no import needed beyond this macro.
+  Called-by:   shared/_macros.html activity_row (comm ledger actor),
+               buy_plans/detail.html (line assignee).
+  Business:    `user` may be None (e.g. an unassigned line / system activity) —
+               renders a neutral '?' circle so callers don't need a None guard.
+               Sizes: sm (h-6, table rows), md (h-9), lg (h-12, headers).
+  Usage:
+    {% from "htmx/partials/shared/_macros.html" import user_avatar %}
+    {{ user_avatar(line.buyer) }}
+    {{ user_avatar(a.user, size='md') }}
+#}
+{% macro user_avatar(user, size='sm') -%}
+{# _box = circle height/width (used by both branches); _text = font size (initials only). #}
+{%- set _dims = {
+  'sm': {'box': 'h-6 w-6',  'text': 'text-[11px]'},
+  'md': {'box': 'h-9 w-9',  'text': 'text-sm'},
+  'lg': {'box': 'h-12 w-12', 'text': 'text-lg'}
+} -%}
+{%- set _dim = _dims.get(size, _dims['sm']) -%}
+{%- set _name = (user.name or user.email or '') if user else '' -%}
+{%- set _title = _name or 'Unassigned' -%}
+{%- if user and user.avatar_path -%}
+<img src="/api/user/avatar/{{ user.avatar_path }}" alt="{{ _title }}" title="{{ _title }}"
+     class="{{ _dim.box }} rounded-full object-cover flex-shrink-0 bg-gray-100">
+{%- else -%}
+<span class="inline-flex items-center justify-center {{ _dim.box }} {{ _dim.text }} rounded-full bg-brand-100 text-brand-600 font-bold flex-shrink-0"
+      title="{{ _title }}">{{ (_name[:1]|upper) if _name else '?' }}</span>
+{%- endif -%}
+{%- endmacro %}

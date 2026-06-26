@@ -36,7 +36,6 @@ _A11Y_ROW_TEMPLATES = (
     "app/templates/htmx/partials/customers/contacts_list.html",
     "app/templates/htmx/partials/vendors/contacts_list.html",
     "app/templates/htmx/partials/vendors/list.html",
-    "app/templates/htmx/partials/vendors/find_by_part.html",
     "app/templates/htmx/partials/materials/list.html",
     "app/templates/htmx/partials/materials/tabs/sourcing.html",
     "app/templates/htmx/partials/requisitions/req_row.html",

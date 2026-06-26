@@ -142,11 +142,12 @@ class TestSchedulerSelectivity:
         from app.constants import RequisitionStatus
         from app.jobs.task_jobs import _ACTIVE_REQ_STATUSES
 
-        assert RequisitionStatus.ARCHIVED not in _ACTIVE_REQ_STATUSES
         assert RequisitionStatus.WON not in _ACTIVE_REQ_STATUSES
         assert RequisitionStatus.LOST not in _ACTIVE_REQ_STATUSES
-        assert RequisitionStatus.ACTIVE in _ACTIVE_REQ_STATUSES
-        assert RequisitionStatus.SOURCING in _ACTIVE_REQ_STATUSES
+        assert RequisitionStatus.CANCELLED not in _ACTIVE_REQ_STATUSES
+        assert RequisitionStatus.OPEN in _ACTIVE_REQ_STATUSES
+        assert RequisitionStatus.OFFERS in _ACTIVE_REQ_STATUSES
+        assert RequisitionStatus.QUOTED in _ACTIVE_REQ_STATUSES
 
     def test_deadline_within_window_would_fire(self):
         """Deadlines within 2 days should be in scope."""

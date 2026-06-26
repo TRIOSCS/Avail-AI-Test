@@ -24,7 +24,7 @@ from app.services.requisition_list_service import (
 )
 
 
-def _make_req(db_session, name, created_by, *, status="active", created_at=None, **extra):
+def _make_req(db_session, name, created_by, *, status="open", created_at=None, **extra):
     """Build, persist, and return a Requisition with sensible test defaults."""
     req = Requisition(
         name=name,
@@ -128,14 +128,6 @@ def test_list_returns_correct_fields(db_session, test_user, test_requisition):
     assert "sourcing_score" in req
 
 
-def test_list_filters_by_status(db_session, test_user, test_requisition):
-    """Status filter excludes non-matching requisitions."""
-    # test_requisition is 'open' status
-    filters = ReqListFilters(status=ReqStatus.archived)
-    result = list_requisitions(db_session, filters, test_user.id, "buyer")
-    assert len(result["requisitions"]) == 0
-
-
 def test_list_search_by_name(db_session, test_user, test_requisition):
     """Search by name returns matching requisitions."""
     filters = ReqListFilters(q="REQ-TEST")
@@ -158,7 +150,7 @@ def test_list_pagination_math(db_session, test_user):
         _make_req(db_session, f"PAGE-REQ-{i}", test_user.id)
     db_session.commit()
 
-    filters = ReqListFilters(status=ReqStatus.active, per_page=2)
+    filters = ReqListFilters(status=ReqStatus.open, per_page=2)
     result = list_requisitions(db_session, filters, test_user.id, "buyer")
     assert result["pagination"].total == 3
     assert result["pagination"].total_pages == 2
@@ -171,7 +163,7 @@ def test_list_pagination_page_2(db_session, test_user):
         _make_req(db_session, f"PAGE-REQ-{i}", test_user.id)
     db_session.commit()
 
-    filters = ReqListFilters(status=ReqStatus.active, per_page=2, page=2)
+    filters = ReqListFilters(status=ReqStatus.open, per_page=2, page=2)
     result = list_requisitions(db_session, filters, test_user.id, "buyer")
     assert len(result["requisitions"]) == 1  # page 2 has 1 item
 
@@ -182,7 +174,7 @@ def test_list_sort_ascending(db_session, test_user):
     _make_req(db_session, "ZZZ-REQ", test_user.id)
     db_session.commit()
 
-    filters = ReqListFilters(status=ReqStatus.active, sort=SortColumn.name, order=SortOrder.asc)
+    filters = ReqListFilters(status=ReqStatus.open, sort=SortColumn.name, order=SortOrder.asc)
     result = list_requisitions(db_session, filters, test_user.id, "buyer")
     names = [r["name"] for r in result["requisitions"]]
     assert names[0] == "AAA-REQ"
@@ -195,7 +187,7 @@ def test_list_sort_descending(db_session, test_user):
     _make_req(db_session, "ZZZ-REQ", test_user.id)
     db_session.commit()
 
-    filters = ReqListFilters(status=ReqStatus.active, sort=SortColumn.name, order=SortOrder.desc)
+    filters = ReqListFilters(status=ReqStatus.open, sort=SortColumn.name, order=SortOrder.desc)
     result = list_requisitions(db_session, filters, test_user.id, "buyer")
     names = [r["name"] for r in result["requisitions"]]
     assert names[0] == "ZZZ-REQ"
@@ -208,7 +200,7 @@ def test_sales_role_filtering(db_session, test_user, sales_user):
     _make_req(db_session, "SALES-REQ", sales_user.id)
     db_session.commit()
 
-    filters = ReqListFilters(status=ReqStatus.active)
+    filters = ReqListFilters(status=ReqStatus.open)
     result = list_requisitions(db_session, filters, sales_user.id, "sales")
     names = [r["name"] for r in result["requisitions"]]
     assert "SALES-REQ" in names
@@ -262,7 +254,7 @@ def test_list_filter_by_owner(db_session, test_user, sales_user):
     _make_req(db_session, "SALES-OWN", sales_user.id)
     db_session.commit()
 
-    filters = ReqListFilters(status=ReqStatus.active, owner=test_user.id)
+    filters = ReqListFilters(status=ReqStatus.open, owner=test_user.id)
     result = list_requisitions(db_session, filters, test_user.id, "buyer")
     names = [r["name"] for r in result["requisitions"]]
     assert "BUYER-OWN" in names
@@ -277,7 +269,7 @@ def test_list_filter_by_urgency(db_session, test_user):
 
     from app.schemas.requisitions2 import Urgency
 
-    filters = ReqListFilters(status=ReqStatus.active, urgency=Urgency.hot)
+    filters = ReqListFilters(status=ReqStatus.open, urgency=Urgency.hot)
     result = list_requisitions(db_session, filters, test_user.id, "buyer")
     names = [r["name"] for r in result["requisitions"]]
     assert "HOT-REQ" in names
@@ -291,7 +283,7 @@ def test_list_filter_by_date_from(db_session, test_user):
     _make_req(db_session, "OLD-REQ", test_user.id, created_at=datetime(2020, 1, 1, tzinfo=timezone.utc))
     db_session.commit()
 
-    filters = ReqListFilters(status=ReqStatus.active, date_from=date_type(2025, 1, 1))
+    filters = ReqListFilters(status=ReqStatus.open, date_from=date_type(2025, 1, 1))
     result = list_requisitions(db_session, filters, test_user.id, "buyer")
     names = [r["name"] for r in result["requisitions"]]
     assert "OLD-REQ" not in names
@@ -304,36 +296,38 @@ def test_list_filter_by_date_to(db_session, test_user):
     _make_req(db_session, "NEW-REQ", test_user.id, created_at=datetime(2099, 1, 1, tzinfo=timezone.utc))
     db_session.commit()
 
-    filters = ReqListFilters(status=ReqStatus.active, date_to=date_type(2026, 12, 31))
+    filters = ReqListFilters(status=ReqStatus.open, date_to=date_type(2026, 12, 31))
     result = list_requisitions(db_session, filters, test_user.id, "buyer")
     names = [r["name"] for r in result["requisitions"]]
     assert "NEW-REQ" not in names
 
 
 def test_list_status_all(db_session, test_user):
-    """Status 'all' shows all requisitions regardless of status."""
-    _make_req(db_session, "ALL-ACTIVE", test_user.id)
-    _make_req(db_session, "ALL-ARCHIVED", test_user.id, status="archived")
+    """Status 'all' shows every requisition regardless of pipeline stage."""
+    _make_req(db_session, "ALL-OPEN", test_user.id, status="open")
+    _make_req(db_session, "ALL-WON", test_user.id, status="won")
     db_session.commit()
 
     filters = ReqListFilters(status=ReqStatus.all)
     result = list_requisitions(db_session, filters, test_user.id, "buyer")
     names = [r["name"] for r in result["requisitions"]]
-    assert "ALL-ACTIVE" in names
-    assert "ALL-ARCHIVED" in names
+    assert "ALL-OPEN" in names
+    assert "ALL-WON" in names
 
 
-def test_list_status_archived(db_session, test_user):
-    """Status 'archived' shows only archived/won/lost/closed."""
-    _make_req(db_session, "ARCH-ACTIVE", test_user.id)
-    _make_req(db_session, "ARCH-ARCHIVED", test_user.id, status="archived")
+# ── hotlist filter (Task 4) ──────────────────────────────────────────
+
+
+def test_hotlist_filter(db_session, test_user):
+    """The 'hotlist' filter returns only hotlist-status rows."""
+    _make_req(db_session, "HOT-REQ", test_user.id, status="hotlist")
+    _make_req(db_session, "OPEN-REQ", test_user.id, status="open")
     db_session.commit()
 
-    filters = ReqListFilters(status=ReqStatus.archived)
-    result = list_requisitions(db_session, filters, test_user.id, "buyer")
-    names = [r["name"] for r in result["requisitions"]]
-    assert "ARCH-ACTIVE" not in names
-    assert "ARCH-ARCHIVED" in names
+    filters = ReqListFilters(status=ReqStatus.hotlist)
+    result = list_requisitions(db_session, filters, test_user.id, "manager")
+    rows = result["requisitions"]
+    assert len(rows) == 1 and rows[0]["status"] == "hotlist"
 
 
 # ── get_team_users ───────────────────────────────────────────────────

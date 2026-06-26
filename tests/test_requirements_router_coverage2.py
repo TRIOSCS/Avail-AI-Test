@@ -204,7 +204,7 @@ class TestAddRequirements:
             name="DupReq",
             customer_name="DupTest Co",
             customer_site_id=site.id,
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )

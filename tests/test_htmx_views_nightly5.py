@@ -33,7 +33,7 @@ def _req(db: Session, user: User, **kw) -> Requisition:
     defaults = dict(
         name=f"N5-REQ-{uuid.uuid4().hex[:6]}",
         customer_name="N5 Corp",
-        status=RequisitionStatus.ACTIVE,
+        status=RequisitionStatus.OPEN,
         created_by=user.id,
         created_at=datetime.now(timezone.utc),
     )

@@ -21,7 +21,7 @@ def _make_offer(db_session, req_name, mpn):
     req = Requisition(
         name=req_name,
         customer_name="Test Co",
-        status="active",
+        status="open",
         created_by=user.id,
     )
     db_session.add(req)

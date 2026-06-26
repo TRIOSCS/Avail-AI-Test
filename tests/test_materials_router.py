@@ -394,7 +394,7 @@ class TestImportStockList:
 
     @patch("app.file_utils.parse_tabular_file")
     @patch("app.file_utils.normalize_stock_row")
-    @patch("app.routers.materials.record_price_snapshot")
+    @patch("app.services.stock_list_ingest.record_price_snapshot")
     @patch("app.routers.materials.get_credential_cached", return_value=None)
     def test_import_success(
         self,
@@ -421,7 +421,7 @@ class TestImportStockList:
 
     @patch("app.file_utils.parse_tabular_file")
     @patch("app.file_utils.normalize_stock_row")
-    @patch("app.routers.materials.record_price_snapshot")
+    @patch("app.services.stock_list_ingest.record_price_snapshot")
     @patch("app.routers.materials.get_credential_cached", return_value=None)
     def test_import_updates_existing_mvh(
         self,

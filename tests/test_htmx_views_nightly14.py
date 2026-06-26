@@ -28,7 +28,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.constants import OfferStatus, RequisitionStatus
+from app.constants import OfferStatus
 from app.models import (
     Offer,
     Requirement,
@@ -335,29 +335,6 @@ class TestSaveParsedOffers:
 
 
 class TestRequisitionsBulkAction:
-    @pytest.mark.parametrize(
-        ("action", "expected_status"),
-        [
-            ("archive", RequisitionStatus.ARCHIVED),
-            ("activate", RequisitionStatus.ACTIVE),
-        ],
-    )
-    def test_bulk_sets_status(
-        self,
-        client: TestClient,
-        db_session: Session,
-        test_requisition: Requisition,
-        action: str,
-        expected_status: RequisitionStatus,
-    ):
-        resp = client.post(
-            f"/v2/partials/requisitions/bulk/{action}",
-            data={"ids": str(test_requisition.id)},
-        )
-        assert resp.status_code == 200
-        db_session.refresh(test_requisition)
-        assert test_requisition.status == expected_status
-
     def test_bulk_assign(self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User):
         resp = client.post(
             "/v2/partials/requisitions/bulk/assign",
@@ -383,14 +360,14 @@ class TestRequisitionsBulkAction:
 
     def test_bulk_no_ids(self, client: TestClient):
         resp = client.post(
-            "/v2/partials/requisitions/bulk/archive",
+            "/v2/partials/requisitions/bulk/assign",
             data={},
         )
         assert resp.status_code == 400
 
     def test_bulk_invalid_id_format(self, client: TestClient):
         resp = client.post(
-            "/v2/partials/requisitions/bulk/archive",
+            "/v2/partials/requisitions/bulk/assign",
             data={"ids": "abc,def"},
         )
         assert resp.status_code == 400
@@ -515,12 +492,12 @@ class TestRequisitionRowAction:
 
     def test_req_not_found(self, client: TestClient):
         resp = client.post(
-            "/v2/partials/requisitions/99999/action/archive",
+            "/v2/partials/requisitions/99999/action/claim",
             data={},
         )
         assert resp.status_code == 404
 
-    @pytest.mark.parametrize("action", ["archive", "activate", "claim", "unclaim", "clone"])
+    @pytest.mark.parametrize("action", ["claim", "unclaim", "clone"])
     def test_valid_action(self, client: TestClient, test_requisition: Requisition, action: str):
         resp = client.post(
             f"/v2/partials/requisitions/{test_requisition.id}/action/{action}",
@@ -531,7 +508,7 @@ class TestRequisitionRowAction:
     def test_return_detail_format(self, client: TestClient, test_requisition: Requisition):
         """Return=detail format returns empty 200 response."""
         resp = client.post(
-            f"/v2/partials/requisitions/{test_requisition.id}/action/activate",
+            f"/v2/partials/requisitions/{test_requisition.id}/action/claim",
             data={"return": "detail"},
         )
         assert resp.status_code == 200

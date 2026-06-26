@@ -73,7 +73,7 @@ def _make_req_and_requirement(db_session, test_user, req_name: str, primary_mpn:
     req = Requisition(
         name=req_name,
         customer_name="Test Co",
-        status="active",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )

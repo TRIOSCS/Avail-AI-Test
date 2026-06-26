@@ -26,6 +26,7 @@ from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from ..constants import (
+    RESTRICTED_ROLES,
     AccessKey,
     ActivityType,
     AttributionStatus,
@@ -44,6 +45,7 @@ from ..constants import (
 )
 from ..database import get_db
 from ..dependencies import (
+    can_approve_buy_plans,
     can_manage_account,
     can_manage_account_team,
     get_buyplan_for_user,
@@ -55,6 +57,8 @@ from ..dependencies import (
     require_access,
     require_admin,
     require_buyer,
+    require_buyplan_approver,
+    require_prospect_site_access,
     require_requisition_access,
     require_user,
     user_has_access,
@@ -87,6 +91,7 @@ from ..models.vendors import VendorContact
 from ..scoring import classify_lead, explain_lead, score_unified
 from ..services import clay_oauth, task_service
 from ..services.activity_service import log_activity as _log_activity
+from ..services.buyplan_naming import summarize_top_flag
 from ..services.commodity_registry import COMMODITY_TREE, get_display_name
 from ..services.faceted_search_service import (
     INTERNAL_FILTER_VALUES,
@@ -499,7 +504,7 @@ async def global_search(
     """Global search across all entity types (type-ahead)."""
     from app.services.global_search_service import fast_search
 
-    results = fast_search(q, db)
+    results = fast_search(q, db, user)
     return template_response(
         "htmx/partials/shared/search_results.html",
         {**_base_ctx(request, user), "results": results, "query": q},
@@ -516,7 +521,7 @@ async def ai_search_endpoint(
     """AI-powered search — triggered by Enter key."""
     from app.services.global_search_service import ai_search
 
-    results = await ai_search(q, db)
+    results = await ai_search(q, db, user)
     return template_response(
         "htmx/partials/shared/search_results.html",
         {**_base_ctx(request, user), "results": results, "query": q, "ai_search": True},
@@ -533,7 +538,7 @@ async def search_results_page(
     """Full search results page."""
     from app.services.global_search_service import fast_search
 
-    results = fast_search(q, db) if q else {"best_match": None, "groups": {}, "total_count": 0}
+    results = fast_search(q, db, user) if q else {"best_match": None, "groups": {}, "total_count": 0}
     return template_response(
         "htmx/partials/search/full_results.html",
         {**_base_ctx(request, user), "results": results, "query": q},
@@ -906,7 +911,7 @@ async def requisition_import_save(
         customer_site_id=site_id,
         deadline=deadline.strip() or None,
         urgency=urgency,
-        status=RequisitionStatus.ACTIVE,
+        status=RequisitionStatus.OPEN,
         created_by=user.id,
         claimed_by_id=user.id,
     )
@@ -1217,7 +1222,7 @@ async def requisition_create(
         customer_name=customer_name or None,
         deadline=deadline or None,
         urgency=urgency,
-        status=RequisitionStatus.ACTIVE,
+        status=RequisitionStatus.OPEN,
         created_by=user.id,
         claimed_by_id=user.id,
     )
@@ -1844,7 +1849,7 @@ async def requisitions_bulk_action(
     if len(ids) > 200:
         raise HTTPException(400, "Maximum 200 requisitions per bulk action")
 
-    valid_actions = {"archive", "activate", "assign"}
+    valid_actions = {"assign"}
     if action not in valid_actions:
         raise HTTPException(400, f"Invalid action: {action}")
 
@@ -1852,13 +1857,7 @@ async def requisitions_bulk_action(
     for r in reqs:
         require_requisition_access(db, r.id, user)
 
-    if action == "archive":
-        for r in reqs:
-            r.status = RequisitionStatus.ARCHIVED
-    elif action == "activate":
-        for r in reqs:
-            r.status = RequisitionStatus.ACTIVE
-    elif action == "assign":
+    if action == "assign":
         owner_id = form.get("owner_id")
         if owner_id:
             new_owner = _safe_int(owner_id)
@@ -2110,10 +2109,9 @@ async def requisition_row_action(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Execute a row-level action (archive, activate, claim, unclaim, won, lost,
-    clone)."""
+    """Execute a row-level action (claim, unclaim, won, lost, clone)."""
 
-    valid_actions = {"archive", "activate", "claim", "unclaim", "won", "lost", "clone"}
+    valid_actions = {"claim", "unclaim", "won", "lost", "clone"}
     if action_name not in valid_actions:
         return HTMLResponse("Invalid action", status_code=400)
 
@@ -2124,13 +2122,14 @@ async def requisition_row_action(
     msg = "Action completed"
     form = await request.form()
 
-    if action_name in ("archive", "activate", "won", "lost"):
-        from ..services.requisition_state import transition
+    if action_name in ("won", "lost"):
+        from ..services.requisition_state import OutcomeReasonRequired, transition
 
-        target = {"archive": "archived", "activate": "active"}.get(action_name, action_name)
         try:
-            transition(req, target, user, db)
-            msg = f"'{req.name}' → {target}"
+            transition(req, action_name, user, db, reason=form.get("reason", ""))
+            msg = f"'{req.name}' → {action_name}"
+        except OutcomeReasonRequired as e:
+            return HTMLResponse(str(e), status_code=400)
         except ValueError as e:
             msg = str(e)
     elif action_name == "claim":
@@ -2956,6 +2955,7 @@ async def ai_rephrase_email(
 ):
     """Rephrase the RFQ email so each send reads uniquely, keeping all parts intact."""
     get_requisition_or_404(db, req_id)  # validates existence
+    require_requisition_access(db, req_id, user)
 
     user_text = body.strip()
     if not user_text:
@@ -4256,96 +4256,6 @@ async def vendor_contacts_partial(
     return template_response("htmx/partials/vendors/contacts_list.html", ctx)
 
 
-@router.get("/v2/partials/vendors/find-by-part", response_class=HTMLResponse)
-async def find_by_part_partial(
-    request: Request,
-    mpn: str = "",
-    hx_target: str = Query("#main-content", alias="hx_target"),
-    push_url_base: str = Query("/v2/vendors", alias="push_url_base"),
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Search vendors by MPN via MaterialVendorHistory."""
-    from ..models.intelligence import MaterialCard, MaterialVendorHistory
-    from ..utils.normalization import normalize_mpn
-
-    hx_target, push_url_base = _sanitize_hx_params(hx_target, push_url_base, "/v2/vendors")
-
-    results = []
-    norm_mpn = normalize_mpn(mpn) if mpn.strip() else None
-
-    if norm_mpn:
-        rows = (
-            db.query(MaterialVendorHistory, VendorCard)
-            .join(MaterialCard, MaterialVendorHistory.material_card_id == MaterialCard.id)
-            .outerjoin(VendorCard, VendorCard.normalized_name == MaterialVendorHistory.vendor_name_normalized)
-            .filter(MaterialCard.normalized_mpn == norm_mpn)
-            .order_by(
-                MaterialVendorHistory.times_seen.desc(),
-                VendorCard.response_rate.desc().nullslast(),
-                VendorCard.total_pos.desc().nullslast(),
-                VendorCard.avg_response_hours.asc().nullslast(),
-            )
-            .limit(30)
-            .all()
-        )
-        for mvh, vc in rows:
-            results.append(
-                {
-                    "vendor_name": mvh.vendor_name,
-                    "vendor_id": vc.id if vc else None,
-                    "times_seen": mvh.times_seen or 0,
-                    "last_price": mvh.last_price,
-                    "last_qty": mvh.last_qty,
-                    "last_seen": mvh.last_seen,
-                    "win_rate": vc.overall_win_rate if vc else None,
-                    "avg_response_hours": vc.avg_response_hours if vc else None,
-                    "is_affinity": False,
-                }
-            )
-
-    # If few MVH results, try vendor affinity matching
-    if norm_mpn and len(results) < 10:
-        try:
-            from app.services.vendor_affinity_service import find_vendor_affinity
-
-            affinity_matches = find_vendor_affinity(norm_mpn, db)
-
-            # Add affinity matches that aren't already in results
-            existing_vendors = {r["vendor_name"].lower() for r in results}
-            for match in affinity_matches:
-                vname = match.get("vendor_name", "")
-                if vname.lower() not in existing_vendors:
-                    results.append(
-                        {
-                            "vendor_name": vname,
-                            "vendor_id": match.get("vendor_id"),
-                            "times_seen": 0,
-                            "last_price": None,
-                            "last_qty": None,
-                            "last_seen": None,
-                            "win_rate": None,
-                            "avg_response_hours": None,
-                            "is_affinity": True,
-                            "affinity_confidence": match.get("confidence", 0),
-                            "affinity_reasoning": match.get("reasoning", ""),
-                        }
-                    )
-        except Exception:
-            logger.warning(f"Vendor affinity lookup failed for {norm_mpn}", exc_info=True)
-
-    ctx = _base_ctx(request, user, "vendors")
-    ctx.update(
-        {
-            "mpn": mpn.strip().upper() if mpn.strip() else None,
-            "results": results,
-            "hx_target": hx_target,
-            "push_url_base": push_url_base,
-        }
-    )
-    return template_response("htmx/partials/vendors/find_by_part.html", ctx)
-
-
 @router.get("/v2/partials/vendors/create-form", response_class=HTMLResponse)
 async def vendor_create_form_early(
     request: Request,
@@ -5434,6 +5344,7 @@ async def vendor_prospect_save(
     pc = db.query(ProspectContact).filter(ProspectContact.id == prospect_id).first()
     if not pc:
         raise HTTPException(404, "Prospect contact not found")
+    require_prospect_site_access(db, user, pc)
 
     pc.is_saved = True
     pc.saved_by_id = user.id
@@ -5461,6 +5372,7 @@ async def vendor_prospect_promote(
     pc = db.query(ProspectContact).filter(ProspectContact.id == prospect_id).first()
     if not pc:
         raise HTTPException(404, "Prospect contact not found")
+    require_prospect_site_access(db, user, pc)
 
     # Dedup: check if email already exists on this vendor
     existing = None
@@ -5518,6 +5430,7 @@ async def vendor_prospect_delete(
     pc = db.query(ProspectContact).filter(ProspectContact.id == prospect_id).first()
     if not pc:
         raise HTTPException(404, "Prospect contact not found")
+    require_prospect_site_access(db, user, pc)
     db.delete(pc)
     db.commit()
     # Return empty string to remove the card from DOM
@@ -6394,9 +6307,19 @@ async def create_company(
         tax_id=form.get("tax_id", "").strip() or None,
         source=form.get("source", "").strip() or "manual",
     )
+    # Assigning a NEW account to someone other than yourself is a manager action, and the
+    # target must be a real active user (mirrors the bulk assign-owner path). A plain rep
+    # assigning to self / leaving it blank keeps the current behaviour.
     owner_id = form.get("owner_id", "")
     if owner_id and owner_id.isdigit():
-        company.account_owner_id = int(owner_id)
+        new_owner_id = int(owner_id)
+        if new_owner_id != user.id:
+            if not is_manager_or_admin(user):
+                raise HTTPException(403, "Only a manager can assign an account to another user")
+            target = db.get(User, new_owner_id)
+            if not target or not target.is_active:
+                raise HTTPException(400, "Owner must be an active user")
+        company.account_owner_id = new_owner_id
     db.add(company)
     db.flush()
 
@@ -7676,8 +7599,7 @@ async def company_detail_partial(
             ),
             Requisition.status.in_(
                 [
-                    RequisitionStatus.ACTIVE,
-                    RequisitionStatus.SOURCING,
+                    RequisitionStatus.OPEN,
                     RequisitionStatus.DRAFT,
                 ]
             ),
@@ -9035,11 +8957,23 @@ async def edit_company(
     company.source = source or company.source
     tax_id = form.get("tax_id", "").strip()
     company.tax_id = tax_id or None
+    # Owner reassignment is a TEAM action — only the primary owner / a manager may seize
+    # primary ownership (can_manage_account admits collaborators + site-owners, who must
+    # NOT be able to lock out the real owner). Gate only when the value actually changes.
     owner_id = form.get("owner_id", "")
     if owner_id and owner_id.isdigit():
-        company.account_owner_id = int(owner_id)
+        new_owner_id = int(owner_id)
+        if new_owner_id != company.account_owner_id:
+            if not can_manage_account_team(user, company):
+                raise HTTPException(403, "Only the account owner or a manager can change the primary owner")
+            company.account_owner_id = new_owner_id
 
     parent_company_id_raw = form.get("parent_company_id", "").strip()
+    # Parent-company (hierarchy) edits are also a team action — match set_parent_company,
+    # which gates on owner/manager — so a collaborator can't restructure the hierarchy.
+    if parent_company_id_raw != (str(company.parent_company_id or "")):
+        if not can_manage_account_team(user, company):
+            raise HTTPException(403, "Only the account owner or a manager can change company hierarchy")
     _set_parent_company(db, company, parent_company_id_raw)
 
     # Registry fields — DRY via apply_company_field.
@@ -10495,16 +10429,17 @@ async def send_batch_follow_up(
     threshold_days = getattr(cfg, "follow_up_days", 2) if cfg else 2
     threshold = datetime.now(timezone.utc) - timedelta(days=threshold_days)
 
-    stale = (
-        db.query(RfqContact)
-        .filter(
-            RfqContact.contact_type == "email",
-            RfqContact.status.in_(["sent", "opened"]),
-            RfqContact.created_at < threshold,
-        )
-        .limit(50)
-        .all()
+    q = db.query(RfqContact).filter(
+        RfqContact.contact_type == "email",
+        RfqContact.status.in_(["sent", "opened"]),
+        RfqContact.created_at < threshold,
     )
+    # Restricted roles act only on contacts under their own requisitions; buyer/manager/admin
+    # stay global. Keep this in lockstep with follow_up_badge so the badge counts what the
+    # batch acts on.
+    if user.role in RESTRICTED_ROLES:
+        q = q.join(Requisition, RfqContact.requisition_id == Requisition.id).filter(Requisition.created_by == user.id)
+    stale = q.limit(50).all()
 
     sent_count = 0
     for contact in stale:
@@ -10530,16 +10465,15 @@ async def follow_up_badge(
     from ..models.offers import Contact as RfqContact
 
     threshold = datetime.now(timezone.utc) - timedelta(days=2)
-    count = (
-        db.query(sqlfunc.count(RfqContact.id))
-        .filter(
-            RfqContact.contact_type == "email",
-            RfqContact.status.in_(["sent", "opened"]),
-            RfqContact.created_at < threshold,
-        )
-        .scalar()
-        or 0
+    q = db.query(sqlfunc.count(RfqContact.id)).filter(
+        RfqContact.contact_type == "email",
+        RfqContact.status.in_(["sent", "opened"]),
+        RfqContact.created_at < threshold,
     )
+    # Same per-owner scope as send_batch_follow_up so the badge matches the batch.
+    if user.role in RESTRICTED_ROLES:
+        q = q.join(Requisition, RfqContact.requisition_id == Requisition.id).filter(Requisition.created_by == user.id)
+    count = q.scalar() or 0
     if count > 0:
         return HTMLResponse(
             f'<span class="ml-auto px-1.5 py-0.5 text-[10px] font-bold text-white bg-amber-500 rounded-full">{count}</span>'
@@ -10750,8 +10684,7 @@ async def dashboard_partial(
         .filter(
             Requisition.status.in_(
                 [
-                    RequisitionStatus.ACTIVE,
-                    RequisitionStatus.SOURCING,
+                    RequisitionStatus.OPEN,
                     RequisitionStatus.DRAFT,
                 ]
             )
@@ -11072,6 +11005,7 @@ def _render_supervise_body(request: Request, user: User, db: Session) -> HTMLRes
             "archive": completed_archive(db, user, scope="all"),
             "is_ops": _is_ops_member(user, db),
             "is_manager": user.role in (UserRole.MANAGER, UserRole.ADMIN),
+            "can_approve": can_approve_buy_plans(user),
             "user": user,
         }
     )
@@ -11122,6 +11056,8 @@ async def buy_plan_detail_partial(
             "lines": bp.lines or [],
             "is_ops_member": _is_ops_member(user, db),
             "user": user,
+            # Most-urgent flag reason so the indicator states the issue at first glance.
+            "top_flag": summarize_top_flag(bp.ai_flags),
         }
     )
     return template_response("htmx/partials/buy_plans/detail.html", ctx)
@@ -11174,10 +11110,14 @@ async def buy_plan_submit_partial(
 async def buy_plan_approve_partial(
     request: Request,
     plan_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_buyplan_approver),
     db: Session = Depends(get_db),
 ):
-    """Manager approves or rejects a pending buy plan — returns refreshed detail."""
+    """Approve or reject a pending buy plan — returns refreshed detail.
+
+    Gated by ``require_buyplan_approver`` (403 unless the user holds the per-user
+    can_approve_buy_plans right). Reject requires a reason (enforced in the service).
+    """
     from ..services.buyplan_notifications import (
         notify_approved,
         notify_rejected,
@@ -11189,9 +11129,6 @@ async def buy_plan_approve_partial(
     action = form.get("action", "approve")
     origin = form.get("origin", "")
 
-    if user.role not in (UserRole.MANAGER, UserRole.ADMIN):
-        raise HTTPException(403, "Manager or admin role required")
-
     try:
         plan = approve_buy_plan(plan_id, action, user, db, notes=form.get("notes"))
         db.commit()
@@ -11199,7 +11136,11 @@ async def buy_plan_approve_partial(
             await run_notify_bg(notify_approved, plan.id)
         else:
             await run_notify_bg(notify_rejected, plan.id)
-    except (ValueError, PermissionError) as e:
+    except PermissionError as e:
+        # The dependency already 403s unauthorized callers; this maps the service's
+        # defense-in-depth approval-right check to 403 (not 400) if it is ever reached.
+        raise HTTPException(403, str(e))
+    except ValueError as e:
         raise HTTPException(400, str(e))
 
     if origin == "supervise":
@@ -11426,6 +11367,52 @@ async def settings_users_tab(
     return template_response("htmx/partials/settings/users.html", ctx)
 
 
+@router.get("/v2/partials/settings/scorecard", response_class=HTMLResponse)
+async def settings_scorecard_tab(
+    request: Request,
+    time_range: str = "this_month",
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Activity Scorecard tab — per-user activity leaderboard. Manager/admin only.
+
+    A leaderboard of all users' activity is oversight/performance data, so it is gated
+    to the supervisor tier (MANAGER + ADMIN) via is_manager_or_admin — buyers/sales/
+    traders never see it. On an HX-Request triggered by the time-range selector only the
+    table fragment is swapped; the first paint (and a direct hit) renders the full tab.
+    """
+    if not is_manager_or_admin(user):
+        raise HTTPException(403, "Managers and admins only")
+    from ..services.activity_scorecard import (
+        DEFAULT_TIME_RANGE,
+        TALK_TIME_BUCKET_SECONDS,
+        TIME_RANGE_LABELS,
+        TIME_RANGES,
+        compute_scorecard,
+        scoring_formula_parts,
+    )
+
+    if time_range not in TIME_RANGES:
+        time_range = DEFAULT_TIME_RANGE
+
+    ctx = _base_ctx(request, user, "settings")
+    ctx.update(
+        {
+            "rows": compute_scorecard(db, time_range),
+            "time_range": time_range,
+            "time_ranges": TIME_RANGES,
+            "time_range_labels": TIME_RANGE_LABELS,
+            "formula_parts": scoring_formula_parts(),
+            "talk_bucket_min": TALK_TIME_BUCKET_SECONDS // 60,
+        }
+    )
+
+    # Time-range selector swaps only the table fragment; full-tab on first paint.
+    if request.headers.get("HX-Request") == "true" and request.headers.get("HX-Trigger-Name") == "time_range":
+        return template_response("htmx/partials/settings/_scorecard_table.html", ctx)
+    return template_response("htmx/partials/settings/scorecard.html", ctx)
+
+
 @router.post("/v2/partials/buy-plans/{plan_id}/reset", response_class=HTMLResponse)
 async def buy_plan_reset_partial(
     request: Request,
@@ -11530,6 +11517,8 @@ async def sourcing_search_trigger(
     req = db.query(Requirement).filter(Requirement.id == requirement_id).first()
     if not req:
         raise HTTPException(404, "Requirement not found")
+    # Search triggers connector SPEND + cross-owner disclosure — scope to the owner.
+    require_requisition_access(db, req.requisition_id, user, label="Requirement")
 
     mpn = req.primary_mpn or ""
     sources = ["brokerbin", "nexar", "digikey", "mouser", "oemsecrets", "element14"]
@@ -13454,6 +13443,7 @@ async def build_buy_plan_htmx(
     ctx["lines"] = bp_lines
     ctx["user"] = user
     ctx["is_ops_member"] = _is_ops_member(user, db)
+    ctx["top_flag"] = summarize_top_flag(plan.ai_flags)
     return template_response("htmx/partials/buy_plans/detail.html", ctx)
 
 
@@ -14108,6 +14098,8 @@ async def settings_partial(
     ctx = _base_ctx(request, user, "settings")
     ctx["active_tab"] = tab
     ctx["is_admin"] = user.role == UserRole.ADMIN
+    # Supervisor-tier flag — gates the Activity Scorecard tab (manager + admin).
+    ctx["is_manager"] = is_manager_or_admin(user)
     return template_response("htmx/partials/settings/index.html", ctx)
 
 
@@ -14384,6 +14376,22 @@ def _build_connector_field(db, source_name: str, env_var: str) -> dict:
     return {"is_set": is_set, "masked": masked}
 
 
+def _worker_status_row(source_name: str, db):
+    """Return the worker-status singleton for a worker-backed source (or None).
+
+    Maps an ApiSource.name (thebrokersite/netcomponents/icsource) to its heartbeat model
+    via connector_service.WORKER_BACKED_SOURCES, reading the id=1 singleton.
+    """
+    from ..models import IcsWorkerStatus, NcWorkerStatus, TbfWorkerStatus
+    from ..services import connector_service
+
+    worker_key = connector_service.WORKER_BACKED_SOURCES.get(source_name)
+    model = {"tbf": TbfWorkerStatus, "nc": NcWorkerStatus, "ics": IcsWorkerStatus}.get(worker_key)
+    if model is None:
+        return None
+    return db.get(model, 1)
+
+
 def _enrich_source(source, db) -> dict:
     """Build the per-source context dict for the connectors tab."""
     from ..services import connector_service
@@ -14405,12 +14413,18 @@ def _enrich_source(source, db) -> dict:
         oauth_connected = False
         needs_reconnect = False
 
+    # Worker-backed sources: derive status from the worker heartbeat, not a direct API.
+    worker = None
+    if connector_service.is_worker_backed(source):
+        worker = connector_service.worker_health(_worker_status_row(name, db))
+
     state = connector_service.connector_state(
         source,
         credential_set=credential_set,
         oauth_connected=oauth_connected,
         needs_reconnect=needs_reconnect,
         keyless=keyless,
+        worker=worker,
     )
 
     # Keyless note
@@ -14422,11 +14436,14 @@ def _enrich_source(source, db) -> dict:
     else:
         keyless_note = ""
 
-    # Planned connectors are never testable — they have no implementation yet.
-    if ct == "planned":
+    # Testability:
+    #  - planned: never (no implementation yet)
+    #  - worker-backed: never via the API-probe Test button — health is the heartbeat,
+    #    not a synchronous search (the worker runs out-of-process on a schedule)
+    #  - else: has some form of access
+    if ct == "planned" or worker is not None:
         testable = False
     else:
-        # Testable = has some form of access
         testable = bool(credential_set or oauth_connected or keyless)
 
     return {
@@ -14447,6 +14464,8 @@ def _enrich_source(source, db) -> dict:
         "error_count_24h": getattr(source, "error_count_24h", 0) or 0,
         "keyless_note": keyless_note,
         "testable": testable,
+        # Worker-backed health (None for direct-API/keyless/oauth sources).
+        "worker": worker,
     }
 
 
@@ -15312,6 +15331,14 @@ async def proactive_do_not_offer(
         cid = int(company_id)
     except (ValueError, TypeError):
         raise HTTPException(400, "company_id must be an integer")
+
+    # Authz: a do-not-offer rule is scoped to a customer account, so the actor must be
+    # able to manage that account — otherwise a cross-account actor could suppress offers
+    # for any company by passing an arbitrary company_id in the form.
+    company = db.get(Company, cid)
+    if not company or not can_manage_account(user, company, db):
+        raise HTTPException(403, "Not authorized to manage this account")
+
     if not is_do_not_offer(db, mpn, cid):
         dno = ProactiveDoNotOffer(
             mpn=mpn.upper(),
@@ -15582,49 +15609,72 @@ async def admin_api_health(
     )
 
 
-@router.post("/v2/partials/admin/import/vendors", response_class=HTMLResponse)
-async def import_vendors_csv(
+@router.post("/v2/partials/vendors/import-stock", response_class=HTMLResponse)
+async def import_vendor_stock_list(
     request: Request,
-    user: User = Depends(require_admin),
+    user: User = Depends(require_buyer),
     db: Session = Depends(get_db),
 ):
-    """Import vendors from CSV upload."""
+    """Ingest a vendor stock-list upload (CSV/TSV/XLSX) from the Vendors-page modal.
+
+    Thin wrapper over the shared ``stock_list_ingest`` service (same ingest the JSON
+    ``POST /api/materials/import-stock`` endpoint uses). Returns an HTML result banner that
+    HTMX swaps into ``#vendor-stock-result``.
+    """
+    from ..services.stock_list_ingest import (
+        StockListValidationError,
+        ingest_stock_list,
+        maybe_trigger_vendor_enrichment,
+        validate_metadata,
+    )
+
     form = await request.form()
     file = form.get("file")
     if not file:
-        raise HTTPException(400, "CSV file is required")
+        return template_response(
+            "htmx/partials/vendors/stock_import_result.html",
+            {"request": request, "error": "A stock-list file is required."},
+        )
 
-    import csv
-    import io
+    filename = file.filename or "upload.csv"
+    vendor_name = form.get("vendor_name") or ""
+    try:
+        # Cheap checks (type + vendor) first — reject before buffering the body.
+        validate_metadata(filename, vendor_name)
+        content = await file.read()
+        result = ingest_stock_list(
+            db,
+            filename=filename,
+            content=content,
+            vendor_name=vendor_name,
+            vendor_website=(form.get("vendor_website") or ""),
+        )
+    except StockListValidationError as exc:
+        return template_response(
+            "htmx/partials/vendors/stock_import_result.html",
+            {"request": request, "error": exc.message},
+        )
 
-    content = await file.read()
-    reader = csv.DictReader(io.StringIO(content.decode("utf-8")))
-    count = 0
-    for row in reader:
-        name = row.get("name", "").strip()
-        if not name:
-            continue
-        from ..vendor_utils import normalize_vendor_name
+    await maybe_trigger_vendor_enrichment(db, result)
+    logger.info(
+        "Vendor stock-list upload by {}: vendor={!r} imported={} skipped={}",
+        user.email,
+        result.vendor_name,
+        result.imported_rows,
+        result.skipped_rows,
+    )
 
-        norm = normalize_vendor_name(name)
-        existing = db.query(VendorCard).filter(VendorCard.normalized_name == norm).first()
-        if not existing:
-            vc = VendorCard(
-                display_name=name,
-                normalized_name=norm,
-                emails=[row.get("email", "")] if row.get("email") else [],
-                phones=[row.get("phone", "")] if row.get("phone") else [],
-                website=row.get("website", ""),
-                sighting_count=0,
-            )
-            db.add(vc)
-            count += 1
-    db.commit()
-    logger.info("Vendor CSV import: {} new vendors by {}", count, user.email)
-
-    return HTMLResponse(
-        f'<div class="bg-emerald-50 border border-emerald-200 rounded p-3 text-sm text-emerald-700">'
-        f"Imported {count} new vendors from CSV.</div>"
+    return template_response(
+        "htmx/partials/vendors/stock_import_result.html",
+        {
+            "request": request,
+            "error": None,
+            "vendor_name": result.vendor_name,
+            "imported_rows": result.imported_rows,
+            "skipped_rows": result.skipped_rows,
+            "total_rows": result.total_rows,
+            "warnings": result.warnings,
+        },
     )
 
 
@@ -15705,8 +15755,7 @@ async def parts_list_partial(
         query = query.filter(
             Requisition.status.in_(
                 [
-                    RequisitionStatus.ACTIVE,
-                    RequisitionStatus.SOURCING,
+                    RequisitionStatus.OPEN,
                 ]
             )
         )
@@ -16644,69 +16693,6 @@ async def unarchive_single_part(
     return await parts_list_partial(request=request, user=user, db=db)
 
 
-@router.patch("/v2/partials/requisitions/{req_id}/archive", response_class=HTMLResponse)
-async def archive_requisition(
-    req_id: int,
-    request: Request,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Archive a whole requisition and cascade to all its requirements."""
-    requisition = db.get(Requisition, req_id)
-    if not requisition:
-        raise HTTPException(404, "Requisition not found")
-    require_requisition_access(db, req_id, user)
-
-    prior_status = requisition.status
-    requisition.status = RequisitionStatus.ARCHIVED
-    for child in requisition.requirements:
-        child.sourcing_status = SourcingStatus.ARCHIVED
-    if prior_status != RequisitionStatus.ARCHIVED:
-        _log_activity(
-            db,
-            activity_type=ActivityType.REQ_ARCHIVED,
-            requisition_id=requisition.id,
-            user_id=user.id,
-            description="Requisition archived",
-        )
-    db.commit()
-    logger.info("Requisition {} ({} parts) archived by {}", req_id, len(requisition.requirements), user.email)
-
-    return await parts_list_partial(request=request, user=user, db=db)
-
-
-@router.patch("/v2/partials/requisitions/{req_id}/unarchive", response_class=HTMLResponse)
-async def unarchive_requisition(
-    req_id: int,
-    request: Request,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Unarchive a requisition and restore all its requirements to open."""
-    requisition = db.get(Requisition, req_id)
-    if not requisition:
-        raise HTTPException(404, "Requisition not found")
-    require_requisition_access(db, req_id, user)
-
-    prior_status = requisition.status
-    requisition.status = RequisitionStatus.ACTIVE
-    for child in requisition.requirements:
-        if child.sourcing_status == SourcingStatus.ARCHIVED:
-            child.sourcing_status = SourcingStatus.OPEN
-    if prior_status != RequisitionStatus.ACTIVE:
-        _log_activity(
-            db,
-            activity_type=ActivityType.REQ_UNARCHIVED,
-            requisition_id=requisition.id,
-            user_id=user.id,
-            description="Requisition unarchived",
-        )
-    db.commit()
-    logger.info("Requisition {} unarchived by {}", req_id, user.email)
-
-    return await parts_list_partial(request=request, user=user, db=db)
-
-
 @router.post("/v2/partials/parts/bulk-archive", response_class=HTMLResponse)
 async def bulk_archive(
     request: Request,
@@ -16734,19 +16720,9 @@ async def bulk_archive(
             Requirement.id.in_(requirement_ids),
         ).update({"sourcing_status": SourcingStatus.ARCHIVED}, synchronize_session="fetch")
 
-    # Archive requisitions and cascade to their children
+    # Archive every part belonging to the named requisitions (part-level
+    # sourcing_status — there is no requisition-level archive/hide flag).
     if requisition_ids:
-        reqs = db.query(Requisition).filter(Requisition.id.in_(requisition_ids)).all()
-        for requisition in reqs:
-            requisition.status = RequisitionStatus.ARCHIVED
-            _log_activity(
-                db,
-                activity_type=ActivityType.REQ_ARCHIVED,
-                requisition_id=requisition.id,
-                user_id=user.id,
-                description="Requisition archived",
-            )
-        # Cascade: archive all children of these requisitions
         db.query(Requirement).filter(
             Requirement.requisition_id.in_(requisition_ids),
         ).update({"sourcing_status": SourcingStatus.ARCHIVED}, synchronize_session="fetch")
@@ -16785,12 +16761,9 @@ async def bulk_unarchive(
             Requirement.sourcing_status == SourcingStatus.ARCHIVED,
         ).update({"sourcing_status": SourcingStatus.OPEN}, synchronize_session="fetch")
 
-    # Unarchive requisitions and cascade to their children
+    # Restore every archived part belonging to the named requisitions
+    # (part-level sourcing_status — there is no requisition-level archive flag).
     if requisition_ids:
-        reqs = db.query(Requisition).filter(Requisition.id.in_(requisition_ids)).all()
-        for requisition in reqs:
-            requisition.status = RequisitionStatus.ACTIVE
-        # Cascade: restore archived children of these requisitions
         db.query(Requirement).filter(
             Requirement.requisition_id.in_(requisition_ids),
             Requirement.sourcing_status == SourcingStatus.ARCHIVED,

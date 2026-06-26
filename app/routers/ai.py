@@ -22,6 +22,7 @@ from ..database import get_db
 from ..dependencies import (
     can_manage_account,
     get_req_for_user,
+    require_prospect_site_access,
     require_requisition_access,
     require_user,
 )
@@ -260,6 +261,7 @@ async def save_prospect_contact(
     pc = db.query(ProspectContact).filter(ProspectContact.id == contact_id).first()
     if not pc:
         raise HTTPException(404, "Prospect contact not found")
+    require_prospect_site_access(db, user, pc)
     pc.is_saved = True
     pc.saved_by_id = user.id
     if payload and payload.notes:
@@ -289,6 +291,7 @@ async def delete_prospect_contact(
     pc = db.query(ProspectContact).filter(ProspectContact.id == contact_id).first()
     if not pc:
         raise HTTPException(404, "Prospect contact not found")
+    require_prospect_site_access(db, user, pc)
     db.delete(pc)
     db.commit()
     return {"ok": True}
@@ -304,13 +307,8 @@ async def promote_prospect_contact(
     # Authz: a site-linked prospect promotes into a SiteContact under a customer account,
     # so gate it on account-management. Vendor-linked prospects are global (no owner).
     pc = db.get(ProspectContact, contact_id)
-    if pc is not None and pc.customer_site_id and not pc.vendor_card_id:
-        from ..models import Company
-
-        site = db.get(CustomerSite, pc.customer_site_id)
-        company = db.get(Company, site.company_id) if site else None
-        if not company or not can_manage_account(user, company, db):
-            raise HTTPException(403, "Not authorized to manage this account")
+    if pc is not None:
+        require_prospect_site_access(db, user, pc)
 
     from ..services.ai_offer_service import promote_prospect_contact as _promote
 
@@ -760,6 +758,17 @@ async def ai_apply_freeform_rfq(
 
     if not payload.customer_site_id:
         raise HTTPException(400, "customer_site_id required")
+
+    # Creating a requisition under a customer site is an account action — gate it on
+    # account-management (mirrors the prospect-contact site gate).
+    from ..models import Company
+
+    site = db.get(CustomerSite, payload.customer_site_id)
+    if not site:
+        raise HTTPException(404, "Customer site not found")
+    company = db.get(Company, site.company_id) if site.company_id else None
+    if not company or not can_manage_account(user, company, db):
+        raise HTTPException(403, "Not authorized to manage this account")
 
     try:
         result = _apply(

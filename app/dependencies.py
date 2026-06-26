@@ -18,15 +18,19 @@ Depends on: models, database, config
 
 import hmac
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from fastapi import Depends, HTTPException, Request
 from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from .constants import RESTRICTED_ROLES, ROLE_ACCESS_DEFAULTS, AccessKey, UserRole
+from .constants import RESTRICTED_ROLES, ROLE_ACCESS_DEFAULTS, AccessKey, ApprovalRecipientStatus, UserRole
 from .database import get_db
 from .models import AccountCollaborator, BuyPlan, Company, CustomerSite, Quote, Requisition, User
+
+if TYPE_CHECKING:
+    from .models import ProspectContact
 
 # Non-interactive service account seeded by startup.py. It authenticates via the
 # x-agent-key header and is barred from admin/settings/buyer (RFQ) endpoints.
@@ -121,6 +125,23 @@ def can_manage_account(user: User, company: Company, db: "Session") -> bool:  # 
         .exists()
     )
     return bool(db.scalar(select(collab_exists)))
+
+
+def require_prospect_site_access(db: Session, user: User, pc: "ProspectContact") -> None:
+    """Gate a mutation on a site-linked prospect contact on account-management rights.
+
+    A prospect tied to a CustomerSite belongs to a customer account, so the actor must be
+    able to manage that account (mirrors the promote-prospect path). Vendor-linked prospects
+    (``pc.vendor_card_id``) are global and stay un-gated. Raises 403 if not authorized.
+
+    Shared by the JSON prospect endpoints (``app/routers/ai.py``) and the HTMX
+    vendor-prospect partials (``app/routers/htmx_views.py``) so the guard lives once.
+    """
+    if pc.customer_site_id and not pc.vendor_card_id:
+        site = db.get(CustomerSite, pc.customer_site_id)
+        company = db.get(Company, site.company_id) if site else None
+        if not company or not can_manage_account(user, company, db):
+            raise HTTPException(403, "Not authorized to manage this account")
 
 
 def can_manage_account_team(user: User, company: Company) -> bool:
@@ -221,6 +242,87 @@ def require_buyer(request: Request, db: Session = Depends(get_db)) -> User:
     if not has_buyer_role(user):
         raise HTTPException(403, "Buyer role required for this action")
     return user
+
+
+# ── Buy-plan approval right (per-user grant) ──────────────────────────
+
+
+def can_approve_buy_plans(user: User | None) -> bool:
+    """True if *user* holds the per-user buy-plan approval right.
+
+    Reads the User.can_approve_buy_plans column directly (single source of truth — the
+    grant is admin-toggled in Users settings, not role-derived). This predicate is the
+    shared gate so any surface that hides the approve/reject UI checks the SAME flag the
+    POST enforces via require_buyplan_approver.
+    """
+    return bool(user is not None and getattr(user, "can_approve_buy_plans", False))
+
+
+def require_buyplan_approver(request: Request, db: Session = Depends(get_db)) -> User:
+    """Dependency: 403 unless the current user holds the buy-plan approval right.
+
+    Gates the buy-plan approve/reject action (wired by a separate task). The right is a
+    per-user grant (User.can_approve_buy_plans), not a role — see can_approve_buy_plans.
+    """
+    user = require_user(request, db)
+    if not can_approve_buy_plans(user):
+        raise HTTPException(403, "Buy-plan approval right required for this action")
+    return user
+
+
+def require_approval_gatekeeper(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+) -> User:
+    """Dependency: 403 unless the current user is a PENDING recipient on this request.
+
+    Resolves request_id from path param "id". Checks:
+      - Direct PENDING row: ApprovalStepRecipient.user_id == user.id
+      - Delegate row: ApprovalStepRecipient.reassigned_to_id == user.id (status PENDING)
+
+    Using Depends(require_user) so test overrides propagate correctly.
+    """
+    from .models.approvals import ApprovalStep, ApprovalStepRecipient
+
+    request_id_str = request.path_params.get("id")
+    if not request_id_str:
+        raise HTTPException(403, "No request id in path")
+
+    try:
+        request_id = int(request_id_str)
+    except (ValueError, TypeError):
+        raise HTTPException(403, "Invalid request id")
+
+    # Direct PENDING recipient
+    recipient = db.execute(
+        select(ApprovalStepRecipient)
+        .join(ApprovalStep, ApprovalStepRecipient.step_id == ApprovalStep.id)
+        .where(
+            ApprovalStep.request_id == request_id,
+            ApprovalStepRecipient.user_id == user.id,
+            ApprovalStepRecipient.status == ApprovalRecipientStatus.PENDING,
+        )
+    ).scalar_one_or_none()
+
+    if recipient is not None:
+        return user
+
+    # Delegate: another slot was reassigned_to_id == user.id and is still PENDING
+    delegate = db.execute(
+        select(ApprovalStepRecipient)
+        .join(ApprovalStep, ApprovalStepRecipient.step_id == ApprovalStep.id)
+        .where(
+            ApprovalStep.request_id == request_id,
+            ApprovalStepRecipient.reassigned_to_id == user.id,
+            ApprovalStepRecipient.status == ApprovalRecipientStatus.PENDING,
+        )
+    ).scalar_one_or_none()
+
+    if delegate is not None:
+        return user
+
+    raise HTTPException(403, "You are not a pending recipient of this approval request")
 
 
 # ── Per-feature access (user-management foundation) ───────────────────

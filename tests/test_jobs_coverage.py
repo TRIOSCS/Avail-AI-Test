@@ -126,7 +126,7 @@ def _make_req_mock(id_, deadline, req_name):
 
     MagicMock.name is reserved, so we use a SimpleNamespace instead.
     """
-    return SimpleNamespace(id=id_, deadline=deadline, name=req_name, status="active")
+    return SimpleNamespace(id=id_, deadline=deadline, name=req_name, status="open")
 
 
 def _db_returning_reqs(mock_db, reqs):

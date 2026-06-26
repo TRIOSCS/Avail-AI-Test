@@ -2,7 +2,7 @@
 audit).
 
 Covers: follow-up send (email), sourcing-lead status/feedback, sightings batch
-assign/status/notes, requisitions2 bulk action, and core batch-archive. A restricted
+assign/status/notes, requisitions2 bulk action, and core batch-assign. A restricted
 non-owner must be unable to act on another user's requisition-scoped resource.
 """
 
@@ -120,24 +120,27 @@ def test_batch_notes_blocks_non_owner_sales(client, db_session, test_requisition
     assert resp.status_code == 404
 
 
-# ── requisitions2 bulk + core batch-archive now restrict TRADER too ──────────
-def test_bulk_action_silently_excludes_non_owner_trader(client, db_session, test_requisition, test_user, admin_user):
+# ── requisitions2 bulk + core batch-assign restrict TRADER too ───────────────
+# (Requisition archiving was removed — a req ends in Won or Lost. The only bulk
+#  action is owner re-assignment, which is manager/admin-only; a restricted TRADER
+#  non-owner must not be able to reassign another user's requisition.)
+def test_bulk_assign_blocks_non_owner_trader(client, db_session, test_requisition, test_user, admin_user):
     test_user.role = UserRole.TRADER
     test_requisition.created_by = admin_user.id
     db_session.commit()
-    client.post("/requisitions2/bulk/archive", data={"ids": str(test_requisition.id)})
+    resp = client.post(
+        "/requisitions2/bulk/assign",
+        data={"ids": str(test_requisition.id), "owner_id": str(test_user.id)},
+    )
+    assert resp.status_code == 403  # trader is not manager/admin
     db_session.refresh(test_requisition)
-    assert test_requisition.status != "archived"  # trader non-owner cannot archive it
+    assert test_requisition.created_by == admin_user.id  # ownership unchanged
 
 
-def test_batch_archive_excludes_non_owner_trader(client, db_session, test_requisition, test_user, admin_user):
-    test_user.role = UserRole.TRADER
-    test_requisition.created_by = admin_user.id
-    db_session.commit()
-    resp = client.put("/api/requisitions/batch-archive", json={"ids": [test_requisition.id]})
-    assert resp.status_code == 200
-    db_session.refresh(test_requisition)
-    assert test_requisition.status != "archived"
+# (The core PUT /api/requisitions/batch-assign endpoint is require_admin-gated in
+#  production; the test `client` fixture overrides require_admin, so role-based
+#  rejection there is not observable here. The requisitions2 bulk/assign case above
+#  covers the in-handler manager/admin gate, which the fixture does NOT bypass.)
 
 
 # ── parts bulk archive/unarchive + sightings batch-refresh (round-2 misses) ──

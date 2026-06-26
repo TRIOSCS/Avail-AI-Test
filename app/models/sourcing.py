@@ -46,12 +46,16 @@ class Requisition(Base):
     customer_name = Column(String(255))
     customer_site_id = Column(Integer, ForeignKey("customer_sites.id", ondelete="SET NULL"))
     company_id = Column(Integer, ForeignKey("companies.id", ondelete="SET NULL"))
-    status = Column(String(50), default="active")
+    status = Column(String(50), default="open")
     # Provenance flag: scratch / quick-source reqs are created by a one-off Search action
     # (Send RFQ / Add Offer) so those flows have a home. Orthogonal to the `status`
     # lifecycle; hidden from the normal requisitions list + picker; flipped to False when
     # promoted (customer/name set). See services/quick_source_service.py.
     is_scratch = Column(Boolean, nullable=False, default=False, server_default="false")
+    # Required Won/Lost close reason (migration 158). Nullable at the DB level —
+    # the app enforces it only on a transition to WON or LOST (see
+    # services/requisition_state.transition), so non-closed reqs stay valid.
+    outcome_reason = Column(Text)
     cloned_from_id = Column(Integer, ForeignKey("requisitions.id", ondelete="SET NULL"))
     created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
     created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))

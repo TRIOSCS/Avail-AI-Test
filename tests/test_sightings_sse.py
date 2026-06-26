@@ -15,7 +15,7 @@ from app.models.vendor_sighting_summary import VendorSightingSummary
 
 def _seed_data(db_session):
     """Create requisition + requirement + sighting summary for testing."""
-    req = Requisition(name="Test RFQ", status="active", customer_name="Acme Corp")
+    req = Requisition(name="Test RFQ", status="open", customer_name="Acme Corp")
     db_session.add(req)
     db_session.flush()
     r = Requirement(

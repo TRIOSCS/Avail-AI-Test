@@ -147,7 +147,7 @@ class TestComputeAllEngagementScoresWinMap:
         req = Requisition(
             name="WIN-REQ",
             customer_name="Test Customer",
-            status="active",
+            status="open",
             created_by=user.id,
             created_at=datetime.now(timezone.utc),
         )

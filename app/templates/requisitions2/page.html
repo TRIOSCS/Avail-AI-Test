@@ -11,6 +11,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Requisitions — AvailAI</title>
+  {# App UI face: Inter (loaded web font) → Aptos → Segoe UI → system fallbacks. #}
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
   {# Vite-built CSS bundles — hash-named so cache-busting is automatic.
      No source fallback: /static/styles.css is raw Tailwind (@tailwind ...) that
      can't render and 404s via Caddy (serves dist) — matches base.html. #}

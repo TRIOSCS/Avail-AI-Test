@@ -206,7 +206,7 @@ def test_requisition(db_session: Session, test_user: User) -> Requisition:
     req = Requisition(
         name="REQ-TEST-001",
         customer_name="Acme Electronics",
-        status="active",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -442,6 +442,27 @@ def test_quote(
     db_session.commit()
     db_session.refresh(q)
     return q
+
+
+@pytest.fixture()
+def test_buy_plan(
+    db_session: Session,
+    test_quote: Quote,
+    test_requisition: Requisition,
+):  # -> BuyPlan (local import; type annotation omitted to satisfy ruff F821)
+    """A minimal BuyPlan linked to the test quote and requisition."""
+    from app.models.buy_plan import BuyPlan
+
+    bp = BuyPlan(
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status="draft",
+        so_status="pending",
+    )
+    db_session.add(bp)
+    db_session.commit()
+    db_session.refresh(bp)
+    return bp
 
 
 @pytest.fixture()

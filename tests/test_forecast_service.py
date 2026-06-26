@@ -24,7 +24,7 @@ from app.services.forecast_service import (
 from tests.conftest import engine  # noqa: F401
 
 
-def _req(db, created_by, *, status="active", value=None, company_id=None, claimed_by_id=None, created_at=None):
+def _req(db, created_by, *, status="open", value=None, company_id=None, claimed_by_id=None, created_at=None):
     req = Requisition(
         name=f"Req {status}",
         status=status,
@@ -41,7 +41,9 @@ def _req(db, created_by, *, status="active", value=None, company_id=None, claime
 
 class TestStageProbability:
     def test_known_statuses(self):
-        assert stage_probability("sourcing") == 0.25
+        assert stage_probability("open") == 0.10
+        assert stage_probability("rfqs_sent") == 0.25
+        assert stage_probability("offers") == 0.40
         assert stage_probability("quoted") == 0.75
         assert stage_probability("won") == 1.0
         assert stage_probability("lost") == 0.0
@@ -54,8 +56,27 @@ class TestStageProbability:
         # Open = 0 < p < 1 — excludes won (1.0) and dead (0.0).
         assert "won" not in OPEN_STATUSES
         assert "lost" not in OPEN_STATUSES
-        assert "sourcing" in OPEN_STATUSES
+        assert "rfqs_sent" in OPEN_STATUSES
         assert OPEN_STATUSES == frozenset(s for s, p in STAGE_WIN_PROBABILITY.items() if 0.0 < p < 1.0)
+
+    def test_live_pipeline_statuses_are_forecastable(self):
+        # Regression guard: the LIVE open statuses written by real requisitions
+        # (migration 158) must all carry a non-zero win probability AND be in
+        # OPEN_STATUSES — otherwise pipeline_summary silently zeros out (the
+        # exact bug the old draft/active/sourcing vocabulary caused).
+        for status in ("open", "rfqs_sent", "offers", "quoted"):
+            assert status in STAGE_WIN_PROBABILITY, f"{status} missing from ladder"
+            assert STAGE_WIN_PROBABILITY[status] > 0.0, f"{status} has zero probability"
+            assert status in OPEN_STATUSES, f"{status} not counted as open"
+
+    def test_terminal_and_monitor_excluded_from_open(self):
+        # hotlist is a MONITOR state (no win probability); won/lost/cancelled are
+        # TERMINAL. None of them belong to the open pipeline.
+        for status in ("hotlist", "won", "lost", "cancelled"):
+            assert status not in OPEN_STATUSES, f"{status} must not be open"
+        # hotlist carries no win probability at all (off-pipeline monitor).
+        assert "hotlist" not in STAGE_WIN_PROBABILITY
+        assert stage_probability("hotlist") == 0.0
 
 
 class TestBulkDealValues:
@@ -79,7 +100,7 @@ class TestBulkDealValues:
 
 class TestPipelineSummary:
     def test_weighted_math(self, db_session: Session, test_user: User):
-        _req(db_session, test_user.id, status="sourcing", value=100000)
+        _req(db_session, test_user.id, status="rfqs_sent", value=100000)
         summary = pipeline_summary(db_session)
         assert summary["open_count"] == 1
         assert summary["open_value"] == 100000.0
@@ -97,17 +118,17 @@ class TestPipelineSummary:
         assert summary["win_rate"] == pytest.approx(2 / 3)
 
     def test_win_rate_zero_when_nothing_decided(self, db_session: Session, test_user: User):
-        _req(db_session, test_user.id, status="sourcing", value=1000)
+        _req(db_session, test_user.id, status="rfqs_sent", value=1000)
         summary = pipeline_summary(db_session)
         assert summary["win_rate"] == 0.0
 
     def test_by_stage_buckets(self, db_session: Session, test_user: User):
-        _req(db_session, test_user.id, status="sourcing", value=100000)
+        _req(db_session, test_user.id, status="rfqs_sent", value=100000)
         _req(db_session, test_user.id, status="quoted", value=40000)
         summary = pipeline_summary(db_session)
         by_stage = {b["status"]: b for b in summary["by_stage"]}
-        assert by_stage["sourcing"]["count"] == 1
-        assert by_stage["sourcing"]["weighted"] == 25000.0
+        assert by_stage["rfqs_sent"]["count"] == 1
+        assert by_stage["rfqs_sent"]["weighted"] == 25000.0
         assert by_stage["quoted"]["count"] == 1
         assert by_stage["quoted"]["weighted"] == 30000.0  # 40000 * 0.75
         # Open stages only; won/lost never appear here.
@@ -117,8 +138,8 @@ class TestPipelineSummary:
         other = User(name="Other Rep", email="other@example.com", role="sales")
         db_session.add(other)
         db_session.flush()
-        _req(db_session, test_user.id, status="sourcing", value=100000, claimed_by_id=test_user.id)
-        _req(db_session, test_user.id, status="sourcing", value=200000, claimed_by_id=other.id)
+        _req(db_session, test_user.id, status="rfqs_sent", value=100000, claimed_by_id=test_user.id)
+        _req(db_session, test_user.id, status="rfqs_sent", value=200000, claimed_by_id=other.id)
         mine = pipeline_summary(db_session, owner_id=test_user.id)
         assert mine["open_value"] == 100000.0
 
@@ -130,19 +151,19 @@ class TestPipelineByAccount:
         db_session.add_all([acme, globex])
         db_session.flush()
         _req(db_session, test_user.id, status="quoted", value=100000, company_id=acme.id)  # w=75000
-        _req(db_session, test_user.id, status="sourcing", value=100000, company_id=globex.id)  # w=25000
+        _req(db_session, test_user.id, status="rfqs_sent", value=100000, company_id=globex.id)  # w=25000
         rows = pipeline_by_account(db_session)
         assert [r["company_name"] for r in rows] == ["Acme Corp", "Globex"]
         assert rows[0]["weighted_value"] == 75000.0
 
     def test_skips_reqs_without_company(self, db_session: Session, test_user: User):
-        _req(db_session, test_user.id, status="sourcing", value=100000, company_id=None)
+        _req(db_session, test_user.id, status="rfqs_sent", value=100000, company_id=None)
         assert pipeline_by_account(db_session) == []
 
 
 class TestPipelineByOwner:
     def test_unassigned_bucket(self, db_session: Session, test_user: User):
-        _req(db_session, test_user.id, status="sourcing", value=100000, claimed_by_id=None)
+        _req(db_session, test_user.id, status="rfqs_sent", value=100000, claimed_by_id=None)
         rows = pipeline_by_owner(db_session)
         assert len(rows) == 1
         assert rows[0]["owner_id"] is None
@@ -160,19 +181,19 @@ class TestPipelineByOwner:
 class TestConversionFunnel:
     def test_status_progression(self, db_session: Session, test_user: User):
         _req(db_session, test_user.id, status="draft")
-        _req(db_session, test_user.id, status="sourcing")
+        _req(db_session, test_user.id, status="rfqs_sent")
         won = _req(db_session, test_user.id, status="won")
         db_session.add(Quote(requisition_id=won.id, quote_number="Q-FUNNEL-1", status="won"))
         db_session.flush()
         funnel = conversion_funnel(db_session)
         assert funnel["opportunities"] == 3
-        assert funnel["sourcing"] == 2  # sourcing + won (not draft)
+        assert funnel["sourcing"] == 2  # rfqs_sent + won (past entry; not draft)
         assert funnel["quoted"] == 1  # the won req (status won) / has a quote
         assert funnel["won"] == 1
         assert funnel["window_days"] == 90
 
     def test_excludes_old_requisitions(self, db_session: Session, test_user: User):
         old = datetime.now(timezone.utc) - timedelta(days=200)
-        _req(db_session, test_user.id, status="sourcing", created_at=old)
+        _req(db_session, test_user.id, status="rfqs_sent", created_at=old)
         funnel = conversion_funnel(db_session, days=90)
         assert funnel["opportunities"] == 0

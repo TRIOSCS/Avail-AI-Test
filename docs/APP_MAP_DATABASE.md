@@ -34,9 +34,11 @@
 | eight_by_eight_enabled | Boolean | default False |
 | notify_buyplan_email_enabled | Boolean NOT NULL | default True; Profile-tab toggle — suppress buy-plan email notifications (migration 151) |
 | notify_new_offer_alert_enabled | Boolean NOT NULL | default True; Profile-tab toggle — suppress new-offer alert notifications (migration 151) |
+| can_approve_buy_plans | Boolean NOT NULL | default False (server_default `false`); migration 155. **Per-user buy-plan approval right** — admin-toggled in the Users settings tab, gates the buy-plan approve/reject action via `dependencies.require_buyplan_approver` / `can_approve_buy_plans(user)`. Role-independent: admins do NOT auto-qualify, the column is the single source of truth. Migration 155 also sweeps any legacy `role='ops'` rows to `'manager'`. |
 | last_login_at | UTCDateTime, nullable | Migration 148. Stamped on every successful OAuth callback. NULL + no azure_id ⇒ an "Invited" (pre-provisioned, never-logged-in) row. |
 | access_overrides | JSON, default `{}` | Migration 148. **Explicit per-user access overrides only**: `{access_key: bool}` keyed by `constants.AccessKey`. An *absent* key means "use the role default" (`constants.ROLE_ACCESS_DEFAULTS`) — the dict never stores the role default, so it stays empty until an admin grants/revokes a specific key. Read by `dependencies.user_has_access` (override wins over role default; admin → all). `ops_verification` is NOT stored here (it lives in `verification_group_members`). |
 | invited_by_id | FK -> users (SET NULL), nullable | Migration 148. The admin who invited this user (set by the Users-tab invite flow); SET NULL so the row survives the inviter's deletion. |
+| avatar_path | String 255, nullable | Migration 156. Stored basename of the uploaded profile photo under `avatars.AVATARS_DIR` (`/app/uploads/avatars`, e.g. `user_12_a1b2c3d4.png`); set by `POST /api/user/avatar` (own-profile only, `require_user`), served by `GET /api/user/avatar/{filename}`. NULL ⇒ the shared `user_avatar` macro renders the initials fallback. |
 
 **`user_admin_audit`** — Append-only trail of admin actions against users (Migration 148)
 | Column | Type | Notes |
@@ -61,8 +63,9 @@ Written by `services.user_admin.record_user_audit` (caller commits); surfaced by
 | name | String 255 | |
 | customer_name | String 255 | |
 | company_id | FK -> companies | |
-| customer_site_id | FK -> customer_sites | |
-| status | String 50 | active\|archived\|completed |
+| customer_site_id | FK -> companies / customer_sites | |
+| status | String 50 | Sales Hub pipeline: `draft` -> `open` -> `rfqs_sent` -> `offers` -> `quoted` -> `won`/`lost`; `hotlist` (off-pipeline monitor — see Proactive); `cancelled` (retained). Enforced by `ck_requisitions_status` CHECK (migration 158): `IN ('draft','open','rfqs_sent','offers','quoted','won','lost','hotlist','cancelled')`. "open" automatically means sourcing. Legacy `active`/`sourcing`/`reopened` were remapped to `open`, `quoting` to `quoted`, and the old `archived` rows to `lost`. There is **no requisition archive/hide capability** — a requisition ends in `won` or `lost` (each carrying a required `outcome_reason`). `RequisitionStatus` (app/constants.py) is the source of truth (`TERMINAL`={won,lost,cancelled}, `OPEN_PIPELINE`={open,rfqs_sent,offers,quoted}, `MONITOR`={hotlist}). |
+| outcome_reason | Text, nullable | Migration 158. The required Won/Lost close reason. Nullable at the DB level (so existing rows and non-closed reqs stay valid); enforcement is **app-side** — every transition to `won`/`lost` via `requisition_state.transition()` requires a non-empty reason or raises `OutcomeReasonRequired` (router → 400). Cleared automatically when a req is reopened off a terminal state. |
 | urgency | String 20 | normal\|hot\|critical |
 | opportunity_value | Numeric 12,2 | |
 | win_probability | Integer, nullable | 0-100; deal win % (migration 146) |
@@ -223,6 +226,8 @@ Written by `services.user_admin.record_user_audit` (caller commits); surfaced by
 
 > **Migration 108 (`108_offer_qualification`)** — adds the 3 columns + `ix_offers_qualification_status` index; also migrates legacy `condition = 'used'` → `'pulls'` (one-way data change, not reversed on downgrade).
 
+> **Migration 157 (`157_qp_approvals`)** — adds 6 new nullable columns to `offers`: `is_primary` (Boolean default false), `sourcing_type` (String 50; `SourcingType` enum), `vendor_rating` (Numeric 3,1), `terms` (JSON), `location` (String 255), `specifics` (Text). See also `###Approvals Engine & QP` section below.
+
 **`quotes`** — Formal quotes sent to customers
 | Column | Type | Notes |
 |--------|------|-------|
@@ -310,6 +315,105 @@ Written by `services.user_admin.record_user_audit` (caller commits); surfaced by
 | added_at | UTCDateTime | |
 
 Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on startup.
+
+---
+
+### Approvals Engine & Quality Plans (Migration 157)
+
+**`approval_gate_configs`** — Per-gate configuration: which user is the approver and up to what amount.
+| Column | Type | Notes |
+|--------|------|-------|
+| id | Integer PK | |
+| gate_type | String 50 | `ApprovalGateType` enum: `buy_plan`\|`prepayment`\|`sales_order`\|`purchase_order` |
+| approver_user_id | FK -> users (CASCADE) | |
+| max_amount | Numeric 12,2, nullable | NULL = applies to any amount |
+| active | Boolean NOT NULL | server_default true; only one active row per gate type expected |
+
+**`quality_plans`** — QC documentation per buy-plan order.
+| Column | Type | Notes |
+|--------|------|-------|
+| id | Integer PK | |
+| buy_plan_id | FK -> buy_plans_v3 (CASCADE) | |
+| vendor_card_id | FK -> vendor_cards (SET NULL), nullable | |
+| status | String 50 NOT NULL | `QualityPlanStatus`: `draft`\|`in_review`\|`approved`\|`rejected` |
+| order_type | String 20 NOT NULL | `QPOrderType`: `new`\|`revision` |
+| inspection_level | String 50, nullable | e.g. "AQL 1.5" |
+| sampling_rate | String 50, nullable | |
+| notes | Text, nullable | |
+| created_by_id | FK -> users (SET NULL) | |
+| approved_by_id | FK -> users (SET NULL) | |
+| approved_at | UTCDateTime, nullable | |
+
+**`prepayments`** — Upfront vendor payment records linked to a buy plan.
+| Column | Type | Notes |
+|--------|------|-------|
+| id | Integer PK | |
+| vendor_card_id | FK -> vendor_cards (SET NULL), nullable | |
+| buy_plan_id | FK -> buy_plans_v3 (CASCADE) | |
+| total_incl_fees | Numeric 12,2 NOT NULL | Inclusive of all fees |
+| currency | String 10 NOT NULL | server_default USD |
+| payment_method | String 20, nullable | `PaymentMethod`: `cc`\|`paypal`\|`wire` |
+| test_report_sent | Boolean NOT NULL | server_default false |
+| buyer_remarks | Text, nullable | |
+| created_by_id | FK -> users (SET NULL) | |
+
+**`approval_requests`** — Root record for one approval workflow instance.
+| Column | Type | Notes |
+|--------|------|-------|
+| id | Integer PK | |
+| gate_type | String 50 NOT NULL | `ApprovalGateType` |
+| status | String 50 NOT NULL | `ApprovalRequestStatus`: `requested`\|`approved`\|`rejected`\|`cancelled`\|`expired` |
+| amount | Numeric 12,2, nullable | Spend amount for gate decisions |
+| currency | String 10, nullable | |
+| requested_by_id | FK -> users (SET NULL) | |
+| owner_id | FK -> users (SET NULL) | Indexed (`ix_approval_req_owner`) |
+| subject_quality_plan_id | FK -> quality_plans (SET NULL), nullable | Indexed (`ix_approval_req_subject_qp`) |
+| subject_prepayment_id | FK -> prepayments (SET NULL), nullable | Indexed (`ix_approval_req_subject_pp`) |
+| resolved_at | UTCDateTime, nullable | |
+| expires_at | UTCDateTime, nullable | |
+
+**`approval_steps`** — Ordered stages within an ApprovalRequest.
+| Column | Type | Notes |
+|--------|------|-------|
+| id | Integer PK | |
+| request_id | FK -> approval_requests (CASCADE) | |
+| seq | Integer NOT NULL | server_default 1 |
+| rule | String 20 NOT NULL | `ApprovalStepRule`: `any`\|`all` |
+| status | String 50 NOT NULL | |
+
+**`approval_step_recipients`** — Per-user assignment within a step.
+| Column | Type | Notes |
+|--------|------|-------|
+| id | Integer PK | |
+| step_id | FK -> approval_steps (CASCADE) | |
+| user_id | FK -> users (CASCADE) | |
+| status | String 50 NOT NULL | `ApprovalRecipientStatus`: `pending`\|`approved`\|`rejected`\|`reassigned` |
+| decided_at | UTCDateTime, nullable | |
+| decision_note | Text, nullable | |
+| reassigned_to_id | FK -> users (SET NULL), nullable | |
+| UNIQUE | (step_id, user_id) | `uq_approval_step_recipient` |
+
+**`approval_events`** — Immutable audit trail for state changes.
+| Column | Type | Notes |
+|--------|------|-------|
+| id | Integer PK | |
+| request_id | FK -> approval_requests (CASCADE) | |
+| actor_id | FK -> users (SET NULL), nullable | |
+| event_type | String 50 NOT NULL | e.g. `submitted`\|`approved`\|`step_advanced` |
+| note | Text, nullable | |
+| payload | JSON, nullable | Extra structured context |
+
+**`approval_outbox`** — Transactional outbox for notifications.
+| Column | Type | Notes |
+|--------|------|-------|
+| id | Integer PK | |
+| request_id | FK -> approval_requests (CASCADE) | |
+| recipient_user_id | FK -> users (CASCADE) | |
+| channel | String 50 NOT NULL | `email`\|`in_app`; server_default `email` |
+| payload | JSON, nullable | |
+| sent_at | UTCDateTime, nullable | NULL = not yet dispatched |
+| fail_count | Integer NOT NULL | server_default 0; the drain skips rows at `MAX_OUTBOX_FAIL_COUNT` (dead-letter) — a deleted recipient or unknown channel is failed (fail_count++), never marked sent |
+| last_error | Text, nullable | last failure reason; set on send error, deleted recipient, or unknown channel |
 
 ---
 

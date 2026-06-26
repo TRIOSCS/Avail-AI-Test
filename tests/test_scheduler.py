@@ -4,7 +4,7 @@ Covers: _utc helper, configure_scheduler job registration, _traced_job wrapper,
 and scheduler configuration tests (conditional flags, job intervals).
 
 Individual job function tests have been split into domain-specific files:
-  - test_jobs_core.py (auto-archive, token refresh, batch results, inbox scan, webhooks)
+  - test_jobs_core.py (token refresh, batch results, inbox scan, webhooks)
   - test_jobs_email.py (contacts sync, deep email mining, vendor contacts, outbound RFQs, calendar)
   - test_jobs_enrichment.py (engagement scoring, deep enrichment, customer enrichment)
   - test_jobs_health.py (health ping, health deep, usage log cleanup, monthly reset)
@@ -93,7 +93,7 @@ def test_utc_none_returns_none():
     "expected_present, expected_absent",
     [
         pytest.param(
-            ("auto_archive", "token_refresh", "inbox_scan", "batch_results"),
+            ("token_refresh", "inbox_scan", "batch_results"),
             (),
             id="core_jobs",
         ),

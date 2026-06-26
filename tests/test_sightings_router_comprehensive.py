@@ -731,7 +731,7 @@ class TestBatchStatusBranches:
         assert "No requirements selected" in resp.text
 
     def test_all_valid_transitions(self, client, db_session):
-        req = Requisition(name="RFQ", status="active", customer_name="Corp")
+        req = Requisition(name="RFQ", status="open", customer_name="Corp")
         db_session.add(req)
         db_session.flush()
         r1 = Requirement(requisition_id=req.id, primary_mpn="A", target_qty=100, sourcing_status="open")

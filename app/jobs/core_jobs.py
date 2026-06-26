@@ -1,4 +1,4 @@
-"""Core background jobs — archive, token refresh, inbox scan, batch results, webhooks.
+"""Core background jobs — token refresh, inbox scan, batch results, webhooks.
 
 Called by: app/jobs/__init__.py via register_core_jobs()
 Depends on: app.database, app.models, app.email_service, app.services.webhook_service
@@ -12,8 +12,8 @@ import sqlalchemy.exc
 from apscheduler.triggers.interval import IntervalTrigger
 from loguru import logger
 
-from ..constants import RequisitionStatus
 from ..scheduler import _traced_job
+from ..services.m365_status import REASON_TRANSIENT, reason_for
 from ..utils.token_manager import _utc
 
 
@@ -27,9 +27,6 @@ def register_core_jobs(scheduler, settings, db=None):
     from ..services.admin_service import get_effective_flag, get_effective_int
 
     scan_interval_min = get_effective_int(db, "inbox_scan_interval_min", settings.inbox_scan_interval_min)
-    scheduler.add_job(
-        _job_auto_archive, IntervalTrigger(minutes=5), id="auto_archive", name="Auto-archive stale requisitions"
-    )
     scheduler.add_job(_job_token_refresh, IntervalTrigger(minutes=5), id="token_refresh", name="Token refresh")
     scheduler.add_job(_job_inbox_scan, IntervalTrigger(minutes=scan_interval_min), id="inbox_scan", name="Inbox scan")
     scheduler.add_job(_job_batch_results, IntervalTrigger(minutes=5), id="batch_results", name="Process batch results")
@@ -49,40 +46,6 @@ def register_core_jobs(scheduler, settings, db=None):
         scheduler.add_job(
             _job_webhook_subscriptions, IntervalTrigger(minutes=5), id="webhook_subs", name="Webhook subscriptions"
         )
-
-
-@_traced_job
-async def _job_auto_archive():
-    """Auto-archive stale requisitions (no activity for 30 days)."""
-    from ..database import SessionLocal
-    from ..models import Requisition
-
-    db = SessionLocal()
-    try:
-        now = datetime.now(timezone.utc)
-        cutoff = now - timedelta(days=30)
-        archived_count = (
-            db.query(Requisition)
-            .filter(
-                Requisition.status == RequisitionStatus.ACTIVE,
-                Requisition.last_searched_at.isnot(None),
-                Requisition.last_searched_at < cutoff,
-            )
-            .update({"status": RequisitionStatus.ARCHIVED}, synchronize_session="fetch")
-        )
-        if archived_count:
-            db.commit()
-            logger.info(f"Auto-archived {archived_count} stale requisition(s)")
-    except (sqlalchemy.exc.OperationalError, sqlalchemy.exc.IntegrityError) as e:
-        logger.error(f"Auto-archive DB error: {e}")
-        db.rollback()
-        raise
-    except Exception as e:
-        logger.exception(f"Auto-archive unexpected error: {e}")
-        db.rollback()
-        raise  # Re-raise so _traced_job / Sentry can capture
-    finally:
-        db.close()
 
 
 @_traced_job
@@ -143,7 +106,7 @@ async def _job_token_refresh():
                 try:
                     user = task_db.get(User, user_id)
                     if user:
-                        user.m365_error_reason = str(e)[:255]
+                        user.m365_error_reason = reason_for(e)
                         task_db.commit()
                 except Exception:
                     task_db.rollback()
@@ -211,7 +174,8 @@ async def _job_inbox_scan():
                 try:
                     user = scan_db.get(User, user_id)
                     if user:
-                        user.m365_error_reason = "Inbox scan timed out"
+                        # A timeout is transient — it self-heals on the next scan.
+                        user.m365_error_reason = REASON_TRANSIENT
                         scan_db.commit()
                 except sqlalchemy.exc.SQLAlchemyError:
                     scan_db.rollback()
@@ -222,7 +186,7 @@ async def _job_inbox_scan():
                 try:
                     user = scan_db.get(User, user_id)
                     if user:
-                        user.m365_error_reason = str(e)[:255]
+                        user.m365_error_reason = reason_for(e)
                         scan_db.commit()
                 except sqlalchemy.exc.SQLAlchemyError:
                     scan_db.rollback()

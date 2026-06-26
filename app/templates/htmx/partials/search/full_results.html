@@ -70,6 +70,8 @@
     ("site_contacts", "Customer Contacts", results.groups.get("site_contacts", [])|length),
     ("parts", "Parts", results.groups.get("parts", [])|length),
     ("offers", "Offers", results.groups.get("offers", [])|length),
+    ("material_cards", "Material Hub", results.groups.get("material_cards", [])|length),
+    ("sightings", "Sightings", results.groups.get("sightings", [])|length),
   ] %}
 
   {# ── Tab bar ── #}
@@ -100,7 +102,9 @@
       "vendor": "/v2/vendors/" ~ bm.id,
       "vendor_contact": "/v2/vendors/" ~ (bm.vendor_card_id|default(bm.id)),
       "part": "/v2/requisitions/" ~ (bm.requisition_id|default("")),
-      "offer": "/v2/requisitions/" ~ (bm.requisition_id|default(""))
+      "offer": "/v2/requisitions/" ~ (bm.requisition_id|default("")),
+      "material_card": "/v2/search?mpn=" ~ (bm.display_mpn|default(bm.normalized_mpn|default(""))|urlencode),
+      "sighting": "/v2/requisitions/" ~ (bm.requisition_id|default(""))
     } %}
     {% set bm_partials_map = {
       "requisition": "/v2/partials/requisitions/" ~ bm.id,
@@ -108,7 +112,9 @@
       "vendor": "/v2/partials/vendors/" ~ bm.id,
       "vendor_contact": "/v2/partials/vendors/" ~ (bm.vendor_card_id|default(bm.id)),
       "part": "/v2/partials/requisitions/" ~ (bm.requisition_id|default("")),
-      "offer": "/v2/partials/requisitions/" ~ (bm.requisition_id|default(""))
+      "offer": "/v2/partials/requisitions/" ~ (bm.requisition_id|default("")),
+      "material_card": "/v2/partials/search?mpn=" ~ (bm.display_mpn|default(bm.normalized_mpn|default(""))|urlencode),
+      "sighting": "/v2/partials/requisitions/" ~ (bm.requisition_id|default(""))
     } %}
     <a href="{{ bm_url_map.get(bm.type, '#') }}"
        hx-get="{{ bm_partials_map.get(bm.type, '#') }}"
@@ -120,7 +126,7 @@
           {{ bm.type[0] }}
         </span>
         <div class="min-w-0 flex-1">
-          <p class="text-base font-semibold text-gray-900">{{ bm.name|default(bm.display_name|default(bm.full_name|default(bm.primary_mpn|default(bm.mpn|default("—"))))) }}</p>
+          <p class="text-base font-semibold text-gray-900">{{ bm.name|default(bm.display_name|default(bm.full_name|default(bm.primary_mpn|default(bm.mpn|default(bm.display_mpn|default(bm.mpn_matched|default("—"))))))) }}</p>
           <div class="flex items-center gap-2 mt-0.5">
             <span class="inline-block rounded bg-brand-200 px-2 py-0.5 text-xs font-medium text-brand-700">{{ bm.type|replace("_", " ")|title }}</span>
             {% if bm.email %}<span class="text-xs text-gray-600">{{ bm.email }}</span>{% endif %}
@@ -145,6 +151,8 @@
       ("site_contacts", "Customer Contacts"),
       ("parts", "Parts"),
       ("offers", "Offers"),
+      ("material_cards", "Material Hub"),
+      ("sightings", "Sightings"),
     ] %}
 
     {% for group_key, group_label in group_config %}
@@ -227,6 +235,30 @@
               <td class="px-4 py-2.5 text-emerald-600 font-medium">
                 {% if item.unit_price %}${{ "%.2f"|format(item.unit_price) }}{% else %}—{% endif %}
               </td>
+
+              {% elif group_key == "material_cards" %}
+              <td class="table-cell">
+                <a href="/v2/search?mpn={{ item.display_mpn|default(item.normalized_mpn|default(''))|urlencode }}"
+                   hx-get="/v2/partials/search?mpn={{ item.display_mpn|default(item.normalized_mpn|default(''))|urlencode }}"
+                   hx-target="#main-content"
+                   hx-push-url="/v2/search?mpn={{ item.display_mpn|default(item.normalized_mpn|default(''))|urlencode }}"
+                   class="font-medium font-mono text-gray-900 hover:text-brand-600">{{ item.display_mpn }}</a>
+              </td>
+              <td class="table-cell text-gray-600">{{ item.manufacturer|default("—") }}</td>
+              <td class="table-cell text-gray-400 text-xs truncate max-w-xs">{{ item.description|default("") }}</td>
+
+              {% elif group_key == "sightings" %}
+              <td class="table-cell">
+                <a href="/v2/requisitions/{{ item.requisition_id|default('') }}"
+                   hx-get="/v2/partials/requisitions/{{ item.requisition_id|default('') }}"
+                   hx-target="#main-content"
+                   hx-push-url="/v2/requisitions/{{ item.requisition_id|default('') }}"
+                   class="font-medium font-mono text-gray-900 hover:text-brand-600">{{ item.mpn_matched }}</a>
+              </td>
+              <td class="table-cell text-gray-600">{{ item.vendor_name|default("—") }}</td>
+              <td class="table-cell text-emerald-600 font-medium">
+                {% if item.unit_price %}${{ "%.2f"|format(item.unit_price) }}{% else %}—{% endif %}
+              </td>
               {% endif %}
 
             </tr>
@@ -273,6 +305,14 @@
             <th class="table-cell--head text-left text-xs font-semibold text-gray-500 uppercase">MPN</th>
             <th class="table-cell--head text-left text-xs font-semibold text-gray-500 uppercase">Vendor</th>
             <th class="table-cell--head text-left text-xs font-semibold text-gray-500 uppercase">Price</th>
+            {% elif group_key == "material_cards" %}
+            <th class="table-cell--head text-left text-secondary font-semibold uppercase">MPN</th>
+            <th class="table-cell--head text-left text-secondary font-semibold uppercase">Manufacturer</th>
+            <th class="table-cell--head text-left text-secondary font-semibold uppercase">Description</th>
+            {% elif group_key == "sightings" %}
+            <th class="table-cell--head text-left text-secondary font-semibold uppercase">MPN</th>
+            <th class="table-cell--head text-left text-secondary font-semibold uppercase">Vendor</th>
+            <th class="table-cell--head text-left text-secondary font-semibold uppercase">Price</th>
             {% endif %}
           </tr>
         </thead>
@@ -347,6 +387,30 @@
             </td>
             <td class="px-4 py-2.5 text-gray-600">{{ item.vendor_name|default("—") }}</td>
             <td class="px-4 py-2.5 text-emerald-600 font-medium">
+              {% if item.unit_price %}${{ "%.2f"|format(item.unit_price) }}{% else %}—{% endif %}
+            </td>
+
+            {% elif group_key == "material_cards" %}
+            <td class="table-cell">
+              <a href="/v2/search?mpn={{ item.display_mpn|default(item.normalized_mpn|default(''))|urlencode }}"
+                 hx-get="/v2/partials/search?mpn={{ item.display_mpn|default(item.normalized_mpn|default(''))|urlencode }}"
+                 hx-target="#main-content"
+                 hx-push-url="/v2/search?mpn={{ item.display_mpn|default(item.normalized_mpn|default(''))|urlencode }}"
+                 class="font-medium font-mono text-gray-900 hover:text-brand-600">{{ item.display_mpn }}</a>
+            </td>
+            <td class="table-cell text-gray-600">{{ item.manufacturer|default("—") }}</td>
+            <td class="table-cell text-gray-400 text-xs truncate max-w-xs">{{ item.description|default("") }}</td>
+
+            {% elif group_key == "sightings" %}
+            <td class="table-cell">
+              <a href="/v2/requisitions/{{ item.requisition_id|default('') }}"
+                 hx-get="/v2/partials/requisitions/{{ item.requisition_id|default('') }}"
+                 hx-target="#main-content"
+                 hx-push-url="/v2/requisitions/{{ item.requisition_id|default('') }}"
+                 class="font-medium font-mono text-gray-900 hover:text-brand-600">{{ item.mpn_matched }}</a>
+            </td>
+            <td class="table-cell text-gray-600">{{ item.vendor_name|default("—") }}</td>
+            <td class="table-cell text-emerald-600 font-medium">
               {% if item.unit_price %}${{ "%.2f"|format(item.unit_price) }}{% else %}—{% endif %}
             </td>
             {% endif %}

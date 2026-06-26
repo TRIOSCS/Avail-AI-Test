@@ -148,7 +148,7 @@ class TestClaimRequisitionNotFound:
         fake_req = Requisition(
             id=999999,
             name="ghost-req",
-            status="active",
+            status="open",
             created_by=test_user.id,
         )
         # The with_for_update() query will return None for id=999999

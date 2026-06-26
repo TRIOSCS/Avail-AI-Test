@@ -363,7 +363,7 @@ class TestGetSavedSightingsWithData:
     def test_sightings_empty_requirements(self, client, db_session, test_user):
         req = Requisition(
             name="EMPTY-REQ",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -419,7 +419,7 @@ class TestListRequirementOffersHistorical:
         # Create an offer on a DIFFERENT requisition with same material_card_id
         other_req = Requisition(
             name="OTHER-REQ",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )

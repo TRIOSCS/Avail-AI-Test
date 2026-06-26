@@ -722,7 +722,7 @@ async def test_add_requirements_with_customer_site_tag_propagation(
     # Create a requisition with a customer_site_id
     req_with_site = Requisition(
         name="Site Test Req",
-        status="active",
+        status="open",
         created_by=test_user.id,
         customer_site_id=test_customer_site.id,
     )

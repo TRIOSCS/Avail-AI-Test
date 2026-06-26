@@ -32,7 +32,7 @@ def _make_requisition(db_session: Session, test_user: User, name: str) -> Requis
     """Create + persist an active requisition owned by the test user."""
     reqn = Requisition(
         name=name,
-        status="active",
+        status="open",
         urgency="normal",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
@@ -49,7 +49,7 @@ def req_with_string_subs(db_session: Session, test_user: User) -> tuple:
     req = Requisition(
         name="REQ-STR-SUBS",
         customer_name="SubCorp",
-        status="active",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -76,7 +76,7 @@ def req_with_lead(db_session: Session, test_user: User) -> tuple:
     req = Requisition(
         name="REQ-LEAD-COV",
         customer_name="LeadCorp",
-        status="active",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )

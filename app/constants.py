@@ -102,26 +102,32 @@ class QualificationStatus(StrEnum):
 
 
 class RequisitionStatus(StrEnum):
-    """Status lifecycle for Requisition records."""
+    """Status lifecycle for Requisition records.
+
+    Pipeline (Sales Hub): OPEN -> RFQS_SENT -> OFFERS -> QUOTED -> WON/LOST. DRAFT
+    precedes OPEN. HOTLIST is an off-pipeline *monitor* state: the salesperson watches a
+    part/customer and the Proactive matcher surfaces an offer when stock appears.
+    CANCELLED retained for existing rows. There is no archive/hide capability — a
+    requisition ends in WON or LOST (each carrying a required outcome_reason).
+    """
 
     DRAFT = "draft"
-    ACTIVE = "active"
-    SOURCING = "sourcing"
+    OPEN = "open"  # entry stage; "open" automatically means sourcing
+    RFQS_SENT = "rfqs_sent"
     OFFERS = "offers"
-    QUOTING = "quoting"
     QUOTED = "quoted"
-    REOPENED = "reopened"
     WON = "won"
     LOST = "lost"
-    ARCHIVED = "archived"
+    HOTLIST = "hotlist"  # monitor-only; surfaced by Proactive on a matching offer
     CANCELLED = "cancelled"
 
-    # Statuses considered "done" — excluded from re-archiving and shown under
-    # the Archive filter. Single source of truth for terminal-status checks.
-    # `nonmember` keeps this off the enum's member list (it's a constant, not a
-    # status value). StrEnum members compare equal to their string values, so
-    # `status.in_(RequisitionStatus.TERMINAL)` matches correctly.
-    TERMINAL = nonmember(frozenset({"archived", "won", "lost", "cancelled"}))
+    # Terminal (done) — excluded from the default open list. Single source of truth.
+    # `nonmember` keeps these off the member list (they're constants, not statuses).
+    TERMINAL = nonmember(frozenset({"won", "lost", "cancelled"}))
+    # Active pipeline stages shown by default in the Sales Hub list.
+    OPEN_PIPELINE = nonmember(frozenset({"open", "rfqs_sent", "offers", "quoted"}))
+    # Off-pipeline monitor states (Hotlist).
+    MONITOR = nonmember(frozenset({"hotlist"}))
 
 
 class SourcingStatus(StrEnum):
@@ -356,6 +362,8 @@ class UserAuditAction(StrEnum):
     DEACTIVATE = "deactivate"
     ACCESS_GRANT = "access_grant"
     ACCESS_REVOKE = "access_revoke"
+    APPROVAL_GRANT = "approval_grant"  # granted buy-plan approval right
+    APPROVAL_REVOKE = "approval_revoke"  # revoked buy-plan approval right
 
 
 # Default access granted to every interactive (non-admin) role. This deliberately
@@ -606,8 +614,6 @@ class ActivityType(StrEnum):
     TASK_COMPLETED = "task_completed"
     TASK_REOPENED = "task_reopened"
     ASSIGNMENT_CHANGED = "assignment_changed"
-    REQ_ARCHIVED = "req_archived"
-    REQ_UNARCHIVED = "req_unarchived"
     STRATEGIC_VENDOR_EXPIRING = "strategic_expiring"  # 18 chars — fits String(20)
     # Communication / manual-entry types
     EMAIL_SENT = "email_sent"
@@ -633,6 +639,12 @@ class ActivityType(StrEnum):
     # Vendor+part unavailability knowledge (vendor_unavailability service)
     VENDOR_UNAVAILABLE = "vendor_unavailable"  # 18 chars — fits String(20)
     VENDOR_AVAILABLE = "vendor_available"
+    # Approval lifecycle (approval engine — Task 5)
+    APPROVAL_REQUESTED = "aprvl_requested"  # 15 chars
+    APPROVAL_APPROVED = "aprvl_approved"  # 14 chars
+    APPROVAL_REJECTED = "aprvl_rejected"  # 14 chars
+    APPROVAL_DELEGATED = "aprvl_delegated"  # 15 chars
+    APPROVAL_CANCELLED = "aprvl_cancelled"  # 15 chars
 
 
 class CallOutcome(StrEnum):
@@ -904,3 +916,112 @@ class SightingsSkipReason(StrEnum):
     READY = "ready"
     NO_EMAIL = "no_email"
     DO_NOT_CONTACT = "do_not_contact"
+
+
+# ---------------------------------------------------------------------------
+# Approvals Engine + Quality Plan constants (Phase 1)
+# ---------------------------------------------------------------------------
+
+
+class ApprovalGateType(StrEnum):
+    """Which approval gate a request belongs to.
+
+    Single source of truth for the approval_requests.gate_type column. Each value names
+    the workflow step that triggered the approval.
+    """
+
+    BUY_PLAN = "buy_plan"
+    PREPAYMENT = "prepayment"
+    SALES_ORDER = "sales_order"
+    PURCHASE_ORDER = "purchase_order"
+
+
+class ApprovalRequestStatus(StrEnum):
+    """Lifecycle state of an ApprovalRequest row.
+
+    requested  — created, awaiting at least one recipient to act. approved   — all
+    required recipients approved (or any, per rule). rejected   — at least one required
+    recipient rejected. cancelled  — withdrawn by the requester before resolution.
+    expired    — deadline passed without resolution.
+    """
+
+    REQUESTED = "requested"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    CANCELLED = "cancelled"
+    EXPIRED = "expired"
+
+
+class ApprovalRecipientStatus(StrEnum):
+    """Per-recipient decision state within an ApprovalRequest.
+
+    pending    — assigned, has not yet responded. approved   — this recipient approved.
+    rejected   — this recipient rejected. reassigned — forwarded to another user; the
+    original row is superseded.
+    """
+
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    REASSIGNED = "reassigned"
+
+
+class ApprovalStepRule(StrEnum):
+    """Quorum rule for a step in the approval chain.
+
+    any — one approval from the recipient pool resolves the step. all — every recipient
+    in the pool must approve.
+    """
+
+    ANY = "any"
+    ALL = "all"
+
+
+class PaymentMethod(StrEnum):
+    """Payment method options for purchase orders and buy plans.
+
+    Single source of truth for payment_method columns across models.
+    """
+
+    CC = "cc"
+    PAYPAL = "paypal"
+    WIRE = "wire"
+
+
+class SourcingType(StrEnum):
+    """Sourcing strategy classification for a buy plan or line item.
+
+    spot       — one-time open-market purchase. contract   — negotiated long-term supply
+    agreement. commodity  — standard commodity purchase. preferred  — preferred-vendor
+    program purchase.
+    """
+
+    SPOT = "spot"
+    CONTRACT = "contract"
+    COMMODITY = "commodity"
+    PREFERRED = "preferred"
+
+
+class QualityPlanStatus(StrEnum):
+    """Lifecycle state of a QualityPlan document.
+
+    draft      — being authored, not yet submitted for review. in_review  — submitted;
+    reviewer(s) have been assigned. approved   — all required reviewers approved the
+    plan. rejected   — one or more reviewers rejected; requires revision.
+    """
+
+    DRAFT = "draft"
+    IN_REVIEW = "in_review"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
+class QPOrderType(StrEnum):
+    """Whether a QualityPlan is for a new order or a revision to an existing one.
+
+    new      — first-time quality plan for this part / supplier pair. revision — updated
+    plan superseding a previously approved version.
+    """
+
+    NEW = "new"
+    REVISION = "revision"

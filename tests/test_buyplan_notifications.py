@@ -46,7 +46,7 @@ def _make_plan(db, submitter_id, **overrides):
     # Requisition
     req = Requisition(
         name="REQ-BP",
-        status="active",
+        status="open",
         created_by=submitter_id,
         created_at=datetime.now(timezone.utc),
     )

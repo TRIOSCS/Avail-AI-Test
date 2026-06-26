@@ -111,7 +111,7 @@ def _make_owned_buy_plan(db: Session, user: User) -> BuyPlan:
     req = Requisition(
         name="N6-REQ",
         customer_name="N6 Corp",
-        status=RequisitionStatus.ACTIVE,
+        status=RequisitionStatus.OPEN,
         created_by=user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -370,12 +370,14 @@ class TestBuyPlanWorkflow:
         )
         assert resp.status_code == 400
 
-    def test_approve_non_manager_raises_403(self, client, db_session, test_user):
-        """Buyer role (not manager/admin) calling approve → 403.
+    def test_approve_without_right_raises_403(self, client, db_session, test_user, monkeypatch):
+        """A user without the can_approve_buy_plans right calling approve → 403.
 
-        The conftest client uses test_user which has role='buyer'. The approve route
-        checks user.role not in (MANAGER, ADMIN).
+        The approve route depends on require_buyplan_approver, which 403s before the
+        route body when the user lacks the right (role is irrelevant). test_user is a
+        buyer with no approval grant.
         """
+        monkeypatch.setattr("app.dependencies.require_user", lambda request, db: test_user)
         resp = client.post(
             "/v2/partials/buy-plans/999/approve",
             data={"action": "approve"},
@@ -585,25 +587,3 @@ class TestProactiveScorecardBadge:
         resp = client.get("/v2/partials/proactive/badge")
         assert resp.status_code == 200
         assert "span" in resp.text and "1" in resp.text
-
-
-# ── Section 8: Vendor import CSV ─────────────────────────────────────
-
-
-class TestVendorImportCSV:
-    """Tests for POST /v2/partials/admin/import/vendors."""
-
-    def test_missing_file_raises_400(self, client, db_session):
-        resp = client.post("/v2/partials/admin/import/vendors", data={})
-        assert resp.status_code == 400
-
-    def test_valid_csv_imports_vendors(self, client, db_session):
-        import io
-
-        csv_content = b"name,email,website\nTestVendorImport,tv@example.com,https://tv.com\n"
-        resp = client.post(
-            "/v2/partials/admin/import/vendors",
-            files={"file": ("vendors.csv", io.BytesIO(csv_content), "text/csv")},
-        )
-        assert resp.status_code == 200
-        assert "Imported" in resp.text

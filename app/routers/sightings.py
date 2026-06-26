@@ -79,7 +79,8 @@ from ..vendor_utils import normalize_vendor_name
 router = APIRouter(tags=["sightings"])
 
 MAX_BATCH_SIZE: Final[int] = 50
-_EXCLUDED_REQ_STATUSES: Final = (RequisitionStatus.ARCHIVED, RequisitionStatus.CANCELLED)
+# Requisitions in these statuses are excluded from sightings (no active sourcing).
+_EXCLUDED_REQ_STATUSES: Final = (RequisitionStatus.CANCELLED,)
 
 _cache: dict[str, tuple[float, Any]] = {}
 

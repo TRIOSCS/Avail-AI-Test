@@ -2,7 +2,7 @@
 app/routers/htmx_views.py.
 
 Targets previously uncovered branches including: unauthenticated page load,
-customer tabs, company CRUD, vendor find-by-part, search endpoints, requisition
+customer tabs, company CRUD, search endpoints, requisition
 search, rfq-send test mode, follow-up send, offer promote/reject, add-to-requisition,
 requisition picker, buy-plan detail, update-requirement HTMX form, and more.
 
@@ -41,7 +41,7 @@ def _make_requisition(db: Session, user: User, **kw) -> Requisition:
     defaults = dict(
         name="REQ-COV",
         customer_name="Cov Corp",
-        status=RequisitionStatus.ACTIVE,
+        status=RequisitionStatus.OPEN,
         created_by=user.id,
         claimed_by_id=user.id,
         created_at=datetime.now(timezone.utc),
@@ -197,27 +197,6 @@ class TestV2PageRouting:
         quote = _make_quote(db_session, req, test_user)
         db_session.commit()
         resp = client.get(f"/v2/quotes/{quote.id}")
-        assert resp.status_code == 200
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# Vendor find-by-part
-# ══════════════════════════════════════════════════════════════════════════
-
-
-class TestVendorFindByPart:
-    @pytest.mark.parametrize(
-        "url",
-        [
-            "/v2/partials/vendors/find-by-part",
-            "/v2/partials/vendors/find-by-part?mpn=LM317T",
-            # Very short MPN that normalize_mpn might return None for
-            "/v2/partials/vendors/find-by-part?mpn=AB",
-        ],
-        ids=["no_mpn", "with_mpn", "short_mpn"],
-    )
-    def test_find_by_part(self, client: TestClient, url: str):
-        resp = client.get(url)
         assert resp.status_code == 200
 
 

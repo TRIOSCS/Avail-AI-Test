@@ -102,7 +102,7 @@ class TestBuyplanEmailGuard:
         submitter = _make_user(db_session, email="rejsub@trioscs.com", notify_buyplan_email_enabled=False)
         mgr = _make_user(db_session, email="rejmgr@trioscs.com")
 
-        req = Requisition(name="REQ-G", status="active", created_by=submitter.id, created_at=datetime.now(timezone.utc))
+        req = Requisition(name="REQ-G", status="open", created_by=submitter.id, created_at=datetime.now(timezone.utc))
         db_session.add(req)
         db_session.flush()
         co = Company(name="Guard Co", is_active=True, created_at=datetime.now(timezone.utc))
