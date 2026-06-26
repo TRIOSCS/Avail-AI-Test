@@ -63,6 +63,7 @@ class TestEnums:
                     BuyPlanLineStatus.VERIFIED,
                     BuyPlanLineStatus.ISSUE,
                     BuyPlanLineStatus.CANCELLED,
+                    BuyPlanLineStatus.RESOURCING,
                 },
             ),
             (

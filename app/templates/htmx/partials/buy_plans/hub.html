@@ -14,8 +14,8 @@
   {# ── Lens switcher ──
      Supervise is gated: only managers/admins/ops (can_supervise) see the button. #}
   <div class="flex items-center gap-2 mb-5">
-    {% for l, label in [('deals', 'My Deals'), ('orders', 'My Orders'), ('supervise', 'Supervise')] %}
-    {% if l != 'supervise' or can_supervise %}
+    {% for l, label in [('deals', 'My Deals'), ('orders', 'My Orders'), ('resource', 'Needs Re-sourcing'), ('supervise', 'Supervise')] %}
+    {% if (l != 'supervise' or can_supervise) and (l != 'resource' or can_resource) %}
     {# Highlight is Alpine-reactive (:class on lens) so the active pill updates the
        instant a lens is clicked — before the server swap returns — and stays correct
        after the re-rendered hub re-inits x-data with the server lens. Mirrors the
@@ -43,6 +43,7 @@
   <div id="bp-hub-body"
        hx-get="{{ '/v2/partials/buy-plans/orders' if lens == 'orders'
                  else '/v2/partials/buy-plans/supervise' if lens == 'supervise'
+                 else '/v2/partials/buy-plans/resource' if lens == 'resource'
                  else '/v2/partials/buy-plans/board?scope=mine' }}"
        hx-trigger="load"
        hx-target="#bp-hub-body"

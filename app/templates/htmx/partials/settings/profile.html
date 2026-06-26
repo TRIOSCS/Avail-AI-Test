@@ -278,6 +278,27 @@
                       after:h-5 after:w-5 after:transition-all peer-checked:bg-accent-500"></div>
         </label>
       </div>
+
+      {# Urgent re-source backfill alerts (email + Teams DM) #}
+      <div class="flex items-center justify-between"
+           x-data="{ enabled: {{ 'true' if profile_user.notify_resource_alert_enabled else 'false' }} }">
+        <div>
+          <p class="text-sm font-medium text-gray-900">Alert me when a deal needs re-sourcing</p>
+          <p class="text-xs text-gray-600 mt-0.5">Urgent email + Teams DM when a cancelled PO needs backfilling. (The in-app alert always shows.)</p>
+        </div>
+        <label class="relative inline-flex items-center cursor-pointer ml-4">
+          <input type="checkbox" x-model="enabled"
+                 class="sr-only peer"
+                 hx-post="/api/user/toggle-resource-alert"
+                 hx-swap="none"
+                 data-loading-disable>
+          <div class="w-11 h-6 bg-gray-200 peer-focus:ring-2 peer-focus:ring-accent-300 rounded-full
+                      peer peer-checked:after:translate-x-full peer-checked:after:border-white
+                      after:content-[''] after:absolute after:top-[2px] after:left-[2px]
+                      after:bg-white after:border-gray-300 after:border after:rounded-full
+                      after:h-5 after:w-5 after:transition-all peer-checked:bg-accent-500"></div>
+        </label>
+      </div>
     </div>
   </div>
 
