@@ -6,7 +6,8 @@
 {% from "htmx/partials/shared/_macros.html" import status_badge, urgency_badge %}
 
 {% set req = requisition %}
-{% set is_archived = req.status == 'archived' or requirement.sourcing_status == 'archived' %}
+{# Part-level archive only — a requisition has no archive status (it ends Won/Lost). #}
+{% set is_archived = requirement.sourcing_status == 'archived' %}
 
 {# ── Part detail + Requisition fields ──────────────────────── #}
 <div id="req-details-fields"

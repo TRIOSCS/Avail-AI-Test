@@ -34,22 +34,19 @@ def test_outcome_blocks_non_owner_trader(client, db_session, test_requisition, t
 
 
 def test_outcome_buyer_happy_path(client, test_requisition):
+    # Won/Lost requires a non-empty reason (enforced app-side, Change 3).
+    resp = client.put(
+        f"/api/requisitions/{test_requisition.id}/outcome",
+        json={"outcome": "won", "reason": "PO received"},
+    )
+    assert resp.status_code == 200
+
+
+def test_outcome_without_reason_rejected(client, test_requisition):
+    """A Won/Lost close with no reason is a 400 (the required-reason rule)."""
     resp = client.put(f"/api/requisitions/{test_requisition.id}/outcome", json={"outcome": "won"})
-    assert resp.status_code == 200
-
-
-# ── PUT /api/requisitions/{req_id}/archive ────────────────────────────────
-
-
-def test_archive_blocks_non_owner_sales(client, db_session, test_requisition, test_user, admin_user):
-    _make_foreign(test_requisition, test_user, admin_user, db_session)
-    resp = client.put(f"/api/requisitions/{test_requisition.id}/archive")
-    assert resp.status_code == 404
-
-
-def test_archive_buyer_happy_path(client, test_requisition):
-    resp = client.put(f"/api/requisitions/{test_requisition.id}/archive")
-    assert resp.status_code == 200
+    assert resp.status_code == 400
+    assert "error" in resp.json()
 
 
 # ── PUT /api/requisitions/{req_id} (update) ───────────────────────────────

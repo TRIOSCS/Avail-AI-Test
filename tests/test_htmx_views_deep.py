@@ -784,8 +784,8 @@ class TestRfqRoutes:
         assert resp.status_code == 400
 
     def test_action_valid_but_404(self, client: TestClient):
-        # "archive" is valid but req 99999 doesn't exist → 404
-        resp = client.post("/v2/partials/requisitions/99999/action/archive")
+        # "clone" is a valid action but req 99999 doesn't exist → 404
+        resp = client.post("/v2/partials/requisitions/99999/action/clone")
         assert resp.status_code == 404
 
     def test_rfq_prepare_404(self, client: TestClient):

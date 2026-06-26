@@ -2,7 +2,7 @@
 
 Verifies:
 1. Requisitions list uses @cached_endpoint with 30-second TTL
-2. Cache invalidated on create/update/archive/bulk-archive/dismiss-offers
+2. Cache invalidated on create/update/dismiss-offers
 3. Material cards list uses @cached_endpoint with 2-hour TTL
 4. Cached responses returned on repeat calls
 """
@@ -49,17 +49,14 @@ class TestRequisitionListCache:
         [
             ("post", "/api/requisitions", {"name": "Test Req"}),
             ("put", "/api/requisitions/{req_id}", {"name": "Updated Name"}),
-            ("put", "/api/requisitions/{req_id}/archive", None),
-            ("put", "/api/requisitions/bulk-archive", None),
             ("post", "/api/requisitions/{req_id}/dismiss-new-offers", None),
         ],
-        ids=["create", "update", "archive", "bulk-archive", "dismiss-new-offers"],
+        ids=["create", "update", "dismiss-new-offers"],
     )
     def test_mutation_invalidates_cache(
         self, client, db_session, test_requisition, test_user, method, path_template, json_body
     ):
-        """Create/update/archive/bulk-archive/dismiss-offers all invalidate the req_list
-        cache."""
+        """Create/update/dismiss-offers all invalidate the req_list cache."""
         path = path_template.format(req_id=test_requisition.id)
         with patch("app.routers.requisitions.invalidate_prefix") as mock_inv:
             resp = client.request(method.upper(), path, json=json_body)
@@ -73,7 +70,7 @@ class TestRequisitionListCache:
 
     def test_list_with_status_filter(self, client, db_session, test_user):
         """Status filter produces different cached results."""
-        resp = client.get("/api/requisitions", params={"status": "archive"})
+        resp = client.get("/api/requisitions", params={"status": "won"})
         assert resp.status_code == 200
         data = resp.json()
         assert isinstance(data["requisitions"], list)

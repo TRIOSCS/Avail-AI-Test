@@ -213,16 +213,9 @@ def test_review_response_blocks_non_owner_sales(client, db_session, foreign_req,
     assert resp.status_code == 404
 
 
-def test_archive_requisition_blocks_non_owner_sales(client, db_session, foreign_req, test_user):
-    _make_sales(db_session, test_user)
-    resp = client.patch(f"/v2/partials/requisitions/{foreign_req.id}/archive")
-    assert resp.status_code == 404
-
-
-def test_unarchive_requisition_blocks_non_owner_sales(client, db_session, foreign_req, test_user):
-    _make_sales(db_session, test_user)
-    resp = client.patch(f"/v2/partials/requisitions/{foreign_req.id}/unarchive")
-    assert resp.status_code == 404
+# Requisition archive/unarchive HTMX routes were removed (a req ends Won/Lost, no
+# hide capability); foreign-req IDOR coverage remains via the responses/review and
+# part-header cases above/below.
 
 
 def test_part_header_blocks_non_owner_sales(client, db_session, foreign_req, test_user):

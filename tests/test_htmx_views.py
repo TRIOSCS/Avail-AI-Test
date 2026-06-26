@@ -747,20 +747,21 @@ class TestRequisitionBulkActions:
         assert resp.status_code == 200
 
     def test_bulk_no_ids(self, client: TestClient):
-        resp = client.post("/v2/partials/requisitions/bulk/archive", data={"ids": ""})
+        resp = client.post("/v2/partials/requisitions/bulk/assign", data={"ids": ""})
         assert resp.status_code == 400
 
     def test_bulk_invalid_ids(self, client: TestClient):
-        resp = client.post("/v2/partials/requisitions/bulk/archive", data={"ids": "abc,def"})
+        resp = client.post("/v2/partials/requisitions/bulk/assign", data={"ids": "abc,def"})
         assert resp.status_code == 400
 
     def test_bulk_invalid_action(self, client: TestClient):
-        resp = client.post("/v2/partials/requisitions/bulk/delete", data={"ids": "1"})
+        # "archive" is no longer a valid bulk action (requisition archiving removed).
+        resp = client.post("/v2/partials/requisitions/bulk/archive", data={"ids": "1"})
         assert resp.status_code == 400
 
     def test_bulk_too_many(self, client: TestClient):
         ids = ",".join(str(i) for i in range(201))
-        resp = client.post("/v2/partials/requisitions/bulk/archive", data={"ids": ids})
+        resp = client.post("/v2/partials/requisitions/bulk/assign", data={"ids": ids})
         assert resp.status_code == 400
 
 

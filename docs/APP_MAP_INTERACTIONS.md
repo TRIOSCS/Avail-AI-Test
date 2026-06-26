@@ -58,9 +58,11 @@ inlined query. Offer creation and offer status changes now also route through
 `activity_service.log_activity()` (`ActivityType.OFFER_CREATED` /
 `ActivityType.OFFER_STATUS_CHANGED`) so offer events appear on the requisition
 Activity tab. Task completion, requisition assignment (claim/unclaim/batch),
-archive/unarchive, and sales-note edits likewise route through
-`activity_service.log_activity()` (`ActivityType.TASK_COMPLETED`,
-`ASSIGNMENT_CHANGED`, `REQ_ARCHIVED`/`REQ_UNARCHIVED`, `SALES_NOTE`).
+status transitions (including the required-reason close to Won/Lost), and
+sales-note edits likewise route through `activity_service.log_activity()`
+(`ActivityType.TASK_COMPLETED`, `ASSIGNMENT_CHANGED`, `STATUS_CHANGED`,
+`SALES_NOTE`). There is no requisition archive action — a requisition ends in
+Won or Lost, each recording an `outcome_reason`.
 
 **AI curation:** each search batch logs one aggregated `sighting_added` row
 ("N sightings added from <sources>", with `details={count, sources}`).
@@ -1494,7 +1496,7 @@ NO history:
 find_matches_for_offer(offer, db)
     +---> _find_matches(...)            # CPH-gated (purchase history)
     +---> _find_hotlist_matches(...)    # NEW: seeds from active HOTLIST reqs
-            |   JOIN Requisition(status='hotlist', is_archived=false)
+            |   JOIN Requisition(status='hotlist')
             |        -> Requirement(material_card_id == offer.material_card_id)
             |        -> CustomerSite(is_active) -> Company(account_owner_id NOT NULL)
             +---> reuse suppression (do_not_offer) + dedup (company_id)

@@ -221,14 +221,14 @@ class TestBulkActionAssign:
     def test_bulk_too_many_ids(self, client: TestClient, db_session: Session, test_user: User):
         ids = ",".join(str(i) for i in range(1, 202))
         resp = client.post(
-            "/v2/partials/requisitions/bulk/archive",
+            "/v2/partials/requisitions/bulk/assign",
             data={"ids": ids},
         )
         assert resp.status_code == 400
 
     def test_bulk_invalid_id_format(self, client: TestClient, db_session: Session, test_user: User):
         resp = client.post(
-            "/v2/partials/requisitions/bulk/archive",
+            "/v2/partials/requisitions/bulk/assign",
             data={"ids": "1,abc,3"},
         )
         assert resp.status_code == 400

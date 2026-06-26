@@ -31,9 +31,6 @@ import pytest
         pytest.param('name="per_page"', id="hidden-per-page"),
         pytest.param("x-show", id="bulk-bar-x-show"),
         pytest.param("selectedIds.size", id="bulk-bar-selected-size"),
-        pytest.param('hx-post="/requisitions2/bulk/archive"', id="bulk-archive-form"),
-        pytest.param('hx-post="/requisitions2/bulk/activate"', id="bulk-activate-form"),
-        pytest.param("getSelectedIdsString()", id="bulk-ids-binding"),
         pytest.param("x-collapse", id="bulk-bar-collapse"),
         pytest.param("response-targets", id="ext-response-targets"),
         pytest.param("loading-states", id="ext-loading-states"),
@@ -109,17 +106,17 @@ def test_sse_triggers_table_refresh(client):
     assert 'hx-get="/requisitions2/table"' in resp.text
 
 
-def test_bulk_bar_buttons_have_loading_states(client):
-    """Bulk bar buttons use data-loading-disable for loading feedback."""
+def test_bulk_bar_shows_selection_count(client):
+    """Bulk bar surfaces the live selection count (archive/activate bulk actions were
+    removed — a requisition ends Won/Lost, no hide capability)."""
     resp = client.get("/requisitions2")
-    assert "data-loading-disable" in resp.text or "data-loading-aria-busy" in resp.text
+    assert "selectedIds.size + ' selected'" in resp.text
 
 
-def test_bulk_bar_forms_have_error_target(client):
-    """Bulk bar forms route errors to #rq2-error."""
+def test_filter_form_routes_errors_to_rq2_error(client):
+    """The requisitions2 controls route HTMX errors to #rq2-error."""
     resp = client.get("/requisitions2")
-    # Both archive and activate bulk forms have error target
-    assert resp.text.count('hx-target-error="#rq2-error"') >= 2
+    assert 'hx-target-error="#rq2-error"' in resp.text
 
 
 def test_sales_user_no_owner_filter(client, db_session, sales_user):

@@ -709,6 +709,7 @@ class TestRequisitionActionErrors:
         assert resp.status_code == 400
 
     def test_req_not_found_returns_404(self, client: TestClient):
-        """Covers line 1834 — not found branch before await request.form()."""
-        resp = client.post("/v2/partials/requisitions/99999/action/archive")
+        """Covers the not-found branch (valid action, missing req) before
+        request.form()."""
+        resp = client.post("/v2/partials/requisitions/99999/action/clone")
         assert resp.status_code == 404

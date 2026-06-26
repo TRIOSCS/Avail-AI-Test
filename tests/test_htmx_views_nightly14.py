@@ -360,14 +360,14 @@ class TestRequisitionsBulkAction:
 
     def test_bulk_no_ids(self, client: TestClient):
         resp = client.post(
-            "/v2/partials/requisitions/bulk/archive",
+            "/v2/partials/requisitions/bulk/assign",
             data={},
         )
         assert resp.status_code == 400
 
     def test_bulk_invalid_id_format(self, client: TestClient):
         resp = client.post(
-            "/v2/partials/requisitions/bulk/archive",
+            "/v2/partials/requisitions/bulk/assign",
             data={"ids": "abc,def"},
         )
         assert resp.status_code == 400

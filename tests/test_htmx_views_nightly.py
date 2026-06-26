@@ -261,7 +261,7 @@ class TestBulkAction:
         assert resp.status_code == 400
 
     def test_bulk_no_ids_raises_400(self, client, db_session: Session, test_user: User):
-        resp = client.post("/v2/partials/requisitions/bulk/archive", data={})
+        resp = client.post("/v2/partials/requisitions/bulk/assign", data={})
         assert resp.status_code == 400
 
 
