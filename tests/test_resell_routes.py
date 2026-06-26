@@ -106,6 +106,30 @@ def test_workspace_renders(client, trader_user, posted_list):
     assert "split-resell" in body  # splitPanel container
 
 
+def test_create_form_route_not_shadowed_by_list_id(client, trader_user):
+    """Regression: the static /v2/partials/resell/create-form route must be matched as itself.
+
+    Before the fix, the dynamic /{list_id} route was registered first, so FastAPI matched
+    'create-form' against {list_id} and returned 422 (int-parse on list_id) — the 'New List'
+    button was dead. Override require_user to a can_post trader and assert the modal renders.
+    """
+    from app.dependencies import require_user
+    from app.main import app
+
+    prev = app.dependency_overrides.get(require_user)
+    app.dependency_overrides[require_user] = lambda: trader_user
+    try:
+        resp = client.get("/v2/partials/resell/create-form")
+    finally:
+        if prev is not None:
+            app.dependency_overrides[require_user] = prev
+        else:
+            app.dependency_overrides.pop(require_user, None)
+
+    assert resp.status_code != 422, f"create-form shadowed by /{{list_id}}: {resp.text}"
+    assert resp.status_code == 200, resp.text  # trader can_post → the new-list modal renders
+
+
 def test_full_page_route(client, trader_user):
     """/v2/resell serves the base shell, wired to load the workspace partial.
 

@@ -328,6 +328,24 @@ async def resell_lists(
 # ── Right detail + lazy tab bodies ───────────────────────────────────
 
 
+# NB: this static route MUST be registered before the dynamic "/{list_id}" route below —
+# otherwise FastAPI matches "create-form" against {list_id} and 422s on int parsing.
+@router.get("/v2/partials/resell/create-form", response_class=HTMLResponse)
+async def resell_create_form(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render the new-list modal (only for users who can post)."""
+    if not excess_service.can_post(user):
+        raise HTTPException(403, "You do not have permission to post excess lists")
+    companies = db.query(Company).order_by(Company.name).all()
+    return template_response(
+        "htmx/partials/resell/create_modal.html",
+        {"request": request, "companies": companies},
+    )
+
+
 @router.get("/v2/partials/resell/{list_id}", response_class=HTMLResponse)
 async def resell_detail(
     request: Request,
@@ -603,22 +621,6 @@ async def resell_bid_pdf(
 
 
 # ── Modal forms ──────────────────────────────────────────────────────
-
-
-@router.get("/v2/partials/resell/create-form", response_class=HTMLResponse)
-async def resell_create_form(
-    request: Request,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Render the new-list modal (only for users who can post)."""
-    if not excess_service.can_post(user):
-        raise HTTPException(403, "You do not have permission to post excess lists")
-    companies = db.query(Company).order_by(Company.name).all()
-    return template_response(
-        "htmx/partials/resell/create_modal.html",
-        {"request": request, "companies": companies},
-    )
 
 
 @router.get("/v2/partials/resell/{list_id}/add-line-form", response_class=HTMLResponse)
