@@ -679,6 +679,7 @@ from .routers.activity import router as activity_router
 from .routers.admin import router as admin_router
 from .routers.ai import router as ai_router
 from .routers.alerts import router as alerts_router
+from .routers.approvals import router as approvals_router
 from .routers.attachments_extra import router as attachments_extra_router
 from .routers.auth import router as auth_router
 from .routers.avatars import router as avatars_router
@@ -726,6 +727,7 @@ app.include_router(sources_router)
 app.include_router(tags_router)
 app.include_router(resell_router)
 app.include_router(v13_router)
+app.include_router(approvals_router)
 app.include_router(prepayments_router)
 app.include_router(vendor_contacts_router)
 app.include_router(vendors_crud_router)
