@@ -551,3 +551,102 @@ def test_header_and_group_use_consistent_vocab(admin_client):
     html = admin_client.get("/v2/partials/settings/connectors").text
     assert "need attention" not in html, "Header should use unified 'need setup' vocab"
     assert "need setup" in html or "needs setup" in html.lower()
+
+
+# ── Worker-aware status: browser-worker sources show worker health ────────
+
+
+def _set_active(db_session, name):
+    """Make a seeded ApiSource active (the connectors page only shows worker state for
+    active worker sources; inactive → 'off')."""
+    from app.models import ApiSource as AS
+
+    src = db_session.query(AS).filter_by(name=name).first()
+    assert src is not None, f"{name} must be seeded"
+    src.is_active = True
+    db_session.commit()
+    return src
+
+
+@pytest.fixture()
+def admin_client_worker_healthy(db_session, admin_user):
+    """Admin client with a HEALTHY NetComponents worker heartbeat seeded."""
+    from datetime import datetime, timezone
+
+    from app.models import NcWorkerStatus
+
+    _seed_sources(db_session)
+    _set_active(db_session, "netcomponents")
+    db_session.add(
+        NcWorkerStatus(
+            id=1,
+            is_running=True,
+            last_heartbeat=datetime.now(timezone.utc),
+            last_search_at=datetime.now(timezone.utc),
+            circuit_breaker_open=False,
+        )
+    )
+    db_session.commit()
+    yield from _make_admin_client(db_session, admin_user)
+
+
+@pytest.fixture()
+def admin_client_worker_stalled(db_session, admin_user):
+    """Admin client with a STALLED ICsource worker (heartbeat 40 min old)."""
+    from datetime import datetime, timedelta, timezone
+
+    from app.models import IcsWorkerStatus
+
+    _seed_sources(db_session)
+    _set_active(db_session, "icsource")
+    db_session.add(
+        IcsWorkerStatus(
+            id=1,
+            is_running=True,
+            last_heartbeat=datetime.now(timezone.utc) - timedelta(minutes=40),
+            circuit_breaker_open=False,
+        )
+    )
+    db_session.commit()
+    yield from _make_admin_client(db_session, admin_user)
+
+
+def test_worker_backed_source_shows_worker_active_not_broken(admin_client_worker_healthy):
+    """A worker-backed source with a healthy worker shows 'Worker active' — NOT
+    'Error'/'Needs setup'/'broken' — even though it has no direct API key."""
+    html = admin_client_worker_healthy.get("/v2/partials/settings/connectors").text
+    assert "Worker active" in html, "Expected 'Worker active' badge for a healthy worker source"
+    # The bug we are fixing: it must NOT read as broken/no-API/needs-setup.
+    assert "Worker down" not in html
+    # NetComponents card must not claim it needs an API key / setup.
+    assert "background worker" in html.lower(), "Expected worker explanation copy"
+
+
+def test_stalled_worker_shows_worker_down(admin_client_worker_stalled):
+    """A worker-backed source whose worker has stalled shows 'Worker down' + the
+    problem."""
+    html = admin_client_worker_stalled.get("/v2/partials/settings/connectors").text
+    assert "Worker down" in html, "Expected 'Worker down' badge for a stalled worker"
+    assert "stalled" in html.lower(), "Expected the stall reason to surface"
+    assert "Worker active" not in html
+
+
+def test_worker_source_has_no_api_test_button(admin_client_worker_healthy):
+    """Worker-backed sources are not testable via the synchronous API probe — their
+    health is the heartbeat, so no per-card Test button targets the NC source."""
+    html = admin_client_worker_healthy.get("/v2/partials/settings/connectors").text
+    # The NC card is rendered; assert it offers the worker login form, not an API test.
+    assert "Save login" in html, "Expected the browser-login Save form for the worker source"
+
+
+def test_keyless_direct_api_source_still_shows_needs_or_off(admin_client):
+    """Regression: a keyless DIRECT-API source (SAM.gov) is unaffected by the worker
+    carve-out — with no toggle on it renders 'Off' (keyless = has access, inactive)."""
+    html = admin_client.get("/v2/partials/settings/connectors").text
+    # SAM.gov is keyless + inactive in the seed → 'Off' (never 'Worker active').
+    assert "SAM.gov" in html
+    # Worker badges must only attach to the three browser-worker sources.
+    # SAM.gov is in the Enrichment group; it must not borrow a worker badge.
+    assert "Worker active" not in html and "Worker down" not in html, (
+        "Direct-API keyless source must not render a worker badge"
+    )

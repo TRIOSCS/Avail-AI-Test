@@ -34,7 +34,9 @@
         "vendor": "/v2/vendors/" ~ bm.id,
         "vendor_contact": "/v2/vendors/" ~ (bm.vendor_card_id|default(bm.id)),
         "part": "/v2/requisitions/" ~ (bm.requisition_id|default("")),
-        "offer": "/v2/requisitions/" ~ (bm.requisition_id|default(""))
+        "offer": "/v2/requisitions/" ~ (bm.requisition_id|default("")),
+        "material_card": "/v2/search?mpn=" ~ (bm.display_mpn|default(bm.normalized_mpn|default(""))|urlencode),
+        "sighting": "/v2/requisitions/" ~ (bm.requisition_id|default(""))
       } %}
       {% set bm_partials_map = {
         "requisition": "/v2/partials/requisitions/" ~ bm.id,
@@ -42,7 +44,9 @@
         "vendor": "/v2/partials/vendors/" ~ bm.id,
         "vendor_contact": "/v2/partials/vendors/" ~ (bm.vendor_card_id|default(bm.id)),
         "part": "/v2/partials/requisitions/" ~ (bm.requisition_id|default("")),
-        "offer": "/v2/partials/requisitions/" ~ (bm.requisition_id|default(""))
+        "offer": "/v2/partials/requisitions/" ~ (bm.requisition_id|default("")),
+        "material_card": "/v2/partials/search?mpn=" ~ (bm.display_mpn|default(bm.normalized_mpn|default(""))|urlencode),
+        "sighting": "/v2/partials/requisitions/" ~ (bm.requisition_id|default(""))
       } %}
       <a href="{{ bm_url_map.get(bm.type, '#') }}"
          hx-get="{{ bm_partials_map.get(bm.type, '#') }}"
@@ -56,7 +60,7 @@
           </span>
         </div>
         <div class="min-w-0 flex-1">
-          <p class="text-sm font-semibold text-gray-900 truncate">{{ bm.name|default(bm.display_name|default(bm.full_name|default(bm.primary_mpn|default(bm.mpn|default("—"))))) }}</p>
+          <p class="text-sm font-semibold text-gray-900 truncate">{{ bm.name|default(bm.display_name|default(bm.full_name|default(bm.primary_mpn|default(bm.mpn|default(bm.display_mpn|default(bm.mpn_matched|default("—"))))))) }}</p>
           <p class="text-xs text-gray-600 truncate">
             <span class="inline-block rounded bg-brand-100 px-1.5 py-0.5 text-xs font-medium text-brand-700">{{ bm.type|replace("_", " ")|title }}</span>
             {% if bm.email %}<span class="ml-1">{{ bm.email }}</span>{% endif %}
@@ -100,6 +104,17 @@
           <path stroke-linecap="round" stroke-linejoin="round"
                 d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1"/>
         </svg>
+      {% elif entity_type == "material_cards" %}
+        <svg class="h-4 w-4 flex-shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round"
+                d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
+        </svg>
+      {% elif entity_type == "sightings" %}
+        <svg class="h-4 w-4 flex-shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+          <path stroke-linecap="round" stroke-linejoin="round"
+                d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+        </svg>
       {% endif %}
     {% endmacro %}
 
@@ -111,7 +126,9 @@
       "vendor_contacts": "Vendor Contacts",
       "site_contacts": "Customer Contacts",
       "parts": "Parts",
-      "offers": "Offers"
+      "offers": "Offers",
+      "material_cards": "Material Hub",
+      "sightings": "Sightings"
     } %}
 
     {# ── Grouped sections ── #}
@@ -220,6 +237,43 @@
             {{ entity_icon("offers") }}
             <span>
               <span class="font-medium font-mono">{{ item.mpn }}</span>
+              {% if item.vendor_name %}
+              <span class="ml-1 text-gray-400">{{ item.vendor_name }}</span>
+              {% endif %}
+              {% if item.unit_price %}
+              <span class="ml-1 text-emerald-600 font-medium">${{ "%.2f"|format(item.unit_price) }}</span>
+              {% endif %}
+            </span>
+          </a>
+
+          {# ── Material Hub cards ── #}
+          {% elif group_key == "material_cards" %}
+          <a href="/v2/search?mpn={{ item.display_mpn|default(item.normalized_mpn|default(''))|urlencode }}"
+             hx-get="/v2/partials/search?mpn={{ item.display_mpn|default(item.normalized_mpn|default(''))|urlencode }}"
+             hx-target="#main-content"
+             hx-push-url="/v2/search?mpn={{ item.display_mpn|default(item.normalized_mpn|default(''))|urlencode }}"
+             @click="searchOpen = false"
+             class="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-gray-700 hover:bg-brand-50 transition-colors">
+            {{ entity_icon("material_cards") }}
+            <span>
+              <span class="font-medium font-mono">{{ item.display_mpn }}</span>
+              {% if item.manufacturer %}
+              <span class="ml-1 text-gray-400">{{ item.manufacturer }}</span>
+              {% endif %}
+            </span>
+          </a>
+
+          {# ── Sightings ── #}
+          {% elif group_key == "sightings" %}
+          <a href="/v2/requisitions/{{ item.requisition_id|default('') }}"
+             hx-get="/v2/partials/requisitions/{{ item.requisition_id|default('') }}"
+             hx-target="#main-content"
+             hx-push-url="/v2/requisitions/{{ item.requisition_id|default('') }}"
+             @click="searchOpen = false"
+             class="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-gray-700 hover:bg-brand-50 transition-colors">
+            {{ entity_icon("sightings") }}
+            <span>
+              <span class="font-medium font-mono">{{ item.mpn_matched }}</span>
               {% if item.vendor_name %}
               <span class="ml-1 text-gray-400">{{ item.vendor_name }}</span>
               {% endif %}

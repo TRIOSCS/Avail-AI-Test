@@ -12,7 +12,6 @@ import os
 
 os.environ["TESTING"] = "1"
 
-import io
 import json
 import uuid
 from contextlib import contextmanager
@@ -815,44 +814,11 @@ class TestKnowledgePartial:
         assert entry.entry_type == "note"
 
 
-# ── Section 16: Admin import/data-ops ────────────────────────────────────
+# ── Section 16: Admin data-ops ───────────────────────────────────────────
 
 
-class TestAdminImportVendors:
-    """Covers POST /v2/partials/admin/import/vendors and GET /v2/partials/admin/data-
-    ops."""
-
-    def test_import_vendors_no_file_returns_400(
-        self, client: TestClient, db_session: Session, test_user: User, admin_user: User
-    ):
-        with admin_client(db_session, admin_user) as admin:
-            resp = admin.post("/v2/partials/admin/import/vendors")
-            assert resp.status_code == 400
-
-    def test_import_vendors_csv_success(self, client: TestClient, db_session: Session, admin_user: User):
-        csv_content = b"name,email,phone,website\nNewVendorCSV Inc,sales@newvendor.com,555-1234,https://newvendor.com\n"
-
-        with admin_client(db_session, admin_user) as admin:
-            resp = admin.post(
-                "/v2/partials/admin/import/vendors",
-                files={"file": ("vendors.csv", io.BytesIO(csv_content), "text/csv")},
-            )
-            assert resp.status_code == 200
-            assert "Imported" in resp.text
-
-    def test_import_vendors_skips_duplicates(
-        self, client: TestClient, db_session: Session, admin_user: User, test_vendor_card: VendorCard
-    ):
-        # Use normalized name that already exists ("arrow electronics")
-        csv_content = b"name,email\nArrow Electronics,sales@arrow.com\n"
-
-        with admin_client(db_session, admin_user) as admin:
-            resp = admin.post(
-                "/v2/partials/admin/import/vendors",
-                files={"file": ("vendors.csv", io.BytesIO(csv_content), "text/csv")},
-            )
-            assert resp.status_code == 200
-            assert "Imported 0" in resp.text
+class TestAdminDataOps:
+    """Covers GET /v2/partials/admin/data-ops and /api-health."""
 
     def test_admin_data_ops_returns_200_for_admin(self, client: TestClient, db_session: Session, admin_user: User):
         """Admin users can access data-ops panel."""

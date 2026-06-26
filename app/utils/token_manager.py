@@ -41,7 +41,11 @@ async def get_valid_token(user, db) -> str | None:
         user.m365_error_reason = None
         db.commit()
     else:
-        user.m365_error_reason = "Token refresh failed"
+        # A failed refresh means the sign-in/refresh token is dead — only a
+        # reconnect fixes it. Record the actionable reason, not a raw string.
+        from ..services.m365_status import reason_for
+
+        user.m365_error_reason = reason_for("token refresh failed")
         db.commit()
     return token
 

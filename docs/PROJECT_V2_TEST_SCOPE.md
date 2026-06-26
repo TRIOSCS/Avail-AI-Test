@@ -228,12 +228,12 @@ Tabs (each loads via `/v2/partials/requisitions/{id}/tab/{tab}`):
 ### 7.1 List `/v2/vendors`
 - Filters: score tier, tags, recency of interaction, region.
 - Columns: name, domain, score, last contact, reliability, open offers.
+- "Upload stock list" button → modal POSTs a vendor's stock list (CSV/TSV/XLSX) to `/v2/partials/vendors/import-stock`; rows ingest as MaterialCard + MaterialVendorHistory + price snapshots (shared `stock_list_ingest` service).
 
 ### 7.2 Detail `/v2/vendors/{id}`
 - Tabs: Overview, Contacts, Offers, Activity, Stock history, Reviews, Tags.
 - Reliability score breakdown: response rate, on-time delivery, cancellation rate, quote conversion.
 - Add/edit/delete contact; merge duplicate vendors; tag edits.
-- "Find by part": `/v2/partials/vendors/find-by-part` → vendors who ever quoted this MPN.
 
 ### 7.3 Fuzzy Matching
 - New vendor with similar name → `fuzzy_score_vendor()` suggests merge; threshold test at ~85%.

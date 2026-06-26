@@ -16,7 +16,9 @@
 {% macro state_badge(s) %}
 {%- set _states = {
   'live':           ('bg-green-100 text-green-800', 'bg-green-500',   'Live'),
+  'worker_active':  ('bg-green-100 text-green-800', 'bg-green-500',   'Worker active'),
   'error':          ('bg-red-100 text-red-800',     'bg-red-500',     'Error'),
+  'worker_down':    ('bg-red-100 text-red-800',     'bg-red-500',     'Worker down'),
   'off':            ('bg-gray-100 text-gray-600',   'bg-gray-400',    'Off'),
   'needs_setup':    ('bg-amber-100 text-amber-800', 'bg-amber-500',   'Needs setup'),
   'needs_reconnect':('bg-amber-100 text-amber-800', 'bg-amber-500',   'Needs reconnect'),
@@ -32,6 +34,8 @@
 
 {% macro _state_help(state) -%}
 {%- if state == 'live' -%}Connected, on, and answering
+{%- elif state == 'worker_active' -%}A background worker is doing the searching — it's running and reporting in
+{%- elif state == 'worker_down' -%}A background worker does the searching, but it has stopped reporting in — see the note below
 {%- elif state == 'off' -%}Set up and ready, but switched off
 {%- elif state == 'untested' -%}Credentials saved but not checked yet — run Test
 {%- elif state == 'needs_setup' -%}Add credentials to turn this on
@@ -39,6 +43,26 @@
 {%- elif state == 'error' -%}Last check failed
 {%- elif state == 'planned' -%}Connector on the roadmap — not built yet
 {%- endif -%}
+{%- endmacro %}
+
+{# ── Worker-backed health detail ─────────────────────────────────────── #}
+{# Renders the verified worker health for browser-backed sources (TBF / NetComponents
+   / ICsource): "Worker active" with the heartbeat age + last successful search, or
+   the specific problem when the worker has stalled. s.worker is the worker_health()
+   verdict dict ({healthy, heartbeat_age_secs, last_search_at, problem}) or None. #}
+{% macro worker_detail(s) -%}
+{%- set w = s.worker -%}
+{%- if w %}
+  {% if w.healthy %}
+  <p class="text-xs text-green-700">
+    Worker active — last reported in
+    {%- if w.heartbeat_age_secs is not none %} {{ w.heartbeat_age_secs // 60 if w.heartbeat_age_secs >= 60 else w.heartbeat_age_secs }}{{ ' min' if w.heartbeat_age_secs >= 60 else ' sec' }} ago{% else %} just now{% endif %}.
+    {% if w.last_search_at %}Last search {{ w.last_search_at.strftime('%b %d, %H:%M UTC') }}.{% else %}No searches completed yet.{% endif %}
+  </p>
+  {% else %}
+  <p class="text-xs text-red-600">Worker down — {{ w.problem or 'worker is not reporting in' }}.</p>
+  {% endif %}
+{%- endif %}
 {%- endmacro %}
 
 {# ── Inline spinner (respects prefers-reduced-motion) ────────────────── #}
@@ -147,7 +171,7 @@ hx-on::after-request='if(event.detail.successful){htmx.ajax("GET","/v2/partials/
                {% if s.state == 'needs_setup' %}disabled{% endif %}
                hx-put="/api/sources/{{ s.id }}/activate"
                hx-trigger="change"
-               {% if s.state == 'live' %}hx-confirm='Turn off {{ s.display_name|e }}? Searches will return fewer results until it&#39;s back on.'{% endif %}
+               {% if s.state in ('live', 'worker_active') %}hx-confirm='Turn off {{ s.display_name|e }}? Searches will return fewer results until it&#39;s back on.'{% endif %}
                hx-target="#connector-card-{{ s.id }}"
                hx-swap="none"
                {{ _refresh_attr(s) }}
@@ -210,9 +234,11 @@ hx-on::after-request='if(event.detail.successful){htmx.ajax("GET","/v2/partials/
     </div>
 
   {% elif s.control_type == 'browser_login' %}
-    {% if s.state == 'needs_setup' %}
-    <p class="text-xs text-gray-500">Sign in with your {{ s.display_name }} account so the worker can search for you</p>
-    {% endif %}
+    {# Worker-backed: health is the worker heartbeat, not a direct API. Only surface the
+       worker verdict when the source is switched on (worker_active / worker_down); an
+       operator-disabled source reads 'Off' and shows no worker note. #}
+    {% if s.state in ('worker_active', 'worker_down') %}{{ worker_detail(s) }}{% endif %}
+    <p class="text-xs text-gray-500">A background worker signs in to {{ s.display_name }} and searches for you. Update the login it uses below.</p>
     <div class="space-y-2">
       {% for ev, field in s.creds.items() %}
         {{ key_field(s, ev, field) }}

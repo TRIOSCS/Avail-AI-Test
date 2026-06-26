@@ -2,7 +2,6 @@
 
 Targets:
   - vendors_list_partial (GET /v2/partials/vendors)
-  - find_by_part_partial (GET /v2/partials/vendors/find-by-part)
   - vendor_detail_partial (GET /v2/partials/vendors/{vendor_id})
   - vendor_tab (GET /v2/partials/vendors/{vendor_id}/tab/{tab})
 
@@ -46,19 +45,6 @@ class TestVendorsListPartial:
     )
     def test_list_query_params(self, client: TestClient, query: str):
         resp = client.get(f"/v2/partials/vendors?{query}")
-        assert resp.status_code == 200
-
-
-# ── Find By Part ──────────────────────────────────────────────────────────
-
-
-class TestFindByPartPartial:
-    def test_find_empty_mpn(self, client: TestClient):
-        resp = client.get("/v2/partials/vendors/find-by-part")
-        assert resp.status_code == 200
-
-    def test_find_with_mpn(self, client: TestClient):
-        resp = client.get("/v2/partials/vendors/find-by-part?mpn=NE555")
         assert resp.status_code == 200
 
 

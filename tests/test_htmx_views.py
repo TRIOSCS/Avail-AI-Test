@@ -320,6 +320,43 @@ class TestGlobalSearch:
         resp = client.get("/v2/partials/search/results?q=test")
         assert resp.status_code == 200
 
+    def test_global_search_renders_material_and_sighting_groups(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """A part-number query renders the new Material Hub + Sightings groups end-to-
+        end."""
+        from app.models.intelligence import MaterialCard
+        from app.models.sourcing import Requirement, Requisition, Sighting
+
+        req = Requisition(name="REQ-UNI", customer_name="Acme", created_by=test_user.id)
+        db_session.add(req)
+        db_session.flush()
+        mc = MaterialCard(normalized_mpn="uni999", display_mpn="UNI-999", manufacturer="ACME Semi")
+        db_session.add(mc)
+        db_session.flush()
+        part = Requirement(
+            requisition_id=req.id, material_card_id=mc.id, primary_mpn="UNI-999", normalized_mpn="uni999"
+        )
+        db_session.add(part)
+        db_session.flush()
+        db_session.add(
+            Sighting(
+                requirement_id=part.id,
+                vendor_name="Distro Inc",
+                vendor_name_normalized="distro inc",
+                mpn_matched="UNI-999",
+                normalized_mpn="uni999",
+            )
+        )
+        db_session.commit()
+
+        resp = client.get("/v2/partials/search/global?q=UNI-999")
+        assert resp.status_code == 200
+        body = resp.text
+        assert "Material Hub" in body
+        assert "Sightings" in body
+        assert "UNI-999" in body
+
 
 # ══════════════════════════════════════════════════════════════════════════
 # Parts Workspace
