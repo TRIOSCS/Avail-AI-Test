@@ -19,6 +19,7 @@ from decimal import Decimal
 from sqlalchemy.orm import Session
 
 from ..constants import ApprovalGateType
+from ..dependencies import get_buyplan_for_user
 from ..models.approvals import ApprovalRequest
 from ..models.quality_plan import Prepayment
 from ..services.approvals.service import create_request
@@ -53,9 +54,15 @@ def create_prepayment(
     Raises:
         NoEligibleApproverError: Propagated from route_request when no eligible
             approver exists for the PREPAYMENT gate at this amount.
+        HTTPException(404): If *created_by* may not access *buy_plan_id* (restricted
+            roles not owning the parent requisition).
     """
+    # Ownership gate (service-layer so the router stays thin): a Prepayment + routed
+    # ApprovalRequest must not be attachable to a buy plan the actor can't access.
+    plan = get_buyplan_for_user(db, created_by, buy_plan_id)
+
     prepayment = Prepayment(
-        buy_plan_id=buy_plan_id,
+        buy_plan_id=plan.id,
         vendor_card_id=vendor_card_id,
         payment_method=payment_method,
         total_incl_fees=total_incl_fees,
