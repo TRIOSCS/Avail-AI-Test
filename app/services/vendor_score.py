@@ -27,6 +27,26 @@ ADVANCEMENT_WEIGHT = 0.80
 REVIEW_WEIGHT = 0.20
 MAX_STAGE_POINTS = 8
 
+# ── Cancellation dampener (vendor fall-down weighs the score down) ──
+# A "slow" cancel (PO sat > SLOW_CANCEL_THRESHOLD_DAYS before the vendor fell down)
+# wasted more of our time, so it counts double a fast one. Pressure = weighted cancels
+# / total POs; the dampener floors at MIN_DAMPENER so a vendor is never zeroed out.
+SLOW_CANCEL_WEIGHT = 2.0
+CANCEL_PENALTY_FACTOR = 0.5
+MIN_DAMPENER = 0.4
+
+
+def _cancel_dampener(cancel_count: int, slow_cancel_count: int, total_pos: int) -> float:
+    """Multiplier in [MIN_DAMPENER, 1.0] reflecting cancellation pressure on the
+    vendor."""
+    if not total_pos or not cancel_count:
+        return 1.0
+    fast = cancel_count - slow_cancel_count
+    weighted = fast * 1.0 + slow_cancel_count * SLOW_CANCEL_WEIGHT
+    pressure = weighted / total_pos
+    return max(MIN_DAMPENER, 1.0 - CANCEL_PENALTY_FACTOR * pressure)
+
+
 # BuyPlan statuses that count as PO confirmed (V4: completed plans)
 PO_CONFIRMED_STATUSES = {BuyPlanStatus.COMPLETED.value}
 # BuyPlan statuses that count as awarded. Cancelled AND halted plans are NOT
@@ -47,8 +67,16 @@ def compute_vendor_score(
     offer_count: int,
     stage_points_sum: float,
     avg_rating: float | None,
+    *,
+    cancel_count: int = 0,
+    slow_cancel_count: int = 0,
+    total_pos: int = 0,
 ) -> dict:
     """Pure calculation — no DB access.
+
+    The cancellation aggregates are optional (default 0) so existing callers are
+    unaffected; when present, the blended ``vendor_score`` is multiplied by
+    ``_cancel_dampener`` (applied only when ``vendor_score`` is not None).
 
     Returns:
         {
@@ -75,6 +103,9 @@ def compute_vendor_score(
     else:
         vendor_score = advancement_score
     vendor_score = round(min(100.0, max(0.0, vendor_score)), 1)
+
+    if vendor_score is not None:
+        vendor_score = round(vendor_score * _cancel_dampener(cancel_count, slow_cancel_count, total_pos), 1)
 
     return {
         "vendor_score": vendor_score,
@@ -121,7 +152,28 @@ def compute_single_vendor_score(db: Session, vendor_card_id: int) -> dict:
     if avg_rating is not None:
         avg_rating = float(avg_rating)
 
-    return compute_vendor_score(offer_count, stage_points_sum, avg_rating)
+    # Cancellation pressure — same po_cancellations table the nightly batch reads.
+    cancel_count, slow_cancel_count = _vendor_cancel_counts(db, vendor_card_id)
+
+    return compute_vendor_score(
+        offer_count,
+        stage_points_sum,
+        avg_rating,
+        cancel_count=cancel_count,
+        slow_cancel_count=slow_cancel_count,
+        total_pos=card.total_pos or 0,
+    )
+
+
+def _vendor_cancel_counts(db: Session, vendor_card_id: int) -> tuple[int, int]:
+    """(cancel_count, slow_cancel_count) over all POCancellation rows for one vendor."""
+    from app.models.po_cancellation import POCancellation
+    from app.services.po_cancellation_service import SLOW_CANCEL_THRESHOLD_DAYS
+
+    rows = db.query(POCancellation.days_to_cancel).filter(POCancellation.vendor_card_id == vendor_card_id).all()
+    cancel_count = len(rows)
+    slow_cancel_count = sum(1 for (d,) in rows if d is not None and d > SLOW_CANCEL_THRESHOLD_DAYS)
+    return cancel_count, slow_cancel_count
 
 
 async def compute_all_vendor_scores(db: Session) -> dict:
@@ -194,6 +246,30 @@ async def compute_all_vendor_scores(db: Session) -> dict:
     )
     review_avg_map = {cid: float(avg) for cid, avg in review_rows if avg is not None}
 
+    # ── Preload PO-cancellation counts grouped by vendor_card_id ──
+    # SAME po_cancellations table compute_single_vendor_score reads, so inline (re-source)
+    # and nightly scoring always agree.
+    from sqlalchemy import case
+
+    from app.models.po_cancellation import POCancellation
+    from app.services.po_cancellation_service import SLOW_CANCEL_THRESHOLD_DAYS
+
+    cancel_rows = (
+        db.query(
+            POCancellation.vendor_card_id,
+            func.count(POCancellation.id),
+            func.sum(case((POCancellation.days_to_cancel > SLOW_CANCEL_THRESHOLD_DAYS, 1), else_=0)),
+        )
+        .filter(POCancellation.vendor_card_id.isnot(None))
+        .group_by(POCancellation.vendor_card_id)
+        .all()
+    )
+    cancel_count_map: dict[int, int] = {}
+    slow_cancel_map: dict[int, int] = {}
+    for vcid, cnt, slow in cancel_rows:
+        cancel_count_map[vcid] = cnt or 0
+        slow_cancel_map[vcid] = int(slow or 0)
+
     # ── Iterate all VendorCards in batches ──
     total_count = db.query(func.count(VendorCard.id)).scalar() or 0
     updated = 0
@@ -219,7 +295,14 @@ async def compute_all_vendor_scores(db: Session) -> dict:
 
             avg_rating = review_avg_map.get(card.id)
 
-            result = compute_vendor_score(offer_count, stage_points_sum, avg_rating)
+            result = compute_vendor_score(
+                offer_count,
+                stage_points_sum,
+                avg_rating,
+                cancel_count=cancel_count_map.get(card.id, 0),
+                slow_cancel_count=slow_cancel_map.get(card.id, 0),
+                total_pos=card.total_pos or 0,
+            )
 
             card.vendor_score = result["vendor_score"]
             card.advancement_score = result["advancement_score"]
