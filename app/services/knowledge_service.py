@@ -851,9 +851,9 @@ def build_pipeline_context(db: Session) -> str:
         for r in all_reqs
         if r.status
         in (
-            RequisitionStatus.ACTIVE,
-            RequisitionStatus.SOURCING,
-            RequisitionStatus.QUOTING,
+            RequisitionStatus.OPEN,
+            RequisitionStatus.RFQS_SENT,
+            RequisitionStatus.QUOTED,
         )
     ]
     if active:
@@ -951,9 +951,9 @@ def build_company_context(db: Session, *, company_id: int) -> str:
                 Requisition.customer_site_id.in_(site_ids),
                 Requisition.status.in_(
                     [
-                        RequisitionStatus.ACTIVE,
-                        RequisitionStatus.SOURCING,
-                        RequisitionStatus.QUOTING,
+                        RequisitionStatus.OPEN,
+                        RequisitionStatus.RFQS_SENT,
+                        RequisitionStatus.QUOTED,
                     ]
                 ),
             )

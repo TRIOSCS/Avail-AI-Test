@@ -2377,9 +2377,9 @@ class TestCustomerImportErrors:
 
 class TestReqStatusTransitions:
     def test_create_offer_changes_req_status(self, client, db_session, test_requisition, monkeypatch):
-        """Creating an offer transitions req from 'active' to 'offers'."""
+        """Creating an offer transitions req from 'open' to 'offers'."""
         monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() if hasattr(coro, "close") else None)
-        test_requisition.status = "active"
+        test_requisition.status = "open"
         db_session.commit()
 
         req = test_requisition
@@ -2402,7 +2402,7 @@ class TestReqStatusTransitions:
     def test_create_quote_changes_req_status(
         self, client, db_session, test_requisition, test_customer_site, test_offer
     ):
-        """Creating a quote transitions req to 'quoting'."""
+        """Creating a quote transitions req to 'quoted'."""
         test_requisition.customer_site_id = test_customer_site.id
         test_requisition.status = "offers"
         db_session.commit()
@@ -2414,7 +2414,7 @@ class TestReqStatusTransitions:
         assert resp.status_code == 200
         data = resp.json()
         assert data["status_changed"] is True
-        assert data["req_status"] == "quoting"
+        assert data["req_status"] == "quoted"
 
     @patch("app.routers.crm.offers.get_credential_cached", return_value=None)
     def test_create_offer_with_vendor_website(self, mock_cred, client, db_session, test_requisition, monkeypatch):

@@ -381,7 +381,7 @@ def test_download_import_sighting_no_reqs_continue(db_session, test_user, test_r
     from app.models import Sighting
 
     test_user.access_token = "at_noreqs"
-    test_requisition.status = "active"
+    test_requisition.status = "open"
     db_session.commit()
 
     mock_gc = MagicMock()
@@ -422,7 +422,7 @@ def test_download_import_sighting_zero_qty_skipped(db_session, test_user, test_r
     from app.models import Sighting
 
     test_user.access_token = "at_zeroqty"
-    test_requisition.status = "active"
+    test_requisition.status = "open"
     db_session.commit()
 
     mock_gc = MagicMock()
@@ -461,7 +461,7 @@ def test_download_import_sighting_dedup_key_skips_duplicate(db_session, test_use
     from app.models import MaterialCard, MaterialVendorHistory, Sighting
 
     test_user.access_token = "at_dedup"
-    test_requisition.status = "active"
+    test_requisition.status = "open"
 
     # Pre-create card + MVH so both rows update (not insert) — avoids unique constraint
     card = MaterialCard(normalized_mpn="lm317t", display_mpn="LM317T", manufacturer="TI")
@@ -523,7 +523,7 @@ def test_download_import_sighting_sqlalchemy_error_rolled_back(db_session, test_
     import sqlalchemy.exc
 
     test_user.access_token = "at_sqlaerr"
-    test_requisition.status = "active"
+    test_requisition.status = "open"
     db_session.commit()
 
     mock_gc = MagicMock()
@@ -567,7 +567,7 @@ def test_download_import_sighting_generic_exception_rolled_back(db_session, test
     raising."""
 
     test_user.access_token = "at_generr"
-    test_requisition.status = "active"
+    test_requisition.status = "open"
     db_session.commit()
 
     mock_gc = MagicMock()
@@ -651,7 +651,7 @@ def test_download_import_sighting_mixed_mpns_one_with_no_req(db_session, test_us
     from app.models import MaterialCard, MaterialVendorHistory, Sighting
 
     test_user.access_token = "at_mixed"
-    test_requisition.status = "active"
+    test_requisition.status = "open"
 
     # Pre-create cards + MVH for both MPNs to avoid unique constraint on MVH
     for mpn_norm, mpn_disp in [("lm317t", "LM317T"), ("zzznomatch", "ZZZNOMATCH")]:

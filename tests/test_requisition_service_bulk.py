@@ -23,7 +23,7 @@ from app.schemas.responses import BatchAssignResponse, BulkArchiveResponse
 from app.services.requisition_service import batch_archive_for_user
 
 
-def _make_req(db: Session, *, owner_id: int, status: str = RequisitionStatus.ACTIVE) -> Requisition:
+def _make_req(db: Session, *, owner_id: int, status: str = RequisitionStatus.OPEN) -> Requisition:
     """Seed a minimal requisition and return the committed row."""
     req = Requisition(
         name=f"REQ-{owner_id}-{status}",
@@ -51,8 +51,8 @@ def test_batch_archive_for_user_sales_only_archives_own(db_session: Session, sal
     assert archived == [own.id]
 
     db_session.expire_all()
-    assert db_session.get(Requisition, own.id).status == RequisitionStatus.ARCHIVED
-    assert db_session.get(Requisition, other.id).status == RequisitionStatus.ACTIVE
+    assert db_session.get(Requisition, own.id).is_archived is True
+    assert db_session.get(Requisition, other.id).is_archived is False
 
 
 def test_batch_archive_excludes_terminal(db_session: Session, test_user: User):
@@ -69,10 +69,9 @@ def test_batch_archive_excludes_terminal(db_session: Session, test_user: User):
 
 
 def test_terminal_constant_values_and_not_a_member():
-    """TERMINAL holds exactly the four done-statuses and is not an enum member."""
+    """TERMINAL holds exactly the three done-statuses and is not an enum member."""
     assert RequisitionStatus.TERMINAL == frozenset(
         {
-            RequisitionStatus.ARCHIVED,
             RequisitionStatus.WON,
             RequisitionStatus.LOST,
             RequisitionStatus.CANCELLED,

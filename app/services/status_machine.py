@@ -51,53 +51,54 @@ BUY_PLAN_TRANSITIONS: dict[str, set[str]] = {
 }
 
 # ── Requisition Status Transitions ──────────────────────────────────────
+# Mirror of app/services/requisition_state.ALLOWED_TRANSITIONS — the Sales Hub
+# pipeline (archive is orthogonal via Requisition.is_archived, not a status).
 REQUISITION_TRANSITIONS: dict[str, set[str]] = {
     RequisitionStatus.DRAFT: {
-        RequisitionStatus.ACTIVE,
-        RequisitionStatus.SOURCING,
-        RequisitionStatus.ARCHIVED,
-        RequisitionStatus.CANCELLED,
+        RequisitionStatus.OPEN,
+        RequisitionStatus.HOTLIST,
     },
-    RequisitionStatus.ACTIVE: {
-        RequisitionStatus.SOURCING,
+    RequisitionStatus.OPEN: {
+        RequisitionStatus.RFQS_SENT,
         RequisitionStatus.OFFERS,
-        RequisitionStatus.QUOTING,
+        RequisitionStatus.QUOTED,
         RequisitionStatus.WON,
         RequisitionStatus.LOST,
-        RequisitionStatus.ARCHIVED,
-        RequisitionStatus.CANCELLED,
+        RequisitionStatus.HOTLIST,
     },
-    RequisitionStatus.SOURCING: {
-        RequisitionStatus.ACTIVE,
+    RequisitionStatus.RFQS_SENT: {
+        RequisitionStatus.OPEN,
         RequisitionStatus.OFFERS,
-        RequisitionStatus.QUOTING,
+        RequisitionStatus.QUOTED,
         RequisitionStatus.WON,
         RequisitionStatus.LOST,
-        RequisitionStatus.ARCHIVED,
-        RequisitionStatus.CANCELLED,
+        RequisitionStatus.HOTLIST,
     },
     RequisitionStatus.OFFERS: {
-        RequisitionStatus.ACTIVE,
-        RequisitionStatus.SOURCING,
-        RequisitionStatus.QUOTING,
+        RequisitionStatus.OPEN,
+        RequisitionStatus.QUOTED,
         RequisitionStatus.WON,
         RequisitionStatus.LOST,
-        RequisitionStatus.ARCHIVED,
-        RequisitionStatus.CANCELLED,
+        RequisitionStatus.HOTLIST,
     },
-    RequisitionStatus.QUOTING: {
-        RequisitionStatus.ACTIVE,
-        RequisitionStatus.SOURCING,
+    RequisitionStatus.QUOTED: {
+        RequisitionStatus.OPEN,
         RequisitionStatus.OFFERS,
         RequisitionStatus.WON,
         RequisitionStatus.LOST,
-        RequisitionStatus.ARCHIVED,
-        RequisitionStatus.CANCELLED,
+        RequisitionStatus.HOTLIST,
     },
-    RequisitionStatus.WON: {RequisitionStatus.ACTIVE, RequisitionStatus.ARCHIVED},
-    RequisitionStatus.LOST: {RequisitionStatus.ACTIVE, RequisitionStatus.ARCHIVED},
-    RequisitionStatus.ARCHIVED: {RequisitionStatus.ACTIVE, RequisitionStatus.DRAFT},
-    RequisitionStatus.CANCELLED: {RequisitionStatus.ACTIVE, RequisitionStatus.DRAFT},
+    RequisitionStatus.WON: {RequisitionStatus.OPEN},
+    RequisitionStatus.LOST: {RequisitionStatus.OPEN, RequisitionStatus.HOTLIST},
+    RequisitionStatus.HOTLIST: {
+        RequisitionStatus.OPEN,
+        RequisitionStatus.RFQS_SENT,
+        RequisitionStatus.OFFERS,
+        RequisitionStatus.QUOTED,
+        RequisitionStatus.WON,
+        RequisitionStatus.LOST,
+    },
+    RequisitionStatus.CANCELLED: {RequisitionStatus.OPEN},
 }
 
 # ── Sourcing Status Transitions (Requirement-level) ────────────────────

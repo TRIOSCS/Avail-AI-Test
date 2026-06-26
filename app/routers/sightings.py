@@ -79,7 +79,9 @@ from ..vendor_utils import normalize_vendor_name
 router = APIRouter(tags=["sightings"])
 
 MAX_BATCH_SIZE: Final[int] = 50
-_EXCLUDED_REQ_STATUSES: Final = (RequisitionStatus.ARCHIVED, RequisitionStatus.CANCELLED)
+# Archive is no longer a status (see Requisition.is_archived) — every use-site below
+# pairs this status filter with an explicit `Requisition.is_archived.is_(False)` guard.
+_EXCLUDED_REQ_STATUSES: Final = (RequisitionStatus.CANCELLED,)
 
 _cache: dict[str, tuple[float, Any]] = {}
 
@@ -305,7 +307,7 @@ async def sightings_list(
     query = (
         db.query(Requirement)
         .join(Requisition, Requirement.requisition_id == Requisition.id)
-        .filter(Requisition.status.notin_(_EXCLUDED_REQ_STATUSES))
+        .filter(Requisition.status.notin_(_EXCLUDED_REQ_STATUSES), Requisition.is_archived.is_(False))
         .options(joinedload(Requirement.requisition).joinedload(Requisition.creator))
     )
 
@@ -343,7 +345,7 @@ async def sightings_list(
         lambda: dict(
             db.query(Requirement.sourcing_status, sqlfunc.count())
             .join(Requisition, Requirement.requisition_id == Requisition.id)
-            .filter(Requisition.status.notin_(_EXCLUDED_REQ_STATUSES))
+            .filter(Requisition.status.notin_(_EXCLUDED_REQ_STATUSES), Requisition.is_archived.is_(False))
             .group_by(Requirement.sourcing_status)
             .all()
         ),
@@ -407,7 +409,7 @@ async def sightings_list(
     active_req_select = (
         db.query(Requirement.id)
         .join(Requisition, Requirement.requisition_id == Requisition.id)
-        .filter(Requisition.status.notin_(_EXCLUDED_REQ_STATUSES))
+        .filter(Requisition.status.notin_(_EXCLUDED_REQ_STATUSES), Requisition.is_archived.is_(False))
     )
 
     # Urgent: priority >= 70 OR need_by_date within 48h
@@ -685,7 +687,7 @@ async def sightings_detail(
         )
         .join(Requirement, VendorSightingSummary.requirement_id == Requirement.id)
         .join(Requisition, Requirement.requisition_id == Requisition.id)
-        .filter(Requisition.status.notin_(_EXCLUDED_REQ_STATUSES))
+        .filter(Requisition.status.notin_(_EXCLUDED_REQ_STATUSES), Requisition.is_archived.is_(False))
         .group_by(VendorSightingSummary.vendor_name)
         .having(sqlfunc.count(sqlfunc.distinct(VendorSightingSummary.requirement_id)) > 1)
         .all()

@@ -3270,8 +3270,10 @@ class TestVendorOverlap:
 
     def test_overlap_excludes_inactive_requisitions(self, client, db_session):
         """Vendors on inactive requisitions are not counted in overlap."""
-        active_req = Requisition(name="Active RFQ", status="active", customer_name="Active Corp")
-        inactive_req = Requisition(name="Inactive RFQ", status="archived", customer_name="Closed Corp")
+        active_req = Requisition(name="Active RFQ", status="open", customer_name="Active Corp")
+        inactive_req = Requisition(
+            name="Inactive RFQ", status="open", is_archived=True, customer_name="Closed Corp"
+        )
         db_session.add_all([active_req, inactive_req])
         db_session.flush()
         r1 = Requirement(
@@ -4077,14 +4079,15 @@ class TestRequisitionStatusFilter:
     """Sightings list excludes requirements from archived/cancelled requisitions."""
 
     @pytest.mark.parametrize(
-        ("status", "mpn"),
+        ("status", "is_archived", "mpn"),
         [
-            ("archived", "ARCHIVED-MPN"),
-            ("cancelled", "CANCELLED-MPN"),
+            # Archive is a flag now (not a status); cancelled stays a status exclusion.
+            ("open", True, "ARCHIVED-MPN"),
+            ("cancelled", False, "CANCELLED-MPN"),
         ],
     )
-    def test_inactive_requisition_excluded(self, client, db_session, status, mpn):
-        req = Requisition(name=f"{status} RFQ", status=status, customer_name="Acme")
+    def test_inactive_requisition_excluded(self, client, db_session, status, is_archived, mpn):
+        req = Requisition(name=f"{mpn} RFQ", status=status, is_archived=is_archived, customer_name="Acme")
         db_session.add(req)
         db_session.flush()
         r = Requirement(requisition_id=req.id, primary_mpn=mpn, target_qty=10, sourcing_status="open")

@@ -38,17 +38,19 @@ from .activity_service import log_activity
 def bulk_archive_others(db: Session, user_id: int) -> list[int]:
     """Archive all active requisitions NOT created by `user_id`.
 
-    Used by the admin-only `/api/requisitions/bulk-archive` route. Already-terminal
-    statuses (archived / won / lost / cancelled) are excluded so the operation is
-    idempotent. Returns the IDs that were actually flipped to archived (may be empty).
+    Used by the admin-only `/api/requisitions/bulk-archive` route. Terminal
+    statuses (won / lost / cancelled) and already-archived rows are excluded so
+    the operation is idempotent. Returns the IDs that were actually flipped to
+    archived (may be empty).
     """
     stmt = (
         update(Requisition)
         .where(
             Requisition.created_by != user_id,
             Requisition.status.notin_(RequisitionStatus.TERMINAL),
+            Requisition.is_archived.is_(False),
         )
-        .values(status=RequisitionStatus.ARCHIVED)
+        .values(is_archived=True)
         .returning(Requisition.id)
         .execution_options(synchronize_session=False)
     )
@@ -59,12 +61,14 @@ def batch_archive_for_user(db: Session, user: User, ids: list[int]) -> list[int]
     """Archive specific requisitions by ID list, respecting role-based ownership.
 
     Sales users may only archive their own requisitions; other roles may
-    archive any. Already-terminal statuses are excluded. Returns the IDs
-    that were actually archived (which may be a strict subset of `ids`).
+    archive any. Terminal statuses and already-archived rows are excluded.
+    Returns the IDs that were actually archived (which may be a strict subset
+    of `ids`).
     """
     conditions = [
         Requisition.id.in_(ids),
         Requisition.status.notin_(RequisitionStatus.TERMINAL),
+        Requisition.is_archived.is_(False),
     ]
     if user.role in RESTRICTED_ROLES:
         conditions.append(Requisition.created_by == user.id)
@@ -72,7 +76,7 @@ def batch_archive_for_user(db: Session, user: User, ids: list[int]) -> list[int]
     stmt = (
         update(Requisition)
         .where(*conditions)
-        .values(status=RequisitionStatus.ARCHIVED)
+        .values(is_archived=True)
         .returning(Requisition.id)
         .execution_options(synchronize_session=False)
     )
@@ -166,7 +170,7 @@ def clone_requisition(
         name=f"{source_req.name} (clone)",
         customer_name=source_req.customer_name,
         customer_site_id=source_req.customer_site_id,
-        status=RequisitionStatus.ACTIVE,
+        status=RequisitionStatus.OPEN,
         cloned_from_id=source_req.id,
         created_by=user_id,
     )

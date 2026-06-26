@@ -64,11 +64,12 @@ async def _job_auto_archive():
         archived_count = (
             db.query(Requisition)
             .filter(
-                Requisition.status == RequisitionStatus.ACTIVE,
+                Requisition.status == RequisitionStatus.OPEN,
+                Requisition.is_archived.is_(False),
                 Requisition.last_searched_at.isnot(None),
                 Requisition.last_searched_at < cutoff,
             )
-            .update({"status": RequisitionStatus.ARCHIVED}, synchronize_session="fetch")
+            .update({"is_archived": True}, synchronize_session="fetch")
         )
         if archived_count:
             db.commit()

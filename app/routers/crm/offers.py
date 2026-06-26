@@ -419,7 +419,7 @@ async def create_offer(
     apply_qualification(offer)
     db.add(offer)
     old_status = req.status
-    if req.status in (RequisitionStatus.ACTIVE, RequisitionStatus.SOURCING):
+    if req.status == RequisitionStatus.OPEN:
         from ...services.requisition_state import transition as req_transition
 
         try:

@@ -30,7 +30,7 @@ async def clone_requisition(req_id: int, user: User = Depends(require_user), db:
         name=f"{req.name} (clone)",
         customer_name=req.customer_name,
         customer_site_id=req.customer_site_id,
-        status=RequisitionStatus.ACTIVE,
+        status=RequisitionStatus.OPEN,
         cloned_from_id=req.id,
         created_by=user.id,
     )

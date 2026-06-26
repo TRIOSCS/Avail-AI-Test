@@ -194,7 +194,7 @@ class TestCdrLinksToRequisition:
         req = Requisition(
             name="REQ-OPEN-001",
             customer_site_id=test_customer_site.id,
-            status="active",
+            status="open",
             created_by=user.id,
         )
         db_session.add(req)

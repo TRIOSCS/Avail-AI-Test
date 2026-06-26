@@ -222,8 +222,7 @@ async def _process_cdrs(db, settings) -> dict:
                     CustomerSite.company_id == match["company_id"],
                     Requisition.status.in_(
                         [
-                            RequisitionStatus.ACTIVE,
-                            RequisitionStatus.SOURCING,
+                            RequisitionStatus.OPEN,
                             RequisitionStatus.OFFERS,
                         ]
                     ),

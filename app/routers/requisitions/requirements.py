@@ -17,7 +17,7 @@ from loguru import logger
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
-from ...constants import ActivityType, OfferStatus, RequisitionStatus, TaskStatus
+from ...constants import ActivityType, OfferStatus, TaskStatus
 from ...database import get_db
 from ...dependencies import get_req_for_user, require_buyer, require_requisition_access, require_user
 from ...models import (
@@ -472,7 +472,7 @@ async def add_requirements(
                     Requisition.customer_site_id == req.customer_site_id,
                     Requisition.id != req_id,
                     Requisition.created_at >= cutoff,
-                    Requisition.status.notin_([RequisitionStatus.ARCHIVED]),
+                    Requisition.is_archived.is_(False),
                 )
                 .all()
             )

@@ -908,7 +908,7 @@ async def requisition_import_save(
         customer_site_id=site_id,
         deadline=deadline.strip() or None,
         urgency=urgency,
-        status=RequisitionStatus.ACTIVE,
+        status=RequisitionStatus.OPEN,
         created_by=user.id,
         claimed_by_id=user.id,
     )
@@ -1219,7 +1219,7 @@ async def requisition_create(
         customer_name=customer_name or None,
         deadline=deadline or None,
         urgency=urgency,
-        status=RequisitionStatus.ACTIVE,
+        status=RequisitionStatus.OPEN,
         created_by=user.id,
         claimed_by_id=user.id,
     )
@@ -1856,10 +1856,10 @@ async def requisitions_bulk_action(
 
     if action == "archive":
         for r in reqs:
-            r.status = RequisitionStatus.ARCHIVED
+            r.is_archived = True
     elif action == "activate":
         for r in reqs:
-            r.status = RequisitionStatus.ACTIVE
+            r.is_archived = False
     elif action == "assign":
         owner_id = form.get("owner_id")
         if owner_id:
@@ -7678,8 +7678,7 @@ async def company_detail_partial(
             ),
             Requisition.status.in_(
                 [
-                    RequisitionStatus.ACTIVE,
-                    RequisitionStatus.SOURCING,
+                    RequisitionStatus.OPEN,
                     RequisitionStatus.DRAFT,
                 ]
             ),
@@ -10752,8 +10751,7 @@ async def dashboard_partial(
         .filter(
             Requisition.status.in_(
                 [
-                    RequisitionStatus.ACTIVE,
-                    RequisitionStatus.SOURCING,
+                    RequisitionStatus.OPEN,
                     RequisitionStatus.DRAFT,
                 ]
             )
@@ -15713,8 +15711,7 @@ async def parts_list_partial(
         query = query.filter(
             Requisition.status.in_(
                 [
-                    RequisitionStatus.ACTIVE,
-                    RequisitionStatus.SOURCING,
+                    RequisitionStatus.OPEN,
                 ]
             )
         )
@@ -16665,11 +16662,11 @@ async def archive_requisition(
         raise HTTPException(404, "Requisition not found")
     require_requisition_access(db, req_id, user)
 
-    prior_status = requisition.status
-    requisition.status = RequisitionStatus.ARCHIVED
+    was_archived = requisition.is_archived
+    requisition.is_archived = True
     for child in requisition.requirements:
         child.sourcing_status = SourcingStatus.ARCHIVED
-    if prior_status != RequisitionStatus.ARCHIVED:
+    if not was_archived:
         _log_activity(
             db,
             activity_type=ActivityType.REQ_ARCHIVED,
@@ -16696,12 +16693,12 @@ async def unarchive_requisition(
         raise HTTPException(404, "Requisition not found")
     require_requisition_access(db, req_id, user)
 
-    prior_status = requisition.status
-    requisition.status = RequisitionStatus.ACTIVE
+    was_archived = requisition.is_archived
+    requisition.is_archived = False
     for child in requisition.requirements:
         if child.sourcing_status == SourcingStatus.ARCHIVED:
             child.sourcing_status = SourcingStatus.OPEN
-    if prior_status != RequisitionStatus.ACTIVE:
+    if was_archived:
         _log_activity(
             db,
             activity_type=ActivityType.REQ_UNARCHIVED,
@@ -16746,7 +16743,7 @@ async def bulk_archive(
     if requisition_ids:
         reqs = db.query(Requisition).filter(Requisition.id.in_(requisition_ids)).all()
         for requisition in reqs:
-            requisition.status = RequisitionStatus.ARCHIVED
+            requisition.is_archived = True
             _log_activity(
                 db,
                 activity_type=ActivityType.REQ_ARCHIVED,
@@ -16797,7 +16794,7 @@ async def bulk_unarchive(
     if requisition_ids:
         reqs = db.query(Requisition).filter(Requisition.id.in_(requisition_ids)).all()
         for requisition in reqs:
-            requisition.status = RequisitionStatus.ACTIVE
+            requisition.is_archived = False
         # Cascade: restore archived children of these requisitions
         db.query(Requirement).filter(
             Requirement.requisition_id.in_(requisition_ids),

@@ -93,7 +93,7 @@ class TestJobAutoArchive:
         req = Requisition(
             name="REQ-STALE-001",
             customer_name="Stale Corp",
-            status=RequisitionStatus.ACTIVE,
+            status=RequisitionStatus.OPEN,
             created_by=test_user.id,
             last_searched_at=datetime.now(timezone.utc) - timedelta(days=31),
             created_at=datetime.now(timezone.utc),
@@ -105,7 +105,7 @@ class TestJobAutoArchive:
             await _job_auto_archive.__wrapped__()
 
         db_session.refresh(req)
-        assert req.status == RequisitionStatus.ARCHIVED
+        assert req.is_archived is True
 
     @pytest.mark.asyncio
     async def test_does_not_archive_recent_requisitions(self, db_session: Session, test_user: User):
@@ -115,7 +115,7 @@ class TestJobAutoArchive:
         req = Requisition(
             name="REQ-FRESH-001",
             customer_name="Fresh Corp",
-            status=RequisitionStatus.ACTIVE,
+            status=RequisitionStatus.OPEN,
             created_by=test_user.id,
             last_searched_at=datetime.now(timezone.utc) - timedelta(days=10),
             created_at=datetime.now(timezone.utc),
@@ -127,7 +127,7 @@ class TestJobAutoArchive:
             await _job_auto_archive.__wrapped__()
 
         db_session.refresh(req)
-        assert req.status == RequisitionStatus.ACTIVE
+        assert req.is_archived is False
 
     @pytest.mark.asyncio
     async def test_does_not_archive_null_last_searched(self, db_session: Session, test_user: User):
@@ -137,7 +137,7 @@ class TestJobAutoArchive:
         req = Requisition(
             name="REQ-NULL-001",
             customer_name="Null Corp",
-            status=RequisitionStatus.ACTIVE,
+            status=RequisitionStatus.OPEN,
             created_by=test_user.id,
             last_searched_at=None,
             created_at=datetime.now(timezone.utc),
@@ -149,7 +149,7 @@ class TestJobAutoArchive:
             await _job_auto_archive.__wrapped__()
 
         db_session.refresh(req)
-        assert req.status == RequisitionStatus.ACTIVE
+        assert req.is_archived is False
 
     @pytest.mark.asyncio
     async def test_archives_multiple_stale(self, db_session: Session, test_user: User):
@@ -160,7 +160,7 @@ class TestJobAutoArchive:
             req = Requisition(
                 name=f"REQ-MULTI-{i}",
                 customer_name="Multi Corp",
-                status=RequisitionStatus.ACTIVE,
+                status=RequisitionStatus.OPEN,
                 created_by=test_user.id,
                 last_searched_at=datetime.now(timezone.utc) - timedelta(days=35),
                 created_at=datetime.now(timezone.utc),
@@ -171,7 +171,7 @@ class TestJobAutoArchive:
         with patch("app.database.SessionLocal", return_value=db_session), patch.object(db_session, "close"):
             await _job_auto_archive.__wrapped__()
 
-        stale = db_session.query(Requisition).filter(Requisition.status == RequisitionStatus.ARCHIVED).count()
+        stale = db_session.query(Requisition).filter(Requisition.is_archived.is_(True)).count()
         assert stale == 3
 
     @pytest.mark.asyncio
