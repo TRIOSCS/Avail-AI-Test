@@ -4807,6 +4807,27 @@ uploader lives in `settings/profile.html`; the shared `user_avatar(user, size)` 
 applied in the `activity_row` macro (comm-ledger actor `a.user`) and `buy_plans/detail.html`
 (line assignee `line.buyer`).
 
+Pan/zoom face-centering (client-side, route unchanged): picking a file in the profile-photo
+card no longer auto-uploads — it opens a circular crop viewport driven by the vanilla
+`Alpine.data('avatarCropper')` component (`htmx_app.js`; no third-party cropper dep). The
+image is painted to a `<canvas>` sized to the round viewport; the user PANS by dragging
+(mouse/touch) and ZOOMS via a slider, the mouse wheel, or a two-finger pinch, all clamped so
+the image always fully covers the circle (cover-scale `minScale`, focal-point zoom). On Save
+the visible circular region is re-rendered into a 512×512 export canvas and `toBlob()`'d
+(JPEG q0.9; PNG when the source carries alpha; the 512² downscale keeps it well under the
+2 MB cap), then POSTed as multipart to the SAME `/api/user/avatar` route — canvas output is a
+real JPEG/PNG so it clears the magic-byte gate unchanged. Because the upload is a `fetch`
+(not an HTMX swap), the component bridges the route's `HX-Trigger`: it fires the global
+`showToast` on `document.body` and a kebab-case `avatar-updated` on `window`; the card's
+outer Alpine state listens via `@avatar-updated.window` (Alpine lowercases attributes, so the
+route's camelCase `avatarUpdated` would not match an `@`-binding) and cache-busts the preview
+`src`. The Remove button (HTMX `hx-delete`) re-dispatches the same `avatar-updated` on
+success. The `user_avatar` macro is unchanged — it already renders `object-cover` in a
+circular frame, so the pre-centered 512² result lands correctly everywhere. The circular
+viewport + dimmed-ring mask are the `.avatar-crop-stage` / `.avatar-crop-mask` primitives in
+`styles.css`. ESLint's browser globals (`Image`/`File`/`FileReader`/`Blob`/`performance`/
+`Element`/`devicePixelRatio`) were added to `eslint.config.mjs` for the canvas APIs.
+
 Admin console (require_admin):  Settings → Tickets  (tab admin-gated)
   GET  /v2/partials/trouble-tickets/{workspace,list,{id}}   (require_admin)
   GET  /api/trouble-tickets/{id}/screenshot                 (require_admin — closes IDOR)
