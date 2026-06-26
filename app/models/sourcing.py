@@ -40,18 +40,23 @@ class Requisition(Base):
         Index("ix_requisitions_urgency", "urgency"),
         Index("ix_requisitions_company", "company_id"),
         Index("ix_requisitions_scratch_user", "created_by", postgresql_where=text("is_scratch")),
+        Index("ix_requisitions_is_archived", "is_archived"),
     )
     id = Column(Integer, primary_key=True)
     name = Column(String(255), nullable=False)
     customer_name = Column(String(255))
     customer_site_id = Column(Integer, ForeignKey("customer_sites.id", ondelete="SET NULL"))
     company_id = Column(Integer, ForeignKey("companies.id", ondelete="SET NULL"))
-    status = Column(String(50), default="active")
+    status = Column(String(50), default="open")
     # Provenance flag: scratch / quick-source reqs are created by a one-off Search action
     # (Send RFQ / Add Offer) so those flows have a home. Orthogonal to the `status`
     # lifecycle; hidden from the normal requisitions list + picker; flipped to False when
     # promoted (customer/name set). See services/quick_source_service.py.
     is_scratch = Column(Boolean, nullable=False, default=False, server_default="false")
+    # Archive is orthogonal to the status pipeline: hidden-but-retrievable.
+    # Replaces the removed ARCHIVED status (migration 157). The Sales Hub list
+    # hides archived reqs by default; an "Archived" filter retrieves them.
+    is_archived = Column(Boolean, nullable=False, default=False, server_default="false")
     cloned_from_id = Column(Integer, ForeignKey("requisitions.id", ondelete="SET NULL"))
     created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
     created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
