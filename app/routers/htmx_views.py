@@ -58,6 +58,7 @@ from ..dependencies import (
     require_admin,
     require_buyer,
     require_buyplan_approver,
+    require_prospect_site_access,
     require_requisition_access,
     require_user,
     user_has_access,
@@ -5349,6 +5350,7 @@ async def vendor_prospect_save(
     pc = db.query(ProspectContact).filter(ProspectContact.id == prospect_id).first()
     if not pc:
         raise HTTPException(404, "Prospect contact not found")
+    require_prospect_site_access(db, user, pc)
 
     pc.is_saved = True
     pc.saved_by_id = user.id
@@ -5376,6 +5378,7 @@ async def vendor_prospect_promote(
     pc = db.query(ProspectContact).filter(ProspectContact.id == prospect_id).first()
     if not pc:
         raise HTTPException(404, "Prospect contact not found")
+    require_prospect_site_access(db, user, pc)
 
     # Dedup: check if email already exists on this vendor
     existing = None
@@ -5433,6 +5436,7 @@ async def vendor_prospect_delete(
     pc = db.query(ProspectContact).filter(ProspectContact.id == prospect_id).first()
     if not pc:
         raise HTTPException(404, "Prospect contact not found")
+    require_prospect_site_access(db, user, pc)
     db.delete(pc)
     db.commit()
     # Return empty string to remove the card from DOM
@@ -15335,6 +15339,14 @@ async def proactive_do_not_offer(
         cid = int(company_id)
     except (ValueError, TypeError):
         raise HTTPException(400, "company_id must be an integer")
+
+    # Authz: a do-not-offer rule is scoped to a customer account, so the actor must be
+    # able to manage that account — otherwise a cross-account actor could suppress offers
+    # for any company by passing an arbitrary company_id in the form.
+    company = db.get(Company, cid)
+    if not company or not can_manage_account(user, company, db):
+        raise HTTPException(403, "Not authorized to manage this account")
+
     if not is_do_not_offer(db, mpn, cid):
         dno = ProactiveDoNotOffer(
             mpn=mpn.upper(),

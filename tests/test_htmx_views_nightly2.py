@@ -694,6 +694,7 @@ class TestProactiveRoutes:
             name="Test Co",
             website="https://testco.com",
             is_active=True,
+            account_owner_id=test_user.id,  # actor must manage the account (authz gate)
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(company)

@@ -1994,13 +1994,25 @@ REUSING the helpers above (no new ad-hoc checks):
 - `create_company` (`POST /v2/partials/customers/create`) — assigning `owner_id != self` requires
   `is_manager_or_admin` and validates the target is an active `User` (else 400), matching the bulk
   assign-owner path.
-- `ai.py` site-linked prospect records — `save_prospect_contact`, `delete_prospect_contact`, and
-  `apply_freeform_rfq` resolve `customer_site_id → CustomerSite.company_id → Company` and require
-  `can_manage_account` (mirrors `promote_prospect_contact`); vendor-linked prospects stay global.
+- `ai.py` site-linked prospect records — `save_prospect_contact`, `delete_prospect_contact`,
+  `promote_prospect_contact`, and `apply_freeform_rfq` resolve
+  `customer_site_id → CustomerSite.company_id → Company` and require `can_manage_account`;
+  vendor-linked prospects stay global. The site-prospect guard lives once as
+  `dependencies.require_prospect_site_access(db, user, pc)` (shared helper) — imported by both
+  `ai.py` and `htmx_views.py`, never duplicated.
+- `htmx_views` vendor-prospect twins — `vendor_prospect_save` / `vendor_prospect_promote` /
+  `vendor_prospect_delete` (`POST|DELETE /v2/partials/vendors/{vendor_id}/ai/prospect/{prospect_id}`
+  `[/save|/promote]`) are the HTMX siblings of the `ai.py` routes above and reach the same
+  `ProspectContact` mutate/delete; they call `require_prospect_site_access` after the 404 check,
+  before mutation, so a cross-account actor can no longer hijack a site-linked prospect by id.
 - `proactive.add_do_not_offer` (`POST /api/proactive/do-not-offer`) — each item's `Company` is
   gated on `can_manage_account` before the DNO row is written, and the auto-dismiss UPDATE is
   scoped to `ProactiveMatch.salesperson_id == user.id` (mirrors `/dismiss`) so it never wipes
   another owner's open matches.
+- `htmx_views.proactive_do_not_offer` (`POST /v2/partials/proactive/do-not-offer`) — the HTMX
+  sibling of `add_do_not_offer`; resolves the form `company_id`/`customer_site_id` to a `Company`
+  and requires `can_manage_account` before inserting `ProactiveDoNotOffer`, so an arbitrary
+  form-supplied company can no longer be suppressed.
 - `sources.parse_response_attachments` (`POST /api/email-mining/parse-response-attachments/{id}`)
   — `require_requisition_access(db, vr.requisition_id, user)` before any Sighting create/overwrite.
 - `prepayment_service.create_prepayment` — `get_buyplan_for_user(db, created_by, buy_plan_id)` (the

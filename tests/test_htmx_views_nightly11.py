@@ -488,7 +488,11 @@ class TestProactiveDoNotOffer:
         )
         assert resp.status_code == 400
 
-    def test_do_not_offer_creates_record(self, client: TestClient, db_session: Session, test_company: Company):
+    def test_do_not_offer_creates_record(
+        self, client: TestClient, db_session: Session, test_company: Company, test_user: User
+    ):
+        test_company.account_owner_id = test_user.id  # actor must manage the account (authz gate)
+        db_session.commit()
         resp = client.post(
             "/v2/partials/proactive/do-not-offer",
             data={"mpn": "LM317T", "company_id": str(test_company.id)},
@@ -500,7 +504,11 @@ class TestProactiveDoNotOffer:
         assert rec is not None
         assert rec.mpn == "LM317T"
 
-    def test_do_not_offer_duplicate_is_idempotent(self, client: TestClient, db_session: Session, test_company: Company):
+    def test_do_not_offer_duplicate_is_idempotent(
+        self, client: TestClient, db_session: Session, test_company: Company, test_user: User
+    ):
+        test_company.account_owner_id = test_user.id  # actor must manage the account (authz gate)
+        db_session.commit()
         client.post(
             "/v2/partials/proactive/do-not-offer",
             data={"mpn": "LM317T", "company_id": str(test_company.id)},

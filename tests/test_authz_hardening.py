@@ -691,6 +691,121 @@ def test_g9_manager_can_assign_active_user(client, db_session, test_user, admin_
     assert co is not None and co.account_owner_id == admin_user.id
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# SIBLING ROUTES — htmx_views reaches the SAME mutations as Group 2 / Group 3.
+# These were pre-existing un-gated twins of the gated ai.py / proactive.py routes;
+# they now reuse the SAME helpers (require_prospect_site_access / can_manage_account).
+#
+# Concern A — vendor_prospect_{save,delete} on a SITE-linked prospect:
+#   POST   /v2/partials/vendors/{vendor_id}/ai/prospect/{prospect_id}/save
+#   DELETE /v2/partials/vendors/{vendor_id}/ai/prospect/{prospect_id}
+# Concern B — proactive do-not-offer for a foreign company:
+#   POST   /v2/partials/proactive/do-not-offer
+# ══════════════════════════════════════════════════════════════════════════
+
+
+def test_siblingA_htmx_vendor_prospect_save_blocks_non_owner(
+    client, db_session, test_user, admin_user, test_vendor_card
+):
+    """A SALES non-owner saving a site-linked prospect via the htmx twin → 403, no
+    mutation."""
+    _make_sales(test_user, db_session)
+    co = _foreign_company(db_session, admin_user)
+    site = _site(db_session, co)  # no site owner → SALES non-owner cannot manage
+    pc = _site_linked_pc(db_session, site)
+    resp = client.post(
+        f"/v2/partials/vendors/{test_vendor_card.id}/ai/prospect/{pc.id}/save",
+        headers={"HX-Request": "true"},
+    )
+    assert resp.status_code == 403
+    db_session.refresh(pc)
+    assert pc.is_saved is False  # NOT mutated
+
+
+def test_siblingA_htmx_vendor_prospect_delete_blocks_non_owner(
+    client, db_session, test_user, admin_user, test_vendor_card
+):
+    """A SALES non-owner deleting a site-linked prospect via the htmx twin → 403, row
+    survives."""
+    _make_sales(test_user, db_session)
+    co = _foreign_company(db_session, admin_user)
+    site = _site(db_session, co)
+    pc = _site_linked_pc(db_session, site)
+    resp = client.delete(
+        f"/v2/partials/vendors/{test_vendor_card.id}/ai/prospect/{pc.id}",
+        headers={"HX-Request": "true"},
+    )
+    assert resp.status_code == 403
+    assert db_session.get(ProspectContact, pc.id) is not None  # NOT deleted
+
+
+def test_siblingA_htmx_vendor_prospect_save_allows_owner(client, db_session, test_user, test_vendor_card):
+    """The account owner saving a site-linked prospect via the htmx twin → 200,
+    mutated."""
+    co = _owned_company(db_session, test_user)  # test_user is account owner
+    site = _site(db_session, co)
+    pc = _site_linked_pc(db_session, site)
+    resp = client.post(
+        f"/v2/partials/vendors/{test_vendor_card.id}/ai/prospect/{pc.id}/save",
+        headers={"HX-Request": "true"},
+    )
+    assert resp.status_code == 200
+    db_session.refresh(pc)
+    assert pc.is_saved is True
+
+
+def test_siblingA_htmx_vendor_prospect_save_vendor_linked_stays_global(client, db_session, test_user, test_vendor_card):
+    """A vendor-linked prospect has no account owner — the gate is a no-op even for
+    SALES."""
+    _make_sales(test_user, db_session)
+    pc = ProspectContact(
+        vendor_card_id=test_vendor_card.id,
+        full_name="Vendor Rep",
+        email="rep@vendor.com",
+        source="web_search",
+        confidence="high",
+    )
+    db_session.add(pc)
+    db_session.commit()
+    db_session.refresh(pc)
+    resp = client.post(
+        f"/v2/partials/vendors/{test_vendor_card.id}/ai/prospect/{pc.id}/save",
+        headers={"HX-Request": "true"},
+    )
+    assert resp.status_code == 200
+    db_session.refresh(pc)
+    assert pc.is_saved is True
+
+
+def test_siblingB_htmx_do_not_offer_blocks_non_owner(client, db_session, test_user, admin_user):
+    """A SALES non-owner suppressing a foreign company's MPN via the htmx twin → 403, no
+    row."""
+    _make_sales(test_user, db_session)
+    co = _foreign_company(db_session, admin_user)  # owned by admin_user
+    resp = client.post(
+        "/v2/partials/proactive/do-not-offer",
+        data={"mpn": "LM317T", "company_id": str(co.id)},
+        headers={"HX-Request": "true"},
+    )
+    assert resp.status_code == 403
+    assert db_session.query(ProactiveDoNotOffer).filter_by(company_id=co.id).count() == 0
+
+
+def test_siblingB_htmx_do_not_offer_allows_owner(client, db_session, test_user):
+    """The account owner suppressing their own company's MPN via the htmx twin → 200,
+    row created."""
+    co = _owned_company(db_session, test_user)
+    resp = client.post(
+        "/v2/partials/proactive/do-not-offer",
+        data={"mpn": "lm317t", "company_id": str(co.id)},
+        headers={"HX-Request": "true"},
+    )
+    assert resp.status_code == 200
+    rows = db_session.query(ProactiveDoNotOffer).filter_by(company_id=co.id).all()
+    assert len(rows) == 1
+    assert rows[0].mpn == "LM317T"  # upper-cased on insert
+
+
 @pytest.fixture(autouse=True)
 def _ai_features_on(monkeypatch):
     """Group-2 ai routes sit behind the AI gate; enable so ownership guards are

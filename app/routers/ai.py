@@ -22,6 +22,7 @@ from ..database import get_db
 from ..dependencies import (
     can_manage_account,
     get_req_for_user,
+    require_prospect_site_access,
     require_requisition_access,
     require_user,
 )
@@ -249,22 +250,6 @@ async def list_prospect_contacts(
     ]
 
 
-def _require_prospect_site_access(db: Session, user: User, pc: "ProspectContact") -> None:
-    """Gate a mutation on a site-linked prospect contact on account-management rights.
-
-    Mirrors promote_prospect_contact: a prospect tied to a CustomerSite belongs to a
-    customer account, so the actor must be able to manage that account. Vendor-linked
-    prospects (pc.vendor_card_id) are global and stay un-gated. 403 if not authorized.
-    """
-    if pc.customer_site_id and not pc.vendor_card_id:
-        from ..models import Company
-
-        site = db.get(CustomerSite, pc.customer_site_id)
-        company = db.get(Company, site.company_id) if site else None
-        if not company or not can_manage_account(user, company, db):
-            raise HTTPException(403, "Not authorized to manage this account")
-
-
 @router.post("/api/ai/prospect-contacts/{contact_id}/save", response_model=SimpleOkIdResponse)
 async def save_prospect_contact(
     contact_id: int,
@@ -276,7 +261,7 @@ async def save_prospect_contact(
     pc = db.query(ProspectContact).filter(ProspectContact.id == contact_id).first()
     if not pc:
         raise HTTPException(404, "Prospect contact not found")
-    _require_prospect_site_access(db, user, pc)
+    require_prospect_site_access(db, user, pc)
     pc.is_saved = True
     pc.saved_by_id = user.id
     if payload and payload.notes:
@@ -306,7 +291,7 @@ async def delete_prospect_contact(
     pc = db.query(ProspectContact).filter(ProspectContact.id == contact_id).first()
     if not pc:
         raise HTTPException(404, "Prospect contact not found")
-    _require_prospect_site_access(db, user, pc)
+    require_prospect_site_access(db, user, pc)
     db.delete(pc)
     db.commit()
     return {"ok": True}
@@ -323,7 +308,7 @@ async def promote_prospect_contact(
     # so gate it on account-management. Vendor-linked prospects are global (no owner).
     pc = db.get(ProspectContact, contact_id)
     if pc is not None:
-        _require_prospect_site_access(db, user, pc)
+        require_prospect_site_access(db, user, pc)
 
     from ..services.ai_offer_service import promote_prospect_contact as _promote
 
