@@ -159,7 +159,16 @@ async def create_quote(
     offer_ids = payload.offer_ids
     line_items = [li.model_dump() for li in payload.line_items] if payload.line_items else []
     if offer_ids and not line_items:
-        offers = db.query(Offer).options(joinedload(Offer.requirement)).filter(Offer.id.in_(offer_ids)).all()
+        # Scope offers to THIS requisition — a foreign offer_id must never copy cross-owner
+        # pricing into the quote or advance another owner's requirement to 'quoted'.
+        offers = (
+            db.query(Offer)
+            .options(joinedload(Offer.requirement))
+            .filter(Offer.id.in_(offer_ids), Offer.requisition_id == req_id)
+            .all()
+        )
+        if {o.id for o in offers} != set(offer_ids):
+            raise HTTPException(400, "One or more offers do not belong to this requisition")
         quoted_prices = _preload_last_quoted_prices(db)
         line_items = []
         for o in offers:
@@ -274,7 +283,10 @@ async def create_quote(
         if req_item_ids:
             from ...models import Offer as OfferModel
 
-            offers_used = db.query(OfferModel).filter(OfferModel.id.in_(req_item_ids)).all()
+            # Defense-in-depth: only advance requirements for offers on THIS requisition.
+            offers_used = (
+                db.query(OfferModel).filter(OfferModel.id.in_(req_item_ids), OfferModel.requisition_id == req_id).all()
+            )
             requirement_ids = list({o.requirement_id for o in offers_used if o.requirement_id})
             if requirement_ids:
                 on_quote_built(requirement_ids, db, actor=user)

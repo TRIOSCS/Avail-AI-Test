@@ -16,7 +16,7 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session, joinedload
 
 from ..database import get_db
-from ..dependencies import require_user
+from ..dependencies import require_requisition_access, require_user
 from ..models.buy_plan import BuyPlan, BuyPlanLine
 from ..models.crm import CustomerSite
 from ..models.quality_plan import QualityPlan
@@ -62,6 +62,23 @@ def _qp_detail_response(request: Request, user, db: Session, qp: QualityPlan) ->
     return template_response("htmx/partials/qp/detail.html", ctx)
 
 
+def _require_qp_access(db: Session, user, qp: QualityPlan) -> None:
+    """Enforce requisition-ownership scope on a Quality Plan action.
+
+    A QP belongs to its BuyPlan's parent requisition; restricted roles may only act on
+    QPs under requisitions they own (or that they created). 404 (not 403) so a QP's
+    existence isn't leaked. No-op for buyer/manager/admin.
+    """
+    bp = db.get(BuyPlan, qp.buy_plan_id) if qp.buy_plan_id else None
+    require_requisition_access(
+        db,
+        bp.requisition_id if bp else None,
+        user,
+        owner_id=qp.created_by_id,
+        label="Quality plan",
+    )
+
+
 @router.get("/v2/qp/{qp_id}", response_class=HTMLResponse)
 def qp_detail(
     request: Request,
@@ -85,6 +102,7 @@ def qp_detail(
     )
     if qp is None:
         raise HTTPException(status_code=404, detail="Quality plan not found")
+    _require_qp_access(db, user, qp)
 
     return _qp_detail_response(request, user, db, qp)
 
@@ -104,6 +122,7 @@ def qp_submit(
     qp = db.get(QualityPlan, qp_id)
     if qp is None:
         raise HTTPException(status_code=404, detail="Quality plan not found")
+    _require_qp_access(db, user, qp)
 
     try:
         qp = submit(db, qp_id, user)

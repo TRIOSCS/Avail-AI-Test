@@ -547,6 +547,7 @@ class TestProactiveRoutes:
 
     def test_proactive_do_not_offer_valid(self, client: TestClient, db_session: Session, test_user: User):
         co = _company(db_session)
+        co.account_owner_id = test_user.id  # actor must manage the account (authz gate)
         db_session.commit()
         with patch("app.services.proactive_helpers.is_do_not_offer", return_value=True):
             resp = client.post(

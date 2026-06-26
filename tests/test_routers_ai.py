@@ -1130,7 +1130,9 @@ def test_apply_freeform_rfq_success(ai_client, db_session, ai_test_user):
     """POST /api/ai/apply-freeform-rfq creates requisition + requirements."""
     from app.models import Company, CustomerSite, Requirement, Requisition
 
-    co = Company(name="Apply Co", is_active=True)
+    # apply-freeform-rfq now gates the site's account on can_manage_account — make the
+    # actor the account owner so the (real) create path runs.
+    co = Company(name="Apply Co", is_active=True, account_owner_id=ai_test_user.id)
     db_session.add(co)
     db_session.flush()
     site = CustomerSite(company_id=co.id, site_name="Apply HQ")

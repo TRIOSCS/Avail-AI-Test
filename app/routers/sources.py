@@ -26,7 +26,13 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..constants import AccessKey
 from ..database import get_db
-from ..dependencies import require_access, require_fresh_token, require_settings_access, require_user
+from ..dependencies import (
+    require_access,
+    require_fresh_token,
+    require_requisition_access,
+    require_settings_access,
+    require_user,
+)
 from ..models import (
     ApiSource,
     Requirement,
@@ -912,6 +918,9 @@ async def parse_response_attachments(
     vr = db.query(VendorResponse).filter_by(id=response_id).first()
     if not vr:
         raise HTTPException(404, "Response not found")
+    # Parsing attachments creates/overwrites Sightings on vr.requisition_id — same
+    # ownership gate every Sighting-mutating handler enforces.
+    require_requisition_access(db, vr.requisition_id, user)
 
     if not vr.message_id:
         raise HTTPException(400, "No message ID — cannot fetch attachments")

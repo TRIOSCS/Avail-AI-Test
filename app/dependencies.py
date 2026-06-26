@@ -18,6 +18,7 @@ Depends on: models, database, config
 
 import hmac
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from fastapi import Depends, HTTPException, Request
 from loguru import logger
@@ -27,6 +28,9 @@ from sqlalchemy.orm import Session, selectinload
 from .constants import RESTRICTED_ROLES, ROLE_ACCESS_DEFAULTS, AccessKey, ApprovalRecipientStatus, UserRole
 from .database import get_db
 from .models import AccountCollaborator, BuyPlan, Company, CustomerSite, Quote, Requisition, User
+
+if TYPE_CHECKING:
+    from .models import ProspectContact
 
 # Non-interactive service account seeded by startup.py. It authenticates via the
 # x-agent-key header and is barred from admin/settings/buyer (RFQ) endpoints.
@@ -121,6 +125,23 @@ def can_manage_account(user: User, company: Company, db: "Session") -> bool:  # 
         .exists()
     )
     return bool(db.scalar(select(collab_exists)))
+
+
+def require_prospect_site_access(db: Session, user: User, pc: "ProspectContact") -> None:
+    """Gate a mutation on a site-linked prospect contact on account-management rights.
+
+    A prospect tied to a CustomerSite belongs to a customer account, so the actor must be
+    able to manage that account (mirrors the promote-prospect path). Vendor-linked prospects
+    (``pc.vendor_card_id``) are global and stay un-gated. Raises 403 if not authorized.
+
+    Shared by the JSON prospect endpoints (``app/routers/ai.py``) and the HTMX
+    vendor-prospect partials (``app/routers/htmx_views.py``) so the guard lives once.
+    """
+    if pc.customer_site_id and not pc.vendor_card_id:
+        site = db.get(CustomerSite, pc.customer_site_id)
+        company = db.get(Company, site.company_id) if site else None
+        if not company or not can_manage_account(user, company, db):
+            raise HTTPException(403, "Not authorized to manage this account")
 
 
 def can_manage_account_team(user: User, company: Company) -> bool:
