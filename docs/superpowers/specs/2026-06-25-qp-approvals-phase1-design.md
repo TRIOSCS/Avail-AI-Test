@@ -5,6 +5,16 @@
 **Source brief:** Mike's "AVAIL — Quality Plan + Approvals Engine" planning brief (2026-06-25)
 **Grounded by:** Phase 0 Discovery (this session) against the live repo
 
+> **⚠️ Implementation divergence (2026-06-26, post-ship).** The approver model described below —
+> a per-`(gate, approver)` `approval_gate_config` table seeded with named approvers ("Myrna ≤ $1k /
+> Mike / Marcus") — was **superseded during the build** by a simpler model Mike approved and
+> reaffirmed: **per-user toggles**, `User.can_approve_buy_plans` / `User.can_approve_prepayments`
+> plus a per-user `prepayment_approval_limit` money guard, set on the manager-approval page. **No
+> names are hardwired in the system, and there is no `approval_gate_config` table** (it was removed
+> in the rework). Routing reads the per-user toggles + limit, not a config table. The shipped engine
+> (migration 157) is the source of truth; this spec is retained as the Phase-1 *design record* only.
+> The §§2/5/6/9 references to `approval_gate_config` and named seeds should be read through this note.
+
 ---
 
 ## 1. Goal
