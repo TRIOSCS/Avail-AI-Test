@@ -690,6 +690,7 @@ from .routers.events import router as events_router
 from .routers.htmx_views import router as htmx_views_router
 from .routers.materials import router as materials_router
 from .routers.part_dossier import router as part_dossier_router
+from .routers.prepayments import router as prepayments_router
 from .routers.proactive import router as proactive_router
 from .routers.quote_builder import router as quote_builder_router
 from .routers.requisitions import router as reqs_router
@@ -725,6 +726,7 @@ app.include_router(sources_router)
 app.include_router(tags_router)
 app.include_router(resell_router)
 app.include_router(v13_router)
+app.include_router(prepayments_router)
 app.include_router(vendor_contacts_router)
 app.include_router(vendors_crud_router)
 app.include_router(quote_builder_router)
