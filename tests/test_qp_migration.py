@@ -9,6 +9,10 @@ tested manually against real Postgres during development; here we confirm
 the graph structure and that all expected table names appear in the migration
 script body.
 
+NOTE: approval_gate_configs is intentionally absent from _EXPECTED_NEW_TABLES.
+Approver eligibility is stored as per-user toggles on the users table
+(can_approve_prepayments, prepayment_approval_limit) — no gate-config table.
+
 Called by: pytest
 Depends on: alembic/ script directory only (no DB connection required)
 """
@@ -24,7 +28,6 @@ _MIGRATION_ID = "157_qp_approvals"
 
 # New tables that must be created by upgrade()
 _EXPECTED_NEW_TABLES = {
-    "approval_gate_configs",
     "prepayments",
     "quality_plans",
     "approval_requests",
@@ -42,6 +45,12 @@ _EXPECTED_NEW_OFFER_COLS = {
     "terms",
     "location",
     "specifics",
+}
+
+# New columns on users (per-gate per-user toggles — no gate-config table)
+_EXPECTED_NEW_USER_COLS = {
+    "can_approve_prepayments",
+    "prepayment_approval_limit",
 }
 
 
@@ -70,12 +79,21 @@ def test_migration_chains_onto_156():
 def test_migration_creates_expected_tables():
     """Upgrade() body must reference every expected new table name."""
     script = _get_script(_MIGRATION_ID)
-    # Read the raw .py source for the migration
     source = pathlib.Path(script.path).read_text()
     for table in _EXPECTED_NEW_TABLES:
         assert table in source, (
             f"Migration source does not mention table {table!r}. Check that create_table() is present for this table."
         )
+
+
+def test_migration_does_not_create_gate_config_table():
+    """approval_gate_configs must NOT appear in upgrade() — replaced by user toggles."""
+    script = _get_script(_MIGRATION_ID)
+    source = pathlib.Path(script.path).read_text()
+    upgrade_body = source.split("def downgrade")[0]
+    assert "approval_gate_configs" not in upgrade_body, (
+        "upgrade() must not create approval_gate_configs — approver model uses per-user toggles on users table."
+    )
 
 
 def test_migration_adds_offer_columns():
@@ -88,12 +106,21 @@ def test_migration_adds_offer_columns():
         )
 
 
+def test_migration_adds_user_approval_columns():
+    """Upgrade() must add the per-user prepayment approval columns to users."""
+    script = _get_script(_MIGRATION_ID)
+    source = pathlib.Path(script.path).read_text()
+    for col in _EXPECTED_NEW_USER_COLS:
+        assert col in source, (
+            f"Migration source does not mention user column {col!r}. Check that add_column('users', ...) is present."
+        )
+
+
 def test_migration_has_downgrade():
     """Downgrade() must exist and drop the new tables."""
     script = _get_script(_MIGRATION_ID)
     source = pathlib.Path(script.path).read_text()
     assert "def downgrade" in source, "Migration is missing downgrade() function"
-    # Spot-check that at least one drop_table appears in downgrade
     assert "drop_table" in source, "downgrade() should contain drop_table calls"
     assert "drop_column" in source, "downgrade() should contain drop_column calls"
 

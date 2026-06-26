@@ -1,11 +1,12 @@
-"""test_approval_routing.py — TDD tests for RoutingService (Task 3).
+"""test_approval_routing.py — TDD tests for RoutingService (toggle model).
 
-Tests: threshold eligibility (all three / exact boundary / capped excluded),
-       no-config gate raises NoEligibleApproverError.
+Tests: buy_plan gate routes to can_approve_buy_plans users; prepayment gate filters
+       by can_approve_prepayments + prepayment_approval_limit; no eligible users raises
+       NoEligibleApproverError; step rule=ANY + all recipients start PENDING.
 
 Called by: pytest
-Depends on: conftest (db_session, test_user), app.services.approvals.routing,
-            app.models.approvals, app.constants
+Depends on: conftest (db_session), app.services.approvals.routing,
+            app.models.approvals, app.models.auth, app.constants
 """
 
 from decimal import Decimal
@@ -13,22 +14,34 @@ from decimal import Decimal
 import pytest
 
 from app.constants import ApprovalGateType, ApprovalRecipientStatus, ApprovalStepRule
-from app.models.approvals import ApprovalGateConfig, ApprovalRequest, ApprovalStep
+from app.models.approvals import ApprovalRequest, ApprovalStep
+from app.models.auth import User
 from app.services.approvals.routing import NoEligibleApproverError, route_request
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 
-def _make_user(db, email: str):
-    from app.models import User
-
-    u = User(email=email, name=email.split("@")[0])
+def _make_user(
+    db,
+    email: str,
+    *,
+    can_approve_buy_plans: bool = False,
+    can_approve_prepayments: bool = False,
+    prepayment_approval_limit=None,
+) -> User:
+    u = User(
+        email=email,
+        name=email.split("@")[0],
+        can_approve_buy_plans=can_approve_buy_plans,
+        can_approve_prepayments=can_approve_prepayments,
+        prepayment_approval_limit=prepayment_approval_limit,
+    )
     db.add(u)
     db.flush()
     return u
 
 
-def _make_request(db, gate: ApprovalGateType, amount: Decimal) -> ApprovalRequest:
+def _make_request(db, gate: ApprovalGateType, amount: Decimal | None = None) -> ApprovalRequest:
     req = ApprovalRequest(gate_type=gate, amount=amount)
     db.add(req)
     db.flush()
@@ -39,45 +52,62 @@ def _make_request(db, gate: ApprovalGateType, amount: Decimal) -> ApprovalReques
 
 
 @pytest.fixture()
-def three_approvers(db_session):
-    """Myrna (cap $1000), Mike (no cap), Marcus (no cap) for PREPAYMENT gate."""
-    myrna = _make_user(db_session, "myrna@trioscs.com")
-    mike = _make_user(db_session, "mike@trioscs.com")
-    marcus = _make_user(db_session, "marcus@trioscs.com")
-
-    configs = [
-        ApprovalGateConfig(
-            gate_type=ApprovalGateType.PREPAYMENT,
-            approver_user_id=myrna.id,
-            max_amount=Decimal("1000.00"),
-            active=True,
-        ),
-        ApprovalGateConfig(
-            gate_type=ApprovalGateType.PREPAYMENT,
-            approver_user_id=mike.id,
-            max_amount=None,
-            active=True,
-        ),
-        ApprovalGateConfig(
-            gate_type=ApprovalGateType.PREPAYMENT,
-            approver_user_id=marcus.id,
-            max_amount=None,
-            active=True,
-        ),
-    ]
-    for c in configs:
-        db_session.add(c)
-    db_session.flush()
-
+def prepayment_approvers(db_session):
+    """Myrna (cap $1,000), Mike (unlimited), Marcus (unlimited) for PREPAYMENT gate."""
+    myrna = _make_user(
+        db_session,
+        "myrna@trioscs.com",
+        can_approve_prepayments=True,
+        prepayment_approval_limit=Decimal("1000.00"),
+    )
+    mike = _make_user(
+        db_session,
+        "mike@trioscs.com",
+        can_approve_prepayments=True,
+        prepayment_approval_limit=None,
+    )
+    marcus = _make_user(
+        db_session,
+        "marcus@trioscs.com",
+        can_approve_prepayments=True,
+        prepayment_approval_limit=None,
+    )
     return myrna, mike, marcus
 
 
-# ── Tests ─────────────────────────────────────────────────────────────────────
+# ── Buy-plan gate tests ───────────────────────────────────────────────────────
 
 
-def test_all_three_eligible_for_small_amount(db_session, three_approvers):
+def test_buyplan_routes_to_can_approve_buy_plans_users(db_session):
+    """BUY_PLAN gate routes to all users with can_approve_buy_plans=True."""
+    alice = _make_user(db_session, "alice@trioscs.com", can_approve_buy_plans=True)
+    bob = _make_user(db_session, "bob@trioscs.com", can_approve_buy_plans=True)
+    # charlie has the toggle off — must not be routed
+    _make_user(db_session, "charlie@trioscs.com", can_approve_buy_plans=False)
+
+    req = _make_request(db_session, ApprovalGateType.BUY_PLAN)
+    step = route_request(db_session, req)
+
+    user_ids = {r.user_id for r in step.recipients}
+    assert user_ids == {alice.id, bob.id}
+
+
+def test_buyplan_no_eligible_raises(db_session):
+    """BUY_PLAN gate with no can_approve_buy_plans users raises
+    NoEligibleApproverError."""
+    _make_user(db_session, "nobody@trioscs.com", can_approve_buy_plans=False)
+    req = _make_request(db_session, ApprovalGateType.BUY_PLAN)
+
+    with pytest.raises(NoEligibleApproverError):
+        route_request(db_session, req)
+
+
+# ── Prepayment gate tests ─────────────────────────────────────────────────────
+
+
+def test_all_three_eligible_for_small_amount(db_session, prepayment_approvers):
     """$400 request routes to all three (Myrna cap 1000 >= 400)."""
-    myrna, mike, marcus = three_approvers
+    myrna, mike, marcus = prepayment_approvers
     req = _make_request(db_session, ApprovalGateType.PREPAYMENT, Decimal("400.00"))
 
     step = route_request(db_session, req)
@@ -86,9 +116,9 @@ def test_all_three_eligible_for_small_amount(db_session, three_approvers):
     assert user_ids == {myrna.id, mike.id, marcus.id}
 
 
-def test_threshold_excludes_capped_approver(db_session, three_approvers):
-    """$2500 request excludes Myrna (cap 1000) — only Mike + Marcus eligible."""
-    myrna, mike, marcus = three_approvers
+def test_threshold_excludes_capped_approver(db_session, prepayment_approvers):
+    """$2,500 request excludes Myrna (cap 1,000) — only Mike + Marcus eligible."""
+    myrna, mike, marcus = prepayment_approvers
     req = _make_request(db_session, ApprovalGateType.PREPAYMENT, Decimal("2500.00"))
 
     step = route_request(db_session, req)
@@ -98,10 +128,9 @@ def test_threshold_excludes_capped_approver(db_session, three_approvers):
     assert myrna.id not in user_ids
 
 
-def test_exact_boundary_is_eligible(db_session, three_approvers):
-    """$1000.00 request should include Myrna — boundary is inclusive (amount <=
-    max_amount)."""
-    myrna, mike, marcus = three_approvers
+def test_exact_boundary_is_eligible(db_session, prepayment_approvers):
+    """$1,000.00 request includes Myrna — boundary is inclusive (amount <= limit)."""
+    myrna, mike, marcus = prepayment_approvers
     req = _make_request(db_session, ApprovalGateType.PREPAYMENT, Decimal("1000.00"))
 
     step = route_request(db_session, req)
@@ -111,60 +140,47 @@ def test_exact_boundary_is_eligible(db_session, three_approvers):
     assert user_ids == {myrna.id, mike.id, marcus.id}
 
 
-def test_step_has_any_rule(db_session, three_approvers):
-    """Created step uses rule=ANY."""
-    _, _, _ = three_approvers
-    req = _make_request(db_session, ApprovalGateType.PREPAYMENT, Decimal("400.00"))
+def test_prepayment_toggle_off_not_routed(db_session):
+    """Users with can_approve_prepayments=False are never routed even if active."""
+    _make_user(db_session, "disabled@trioscs.com", can_approve_prepayments=False)
+    req = _make_request(db_session, ApprovalGateType.PREPAYMENT, Decimal("500.00"))
 
+    with pytest.raises(NoEligibleApproverError):
+        route_request(db_session, req)
+
+
+def test_prepayment_no_eligible_approver_raises(db_session):
+    """Gate with zero eligible users raises NoEligibleApproverError."""
+    req = _make_request(db_session, ApprovalGateType.PREPAYMENT, Decimal("500.00"))
+
+    with pytest.raises(NoEligibleApproverError):
+        route_request(db_session, req)
+
+
+# ── Step + recipient invariants ───────────────────────────────────────────────
+
+
+def test_step_has_any_rule(db_session, prepayment_approvers):
+    """Created step uses rule=ANY."""
+    req = _make_request(db_session, ApprovalGateType.PREPAYMENT, Decimal("400.00"))
     step = route_request(db_session, req)
 
     assert step.rule == ApprovalStepRule.ANY
 
 
-def test_recipients_have_pending_status(db_session, three_approvers):
+def test_recipients_have_pending_status(db_session, prepayment_approvers):
     """All created recipients start as PENDING."""
-    _, _, _ = three_approvers
     req = _make_request(db_session, ApprovalGateType.PREPAYMENT, Decimal("400.00"))
-
     step = route_request(db_session, req)
 
     for recipient in step.recipients:
         assert recipient.status == ApprovalRecipientStatus.PENDING
 
 
-def test_step_linked_to_request(db_session, three_approvers):
+def test_step_linked_to_request(db_session, prepayment_approvers):
     """Created step is linked to the correct request."""
-    _, _, _ = three_approvers
     req = _make_request(db_session, ApprovalGateType.PREPAYMENT, Decimal("400.00"))
-
     step = route_request(db_session, req)
 
     assert step.request_id == req.id
     assert isinstance(step, ApprovalStep)
-
-
-def test_no_eligible_approver_error_when_no_config(db_session):
-    """Gate with zero configs raises NoEligibleApproverError."""
-    req = _make_request(db_session, ApprovalGateType.PREPAYMENT, Decimal("500.00"))
-
-    with pytest.raises(NoEligibleApproverError):
-        route_request(db_session, req)
-
-
-def test_inactive_config_excluded(db_session):
-    """Inactive config rows are not considered eligible approvers."""
-    user = _make_user(db_session, "inactive@trioscs.com")
-    db_session.add(
-        ApprovalGateConfig(
-            gate_type=ApprovalGateType.PREPAYMENT,
-            approver_user_id=user.id,
-            max_amount=None,
-            active=False,  # inactive — should not route to this user
-        )
-    )
-    db_session.flush()
-
-    req = _make_request(db_session, ApprovalGateType.PREPAYMENT, Decimal("500.00"))
-
-    with pytest.raises(NoEligibleApproverError):
-        route_request(db_session, req)

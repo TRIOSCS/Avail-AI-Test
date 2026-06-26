@@ -1,10 +1,13 @@
-"""approvals.py — Approval Engine ORM models (6 tables).
+"""approvals.py — Approval Engine ORM models (5 tables).
 
 Purpose: Core approval-workflow tables: ApprovalRequest, ApprovalStep,
-         ApprovalStepRecipient, ApprovalEvent, ApprovalOutbox,
-         ApprovalGateConfig.
+         ApprovalStepRecipient, ApprovalEvent, ApprovalOutbox.
 
-Called by: services/approvals.py (not yet written), routers/approvals.py (Task 3+)
+Approver eligibility is stored as per-gate per-user toggles on the User model
+(User.can_approve_buy_plans, User.can_approve_prepayments,
+User.prepayment_approval_limit) — NOT in a separate gate-config table.
+
+Called by: services/approvals.py, routers/approvals.py (Task 3+)
 Depends on: models.base, app.constants (ApprovalRequestStatus,
             ApprovalRecipientStatus, ApprovalStepRule; gate_type stores
             ApprovalGateType values, set by the service layer), models.auth (User)
@@ -14,7 +17,6 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     JSON,
-    Boolean,
     Column,
     ForeignKey,
     Index,
@@ -40,7 +42,6 @@ __all__ = [
     "ApprovalStepRecipient",
     "ApprovalEvent",
     "ApprovalOutbox",
-    "ApprovalGateConfig",
 ]
 
 
@@ -237,36 +238,4 @@ class ApprovalOutbox(Base):
         Index("ix_approval_outbox_request", "request_id"),
         Index("ix_approval_outbox_recipient", "recipient_user_id"),
         Index("ix_approval_outbox_sent", "sent_at"),
-    )
-
-
-# ── ApprovalGateConfig ─────────────────────────────────────────────────────────
-
-
-class ApprovalGateConfig(Base):
-    """Per-gate configuration row: which user is the approver and up to what amount.
-
-    Supports one active config per gate_type (active=True). max_amount=NULL means
-    the gate applies to any amount. Multiple inactive rows can coexist for audit.
-    """
-
-    __tablename__ = "approval_gate_configs"
-
-    id = Column(Integer, primary_key=True)
-
-    gate_type = Column(String(50), nullable=False)  # ApprovalGateType
-    approver_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    max_amount = Column(Numeric(12, 2), nullable=True)
-    active = Column(Boolean, nullable=False, default=True)
-
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(UTCDateTime, onupdate=lambda: datetime.now(timezone.utc))
-
-    # ── Relationships
-    approver = relationship("User", foreign_keys=[approver_user_id])
-
-    __table_args__ = (
-        Index("ix_approval_gate_cfg_type", "gate_type"),
-        Index("ix_approval_gate_cfg_approver", "approver_user_id"),
-        Index("ix_approval_gate_cfg_active", "active"),
     )

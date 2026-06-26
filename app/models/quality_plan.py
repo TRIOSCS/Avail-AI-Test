@@ -81,9 +81,10 @@ class Prepayment(Base):
     """Upfront payment record for a buy-plan vendor purchase.
 
     Captures the total amount (inclusive of fees), payment method, and buyer remarks.
-    May trigger an ApprovalRequest if the amount exceeds the configured gate threshold
-    (ApprovalGateConfig). test_report_sent tracks whether the vendor has returned the
-    test report that was promised as a condition of the prepayment.
+    May trigger an ApprovalRequest routed to users with can_approve_prepayments=True
+    (filtered by prepayment_approval_limit if set). test_report_sent tracks whether the
+    vendor has returned the test report that was promised as a condition of the
+    prepayment.
     """
 
     __tablename__ = "prepayments"

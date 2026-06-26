@@ -27,7 +27,6 @@ from app.constants import (
 from app.models import ActivityLog
 from app.models.approvals import (
     ApprovalEvent,
-    ApprovalGateConfig,
     ApprovalRequest,
     ApprovalStep,
     ApprovalStepRecipient,
@@ -91,16 +90,12 @@ def delegate(db_session):
 
 @pytest.fixture()
 def open_request(db_session, approver):
-    """An open PREPAYMENT ApprovalRequest routed to approver."""
+    """An open PREPAYMENT ApprovalRequest routed to approver.
+
+    Uses the per-user toggle model: can_approve_prepayments=True, no limit.
+    """
     requester = _make_user(db_session, "buyer.ev@trioscs.com")
-    db_session.add(
-        ApprovalGateConfig(
-            gate_type=ApprovalGateType.PREPAYMENT,
-            approver_user_id=approver.id,
-            max_amount=None,
-            active=True,
-        )
-    )
+    approver.can_approve_prepayments = True
     db_session.flush()
 
     subject = _make_prepayment(db_session)

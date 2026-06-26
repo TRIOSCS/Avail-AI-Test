@@ -1,11 +1,11 @@
 """157_qp_approvals — QP + Approvals Engine schema (migration 157).
 
 ADDITIVE ONLY: CREATE tables + ADD columns. No drops in upgrade().
-New tables: approval_gate_configs, prepayments, quality_plans,
-            approval_requests, approval_events, approval_outbox,
-            approval_steps, approval_step_recipients.
+New tables: prepayments, quality_plans, approval_requests, approval_events,
+            approval_outbox, approval_steps, approval_step_recipients.
 New columns on offers: is_primary, sourcing_type, vendor_rating,
                        terms, location, specifics.
+New columns on users: can_approve_prepayments, prepayment_approval_limit.
 
 Chains onto: 156_user_avatar
 Claimed in:  MIGRATION_NUMBERS_IN_FLIGHT.txt (157 feat/qp-approvals-phase1)
@@ -31,32 +31,27 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    """Create 8 new tables and 6 new columns on offers.
+    """Create 7 new tables, 6 new offer columns, and 2 new user columns.
 
-    Additive only.
+    Additive only — no drops.
     """
 
-    # ── approval_gate_configs ──────────────────────────────────────────────
-    op.create_table(
-        "approval_gate_configs",
-        sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("gate_type", sa.String(50), nullable=False),
+    # ── users: prepayment approval toggle + optional dollar limit ─────────────
+    op.add_column(
+        "users",
         sa.Column(
-            "approver_user_id",
-            sa.Integer(),
-            sa.ForeignKey("users.id", ondelete="CASCADE"),
+            "can_approve_prepayments",
+            sa.Boolean(),
             nullable=False,
+            server_default="false",
         ),
-        sa.Column("max_amount", sa.Numeric(12, 2), nullable=True),
-        sa.Column("active", sa.Boolean(), nullable=False, server_default="true"),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True),
     )
-    op.create_index("ix_approval_gate_cfg_type", "approval_gate_configs", ["gate_type"])
-    op.create_index("ix_approval_gate_cfg_approver", "approval_gate_configs", ["approver_user_id"])
-    op.create_index("ix_approval_gate_cfg_active", "approval_gate_configs", ["active"])
+    op.add_column(
+        "users",
+        sa.Column("prepayment_approval_limit", sa.Numeric(12, 2), nullable=True),
+    )
 
-    # ── prepayments ────────────────────────────────────────────────────────
+    # ── prepayments ────────────────────────────────────────────────────────────
     op.create_table(
         "prepayments",
         sa.Column("id", sa.Integer(), primary_key=True),
@@ -90,7 +85,7 @@ def upgrade() -> None:
     op.create_index("ix_prepayment_buy_plan", "prepayments", ["buy_plan_id"])
     op.create_index("ix_prepayment_created_by", "prepayments", ["created_by_id"])
 
-    # ── quality_plans ──────────────────────────────────────────────────────
+    # ── quality_plans ──────────────────────────────────────────────────────────
     op.create_table(
         "quality_plans",
         sa.Column("id", sa.Integer(), primary_key=True),
@@ -132,7 +127,7 @@ def upgrade() -> None:
     op.create_index("ix_qp_status", "quality_plans", ["status"])
     op.create_index("ix_qp_created_by", "quality_plans", ["created_by_id"])
 
-    # ── approval_requests ──────────────────────────────────────────────────
+    # ── approval_requests ──────────────────────────────────────────────────────
     op.create_table(
         "approval_requests",
         sa.Column("id", sa.Integer(), primary_key=True),
@@ -176,7 +171,7 @@ def upgrade() -> None:
     op.create_index("ix_approval_req_subject_qp", "approval_requests", ["subject_quality_plan_id"])
     op.create_index("ix_approval_req_subject_pp", "approval_requests", ["subject_prepayment_id"])
 
-    # ── approval_events ────────────────────────────────────────────────────
+    # ── approval_events ────────────────────────────────────────────────────────
     op.create_table(
         "approval_events",
         sa.Column("id", sa.Integer(), primary_key=True),
@@ -201,7 +196,7 @@ def upgrade() -> None:
     op.create_index("ix_approval_event_actor", "approval_events", ["actor_id"])
     op.create_index("ix_approval_event_type", "approval_events", ["event_type"])
 
-    # ── approval_outbox ────────────────────────────────────────────────────
+    # ── approval_outbox ────────────────────────────────────────────────────────
     op.create_table(
         "approval_outbox",
         sa.Column("id", sa.Integer(), primary_key=True),
@@ -228,7 +223,7 @@ def upgrade() -> None:
     op.create_index("ix_approval_outbox_recipient", "approval_outbox", ["recipient_user_id"])
     op.create_index("ix_approval_outbox_sent", "approval_outbox", ["sent_at"])
 
-    # ── approval_steps ─────────────────────────────────────────────────────
+    # ── approval_steps ─────────────────────────────────────────────────────────
     op.create_table(
         "approval_steps",
         sa.Column("id", sa.Integer(), primary_key=True),
@@ -247,7 +242,7 @@ def upgrade() -> None:
     op.create_index("ix_approval_step_request", "approval_steps", ["request_id"])
     op.create_index("ix_approval_step_status", "approval_steps", ["status"])
 
-    # ── approval_step_recipients ───────────────────────────────────────────
+    # ── approval_step_recipients ───────────────────────────────────────────────
     op.create_table(
         "approval_step_recipients",
         sa.Column("id", sa.Integer(), primary_key=True),
@@ -279,7 +274,7 @@ def upgrade() -> None:
     op.create_index("ix_approval_recip_user", "approval_step_recipients", ["user_id"])
     op.create_index("ix_approval_recip_status", "approval_step_recipients", ["status"])
 
-    # ── offers: 6 new nullable columns ────────────────────────────────────
+    # ── offers: 6 new nullable columns ────────────────────────────────────────
     op.add_column(
         "offers",
         sa.Column(
@@ -297,7 +292,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Symmetric reversal: drop 6 offer columns then drop all 8 new tables."""
+    """Symmetric reversal: drop 6 offer columns, 2 user columns, then 7 tables."""
 
     # Offer columns (reverse add order)
     op.drop_column("offers", "specifics")
@@ -345,7 +340,6 @@ def downgrade() -> None:
     op.drop_index("ix_prepayment_vendor_card", table_name="prepayments")
     op.drop_table("prepayments")
 
-    op.drop_index("ix_approval_gate_cfg_active", table_name="approval_gate_configs")
-    op.drop_index("ix_approval_gate_cfg_approver", table_name="approval_gate_configs")
-    op.drop_index("ix_approval_gate_cfg_type", table_name="approval_gate_configs")
-    op.drop_table("approval_gate_configs")
+    # User columns (reverse add order)
+    op.drop_column("users", "prepayment_approval_limit")
+    op.drop_column("users", "can_approve_prepayments")

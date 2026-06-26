@@ -1,13 +1,14 @@
 """test_approvals_models.py — ORM smoke tests for the approval engine models.
 
 Tests: ApprovalRequest / ApprovalStep / ApprovalStepRecipient chain integrity,
-       ApprovalGateConfig cap column, QualityPlan, Prepayment, and the 6 new
-       Offer columns (is_primary, sourcing_type, vendor_rating, terms, location,
-       specifics).
+       per-user prepayment approval toggle + limit on User, QualityPlan,
+       Prepayment, and the 6 new Offer columns (is_primary, sourcing_type,
+       vendor_rating, terms, location, specifics).
 
 Called by: pytest
 Depends on: conftest (db_session, test_user), app.models.approvals,
-            app.models.quality_plan, app.models.offers, app.constants
+            app.models.auth, app.models.quality_plan, app.models.offers,
+            app.constants
 """
 
 from decimal import Decimal
@@ -24,12 +25,12 @@ from app.constants import (
 )
 from app.models.approvals import (
     ApprovalEvent,
-    ApprovalGateConfig,
     ApprovalOutbox,
     ApprovalRequest,
     ApprovalStep,
     ApprovalStepRecipient,
 )
+from app.models.auth import User
 from app.models.quality_plan import Prepayment, QualityPlan
 
 # ── Core chain test (from brief) ───────────────────────────────────────────────
@@ -59,20 +60,47 @@ def test_request_step_recipient_chain(db_session, test_user):
     assert step.request_id == req.id
 
 
-# ── Gate config cap test (from brief) ─────────────────────────────────────────
+# ── Per-user prepayment toggle + limit ────────────────────────────────────────
 
 
-def test_gate_config_cap(db_session, test_user):
-    cfg = ApprovalGateConfig(
-        gate_type=ApprovalGateType.PREPAYMENT,
-        approver_user_id=test_user.id,
-        max_amount=Decimal("1000"),
-        active=True,
+def test_user_prepayment_toggle_and_limit(db_session):
+    """can_approve_prepayments toggle + prepayment_approval_limit persists correctly."""
+    u = User(
+        email="myrna@trioscs.com",
+        name="Myrna",
+        can_approve_prepayments=True,
+        prepayment_approval_limit=Decimal("1000.00"),
     )
-    db_session.add(cfg)
+    db_session.add(u)
     db_session.flush()
 
-    assert cfg.max_amount == Decimal("1000")
+    assert u.can_approve_prepayments is True
+    assert u.prepayment_approval_limit == Decimal("1000.00")
+
+
+def test_user_prepayment_unlimited(db_session):
+    """prepayment_approval_limit=None means unlimited — column accepts NULL."""
+    u = User(
+        email="mike@trioscs.com",
+        name="Mike",
+        can_approve_prepayments=True,
+        prepayment_approval_limit=None,
+    )
+    db_session.add(u)
+    db_session.flush()
+
+    assert u.can_approve_prepayments is True
+    assert u.prepayment_approval_limit is None
+
+
+def test_user_prepayment_defaults_off(db_session):
+    """can_approve_prepayments defaults to False for a new user."""
+    u = User(email="newuser@trioscs.com", name="New")
+    db_session.add(u)
+    db_session.flush()
+
+    assert u.can_approve_prepayments is False
+    assert u.prepayment_approval_limit is None
 
 
 # ── ApprovalEvent append-only ──────────────────────────────────────────────────

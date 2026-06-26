@@ -7,10 +7,10 @@ Or from submodules: from app.models.auth import User
 # Alert read-state (per-user seen-state for cross-app alerts)
 from .alert_seen import AlertSeen  # noqa: F401
 
-# Approvals engine (6 tables: request, step, recipient, event, outbox, gate config)
+# Approvals engine (5 tables: request, step, recipient, event, outbox)
+# Approver eligibility uses per-user toggles on the User model — no gate-config table.
 from .approvals import (  # noqa: F401
     ApprovalEvent,
-    ApprovalGateConfig,
     ApprovalOutbox,
     ApprovalRequest,
     ApprovalStep,

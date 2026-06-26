@@ -23,7 +23,6 @@ from app.constants import (
 )
 from app.models.approvals import (
     ApprovalEvent,
-    ApprovalGateConfig,
     ApprovalOutbox,
     ApprovalRequest,
     ApprovalStep,
@@ -93,20 +92,15 @@ def other_user(db_session):
 
 @pytest.fixture()
 def prepayment_request_with_two_recipients(db_session, mike, marcus):
-    """A PREPAYMENT ApprovalRequest routed to Mike + Marcus (both no-cap, PENDING).
+    """A PREPAYMENT ApprovalRequest routed to Mike + Marcus (both unlimited, PENDING).
 
     Built through the production create_request path against a real Prepayment subject.
+    Uses the per-user toggle model: can_approve_prepayments=True, no limit.
     """
     requester = _make_user(db_session, "buyer@trioscs.com")
-    for approver in (mike, marcus):
-        db_session.add(
-            ApprovalGateConfig(
-                gate_type=ApprovalGateType.PREPAYMENT,
-                approver_user_id=approver.id,
-                max_amount=None,
-                active=True,
-            )
-        )
+    # Grant prepayment approval right to both approvers (unlimited)
+    mike.can_approve_prepayments = True
+    marcus.can_approve_prepayments = True
     db_session.flush()
 
     subject = _make_prepayment(db_session)

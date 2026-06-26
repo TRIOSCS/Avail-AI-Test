@@ -1,26 +1,31 @@
 """routing.py — RoutingService: eligibility filtering + step/recipient creation.
 
-Purpose: Given an ApprovalRequest, reads active ApprovalGateConfig rows for the
-         request's gate_type, filters by amount eligibility (max_amount IS NULL OR
-         request.amount <= max_amount), creates one ApprovalStep (rule=ANY) and one
-         ApprovalStepRecipient (status=PENDING) per eligible approver.
+Purpose: Given an ApprovalRequest, queries active Users for the request's gate_type
+         using per-gate per-user toggles on the User model (can_approve_buy_plans,
+         can_approve_prepayments + prepayment_approval_limit). Creates one
+         ApprovalStep (rule=ANY) and one ApprovalStepRecipient (status=PENDING) per
+         eligible approver.
 
-         Raises NoEligibleApproverError when no active, amount-eligible config exists
+         Raises NoEligibleApproverError when no active, amount-eligible user exists
          for the gate — caller must handle this (e.g. block the action or alert admins).
 
-Called by: app.services.approvals (re-exported), future ApprovalService (Task 4+)
-Depends on: app.models.approvals, app.constants
+Gate → column map:
+  buy_plan   → User.can_approve_buy_plans (no amount limit)
+  prepayment → User.can_approve_prepayments + optional prepayment_approval_limit
+
+Called by: app.services.approvals (re-exported), ApprovalService (Task 4+)
+Depends on: app.models.approvals, app.models.auth, app.constants
 """
 
 from sqlalchemy.orm import Session
 
-from ...constants import ApprovalRecipientStatus, ApprovalStepRule
+from ...constants import ApprovalGateType, ApprovalRecipientStatus, ApprovalStepRule
 from ...models.approvals import (
-    ApprovalGateConfig,
     ApprovalRequest,
     ApprovalStep,
     ApprovalStepRecipient,
 )
+from ...models.auth import User
 
 
 class NoEligibleApproverError(Exception):
@@ -30,9 +35,11 @@ class NoEligibleApproverError(Exception):
 def route_request(db: Session, request: ApprovalRequest) -> ApprovalStep:
     """Create one ApprovalStep + one ApprovalStepRecipient per eligible approver.
 
-    Eligibility criteria (both must hold):
-    - config.active is True
-    - config.max_amount IS NULL  OR  request.amount <= config.max_amount
+    Eligibility is determined by per-gate per-user toggles on the User model:
+
+    - buy_plan gate: User.can_approve_buy_plans is True (no amount check).
+    - prepayment gate: User.can_approve_prepayments is True AND
+      (prepayment_approval_limit IS NULL OR request.amount <= limit).
 
     Args:
         db: SQLAlchemy session (sync, 2.0 style).
@@ -42,22 +49,44 @@ def route_request(db: Session, request: ApprovalRequest) -> ApprovalStep:
         The newly created ApprovalStep (with .recipients already populated in-session).
 
     Raises:
-        NoEligibleApproverError: If zero eligible configs exist for the gate.
+        NoEligibleApproverError: If zero eligible users exist for the gate.
     """
-    configs: list[ApprovalGateConfig] = (
-        db.query(ApprovalGateConfig)
-        .filter(
-            ApprovalGateConfig.gate_type == request.gate_type,
-            ApprovalGateConfig.active.is_(True),
-        )
-        .all()
-    )
+    gate = request.gate_type
 
-    # Filter in Python to avoid db-dialect differences for Numeric comparison with NULL
-    eligible = [cfg for cfg in configs if cfg.max_amount is None or request.amount <= cfg.max_amount]
+    if gate == ApprovalGateType.BUY_PLAN:
+        candidates = (
+            db.query(User)
+            .filter(
+                User.is_active.is_(True),
+                User.can_approve_buy_plans.is_(True),
+            )
+            .all()
+        )
+        # No amount check for buy_plan gate
+        eligible = candidates
+
+    elif gate == ApprovalGateType.PREPAYMENT:
+        candidates = (
+            db.query(User)
+            .filter(
+                User.is_active.is_(True),
+                User.can_approve_prepayments.is_(True),
+            )
+            .all()
+        )
+        # Filter in Python to handle NULL limit (unlimited) vs capped limit
+        amount = request.amount
+        eligible = [
+            u
+            for u in candidates
+            if u.prepayment_approval_limit is None or (amount is not None and amount <= u.prepayment_approval_limit)
+        ]
+
+    else:
+        raise NoEligibleApproverError(f"No routing rule defined for gate={gate!r}")
 
     if not eligible:
-        raise NoEligibleApproverError(f"No eligible approver for gate={request.gate_type!r} amount={request.amount}")
+        raise NoEligibleApproverError(f"No eligible approver for gate={gate!r} amount={request.amount}")
 
     step = ApprovalStep(
         request_id=request.id,
@@ -65,12 +94,12 @@ def route_request(db: Session, request: ApprovalRequest) -> ApprovalStep:
         rule=ApprovalStepRule.ANY,
     )
     db.add(step)
-    db.flush()  # Assign step.id before creating recipients
+    db.flush()  # assign step.id before creating recipients
 
-    for cfg in eligible:
+    for user in eligible:
         recipient = ApprovalStepRecipient(
             step_id=step.id,
-            user_id=cfg.approver_user_id,
+            user_id=user.id,
             status=ApprovalRecipientStatus.PENDING,
         )
         db.add(recipient)
