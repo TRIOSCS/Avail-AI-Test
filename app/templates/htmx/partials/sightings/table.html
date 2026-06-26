@@ -12,11 +12,11 @@
 {# ── Smart Priority Dashboard Strip ────────────────────────── #}
 {% set dc = dashboard_counters|default({}) %}
 <div class="px-3 pt-3 pb-2 border-b border-gray-100 flex items-center gap-2 flex-wrap">
-  {# Urgent counter #}
+  {# Urgent counter — Sales Hub btn shape; active count tints the chrome. #}
   <button hx-get="/v2/partials/sightings?priority_min=70&q={{ q }}&manufacturer={{ manufacturer|default('') }}"
           hx-target="#sightings-table" hx-swap="innerHTML"
-          class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-colors
-                 {{ 'bg-rose-100 text-rose-700' if dc.get('urgent', 0) > 0 else 'bg-gray-100 text-gray-500' }}">
+          class="btn btn-sm btn-secondary inline-flex items-center gap-1.5
+                 {{ 'border-rose-300 text-rose-700 bg-rose-50' if dc.get('urgent', 0) > 0 else '' }}">
     <span class="inline-block w-2 h-2 rounded-full {{ 'bg-rose-500' if dc.get('urgent', 0) > 0 else 'bg-gray-300' }}"></span>
     {{ dc.get('urgent', 0) }} Urgent
   </button>
@@ -24,8 +24,8 @@
   {# Stale counter #}
   <button hx-get="/v2/partials/sightings?stale=1&q={{ q }}&manufacturer={{ manufacturer|default('') }}"
           hx-target="#sightings-table" hx-swap="innerHTML"
-          class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-colors
-                 {{ 'bg-amber-100 text-amber-700' if dc.get('stale', 0) > 0 else 'bg-gray-100 text-gray-500' }}">
+          class="btn btn-sm btn-secondary inline-flex items-center gap-1.5
+                 {{ 'border-amber-300 text-amber-700 bg-amber-50' if dc.get('stale', 0) > 0 else '' }}">
     <span class="inline-block w-2 h-2 rounded-full {{ 'bg-amber-500' if dc.get('stale', 0) > 0 else 'bg-gray-300' }}"></span>
     {{ dc.get('stale', 0) }} Stale
   </button>
@@ -33,8 +33,8 @@
   {# Pending counter #}
   <button hx-get="/v2/partials/sightings?status=offered&q={{ q }}&manufacturer={{ manufacturer|default('') }}"
           hx-target="#sightings-table" hx-swap="innerHTML"
-          class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-colors
-                 {{ 'bg-blue-100 text-blue-700' if dc.get('pending', 0) > 0 else 'bg-gray-100 text-gray-500' }}">
+          class="btn btn-sm btn-secondary inline-flex items-center gap-1.5
+                 {{ 'border-blue-300 text-blue-700 bg-blue-50' if dc.get('pending', 0) > 0 else '' }}">
     <span class="inline-block w-2 h-2 rounded-full {{ 'bg-blue-500' if dc.get('pending', 0) > 0 else 'bg-gray-300' }}"></span>
     {{ dc.get('pending', 0) }} Pending
   </button>
@@ -83,7 +83,7 @@
           hx-trigger="change"
           hx-target="#sightings-table"
           :hx-vals="JSON.stringify({status: sStatus, q: sQ, manufacturer: sManufacturer})"
-          class="rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-600">
+          class="input w-auto">
     <option value="" {{ 'selected' if not group_by }}>Flat</option>
     <option value="brand" {{ 'selected' if group_by == 'brand' }}>By Brand</option>
     <option value="manufacturer" {{ 'selected' if group_by == 'manufacturer' }}>By Manufacturer</option>
@@ -125,14 +125,14 @@
                  @change="document.querySelectorAll('.req-checkbox').forEach(cb => { cb.checked = toggleAll; if (toggleAll) $store.sightingSelection.toggle(parseInt(cb.value)); else $store.sightingSelection.clear(); })"
                  class="rounded border-gray-300">
         </th>
-        <th class="text-left">Part Numbers</th>
-        <th class="text-left hidden sm:table-cell">Description</th>
-        <th class="text-right w-[60px] hidden sm:table-cell">Qty</th>
-        <th class="text-left hidden xl:table-cell">Customer</th>
-        <th class="text-left w-[80px] hidden xl:table-cell">Sales</th>
-        <th class="text-left w-[80px]">Coverage</th>
-        <th class="text-left w-[80px]">Status</th>
-        <th class="text-center w-[60px] hidden xl:table-cell">Priority</th>
+        <th class="opp-col-header text-left">Part Numbers</th>
+        <th class="opp-col-header text-left hidden sm:table-cell">Description</th>
+        <th class="opp-col-header text-right w-[60px] hidden sm:table-cell">Qty</th>
+        <th class="opp-col-header text-left hidden xl:table-cell">Customer</th>
+        <th class="opp-col-header text-left w-[80px] hidden xl:table-cell">Sales</th>
+        <th class="opp-col-header text-left w-[80px]">Coverage</th>
+        <th class="opp-col-header text-left w-[80px]">Status</th>
+        <th class="opp-col-header text-right w-[60px] hidden xl:table-cell">Priority</th>
       </tr>
     </thead>
     <tbody>
@@ -171,10 +171,7 @@
             x-data="{ refreshing: false }"
             :class="refreshing ? 'opacity-60' : ''">
           <div class="relative flex items-center gap-1">
-            <div class="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden" title="{{ cov_pct }}% coverage ({{ cov_qty }} / {{ r.target_qty or '?' }})">
-              <div class="h-full rounded-full transition-all duration-300 {{ 'bg-red-300' if cov_pct < 50 else 'bg-gray-400' }}"
-                   style="width: {{ cov_pct }}%"></div>
-            </div>
+            <span title="{{ cov_pct }}% coverage ({{ cov_qty }} / {{ r.target_qty or '?' }})">{{ m.coverage_meter(cov_qty, r.target_qty) }}</span>
             <span class="text-[10px] text-gray-400 w-7 text-right">{{ cov_pct }}%</span>
             <button class="ml-0.5 text-gray-300 hover:text-amber-500 transition-colors"
                     title="Search this requirement"
@@ -193,7 +190,7 @@
         </td>
         <td>
           <div class="flex items-center gap-1.5">
-            <span class="transition-colors duration-200">{{ m.status_badge(r.sourcing_status) }}</span>
+            <span class="transition-colors duration-200">{{ m.opp_status_cell(r.sourcing_status, none) }}</span>
             {# Hover-revealed quick Build RFQ button — @click.stop so it doesn't
                select the row; mirrors the refresh icon-button pattern above #}
             <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/sightings/vendor-modal?requirement_ids={{ r.id }}'})"
@@ -205,7 +202,7 @@
             </button>
           </div>
         </td>
-        <td class="text-center hidden xl:table-cell">
+        <td class="text-right hidden xl:table-cell">
           {% if r.priority_score %}
             {% set pri = r.priority_score %}
             {% set pri_label = 'High' if pri >= 70 else ('Med' if pri >= 40 else 'Low') %}
@@ -220,7 +217,7 @@
         <tr class="bg-gray-50 border-b border-gray-200">
           <td colspan="9" class="px-3 py-2">
             <div class="flex items-center gap-3">
-              <span class="font-semibold text-sm text-gray-800">{{ group_name }}</span>
+              <span class="h4">{{ group_name }}</span>
               {# "Select all N" checkbox for this group — adds/removes all group ids in the basket #}
               <label class="flex items-center gap-1.5 cursor-pointer select-none">
                 <input type="checkbox" class="rounded border-gray-300"

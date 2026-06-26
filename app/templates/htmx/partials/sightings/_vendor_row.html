@@ -51,7 +51,7 @@
 {% set name_color = 'text-gray-400' if is_unavailable else 'text-gray-900' %}
 {% set num_color = 'text-gray-400' if is_unavailable else 'text-gray-600' %}
 {% set score_color = 'text-gray-400' if (is_unavailable or s.score is none)
-   else ('text-emerald-600' if s.score >= 70 else ('text-amber-600' if s.score >= 40 else 'text-gray-500')) %}
+   else ('figure-accent' if s.score >= 70 else ('text-amber-600' if s.score >= 40 else 'text-gray-500')) %}
 {# Blacklisted vendors expose no actions; everyone else gets a kebab. #}
 {% set has_actions = vs != 'blacklisted' %}
 
@@ -215,19 +215,19 @@
           {# ── Unavailability knowledge — first entry, full width ── #}
           {% if unav and is_unavailable %}
           <div class="col-span-2">
-            <span class="text-gray-400">What we learned:</span>
+            <span class="text-secondary">What we learned:</span>
             <span class="text-rose-600 font-medium">{{ unav.reason_label }}</span>
             {% if unav.note %}<span class="italic text-gray-600">— {{ unav.note }}</span>{% endif %}
             <span class="text-gray-400">· {% if unav.marked_by %}{{ unav.marked_by }}, {% endif %}{{ unav.age_days }}d ago</span>
           </div>
           {% elif unav_advisory or unav_restock %}
           <div class="col-span-2">
-            <span class="text-gray-400">History:</span>
+            <span class="text-secondary">History:</span>
             <span class="text-gray-600">Marked unavailable — {{ unav.reason_label|lower }}{% if unav.note %} — <span class="italic">{{ unav.note }}</span>{% endif %} · {% if unav.marked_by %}{{ unav.marked_by }}, {% endif %}{{ unav.age_days }}d ago{% if unav.released_by %} · released by {{ unav.released_by }}{% endif %}</span>
           </div>
           {% if unav_restock %}
           <div class="col-span-2">
-            <span class="text-gray-400">Changed:</span>
+            <span class="text-secondary">Changed:</span>
             <span class="font-mono text-emerald-600">{{ unav.qty_at_mark if unav.qty_at_mark is not none else '?' }} → {{ s.estimated_qty or '—' }}</span>
             {% if intel.get('age_days') is not none %}<span class="text-gray-400">· seen {{ intel.age_days }}d ago</span>{% endif %}
           </div>
@@ -236,14 +236,14 @@
 
           {% if intel.get('listing_count') %}
           <div>
-            <span class="text-gray-400">Sources:</span>
+            <span class="text-secondary">Sources:</span>
             <span class="text-gray-700">Found on {{ intel.listing_count }} source{{ 's' if intel.listing_count != 1 }}</span>
           </div>
           {% endif %}
 
           {% if intel.get('source_types') %}
           <div>
-            <span class="text-gray-400">Via:</span>
+            <span class="text-secondary">Via:</span>
             {% for src in intel.source_types[:3] %}
               {% set source_name = src %}
               {% include "htmx/partials/shared/source_badge.html" %}
@@ -256,49 +256,49 @@
 
           {% if intel.get('tier') %}
           <div>
-            <span class="text-gray-400">Evidence:</span>
+            <span class="text-secondary">Evidence:</span>
             <span class="text-gray-700">{{ intel.tier }}</span>
           </div>
           {% endif %}
 
           {% if s.avg_price and s.best_price %}
           <div>
-            <span class="text-gray-400">Price Range:</span>
+            <span class="text-secondary">Price Range:</span>
             <span class="font-mono text-gray-700">${{ '%.2f'|format(s.best_price) }} — ${{ '%.2f'|format(s.avg_price) }}</span>
           </div>
           {% endif %}
 
           {% if intel.get('response_rate') is not none %}
           <div>
-            <span class="text-gray-400">Response Rate:</span>
+            <span class="text-secondary">Response Rate:</span>
             <span class="text-gray-700">{{ (intel.response_rate * 100)|int }}%</span>
           </div>
           {% endif %}
 
           {% if intel.get('ghost_rate') is not none %}
           <div>
-            <span class="text-gray-400">Ghost Rate:</span>
+            <span class="text-secondary">Ghost Rate:</span>
             <span class="{{ 'text-rose-600' if intel.ghost_rate > 0.3 else 'text-gray-700' }}">{{ (intel.ghost_rate * 100)|int }}%</span>
           </div>
           {% endif %}
 
           {% if intel.get('best_lead_time_days') %}
           <div>
-            <span class="text-gray-400">Lead Time:</span>
+            <span class="text-secondary">Lead Time:</span>
             <span class="text-gray-700">{{ intel.best_lead_time_days }} day{{ 's' if intel.best_lead_time_days != 1 }}</span>
           </div>
           {% endif %}
 
           {% if intel.get('min_moq') %}
           <div>
-            <span class="text-gray-400">MOQ:</span>
+            <span class="text-secondary">MOQ:</span>
             <span class="font-mono text-gray-700">{{ intel.min_moq }}</span>
           </div>
           {% endif %}
 
           {% if vendor_phone %}
           <div>
-            <span class="text-gray-400">Phone:</span>
+            <span class="text-secondary">Phone:</span>
             <a href="tel:{{ vendor_phone }}" @click.stop class="text-accent-600 hover:text-accent-700">{{ vendor_phone }}</a>
           </div>
           {% endif %}

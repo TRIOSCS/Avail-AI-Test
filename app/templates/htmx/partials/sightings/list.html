@@ -136,18 +136,12 @@
     </div>
   </div>
 
-  {# ── Drag Handle (desktop only) ────────────────────────────── #}
-  <div class="hidden lg:block w-[3px] cursor-col-resize bg-gray-200 hover:bg-accent-400 transition-colors flex-shrink-0 relative group"
+  {# ── Drag Handle (desktop only) — slim Sales-Hub treatment ─────── #}
+  <div class="hidden lg:block w-1 cursor-col-resize bg-gray-200 hover:bg-accent-400 transition-colors flex-shrink-0 relative"
        :class="dragging ? 'bg-accent-500' : ''"
        @mousedown="startDrag($event)">
+    {# Invisible widened hit-target keeps the grip easy to grab despite the slim bar. #}
     <div class="absolute inset-y-0 -left-2 -right-2"></div>
-    <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-      <div class="w-1 h-1 rounded-full bg-white"></div>
-      <div class="w-1 h-1 rounded-full bg-white"></div>
-      <div class="w-1 h-1 rounded-full bg-white"></div>
-      <div class="w-1 h-1 rounded-full bg-white"></div>
-      <div class="w-1 h-1 rounded-full bg-white"></div>
-    </div>
   </div>
 
   {# ── Right Panel: Requirement Detail ─────────────────────── #}
@@ -198,8 +192,10 @@
         {% endfor %}
       </div>
     </div>
-    {# Detail content — loaded via HTMX when row selected #}
-    <div x-show="selectedReqId" x-cloak id="sightings-detail" class="sightings-fade p-3"
+    {# Detail content — loaded via HTMX when row selected. No padding here: the
+       detail partials (header/grid/tabs + offers_panel/activity_section) carry
+       their own px-5 py-3 so the Sales-Hub header sits flush to the edge. #}
+    <div x-show="selectedReqId" x-cloak id="sightings-detail" class="sightings-fade"
          hx-indicator="#sightings-detail-skeleton"></div>
   </div>
 </div>
