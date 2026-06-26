@@ -120,8 +120,7 @@ def test_approval_event_created(db_session, test_user):
         request_id=req.id,
         actor_id=test_user.id,
         event_type="submitted",
-        note="Submitted for review",
-        payload={"gate": "buy_plan"},
+        payload={"gate": "buy_plan", "comment": "Submitted for review"},
     )
     db_session.add(evt)
     db_session.flush()

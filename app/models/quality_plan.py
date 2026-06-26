@@ -5,8 +5,9 @@ Purpose: QualityPlan tracks inspection/QC documentation per buy-plan order.
          may require an approval gate before the PO is issued.
 
 Called by: services/quality_plan.py, routers/quality_plan.py (Task 3+)
-           Also referenced as FK targets by ApprovalRequest.subject_quality_plan_id
-           and ApprovalRequest.subject_prepayment_id.
+           Also referenced (no DB FK) by ApprovalRequest's polymorphic
+           (subject_type, subject_id) pair — subject_type=ApprovalSubjectType.QUALITY_PLAN
+           or .PREPAYMENT, subject_id holding the QualityPlan/Prepayment PK.
 Depends on: models.base, app.constants (QualityPlanStatus, QPOrderType, PaymentMethod),
             models.buy_plan (BuyPlan), models.vendors (VendorCard)
 """

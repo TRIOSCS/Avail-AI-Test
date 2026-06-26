@@ -52,8 +52,11 @@ class ApprovalRequest(Base):
     """Root record for a single approval workflow instance.
 
     One row per event requiring sign-off (e.g. a prepayment, a buy-plan). The gate_type
-    column distinguishes which workflow this belongs to. Subject FKs link back to the
-    entity being approved (quality plan or prepayment).
+    column distinguishes which workflow this belongs to. The polymorphic (subject_type,
+    subject_id) pair links back to the entity being approved without a cross-table FK —
+    subject_type holds an ApprovalSubjectType value and subject_id its PK (mirrors
+    MaterialCardAudit.material_card_id; survives subject deletion and lets later phases
+    point at buy plans / quotes / resell offers with no schema change).
     """
 
     __tablename__ = "approval_requests"
@@ -71,9 +74,10 @@ class ApprovalRequest(Base):
     requested_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     owner_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
-    # Subject entity (one of these is populated, rest NULL)
-    subject_quality_plan_id = Column(Integer, ForeignKey("quality_plans.id", ondelete="SET NULL"), nullable=True)
-    subject_prepayment_id = Column(Integer, ForeignKey("prepayments.id", ondelete="SET NULL"), nullable=True)
+    # Polymorphic subject (ApprovalSubjectType value + the subject's PK). No cross-table
+    # FK by design — see the class docstring.
+    subject_type = Column(String(50), nullable=True)  # ApprovalSubjectType
+    subject_id = Column(Integer, nullable=True)
 
     # Resolution tracking
     resolved_at = Column(UTCDateTime, nullable=True)
@@ -93,8 +97,7 @@ class ApprovalRequest(Base):
         Index("ix_approval_req_owner", "owner_id"),
         Index("ix_approval_req_status", "status"),
         Index("ix_approval_req_gate_type", "gate_type"),
-        Index("ix_approval_req_subject_qp", "subject_quality_plan_id"),
-        Index("ix_approval_req_subject_pp", "subject_prepayment_id"),
+        Index("ix_approval_req_subject", "subject_type", "subject_id"),
     )
 
 
@@ -106,6 +109,10 @@ class ApprovalStep(Base):
 
     Steps are processed in seq order. rule controls quorum: 'any' (one approval
     suffices) or 'all' (every recipient must approve).
+
+    NOTE: ``status``/``resolved_at`` are intentionally unmaintained under today's
+    single-step ANY model (the request itself is the resolution unit) — they are
+    deliberate scaffolding for the future multi-step chain, not dead columns.
     """
 
     __tablename__ = "approval_steps"
@@ -187,8 +194,7 @@ class ApprovalEvent(Base):
     actor_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
     event_type = Column(String(50), nullable=False)
-    note = Column(Text, nullable=True)
-    payload = Column(JSON, nullable=True)  # extra structured context
+    payload = Column(JSON, nullable=True)  # extra structured context (the comment sink)
 
     created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
 
@@ -221,7 +227,7 @@ class ApprovalOutbox(Base):
     request_id = Column(Integer, ForeignKey("approval_requests.id", ondelete="CASCADE"), nullable=False)
     recipient_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
 
-    channel = Column(String(50), nullable=False, default="email")  # email | in_app
+    channel = Column(String(50), nullable=False, default="in_app")  # email | in_app
     payload = Column(JSON, nullable=True)
 
     sent_at = Column(UTCDateTime, nullable=True)

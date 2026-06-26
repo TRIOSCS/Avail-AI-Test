@@ -109,7 +109,8 @@ def _make_approval_chain(
     ar = ApprovalRequest(
         gate_type="buy_plan",
         status="requested",
-        subject_quality_plan_id=qp.id,
+        subject_type="quality_plan",
+        subject_id=qp.id,
         requested_by_id=user.id,
         owner_id=user.id,
     )

@@ -3,8 +3,9 @@
 Purpose: The orchestration core of the Approval Engine.
 
          create_request persists an ApprovalRequest for a subject entity (a Prepayment
-         or a QualityPlan), wires the matching subject FK, then routes it to eligible
-         approvers via route_request (Task 3).
+         or a QualityPlan), sets the polymorphic (subject_type, subject_id) pair, routes
+         it to eligible approvers via route_request, then records its genesis 'submitted'
+         audit event.
 
          decide resolves a request. It takes a row lock on the request
          (SELECT … FOR UPDATE — enforced on PostgreSQL, a no-op on SQLite) and guards on
@@ -12,8 +13,9 @@ Purpose: The orchestration core of the Approval Engine.
          (idempotent / first-responder-wins) even where the lock is a no-op. The acting
          user must hold a PENDING recipient row on the request (else PermissionError). On
          resolution it records the recipient decision, closes the request
-         (APPROVED / REJECTED), writes one audit ApprovalEvent, and enqueues a single
-         "decided" ApprovalOutbox row for the notification worker.
+         (APPROVED / REJECTED), writes one audit ApprovalEvent, and enqueues two
+         "decided" ApprovalOutbox rows (in_app + email — the locked dual-channel notice)
+         for the notification worker.
 
 Called by: routers/approvals.py (Task 5+), buy-plan / prepayment flows that gate on
            approval.
@@ -31,7 +33,11 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ...constants import ApprovalRecipientStatus, ApprovalRequestStatus
+from ...constants import (
+    ApprovalRecipientStatus,
+    ApprovalRequestStatus,
+    ApprovalSubjectType,
+)
 from ...models.approvals import (
     ApprovalOutbox,
     ApprovalRequest,
@@ -56,6 +62,7 @@ def create_request(
     subject: Prepayment | QualityPlan,
     requested_by: Any,
     owner: Any,
+    currency: str = "USD",
 ) -> ApprovalRequest:
     """Persist an ApprovalRequest for *subject* and route it to eligible approvers.
 
@@ -63,13 +70,15 @@ def create_request(
         db: SQLAlchemy session (sync, 2.0 style).
         gate_type: An ApprovalGateType value (the gate this request belongs to).
         amount: Spend amount used for threshold routing (may be None for non-spend gates).
-        subject: The entity being approved — a Prepayment or a QualityPlan. The matching
-            subject_*_id FK is set from its id.
+        subject: The entity being approved — a Prepayment or a QualityPlan. The polymorphic
+            (subject_type, subject_id) pair is set from its type + id.
         requested_by: The User who triggered the request.
         owner: The User who owns the originating entity (notified on resolution).
+        currency: ISO currency code of *amount* (defaults to "USD").
 
     Returns:
-        The flushed ApprovalRequest, already routed (its steps/recipients exist in-session).
+        The flushed ApprovalRequest, already routed (its steps/recipients exist in-session)
+        and carrying its genesis 'submitted' audit event.
 
     Raises:
         TypeError: If *subject* is neither a Prepayment nor a QualityPlan.
@@ -78,22 +87,27 @@ def create_request(
     request = ApprovalRequest(
         gate_type=gate_type,
         amount=amount,
+        currency=currency,
         status=ApprovalRequestStatus.REQUESTED,
         requested_by_id=requested_by.id if requested_by is not None else None,
         owner_id=owner.id if owner is not None else None,
     )
 
     if isinstance(subject, Prepayment):
-        request.subject_prepayment_id = subject.id
+        request.subject_type = ApprovalSubjectType.PREPAYMENT
     elif isinstance(subject, QualityPlan):
-        request.subject_quality_plan_id = subject.id
+        request.subject_type = ApprovalSubjectType.QUALITY_PLAN
     else:
         raise TypeError(f"subject must be a Prepayment or QualityPlan, got {type(subject).__name__}")
+    request.subject_id = subject.id
 
     db.add(request)
     db.flush()  # Assign request.id before routing
 
     route_request(db, request)
+
+    # Genesis audit row: the 'submitted' event anchors the request's append-only trail.
+    _record_event(db, request, requested_by, "submitted")
     return request
 
 
@@ -172,15 +186,24 @@ def decide(
     event_type = "approved" if approved else "rejected"
     _record_event(db, request, user, event_type, metadata={"comment": comment} if comment else None)
 
-    # Enqueue exactly one notification for the request owner (fall back to requester,
-    # then the decider) — recipient_user_id is NOT NULL.
+    # Notify the request owner (fall back to requester, then the decider) on BOTH the
+    # in-app and email channels — Mike's locked decision. recipient_user_id is NOT NULL.
     notify_user_id = request.owner_id or request.requested_by_id or user.id
+    payload = {"event_type": "decided", "decision": event_type, "comment": comment}
     db.add(
         ApprovalOutbox(
             request_id=request.id,
             recipient_user_id=notify_user_id,
             channel="in_app",
-            payload={"event_type": "decided", "decision": event_type},
+            payload=payload,
+        )
+    )
+    db.add(
+        ApprovalOutbox(
+            request_id=request.id,
+            recipient_user_id=notify_user_id,
+            channel="email",
+            payload=payload,
         )
     )
 
