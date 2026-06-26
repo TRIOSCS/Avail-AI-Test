@@ -41,6 +41,7 @@ from ..services.material_card_service import (
 )
 from ..services.spec_tiers import set_manufacturer
 from ..services.stock_list_ingest import (
+    StockListResult,
     StockListValidationError,
     ingest_stock_list,
     validate_metadata,
@@ -765,7 +766,7 @@ async def import_stock_list_standalone(
     }
 
 
-async def _maybe_enrich_vendor(db: Session, result) -> bool:
+async def _maybe_enrich_vendor(db: Session, result: StockListResult) -> bool:
     """Fire background vendor enrichment when the ingest flagged a brand-new vendor with
     a domain and an enrichment credential is configured.
 
