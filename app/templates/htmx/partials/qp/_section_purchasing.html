@@ -1,0 +1,106 @@
+{#
+  qp/_section_purchasing.html — Quality Plan § Purchasing "Quality Questions" (C2b).
+  Same pattern as _section_sales: editable form PATCHing /v2/qp/{id}/purchasing on change
+  while in draft, read-only once approved. Server-driven purchasing_errors block the
+  "Submit Purchasing for Approval" button until PO# + the QC-required fields are filled.
+
+  Receives: qp (QualityPlan ORM), purchasing_errors (list[str]),
+            purchasing_gate (ApprovalRequest|None), user (User).
+  Called by: routers/quality_plans.py (_render_purchasing_section, _qp_detail_response)
+             and qp/detail.html ({% include %}).
+  Depends on: HTMX, Tailwind CSS. Swaps into its own #qp-section-purchasing wrapper.
+#}
+{% set approved = qp.purchasing_section_approved_at is not none %}
+{% set locked = approved or (purchasing_gate is not none and purchasing_gate.status == 'requested') %}
+
+<div id="qp-section-purchasing">
+  {% if locked %}
+  <dl class="grid grid-cols-2 gap-x-6 gap-y-2 text-xs md:grid-cols-3">
+    {% macro ro(label, value) %}
+    <div>
+      <dt class="text-gray-400">{{ label }}</dt>
+      <dd class="font-medium text-gray-800 mt-0.5">{{ value if (value is not none and value != '') else '—' }}</dd>
+    </div>
+    {% endmacro %}
+    {% macro ro_bool(label, value) %}
+    <div>
+      <dt class="text-gray-400">{{ label }}</dt>
+      <dd class="font-medium text-gray-800 mt-0.5">{{ 'Yes' if value else ('No' if value is false else '—') }}</dd>
+    </div>
+    {% endmacro %}
+    {{ ro('Purchase Order #', qp.purchasing_po_number) }}
+    {{ ro('Condition', qp.purchasing_condition) }}
+    {{ ro('FW / HW / REV / Date Codes', qp.purchasing_fw_hw_rev) }}
+    {{ ro('Product Commodity', qp.purchasing_product_commodity) }}
+    {{ ro_bool('Testing Required', qp.purchasing_testing_required) }}
+    {{ ro('Testing Option', qp.purchasing_testing_option) }}
+    {{ ro('Routing / Prescreening WHS', qp.purchasing_routing_prescreening_whs) }}
+    {{ ro('Packaging', qp.purchasing_packaging) }}
+    {{ ro_bool('Will TPO Ship Complete', qp.purchasing_tpo_ship_complete) }}
+    {{ ro('TPO Notes / Shipping Schedule', qp.purchasing_tpo_notes) }}
+  </dl>
+  {% if approved %}
+  <p class="mt-3 text-xs text-emerald-700">Approved {{ qp.purchasing_section_approved_at.strftime('%Y-%m-%d %H:%M UTC') }} — read-only.</p>
+  {% endif %}
+
+  {% else %}
+  <form hx-patch="/v2/qp/{{ qp.id }}/purchasing"
+        hx-target="#qp-section-purchasing"
+        hx-swap="outerHTML"
+        hx-trigger="change"
+        class="grid grid-cols-1 gap-3 md:grid-cols-2">
+    {% macro txt(name, label, value) %}
+    <label class="block text-xs">
+      <span class="text-gray-600">{{ label }}</span>
+      <input type="text" name="{{ name }}" value="{{ value if value is not none else '' }}"
+             class="mt-0.5 w-full rounded border-gray-300 text-xs">
+    </label>
+    {% endmacro %}
+    {% macro area(name, label, value) %}
+    <label class="block text-xs md:col-span-2">
+      <span class="text-gray-600">{{ label }}</span>
+      <textarea name="{{ name }}" rows="2"
+                class="mt-0.5 w-full rounded border-gray-300 text-xs">{{ value if value is not none else '' }}</textarea>
+    </label>
+    {% endmacro %}
+    {% macro yn(name, label, value) %}
+    <label class="block text-xs">
+      <span class="text-gray-600">{{ label }}</span>
+      <select name="{{ name }}" class="mt-0.5 w-full rounded border-gray-300 text-xs">
+        <option value="" {{ 'selected' if value is none }}>—</option>
+        <option value="true" {{ 'selected' if value is true }}>Yes</option>
+        <option value="false" {{ 'selected' if value is false }}>No</option>
+      </select>
+    </label>
+    {% endmacro %}
+    {{ txt('purchasing_po_number', 'Purchase Order #', qp.purchasing_po_number) }}
+    {{ txt('purchasing_condition', 'Condition', qp.purchasing_condition) }}
+    {{ txt('purchasing_product_commodity', 'Product Commodity', qp.purchasing_product_commodity) }}
+    {{ area('purchasing_fw_hw_rev', 'FW / HW / REV / Date & Week Codes', qp.purchasing_fw_hw_rev) }}
+    {{ yn('purchasing_testing_required', 'Testing Required', qp.purchasing_testing_required) }}
+    {{ txt('purchasing_testing_option', 'Testing Option', qp.purchasing_testing_option) }}
+    {{ txt('purchasing_routing_prescreening_whs', 'Routing / Prescreening WHS', qp.purchasing_routing_prescreening_whs) }}
+    {{ area('purchasing_packaging', 'Packaging', qp.purchasing_packaging) }}
+    {{ yn('purchasing_tpo_ship_complete', 'Will TPO Ship Complete', qp.purchasing_tpo_ship_complete) }}
+    {{ area('purchasing_tpo_notes', 'TPO Notes / Shipping Schedule', qp.purchasing_tpo_notes) }}
+  </form>
+
+  {% if purchasing_errors %}
+  <div class="mt-3 rounded border border-amber-200 bg-amber-50 p-2">
+    <p class="text-xs font-semibold text-amber-700 mb-0.5">Complete before submitting:</p>
+    <ul class="list-disc list-inside">
+      {% for e in purchasing_errors %}<li class="text-xs text-amber-700">{{ e }}</li>{% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+  {% if purchasing_gate is none or purchasing_gate.status in ('rejected', 'cancelled') %}
+  <form class="mt-3" hx-post="/v2/qp/{{ qp.id }}/submit-purchasing" hx-target="#main-content" hx-swap="innerHTML">
+    <button type="submit" data-loading-disable
+            class="btn btn-secondary btn-sm"
+            {{ 'disabled' if purchasing_errors }}>
+      Submit Purchasing for Approval
+    </button>
+  </form>
+  {% endif %}
+  {% endif %}
+</div>

@@ -1,0 +1,134 @@
+{#
+  qp/_section_sales.html — Quality Plan § Sales "Quality Questions" (C2b).
+  A dense field grid: editable (one <form> that PATCHes /v2/qp/{id}/sales on change and
+  swaps this partial into itself) while the section is in draft, read-only once approved.
+  Server-driven sales_errors block the "Submit Sales for Approval" button until the
+  required fields (SO# + the QC-required fields) are filled.
+
+  Receives: qp (QualityPlan ORM), sales_errors (list[str]), sales_gate (ApprovalRequest|None),
+            user (User).
+  Called by: routers/quality_plans.py (_render_sales_section, _qp_detail_response) and
+             qp/detail.html ({% include %}).
+  Depends on: HTMX, Tailwind CSS. Swaps into its own #qp-section-sales wrapper.
+#}
+{% set approved = qp.sales_section_approved_at is not none %}
+{# A section is locked once approved OR while a request is pending (read-only review). #}
+{% set locked = approved or (sales_gate is not none and sales_gate.status == 'requested') %}
+
+<div id="qp-section-sales">
+  {% if locked %}
+  {# ── Read-only display grid ── #}
+  <dl class="grid grid-cols-2 gap-x-6 gap-y-2 text-xs md:grid-cols-3">
+    {% macro ro(label, value) %}
+    <div>
+      <dt class="text-gray-400">{{ label }}</dt>
+      <dd class="font-medium text-gray-800 mt-0.5">{{ value if (value is not none and value != '') else '—' }}</dd>
+    </div>
+    {% endmacro %}
+    {% macro ro_bool(label, value) %}
+    <div>
+      <dt class="text-gray-400">{{ label }}</dt>
+      <dd class="font-medium text-gray-800 mt-0.5">{{ 'Yes' if value else ('No' if value is false else '—') }}</dd>
+    </div>
+    {% endmacro %}
+    {{ ro('Sales Order #', qp.sales_so_number) }}
+    {{ ro('Condition', qp.sales_condition) }}
+    {{ ro('Quantity', qp.sales_quantity) }}
+    {{ ro('FW / HW / REV / Date Codes', qp.sales_fw_hw_rev) }}
+    {{ ro('Product Commodity', qp.sales_product_commodity) }}
+    {{ ro_bool('Testing Required', qp.sales_testing_required) }}
+    {{ ro('Testing Option', qp.sales_testing_option) }}
+    {{ ro('Testing Specifics', qp.sales_testing_specifics) }}
+    {{ ro('Test Location', qp.sales_test_location) }}
+    {{ ro_bool('Serial Preapproval Required', qp.sales_serial_preapproval_required) }}
+    {{ ro_bool('Authorized to Ship Early', qp.sales_authorized_ship_early) }}
+    {{ ro_bool('Authorized to Ship Partial', qp.sales_authorized_ship_partial) }}
+    {{ ro('Routing / Prescreening WHS', qp.sales_routing_prescreening_whs) }}
+    {{ ro('Vendor Rating', qp.sales_vendor_rating) }}
+    {{ ro_bool('Third-party Packaging OK', qp.sales_third_party_pkg_ok) }}
+    {{ ro('Packaging Requirements', qp.sales_pkg_requirements) }}
+    {{ ro('BOM / Matrix Links / SUBS', qp.sales_bom_matrix_links) }}
+    {{ ro('Notes', qp.sales_notes) }}
+  </dl>
+  {% if approved %}
+  <p class="mt-3 text-xs text-emerald-700">Approved {{ qp.sales_section_approved_at.strftime('%Y-%m-%d %H:%M UTC') }} — read-only.</p>
+  {% endif %}
+
+  {% else %}
+  {# ── Editable grid: one form PATCHes the whole section on any field change ── #}
+  <form hx-patch="/v2/qp/{{ qp.id }}/sales"
+        hx-target="#qp-section-sales"
+        hx-swap="outerHTML"
+        hx-trigger="change"
+        class="grid grid-cols-1 gap-3 md:grid-cols-2">
+    {% macro txt(name, label, value) %}
+    <label class="block text-xs">
+      <span class="text-gray-600">{{ label }}</span>
+      <input type="text" name="{{ name }}" value="{{ value if value is not none else '' }}"
+             class="mt-0.5 w-full rounded border-gray-300 text-xs">
+    </label>
+    {% endmacro %}
+    {% macro num(name, label, value) %}
+    <label class="block text-xs">
+      <span class="text-gray-600">{{ label }}</span>
+      <input type="number" name="{{ name }}" value="{{ value if value is not none else '' }}"
+             class="mt-0.5 w-full rounded border-gray-300 text-xs">
+    </label>
+    {% endmacro %}
+    {% macro area(name, label, value) %}
+    <label class="block text-xs md:col-span-2">
+      <span class="text-gray-600">{{ label }}</span>
+      <textarea name="{{ name }}" rows="2"
+                class="mt-0.5 w-full rounded border-gray-300 text-xs">{{ value if value is not none else '' }}</textarea>
+    </label>
+    {% endmacro %}
+    {% macro yn(name, label, value) %}
+    <label class="block text-xs">
+      <span class="text-gray-600">{{ label }}</span>
+      <select name="{{ name }}" class="mt-0.5 w-full rounded border-gray-300 text-xs">
+        <option value="" {{ 'selected' if value is none }}>—</option>
+        <option value="true" {{ 'selected' if value is true }}>Yes</option>
+        <option value="false" {{ 'selected' if value is false }}>No</option>
+      </select>
+    </label>
+    {% endmacro %}
+    {{ txt('sales_so_number', 'Sales Order #', qp.sales_so_number) }}
+    {{ txt('sales_condition', 'Condition', qp.sales_condition) }}
+    {{ num('sales_quantity', 'Quantity', qp.sales_quantity) }}
+    {{ txt('sales_product_commodity', 'Product Commodity', qp.sales_product_commodity) }}
+    {{ area('sales_fw_hw_rev', 'FW / HW / REV / Date & Week Codes', qp.sales_fw_hw_rev) }}
+    {{ yn('sales_testing_required', 'Testing Required', qp.sales_testing_required) }}
+    {{ txt('sales_testing_option', 'Testing Option', qp.sales_testing_option) }}
+    {{ area('sales_testing_specifics', 'Testing Specifics', qp.sales_testing_specifics) }}
+    {{ txt('sales_test_location', 'Test Location', qp.sales_test_location) }}
+    {{ yn('sales_serial_preapproval_required', 'Serial Preapproval Required', qp.sales_serial_preapproval_required) }}
+    {{ yn('sales_authorized_ship_early', 'Authorized to Ship Early', qp.sales_authorized_ship_early) }}
+    {{ yn('sales_authorized_ship_partial', 'Authorized to Ship Partial', qp.sales_authorized_ship_partial) }}
+    {{ txt('sales_routing_prescreening_whs', 'Routing / Prescreening WHS', qp.sales_routing_prescreening_whs) }}
+    {{ txt('sales_vendor_rating', 'Vendor Rating', qp.sales_vendor_rating) }}
+    {{ yn('sales_third_party_pkg_ok', 'Third-party Packaging OK', qp.sales_third_party_pkg_ok) }}
+    {{ area('sales_pkg_requirements', 'List Packaging Requirements', qp.sales_pkg_requirements) }}
+    {{ area('sales_bom_matrix_links', 'BOM / Matrix Links / Acceptable SUBS / TSO', qp.sales_bom_matrix_links) }}
+    {{ area('sales_notes', 'Notes', qp.sales_notes) }}
+  </form>
+
+  {# ── Completeness gate + submit ── #}
+  {% if sales_errors %}
+  <div class="mt-3 rounded border border-amber-200 bg-amber-50 p-2">
+    <p class="text-xs font-semibold text-amber-700 mb-0.5">Complete before submitting:</p>
+    <ul class="list-disc list-inside">
+      {% for e in sales_errors %}<li class="text-xs text-amber-700">{{ e }}</li>{% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+  {% if sales_gate is none or sales_gate.status in ('rejected', 'cancelled') %}
+  <form class="mt-3" hx-post="/v2/qp/{{ qp.id }}/submit-sales" hx-target="#main-content" hx-swap="innerHTML">
+    <button type="submit" data-loading-disable
+            class="btn btn-secondary btn-sm"
+            {{ 'disabled' if sales_errors }}>
+      Submit Sales for Approval
+    </button>
+  </form>
+  {% endif %}
+  {% endif %}
+</div>
