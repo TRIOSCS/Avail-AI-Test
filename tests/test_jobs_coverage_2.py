@@ -2623,7 +2623,11 @@ class TestJobTokenRefreshEdgeCases:
                     ):
                         _run(_job_token_refresh.__wrapped__())
 
-        assert "token expired" in user.m365_error_reason
+        # "token expired" is an auth failure → actionable reconnect reason,
+        # not the raw exception text.
+        from app.services.m365_status import REASON_AUTH
+
+        assert user.m365_error_reason == REASON_AUTH
 
     @patch("app.jobs.core_jobs.logger")
     def test_generic_exception(self, mock_logger):

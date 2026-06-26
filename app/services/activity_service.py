@@ -1575,6 +1575,7 @@ def get_inbox_sync_status(db: Session, user) -> dict:
     env default — so this staleness threshold matches the actual scan cadence.
     """
     from app.services.admin_service import get_effective_int
+    from app.services.m365_status import action_for_reason
 
     now = datetime.now(timezone.utc)
     connected = bool(getattr(user, "m365_connected", False))
@@ -1598,11 +1599,18 @@ def get_inbox_sync_status(db: Session, user) -> dict:
     else:
         health = InboxSyncHealth.OK
 
+    error_reason = getattr(user, "m365_error_reason", None)
+    # Reverse-map the persisted reason to the user's next step so the card can
+    # show a specific, accurate message (reconnect vs. self-healing) instead of
+    # a generic "snag". None/legacy reasons resolve to a safe non-reconnect action.
+    error_action = action_for_reason(error_reason)
+
     return {
         "connected": connected,
         "last_scan_at": _utc(last_scan) if last_scan else None,
         "is_stale": is_stale,
         "token_ok": token_ok,
-        "error_reason": getattr(user, "m365_error_reason", None),
+        "error_reason": error_reason,
+        "error_action": error_action.value if error_action else None,
         "health": health,
     }

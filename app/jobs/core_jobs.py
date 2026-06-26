@@ -14,6 +14,7 @@ from loguru import logger
 
 from ..constants import RequisitionStatus
 from ..scheduler import _traced_job
+from ..services.m365_status import REASON_TRANSIENT, reason_for
 from ..utils.token_manager import _utc
 
 
@@ -143,7 +144,7 @@ async def _job_token_refresh():
                 try:
                     user = task_db.get(User, user_id)
                     if user:
-                        user.m365_error_reason = str(e)[:255]
+                        user.m365_error_reason = reason_for(e)
                         task_db.commit()
                 except Exception:
                     task_db.rollback()
@@ -211,7 +212,8 @@ async def _job_inbox_scan():
                 try:
                     user = scan_db.get(User, user_id)
                     if user:
-                        user.m365_error_reason = "Inbox scan timed out"
+                        # A timeout is transient — it self-heals on the next scan.
+                        user.m365_error_reason = REASON_TRANSIENT
                         scan_db.commit()
                 except sqlalchemy.exc.SQLAlchemyError:
                     scan_db.rollback()
@@ -222,7 +224,7 @@ async def _job_inbox_scan():
                 try:
                     user = scan_db.get(User, user_id)
                     if user:
-                        user.m365_error_reason = str(e)[:255]
+                        user.m365_error_reason = reason_for(e)
                         scan_db.commit()
                 except sqlalchemy.exc.SQLAlchemyError:
                     scan_db.rollback()

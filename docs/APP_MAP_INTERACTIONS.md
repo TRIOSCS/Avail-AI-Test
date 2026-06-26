@@ -1563,7 +1563,15 @@ activity_service.get_inbox_sync_status(user)
     |       WARNING — last_inbox_scan > 2× inbox_scan_interval_min ago
     |       OK     — connected, token valid, scan recent
     |
-    +---> Returns: {connected, last_scan_at, is_stale, token_ok, error_reason, health}
+    +---> Reverse-maps m365_error_reason -> error_action via
+    |     m365_status.action_for_reason():
+    |       REASON_AUTH         -> "reconnect" (sign-in dead; link to /auth/login)
+    |       REASON_TRANSIENT    -> "wait" (self-heals on next cycle)
+    |       REASON_SUBSCRIPTION -> None (informational; webhook channel)
+    |       None / legacy raw   -> None / "wait" (never wrongly "reconnect")
+    |
+    +---> Returns: {connected, last_scan_at, is_stale, token_ok,
+    |               error_reason, error_action, health}
     |
     v
 Two surfaces:
@@ -1571,9 +1579,22 @@ Two surfaces:
        (shown when health=error or is_stale=True; included at top of list.html)
     2. Settings → Profile: settings/_mailbox_sync_card.html
        (connected: friendly sync status + "Scan now" button + last-checked
-        timeago; not connected: a "Mailbox not connected" empty state with a
-        reconnect hint and no Scan-now button. m365_error_reason is rendered as
-        friendly text, not a raw string.)
+        timeago; on error, branches on error_action — "reconnect" shows the
+        accurate reason + a Reconnect Microsoft 365 link, otherwise an amber
+        self-healing note. not connected: a "Mailbox not connected" empty state
+        with a Connect Microsoft 365 button. m365_error_reason is ALWAYS a
+        friendly, actionable sentence — never a raw str(exception).)
+
+m365_error_reason vocabulary (app/services/m365_status.py is the single source
+of truth — all four writers route through it):
+    - token_manager.get_valid_token + core_jobs token-refresh failure
+      -> reason_for(): auth-signal errors -> REASON_AUTH, else REASON_TRANSIENT
+    - core_jobs inbox-scan timeout -> REASON_TRANSIENT; scan exception
+      -> reason_for() (classified, never raw str(e))
+    - webhook_service subscription renewal >= 3 fails -> REASON_SUBSCRIPTION
+A successful inbox poll (email_jobs._scan_user_inbox) clears a self-healed
+token/scan reason (NOT the subscription one — separate webhook lifecycle) so
+the card stops showing a resolved error.
 
 "Scan now" button:
     POST /v2/partials/settings/inbox/scan-now
