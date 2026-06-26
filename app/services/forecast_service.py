@@ -22,40 +22,47 @@ from sqlalchemy import case
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
 
+from app.constants import RequisitionStatus
 from app.models import Company, Quote, Requirement, Requisition, User
 from app.services.requisition_list_service import _resolve_deal_value
 
-# Stage -> win-probability. Standard CRM stage-weighting; tune to match real
-# close rates. Terminal stages: won=1.0 (realized), lost/archived/cancelled=0.0
-# (dead). This constant is the single forecasting lever — adjust it (not the
-# call sites) if observed close rates differ.
+# Stage -> win-probability, keyed on the canonical RequisitionStatus pipeline
+# (Sales Hub: DRAFT -> OPEN -> RFQS_SENT -> OFFERS -> QUOTED -> WON/LOST).
+# Standard CRM stage-weighting; tune to match real close rates. Terminal stages:
+# won=1.0 (realized), lost/cancelled=0.0 (dead). HOTLIST is an off-pipeline
+# *monitor* state (RequisitionStatus.MONITOR) with NO win probability — it is
+# deliberately absent here so it never enters OPEN_STATUSES, the open-deal count,
+# the open value, or the weighted forecast. This constant is the single
+# forecasting lever — adjust it (not the call sites) if observed close rates differ.
 STAGE_WIN_PROBABILITY: dict[str, float] = {
-    "draft": 0.05,
-    "active": 0.10,
-    "sourcing": 0.25,
-    "offers": 0.40,
-    "quoting": 0.60,
-    "quoted": 0.75,
-    "reopened": 0.50,
-    "won": 1.00,
-    "lost": 0.0,
-    "archived": 0.0,
-    "cancelled": 0.0,
+    RequisitionStatus.DRAFT: 0.05,
+    RequisitionStatus.OPEN: 0.10,
+    RequisitionStatus.RFQS_SENT: 0.25,
+    RequisitionStatus.OFFERS: 0.40,
+    RequisitionStatus.QUOTED: 0.75,
+    RequisitionStatus.WON: 1.00,
+    RequisitionStatus.LOST: 0.0,
+    RequisitionStatus.CANCELLED: 0.0,
 }
 
 # Open = non-terminal = statuses with a live (0 < p < 1) probability, kept in
-# lifecycle order for stable display.
-_OPEN_ORDER = ["draft", "active", "sourcing", "offers", "quoting", "quoted", "reopened"]
+# lifecycle order for stable display. HOTLIST (monitor) and the terminal stages
+# are excluded by construction.
+_OPEN_ORDER: list[str] = [
+    RequisitionStatus.DRAFT,
+    RequisitionStatus.OPEN,
+    RequisitionStatus.RFQS_SENT,
+    RequisitionStatus.OFFERS,
+    RequisitionStatus.QUOTED,
+]
 OPEN_STATUSES: frozenset[str] = frozenset(s for s, p in STAGE_WIN_PROBABILITY.items() if 0.0 < p < 1.0)
 
 _STAGE_LABELS: dict[str, str] = {
-    "draft": "Draft",
-    "active": "Active",
-    "sourcing": "Sourcing",
-    "offers": "Offers",
-    "quoting": "Quoting",
-    "quoted": "Quoted",
-    "reopened": "Reopened",
+    RequisitionStatus.DRAFT: "Draft",
+    RequisitionStatus.OPEN: "Open",
+    RequisitionStatus.RFQS_SENT: "RFQs Sent",
+    RequisitionStatus.OFFERS: "Offers",
+    RequisitionStatus.QUOTED: "Quoted",
 }
 
 
@@ -145,9 +152,9 @@ def pipeline_summary(db: Session, *, owner_id: int | None = None) -> dict:
             bucket["value"] += val
             bucket["weighted"] += weighted
 
-    won_reqs = base.filter(Requisition.status == "won").all()
+    won_reqs = base.filter(Requisition.status == RequisitionStatus.WON).all()
     won_count = len(won_reqs)
-    lost_count = base.filter(Requisition.status == "lost").count()
+    lost_count = base.filter(Requisition.status == RequisitionStatus.LOST).count()
     won_values = bulk_deal_values(db, [r.id for r in won_reqs])
     won_value = sum(won_values.values())
     decided = won_count + lost_count
@@ -203,7 +210,7 @@ def pipeline_by_owner(db: Session) -> list[dict]:
     """
     open_reqs = db.query(Requisition).filter(Requisition.status.in_(OPEN_STATUSES)).all()
     open_values = bulk_deal_values(db, [r.id for r in open_reqs])
-    won_reqs = db.query(Requisition).filter(Requisition.status == "won").all()
+    won_reqs = db.query(Requisition).filter(Requisition.status == RequisitionStatus.WON).all()
     won_values = bulk_deal_values(db, [r.id for r in won_reqs])
 
     by_owner: dict[int | None, dict] = {}
@@ -247,7 +254,8 @@ def conversion_funnel(db: Session, *, days: int = 90) -> dict:
 
     Counts requisitions created within `days`:
       - opportunities: all reqs created in window
-      - sourcing:      reached sourcing+ (status not in {draft, active})
+      - sourcing:      progressed past entry (status not in {draft, open}; OPEN is
+                       the entry stage so it does not yet count as "reached sourcing+")
       - quoted:        has >=1 Quote OR status in {quoted, won}
       - won:           status == won
     Each later stage is a subset of the prior, so the funnel is monotonic.
@@ -263,9 +271,11 @@ def conversion_funnel(db: Session, *, days: int = 90) -> dict:
         }
 
     opportunities = len(reqs)
-    sourcing = sum(1 for r in reqs if r.status not in ("draft", "active"))
-    quoted = sum(1 for r in reqs if r.id in quoted_req_ids or r.status in ("quoted", "won"))
-    won = sum(1 for r in reqs if r.status == "won")
+    sourcing = sum(1 for r in reqs if r.status not in (RequisitionStatus.DRAFT, RequisitionStatus.OPEN))
+    quoted = sum(
+        1 for r in reqs if r.id in quoted_req_ids or r.status in (RequisitionStatus.QUOTED, RequisitionStatus.WON)
+    )
+    won = sum(1 for r in reqs if r.status == RequisitionStatus.WON)
 
     return {
         "window_days": days,
