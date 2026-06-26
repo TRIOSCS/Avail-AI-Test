@@ -148,7 +148,16 @@ def _run_approve_side_effects(
     two paths can never drift. Optional manager ``line_overrides`` swap vendors/quantities
     before the plan is activated. Stamps approver/decision metadata, generates the buyer
     'Cut PO' tasks, and writes the audit ActivityLog row. The caller owns the flush/commit.
+
+    State guard FIRST: only a PENDING plan may be approved. This is the single point that
+    protects BOTH approval paths — if an approver decides a STALE engine request whose plan
+    has since left PENDING (e.g. it was cancelled or halted out from under the queue), this
+    raises cleanly so the router turns it into a 400 / idempotent no-op instead of silently
+    resurrecting the cancelled plan to ACTIVE. ``approve_buy_plan`` keeps its own pre-check
+    (defense in depth); the engine ``decide()`` dispatch relies on this one.
     """
+    if plan.status != BuyPlanStatus.PENDING.value:
+        raise ValueError(f"Can only approve a pending plan (current: {plan.status})")
     now = datetime.now(timezone.utc)
     if line_overrides:
         _apply_line_overrides(plan, line_overrides, db)
@@ -167,7 +176,14 @@ def _run_reject_side_effects(plan: BuyPlan, user: User, db: Session, *, reason: 
     Counterpart to ``_run_approve_side_effects``; shared by the legacy path and the engine
     ``decide()`` dispatch. Stamps the rejecting user + reason and writes the audit
     ActivityLog row. The caller owns the flush/commit.
+
+    State guard FIRST (same rationale as ``_run_approve_side_effects``): only a PENDING plan
+    may be rejected, so deciding a stale request whose plan already left PENDING raises a
+    clean ValueError (→ router 400) rather than dragging a cancelled/halted plan back to
+    DRAFT.
     """
+    if plan.status != BuyPlanStatus.PENDING.value:
+        raise ValueError(f"Can only reject a pending plan (current: {plan.status})")
     plan.status = BuyPlanStatus.DRAFT.value
     plan.approved_by_id = user.id
     plan.approved_at = datetime.now(timezone.utc)
@@ -176,33 +192,38 @@ def _run_reject_side_effects(plan: BuyPlan, user: User, db: Session, *, reason: 
     _log_approval_activity(plan, "reject", user, reason, db)
 
 
-def _open_engine_request_for_plan(plan: BuyPlan, user: User, db: Session) -> None:
-    """Open a BUY_PLAN ApprovalRequest for *plan*, cancelling any stale open one first.
+def _cancel_open_engine_requests_for_plan(plan: BuyPlan, user: User, db: Session) -> int:
+    """Cancel every open (REQUESTED) BUY_PLAN ApprovalRequest for *plan* via the engine.
 
-    Called when a plan enters PENDING (submit / resubmit). RISK 2 (double request): a
-    resubmit must never leave two REQUESTED rows racing for the same plan, so we cancel
-    every existing open (REQUESTED) request for this plan via the engine's ``cancel``
-    BEFORE creating the fresh one — leaving exactly one open request. ``cancel`` is safe
-    here because *user* is the requester/owner of any prior request (we always pass
-    requested_by=owner=user). If no approver holds ``can_approve_buy_plans`` the engine
-    raises NoEligibleApproverError; we log a WARNING and leave the plan PENDING with no
-    orphan engine state (the create_request flush is the only write, and it is rolled into
-    the caller's transaction — a failed route leaves nothing half-built).
+    The single point that closes a plan's engine gate when the plan leaves PENDING — called
+    by ``_open_engine_request_for_plan`` (before opening a fresh request, RISK 2: never two
+    live REQUESTED rows) AND by the non-decide transitions that take a plan out of PENDING
+    (``cancel_buy_plan``, ``verify_so`` HALT). Cancelling the open request there means no
+    REQUESTED row is orphaned in the approvals queue/badge for a plan that no longer exists
+    to approve — and, crucially, closes the resurrection vector (an approver can no longer
+    pick a stale request out of the queue and re-activate a cancelled plan).
 
-    Lazy imports: the approvals service imports buyplan_workflow (decide() dispatch), so a
-    top-level import here would be circular.
+    Authz: each request is cancelled on behalf of its OWN ``requested_by`` (falling back to
+    ``owner``), the user who originally submitted the plan — so the engine ``cancel`` authz
+    (requester/owner OR manager/admin) is satisfied for EVERY transition caller, regardless
+    of whether the user driving the transition is the submitter, a manager/admin, or an
+    ops-group member who is neither (the verify_so HALT case). The plan-level audit of who
+    cancelled/halted the plan is already captured on the plan + its activity log; this
+    cancel is a system-driven consequence of the plan leaving PENDING, not a separate
+    user-initiated cancel of someone else's request. ``user`` is used only as a final
+    fallback actor when a request somehow carries no requester/owner.
+
+    Returns the number of requests cancelled. Lazy imports avoid the circular import (the
+    approvals service imports buyplan_workflow for the decide() dispatch).
     """
     from ..constants import (
-        ApprovalGateType,
         ApprovalRequestStatus,
         ApprovalSubjectType,
     )
     from ..models.approvals import ApprovalRequest
     from .approvals.events import cancel as svc_cancel
-    from .approvals.routing import NoEligibleApproverError
-    from .approvals.service import create_request
 
-    stale = (
+    open_requests = (
         db.execute(
             select(ApprovalRequest).where(
                 ApprovalRequest.subject_type == ApprovalSubjectType.BUY_PLAN,
@@ -213,8 +234,34 @@ def _open_engine_request_for_plan(plan: BuyPlan, user: User, db: Session) -> Non
         .scalars()
         .all()
     )
-    for ar in stale:
-        svc_cancel(db, ar.id, actor=user)
+    cancelled = 0
+    for ar in open_requests:
+        actor = ar.requested_by or ar.owner or user
+        svc_cancel(db, ar.id, actor=actor)
+        cancelled += 1
+    return cancelled
+
+
+def _open_engine_request_for_plan(plan: BuyPlan, user: User, db: Session) -> None:
+    """Open a BUY_PLAN ApprovalRequest for *plan*, cancelling any stale open one first.
+
+    Called when a plan enters PENDING (submit / resubmit). RISK 2 (double request): a
+    resubmit must never leave two REQUESTED rows racing for the same plan, so we cancel
+    every existing open (REQUESTED) request for this plan via
+    ``_cancel_open_engine_requests_for_plan`` BEFORE creating the fresh one — leaving exactly
+    one open request. If no approver holds ``can_approve_buy_plans`` the engine raises
+    NoEligibleApproverError; we log a WARNING and leave the plan PENDING with no orphan
+    engine state (the create_request flush is the only write, and it is rolled into the
+    caller's transaction — a failed route leaves nothing half-built).
+
+    Lazy imports: the approvals service imports buyplan_workflow (decide() dispatch), so a
+    top-level import here would be circular.
+    """
+    from ..constants import ApprovalGateType
+    from .approvals.routing import NoEligibleApproverError
+    from .approvals.service import create_request
+
+    _cancel_open_engine_requests_for_plan(plan, user, db)
 
     try:
         create_request(
@@ -296,6 +343,13 @@ def verify_so(
         # SOVerificationStatus has no dedicated HALTED value, so a halt reuses REJECTED
         # for so_status; it is distinguished from a plain reject by plan.status == HALTED
         # (set just below).
+        # If the plan is still PENDING when halted, close its open engine request BEFORE the
+        # transition so no REQUESTED row is orphaned in the approvals queue/badge and the
+        # plan can never be resurrected by approving a stale request (the canceller is an
+        # ops member who may be neither the submitter nor a manager/admin, so the helper
+        # cancels on behalf of each request's own requester/owner — authz always satisfied).
+        if plan.status == BuyPlanStatus.PENDING.value:
+            _cancel_open_engine_requests_for_plan(plan, user, db)
         plan.so_status = SOVerificationStatus.REJECTED.value
         plan.so_rejection_note = rejection_note
         plan.status = BuyPlanStatus.HALTED.value
@@ -534,6 +588,15 @@ def cancel_buy_plan(plan_id: int, user: User, db: Session, *, reason: str | None
         raise ValueError(f"Buy plan {plan_id} not found")
     if plan.status in (BuyPlanStatus.COMPLETED.value, BuyPlanStatus.CANCELLED.value):
         raise ValueError(f"Cannot cancel plan in '{plan.status}' status")
+
+    # If the plan is still PENDING, close its open engine request BEFORE the transition so
+    # no REQUESTED row is orphaned in the approvals queue/badge — and, critically, so an
+    # approver can no longer pull a stale request out of the queue and resurrect this
+    # cancelled plan to ACTIVE. The helper cancels on behalf of each request's own
+    # requester/owner, so the engine cancel authz is satisfied even when the canceller is
+    # the (non-manager) plan owner.
+    if plan.status == BuyPlanStatus.PENDING.value:
+        _cancel_open_engine_requests_for_plan(plan, user, db)
 
     plan.status = BuyPlanStatus.CANCELLED.value
     plan.cancelled_at = datetime.now(timezone.utc)

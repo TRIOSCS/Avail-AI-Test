@@ -5054,6 +5054,28 @@ open request exists — a plan that went `PENDING` before C1 deployed — it fal
 legacy `approve_buy_plan` and logs a WARNING (RISK 3, transition window, removed in a
 follow-up).
 
+**Leaving PENDING outside `decide()` cancels the open engine request (no orphan, no
+resurrection):** a PENDING plan carries a live `REQUESTED` `BUY_PLAN` `ApprovalRequest`, so
+any transition that takes the plan out of PENDING *without going through `decide()`* must
+close that request or it would orphan a row in the approvals queue/badge — and, worse, let
+an approver pull the stale request and resurrect the plan. `cancel_buy_plan` and the
+`verify_so` **HALT** branch therefore call
+`_cancel_open_engine_requests_for_plan(plan, user, db)` (the stale-cancel loop factored out
+of `_open_engine_request_for_plan`) **at/before the transition, only when the plan is still
+PENDING**. That helper cancels each open request on behalf of the request's OWN
+`requested_by`/`owner` (the original submitter), so the `events.cancel` authz
+(requester/owner OR manager/admin) is satisfied for EVERY caller — including a `verify_so`
+HALT driven by an ops-group member who is neither the submitter nor a manager/admin. As a
+second line of defense, `_run_approve_side_effects`/`_run_reject_side_effects` re-check
+`plan.status == PENDING` at entry: deciding a stale request whose plan already left PENDING
+raises `ValueError` → the router returns a clean 400 (via `get_db`'s rollback) instead of
+silently reactivating a cancelled/halted plan.
+
+The buy-plans ACTION badge (`alerts/sources/buyplan.py`, branch 2 — manager approval) counts
+ONLY pending plans with **no open `BUY_PLAN` `ApprovalRequest`**, so a post-C1 plan surfaces
+on the **Approvals** badge alone (no double-count) while a pre-C1 transition-window plan (no
+engine request) still surfaces on the buy-plans badge and never goes invisible.
+
 The **read-only buy-plan bridge is RETIRED** (C1). `list_requests`/`get_queue`
 (`routers/approvals.py`) are engine-only: a buy plan surfaces as a native `ApprovalRequest`
 (`gate_type=buy_plan`, `subject_type=buy_plan`). `_serialize_request(r)` is the single

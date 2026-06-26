@@ -33,19 +33,22 @@ from app.constants import (
     ApprovalRequestStatus,
     ApprovalSubjectType,
     BuyPlanStatus,
+    SOVerificationStatus,
 )
 from app.database import get_db
 from app.dependencies import require_buyplan_approver, require_user
 from app.models.approvals import ApprovalRequest, ApprovalStep, ApprovalStepRecipient
 from app.models.auth import User
-from app.models.buy_plan import BuyPlan
+from app.models.buy_plan import BuyPlan, VerificationGroupMember
 from app.models.quotes import Quote
 from app.models.sourcing import Requisition
 from app.services.approvals.service import decide as svc_decide
 from app.services.buyplan_workflow import (
     approve_buy_plan,
+    cancel_buy_plan,
     resubmit_buy_plan,
     submit_buy_plan,
+    verify_so,
 )
 
 # ── Helpers ─────────────────────────────────────────────────────────────
@@ -405,3 +408,149 @@ def test_legacy_approve_and_engine_decide_reach_same_active_state(db_session: Se
     db_session.refresh(engine_plan)
     assert engine_plan.status == BuyPlanStatus.ACTIVE.value
     assert engine_plan.approved_by_id == approver.id
+
+
+# ── Cancel / halt cascade the open engine request (no orphan, no resurrection) ──
+
+
+def _ops_member(db: Session, *, role: str = "buyer") -> User:
+    """An active ops verification-group member (defaults to a plain buyer — NEITHER the
+    plan submitter NOR a manager/admin — to prove the engine cancel authz still
+    holds)."""
+    u = User(
+        email=f"c1-ops-{uuid.uuid4().hex[:6]}@test.com",
+        name="C1 Ops",
+        role=role,
+        azure_id=f"azure-c1-ops-{uuid.uuid4().hex[:8]}",
+        can_approve_buy_plans=False,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(u)
+    db.flush()
+    db.add(VerificationGroupMember(user_id=u.id, is_active=True))
+    db.flush()
+    return u
+
+
+def test_cancel_pending_plan_cancels_open_request(db_session: Session) -> None:
+    """(a) Cancelling a PENDING plan with an open engine request CANCELS that request
+    (it no longer sits REQUESTED in the queue/badge), and a later approve is
+    impossible."""
+    approver = _make_approver(db_session)
+    plan = _make_draft_plan(db_session, approver)
+    submit_buy_plan(plan.id, "SO-C1CANCEL", approver, db_session)
+    ar_id = _open_requests(db_session, plan.id)[0].id
+
+    cancel_buy_plan(plan.id, approver, db_session, reason="customer pulled the order")
+
+    db_session.refresh(plan)
+    assert plan.status == BuyPlanStatus.CANCELLED.value
+    # The request is CANCELLED, not REQUESTED — no orphan in the approvals queue/badge.
+    assert db_session.get(ApprovalRequest, ar_id).status == ApprovalRequestStatus.CANCELLED
+    assert _open_requests(db_session, plan.id) == []
+
+    # Deciding the now-CANCELLED request is impossible (engine rejects a non-REQUESTED req).
+    raised = False
+    try:
+        svc_decide(db_session, ar_id, approver, "approve", comment="too late")
+    except ValueError:
+        raised = True
+    assert raised, "approving a cancelled engine request must raise"
+    db_session.refresh(plan)
+    assert plan.status == BuyPlanStatus.CANCELLED.value
+
+
+def test_orphan_request_approval_does_not_resurrect_cancelled_plan(db_session: Session, monkeypatch) -> None:
+    """(b) THE proven bug, closed: if a stale REQUESTED request survives (cancel cascade
+    suppressed) on a CANCELLED plan, approving it must NOT resurrect the plan.
+
+    The state guard in ``_run_approve_side_effects`` raises ValueError → the request stays
+    open and the plan stays CANCELLED with no buyer tasks generated.
+    """
+    import app.services.buyplan_workflow as bw
+
+    approver = _make_approver(db_session)
+    plan = _make_draft_plan(db_session, approver)
+    submit_buy_plan(plan.id, "SO-C1ORPHAN", approver, db_session)
+    ar_id = _open_requests(db_session, plan.id)[0].id
+
+    # Simulate the PRE-FIX orphan: cancel the plan WITHOUT cascading the request (patch the
+    # cascade to a no-op), leaving the request stuck REQUESTED on a CANCELLED plan.
+    monkeypatch.setattr(bw, "_cancel_open_engine_requests_for_plan", lambda *a, **k: 0)
+    cancel_buy_plan(plan.id, approver, db_session, reason="cancelled")
+    monkeypatch.undo()
+    db_session.refresh(plan)
+    assert plan.status == BuyPlanStatus.CANCELLED.value
+    assert _open_requests(db_session, plan.id)  # the orphan still sits REQUESTED
+
+    # An approver picks the orphan out of the queue and approves it.
+    task_calls: list = []
+    monkeypatch.setattr(bw, "_generate_buyer_tasks", lambda *a, **k: task_calls.append(1))
+
+    raised = False
+    try:
+        svc_decide(db_session, ar_id, approver, "approve", comment="resurrect?")
+    except ValueError:
+        raised = True
+    assert raised, "the state guard must reject approving an orphan on a cancelled plan"
+
+    # No resurrection: plan stays CANCELLED, never went ACTIVE, no buyer tasks generated.
+    db_session.refresh(plan)
+    assert plan.status == BuyPlanStatus.CANCELLED.value
+    assert task_calls == [], "buyer tasks must NOT be generated for a cancelled plan"
+
+
+def test_verify_so_halt_cancels_open_request(db_session: Session) -> None:
+    """(c) HALTing a PENDING plan (via verify_so) cancels its open engine request, even
+    when the halting ops member is a plain buyer (not submitter, not manager/admin) —
+    the helper cancels on behalf of the request's own requester/owner so authz holds."""
+    approver = _make_approver(db_session)
+    ops = _ops_member(db_session)  # plain buyer, distinct from the approver/submitter
+    plan = _make_draft_plan(db_session, approver)
+    submit_buy_plan(plan.id, "SO-C1HALT", approver, db_session)
+    ar_id = _open_requests(db_session, plan.id)[0].id
+    assert plan.status == BuyPlanStatus.PENDING.value
+
+    verify_so(plan.id, "halt", ops, db_session, rejection_note="SO mismatch in Acctivate")
+
+    db_session.refresh(plan)
+    assert plan.status == BuyPlanStatus.HALTED.value
+    assert db_session.get(ApprovalRequest, ar_id).status == ApprovalRequestStatus.CANCELLED
+    assert _open_requests(db_session, plan.id) == []
+
+
+# ── Badge: post-C1 plan counts on approvals only; pre-C1 plan counts on buy-plans ──
+
+
+def test_buyplan_badge_excludes_plans_with_open_engine_request(db_session: Session) -> None:
+    """(d) A post-C1 PENDING plan (open engine request) is NOT counted by the buy-plans
+    ACTION badge (it surfaces on the approvals badge instead — no double-count); a
+    pre-C1 PENDING plan (NO engine request) still counts on the buy-plans badge so it
+    stays visible."""
+    from app.services.alerts.sources.approvals import ApprovalRequestActionSource
+    from app.services.alerts.sources.buyplan import BuyplanActionSource
+
+    bp_source = BuyplanActionSource()
+    appr_source = ApprovalRequestActionSource()
+
+    approver = _make_approver(db_session)
+
+    # Post-C1 plan: PENDING with an open engine request routed to the approver.
+    post_c1 = _make_draft_plan(db_session, approver)
+    submit_buy_plan(post_c1.id, "SO-C1BADGE", approver, db_session)
+    db_session.flush()
+
+    # The post-C1 plan counts on the approvals badge, NOT the buy-plans badge.
+    assert appr_source.count_for_user(db_session, approver) == 1
+    assert bp_source.count_for_user(db_session, approver) == 0
+
+    # Pre-C1 plan: PENDING with NO engine request (transition window). It must stay visible
+    # on the buy-plans badge.
+    pre_c1 = _make_draft_plan(db_session, approver)
+    pre_c1.status = BuyPlanStatus.PENDING.value
+    pre_c1.so_status = SOVerificationStatus.PENDING.value
+    db_session.flush()
+
+    assert bp_source.count_for_user(db_session, approver) == 1
+    # The approvals badge is unchanged by the pre-C1 plan (it has no engine request).
+    assert appr_source.count_for_user(db_session, approver) == 1
