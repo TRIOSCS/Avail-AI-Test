@@ -90,7 +90,7 @@ def _render_grouped_list(contact_rows, company=None, now_utc=None, roles=None):
     """Render the _contacts_grouped_list.html template with given data."""
     company = company or _make_company()
     now_utc = now_utc or datetime.now(timezone.utc)
-    roles = roles or ("specifier", "buyer_po", "ap_payer", "logistics", "exec", "other")
+    roles = roles or ("buyer", "manager", "engineer", "planner", "other")
     tpl = ENV.get_template("htmx/partials/customers/tabs/_contacts_grouped_list.html")
     return tpl.render(
         company=company,
@@ -104,7 +104,7 @@ def _render_grouped_list(contact_rows, company=None, now_utc=None, roles=None):
 def _render_contact_form(contact=None, site=None, company=None, mode="edit", sites=None, roles=None):
     """Render the _contact_form.html template."""
     company = company or _make_company()
-    roles = roles or ("specifier", "buyer_po", "ap_payer", "logistics", "exec", "other")
+    roles = roles or ("buyer", "manager", "engineer", "planner", "other")
     tpl = ENV.get_template("htmx/partials/customers/tabs/_contact_form.html")
     ctx = {
         "company": company,
@@ -296,12 +296,34 @@ class TestExpandDrawerContainsWechatTeamsNotes:
         html = _render_grouped_list(rows)
         assert "teams.microsoft.com" in html
 
-    def test_expand_drawer_contains_notes_when_set(self):
-        contact = _make_contact(notes="Call on Tuesdays")
+    def test_expand_drawer_contains_recent_note_preview_when_set(self):
+        """The drawer renders the recent ActivityLog note preview (recent_note) and a
+        'See all notes' button into the notes modal."""
+        contact = _make_contact()
         site = _make_site()
-        rows = [{"contact": contact, "site": site, "legacy": False, "cadence": "new"}]
+        rows = [
+            {
+                "contact": contact,
+                "site": site,
+                "legacy": False,
+                "cadence": "new",
+                "recent_note": "Call on Tuesdays",
+            }
+        ]
         html = _render_grouped_list(rows)
         assert "Call on Tuesdays" in html
+        assert "See all notes" in html
+        assert f"contacts/{contact.id}/notes-modal" in html
+
+    def test_expand_drawer_shows_add_note_when_no_notes(self):
+        """With no recent note, the drawer shows a '+ Add note' button into the
+        modal."""
+        contact = _make_contact()
+        site = _make_site()
+        rows = [{"contact": contact, "site": site, "legacy": False, "cadence": "new", "recent_note": None}]
+        html = _render_grouped_list(rows)
+        assert "+ Add note" in html
+        assert f"contacts/{contact.id}/notes-modal" in html
 
 
 class TestEditModalSurfacesBlankFields:

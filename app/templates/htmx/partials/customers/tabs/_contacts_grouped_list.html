@@ -96,7 +96,7 @@
             <tbody data-contact-row
                    data-site-id="{{ grp_site.id if grp_site else 0 }}"
                    data-contact-search="{{ _cname | lower }}">
-              {{ contact_row(company, row.contact, row.site, row.legacy, now_utc, row.cadence if not row.legacy else 'new', _roles) }}
+              {{ contact_row(company, row.contact, row.site, row.legacy, now_utc, row.cadence if not row.legacy else 'new', _roles, row.recent_note) }}
             </tbody>
           {% endfor %}
         </table>

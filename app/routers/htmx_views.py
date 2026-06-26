@@ -31,6 +31,7 @@ from ..constants import (
     ActivityType,
     AttributionStatus,
     BuyPlanStatus,
+    ContactRole,
     ContactStatus,
     OfferStatus,
     ProactiveMatchStatus,
@@ -6811,10 +6812,12 @@ async def get_company_contacts_for_select(
 
 _VALID_TIERS = frozenset({"key", "core", "standard", "prospect"})
 
-# Canonical buying-role taxonomy (P2b).  Legacy values (buyer/technical/
-# decision_maker/operations) remain valid in the DB but can only be cleared
+# Canonical buying-role taxonomy — sourced from the ContactRole StrEnum (single
+# source of truth in app/constants.py; mirrored as the `roles` Jinja2 global in
+# app/template_env.py). Legacy DB values (buyer_po/specifier/ap_payer/logistics/
+# exec/technical/decision_maker/operations) remain in the DB but can only be cleared
 # via the "— clear —" option; they are not in this set.
-CANONICAL_ROLES = ("specifier", "buyer_po", "ap_payer", "logistics", "exec", "other")
+CANONICAL_ROLES = tuple(ContactRole)
 _VALID_ROLES = frozenset(CANONICAL_ROLES)
 
 # ── Inline-editable field registry (WS1) ────────────────────────────────────
@@ -10060,6 +10063,118 @@ async def contact_files_modal(
         "htmx/partials/customers/_contact_files_modal.html",
         {"request": request, "contact": contact},
     )
+
+
+def _contact_under_company(db: Session, company_id: int, contact_id: int) -> SiteContact:
+    """Load a SiteContact and verify it belongs to *company_id* (via its site).
+
+    Raises HTTPException(404) if the contact does not exist or is not under that company
+    — the contact-notes-modal endpoints share this lookup.
+    """
+    contact = (
+        db.query(SiteContact)
+        .join(CustomerSite, SiteContact.customer_site_id == CustomerSite.id)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+    return contact
+
+
+def _render_contact_notes_modal(
+    request: Request,
+    company: Company,
+    contact: SiteContact,
+    db: Session,
+    can_manage: bool,
+    error: str | None = None,
+) -> HTMLResponse:
+    """Render the contact-notes modal body (feed + add form).
+
+    Shared by GET + POST.
+    """
+    from ..services.activity_service import get_site_contact_notes
+
+    notes = get_site_contact_notes(contact.id, db)
+    return template_response(
+        "htmx/partials/customers/_contact_notes_modal.html",
+        {
+            "request": request,
+            "company": company,
+            "contact": contact,
+            "notes": notes,
+            "can_manage": can_manage,
+            "error": error,
+        },
+    )
+
+
+@router.get(
+    "/v2/partials/customers/{company_id}/contacts/{contact_id}/notes-modal",
+    response_class=HTMLResponse,
+)
+async def contact_notes_modal(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the global-modal body with a contact's note feed + add form.
+
+    Loaded by the contact-card drawer "See all notes" / "+ Add note" action via
+    $dispatch('open-modal'). 404 if the contact is not under this company.
+    """
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+    contact = _contact_under_company(db, company_id, contact_id)
+    return _render_contact_notes_modal(request, company, contact, db, can_manage=can_manage_account(user, company, db))
+
+
+@router.post(
+    "/v2/partials/customers/{company_id}/contacts/{contact_id}/notes",
+    response_class=HTMLResponse,
+)
+async def add_contact_note(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Log a manual note against a contact, then re-render the notes-modal body.
+
+    can_manage_account gate (403 otherwise). Blank note → inline error (no write).
+    """
+    from ..services.activity_service import log_site_contact_note
+
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Only the owner or an admin can add notes for this contact")
+    contact = _contact_under_company(db, company_id, contact_id)
+
+    form = await request.form()
+    notes_text = (form.get("notes") or "").strip()
+    if not notes_text:
+        return _render_contact_notes_modal(
+            request, company, contact, db, can_manage=True, error="Note cannot be empty."
+        )
+
+    log_site_contact_note(
+        user_id=user.id,
+        site_contact_id=contact.id,
+        customer_site_id=contact.customer_site_id,
+        company_id=company_id,
+        notes=notes_text,
+        db=db,
+    )
+    db.commit()
+    logger.info("Note added to contact {} by {} (company {})", contact_id, user.email, company_id)
+    return _render_contact_notes_modal(request, company, contact, db, can_manage=True)
 
 
 @router.post(
