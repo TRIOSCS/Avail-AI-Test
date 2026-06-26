@@ -40,7 +40,7 @@ def _make_user(db: Session, role: str = "buyer"):
 def _make_req_and_requirement(db: Session, user_id: int, mpn: str = "LM317T"):
     from app.models import Requirement, Requisition
 
-    req = Requisition(name="Test Req", status="active", created_by=user_id)
+    req = Requisition(name="Test Req", status="open", created_by=user_id)
     db.add(req)
     db.flush()
 

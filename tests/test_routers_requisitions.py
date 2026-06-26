@@ -59,8 +59,8 @@ def test_requisition_counts_with_data(client, test_requisition):
 
 
 def test_requisition_counts_archive_includes_archived(client, db_session, test_requisition):
-    """GET /api/requisitions/counts archive count includes archived/won/lost/closed."""
-    test_requisition.status = "archived"
+    """GET /api/requisitions/counts archive count includes is_archived rows."""
+    test_requisition.is_archived = True
     db_session.commit()
     resp = client.get("/api/requisitions/counts")
     assert resp.status_code == 200
@@ -104,8 +104,8 @@ def test_list_requisitions_search_no_match(client, test_requisition):
 
 
 def test_list_requisitions_archive_filter(client, db_session, test_requisition):
-    """Status=archive shows only archived/won/lost/closed requisitions."""
-    test_requisition.status = "archived"
+    """Status=archive shows only is_archived requisitions."""
+    test_requisition.is_archived = True
     db_session.commit()
     resp = client.get("/api/requisitions", params={"status": "archive"})
     assert resp.status_code == 200
@@ -120,7 +120,7 @@ def test_list_requisitions_pagination(client, db_session, test_user):
         db_session.add(
             Requisition(
                 name=f"REQ-PAGE-{i}",
-                status="active",
+                status="open",
                 created_by=test_user.id,
                 created_at=datetime.now(timezone.utc),
             )
@@ -149,15 +149,15 @@ def test_update_requisition_not_found(client):
 
 
 def test_toggle_archive(client, test_requisition):
-    """PUT /api/requisitions/{id}/archive toggles between archived and active."""
+    """PUT /api/requisitions/{id}/archive toggles is_archived (orthogonal to status)."""
     resp = client.put(f"/api/requisitions/{test_requisition.id}/archive")
     assert resp.status_code == 200
-    assert resp.json()["status"] == "archived"
+    assert resp.json()["is_archived"] is True
 
     # Toggle back
     resp = client.put(f"/api/requisitions/{test_requisition.id}/archive")
     assert resp.status_code == 200
-    assert resp.json()["status"] == "active"
+    assert resp.json()["is_archived"] is False
 
 
 def test_toggle_archive_not_found(client):
@@ -417,7 +417,7 @@ def test_get_saved_sightings_buyer_outcomes_offer_and_unavailable(client, db_ses
         qty_available=100,
         unit_price=0.55,
         entered_by_id=test_user.id,
-        status="active",
+        status="open",
         created_at=datetime.now(timezone.utc),
     )
     db_session.add(offer)
@@ -533,13 +533,13 @@ def test_bulk_archive(client, db_session, test_user):
 
     r1 = Requisition(
         name="BULK-1",
-        status="active",
+        status="open",
         created_by=other.id,
         created_at=datetime.now(timezone.utc),
     )
     r2 = Requisition(
         name="BULK-2",
-        status="active",
+        status="open",
         created_by=other.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -557,9 +557,9 @@ def test_batch_archive_by_ids(client, db_session, test_user):
     """PUT /api/requisitions/batch-archive archives specific reqs by ID."""
     from app.models import Requisition
 
-    r1 = Requisition(name="BA-1", status="active", created_by=test_user.id, created_at=datetime.now(timezone.utc))
-    r2 = Requisition(name="BA-2", status="active", created_by=test_user.id, created_at=datetime.now(timezone.utc))
-    r3 = Requisition(name="BA-3", status="active", created_by=test_user.id, created_at=datetime.now(timezone.utc))
+    r1 = Requisition(name="BA-1", status="open", created_by=test_user.id, created_at=datetime.now(timezone.utc))
+    r2 = Requisition(name="BA-2", status="open", created_by=test_user.id, created_at=datetime.now(timezone.utc))
+    r3 = Requisition(name="BA-3", status="open", created_by=test_user.id, created_at=datetime.now(timezone.utc))
     db_session.add_all([r1, r2, r3])
     db_session.commit()
 
@@ -568,9 +568,9 @@ def test_batch_archive_by_ids(client, db_session, test_user):
     data = resp.json()
     assert data["ok"] is True
     assert data["archived_count"] == 2
-    # r3 should still be open
+    # r3 should still be open (not archived)
     db_session.refresh(r3)
-    assert r3.status == "active"
+    assert r3.is_archived is False
 
 
 def test_batch_assign(client, db_session, test_user):
@@ -583,8 +583,8 @@ def test_batch_assign(client, db_session, test_user):
     # batch-assign requires admin; override for this test
     app.dependency_overrides[require_admin] = lambda: test_user
 
-    r1 = Requisition(name="ASSIGN-1", status="active", created_by=test_user.id, created_at=datetime.now(timezone.utc))
-    r2 = Requisition(name="ASSIGN-2", status="active", created_by=test_user.id, created_at=datetime.now(timezone.utc))
+    r1 = Requisition(name="ASSIGN-1", status="open", created_by=test_user.id, created_at=datetime.now(timezone.utc))
+    r2 = Requisition(name="ASSIGN-2", status="open", created_by=test_user.id, created_at=datetime.now(timezone.utc))
     db_session.add_all([r1, r2])
     db_session.commit()
 
@@ -699,14 +699,14 @@ def test_sales_user_sees_only_own_requisitions(client, db_session, test_user, sa
     # Create a requisition owned by test_user (buyer)
     buyer_req = Requisition(
         name="Buyer-REQ",
-        status="active",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
     # Create a requisition owned by sales_user
     sales_req = Requisition(
         name="Sales-REQ",
-        status="active",
+        status="open",
         created_by=sales_user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -738,7 +738,7 @@ def test_list_requisitions_with_customer_site(client, db_session, test_user, tes
 
     req = Requisition(
         name="REQ-SITE",
-        status="active",
+        status="open",
         customer_site_id=test_customer_site.id,
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
@@ -805,12 +805,12 @@ def test_update_requisition_empty_name_preserves_old(client, db_session, test_re
 
 @pytest.mark.parametrize("status", ["won", "lost"])
 def test_toggle_archive_terminal_status(client, db_session, test_requisition, status):
-    """Archiving a 'won'/'lost' requisition transitions it to 'active'."""
+    """Archiving a 'won'/'lost' requisition flips is_archived (status untouched)."""
     test_requisition.status = status
     db_session.commit()
     resp = client.put(f"/api/requisitions/{test_requisition.id}/archive")
     assert resp.status_code == 200
-    assert resp.json()["status"] == "active"
+    assert resp.json()["is_archived"] is True
 
 
 def test_clone_requisition_with_substitutes(client, db_session, test_requisition):
@@ -980,7 +980,7 @@ def test_saved_sightings_with_historical_offers(client, db_session, test_requisi
     # Create another requisition with an offer for the same MPN
     other_req = Requisition(
         name="OTHER-REQ",
-        status="active",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -994,7 +994,7 @@ def test_saved_sightings_with_historical_offers(client, db_session, test_requisi
         qty_available=200,
         unit_price=0.55,
         entered_by_id=test_user.id,
-        status="active",
+        status="open",
         created_at=datetime.now(timezone.utc),
     )
     db_session.add(hist_offer)

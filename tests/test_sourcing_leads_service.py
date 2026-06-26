@@ -39,7 +39,7 @@ def _make_requisition(db: Session) -> Requisition:
     req = Requisition(
         name="REQ-SL-001",
         customer_name="Test Co",
-        status="active",
+        status="open",
         created_at=datetime.now(timezone.utc),
     )
     db.add(req)

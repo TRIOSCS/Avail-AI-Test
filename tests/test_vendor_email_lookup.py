@@ -32,7 +32,7 @@ def _make_requirement(db: Session) -> Requirement:
     user = User(email=email, name="SV", role="buyer", azure_id=azure_id)
     db.add(user)
     db.flush()
-    req = Requisition(name=f"SV-REQ-{_req_counter}", status="active", created_by=user.id)
+    req = Requisition(name=f"SV-REQ-{_req_counter}", status="open", created_by=user.id)
     db.add(req)
     db.flush()
     item = Requirement(requisition_id=req.id, primary_mpn="GENERIC", target_qty=1)

@@ -1078,7 +1078,7 @@ class TestBuildContext:
 
         req = Requisition(
             name="Test Req",
-            status="active",
+            status="open",
             created_by=user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -1118,7 +1118,7 @@ class TestGenerateInsights:
 
         req = Requisition(
             name="Test Req 2",
-            status="active",
+            status="open",
             created_by=user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -1158,7 +1158,7 @@ class TestGenerateInsights:
 
         req = Requisition(
             name="Test Req 3",
-            status="active",
+            status="open",
             created_by=user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -1192,7 +1192,7 @@ class TestGenerateInsights:
 
         req = Requisition(
             name="Test Req 4",
-            status="active",
+            status="open",
             created_by=user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -1298,7 +1298,7 @@ class TestGetCachedInsights:
 
         req = Requisition(
             name="Test Req 5",
-            status="active",
+            status="open",
             created_by=user.id,
             created_at=datetime.now(timezone.utc),
         )

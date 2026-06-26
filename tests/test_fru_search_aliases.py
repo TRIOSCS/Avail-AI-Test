@@ -54,7 +54,7 @@ def _make_requirement(db: Session, user, primary_mpn: str, substitutes=None) -> 
     requisition = Requisition(
         name="REQ-FRU-1",
         customer_name="Test Co",
-        status="active",
+        status="open",
         created_by=user.id,
         created_at=datetime.now(timezone.utc),
     )

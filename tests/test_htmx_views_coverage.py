@@ -41,7 +41,7 @@ def _make_requisition(db: Session, user: User, **kw) -> Requisition:
     defaults = dict(
         name="REQ-COV",
         customer_name="Cov Corp",
-        status=RequisitionStatus.ACTIVE,
+        status=RequisitionStatus.OPEN,
         created_by=user.id,
         claimed_by_id=user.id,
         created_at=datetime.now(timezone.utc),

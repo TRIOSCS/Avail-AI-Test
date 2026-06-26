@@ -69,7 +69,8 @@ def set_hotlist(req, actor, db: Session) -> None:
 
 
 def set_archived(req, archived: bool, actor, db: Session) -> None:
-    """Archive/unarchive a requisition (hidden-but-retrievable; orthogonal to status)."""
+    """Archive/unarchive a requisition (hidden-but-retrievable; orthogonal to
+    status)."""
     from ..constants import ActivityType
 
     if req.is_archived == archived:

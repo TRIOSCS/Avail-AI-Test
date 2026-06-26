@@ -139,7 +139,7 @@ class TestListPartial:
 def _seed_requisition(db: Session, user_id: int) -> Requisition:
     req = Requisition(
         name="REQ-UI",
-        status="active",
+        status="open",
         created_by=user_id,
         created_at=datetime.now(timezone.utc),
     )

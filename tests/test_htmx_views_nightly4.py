@@ -31,7 +31,7 @@ def _req(db: Session, user: User, **kw) -> Requisition:
     defaults = dict(
         name="N4-REQ",
         customer_name="N4 Corp",
-        status=RequisitionStatus.ACTIVE,
+        status=RequisitionStatus.OPEN,
         created_by=user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -588,7 +588,7 @@ class TestCompanyTabRoutes:
             name="TAB-REQ-001",
             customer_name=test_company.name,
             company_id=test_company.id,
-            status=RequisitionStatus.ACTIVE,
+            status=RequisitionStatus.OPEN,
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )

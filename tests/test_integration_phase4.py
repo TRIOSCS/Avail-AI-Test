@@ -46,7 +46,7 @@ def _make_requisition(db: Session, user: User) -> Requisition:
     r = Requisition(
         name="P4-INTEG-001",
         customer_name="Test Co",
-        status="active",
+        status="open",
         created_by=user.id,
         created_at=datetime.now(timezone.utc),
     )

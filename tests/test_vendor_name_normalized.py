@@ -46,7 +46,7 @@ def requisition(db_session: Session, user: User) -> Requisition:
     req = Requisition(
         name="REQ-VNORM",
         customer_name="Test Co",
-        status="active",
+        status="open",
         created_by=user.id,
     )
     db_session.add(req)

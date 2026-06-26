@@ -28,7 +28,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.constants import OfferStatus, RequisitionStatus
+from app.constants import OfferStatus
 from app.models import (
     Offer,
     Requirement,
@@ -336,10 +336,10 @@ class TestSaveParsedOffers:
 
 class TestRequisitionsBulkAction:
     @pytest.mark.parametrize(
-        ("action", "expected_status"),
+        ("action", "expected_archived"),
         [
-            ("archive", RequisitionStatus.ARCHIVED),
-            ("activate", RequisitionStatus.ACTIVE),
+            ("archive", True),
+            ("activate", False),
         ],
     )
     def test_bulk_sets_status(
@@ -348,7 +348,7 @@ class TestRequisitionsBulkAction:
         db_session: Session,
         test_requisition: Requisition,
         action: str,
-        expected_status: RequisitionStatus,
+        expected_archived: bool,
     ):
         resp = client.post(
             f"/v2/partials/requisitions/bulk/{action}",
@@ -356,7 +356,7 @@ class TestRequisitionsBulkAction:
         )
         assert resp.status_code == 200
         db_session.refresh(test_requisition)
-        assert test_requisition.status == expected_status
+        assert test_requisition.is_archived is expected_archived
 
     def test_bulk_assign(self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User):
         resp = client.post(

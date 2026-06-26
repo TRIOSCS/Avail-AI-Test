@@ -520,7 +520,7 @@ class TestQueueManager:
         req1 = Requisition(
             name="REQ-1",
             customer_name="Acme",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -567,7 +567,7 @@ class TestQueueManager:
         req2 = Requisition(
             name="REQ-2",
             customer_name="Beta Corp",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -608,7 +608,7 @@ class TestQueueManager:
         req1 = Requisition(
             name="REQ-D1",
             customer_name="X",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -639,7 +639,7 @@ class TestQueueManager:
         req2 = Requisition(
             name="REQ-D2",
             customer_name="Y",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )

@@ -111,7 +111,7 @@ def _make_owned_buy_plan(db: Session, user: User) -> BuyPlan:
     req = Requisition(
         name="N6-REQ",
         customer_name="N6 Corp",
-        status=RequisitionStatus.ACTIVE,
+        status=RequisitionStatus.OPEN,
         created_by=user.id,
         created_at=datetime.now(timezone.utc),
     )

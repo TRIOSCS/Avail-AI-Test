@@ -21,6 +21,7 @@ Create Date: 2026-06-26
 """
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision = "157_req_pipeline_hotlist"

@@ -83,7 +83,7 @@ def _make_sighting(db, vendor_name, mpn, manufacturer=None):
         req = Requisition(
             name="REQ-SIGHTING",
             customer_name="Test",
-            status="active",
+            status="open",
             created_by=user.id,
             created_at=datetime.now(timezone.utc),
         )

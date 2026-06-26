@@ -48,7 +48,7 @@ def _completed_plan(db, *, line_specs, so="SO-1"):
     site = CustomerSite(company_id=company.id, site_name="HQ", is_active=True)
     db.add(site)
     db.flush()
-    req = Requisition(name="R", customer_site_id=site.id, status="archived", created_by=owner.id)
+    req = Requisition(name="R", customer_site_id=site.id, status="open", is_archived=True, created_by=owner.id)
     db.add(req)
     db.flush()
     quote = Quote(requisition_id=req.id, quote_number=f"Q-{so}")

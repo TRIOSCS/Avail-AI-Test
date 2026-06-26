@@ -25,7 +25,7 @@ def requisition(db_session: Session, test_user: User) -> Requisition:
     req = Requisition(
         name="KNOW-TEST-REQ",
         customer_name="Test Co",
-        status="active",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -585,7 +585,7 @@ class TestBuildPipelineContext:
         req = Requisition(
             name="PIPELINE-TEST-REQ",
             customer_name="Test Co",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -756,7 +756,7 @@ class TestGeneratePipelineInsights:
         req = Requisition(
             name="PIPE-INSIGHT-REQ",
             customer_name="Test Co",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )

@@ -1242,7 +1242,7 @@ class TestUnifiedActivityTimeline:
     def _make_requisition(self, db_session: Session, company, name: str = "REQ-001"):
         from app.models.sourcing import Requisition
 
-        req = Requisition(name=name, customer_name=company.name, company_id=company.id, status="active")
+        req = Requisition(name=name, customer_name=company.name, company_id=company.id, status="open")
         db_session.add(req)
         db_session.flush()
         return req
@@ -2797,7 +2797,7 @@ class TestAccountBuyPlansTab:
     def _make_requisition(self, db_session: Session, company: Company, name: str = "REQ-BP-001"):
         from app.models.sourcing import Requisition
 
-        req = Requisition(name=name, customer_name=company.name, company_id=company.id, status="active")
+        req = Requisition(name=name, customer_name=company.name, company_id=company.id, status="open")
         db_session.add(req)
         db_session.flush()
         return req
@@ -2916,7 +2916,7 @@ class TestCRMMacroDedup:
         from app.models.sourcing import Requisition
 
         co = self._make_company(db_session)
-        req = Requisition(name="REQ-MD-001", customer_name=co.name, company_id=co.id, status="active")
+        req = Requisition(name="REQ-MD-001", customer_name=co.name, company_id=co.id, status="open")
         db_session.add(req)
         db_session.flush()
         q = Quote(
@@ -3002,7 +3002,7 @@ class TestCRMMacroDedup:
         from app.models.sourcing import Requisition
 
         co = self._make_company(db_session)
-        req = Requisition(name="REQ-MD-AT", customer_name=co.name, company_id=co.id, status="active")
+        req = Requisition(name="REQ-MD-AT", customer_name=co.name, company_id=co.id, status="open")
         db_session.add(req)
         db_session.flush()
         # RFQ and quote — must NOT appear in activity tab
@@ -4696,7 +4696,7 @@ class TestDispositionFilter:
         req = Requisition(
             name="Open Req",
             company_id=with_req.id,
-            status="active",
+            status="open",
         )
         db_session.add(req)
         db_session.commit()
@@ -4764,7 +4764,7 @@ class TestDispositionFilter:
         other_with_req = self._make_company(db_session, "OtherReq Corp")
 
         for co in (mine_with_req, other_with_req):
-            req = Requisition(name="Req", company_id=co.id, status="active")
+            req = Requisition(name="Req", company_id=co.id, status="open")
             db_session.add(req)
         db_session.commit()
 

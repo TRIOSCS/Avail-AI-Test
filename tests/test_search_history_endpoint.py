@@ -52,7 +52,7 @@ def test_known_mpn_renders_history(client: TestClient, db_session: Session):
     db_session.add(card)
     db_session.commit()
     db_session.refresh(card)
-    req = Requisition(name="R", customer_name="ACME", status="active")
+    req = Requisition(name="R", customer_name="ACME", status="open")
     db_session.add(req)
     db_session.commit()
     db_session.refresh(req)

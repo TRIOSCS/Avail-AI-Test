@@ -434,7 +434,8 @@ def test_row_action_assign_without_owner_id(client, test_requisition, test_user,
     ],
 )
 def test_row_action_invalid_state(client, test_requisition, db_session, start_status, action):
-    """Row actions that aren't valid status transitions return 200 with an error toast."""
+    """Row actions that aren't valid status transitions return 200 with an error
+    toast."""
     test_requisition.status = start_status
     db_session.commit()
 

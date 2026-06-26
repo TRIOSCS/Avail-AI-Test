@@ -97,7 +97,7 @@ class TestInlineSave:
         assert resp.status_code == 422
 
     def test_status_field_valid_transition(self, client: TestClient, active_req: Requisition, db_session: Session):
-        """field=status with a valid target triggers a transition."""
+        """Field=status with a valid target triggers a transition."""
         with patch("app.services.requisition_state.transition") as mock_tr:
             resp = client.patch(
                 f"/requisitions2/{active_req.id}/inline",

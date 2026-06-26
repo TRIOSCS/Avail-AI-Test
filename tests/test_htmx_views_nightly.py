@@ -39,7 +39,7 @@ def _req(db: Session, user: User, **kw) -> Requisition:
     defaults = dict(
         name="NIGHTLY-REQ",
         customer_name="Nightly Corp",
-        status=RequisitionStatus.ACTIVE,
+        status=RequisitionStatus.OPEN,
         created_by=user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -262,7 +262,7 @@ class TestBulkAction:
         assert resp.status_code == 200
 
     def test_bulk_activate(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user, status=RequisitionStatus.ARCHIVED)
+        req = _req(db_session, test_user, is_archived=True)
         db_session.commit()
 
         resp = client.post(

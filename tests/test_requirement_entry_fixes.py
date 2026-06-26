@@ -123,7 +123,7 @@ def test_sourcing_score_sales_cannot_see_others(db_session, sales_user, test_use
     # Create a requisition owned by test_user (buyer)
     req = Requisition(
         name="Other User Req",
-        status="active",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -146,13 +146,13 @@ def test_batch_archive_sales_only_own(db_session, sales_user, test_user):
     """Sales user can only batch-archive their own requisitions."""
     own_req = Requisition(
         name="My Req",
-        status="active",
+        status="open",
         created_by=sales_user.id,
         created_at=datetime.now(timezone.utc),
     )
     other_req = Requisition(
         name="Other Req",
-        status="active",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -173,8 +173,8 @@ def test_batch_archive_sales_only_own(db_session, sales_user, test_user):
         assert data["archived_count"] == 1
         db_session.refresh(own_req)
         db_session.refresh(other_req)
-        assert own_req.status == "archived"
-        assert other_req.status == "active"
+        assert own_req.is_archived is True
+        assert other_req.is_archived is False
     finally:
         _clear_overrides()
 

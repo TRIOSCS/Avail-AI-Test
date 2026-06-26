@@ -70,7 +70,7 @@ async def test_e2e_sprej_resolution_persists_sighting_and_pending(db_session, en
     rset = Requisition(
         name="e2e-sprej",
         customer_name="Acme",
-        status="active",
+        status="open",
         created_by=user.id,
         created_at=datetime.now(timezone.utc),
     )

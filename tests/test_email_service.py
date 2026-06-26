@@ -1045,7 +1045,7 @@ def _two_requisitions(db_session, test_user):
         req = Requisition(
             name=f"REQ-CROSS-{i}",
             customer_name="Acme Electronics",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )

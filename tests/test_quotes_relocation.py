@@ -15,7 +15,7 @@ def _req_with_part(db_session, test_user, *, company_id=None, customer_name="Acm
 
     reqn = Requisition(
         name="Test Req",
-        status="active",
+        status="open",
         urgency="normal",
         customer_name=customer_name,
         company_id=company_id,

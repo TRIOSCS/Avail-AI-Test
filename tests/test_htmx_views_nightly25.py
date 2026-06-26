@@ -64,7 +64,7 @@ def _mock_get_request(path: str = "/v2/test", query_params: dict | None = None) 
 def _make_req(db: Session, user: User) -> Requisition:
     req = Requisition(
         name="Nightly25 Test Req",
-        status="active",
+        status="open",
         created_by=user.id,
     )
     db.add(req)

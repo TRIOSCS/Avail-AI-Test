@@ -46,7 +46,7 @@ def req_with_offers(db_session: Session, test_user: User):
     req = Requisition(
         name="QB-A",
         customer_name="Chunk A Co",
-        status="active",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -109,7 +109,7 @@ class TestBestCostFor:
         req = Requisition(
             name="QB-A-EMPTY",
             customer_name="Empty Co",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -130,7 +130,7 @@ class TestBestCostFor:
         req = Requisition(
             name="QB-A-NOPRICE",
             customer_name="NoPrice Co",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -203,7 +203,7 @@ def _seeded_quote(db_session: Session, test_user: User) -> Quote:
     req = Requisition(
         name="QB-A-EXPORT",
         customer_name="Export Co",
-        status="active",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -358,7 +358,7 @@ class TestBuildQuoteTabData:
         req = Requisition(
             name="QB-TAB-EMPTY",
             customer_name="Empty Co",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )

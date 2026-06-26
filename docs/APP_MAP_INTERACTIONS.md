@@ -1445,6 +1445,33 @@ proactive matches surface on the Proactive tab without waiting for the daily cro
 Bounded to 5 offers per card (per_card_limit); the engine's own dedup prevents
 duplicate matches.
 
+**Hotlist → Proactive (monitor without purchase history).** The CPH path returns
+no matches when a customer has never bought the part (`_find_matches` needs CPH
+rows). A **HOTLIST** requisition (`RequisitionStatus.HOTLIST`) is an explicit
+salesperson request to watch a part/customer, so `find_matches_for_offer` runs a
+SECOND seeding pass — `_find_hotlist_matches` (`proactive_matching.py`) — that needs
+NO history:
+
+```
+find_matches_for_offer(offer, db)
+    +---> _find_matches(...)            # CPH-gated (purchase history)
+    +---> _find_hotlist_matches(...)    # NEW: seeds from active HOTLIST reqs
+            |   JOIN Requisition(status='hotlist', is_archived=false)
+            |        -> Requirement(material_card_id == offer.material_card_id)
+            |        -> CustomerSite(is_active) -> Company(account_owner_id NOT NULL)
+            +---> reuse suppression (do_not_offer) + dedup (company_id)
+            +---> baseline match_score=60 (explicit monitor, no history to weight)
+            +---> DB: INSERT proactive_matches (status=NEW), ActivityLog
+    return cph_matches + hot_matches    # deduped on company_id across both passes
+```
+
+The seeded `ProactiveMatch` carries the hotlist `requisition_id` and the company's
+`account_owner_id` as salesperson, and surfaces on the **existing Proactive list**
+with the same one-click-send pipeline (`proactive_email.py` → Graph sendMail) — no
+new surface. So a HOTLIST req turns "an offer arrived for the part you're watching"
+into a one-click outbound, even for a customer with zero purchase history. (Auto-send
+on a hotlist hit is intentionally out of scope — the salesperson confirms the send.)
+
 ### Unified AI Email Drafting (RFQ rephrase · vendor reply · follow-up)
 
 ```

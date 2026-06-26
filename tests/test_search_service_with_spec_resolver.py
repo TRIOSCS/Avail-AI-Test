@@ -35,7 +35,7 @@ def known_mpn_requirement(db_session, test_user):
     rset = Requisition(
         name="known-mpn",
         customer_name="Acme",
-        status="active",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -57,7 +57,7 @@ def spec_code_requirement(db_session, test_user):
     rset = Requisition(
         name="spec-code",
         customer_name="Acme",
-        status="active",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -434,7 +434,7 @@ async def test_non_ibm_oem_hint_is_passed_to_resolver(db_session, enable_flag, t
     rset = Requisition(
         name="dell-spec",
         customer_name="Acme",
-        status="active",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )

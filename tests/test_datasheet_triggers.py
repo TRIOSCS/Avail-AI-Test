@@ -42,7 +42,7 @@ def scratch_req(db_session, test_user):
     r = Requisition(
         name="Trigger Test Req",
         created_by=test_user.id,
-        status="active",
+        status="open",
     )
     db_session.add(r)
     db_session.commit()

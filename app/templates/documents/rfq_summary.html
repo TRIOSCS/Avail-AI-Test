@@ -29,7 +29,7 @@
   <h2>Requisition Details</h2>
   <table class="meta-table">
     <tr><td class="meta-label">Customer</td><td>{{ (requisition.customer_name | e) or '—' }}</td></tr>
-    <tr><td class="meta-label">Status</td><td><span class="badge badge-{{ 'active' if requisition.status in ('active','open','sourcing') else 'closed' }}">{{ requisition.status }}</span></td></tr>
+    <tr><td class="meta-label">Status</td><td><span class="badge badge-{{ 'active' if requisition.status in ('open','rfqs_sent','offers','quoted','hotlist','draft') else 'closed' }}">{{ requisition.status }}</span></td></tr>
     <tr><td class="meta-label">Created</td><td>{{ requisition.created_at.strftime('%Y-%m-%d') if requisition.created_at else '—' }}</td></tr>
     {% if requisition.deadline %}
     <tr><td class="meta-label">Deadline</td><td>{{ requisition.deadline }}</td></tr>

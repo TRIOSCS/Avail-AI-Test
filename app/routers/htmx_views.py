@@ -2126,13 +2126,18 @@ async def requisition_row_action(
     msg = "Action completed"
     form = await request.form()
 
-    if action_name in ("archive", "activate", "won", "lost"):
+    if action_name in ("archive", "activate"):
+        # Archive is orthogonal to the status pipeline (is_archived), not a status.
+        from ..services.requisition_state import set_archived
+
+        set_archived(req, action_name == "archive", user, db)
+        msg = f"'{req.name}' {'archived' if action_name == 'archive' else 'restored'}"
+    elif action_name in ("won", "lost"):
         from ..services.requisition_state import transition
 
-        target = {"archive": "archived", "activate": "active"}.get(action_name, action_name)
         try:
-            transition(req, target, user, db)
-            msg = f"'{req.name}' → {target}"
+            transition(req, action_name, user, db)
+            msg = f"'{req.name}' → {action_name}"
         except ValueError as e:
             msg = str(e)
     elif action_name == "claim":

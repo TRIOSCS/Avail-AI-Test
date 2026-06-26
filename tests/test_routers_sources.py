@@ -568,7 +568,7 @@ def _vendor_response(db_session: Session, test_user: User) -> VendorResponse:
     req = Requisition(
         name="REQ-ATT-001",
         customer_name="Acme",
-        status="active",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -1851,7 +1851,7 @@ def test_parse_response_attachments_no_message_id(
     req = Requisition(
         name="REQ-NOMSGID",
         customer_name="Acme",
-        status="active",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -2089,7 +2089,7 @@ def test_parse_response_attachments_vendor_domain_extraction(
     req = Requisition(
         name="REQ-DOMAIN",
         customer_name="Acme",
-        status="active",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )

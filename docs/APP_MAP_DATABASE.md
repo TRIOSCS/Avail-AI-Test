@@ -63,8 +63,9 @@ Written by `services.user_admin.record_user_audit` (caller commits); surfaced by
 | name | String 255 | |
 | customer_name | String 255 | |
 | company_id | FK -> companies | |
-| customer_site_id | FK -> customer_sites | |
-| status | String 50 | active\|archived\|completed |
+| customer_site_id | FK -> companies / customer_sites | |
+| status | String 50 | Sales Hub pipeline: `draft` -> `open` -> `rfqs_sent` -> `offers` -> `quoted` -> `won`/`lost`; `hotlist` (off-pipeline monitor — see Proactive); `cancelled` (retained). Enforced by `ck_requisitions_status` CHECK (migration 157): `IN ('draft','open','rfqs_sent','offers','quoted','won','lost','hotlist','cancelled')`. "open" automatically means sourcing. Legacy `active`/`sourcing`/`reopened` were remapped to `open`, `quoting` to `quoted`, `archived` rows to `status='lost' + is_archived=true`. `RequisitionStatus` (app/constants.py) is the source of truth (`TERMINAL`={won,lost,cancelled}, `OPEN_PIPELINE`={open,rfqs_sent,offers,quoted}, `MONITOR`={hotlist}). |
+| is_archived | Boolean NOT NULL (server_default false), indexed `ix_requisitions_is_archived` | Migration 157. Archive is orthogonal to the status pipeline — a hidden-but-retrievable flag, NOT a status. The Sales Hub list hides archived rows by default; the "Archived" filter retrieves them. Toggled via `set_archived()` (app/services/requisition_state.py). Replaces the removed `archived` status. |
 | urgency | String 20 | normal\|hot\|critical |
 | opportunity_value | Numeric 12,2 | |
 | win_probability | Integer, nullable | 0-100; deal win % (migration 146) |

@@ -71,7 +71,7 @@
           @change="$el.form.requestSubmit()"
           @blur="if (!$el.form._cancelled) $el.form.requestSubmit()"
           @keydown.escape.prevent="{{ cancel_edit }}">
-    {% for s in ['draft', 'active', 'sourcing', 'offers', 'quoting', 'quoted', 'won', 'lost', 'archived'] %}
+    {% for s in ['draft', 'open', 'rfqs_sent', 'offers', 'quoted', 'hotlist', 'won', 'lost'] %}
     <option value="{{ s }}" {{ 'selected' if req.status == s else '' }}>{{ s|capitalize }}</option>
     {% endfor %}
   </select>

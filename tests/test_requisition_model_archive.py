@@ -1,4 +1,7 @@
-"""Requisition.is_archived + default status. Called by: pytest. Depends on: app.models, conftest db_session."""
+"""Requisition.is_archived + default status.
+
+Called by: pytest. Depends on: app.models, conftest db_session.
+"""
 
 from app.models import Requisition
 

@@ -1287,13 +1287,13 @@ class TestGlobalSearchHelpers:
         obj = MagicMock()
         obj.id = 42
         obj.name = "Test"
-        obj.status = "active"
+        obj.status = "open"
 
         d = _to_dict(obj, ["name", "status"], "requisition")
         assert d["type"] == "requisition"
         assert d["id"] == 42
         assert d["name"] == "Test"
-        assert d["status"] == "active"
+        assert d["status"] == "open"
 
     def test_is_postgres(self):
         from app.services.global_search_service import _is_postgres
@@ -1347,7 +1347,7 @@ class TestFastSearch:
         req_mock.id = 1
         req_mock.name = "LM358 Order"
         req_mock.customer_name = "Acme"
-        req_mock.status = "active"
+        req_mock.status = "open"
 
         # Track filter calls to return results only on the first call (requisitions)
         call_count = [0]
@@ -1396,7 +1396,7 @@ class TestRunIntentQuery:
         req.id = 1
         req.name = "Test Req"
         req.customer_name = "Acme"
-        req.status = "active"
+        req.status = "open"
 
         # Requisition path chains TWO filters: ilike_filter + is_scratch.is_(False)
         db.query.return_value.filter.return_value.filter.return_value.limit.return_value.all.return_value = [req]

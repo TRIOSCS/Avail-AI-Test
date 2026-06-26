@@ -46,33 +46,33 @@ def _clear_scheduler_jobs():
 
 
 @pytest.mark.parametrize(
-    ("name", "last_searched_at", "expected_status"),
+    ("name", "last_searched_at", "expected_archived"),
     [
         pytest.param(
             "OLD-001",
             datetime.now(timezone.utc) - timedelta(days=45),
-            "archived",
+            True,
             id="stale_gets_archived",
         ),
         pytest.param(
             "RECENT-001",
             datetime.now(timezone.utc) - timedelta(days=5),
-            "active",
+            False,
             id="recent_skipped",
         ),
         pytest.param(
             "UNSEARCHED-001",
             None,
-            "active",
+            False,
             id="never_searched_skipped",
         ),
     ],
 )
-def test_auto_archive_by_last_searched(scheduler_db, test_user, name, last_searched_at, expected_status):
-    """Active requisitions are archived only when last searched >30 days ago."""
+def test_auto_archive_by_last_searched(scheduler_db, test_user, name, last_searched_at, expected_archived):
+    """Open requisitions get is_archived=True only when last searched >30 days ago."""
     req = Requisition(
         name=name,
-        status="active",
+        status="open",
         created_by=test_user.id,
         last_searched_at=last_searched_at,
     )
@@ -84,21 +84,22 @@ def test_auto_archive_by_last_searched(scheduler_db, test_user, name, last_searc
     asyncio.run(_job_auto_archive())
 
     scheduler_db.refresh(req)
-    assert req.status == expected_status
+    assert req.is_archived is expected_archived
+    assert req.status == "open"  # archive is orthogonal — status is untouched
 
 
 def test_auto_archive_only_archives_active_status(scheduler_db, test_user):
-    """Only requisitions with status='active' are archived; other statuses are
-    untouched."""
+    """Only OPEN requisitions are archived; other statuses are untouched."""
     already_archived = Requisition(
         name="ALREADY-ARCHIVED",
-        status="archived",
+        status="open",
+        is_archived=True,
         created_by=test_user.id,
         last_searched_at=datetime.now(timezone.utc) - timedelta(days=60),
     )
     active_stale = Requisition(
         name="ACTIVE-STALE",
-        status="active",
+        status="open",
         created_by=test_user.id,
         last_searched_at=datetime.now(timezone.utc) - timedelta(days=60),
     )
@@ -118,9 +119,9 @@ def test_auto_archive_only_archives_active_status(scheduler_db, test_user):
     scheduler_db.refresh(already_archived)
     scheduler_db.refresh(active_stale)
     scheduler_db.refresh(draft_stale)
-    assert already_archived.status == "archived"  # unchanged
-    assert active_stale.status == "archived"  # stale active → archived
-    assert draft_stale.status == "draft"  # non-active status untouched
+    assert already_archived.is_archived is True  # unchanged
+    assert active_stale.is_archived is True  # stale open → archived
+    assert draft_stale.is_archived is False  # non-open status untouched
 
 
 def test_auto_archive_error_handling(scheduler_db):

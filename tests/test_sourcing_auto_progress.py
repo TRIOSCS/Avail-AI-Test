@@ -37,7 +37,7 @@ def requisition(db_session: Session, user: User) -> Requisition:
     req = Requisition(
         name="TEST-REQ-001",
         customer_name="Test Customer",
-        status="active",
+        status="open",
         created_by=user.id,
         created_at=datetime.now(timezone.utc),
     )

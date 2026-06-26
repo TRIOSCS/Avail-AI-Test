@@ -211,7 +211,8 @@ def test_empty_table_shows_message(client):
 
 
 def test_table_row_action_rail_has_hotlist_button(client, test_requisition, db_session):
-    """The row action rail offers a Hotlist toggle for a non-terminal, un-archived req."""
+    """The row action rail offers a Hotlist toggle for a non-terminal, un-archived
+    req."""
     test_requisition.status = "open"
     db_session.commit()
     resp = client.get("/requisitions2/table", params={"status": "open"})
@@ -260,7 +261,7 @@ def test_detail_archived_shows_activate_button(client, test_requisition, db_sess
 
     resp = client.get(f"/requisitions2/{test_requisition.id}/detail")
     assert "action/activate" in resp.text
-    assert f'/requisitions2/{test_requisition.id}/action/archive' not in resp.text
+    assert f"/requisitions2/{test_requisition.id}/action/archive" not in resp.text
 
 
 def test_detail_shows_claim_for_buyer(client, test_requisition, db_session):

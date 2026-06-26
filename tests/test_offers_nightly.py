@@ -20,7 +20,7 @@ from app.models import Offer, Requisition
 # ── helpers ──────────────────────────────────────────────────────────
 
 
-def _make_requisition(db: Session, user_id: int, status: str = "active") -> Requisition:
+def _make_requisition(db: Session, user_id: int, status: str = "open") -> Requisition:
     req = Requisition(
         name="Test Req",
         status=status,

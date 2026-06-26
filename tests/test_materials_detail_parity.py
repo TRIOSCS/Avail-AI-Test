@@ -24,7 +24,7 @@ def _seed(db: Session) -> MaterialCard:
     db.add(card)
     db.commit()
     db.refresh(card)
-    req = Requisition(name="R", customer_name="ACME", status="active")
+    req = Requisition(name="R", customer_name="ACME", status="open")
     db.add(req)
     db.commit()
     db.refresh(req)

@@ -42,7 +42,7 @@ def _make_requisition(db: Session, user: User, **kw) -> Requisition:
     defaults = dict(
         name="REQ-TEST",
         customer_name="Acme",
-        status=RequisitionStatus.ACTIVE,
+        status=RequisitionStatus.OPEN,
         created_by=user.id,
         claimed_by_id=user.id,
         created_at=datetime.now(timezone.utc),
@@ -392,7 +392,7 @@ class TestRequisitionsListPartial:
         assert resp.status_code == 200
 
     def test_list_with_status_filter(self, client: TestClient, db_session: Session, test_user: User):
-        _make_requisition(db_session, test_user, status=RequisitionStatus.ACTIVE)
+        _make_requisition(db_session, test_user, status=RequisitionStatus.OPEN)
         db_session.commit()
         resp = client.get("/v2/partials/requisitions?status=active")
         assert resp.status_code == 200
@@ -699,7 +699,7 @@ class TestRequisitionRowActions:
             assert resp.status_code == 200
 
     def test_action_activate(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user, status=RequisitionStatus.ARCHIVED)
+        req = _make_requisition(db_session, test_user, is_archived=True)
         db_session.commit()
         with patch("app.services.requisition_state.transition"):
             resp = client.post(f"/v2/partials/requisitions/{req.id}/action/activate", data={})
@@ -762,7 +762,7 @@ class TestRequisitionBulkActions:
         assert resp.status_code == 200
 
     def test_bulk_activate(self, client: TestClient, db_session: Session, test_user: User):
-        r1 = _make_requisition(db_session, test_user, status=RequisitionStatus.ARCHIVED)
+        r1 = _make_requisition(db_session, test_user, is_archived=True)
         db_session.commit()
         resp = client.post(
             "/v2/partials/requisitions/bulk/activate",
@@ -1839,7 +1839,7 @@ class TestPartArchive:
             assert resp.status_code == 200
 
     def test_unarchive_requisition(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user, status=RequisitionStatus.ARCHIVED)
+        req = _make_requisition(db_session, test_user, is_archived=True)
         db_session.commit()
         with patch("app.services.requisition_state.transition"):
             resp = client.patch(f"/v2/partials/requisitions/{req.id}/unarchive")

@@ -347,7 +347,7 @@ class TestCompanyDetail:
             name="REQ-DETAIL-001",
             customer_name="Acme Electronics",
             customer_site_id=test_customer_site.id,
-            status="active",
+            status="open",
             created_by=test_user.id,
         )
         db_session.add(req)
@@ -1468,7 +1468,7 @@ class TestOffersAdditional:
         req2 = Requisition(
             name="REQ-OTHER",
             customer_name="Other Co",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -2568,7 +2568,7 @@ class TestHistoricalOffersSubstitutes:
         req2 = Requisition(
             name="REQ-SUB",
             customer_name="Sub Co",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -2668,7 +2668,7 @@ class TestCompanyTags:
         req = Requisition(
             name="TAG-REQ-001",
             customer_site_id=site.id,
-            status="active",
+            status="open",
         )
         db_session.add(req)
         db_session.flush()
@@ -2812,7 +2812,7 @@ class TestOfferCompetitiveNotif:
         """Existing competitive_quote notification gets updated, not duplicated (lines
         399-400)."""
         monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() if hasattr(coro, "close") else None)
-        test_requisition.status = "active"
+        test_requisition.status = "open"
         db_session.commit()
         req = test_requisition
         requirement = req.requirements[0]

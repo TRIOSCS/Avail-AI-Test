@@ -38,10 +38,9 @@ from .activity_service import log_activity
 def bulk_archive_others(db: Session, user_id: int) -> list[int]:
     """Archive all active requisitions NOT created by `user_id`.
 
-    Used by the admin-only `/api/requisitions/bulk-archive` route. Terminal
-    statuses (won / lost / cancelled) and already-archived rows are excluded so
-    the operation is idempotent. Returns the IDs that were actually flipped to
-    archived (may be empty).
+    Used by the admin-only `/api/requisitions/bulk-archive` route. Terminal statuses
+    (won / lost / cancelled) and already-archived rows are excluded so the operation is
+    idempotent. Returns the IDs that were actually flipped to archived (may be empty).
     """
     stmt = (
         update(Requisition)

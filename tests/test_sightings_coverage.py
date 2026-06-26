@@ -37,7 +37,7 @@ from app.models.vendors import VendorCard, VendorContact
 
 def _seed_active(db_session):
     """Create an active requisition + requirement + vendor summary."""
-    req = Requisition(name="Coverage RFQ", status="active", customer_name="Cover Corp")
+    req = Requisition(name="Coverage RFQ", status="open", customer_name="Cover Corp")
     db_session.add(req)
     db_session.flush()
     r = Requirement(
@@ -110,7 +110,7 @@ class TestHeatmapCriticalHotUrgency:
         branch."""
         req = Requisition(
             name="Critical RFQ",
-            status="active",
+            status="open",
             customer_name="Crit Corp",
         )
         db_session.add(req)
@@ -770,8 +770,8 @@ class TestManufacturerBasket:
 
     def _seed_multi_req_ibm(self, db_session):
         """Two requisitions each with one IBM part and one non-IBM part."""
-        req1 = Requisition(name="Req1", status="active", customer_name="Cust A")
-        req2 = Requisition(name="Req2", status="active", customer_name="Cust B")
+        req1 = Requisition(name="Req1", status="open", customer_name="Cust A")
+        req2 = Requisition(name="Req2", status="open", customer_name="Cust B")
         db_session.add_all([req1, req2])
         db_session.flush()
 
@@ -1169,7 +1169,7 @@ class TestPreviewSkipReason:
     """Preview step renders skip_reason badges: amber=no_email, rose=unavailable/dnc."""
 
     def _make_req_and_requirement(self, db_session):
-        req = Requisition(name="SkipReason RFQ", status="active", customer_name="Skip Corp")
+        req = Requisition(name="SkipReason RFQ", status="open", customer_name="Skip Corp")
         db_session.add(req)
         db_session.flush()
         r = Requirement(
@@ -1325,7 +1325,7 @@ class TestComposeTimeVendorIntel:
 
     def _seed_vendor_with_intel(self, db_session):
         """Create requirement + VendorSightingSummary + VendorCard with intel fields."""
-        req = Requisition(name="Intel RFQ", status="active", customer_name="Intel Corp")
+        req = Requisition(name="Intel RFQ", status="open", customer_name="Intel Corp")
         db_session.add(req)
         db_session.flush()
         r = Requirement(
@@ -1426,7 +1426,7 @@ class TestComposeTimeVendorIntel:
 
     def test_vendor_modal_renders_em_dash_when_no_lead_time(self, client, db_session):
         """vendor_modal.html renders '—' for lead time when lead_time_days is None."""
-        req = Requisition(name="NoLead RFQ", status="active", customer_name="NoLead Corp")
+        req = Requisition(name="NoLead RFQ", status="open", customer_name="NoLead Corp")
         db_session.add(req)
         db_session.flush()
         r = Requirement(
@@ -1481,7 +1481,7 @@ class TestComposeTimeVendorIntel:
         """
         from app.routers.sightings import _coverage_ranked_vendor_rows
 
-        req = Requisition(name="NullLead RFQ", status="active", customer_name="NL Corp")
+        req = Requisition(name="NullLead RFQ", status="open", customer_name="NL Corp")
         db_session.add(req)
         db_session.flush()
         # Two requirements so we can create two VSS rows for the same vendor

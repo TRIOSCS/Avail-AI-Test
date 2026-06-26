@@ -72,7 +72,7 @@ def _req(db: Session, user: User, **kw) -> Requisition:
     defaults = dict(
         name="NIGHTLY2-REQ",
         customer_name="Nightly2 Corp",
-        status=RequisitionStatus.ACTIVE,
+        status=RequisitionStatus.OPEN,
         created_by=user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -186,7 +186,7 @@ class TestPartsListPartial:
         assert resp.status_code == 200
 
     def test_parts_list_filter_archived(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user, status=RequisitionStatus.ARCHIVED)
+        req = _req(db_session, test_user, is_archived=True)
         _requirement(db_session, req, sourcing_status=SourcingStatus.ARCHIVED)
         db_session.commit()
 
@@ -554,7 +554,7 @@ class TestArchiveSystem:
         assert resp.status_code == 404
 
     def test_unarchive_requisition(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user, status=RequisitionStatus.ARCHIVED)
+        req = _req(db_session, test_user, is_archived=True)
         _requirement(db_session, req, sourcing_status=SourcingStatus.ARCHIVED)
         db_session.commit()
 
@@ -571,7 +571,7 @@ class TestArchiveSystem:
         assert resp.status_code == 200
 
     def test_bulk_unarchive(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user, status=RequisitionStatus.ARCHIVED)
+        req = _req(db_session, test_user, is_archived=True)
         item = _requirement(db_session, req, sourcing_status=SourcingStatus.ARCHIVED)
         db_session.commit()
 

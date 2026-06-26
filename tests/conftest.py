@@ -206,7 +206,7 @@ def test_requisition(db_session: Session, test_user: User) -> Requisition:
     req = Requisition(
         name="REQ-TEST-001",
         customer_name="Acme Electronics",
-        status="active",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )

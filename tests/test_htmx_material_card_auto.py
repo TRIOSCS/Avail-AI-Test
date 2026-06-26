@@ -19,7 +19,7 @@ def _make_requisition(db, user_id, name="REQ-MC-001"):
     req = Requisition(
         name=name,
         customer_name="Test Corp",
-        status="active",
+        status="open",
         created_by=user_id,
         created_at=datetime.now(timezone.utc),
     )

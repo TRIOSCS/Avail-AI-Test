@@ -77,7 +77,7 @@ def _make_requisition(db: Session, user: User, name: str | None = None) -> Requi
     req = Requisition(
         name=name or f"REQ-{uuid.uuid4().hex[:6]}",
         customer_name="TestCo",
-        status="active",
+        status="open",
         created_by=user.id,
         created_at=datetime.now(timezone.utc),
     )

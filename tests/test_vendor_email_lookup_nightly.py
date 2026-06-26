@@ -28,7 +28,7 @@ def basic_req(db_session: Session, test_user: User) -> Requisition:
     req = Requisition(
         name="VEL-NIGHTLY",
         customer_name="Test Co",
-        status="active",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )

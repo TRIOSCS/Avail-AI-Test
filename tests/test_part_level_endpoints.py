@@ -272,7 +272,7 @@ class TestRequisitionStatusFilter:
 
         r1 = Requisition(name="Won Req", status="won", created_by=test_user.id)
         r2 = Requisition(name="Lost Req", status="lost", created_by=test_user.id)
-        r3 = Requisition(name="Active Req", status="active", created_by=test_user.id)
+        r3 = Requisition(name="Active Req", status="open", created_by=test_user.id)
         db_session.add_all([r1, r2, r3])
         db_session.commit()
 

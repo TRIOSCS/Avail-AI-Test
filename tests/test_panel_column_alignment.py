@@ -39,7 +39,7 @@ def req_with_vendor_summary(db_session: Session, test_user: User) -> tuple:
     req = Requisition(
         name="COL-ALIGN-REQ",
         customer_name="Column Co",
-        status="active",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )

@@ -474,13 +474,13 @@ class TestDeleteRequirement:
     ) -> None:
         req1 = Requisition(
             name="REQ-A",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
         req2 = Requisition(
             name="REQ-B",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )

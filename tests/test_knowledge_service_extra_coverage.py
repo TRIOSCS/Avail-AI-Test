@@ -63,7 +63,7 @@ def requisition(db_session: Session, test_user: User) -> Requisition:
     req = Requisition(
         name="EXTRA-KNOW-REQ",
         customer_name="Test Co",
-        status="active",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -268,7 +268,7 @@ class TestBuildContextExtended:
         req = Requisition(
             name="COMP-CTX-REQ",
             customer_name="Acme Electronics",
-            status="active",
+            status="open",
             created_by=test_user.id,
             company_id=test_company.id,
             created_at=datetime.now(timezone.utc),
@@ -504,7 +504,7 @@ class TestBuildPipelineContextExtended:
         req = Requisition(
             name="DEADLINE-REQ",
             customer_name="Urgent Co",
-            status="active",
+            status="open",
             created_by=test_user.id,
             deadline=datetime.now(timezone.utc) + timedelta(days=7),
             created_at=datetime.now(timezone.utc),
@@ -537,7 +537,7 @@ class TestBuildPipelineContextExtended:
         req = Requisition(
             name="STALE-NAIVE-REQ",
             customer_name="Naive Co",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
             updated_at=stale_naive,
@@ -792,7 +792,7 @@ class TestGeneratePipelineInsightsClaudeError:
         req = Requisition(
             name=req_name,
             customer_name="Test",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -815,7 +815,7 @@ class TestGeneratePipelineInsightsClaudeError:
         req = Requisition(
             name="PIPE-REPLACE-REQ",
             customer_name="Test",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )

@@ -10,7 +10,7 @@ from app.models.sourcing import Requirement, Requisition
 
 def _make_requisition(db_session):
     """Create and flush an active test Requisition, returning it with an id assigned."""
-    req = Requisition(name="Test RFQ", status="active")
+    req = Requisition(name="Test RFQ", status="open")
     db_session.add(req)
     db_session.flush()
     return req

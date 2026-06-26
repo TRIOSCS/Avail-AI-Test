@@ -311,7 +311,8 @@ def test_list_filter_by_date_to(db_session, test_user):
 
 
 def test_list_status_all(db_session, test_user):
-    """Status 'all' shows every non-archived requisition regardless of pipeline stage."""
+    """Status 'all' shows every non-archived requisition regardless of pipeline
+    stage."""
     _make_req(db_session, "ALL-OPEN", test_user.id, status="open")
     _make_req(db_session, "ALL-WON", test_user.id, status="won")
     db_session.commit()

@@ -77,10 +77,10 @@ def test_archive_requisition(client):
     req_id = _create_req(client, name="REQ-ARCH", customer_name="ArchCo")
     resp = client.put(f"/api/requisitions/{req_id}/archive")
     assert resp.status_code == 200
-    assert resp.json()["status"] == "archived"
+    assert resp.json()["is_archived"] is True
     # Toggle back
     resp2 = client.put(f"/api/requisitions/{req_id}/archive")
-    assert resp2.json()["status"] == "active"
+    assert resp2.json()["is_archived"] is False
 
 
 def test_archive_nonexistent(client):

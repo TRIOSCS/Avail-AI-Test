@@ -24,7 +24,7 @@ from app.services.forecast_service import (
 from tests.conftest import engine  # noqa: F401
 
 
-def _req(db, created_by, *, status="active", value=None, company_id=None, claimed_by_id=None, created_at=None):
+def _req(db, created_by, *, status="open", value=None, company_id=None, claimed_by_id=None, created_at=None):
     req = Requisition(
         name=f"Req {status}",
         status=status,

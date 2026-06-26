@@ -376,7 +376,7 @@ class TestJobAutoSurfaceWithDb:
         req = Requisition(
             name=f"REQ-{_uid()}",
             company_id=co.id,
-            status="active",
+            status="open",
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(req)
@@ -402,7 +402,7 @@ class TestJobAutoSurfaceWithDb:
         req = Requisition(
             name=f"REQ-{_uid()}",
             company_id=co.id,
-            status="active",
+            status="open",
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(req)
@@ -420,7 +420,7 @@ class TestJobAutoSurfaceWithDb:
         req = Requisition(
             name=f"REQ-{_uid()}",
             company_id=co.id,
-            status="active",
+            status="open",
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(req)
@@ -441,7 +441,7 @@ class TestJobAutoSurfaceWithDb:
         req = Requisition(
             name=f"REQ-{_uid()}",
             company_id=co.id,
-            status="active",
+            status="open",
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(req)

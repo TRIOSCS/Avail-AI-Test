@@ -13,12 +13,13 @@ from app.models import Requirement, Requisition
 from tests.conftest import engine  # noqa: F401
 
 
-def _make_requisition(db, user_id, name="REQ-ARCH-001", status="active"):
+def _make_requisition(db, user_id, name="REQ-ARCH-001", status="open", is_archived=False):
     """Helper to create a requisition with requirements."""
     req = Requisition(
         name=name,
         customer_name="Test Co",
         status=status,
+        is_archived=is_archived,
         created_by=user_id,
         created_at=datetime.now(timezone.utc),
     )
@@ -85,7 +86,7 @@ def test_archive_whole_requisition(client, db_session, test_user):
     assert resp.status_code == 200
 
     db_session.refresh(req)
-    assert req.status == "archived"
+    assert req.is_archived is True
 
     for p in [p1, p2, p3]:
         db_session.refresh(p)
@@ -94,7 +95,7 @@ def test_archive_whole_requisition(client, db_session, test_user):
 
 def test_unarchive_whole_requisition(client, db_session, test_user):
     """PATCH /v2/partials/requisitions/{id}/unarchive restores requisition and parts."""
-    req = _make_requisition(db_session, test_user.id, name="REQ-UNARCH", status="archived")
+    req = _make_requisition(db_session, test_user.id, name="REQ-UNARCH", is_archived=True)
     p1 = _make_requirement(db_session, req.id, mpn="PART-A", sourcing_status="archived")
     p2 = _make_requirement(db_session, req.id, mpn="PART-B", sourcing_status="archived")
     db_session.commit()
@@ -103,7 +104,7 @@ def test_unarchive_whole_requisition(client, db_session, test_user):
     assert resp.status_code == 200
 
     db_session.refresh(req)
-    assert req.status == "active"
+    assert req.is_archived is False
 
     for p in [p1, p2]:
         db_session.refresh(p)
@@ -130,7 +131,7 @@ def test_bulk_archive(client, db_session, test_user):
     assert p1.sourcing_status == "archived"
 
     db_session.refresh(req2)
-    assert req2.status == "archived"
+    assert req2.is_archived is True
 
     for p in [p2, p3]:
         db_session.refresh(p)
@@ -139,7 +140,7 @@ def test_bulk_archive(client, db_session, test_user):
 
 def test_bulk_unarchive(client, db_session, test_user):
     """POST /v2/partials/parts/bulk-unarchive restores parts and requisitions."""
-    req = _make_requisition(db_session, test_user.id, name="REQ-BULKUN", status="archived")
+    req = _make_requisition(db_session, test_user.id, name="REQ-BULKUN", is_archived=True)
     p1 = _make_requirement(db_session, req.id, mpn="UN-A", sourcing_status="archived")
     p2 = _make_requirement(db_session, req.id, mpn="UN-B", sourcing_status="archived")
     db_session.commit()
@@ -154,7 +155,7 @@ def test_bulk_unarchive(client, db_session, test_user):
     assert p1.sourcing_status == "open"
 
     db_session.refresh(req)
-    assert req.status == "active"
+    assert req.is_archived is False
 
     db_session.refresh(p2)
     assert p2.sourcing_status == "open"

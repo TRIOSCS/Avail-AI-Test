@@ -65,7 +65,7 @@ def _make_req_with_quote(db_session, owner: User, site: CustomerSite, tag: str) 
     req = Requisition(
         name=f"REQ-IDOR-{tag}",
         customer_name="Acme Electronics",
-        status="active",
+        status="open",
         customer_site_id=site.id,
         created_by=owner.id,
         created_at=datetime.now(timezone.utc),

@@ -120,7 +120,7 @@
       </button>
       <div x-show="open" x-cloak x-transition
            class="absolute right-0 top-full mt-1 w-40 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-1">
-        {% if req.status != 'archived' %}
+        {% if not req.is_archived %}
         <button hx-post="/v2/partials/requisitions/{{ req.id }}/action/archive"
                 hx-target="#main-content"
                 hx-confirm="Archive '{{ req.name }}'?"
@@ -147,14 +147,14 @@
                 @click="open = false"
                 class="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">Unclaim</button>
         {% endif %}
-        {% if req.status in ('active', 'sourcing', 'offers', 'quoting', 'quoted', 'open', 'reopened') %}
+        {% if req.status in ('open', 'rfqs_sent', 'offers', 'quoted', 'hotlist') %}
         <button hx-post="/v2/partials/requisitions/{{ req.id }}/action/won"
                 hx-target="#main-content"
                 data-loading-disable
                 @click="open = false"
                 class="w-full text-left px-3 py-1.5 text-sm text-emerald-700 hover:bg-emerald-50">Mark Won</button>
         {% endif %}
-        {% if req.status in ('active', 'sourcing', 'offers', 'quoting', 'quoted', 'open', 'reopened') %}
+        {% if req.status in ('open', 'rfqs_sent', 'offers', 'quoted', 'hotlist') %}
         <button hx-post="/v2/partials/requisitions/{{ req.id }}/action/lost"
                 hx-target="#main-content"
                 hx-confirm="Mark '{{ req.name }}' as lost?"

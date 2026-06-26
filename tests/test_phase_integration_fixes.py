@@ -25,7 +25,7 @@ def req_with_offers(db_session: Session, test_user: User):
     """A requisition with requirements and offers."""
     req = Requisition(
         name="Integration Test Req",
-        status="active",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -186,7 +186,7 @@ class TestVendorEmailsBacklink:
 
         req = Requisition(
             name="Backlink Req",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -233,7 +233,7 @@ class TestMaterialVendorLink:
 
         req = Requisition(
             name="Vendor Link Test",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -280,7 +280,7 @@ class TestCompanyActivityTab:
 
         req = Requisition(
             name="Activity Req",
-            status="active",
+            status="open",
             created_by=test_user.id,
             company_id=company.id,
             created_at=datetime.now(timezone.utc),
@@ -335,7 +335,7 @@ class TestCompanyActivityTab:
 
         req = Requisition(
             name="Mixed Req",
-            status="active",
+            status="open",
             created_by=test_user.id,
             company_id=company.id,
             created_at=datetime.now(timezone.utc),
@@ -403,7 +403,7 @@ class TestInsightsPanels:
         """Requisition insights panel renders with no cached insights."""
         req = Requisition(
             name="Insights Req",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -486,7 +486,7 @@ class TestManualOfferCreation:
         """Add offer form renders with requirement options."""
         req = Requisition(
             name="Offer Form Test",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -505,7 +505,7 @@ class TestManualOfferCreation:
         """Manual offer creation saves to DB."""
         req = Requisition(
             name="Manual Offer Test",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -534,7 +534,7 @@ class TestManualOfferCreation:
         """Manual offer creation fails without vendor/mpn."""
         req = Requisition(
             name="Missing Fields Test",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -553,7 +553,7 @@ class TestReconfirmOffer:
         """Reconfirming an offer resets expiry and increments count."""
         req = Requisition(
             name="Reconfirm Test",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )

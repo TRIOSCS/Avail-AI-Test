@@ -34,7 +34,7 @@ class TestRfqActivityCompanyId:
             name="Test RFQ",
             customer_site_id=site.id,
             created_by=test_user.id,
-            status="active",
+            status="open",
         )
         db_session.add(req)
         db_session.flush()
@@ -57,7 +57,7 @@ class TestRfqActivityCompanyId:
             name="No Site RFQ",
             customer_site_id=None,
             created_by=test_user.id,
-            status="active",
+            status="open",
         )
         db_session.add(req)
         db_session.flush()
@@ -111,7 +111,7 @@ class TestQuoteActivityCompanyId:
             name="Quote RFQ",
             customer_site_id=site.id,
             created_by=test_user.id,
-            status="active",
+            status="open",
         )
         db_session.add(req)
         db_session.flush()

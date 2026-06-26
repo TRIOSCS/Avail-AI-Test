@@ -86,7 +86,7 @@ def _make_contact(db: Session, site: CustomerSite, *, full_name: str) -> SiteCon
     return c
 
 
-def _make_req(db: Session, *, name: str, site_id: int, status: str = "active") -> Requisition:
+def _make_req(db: Session, *, name: str, site_id: int, status: str = "open") -> Requisition:
     r = Requisition(name=name, customer_site_id=site_id, status=status)
     db.add(r)
     db.flush()

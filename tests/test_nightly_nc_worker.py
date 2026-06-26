@@ -665,7 +665,7 @@ class TestNcSightingWriter:
     def _make_requirement(db, *, req_name, mpn, normalized_mpn, target_qty):
         from app.models import MaterialCard, Requirement, Requisition
 
-        req = Requisition(name=req_name, status="active")
+        req = Requisition(name=req_name, status="open")
         db.add(req)
         db.flush()
 

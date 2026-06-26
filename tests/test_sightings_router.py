@@ -41,7 +41,7 @@ class _XDataExtractor(HTMLParser):
 
 def _seed_data(db_session):
     """Create requisition + requirement + sighting for testing."""
-    req = Requisition(name="Test RFQ", status="active", customer_name="Acme Corp")
+    req = Requisition(name="Test RFQ", status="open", customer_name="Acme Corp")
     db_session.add(req)
     db_session.flush()
     r = Requirement(
@@ -252,7 +252,7 @@ class TestSightingsFilters:
 
     def test_search_by_substitute_mpn(self, client, db_session):
         """Search filter matches requirements by substitute MPN."""
-        req = Requisition(name="Sub RFQ", status="active", customer_name="SubCo")
+        req = Requisition(name="Sub RFQ", status="open", customer_name="SubCo")
         db_session.add(req)
         db_session.flush()
         r = Requirement(
@@ -367,7 +367,7 @@ class TestSightingsMarkUnavailable:
     def test_zero_key_mark_returns_400_json_error_without_activity(self, client, db_session):
         """Service ValueError (no derivable MPN keys — CRITICAL-1) maps to a 400 JSON
         error and writes nothing, including no ActivityLog."""
-        req = Requisition(name="Keyless RFQ", status="active", customer_name="NoKey Co")
+        req = Requisition(name="Keyless RFQ", status="open", customer_name="NoKey Co")
         db_session.add(req)
         db_session.flush()
         r = Requirement(requisition_id=req.id, primary_mpn=None, sourcing_status="open")
@@ -434,7 +434,7 @@ class TestSightingsMarkUnavailable:
     def test_zero_key_mark_htmx_surfaces_specific_message(self, client, db_session):
         """F5: the service ValueError (no derivable MPN keys) surfaces its actionable
         message to htmx callers; API callers keep the 400 JSON (pinned above)."""
-        req = Requisition(name="Keyless RFQ 2", status="active", customer_name="NoKey Co")
+        req = Requisition(name="Keyless RFQ 2", status="open", customer_name="NoKey Co")
         db_session.add(req)
         db_session.flush()
         r = Requirement(requisition_id=req.id, primary_mpn=None, sourcing_status="open")
@@ -767,7 +767,7 @@ class TestRfqModalUnavailableExclusion:
         _, r, s = _seed_data(db_session)
         card = self._card(db_session, link_summary=s)
         _unav_record(db_session, requirement_id=r.id)  # key testmpn001 only
-        req2 = Requisition(name="Other RFQ", status="active", customer_name="Other Co")
+        req2 = Requisition(name="Other RFQ", status="open", customer_name="Other Co")
         db_session.add(req2)
         db_session.flush()
         r2 = Requirement(
@@ -841,7 +841,7 @@ class TestVendorModalCoverageRanking:
     """
 
     def _requirements(self, db_session, mpns):
-        req = Requisition(name="Coverage RFQ", status="active", customer_name="Cov Co")
+        req = Requisition(name="Coverage RFQ", status="open", customer_name="Cov Co")
         db_session.add(req)
         db_session.flush()
         items = []
@@ -1031,7 +1031,7 @@ class TestCoverageRankedVendorRows:
     """
 
     def _reqs(self, db_session, mpns):
-        req = Requisition(name="Cov Unit RFQ", status="active", customer_name="CovU Co")
+        req = Requisition(name="Cov Unit RFQ", status="open", customer_name="CovU Co")
         db_session.add(req)
         db_session.flush()
         items = []
@@ -1272,7 +1272,7 @@ class TestVendorModalCardlessCoverage:
     """
 
     def _reqs(self, db_session, mpns):
-        req = Requisition(name="Cardless RFQ", status="active", customer_name="CL Co")
+        req = Requisition(name="Cardless RFQ", status="open", customer_name="CL Co")
         db_session.add(req)
         db_session.flush()
         items = []
@@ -1435,7 +1435,7 @@ class TestVendorAffinityOnDemand:
     PATCH_TARGET = "app.services.vendor_affinity_service.find_vendor_affinity"
 
     def _requirements(self, db_session, mpns):
-        req = Requisition(name="Affinity RFQ", status="active", customer_name="Aff Co")
+        req = Requisition(name="Affinity RFQ", status="open", customer_name="Aff Co")
         db_session.add(req)
         db_session.flush()
         items = []
@@ -1703,7 +1703,7 @@ class TestComposerVendor:
     URL = "/v2/partials/sightings/composer-vendor"
 
     def _requirements(self, db_session, mpns):
-        req = Requisition(name="Composer RFQ", status="active", customer_name="Comp Co")
+        req = Requisition(name="Composer RFQ", status="open", customer_name="Comp Co")
         db_session.add(req)
         db_session.flush()
         items = []
@@ -2208,7 +2208,7 @@ def _seed_two_requisitions(db_session):
     """Two requisitions, one OPEN requirement each — a cross-requisition selection."""
     out = []
     for i, mpn in enumerate(["CROSS-MPN-A", "CROSS-MPN-B"]):
-        req = Requisition(name=f"Cross RFQ {i}", status="active", customer_name="Acme Corp")
+        req = Requisition(name=f"Cross RFQ {i}", status="open", customer_name="Acme Corp")
         db_session.add(req)
         db_session.flush()
         r = Requirement(
@@ -2652,7 +2652,7 @@ class TestVendorRowLeadTime:
     """
 
     def _requirement(self, db_session, mpn="LT-MPN-1"):
-        req = Requisition(name="Lead-time RFQ", status="active", customer_name="LT Co")
+        req = Requisition(name="Lead-time RFQ", status="open", customer_name="LT Co")
         db_session.add(req)
         db_session.flush()
         r = Requirement(requisition_id=req.id, primary_mpn=mpn, target_qty=10, sourcing_status="open")
@@ -2697,7 +2697,7 @@ class TestCommoditySignalChip:
         mc = MaterialCard(normalized_mpn="cs-mpn-1", display_mpn="CS-MPN-1", category=category)
         db_session.add(mc)
         db_session.flush()
-        req = Requisition(name="Commodity RFQ", status="active", customer_name="CS Co")
+        req = Requisition(name="Commodity RFQ", status="open", customer_name="CS Co")
         db_session.add(req)
         db_session.flush()
         r = Requirement(
@@ -2974,7 +2974,7 @@ class TestCoverageMap:
 
     def test_coverage_zero_when_no_sightings(self, client, db_session):
         """Requirements with no sightings show 0% coverage."""
-        req = Requisition(name="Test RFQ", status="active", customer_name="Acme Corp")
+        req = Requisition(name="Test RFQ", status="open", customer_name="Acme Corp")
         db_session.add(req)
         db_session.flush()
         r = Requirement(
@@ -3120,7 +3120,7 @@ class TestSuggestedAction:
         assert "send RFQ" in resp.text.lower() or "vendor" in resp.text.lower()
 
     def test_open_no_sightings(self, client, db_session):
-        req = Requisition(name="Test RFQ", status="active", customer_name="Acme Corp")
+        req = Requisition(name="Test RFQ", status="open", customer_name="Acme Corp")
         db_session.add(req)
         db_session.flush()
         r = Requirement(
@@ -3189,7 +3189,7 @@ class TestVendorOverlap:
 
     def test_overlap_badge_shown_when_vendor_on_multiple_reqs(self, client, db_session):
         """Vendor appearing on 2+ active reqs shows 'Also on N other reqs' badge."""
-        req = Requisition(name="RFQ-1", status="active", customer_name="Acme Corp")
+        req = Requisition(name="RFQ-1", status="open", customer_name="Acme Corp")
         db_session.add(req)
         db_session.flush()
         r1 = Requirement(
@@ -3239,7 +3239,7 @@ class TestVendorOverlap:
 
     def test_overlap_counts_multiple_reqs(self, client, db_session):
         """Vendor on 3 reqs shows 'Also on 2 other reqs'."""
-        req = Requisition(name="RFQ-M", status="active", customer_name="Multi Corp")
+        req = Requisition(name="RFQ-M", status="open", customer_name="Multi Corp")
         db_session.add(req)
         db_session.flush()
         reqs = []
@@ -3271,9 +3271,7 @@ class TestVendorOverlap:
     def test_overlap_excludes_inactive_requisitions(self, client, db_session):
         """Vendors on inactive requisitions are not counted in overlap."""
         active_req = Requisition(name="Active RFQ", status="open", customer_name="Active Corp")
-        inactive_req = Requisition(
-            name="Inactive RFQ", status="open", is_archived=True, customer_name="Closed Corp"
-        )
+        inactive_req = Requisition(name="Inactive RFQ", status="open", is_archived=True, customer_name="Closed Corp")
         db_session.add_all([active_req, inactive_req])
         db_session.flush()
         r1 = Requirement(
@@ -3320,7 +3318,7 @@ class TestVendorCollapse:
 
     def test_six_vendors_shows_collapse_toggle(self, client, db_session):
         """With 6 vendors, the 'Show 1 more vendor' link appears."""
-        req = Requisition(name="Big RFQ", status="active", customer_name="Big Corp")
+        req = Requisition(name="Big RFQ", status="open", customer_name="Big Corp")
         db_session.add(req)
         db_session.flush()
         r = Requirement(
@@ -3348,7 +3346,7 @@ class TestVendorCollapse:
 
     def test_five_vendors_no_collapse(self, client, db_session):
         """With exactly 5 vendors, no collapse toggle appears."""
-        req = Requisition(name="Five RFQ", status="active", customer_name="Five Corp")
+        req = Requisition(name="Five RFQ", status="open", customer_name="Five Corp")
         db_session.add(req)
         db_session.flush()
         r = Requirement(
@@ -3376,7 +3374,7 @@ class TestVendorCollapse:
 
     def test_eight_vendors_shows_correct_count(self, client, db_session):
         """With 8 vendors, shows 'Show 3 more vendors'."""
-        req = Requisition(name="Eight RFQ", status="active", customer_name="Eight Corp")
+        req = Requisition(name="Eight RFQ", status="open", customer_name="Eight Corp")
         db_session.add(req)
         db_session.flush()
         r = Requirement(
@@ -3415,7 +3413,7 @@ class TestEmptyStates:
 
     def test_empty_sightings_in_detail(self, client, db_session):
         """Requirement with no sightings shows Run Search CTA."""
-        req = Requisition(name="Test RFQ", status="active", customer_name="Acme Corp")
+        req = Requisition(name="Test RFQ", status="open", customer_name="Acme Corp")
         db_session.add(req)
         db_session.flush()
         r = Requirement(
@@ -3529,7 +3527,7 @@ class TestBatchStatus:
         assert r.sourcing_status == "open"
 
     def test_mixed_valid_and_invalid(self, client, db_session):
-        req = Requisition(name="Mix RFQ", status="active", customer_name="Mix Corp")
+        req = Requisition(name="Mix RFQ", status="open", customer_name="Mix Corp")
         db_session.add(req)
         db_session.flush()
         r1 = Requirement(requisition_id=req.id, primary_mpn="MPN-A", target_qty=100, sourcing_status="open")
@@ -3585,7 +3583,7 @@ class TestBatchNotes:
         assert logs[0].notes == "Test batch note"
 
     def test_multiple_requirements(self, client, db_session):
-        req = Requisition(name="Multi RFQ", status="active", customer_name="Multi Corp")
+        req = Requisition(name="Multi RFQ", status="open", customer_name="Multi Corp")
         db_session.add(req)
         db_session.flush()
         r1 = Requirement(requisition_id=req.id, primary_mpn="MPN-1", target_qty=100, sourcing_status="open")
@@ -3743,7 +3741,7 @@ class TestPreviewInquiry:
 class TestSightingsSubsBadge:
     def test_table_shows_sub_count_badge(self, client, db_session):
         """Table row shows '+N subs' badge when requirement has substitutes."""
-        req = Requisition(name="Sub RFQ", status="active", customer_name="SubCo")
+        req = Requisition(name="Sub RFQ", status="open", customer_name="SubCo")
         db_session.add(req)
         db_session.flush()
         r = Requirement(
@@ -3788,7 +3786,7 @@ class TestSightingsSubsBadge:
 class TestSightingsDetailSubs:
     def test_detail_shows_sub_pills(self, client, db_session):
         """Detail panel shows substitute MPN pills below primary MPN."""
-        req = Requisition(name="Sub RFQ", status="active", customer_name="SubCo")
+        req = Requisition(name="Sub RFQ", status="open", customer_name="SubCo")
         db_session.add(req)
         db_session.flush()
         r = Requirement(
@@ -3832,7 +3830,7 @@ class TestSightingsDetailSubs:
 class TestSightingsVendorMatchedMpns:
     def test_vendor_row_shows_via_sub_tag(self, client, db_session):
         """Vendor row shows 'via SUB-MPN' when vendor sighting matched a substitute."""
-        req = Requisition(name="Match RFQ", status="active", customer_name="MatchCo")
+        req = Requisition(name="Match RFQ", status="open", customer_name="MatchCo")
         db_session.add(req)
         db_session.flush()
         r = Requirement(
@@ -3872,7 +3870,7 @@ class TestSightingsVendorMatchedMpns:
 
     def test_vendor_row_no_via_tag_for_primary(self, client, db_session):
         """Vendor row does NOT show 'via' tag when sighting matched the primary MPN."""
-        req = Requisition(name="Primary RFQ", status="active", customer_name="PrimaryCo")
+        req = Requisition(name="Primary RFQ", status="open", customer_name="PrimaryCo")
         db_session.add(req)
         db_session.flush()
         r = Requirement(
@@ -3908,7 +3906,7 @@ class TestSightingsVendorMatchedMpns:
 
     def test_vendor_row_shows_multiple_via_tags(self, client, db_session):
         """Vendor row shows multiple 'via' tags when vendor matched multiple subs."""
-        req = Requisition(name="Multi RFQ", status="active", customer_name="MultiCo")
+        req = Requisition(name="Multi RFQ", status="open", customer_name="MultiCo")
         db_session.add(req)
         db_session.flush()
         r = Requirement(
@@ -3962,7 +3960,7 @@ class TestSightingsVendorRowActions:
     not tucked inside the expandable detail (x-show="expanded")."""
 
     def _seed_vendor_row(self, db_session, status="open"):
-        req = Requisition(name="Action RFQ", status="active", customer_name="ActCo")
+        req = Requisition(name="Action RFQ", status="open", customer_name="ActCo")
         db_session.add(req)
         db_session.flush()
         r = Requirement(
@@ -4007,7 +4005,7 @@ class TestMPNClickableLinks:
 
     def test_table_mpn_links_to_material_card(self, client, db_session):
         """Table MPN chips render as <a> links when MaterialCard exists."""
-        req = Requisition(name="Link RFQ", status="active", customer_name="LinkCo")
+        req = Requisition(name="Link RFQ", status="open", customer_name="LinkCo")
         db_session.add(req)
         db_session.flush()
         card = MaterialCard(
@@ -4047,7 +4045,7 @@ class TestMPNClickableLinks:
     def test_detail_mpn_links_to_material_card(self, client, db_session):
         """Detail panel MPN chips render as clickable buttons when MaterialCard
         exists."""
-        req = Requisition(name="Detail Link RFQ", status="active", customer_name="DLCo")
+        req = Requisition(name="Detail Link RFQ", status="open", customer_name="DLCo")
         db_session.add(req)
         db_session.flush()
         card = MaterialCard(

@@ -154,15 +154,15 @@ class TestRequisitionLifecycle:
     def test_draft_to_active(self, db_session):
         data = _full_setup(db_session)
         req = data["requisition"]
-        req_transition(req, "active", data["sales"], db_session)
-        assert req.status == "active"
+        req_transition(req, "open", data["sales"], db_session)
+        assert req.status == "open"
 
     def test_active_to_sourcing(self, db_session):
         data = _full_setup(db_session)
         req = data["requisition"]
-        req_transition(req, "active", data["sales"], db_session)
-        req_transition(req, "sourcing", data["sales"], db_session)
-        assert req.status == "sourcing"
+        req_transition(req, "open", data["sales"], db_session)
+        req_transition(req, "rfqs_sent", data["sales"], db_session)
+        assert req.status == "rfqs_sent"
 
     def test_illegal_transition_rejected(self, db_session):
         data = _full_setup(db_session)
@@ -171,13 +171,13 @@ class TestRequisitionLifecycle:
             req_transition(req, "completed", data["sales"], db_session)
 
     def test_won_to_active_allowed(self, db_session):
-        """Regression: toggle archive from won back to active must work."""
+        """Regression: a won requisition can be reopened to open."""
         data = _full_setup(db_session)
         req = data["requisition"]
-        req_transition(req, "active", data["sales"], db_session)
+        req_transition(req, "open", data["sales"], db_session)
         req_transition(req, "won", data["sales"], db_session)
-        req_transition(req, "active", data["sales"], db_session)
-        assert req.status == "active"
+        req_transition(req, "open", data["sales"], db_session)
+        assert req.status == "open"
 
 
 # ── Requirement sourcing status ───────────────────────────────────────
@@ -396,7 +396,7 @@ class TestBuildBuyPlanIntegration:
     def test_build_from_won_quote(self, db_session):
         """Building a buy plan from a won quote with valid offers."""
         data = _full_setup(db_session)
-        req_transition(data["requisition"], "active", data["sales"], db_session)
+        req_transition(data["requisition"], "open", data["sales"], db_session)
 
         offer = Offer(
             requisition_id=data["requisition"].id,

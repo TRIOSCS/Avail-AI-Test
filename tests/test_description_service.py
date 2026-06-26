@@ -196,7 +196,7 @@ def test_add_requirement_saves_description(client, db_session):
     """When creating a requirement with description, it should be persisted."""
     from app.models import Requirement, Requisition
 
-    req = Requisition(name="Test Req", status="active", created_by=1)
+    req = Requisition(name="Test Req", status="open", created_by=1)
     db_session.add(req)
     db_session.commit()
 

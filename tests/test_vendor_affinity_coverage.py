@@ -72,7 +72,7 @@ def req_with_item(db_session: Session, test_user) -> tuple:
     req = Requisition(
         name="AFFINITY-REQ",
         customer_name="Test Co",
-        status="active",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )

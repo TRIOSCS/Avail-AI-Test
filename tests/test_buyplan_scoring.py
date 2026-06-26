@@ -275,7 +275,7 @@ class TestAssignBuyer:
 
         req = Requisition(
             name="Test",
-            status="active",
+            status="open",
             created_by=buyer.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -313,7 +313,7 @@ class TestAssignBuyer:
 
         req = Requisition(
             name="Test",
-            status="active",
+            status="open",
             created_by=user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -359,7 +359,7 @@ class TestAssignBuyer:
 
         req = Requisition(
             name="Test",
-            status="active",
+            status="open",
             created_by=buyer1.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -405,7 +405,7 @@ class TestAssignBuyer:
 
         req = Requisition(
             name="Test",
-            status="active",
+            status="open",
             created_by=inactive_buyer.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -451,7 +451,7 @@ class TestAssignBuyer:
 
         req = Requisition(
             name="Test",
-            status="active",
+            status="open",
             created_by=sales_user.id,
             created_at=datetime.now(timezone.utc),
         )

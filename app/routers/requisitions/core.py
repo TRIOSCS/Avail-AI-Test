@@ -3,7 +3,8 @@
 Business Rules:
 - Requisitions contain requirements (parent/child)
 - Sales users only see their own requisitions; all other roles see everything
-- Archiving/outcomes use status transitions: draft → active → archived/won/lost
+- Pipeline status transitions: draft → open → rfqs_sent → offers → quoted → won/lost
+  (plus hotlist monitor). Archiving is orthogonal — Requisition.is_archived, not a status.
 - Sourcing score computed from 7 weighted factors
 
 Called by: requisitions.__init__ (sub-router)
@@ -368,9 +369,12 @@ def _build_requisition_list(q, status, sort, order, limit, offset, user, db):
         else:
             query = query.filter(Requisition.status.in_(statuses))
     else:
+        # Default working set: everything not archived and not terminal
+        # (open/rfqs_sent/offers/quoted plus draft + hotlist), so a freshly
+        # created draft is visible. Archive is orthogonal (is_archived).
         query = query.filter(
             Requisition.is_archived.is_(False),
-            Requisition.status.in_(list(RequisitionStatus.OPEN_PIPELINE)),
+            Requisition.status.notin_(RequisitionStatus.TERMINAL),
         )
 
     # Resolve sort column — whitelist to prevent SQL injection

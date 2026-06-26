@@ -41,7 +41,7 @@ def _requisition(db: Session, user: User, **kw) -> Requisition:
     r = Requisition(
         name="REQ-DEEP",
         customer_name="Deep Corp",
-        status=RequisitionStatus.ACTIVE,
+        status=RequisitionStatus.OPEN,
         created_by=user.id,
         created_at=datetime.now(timezone.utc),
         **kw,

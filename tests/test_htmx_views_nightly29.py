@@ -26,7 +26,7 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 
-from app.constants import RequisitionStatus, SourcingStatus
+from app.constants import SourcingStatus
 from app.models import Requirement, Requisition, User
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -56,7 +56,7 @@ async def _call_bulk(handler, payload, user, db):
 
 
 def _make_requisition(db: Session, user: User) -> Requisition:
-    req = Requisition(name="N29 Req", status="active", created_by=user.id)
+    req = Requisition(name="N29 Req", status="open", created_by=user.id)
     db.add(req)
     db.commit()
     db.refresh(req)
@@ -120,7 +120,7 @@ class TestBulkArchiveDirect:
 
         assert result.status_code == 200
         db_session.refresh(req)
-        assert req.status == RequisitionStatus.ARCHIVED
+        assert req.is_archived is True
         db_session.refresh(part)
         assert part.sourcing_status == SourcingStatus.ARCHIVED
 
@@ -180,7 +180,7 @@ class TestBulkUnarchiveDirect:
 
         req = _make_requisition(db_session, test_user)
         part = _make_requirement(db_session, req)
-        req.status = RequisitionStatus.ARCHIVED
+        req.is_archived = True
         part.sourcing_status = SourcingStatus.ARCHIVED
         db_session.commit()
 
@@ -190,7 +190,7 @@ class TestBulkUnarchiveDirect:
 
         assert result.status_code == 200
         db_session.refresh(req)
-        assert req.status == RequisitionStatus.ACTIVE
+        assert req.is_archived is False
         db_session.refresh(part)
         assert part.sourcing_status == SourcingStatus.OPEN
 
@@ -200,7 +200,7 @@ class TestBulkUnarchiveDirect:
 
         req = _make_requisition(db_session, test_user)
         part = _make_requirement(db_session, req)
-        req.status = RequisitionStatus.ARCHIVED
+        req.is_archived = True
         part.sourcing_status = SourcingStatus.ARCHIVED
         db_session.commit()
 

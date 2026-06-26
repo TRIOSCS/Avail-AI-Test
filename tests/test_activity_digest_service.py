@@ -94,7 +94,7 @@ def _mk_activity(db, **kw):
     if req_id is not None:
         existing = db.get(Requisition, req_id)
         if existing is None:
-            req = Requisition(id=req_id, name=f"REQ-TEST-{req_id}", status="active")
+            req = Requisition(id=req_id, name=f"REQ-TEST-{req_id}", status="open")
             db.add(req)
             db.flush()
 

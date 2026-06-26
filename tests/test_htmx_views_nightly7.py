@@ -43,7 +43,7 @@ def _make_requisition(db: Session, user: User, name: str = "REQ-N7-001") -> Requ
     req = Requisition(
         name=name,
         customer_name="Test Customer",
-        status=RequisitionStatus.ACTIVE,
+        status=RequisitionStatus.OPEN,
         created_by=user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -837,7 +837,7 @@ class TestBulkArchive:
         )
         assert resp.status_code == 200
         db_session.refresh(req)
-        assert req.status == RequisitionStatus.ARCHIVED
+        assert req.is_archived is True
 
     def test_archive_empty_body_returns_200(self, client, db_session):
         resp = client.post(

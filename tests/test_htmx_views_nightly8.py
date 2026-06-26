@@ -45,7 +45,7 @@ def _req(db: Session, user: User, **kw) -> Requisition:
     defaults = dict(
         name=f"N8-REQ-{uuid.uuid4().hex[:6]}",
         customer_name="Acme",
-        status=RequisitionStatus.ACTIVE,
+        status=RequisitionStatus.OPEN,
         created_by=user.id,
         claimed_by_id=user.id,
         created_at=datetime.now(timezone.utc),
@@ -852,7 +852,7 @@ class TestBulkArchiveParts:
         assert item.sourcing_status == SourcingStatus.ARCHIVED
 
     def test_bulk_archive_requisitions(self, client: TestClient, db_session: Session, test_user: User):
-        req = _req(db_session, test_user, status=RequisitionStatus.ACTIVE)
+        req = _req(db_session, test_user, status=RequisitionStatus.OPEN)
         item = _requirement(db_session, req)
         resp = client.post(
             "/v2/partials/parts/bulk-archive",
@@ -860,7 +860,7 @@ class TestBulkArchiveParts:
         )
         assert resp.status_code == 200
         db_session.refresh(req)
-        assert req.status == RequisitionStatus.ARCHIVED
+        assert req.is_archived is True
 
     def test_bulk_archive_empty_body(self, client: TestClient):
         resp = client.post(
@@ -881,7 +881,7 @@ class TestBulkArchiveParts:
         assert item.sourcing_status == SourcingStatus.OPEN
 
     def test_bulk_unarchive_requisitions(self, client: TestClient, db_session: Session, test_user: User):
-        req = _req(db_session, test_user, status=RequisitionStatus.ARCHIVED)
+        req = _req(db_session, test_user, is_archived=True)
         item = _requirement(db_session, req, sourcing_status=SourcingStatus.ARCHIVED)
         resp = client.post(
             "/v2/partials/parts/bulk-unarchive",
@@ -889,7 +889,7 @@ class TestBulkArchiveParts:
         )
         assert resp.status_code == 200
         db_session.refresh(req)
-        assert req.status == RequisitionStatus.ACTIVE
+        assert req.is_archived is False
 
     def test_bulk_unarchive_empty(self, client: TestClient):
         resp = client.post(

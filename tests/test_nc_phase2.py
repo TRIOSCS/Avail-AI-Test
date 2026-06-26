@@ -110,7 +110,7 @@ def test_enqueue_dedup_returns_none(db_session, test_requisition, test_user):
     req2 = Requisition(
         name="REQ-TEST-002",
         customer_name="Other Co",
-        status="active",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -136,7 +136,7 @@ def test_enqueue_no_mpn_returns_none(db_session, test_user):
     req = Requisition(
         name="REQ-NOMPN",
         customer_name="Test Co",
-        status="active",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -172,7 +172,7 @@ def test_get_next_queued_item_ordering(db_session, test_user):
         req = Requisition(
             name=f"REQ-{i}",
             customer_name="Test",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -256,7 +256,7 @@ def test_get_queue_stats(db_session, test_user):
         req = Requisition(
             name=f"REQ-STAT-{i}",
             customer_name="Test",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
