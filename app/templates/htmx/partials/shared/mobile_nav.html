@@ -11,7 +11,7 @@
        moreOpen: false,
        activeNav: '{{ current_view }}',
        urlToNav(url) {
-         const map = {'/v2/requisitions':'requisitions','/v2/sightings':'sightings','/v2/materials':'materials','/v2/search':'search','/v2/buy-plans':'buy-plans','/v2/resell':'resell','/v2/crm':'crm','/v2/customers':'crm','/v2/contacts':'crm','/v2/vendor-contacts':'crm','/v2/vendors':'crm','/v2/proactive':'proactive','/v2/prospecting':'prospecting','/v2/my-day':'my-day','/v2/settings':'settings'};
+         const map = {'/v2/requisitions':'requisitions','/v2/sightings':'sightings','/v2/materials':'materials','/v2/search':'search','/v2/buy-plans':'buy-plans','/v2/resell':'resell','/v2/crm':'crm','/v2/customers':'crm','/v2/contacts':'crm','/v2/vendor-contacts':'crm','/v2/vendors':'crm','/v2/proactive':'proactive','/v2/prospecting':'prospecting','/v2/my-day':'my-day','/v2/approvals':'approvals','/v2/settings':'settings'};
          for (const [prefix, id] of Object.entries(map)) { if (url.startsWith(prefix)) return id; }
          return this.activeNav;
        }
@@ -41,7 +41,9 @@
       ('prospecting', 'Prospect', '/v2/prospecting', '/v2/partials/prospecting',
        'M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7'),
       ('my-day', 'Tasks', '/v2/my-day', '/v2/partials/my-day',
-       'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z')
+       'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z'),
+      ('approvals', 'Approvals', '/v2/approvals/queue', '/v2/approvals/queue',
+       'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z')
     ] %}
     {% for id, label, href, partial, icon_path in nav_items %}
     {# Per-user nav gate: hide a section the user lacks access to. `access` is a
@@ -71,7 +73,7 @@
               hx-swap="innerHTML"
               hx-push-url="false"
               class="absolute -top-1.5 -right-2 flex items-center justify-center min-w-[14px] h-[14px]"></span>
-        {% elif id in ('requisitions', 'buy-plans', 'crm', 'my-day') %}
+        {% elif id in ('requisitions', 'buy-plans', 'crm', 'my-day', 'approvals') %}
         {# Cross-app alert badge — same emerald pill as proactive, fed by the AlertSource registry #}
         <span id="{{ id }}-nav-badge"
               hx-get="/v2/partials/alerts/{{ id }}/badge"

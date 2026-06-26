@@ -11117,7 +11117,20 @@ async def buy_plan_approve_partial(
 
     Gated by ``require_buyplan_approver`` (403 unless the user holds the per-user
     can_approve_buy_plans right). Reject requires a reason (enforced in the service).
+
+    QP Phase C1: the approval engine OWNS the gate. We look up the open BUY_PLAN
+    ApprovalRequest for this plan and resolve it via the engine's ``decide`` — which drives
+    the buy-plan side effects (ACTIVE + buyer tasks / DRAFT) in the SAME transaction. We let
+    ``decide`` raise (no swallowing) so a side-effect failure rolls back the whole decision
+    atomically (RISK 1). If NO open request exists — a plan that went PENDING before C1
+    deployed — we fall back to the legacy ``approve_buy_plan`` and log a WARNING (RISK 3,
+    transition window; the fallback is removed in a follow-up once no pre-C1 plans remain).
     """
+    from sqlalchemy import select as _select
+
+    from ..constants import ApprovalRequestStatus, ApprovalSubjectType
+    from ..models.approvals import ApprovalRequest
+    from ..services.approvals.service import decide as svc_decide
     from ..services.buyplan_notifications import (
         notify_approved,
         notify_rejected,
@@ -11128,14 +11141,36 @@ async def buy_plan_approve_partial(
     form = await request.form()
     action = form.get("action", "approve")
     origin = form.get("origin", "")
+    notes = form.get("notes")
+
+    open_request = (
+        db.execute(
+            _select(ApprovalRequest).where(
+                ApprovalRequest.subject_type == ApprovalSubjectType.BUY_PLAN,
+                ApprovalRequest.subject_id == plan_id,
+                ApprovalRequest.status == ApprovalRequestStatus.REQUESTED,
+            )
+        )
+        .scalars()
+        .first()
+    )
 
     try:
-        plan = approve_buy_plan(plan_id, action, user, db, notes=form.get("notes"))
+        if open_request is not None:
+            # Engine path: decide() resolves the request AND drives the plan side effects.
+            svc_decide(db, open_request.id, user, action, comment=notes or None)
+        else:
+            # RISK 3 fallback: plan pending pre-C1 with no engine request yet.
+            logger.warning(
+                "Buy plan {} approve/reject with no open engine request — falling back to legacy approve_buy_plan",
+                plan_id,
+            )
+            approve_buy_plan(plan_id, action, user, db, notes=notes)
         db.commit()
         if action == "approve":
-            await run_notify_bg(notify_approved, plan.id)
+            await run_notify_bg(notify_approved, plan_id)
         else:
-            await run_notify_bg(notify_rejected, plan.id)
+            await run_notify_bg(notify_rejected, plan_id)
     except PermissionError as e:
         # The dependency already 403s unauthorized callers; this maps the service's
         # defense-in-depth approval-right check to 403 (not 400) if it is ever reached.

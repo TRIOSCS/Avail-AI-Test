@@ -17,6 +17,12 @@ Purpose: The orchestration core of the Approval Engine.
          "decided" ApprovalOutbox rows (in_app + email — the locked dual-channel notice)
          for the notification worker.
 
+         For a BUY_PLAN subject, decide ALSO drives the buy-plan side effects in the SAME
+         session/flush — approve → plan ACTIVE + buyer tasks, reject → plan DRAFT — by
+         delegating to buyplan_workflow's shared helpers. These run inline (no swallowing
+         try/except), so a side-effect failure rolls back the whole decision atomically:
+         the request can never land APPROVED while the plan stays PENDING (QP Phase C1).
+
 Called by: routers/approvals.py (Task 5+), buy-plan / prepayment flows that gate on
            approval.
 Depends on: app.models.approvals, app.models.quality_plan (Prepayment),
@@ -44,9 +50,10 @@ from ...models.approvals import (
     ApprovalStep,
     ApprovalStepRecipient,
 )
+from ...models.buy_plan import BuyPlan
 from ...models.quality_plan import Prepayment, QualityPlan
 from .events import record as _record_event
-from .routing import route_request
+from .routing import NoEligibleApproverError, route_request
 
 # action → terminal request status / per-recipient status / audit event_type
 _APPROVE = "approve"
@@ -59,7 +66,7 @@ def create_request(
     *,
     gate_type: str,
     amount: Decimal | None,
-    subject: Prepayment | QualityPlan,
+    subject: Prepayment | QualityPlan | BuyPlan,
     requested_by: Any,
     owner: Any,
     currency: str = "USD",
@@ -70,8 +77,8 @@ def create_request(
         db: SQLAlchemy session (sync, 2.0 style).
         gate_type: An ApprovalGateType value (the gate this request belongs to).
         amount: Spend amount used for threshold routing (may be None for non-spend gates).
-        subject: The entity being approved — a Prepayment or a QualityPlan. The polymorphic
-            (subject_type, subject_id) pair is set from its type + id.
+        subject: The entity being approved — a Prepayment, a QualityPlan, or a BuyPlan. The
+            polymorphic (subject_type, subject_id) pair is set from its type + id.
         requested_by: The User who triggered the request.
         owner: The User who owns the originating entity (notified on resolution).
         currency: ISO currency code of *amount* (defaults to "USD").
@@ -81,7 +88,7 @@ def create_request(
         and carrying its genesis 'submitted' audit event.
 
     Raises:
-        TypeError: If *subject* is neither a Prepayment nor a QualityPlan.
+        TypeError: If *subject* is not a Prepayment, QualityPlan, or BuyPlan.
         NoEligibleApproverError: Propagated from route_request when no approver is eligible.
     """
     request = ApprovalRequest(
@@ -97,14 +104,24 @@ def create_request(
         request.subject_type = ApprovalSubjectType.PREPAYMENT
     elif isinstance(subject, QualityPlan):
         request.subject_type = ApprovalSubjectType.QUALITY_PLAN
+    elif isinstance(subject, BuyPlan):
+        request.subject_type = ApprovalSubjectType.BUY_PLAN
     else:
-        raise TypeError(f"subject must be a Prepayment or QualityPlan, got {type(subject).__name__}")
+        raise TypeError(f"subject must be a Prepayment, QualityPlan, or BuyPlan, got {type(subject).__name__}")
     request.subject_id = subject.id
 
     db.add(request)
     db.flush()  # Assign request.id before routing
 
-    route_request(db, request)
+    try:
+        route_request(db, request)
+    except NoEligibleApproverError:
+        # Routing found no eligible approver: the request has no recipients and is
+        # meaningless. Remove the half-built row so a caller that catches this error and
+        # still commits (e.g. the buy-plan submit path) leaves NO orphan engine state.
+        db.delete(request)
+        db.flush()
+        raise
 
     # Genesis audit row: the 'submitted' event anchors the request's append-only trail.
     _record_event(db, request, requested_by, "submitted")
@@ -208,4 +225,23 @@ def decide(
     )
 
     db.flush()
+
+    # On-resolve subject dispatch. A BUY_PLAN request drives the EXISTING buy-plan side
+    # effects (approve → ACTIVE + buyer tasks, reject → DRAFT) in THIS session, before the
+    # router commits. Lazy import: buyplan_workflow imports the approvals package, so a
+    # top-level import here would be circular. We deliberately do NOT wrap this in a
+    # swallowing try/except — a side-effect failure must propagate so the router's
+    # transaction rolls back the whole decision atomically (RISK 1: no APPROVED-request /
+    # PENDING-plan split-brain).
+    if request.subject_type == ApprovalSubjectType.BUY_PLAN and request.subject_id is not None:
+        from ..buyplan_workflow import _run_approve_side_effects, _run_reject_side_effects
+
+        plan = db.get(BuyPlan, request.subject_id)
+        if plan is not None:
+            if approved:
+                _run_approve_side_effects(plan, user, db, notes=comment)
+            else:
+                _run_reject_side_effects(plan, user, db, reason=comment or "Rejected")
+            db.flush()
+
     return request

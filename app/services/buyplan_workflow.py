@@ -10,6 +10,7 @@ Depends on: buyplan_scoring, buyplan_builder, models, config
 from datetime import datetime, timezone
 
 from loguru import logger
+from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
 from ..config import settings
@@ -79,6 +80,9 @@ def submit_buy_plan(
     else:
         plan.status = BuyPlanStatus.PENDING.value
         logger.info("Buy plan {} pending approval (cost={:.2f})", plan_id, float(plan.total_cost or 0))
+        # Open the engine gate: route a BUY_PLAN ApprovalRequest to can_approve_buy_plans
+        # holders (cancels any stale open request first — RISK 2).
+        _open_engine_request_for_plan(plan, user, db)
 
     db.flush()
     return plan
@@ -115,32 +119,114 @@ def approve_buy_plan(
     if not can_approve_buy_plans(user):
         raise PermissionError("Buy-plan approval right required to approve/reject")
 
-    now = datetime.now(timezone.utc)
     if action == "approve":
-        if line_overrides:
-            _apply_line_overrides(plan, line_overrides, db)
-        plan.status = BuyPlanStatus.ACTIVE.value
-        plan.approved_by_id = user.id
-        plan.approved_at = now
-        plan.approval_notes = notes
-        logger.info("Buy plan {} approved by {}", plan_id, user.email)
-        _generate_buyer_tasks(plan, db)
-        _log_approval_activity(plan, "approve", user, notes, db)
+        _run_approve_side_effects(plan, user, db, line_overrides=line_overrides, notes=notes)
     elif action == "reject":
         reason = (notes or "").strip()
         if not reason:
             raise ValueError("A rejection reason is required")
-        plan.status = BuyPlanStatus.DRAFT.value
-        plan.approved_by_id = user.id
-        plan.approved_at = now
-        plan.approval_notes = reason
-        logger.info("Buy plan {} rejected by {}: {}", plan_id, user.email, reason)
-        _log_approval_activity(plan, "reject", user, reason, db)
+        _run_reject_side_effects(plan, user, db, reason=reason)
     else:
         raise ValueError(f"Invalid action: {action}")
 
     db.flush()
     return plan
+
+
+def _run_approve_side_effects(
+    plan: BuyPlan,
+    user: User,
+    db: Session,
+    *,
+    line_overrides: list[dict] | None = None,
+    notes: str | None = None,
+) -> None:
+    """Apply the on-approve side effects to *plan* (status→ACTIVE + buyer tasks).
+
+    The single arbitration point for a buy-plan approval's effects, called by BOTH the
+    legacy ``approve_buy_plan`` path and the approvals-engine ``decide()`` dispatch so the
+    two paths can never drift. Optional manager ``line_overrides`` swap vendors/quantities
+    before the plan is activated. Stamps approver/decision metadata, generates the buyer
+    'Cut PO' tasks, and writes the audit ActivityLog row. The caller owns the flush/commit.
+    """
+    now = datetime.now(timezone.utc)
+    if line_overrides:
+        _apply_line_overrides(plan, line_overrides, db)
+    plan.status = BuyPlanStatus.ACTIVE.value
+    plan.approved_by_id = user.id
+    plan.approved_at = now
+    plan.approval_notes = notes
+    logger.info("Buy plan {} approved by {}", plan.id, user.email)
+    _generate_buyer_tasks(plan, db)
+    _log_approval_activity(plan, "approve", user, notes, db)
+
+
+def _run_reject_side_effects(plan: BuyPlan, user: User, db: Session, *, reason: str) -> None:
+    """Apply the on-reject side effects to *plan* (status→DRAFT, back to salesperson).
+
+    Counterpart to ``_run_approve_side_effects``; shared by the legacy path and the engine
+    ``decide()`` dispatch. Stamps the rejecting user + reason and writes the audit
+    ActivityLog row. The caller owns the flush/commit.
+    """
+    plan.status = BuyPlanStatus.DRAFT.value
+    plan.approved_by_id = user.id
+    plan.approved_at = datetime.now(timezone.utc)
+    plan.approval_notes = reason
+    logger.info("Buy plan {} rejected by {}: {}", plan.id, user.email, reason)
+    _log_approval_activity(plan, "reject", user, reason, db)
+
+
+def _open_engine_request_for_plan(plan: BuyPlan, user: User, db: Session) -> None:
+    """Open a BUY_PLAN ApprovalRequest for *plan*, cancelling any stale open one first.
+
+    Called when a plan enters PENDING (submit / resubmit). RISK 2 (double request): a
+    resubmit must never leave two REQUESTED rows racing for the same plan, so we cancel
+    every existing open (REQUESTED) request for this plan via the engine's ``cancel``
+    BEFORE creating the fresh one — leaving exactly one open request. ``cancel`` is safe
+    here because *user* is the requester/owner of any prior request (we always pass
+    requested_by=owner=user). If no approver holds ``can_approve_buy_plans`` the engine
+    raises NoEligibleApproverError; we log a WARNING and leave the plan PENDING with no
+    orphan engine state (the create_request flush is the only write, and it is rolled into
+    the caller's transaction — a failed route leaves nothing half-built).
+
+    Lazy imports: the approvals service imports buyplan_workflow (decide() dispatch), so a
+    top-level import here would be circular.
+    """
+    from ..constants import (
+        ApprovalGateType,
+        ApprovalRequestStatus,
+        ApprovalSubjectType,
+    )
+    from ..models.approvals import ApprovalRequest
+    from .approvals.events import cancel as svc_cancel
+    from .approvals.routing import NoEligibleApproverError
+    from .approvals.service import create_request
+
+    stale = (
+        db.execute(
+            select(ApprovalRequest).where(
+                ApprovalRequest.subject_type == ApprovalSubjectType.BUY_PLAN,
+                ApprovalRequest.subject_id == plan.id,
+                ApprovalRequest.status == ApprovalRequestStatus.REQUESTED,
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for ar in stale:
+        svc_cancel(db, ar.id, actor=user)
+
+    try:
+        create_request(
+            db,
+            gate_type=ApprovalGateType.BUY_PLAN,
+            amount=plan.total_cost,
+            subject=plan,
+            requested_by=user,
+            owner=user,
+        )
+    except NoEligibleApproverError:
+        logger.warning("Buy plan {} pending but no BUY_PLAN approver configured", plan.id)
 
 
 def _log_approval_activity(plan: BuyPlan, action: str, user: User, notes: str | None, db: Session) -> None:
@@ -517,6 +603,9 @@ def resubmit_buy_plan(
         plan.approved_at = datetime.now(timezone.utc)
     else:
         plan.status = BuyPlanStatus.PENDING.value
+        # Re-open the engine gate. Cancels the stale request from the prior submission so
+        # exactly ONE REQUESTED request exists for this plan (RISK 2).
+        _open_engine_request_for_plan(plan, user, db)
 
     db.flush()
     return plan
