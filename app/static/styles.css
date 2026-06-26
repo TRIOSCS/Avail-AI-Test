@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 /* ── Design System: Clean, high-contrast utility ──────────────────────
-   Font: Aptos → Segoe UI → system-ui
+   Font: Aptos (system, Win11/Office) → Inter (loaded web font) → Segoe UI → system-ui
    Hairlines: --line #BFC4CE (base) · --line-subtle #D5D8DF (see :root)
    Body text: #1e293b (slate-800), secondary: #4B5463 (brand-600)
    Min interactive font: 11px, body: 13px, headings: 15px
@@ -11,7 +11,7 @@
 
 @layer base {
   body {
-    @apply text-[14px] text-gray-900 leading-normal antialiased;
+    @apply font-sans text-[14px] text-gray-900 leading-normal antialiased;
   }
 }
 
@@ -418,7 +418,7 @@ hr { border-color: #BFC4CE; }
   font-size: 13px;
 }
 .compact-table th {
-  font-family: 'Aptos', 'Segoe UI', system-ui, sans-serif;
+  font-family: 'Aptos', 'Inter', 'Segoe UI', system-ui, sans-serif;
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.05em;
@@ -442,7 +442,7 @@ hr { border-color: #BFC4CE; }
   font-size: 12px;
 }
 .compact-table td.td-label {
-  font-family: 'Aptos', 'Segoe UI', system-ui, sans-serif;
+  font-family: 'Aptos', 'Inter', 'Segoe UI', system-ui, sans-serif;
   font-size: 13px;
 }
 .compact-table tbody tr {
@@ -524,7 +524,7 @@ table {
   letter-spacing: 0.03em;
   text-transform: uppercase;
   border-radius: 4px;
-  font-family: 'Aptos', 'Segoe UI', system-ui, sans-serif;
+  font-family: 'Aptos', 'Inter', 'Segoe UI', system-ui, sans-serif;
 }
 /* ── Panel chrome — workspace panels ──────────────────────────────── */
 .panel-header {
@@ -537,7 +537,7 @@ table {
   flex-shrink: 0;
 }
 .panel-title {
-  font-family: 'Aptos', 'Segoe UI', system-ui, sans-serif;
+  font-family: 'Aptos', 'Inter', 'Segoe UI', system-ui, sans-serif;
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.06em;
@@ -554,7 +554,7 @@ table {
   border-bottom: 2px solid transparent;
   transition: all 0.15s;
   white-space: nowrap;
-  font-family: 'Aptos', 'Segoe UI', system-ui, sans-serif;
+  font-family: 'Aptos', 'Inter', 'Segoe UI', system-ui, sans-serif;
 }
 .ws-tab:hover {
   color: #4B5463;
