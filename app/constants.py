@@ -102,26 +102,32 @@ class QualificationStatus(StrEnum):
 
 
 class RequisitionStatus(StrEnum):
-    """Status lifecycle for Requisition records."""
+    """Status lifecycle for Requisition records.
+
+    Pipeline (Sales Hub): OPEN -> RFQS_SENT -> OFFERS -> QUOTED -> WON/LOST. DRAFT
+    precedes OPEN. HOTLIST is an off-pipeline *monitor* state: the salesperson watches a
+    part/customer and the Proactive matcher surfaces an offer when stock appears.
+    CANCELLED retained for existing rows. Archive is NOT a status — see
+    Requisition.is_archived (hidden-but-retrievable).
+    """
 
     DRAFT = "draft"
-    ACTIVE = "active"
-    SOURCING = "sourcing"
+    OPEN = "open"  # entry stage; "open" automatically means sourcing
+    RFQS_SENT = "rfqs_sent"
     OFFERS = "offers"
-    QUOTING = "quoting"
     QUOTED = "quoted"
-    REOPENED = "reopened"
     WON = "won"
     LOST = "lost"
-    ARCHIVED = "archived"
+    HOTLIST = "hotlist"  # monitor-only; surfaced by Proactive on a matching offer
     CANCELLED = "cancelled"
 
-    # Statuses considered "done" — excluded from re-archiving and shown under
-    # the Archive filter. Single source of truth for terminal-status checks.
-    # `nonmember` keeps this off the enum's member list (it's a constant, not a
-    # status value). StrEnum members compare equal to their string values, so
-    # `status.in_(RequisitionStatus.TERMINAL)` matches correctly.
-    TERMINAL = nonmember(frozenset({"archived", "won", "lost", "cancelled"}))
+    # Terminal (done) — excluded from the default open list. Single source of truth.
+    # `nonmember` keeps these off the member list (they're constants, not statuses).
+    TERMINAL = nonmember(frozenset({"won", "lost", "cancelled"}))
+    # Active pipeline stages shown by default in the Sales Hub list.
+    OPEN_PIPELINE = nonmember(frozenset({"open", "rfqs_sent", "offers", "quoted"}))
+    # Off-pipeline monitor states (Hotlist).
+    MONITOR = nonmember(frozenset({"hotlist"}))
 
 
 class SourcingStatus(StrEnum):
