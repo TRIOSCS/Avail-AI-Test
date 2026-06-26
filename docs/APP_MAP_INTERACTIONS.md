@@ -2118,13 +2118,40 @@ CDM left list (`_account_list.html`), regardless of `site_count`, hx-gets the SA
   Phone is a `tel:` link and Email an Outlook-web compose deeplink — both carry the
   `data-outreach-log` attrs so `htmx_app.js` logs the touch (same path as the old
   `outreach_btn`). Each row has an Alpine `x-data='{open:false}'` **expand drawer**
-  (chevron) revealing Teams deeplink, WeChat copy-id, secondary email/phone,
-  LinkedIn, reports-to, notes, the inline role editor and cadence clocks. Row-level
-  management (edit, set-primary, priority, archive, DNC, merge, move, delete) lives
-  in a per-row kebab so the row stays scannable. Cell padding uses the locked
-  `.compact-table`/`.td-label` utilities (no inline `px-`/`py-` on `<td>`). The old
-  `contact_card` macro is retained in `_contact_macros.html` but no longer rendered
-  by the contacts tab.
+  (chevron) laid out as a **dense horizontal flow** (`flex flex-wrap items-center
+  gap-x-4 gap-y-2`, wraps on mobile) rather than a vertical stack: click-to-contact
+  Phone (`tel:`) + Email (Outlook compose) lead, followed by Teams deeplink, WeChat
+  copy-id, secondary email/phone, LinkedIn, reports-to, the inline role editor and
+  cadence clocks, with a full-width **recent-note** footer (latest `ActivityLog` NOTE
+  preview + a "See all notes" / "+ Add note" button that `$dispatch('open-modal')`s the
+  contact-notes modal). Row-level management (edit, set-primary, priority, archive,
+  DNC, merge, move, delete) lives in a per-row kebab so the row stays scannable. Cell
+  padding uses the locked `.compact-table`/`.td-label` utilities (no inline `px-`/`py-`
+  on `<td>`). The old per-card `contact_card` macro was **removed as dead code** — the
+  `contact_row` macro is the only contact surface.
+- **Buying-role vocabulary — single source `ContactRole` (`app/constants.py`).** The
+  `StrEnum` `buyer/manager/engineer/planner/other` drives BOTH `CANONICAL_ROLES`
+  (`htmx_views.py`, `tuple(ContactRole)`) and the `roles` Jinja2 global fallback
+  (`template_env.py`); `_VALID_ROLES = frozenset(CANONICAL_ROLES)` gates the setter.
+  The role editor (`POST .../contacts/{id}/role` → `set_contact_role`, validated by
+  `_validate_role`: blank → NULL, non-canonical → 400) renders the five options + a
+  "— clear —". Legacy DB values (`buyer_po/specifier/ap_payer/logistics/exec/technical/
+  decision_maker/operations`) remain in the display-label + color maps so existing rows
+  render a clean read-only chip, but they are NOT selectable and 400 if re-submitted.
+  Chip colors are safelisted shades (buyer=blue, manager=violet, engineer=sky,
+  planner=amber, other=gray).
+- **Contact-notes modal (reuses the activity-log notes infra).** `recent_note` (latest
+  `ActivityLog` NOTE per contact) is batched in `crm_service.company_contact_rows`
+  (`_latest_contact_notes`, one grouped query — no N+1) and threaded through to
+  `contact_row`. The drawer button opens
+  `GET /v2/partials/customers/{company_id}/contacts/{contact_id}/notes-modal`
+  (`contact_notes_modal` → `_contact_notes_modal.html`: feed via
+  `activity_service.get_site_contact_notes`, newest-first with date + author, plus an
+  add form; 404 if the contact isn't under that company).
+  `POST /v2/partials/customers/{company_id}/contacts/{contact_id}/notes`
+  (`add_contact_note`) is `can_manage_account`-gated (403 else), blank → inline error,
+  else `activity_service.log_site_contact_note` + commit, re-rendering the modal body
+  (`hx-swap='outerHTML'` into `#contact-notes-modal-body`).
 - The contact edit modal (`_contact_form.html`) always renders **every** known
   contact field as a labeled input (blank → empty field), so a user sees all the
   fields they could fill in.

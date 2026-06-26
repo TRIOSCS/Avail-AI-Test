@@ -2165,26 +2165,26 @@ class TestBuyingRoleSetter:
         return company, site, contact
 
     def test_set_role_updates_db(self, client: TestClient, db_session: Session, test_user: User):
-        """POST contact_role=buyer_po persists to SiteContact.contact_role."""
+        """POST contact_role=buyer persists to SiteContact.contact_role."""
 
         company, site, contact = self._make_company_with_contact(db_session, owner_id=test_user.id)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/contacts/{contact.id}/role",
-            data={"contact_role": "buyer_po"},
+            data={"contact_role": "buyer"},
         )
         assert resp.status_code == 200
         db_session.refresh(contact)
-        assert contact.contact_role == "buyer_po"
+        assert contact.contact_role == "buyer"
 
     def test_set_role_rerenders_chip(self, client: TestClient, db_session: Session, test_user: User):
         """POST role returns HTML containing the chip for the new role."""
         company, site, contact = self._make_company_with_contact(db_session, owner_id=test_user.id)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/contacts/{contact.id}/role",
-            data={"contact_role": "specifier"},
+            data={"contact_role": "engineer"},
         )
         assert resp.status_code == 200
-        assert "specifier" in resp.text.lower() or "Specifier" in resp.text
+        assert "engineer" in resp.text.lower() or "Engineer" in resp.text
 
     def test_set_role_invalid_value_returns_400(self, client: TestClient, db_session: Session, test_user: User):
         """POST with unknown role value returns 400."""
@@ -2195,9 +2195,22 @@ class TestBuyingRoleSetter:
         )
         assert resp.status_code == 400
 
+    def test_set_role_legacy_value_rejected(self, client: TestClient, db_session: Session, test_user: User):
+        """A legacy DB value (buyer_po) is no longer selectable — POST 400s.
+
+        Legacy values still render read-only via the display-label maps, but the setter
+        only accepts the canonical ContactRole vocabulary.
+        """
+        company, site, contact = self._make_company_with_contact(db_session, owner_id=test_user.id)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/contacts/{contact.id}/role",
+            data={"contact_role": "buyer_po"},
+        )
+        assert resp.status_code == 400
+
     def test_set_role_all_canonical_values_accepted(self, client: TestClient, db_session: Session, test_user: User):
         """All canonical buying-role values are accepted."""
-        for role_val in ("specifier", "buyer_po", "ap_payer", "logistics", "exec", "other"):
+        for role_val in ("buyer", "manager", "engineer", "planner", "other"):
             company, site, contact = self._make_company_with_contact(db_session, owner_id=test_user.id)
             resp = client.post(
                 f"/v2/partials/customers/{company.id}/contacts/{contact.id}/role",
@@ -2210,7 +2223,7 @@ class TestBuyingRoleSetter:
         company, _, _ = self._make_company_with_contact(db_session, owner_id=test_user.id)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/contacts/99999/role",
-            data={"contact_role": "buyer_po"},
+            data={"contact_role": "buyer"},
         )
         assert resp.status_code == 404
 
@@ -2237,12 +2250,12 @@ class TestBuyingRoleSetter:
         company, site, contact = self._make_company_with_contact(db_session, owner_id=test_user.id)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/contacts/{contact.id}/role",
-            data={"contact_role": "specifier"},
+            data={"contact_role": "engineer"},
         )
         assert resp.status_code == 200
         html = resp.text
         # All canonical values must appear as option values
-        for role in ("specifier", "buyer_po", "ap_payer", "logistics", "exec", "other"):
+        for role in ("buyer", "manager", "engineer", "planner", "other"):
             assert f"value='{role}'" in html or f'value="{role}"' in html, (
                 f"Expected role '{role}' as an <option> value in chip editor HTML"
             )
@@ -2294,7 +2307,7 @@ class TestRoleChipLegacy:
         assert "buyer" in resp.text.lower() or "Buyer" in resp.text
 
     def test_canonical_buyer_po_renders_chip(self, client: TestClient, db_session: Session, test_user: User):
-        """New canonical role 'buyer_po' renders a chip in the contact card."""
+        """Legacy role 'buyer_po' still renders a read-only chip in the contact card."""
         company, _, _ = self._make_company_with_contact(db_session, contact_role="buyer_po")
         resp = client.get(f"/v2/partials/customers/{company.id}")
         assert resp.status_code == 200
@@ -2302,7 +2315,7 @@ class TestRoleChipLegacy:
         assert "buyer" in resp.text.lower() or "PO" in resp.text or "Buyer" in resp.text
 
     def test_canonical_specifier_renders_chip(self, client: TestClient, db_session: Session, test_user: User):
-        """New canonical role 'specifier' renders a chip."""
+        """Legacy role 'specifier' still renders a read-only chip."""
         company, _, _ = self._make_company_with_contact(db_session, contact_role="specifier")
         resp = client.get(f"/v2/partials/customers/{company.id}")
         assert resp.status_code == 200
@@ -2502,7 +2515,7 @@ class TestEditContact:
             f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
             data={
                 "full_name": "Alice Smith",
-                "contact_role": "buyer_po",  # canonical value — should persist
+                "contact_role": "buyer",  # canonical value — should persist
                 "title": "Buyer",
                 "email": "alice@editco.com",
                 "phone": "+16175550001",
@@ -2512,7 +2525,7 @@ class TestEditContact:
         db_session.expire_all()
         updated = db_session.query(SiteContact).filter(SiteContact.id == contact.id).first()
         assert updated is not None
-        assert updated.contact_role == "buyer_po"
+        assert updated.contact_role == "buyer"
 
     def test_post_contact_edit_legacy_role_returns_400(self, client: TestClient, db_session: Session, test_user: User):
         """POST contact edit with legacy role 'decision_maker' returns 400."""
@@ -3113,8 +3126,8 @@ class TestContactsTabHome:
         resp = client.get(f"/v2/partials/customers/{company.id}/contacts/add-form")
         assert resp.status_code == 200
         assert "contact_role" in resp.text
-        assert "buyer_po" in resp.text
-        assert "specifier" in resp.text
+        assert "buyer" in resp.text
+        assert "engineer" in resp.text
 
     def test_get_add_form_new_site_option_present(self, client: TestClient, db_session: Session, test_user: User):
         """GET add-form includes a '+ new site' option in the site select."""
@@ -3171,7 +3184,7 @@ class TestContactsTabHome:
                 "full_name": "New Bob",
                 "email": "newbob@tabco.com",
                 "title": "Manager",
-                "contact_role": "buyer_po",
+                "contact_role": "buyer",
             },
         )
         assert resp.status_code == 200
@@ -3291,13 +3304,13 @@ class TestContactsTabHome:
             data={
                 "full_name": "Alice Prime",
                 "email": "alice@tabco.com",
-                "contact_role": "buyer_po",
+                "contact_role": "buyer",
             },
         )
         assert resp.status_code == 200
         db_session.expire_all()
         updated = db_session.get(SiteContact, contact.id)
-        assert updated.contact_role == "buyer_po"
+        assert updated.contact_role == "buyer"
 
     def test_edit_invalid_role_returns_400(self, client: TestClient, db_session: Session, test_user: User):
         """POST edit with legacy 'decision_maker' role returns 400."""
@@ -3419,8 +3432,8 @@ class TestContactsTabHome:
         assert "contacts-tab-list" in html
         # Contact's email must appear (Step 4: form uses first_name/last_name, not full_name input)
         assert test_contact.email in html
-        # Role options must be present
-        assert "buyer_po" in html
+        # Role options must be present (canonical ContactRole vocabulary)
+        assert "engineer" in html
 
     def test_contacts_tab_create_response_contains_roles(
         self,
@@ -3439,7 +3452,7 @@ class TestContactsTabHome:
             headers={"HX-Target": "contacts-tab-list"},
         )
         assert resp.status_code == 200
-        assert "buyer_po" in resp.text
+        assert "engineer" in resp.text
 
     def test_delete_contact_response_contains_roles(
         self,
@@ -3493,7 +3506,7 @@ class TestContactsTabHome:
             headers={"HX-Target": "contacts-tab-list"},
         )
         assert resp.status_code == 200
-        assert "buyer_po" in resp.text
+        assert "engineer" in resp.text
 
     def test_edit_contact_response_contains_roles(
         self,
@@ -3510,11 +3523,11 @@ class TestContactsTabHome:
         db_session.commit()
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/sites/{test_site.id}/contacts/{test_contact.id}/edit",
-            data={"full_name": test_contact.full_name, "contact_role": "buyer_po"},
+            data={"full_name": test_contact.full_name, "contact_role": "engineer"},
             headers={"HX-Target": "contacts-tab-list"},
         )
         assert resp.status_code == 200
-        assert "buyer_po" in resp.text
+        assert "engineer" in resp.text
 
 
 class TestC3KebabActionsAndCadence:
