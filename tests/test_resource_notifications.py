@@ -273,6 +273,30 @@ class TestNotifyResourceRequested:
         assert optout.id not in dmed
 
     @pytest.mark.asyncio
+    async def test_managers_and_admins_are_recipients_traders_excluded(self, db_session, test_vendor_card):
+        # Managers/admins can ALSO claim the open pool, so the urgent alert must reach them;
+        # sales/trader (who cannot cut/claim POs) must NOT receive it.
+        from app.services.buyplan_notifications import notify_resource_requested
+
+        actor = _make_user(db_session, "actor2@trioscs.com", "Actor", "buyer")
+        manager = _make_user(db_session, "mgr@trioscs.com", "A Manager", "manager")
+        admin = _make_user(db_session, "admin@trioscs.com", "An Admin", "admin")
+        trader = _make_user(db_session, "trader2@trioscs.com", "A Trader", "trader")
+        plan, line = _make_plan_with_line(
+            db_session, submitter_id=actor.id, creator_id=actor.id, vendor_card_id=test_vendor_card.id
+        )
+
+        p_email, p_card, p_dm = _patch_channels()
+        with p_email, p_card, p_dm:
+            await notify_resource_requested(plan, db_session, line_id=line.id, actor_id=actor.id, reason="x")
+
+        recipient_ids = {a.user_id for a in db_session.query(ActivityLog).filter_by(buy_plan_id=plan.id).all()}
+        assert manager.id in recipient_ids
+        assert admin.id in recipient_ids
+        assert trader.id not in recipient_ids
+        assert actor.id not in recipient_ids
+
+    @pytest.mark.asyncio
     async def test_optout_still_gets_inapp_and_card_still_posts(self, db_session, test_vendor_card):
         from app.services.buyplan_notifications import notify_resource_requested
 

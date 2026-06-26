@@ -11460,11 +11460,20 @@ async def buy_plan_resource_line_partial(
         raise HTTPException(400, "A re-source reason is required")
 
     try:
-        resource_line(plan_id, line_id, reason_code, reason_note, user, db, also_line_ids=also_line_ids)
+        payload = resource_line(plan_id, line_id, reason_code, reason_note, user, db, also_line_ids=also_line_ids)
         db.commit()
-        await run_notify_bg(notify_resource_requested, plan_id, line_id=line_id, actor_id=user.id, reason=reason_code)
     except ValueError as e:
+        # Log before re-raising so a real failure (e.g. an un-keyable requirement deep in
+        # the service) leaves a server trace instead of a silent, mislabeled 400.
+        logger.warning("Re-source failed for plan {} line {}: {}", plan_id, line_id, e)
         raise HTTPException(400, str(e))
+
+    # Broadcast one urgent alert PER re-sourced line (scope=plan re-sources siblings too,
+    # and each pooled line needs its own claim).
+    for resourced in payload["resourced_lines"]:
+        await run_notify_bg(
+            notify_resource_requested, plan_id, line_id=resourced["line_id"], actor_id=user.id, reason=reason_code
+        )
 
     if origin == "resource":
         return await buy_plans_resource_partial(request, user, db)
@@ -11495,6 +11504,7 @@ async def buy_plan_claim_line_partial(
         claim_line(plan_id, line_id, user, db)
         db.commit()
     except ValueError as e:
+        logger.info("Claim lost/invalid for plan {} line {} by {}: {}", plan_id, line_id, user.id, e)
         raise HTTPException(409, str(e))
 
     if origin == "resource":

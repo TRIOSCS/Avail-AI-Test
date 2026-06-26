@@ -107,10 +107,14 @@ def mark_offer_sold(db: Session, offer, user) -> None:
 
     from ..models.intelligence import ChangeLog
     from ..services.activity_service import log_activity
-    from ..services.status_machine import require_valid_transition
+    from ..services.status_machine import validate_transition
 
+    # Best-effort: an offer that can't reach SOLD (e.g. already EXPIRED/REJECTED) must NOT
+    # abort the whole re-source — the cancellation record + line pooling still need to run.
     old_status = offer.status
-    require_valid_transition("offer", offer.status, OfferStatus.SOLD)
+    if not validate_transition("offer", offer.status, OfferStatus.SOLD, raise_on_invalid=False):
+        logger.warning("Re-source: offer {} in status {!r} cannot be marked sold — skipping", offer.id, offer.status)
+        return
     offer.status = OfferStatus.SOLD
     offer.updated_at = datetime.now(timezone.utc)
     offer.updated_by_id = user.id if user else None
@@ -152,6 +156,11 @@ def mark_vendor_unavailable(db: Session, *, requirement, offer, reason_code, not
     ``requirement`` is None there is nothing to key on, so returns 0.
     """
     if requirement is None:
+        logger.warning(
+            "Re-source: offer {} has no requirement — vendor {!r} NOT marked unavailable for the part",
+            getattr(offer, "id", None),
+            getattr(offer, "vendor_name", None),
+        )
         return 0
 
     from ..services.vendor_unavailability import record_unavailability

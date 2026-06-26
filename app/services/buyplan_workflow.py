@@ -495,6 +495,13 @@ def resource_line(
     if not plan:
         raise ValueError(f"Buy plan {plan_id} not found")
 
+    # Only ACTIVE (live) or COMPLETED (auto-completed, reopened below) plans can be
+    # re-sourced. A VERIFIED line can survive on a CANCELLED/HALTED plan (cancel only
+    # cascades open lines), but re-sourcing it would dead-end — claim → confirm_po needs
+    # an ACTIVE plan, which a cancelled/halted plan can never become here.
+    if plan.status not in (BuyPlanStatus.ACTIVE.value, BuyPlanStatus.COMPLETED.value):
+        raise ValueError(f"Cannot re-source on a {plan.status} plan (must be active or completed)")
+
     reason_code = LineResourceReason(reason_code).value  # validate the dropdown value
 
     target_ids = {line_id} | {int(i) for i in (also_line_ids or [])}
@@ -513,23 +520,31 @@ def resource_line(
         requirement = line.requirement
 
         # ── Side effects (all NO-COMMIT; the route owns the transaction). Order
-        #    matters: record reads line.po_confirmed_at BEFORE we clear it below. ──
-        record_po_cancellation(
-            db,
-            line=line,
-            offer=offer,
-            requirement=requirement,
-            reason_code=reason_code,
-            reason_text=reason_note,
-            user=user,
-        )
+        #    matters: record reads line.po_confirmed_at BEFORE we clear it below.
+        #    A live-PO line can lose its offer (offer_id is SET NULL on offer delete) —
+        #    without an offer there is no vendor to attribute the cancellation to, so we
+        #    skip the cancellation/sold/unavailable side effects and still pool the line. ──
         if offer:
+            record_po_cancellation(
+                db,
+                line=line,
+                offer=offer,
+                requirement=requirement,
+                reason_code=reason_code,
+                reason_text=reason_note,
+                user=user,
+            )
             mark_offer_sold(db, offer, user)
             mark_vendor_unavailable(
                 db, requirement=requirement, offer=offer, reason_code=reason_code, note=reason_note, user=user
             )
             if offer.vendor_card_id:
                 vendor_card_ids.add(offer.vendor_card_id)
+        else:
+            logger.warning(
+                "Re-source line {} has no offer (offer_id NULL) — pooling without a cancellation fact",
+                line.id,
+            )
 
         resourced.append(
             {

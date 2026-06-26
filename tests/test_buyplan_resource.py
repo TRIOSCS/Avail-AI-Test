@@ -198,6 +198,58 @@ class TestResourceLine:
         assert db_session.query(POCancellation).count() == 2
 
 
+class TestResourceLineEdgeCases:
+    def test_rejects_cancelled_plan(
+        self, db_session: Session, test_user, test_quote, test_requisition, test_vendor_card
+    ):
+        # A VERIFIED line can survive on a CANCELLED plan (cancel only cascades open lines);
+        # re-sourcing it would create a dead-end (claim → confirm_po needs an ACTIVE plan).
+        plan = _make_plan(db_session, test_quote, test_requisition, status=BuyPlanStatus.CANCELLED.value)
+        requirement = test_requisition.requirements[0]
+        offer = _make_offer(db_session, requirement, test_vendor_card)
+        line = _make_cut_line(db_session, plan, requirement, offer, test_user)
+
+        with pytest.raises(ValueError):
+            resource_line(plan.id, line.id, LineResourceReason.OTHER.value, None, test_user, db_session)
+
+    def test_offerless_line_pools_without_cancellation_row(
+        self, db_session: Session, test_user, test_quote, test_requisition, test_vendor_card
+    ):
+        # offer_id is SET NULL on offer delete; a live-PO line can lose its offer. Re-source
+        # must still pool the line (no crash), just without a cancellation fact.
+        plan = _make_plan(db_session, test_quote, test_requisition)
+        requirement = test_requisition.requirements[0]
+        offer = _make_offer(db_session, requirement, test_vendor_card)
+        line = _make_cut_line(db_session, plan, requirement, offer, test_user)
+        line.offer_id = None
+        db_session.flush()
+
+        resource_line(plan.id, line.id, LineResourceReason.OTHER.value, None, test_user, db_session)
+        db_session.commit()
+        db_session.refresh(line)
+
+        assert line.status == BuyPlanLineStatus.RESOURCING.value
+        assert db_session.query(POCancellation).filter_by(buy_plan_line_id=line.id).count() == 0
+
+    def test_expired_offer_does_not_abort_resource(
+        self, db_session: Session, test_user, test_quote, test_requisition, test_vendor_card
+    ):
+        # An EXPIRED offer can't transition to SOLD; mark_offer_sold must be best-effort and
+        # NOT abort the whole re-source.
+        plan = _make_plan(db_session, test_quote, test_requisition)
+        requirement = test_requisition.requirements[0]
+        offer = _make_offer(db_session, requirement, test_vendor_card, status=OfferStatus.EXPIRED.value)
+        line = _make_cut_line(db_session, plan, requirement, offer, test_user)
+
+        resource_line(plan.id, line.id, LineResourceReason.SOLD_ELSEWHERE.value, None, test_user, db_session)
+        db_session.commit()
+        db_session.refresh(line)
+        db_session.refresh(offer)
+
+        assert line.status == BuyPlanLineStatus.RESOURCING.value
+        assert offer.status == OfferStatus.EXPIRED.value  # left as-is (couldn't go SOLD)
+
+
 class TestClaimLine:
     def _resourcing_line(self, db, test_user, quote, requisition, vendor_card):
         plan = _make_plan(db, quote, requisition)
@@ -360,6 +412,31 @@ class TestResourceRoutes:
         assert line.status == BuyPlanLineStatus.RESOURCING.value
         fired = [c.args[0].__name__ for c in mock_bg.await_args_list]
         assert "notify_resource_requested" in fired
+
+    @pytest.mark.asyncio
+    async def test_escalation_fires_one_alert_per_resourced_line(
+        self, db_session: Session, test_user, test_quote, test_requisition, test_vendor_card
+    ):
+        from app.routers import htmx_views
+
+        plan = _make_plan(db_session, test_quote, test_requisition)
+        requirement = test_requisition.requirements[0]
+        offer_a = _make_offer(db_session, requirement, test_vendor_card)
+        offer_b = _make_offer(db_session, requirement, test_vendor_card)
+        line_a = _make_cut_line(db_session, plan, requirement, offer_a, test_user, po_number="PO-A")
+        line_b = _make_cut_line(db_session, plan, requirement, offer_b, test_user, po_number="PO-B")
+        db_session.commit()
+
+        mock_bg = AsyncMock()
+        req = _FakeRequest({"reason_code": "sold_elsewhere", "scope": "plan", "also_line_ids": [str(line_b.id)]})
+        with (
+            patch("app.services.buyplan_notifications.run_notify_bg", mock_bg),
+            patch.object(htmx_views, "buy_plan_detail_partial", new_callable=AsyncMock, return_value="ok"),
+        ):
+            await htmx_views.buy_plan_resource_line_partial(req, plan.id, line_a.id, user=test_user, db=db_session)
+
+        alerted_line_ids = {c.kwargs["line_id"] for c in mock_bg.await_args_list}
+        assert alerted_line_ids == {line_a.id, line_b.id}
 
     @pytest.mark.asyncio
     async def test_claim_forbidden_for_non_po_cutter(self, db_session: Session, sales_user):

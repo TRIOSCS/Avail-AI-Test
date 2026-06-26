@@ -867,8 +867,18 @@ async def notify_resource_requested(
     vendor_card_id = offer.vendor_card_id if offer else None
     rc = _resource_context(plan, line, db, reason)
 
-    # \u2500\u2500 Recipients: active buyers (minus the actor) + the salesperson \u2500\u2500
-    recipients = db.query(User).filter(User.role == UserRole.BUYER, User.is_active.is_(True), User.id != actor_id).all()
+    # \u2500\u2500 Recipients: active PO-cutters (buyer/manager/admin) minus the actor + the
+    #    salesperson. Managers/admins are included because they can ALSO claim the open
+    #    pool \u2014 so if every buyer is the actor/inactive they remain reachable. \u2500\u2500
+    recipients = (
+        db.query(User)
+        .filter(
+            User.role.in_([UserRole.BUYER, UserRole.MANAGER, UserRole.ADMIN]),
+            User.is_active.is_(True),
+            User.id != actor_id,
+        )
+        .all()
+    )
     seen = {u.id for u in recipients}
     salesperson = plan.submitted_by or (plan.requisition.creator if plan.requisition else None)
     if salesperson and salesperson.id != actor_id and salesperson.id not in seen:
@@ -876,7 +886,8 @@ async def notify_resource_requested(
         seen.add(salesperson.id)
 
     if not recipients:
-        logger.info("Re-source: no recipients for plan {} (actor {})", plan.id, actor_id)
+        # URGENT alert reaching nobody is a real operational gap, not routine.
+        logger.warning("Re-source: URGENT alert for plan {} reached 0 recipients (actor {})", plan.id, actor_id)
         return
 
     # \u2500\u2500 In-app rows (ALWAYS, every recipient) \u2014 committed before Teams \u2500\u2500
