@@ -1,17 +1,22 @@
-"""test_approvals_bridge.py — Tests for Task 12: unified approvals queue bridges buy-
-plan approvals.
+"""test_approvals_bridge.py — Engine-native approvals queue (QP Phase C1).
+
+The read-only buy-plan bridge is RETIRED. A buy-plan submission now surfaces in the queue
+as a native engine ApprovalRequest (gate_type=buy_plan, subject_type=buy_plan, subject_id
+= plan id), NOT a synthetic source="buy_plan" bridge item.
 
 Covers:
-  - GET /v2/approvals/requests returns both engine ApprovalRequest items AND pending BuyPlan items.
-  - BuyPlan item includes source="buy_plan", gate_type="buy_plan", and a detail_url linking to the
-    existing buy-plan detail partial (/v2/partials/buy-plans/{id}).
-  - BuyPlan with non-pending status is NOT included.
-  - GET /v2/approvals/queue renders the HTML queue template (200, text/html).
-  - The HTML queue contains the buy-plan row with a link to the detail page.
+  - GET /v2/approvals/requests lists a buy_plan-subject ApprovalRequest as an engine item
+    (no `source` field; carries subject_type/subject_id) alongside other engine requests.
+  - The list NEVER emits a synthetic source="buy_plan" bridge item.
+  - Filtering gate_type=buy_plan returns exactly the buy-plan requests.
+  - A pending BuyPlan with NO ApprovalRequest (pre-C1 / unrouted) does NOT appear — the
+    queue is engine-only.
+  - GET /v2/approvals/queue renders HTML; a buy_plan-subject row links to the plan detail
+    partial (/v2/partials/buy-plans/{id}) and the queue still renders for prepayment rows.
 
 Called by: pytest
-Depends on: conftest (db_session, test_user), app.routers.approvals,
-            app.models.buy_plan, app.models.approvals, app.dependencies.
+Depends on: conftest (db_session), app.routers.approvals, app.models.approvals,
+            app.models.buy_plan, app.dependencies.
 """
 
 import uuid
@@ -20,6 +25,7 @@ from datetime import datetime, timezone
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from app.constants import ApprovalGateType, ApprovalSubjectType
 from app.database import get_db
 from app.dependencies import require_user
 from app.models.approvals import ApprovalRequest, ApprovalStep, ApprovalStepRecipient
@@ -45,7 +51,7 @@ def _make_user(db: Session, *, can_approve: bool = True) -> User:
     return u
 
 
-def _make_pending_buy_plan(db: Session, user: User, *, status: str = "pending") -> BuyPlan:
+def _make_buy_plan(db: Session, user: User, *, status: str = "pending") -> BuyPlan:
     req = Requisition(
         name=f"REQ-BRIDGE-{uuid.uuid4().hex[:6]}",
         customer_name="BridgeCo",
@@ -73,15 +79,37 @@ def _make_pending_buy_plan(db: Session, user: User, *, status: str = "pending") 
         status=status,
         so_status="pending",
         submitted_by_id=user.id,
+        total_cost=12_000,
     )
     db.add(bp)
     db.flush()
     return bp
 
 
-def _make_engine_request(db: Session, user: User) -> ApprovalRequest:
+def _make_buy_plan_request(db: Session, bp: BuyPlan, user: User) -> ApprovalRequest:
+    """A native engine BUY_PLAN ApprovalRequest for *bp*, routed to *user* (pending)."""
     ar = ApprovalRequest(
-        gate_type="prepayment",
+        gate_type=ApprovalGateType.BUY_PLAN,
+        status="requested",
+        subject_type=ApprovalSubjectType.BUY_PLAN,
+        subject_id=bp.id,
+        amount=bp.total_cost,
+        requested_by_id=user.id,
+        owner_id=user.id,
+    )
+    db.add(ar)
+    db.flush()
+    step = ApprovalStep(request_id=ar.id, seq=1, rule="any", status="pending")
+    db.add(step)
+    db.flush()
+    db.add(ApprovalStepRecipient(step_id=step.id, user_id=user.id, status="pending"))
+    db.flush()
+    return ar
+
+
+def _make_prepayment_request(db: Session, user: User) -> ApprovalRequest:
+    ar = ApprovalRequest(
+        gate_type=ApprovalGateType.PREPAYMENT,
         status="requested",
         requested_by_id=user.id,
         owner_id=user.id,
@@ -91,7 +119,7 @@ def _make_engine_request(db: Session, user: User) -> ApprovalRequest:
     step = ApprovalStep(request_id=ar.id, seq=1, rule="any", status="pending")
     db.add(step)
     db.flush()
-    ApprovalStepRecipient(step_id=step.id, user_id=user.id, status="pending")
+    db.add(ApprovalStepRecipient(step_id=step.id, user_id=user.id, status="pending"))
     db.flush()
     return ar
 
@@ -117,12 +145,13 @@ def _build_client(db: Session, user: User):
 # ── Tests ────────────────────────────────────────────────────────────────
 
 
-class TestUnifiedQueue:
-    def test_list_includes_pending_buy_plan(self, db_session: Session) -> None:
-        """GET /v2/approvals/requests returns pending BuyPlan as an item with
-        source=buy_plan."""
+class TestEngineNativeQueue:
+    def test_list_includes_buy_plan_request_as_engine_item(self, db_session: Session) -> None:
+        """A buy-plan submission surfaces as a native engine item carrying
+        subject_type=buy_plan + subject_id, with NO `source` field."""
         user = _make_user(db_session)
-        bp = _make_pending_buy_plan(db_session, user, status="pending")
+        bp = _make_buy_plan(db_session, user, status="pending")
+        ar = _make_buy_plan_request(db_session, bp, user)
         db_session.commit()
 
         for client in _build_client(db_session, user):
@@ -130,63 +159,77 @@ class TestUnifiedQueue:
 
         assert resp.status_code == 200
         body = resp.json()
-        bp_items = [i for i in body["items"] if i.get("source") == "buy_plan" and i.get("subject_id") == bp.id]
-        assert len(bp_items) == 1, f"Expected 1 buy_plan item, got: {bp_items}"
-
-    def test_list_buy_plan_item_has_detail_url(self, db_session: Session) -> None:
-        """Buy-plan item includes detail_url pointing at the existing buy-plan detail
-        partial."""
-        user = _make_user(db_session)
-        bp = _make_pending_buy_plan(db_session, user, status="pending")
-        db_session.commit()
-
-        for client in _build_client(db_session, user):
-            resp = client.get("/v2/approvals/requests")
-
-        body = resp.json()
-        bp_items = [i for i in body["items"] if i.get("source") == "buy_plan" and i.get("subject_id") == bp.id]
-        assert len(bp_items) == 1
-        item = bp_items[0]
+        items = {i["id"]: i for i in body["items"]}
+        assert ar.id in items
+        item = items[ar.id]
+        assert "source" not in item, "engine items must not carry a bridge `source` field"
         assert item["gate_type"] == "buy_plan"
-        assert item["detail_url"] == f"/v2/partials/buy-plans/{bp.id}"
+        assert item["subject_type"] == "buy_plan"
+        assert item["subject_id"] == bp.id
 
-    def test_list_both_engine_and_buy_plan_items(self, db_session: Session) -> None:
-        """Queue lists a prepayment engine request AND a pending buy-plan in the same
-        response."""
+    def test_list_never_emits_bridge_source(self, db_session: Session) -> None:
+        """The retired bridge must never produce a synthetic source='buy_plan' item."""
         user = _make_user(db_session)
-        ar = _make_engine_request(db_session, user)
-        bp = _make_pending_buy_plan(db_session, user, status="pending")
+        bp = _make_buy_plan(db_session, user, status="pending")
+        _make_buy_plan_request(db_session, bp, user)
         db_session.commit()
 
         for client in _build_client(db_session, user):
             resp = client.get("/v2/approvals/requests")
 
         body = resp.json()
-        sources = {i.get("source") for i in body["items"]}
-        assert "buy_plan" in sources, f"Missing buy_plan source; sources={sources}"
-        # Engine request items don't have a source field (or source=engine)
-        engine_items = [i for i in body["items"] if i.get("id") == ar.id]
-        assert len(engine_items) == 1
+        assert all(i.get("source") != "buy_plan" for i in body["items"])
 
-    def test_non_pending_buy_plan_excluded(self, db_session: Session) -> None:
-        """BuyPlan with status != 'pending' is NOT included in the unified queue."""
+    def test_filter_gate_type_buy_plan(self, db_session: Session) -> None:
+        """gate_type=buy_plan returns exactly the buy-plan requests, not prepayments."""
         user = _make_user(db_session)
-        # "active" = buy-plan status after manager approved → should NOT appear in approval queue
-        _make_pending_buy_plan(db_session, user, status="active")
+        bp = _make_buy_plan(db_session, user, status="pending")
+        ar = _make_buy_plan_request(db_session, bp, user)
+        _make_prepayment_request(db_session, user)
+        db_session.commit()
+
+        for client in _build_client(db_session, user):
+            resp = client.get("/v2/approvals/requests?gate_type=buy_plan")
+
+        body = resp.json()
+        ids = {i["id"] for i in body["items"]}
+        assert ids == {ar.id}
+        assert all(i["gate_type"] == "buy_plan" for i in body["items"])
+
+    def test_pending_buy_plan_without_request_is_absent(self, db_session: Session) -> None:
+        """A pending BuyPlan with no ApprovalRequest does NOT appear — the queue is
+        engine-only (no read-only bridge surfacing a bare BuyPlan)."""
+        user = _make_user(db_session)
+        bp = _make_buy_plan(db_session, user, status="pending")  # no engine request
         db_session.commit()
 
         for client in _build_client(db_session, user):
             resp = client.get("/v2/approvals/requests")
 
         body = resp.json()
-        active_bp_items = [i for i in body["items"] if i.get("source") == "buy_plan" and i.get("status") == "active"]
-        assert len(active_bp_items) == 0, "Non-pending buy plans should not appear in the approval queue"
+        assert all(i.get("subject_id") != bp.id for i in body["items"])
 
-    def test_queue_html_renders_buy_plan_row_with_link(self, db_session: Session) -> None:
-        """GET /v2/approvals/queue returns HTML with buy-plan row linking to detail
-        partial."""
+    def test_both_buy_plan_and_prepayment_listed(self, db_session: Session) -> None:
+        """Buy-plan and prepayment engine requests both appear in one response."""
         user = _make_user(db_session)
-        bp = _make_pending_buy_plan(db_session, user, status="pending")
+        bp = _make_buy_plan(db_session, user, status="pending")
+        bp_ar = _make_buy_plan_request(db_session, bp, user)
+        pp_ar = _make_prepayment_request(db_session, user)
+        db_session.commit()
+
+        for client in _build_client(db_session, user):
+            resp = client.get("/v2/approvals/requests")
+
+        body = resp.json()
+        ids = {i["id"] for i in body["items"]}
+        assert {bp_ar.id, pp_ar.id} <= ids
+
+    def test_queue_html_links_buy_plan_subject_to_detail(self, db_session: Session) -> None:
+        """GET /v2/approvals/queue renders HTML; a buy_plan-subject row links to the
+        plan detail partial."""
+        user = _make_user(db_session)
+        bp = _make_buy_plan(db_session, user, status="pending")
+        _make_buy_plan_request(db_session, bp, user)
         db_session.commit()
 
         for client in _build_client(db_session, user):
@@ -194,5 +237,32 @@ class TestUnifiedQueue:
 
         assert resp.status_code == 200
         assert "text/html" in resp.headers.get("content-type", "")
-        body = resp.text
-        assert f"/v2/partials/buy-plans/{bp.id}" in body
+        assert f"/v2/partials/buy-plans/{bp.id}" in resp.text
+
+    def test_queue_header_counts_only_open_requests(self, db_session: Session) -> None:
+        """The 'N items pending' header counts only REQUESTED rows — a resolved request
+        renders (with a View link) but must not inflate the pending count."""
+        user = _make_user(db_session)
+        bp = _make_buy_plan(db_session, user, status="pending")
+        _make_buy_plan_request(db_session, bp, user)  # one open
+        resolved = _make_prepayment_request(db_session, user)
+        resolved.status = "approved"  # a historical, non-pending row
+        db_session.commit()
+
+        for client in _build_client(db_session, user):
+            resp = client.get("/v2/approvals/queue")
+
+        assert resp.status_code == 200
+        assert "1 item pending" in resp.text, resp.text[:400]
+
+    def test_queue_html_renders_prepayment_row(self, db_session: Session) -> None:
+        """The engine-only queue still renders non-buy-plan rows (prepayment)."""
+        user = _make_user(db_session)
+        ar = _make_prepayment_request(db_session, user)
+        db_session.commit()
+
+        for client in _build_client(db_session, user):
+            resp = client.get("/v2/approvals/queue")
+
+        assert resp.status_code == 200
+        assert f"/v2/approvals/requests/{ar.id}" in resp.text

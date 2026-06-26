@@ -5004,13 +5004,15 @@ checkboxes bind to it; `window.ticketBulkAction(kind, ids, status)` POSTs and fi
 `approvals.service.create_request(db, *, gate_type, amount, subject, requested_by, owner,
 currency="USD")` is the single entry for spawning a routed approval:
 - Persists an `ApprovalRequest`, setting the **polymorphic** `(subject_type, subject_id)`
-  pair from the subject (`Prepayment` → `prepayment`, `QualityPlan` → `quality_plan`) — no
-  cross-table FK (mirrors `MaterialCardAudit`). `currency` (defaults USD) lands on
-  `request.currency`; `prepayment_service.create_prepayment` passes
+  pair from the subject (`Prepayment` → `prepayment`, `QualityPlan` → `quality_plan`,
+  `BuyPlan` → `buy_plan`) — no cross-table FK (mirrors `MaterialCardAudit`). `currency`
+  (defaults USD) lands on `request.currency`; `prepayment_service.create_prepayment` passes
   `currency=prepayment.currency`, completing the currency contract.
 - Flushes, calls `routing.route_request`, then records the **genesis `submitted`**
   `ApprovalEvent` + `ActivityLog` (`APPROVAL_REQUESTED`) — so every request's append-only
-  trail starts with a creation row (its `event_type` is `submitted`).
+  trail starts with a creation row (its `event_type` is `submitted`). If routing raises
+  `NoEligibleApproverError` the half-built request is **deleted** before re-raising, so a
+  caller that catches the error and still commits leaves no orphan engine state.
 
 `approvals.service.decide(db, request_id, user, action, comment=None)` resolves a request
 (first-responder-wins, row-locked). On resolution it records one `approved`/`rejected`
@@ -5018,6 +5020,16 @@ currency="USD")` is the single entry for spawning a routed approval:
 (`owner_id` → `requested_by_id` → decider) — one `channel='in_app'` and one
 `channel='email'` (Mike's locked dual-channel notice). Both carry the same payload
 `{"event_type": "decided", "decision": <approved|rejected>, "comment": <comment>}`.
+
+**On-resolve subject dispatch (QP Phase C1):** after the flush, a `subject_type=='buy_plan'`
+request drives the EXISTING buy-plan side effects in the SAME session — approve →
+`buyplan_workflow._run_approve_side_effects` (plan `ACTIVE` + `_generate_buyer_tasks` +
+approver stamp + audit `ActivityLog`); reject → `_run_reject_side_effects` (plan `DRAFT`).
+The dispatch runs inline with **no swallowing try/except**, so a side-effect failure
+propagates and the router's transaction rolls the whole decision back atomically — a request
+can never land `APPROVED` while its plan stays `PENDING` (RISK 1). `_run_approve_side_effects`
+/`_run_reject_side_effects` are the single arbitration point shared by BOTH the engine
+dispatch and the legacy `approve_buy_plan`, so the two paths can never drift.
 
 `jobs.approval_outbox.dispatch_pending` drains the outbox (60s job):
 - `in_app` → `notifications.write_in_app`; the `Notification.body` now carries the decision
@@ -5028,6 +5040,50 @@ currency="USD")` is the single entry for spawning a routed approval:
 - Channel server_default is `in_app` (migration 159) so an outbox row without an explicit
   channel is never silently treated as email.
 
-Router JSON (`routers/approvals.py`): `_serialize_request(r)` is the single 9-field engine-item
-projection shared by `list_requests` + `get_request` (distinct from the read-only buy-plan
-bridge `_buy_plan_as_queue_item`, which is unchanged).
+**Buy-plan submission → engine gate (QP Phase C1):** `buyplan_workflow.submit_buy_plan`
+(and `resubmit_buy_plan`), on the non-auto-approve path, call
+`_open_engine_request_for_plan(plan, user, db)` — which FIRST cancels every existing open
+(`REQUESTED`) `ApprovalRequest` for the plan via `events.cancel` (so a resubmit never leaves
+two live requests — RISK 2), THEN `create_request(gate_type=BUY_PLAN, subject=plan,
+requested_by=owner=user)` routes a request to every `can_approve_buy_plans` holder. No
+approver configured → `NoEligibleApproverError` is caught, logged WARNING, plan stays
+`PENDING` with no engine state. The live approve/reject POST
+(`/v2/partials/buy-plans/{id}/approve`, `buy_plan_approve_partial`) looks up the open
+`BUY_PLAN` request and resolves it via `decide` (side effects run inside `decide`); if NO
+open request exists — a plan that went `PENDING` before C1 deployed — it falls back to the
+legacy `approve_buy_plan` and logs a WARNING (RISK 3, transition window, removed in a
+follow-up).
+
+**Leaving PENDING outside `decide()` cancels the open engine request (no orphan, no
+resurrection):** a PENDING plan carries a live `REQUESTED` `BUY_PLAN` `ApprovalRequest`, so
+any transition that takes the plan out of PENDING *without going through `decide()`* must
+close that request or it would orphan a row in the approvals queue/badge — and, worse, let
+an approver pull the stale request and resurrect the plan. `cancel_buy_plan` and the
+`verify_so` **HALT** branch therefore call
+`_cancel_open_engine_requests_for_plan(plan, user, db)` (the stale-cancel loop factored out
+of `_open_engine_request_for_plan`) **at/before the transition, only when the plan is still
+PENDING**. That helper cancels each open request on behalf of the request's OWN
+`requested_by`/`owner` (the original submitter), so the `events.cancel` authz
+(requester/owner OR manager/admin) is satisfied for EVERY caller — including a `verify_so`
+HALT driven by an ops-group member who is neither the submitter nor a manager/admin. As a
+second line of defense, `_run_approve_side_effects`/`_run_reject_side_effects` re-check
+`plan.status == PENDING` at entry: deciding a stale request whose plan already left PENDING
+raises `ValueError` → the router returns a clean 400 (via `get_db`'s rollback) instead of
+silently reactivating a cancelled/halted plan.
+
+The buy-plans ACTION badge (`alerts/sources/buyplan.py`, branch 2 — manager approval) counts
+ONLY pending plans with **no open `BUY_PLAN` `ApprovalRequest`**, so a post-C1 plan surfaces
+on the **Approvals** badge alone (no double-count) while a pre-C1 transition-window plan (no
+engine request) still surfaces on the buy-plans badge and never goes invisible.
+
+The **read-only buy-plan bridge is RETIRED** (C1). `list_requests`/`get_queue`
+(`routers/approvals.py`) are engine-only: a buy plan surfaces as a native `ApprovalRequest`
+(`gate_type=buy_plan`, `subject_type=buy_plan`). `_serialize_request(r)` is the single
+11-field engine-item projection shared by `list_requests` + `get_request` (now carrying
+`subject_type`/`subject_id` so a `buy_plan` request links back to its plan detail partial).
+The `/v2/approvals/queue` partial renders one engine table with inline approve/reject for
+`requested` rows posting to the decision endpoint; a `buy_plan`-subject row links to
+`/v2/partials/buy-plans/{subject_id}`. An **Approvals** primary-nav item
+(`mobile_nav.html` → `/v2/approvals/queue`) surfaces the queue, with an emerald badge fed by
+`ApprovalRequestActionSource` (tab `approvals`, `AlertKind.APPROVAL_ACTION`) counting open
+requests where the user is a PENDING recipient.

@@ -377,12 +377,12 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 | currency | String 10, nullable | |
 | requested_by_id | FK -> users (SET NULL) | |
 | owner_id | FK -> users (SET NULL) | Indexed (`ix_approval_req_owner`) |
-| subject_type | String 50, nullable | `ApprovalSubjectType` (`quality_plan`\|`prepayment`; BUY_PLAN/QUOTE/RESELL_OFFER added by later QP-Phase-C phases). **Polymorphic** — no cross-table FK (mirrors `MaterialCardAudit.material_card_id`); survives subject deletion. Migration 159 replaced the two nullable subject FK columns with this pair. |
+| subject_type | String 50, nullable | `ApprovalSubjectType` (`quality_plan`\|`prepayment`\|`buy_plan`; QUOTE/RESELL_OFFER added by later QP-Phase-C phases). `buy_plan` (QP Phase C1) routes the live buy-plan gate through the engine. **Polymorphic** — no cross-table FK (mirrors `MaterialCardAudit.material_card_id`); survives subject deletion. Migration 159 replaced the two nullable subject FK columns with this pair. |
 | subject_id | Integer, nullable | The subject's PK. `(subject_type, subject_id)` composite-indexed (`ix_approval_req_subject`). |
 | resolved_at | UTCDateTime, nullable | |
 | expires_at | UTCDateTime, nullable | |
 
-> Set by `approvals.service.create_request` from the passed subject (Prepayment → `prepayment`, QualityPlan → `quality_plan`). The router `_serialize_request`/`_buy_plan_as_queue_item` JSON shapes do not expose these columns.
+> Set by `approvals.service.create_request` from the passed subject (Prepayment → `prepayment`, QualityPlan → `quality_plan`, BuyPlan → `buy_plan`). The router `_serialize_request` JSON shape now exposes `subject_type`/`subject_id` (QP Phase C1, so a `buy_plan` request links back to its plan detail partial); the read-only buy-plan bridge `_buy_plan_as_queue_item` was retired.
 
 **`approval_steps`** — Ordered stages within an ApprovalRequest.
 | Column | Type | Notes |
@@ -928,7 +928,7 @@ Self-invalidates: service regens when `basis_last_activity_at` or `basis_activit
 |--------|------|-------|
 | id | Integer PK | |
 | user_id | FK -> users (CASCADE) | |
-| alert_kind | String 40 | `AlertKind` value (offer_confirmed\|inbound_customer\|inbound_vendor\|buyplan_action) |
+| alert_kind | String 40 | `AlertKind` value (offer_confirmed\|inbound_customer\|inbound_vendor\|buyplan_action\|tasks_action\|approval_action) |
 | ref_id | Integer | Source item's id (offer.id, activity_log.id, buy_plan(_line).id — no DB-level FK, kind-scoped) |
 | seen_at | UTCDateTime | When marked seen (Python default) |
 

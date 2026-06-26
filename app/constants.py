@@ -894,6 +894,7 @@ class AlertKind(StrEnum):
     INBOUND_VENDOR = "inbound_vendor"
     BUYPLAN_ACTION = "buyplan_action"
     TASKS_ACTION = "tasks_action"
+    APPROVAL_ACTION = "approval_action"
 
 
 class SightingsSkipReason(StrEnum):
@@ -941,12 +942,14 @@ class ApprovalSubjectType(StrEnum):
 
     Single source of truth for the approval_requests.subject_type column. The
     (subject_type, subject_id) pair points back at the originating entity without a
-    cross-table FK (mirrors MaterialCardAudit.material_card_id). BUY_PLAN, QUOTE, and
-    RESELL_OFFER are added by later phases (QP Phase C) when their fan-out lands.
+    cross-table FK (mirrors MaterialCardAudit.material_card_id). BUY_PLAN (QP Phase C1)
+    routes the live buy-plan gate through the engine; QUOTE and RESELL_OFFER follow in
+    later phases when their fan-out lands.
     """
 
     QUALITY_PLAN = "quality_plan"
     PREPAYMENT = "prepayment"
+    BUY_PLAN = "buy_plan"
 
 
 class ApprovalRequestStatus(StrEnum):

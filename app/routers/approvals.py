@@ -5,14 +5,15 @@ Purpose: HTTP surface for approval workflows. Returns JSON; HTMX partials can
            - app.services.approvals.service (decide)
            - app.services.approvals.events (reassign, cancel)
 
-         Task 12: GET /v2/approvals/requests also merges pending BuyPlan rows
-         (read-only bridge). GET /v2/approvals/queue renders the HTML queue
-         template surfacing both engine requests and pending buy-plan approvals.
+         QP Phase C1: the engine OWNS the buy-plan gate, so list_requests and the
+         /v2/approvals/queue view are engine-only — a buy-plan submission surfaces here
+         as a native ApprovalRequest (gate_type=buy_plan, subject_type=buy_plan). The old
+         read-only buy-plan bridge has been retired.
 
 Called by: app.main (router registration).
 Depends on: app.services.approvals.service, app.services.approvals.events,
             app.dependencies (require_user, require_approval_gatekeeper),
-            app.database (get_db), app.models.approvals, app.models.buy_plan,
+            app.database (get_db), app.models.approvals,
             app.constants, app.template_env.
 """
 
@@ -25,7 +26,6 @@ from ..database import get_db
 from ..dependencies import require_approval_gatekeeper, require_user
 from ..models.approvals import ApprovalRequest
 from ..models.auth import User
-from ..models.buy_plan import BuyPlan
 from ..services.approvals.events import cancel as svc_cancel
 from ..services.approvals.events import reassign as svc_reassign
 from ..services.approvals.service import decide as svc_decide
@@ -37,14 +37,17 @@ router = APIRouter(tags=["approvals"])
 def _serialize_request(r: ApprovalRequest) -> dict:
     """Project an ApprovalRequest to its JSON shape (shared by list + detail).
 
-    The 9-field engine-item projection: id, gate_type, status, amount-as-str, currency,
-    requested_by_id, owner_id, resolved_at (iso), resolution_note, created_at (iso).
-    Distinct from `_buy_plan_as_queue_item` (the read-only buy-plan bridge contract).
+    The 11-field engine-item projection: id, gate_type, status, subject_type, subject_id,
+    amount-as-str, currency, requested_by_id, owner_id, resolved_at (iso), resolution_note,
+    created_at (iso). subject_type/subject_id let a caller link a buy_plan request back to
+    its plan detail partial.
     """
     return {
         "id": r.id,
         "gate_type": r.gate_type,
         "status": r.status,
+        "subject_type": r.subject_type,
+        "subject_id": r.subject_id,
         "amount": str(r.amount) if r.amount is not None else None,
         "currency": r.currency,
         "requested_by_id": r.requested_by_id,
@@ -52,26 +55,6 @@ def _serialize_request(r: ApprovalRequest) -> dict:
         "resolved_at": r.resolved_at.isoformat() if r.resolved_at else None,
         "resolution_note": r.resolution_note,
         "created_at": r.created_at.isoformat() if r.created_at else None,
-    }
-
-
-def _buy_plan_as_queue_item(bp: BuyPlan) -> dict:
-    """Serialize a pending BuyPlan as a unified-queue item.
-
-    The source="buy_plan" field distinguishes these read-only bridge items from engine
-    ApprovalRequest items. detail_url links to the existing buy-plan detail partial
-    (which already has the gated approve/reject actions).
-    """
-    return {
-        "source": "buy_plan",
-        "subject_id": bp.id,
-        "gate_type": "buy_plan",
-        "status": bp.status,
-        "amount": str(bp.total_cost) if bp.total_cost is not None else None,
-        "currency": "USD",
-        "requested_by_id": bp.submitted_by_id,
-        "created_at": bp.created_at.isoformat() if bp.created_at else None,
-        "detail_url": f"/v2/partials/buy-plans/{bp.id}",
     }
 
 
@@ -158,36 +141,22 @@ def list_requests(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_user),
 ):
-    """List ApprovalRequests merged with pending BuyPlan approvals (read-only bridge).
+    """List engine ApprovalRequests (optionally filtered by gate_type / status).
 
-    Engine items come from ApprovalRequest; buy-plan items are read-only rows
-    for BuyPlans with status='pending' (Task 12 bridge). Buy-plan items carry
-    source='buy_plan' and detail_url so the caller can link to the existing
-    gated approve/reject UI without duplicating that action here.
+    QP Phase C1: engine-only. A buy-plan submission is a native ApprovalRequest
+    (gate_type=buy_plan, subject_type=buy_plan), so the old read-only buy-plan bridge is
+    gone — filter on gate_type='buy_plan' to get exactly the buy-plan requests.
 
     Returns: {"items": [...], "total": N}.
     """
     q = select(ApprovalRequest)
-    if gate_type and gate_type != "buy_plan":
+    if gate_type:
         q = q.where(ApprovalRequest.gate_type == gate_type)
-    elif gate_type:
-        # gate_type=buy_plan: engine has no such type; return only buy-plan bridge items
-        q = q.where(ApprovalRequest.gate_type == "__never__")
     if status:
         q = q.where(ApprovalRequest.status == status)
 
     rows = db.execute(q).scalars().all()
-
     items = [_serialize_request(r) for r in rows]
-
-    # Bridge: merge pending BuyPlan rows unless a non-buy_plan gate_type filter excludes them
-    include_buy_plans = not gate_type or gate_type == "buy_plan"
-    if include_buy_plans:
-        bp_status_filter = status if status else "pending"
-        if bp_status_filter == "pending":
-            bp_rows = db.execute(select(BuyPlan).where(BuyPlan.status == "pending")).scalars().all()
-            items.extend(_buy_plan_as_queue_item(bp) for bp in bp_rows)
-
     return {"items": items, "total": len(items)}
 
 
@@ -197,21 +166,19 @@ def get_queue(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_user),
 ):
-    """Render the unified approvals queue as an HTMX partial.
+    """Render the engine approvals queue as an HTMX partial.
 
-    Surfaces both engine ApprovalRequests and pending BuyPlan approvals in one table.
-    Buy-plan rows link to the existing buy-plan detail partial where the gated
-    approve/reject actions already live. No behavior change to buy-plan approval — this
-    is read-only surfacing only.
+    QP Phase C1: engine-only. Every pending approval — buy plans included — is an
+    ApprovalRequest, so the queue renders one table of engine rows. A buy_plan-subject row
+    links to its plan detail partial and offers inline approve/reject posting to the
+    engine's decision endpoint.
     """
     engine_rows = db.execute(select(ApprovalRequest)).scalars().all()
-    buy_plan_rows = db.execute(select(BuyPlan).where(BuyPlan.status == "pending")).scalars().all()
 
     ctx = {
         "request": request,
         "current_user": current_user,
         "engine_requests": engine_rows,
-        "buy_plan_rows": buy_plan_rows,
     }
     return template_response("htmx/partials/approvals/_queue.html", ctx)
 

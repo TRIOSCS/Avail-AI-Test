@@ -35,6 +35,13 @@ class TestMobileNavTemplate:
         src = _TEMPLATE.read_text()
         assert "('reporting'," not in src, "'reporting' nav item still present in nav_items"
 
+    def test_nav_items_has_approvals_entry(self):
+        """nav_items tuple contains the C1 'approvals' entry → /v2/approvals/queue."""
+        src = _TEMPLATE.read_text()
+        assert "('approvals'," in src, "'approvals' nav item missing from nav_items"
+        assert "'/v2/approvals/queue'" in src, "Approvals nav must point at the engine queue"
+        assert "'/v2/approvals':'approvals'" in src, "urlToNav must map /v2/approvals to 'approvals'"
+
     def test_url_to_nav_maps_buy_plans_to_itself(self):
         """UrlToNav maps /v2/buy-plans to 'buy-plans'."""
         src = _TEMPLATE.read_text()
@@ -52,7 +59,7 @@ class TestMobileNavTemplate:
         verifies the badge wiring, not an incidental 'buy-plans' string elsewhere.
         """
         src = _TEMPLATE.read_text()
-        assert "{% elif id in ('requisitions', 'buy-plans', 'crm', 'my-day') %}" in src
+        assert "{% elif id in ('requisitions', 'buy-plans', 'crm', 'my-day', 'approvals') %}" in src
 
 
 class TestNavIdAlias:

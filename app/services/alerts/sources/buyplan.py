@@ -4,8 +4,11 @@ Surfaces the open work the current user personally owns across three buy-plan ro
 unioned into one count + spotlight list:
 
   1. Buyer PO step — a BuyPlanLine assigned to me that is still AWAITING_PO.
-  2. Manager approval — a PENDING buy plan with no approver yet, where my role lets
-     me approve (manager/admin — the same rule buyplan_workflow.approve_buy_plan enforces).
+  2. Manager approval — a PENDING buy plan WITH NO OPEN BUY_PLAN ApprovalRequest, where I
+     hold can_approve_buy_plans. Post-C1 the engine owns the gate, so a plan that opened an
+     engine request is counted by the approvals badge instead (counting it here too would
+     double-count); only a pre-C1 transition-window plan (no engine request) still surfaces
+     here so it never goes invisible.
   3. Ops verify — a buy plan whose SO is still PENDING and unverified, where I am an
      active member of the ops verification group (the same rule verify_so enforces).
 
@@ -84,12 +87,32 @@ class BuyplanActionSource(AlertSource):
         #    right. Single source of truth: can_approve_buy_plans (the per-user column the
         #    approve route + service enforce), NOT a role set — so the badge never counts a
         #    step the user could not actually act on, and always counts one they can.
+        #
+        #    Post-C1, the approvals engine OWNS the buy-plan gate: a PENDING plan opens a
+        #    BUY_PLAN ApprovalRequest that the dedicated approvals badge counts. Counting
+        #    that same plan here too would DOUBLE-count it (buy-plans badge + approvals
+        #    badge). So this branch counts ONLY pending plans with NO open engine request —
+        #    i.e. post-C1 plans surface on the approvals badge alone, while a pre-C1
+        #    transition-window plan (PENDING but never got an engine request) still surfaces
+        #    here so it never goes invisible.
         if can_approve_buy_plans(user):
+            from app.constants import ApprovalRequestStatus, ApprovalSubjectType
+            from app.models.approvals import ApprovalRequest
+
+            open_req_subq = (
+                db.query(ApprovalRequest.subject_id)
+                .filter(
+                    ApprovalRequest.subject_type == ApprovalSubjectType.BUY_PLAN,
+                    ApprovalRequest.status == ApprovalRequestStatus.REQUESTED,
+                )
+                .subquery()
+            )
             approval_plans = (
                 db.query(BuyPlan.id)
                 .filter(
                     BuyPlan.status == BuyPlanStatus.PENDING,
                     BuyPlan.approved_by_id.is_(None),
+                    BuyPlan.id.not_in(db.query(open_req_subq.c.subject_id)),
                 )
                 .all()
             )
