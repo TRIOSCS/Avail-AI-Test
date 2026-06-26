@@ -297,40 +297,6 @@ class TestArchiveSinglePart:
         assert resp.status_code == 404
 
 
-class TestArchiveRequisition:
-    def test_archive_requisition(
-        self,
-        client: TestClient,
-        db_session: Session,
-        test_requisition: Requisition,
-    ) -> None:
-        resp = client.patch(f"/v2/partials/requisitions/{test_requisition.id}/archive")
-        assert resp.status_code == 200
-        db_session.refresh(test_requisition)
-        assert test_requisition.is_archived is True
-
-    def test_archive_req_not_found(self, client: TestClient) -> None:
-        resp = client.patch("/v2/partials/requisitions/99999/archive")
-        assert resp.status_code == 404
-
-    def test_unarchive_requisition(
-        self,
-        client: TestClient,
-        db_session: Session,
-        test_requisition: Requisition,
-    ) -> None:
-        test_requisition.is_archived = True
-        db_session.commit()
-        resp = client.patch(f"/v2/partials/requisitions/{test_requisition.id}/unarchive")
-        assert resp.status_code == 200
-        db_session.refresh(test_requisition)
-        assert test_requisition.is_archived is False
-
-    def test_unarchive_req_not_found(self, client: TestClient) -> None:
-        resp = client.patch("/v2/partials/requisitions/99999/unarchive")
-        assert resp.status_code == 404
-
-
 class TestBulkArchive:
     def test_bulk_archive_requirements(
         self,
@@ -353,13 +319,14 @@ class TestBulkArchive:
         db_session: Session,
         test_requisition: Requisition,
     ) -> None:
+        req = _first_requirement(db_session, test_requisition)
         resp = client.post(
             "/v2/partials/parts/bulk-archive",
             json={"requirement_ids": [], "requisition_ids": [test_requisition.id]},
         )
         assert resp.status_code == 200
-        db_session.refresh(test_requisition)
-        assert test_requisition.is_archived is True
+        db_session.refresh(req)
+        assert req.sourcing_status == "archived"
 
     def test_bulk_unarchive_requirements(
         self,

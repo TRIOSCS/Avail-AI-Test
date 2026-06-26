@@ -472,7 +472,6 @@ async def add_requirements(
                     Requisition.customer_site_id == req.customer_site_id,
                     Requisition.id != req_id,
                     Requisition.created_at >= cutoff,
-                    Requisition.is_archived.is_(False),
                 )
                 .all()
             )

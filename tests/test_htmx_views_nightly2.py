@@ -186,7 +186,7 @@ class TestPartsListPartial:
         assert resp.status_code == 200
 
     def test_parts_list_filter_archived(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user, is_archived=True)
+        req = _req(db_session, test_user)
         _requirement(db_session, req, sourcing_status=SourcingStatus.ARCHIVED)
         db_session.commit()
 
@@ -541,26 +541,6 @@ class TestArchiveSystem:
         resp = client.patch(f"/v2/partials/parts/{item.id}/unarchive")
         assert resp.status_code == 200
 
-    def test_archive_requisition(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        _requirement(db_session, req)
-        db_session.commit()
-
-        resp = client.patch(f"/v2/partials/requisitions/{req.id}/archive")
-        assert resp.status_code == 200
-
-    def test_archive_requisition_not_found(self, client, db_session: Session):
-        resp = client.patch("/v2/partials/requisitions/999999/archive")
-        assert resp.status_code == 404
-
-    def test_unarchive_requisition(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user, is_archived=True)
-        _requirement(db_session, req, sourcing_status=SourcingStatus.ARCHIVED)
-        db_session.commit()
-
-        resp = client.patch(f"/v2/partials/requisitions/{req.id}/unarchive")
-        assert resp.status_code == 200
-
     def test_bulk_archive(self, client, db_session: Session, test_user: User):
         item = _part(db_session, test_user)
 
@@ -571,7 +551,7 @@ class TestArchiveSystem:
         assert resp.status_code == 200
 
     def test_bulk_unarchive(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user, is_archived=True)
+        req = _req(db_session, test_user)
         item = _requirement(db_session, req, sourcing_status=SourcingStatus.ARCHIVED)
         db_session.commit()
 

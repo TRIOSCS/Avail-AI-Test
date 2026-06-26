@@ -128,14 +128,6 @@ def test_list_returns_correct_fields(db_session, test_user, test_requisition):
     assert "sourcing_score" in req
 
 
-def test_list_filters_by_status(db_session, test_user, test_requisition):
-    """Status filter excludes non-matching requisitions."""
-    # test_requisition is 'open' status
-    filters = ReqListFilters(status=ReqStatus.archived)
-    result = list_requisitions(db_session, filters, test_user.id, "buyer")
-    assert len(result["requisitions"]) == 0
-
-
 def test_list_search_by_name(db_session, test_user, test_requisition):
     """Search by name returns matching requisitions."""
     filters = ReqListFilters(q="REQ-TEST")
@@ -311,8 +303,7 @@ def test_list_filter_by_date_to(db_session, test_user):
 
 
 def test_list_status_all(db_session, test_user):
-    """Status 'all' shows every non-archived requisition regardless of pipeline
-    stage."""
+    """Status 'all' shows every requisition regardless of pipeline stage."""
     _make_req(db_session, "ALL-OPEN", test_user.id, status="open")
     _make_req(db_session, "ALL-WON", test_user.id, status="won")
     db_session.commit()
@@ -324,46 +315,11 @@ def test_list_status_all(db_session, test_user):
     assert "ALL-WON" in names
 
 
-def test_list_status_archived(db_session, test_user):
-    """Status 'archived' shows only is_archived rows (orthogonal to pipeline stage)."""
-    _make_req(db_session, "ARCH-OPEN", test_user.id, status="open")
-    _make_req(db_session, "ARCH-ARCHIVED", test_user.id, status="lost", is_archived=True)
-    db_session.commit()
-
-    filters = ReqListFilters(status=ReqStatus.archived)
-    result = list_requisitions(db_session, filters, test_user.id, "buyer")
-    names = [r["name"] for r in result["requisitions"]]
-    assert "ARCH-OPEN" not in names
-    assert "ARCH-ARCHIVED" in names
-
-
-# ── is_archived gate + hotlist filter (Task 4) ───────────────────────
-
-
-def test_archived_hidden_by_default(db_session, test_user):
-    """The 'all' filter never returns archived requisitions."""
-    _make_req(db_session, "DEFAULT-OPEN", test_user.id, status="open")
-    _make_req(db_session, "DEFAULT-ARCH", test_user.id, status="open", is_archived=True)
-    db_session.commit()
-
-    filters = ReqListFilters(status=ReqStatus.all)
-    result = list_requisitions(db_session, filters, test_user.id, "manager")
-    assert all(not r["is_archived"] for r in result["requisitions"])
-
-
-def test_archived_filter_shows_archived(db_session, test_user):
-    """The 'archived' filter returns only is_archived rows."""
-    _make_req(db_session, "ARCH-ONLY", test_user.id, status="lost", is_archived=True)
-    db_session.commit()
-
-    filters = ReqListFilters(status=ReqStatus.archived)
-    result = list_requisitions(db_session, filters, test_user.id, "manager")
-    rows = result["requisitions"]
-    assert len(rows) == 1 and rows[0]["is_archived"]
+# ── hotlist filter (Task 4) ──────────────────────────────────────────
 
 
 def test_hotlist_filter(db_session, test_user):
-    """The 'hotlist' filter returns only hotlist-status, non-archived rows."""
+    """The 'hotlist' filter returns only hotlist-status rows."""
     _make_req(db_session, "HOT-REQ", test_user.id, status="hotlist")
     _make_req(db_session, "OPEN-REQ", test_user.id, status="open")
     db_session.commit()

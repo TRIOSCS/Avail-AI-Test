@@ -170,7 +170,7 @@ class TestInlineSave:
 class TestRowAction:
     def test_missing_req_returns_404(self, client: TestClient):
         """get_req_for_user raises HTTPException 404 for unknown req in row_action."""
-        resp = client.post("/requisitions2/999999/action/archive")
+        resp = client.post("/requisitions2/999999/action/claim")
         assert resp.status_code == 404
 
     def test_clone_action(self, client: TestClient, active_req: Requisition):
@@ -191,13 +191,6 @@ class TestRowAction:
         ):
             resp = client.post(f"/requisitions2/{active_req.id}/action/unclaim")
         assert resp.status_code == 200  # returns table, not error
-
-    def test_archive_action(self, client: TestClient, active_req: Requisition, db_session: Session):
-        """Archive action toggles is_archived via set_archived."""
-        resp = client.post(f"/requisitions2/{active_req.id}/action/archive")
-        assert resp.status_code == 200
-        db_session.refresh(active_req)
-        assert active_req.is_archived is True
 
     def test_assign_action_with_owner(
         self, client: TestClient, active_req: Requisition, test_user: User, db_session: Session

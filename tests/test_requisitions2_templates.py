@@ -71,7 +71,7 @@ def test_filter_form_htmx_trigger(client):
 
 @pytest.mark.parametrize(
     "status",
-    ["all", "open", "rfqs_sent", "offers", "quoted", "hotlist", "won", "lost", "archived"],
+    ["all", "open", "rfqs_sent", "offers", "quoted", "hotlist", "won", "lost"],
 )
 def test_filter_form_includes_status_option(client, status):
     """Filter form has status dropdown with all new pipeline options."""
@@ -251,17 +251,7 @@ def test_detail_panel_has_action_buttons(client, test_requisition, db_session):
     db_session.commit()
 
     resp = client.get(f"/requisitions2/{test_requisition.id}/detail")
-    assert f'hx-post="/requisitions2/{test_requisition.id}/action/archive"' in resp.text
-
-
-def test_detail_archived_shows_activate_button(client, test_requisition, db_session):
-    """Archived detail panel shows Restore (activate) button instead of Archive."""
-    test_requisition.is_archived = True
-    db_session.commit()
-
-    resp = client.get(f"/requisitions2/{test_requisition.id}/detail")
-    assert "action/activate" in resp.text
-    assert f"/requisitions2/{test_requisition.id}/action/archive" not in resp.text
+    assert f'hx-post="/requisitions2/{test_requisition.id}/action/won"' in resp.text
 
 
 def test_detail_shows_claim_for_buyer(client, test_requisition, db_session):
@@ -290,16 +280,15 @@ def test_detail_panel_action_buttons_exist(client, test_requisition, db_session)
     db_session.commit()
 
     resp = client.get(f"/requisitions2/{test_requisition.id}/detail")
-    assert "action/archive" in resp.text
+    assert "action/hotlist" in resp.text
 
 
 def test_detail_panel_has_action_buttons_for_active(client, test_requisition, db_session):
-    """Detail panel for an open req shows archive, won, and hotlist buttons."""
+    """Detail panel for an open req shows won and hotlist buttons."""
     test_requisition.status = "open"
     db_session.commit()
 
     resp = client.get(f"/requisitions2/{test_requisition.id}/detail")
-    assert "action/archive" in resp.text
     assert "action/won" in resp.text
     assert "action/hotlist" in resp.text
 

@@ -5,7 +5,8 @@ Covers:
 - Illegal transitions raise ValueError
 - ActivityLog created on transition
 - No-op when status unchanged
-- set_hotlist / set_archived helpers
+- set_hotlist helper
+- Won/Lost transitions require an outcome reason
 """
 
 import os
@@ -19,7 +20,7 @@ from app.constants import ActivityType, RequisitionStatus
 from app.models import ActivityLog
 from app.services.requisition_state import (
     ALLOWED_TRANSITIONS,
-    set_archived,
+    OutcomeReasonRequired,
     set_hotlist,
     transition,
 )
@@ -177,7 +178,7 @@ class TestTransitionEdgeCases:
 
 
 class TestPipelineAndHelpers:
-    """New pipeline transitions, legacy normalisation, and hotlist/archive helpers."""
+    """New pipeline transitions, legacy normalisation, and the hotlist helper."""
 
     def test_transition_open_to_rfqs_sent(self, db_session, test_requisition, test_user):
         test_requisition.status = "open"
@@ -200,8 +201,28 @@ class TestPipelineAndHelpers:
         transition(test_requisition, "open", test_user, db_session)
         assert test_requisition.status == "open"
 
-    def test_set_archived_toggle(self, db_session, test_requisition, test_user):
-        set_archived(test_requisition, True, test_user, db_session)
-        assert test_requisition.is_archived is True
-        set_archived(test_requisition, False, test_user, db_session)
-        assert test_requisition.is_archived is False
+    def test_won_requires_reason(self, db_session, test_requisition, test_user):
+        test_requisition.status = "offers"
+        db_session.commit()
+        with pytest.raises(OutcomeReasonRequired, match="reason is required"):
+            transition(test_requisition, "won", test_user, db_session)
+
+    def test_lost_requires_reason(self, db_session, test_requisition, test_user):
+        test_requisition.status = "offers"
+        db_session.commit()
+        with pytest.raises(OutcomeReasonRequired, match="reason is required"):
+            transition(test_requisition, "lost", test_user, db_session)
+
+    def test_won_persists_stripped_reason(self, db_session, test_requisition, test_user):
+        test_requisition.status = "offers"
+        db_session.commit()
+        transition(test_requisition, "won", test_user, db_session, reason="  Best price  ")
+        assert test_requisition.status == "won"
+        assert test_requisition.outcome_reason == "Best price"
+
+    def test_non_terminal_transition_clears_outcome_reason(self, db_session, test_requisition, test_user):
+        test_requisition.status = "won"
+        test_requisition.outcome_reason = "stale"
+        db_session.commit()
+        transition(test_requisition, "open", test_user, db_session)
+        assert test_requisition.outcome_reason is None

@@ -303,6 +303,7 @@ async def inline_save(
     req_id: int,
     field: str = Form(...),
     value: str = Form(default=""),
+    reason: str = Form(default=""),
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
 ):
@@ -326,11 +327,13 @@ async def inline_save(
         msg = f"Renamed to '{clean}'"
 
     elif field == "status":
-        from ..services.requisition_state import transition
+        from ..services.requisition_state import OutcomeReasonRequired, transition
 
         try:
-            transition(req, value, user, db)
+            transition(req, value, user, db, reason=reason)
             msg = f"Status changed to {value}"
+        except OutcomeReasonRequired as e:
+            return HTMLResponse(html.escape(str(e)), status_code=400)
         except ValueError as e:
             return HTMLResponse(html.escape(str(e)), status_code=422)
 
@@ -383,6 +386,7 @@ async def row_action(
     req_id: int,
     action_name: RowActionName,
     owner_id: int = Form(default=None),
+    reason: str = Form(default=""),
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
 ):
@@ -393,35 +397,24 @@ async def row_action(
 
     msg = "Action completed"
 
-    # Won/Lost are status transitions; archive/activate toggle the orthogonal
-    # is_archived boolean (no longer a pipeline status); hotlist puts the req on
-    # the Proactive monitor. Status moves differ only by target state + verb.
+    # Won/Lost are status transitions that require a close reason; hotlist puts
+    # the req on the Proactive monitor. Status moves differ only by target/verb.
     transition_actions = {
         RowActionName.won: ("won", f"'{req.name}' marked won"),
         RowActionName.lost: ("lost", f"'{req.name}' marked lost"),
     }
 
     if action_name in transition_actions:
-        from ..services.requisition_state import transition
+        from ..services.requisition_state import OutcomeReasonRequired, transition
 
         target_state, success_msg = transition_actions[action_name]
         try:
-            transition(req, target_state, user, db)
+            transition(req, target_state, user, db, reason=reason)
             msg = success_msg
+        except OutcomeReasonRequired as e:
+            return HTMLResponse(html.escape(str(e)), status_code=400)
         except ValueError as e:
             msg = str(e)
-
-    elif action_name == RowActionName.archive:
-        from ..services.requisition_state import set_archived
-
-        set_archived(req, True, user, db)
-        msg = f"'{req.name}' archived"
-
-    elif action_name == RowActionName.activate:
-        from ..services.requisition_state import set_archived
-
-        set_archived(req, False, user, db)
-        msg = f"'{req.name}' restored"
 
     elif action_name == RowActionName.hotlist:
         from ..services.requisition_state import set_hotlist
@@ -503,22 +496,8 @@ async def bulk_action(
     reqs = reqs_q.all()
     count = 0
 
-    # Archive/Activate toggle the orthogonal is_archived boolean (archive is no
-    # longer a pipeline status). set_archived is a no-op when already in the
-    # target state, so re-archiving doesn't inflate the count.
-    archive_target = {
-        BulkActionName.archive: True,
-        BulkActionName.activate: False,
-    }.get(action_name)
-
     for req in reqs:
-        if archive_target is not None:
-            from ..services.requisition_state import set_archived
-
-            if req.is_archived != archive_target:
-                set_archived(req, archive_target, user, db)
-                count += 1
-        elif action_name == BulkActionName.assign and owner_id:
+        if action_name == BulkActionName.assign and owner_id:
             req.created_by = owner_id
             count += 1
 

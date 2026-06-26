@@ -11,8 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from sqlalchemy.orm import Session
 
-from app.constants import RequisitionStatus
-from app.models import Requisition, User
+from app.models import User
 
 # ═══════════════════════════════════════════════════════════════════════
 #  register_core_jobs
@@ -34,7 +33,6 @@ class TestRegisterCoreJobs:
         register_core_jobs(scheduler, settings)
 
         job_ids = [call.kwargs["id"] for call in scheduler.add_job.call_args_list]
-        assert "auto_archive" in job_ids
         assert "token_refresh" in job_ids
         assert "inbox_scan" in job_ids
         assert "batch_results" in job_ids
@@ -60,12 +58,12 @@ class TestRegisterCoreJobs:
     @pytest.mark.parametrize(
         ("activity_tracking_enabled", "expected_count"),
         [
-            pytest.param(False, 6, id="without_webhooks"),
-            pytest.param(True, 7, id="with_webhooks"),
+            pytest.param(False, 5, id="without_webhooks"),
+            pytest.param(True, 6, id="with_webhooks"),
         ],
     )
     def test_total_job_count(self, activity_tracking_enabled: bool, expected_count: int):
-        """Exactly 6 jobs without activity tracking, 7 with it enabled."""
+        """Exactly 5 jobs without activity tracking, 6 with it enabled."""
         from app.jobs.core_jobs import register_core_jobs
 
         scheduler = MagicMock()
@@ -75,118 +73,6 @@ class TestRegisterCoreJobs:
 
         register_core_jobs(scheduler, settings)
         assert scheduler.add_job.call_count == expected_count
-
-
-# ═══════════════════════════════════════════════════════════════════════
-#  _job_auto_archive
-# ═══════════════════════════════════════════════════════════════════════
-
-
-class TestJobAutoArchive:
-    """Tests for _job_auto_archive()."""
-
-    @pytest.mark.asyncio
-    async def test_archives_stale_requisitions(self, db_session: Session, test_user: User):
-        """Requisitions inactive >30 days get archived."""
-        from app.jobs.core_jobs import _job_auto_archive
-
-        req = Requisition(
-            name="REQ-STALE-001",
-            customer_name="Stale Corp",
-            status=RequisitionStatus.OPEN,
-            created_by=test_user.id,
-            last_searched_at=datetime.now(timezone.utc) - timedelta(days=31),
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(req)
-        db_session.commit()
-
-        with patch("app.database.SessionLocal", return_value=db_session), patch.object(db_session, "close"):
-            await _job_auto_archive.__wrapped__()
-
-        db_session.refresh(req)
-        assert req.is_archived is True
-
-    @pytest.mark.asyncio
-    async def test_does_not_archive_recent_requisitions(self, db_session: Session, test_user: User):
-        """Requisitions active within 30 days are untouched."""
-        from app.jobs.core_jobs import _job_auto_archive
-
-        req = Requisition(
-            name="REQ-FRESH-001",
-            customer_name="Fresh Corp",
-            status=RequisitionStatus.OPEN,
-            created_by=test_user.id,
-            last_searched_at=datetime.now(timezone.utc) - timedelta(days=10),
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(req)
-        db_session.commit()
-
-        with patch("app.database.SessionLocal", return_value=db_session), patch.object(db_session, "close"):
-            await _job_auto_archive.__wrapped__()
-
-        db_session.refresh(req)
-        assert req.is_archived is False
-
-    @pytest.mark.asyncio
-    async def test_does_not_archive_null_last_searched(self, db_session: Session, test_user: User):
-        """Requisitions with no last_searched_at are skipped."""
-        from app.jobs.core_jobs import _job_auto_archive
-
-        req = Requisition(
-            name="REQ-NULL-001",
-            customer_name="Null Corp",
-            status=RequisitionStatus.OPEN,
-            created_by=test_user.id,
-            last_searched_at=None,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(req)
-        db_session.commit()
-
-        with patch("app.database.SessionLocal", return_value=db_session), patch.object(db_session, "close"):
-            await _job_auto_archive.__wrapped__()
-
-        db_session.refresh(req)
-        assert req.is_archived is False
-
-    @pytest.mark.asyncio
-    async def test_archives_multiple_stale(self, db_session: Session, test_user: User):
-        """Multiple stale requisitions all get archived."""
-        from app.jobs.core_jobs import _job_auto_archive
-
-        for i in range(3):
-            req = Requisition(
-                name=f"REQ-MULTI-{i}",
-                customer_name="Multi Corp",
-                status=RequisitionStatus.OPEN,
-                created_by=test_user.id,
-                last_searched_at=datetime.now(timezone.utc) - timedelta(days=35),
-                created_at=datetime.now(timezone.utc),
-            )
-            db_session.add(req)
-        db_session.commit()
-
-        with patch("app.database.SessionLocal", return_value=db_session), patch.object(db_session, "close"):
-            await _job_auto_archive.__wrapped__()
-
-        stale = db_session.query(Requisition).filter(Requisition.is_archived.is_(True)).count()
-        assert stale == 3
-
-    @pytest.mark.asyncio
-    async def test_auto_archive_handles_exception(self, db_session: Session):
-        """Exception during query is caught and re-raised."""
-        from app.jobs.core_jobs import _job_auto_archive
-
-        mock_db = MagicMock()
-        mock_db.query.side_effect = RuntimeError("DB connection lost")
-
-        with patch("app.database.SessionLocal", return_value=mock_db):
-            with pytest.raises(RuntimeError, match="DB connection lost"):
-                await _job_auto_archive.__wrapped__()
-        mock_db.rollback.assert_called_once()
-        mock_db.close.assert_called_once()
 
 
 # ═══════════════════════════════════════════════════════════════════════

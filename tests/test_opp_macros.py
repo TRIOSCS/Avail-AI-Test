@@ -357,13 +357,12 @@ def test_opp_name_cell_name_has_truncate_tip():
 # ── opp_row_action_rail ───────────────────────────────────────────────
 
 
-def _req(status="open", claimed_by_id=None, name="Acme", rid=1, is_archived=False):
+def _req(status="open", claimed_by_id=None, name="Acme", rid=1):
     return {
         "id": rid,
         "name": name,
         "status": status,
         "claimed_by_id": claimed_by_id,
-        "is_archived": is_archived,
     }
 
 
@@ -384,26 +383,14 @@ def render_rail(req, user):
     return tpl.render(req=req, user=user).strip()
 
 
-def test_rail_shows_archive_when_not_archived():
-    html = render_rail(_req(status="open", is_archived=False), _user())
-    assert "action/archive" in html
-    assert "action/activate" not in html
-
-
-def test_rail_shows_activate_when_archived():
-    html = render_rail(_req(status="open", is_archived=True), _user())
-    assert "action/activate" in html
-    assert "action/archive" not in html
-
-
 def test_rail_shows_hotlist_for_open_req():
-    html = render_rail(_req(status="open", is_archived=False), _user())
+    html = render_rail(_req(status="open"), _user())
     assert "action/hotlist" in html
     assert "Add Acme to Hotlist" in html
 
 
 def test_rail_hides_hotlist_for_hotlisted_req():
-    html = render_rail(_req(status="hotlist", is_archived=False), _user())
+    html = render_rail(_req(status="hotlist"), _user())
     assert "action/hotlist" not in html
 
 

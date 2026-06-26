@@ -15,8 +15,8 @@ from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from ..constants import RESTRICTED_ROLES, ActivityType, RequisitionStatus
-from ..models import Offer, Requirement, Requisition, User
+from ..constants import ActivityType, RequisitionStatus
+from ..models import Offer, Requirement, Requisition
 from ..utils.normalization import (
     normalize_condition,
     normalize_mpn,
@@ -26,60 +26,13 @@ from ..utils.normalization import (
 from .activity_service import log_activity
 
 # ---------------------------------------------------------------------------
-# Bulk archive / assign — UPDATE...RETURNING
+# Bulk assign — UPDATE...RETURNING
 # ---------------------------------------------------------------------------
 #
-# These helpers execute a single `UPDATE ... RETURNING id` per call and return
-# the IDs that were actually updated. The caller controls the transaction
-# (commit happens after activity-log writes) so the audit trail and the
-# status mutation land atomically.
-
-
-def bulk_archive_others(db: Session, user_id: int) -> list[int]:
-    """Archive all active requisitions NOT created by `user_id`.
-
-    Used by the admin-only `/api/requisitions/bulk-archive` route. Terminal statuses
-    (won / lost / cancelled) and already-archived rows are excluded so the operation is
-    idempotent. Returns the IDs that were actually flipped to archived (may be empty).
-    """
-    stmt = (
-        update(Requisition)
-        .where(
-            Requisition.created_by != user_id,
-            Requisition.status.notin_(RequisitionStatus.TERMINAL),
-            Requisition.is_archived.is_(False),
-        )
-        .values(is_archived=True)
-        .returning(Requisition.id)
-        .execution_options(synchronize_session=False)
-    )
-    return list(db.execute(stmt).scalars().all())
-
-
-def batch_archive_for_user(db: Session, user: User, ids: list[int]) -> list[int]:
-    """Archive specific requisitions by ID list, respecting role-based ownership.
-
-    Sales users may only archive their own requisitions; other roles may
-    archive any. Terminal statuses and already-archived rows are excluded.
-    Returns the IDs that were actually archived (which may be a strict subset
-    of `ids`).
-    """
-    conditions = [
-        Requisition.id.in_(ids),
-        Requisition.status.notin_(RequisitionStatus.TERMINAL),
-        Requisition.is_archived.is_(False),
-    ]
-    if user.role in RESTRICTED_ROLES:
-        conditions.append(Requisition.created_by == user.id)
-
-    stmt = (
-        update(Requisition)
-        .where(*conditions)
-        .values(is_archived=True)
-        .returning(Requisition.id)
-        .execution_options(synchronize_session=False)
-    )
-    return list(db.execute(stmt).scalars().all())
+# This helper executes a single `UPDATE ... RETURNING id` and returns the IDs
+# that were actually updated. The caller controls the transaction (commit
+# happens after activity-log writes) so the audit trail and the mutation land
+# atomically.
 
 
 def batch_assign_owner(db: Session, ids: list[int], owner_id: int) -> list[int]:

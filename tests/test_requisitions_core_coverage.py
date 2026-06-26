@@ -3,12 +3,12 @@ app/routers/requisitions/core.py.
 
 Targets uncovered branches:
 - requisition_counts with SALES role (line 62)
-- list_requisitions with multi-status filter, search, archive status filter
+- list_requisitions with multi-status filter, search
 - get_requisition 404
 - mark_outcome 404
 - update_requisition with urgency validation, opportunity_value, etc.
 - claim/unclaim (role checks, 404, ValueError)
-- batch operations
+- batch assign
 
 Called by: pytest
 Depends on: conftest.py fixtures
@@ -81,7 +81,6 @@ class TestRequisitionCounts:
         data = resp.json()
         assert "total" in data
         assert "open" in data
-        assert "archive" in data
 
     def test_counts_as_sales_user(self, db_session):
         """Sales user only counts own requisitions."""
@@ -130,16 +129,6 @@ class TestListRequisitions:
         """Filtering/sorting/pagination query params all return 200."""
         resp = client.get(f"/api/requisitions{query}")
         assert resp.status_code == 200
-
-    def test_list_with_archive_status(self, client, db_session, test_user):
-        """GET /api/requisitions?status=archive returns is_archived reqs."""
-        _make_req(db_session, test_user.id, name="Archived Req", status="lost", is_archived=True)
-        db_session.commit()
-
-        resp = client.get("/api/requisitions?status=archive")
-        assert resp.status_code == 200
-        names = [r["name"] for r in resp.json()["requisitions"]]
-        assert "Archived Req" in names
 
 
 # ── Get Requisition ──────────────────────────────────────────────────
@@ -196,10 +185,10 @@ class TestMarkOutcome:
         assert resp.status_code == 404
 
     def test_mark_outcome_success(self, client, test_requisition):
-        """PUT outcome marks requisition as won."""
+        """PUT outcome marks requisition as won (a close reason is required)."""
         resp = client.put(
             f"/api/requisitions/{test_requisition.id}/outcome",
-            json={"outcome": "won"},
+            json={"outcome": "won", "reason": "Customer signed PO"},
         )
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
@@ -255,139 +244,6 @@ class TestUpdateRequisition:
             json={"customer_site_id": test_customer_site.id},
         )
         assert resp.status_code == 200
-
-
-# ── Toggle Archive ───────────────────────────────────────────────────
-
-
-class TestToggleArchive:
-    def test_archive_not_found(self, client):
-        """PUT archive for non-existent req returns 404."""
-        resp = client.put("/api/requisitions/99999/archive")
-        assert resp.status_code == 404
-
-    def test_archive_active_req(self, client, test_requisition):
-        """Archiving a live req flips is_archived to True (status untouched)."""
-        resp = client.put(f"/api/requisitions/{test_requisition.id}/archive")
-        assert resp.status_code == 200
-        assert resp.json()["is_archived"] is True
-
-    def test_unarchive_archived_req(self, client, db_session, test_user):
-        """Unarchiving an archived req flips is_archived back to False."""
-        req = _make_req(db_session, test_user.id, name="Archived to Restore", status="lost", is_archived=True)
-        db_session.commit()
-
-        resp = client.put(f"/api/requisitions/{req.id}/archive")
-        assert resp.status_code == 200
-        assert resp.json()["is_archived"] is False
-
-
-# ── Bulk Archive ─────────────────────────────────────────────────────
-
-
-class TestBulkArchive:
-    def test_bulk_archive_returns_count(self, client, db_session, test_user):
-        """PUT /api/requisitions/bulk-archive archives all non-owner active reqs."""
-        other_user = User(
-            email="other_bulk@test.com",
-            name="Other Bulk",
-            role="buyer",
-            azure_id="bulk-other-001",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(other_user)
-        db_session.flush()
-
-        _make_req(db_session, other_user.id, name="Other Bulk Req")
-        db_session.commit()
-
-        resp = client.put("/api/requisitions/bulk-archive")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["ok"] is True
-        assert data["archived_count"] >= 1
-
-    def test_bulk_archive_returns_ids(self, client, db_session, test_user):
-        """Bulk-archive response includes archived_ids matching the affected rows."""
-        other = User(
-            email="bulk_ids_other@test.com",
-            name="Bulk IDs Other",
-            role="buyer",
-            azure_id="bulk-ids-001",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(other)
-        db_session.flush()
-
-        reqs = [_make_req(db_session, other.id, name=f"Bulk IDs Req {i}") for i in range(3)]
-        db_session.commit()
-
-        resp = client.put("/api/requisitions/bulk-archive")
-        assert resp.status_code == 200
-        body = resp.json()
-
-        expected_ids = {r.id for r in reqs}
-        assert set(body["archived_ids"]) == expected_ids
-        assert body["archived_count"] == 3
-
-
-# ── Batch Archive ────────────────────────────────────────────────────
-
-
-class TestBatchArchive:
-    def test_batch_archive_by_ids(self, client, test_requisition):
-        """PUT /api/requisitions/batch-archive archives listed IDs."""
-        resp = client.put(
-            "/api/requisitions/batch-archive",
-            json={"ids": [test_requisition.id]},
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["ok"] is True
-
-    def test_batch_archive_already_archived_ids(self, client, db_session, test_user):
-        """Batch archive of already-archived req returns 0 archived."""
-        req = _make_req(db_session, test_user.id, name="Already Archived", status="lost", is_archived=True)
-        db_session.commit()
-        resp = client.put(
-            "/api/requisitions/batch-archive",
-            json={"ids": [req.id]},
-        )
-        assert resp.status_code == 200
-        assert resp.json()["archived_count"] == 0
-
-    def test_batch_archive_sales_role_own_reqs(self, db_session):
-        """Sales user can only batch-archive own reqs."""
-        sales = User(
-            email="salesbatch@test.com",
-            name="Sales Batch",
-            role="sales",
-            azure_id="sb-001",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(sales)
-        db_session.flush()
-
-        req = _make_req(db_session, sales.id, name="Sales Batch Req")
-        db_session.commit()
-
-        with _client_as(db_session, sales) as c:
-            resp = c.put("/api/requisitions/batch-archive", json={"ids": [req.id]})
-        assert resp.status_code == 200
-        assert resp.json()["archived_count"] >= 1
-
-    def test_batch_archive_returns_ids(self, client, db_session, test_user):
-        """Batch-archive response includes archived_ids matching the requested IDs."""
-        reqs = [_make_req(db_session, test_user.id, name=f"Batch IDs Req {i}") for i in range(3)]
-        db_session.commit()
-        ids = [r.id for r in reqs]
-
-        resp = client.put("/api/requisitions/batch-archive", json={"ids": ids})
-        assert resp.status_code == 200
-        body = resp.json()
-
-        assert sorted(body["archived_ids"]) == sorted(ids)
-        assert body["archived_count"] == 3
 
 
 # ── Batch Assign ─────────────────────────────────────────────────────

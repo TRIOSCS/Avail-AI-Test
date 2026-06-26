@@ -830,14 +830,15 @@ class TestBulkArchive:
 
     def test_archive_requisitions_returns_200(self, client, db_session, test_user):
         req = _make_requisition(db_session, test_user)
+        req_item = req.requirements[0]
 
         resp = client.post(
             "/v2/partials/parts/bulk-archive",
             json={"requirement_ids": [], "requisition_ids": [req.id]},
         )
         assert resp.status_code == 200
-        db_session.refresh(req)
-        assert req.is_archived is True
+        db_session.refresh(req_item)
+        assert req_item.sourcing_status == SourcingStatus.ARCHIVED
 
     def test_archive_empty_body_returns_200(self, client, db_session):
         resp = client.post(

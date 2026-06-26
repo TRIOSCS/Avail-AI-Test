@@ -119,8 +119,6 @@ class TestBulkArchiveDirect:
         )
 
         assert result.status_code == 200
-        db_session.refresh(req)
-        assert req.is_archived is True
         db_session.refresh(part)
         assert part.sourcing_status == SourcingStatus.ARCHIVED
 
@@ -175,12 +173,12 @@ class TestBulkUnarchiveDirect:
         assert part.sourcing_status == SourcingStatus.OPEN
 
     async def test_requisition_ids_branch_covered(self, db_session: Session, test_user: User):
-        """Lines 9914–9922: requisition_ids non-empty → status ACTIVE + cascade."""
+        """Lines 9914–9922: requisition_ids non-empty → archived parts restored to
+        open."""
         from app.routers.htmx_views import bulk_unarchive
 
         req = _make_requisition(db_session, test_user)
         part = _make_requirement(db_session, req)
-        req.is_archived = True
         part.sourcing_status = SourcingStatus.ARCHIVED
         db_session.commit()
 
@@ -189,8 +187,6 @@ class TestBulkUnarchiveDirect:
         )
 
         assert result.status_code == 200
-        db_session.refresh(req)
-        assert req.is_archived is False
         db_session.refresh(part)
         assert part.sourcing_status == SourcingStatus.OPEN
 
@@ -200,7 +196,6 @@ class TestBulkUnarchiveDirect:
 
         req = _make_requisition(db_session, test_user)
         part = _make_requirement(db_session, req)
-        req.is_archived = True
         part.sourcing_status = SourcingStatus.ARCHIVED
         db_session.commit()
 

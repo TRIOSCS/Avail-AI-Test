@@ -46,8 +46,6 @@ _RULE_MEANINGFUL_TYPES: frozenset[str] = frozenset(
         ActivityType.OFFER_STATUS_CHANGED,
         ActivityType.ASSIGNMENT_CHANGED,
         ActivityType.TASK_COMPLETED,
-        ActivityType.REQ_ARCHIVED,
-        ActivityType.REQ_UNARCHIVED,
     }
 )
 

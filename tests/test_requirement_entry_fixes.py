@@ -139,46 +139,6 @@ def test_sourcing_score_sales_cannot_see_others(db_session, sales_user, test_use
         _clear_overrides()
 
 
-# ── B10: Batch archive respects role ─────────────────────────────────
-
-
-def test_batch_archive_sales_only_own(db_session, sales_user, test_user):
-    """Sales user can only batch-archive their own requisitions."""
-    own_req = Requisition(
-        name="My Req",
-        status="open",
-        created_by=sales_user.id,
-        created_at=datetime.now(timezone.utc),
-    )
-    other_req = Requisition(
-        name="Other Req",
-        status="open",
-        created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add_all([own_req, other_req])
-    db_session.commit()
-    db_session.refresh(own_req)
-    db_session.refresh(other_req)
-
-    sales_c = _make_sales_client(db_session, sales_user)
-    try:
-        resp = sales_c.put(
-            "/api/requisitions/batch-archive",
-            json={"ids": [own_req.id, other_req.id]},
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        # Only the sales user's own requisition should be archived
-        assert data["archived_count"] == 1
-        db_session.refresh(own_req)
-        db_session.refresh(other_req)
-        assert own_req.is_archived is True
-        assert other_req.is_archived is False
-    finally:
-        _clear_overrides()
-
-
 # ── B11: Batch assign requires admin ─────────────────────────────────
 
 

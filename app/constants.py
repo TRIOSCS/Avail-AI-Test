@@ -107,8 +107,8 @@ class RequisitionStatus(StrEnum):
     Pipeline (Sales Hub): OPEN -> RFQS_SENT -> OFFERS -> QUOTED -> WON/LOST. DRAFT
     precedes OPEN. HOTLIST is an off-pipeline *monitor* state: the salesperson watches a
     part/customer and the Proactive matcher surfaces an offer when stock appears.
-    CANCELLED retained for existing rows. Archive is NOT a status — see
-    Requisition.is_archived (hidden-but-retrievable).
+    CANCELLED retained for existing rows. There is no archive/hide capability — a
+    requisition ends in WON or LOST (each carrying a required outcome_reason).
     """
 
     DRAFT = "draft"
@@ -614,8 +614,6 @@ class ActivityType(StrEnum):
     TASK_COMPLETED = "task_completed"
     TASK_REOPENED = "task_reopened"
     ASSIGNMENT_CHANGED = "assignment_changed"
-    REQ_ARCHIVED = "req_archived"
-    REQ_UNARCHIVED = "req_unarchived"
     STRATEGIC_VENDOR_EXPIRING = "strategic_expiring"  # 18 chars — fits String(20)
     # Communication / manual-entry types
     EMAIL_SENT = "email_sent"

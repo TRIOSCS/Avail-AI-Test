@@ -277,7 +277,6 @@ async def get_company(
                 )
                 .filter(
                     Requisition.status.notin_([RequisitionStatus.WON, RequisitionStatus.LOST]),
-                    Requisition.is_archived.is_(False),
                     Requisition.customer_site_id.in_(site_ids),
                 )
                 .group_by(Requisition.customer_site_id)

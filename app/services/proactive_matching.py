@@ -203,7 +203,6 @@ def _find_hotlist_matches(
         .join(Company, Company.id == Requisition.company_id)
         .filter(
             Requisition.status == RequisitionStatus.HOTLIST.value,
-            Requisition.is_archived.is_(False),
             Requirement.material_card_id == material_card_id,
             Company.account_owner_id.isnot(None),
             CustomerSite.is_active.is_(True),

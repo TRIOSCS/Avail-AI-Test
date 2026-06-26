@@ -1,10 +1,11 @@
-"""Requisition CRUD — list, create, update, archive, outcome, counts, sourcing-score.
+"""Requisition CRUD — list, create, update, outcome, counts, sourcing-score.
 
 Business Rules:
 - Requisitions contain requirements (parent/child)
 - Sales users only see their own requisitions; all other roles see everything
 - Pipeline status transitions: draft → open → rfqs_sent → offers → quoted → won/lost
-  (plus hotlist monitor). Archiving is orthogonal — Requisition.is_archived, not a status.
+  (plus hotlist monitor). There is no archive/hide capability; closing to won/lost
+  requires a reason (Requisition.outcome_reason).
 - Sourcing score computed from 7 weighted factors
 
 Called by: requisitions.__init__ (sub-router)
@@ -36,20 +37,15 @@ from ...models import (
     VendorResponse,
 )
 from ...schemas.requisitions import (
-    BatchArchiveByIds,
     BatchAssign,
     RequisitionCreate,
     RequisitionOut,
     RequisitionOutcome,
     RequisitionUpdate,
 )
-from ...schemas.responses import BatchAssignResponse, BulkArchiveResponse, RequisitionListResponse
+from ...schemas.responses import BatchAssignResponse, RequisitionListResponse
 from ...services.activity_service import log_activity
-from ...services.requisition_service import (
-    batch_archive_for_user,
-    batch_assign_owner,
-    bulk_archive_others,
-)
+from ...services.requisition_service import batch_assign_owner
 from ...services.sourcing_score import compute_sourcing_score_safe
 from ...utils.sql_helpers import escape_like
 
@@ -74,16 +70,9 @@ async def requisition_counts(
         select(sqlfunc.count(Requisition.id)).where(
             *base_filter,
             Requisition.status.in_(list(RequisitionStatus.OPEN_PIPELINE)),
-            Requisition.is_archived.is_(False),
         )
     )
-    archive_cnt = db.scalar(
-        select(sqlfunc.count(Requisition.id)).where(
-            *base_filter,
-            Requisition.is_archived.is_(True),
-        )
-    )
-    return {"total": total or 0, "open": open_cnt or 0, "archive": archive_cnt or 0}
+    return {"total": total or 0, "open": open_cnt or 0}
 
 
 @router.get("/api/requisitions", response_model=RequisitionListResponse, response_model_exclude_none=True)
@@ -358,22 +347,16 @@ def _build_requisition_list(q, status, sort, order, limit, offset, user, db):
                 subs_match,
             )
         )
-    elif status == "archive":
-        query = query.filter(Requisition.is_archived.is_(True))
     elif status:
-        # Explicit status filter hides archived rows so they don't leak in.
-        query = query.filter(Requisition.is_archived.is_(False))
         statuses = [s.strip() for s in status.split(",") if s.strip()]
         if len(statuses) == 1:
             query = query.filter(Requisition.status == statuses[0])
         else:
             query = query.filter(Requisition.status.in_(statuses))
     else:
-        # Default working set: everything not archived and not terminal
-        # (open/rfqs_sent/offers/quoted plus draft + hotlist), so a freshly
-        # created draft is visible. Archive is orthogonal (is_archived).
+        # Default working set: everything not terminal (open/rfqs_sent/offers/
+        # quoted plus draft + hotlist), so a freshly created draft is visible.
         query = query.filter(
-            Requisition.is_archived.is_(False),
             Requisition.status.notin_(RequisitionStatus.TERMINAL),
         )
 
@@ -553,93 +536,22 @@ async def create_requisition(
 async def mark_outcome(
     req_id: int, body: RequisitionOutcome, user: User = Depends(require_user), db: Session = Depends(get_db)
 ):
-    """Mark a requisition as won or lost."""
+    """Mark a requisition as won or lost (a non-empty reason is required)."""
+    from ...services.requisition_state import OutcomeReasonRequired, transition
     from . import invalidate_prefix
 
     req = get_req_for_user(db, user, req_id)
     if not req:
         raise HTTPException(404, "Requisition not found")
-    req.status = body.outcome
+    try:
+        transition(req, body.outcome, user, db, reason=body.reason)
+    except OutcomeReasonRequired as e:
+        raise HTTPException(400, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     db.commit()
     invalidate_prefix("req_list")
     return {"ok": True, "status": req.status}
-
-
-@router.put("/api/requisitions/{req_id}/archive")
-async def toggle_archive(req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
-    from ...services.requisition_state import set_archived
-    from . import invalidate_prefix
-
-    req = get_req_for_user(db, user, req_id)
-    if not req:
-        raise HTTPException(404, "Requisition not found")
-    # Archive is an orthogonal boolean now (hidden-but-retrievable), not a status.
-    # set_archived flips it and logs REQ_ARCHIVED / REQ_UNARCHIVED.
-    set_archived(req, not req.is_archived, user, db)
-    db.commit()
-    invalidate_prefix("req_list")
-    return {"ok": True, "is_archived": req.is_archived}
-
-
-@router.put("/api/requisitions/bulk-archive", response_model=BulkArchiveResponse)
-async def bulk_archive(user: User = Depends(require_admin), db: Session = Depends(get_db)):
-    """Archive all active requisitions NOT created by the current user."""
-    from . import invalidate_prefix
-
-    archived_ids = bulk_archive_others(db, user.id)
-    for rid in archived_ids:
-        log_activity(
-            db,
-            activity_type=ActivityType.REQ_ARCHIVED,
-            requisition_id=rid,
-            user_id=user.id,
-            description="Requisition archived (bulk)",
-        )
-    db.commit()
-    invalidate_prefix("req_list")
-    logger.info(
-        "admin user_id={} ({}) bulk-archived {} requisition(s) (not their own): {}",
-        user.id,
-        user.email,
-        len(archived_ids),
-        archived_ids[:50],
-    )
-    return BulkArchiveResponse(archived_count=len(archived_ids), archived_ids=archived_ids)
-
-
-@router.put("/api/requisitions/batch-archive", response_model=BulkArchiveResponse)
-async def batch_archive_by_ids(
-    payload: BatchArchiveByIds,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Archive specific requisitions by ID list."""
-    from . import invalidate_prefix
-
-    archived_ids = batch_archive_for_user(db, user, payload.ids)
-    for rid in archived_ids:
-        log_activity(
-            db,
-            activity_type=ActivityType.REQ_ARCHIVED,
-            requisition_id=rid,
-            user_id=user.id,
-            description="Requisition archived (bulk)",
-        )
-    db.commit()
-    invalidate_prefix("req_list")
-    if archived_ids or payload.ids:
-        # Log requested-vs-archived so support can see when rows got
-        # auth-filtered, already-terminal, or didn't exist.
-        logger.info(
-            "user_id={} role={} batch-archived {}/{} requisition(s): archived={} requested={}",
-            user.id,
-            user.role,
-            len(archived_ids),
-            len(payload.ids),
-            archived_ids[:50],
-            payload.ids[:50],
-        )
-    return BulkArchiveResponse(archived_count=len(archived_ids), archived_ids=archived_ids)
 
 
 @router.put("/api/requisitions/batch-assign", response_model=BatchAssignResponse)

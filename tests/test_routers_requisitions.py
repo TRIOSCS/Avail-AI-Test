@@ -47,7 +47,6 @@ def test_requisition_counts_empty(client):
     data = resp.json()
     assert data["total"] == 0
     assert data["open"] == 0
-    assert data["archive"] == 0
 
 
 def test_requisition_counts_with_data(client, test_requisition):
@@ -56,16 +55,6 @@ def test_requisition_counts_with_data(client, test_requisition):
     assert resp.status_code == 200
     data = resp.json()
     assert data["total"] >= 1
-
-
-def test_requisition_counts_archive_includes_archived(client, db_session, test_requisition):
-    """GET /api/requisitions/counts archive count includes is_archived rows."""
-    test_requisition.is_archived = True
-    db_session.commit()
-    resp = client.get("/api/requisitions/counts")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["archive"] >= 1
 
 
 def test_list_requisitions_empty(client):
@@ -103,15 +92,6 @@ def test_list_requisitions_search_no_match(client, test_requisition):
     assert len(resp.json()["requisitions"]) == 0
 
 
-def test_list_requisitions_archive_filter(client, db_session, test_requisition):
-    """Status=archive shows only is_archived requisitions."""
-    test_requisition.is_archived = True
-    db_session.commit()
-    resp = client.get("/api/requisitions", params={"status": "archive"})
-    assert resp.status_code == 200
-    assert len(resp.json()["requisitions"]) >= 1
-
-
 def test_list_requisitions_pagination(client, db_session, test_user):
     """Limit and offset work correctly."""
     from app.models import Requisition
@@ -145,24 +125,6 @@ def test_update_requisition(client, test_requisition):
 def test_update_requisition_not_found(client):
     """PUT returns 404 for non-existent requisition."""
     resp = client.put("/api/requisitions/99999", json={"name": "x"})
-    assert resp.status_code == 404
-
-
-def test_toggle_archive(client, test_requisition):
-    """PUT /api/requisitions/{id}/archive toggles is_archived (orthogonal to status)."""
-    resp = client.put(f"/api/requisitions/{test_requisition.id}/archive")
-    assert resp.status_code == 200
-    assert resp.json()["is_archived"] is True
-
-    # Toggle back
-    resp = client.put(f"/api/requisitions/{test_requisition.id}/archive")
-    assert resp.status_code == 200
-    assert resp.json()["is_archived"] is False
-
-
-def test_toggle_archive_not_found(client):
-    """Archive returns 404 for non-existent requisition."""
-    resp = client.put("/api/requisitions/99999/archive")
     assert resp.status_code == 404
 
 
@@ -516,63 +478,6 @@ def test_mark_sighting_unavailable_forbidden_for_other_sales_user(db_session, te
 # ── Bulk Operations ──────────────────────────────────────────────────
 
 
-def test_bulk_archive(client, db_session, test_user):
-    """PUT /api/requisitions/bulk-archive archives reqs not created by current user."""
-    from app.models import Requisition, User
-
-    # bulk-archive archives reqs NOT created by the current user
-    other = User(
-        email="other@trioscs.com",
-        name="Other",
-        role="buyer",
-        azure_id="az-other-bulk",
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(other)
-    db_session.flush()
-
-    r1 = Requisition(
-        name="BULK-1",
-        status="open",
-        created_by=other.id,
-        created_at=datetime.now(timezone.utc),
-    )
-    r2 = Requisition(
-        name="BULK-2",
-        status="open",
-        created_by=other.id,
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add_all([r1, r2])
-    db_session.commit()
-
-    resp = client.put("/api/requisitions/bulk-archive")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["ok"] is True
-    assert data["archived_count"] >= 2
-
-
-def test_batch_archive_by_ids(client, db_session, test_user):
-    """PUT /api/requisitions/batch-archive archives specific reqs by ID."""
-    from app.models import Requisition
-
-    r1 = Requisition(name="BA-1", status="open", created_by=test_user.id, created_at=datetime.now(timezone.utc))
-    r2 = Requisition(name="BA-2", status="open", created_by=test_user.id, created_at=datetime.now(timezone.utc))
-    r3 = Requisition(name="BA-3", status="open", created_by=test_user.id, created_at=datetime.now(timezone.utc))
-    db_session.add_all([r1, r2, r3])
-    db_session.commit()
-
-    resp = client.put("/api/requisitions/batch-archive", json={"ids": [r1.id, r2.id]})
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["ok"] is True
-    assert data["archived_count"] == 2
-    # r3 should still be open (not archived)
-    db_session.refresh(r3)
-    assert r3.is_archived is False
-
-
 def test_batch_assign(client, db_session, test_user):
     """PUT /api/requisitions/batch-assign assigns owner to specific reqs (admin
     only)."""
@@ -801,16 +706,6 @@ def test_update_requisition_empty_name_preserves_old(client, db_session, test_re
     )
     assert resp.status_code == 200
     assert resp.json()["name"] == old_name
-
-
-@pytest.mark.parametrize("status", ["won", "lost"])
-def test_toggle_archive_terminal_status(client, db_session, test_requisition, status):
-    """Archiving a 'won'/'lost' requisition flips is_archived (status untouched)."""
-    test_requisition.status = status
-    db_session.commit()
-    resp = client.put(f"/api/requisitions/{test_requisition.id}/archive")
-    assert resp.status_code == 200
-    assert resp.json()["is_archived"] is True
 
 
 def test_clone_requisition_with_substitutes(client, db_session, test_requisition):

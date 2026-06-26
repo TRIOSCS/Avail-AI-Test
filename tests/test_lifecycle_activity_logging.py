@@ -1,7 +1,7 @@
 """test_lifecycle_activity_logging.py — lifecycle events write activity_log rows.
 
-Covers Plan 2b: task_completed, assignment_changed, req_archived/req_unarchived,
-and sales_note events route through activity_service.log_activity().
+Covers Plan 2b: task_completed, assignment_changed, and sales_note events route
+through activity_service.log_activity().
 
 Called by: pytest
 Depends on: app/services/activity_service.py, app/constants.py, conftest.py
@@ -66,29 +66,6 @@ def test_claim_requisition_logs_assignment_changed(db_session, test_requisition,
     assert len(rows) == 1
     legacy = db_session.query(ActivityLog).filter(ActivityLog.activity_type == "requisition_claimed").all()
     assert legacy == []
-
-
-def test_toggle_archive_logs_req_archived(client, db_session, test_requisition):
-    """Archiving a requisition writes a req_archived activity row; toggling back writes
-    a req_unarchived row."""
-    resp = client.put(f"/api/requisitions/{test_requisition.id}/archive")
-    assert resp.status_code == 200, resp.text
-    rows = _activity_rows(db_session, test_requisition.id, ActivityType.REQ_ARCHIVED)
-    assert len(rows) == 1
-
-    resp = client.put(f"/api/requisitions/{test_requisition.id}/archive")
-    assert resp.status_code == 200, resp.text
-    rows = _activity_rows(db_session, test_requisition.id, ActivityType.REQ_UNARCHIVED)
-    assert len(rows) == 1
-
-
-def test_batch_archive_logs_req_archived(client, db_session, test_requisition):
-    """Bulk-archiving requisitions writes a req_archived row for each."""
-    before = len(_activity_rows(db_session, test_requisition.id, ActivityType.REQ_ARCHIVED))
-    resp = client.put("/api/requisitions/batch-archive", json={"ids": [test_requisition.id]})
-    assert resp.status_code == 200, resp.text
-    rows = _activity_rows(db_session, test_requisition.id, ActivityType.REQ_ARCHIVED)
-    assert len(rows) == before + 1
 
 
 def test_save_part_notes_logs_sales_note(client, db_session, test_requisition):

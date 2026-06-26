@@ -1,22 +1,22 @@
-"""Rework requisition pipeline + add is_archived; drop archive status.
+"""Rework requisition pipeline + add outcome_reason; drop archive status.
 
-Adds requisitions.is_archived (orthogonal hidden-but-retrievable flag) and remaps
-the legacy status pipeline onto OPEN/RFQS_SENT/OFFERS/QUOTED/WON/LOST/HOTLIST:
+Remaps the legacy status pipeline onto OPEN/RFQS_SENT/OFFERS/QUOTED/WON/LOST/HOTLIST
+and adds requisitions.outcome_reason (the required Won/Lost close reason — enforced
+app-side, nullable at the DB level so existing rows and non-closed reqs stay valid):
 
-    archived            -> is_archived=true, status='lost' (terminal placeholder)
+    archived            -> lost   (terminal; the old archive status collapses to lost)
     active / sourcing / reopened -> open  ("open automatically means sourcing")
     quoting             -> quoted
     NULL                -> open
 
-Archive is no longer a status — see app/models/sourcing.py Requisition.is_archived
-and app/services/requisition_state.set_archived(). The archived->lost+is_archived
-mapping keeps those rows hidden-but-retrievable via the "Archived" filter regardless
-of their terminal status value.
+There is NO requisition archive/hide capability — a requisition ends in Won or Lost
+(each carrying a required outcome_reason). The unrelated CRM/contact is_archived
+(archive-DNC, migration 148) is a separate feature and is untouched here.
 
-Called by: alembic. Depends on: 156_user_avatar.
+Called by: alembic. Depends on: 157_qp_approvals.
 
-Revision ID: 157_req_pipeline_hotlist
-Revises: 156_user_avatar
+Revision ID: 158_req_pipeline_hotlist
+Revises: 157_qp_approvals
 Create Date: 2026-06-26
 """
 
@@ -24,32 +24,30 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "157_req_pipeline_hotlist"
-down_revision = "156_user_avatar"
+revision = "158_req_pipeline_hotlist"
+down_revision = "157_qp_approvals"
 branch_labels = None
 depends_on = None
 
 
-# New status whitelist for the reworked pipeline (migration 157).
+# New status whitelist for the reworked pipeline (migration 158).
 _NEW_STATUSES = "'draft','open','rfqs_sent','offers','quoted','won','lost','hotlist','cancelled'"
 # Old whitelist from migration 8c22bd2f6837 (restored on downgrade).
 _OLD_STATUSES = "'draft','active','sourcing','offers','quoting','quoted','reopened','won','lost','archived','cancelled'"
 
 
 def upgrade() -> None:
-    op.add_column(
-        "requisitions",
-        sa.Column("is_archived", sa.Boolean(), nullable=False, server_default=sa.text("false")),
-    )
-    op.create_index("ix_requisitions_is_archived", "requisitions", ["is_archived"])
+    # Required Won/Lost close reason — nullable at the DB level (enforcement is
+    # app-side, so existing rows and non-closed requisitions remain valid).
+    op.add_column("requisitions", sa.Column("outcome_reason", sa.Text(), nullable=True))
 
     bind = op.get_bind()
     # Drop the old status CHECK first so the remap to new values is permitted
     # (ck_requisitions_status from migration 8c22bd2f6837 whitelists the old set).
     op.drop_constraint("ck_requisitions_status", "requisitions", type_="check")
 
-    # Archived -> hidden boolean + terminal placeholder status (still retrievable).
-    bind.execute(sa.text("UPDATE requisitions SET is_archived = true, status = 'lost' WHERE status = 'archived'"))
+    # The old archive status collapses to the terminal lost stage (no hide flag).
+    bind.execute(sa.text("UPDATE requisitions SET status = 'lost' WHERE status = 'archived'"))
     # Merge legacy active stages into the new single entry stage.
     bind.execute(sa.text("UPDATE requisitions SET status = 'open' WHERE status IN ('active', 'sourcing', 'reopened')"))
     bind.execute(sa.text("UPDATE requisitions SET status = 'quoted' WHERE status = 'quoting'"))
@@ -67,9 +65,9 @@ def upgrade() -> None:
 def downgrade() -> None:
     bind = op.get_bind()
     op.drop_constraint("ck_requisitions_status", "requisitions", type_="check")
-    # Best-effort reverse: archived rows recover their archived status; new-only
-    # stages collapse to their nearest legacy equivalent so the old CHECK accepts them.
-    bind.execute(sa.text("UPDATE requisitions SET status = 'archived' WHERE is_archived = true"))
+    # Best-effort reverse: new-only stages collapse to their nearest legacy
+    # equivalent so the old CHECK accepts them. (The archived->lost remap is
+    # lossy and not reversed — those rows stay lost.)
     bind.execute(sa.text("UPDATE requisitions SET status = 'sourcing' WHERE status = 'rfqs_sent'"))
     bind.execute(sa.text("UPDATE requisitions SET status = 'active' WHERE status IN ('open', 'hotlist')"))
     op.create_check_constraint(
@@ -77,5 +75,4 @@ def downgrade() -> None:
         "requisitions",
         f"status IN ({_OLD_STATUSES})",
     )
-    op.drop_index("ix_requisitions_is_archived", table_name="requisitions")
-    op.drop_column("requisitions", "is_archived")
+    op.drop_column("requisitions", "outcome_reason")

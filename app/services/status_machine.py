@@ -52,7 +52,7 @@ BUY_PLAN_TRANSITIONS: dict[str, set[str]] = {
 
 # ── Requisition Status Transitions ──────────────────────────────────────
 # Mirror of app/services/requisition_state.ALLOWED_TRANSITIONS — the Sales Hub
-# pipeline (archive is orthogonal via Requisition.is_archived, not a status).
+# pipeline. There is no archive/hide capability; a req ends in WON or LOST.
 REQUISITION_TRANSITIONS: dict[str, set[str]] = {
     RequisitionStatus.DRAFT: {
         RequisitionStatus.OPEN,

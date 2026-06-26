@@ -43,18 +43,6 @@ class TestCoreJobsPropagation:
     """Verify core_jobs top-level handlers re-raise."""
 
     @pytest.mark.asyncio
-    async def test_auto_archive_reraises(self):
-        db = _make_fake_db()
-        with patch("app.database.SessionLocal", _make_session_local_factory(db)):
-            from app.jobs.core_jobs import _job_auto_archive
-
-            fn = _job_auto_archive.__wrapped__
-            with pytest.raises(RuntimeError, match="DB connection lost"):
-                await fn()
-            db.rollback.assert_called_once()
-            db.close.assert_called_once()
-
-    @pytest.mark.asyncio
     async def test_token_refresh_reraises(self):
         db = _make_fake_db()
         with patch("app.database.SessionLocal", _make_session_local_factory(db)):

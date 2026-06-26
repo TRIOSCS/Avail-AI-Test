@@ -38,7 +38,7 @@
            x-bind:checked="selectedIds.has({{ req.id }})">
   </td>
   <td class="px-3 py-2 overflow-hidden">{{ opp_name_cell(req) }}</td>
-  <td class="px-3 py-2">{{ opp_status_cell(req.status, req.hours_until_bid_due) }}</td>
+  <td class="px-3 py-2">{{ opp_status_cell(req.status, req.hours_until_bid_due, reason=req.outcome_reason) }}</td>
   <td class="px-3 py-2 text-sm text-gray-600 overflow-hidden">
     <span class="truncate block" x-truncate-tip>{{ customer_display or '—' }}</span>
   </td>

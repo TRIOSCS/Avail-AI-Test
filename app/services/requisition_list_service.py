@@ -459,18 +459,12 @@ def list_requisitions(
             )
         )
     # ── Status filter ────────────────────────────────────────────────
-    # Archive is orthogonal to the status pipeline (hidden-but-retrievable):
-    # the "archived" filter shows archived rows; every other filter hides them.
-    elif filters.status.value == "archived":
-        query = query.filter(Requisition.is_archived.is_(True))
+    elif filters.status.value == "all":
+        pass  # no status filter
+    elif filters.status.value == "open":
+        query = query.filter(Requisition.status.in_(list(RequisitionStatus.OPEN_PIPELINE)))
     else:
-        query = query.filter(Requisition.is_archived.is_(False))
-        if filters.status.value == "all":
-            pass  # no status filter (still excludes archived)
-        elif filters.status.value == "open":
-            query = query.filter(Requisition.status.in_(list(RequisitionStatus.OPEN_PIPELINE)))
-        else:
-            query = query.filter(Requisition.status == filters.status.value)
+        query = query.filter(Requisition.status == filters.status.value)
 
     # ── Owner filter ─────────────────────────────────────────────────
     if filters.owner:
@@ -553,7 +547,7 @@ def list_requisitions(
                 "id": r.id,
                 "name": r.name,
                 "status": r.status,
-                "is_archived": r.is_archived,
+                "outcome_reason": r.outcome_reason,
                 "customer_site_id": r.customer_site_id,
                 "company_id": (r.customer_site.company_id if r.customer_site else None),
                 "customer_display": (
@@ -649,7 +643,7 @@ def get_requisition_detail(
             "id": req.id,
             "name": req.name,
             "status": req.status,
-            "is_archived": req.is_archived,
+            "outcome_reason": req.outcome_reason,
             "customer_display": customer_display,
             "created_by_name": creator_name,
             "requirement_count": len(requirements),
@@ -722,7 +716,7 @@ def get_row_context(db: Session, req: Requisition, user) -> dict:
             "id": req.id,
             "name": req.name,
             "status": req.status,
-            "is_archived": req.is_archived,
+            "outcome_reason": req.outcome_reason,
             "customer_display": customer_display,
             "requirement_count": req_cnt,
             "offer_count": offer_cnt,

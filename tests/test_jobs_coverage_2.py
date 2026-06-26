@@ -752,8 +752,8 @@ class TestRegisterCoreJobs:
     @pytest.mark.parametrize(
         "activity_tracking_enabled, expected_jobs",
         [
-            pytest.param(True, 7, id="with_activity_tracking"),
-            pytest.param(False, 6, id="without_activity_tracking"),
+            pytest.param(True, 6, id="with_activity_tracking"),
+            pytest.param(False, 5, id="without_activity_tracking"),
         ],
     )
     def test_registers(self, activity_tracking_enabled, expected_jobs):
@@ -766,68 +766,6 @@ class TestRegisterCoreJobs:
 
         register_core_jobs(scheduler, settings)
         assert scheduler.add_job.call_count == expected_jobs
-
-
-class TestJobAutoArchive:
-    """Tests for _job_auto_archive()."""
-
-    @patch("app.jobs.core_jobs.logger")
-    def test_archives_stale_reqs(self, mock_logger):
-        from app.jobs.core_jobs import _job_auto_archive
-
-        mock_db = _mock_db()
-        mock_db.query.return_value.filter.return_value.update.return_value = 2
-
-        with patch("app.database.SessionLocal", return_value=mock_db):
-            _run(_job_auto_archive.__wrapped__())
-
-        mock_db.commit.assert_called_once()
-        mock_db.close.assert_called_once()
-
-    @patch("app.jobs.core_jobs.logger")
-    def test_no_stale_reqs(self, mock_logger):
-        from app.jobs.core_jobs import _job_auto_archive
-
-        mock_db = _mock_db()
-        mock_db.query.return_value.filter.return_value.update.return_value = 0
-
-        with patch("app.database.SessionLocal", return_value=mock_db):
-            _run(_job_auto_archive.__wrapped__())
-
-        mock_db.commit.assert_not_called()
-        mock_db.close.assert_called_once()
-
-    @patch("app.jobs.core_jobs.logger")
-    def test_operational_error(self, mock_logger):
-        import sqlalchemy.exc
-
-        from app.jobs.core_jobs import _job_auto_archive
-
-        mock_db = _mock_db()
-        mock_db.query.return_value.filter.return_value.update.side_effect = sqlalchemy.exc.OperationalError(
-            "stmt", {}, Exception("conn")
-        )
-
-        with patch("app.database.SessionLocal", return_value=mock_db):
-            with pytest.raises(sqlalchemy.exc.OperationalError):
-                _run(_job_auto_archive.__wrapped__())
-
-        mock_db.rollback.assert_called_once()
-        mock_db.close.assert_called_once()
-
-    @patch("app.jobs.core_jobs.logger")
-    def test_generic_exception(self, mock_logger):
-        from app.jobs.core_jobs import _job_auto_archive
-
-        mock_db = _mock_db()
-        mock_db.query.return_value.filter.return_value.update.side_effect = RuntimeError("bad")
-
-        with patch("app.database.SessionLocal", return_value=mock_db):
-            with pytest.raises(RuntimeError, match="bad"):
-                _run(_job_auto_archive.__wrapped__())
-
-        mock_db.rollback.assert_called_once()
-        mock_db.close.assert_called_once()
 
 
 class TestJobTokenRefresh:

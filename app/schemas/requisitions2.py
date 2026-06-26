@@ -22,7 +22,6 @@ class ReqStatus(str, Enum):
     won = "won"
     lost = "lost"
     hotlist = "hotlist"
-    archived = "archived"
 
 
 class Urgency(str, Enum):
@@ -75,8 +74,6 @@ class RowActionName(str, Enum):
     assign = "assign"
     claim = "claim"
     unclaim = "unclaim"
-    archive = "archive"
-    activate = "activate"
     won = "won"
     lost = "lost"
     hotlist = "hotlist"
@@ -84,9 +81,7 @@ class RowActionName(str, Enum):
 
 
 class BulkActionName(str, Enum):
-    archive = "archive"
     assign = "assign"
-    activate = "activate"
 
 
 class PaginationContext(BaseModel):

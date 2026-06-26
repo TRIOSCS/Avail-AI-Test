@@ -676,7 +676,7 @@ class TestRequisitionInlineEdit:
         with patch("app.services.requisition_state.transition"):
             resp = client.patch(
                 f"/v2/partials/requisitions/{req.id}/inline",
-                data={"field": "status", "value": "archived", "context": "row"},
+                data={"field": "status", "value": "open", "context": "row"},
             )
             assert resp.status_code == 200
 
@@ -689,21 +689,7 @@ class TestRequisitionInlineEdit:
 
 
 class TestRequisitionRowActions:
-    """Test row-level actions (archive, activate, claim, unclaim, clone)."""
-
-    def test_action_archive(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        db_session.commit()
-        with patch("app.services.requisition_state.transition"):
-            resp = client.post(f"/v2/partials/requisitions/{req.id}/action/archive", data={})
-            assert resp.status_code == 200
-
-    def test_action_activate(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user, is_archived=True)
-        db_session.commit()
-        with patch("app.services.requisition_state.transition"):
-            resp = client.post(f"/v2/partials/requisitions/{req.id}/action/activate", data={})
-            assert resp.status_code == 200
+    """Test row-level actions (claim, unclaim, won, lost, clone)."""
 
     def test_action_claim(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user, claimed_by_id=None)
@@ -734,15 +720,15 @@ class TestRequisitionRowActions:
         assert resp.status_code == 400
 
     def test_action_not_found(self, client: TestClient):
-        resp = client.post("/v2/partials/requisitions/999999/action/archive", data={})
+        resp = client.post("/v2/partials/requisitions/999999/action/claim", data={})
         assert resp.status_code == 404
 
     def test_action_return_format_detail(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user)
         db_session.commit()
-        with patch("app.services.requisition_state.transition"):
+        with patch("app.services.requirement_status.claim_requisition"):
             resp = client.post(
-                f"/v2/partials/requisitions/{req.id}/action/archive",
+                f"/v2/partials/requisitions/{req.id}/action/claim",
                 data={"return": "detail"},
             )
             assert resp.status_code == 200
@@ -750,25 +736,6 @@ class TestRequisitionRowActions:
 
 class TestRequisitionBulkActions:
     """Test bulk actions on requisitions."""
-
-    def test_bulk_archive(self, client: TestClient, db_session: Session, test_user: User):
-        r1 = _make_requisition(db_session, test_user, name="Bulk1")
-        r2 = _make_requisition(db_session, test_user, name="Bulk2")
-        db_session.commit()
-        resp = client.post(
-            "/v2/partials/requisitions/bulk/archive",
-            data={"ids": f"{r1.id},{r2.id}"},
-        )
-        assert resp.status_code == 200
-
-    def test_bulk_activate(self, client: TestClient, db_session: Session, test_user: User):
-        r1 = _make_requisition(db_session, test_user, is_archived=True)
-        db_session.commit()
-        resp = client.post(
-            "/v2/partials/requisitions/bulk/activate",
-            data={"ids": str(r1.id)},
-        )
-        assert resp.status_code == 200
 
     def test_bulk_assign(self, client: TestClient, db_session: Session, test_user: User):
         r1 = _make_requisition(db_session, test_user)
@@ -1830,20 +1797,6 @@ class TestPartArchive:
         db_session.commit()
         resp = client.patch(f"/v2/partials/parts/{item.id}/unarchive")
         assert resp.status_code == 200
-
-    def test_archive_requisition(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        db_session.commit()
-        with patch("app.services.requisition_state.transition"):
-            resp = client.patch(f"/v2/partials/requisitions/{req.id}/archive")
-            assert resp.status_code == 200
-
-    def test_unarchive_requisition(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user, is_archived=True)
-        db_session.commit()
-        with patch("app.services.requisition_state.transition"):
-            resp = client.patch(f"/v2/partials/requisitions/{req.id}/unarchive")
-            assert resp.status_code == 200
 
     def test_bulk_archive(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user)
