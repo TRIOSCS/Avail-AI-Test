@@ -5084,6 +5084,23 @@ open request exists — a plan that went `PENDING` before C1 deployed — it fal
 legacy `approve_buy_plan` and logs a WARNING (RISK 3, transition window, removed in a
 follow-up).
 
+**QP front door — open-or-create from a buy plan (`GET /v2/qp/for-buy-plan/{bp_id}`):**
+the only entry point to the native QP view. The buy-plan detail (`buy_plans/detail.html`)
+renders a secondary "Quality Plan" button (`hx-get="/v2/qp/for-buy-plan/{bp.id}"`,
+`hx-target="#main-content"`, `hx-push-url="true"`) in the header actions row, always shown
+(independent of the role-aware action banner). The route (`quality_plans.qp_for_buy_plan`)
+ownership-scopes via `get_buyplan_for_user(db, user, bp_id)` (404 for a missing plan OR a
+`RESTRICTED_ROLES` non-owner — existence not leaked, enforced BEFORE any create), then
+get-or-creates: `db.query(QualityPlan).filter_by(buy_plan_id=bp.id).first()`, else
+`create_qp(db, owner_id=user.id, buy_plan_id=bp.id)` + commit. It is idempotent — a buy plan
+has at most one QP, so a second open returns the same row (no duplicate). It re-loads the QP
+with the same eager options `qp_detail` uses and renders via the shared `_qp_detail_response`,
+so the user lands on the native QP detail. The QP detail's header sub-line carries a back-link
+to the buy plan (`hx-get="/v2/partials/buy-plans/{bp.id}"`, `hx-target="#main-content"`) so the
+view is not a dead-end. Coverage: `tests/test_qp_entry.py` (create-on-first-open, idempotent
+second open, restricted-non-owner 404 with no QP created, button renders the for-buy-plan
+hx-get).
+
 **QP section gates — Sales / Purchasing (QP Phase C2a):** the QualityPlan is the engine
 subject (`subject_type='quality_plan'`); the `gate_type` discriminates the section.
 `routing.route_request` gains `SALES_ORDER` → every active `can_approve_sales_orders` holder

@@ -1,7 +1,8 @@
 """routers/quality_plans.py — HTMX router for Quality Plan views.
 
-Purpose: Exposes GET /v2/qp/{id} (QP detail partial),
-         POST /v2/qp/{id}/submit (submit-for-review action), the QP Phase C2a
+Purpose: Exposes GET /v2/qp/for-buy-plan/{bp_id} (the front door — get-or-create the QP
+         for a buy plan and render its native detail), GET /v2/qp/{id} (QP detail
+         partial), POST /v2/qp/{id}/submit (submit-for-review action), the QP Phase C2a
          section gates POST /v2/qp/{id}/submit-sales + /submit-purchasing (open the
          SALES_ORDER / PURCHASE_ORDER approval gate), and the QP Phase C2b native-section
          editors: PATCH /v2/qp/{id}/sales + /purchasing (inline field edit → refreshed
@@ -31,7 +32,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from ..constants import ApprovalGateType, ApprovalSubjectType
 from ..database import get_db
-from ..dependencies import require_requisition_access, require_user
+from ..dependencies import get_buyplan_for_user, require_requisition_access, require_user
 from ..models.approvals import ApprovalRequest
 from ..models.buy_plan import BuyPlan, BuyPlanLine
 from ..models.crm import CustomerSite
@@ -41,6 +42,7 @@ from ..models.quotes import Quote
 from ..services.quality_plan_service import (
     IncompleteQPError,
     NoSectionApproverError,
+    create_qp,
     submit,
     submit_section,
     validate_complete,
@@ -232,6 +234,46 @@ def _require_qp_access(db: Session, user, qp: QualityPlan) -> None:
         owner_id=qp.created_by_id,
         label="Quality plan",
     )
+
+
+@router.get("/v2/qp/for-buy-plan/{bp_id}", response_class=HTMLResponse)
+def qp_for_buy_plan(
+    request: Request,
+    bp_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+) -> HTMLResponse:
+    """Get-or-create the Quality Plan for a buy plan and render its native detail.
+
+    The front door to the QP view: the buy-plan owner clicks "Quality Plan" and lands
+    here. Idempotent — the first open creates the (DRAFT) QP for this buy plan, every
+    later open returns the same one (a buy plan has at most one QP). Ownership is scoped
+    through the buy plan's parent requisition via get_buyplan_for_user, so a restricted-
+    role non-owner gets a 404 (existence not leaked) before any QP is created.
+    """
+    # Ownership-scoped load (404 for missing buy plan or restricted non-owner).
+    bp = get_buyplan_for_user(db, user, bp_id)
+
+    qp = db.execute(select(QualityPlan).where(QualityPlan.buy_plan_id == bp.id)).scalar_one_or_none()
+    if qp is None:
+        qp = create_qp(db, owner_id=user.id, buy_plan_id=bp.id)
+        db.commit()
+
+    # Re-load with the same eager options qp_detail uses so the detail partial renders
+    # the owner / serial / FRU sections without lazy-load surprises.
+    qp = db.get(
+        QualityPlan,
+        qp.id,
+        options=[
+            joinedload(QualityPlan.created_by),
+            joinedload(QualityPlan.approved_by),
+            joinedload(QualityPlan.buy_plan),
+            joinedload(QualityPlan.serial_entries).joinedload(QpSerialEntry.buyer),
+            joinedload(QualityPlan.serial_entries).joinedload(QpSerialEntry.submitted_by),
+            joinedload(QualityPlan.fru_lookups),
+        ],
+    )
+    return _qp_detail_response(request, user, db, qp)
 
 
 @router.get("/v2/qp/{qp_id}", response_class=HTMLResponse)
