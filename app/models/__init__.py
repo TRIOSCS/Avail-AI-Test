@@ -7,6 +7,16 @@ Or from submodules: from app.models.auth import User
 # Alert read-state (per-user seen-state for cross-app alerts)
 from .alert_seen import AlertSeen  # noqa: F401
 
+# Approvals engine (5 tables: request, step, recipient, event, outbox)
+# Approver eligibility uses per-user toggles on the User model — no gate-config table.
+from .approvals import (  # noqa: F401
+    ApprovalEvent,
+    ApprovalOutbox,
+    ApprovalRequest,
+    ApprovalStep,
+    ApprovalStepRecipient,
+)
+
 # Auth & Users
 from .auth import User, UserAdminAudit  # noqa: F401
 from .base import Base  # noqa: F401
@@ -123,6 +133,9 @@ from .prospect_account import ProspectAccount  # noqa: F401
 
 # Purchase History (Proactive matching backbone)
 from .purchase_history import CustomerPartHistory  # noqa: F401
+
+# Quality Plans + Prepayments (QP workflow subjects)
+from .quality_plan import Prepayment, QualityPlan  # noqa: F401
 
 # Quotes (V1 BuyPlan model removed — use BuyPlan from buy_plan module)
 from .quotes import Quote, QuoteLine  # noqa: F401
