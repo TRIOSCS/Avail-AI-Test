@@ -38,7 +38,7 @@
            x-bind:checked="selectedIds.has({{ req.id }})">
   </td>
   <td class="px-3 py-2 overflow-hidden">{{ opp_name_cell(req) }}</td>
-  <td class="px-3 py-2">{{ opp_status_cell(req.status, req.hours_until_bid_due) }}</td>
+  <td class="px-3 py-2">{{ opp_status_cell(req.status, req.hours_until_bid_due, reason=req.outcome_reason) }}</td>
   <td class="px-3 py-2 text-sm text-gray-600 overflow-hidden">
     <span class="truncate block" x-truncate-tip>{{ customer_display or '—' }}</span>
   </td>
@@ -66,20 +66,4 @@
                 {% endif %}data-loading-disable
                 @click="open = false"
                 class="flex w-full items-center gap-2 px-3 py-2 text-sm {{ color_classes }}">{{ label }}</button>
-{%- endmacro %}
-
-{# Bulk-action form for the selected-rows bar. action is the /bulk/<action> slug. #}
-{% macro bulk_action_form(action, label) -%}
-<form hx-post="/requisitions2/bulk/{{ action }}"
-        hx-target="#rq2-table"
-        hx-swap="innerHTML"
-        hx-target-error="#rq2-error"
-        class="inline">
-    <input type="hidden" name="ids" :value="getSelectedIdsString()">
-    <button type="submit"
-            data-loading-disable
-            class="px-3 py-1 rounded bg-gray-200 hover:bg-gray-300 text-gray-700 text-xs font-medium">
-      {{ label }}
-    </button>
-  </form>
 {%- endmacro %}

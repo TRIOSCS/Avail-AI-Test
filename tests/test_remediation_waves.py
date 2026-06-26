@@ -52,9 +52,9 @@ class TestStatusMachine:
             validate_transition("buy_plan", "completed", "active")
 
     def test_requisition_transitions(self):
-        assert validate_transition("requisition", "draft", "active") is True
-        assert validate_transition("requisition", "active", "offers") is True
-        assert validate_transition("requisition", "offers", "quoting") is True
+        assert validate_transition("requisition", "draft", "open") is True
+        assert validate_transition("requisition", "open", "offers") is True
+        assert validate_transition("requisition", "offers", "quoted") is True
 
     def test_unknown_entity_allows_transition(self):
         assert validate_transition("unknown_entity", "a", "b") is True

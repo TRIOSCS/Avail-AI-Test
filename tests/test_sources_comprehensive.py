@@ -156,7 +156,7 @@ def _make_m365_vendor_response(db_session, test_user, *, req_name, message_id):
     req = Requisition(
         name=req_name,
         customer_name="Test",
-        status="active",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )

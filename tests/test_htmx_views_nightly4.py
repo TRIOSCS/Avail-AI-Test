@@ -31,7 +31,7 @@ def _req(db: Session, user: User, **kw) -> Requisition:
     defaults = dict(
         name="N4-REQ",
         customer_name="N4 Corp",
-        status=RequisitionStatus.ACTIVE,
+        status=RequisitionStatus.OPEN,
         created_by=user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -566,7 +566,7 @@ class TestCompanyTabRoutes:
             name="TAB-REQ-001",
             customer_name=test_company.name,
             company_id=test_company.id,
-            status=RequisitionStatus.ACTIVE,
+            status=RequisitionStatus.OPEN,
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -709,6 +709,7 @@ class TestRequisitionActionErrors:
         assert resp.status_code == 400
 
     def test_req_not_found_returns_404(self, client: TestClient):
-        """Covers line 1834 — not found branch before await request.form()."""
-        resp = client.post("/v2/partials/requisitions/99999/action/archive")
+        """Covers the not-found branch (valid action, missing req) before
+        request.form()."""
+        resp = client.post("/v2/partials/requisitions/99999/action/clone")
         assert resp.status_code == 404

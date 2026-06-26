@@ -25,7 +25,7 @@ def _make_user(db, name="Test User"):
     return u
 
 
-def _make_req(db, user, name="REQ-1", status="active"):
+def _make_req(db, user, name="REQ-1", status="open"):
     r = Requisition(
         name=name,
         status=status,

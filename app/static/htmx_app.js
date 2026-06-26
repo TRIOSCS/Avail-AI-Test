@@ -1099,9 +1099,24 @@ Alpine.data('contactsView', () => ({
  */
 Alpine.data('rowActionRail', () => ({
   show: false,
+  // Won/Lost require a close reason. `outcomePrompt` names the pending terminal
+  // action ('won' | 'lost' | null); `outcomeReason` holds the typed reason. The
+  // confirm button is gated on a non-empty trimmed reason, mirroring the
+  // buy-plan cancel modal's required-textarea pattern.
+  outcomePrompt: null,
+  outcomeReason: '',
+  openOutcome(action) {
+    this.outcomeReason = '';
+    this.outcomePrompt = action;
+  },
+  closeOutcome() {
+    this.outcomePrompt = null;
+    this.outcomeReason = '';
+  },
+  get outcomeReady() { return this.outcomeReason.trim().length > 0; },
   init() {
     this.$el.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') { this.show = false; }
+      if (e.key === 'Escape') { this.show = false; this.closeOutcome(); }
     });
   },
 }));

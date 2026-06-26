@@ -14,7 +14,7 @@ def _make_requisition_and_parts(db_session, test_user, num_parts=2, **part_kwarg
 
     reqn = Requisition(
         name="Test Req",
-        status="active",
+        status="open",
         urgency="normal",
         customer_name="Acme Corp",
         created_by=test_user.id,
@@ -50,7 +50,7 @@ def _make_req_with_part(db_session, test_user, *, req_name, **part_kwargs):
 
     reqn = Requisition(
         name=req_name,
-        status="active",
+        status="open",
         urgency="normal",
         customer_name="TestCo",
         created_by=test_user.id,

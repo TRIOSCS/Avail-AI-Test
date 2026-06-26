@@ -17,7 +17,7 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from ..config import settings
-from ..constants import OfferStatus, ProactiveMatchStatus
+from ..constants import OfferStatus, ProactiveMatchStatus, RequisitionStatus
 from ..models import (
     ActivityLog,
     Company,
@@ -138,17 +138,128 @@ def _aggregate_cph_by_company(cph_rows: list) -> dict[int, dict]:
 
 
 def find_matches_for_offer(offer_id: int, db: Session) -> list[ProactiveMatch]:
-    """Find customer matches for a single offer via CPH."""
+    """Find customer matches for a single offer.
+
+    Two seeding sources:
+      1. CPH (purchase history) via ``_find_matches`` — the primary backbone.
+      2. Active HOTLIST requisitions via ``_find_hotlist_matches`` — surfaces a part
+         the customer never bought but a salesperson explicitly asked to monitor.
+
+    Dedup stays one active match per ``(material_card_id, company_id)``. The CPH pass
+    ``db.add()``s rows that are still uncommitted when the hotlist pass runs, so the
+    hotlist pass's DB query can't see them — we pass the CPH companies in via
+    ``skip_company_ids`` so the same customer never gets two matches in one call.
+    """
     offer = db.get(Offer, offer_id)
     if not offer or not offer.material_card_id:
         return []
-    return _find_matches(
+    cost = float(offer.unit_price) if offer.unit_price else None
+    cph_matches = _find_matches(
         db,
         material_card_id=offer.material_card_id,
         mpn=offer.mpn or "",
-        our_cost=float(offer.unit_price) if offer.unit_price else None,
+        our_cost=cost,
         source_offer=offer,
     )
+    hot_matches = _find_hotlist_matches(
+        db,
+        material_card_id=offer.material_card_id,
+        mpn=offer.mpn or "",
+        our_cost=cost,
+        source_offer=offer,
+        skip_company_ids={m.company_id for m in cph_matches},
+    )
+    return cph_matches + hot_matches
+
+
+def _find_hotlist_matches(
+    db: Session,
+    *,
+    material_card_id: int,
+    mpn: str,
+    our_cost: float | None,
+    source_offer: Offer | None,
+    skip_company_ids: set[int] | None = None,
+) -> list[ProactiveMatch]:
+    """Seed ProactiveMatch rows from active HOTLIST requisitions for this part.
+
+    Unlike the CPH path this does NOT require purchase history — a hotlist is an
+    explicit salesperson request to monitor a part for a customer. Reuses the
+    same suppression + dedup + surface pipeline.
+
+    ``skip_company_ids`` carries the company_ids the CPH pass already produced in
+    THIS call (their ``db.add()``s are uncommitted, so a fresh DB query won't see
+    them) — union them into the existing-match set so dedup holds across both passes.
+    """
+    mpn_upper = normalize_mpn(mpn) or mpn.upper().strip()
+    fallback_offer_id = source_offer.id if source_offer else None
+    if not fallback_offer_id:
+        return []
+
+    rows = (
+        db.query(Requisition, CustomerSite, Company)
+        .join(Requirement, Requirement.requisition_id == Requisition.id)
+        .join(CustomerSite, CustomerSite.id == Requisition.customer_site_id)
+        .join(Company, Company.id == Requisition.company_id)
+        .filter(
+            Requisition.status == RequisitionStatus.HOTLIST.value,
+            Requirement.material_card_id == material_card_id,
+            Company.account_owner_id.isnot(None),
+            CustomerSite.is_active.is_(True),
+        )
+        .all()
+    )
+    if not rows:
+        return []
+
+    # Existing active matches for this card from the DB, UNION the CPH companies
+    # from this call (uncommitted → invisible to the query above).
+    existing = {
+        r[0]
+        for r in db.query(ProactiveMatch.company_id)
+        .filter(
+            ProactiveMatch.material_card_id == material_card_id,
+            ProactiveMatch.status.in_([ProactiveMatchStatus.NEW, ProactiveMatchStatus.SENT]),
+        )
+        .all()
+    }
+    existing |= skip_company_ids or set()
+
+    dno = build_batch_dno_set(db, mpn_upper, {c.id for _, _, c in rows})
+
+    out: list[ProactiveMatch] = []
+    for req, site, company in rows:
+        if company.id in existing or company.id in dno:
+            continue
+        match = ProactiveMatch(
+            offer_id=fallback_offer_id,
+            requirement_id=None,
+            requisition_id=req.id,
+            customer_site_id=site.id,
+            salesperson_id=company.account_owner_id,
+            mpn=mpn_upper,
+            material_card_id=material_card_id,
+            company_id=company.id,
+            match_score=60,  # baseline — explicit monitor request, no history to weight
+            margin_pct=None,
+            customer_purchase_count=0,
+            our_cost=our_cost,
+        )
+        db.add(match)
+        out.append(match)
+        existing.add(company.id)
+        db.add(
+            ActivityLog(
+                user_id=company.account_owner_id,
+                activity_type="proactive_match",
+                channel="system",
+                requisition_id=req.id,
+                company_id=company.id,
+                contact_name=company.name,
+                subject=f"Hotlist match: {mpn_upper} — {company.name}",
+            )
+        )
+    return out
 
 
 _WATERMARK_KEY = "proactive_last_scan"

@@ -1,14 +1,14 @@
 {# requisitions2/_bulk_bar.html — Bulk action bar for selected requisitions.
    Called by: page.html (include)
    Depends on: Alpine.js rq2 store (selectedIds)
+
+   There is no requisition archive/hide capability (a req ends in Won or Lost),
+   so the only bulk action is owner re-assignment (manager/admin only), driven
+   from the owner picker elsewhere via POST /requisitions2/bulk/assign. This bar
+   surfaces the live selection count.
 #}
-{% from "requisitions2/_row_macros.html" import bulk_action_form -%}
 <div x-show="selectedIds.size > 0" x-collapse x-cloak
      class="flex items-center gap-2 mt-1 text-sm text-gray-600">
 
   <span x-text="selectedIds.size + ' selected'"></span>
-
-  {{ bulk_action_form('archive', 'Archive') }}
-
-  {{ bulk_action_form('activate', 'Activate') }}
 </div>

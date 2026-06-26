@@ -71,7 +71,7 @@ def _req(db: Session, user: User, **kw) -> Requisition:
     defaults = dict(
         name="N3-REQ",
         customer_name="N3 Corp",
-        status=RequisitionStatus.ACTIVE,
+        status=RequisitionStatus.OPEN,
         created_by=user.id,
         created_at=datetime.now(timezone.utc),
     )

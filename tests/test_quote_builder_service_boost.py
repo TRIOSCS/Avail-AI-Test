@@ -65,7 +65,7 @@ def req_and_item(db_session: Session, test_user: User):
     req = Requisition(
         name="QB-BOOST",
         customer_name="Boost Co",
-        status="active",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )

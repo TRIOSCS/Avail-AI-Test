@@ -27,7 +27,7 @@ from app.models import Requirement, Requisition
 def _make_requisition(db: Session, user_id: int) -> Requisition:
     req = Requisition(
         name="AI Test Req",
-        status="active",
+        status="open",
         created_by=user_id,
         created_at=datetime.now(timezone.utc),
     )

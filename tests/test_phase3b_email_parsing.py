@@ -26,7 +26,7 @@ def req_with_parts(db_session: Session, test_user: User) -> Requisition:
     req = Requisition(
         name="REQ-PARSE-001",
         customer_name="Test Corp",
-        status="active",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )

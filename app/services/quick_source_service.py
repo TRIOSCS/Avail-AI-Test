@@ -72,7 +72,7 @@ def get_or_create_scratch_req(db: Session, user: User, mpn: str) -> tuple[Requis
     req = Requisition(
         name=f"Quick-source: {display}",
         customer_name=None,
-        status=RequisitionStatus.ACTIVE,
+        status=RequisitionStatus.OPEN,
         is_scratch=True,
         created_by=user.id,
     )

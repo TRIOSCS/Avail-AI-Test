@@ -752,8 +752,8 @@ class TestRegisterCoreJobs:
     @pytest.mark.parametrize(
         "activity_tracking_enabled, expected_jobs",
         [
-            pytest.param(True, 7, id="with_activity_tracking"),
-            pytest.param(False, 6, id="without_activity_tracking"),
+            pytest.param(True, 6, id="with_activity_tracking"),
+            pytest.param(False, 5, id="without_activity_tracking"),
         ],
     )
     def test_registers(self, activity_tracking_enabled, expected_jobs):
@@ -766,68 +766,6 @@ class TestRegisterCoreJobs:
 
         register_core_jobs(scheduler, settings)
         assert scheduler.add_job.call_count == expected_jobs
-
-
-class TestJobAutoArchive:
-    """Tests for _job_auto_archive()."""
-
-    @patch("app.jobs.core_jobs.logger")
-    def test_archives_stale_reqs(self, mock_logger):
-        from app.jobs.core_jobs import _job_auto_archive
-
-        mock_db = _mock_db()
-        mock_db.query.return_value.filter.return_value.update.return_value = 2
-
-        with patch("app.database.SessionLocal", return_value=mock_db):
-            _run(_job_auto_archive.__wrapped__())
-
-        mock_db.commit.assert_called_once()
-        mock_db.close.assert_called_once()
-
-    @patch("app.jobs.core_jobs.logger")
-    def test_no_stale_reqs(self, mock_logger):
-        from app.jobs.core_jobs import _job_auto_archive
-
-        mock_db = _mock_db()
-        mock_db.query.return_value.filter.return_value.update.return_value = 0
-
-        with patch("app.database.SessionLocal", return_value=mock_db):
-            _run(_job_auto_archive.__wrapped__())
-
-        mock_db.commit.assert_not_called()
-        mock_db.close.assert_called_once()
-
-    @patch("app.jobs.core_jobs.logger")
-    def test_operational_error(self, mock_logger):
-        import sqlalchemy.exc
-
-        from app.jobs.core_jobs import _job_auto_archive
-
-        mock_db = _mock_db()
-        mock_db.query.return_value.filter.return_value.update.side_effect = sqlalchemy.exc.OperationalError(
-            "stmt", {}, Exception("conn")
-        )
-
-        with patch("app.database.SessionLocal", return_value=mock_db):
-            with pytest.raises(sqlalchemy.exc.OperationalError):
-                _run(_job_auto_archive.__wrapped__())
-
-        mock_db.rollback.assert_called_once()
-        mock_db.close.assert_called_once()
-
-    @patch("app.jobs.core_jobs.logger")
-    def test_generic_exception(self, mock_logger):
-        from app.jobs.core_jobs import _job_auto_archive
-
-        mock_db = _mock_db()
-        mock_db.query.return_value.filter.return_value.update.side_effect = RuntimeError("bad")
-
-        with patch("app.database.SessionLocal", return_value=mock_db):
-            with pytest.raises(RuntimeError, match="bad"):
-                _run(_job_auto_archive.__wrapped__())
-
-        mock_db.rollback.assert_called_once()
-        mock_db.close.assert_called_once()
 
 
 class TestJobTokenRefresh:
@@ -1287,13 +1225,13 @@ class TestGlobalSearchHelpers:
         obj = MagicMock()
         obj.id = 42
         obj.name = "Test"
-        obj.status = "active"
+        obj.status = "open"
 
         d = _to_dict(obj, ["name", "status"], "requisition")
         assert d["type"] == "requisition"
         assert d["id"] == 42
         assert d["name"] == "Test"
-        assert d["status"] == "active"
+        assert d["status"] == "open"
 
     def test_is_postgres(self):
         from app.services.global_search_service import _is_postgres
@@ -1347,7 +1285,7 @@ class TestFastSearch:
         req_mock.id = 1
         req_mock.name = "LM358 Order"
         req_mock.customer_name = "Acme"
-        req_mock.status = "active"
+        req_mock.status = "open"
 
         # Track filter calls to return results only on the first call (requisitions)
         call_count = [0]
@@ -1396,7 +1334,7 @@ class TestRunIntentQuery:
         req.id = 1
         req.name = "Test Req"
         req.customer_name = "Acme"
-        req.status = "active"
+        req.status = "open"
 
         # Requisition path chains TWO filters: ilike_filter + is_scratch.is_(False)
         db.query.return_value.filter.return_value.filter.return_value.limit.return_value.all.return_value = [req]

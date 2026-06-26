@@ -456,7 +456,7 @@ class TestRequisitionServiceSubstituteDedup:
         """Lines 186-188: duplicate normalized substitutes are deduplicated on clone."""
         from app.services.requisition_service import clone_requisition
 
-        req = Requisition(name="ORIG-REQ", status="active")
+        req = Requisition(name="ORIG-REQ", status="open")
         db_session.add(req)
         db_session.flush()
 

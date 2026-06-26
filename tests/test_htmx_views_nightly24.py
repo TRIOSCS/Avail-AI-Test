@@ -64,7 +64,7 @@ def _make_req(db: Session, user: User) -> Requisition:
     req = Requisition(
         name=f"REQ-{uuid.uuid4().hex[:6]}",
         customer_name="TestCo",
-        status="active",
+        status="open",
         created_by=user.id,
         created_at=datetime.now(timezone.utc),
     )

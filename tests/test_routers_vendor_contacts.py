@@ -274,7 +274,7 @@ def test_email_metrics_with_contacts_and_responses(client, db_session, test_vend
     req = Requisition(
         name="REQ-METRIC-001",
         customer_name="Test Co",
-        status="active",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )

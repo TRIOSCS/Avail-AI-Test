@@ -63,8 +63,9 @@ Written by `services.user_admin.record_user_audit` (caller commits); surfaced by
 | name | String 255 | |
 | customer_name | String 255 | |
 | company_id | FK -> companies | |
-| customer_site_id | FK -> customer_sites | |
-| status | String 50 | active\|archived\|completed |
+| customer_site_id | FK -> companies / customer_sites | |
+| status | String 50 | Sales Hub pipeline: `draft` -> `open` -> `rfqs_sent` -> `offers` -> `quoted` -> `won`/`lost`; `hotlist` (off-pipeline monitor — see Proactive); `cancelled` (retained). Enforced by `ck_requisitions_status` CHECK (migration 158): `IN ('draft','open','rfqs_sent','offers','quoted','won','lost','hotlist','cancelled')`. "open" automatically means sourcing. Legacy `active`/`sourcing`/`reopened` were remapped to `open`, `quoting` to `quoted`, and the old `archived` rows to `lost`. There is **no requisition archive/hide capability** — a requisition ends in `won` or `lost` (each carrying a required `outcome_reason`). `RequisitionStatus` (app/constants.py) is the source of truth (`TERMINAL`={won,lost,cancelled}, `OPEN_PIPELINE`={open,rfqs_sent,offers,quoted}, `MONITOR`={hotlist}). |
+| outcome_reason | Text, nullable | Migration 158. The required Won/Lost close reason. Nullable at the DB level (so existing rows and non-closed reqs stay valid); enforcement is **app-side** — every transition to `won`/`lost` via `requisition_state.transition()` requires a non-empty reason or raises `OutcomeReasonRequired` (router → 400). Cleared automatically when a req is reopened off a terminal state. |
 | urgency | String 20 | normal\|hot\|critical |
 | opportunity_value | Numeric 12,2 | |
 | win_probability | Integer, nullable | 0-100; deal win % (migration 146) |

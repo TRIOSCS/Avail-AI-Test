@@ -671,7 +671,7 @@ class TestBoostConfidenceInternal:
         req = Requisition(
             name="SIGHT-REQ",
             customer_name="Test",
-            status="active",
+            status="open",
             created_by=None,
             created_at=datetime.now(timezone.utc),
         )
@@ -718,7 +718,7 @@ class TestBoostConfidenceInternal:
         req = Requisition(
             name="MULTI-REQ",
             customer_name="T",
-            status="active",
+            status="open",
             created_by=None,
             created_at=datetime.now(timezone.utc),
         )

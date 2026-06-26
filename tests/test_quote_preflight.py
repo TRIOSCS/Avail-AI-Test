@@ -122,7 +122,7 @@ class TestMpnDriftCheck:
         # against, so drift is never asserted (avoids false positives on MPN-less reqs).
         from app.models import Requisition
 
-        req = Requisition(name="REQ-NO-MPN", customer_name="X", status="active", created_by=test_user.id)
+        req = Requisition(name="REQ-NO-MPN", customer_name="X", status="open", created_by=test_user.id)
         db_session.add(req)
         db_session.flush()
         db_session.add(Requirement(requisition_id=req.id, target_qty=1))  # no primary/customer/oem PN

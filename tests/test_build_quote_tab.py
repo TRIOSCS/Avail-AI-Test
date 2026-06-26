@@ -37,7 +37,7 @@ def quoteable_req(db_session: Session, test_user: User, test_customer_site) -> R
     req = Requisition(
         name="QB-TAB-001",
         customer_name="Acme Electronics",
-        status="active",
+        status="open",
         customer_site_id=test_customer_site.id,
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
@@ -96,7 +96,7 @@ class TestBuildQuoteTabRender:
     ):
         req = Requisition(
             name="QB-TAB-EMPTY",
-            status="active",
+            status="open",
             customer_site_id=test_customer_site.id,
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
@@ -274,7 +274,7 @@ class TestBuildQuoteAssemble:
     def test_assemble_blocked_without_customer_site(self, client: TestClient, db_session: Session, test_user: User):
         req = Requisition(
             name="QB-TAB-NOSITE",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )

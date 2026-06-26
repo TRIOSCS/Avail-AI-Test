@@ -733,10 +733,10 @@ class TestQueueManager:
         assert item is not None
         assert item.mpn == "LM317T"
         assert item.status == "pending"
-        assert item.priority == 1  # "active" is in _ACTIVE_STATUSES
+        assert item.priority == 1  # "open" is in OPEN_PIPELINE (_ACTIVE_STATUSES)
 
     def test_enqueue_active_requisition_gets_priority(self, db_session, test_requisition):
-        test_requisition.status = "sourcing"
+        test_requisition.status = "rfqs_sent"
         db_session.commit()
         req = test_requisition.requirements[0]
         item = enqueue_for_ics_search(req.id, db_session)
@@ -764,7 +764,7 @@ class TestQueueManager:
         req1 = Requisition(
             name="REQ-1",
             customer_name="Acme",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -808,7 +808,7 @@ class TestQueueManager:
         req2 = Requisition(
             name="REQ-2",
             customer_name="Beta Corp",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -842,7 +842,7 @@ class TestQueueManager:
         req1 = Requisition(
             name="REQ-D1",
             customer_name="X",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -872,7 +872,7 @@ class TestQueueManager:
         req2 = Requisition(
             name="REQ-D2",
             customer_name="Y",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -935,14 +935,14 @@ class TestQueueManager:
         r1 = Requisition(
             name="OLD",
             customer_name="A",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
         )
         r2 = Requisition(
             name="NEW",
             customer_name="B",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime(2026, 2, 1, tzinfo=timezone.utc),
         )

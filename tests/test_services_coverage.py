@@ -50,7 +50,7 @@ def _add_requirement(db_session, customer_site_id, *, req_name, mpn, brand, qty)
         name=req_name,
         customer_name="Acme",
         customer_site_id=customer_site_id,
-        status="active",
+        status="open",
         created_at=datetime.now(timezone.utc),
     )
     db_session.add(req)

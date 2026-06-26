@@ -148,7 +148,7 @@ async def send_quote_email(
     quote.sent_at = datetime.now(timezone.utc)
     req = db.get(Requisition, quote.requisition_id)
     old_status = req.status if req else None
-    if req and req.status not in (RequisitionStatus.WON, RequisitionStatus.LOST, RequisitionStatus.ARCHIVED):
+    if req and req.status not in (RequisitionStatus.WON, RequisitionStatus.LOST):
         req.status = RequisitionStatus.QUOTED
 
     # 6. Write an OUTBOUND email ActivityLog for the customer recipient.

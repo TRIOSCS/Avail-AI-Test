@@ -38,7 +38,7 @@ def req_with_item(db_session: Session, test_user: User) -> tuple:
     req = Requisition(
         name="COV2-REQ",
         customer_name="Cov Co",
-        status="active",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )

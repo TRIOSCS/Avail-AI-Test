@@ -751,7 +751,7 @@ def test_download_and_import_stock_list_teams_alert(scheduler_db, test_user, tes
     from app.models import Sighting
 
     test_user.access_token = "at_dl"
-    test_requisition.status = "active"
+    test_requisition.status = "open"
     scheduler_db.commit()
 
     mock_gc = _graph_client({"contentBytes": base64.b64encode(b"data").decode()})

@@ -102,26 +102,32 @@ class QualificationStatus(StrEnum):
 
 
 class RequisitionStatus(StrEnum):
-    """Status lifecycle for Requisition records."""
+    """Status lifecycle for Requisition records.
+
+    Pipeline (Sales Hub): OPEN -> RFQS_SENT -> OFFERS -> QUOTED -> WON/LOST. DRAFT
+    precedes OPEN. HOTLIST is an off-pipeline *monitor* state: the salesperson watches a
+    part/customer and the Proactive matcher surfaces an offer when stock appears.
+    CANCELLED retained for existing rows. There is no archive/hide capability — a
+    requisition ends in WON or LOST (each carrying a required outcome_reason).
+    """
 
     DRAFT = "draft"
-    ACTIVE = "active"
-    SOURCING = "sourcing"
+    OPEN = "open"  # entry stage; "open" automatically means sourcing
+    RFQS_SENT = "rfqs_sent"
     OFFERS = "offers"
-    QUOTING = "quoting"
     QUOTED = "quoted"
-    REOPENED = "reopened"
     WON = "won"
     LOST = "lost"
-    ARCHIVED = "archived"
+    HOTLIST = "hotlist"  # monitor-only; surfaced by Proactive on a matching offer
     CANCELLED = "cancelled"
 
-    # Statuses considered "done" — excluded from re-archiving and shown under
-    # the Archive filter. Single source of truth for terminal-status checks.
-    # `nonmember` keeps this off the enum's member list (it's a constant, not a
-    # status value). StrEnum members compare equal to their string values, so
-    # `status.in_(RequisitionStatus.TERMINAL)` matches correctly.
-    TERMINAL = nonmember(frozenset({"archived", "won", "lost", "cancelled"}))
+    # Terminal (done) — excluded from the default open list. Single source of truth.
+    # `nonmember` keeps these off the member list (they're constants, not statuses).
+    TERMINAL = nonmember(frozenset({"won", "lost", "cancelled"}))
+    # Active pipeline stages shown by default in the Sales Hub list.
+    OPEN_PIPELINE = nonmember(frozenset({"open", "rfqs_sent", "offers", "quoted"}))
+    # Off-pipeline monitor states (Hotlist).
+    MONITOR = nonmember(frozenset({"hotlist"}))
 
 
 class SourcingStatus(StrEnum):
@@ -608,8 +614,6 @@ class ActivityType(StrEnum):
     TASK_COMPLETED = "task_completed"
     TASK_REOPENED = "task_reopened"
     ASSIGNMENT_CHANGED = "assignment_changed"
-    REQ_ARCHIVED = "req_archived"
-    REQ_UNARCHIVED = "req_unarchived"
     STRATEGIC_VENDOR_EXPIRING = "strategic_expiring"  # 18 chars — fits String(20)
     # Communication / manual-entry types
     EMAIL_SENT = "email_sent"

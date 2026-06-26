@@ -42,7 +42,7 @@ def req_item(db_session: Session, test_user: User):
     req = Requisition(
         name="COV3-REQ",
         customer_name="Cov Corp",
-        status="active",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -68,7 +68,7 @@ def two_items(db_session: Session, test_user: User):
     req = Requisition(
         name="COV3-REQ-TWO",
         customer_name="Multi Corp",
-        status="active",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -545,7 +545,7 @@ class TestPreviewInquiryCoverage:
         req = Requisition(
             name="ORPHAN-REQ",
             customer_name="Orphan Co",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )

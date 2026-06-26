@@ -169,7 +169,7 @@ class TestVendorMergeService:
         req = Requisition(
             name="REQ-1",
             customer_name="Test",
-            status="active",
+            status="open",
             created_by=user.id,
             created_at=datetime.now(timezone.utc),
         )

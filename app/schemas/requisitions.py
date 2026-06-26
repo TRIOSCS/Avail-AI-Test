@@ -55,12 +55,6 @@ def _normalize_mpn_list(v):
 # ── Batch Operations ─────────────────────────────────────────────────
 
 
-class BatchArchiveByIds(BaseModel):
-    """Archive specific requisitions by ID list."""
-
-    ids: list[int] = Field(..., min_length=1, max_length=200)
-
-
 class BatchAssign(BaseModel):
     """Assign an owner to specific requisitions."""
 
@@ -208,9 +202,10 @@ class SightingUnavailableIn(BaseModel):
 
 
 class RequisitionOutcome(BaseModel):
-    """Mark a requisition as won or lost."""
+    """Mark a requisition as won or lost (a close reason is required)."""
 
     outcome: str = Field(..., description="Must be 'won' or 'lost'")
+    reason: str = Field("", description="Required close reason for the Won/Lost outcome")
 
     @field_validator("outcome")
     @classmethod

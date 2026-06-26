@@ -302,6 +302,21 @@ tr:focus-within .opp-action-rail {
 .opp-action-rail button:hover { background: var(--opp-sep); color: var(--opp-text-primary); }
 .opp-action-rail button:focus-visible { outline: 2px solid var(--opp-status-open); outline-offset: 1px; }
 
+/* Won/Lost close-reason popover anchored under the row action rail. */
+.opp-outcome-prompt {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 8px;
+  width: 240px;
+  padding: 8px;
+  background: #fff;
+  border: 1px solid var(--opp-sep);
+  border-radius: 8px;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.12);
+  z-index: 20;
+  text-align: left;
+}
+
 .opp-col-header {
   font-family: inherit;
   font-size: 10px;

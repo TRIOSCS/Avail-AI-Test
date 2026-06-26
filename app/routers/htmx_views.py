@@ -911,7 +911,7 @@ async def requisition_import_save(
         customer_site_id=site_id,
         deadline=deadline.strip() or None,
         urgency=urgency,
-        status=RequisitionStatus.ACTIVE,
+        status=RequisitionStatus.OPEN,
         created_by=user.id,
         claimed_by_id=user.id,
     )
@@ -1222,7 +1222,7 @@ async def requisition_create(
         customer_name=customer_name or None,
         deadline=deadline or None,
         urgency=urgency,
-        status=RequisitionStatus.ACTIVE,
+        status=RequisitionStatus.OPEN,
         created_by=user.id,
         claimed_by_id=user.id,
     )
@@ -1849,7 +1849,7 @@ async def requisitions_bulk_action(
     if len(ids) > 200:
         raise HTTPException(400, "Maximum 200 requisitions per bulk action")
 
-    valid_actions = {"archive", "activate", "assign"}
+    valid_actions = {"assign"}
     if action not in valid_actions:
         raise HTTPException(400, f"Invalid action: {action}")
 
@@ -1857,13 +1857,7 @@ async def requisitions_bulk_action(
     for r in reqs:
         require_requisition_access(db, r.id, user)
 
-    if action == "archive":
-        for r in reqs:
-            r.status = RequisitionStatus.ARCHIVED
-    elif action == "activate":
-        for r in reqs:
-            r.status = RequisitionStatus.ACTIVE
-    elif action == "assign":
+    if action == "assign":
         owner_id = form.get("owner_id")
         if owner_id:
             new_owner = _safe_int(owner_id)
@@ -2115,10 +2109,9 @@ async def requisition_row_action(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Execute a row-level action (archive, activate, claim, unclaim, won, lost,
-    clone)."""
+    """Execute a row-level action (claim, unclaim, won, lost, clone)."""
 
-    valid_actions = {"archive", "activate", "claim", "unclaim", "won", "lost", "clone"}
+    valid_actions = {"claim", "unclaim", "won", "lost", "clone"}
     if action_name not in valid_actions:
         return HTMLResponse("Invalid action", status_code=400)
 
@@ -2129,13 +2122,14 @@ async def requisition_row_action(
     msg = "Action completed"
     form = await request.form()
 
-    if action_name in ("archive", "activate", "won", "lost"):
-        from ..services.requisition_state import transition
+    if action_name in ("won", "lost"):
+        from ..services.requisition_state import OutcomeReasonRequired, transition
 
-        target = {"archive": "archived", "activate": "active"}.get(action_name, action_name)
         try:
-            transition(req, target, user, db)
-            msg = f"'{req.name}' → {target}"
+            transition(req, action_name, user, db, reason=form.get("reason", ""))
+            msg = f"'{req.name}' → {action_name}"
+        except OutcomeReasonRequired as e:
+            return HTMLResponse(str(e), status_code=400)
         except ValueError as e:
             msg = str(e)
     elif action_name == "claim":
@@ -7605,8 +7599,7 @@ async def company_detail_partial(
             ),
             Requisition.status.in_(
                 [
-                    RequisitionStatus.ACTIVE,
-                    RequisitionStatus.SOURCING,
+                    RequisitionStatus.OPEN,
                     RequisitionStatus.DRAFT,
                 ]
             ),
@@ -10691,8 +10684,7 @@ async def dashboard_partial(
         .filter(
             Requisition.status.in_(
                 [
-                    RequisitionStatus.ACTIVE,
-                    RequisitionStatus.SOURCING,
+                    RequisitionStatus.OPEN,
                     RequisitionStatus.DRAFT,
                 ]
             )
@@ -15763,8 +15755,7 @@ async def parts_list_partial(
         query = query.filter(
             Requisition.status.in_(
                 [
-                    RequisitionStatus.ACTIVE,
-                    RequisitionStatus.SOURCING,
+                    RequisitionStatus.OPEN,
                 ]
             )
         )
@@ -16702,69 +16693,6 @@ async def unarchive_single_part(
     return await parts_list_partial(request=request, user=user, db=db)
 
 
-@router.patch("/v2/partials/requisitions/{req_id}/archive", response_class=HTMLResponse)
-async def archive_requisition(
-    req_id: int,
-    request: Request,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Archive a whole requisition and cascade to all its requirements."""
-    requisition = db.get(Requisition, req_id)
-    if not requisition:
-        raise HTTPException(404, "Requisition not found")
-    require_requisition_access(db, req_id, user)
-
-    prior_status = requisition.status
-    requisition.status = RequisitionStatus.ARCHIVED
-    for child in requisition.requirements:
-        child.sourcing_status = SourcingStatus.ARCHIVED
-    if prior_status != RequisitionStatus.ARCHIVED:
-        _log_activity(
-            db,
-            activity_type=ActivityType.REQ_ARCHIVED,
-            requisition_id=requisition.id,
-            user_id=user.id,
-            description="Requisition archived",
-        )
-    db.commit()
-    logger.info("Requisition {} ({} parts) archived by {}", req_id, len(requisition.requirements), user.email)
-
-    return await parts_list_partial(request=request, user=user, db=db)
-
-
-@router.patch("/v2/partials/requisitions/{req_id}/unarchive", response_class=HTMLResponse)
-async def unarchive_requisition(
-    req_id: int,
-    request: Request,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Unarchive a requisition and restore all its requirements to open."""
-    requisition = db.get(Requisition, req_id)
-    if not requisition:
-        raise HTTPException(404, "Requisition not found")
-    require_requisition_access(db, req_id, user)
-
-    prior_status = requisition.status
-    requisition.status = RequisitionStatus.ACTIVE
-    for child in requisition.requirements:
-        if child.sourcing_status == SourcingStatus.ARCHIVED:
-            child.sourcing_status = SourcingStatus.OPEN
-    if prior_status != RequisitionStatus.ACTIVE:
-        _log_activity(
-            db,
-            activity_type=ActivityType.REQ_UNARCHIVED,
-            requisition_id=requisition.id,
-            user_id=user.id,
-            description="Requisition unarchived",
-        )
-    db.commit()
-    logger.info("Requisition {} unarchived by {}", req_id, user.email)
-
-    return await parts_list_partial(request=request, user=user, db=db)
-
-
 @router.post("/v2/partials/parts/bulk-archive", response_class=HTMLResponse)
 async def bulk_archive(
     request: Request,
@@ -16792,19 +16720,9 @@ async def bulk_archive(
             Requirement.id.in_(requirement_ids),
         ).update({"sourcing_status": SourcingStatus.ARCHIVED}, synchronize_session="fetch")
 
-    # Archive requisitions and cascade to their children
+    # Archive every part belonging to the named requisitions (part-level
+    # sourcing_status — there is no requisition-level archive/hide flag).
     if requisition_ids:
-        reqs = db.query(Requisition).filter(Requisition.id.in_(requisition_ids)).all()
-        for requisition in reqs:
-            requisition.status = RequisitionStatus.ARCHIVED
-            _log_activity(
-                db,
-                activity_type=ActivityType.REQ_ARCHIVED,
-                requisition_id=requisition.id,
-                user_id=user.id,
-                description="Requisition archived",
-            )
-        # Cascade: archive all children of these requisitions
         db.query(Requirement).filter(
             Requirement.requisition_id.in_(requisition_ids),
         ).update({"sourcing_status": SourcingStatus.ARCHIVED}, synchronize_session="fetch")
@@ -16843,12 +16761,9 @@ async def bulk_unarchive(
             Requirement.sourcing_status == SourcingStatus.ARCHIVED,
         ).update({"sourcing_status": SourcingStatus.OPEN}, synchronize_session="fetch")
 
-    # Unarchive requisitions and cascade to their children
+    # Restore every archived part belonging to the named requisitions
+    # (part-level sourcing_status — there is no requisition-level archive flag).
     if requisition_ids:
-        reqs = db.query(Requisition).filter(Requisition.id.in_(requisition_ids)).all()
-        for requisition in reqs:
-            requisition.status = RequisitionStatus.ACTIVE
-        # Cascade: restore archived children of these requisitions
         db.query(Requirement).filter(
             Requirement.requisition_id.in_(requisition_ids),
             Requirement.sourcing_status == SourcingStatus.ARCHIVED,

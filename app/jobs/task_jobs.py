@@ -26,8 +26,7 @@ _BID_DUE_CAP = 20
 
 # Active requisition statuses worth alerting on
 _ACTIVE_REQ_STATUSES = {
-    RequisitionStatus.ACTIVE,
-    RequisitionStatus.SOURCING,
+    RequisitionStatus.OPEN,
     RequisitionStatus.QUOTED,
     RequisitionStatus.OFFERS,
 }

@@ -19,15 +19,14 @@ from app.constants import (
     ("member", "value"),
     [
         (RequisitionStatus.DRAFT, "draft"),
-        (RequisitionStatus.ACTIVE, "active"),
-        (RequisitionStatus.SOURCING, "sourcing"),
+        (RequisitionStatus.OPEN, "open"),
+        (RequisitionStatus.RFQS_SENT, "rfqs_sent"),
         (RequisitionStatus.OFFERS, "offers"),
-        (RequisitionStatus.QUOTING, "quoting"),
         (RequisitionStatus.QUOTED, "quoted"),
-        (RequisitionStatus.REOPENED, "reopened"),
         (RequisitionStatus.WON, "won"),
         (RequisitionStatus.LOST, "lost"),
-        (RequisitionStatus.ARCHIVED, "archived"),
+        (RequisitionStatus.HOTLIST, "hotlist"),
+        (RequisitionStatus.CANCELLED, "cancelled"),
     ],
 )
 def test_requisition_status_values(member, value):
@@ -82,6 +81,6 @@ def test_sourcing_status_has_archived():
 
 def test_enum_is_str():
     """StrEnum values are equal to plain strings."""
-    assert RequisitionStatus.ACTIVE == "active"
-    assert "active" == RequisitionStatus.ACTIVE
-    assert RequisitionStatus.ACTIVE in {"active", "sourcing"}
+    assert RequisitionStatus.OPEN == "open"
+    assert "open" == RequisitionStatus.OPEN
+    assert RequisitionStatus.OPEN in {"open", "rfqs_sent"}

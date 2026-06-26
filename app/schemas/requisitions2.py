@@ -15,13 +15,13 @@ from pydantic import BaseModel, Field
 
 class ReqStatus(str, Enum):
     all = "all"
-    active = "active"
-    draft = "draft"
-    sourcing = "sourcing"
-    archived = "archived"
+    open = "open"
+    rfqs_sent = "rfqs_sent"
+    offers = "offers"
+    quoted = "quoted"
     won = "won"
     lost = "lost"
-    closed = "closed"
+    hotlist = "hotlist"
 
 
 class Urgency(str, Enum):
@@ -51,7 +51,7 @@ class ReqListFilters(BaseModel):
     """
 
     q: str = ""
-    status: ReqStatus = ReqStatus.active
+    status: ReqStatus = ReqStatus.open
     owner: int | None = None
     urgency: Urgency | None = None
     date_from: date | None = None
@@ -74,17 +74,14 @@ class RowActionName(str, Enum):
     assign = "assign"
     claim = "claim"
     unclaim = "unclaim"
-    archive = "archive"
-    activate = "activate"
     won = "won"
     lost = "lost"
+    hotlist = "hotlist"
     clone = "clone"
 
 
 class BulkActionName(str, Enum):
-    archive = "archive"
     assign = "assign"
-    activate = "activate"
 
 
 class PaginationContext(BaseModel):

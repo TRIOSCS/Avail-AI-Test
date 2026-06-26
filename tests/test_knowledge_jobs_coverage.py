@@ -46,7 +46,7 @@ def active_req(db_session: Session, test_user: User) -> Requisition:
     req = Requisition(
         name="KJ-TEST-REQ",
         customer_name="Test Co",
-        status="active",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),

@@ -17,7 +17,7 @@ from app.models.vendor_sighting_summary import VendorSightingSummary
 
 class TestRequirementLastSearchedAt:
     def test_requirement_has_last_searched_at_column(self, db_session):
-        req = Requisition(name="Test RFQ", status=RequisitionStatus.ACTIVE, customer_name="Acme")
+        req = Requisition(name="Test RFQ", status=RequisitionStatus.OPEN, customer_name="Acme")
         db_session.add(req)
         db_session.flush()
         r = Requirement(
@@ -32,7 +32,7 @@ class TestRequirementLastSearchedAt:
         assert r.last_searched_at is None
 
     def test_last_searched_at_accepts_datetime(self, db_session):
-        req = Requisition(name="Test RFQ", status=RequisitionStatus.ACTIVE, customer_name="Acme")
+        req = Requisition(name="Test RFQ", status=RequisitionStatus.OPEN, customer_name="Acme")
         db_session.add(req)
         db_session.flush()
         now = datetime.now(timezone.utc)
@@ -84,7 +84,7 @@ class TestSearchRequirementStamp:
     ):
         mock_fetch.return_value = ([], source_statuses)
 
-        req = Requisition(name=req_name, status=RequisitionStatus.ACTIVE, customer_name="Acme")
+        req = Requisition(name=req_name, status=RequisitionStatus.OPEN, customer_name="Acme")
         db_session.add(req)
         db_session.flush()
         r = Requirement(
@@ -112,7 +112,7 @@ class TestSearchRequirementStamp:
 
 def _seed_requirement(db_session, mpn="RATE-001", last_searched_at=None):
     """Create a requisition + requirement for testing."""
-    req = Requisition(name="Rate Test RFQ", status=RequisitionStatus.ACTIVE, customer_name="Acme")
+    req = Requisition(name="Rate Test RFQ", status=RequisitionStatus.OPEN, customer_name="Acme")
     db_session.add(req)
     db_session.flush()
     r = Requirement(

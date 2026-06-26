@@ -178,7 +178,7 @@ def test_log_activity_resolves_company_from_requisition(db_session, test_user, t
     req = Requisition(
         name="REQ-COMPANY-RESOLVE",
         customer_name="Acme Electronics",
-        status="active",
+        status="open",
         created_by=test_user.id,
         customer_site_id=test_customer_site.id,
     )
@@ -202,7 +202,7 @@ def test_log_activity_explicit_company_id_skips_resolution(db_session, test_user
     req = Requisition(
         name="REQ-EXPLICIT-COMPANY",
         customer_name="Acme Electronics",
-        status="active",
+        status="open",
         created_by=test_user.id,
         customer_site_id=test_customer_site.id,
     )

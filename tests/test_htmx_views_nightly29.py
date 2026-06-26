@@ -26,7 +26,7 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 
-from app.constants import RequisitionStatus, SourcingStatus
+from app.constants import SourcingStatus
 from app.models import Requirement, Requisition, User
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -56,7 +56,7 @@ async def _call_bulk(handler, payload, user, db):
 
 
 def _make_requisition(db: Session, user: User) -> Requisition:
-    req = Requisition(name="N29 Req", status="active", created_by=user.id)
+    req = Requisition(name="N29 Req", status="open", created_by=user.id)
     db.add(req)
     db.commit()
     db.refresh(req)
@@ -119,8 +119,6 @@ class TestBulkArchiveDirect:
         )
 
         assert result.status_code == 200
-        db_session.refresh(req)
-        assert req.status == RequisitionStatus.ARCHIVED
         db_session.refresh(part)
         assert part.sourcing_status == SourcingStatus.ARCHIVED
 
@@ -175,12 +173,12 @@ class TestBulkUnarchiveDirect:
         assert part.sourcing_status == SourcingStatus.OPEN
 
     async def test_requisition_ids_branch_covered(self, db_session: Session, test_user: User):
-        """Lines 9914–9922: requisition_ids non-empty → status ACTIVE + cascade."""
+        """Lines 9914–9922: requisition_ids non-empty → archived parts restored to
+        open."""
         from app.routers.htmx_views import bulk_unarchive
 
         req = _make_requisition(db_session, test_user)
         part = _make_requirement(db_session, req)
-        req.status = RequisitionStatus.ARCHIVED
         part.sourcing_status = SourcingStatus.ARCHIVED
         db_session.commit()
 
@@ -189,8 +187,6 @@ class TestBulkUnarchiveDirect:
         )
 
         assert result.status_code == 200
-        db_session.refresh(req)
-        assert req.status == RequisitionStatus.ACTIVE
         db_session.refresh(part)
         assert part.sourcing_status == SourcingStatus.OPEN
 
@@ -200,7 +196,6 @@ class TestBulkUnarchiveDirect:
 
         req = _make_requisition(db_session, test_user)
         part = _make_requirement(db_session, req)
-        req.status = RequisitionStatus.ARCHIVED
         part.sourcing_status = SourcingStatus.ARCHIVED
         db_session.commit()
 

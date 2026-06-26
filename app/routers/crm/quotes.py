@@ -241,13 +241,13 @@ async def create_quote(
             created_by_id=user.id,
         )
         db.add(quote)
-        if req.status in ("active", "sourcing", "offers"):
+        if req.status in ("open", "offers"):
             from ...services.requisition_state import transition as req_transition
 
             try:
-                req_transition(req, "quoting", user, db)
+                req_transition(req, "quoted", user, db)
             except ValueError:
-                pass  # already in quoting or later state
+                pass  # already in quoted or later state
         try:
             db.commit()
             break
@@ -543,7 +543,7 @@ async def reopen_quote(
         raise HTTPException(404, "Quote not found")
     req = db.get(Requisition, quote.requisition_id)
     if req:
-        req.status = RequisitionStatus.REOPENED
+        req.status = RequisitionStatus.OPEN
     if payload.revise:
         new_quote = _build_revision(quote, user)
         db.add(new_quote)

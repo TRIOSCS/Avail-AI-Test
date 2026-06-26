@@ -35,7 +35,7 @@ def vendor_with_emails(db_session: Session, test_user: User) -> VendorCard:
 
     req = Requisition(
         name="Email Test Req",
-        status="sourcing",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )

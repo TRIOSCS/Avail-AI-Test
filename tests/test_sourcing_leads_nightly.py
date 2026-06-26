@@ -169,7 +169,7 @@ def _make_req_and_requirement(db):
     )
     db.add(u)
     db.flush()
-    req = Requisition(name="R", status="active", created_by=u.id)
+    req = Requisition(name="R", status="open", created_by=u.id)
     db.add(req)
     db.flush()
     requirement = Requirement(requisition_id=req.id, primary_mpn="ABC123")

@@ -12,7 +12,7 @@ from app.models.sourcing import Requirement, Requisition
 
 def _make_requirement(db_session, **fields):
     """Persist a Requirement (with its parent Requisition) and return it flushed."""
-    req = Requisition(name="Test", status=RequisitionStatus.ACTIVE, customer_name="Acme")
+    req = Requisition(name="Test", status=RequisitionStatus.OPEN, customer_name="Acme")
     db_session.add(req)
     db_session.flush()
     r = Requirement(
@@ -54,7 +54,7 @@ class TestMPNUppercaseValidator:
 class TestAPISubstituteFormat:
     def test_batch_create_stores_dict_subs(self, client, db_session):
         """POST /api/requisitions/{id}/requirements should store subs as dicts."""
-        req = Requisition(name="API Test", status=RequisitionStatus.ACTIVE, customer_name="Acme")
+        req = Requisition(name="API Test", status=RequisitionStatus.OPEN, customer_name="Acme")
         db_session.add(req)
         db_session.commit()
         resp = client.post(
@@ -77,7 +77,7 @@ class TestAPISubstituteFormat:
 
     def test_patch_stores_dict_subs(self, client, db_session):
         """PATCH should store subs as dicts."""
-        req = Requisition(name="API Test", status=RequisitionStatus.ACTIVE, customer_name="Acme")
+        req = Requisition(name="API Test", status=RequisitionStatus.OPEN, customer_name="Acme")
         db_session.add(req)
         db_session.flush()
         r = Requirement(

@@ -43,7 +43,7 @@ class TestCloneRequisition:
         assert cloned.customer_name == test_requisition.customer_name
         assert cloned.cloned_from_id == test_requisition.id
         assert cloned.created_by == test_user.id
-        assert cloned.status == "active"
+        assert cloned.status == "open"
 
     def test_requirements_are_duplicated_to_new_req(self, client, db_session, test_user, test_requisition):
         """All requirements from the original are cloned to the new requisition."""

@@ -88,7 +88,7 @@ class TestVendorDetailMpnContext:
         req = Requisition(
             name="Test Req",
             created_by=test_user.id,
-            status="active",
+            status="open",
         )
         db_session.add(req)
         db_session.flush()

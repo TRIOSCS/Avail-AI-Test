@@ -36,7 +36,7 @@ def test_creates_scratch_requisition(db_session, test_user):
 
     assert req.is_scratch is True
     assert req.created_by == test_user.id
-    assert req.status == RequisitionStatus.ACTIVE
+    assert req.status == RequisitionStatus.OPEN
     assert req.customer_name is None
     assert req.name == "Quick-source: LM317T"
     assert requirement.requisition_id == req.id
@@ -96,7 +96,7 @@ def test_persist_empty_payload_creates_no_sightings(db_session, test_user):
 
 
 def test_scratch_reqs_excluded_from_requisitions_list(client, db_session, test_user):
-    db_session.add(Requisition(name="REQ-NORMAL-9", status="active", created_by=test_user.id))
+    db_session.add(Requisition(name="REQ-NORMAL-9", status="open", created_by=test_user.id))
     db_session.commit()
     get_or_create_scratch_req(db_session, test_user, "SCRATCHONLYPN")
     db_session.commit()
@@ -109,7 +109,7 @@ def test_scratch_reqs_excluded_from_requisitions_list(client, db_session, test_u
 
 
 def test_scratch_reqs_excluded_from_requisition_picker(client, db_session, test_user):
-    db_session.add(Requisition(name="REQ-NORMAL-9", status="active", created_by=test_user.id))
+    db_session.add(Requisition(name="REQ-NORMAL-9", status="open", created_by=test_user.id))
     db_session.commit()
     get_or_create_scratch_req(db_session, test_user, "SCRATCHONLYPN")
     db_session.commit()

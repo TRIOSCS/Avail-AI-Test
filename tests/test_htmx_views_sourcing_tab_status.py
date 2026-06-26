@@ -32,7 +32,7 @@ def _make_user(db_session) -> User:
 
 
 def _make_requisition(db_session) -> Requisition:
-    req = Requisition(name="Test RFQ", status="active")
+    req = Requisition(name="Test RFQ", status="open")
     db_session.add(req)
     db_session.flush()
     return req

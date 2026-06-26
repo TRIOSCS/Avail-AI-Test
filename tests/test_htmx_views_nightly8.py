@@ -45,7 +45,7 @@ def _req(db: Session, user: User, **kw) -> Requisition:
     defaults = dict(
         name=f"N8-REQ-{uuid.uuid4().hex[:6]}",
         customer_name="Acme",
-        status=RequisitionStatus.ACTIVE,
+        status=RequisitionStatus.OPEN,
         created_by=user.id,
         claimed_by_id=user.id,
         created_at=datetime.now(timezone.utc),
@@ -221,14 +221,14 @@ class TestBulkActionAssign:
     def test_bulk_too_many_ids(self, client: TestClient, db_session: Session, test_user: User):
         ids = ",".join(str(i) for i in range(1, 202))
         resp = client.post(
-            "/v2/partials/requisitions/bulk/archive",
+            "/v2/partials/requisitions/bulk/assign",
             data={"ids": ids},
         )
         assert resp.status_code == 400
 
     def test_bulk_invalid_id_format(self, client: TestClient, db_session: Session, test_user: User):
         resp = client.post(
-            "/v2/partials/requisitions/bulk/archive",
+            "/v2/partials/requisitions/bulk/assign",
             data={"ids": "1,abc,3"},
         )
         assert resp.status_code == 400
@@ -852,15 +852,15 @@ class TestBulkArchiveParts:
         assert item.sourcing_status == SourcingStatus.ARCHIVED
 
     def test_bulk_archive_requisitions(self, client: TestClient, db_session: Session, test_user: User):
-        req = _req(db_session, test_user, status=RequisitionStatus.ACTIVE)
+        req = _req(db_session, test_user, status=RequisitionStatus.OPEN)
         item = _requirement(db_session, req)
         resp = client.post(
             "/v2/partials/parts/bulk-archive",
             json={"requirement_ids": [], "requisition_ids": [req.id]},
         )
         assert resp.status_code == 200
-        db_session.refresh(req)
-        assert req.status == RequisitionStatus.ARCHIVED
+        db_session.refresh(item)
+        assert item.sourcing_status == SourcingStatus.ARCHIVED
 
     def test_bulk_archive_empty_body(self, client: TestClient):
         resp = client.post(
@@ -881,15 +881,15 @@ class TestBulkArchiveParts:
         assert item.sourcing_status == SourcingStatus.OPEN
 
     def test_bulk_unarchive_requisitions(self, client: TestClient, db_session: Session, test_user: User):
-        req = _req(db_session, test_user, status=RequisitionStatus.ARCHIVED)
+        req = _req(db_session, test_user)
         item = _requirement(db_session, req, sourcing_status=SourcingStatus.ARCHIVED)
         resp = client.post(
             "/v2/partials/parts/bulk-unarchive",
             json={"requirement_ids": [], "requisition_ids": [req.id]},
         )
         assert resp.status_code == 200
-        db_session.refresh(req)
-        assert req.status == RequisitionStatus.ACTIVE
+        db_session.refresh(item)
+        assert item.sourcing_status == SourcingStatus.OPEN
 
     def test_bulk_unarchive_empty(self, client: TestClient):
         resp = client.post(

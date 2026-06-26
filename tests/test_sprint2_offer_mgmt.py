@@ -23,7 +23,7 @@ def req_with_offer(db_session: Session, test_user: User):
     """A requisition with one active offer."""
     req = Requisition(
         name="Sprint2 Test Req",
-        status="active",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -58,7 +58,7 @@ def pending_review_offer(db_session: Session, test_user: User):
     """An offer in pending_review status for review queue tests."""
     req = Requisition(
         name="Review Queue Req",
-        status="active",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )

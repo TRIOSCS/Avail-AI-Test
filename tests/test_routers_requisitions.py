@@ -47,7 +47,6 @@ def test_requisition_counts_empty(client):
     data = resp.json()
     assert data["total"] == 0
     assert data["open"] == 0
-    assert data["archive"] == 0
 
 
 def test_requisition_counts_with_data(client, test_requisition):
@@ -56,16 +55,6 @@ def test_requisition_counts_with_data(client, test_requisition):
     assert resp.status_code == 200
     data = resp.json()
     assert data["total"] >= 1
-
-
-def test_requisition_counts_archive_includes_archived(client, db_session, test_requisition):
-    """GET /api/requisitions/counts archive count includes archived/won/lost/closed."""
-    test_requisition.status = "archived"
-    db_session.commit()
-    resp = client.get("/api/requisitions/counts")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["archive"] >= 1
 
 
 def test_list_requisitions_empty(client):
@@ -103,15 +92,6 @@ def test_list_requisitions_search_no_match(client, test_requisition):
     assert len(resp.json()["requisitions"]) == 0
 
 
-def test_list_requisitions_archive_filter(client, db_session, test_requisition):
-    """Status=archive shows only archived/won/lost/closed requisitions."""
-    test_requisition.status = "archived"
-    db_session.commit()
-    resp = client.get("/api/requisitions", params={"status": "archive"})
-    assert resp.status_code == 200
-    assert len(resp.json()["requisitions"]) >= 1
-
-
 def test_list_requisitions_pagination(client, db_session, test_user):
     """Limit and offset work correctly."""
     from app.models import Requisition
@@ -120,7 +100,7 @@ def test_list_requisitions_pagination(client, db_session, test_user):
         db_session.add(
             Requisition(
                 name=f"REQ-PAGE-{i}",
-                status="active",
+                status="open",
                 created_by=test_user.id,
                 created_at=datetime.now(timezone.utc),
             )
@@ -145,24 +125,6 @@ def test_update_requisition(client, test_requisition):
 def test_update_requisition_not_found(client):
     """PUT returns 404 for non-existent requisition."""
     resp = client.put("/api/requisitions/99999", json={"name": "x"})
-    assert resp.status_code == 404
-
-
-def test_toggle_archive(client, test_requisition):
-    """PUT /api/requisitions/{id}/archive toggles between archived and active."""
-    resp = client.put(f"/api/requisitions/{test_requisition.id}/archive")
-    assert resp.status_code == 200
-    assert resp.json()["status"] == "archived"
-
-    # Toggle back
-    resp = client.put(f"/api/requisitions/{test_requisition.id}/archive")
-    assert resp.status_code == 200
-    assert resp.json()["status"] == "active"
-
-
-def test_toggle_archive_not_found(client):
-    """Archive returns 404 for non-existent requisition."""
-    resp = client.put("/api/requisitions/99999/archive")
     assert resp.status_code == 404
 
 
@@ -417,7 +379,7 @@ def test_get_saved_sightings_buyer_outcomes_offer_and_unavailable(client, db_ses
         qty_available=100,
         unit_price=0.55,
         entered_by_id=test_user.id,
-        status="active",
+        status="open",
         created_at=datetime.now(timezone.utc),
     )
     db_session.add(offer)
@@ -516,63 +478,6 @@ def test_mark_sighting_unavailable_forbidden_for_other_sales_user(db_session, te
 # ── Bulk Operations ──────────────────────────────────────────────────
 
 
-def test_bulk_archive(client, db_session, test_user):
-    """PUT /api/requisitions/bulk-archive archives reqs not created by current user."""
-    from app.models import Requisition, User
-
-    # bulk-archive archives reqs NOT created by the current user
-    other = User(
-        email="other@trioscs.com",
-        name="Other",
-        role="buyer",
-        azure_id="az-other-bulk",
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(other)
-    db_session.flush()
-
-    r1 = Requisition(
-        name="BULK-1",
-        status="active",
-        created_by=other.id,
-        created_at=datetime.now(timezone.utc),
-    )
-    r2 = Requisition(
-        name="BULK-2",
-        status="active",
-        created_by=other.id,
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add_all([r1, r2])
-    db_session.commit()
-
-    resp = client.put("/api/requisitions/bulk-archive")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["ok"] is True
-    assert data["archived_count"] >= 2
-
-
-def test_batch_archive_by_ids(client, db_session, test_user):
-    """PUT /api/requisitions/batch-archive archives specific reqs by ID."""
-    from app.models import Requisition
-
-    r1 = Requisition(name="BA-1", status="active", created_by=test_user.id, created_at=datetime.now(timezone.utc))
-    r2 = Requisition(name="BA-2", status="active", created_by=test_user.id, created_at=datetime.now(timezone.utc))
-    r3 = Requisition(name="BA-3", status="active", created_by=test_user.id, created_at=datetime.now(timezone.utc))
-    db_session.add_all([r1, r2, r3])
-    db_session.commit()
-
-    resp = client.put("/api/requisitions/batch-archive", json={"ids": [r1.id, r2.id]})
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["ok"] is True
-    assert data["archived_count"] == 2
-    # r3 should still be open
-    db_session.refresh(r3)
-    assert r3.status == "active"
-
-
 def test_batch_assign(client, db_session, test_user):
     """PUT /api/requisitions/batch-assign assigns owner to specific reqs (admin
     only)."""
@@ -583,8 +488,8 @@ def test_batch_assign(client, db_session, test_user):
     # batch-assign requires admin; override for this test
     app.dependency_overrides[require_admin] = lambda: test_user
 
-    r1 = Requisition(name="ASSIGN-1", status="active", created_by=test_user.id, created_at=datetime.now(timezone.utc))
-    r2 = Requisition(name="ASSIGN-2", status="active", created_by=test_user.id, created_at=datetime.now(timezone.utc))
+    r1 = Requisition(name="ASSIGN-1", status="open", created_by=test_user.id, created_at=datetime.now(timezone.utc))
+    r2 = Requisition(name="ASSIGN-2", status="open", created_by=test_user.id, created_at=datetime.now(timezone.utc))
     db_session.add_all([r1, r2])
     db_session.commit()
 
@@ -699,14 +604,14 @@ def test_sales_user_sees_only_own_requisitions(client, db_session, test_user, sa
     # Create a requisition owned by test_user (buyer)
     buyer_req = Requisition(
         name="Buyer-REQ",
-        status="active",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
     # Create a requisition owned by sales_user
     sales_req = Requisition(
         name="Sales-REQ",
-        status="active",
+        status="open",
         created_by=sales_user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -738,7 +643,7 @@ def test_list_requisitions_with_customer_site(client, db_session, test_user, tes
 
     req = Requisition(
         name="REQ-SITE",
-        status="active",
+        status="open",
         customer_site_id=test_customer_site.id,
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
@@ -801,16 +706,6 @@ def test_update_requisition_empty_name_preserves_old(client, db_session, test_re
     )
     assert resp.status_code == 200
     assert resp.json()["name"] == old_name
-
-
-@pytest.mark.parametrize("status", ["won", "lost"])
-def test_toggle_archive_terminal_status(client, db_session, test_requisition, status):
-    """Archiving a 'won'/'lost' requisition transitions it to 'active'."""
-    test_requisition.status = status
-    db_session.commit()
-    resp = client.put(f"/api/requisitions/{test_requisition.id}/archive")
-    assert resp.status_code == 200
-    assert resp.json()["status"] == "active"
 
 
 def test_clone_requisition_with_substitutes(client, db_session, test_requisition):
@@ -980,7 +875,7 @@ def test_saved_sightings_with_historical_offers(client, db_session, test_requisi
     # Create another requisition with an offer for the same MPN
     other_req = Requisition(
         name="OTHER-REQ",
-        status="active",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -994,7 +889,7 @@ def test_saved_sightings_with_historical_offers(client, db_session, test_requisi
         qty_available=200,
         unit_price=0.55,
         entered_by_id=test_user.id,
-        status="active",
+        status="open",
         created_at=datetime.now(timezone.utc),
     )
     db_session.add(hist_offer)

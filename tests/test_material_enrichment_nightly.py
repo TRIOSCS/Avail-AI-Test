@@ -62,7 +62,7 @@ def _make_card_with_requirement(db: Session, mpn: str) -> MaterialCard:
     req = Requisition(
         name=f"REQ-{mpn}",
         customer_name="Test Corp",
-        status="active",
+        status="open",
         created_by=user.id,
         created_at=datetime.now(timezone.utc),
     )

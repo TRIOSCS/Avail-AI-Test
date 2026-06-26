@@ -166,7 +166,7 @@ class TestV2PageRequisitionsPath:
         """Lines 228-230: requisitions detail URL sets partial to /v2/partials/requisitions/{id}."""
         from app.models import Requisition
 
-        req = Requisition(name="Test Req", status="active", created_by=test_user.id)
+        req = Requisition(name="Test Req", status="open", created_by=test_user.id)
         db_session.add(req)
         db_session.commit()
         db_session.refresh(req)

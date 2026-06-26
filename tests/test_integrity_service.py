@@ -58,7 +58,7 @@ def _make_requisition(db: Session, user: User) -> Requisition:
     r = Requisition(
         name="INT-TEST-001",
         customer_name="Test Co",
-        status="active",
+        status="open",
         created_by=user.id,
     )
     db.add(r)

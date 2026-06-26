@@ -30,7 +30,7 @@ def _other_requirement(db_session, admin_user):
     req = Requisition(
         name="REQ-OTHER-OWNER",
         customer_name="Other Co",
-        status="active",
+        status="open",
         created_by=admin_user.id,
         created_at=datetime.now(timezone.utc),
     )

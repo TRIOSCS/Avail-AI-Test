@@ -20,7 +20,7 @@ from app.utils.normalization import normalize_mpn_key
 
 
 def _req(db, mpn="LM317T", subs=None, customer="Acme Corp"):
-    rq = Requisition(name="RFQ", status="active", customer_name=customer)
+    rq = Requisition(name="RFQ", status="open", customer_name=customer)
     db.add(rq)
     db.flush()
     r = Requirement(

@@ -101,7 +101,7 @@ def test_collect_db_descriptions_with_sighting_raw_data():
     sess = TestSessionLocal()
     try:
         user = _make_user_in_sess(sess)
-        req = Requisition(name="Test Req", status="active", created_by=user.id)
+        req = Requisition(name="Test Req", status="open", created_by=user.id)
         sess.add(req)
         sess.flush()
 
@@ -144,7 +144,7 @@ def test_collect_db_descriptions_with_requirement_description():
     sess = TestSessionLocal()
     try:
         user = _make_user_in_sess(sess)
-        req = Requisition(name="Old Req", status="active", created_by=user.id)
+        req = Requisition(name="Old Req", status="open", created_by=user.id)
         sess.add(req)
         sess.flush()
 
@@ -186,7 +186,7 @@ def test_collect_db_descriptions_deduplicates():
         )
         sess.add(card)
 
-        req = Requisition(name="R1", status="active", created_by=user.id)
+        req = Requisition(name="R1", status="open", created_by=user.id)
         sess.add(req)
         sess.flush()
 
@@ -266,7 +266,7 @@ def test_collect_db_descriptions_limits_to_five_sources():
     sess = TestSessionLocal()
     try:
         user = _make_user_in_sess(sess, suffix="limit")
-        req = Requisition(name="Req Multi", status="active", created_by=user.id)
+        req = Requisition(name="Req Multi", status="open", created_by=user.id)
         sess.add(req)
         sess.flush()
 

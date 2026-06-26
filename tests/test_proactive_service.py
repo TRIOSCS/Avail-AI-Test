@@ -252,7 +252,7 @@ class TestSendProactiveOffer:
         source_req = Requisition(
             name="Totals-Req",
             customer_name="Test",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -974,7 +974,7 @@ class TestQtyCapping:
         source_req = Requisition(
             name="Cap-Req",
             customer_name="Test",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -1032,7 +1032,7 @@ class TestQtyCapping:
         source_req = Requisition(
             name="Avail-Req",
             customer_name="Test",
-            status="active",
+            status="open",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )

@@ -170,7 +170,7 @@ class TestVendorPartUnavailabilityModel:
 
 
 def _make_requirement(db_session: Session, primary_mpn: str | None = "ST3300657SS") -> Requirement:
-    requisition = Requisition(name="Test RFQ", status="active")
+    requisition = Requisition(name="Test RFQ", status="open")
     db_session.add(requisition)
     db_session.flush()
     requirement = Requirement(
