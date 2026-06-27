@@ -18,7 +18,9 @@ register("buy-plans", BuyplanActionSource())  # Buy Plans is its own primary nav
 register("buy-plans", BuyplanResourcingSource())  # open re-sourcing pool (adds to the tab badge)
 register("crm", InboundCustomerSource())  # CRM — inbound from a customer
 register("my-day", TasksActionSource())  # My Day — open tasks assigned to me
-register("approvals", ApprovalRequestActionSource())  # Approvals — engine requests I must decide
+register(
+    "buy-plans", ApprovalRequestActionSource()
+)  # Approvals folded into the Buy Plans hub — count merges onto its badge
 
 __all__ = [
     "OfferConfirmedSource",

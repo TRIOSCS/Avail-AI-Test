@@ -35,12 +35,13 @@ class TestMobileNavTemplate:
         src = _TEMPLATE.read_text()
         assert "('reporting'," not in src, "'reporting' nav item still present in nav_items"
 
-    def test_nav_items_has_approvals_entry(self):
-        """nav_items tuple contains the C1 'approvals' entry → /v2/approvals/queue."""
+    def test_nav_items_has_no_approvals_entry(self):
+        """Approvals is folded into the Buy Plans hub lens — no standalone nav item."""
         src = _TEMPLATE.read_text()
-        assert "('approvals'," in src, "'approvals' nav item missing from nav_items"
-        assert "'/v2/approvals/queue'" in src, "Approvals nav must point at the engine queue"
-        assert "'/v2/approvals':'approvals'" in src, "urlToNav must map /v2/approvals to 'approvals'"
+        assert "('approvals'," not in src, "'approvals' nav item must be removed (folded into Buy Plans hub)"
+        assert "'/v2/approvals/queue'" not in src, "the standalone Approvals nav link must be gone"
+        # Deep links to /v2/approvals highlight the Buy Plans tab (it 302s to the hub lens).
+        assert "'/v2/approvals':'buy-plans'" in src, "urlToNav must alias /v2/approvals to 'buy-plans'"
 
     def test_url_to_nav_maps_buy_plans_to_itself(self):
         """UrlToNav maps /v2/buy-plans to 'buy-plans'."""
@@ -59,7 +60,7 @@ class TestMobileNavTemplate:
         verifies the badge wiring, not an incidental 'buy-plans' string elsewhere.
         """
         src = _TEMPLATE.read_text()
-        assert "{% elif id in ('requisitions', 'buy-plans', 'crm', 'my-day', 'approvals') %}" in src
+        assert "{% elif id in ('requisitions', 'buy-plans', 'crm', 'my-day') %}" in src
 
 
 class TestNavIdAlias:

@@ -1,0 +1,92 @@
+{#
+  approvals/_macros.html — row + empty-state macros for the four-tab approvals queue.
+
+  Purpose: render one ApprovalRequest row (RowVM) for the Pending or Recently-resolved
+           table, and the per-tab empty state. Pending rows show inline approve/reject
+           ONLY when row.can_act (the user is an eligible PENDING recipient — mirrors the
+           engine's decide() gate); otherwise they show the routed-to approver names.
+
+  Used by: approvals/_queue.html.
+  Depends on: shared/_macros.html (btn_primary/btn_danger — canonical .btn-sm sizing),
+              .compact-table from styles.css, the accent palette.
+
+  Note: approve/reject POST to the engine decision endpoint, then re-fetch the active tab
+  back into #bp-hub-body (the hub lens body) so the user stays on the same sub-tab.
+#}
+{% from "htmx/partials/shared/_macros.html" import btn_primary, btn_danger %}
+
+
+{% macro _status_pill(status) -%}
+<span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium
+  {% if status == 'approved' %}bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-200
+  {% elif status == 'rejected' %}bg-red-50 text-red-700 ring-1 ring-inset ring-red-200
+  {% elif status == 'cancelled' %}bg-gray-100 text-gray-600 ring-1 ring-inset ring-gray-200
+  {% elif status == 'expired' %}bg-gray-100 text-gray-500 ring-1 ring-inset ring-gray-200
+  {% else %}bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-200{% endif %}">
+  {{ status | title }}
+</span>
+{%- endmacro %}
+
+
+{% macro _subject_cell(row) -%}
+{% if row.subject_href %}
+{# Subject link navigates to the subject's detail (replaces the page) — explicit
+   hx-target so it never inherits #main-content's hx-target="this" ambiguously. #}
+<a href="{{ row.subject_href }}"
+   hx-get="{{ row.subject_href }}"
+   hx-target="#main-content"
+   hx-push-url="false"
+   class="font-medium text-brand-600 hover:text-brand-800">{{ row.subject_label }}</a>
+{% else %}
+<span class="text-gray-700">{{ row.subject_label }}</span>
+{% endif %}
+{% if row.parent_label %}<div class="text-[11px] text-gray-400">{{ row.parent_label }}</div>{% endif %}
+{% if row.payment_method %}<div class="text-[11px] text-gray-400">{{ row.payment_method | title }}</div>{% endif %}
+{%- endmacro %}
+
+
+{% macro approval_row(row, pending, active_tab) -%}
+{% set refetch = "if(event.detail.successful) htmx.ajax('GET','/v2/partials/buy-plans/approvals?tab=" ~ active_tab ~ "',{target:'#bp-hub-body',indicator:'#approvals-queue'})" %}
+<tr>
+  <td class="td-label">{{ _subject_cell(row) }}</td>
+  <td>{% if row.amount is not none %}${{ "{:,.2f}".format(row.amount) }}{% else %}—{% endif %}</td>
+  <td class="td-label text-gray-600">{{ row.requester_name }}</td>
+  {% if pending %}
+  <td class="td-label text-right">
+    {% if row.can_act %}
+    <div class="inline-flex items-center gap-1.5">
+      {{ btn_primary('Approve', {
+        'hx-post': '/v2/approvals/requests/' ~ row.id ~ '/decision',
+        'hx-vals': "js:{action: 'approve'}",
+        'hx-swap': 'none',
+        'hx-on::after-request': refetch
+      }) }}
+      {{ btn_danger('Reject', {
+        'hx-post': '/v2/approvals/requests/' ~ row.id ~ '/decision',
+        'hx-vals': "js:{action: 'reject', comment: prompt('Reason for rejection?') || ''}",
+        'hx-swap': 'none',
+        'hx-on::after-request': refetch
+      }) }}
+    </div>
+    {% else %}
+    <span class="text-xs text-gray-400">Routed to {{ row.approver_names }}</span>
+    {% endif %}
+  </td>
+  {% else %}
+  <td>{{ _status_pill(row.status) }}</td>
+  <td class="text-gray-500 text-xs">
+    {{ row.resolved_at.strftime('%Y-%m-%d') if row.resolved_at else (row.created_at.strftime('%Y-%m-%d') if row.created_at else '—') }}
+  </td>
+  {% endif %}
+</tr>
+{%- endmacro %}
+
+
+{% macro empty_state(label) -%}
+<div class="rounded-lg border border-gray-200 bg-white px-6 py-10 text-center">
+  <svg class="mx-auto h-10 w-10 text-emerald-300 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+  </svg>
+  <p class="text-sm text-gray-600">No {{ label | lower }} awaiting approval.</p>
+</div>
+{%- endmacro %}
