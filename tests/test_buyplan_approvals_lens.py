@@ -71,6 +71,24 @@ class TestApprovalsLensGating:
             assert label in resp.text
         assert 'hx-target="#bp-hub-body"' in resp.text
 
+    def test_full_page_threads_lens_to_lazy_partial(self, nonadmin_client):
+        """A full-page load of /v2/buy-plans?lens=approvals threads ?lens= into the lazy
+        partial URL, so a deep link / reload / the /v2/approvals/queue redirect lands on
+        the requested lens instead of the role default.
+
+        (v2_page authenticates via the session cookie, so this needs nonadmin_client,
+        not the require_user-only client.)
+        """
+        resp = nonadmin_client.get("/v2/buy-plans?lens=approvals")
+        assert resp.status_code == 200
+        assert "/v2/partials/buy-plans?lens=approvals" in resp.text
+
+    def test_full_page_ignores_unknown_lens(self, nonadmin_client):
+        """An unknown ?lens= value is dropped (no query string), not echoed verbatim."""
+        resp = nonadmin_client.get("/v2/buy-plans?lens=bogus")
+        assert resp.status_code == 200
+        assert "lens=bogus" not in resp.text
+
 
 class TestBadgeMerge:
     def test_approval_action_registered_under_buy_plans(self):

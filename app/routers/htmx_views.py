@@ -461,6 +461,17 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         # first full-page load instead of defaulting to Connectors.
         tab_qs = request.query_params.get("tab", "").strip()
         partial_url = f"/v2/partials/settings?tab={quote(tab_qs)}" if tab_qs else "/v2/partials/settings"
+    elif current_view == "buy-plans":
+        # Thread ?lens= through so a deep-link / redirect (the legacy /v2/approvals/queue
+        # → /v2/buy-plans?lens=approvals) and a reload/bookmark of a pushed lens URL paint
+        # the right lens on first full-page load instead of falling to _default_lens. A
+        # detail URL (/buy-plans/{id}) is overridden by the _DETAIL_VIEWS block below.
+        lens_qs = request.query_params.get("lens", "").strip()
+        partial_url = (
+            f"/v2/partials/buy-plans?lens={quote(lens_qs)}"
+            if lens_qs in ("orders", "deals", "supervise", "resource", "approvals")
+            else "/v2/partials/buy-plans"
+        )
     else:
         partial_url = f"/v2/partials/{current_view}"
     # Detail views: a trailing numeric id (/{view}/{id}) overrides the list partial with

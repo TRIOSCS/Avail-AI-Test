@@ -479,6 +479,68 @@ def test_amount_source_per_gate(db_session: Session) -> None:
     assert build_queue_view(db_session, me, "prepayments").pending_rows[0].amount == Decimal("2500.00")
 
 
+def test_invalid_tab_falls_back_to_smart_default(db_session: Session) -> None:
+    """An explicit-but-unknown tab (e.g. a stale deep-link) degrades to the smart
+    default, never a KeyError/500.
+
+    The router passes ``tab`` through unvalidated.
+    """
+    me = _user(db_session)
+    bp = _bp(db_session, me)
+    qp = _qp(db_session, bp, me)
+    _seed(
+        db_session,
+        ApprovalGateType.PURCHASE_ORDER,
+        subject_type=ApprovalSubjectType.QUALITY_PLAN,
+        subject_id=qp.id,
+        pending_recipients=(me,),
+    )
+
+    view = build_queue_view(db_session, me, "garbage")
+
+    assert view.active_tab in ("buy_plans", "sales_orders", "purchase_orders", "prepayments")
+    assert view.active_tab == "purchase_orders"  # equals the smart default (most awaiting me)
+
+
+def test_pending_capped_oldest_first(db_session, monkeypatch) -> None:
+    """PENDING_CAP bounds the pending list, oldest-first so the work most in need of a
+    decision is never the part that gets hidden."""
+    from app.services.approvals import queue as queue_mod
+
+    monkeypatch.setattr(queue_mod, "PENDING_CAP", 2)
+    me = _user(db_session)
+    bp = _bp(db_session, me)
+    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    oldest = _seed(
+        db_session,
+        ApprovalGateType.BUY_PLAN,
+        subject_type=ApprovalSubjectType.BUY_PLAN,
+        subject_id=bp.id,
+        pending_recipients=(me,),
+        created_at=base,
+    )
+    second = _seed(
+        db_session,
+        ApprovalGateType.BUY_PLAN,
+        subject_type=ApprovalSubjectType.BUY_PLAN,
+        subject_id=bp.id,
+        pending_recipients=(me,),
+        created_at=base + timedelta(days=1),
+    )
+    _seed(  # newest — must be the one dropped by the cap
+        db_session,
+        ApprovalGateType.BUY_PLAN,
+        subject_type=ApprovalSubjectType.BUY_PLAN,
+        subject_id=bp.id,
+        pending_recipients=(me,),
+        created_at=base + timedelta(days=2),
+    )
+
+    view = build_queue_view(db_session, me, "buy_plans")
+
+    assert [r.id for r in view.pending_rows] == [oldest.id, second.id]
+
+
 def test_routed_request_via_service_is_actionable(db_session: Session) -> None:
     """Integration: a request created through the real create_request/route path is can_act for its approver."""
     from app.services.approvals.service import create_request
