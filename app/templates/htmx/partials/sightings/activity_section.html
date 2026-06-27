@@ -2,9 +2,12 @@
    Called by: sightings/detail.html (include), sightings_log_activity (POST response)
    Depends on: HTMX, Alpine.js, Tailwind
    Context vars: activities (list of ActivityLog), requirement
+   Root padding (px-5 py-3) is self-contained: this partial swaps standalone into
+   #sightings-activity-section, whose parent #sightings-detail is flush (no p-3).
 #}
 
-<h4 class="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">Activity</h4>
+<div class="px-5 py-3">
+<h4 class="h4 mb-2">Activity</h4>
 
 {# ── Inline Log Note Form ──────────────────────────────────── #}
 <div x-data="{ open: false }" class="mb-3">
@@ -70,3 +73,4 @@
 
 {# ── Timeline ──────────────────────────────────────────────── #}
 {% include "htmx/partials/shared/activity_timeline.html" %}
+</div>

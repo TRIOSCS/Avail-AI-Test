@@ -4108,3 +4108,138 @@ class TestRequisitionStatusFilter:
         assert resp.status_code == 200
         for status in ("sourcing", "won", "quoted"):
             assert f"MPN-{status.upper()}" in resp.text
+
+
+class TestSightingsSalesHubLook:
+    """Pins the Sales Hub (requisitions2) visual restyle of the Sightings page: the list
+    table + detail panel adopt the shared opportunity-table tokens (opp-col-header /
+    opp_status_cell / coverage_meter / .h4 / .figure-accent / .input / .btn btn-sm),
+    WITHOUT flattening the Sightings-specific behaviour.
+
+    Companion guards: TestSightingsVendorRowStatusTreatment pins the protected
+    red/green row_tint; TestDashboardCounters/TestBatchStatus/TestBatchNotes pin
+    the counters + action-bar handlers. Here we assert the new class strings AND
+    re-confirm the protected interactions co-exist in the same render.
+    """
+
+    # ── List table tokens ────────────────────────────────────────────
+    def test_table_th_uses_opp_col_header(self, client, db_session):
+        _seed_data(db_session)
+        resp = client.get("/v2/partials/sightings")
+        assert resp.status_code == 200
+        assert "opp-col-header" in resp.text  # Sales Hub column headers
+
+    def test_table_status_cell_is_opp_status_dot(self, client, db_session):
+        """Status column uses the dot+label opp_status_cell, not the old pill badge."""
+        _seed_data(db_session)
+        resp = client.get("/v2/partials/sightings")
+        assert resp.status_code == 200
+        assert "opp-status-dot" in resp.text
+
+    def test_table_coverage_uses_coverage_meter(self, client, db_session):
+        """Coverage column uses the 6-segment opp-coverage meter macro."""
+        _seed_data(db_session)
+        resp = client.get("/v2/partials/sightings")
+        assert resp.status_code == 200
+        assert "opp-coverage" in resp.text
+        assert "opp-coverage-seg" in resp.text
+
+    def test_kpi_counters_use_btn_shape(self, client, db_session):
+        """The Urgent/Stale/Pending counters adopt the .btn btn-sm btn-secondary shape
+        (no longer rounded-full pills)."""
+        _seed_data(db_session)
+        resp = client.get("/v2/partials/sightings")
+        assert resp.status_code == 200
+        assert "btn btn-sm btn-secondary" in resp.text
+
+    def test_group_by_select_uses_input_token(self, client, db_session):
+        _seed_data(db_session)
+        resp = client.get("/v2/partials/sightings")
+        assert resp.status_code == 200
+        assert 'class="input w-auto"' in resp.text
+
+    def test_grouped_label_uses_h4_token(self, client, db_session):
+        """Group-header label renders with the .h4 token when grouped."""
+        _seed_data(db_session)
+        resp = client.get("/v2/partials/sightings?group_by=manufacturer")
+        assert resp.status_code == 200
+        assert '<span class="h4">' in resp.text
+
+    # ── List table — PROTECTED interactions still render ─────────────
+    def test_table_keeps_selection_and_action_bar(self, client, db_session):
+        """The Sales Hub restyle must NOT drop the checkbox selection store nor the
+        multi-select action bar (Build RFQ / Refresh / Change Status / Add Note)."""
+        _seed_data(db_session)
+        resp = client.get("/v2/partials/sightings")
+        body = resp.text
+        assert "sightingSelection" in body  # selection store
+        assert "toggleAll" in body  # select-all checkbox
+        assert "req-checkbox" in body  # per-row checkbox
+        assert "Build RFQ (" in body  # action bar primary
+        assert "Refresh Sightings" in body  # action bar refresh
+        assert "Change Status" in body  # action bar status dropdown
+        assert "Add Note" in body  # action bar notes dropdown
+
+    # ── Detail panel tokens ──────────────────────────────────────────
+    def test_detail_header_is_flush_sales_hub(self, client, db_session):
+        """Part header adopts the flush requisitions2 header shell (px-5 py-3 + bg-
+        gray-50 + border-b) and the .h4 vendors heading."""
+        _, r, _ = _seed_data(db_session)
+        resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
+        body = resp.text
+        assert resp.status_code == 200
+        assert "px-5 py-3 border-b border-gray-200 bg-gray-50" in body  # flush header
+        assert 'class="h4 mb-2"' in body  # vendors heading uses .h4
+
+    def test_detail_target_price_uses_figure_accent(self, client, db_session):
+        _, r, _ = _seed_data(db_session)
+        # _seed_data sets target_price via requirement? ensure a price is present
+        r.target_price = 2.5
+        db_session.commit()
+        resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
+        assert resp.status_code == 200
+        assert "figure-accent" in resp.text  # target price + high score both use it
+
+    def test_detail_status_select_hx_patch_preserved(self, client, db_session):
+        """The Sightings-specific inline status <select> hx-patch must survive the
+        restyle (it is NOT replaced by the Sales Hub static status pill)."""
+        _, r, _ = _seed_data(db_session)
+        resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
+        body = resp.text
+        assert resp.status_code == 200
+        assert "/advance-status" in body  # inline status select endpoint
+        assert 'hx-patch="/v2/partials/sightings/' in body
+
+    def test_detail_high_score_vendor_uses_figure_accent(self, client, db_session):
+        """A vendor scoring >= 70 renders its score with .figure-accent (was text-
+        emerald-600)."""
+        _, r, _ = _seed_data(db_session)  # seed sets score=75.0 (>= 70)
+        resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
+        assert resp.status_code == 200
+        assert "figure-accent" in resp.text
+        # the old per-score emerald text token is gone from the score cell
+        assert "Good Vendor" in resp.text
+
+    # ── Offers / Activity panels self-pad (so the now-flush #sightings-detail
+    #    doesn't let their content hit the edge on a standalone innerHTML swap).
+    #    Both panels are included inline by /detail, so we assert their unique
+    #    content sits inside a px-5 py-3 root there. ──────────────────────────
+    def test_offers_panel_self_pads(self, client, db_session):
+        _, r, _ = _seed_data(db_session)
+        resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
+        body = resp.text
+        assert resp.status_code == 200
+        # offers_panel root is px-5 py-3 immediately wrapping its "All offers for" heading
+        assert re.search(
+            r'<div class="px-5 py-3">\s*<div class="mb-3 flex items-center justify-between">\s*'
+            r'<h4 class="h4">\s*All offers for',
+            body,
+        )
+
+    def test_activity_panel_self_pads(self, client, db_session):
+        _, r, _ = _seed_data(db_session)
+        resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
+        body = resp.text
+        assert resp.status_code == 200
+        # activity_section root is px-5 py-3 immediately wrapping its Activity heading
+        assert re.search(r'<div class="px-5 py-3">\s*<h4 class="h4 mb-2">Activity</h4>', body)

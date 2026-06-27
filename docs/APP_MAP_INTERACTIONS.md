@@ -4362,7 +4362,15 @@ BROWSER (HTMX + Alpine.js)
       _mpn_chips.html: equal inline pills for all MPNs (primary + subs)
           with overflow toggle and modal material card click
       status_badge macro (_macros.html): unified badge rendering
-          used across all pages (requisitions, sightings, parts, etc.)
+          used across all pages (requisitions, parts, etc.)
+      Sales-Hub look (requisitions2 opportunity-table tokens): the
+          Sightings list table + detail panel reuse opp_status_cell
+          (status dot+label), coverage_meter (6-seg meter), .opp-col-header
+          (th), .h4 / .figure-accent / .input / .btn btn-sm. Sightings-only
+          treatments are preserved: the red/green _vendor_row row_tint
+          (bg-rose-50/60 unavailable, bg-emerald-50/50 offer-in), the inline
+          status <select> hx-patch advance-status, the per-vendor expandable
+          drawer, the SSE refresh, and the multi-select action bar.
 ```
 
 ---
@@ -5105,6 +5113,17 @@ dispatch and the legacy `approve_buy_plan`, so the two paths can never drift.
   `fail_count`/`last_error`; the dead-letter cap (`MAX_OUTBOX_FAIL_COUNT`) retires a broken row.
 - Channel server_default is `in_app` (migration 159) so an outbox row without an explicit
   channel is never silently treated as email.
+- **Transaction model: PER-ROW COMMIT, not SAVEPOINT.** Each row commits in its own
+  transaction (`row.sent_at = now; db.commit()` on success; `db.rollback()` +
+  `_mark_failed` (which itself commits) on failure). This per-row isolation — not a
+  `db.begin_nested()` SAVEPOINT — keeps a failing row from poisoning the batch. A SAVEPOINT
+  is deliberately NOT used because the email path (`send_email` →
+  `token_manager.get_valid_token`) commits the session MID-ROW when it refreshes an expired
+  Graph token, which ends any enclosing savepoint; the old SAVEPOINT design therefore raised
+  `ResourceClosedError` at `savepoint.commit()`, aborted the whole batch, and stranded the
+  email row (sent_at NULL, fail_count 0) while the sibling in_app row had already delivered.
+  A dispatch path that commits internally is fundamentally incompatible with an enclosing
+  savepoint, so each row owns its own commit.
 
 **Buy-plan submission → engine gate (QP Phase C1):** `buyplan_workflow.submit_buy_plan`
 (and `resubmit_buy_plan`), on the non-auto-approve path, call

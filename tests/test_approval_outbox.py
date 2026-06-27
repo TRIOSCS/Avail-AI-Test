@@ -14,6 +14,7 @@ Depends on: conftest (db_session), app.jobs.approval_outbox,
             app.models.approvals, app.models.notification, app.models.auth
 """
 
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -285,10 +286,10 @@ async def test_unknown_channel_is_failed_not_marked_sent(db_session):
 
 
 @pytest.mark.asyncio
-async def test_in_app_failure_savepoint_does_not_poison_batch(db_session):
-    """If the in_app flush raises, the per-row SAVEPOINT rolls back the dirty
-    Notification and the fail_count/last_error write still survives; a healthy later row
-    in the same batch still dispatches (batch not poisoned)."""
+async def test_in_app_failure_does_not_poison_batch(db_session):
+    """If the in_app write raises, that row is rolled back and failed (fail_count/
+    last_error recorded, no dirty Notification persisted), and a healthy later row in
+    the same batch still dispatches (batch not poisoned by per-row isolation)."""
     from app.jobs import approval_outbox
     from app.jobs.approval_outbox import dispatch_pending
 
@@ -305,7 +306,7 @@ async def test_in_app_failure_savepoint_does_not_poison_batch(db_session):
     def _flaky_write(db, user_id, event_type, title, body=None):
         calls["n"] += 1
         if calls["n"] == 1:
-            db.add(  # dirty object that must be rolled back to the savepoint
+            db.add(  # dirty object that must NOT survive the failed row
                 Notification(user_id=user_id, event_type=event_type, title=title, body=body, is_read=False)
             )
             raise RuntimeError("boom in_app")
@@ -323,4 +324,62 @@ async def test_in_app_failure_savepoint_does_not_poison_batch(db_session):
 
     # Exactly one Notification — the bad row's dirty Notification was rolled back.
     notifs = db_session.execute(select(Notification).where(Notification.user_id == user.id)).scalars().all()
-    assert len(notifs) == 1, "the failed row's Notification must have been rolled back to the savepoint"
+    assert len(notifs) == 1, "the failed row's Notification must have been rolled back"
+
+
+@pytest.mark.asyncio
+async def test_email_dispatch_path_committing_session_does_not_abort_batch(db_session):
+    """Regression for the staging ResourceClosedError.
+
+    The real email path is ``send_email`` → ``token_manager.get_valid_token(user, db)``,
+    which on an expired/near-expiry token refreshes it and calls ``db.commit()`` MID-ROW.
+    A mid-row commit ends any enclosing ``begin_nested()`` SAVEPOINT, so the old drain
+    blew up at ``savepoint.commit()`` with ``sqlalchemy.exc.ResourceClosedError: This
+    transaction is closed`` — and the failing ``except savepoint.rollback()`` propagated,
+    aborting the whole 60s batch and leaving the email row stuck (sent_at NULL,
+    fail_count 0) while the sibling in_app row had already been delivered.
+
+    The drain MUST tolerate a dispatch path that commits/closes the transaction mid-row:
+    no ResourceClosedError, the committing email row is delivered, and a sibling in_app
+    row in the same batch still delivers.
+    """
+    from app.jobs.approval_outbox import dispatch_pending
+
+    sender = _make_user(db_session, "refresher@example.com")
+    other = _make_user(db_session, "inapp-sibling@example.com")
+    req = _make_request(db_session, sender)
+    email_row = _pending_outbox(db_session, req, sender, channel="email")
+    inapp_row = _pending_outbox(db_session, req, other, channel="in_app")
+    db_session.commit()
+
+    # Faithfully simulate get_valid_token's token-refresh write: mutate the user and
+    # commit the SESSION mid-row, exactly as token_manager does, then return a token.
+    async def _refresh_then_token(user, db):
+        user.m365_last_healthy = datetime.now(timezone.utc)
+        db.commit()  # this is what closed the savepoint in production
+        return "tok"
+
+    with (
+        patch(
+            "app.services.approvals.notifications.get_valid_token",
+            side_effect=_refresh_then_token,
+        ),
+        patch("app.services.approvals.notifications.GraphClient") as MockGC,
+    ):
+        gc_instance = MagicMock()
+        gc_instance.post_json = AsyncMock(return_value=None)
+        MockGC.return_value = gc_instance
+
+        # Must NOT raise ResourceClosedError.
+        dispatched = await dispatch_pending(db_session)
+
+    assert dispatched == 2, "both the committing email row and the in_app sibling dispatch"
+
+    db_session.refresh(email_row)
+    db_session.refresh(inapp_row)
+    assert email_row.sent_at is not None, "the committing email row must be marked sent"
+    assert email_row.fail_count == 0
+    assert inapp_row.sent_at is not None, "the sibling in_app row must NOT be aborted"
+
+    notifs = db_session.execute(select(Notification).where(Notification.user_id == other.id)).scalars().all()
+    assert len(notifs) == 1, "the in_app sibling's Notification must be written"
