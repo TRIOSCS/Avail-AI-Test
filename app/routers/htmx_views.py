@@ -10990,6 +10990,30 @@ def _can_resource(user: User) -> bool:
     return user.role in _PO_CUTTER_ROLES
 
 
+def _can_see_all_deals(user: User, db: Session) -> bool:
+    """True when the user may view every owner's deals on the Deal Hub board.
+
+    PO-cutters (buyers + managers/admins) and ops verification-group members see the
+    full deal flow; sales/traders are scoped to their own deals only. Broader than
+    ``_can_supervise`` by including buyers, who need cross-owner visibility to cut POs.
+    """
+    return _can_resource(user) or _is_ops_member(user, db)
+
+
+def _resolve_deal_scope(scope: str, can_see_all: bool) -> str:
+    """Normalize a requested deal scope against the user's visibility.
+
+    Empty/unknown → the role default (``all`` for can-see-all users, else ``mine``).
+    ``all`` requested by a user without cross-owner visibility is forced to ``mine`` so
+    no other rep's plans leak.
+    """
+    if scope not in ("mine", "all"):
+        return "all" if can_see_all else "mine"
+    if scope == "all" and not can_see_all:
+        return "mine"
+    return scope
+
+
 def _can_approve_any(user: User) -> bool:
     """True when the user can approve at least one gate (sees the hub "Approvals"
     lens)."""
@@ -11118,20 +11142,20 @@ async def buy_plans_orders_partial(
 @router.get("/v2/partials/buy-plans/board", response_class=HTMLResponse)
 async def buy_plans_board_partial(
     request: Request,
-    scope: str = "mine",
+    scope: str = "",
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
     """Sales "My Deals" / manager board body: stage-grouped deal cards.
 
-    ``scope=all`` is role-gated — a non-manager/non-ops user is forced to
-    ``scope=mine`` so no other rep's plans leak.
+    Scope is role-defaulted: PO-cutters + ops (``_can_see_all_deals``) default to
+    ``all`` and may toggle to ``mine``; sales/traders are locked to ``mine`` so no
+    other rep's plans leak.
     """
     from ..services.buyplan_hub import completed_archive, deals_board
 
-    scope = scope if scope in ("mine", "all") else "mine"
-    if scope == "all" and not _can_supervise(user, db):
-        scope = "mine"
+    can_all = _can_see_all_deals(user, db)
+    scope = _resolve_deal_scope(scope, can_all)
 
     ctx = _base_ctx(request, user, "buy-plans")
     ctx.update(
@@ -11139,6 +11163,7 @@ async def buy_plans_board_partial(
             "board": deals_board(db, user, scope=scope),
             "scope": scope,
             "archive": completed_archive(db, user, scope=scope),
+            "can_see_all_deals": can_all,
         }
     )
     return template_response("htmx/partials/buy_plans/_board.html", ctx)
@@ -11147,22 +11172,20 @@ async def buy_plans_board_partial(
 @router.get("/v2/partials/buy-plans/archive", response_class=HTMLResponse)
 async def buy_plans_archive_partial(
     request: Request,
-    scope: str = "mine",
+    scope: str = "",
     offset: int = 0,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
     """Completed-transactions archive page (lazy "load older" chunk).
 
-    Returns just the rows partial (not the whole section) so an htmx "Load older"
-    click can append the next page in place. ``scope=all`` is role-gated exactly
-    like the board so no other rep's completed plans leak to a non-supervisor.
+    Returns just the rows partial (not the whole section) so an htmx "Load older" click
+    can append the next page in place. Scope is role-resolved exactly like the board so
+    no other rep's completed plans leak to a sales/trader user.
     """
     from ..services.buyplan_hub import completed_archive
 
-    scope = scope if scope in ("mine", "all") else "mine"
-    if scope == "all" and not _can_supervise(user, db):
-        scope = "mine"
+    scope = _resolve_deal_scope(scope, _can_see_all_deals(user, db))
 
     ctx = _base_ctx(request, user, "buy-plans")
     ctx.update(
