@@ -1205,6 +1205,24 @@ class TestCaseReport:
         report = generate_case_report(plan, db_session)
         assert "Auto-approved" in report
 
+    def test_report_falls_back_to_requisition_customer_for_so_origin(
+        self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
+    ):
+        """SO-origin plan (no quote) renders the requisition's customer, not Unknown."""
+        plan = _make_plan(
+            db_session,
+            test_user,
+            test_quote,
+            test_requisition,
+            quote_id=None,
+            status=BuyPlanStatus.COMPLETED.value,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.refresh(plan)
+
+        report = generate_case_report(plan, db_session)
+        assert "Customer: Acme Electronics" in report
+
 
 # ── Async PO Verification ───────────────────────────────────────────
 

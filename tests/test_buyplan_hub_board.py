@@ -549,3 +549,18 @@ def test_completed_archive_empty(db_session, test_user, test_quote, test_requisi
     assert page["total"] == 0
     assert page["deals"] == []
     assert page["next_offset"] is None
+
+
+def test_customer_name_falls_back_to_requisition_for_so_origin(db_session):
+    """SO-origin plan (no quote) resolves customer from requisition.customer_name."""
+    from app.models.sourcing import Requisition
+    from app.services.buyplan_hub import _customer_name
+
+    req = Requisition(name="SO-Test-Req", customer_name="Globex Corp")
+    db_session.add(req)
+    db_session.flush()
+    plan = BuyPlan(quote_id=None, requisition_id=req.id)
+    db_session.add(plan)
+    db_session.flush()
+    plan.requisition = req
+    assert _customer_name(plan) == "Globex Corp"

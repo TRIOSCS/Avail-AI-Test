@@ -166,14 +166,29 @@ class TestPlanContext:
     def test_no_quote(self, db_session):
         from app.services.buyplan_notifications import _plan_context
 
-        # Use a mock with quote_id=None to test the no-quote path
-        # (real BuyPlan has NOT NULL on quote_id)
-        mock_plan = MagicMock(submitted_by_id=None, quote_id=None)
+        # Use a mock with quote_id=None and no requisition to test blank path.
+        mock_plan = MagicMock(submitted_by_id=None, quote_id=None, requisition=None)
         ctx = _plan_context(mock_plan, db_session)
 
         assert ctx["customer_name"] == ""
         assert ctx["quote_number"] == ""
         assert ctx["submitter"] is None
+
+    def test_plan_context_uses_requisition_customer_without_quote(self, db_session):
+        """SO-origin plan (no quote) populates customer_name from requisition."""
+        from app.models.sourcing import Requisition
+        from app.services.buyplan_notifications import _plan_context
+
+        req = Requisition(name="SO-Notif-Req", customer_name="Initech")
+        db_session.add(req)
+        db_session.flush()
+        plan = BuyPlan(quote_id=None, requisition_id=req.id)
+        db_session.add(plan)
+        db_session.flush()
+        plan.requisition = req
+        ctx = _plan_context(plan, db_session)
+        assert ctx["customer_name"] == "Initech"
+        assert ctx["quote_number"] == ""
 
     def test_site_without_company(self, db_session):
         """When quote.customer_site exists but .company is None, falls back to

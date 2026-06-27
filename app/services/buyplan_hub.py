@@ -63,17 +63,21 @@ def _issue_reason(line: BuyPlanLine) -> str:
 
 
 def _customer_name(plan: BuyPlan) -> str | None:
-    """Derive a display customer name: plan.quote → customer_site → company.name.
+    """Derive a display customer name from quote or requisition.
 
-    The single shared derivation used by every Deal Hub read model (buyer/team
-    queue, deal board, supervise triage). Returns ``None`` when the plan's quote
-    has no customer_site (e.g. the site was deleted and the FK nulled via
-    ``ON DELETE SET NULL``).
+    Quote path (preferred): plan.quote → customer_site → company.name.
+    Requisition fallback (SO-origin plans with no quote): req.customer_name,
+    then req.customer_site → company.name.
+    Returns ``None`` when neither source has a customer name.
     """
-    if plan.quote and plan.quote.customer_site:
-        # CustomerSite.company_id is NOT NULL, so the relationship always resolves.
-        name: str = plan.quote.customer_site.company.name
-        return name
+    if plan.quote and plan.quote.customer_site and plan.quote.customer_site.company:
+        return plan.quote.customer_site.company.name
+    req = plan.requisition
+    if req:
+        if req.customer_name:
+            return req.customer_name
+        if req.customer_site and req.customer_site.company:
+            return req.customer_site.company.name
     return None
 
 
