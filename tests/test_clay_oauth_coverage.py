@@ -141,7 +141,7 @@ class TestClayOAuthStore:
             assert needs_reconnect() is False
 
     def test_disconnect_clears_all_keys(self):
-        """disconnect() calls _store with None for all keys."""
+        """Disconnect() calls _store with None for all keys."""
         from app.services.clay_oauth import disconnect
 
         with patch("app.services.clay_oauth._store") as mock_store:

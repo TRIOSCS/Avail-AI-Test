@@ -317,7 +317,7 @@ class TestSearchEngine:
 
     @pytest.mark.asyncio
     async def test_search_part_response_none(self):
-        """goto() returns None is handled gracefully."""
+        """Goto() returns None is handled gracefully."""
         from app.services.tbf_worker.search_engine import search_part
 
         page = MagicMock()
@@ -371,7 +371,7 @@ class TestTbfSessionManager:
 
     @pytest.mark.asyncio
     async def test_start_no_display(self):
-        """start() raises RuntimeError when DISPLAY is not set."""
+        """Start() raises RuntimeError when DISPLAY is not set."""
         from app.services.tbf_worker.session_manager import TbfSessionManager
 
         env = {k: v for k, v in os.environ.items() if k != "DISPLAY"}
@@ -613,7 +613,7 @@ class TestWorkerFunctions:
 
     @pytest.mark.asyncio
     async def test_main_no_display_raises_stops(self):
-        """main() handles browser start failure gracefully (returns without raising)."""
+        """Main() handles browser start failure gracefully (returns without raising)."""
         from app.services.tbf_worker.worker import main
 
         mock_db = MagicMock()
@@ -637,7 +637,7 @@ class TestWorkerFunctions:
 
     @pytest.mark.asyncio
     async def test_main_login_failure(self):
-        """main() exits when initial login fails."""
+        """Main() exits when initial login fails."""
         from app.services.tbf_worker.worker import main
 
         mock_db = MagicMock()
