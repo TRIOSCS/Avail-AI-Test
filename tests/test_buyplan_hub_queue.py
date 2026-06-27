@@ -162,9 +162,15 @@ def test_customer_name_returns_company_name(db_session, test_quote, test_requisi
     assert _customer_name(plan) == "Acme Electronics"
 
 
-def test_customer_name_none_when_quote_has_no_site(db_session, test_requisition, test_user):
-    """A plan whose quote has a NULL customer_site (site deleted → SET NULL) yields
-    None."""
+def test_customer_name_falls_back_to_requisition_when_quote_has_no_site(db_session, test_requisition, test_user):
+    """A plan whose quote has a NULL customer_site (site deleted → SET NULL) falls back
+    to the requisition's customer.
+
+    SP-2 made the buy plan's customer label resilient for plans with no usable quote
+    customer (originally for quote-less Sales Orders, but the same fallback applies
+    whenever the quote yields no customer): ``_customer_name`` now returns the
+    requisition's ``customer_name`` instead of ``None``.
+    """
     from app.models.quotes import Quote
     from app.services.buyplan_hub import _customer_name
 
@@ -179,7 +185,8 @@ def test_customer_name_none_when_quote_has_no_site(db_session, test_requisition,
     db_session.flush()
     plan = _make_plan(db_session, quote_id=siteless_quote.id, requisition_id=test_requisition.id)
     db_session.flush()
-    assert _customer_name(plan) is None
+    # test_requisition fixture carries customer_name="Acme Electronics"
+    assert _customer_name(plan) == "Acme Electronics"
 
 
 # ── Team Orders (read-only awareness of OTHER buyers' open lines) ──────────
