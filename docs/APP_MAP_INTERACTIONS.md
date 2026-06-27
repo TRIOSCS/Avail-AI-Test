@@ -1346,19 +1346,37 @@ something pending; its inline approve/reject re-fetch the SAME stage-tab body in
 `#bp-hub-body`. The standalone four-tab Approvals lens (`/v2/partials/buy-plans/approvals` +
 `approvals/_queue.html`) is **retired** — each gate now renders inside its stage tab.
 
+**Deal-board visibility (role-scoped).** The My Deals board + its archive are scope-gated
+by `_can_see_all_deals` (= `_can_resource` PO-cutters — buyers/managers/admins — OR an ops
+verification-group member; broader than `_can_supervise` by including buyers). Those users
+**default to `scope=all`** and get an **All deals / Mine** toggle (in `_board.html`, swaps
+`#bp-hub-body`); sales/traders are **locked to `scope=mine`** with no toggle. Both the board
+(`/partials/buy-plans/board`) and the archive (`/partials/buy-plans/archive`) route the
+requested `scope` through `_resolve_deal_scope(scope, can_see_all)` — empty/unknown → the
+role default, and `all` requested without visibility is forced to `mine` (no leak). The
+**Buy Plans stage tab** (`approvals_tab_partial` lens=`buy_plans`) adopts the SAME resolution
+and renders the board with `scope_toggle_url=/v2/partials/approvals/buy-plans` so the All/Mine
+toggle reloads the whole tab body (pinned approval section + board), not just the bare board —
+the pinned section survives a toggle. The standalone `/board` route keeps the default
+`scope_toggle_url` (reloads only the board).
+
 ```
 GET /v2/partials/approvals?lens=          (shell: stage-tab switcher + lazy #bp-hub-body)
     |
     +-- sales_orders    --> GET /partials/approvals/sales-orders
     |                        pinned sales_order queue (approver-only) + neutral empty state
     |                        ("No sales orders yet" — SO build flow is SP-2)
-    +-- buy_plans       --> GET /partials/approvals/buy-plans
+    +-- buy_plans       --> GET /partials/approvals/buy-plans?scope=
     |                        pinned buy_plan queue (approver-only) + buyplan_hub.deals_board
-    |                        (_board.html, scope=mine: 3 ACTIVE columns Draft/Pending/Active,
-    |                        COMPLETED excluded; + collapsed "Completed (N)" archive below,
-    |                        lazy "Load older" via GET /partials/buy-plans/archive?scope=…&
-    |                        offset=…). The /partials/buy-plans/board?scope=mine|all route
-    |                        (scope=all role-gated to supervisors) is unchanged.
+    |                        (_board.html: 3 ACTIVE columns Draft/Pending/Active, COMPLETED
+    |                        excluded; + collapsed "Completed (N)" archive below, lazy "Load
+    |                        older" via GET /partials/buy-plans/archive?scope=…&offset=…).
+    |                        Scope role-defaulted via _resolve_deal_scope (_can_see_all_deals
+    |                        users default all + an All/Mine toggle; sales/traders locked to
+    |                        mine). The toggle uses scope_toggle_url=/partials/approvals/
+    |                        buy-plans so it reloads the WHOLE tab (pinned section + board),
+    |                        preserving the pinned approvals section. The standalone
+    |                        /partials/buy-plans/board?scope= route is also role-defaulted.
     +-- purchase_orders --> GET /partials/approvals/purchase-orders
     |                        pinned purchase_order queue (approver-only)
     |                        + buyplan_hub.buyer_line_queue (buyer PO-cut queue) +

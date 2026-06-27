@@ -3,11 +3,12 @@
 Covers:
 - /v2/partials/approvals renders the stage-tab switcher + lazy body with the explicit
   hx-target="#bp-hub-body" (guards the cards-vanish landmine) and the role-default load.
-- /v2/partials/approvals?lens=buy_plans loads the Buy Plans stage-tab body by default.
+- /v2/partials/approvals?lens=buy_plans loads the Buy Plans stage-tab body, scope role-defaulted.
 - /v2/partials/buy-plans/orders shows a buyer's AWAITING_PO line, an origin=queue confirm
   form, and the rejection note on kicked-back rows.
 - /v2/partials/buy-plans/board?scope=mine renders 4 columns and rings needs_my_action cards.
-- /v2/partials/buy-plans/board?scope=all by a non-manager is forced to mine (no leak).
+- /v2/partials/buy-plans/board?scope=all is allowed for a buyer/manager (can_see_all_deals)
+  but forced to mine for sales/traders (no leak); the All/Mine toggle shows only for the former.
 - confirm-po with origin=queue returns the queue partial; default origin returns detail.
 
 Depends on: app/routers/htmx_views (hub routes), app/services/buyplan_hub,
@@ -18,6 +19,7 @@ Depends on: app/routers/htmx_views (hub routes), app/services/buyplan_hub,
 from __future__ import annotations
 
 import uuid
+from contextlib import contextmanager
 
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -25,6 +27,20 @@ from sqlalchemy.orm import Session
 from app.constants import BuyPlanLineStatus, BuyPlanStatus, SOVerificationStatus
 from app.models.buy_plan import BuyPlan, BuyPlanLine
 from app.models.quotes import Quote
+
+
+@contextmanager
+def _acting_as(user):
+    """Override require_user for the duration of the block (drives role-scoped
+    routes)."""
+    from app.dependencies import require_user
+    from app.main import app
+
+    app.dependency_overrides[require_user] = lambda: user
+    try:
+        yield
+    finally:
+        app.dependency_overrides.pop(require_user, None)
 
 
 def _make_quote(db: Session, req_id: int) -> Quote:
@@ -114,16 +130,35 @@ def test_hub_shell_lens_buy_plans_loads_tab_body(client: TestClient):
 
 def test_hub_shell_sales_defaults_to_buy_plans(client: TestClient, sales_user):
     """A sales user with no lens lands on the Buy Plans deal board tab."""
-    from app.dependencies import require_user
-    from app.main import app
-
-    app.dependency_overrides[require_user] = lambda: sales_user
-    try:
+    with _acting_as(sales_user):
         resp = client.get("/v2/partials/approvals")
-    finally:
-        app.dependency_overrides.pop(require_user, None)
     assert resp.status_code == 200
     assert "/v2/partials/approvals/buy-plans" in resp.text
+
+
+def test_buy_plans_tab_scope_toggle_points_at_tab(client: TestClient):
+    """The Buy Plans stage tab's All/Mine toggle reloads the TAB (not the bare board),
+    so the pinned approval section survives a toggle.
+
+    Default client is a buyer (can_see_all).
+    """
+    resp = client.get("/v2/partials/approvals/buy-plans")
+    assert resp.status_code == 200
+    # Toggle pills target the tab URL, carrying scope — so the swap re-renders pinned + board.
+    assert "/v2/partials/approvals/buy-plans?scope=all" in resp.text
+    assert "/v2/partials/approvals/buy-plans?scope=mine" in resp.text
+    # And NOT the standalone board route (which would drop the pinned section).
+    assert "/v2/partials/buy-plans/board?scope=" not in resp.text
+
+
+def test_buy_plans_tab_sales_locked_to_mine_no_toggle(client: TestClient, sales_user):
+    """A sales/trader user gets no scope toggle on the Buy Plans tab and scope=all is
+    refused (no other rep's deals leak), exactly like the standalone board."""
+    with _acting_as(sales_user):
+        resp = client.get("/v2/partials/approvals/buy-plans?scope=all")
+    assert resp.status_code == 200
+    assert "?scope=all" not in resp.text
+    assert "?scope=mine" not in resp.text
 
 
 def test_hub_shell_manager_defaults_to_supervise(client: TestClient, manager_user):
@@ -283,25 +318,113 @@ def test_board_mine_rings_needs_my_action(client: TestClient, db_session: Sessio
     assert "ring-2 ring-amber-400" in body
 
 
-def test_board_scope_all_forced_to_mine_for_non_manager(
-    client: TestClient, db_session: Session, test_user, manager_user, test_requisition
-):
-    """Scope=all requested by a plain buyer must NOT leak another user's plans."""
-    q = _make_quote(db_session, test_requisition.id)
-    # A plan owned by someone else — must be hidden when scope is forced to mine.
-    other_plan = _make_plan(
+def _make_owned_plan(db_session, owner, req, *, status=BuyPlanStatus.DRAFT, **kw):
+    """A DRAFT (or given-status) plan owned by ``owner`` — used to prove cross-owner
+    visibility.
+
+    Returns the plan.
+    """
+    q = _make_quote(db_session, req.id)
+    plan = _make_plan(
         db_session,
         quote_id=q.id,
-        req_id=test_requisition.id,
-        status=BuyPlanStatus.DRAFT,
-        submitted_by_id=manager_user.id,
+        req_id=req.id,
+        status=status,
+        submitted_by_id=owner.id,
+        **kw,
     )
     db_session.commit()
+    return plan
 
+
+def test_board_default_scope_all_for_buyer(
+    client: TestClient, db_session: Session, test_user, manager_user, test_requisition
+):
+    """A buyer opening the deals board with NO scope param defaults to all deals."""
+    other = _make_owned_plan(db_session, manager_user, test_requisition)
+    resp = client.get("/v2/partials/buy-plans/board")
+    assert resp.status_code == 200
+    assert f"/v2/partials/buy-plans/{other.id}" in resp.text
+
+
+def test_board_scope_all_allowed_for_buyer(
+    client: TestClient, db_session: Session, test_user, manager_user, test_requisition
+):
+    """A buyer is a PO-cutter (can_see_all_deals): scope=all shows every owner's
+    deals."""
+    other = _make_owned_plan(db_session, manager_user, test_requisition)
     resp = client.get("/v2/partials/buy-plans/board?scope=all")
     assert resp.status_code == 200
-    # The other user's plan id must not appear as an openable card
-    assert f"/v2/partials/buy-plans/{other_plan.id}" not in resp.text
+    assert f"/v2/partials/buy-plans/{other.id}" in resp.text
+
+
+def test_board_default_scope_mine_for_sales(
+    client: TestClient, db_session: Session, sales_user, manager_user, test_requisition
+):
+    """A sales user defaults to their OWN deals: their own plan appears, another owner's
+    does not (proves mine-scope is non-empty, not just leak-free)."""
+    other = _make_owned_plan(db_session, manager_user, test_requisition)
+    mine = _make_owned_plan(db_session, sales_user, test_requisition)
+    with _acting_as(sales_user):
+        resp = client.get("/v2/partials/buy-plans/board")
+    assert resp.status_code == 200
+    assert f"/v2/partials/buy-plans/{mine.id}" in resp.text
+    assert f"/v2/partials/buy-plans/{other.id}" not in resp.text
+
+
+def test_board_scope_all_forced_to_mine_for_sales(
+    client: TestClient, db_session: Session, sales_user, manager_user, test_requisition
+):
+    """Scope=all requested by a sales user must NOT leak another user's plans."""
+    other = _make_owned_plan(db_session, manager_user, test_requisition)
+    with _acting_as(sales_user):
+        resp = client.get("/v2/partials/buy-plans/board?scope=all")
+    assert resp.status_code == 200
+    assert f"/v2/partials/buy-plans/{other.id}" not in resp.text
+
+
+def test_board_scope_all_forced_to_mine_for_trader(
+    client: TestClient, db_session: Session, trader_user, manager_user, test_requisition
+):
+    """Scope=all requested by a trader is also forced to mine (no leak)."""
+    other = _make_owned_plan(db_session, manager_user, test_requisition)
+    with _acting_as(trader_user):
+        resp = client.get("/v2/partials/buy-plans/board?scope=all")
+    assert resp.status_code == 200
+    assert f"/v2/partials/buy-plans/{other.id}" not in resp.text
+
+
+def test_board_scope_toggle_shown_for_buyer(client: TestClient):
+    """The All/Mine scope toggle renders for a can_see_all_deals user (buyer)."""
+    resp = client.get("/v2/partials/buy-plans/board")
+    assert resp.status_code == 200
+    assert "/v2/partials/buy-plans/board?scope=all" in resp.text
+    assert "/v2/partials/buy-plans/board?scope=mine" in resp.text
+
+
+def test_board_scope_toggle_hidden_for_sales(client: TestClient, sales_user):
+    """Sales/traders have no scope toggle — they are locked to their own deals."""
+    with _acting_as(sales_user):
+        resp = client.get("/v2/partials/buy-plans/board")
+    assert resp.status_code == 200
+    assert "/v2/partials/buy-plans/board?scope=all" not in resp.text
+
+
+def test_board_ops_member_sees_all_deals(
+    client: TestClient, db_session: Session, sales_user, manager_user, test_requisition
+):
+    """The ops arm of _can_see_all_deals: an ops verification-group member is elevated to
+    all-deals visibility even from a RESTRICTED role — a sales user with ops membership
+    defaults to scope=all AND gets the All/Mine toggle."""
+    other = _make_owned_plan(db_session, manager_user, test_requisition)
+    _add_ops(db_session, sales_user)
+    db_session.commit()
+    with _acting_as(sales_user):
+        resp = client.get("/v2/partials/buy-plans/board")
+    assert resp.status_code == 200
+    assert f"/v2/partials/buy-plans/{other.id}" in resp.text
+    assert "/v2/partials/buy-plans/board?scope=all" in resp.text
+    assert "/v2/partials/buy-plans/board?scope=mine" in resp.text
 
 
 def test_board_scope_all_allowed_for_manager(
@@ -379,26 +502,68 @@ def test_archive_partial_returns_rows(client: TestClient, db_session: Session, t
     assert f"/v2/partials/buy-plans/{plan.id}" in resp.text
 
 
-def test_archive_scope_all_forced_to_mine_for_non_manager(
+def test_archive_scope_all_allowed_for_buyer(
     client: TestClient, db_session: Session, test_user, manager_user, test_requisition
 ):
-    """Scope=all on the archive route must not leak another user's completed plans."""
+    """A buyer (can_see_all_deals) sees every owner's completed plans on the archive
+    route."""
     from datetime import datetime, timezone
 
-    q = _make_quote(db_session, test_requisition.id)
-    other = _make_plan(
+    other = _make_owned_plan(
         db_session,
-        quote_id=q.id,
-        req_id=test_requisition.id,
+        manager_user,
+        test_requisition,
         status=BuyPlanStatus.COMPLETED,
-        submitted_by_id=manager_user.id,
         completed_at=datetime.now(timezone.utc),
     )
-    db_session.commit()
 
     resp = client.get("/v2/partials/buy-plans/archive?scope=all")
     assert resp.status_code == 200
+    assert f"/v2/partials/buy-plans/{other.id}" in resp.text
+
+
+def test_archive_scope_all_forced_to_mine_for_sales(
+    client: TestClient, db_session: Session, sales_user, manager_user, test_requisition
+):
+    """Scope=all on the archive route must not leak another user's completed plans to
+    sales."""
+    from datetime import datetime, timezone
+
+    other = _make_owned_plan(
+        db_session,
+        manager_user,
+        test_requisition,
+        status=BuyPlanStatus.COMPLETED,
+        completed_at=datetime.now(timezone.utc),
+    )
+
+    with _acting_as(sales_user):
+        resp = client.get("/v2/partials/buy-plans/archive?scope=all")
+    assert resp.status_code == 200
     assert f"/v2/partials/buy-plans/{other.id}" not in resp.text
+
+
+def test_archive_ops_member_sees_all_completed(
+    client: TestClient, db_session: Session, sales_user, manager_user, test_requisition
+):
+    """The ops arm on the archive route: an ops member (even from a sales role) sees every
+    owner's completed deals."""
+    from datetime import datetime, timezone
+
+    other = _make_owned_plan(
+        db_session,
+        manager_user,
+        test_requisition,
+        status=BuyPlanStatus.COMPLETED,
+        completed_at=datetime.now(timezone.utc),
+    )
+    _add_ops(db_session, sales_user)
+    db_session.commit()
+
+    with _acting_as(sales_user):
+        resp = client.get("/v2/partials/buy-plans/archive?scope=all")
+    assert resp.status_code == 200
+    assert f"/v2/partials/buy-plans/{other.id}" in resp.text
 
 
 # ── confirm-po origin behavior ─────────────────────────────────────────────
