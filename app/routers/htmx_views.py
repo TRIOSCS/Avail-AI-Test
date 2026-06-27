@@ -138,7 +138,7 @@ _DASH = "\u2014"  # em-dash for template fallbacks
 # correct, since it has no parent tab to highlight.
 # The global contact lists live under the CRM nav item (twins of Customers/Vendors),
 # so they borrow the "crm" highlight.
-_NAV_ID_ALIAS: dict[str, str] = {"contacts": "crm", "vendor-contacts": "crm"}
+_NAV_ID_ALIAS: dict[str, str] = {"contacts": "crm", "vendor-contacts": "crm", "approvals": "buy-plans"}
 
 # Vite manifest for asset fingerprinting — read once at import time.
 _MANIFEST_PATH = Path("app/static/dist/.vite/manifest.json")
@@ -323,6 +323,7 @@ _VIEW_ACCESS: dict[str, AccessKey] = {
     "materials": AccessKey.MATERIALS,
     "search": AccessKey.SEARCH,
     "buy-plans": AccessKey.BUY_PLANS,
+    "approvals": AccessKey.BUY_PLANS,
     "resell": AccessKey.RESELL,
     "crm": AccessKey.CRM,
     "customers": AccessKey.CRM,
@@ -361,7 +362,7 @@ _MODULE_ENTRY_URLS: tuple[tuple[AccessKey, str], ...] = (
 @router.get("/v2/customers/{company_id:int}", response_class=HTMLResponse)
 @router.get("/v2/contacts", response_class=HTMLResponse)
 @router.get("/v2/vendor-contacts", response_class=HTMLResponse)
-@router.get("/v2/buy-plans", response_class=HTMLResponse)
+@router.get("/v2/approvals", response_class=HTMLResponse)
 @router.get("/v2/buy-plans/{bp_id:int}", response_class=HTMLResponse)
 @router.get("/v2/resell", response_class=HTMLResponse)
 @router.get("/v2/resell/{list_id:int}", response_class=HTMLResponse)
@@ -390,6 +391,7 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
     # First matching segment wins — order is load-bearing (e.g. /buy-plans before
     # /requisitions). Anything unmatched defaults to the requisitions view.
     _VIEW_SEGMENTS = (
+        "approvals",
         "buy-plans",
         "resell",
         "quotes",
@@ -461,7 +463,7 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         # first full-page load instead of defaulting to Connectors.
         tab_qs = request.query_params.get("tab", "").strip()
         partial_url = f"/v2/partials/settings?tab={quote(tab_qs)}" if tab_qs else "/v2/partials/settings"
-    elif current_view == "buy-plans":
+    elif current_view in ("buy-plans", "approvals"):
         # Thread ?lens= through so a deep-link / redirect (the legacy /v2/approvals/queue
         # → /v2/buy-plans?lens=approvals) and a reload/bookmark of a pushed lens URL paint
         # the right lens on first full-page load instead of falling to _default_lens. A
@@ -501,6 +503,20 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
     ctx = _base_ctx(request, user, nav_active)
     ctx["partial_url"] = partial_url
     return page_response(ctx)
+
+
+@router.get("/v2/buy-plans", response_class=HTMLResponse)
+async def buy_plans_legacy_redirect(request: Request):
+    """302 the legacy Buy Plans URL to the renamed Approvals module (query preserved).
+
+    The hub was renamed Buy Plans → Approvals (SP-1); old bookmarks / pushed lens URLs
+    keep working via this redirect. Detail URLs (/v2/buy-plans/{id}) are unchanged and
+    still served directly by ``v2_page``.
+    """
+    from fastapi.responses import RedirectResponse
+
+    qs = request.url.query
+    return RedirectResponse(f"/v2/approvals?{qs}" if qs else "/v2/approvals", status_code=302)
 
 
 # ── Global search ──────────────────────────────────────────────────────

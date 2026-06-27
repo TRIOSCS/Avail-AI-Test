@@ -24,11 +24,11 @@ _TEMPLATE = pathlib.Path("app/templates/htmx/partials/shared/mobile_nav.html")
 class TestMobileNavTemplate:
     """mobile_nav.html contains 'buy-plans' nav item and NOT 'reporting'."""
 
-    def test_nav_items_has_buy_plans_entry(self):
-        """nav_items tuple contains the 'buy-plans' entry."""
+    def test_nav_items_has_approvals_entry(self):
+        """The nav item keeps internal id 'buy-plans' but shows the 'Approvals' label
+        and points at /v2/approvals (renamed module, SP-1)."""
         src = _TEMPLATE.read_text()
-        assert "('buy-plans'," in src, "'buy-plans' nav item missing from nav_items"
-        assert "Buy Plans" in src, "Buy Plans label missing"
+        assert "('buy-plans', 'Approvals', '/v2/approvals'," in src, "Approvals nav entry missing/incorrect"
 
     def test_nav_items_has_no_reporting_entry(self):
         """nav_items tuple does NOT contain a 'reporting' entry."""
