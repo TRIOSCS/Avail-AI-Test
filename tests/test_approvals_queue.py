@@ -545,7 +545,7 @@ def test_routed_request_via_service_is_actionable(db_session: Session) -> None:
     """Integration: a request created through the real create_request/route path is can_act for its approver."""
     from app.services.approvals.service import create_request
 
-    me = _user(db_session, can_approve_sales_orders=True)
+    me = _user(db_session, can_approve_qp_sales=True)
     bp = _bp(db_session, me)
     qp = _qp(db_session, bp, me)
     create_request(

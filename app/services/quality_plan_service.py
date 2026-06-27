@@ -286,7 +286,7 @@ def submit_section(db: Session, qp_id: int, gate_type: str, user: Any) -> Any:
 
     The QualityPlan is the engine subject (subject_type=QUALITY_PLAN); the gate_type
     discriminates which section is being submitted. Routes to users holding the matching
-    per-user approval toggle (can_approve_sales_orders / can_approve_pos). C2b enforces
+    per-user approval toggle (can_approve_qp_sales / can_approve_pos). C2b enforces
     per-section field completeness first: a blank SO#/PO# or any missing QC-required
     field raises IncompleteQPError before any gate request is opened.
 

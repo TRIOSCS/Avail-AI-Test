@@ -11043,7 +11043,7 @@ _APPROVALS_TABS = ("sales_orders", "buy_plans", "purchase_orders", "prepayments"
 # section. The keys match services.approvals.queue.TAB_GATE; the values are User columns.
 _TAB_APPROVE_ATTR = {
     "buy_plans": "can_approve_buy_plans",
-    "sales_orders": "can_approve_sales_orders",
+    "sales_orders": "can_approve_qp_sales",
     "purchase_orders": "can_approve_pos",
     "prepayments": "can_approve_prepayments",
 }

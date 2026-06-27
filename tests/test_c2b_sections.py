@@ -45,14 +45,14 @@ from app.services.quality_plan_service import (
 # ── Helpers ─────────────────────────────────────────────────────────────
 
 
-def _make_user(db: Session, *, can_approve_sales_orders: bool = False, can_approve_pos: bool = False) -> User:
+def _make_user(db: Session, *, can_approve_qp_sales: bool = False, can_approve_pos: bool = False) -> User:
     u = User(
         email=f"c2b-{uuid.uuid4().hex[:8]}@test.com",
         name="C2b User",
         role="admin",
         azure_id=f"azure-c2b-{uuid.uuid4().hex[:8]}",
         is_active=True,
-        can_approve_sales_orders=can_approve_sales_orders,
+        can_approve_qp_sales=can_approve_qp_sales,
         can_approve_pos=can_approve_pos,
         created_at=datetime.now(timezone.utc),
     )
@@ -139,7 +139,7 @@ def test_complete_sections_validate_clean(db_session: Session) -> None:
 def test_submit_incomplete_sales_raises_and_opens_no_gate(db_session: Session) -> None:
     """An incomplete Sales section raises IncompleteQPError and opens no gate
     request."""
-    approver = _make_user(db_session, can_approve_sales_orders=True)
+    approver = _make_user(db_session, can_approve_qp_sales=True)
     qp = _make_qp(db_session, approver)  # not filled
     with pytest.raises(IncompleteQPError):
         submit_section(db_session, qp.id, ApprovalGateType.SALES_ORDER, approver)
@@ -153,7 +153,7 @@ def test_submit_incomplete_sales_raises_and_opens_no_gate(db_session: Session) -
 
 def test_submit_complete_sales_opens_gate(db_session: Session) -> None:
     """A complete Sales section opens the SALES_ORDER request."""
-    approver = _make_user(db_session, can_approve_sales_orders=True)
+    approver = _make_user(db_session, can_approve_qp_sales=True)
     qp = _make_qp(db_session, approver, fill_sales=True)
     req = submit_section(db_session, qp.id, ApprovalGateType.SALES_ORDER, approver)
     assert req.gate_type == ApprovalGateType.SALES_ORDER
@@ -201,7 +201,7 @@ def qp_client(db_session: Session):
     from app.dependencies import require_user
     from app.main import app
 
-    owner = _make_user(db_session, can_approve_sales_orders=True, can_approve_pos=True)
+    owner = _make_user(db_session, can_approve_qp_sales=True, can_approve_pos=True)
     qp = _make_qp(db_session, owner, fill_sales=True, fill_purchasing=True)
     db_session.commit()
 
@@ -346,7 +346,7 @@ def test_submit_button_disabled_when_section_incomplete(db_session: Session) -> 
     from app.dependencies import require_user
     from app.main import app
 
-    owner = _make_user(db_session, can_approve_sales_orders=True)
+    owner = _make_user(db_session, can_approve_qp_sales=True)
     qp = _make_qp(db_session, owner)  # incomplete
     db_session.commit()
 
