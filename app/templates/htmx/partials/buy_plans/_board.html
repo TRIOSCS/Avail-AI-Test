@@ -22,8 +22,21 @@
 <div class="flex items-center gap-4 mb-3 text-xs text-gray-600">
   <span>{{ open_cards|length }} open deal{{ 's' if open_cards|length != 1 }}</span>
   <span>${{ '{:,.0f}'.format(open_value) }} open value</span>
-  {% if scope == 'all' %}
-  <span class="text-brand-600 font-medium">all reps</span>
+  {% if can_see_all_deals %}
+  {# Scope filter — PO-cutters + ops narrow to their own deals or see every owner's.
+     Sales/traders never get this (locked to their own). Each pill reloads the lens body
+     in place; mirrors the lens-switcher pill aesthetic (accent-600 active). #}
+  <div class="ml-auto inline-flex items-center rounded-full bg-brand-100 p-0.5">
+    {% for s, lbl in [('all', 'All deals'), ('mine', 'Mine')] %}
+    <button hx-get="/v2/partials/buy-plans/board?scope={{ s }}"
+            hx-target="#bp-hub-body"
+            hx-swap="innerHTML"
+            class="px-3 py-0.5 rounded-full font-medium transition-colors
+                   {% if scope == s %}bg-accent-600 text-white shadow-sm{% else %}text-brand-600 hover:bg-brand-200{% endif %}">
+      {{ lbl }}
+    </button>
+    {% endfor %}
+  </div>
   {% endif %}
 </div>
 {% endif %}

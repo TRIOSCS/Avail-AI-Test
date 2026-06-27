@@ -1334,13 +1334,24 @@ OR ops verification-group member); Needs Re-sourcing by `_can_resource` (PO-cutt
 **Approvals** by `_can_approve_any` (any `can_approve_*` toggle). A user who requests a
 lens they lack is served a safe fallback / 403 (defense in depth).
 
+**Deal-board visibility (role-scoped).** The My Deals board + its archive are scope-gated
+by `_can_see_all_deals` (= `_can_resource` PO-cutters — buyers/managers/admins — OR an ops
+verification-group member; broader than `_can_supervise` by including buyers). Those users
+**default to `scope=all`** and get an **All deals / Mine** toggle (in `_board.html`, swaps
+`#bp-hub-body`); sales/traders are **locked to `scope=mine`** with no toggle. Both the board
+(`/partials/buy-plans/board`) and the archive (`/partials/buy-plans/archive`) route the
+requested `scope` through `_resolve_deal_scope(scope, can_see_all)` — empty/unknown → the
+role default, and `all` requested without visibility is forced to `mine` (no leak). The hub
+shell loads the deals body with no `?scope=` so the partial resolves the default per role.
+
 ```
 GET /v2/partials/buy-plans?lens=          (shell: switcher + lazy #bp-hub-body)
     |
-    +-- lens=deals     --> GET /partials/buy-plans/board?scope=mine|all
+    +-- lens=deals     --> GET /partials/buy-plans/board   (scope role-defaulted)
     |                        services/buyplan_hub.deals_board   (sales stage board:
     |                        3 ACTIVE columns Draft/Pending/Active — COMPLETED excluded;
-    |                        scope=all role-gated to supervisors)
+    |                        scope via _resolve_deal_scope: _can_see_all_deals users
+    |                        default all + All/Mine toggle; sales/traders locked to mine)
     |                        + completed_archive(scope=…) → collapsed "Completed (N)"
     |                          archive section below the board (_archive.html). Lazy
     |                          "Load older" pages via GET /partials/buy-plans/archive?
