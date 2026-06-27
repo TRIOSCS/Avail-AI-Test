@@ -11,8 +11,9 @@ Covers:
   - Filtering gate_type=buy_plan returns exactly the buy-plan requests.
   - A pending BuyPlan with NO ApprovalRequest (pre-C1 / unrouted) does NOT appear — the
     queue is engine-only.
-  - GET /v2/approvals/queue renders HTML; a buy_plan-subject row links to the plan detail
-    partial (/v2/partials/buy-plans/{id}) and the queue still renders for prepayment rows.
+  - The four-tab approvals queue (Buy-Plans hub "approvals" lens body,
+    /v2/partials/buy-plans/approvals) renders HTML; a buy_plan-subject row links to the
+    plan detail partial, Pending/Recently-resolved split, and prepayment rows render.
 
 Called by: pytest
 Depends on: conftest (db_session), app.routers.approvals, app.models.approvals,
@@ -224,8 +225,8 @@ class TestEngineNativeQueue:
         ids = {i["id"] for i in body["items"]}
         assert {bp_ar.id, pp_ar.id} <= ids
 
-    def test_queue_html_links_buy_plan_subject_to_detail(self, db_session: Session) -> None:
-        """GET /v2/approvals/queue renders HTML; a buy_plan-subject row links to the
+    def test_lens_links_buy_plan_subject_to_detail(self, db_session: Session) -> None:
+        """The Buy Plans approvals tab renders HTML; a buy_plan-subject row links to the
         plan detail partial."""
         user = _make_user(db_session)
         bp = _make_buy_plan(db_session, user, status="pending")
@@ -233,36 +234,39 @@ class TestEngineNativeQueue:
         db_session.commit()
 
         for client in _build_client(db_session, user):
-            resp = client.get("/v2/approvals/queue")
+            resp = client.get("/v2/partials/buy-plans/approvals?tab=buy_plans")
 
         assert resp.status_code == 200
         assert "text/html" in resp.headers.get("content-type", "")
         assert f"/v2/partials/buy-plans/{bp.id}" in resp.text
 
-    def test_queue_header_counts_only_open_requests(self, db_session: Session) -> None:
-        """The 'N items pending' header counts only REQUESTED rows — a resolved request
-        renders (with a View link) but must not inflate the pending count."""
+    def test_lens_splits_pending_and_resolved(self, db_session: Session) -> None:
+        """A REQUESTED row lands in Pending; a resolved row lands in Recently resolved —
+        the two sections are distinct (a resolved row never inflates Pending)."""
         user = _make_user(db_session)
         bp = _make_buy_plan(db_session, user, status="pending")
         _make_buy_plan_request(db_session, bp, user)  # one open
-        resolved = _make_prepayment_request(db_session, user)
-        resolved.status = "approved"  # a historical, non-pending row
+        bp2 = _make_buy_plan(db_session, user, status="pending")
+        resolved = _make_buy_plan_request(db_session, bp2, user)
+        resolved.status = "approved"  # a historical, non-pending row of the SAME gate
+        resolved.resolved_at = datetime.now(timezone.utc)
         db_session.commit()
 
         for client in _build_client(db_session, user):
-            resp = client.get("/v2/approvals/queue")
+            resp = client.get("/v2/partials/buy-plans/approvals?tab=buy_plans")
 
         assert resp.status_code == 200
-        assert "1 item pending" in resp.text, resp.text[:400]
+        assert "Pending" in resp.text
+        assert "Recently resolved" in resp.text
 
-    def test_queue_html_renders_prepayment_row(self, db_session: Session) -> None:
-        """The engine-only queue still renders non-buy-plan rows (prepayment)."""
+    def test_prepayments_tab_renders_row(self, db_session: Session) -> None:
+        """The Vendor Prepayments tab renders a prepayment-gate row."""
         user = _make_user(db_session)
         ar = _make_prepayment_request(db_session, user)
         db_session.commit()
 
         for client in _build_client(db_session, user):
-            resp = client.get("/v2/approvals/queue")
+            resp = client.get("/v2/partials/buy-plans/approvals?tab=prepayments")
 
         assert resp.status_code == 200
-        assert f"/v2/approvals/requests/{ar.id}" in resp.text
+        assert f"Request #{ar.id}" in resp.text  # no subject set → audit-safe fallback label

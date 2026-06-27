@@ -1,115 +1,95 @@
 {#
-  approvals/_queue.html — Engine approvals queue: every pending approval is an ApprovalRequest.
+  approvals/_queue.html — Four-tab approvals queue (the Buy-Plans hub "approvals" lens body).
 
-  Purpose: Single view for approvers to see all pending approval items. Every row is an
-           engine ApprovalRequest (prepayments, buy plans, …) actioned inline against the
-           engine's decision endpoint. QP Phase C1 retired the read-only buy-plan bridge:
-           a buy-plan submission now surfaces here as a native buy_plan-subject request,
-           and its Subject cell links to the plan detail partial.
+  Purpose: segment every engine ApprovalRequest into four tabs by gate_type — Buy Plans /
+           Sales Orders / Purchase Orders / Vendor Prepayments. Each tab shows a Pending
+           section (inline approve/reject for eligible recipients) and a Recently-resolved
+           read-only section. Per-tab pills are ORG-WIDE pending counts. The view opens on
+           the smart-default tab (most awaiting the current user) when no tab is requested.
 
   Receives:
-    engine_requests (list[ApprovalRequest]) — engine approval requests (any status).
-    current_user    (User)                  — authenticated user.
-    request         (Request)               — FastAPI request (required by template_response).
+    view         (services.approvals.queue.QueueView) — active_tab/active_label/tabs/
+                 pending_rows/resolved_rows, all pre-resolved (no ORM access here).
+    current_user (User)    — authenticated user.
+    request      (Request) — required by template_response.
 
-  Called by: routers/approvals.py → GET /v2/approvals/queue.
-  Depends on: Tailwind CSS, HTMX, app accent palette, .compact-table from styles.css,
-              shared/_macros.html (btn_primary/btn_danger — canonical .btn-sm sizing).
+  Rendered into #bp-hub-body by routers/htmx_views.py → GET /v2/partials/buy-plans/approvals.
+  LANDMINE: the sub-tabs swap into #bp-hub-body (NOT #main-content) — an explicit hx-target
+  is mandatory inside the hub or the swap inherits #main-content's hx-target="this" and
+  wipes the page (see buy_plans/hub.html).
+  Depends on: approvals/_macros.html, Tailwind + accent palette, .compact-table, HTMX.
 #}
-{% from "htmx/partials/shared/_macros.html" import btn_primary, btn_danger %}
+{% from "htmx/partials/approvals/_macros.html" import approval_row, empty_state %}
 
-{# Count only OPEN (requested) rows for the "pending" header — resolved rows still render
-   below (with a View link) but are not "pending". #}
-{% set pending_count = engine_requests | selectattr('status', 'equalto', 'requested') | list | length %}
-<div id="approvals-queue" class="page-fluid">
-  <div class="flex items-center justify-between mb-5">
-    <div>
-      <h2 class="text-lg font-semibold text-gray-900">Approvals Queue</h2>
-      <p class="text-sm text-gray-600 mt-0.5">
-        {{ pending_count }} item{{ 's' if pending_count != 1 }} pending
-      </p>
-    </div>
+<div id="approvals-queue">
+
+  {# ── Tab strip (segment by gate_type) — sub-tabs swap into the hub lens body ── #}
+  <div class="flex flex-wrap gap-2 mb-4" role="tablist">
+    {% for t in view.tabs %}
+    <a hx-get="/v2/partials/buy-plans/approvals?tab={{ t.key }}"
+       hx-target="#bp-hub-body"
+       hx-swap="innerHTML"
+       hx-push-url="false"
+       role="tab"
+       aria-selected="{{ 'true' if view.active_tab == t.key else 'false' }}"
+       class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg transition-colors focus:outline-none focus:ring-2"
+       style="{% if view.active_tab == t.key %}background-color:var(--accent);color:var(--accent-contrast);--tw-ring-color:var(--accent-ring);{% else %}background-color:#f3f4f6;color:#374151;border:1px solid #d1d5db;--tw-ring-color:var(--accent-ring);{% endif %}">
+      {{ t.label }}
+      {% if t.count > 0 %}
+      <span class="badge-warning ml-1 text-[11px] font-bold px-1.5 py-0.5">{{ t.count }}</span>
+      {% endif %}
+    </a>
+    {% endfor %}
   </div>
 
-  {% if engine_requests|length == 0 %}
-  <div class="rounded-lg border border-gray-200 bg-white px-6 py-10 text-center">
-    <p class="text-sm text-gray-600">No pending approvals.</p>
-  </div>
+  {% if not view.pending_rows and not view.resolved_rows %}
+  {{ empty_state(view.active_label) }}
   {% else %}
-  <div class="rounded-lg border border-gray-200 bg-white overflow-hidden">
+
+  {# ── Pending ── #}
+  {% if view.pending_rows %}
+  <h3 class="text-sm font-semibold text-gray-900 mb-2">
+    Pending <span class="text-gray-400 font-normal">({{ view.pending_rows | length }})</span>
+  </h3>
+  <div class="rounded-lg border border-gray-200 bg-white overflow-hidden mb-6">
     <table class="compact-table">
       <thead>
         <tr>
-          <th class="text-left">Type</th>
           <th class="text-left">Subject</th>
           <th class="text-left">Amount</th>
-          <th class="text-left">Status</th>
-          <th class="text-left">Created</th>
+          <th class="text-left">Requested by</th>
           <th></th>
         </tr>
       </thead>
       <tbody>
-
-        {# ── Engine ApprovalRequest rows ── #}
-        {% for ar in engine_requests %}
-        <tr>
-          <td class="td-label">
-            <span class="inline-flex items-center rounded-full bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700 ring-1 ring-inset ring-brand-200">
-              {{ ar.gate_type | replace('_', ' ') | title }}
-            </span>
-          </td>
-          <td class="td-label text-gray-700">
-            {% if ar.subject_type == 'buy_plan' and ar.subject_id %}
-            {# Buy-plan subject: link to the plan detail partial (read-context for the approver). #}
-            <a href="/v2/partials/buy-plans/{{ ar.subject_id }}"
-               hx-get="/v2/partials/buy-plans/{{ ar.subject_id }}"
-               hx-target="#main-content"
-               hx-push-url="false"
-               class="font-medium text-brand-600 hover:text-brand-800">Plan #{{ ar.subject_id }}</a>
-            {% else %}
-            Request #{{ ar.id }}
-            {% endif %}
-          </td>
-          <td>{% if ar.amount %}${{ "{:,.2f}".format(ar.amount) }}{% else %}—{% endif %}</td>
-          <td class="td-label">
-            <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium
-              {% if ar.status == 'approved' %}bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-200
-              {% elif ar.status == 'rejected' %}bg-red-50 text-red-700 ring-1 ring-inset ring-red-200
-              {% else %}bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-200{% endif %}">
-              {{ ar.status | title }}
-            </span>
-          </td>
-          <td>{{ ar.created_at.strftime('%Y-%m-%d') if ar.created_at else '—' }}</td>
-          <td class="td-label text-right">
-            {% if ar.status == 'requested' %}
-            {# Inline approve/reject against the engine decision endpoint (returns JSON), then
-               re-fetch the whole queue into #main-content on success. The refresh htmx.ajax
-               carries an indicator: (HTMX 2.x doesn't auto-read hx-indicator for imperative
-               calls). A 403 (not a pending recipient) is fail-quiet: the queue is unchanged. #}
-            <div class="inline-flex items-center gap-1.5">
-              {{ btn_primary('Approve', {
-                'hx-post': '/v2/approvals/requests/' ~ ar.id ~ '/decision',
-                'hx-vals': "js:{action: 'approve'}",
-                'hx-swap': 'none',
-                'hx-on::after-request': "if(event.detail.successful) htmx.ajax('GET','/v2/approvals/queue',{target:'#main-content',indicator:'#approvals-queue'})"
-              }) }}
-              {{ btn_danger('Reject', {
-                'hx-post': '/v2/approvals/requests/' ~ ar.id ~ '/decision',
-                'hx-vals': "js:{action: 'reject', comment: prompt('Reason for rejection?') || ''}",
-                'hx-swap': 'none',
-                'hx-on::after-request': "if(event.detail.successful) htmx.ajax('GET','/v2/approvals/queue',{target:'#main-content',indicator:'#approvals-queue'})"
-              }) }}
-            </div>
-            {% else %}
-            <a href="/v2/approvals/requests/{{ ar.id }}"
-               class="text-xs font-medium text-brand-600 hover:text-brand-800">View</a>
-            {% endif %}
-          </td>
-        </tr>
-        {% endfor %}
-
+        {% for row in view.pending_rows %}{{ approval_row(row, True, view.active_tab) }}{% endfor %}
       </tbody>
     </table>
   </div>
+  {% else %}
+  <p class="text-sm text-gray-500 mb-6">Nothing pending right now.</p>
+  {% endif %}
+
+  {# ── Recently resolved (read-only history) ── #}
+  {% if view.resolved_rows %}
+  <h3 class="text-sm font-semibold text-gray-900 mb-2">Recently resolved</h3>
+  <div class="rounded-lg border border-gray-200 bg-white overflow-hidden">
+    <table class="compact-table">
+      <thead>
+        <tr>
+          <th class="text-left">Subject</th>
+          <th class="text-left">Amount</th>
+          <th class="text-left">Requested by</th>
+          <th class="text-left">Status</th>
+          <th class="text-left">Resolved</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in view.resolved_rows %}{{ approval_row(row, False, view.active_tab) }}{% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
   {% endif %}
 </div>

@@ -5,10 +5,14 @@ Purpose: HTTP surface for approval workflows. Returns JSON; HTMX partials can
            - app.services.approvals.service (decide)
            - app.services.approvals.events (reassign, cancel)
 
-         QP Phase C1: the engine OWNS the buy-plan gate, so list_requests and the
-         /v2/approvals/queue view are engine-only — a buy-plan submission surfaces here
-         as a native ApprovalRequest (gate_type=buy_plan, subject_type=buy_plan). The old
-         read-only buy-plan bridge has been retired.
+         QP Phase C1: the engine OWNS the buy-plan gate, so list_requests is engine-only —
+         a buy-plan submission surfaces as a native ApprovalRequest (gate_type=buy_plan,
+         subject_type=buy_plan). The old read-only buy-plan bridge has been retired.
+
+         The human-facing queue is now FOUR tabs (Buy Plans / Sales Orders / Purchase
+         Orders / Vendor Prepayments) folded into the Buy-Plans hub as its "approvals"
+         lens — rendered by routers/htmx_views.py via services/approvals/queue. The legacy
+         GET /v2/approvals/queue 302-redirects there.
 
 Called by: app.main (router registration).
 Depends on: app.services.approvals.service, app.services.approvals.events,
@@ -17,8 +21,8 @@ Depends on: app.services.approvals.service, app.services.approvals.events,
             app.constants, app.template_env.
 """
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import APIRouter, Depends, Form, HTTPException
+from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -29,7 +33,6 @@ from ..models.auth import User
 from ..services.approvals.events import cancel as svc_cancel
 from ..services.approvals.events import reassign as svc_reassign
 from ..services.approvals.service import decide as svc_decide
-from ..template_env import template_response
 
 router = APIRouter(tags=["approvals"])
 
@@ -160,27 +163,16 @@ def list_requests(
     return {"items": items, "total": len(items)}
 
 
-@router.get("/v2/approvals/queue", response_class=HTMLResponse)
-def get_queue(
-    request: Request,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_user),
-):
-    """Render the engine approvals queue as an HTMX partial.
+@router.get("/v2/approvals/queue")
+def get_queue(current_user: User = Depends(require_user)) -> RedirectResponse:
+    """Retired standalone queue — folded into the Buy Plans hub 'approvals' lens.
 
-    QP Phase C1: engine-only. Every pending approval — buy plans included — is an
-    ApprovalRequest, so the queue renders one table of engine rows. A buy_plan-subject row
-    links to its plan detail partial and offers inline approve/reject posting to the
-    engine's decision endpoint.
+    The four-tab approvals queue now renders as a Buy-Plans hub lens body (GET
+    /v2/partials/buy-plans/approvals). This route 302-redirects any deep link or old
+    bookmark to that lens so nothing 404s. The render + tab logic live in
+    services/approvals/queue.build_queue_view.
     """
-    engine_rows = db.execute(select(ApprovalRequest)).scalars().all()
-
-    ctx = {
-        "request": request,
-        "current_user": current_user,
-        "engine_requests": engine_rows,
-    }
-    return template_response("htmx/partials/approvals/_queue.html", ctx)
+    return RedirectResponse(url="/v2/buy-plans?lens=approvals", status_code=302)
 
 
 @router.get("/v2/approvals/requests/{id}")

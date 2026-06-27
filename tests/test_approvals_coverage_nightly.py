@@ -17,7 +17,6 @@ import uuid
 from datetime import datetime, timezone
 from unittest.mock import patch
 
-from fastapi.responses import HTMLResponse
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -155,19 +154,19 @@ class TestApprovalsRouterCoverage:
         assert resp.status_code == 404
         assert "error" in resp.json()
 
-    def test_get_queue_renders(self, db_session: Session):
-        """GET /v2/approvals/queue renders without error."""
+    def test_get_queue_redirects_to_hub_lens(self, db_session: Session):
+        """GET /v2/approvals/queue 302-redirects to the Buy Plans hub 'approvals' lens.
+
+        The standalone queue was retired — the four-tab queue now renders as a Buy-Plans
+        hub lens body. The old URL stays a valid deep link via the redirect.
+        """
         user = _make_user(db_session)
         db_session.commit()
 
         client = _get_client(db_session, user)
-        with patch("app.routers.approvals.template_response") as mock_tpl:
-            mock_tpl.return_value = HTMLResponse("<html></html>")
-            resp = client.get("/v2/approvals/queue")
-        # The queue view does real ORM work; without full fixtures it may 500 before
-        # template_response is reached. We only assert the route is reachable and the
-        # app doesn't raise at the framework layer (status is a valid HTTP response).
-        assert resp.status_code in (200, 500)
+        resp = client.get("/v2/approvals/queue", follow_redirects=False)
+        assert resp.status_code == 302
+        assert resp.headers["location"] == "/v2/buy-plans?lens=approvals"
 
     def test_serialize_request_all_fields(self, db_session: Session):
         """_serialize_request projects all 11 fields."""

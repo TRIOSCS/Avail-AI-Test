@@ -461,6 +461,17 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         # first full-page load instead of defaulting to Connectors.
         tab_qs = request.query_params.get("tab", "").strip()
         partial_url = f"/v2/partials/settings?tab={quote(tab_qs)}" if tab_qs else "/v2/partials/settings"
+    elif current_view == "buy-plans":
+        # Thread ?lens= through so a deep-link / redirect (the legacy /v2/approvals/queue
+        # → /v2/buy-plans?lens=approvals) and a reload/bookmark of a pushed lens URL paint
+        # the right lens on first full-page load instead of falling to _default_lens. A
+        # detail URL (/buy-plans/{id}) is overridden by the _DETAIL_VIEWS block below.
+        lens_qs = request.query_params.get("lens", "").strip()
+        partial_url = (
+            f"/v2/partials/buy-plans?lens={quote(lens_qs)}"
+            if lens_qs in ("orders", "deals", "supervise", "resource", "approvals")
+            else "/v2/partials/buy-plans"
+        )
     else:
         partial_url = f"/v2/partials/{current_view}"
     # Detail views: a trailing numeric id (/{view}/{id}) overrides the list partial with
@@ -10979,6 +10990,17 @@ def _can_resource(user: User) -> bool:
     return user.role in _PO_CUTTER_ROLES
 
 
+def _can_approve_any(user: User) -> bool:
+    """True when the user can approve at least one gate (sees the hub "Approvals"
+    lens)."""
+    return bool(
+        getattr(user, "can_approve_buy_plans", False)
+        or getattr(user, "can_approve_prepayments", False)
+        or getattr(user, "can_approve_sales_orders", False)
+        or getattr(user, "can_approve_pos", False)
+    )
+
+
 def _require_po_cutter(user: User) -> None:
     """403 unless the user is an active PO-cutter (buyer/manager/admin)."""
     if not _can_resource(user) or not getattr(user, "is_active", True):
@@ -11011,7 +11033,7 @@ async def buy_plans_list_partial(
     The shell renders only the lens switcher + a lazy body that loads the active
     lens partial into ``#bp-hub-body``. Row data is fetched by the body, not here.
     """
-    active_lens = lens if lens in ("orders", "deals", "supervise", "resource") else _default_lens(user, db)
+    active_lens = lens if lens in ("orders", "deals", "supervise", "resource", "approvals") else _default_lens(user, db)
 
     # Spotlight markers: plan rows that carry an open step needing this user's action.
     # Buy Plans is its own primary nav tab, so the source is registered under "buy-plans".
@@ -11026,9 +11048,33 @@ async def buy_plans_list_partial(
             "alert_markers": alert_markers,
             "can_supervise": _can_supervise(user, db),
             "can_resource": _can_resource(user),
+            "can_approve_any": _can_approve_any(user),
         }
     )
     return template_response("htmx/partials/buy_plans/hub.html", ctx)
+
+
+@router.get("/v2/partials/buy-plans/approvals", response_class=HTMLResponse)
+async def buy_plans_approvals_partial(
+    request: Request,
+    tab: str | None = None,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Approvals lens body — the four-tab engine approvals queue.
+
+    Buy Plans / Sales Orders / Purchase Orders / Vendor Prepayments, segmented by
+    gate_type. Approver-gated (any can_approve_* toggle). Renders into #bp-hub-body; its
+    sub-tabs swap back into the same container. ``tab`` absent → smart-default tab.
+    """
+    if not _can_approve_any(user):
+        raise HTTPException(403, "Approvals require an approver role")
+    from ..services.approvals.queue import build_queue_view
+
+    ctx = _base_ctx(request, user, "buy-plans")
+    ctx["view"] = build_queue_view(db, user, tab)
+    ctx["current_user"] = user
+    return template_response("htmx/partials/approvals/_queue.html", ctx)
 
 
 @router.get("/v2/partials/buy-plans/resource", response_class=HTMLResponse)
