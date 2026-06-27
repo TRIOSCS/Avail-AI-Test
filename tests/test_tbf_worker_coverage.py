@@ -249,9 +249,10 @@ class TestMonitoring:
     def test_check_html_structure_hash_empty(self):
         from app.services.tbf_worker.monitoring import check_html_structure_hash
 
-        # Result is True (known) or False (new hash) — both are valid bools
+        # Returns the 16-char structure-hash string (contract is `-> str`).
         result = check_html_structure_hash("<html><body></body></html>", "TEST_MPN")
-        assert isinstance(result, (bool, str))
+        assert isinstance(result, str)
+        assert len(result) == 16
 
     def test_capture_sentry_error_no_sentry(self):
         from app.services.tbf_worker.monitoring import capture_sentry_error
@@ -335,8 +336,6 @@ class TestSearchEngine:
         from app.services.tbf_worker.search_engine import search_part
 
         page = MagicMock()
-        mock_response = MagicMock()
-        mock_response.status = PropertyError = property(lambda self: (_ for _ in ()).throw(Exception("err")))
 
         # Simulate response.status raising
         broken_response = MagicMock()

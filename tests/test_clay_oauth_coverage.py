@@ -15,17 +15,6 @@ os.environ.setdefault("TESTING", "1")
 
 
 class TestClayOAuthStore:
-    def _mock_db_with_source(self, creds=None):
-        """Create a mock DB session with an ApiSource-like row."""
-
-        mock_source = MagicMock()
-        mock_source.credentials = dict(creds or {})
-
-        mock_db = MagicMock()
-        # query().filter_by().first() returns None (no existing row)
-        mock_db.query.return_value.filter_by.return_value.first.return_value = None
-        return mock_db, mock_source
-
     def test_store_creates_new_source(self):
         """_store() creates an ApiSource row when none exists."""
         from app.services.clay_oauth import _store
