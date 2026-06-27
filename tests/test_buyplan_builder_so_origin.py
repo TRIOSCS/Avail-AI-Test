@@ -107,6 +107,10 @@ def test_create_sales_order_from_offers_makes_draft_without_quote(db_session, so
     assert plan.requisition_id == req.id
     assert plan.status == BuyPlanStatus.DRAFT.value
     assert len(plan.lines) == len(selections)
+    # The per-requirement sell_price (1.25) must thread onto the line, NOT the
+    # requirement's target_price fallback (1.0) — guards the sell_prices threading
+    # that Task 10's UI wiring depends on.
+    assert float(plan.lines[0].unit_sell) == 1.25
 
 
 def test_duplicate_so_for_requisition_is_blocked(db_session, so_origin_fixture):
