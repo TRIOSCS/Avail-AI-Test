@@ -392,3 +392,21 @@ class TestCancelHaltRelationships:
         db_session.refresh(plan)
         assert plan.cancelled_by is not None and plan.cancelled_by.id == test_user.id
         assert plan.halted_by is not None and plan.halted_by.id == test_user.id
+
+
+# ── SP-2: Sales-Order origin (no customer quote) ──────────────────────
+
+
+def test_buy_plan_persists_without_quote(db_session):
+    """An SO-origin buy plan has no customer quote (quote_id is nullable)."""
+    from app.models.buy_plan import BuyPlan
+    from app.models.sourcing import Requisition
+
+    req = Requisition(name="SO-Test-Req", customer_name="Acme")
+    db_session.add(req)
+    db_session.flush()
+    plan = BuyPlan(quote_id=None, requisition_id=req.id)
+    db_session.add(plan)
+    db_session.commit()
+    assert plan.id is not None
+    assert plan.quote is None

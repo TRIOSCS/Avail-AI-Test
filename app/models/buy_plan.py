@@ -75,7 +75,7 @@ class BuyPlan(Base):
     id = Column(Integer, primary_key=True)
 
     # ── Quote / Deal linkage
-    quote_id = Column(Integer, ForeignKey("quotes.id", ondelete="CASCADE"), nullable=False)
+    quote_id = Column(Integer, ForeignKey("quotes.id", ondelete="CASCADE"), nullable=True)
     requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False)
 
     # ── Acctivate references
