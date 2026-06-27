@@ -15,8 +15,9 @@ Depends on: conftest.py, app.routers.approvals, app.models.approvals
 import os
 import uuid
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
+from fastapi.responses import HTMLResponse
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -161,7 +162,7 @@ class TestApprovalsRouterCoverage:
 
         client = _get_client(db_session, user)
         with patch("app.routers.approvals.template_response") as mock_tpl:
-            mock_tpl.return_value = MagicMock(status_code=200, body=b"<html></html>")
+            mock_tpl.return_value = HTMLResponse("<html></html>")
             resp = client.get("/v2/approvals/queue")
         # template_response is mocked to return 200 — the route must render cleanly.
         assert resp.status_code == 200
