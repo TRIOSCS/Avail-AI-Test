@@ -165,12 +165,12 @@ def list_requests(
 
 @router.get("/v2/approvals/queue")
 def get_queue(current_user: User = Depends(require_user)) -> RedirectResponse:
-    """Retired standalone queue — folded into the Buy Plans hub 'approvals' lens.
+    """Retired standalone queue — folded into the Approvals hub stage tabs.
 
-    The four-tab approvals queue now renders as a Buy-Plans hub lens body (GET
-    /v2/partials/buy-plans/approvals). This route 302-redirects any deep link or old
-    bookmark to that lens so nothing 404s. The render + tab logic live in
-    services/approvals/queue.build_queue_view.
+    Each gate's pending queue now renders as a pinned section inside its lifecycle stage
+    tab (services/approvals/queue.build_queue_view per gate). This route 302-redirects
+    any deep link or old bookmark into the hub (which lands on the role-default stage)
+    so nothing 404s; the legacy /v2/buy-plans path itself 302s on to /v2/approvals.
     """
     return RedirectResponse(url="/v2/buy-plans?lens=approvals", status_code=302)
 

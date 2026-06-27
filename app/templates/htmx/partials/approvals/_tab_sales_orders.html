@@ -1,0 +1,13 @@
+{#
+  approvals/_tab_sales_orders.html — Sales Orders stage-tab body.
+  The Sales Order build flow lands in SP-2, so SP-1 has no work surface here — a non-approver
+  sees only a neutral empty state; an approver also sees the pinned sales_order queue section.
+  Receives: view, show_pending (pinned section).
+  Called by: htmx_views.py approvals_tab_partial (lens=sales_orders). Into #bp-hub-body.
+  Depends on: approvals/_pending_section.html.
+#}
+{% include "htmx/partials/approvals/_pending_section.html" %}
+<div class="rounded-lg border border-gray-200 bg-white px-6 py-10 text-center">
+  <p class="text-sm text-gray-600">No sales orders yet</p>
+  <p class="text-xs text-gray-400 mt-1">Sales orders will appear here once the build flow ships.</p>
+</div>

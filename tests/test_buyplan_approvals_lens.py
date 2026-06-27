@@ -1,15 +1,16 @@
-"""test_buyplan_approvals_lens.py — Approvals folded into the Buy Plans hub.
+"""test_buyplan_approvals_lens.py — Per-gate approvals folded into the stage tabs.
 
-Covers:
-  - the hub renders the "Approvals" lens pill ONLY for approvers (can_approve_any);
-  - the lens-body route /v2/partials/buy-plans/approvals is approver-gated (403 otherwise)
-    and renders the four-tab queue into #bp-hub-body;
-  - the approvals alert count merges onto the Buy Plans nav badge (the source is
-    re-registered under the "buy-plans" tab).
+The standalone four-tab Approvals lens is RETIRED (SP-1). Each gate's pending queue now
+renders as a pinned "Pending approvals" section INSIDE its stage tab, shown only to the
+matching approver. Covers:
+  - the Buy Plans stage tab hides the pinned section for a non-approver and shows it for
+    a user holding can_approve_buy_plans (with a pending row);
+  - the full page threads ?lens= into the lazy hub partial (new stage-tab keys);
+  - the approvals alert count still merges onto the Buy Plans nav badge.
 
 Called by: pytest
-Depends on: conftest (client, test_user, db_session), app.routers.htmx_views,
-            app.services.alerts, app.models.approvals.
+Depends on: conftest (client, nonadmin_client, test_user, db_session),
+            app.routers.htmx_views, app.services.alerts, app.models.approvals.
 """
 
 from app.constants import (
@@ -41,51 +42,42 @@ def _seed_pending_buy_plan_approval(db, user):
     return ar
 
 
-class TestApprovalsLensGating:
-    def test_pill_hidden_for_non_approver(self, client, test_user, db_session):
-        """A user with no approver toggle does not see the Approvals lens pill."""
-        resp = client.get("/v2/partials/buy-plans")
+class TestPinnedApprovalSection:
+    def test_section_hidden_for_non_approver(self, client, test_user, db_session):
+        """A buyer without can_approve_buy_plans sees the Buy Plans tab work surface but
+        NO pinned approvals section."""
+        _seed_pending_buy_plan_approval(db_session, test_user)
+        db_session.commit()
+        resp = client.get("/v2/partials/approvals/buy-plans")
         assert resp.status_code == 200
-        assert "lens=approvals" not in resp.text
+        assert "Pending approvals" not in resp.text
 
-    def test_pill_shown_for_approver(self, client, test_user, db_session):
-        """An approver sees the Approvals lens pill in the hub switcher."""
+    def test_section_shown_for_approver(self, client, test_user, db_session):
+        """Granting can_approve_buy_plans surfaces the pinned section with its pending
+        row inside the Buy Plans tab."""
         test_user.can_approve_buy_plans = True
-        db_session.flush()
-        resp = client.get("/v2/partials/buy-plans")
+        _seed_pending_buy_plan_approval(db_session, test_user)
+        db_session.commit()
+        resp = client.get("/v2/partials/approvals/buy-plans")
         assert resp.status_code == 200
-        assert "lens=approvals" in resp.text
-
-    def test_lens_body_403_for_non_approver(self, client, test_user, db_session):
-        """The lens body is approver-gated."""
-        resp = client.get("/v2/partials/buy-plans/approvals")
-        assert resp.status_code == 403
-
-    def test_lens_body_renders_four_tabs_into_hub_body(self, client, test_user, db_session):
-        """An approver gets all four tab labels and sub-tabs targeting #bp-hub-body."""
-        test_user.can_approve_sales_orders = True
-        db_session.flush()
-        resp = client.get("/v2/partials/buy-plans/approvals?tab=buy_plans")
-        assert resp.status_code == 200
-        for label in ("Buy Plans", "Sales Orders", "Purchase Orders", "Vendor Prepayments"):
-            assert label in resp.text
-        assert 'hx-target="#bp-hub-body"' in resp.text
+        assert "Pending approvals" in resp.text
+        # The inline approve/reject refetches the SAME stage-tab body into #bp-hub-body.
+        assert "/v2/partials/approvals/buy-plans" in resp.text
 
     def test_full_page_threads_lens_to_lazy_partial(self, nonadmin_client):
-        """A full-page load of /v2/buy-plans?lens=approvals threads ?lens= into the lazy
-        partial URL, so a deep link / reload / the /v2/approvals/queue redirect lands on
-        the requested lens instead of the role default.
+        """A full-page load of /v2/approvals?lens=buy_plans threads ?lens= into the lazy
+        partial URL, so a deep link / reload lands on the requested stage instead of the
+        role default.
 
-        (v2_page authenticates via the session cookie, so this needs nonadmin_client,
-        not the require_user-only client.)
+        (v2_page authenticates via the session cookie, so this needs nonadmin_client.)
         """
-        resp = nonadmin_client.get("/v2/buy-plans?lens=approvals")
+        resp = nonadmin_client.get("/v2/approvals?lens=buy_plans")
         assert resp.status_code == 200
-        assert "/v2/partials/buy-plans?lens=approvals" in resp.text
+        assert "/v2/partials/approvals?lens=buy_plans" in resp.text
 
     def test_full_page_ignores_unknown_lens(self, nonadmin_client):
         """An unknown ?lens= value is dropped (no query string), not echoed verbatim."""
-        resp = nonadmin_client.get("/v2/buy-plans?lens=bogus")
+        resp = nonadmin_client.get("/v2/approvals?lens=bogus")
         assert resp.status_code == 200
         assert "lens=bogus" not in resp.text
 

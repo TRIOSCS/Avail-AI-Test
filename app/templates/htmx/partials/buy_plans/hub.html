@@ -1,30 +1,33 @@
 {#
-  buy_plans/hub.html — Buy Plan Deal Hub shell with role-lens switcher.
-  Three lenses: My Deals (sales board), My Orders (buyer PO queue), Supervise (manager).
-  The body lazy-loads the active lens partial into #bp-hub-body.
-  Receives: lens (str: 'orders'|'deals'|'supervise'), alert_markers (dict).
-  Called by: htmx_views.py buy_plans_list_partial endpoint.
-  Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette;
-              _orders_queue.html / _board.html (lazy-loaded bodies).
+  buy_plans/hub.html — Approvals hub shell with a lifecycle stage-tab switcher.
+  Five stages: Sales Orders, Buy Plans, Purchase Orders, Vendor Prepayments, Supervise.
+  The body lazy-loads the active stage tab partial into #bp-hub-body.
+  Receives: lens (str: 'sales_orders'|'buy_plans'|'purchase_orders'|'prepayments'|
+            'supervise'), can_supervise (bool), alert_markers (dict).
+  Called by: htmx_views.py buy_plans_list_partial (GET /v2/partials/approvals).
+  Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette; the per-stage tab bodies
+              under approvals/ (lazy-loaded into #bp-hub-body).
 #}
-<title hx-swap-oob="true">Buy Plans — AvailAI</title>
+<title hx-swap-oob="true">Approvals — AvailAI</title>
 
 <div class="page-fluid" x-data="{ lens: '{{ lens }}' }">
 
-  {# ── Lens switcher ──
-     Supervise is gated: only managers/admins/ops (can_supervise) see the button. #}
-  <div class="flex items-center gap-2 mb-5">
-    {% for l, label in [('deals', 'My Deals'), ('orders', 'My Orders'), ('resource', 'Needs Re-sourcing'), ('approvals', 'Approvals'), ('supervise', 'Supervise')] %}
-    {% if (l != 'supervise' or can_supervise) and (l != 'resource' or can_resource) and (l != 'approvals' or can_approve_any) %}
+  {# ── Stage-tab switcher ──
+     The four lifecycle stages are always shown; Supervise is gated to managers/admins/ops
+     (can_supervise). The work surface + the pinned approval section INSIDE each stage are
+     what gate further by role. #}
+  <div class="flex flex-wrap items-center gap-2 mb-5">
+    {% for l, label in [('sales_orders', 'Sales Orders'), ('buy_plans', 'Buy Plans'), ('purchase_orders', 'Purchase Orders'), ('prepayments', 'Vendor Prepayments'), ('supervise', 'Supervise')] %}
+    {% if l != 'supervise' or can_supervise %}
     {# Highlight is Alpine-reactive (:class on lens) so the active pill updates the
-       instant a lens is clicked — before the server swap returns — and stays correct
+       instant a tab is clicked — before the server swap returns — and stays correct
        after the re-rendered hub re-inits x-data with the server lens. Mirrors the
        settings tab_button pattern (partials/settings/_macros.html).
        Active state uses accent-600 (PR0 single-accent rule); inactive chrome stays brand-*. #}
-    <button hx-get="/v2/partials/buy-plans?lens={{ l }}"
+    <button hx-get="/v2/partials/approvals?lens={{ l }}"
             hx-target="#main-content"
             hx-swap="innerHTML"
-            hx-push-url="/v2/buy-plans?lens={{ l }}"
+            hx-push-url="/v2/approvals?lens={{ l }}"
             @click="lens = '{{ l }}'"
             :class="lens === '{{ l }}'
                     ? 'bg-accent-600 text-white shadow-sm'
@@ -37,19 +40,17 @@
   </div>
 
   {# ── Lazy body ──
+     The active stage key maps to its dash-cased tab body URL (buy_plans → buy-plans).
      LANDMINE: hx-trigger="load" MUST carry the explicit hx-target="#bp-hub-body".
      Without it the element inherits #main-content's hx-target="this" and the load
      wipes the whole page (known cards-vanish regression). #}
+  {% set lens_path = lens | replace('_', '-') %}
   <div id="bp-hub-body"
-       hx-get="{{ '/v2/partials/buy-plans/orders' if lens == 'orders'
-                 else '/v2/partials/buy-plans/supervise' if lens == 'supervise'
-                 else '/v2/partials/buy-plans/resource' if lens == 'resource'
-                 else '/v2/partials/buy-plans/approvals' if lens == 'approvals'
-                 else '/v2/partials/buy-plans/board' }}"
+       hx-get="/v2/partials/approvals/{{ lens_path }}"
        hx-trigger="load"
        hx-target="#bp-hub-body"
        hx-swap="innerHTML">
-    {# Finding #8: spinner consistent with other lazy bodies in the app #}
+    {# Spinner consistent with other lazy bodies in the app #}
     <div class="p-4 text-center text-gray-400 text-sm flex items-center justify-center gap-2">
       <svg class="h-5 w-5 text-gray-400 animate-spin" viewBox="0 0 24 24" fill="none">
         <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"

@@ -1,17 +1,17 @@
 {#
-  approvals/_macros.html — row + empty-state macros for the four-tab approvals queue.
+  approvals/_macros.html — row + empty-state macros for the per-gate approvals section.
 
   Purpose: render one ApprovalRequest row (RowVM) for the Pending or Recently-resolved
-           table, and the per-tab empty state. Pending rows show inline approve/reject
+           table, and a per-gate empty state. Pending rows show inline approve/reject
            ONLY when row.can_act (the user is an eligible PENDING recipient — mirrors the
            engine's decide() gate); otherwise they show the routed-to approver names.
 
-  Used by: approvals/_queue.html.
+  Used by: approvals/_pending_section.html (the pinned per-gate stage-tab section).
   Depends on: shared/_macros.html (btn_primary/btn_danger — canonical .btn-sm sizing),
               .compact-table from styles.css, the accent palette.
 
-  Note: approve/reject POST to the engine decision endpoint, then re-fetch the active tab
-  back into #bp-hub-body (the hub lens body) so the user stays on the same sub-tab.
+  Note: approve/reject POST to the engine decision endpoint, then re-fetch the stage-tab
+  body (refetch_url) back into #bp-hub-body so the user stays on the same stage tab.
 #}
 {% from "htmx/partials/shared/_macros.html" import btn_primary, btn_danger %}
 
@@ -45,8 +45,8 @@
 {%- endmacro %}
 
 
-{% macro approval_row(row, pending, active_tab) -%}
-{% set refetch = "if(event.detail.successful) htmx.ajax('GET','/v2/partials/buy-plans/approvals?tab=" ~ active_tab ~ "',{target:'#bp-hub-body',indicator:'#approvals-queue'})" %}
+{% macro approval_row(row, pending, refetch_url) -%}
+{% set refetch = "if(event.detail.successful) htmx.ajax('GET','" ~ refetch_url ~ "',{target:'#bp-hub-body',indicator:'#approvals-pending'})" %}
 <tr>
   <td class="td-label">{{ _subject_cell(row) }}</td>
   <td>{% if row.amount is not none %}${{ "{:,.2f}".format(row.amount) }}{% else %}—{% endif %}</td>
