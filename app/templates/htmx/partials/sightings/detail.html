@@ -9,39 +9,44 @@
 {% import "htmx/partials/shared/_macros.html" as m %}
 {% from "htmx/partials/shared/_mpn_chips.html" import mpn_chips %}
 
-{# ── Part Header (always visible above tabs) ─────────────────── #}
-<div class="border-b border-gray-100 pb-3 mb-3 sightings-slide-down">
-  <div class="flex items-start justify-between">
-    <div>
-      {{ mpn_chips(requirement, link_map=link_map) }}
-      {% if requirement.manufacturer %}
-      <p class="text-xs text-gray-600 mt-1">{{ requirement.manufacturer }}</p>
-      {% endif %}
-    </div>
-    <div class="flex items-center gap-2 flex-shrink-0">
-      <button @click="$dispatch('open-modal', {url: '/v2/partials/sightings/vendor-modal?requirement_ids={{ requirement.id }}'})"
-              class="btn-primary btn-sm">Build RFQ</button>
-      {{ m.search_button(requirement, target="#sightings-detail", swap="innerHTML") }}
-    </div>
+{# ── Part Header (always visible above tabs) — Sales Hub look:
+     flush flex header (mirror requisitions2/_detail_panel.html:27) then a
+     dt/dd metadata grid. The inline status <select> hx-patch is Sightings-
+     specific and stays AS-IS. ─────────────────────────────────────────── #}
+<div class="flex items-center gap-3 px-5 py-3 border-b border-gray-200 bg-gray-50 flex-shrink-0 sightings-slide-down">
+  <div class="flex-1 min-w-0">
+    {{ mpn_chips(requirement, link_map=link_map) }}
+    {% if requirement.manufacturer %}
+    <p class="text-xs text-gray-600 mt-1">{{ requirement.manufacturer }}</p>
+    {% endif %}
   </div>
+  <div class="flex items-center gap-2 flex-shrink-0">
+    <button @click="$dispatch('open-modal', {url: '/v2/partials/sightings/vendor-modal?requirement_ids={{ requirement.id }}'})"
+            class="btn btn-sm btn-primary">Build RFQ</button>
+    {{ m.search_button(requirement, target="#sightings-detail", swap="innerHTML") }}
+  </div>
+</div>
 
-  <div class="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+<div class="grid grid-cols-2 gap-x-4 gap-y-2 px-5 py-3 border-b border-gray-200 text-sm flex-shrink-0">
     <div>
-      <span class="text-gray-400">Qty:</span>
-      <span class="font-mono text-sm font-semibold text-gray-800">{{ requirement.target_qty or '—' }}</span>
+      <dt class="text-xs font-medium text-gray-400 uppercase">Qty</dt>
+      <dd class="text-gray-900 mt-0.5 font-mono font-semibold">{{ requirement.target_qty or '—' }}</dd>
     </div>
     <div>
-      <span class="text-gray-400">Target:</span>
-      <span class="figure-accent text-sm font-semibold">{{ '$%.2f'|format(requirement.target_price) if requirement.target_price else '—' }}</span>
+      <dt class="text-xs font-medium text-gray-400 uppercase">Target</dt>
+      <dd class="figure-accent mt-0.5 font-semibold">{{ '$%.2f'|format(requirement.target_price) if requirement.target_price else '—' }}</dd>
     </div>
     <div>
-      <span class="text-gray-400">Customer:</span>
-      <a href="/v2/requisitions/{{ requisition.id }}" class="text-accent-600 hover:underline">
-        {{ requisition.customer_name or '—' }}
-      </a>
+      <dt class="text-xs font-medium text-gray-400 uppercase">Customer</dt>
+      <dd class="mt-0.5">
+        <a href="/v2/requisitions/{{ requisition.id }}" class="text-accent-600 hover:underline">
+          {{ requisition.customer_name or '—' }}
+        </a>
+      </dd>
     </div>
     <div>
-      <span class="text-gray-400">Status:</span>
+      <dt class="text-xs font-medium text-gray-400 uppercase">Status</dt>
+      <dd class="mt-0.5">
       {% set status_styles = {
         'open': 'text-gray-700',
         'sourcing': 'text-blue-700',
@@ -70,20 +75,20 @@
         {{ (requirement.sourcing_status or 'open')|capitalize }}
       </span>
       {% endif %}
+      </dd>
     </div>
-  </div>
 </div>
 
 {# ── Tabbed body: Vendors (default) / Activity ──────────────── #}
 {# Inline rendering: `activities` already loaded by sightings_detail; lazy hx-get would add a round trip with no benefit. #}
 <div x-data="{ activeTab: 'vendors' }">
-  <div class="border-b border-gray-200 mb-3">
-    <nav class="flex gap-6 -mb-px">
+  <div class="border-b border-gray-200 px-5">
+    <nav class="flex gap-0 -mb-px">
       {% for tab_id, tab_label in [('vendors', 'Vendors'), ('offers', 'Offers'), ('activity', 'Activity')] %}
       <button @click="activeTab = '{{ tab_id }}'"
               type="button"
               :class="activeTab === '{{ tab_id }}' ? 'border-accent-600 text-accent-600' : 'border-transparent text-gray-500 hover:text-gray-900 hover:border-gray-200'"
-              class="py-2 px-1 text-xs font-medium border-b-2 transition-colors whitespace-nowrap">
+              class="px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap">
         {{ tab_label }}
       </button>
       {% endfor %}
@@ -91,9 +96,9 @@
   </div>
 
   {# ── Vendors panel (default) ──────────────────────────────── #}
-  <div x-show="activeTab === 'vendors'" x-cloak>
+  <div x-show="activeTab === 'vendors'" x-cloak class="px-5 py-3">
 <div class="mb-4">
-  <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+  <h4 class="h4 mb-2">
     Vendors ({{ summaries|length }})
   </h4>
 

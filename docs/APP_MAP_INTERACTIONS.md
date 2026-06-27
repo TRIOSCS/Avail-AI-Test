@@ -4326,7 +4326,15 @@ BROWSER (HTMX + Alpine.js)
       _mpn_chips.html: equal inline pills for all MPNs (primary + subs)
           with overflow toggle and modal material card click
       status_badge macro (_macros.html): unified badge rendering
-          used across all pages (requisitions, sightings, parts, etc.)
+          used across all pages (requisitions, parts, etc.)
+      Sales-Hub look (requisitions2 opportunity-table tokens): the
+          Sightings list table + detail panel reuse opp_status_cell
+          (status dot+label), coverage_meter (6-seg meter), .opp-col-header
+          (th), .h4 / .figure-accent / .input / .btn btn-sm. Sightings-only
+          treatments are preserved: the red/green _vendor_row row_tint
+          (bg-rose-50/60 unavailable, bg-emerald-50/50 offer-in), the inline
+          status <select> hx-patch advance-status, the per-vendor expandable
+          drawer, the SSE refresh, and the multi-select action bar.
 ```
 
 ---
