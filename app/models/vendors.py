@@ -64,6 +64,11 @@ class VendorCard(Base):
     enrichment_provenance = Column(JSONB, default=dict, server_default="{}")
 
     cancellation_rate = Column(Float)
+    # PO-cancellation performance (po_cancellation_service): avg days from PO-cut to
+    # cancel (longer = worse), and count of "slow" cancels (> threshold days) which
+    # weigh the vendor score down harder. Refreshed inline at re-source + nightly.
+    avg_days_to_cancel = Column(Float)
+    slow_cancel_count = Column(Integer, default=0)
 
     # Engagement scoring (Email Mining v2 Upgrade 4)
     total_outreach = Column(Integer, default=0)

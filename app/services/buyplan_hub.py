@@ -212,6 +212,79 @@ def team_line_queue(db: Session, user: object) -> list[dict]:
     return rows
 
 
+def resourcing_pool_queue(db: Session) -> list[dict]:
+    """Every open-pool line awaiting a claim, pool-wide (not per-buyer).
+
+    A line qualifies when it is ``RESOURCING``, ``buyer_id IS NULL``, and its parent
+    plan is ``ACTIVE`` — i.e. a cut PO was cancelled (vendor fell down) and any buyer can
+    backfill it. Each row carries the canceled-vendor + reason context (from the most
+    recent POCancellation for that line) so the queue reads as a triage list. Oldest plan
+    first.
+
+    Each dict: line_id, plan_id, customer_name, mpn, description, quantity,
+               canceled_vendor, reason_code, cancelled_at.
+    """
+    from ..models.po_cancellation import POCancellation
+
+    lines = (
+        db.query(BuyPlanLine)
+        .join(BuyPlan, BuyPlanLine.buy_plan_id == BuyPlan.id)
+        .filter(
+            BuyPlanLine.status == BuyPlanLineStatus.RESOURCING,
+            BuyPlanLine.buyer_id.is_(None),
+            BuyPlan.status == BuyPlanStatus.ACTIVE,
+        )
+        .options(
+            joinedload(BuyPlanLine.buy_plan)
+            .joinedload(BuyPlan.quote)
+            .joinedload(Quote.customer_site)
+            .joinedload(CustomerSite.company),
+            joinedload(BuyPlanLine.requirement),
+        )
+        .all()
+    )
+    if not lines:
+        return []
+
+    # Latest cancellation per line (the one that just sent it to the pool).
+    cancels = (
+        db.query(POCancellation)
+        .filter(POCancellation.buy_plan_line_id.in_([ln.id for ln in lines]))
+        .options(joinedload(POCancellation.vendor_card))
+        .order_by(POCancellation.cancelled_at.desc())
+        .all()
+    )
+    latest_cancel: dict[int, POCancellation] = {}
+    for c in cancels:
+        latest_cancel.setdefault(c.buy_plan_line_id, c)
+
+    lines.sort(key=lambda ln: ln.buy_plan.created_at)
+
+    rows = []
+    for ln in lines:
+        req = ln.requirement
+        cancel = latest_cancel.get(ln.id)
+        canceled_vendor = None
+        if cancel:
+            canceled_vendor = (
+                cancel.vendor_card.display_name if cancel.vendor_card else None
+            ) or cancel.vendor_name_normalized
+        rows.append(
+            {
+                "line_id": ln.id,
+                "plan_id": ln.buy_plan_id,
+                "customer_name": _customer_name(ln.buy_plan),
+                "mpn": req.primary_mpn if req else None,
+                "description": req.description if req else None,
+                "quantity": ln.quantity,
+                "canceled_vendor": canceled_vendor,
+                "reason_code": cancel.reason_code if cancel else None,
+                "cancelled_at": cancel.cancelled_at if cancel else None,
+            }
+        )
+    return rows
+
+
 # ── Column mapping ────────────────────────────────────────────────────
 
 _STATUS_TO_COLUMN: dict[str, str] = {

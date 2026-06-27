@@ -1272,6 +1272,7 @@ buyplan_workflow.py (state machine)
     |   approve AND reject each write a BUYPLAN_APPROVED/BUYPLAN_REJECTED ActivityLog (plan-scoped).
     |
     |  Per-line (active):  awaiting_po --confirm_po--> pending_verify --verify_po(ops)--> verified
+    |  Re-source (§6e):    pending_verify|verified --resource_line--> resourcing --claim_line--> awaiting_po
     |  Ops SO track:       so_status: pending --verify_so(ops)--> approved / rejected
     |  Completion gate:    all lines terminal AND so_status=approved. verify_so/verify_po require a
     |                      VerificationGroupMember (manage via Settings > Ops Group; seeded from ADMIN_EMAILS).
@@ -1286,6 +1287,41 @@ buyplan_workflow.py (state machine)
     +---> inventory_jobs.py: buyplan_nudge (30 min) re-pings buyer (PO unconfirmed >4h) and
             ops (PO unverified >2h) until lines advance; idempotent via buy_plan_lines.last_nudge_at
 ```
+
+### 6e. Re-source (cancelled PO → open claim pool → urgent buyer backfill)
+
+A buyer records a PO on a line to close it out in Acctivate; when a **vendor falls down**
+(sells elsewhere / can't deliver) the buyer cancels that PO in Acctivate and clicks
+**Re-source** on the line (`POST /v2/partials/buy-plans/{plan}/lines/{line}/resource`;
+gated by `get_buyplan_for_user` ownership + `_require_po_cutter` role). The button shows
+on `pending_verify`/`verified` lines even when the plan auto-completed (the late-fall-down
+case). `buyplan_workflow.resource_line` (default one line; `scope=plan` escalates to the
+plan's other cut lines) for each target, in one transaction:
+
+1. `po_cancellation_service.record_po_cancellation` — append the immutable `po_cancellations`
+   row (vendor-performance fact; `days_to_cancel` from `po_confirmed_at`).
+2. `mark_offer_sold` — the offer → `OfferStatus.SOLD` (Offers tab) + ChangeLog/ActivityLog.
+3. `mark_vendor_unavailable` — `record_unavailability(SOLD_ELSEWHERE-mapped)` so the vendor
+   shows **unavailable** for that part on the Sightings tab (§2d).
+4. Reset the line into the pool: clear buyer/offer/PO fields, `status = resourcing`; reopen
+   the plan to `active` if it had auto-completed.
+5. `refresh_vendor_cancellation_metrics` — recompute the vendor's `cancellation_rate` /
+   `avg_days_to_cancel` / `slow_cancel_count` (a slow cancel, >7d, dampens `vendor_score`
+   harder — `vendor_score._cancel_dampener`).
+
+The route then fires `run_notify_bg(notify_resource_requested)` — an **URGENT broadcast** to
+all other active buyers + the deal's salesperson across three channels
+(`buyplan_notifications.notify_resource_requested`): an in-app `ActivityLog`
+(`RESOURCE_REQUESTED`, always written) + a Teams **channel Adaptive Card** (always posted,
+webhook-gated) + **email and a Teams DM** (honor `users.notify_resource_alert_enabled`; the
+in-app row + channel card are the always-on delivery floor). Each channel isolates its own
+failures; the POST returns immediately (fire-and-forget own-session).
+
+The pooled line surfaces in the **"Needs Re-sourcing"** lens (`resourcing_pool_queue`,
+shown to PO-cutters) + adds to the buy-plans badge via `BuyplanResourcingSource` (ACTION,
+pool-wide). Any PO-cutter **Claims** it (`claim_line` — atomic guarded UPDATE, first-to-claim
+wins, loser → 409) which returns it to `awaiting_po` under the new owner for the normal PO
+flow. See APP_MAP_DATABASE `po_cancellations`.
 
 **Buy Plan Deal Hub — role-lens read flow.** `/v2/buy-plans` is its own primary-nav
 tab rendering a lens shell (`partials/buy_plans/hub.html`): a lens switcher + a lazy

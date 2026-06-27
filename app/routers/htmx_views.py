@@ -10969,6 +10969,22 @@ def _can_supervise(user: User, db: Session) -> bool:
     return user.role in (UserRole.MANAGER, UserRole.ADMIN) or _is_ops_member(user, db)
 
 
+# Roles that cut/claim POs. Deliberately NOT the broader BUYER_ROLES (which includes
+# SALES/TRADER) — only these may re-source a cancelled PO or claim an open-pool line.
+_PO_CUTTER_ROLES = (UserRole.BUYER, UserRole.MANAGER, UserRole.ADMIN)
+
+
+def _can_resource(user: User) -> bool:
+    """True when the user may re-source / claim buy-plan lines (a PO-cutter)."""
+    return user.role in _PO_CUTTER_ROLES
+
+
+def _require_po_cutter(user: User) -> None:
+    """403 unless the user is an active PO-cutter (buyer/manager/admin)."""
+    if not _can_resource(user) or not getattr(user, "is_active", True):
+        raise HTTPException(403, "Only buyers and managers can re-source / claim lines")
+
+
 def _default_lens(user: User, db: Session) -> str:
     """Pick the landing lens for the Deal Hub based on the user's role.
 
@@ -10995,7 +11011,7 @@ async def buy_plans_list_partial(
     The shell renders only the lens switcher + a lazy body that loads the active
     lens partial into ``#bp-hub-body``. Row data is fetched by the body, not here.
     """
-    active_lens = lens if lens in ("orders", "deals", "supervise") else _default_lens(user, db)
+    active_lens = lens if lens in ("orders", "deals", "supervise", "resource") else _default_lens(user, db)
 
     # Spotlight markers: plan rows that carry an open step needing this user's action.
     # Buy Plans is its own primary nav tab, so the source is registered under "buy-plans".
@@ -11009,9 +11025,29 @@ async def buy_plans_list_partial(
             "lens": active_lens,
             "alert_markers": alert_markers,
             "can_supervise": _can_supervise(user, db),
+            "can_resource": _can_resource(user),
         }
     )
     return template_response("htmx/partials/buy_plans/hub.html", ctx)
+
+
+@router.get("/v2/partials/buy-plans/resource", response_class=HTMLResponse)
+async def buy_plans_resource_partial(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Open-claim queue body for the "Needs Re-sourcing" lens (pool-wide).
+
+    Lists every line whose cut PO was cancelled (vendor fell down) and is unassigned,
+    awaiting any PO-cutter to claim + backfill.
+    """
+    from ..services.buyplan_hub import resourcing_pool_queue
+
+    ctx = _base_ctx(request, user, "buy-plans")
+    ctx["queue"] = resourcing_pool_queue(db)
+    ctx["can_claim"] = _can_resource(user)
+    return template_response("htmx/partials/buy_plans/_resource_queue.html", ctx)
 
 
 @router.get("/v2/partials/buy-plans/orders", response_class=HTMLResponse)
@@ -11170,6 +11206,7 @@ async def buy_plan_detail_partial(
             "bp": bp,
             "lines": bp.lines or [],
             "is_ops_member": _is_ops_member(user, db),
+            "can_resource": _can_resource(user),
             "user": user,
             # Most-urgent flag reason so the indicator states the issue at first glance.
             "top_flag": summarize_top_flag(bp.ai_flags),
@@ -11389,6 +11426,90 @@ async def buy_plan_confirm_po_partial(
     if origin == "queue":
         return await buy_plans_orders_partial(request, user, db)
 
+    return await buy_plan_detail_partial(request, plan_id, user, db)
+
+
+@router.post("/v2/partials/buy-plans/{plan_id}/lines/{line_id}/resource", response_class=HTMLResponse)
+async def buy_plan_resource_line_partial(
+    request: Request,
+    plan_id: int,
+    line_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Re-source a line whose vendor PO was cancelled.
+
+    Records the cancellation (vendor performance), marks the offer sold + the vendor
+    unavailable, drops the line into the open claim pool, and fires the URGENT backfill
+    alert to all other buyers. ``scope=plan`` re-sources the plan's other cut lines too.
+    """
+    from ..services.buyplan_notifications import notify_resource_requested, run_notify_bg
+    from ..services.buyplan_workflow import resource_line
+
+    # Per-record ownership (non-owner SALES/TRADER → 404) + PO-cutter role gate (403).
+    get_buyplan_for_user(db, user, plan_id)
+    _require_po_cutter(user)
+
+    form = await request.form()
+    reason_code = form.get("reason_code", "").strip()
+    reason_note = (form.get("reason_note") or "").strip() or None
+    scope = form.get("scope", "line")
+    origin = form.get("origin", "")
+    also_line_ids = [int(i) for i in form.getlist("also_line_ids")] if scope == "plan" else []
+
+    if not reason_code:
+        raise HTTPException(400, "A re-source reason is required")
+
+    try:
+        payload = resource_line(plan_id, line_id, reason_code, reason_note, user, db, also_line_ids=also_line_ids)
+        db.commit()
+    except ValueError as e:
+        # Log before re-raising so a real failure (e.g. an un-keyable requirement deep in
+        # the service) leaves a server trace instead of a silent, mislabeled 400.
+        logger.warning("Re-source failed for plan {} line {}: {}", plan_id, line_id, e)
+        raise HTTPException(400, str(e))
+
+    # Broadcast one urgent alert PER re-sourced line (scope=plan re-sources siblings too,
+    # and each pooled line needs its own claim).
+    for resourced in payload["resourced_lines"]:
+        await run_notify_bg(
+            notify_resource_requested, plan_id, line_id=resourced["line_id"], actor_id=user.id, reason=reason_code
+        )
+
+    if origin == "resource":
+        return await buy_plans_resource_partial(request, user, db)
+    return await buy_plan_detail_partial(request, plan_id, user, db)
+
+
+@router.post("/v2/partials/buy-plans/{plan_id}/lines/{line_id}/claim", response_class=HTMLResponse)
+async def buy_plan_claim_line_partial(
+    request: Request,
+    plan_id: int,
+    line_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Claim an open-pool (RESOURCING) line. First-to-claim wins.
+
+    No per-record ownership gate: the open pool is intentionally claimable by ANY active
+    PO-cutter regardless of who owns the parent requisition. The lost race → 409.
+    """
+    from ..services.buyplan_workflow import claim_line
+
+    _require_po_cutter(user)
+
+    form = await request.form()
+    origin = form.get("origin", "")
+
+    try:
+        claim_line(plan_id, line_id, user, db)
+        db.commit()
+    except ValueError as e:
+        logger.info("Claim lost/invalid for plan {} line {} by {}: {}", plan_id, line_id, user.id, e)
+        raise HTTPException(409, str(e))
+
+    if origin == "resource":
+        return await buy_plans_resource_partial(request, user, db)
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
 
@@ -14442,6 +14563,22 @@ async def toggle_new_offer_alert(
     logger.info("New-offer alerts toggled", user_id=user.id, enabled=user.notify_new_offer_alert_enabled)
     response = HTMLResponse(status_code=200)
     settings_toast(response, f"New-offer alerts {state}.")
+    return response
+
+
+@router.post("/api/user/toggle-resource-alert", response_class=HTMLResponse)
+async def toggle_resource_alert(
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Toggle urgent re-source backfill alerts (email + Teams DM) for the current
+    user."""
+    user.notify_resource_alert_enabled = not user.notify_resource_alert_enabled
+    db.commit()
+    state = "enabled" if user.notify_resource_alert_enabled else "disabled"
+    logger.info("Re-source alerts toggled", user_id=user.id, enabled=user.notify_resource_alert_enabled)
+    response = HTMLResponse(status_code=200)
+    settings_toast(response, f"Re-source alerts {state}.")
     return response
 
 

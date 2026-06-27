@@ -152,6 +152,26 @@ def compute_vendor_scorecard(
                 offers_to_po += 1
     po_conversion = (offers_to_po / total_offers) if total_offers > 0 else None
 
+    # ── PO-cancellation metrics (windowed) ──
+    # Vendor fall-down: cancels in window over the windowed PO volume (offers placed in
+    # window that converted to a PO) when available, else lifetime total_pos. Same
+    # po_cancellations table the inline re-source path and vendor_score read.
+    from ..models.po_cancellation import POCancellation
+
+    cancels_in_window = (
+        db.query(POCancellation)
+        .filter(
+            POCancellation.vendor_card_id == vendor_card_id,
+            POCancellation.cancelled_at >= cutoff,
+        )
+        .all()
+    )
+    n_cancels = len(cancels_in_window)
+    cancel_denominator = offers_to_po if offers_to_po else (vc.total_pos or 0)
+    cancellation_rate = min(1.0, n_cancels / cancel_denominator) if cancel_denominator else None
+    cancel_days = [c.days_to_cancel for c in cancels_in_window if c.days_to_cancel is not None]
+    avg_days_to_cancel = round(sum(cancel_days) / len(cancel_days), 1) if cancel_days else None
+
     # ── 5. Average buyer review rating ──
     avg_rating_row = (
         db.query(sqlfunc.avg(VendorReview.rating))
@@ -190,6 +210,8 @@ def compute_vendor_scorecard(
         "is_sufficient_data": is_sufficient,
         "rfqs_sent": rfqs_sent,
         "rfqs_answered": rfqs_answered,
+        "cancellation_rate": cancellation_rate,
+        "avg_days_to_cancel": avg_days_to_cancel,
     }
 
 
@@ -280,6 +302,9 @@ def compute_all_vendor_scorecards(db: Session) -> dict:
                 snap.is_sufficient_data = result["is_sufficient_data"]
                 snap.rfqs_sent = result["rfqs_sent"]
                 snap.rfqs_answered = result["rfqs_answered"]
+                # .get() keeps older callers/mocks that predate these keys working.
+                snap.cancellation_rate = result.get("cancellation_rate")
+                snap.avg_days_to_cancel = result.get("avg_days_to_cancel")
 
                 if result["is_sufficient_data"]:
                     updated += 1

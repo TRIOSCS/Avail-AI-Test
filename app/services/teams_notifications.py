@@ -49,6 +49,38 @@ async def post_teams_channel(message: str) -> None:
         logger.error("Teams channel post failed: {}", e)
 
 
+async def post_teams_channel_card(card: dict) -> None:
+    """Post a FULL Adaptive Card to the configured Teams channel via webhook.
+
+    Sibling of :func:`post_teams_channel`, but the caller supplies the entire Adaptive
+    Card ``content`` dict (so it can carry a FactSet, an ``Action.OpenUrl`` button, colored
+    TextBlocks, etc.) rather than a single markdown string. The card is wrapped verbatim in
+    the same message envelope. Silently skips if no webhook URL is configured.
+    """
+    webhook_url = get_credential_cached("teams_notifications", "TEAMS_WEBHOOK_URL")
+    if not webhook_url:
+        logger.debug("Teams webhook not configured — skipping channel card post")
+        return
+    try:
+        resp = await http.post(
+            webhook_url,
+            json={
+                "type": "message",
+                "attachments": [
+                    {
+                        "contentType": "application/vnd.microsoft.card.adaptive",
+                        "content": card,
+                    }
+                ],
+            },
+            timeout=15,
+        )
+        if resp.status_code not in (200, 202):
+            logger.warning("Teams webhook (card) returned {}: {}", resp.status_code, resp.text[:200])
+    except Exception as e:
+        logger.error("Teams channel card post failed: {}", e)
+
+
 async def send_teams_dm(user, message: str, db=None) -> None:
     """Send a direct Teams message to a user via Graph API.
 

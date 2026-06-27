@@ -10,7 +10,7 @@ Depends on: buyplan_scoring, buyplan_builder, models, config
 from datetime import datetime, timezone
 
 from loguru import logger
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session, joinedload
 
 from ..config import settings
@@ -449,6 +449,197 @@ def verify_po(
         raise ValueError(f"Invalid PO verification action: {action}")
 
     db.flush()
+    return line
+
+
+# ── Workflow: Re-source (PO cancelled → open claim pool) ─────────────
+
+# A live PO exists only on these line statuses, so only these can be re-sourced.
+RESOURCEABLE_LINE_STATUSES = {
+    BuyPlanLineStatus.PENDING_VERIFY.value,
+    BuyPlanLineStatus.VERIFIED.value,
+}
+
+
+def resource_line(
+    plan_id: int,
+    line_id: int,
+    reason_code: str,
+    reason_note: str | None,
+    user: User,
+    db: Session,
+    also_line_ids: list[int] | None = None,
+) -> dict:
+    """Re-source one (default) or several cut-PO lines back into the open claim pool.
+
+    A vendor fell down (sold elsewhere / can't deliver), the buyer cancelled the PO in
+    Acctivate, and now the line must be backfilled. For each target line this:
+      1. records an immutable POCancellation (vendor-performance fact),
+      2. marks the vendor's offer SOLD + the vendor unavailable for that part,
+      3. resets the line into the pool (unassigned, no PO/offer, status RESOURCING),
+    then reopens the plan if it had auto-completed and refreshes the canceled vendors'
+    cancellation metrics. Returns a payload the route hands to the urgent-alert fan-out.
+
+    Escalation: ``also_line_ids`` re-sources sibling lines on the SAME plan in one action
+    (the hybrid scope — default is just ``line_id``).
+    """
+    from ..constants import LineResourceReason
+    from .po_cancellation_service import (
+        mark_offer_sold,
+        mark_vendor_unavailable,
+        record_po_cancellation,
+        refresh_vendor_cancellation_metrics,
+    )
+
+    plan = db.get(BuyPlan, plan_id, options=[joinedload(BuyPlan.lines)])
+    if not plan:
+        raise ValueError(f"Buy plan {plan_id} not found")
+
+    # Only ACTIVE (live) or COMPLETED (auto-completed, reopened below) plans can be
+    # re-sourced. A VERIFIED line can survive on a CANCELLED/HALTED plan (cancel only
+    # cascades open lines), but re-sourcing it would dead-end — claim → confirm_po needs
+    # an ACTIVE plan, which a cancelled/halted plan can never become here.
+    if plan.status not in (BuyPlanStatus.ACTIVE.value, BuyPlanStatus.COMPLETED.value):
+        raise ValueError(f"Cannot re-source on a {plan.status} plan (must be active or completed)")
+
+    reason_code = LineResourceReason(reason_code).value  # validate the dropdown value
+
+    target_ids = {line_id} | {int(i) for i in (also_line_ids or [])}
+    targets = [ln for ln in plan.lines if ln.id in target_ids]
+    if not targets:
+        raise ValueError(f"No lines {sorted(target_ids)} found in plan {plan_id}")
+
+    resourced: list[dict] = []
+    vendor_card_ids: set[int] = set()
+
+    for line in targets:
+        if line.status not in RESOURCEABLE_LINE_STATUSES:
+            raise ValueError(f"Line {line.id} has no live PO to re-source (status: {line.status})")
+
+        offer = line.offer
+        requirement = line.requirement
+
+        # ── Side effects (all NO-COMMIT; the route owns the transaction). Order
+        #    matters: record reads line.po_confirmed_at BEFORE we clear it below.
+        #    A live-PO line can lose its offer (offer_id is SET NULL on offer delete) —
+        #    without an offer there is no vendor to attribute the cancellation to, so we
+        #    skip the cancellation/sold/unavailable side effects and still pool the line. ──
+        if offer:
+            record_po_cancellation(
+                db,
+                line=line,
+                offer=offer,
+                requirement=requirement,
+                reason_code=reason_code,
+                reason_text=reason_note,
+                user=user,
+            )
+            mark_offer_sold(db, offer, user)
+            mark_vendor_unavailable(
+                db, requirement=requirement, offer=offer, reason_code=reason_code, note=reason_note, user=user
+            )
+            if offer.vendor_card_id:
+                vendor_card_ids.add(offer.vendor_card_id)
+        else:
+            logger.warning(
+                "Re-source line {} has no offer (offer_id NULL) — pooling without a cancellation fact",
+                line.id,
+            )
+
+        resourced.append(
+            {
+                "line_id": line.id,
+                "offer_id": line.offer_id,
+                "vendor_name": offer.vendor_name if offer else None,
+                "prior_buyer_id": line.buyer_id,
+                "po_number": line.po_number,
+                "requirement_id": line.requirement_id,
+            }
+        )
+
+        # ── Reset the line into the open claim pool. Keep requirement_id / quantity /
+        #    unit_sell (re-sourcing the same need at the same sell price). ──
+        line.buyer_id = None
+        line.assignment_reason = None
+        line.offer_id = None
+        line.unit_cost = None
+        line.margin_pct = None
+        line.ai_score = None
+        line.po_number = None
+        line.estimated_ship_date = None
+        line.po_confirmed_at = None
+        line.po_verified_by_id = None
+        line.po_verified_at = None
+        line.po_rejection_note = None
+        line.issue_type = None
+        line.issue_note = None
+        line.last_nudge_at = None
+        line.status = BuyPlanLineStatus.RESOURCING.value
+
+    # A verified line auto-completes its plan; re-sourcing it must reopen the plan so the
+    # re-claimed line's PO flow (confirm_po requires an ACTIVE plan) works again.
+    if plan.status == BuyPlanStatus.COMPLETED.value:
+        plan.status = BuyPlanStatus.ACTIVE.value
+        plan.completed_at = None
+        plan.case_report = None
+
+    # Flush so the new POCancellation rows are visible to the metric refresh
+    # (the test session runs autoflush=False).
+    db.flush()
+    for vcid in vendor_card_ids:
+        refresh_vendor_cancellation_metrics(db, vcid)
+
+    db.flush()
+    logger.info(
+        "Re-sourced {} line(s) on plan {} by {} (reason: {})",
+        len(resourced),
+        plan_id,
+        user.email,
+        reason_code,
+    )
+    return {
+        "plan_id": plan_id,
+        "actor_id": user.id,
+        "reason_code": reason_code,
+        "reason_note": reason_note,
+        "resourced_lines": resourced,
+    }
+
+
+def claim_line(plan_id: int, line_id: int, user: User, db: Session) -> BuyPlanLine:
+    """First-to-claim wins: take an open-pool (RESOURCING, unassigned) line.
+
+    Atomic guarded UPDATE — succeeds only while the line is still RESOURCING and
+    unassigned. Under PostgreSQL READ COMMITTED the second concurrent claimer blocks on
+    the row lock, re-evaluates the predicate after the winner commits, matches nothing,
+    and gets a clean ValueError (the route maps it to HTTP 409).
+    """
+    plan = db.get(BuyPlan, plan_id)
+    if not plan:
+        raise ValueError(f"Buy plan {plan_id} not found")
+
+    result = db.execute(
+        update(BuyPlanLine)
+        .where(
+            BuyPlanLine.id == line_id,
+            BuyPlanLine.buy_plan_id == plan_id,
+            BuyPlanLine.status == BuyPlanLineStatus.RESOURCING.value,
+            BuyPlanLine.buyer_id.is_(None),
+        )
+        .values(
+            buyer_id=user.id,
+            assignment_reason="claimed",
+            status=BuyPlanLineStatus.AWAITING_PO.value,
+            last_nudge_at=None,
+        )
+    )
+    if result.rowcount == 0:
+        raise ValueError("Line was already claimed or is no longer in re-sourcing")
+
+    db.flush()
+    line = db.get(BuyPlanLine, line_id)
+    db.refresh(line)
+    logger.info("Line {} (plan {}) claimed by {}", line_id, plan_id, user.email)
     return line
 
 
