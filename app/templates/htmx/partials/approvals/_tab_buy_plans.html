@@ -1,0 +1,9 @@
+{#
+  approvals/_tab_buy_plans.html — Buy Plans stage-tab body.
+  Pinned per-gate approval section (buy_plan gate) above the rep's mine-scope deal board.
+  Receives: view, show_pending (pinned section); board, scope, archive (deal board).
+  Called by: htmx_views.py approvals_tab_partial (lens=buy_plans). Loaded into #bp-hub-body.
+  Depends on: approvals/_pending_section.html, buy_plans/_board.html.
+#}
+{% include "htmx/partials/approvals/_pending_section.html" %}
+{% include "htmx/partials/buy_plans/_board.html" %}

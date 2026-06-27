@@ -1,9 +1,9 @@
-"""Route tests for the Buy Plan Deal Hub shell + buyer Orders + sales Deals lenses.
+"""Route tests for the Approvals hub stage-tab shell + buyer Orders + deal board bodies.
 
 Covers:
-- /v2/partials/buy-plans renders the lens switcher + lazy body with the explicit
-  hx-target="#bp-hub-body" (guards the cards-vanish landmine) and the orders default load.
-- /v2/partials/buy-plans?lens=deals loads the board(scope=mine) by default.
+- /v2/partials/approvals renders the stage-tab switcher + lazy body with the explicit
+  hx-target="#bp-hub-body" (guards the cards-vanish landmine) and the role-default load.
+- /v2/partials/approvals?lens=buy_plans loads the Buy Plans stage-tab body by default.
 - /v2/partials/buy-plans/orders shows a buyer's AWAITING_PO line, an origin=queue confirm
   form, and the rejection note on kicked-back rows.
 - /v2/partials/buy-plans/board?scope=mine renders 4 columns and rings needs_my_action cards.
@@ -68,83 +68,86 @@ def _make_line(db: Session, *, plan_id: int, **kw) -> BuyPlanLine:
 # ── Shell + lens routing ──────────────────────────────────────────────────
 
 
-def test_hub_shell_buyer_defaults_to_orders(client: TestClient):
-    """Buyer hub: lens switcher present, lazy body carries explicit target + orders URL."""
-    resp = client.get("/v2/partials/buy-plans")
+def test_hub_shell_buyer_defaults_to_purchase_orders(client: TestClient):
+    """Buyer hub: stage-tab switcher present, lazy body carries explicit target + the
+    Purchase Orders tab-body URL (the buyer's default landing stage)."""
+    resp = client.get("/v2/partials/approvals")
     assert resp.status_code == 200
     body = resp.text
-    # Lens switcher — deals/orders for everyone; Supervise is gated (hidden for buyer)
-    assert "My Deals" in body
-    assert "My Orders" in body
+    # Stage-tab switcher — the four stages for everyone; Supervise is gated (hidden for buyer)
+    assert "Sales Orders" in body
+    assert "Buy Plans" in body
+    assert "Purchase Orders" in body
     assert "?lens=supervise" not in body
     # Lazy body + the landmine guard: explicit hx-target on the load container
     assert 'id="bp-hub-body"' in body
     assert 'hx-target="#bp-hub-body"' in body
-    # Buyer default loads the orders queue
-    assert "/v2/partials/buy-plans/orders" in body
+    # Buyer default loads the Purchase Orders tab body
+    assert "/v2/partials/approvals/purchase-orders" in body
 
 
 def test_hub_lens_highlight_is_alpine_reactive(client: TestClient):
-    """The active-lens pill highlight is Alpine-reactive (:class on lens), so a lens
-    click updates the indicator instantly instead of waiting for the server swap.
+    """The active-tab pill highlight is Alpine-reactive (:class on lens), so a tab click
+    updates the indicator instantly instead of waiting for the server swap.
 
     The shell must carry the lens state in x-data and bind the active pill class to it,
     not bake the highlight into static Jinja (which goes stale on the @click).
     """
-    resp = client.get("/v2/partials/buy-plans?lens=orders")
+    resp = client.get("/v2/partials/approvals?lens=purchase_orders")
     assert resp.status_code == 200
     body = resp.text
     # Alpine holds the lens state, seeded from the server-resolved lens.
-    assert "x-data=\"{ lens: 'orders' }\"" in body
+    assert "x-data=\"{ lens: 'purchase_orders' }\"" in body
     # Active-pill highlight is bound reactively to that lens var.
     assert ':class="lens ===' in body
     assert "bg-accent-600 text-white shadow-sm" in body
 
 
-def test_hub_shell_lens_deals_loads_board_mine(client: TestClient):
-    """Lens=deals loads the board scoped to mine by default."""
-    resp = client.get("/v2/partials/buy-plans?lens=deals")
+def test_hub_shell_lens_buy_plans_loads_tab_body(client: TestClient):
+    """Lens=buy_plans lazy-loads the Buy Plans tab body (deal board + pinned
+    section)."""
+    resp = client.get("/v2/partials/approvals?lens=buy_plans")
     assert resp.status_code == 200
-    assert "/v2/partials/buy-plans/board?scope=mine" in resp.text
+    assert "/v2/partials/approvals/buy-plans" in resp.text
     assert 'hx-target="#bp-hub-body"' in resp.text
 
 
-def test_hub_shell_sales_defaults_to_deals(client: TestClient, sales_user):
-    """A sales user with no lens lands on the deals board (scope=mine)."""
+def test_hub_shell_sales_defaults_to_buy_plans(client: TestClient, sales_user):
+    """A sales user with no lens lands on the Buy Plans deal board tab."""
     from app.dependencies import require_user
     from app.main import app
 
     app.dependency_overrides[require_user] = lambda: sales_user
     try:
-        resp = client.get("/v2/partials/buy-plans")
+        resp = client.get("/v2/partials/approvals")
     finally:
         app.dependency_overrides.pop(require_user, None)
     assert resp.status_code == 200
-    assert "/v2/partials/buy-plans/board?scope=mine" in resp.text
+    assert "/v2/partials/approvals/buy-plans" in resp.text
 
 
 def test_hub_shell_manager_defaults_to_supervise(client: TestClient, manager_user):
-    """A manager with no lens lands on the supervise lens body."""
+    """A manager with no lens lands on the Supervise tab body."""
     from app.dependencies import require_user
     from app.main import app
 
     app.dependency_overrides[require_user] = lambda: manager_user
     try:
-        resp = client.get("/v2/partials/buy-plans")
+        resp = client.get("/v2/partials/approvals")
     finally:
         app.dependency_overrides.pop(require_user, None)
     assert resp.status_code == 200
-    assert "/v2/partials/buy-plans/supervise" in resp.text
+    assert "/v2/partials/approvals/supervise" in resp.text
 
 
 def test_hub_supervise_button_hidden_for_sales(client: TestClient, sales_user):
-    """The Supervise switcher button is hidden for a non-supervisor (sales)."""
+    """The Supervise stage tab is hidden for a non-supervisor (sales)."""
     from app.dependencies import require_user
     from app.main import app
 
     app.dependency_overrides[require_user] = lambda: sales_user
     try:
-        resp = client.get("/v2/partials/buy-plans")
+        resp = client.get("/v2/partials/approvals")
     finally:
         app.dependency_overrides.pop(require_user, None)
     assert resp.status_code == 200
@@ -152,13 +155,13 @@ def test_hub_supervise_button_hidden_for_sales(client: TestClient, sales_user):
 
 
 def test_hub_supervise_button_shown_for_manager(client: TestClient, manager_user):
-    """The Supervise switcher button is present for a manager."""
+    """The Supervise stage tab is present for a manager."""
     from app.dependencies import require_user
     from app.main import app
 
     app.dependency_overrides[require_user] = lambda: manager_user
     try:
-        resp = client.get("/v2/partials/buy-plans")
+        resp = client.get("/v2/partials/approvals")
     finally:
         app.dependency_overrides.pop(require_user, None)
     assert resp.status_code == 200

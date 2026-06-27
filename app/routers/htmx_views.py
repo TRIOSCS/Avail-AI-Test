@@ -464,15 +464,15 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         tab_qs = request.query_params.get("tab", "").strip()
         partial_url = f"/v2/partials/settings?tab={quote(tab_qs)}" if tab_qs else "/v2/partials/settings"
     elif current_view in ("buy-plans", "approvals"):
-        # Thread ?lens= through so a deep-link / redirect (the legacy /v2/approvals/queue
-        # → /v2/buy-plans?lens=approvals) and a reload/bookmark of a pushed lens URL paint
-        # the right lens on first full-page load instead of falling to _default_lens. A
-        # detail URL (/buy-plans/{id}) is overridden by the _DETAIL_VIEWS block below.
+        # Thread ?lens= through so a deep-link / redirect and a reload/bookmark of a pushed
+        # stage URL paint the right stage tab on first full-page load instead of falling to
+        # _default_lens. Lens keys are the five lifecycle stages. A detail URL
+        # (/buy-plans/{id}) is overridden by the _DETAIL_VIEWS block below.
         lens_qs = request.query_params.get("lens", "").strip()
         partial_url = (
-            f"/v2/partials/buy-plans?lens={quote(lens_qs)}"
-            if lens_qs in ("orders", "deals", "supervise", "resource", "approvals")
-            else "/v2/partials/buy-plans"
+            f"/v2/partials/approvals?lens={quote(lens_qs)}"
+            if lens_qs in ("sales_orders", "buy_plans", "purchase_orders", "prepayments", "supervise")
+            else "/v2/partials/approvals"
         )
     else:
         partial_url = f"/v2/partials/{current_view}"
@@ -11006,37 +11006,40 @@ def _can_resource(user: User) -> bool:
     return user.role in _PO_CUTTER_ROLES
 
 
-def _can_approve_any(user: User) -> bool:
-    """True when the user can approve at least one gate (sees the hub "Approvals"
-    lens)."""
-    return bool(
-        getattr(user, "can_approve_buy_plans", False)
-        or getattr(user, "can_approve_prepayments", False)
-        or getattr(user, "can_approve_sales_orders", False)
-        or getattr(user, "can_approve_pos", False)
-    )
-
-
 def _require_po_cutter(user: User) -> None:
     """403 unless the user is an active PO-cutter (buyer/manager/admin)."""
     if not _can_resource(user) or not getattr(user, "is_active", True):
         raise HTTPException(403, "Only buyers and managers can re-source / claim lines")
 
 
-def _default_lens(user: User, db: Session) -> str:
-    """Pick the landing lens for the Deal Hub based on the user's role.
+# Canonical stage-tab lens keys (underscored). URL paths use dashes (sales-orders, …).
+_APPROVALS_TABS = ("sales_orders", "buy_plans", "purchase_orders", "prepayments", "supervise")
 
-    - buyers land on their PO queue ("orders"),
-    - managers/admins/ops land on the supervise board ("supervise"),
-    - everyone else (sales/trader) lands on the deal board ("deals").
+# Per-gate approve-right attribute that gates each stage tab's pinned "Pending approvals"
+# section. The keys match services.approvals.queue.TAB_GATE; the values are User columns.
+_TAB_APPROVE_ATTR = {
+    "buy_plans": "can_approve_buy_plans",
+    "sales_orders": "can_approve_sales_orders",
+    "purchase_orders": "can_approve_pos",
+    "prepayments": "can_approve_prepayments",
+}
+
+
+def _default_lens(user: User, db: Session) -> str:
+    """Pick the landing stage tab for the Approvals hub based on the user's role.
+
+    - buyers land on the Purchase Orders stage (their PO cut queue),
+    - managers/admins/ops land on Supervise,
+    - everyone else (sales/trader) lands on the Buy Plans deal board.
     """
     if user.role == UserRole.BUYER:
-        return "orders"
+        return "purchase_orders"
     if _can_supervise(user, db):
         return "supervise"
-    return "deals"
+    return "buy_plans"
 
 
+@router.get("/v2/partials/approvals", response_class=HTMLResponse)
 @router.get("/v2/partials/buy-plans", response_class=HTMLResponse)
 async def buy_plans_list_partial(
     request: Request,
@@ -11044,12 +11047,13 @@ async def buy_plans_list_partial(
     user: User = Depends(require_access(AccessKey.BUY_PLANS)),
     db: Session = Depends(get_db),
 ):
-    """Return the Buy Plan Deal Hub shell.
+    """Return the Approvals hub shell (stage-tab switcher).
 
-    The shell renders only the lens switcher + a lazy body that loads the active
-    lens partial into ``#bp-hub-body``. Row data is fetched by the body, not here.
+    The shell renders the five lifecycle stage tabs + a lazy body that loads the active
+    stage tab partial into ``#bp-hub-body``. Row data is fetched by the body, not here.
+    ``/v2/partials/buy-plans`` is kept as a back-compat alias for in-flight htmx.
     """
-    active_lens = lens if lens in ("orders", "deals", "supervise", "resource", "approvals") else _default_lens(user, db)
+    active_lens = lens if lens in _APPROVALS_TABS else _default_lens(user, db)
 
     # Spotlight markers: plan rows that carry an open step needing this user's action.
     # Buy Plans is its own primary nav tab, so the source is registered under "buy-plans".
@@ -11062,35 +11066,72 @@ async def buy_plans_list_partial(
         {
             "lens": active_lens,
             "alert_markers": alert_markers,
+            # Only Supervise is gate-rendered in the shell; the four stage tabs are always
+            # shown (their work surface + pinned approval section gate by role inside).
             "can_supervise": _can_supervise(user, db),
-            "can_resource": _can_resource(user),
-            "can_approve_any": _can_approve_any(user),
         }
     )
     return template_response("htmx/partials/buy_plans/hub.html", ctx)
 
 
-@router.get("/v2/partials/buy-plans/approvals", response_class=HTMLResponse)
-async def buy_plans_approvals_partial(
+@router.get("/v2/partials/approvals/{tab}", response_class=HTMLResponse)
+async def approvals_tab_partial(
     request: Request,
-    tab: str | None = None,
+    tab: str,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Approvals lens body — the four-tab engine approvals queue.
+    """Render one Approvals stage-tab body into ``#bp-hub-body``.
 
-    Buy Plans / Sales Orders / Purchase Orders / Vendor Prepayments, segmented by
-    gate_type. Approver-gated (any can_approve_* toggle). Renders into #bp-hub-body; its
-    sub-tabs swap back into the same container. ``tab`` absent → smart-default tab.
+    Composes the re-homed work surface for the stage (deal board / buyer orders +
+    re-sourcing pool / neutral empty state) with a pinned per-gate "Pending approvals"
+    section (services.approvals.queue.build_queue_view), shown only when the viewer holds
+    that gate's approve right. ``supervise`` reuses the manager triage body. ``tab`` arrives
+    dash-cased (e.g. purchase-orders) and maps to the underscored stage key.
     """
-    if not _can_approve_any(user):
-        raise HTTPException(403, "Approvals require an approver role")
+    lens = tab.replace("-", "_")
+    if lens not in _APPROVALS_TABS:
+        raise HTTPException(404, "Unknown approvals tab")
+
+    if lens == "supervise":
+        return _render_supervise_body(request, user, db)
+
     from ..services.approvals.queue import build_queue_view
 
     ctx = _base_ctx(request, user, "buy-plans")
-    ctx["view"] = build_queue_view(db, user, tab)
-    ctx["current_user"] = user
-    return template_response("htmx/partials/approvals/_queue.html", ctx)
+    ctx["view"] = build_queue_view(db, user, lens)
+    ctx["show_pending"] = bool(getattr(user, _TAB_APPROVE_ATTR[lens], False))
+
+    if lens == "buy_plans":
+        from ..services.buyplan_hub import completed_archive, deals_board
+
+        ctx.update(
+            {
+                "board": deals_board(db, user, scope="mine"),
+                "scope": "mine",
+                "archive": completed_archive(db, user, scope="mine"),
+            }
+        )
+        return template_response("htmx/partials/approvals/_tab_buy_plans.html", ctx)
+
+    if lens == "purchase_orders":
+        from ..services.buyplan_hub import buyer_line_queue, resourcing_pool_queue, team_line_queue
+
+        ctx.update(
+            {
+                "orders_queue": buyer_line_queue(db, user),
+                "team": team_line_queue(db, user),
+                "resource_queue": resourcing_pool_queue(db),
+                "can_claim": _can_resource(user),
+            }
+        )
+        return template_response("htmx/partials/approvals/_tab_purchase_orders.html", ctx)
+
+    if lens == "sales_orders":
+        return template_response("htmx/partials/approvals/_tab_sales_orders.html", ctx)
+
+    # prepayments — approval-only stage (no work surface in SP-1)
+    return template_response("htmx/partials/approvals/_tab_prepayments.html", ctx)
 
 
 @router.get("/v2/partials/buy-plans/resource", response_class=HTMLResponse)
@@ -11118,7 +11159,8 @@ async def buy_plans_orders_partial(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Buyer "My Orders" lens body: the actionable per-line PO cut queue.
+    """Buyer Orders body (re-homed under the Purchase Orders stage tab): the actionable
+    per-line PO cut queue.
 
     Also includes a read-only "Team Orders" awareness section listing open lines
     assigned to OTHER buyers (see ``team_line_queue``).
@@ -11138,7 +11180,8 @@ async def buy_plans_board_partial(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Sales "My Deals" / manager board body: stage-grouped deal cards.
+    """Deal board body (re-homed under the Buy Plans / Supervise stage tabs): stage-
+    grouped deal cards.
 
     ``scope=all`` is role-gated — a non-manager/non-ops user is forced to
     ``scope=mine`` so no other rep's plans leak.

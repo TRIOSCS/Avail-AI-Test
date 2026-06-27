@@ -11,8 +11,8 @@ Covers:
   - Filtering gate_type=buy_plan returns exactly the buy-plan requests.
   - A pending BuyPlan with NO ApprovalRequest (pre-C1 / unrouted) does NOT appear — the
     queue is engine-only.
-  - The four-tab approvals queue (Buy-Plans hub "approvals" lens body,
-    /v2/partials/buy-plans/approvals) renders HTML; a buy_plan-subject row links to the
+  - The per-gate pinned approvals section inside a stage tab
+    (/v2/partials/approvals/<stage>) renders HTML; a buy_plan-subject row links to the
     plan detail partial, Pending/Recently-resolved split, and prepayment rows render.
 
 Called by: pytest
@@ -226,15 +226,15 @@ class TestEngineNativeQueue:
         assert {bp_ar.id, pp_ar.id} <= ids
 
     def test_lens_links_buy_plan_subject_to_detail(self, db_session: Session) -> None:
-        """The Buy Plans approvals tab renders HTML; a buy_plan-subject row links to the
-        plan detail partial."""
-        user = _make_user(db_session)
+        """The Buy Plans stage tab's pinned section renders HTML; a buy_plan-subject row
+        links to the plan detail partial."""
+        user = _make_user(db_session)  # can_approve_buy_plans=True → pinned section shows
         bp = _make_buy_plan(db_session, user, status="pending")
         _make_buy_plan_request(db_session, bp, user)
         db_session.commit()
 
         for client in _build_client(db_session, user):
-            resp = client.get("/v2/partials/buy-plans/approvals?tab=buy_plans")
+            resp = client.get("/v2/partials/approvals/buy-plans")
 
         assert resp.status_code == 200
         assert "text/html" in resp.headers.get("content-type", "")
@@ -253,20 +253,22 @@ class TestEngineNativeQueue:
         db_session.commit()
 
         for client in _build_client(db_session, user):
-            resp = client.get("/v2/partials/buy-plans/approvals?tab=buy_plans")
+            resp = client.get("/v2/partials/approvals/buy-plans")
 
         assert resp.status_code == 200
         assert "Pending" in resp.text
         assert "Recently resolved" in resp.text
 
     def test_prepayments_tab_renders_row(self, db_session: Session) -> None:
-        """The Vendor Prepayments tab renders a prepayment-gate row."""
+        """The Vendor Prepayments tab's pinned section renders a prepayment-gate row for
+        a prepayment approver."""
         user = _make_user(db_session)
+        user.can_approve_prepayments = True  # the prepayments gate's approve right
         ar = _make_prepayment_request(db_session, user)
         db_session.commit()
 
         for client in _build_client(db_session, user):
-            resp = client.get("/v2/partials/buy-plans/approvals?tab=prepayments")
+            resp = client.get("/v2/partials/approvals/prepayments")
 
         assert resp.status_code == 200
         assert f"Request #{ar.id}" in resp.text  # no subject set → audit-safe fallback label

@@ -1323,45 +1323,55 @@ pool-wide). Any PO-cutter **Claims** it (`claim_line` — atomic guarded UPDATE,
 wins, loser → 409) which returns it to `awaiting_po` under the new owner for the normal PO
 flow. See APP_MAP_DATABASE `po_cancellations`.
 
-**Buy Plan Deal Hub — role-lens read flow.** `/v2/buy-plans` is its own primary-nav
-tab rendering a lens shell (`partials/buy_plans/hub.html`): a lens switcher + a lazy
-`#bp-hub-body` that loads the active lens body. The shell route
-`GET /v2/partials/buy-plans?lens=` resolves the lens
-(`deals`/`orders`/`resource`/`approvals`/`supervise`), falling back to a **role-derived
-default** (`_default_lens`): managers/admins/ops → Supervise, buyers → My Orders, everyone
-else → My Deals. The Supervise button + lens are gated by `_can_supervise` (manager/admin
-OR ops verification-group member); Needs Re-sourcing by `_can_resource` (PO-cutter); and
-**Approvals** by `_can_approve_any` (any `can_approve_*` toggle). A user who requests a
-lens they lack is served a safe fallback / 403 (defense in depth).
+**Approvals module — lifecycle stage-tab read flow (SP-1).** `/v2/approvals` is its own
+primary-nav tab (legacy `/v2/buy-plans` 302-redirects to it, preserving `?lens=`) rendering
+a stage-tab shell (`partials/buy_plans/hub.html`): a switcher over the five **lifecycle
+stages** + a lazy `#bp-hub-body` that loads the active stage tab body. The shell route
+`GET /v2/partials/approvals?lens=` (alias `/v2/partials/buy-plans`) resolves the stage
+(`sales_orders`/`buy_plans`/`purchase_orders`/`prepayments`/`supervise`), falling back to a
+**role-derived default** (`_default_lens`): managers/admins/ops → Supervise, buyers →
+Purchase Orders, everyone else → Buy Plans. Only the **Supervise** tab is gate-rendered
+(`_can_supervise` = manager/admin OR ops verification-group member); the other four stage
+tabs are always shown — the *work surface* and the *pinned approval section* inside each
+gate further by role. URL paths are dash-cased (`/v2/partials/approvals/<stage>`); lens keys
+are underscored.
+
+Each stage tab body (`GET /v2/partials/approvals/<stage>`, `approvals_tab_partial`) composes
+the re-homed work surface (no new read models) with a **pinned "Pending approvals (N)"
+section** (`approvals/_pending_section.html`) built from `services/approvals/queue.
+build_queue_view(db, user, tab=<gate>)` for that single gate. The pinned section renders ONLY
+when the viewer holds that gate's approve right (`show_pending` = `can_approve_buy_plans` /
+`can_approve_sales_orders` / `can_approve_pos` / `can_approve_prepayments`) AND there is
+something pending; its inline approve/reject re-fetch the SAME stage-tab body into
+`#bp-hub-body`. The standalone four-tab Approvals lens (`/v2/partials/buy-plans/approvals` +
+`approvals/_queue.html`) is **retired** — each gate now renders inside its stage tab.
 
 ```
-GET /v2/partials/buy-plans?lens=          (shell: switcher + lazy #bp-hub-body)
+GET /v2/partials/approvals?lens=          (shell: stage-tab switcher + lazy #bp-hub-body)
     |
-    +-- lens=deals     --> GET /partials/buy-plans/board?scope=mine|all
-    |                        services/buyplan_hub.deals_board   (sales stage board:
-    |                        3 ACTIVE columns Draft/Pending/Active — COMPLETED excluded;
-    |                        scope=all role-gated to supervisors)
-    |                        + completed_archive(scope=…) → collapsed "Completed (N)"
-    |                          archive section below the board (_archive.html). Lazy
-    |                          "Load older" pages via GET /partials/buy-plans/archive?
-    |                          scope=…&offset=… (returns _archive_rows.html, self-replacing
-    |                          button, completed_at-desc, page size ARCHIVE_PAGE_SIZE=20).
-    |                          Keeps the daily 10–15 completions out of the working board.
-    +-- lens=orders    --> GET /partials/buy-plans/orders
-    |                        services/buyplan_hub.buyer_line_queue (buyer PO-cut queue)
-    |                        + buyplan_hub.team_line_queue (read-only "Team Orders"
-    |                        awareness section: other buyers' open AWAITING_PO/
-    |                        PENDING_VERIFY lines; no action affordances)
-    +-- lens=approvals --> GET /partials/buy-plans/approvals?tab=
-    |                        services/approvals/queue.build_queue_view (four sub-tabs by
-    |                        gate_type: buy_plans/sales_orders/purchase_orders/prepayments;
-    |                        Pending + Recently-resolved; smart-default tab; sub-tabs swap
-    |                        back into #bp-hub-body). Approver-gated (_can_approve_any).
-    +-- lens=supervise --> GET /partials/buy-plans/supervise
+    +-- sales_orders    --> GET /partials/approvals/sales-orders
+    |                        pinned sales_order queue (approver-only) + neutral empty state
+    |                        ("No sales orders yet" — SO build flow is SP-2)
+    +-- buy_plans       --> GET /partials/approvals/buy-plans
+    |                        pinned buy_plan queue (approver-only) + buyplan_hub.deals_board
+    |                        (_board.html, scope=mine: 3 ACTIVE columns Draft/Pending/Active,
+    |                        COMPLETED excluded; + collapsed "Completed (N)" archive below,
+    |                        lazy "Load older" via GET /partials/buy-plans/archive?scope=…&
+    |                        offset=…). The /partials/buy-plans/board?scope=mine|all route
+    |                        (scope=all role-gated to supervisors) is unchanged.
+    +-- purchase_orders --> GET /partials/approvals/purchase-orders
+    |                        pinned purchase_order queue (approver-only)
+    |                        + buyplan_hub.buyer_line_queue (buyer PO-cut queue) +
+    |                        team_line_queue (read-only "Team Orders" awareness)
+    |                        + buyplan_hub.resourcing_pool_queue (open "Needs Re-sourcing"
+    |                        claim pool; claim gated by _can_resource)
+    +-- prepayments     --> GET /partials/approvals/prepayments
+    |                        pinned prepayment queue (approver-only) + neutral empty state
+    |                        ("No prepayment requests" — approval-only stage)
+    +-- supervise       --> GET /partials/approvals/supervise   (_render_supervise_body)
                              services/buyplan_hub.supervise_overview (triage strip:
                              approvals / SO+PO verify / overdue / flagged / halted)
-                             + deals_board(scope=all) + completed_archive(scope=all)
-                             (the same archive section renders below the embedded board).
+                             + deals_board(scope=all) + completed_archive(scope=all).
                              Triage forms post origin=supervise so the action re-renders
                              THIS body into #bp-hub-body.
 ```
@@ -5230,23 +5240,25 @@ is engine-only: a buy plan surfaces as a native `ApprovalRequest` (`gate_type=bu
 `subject_type=buy_plan`). `_serialize_request(r)` is the single 11-field engine-item
 projection shared by `list_requests` + `get_request` (carrying `subject_type`/`subject_id`).
 
-**Approvals = four tabs, folded into the Buy Plans hub.** The human-facing queue is no
-longer a standalone nav item. It is the **"Approvals" lens** of the Buy-Plans Deal Hub
-(`partials/buy_plans/hub.html`), gated to approvers (`_can_approve_any` — any
-`can_approve_*` toggle). The lens body route `GET /v2/partials/buy-plans/approvals?tab=`
-(`routers/htmx_views.py`) calls `services/approvals/queue.build_queue_view(db, user, tab)`
-and renders `partials/approvals/_queue.html` into `#bp-hub-body`. The view segments every
-`ApprovalRequest` by `gate_type` into four sub-tabs — **Buy Plans / Sales Orders / Purchase
-Orders / Vendor Prepayments** — each a **Pending** section (inline approve/reject) over a
-**Recently-resolved** section (terminal statuses, capped at 10, ordered by
-`coalesce(resolved_at, updated_at, created_at) desc` so a cancelled row with a NULL
-`resolved_at` still sorts sanely). Subjects resolve by `subject_type` (buy_plan→`Plan #` /
-plan detail, quality_plan→`QP #` / `/v2/qp/{id}` with the parent deal as a sub-label,
+**Approvals = a pinned per-gate section inside each lifecycle stage tab (SP-1).** The
+human-facing queue is no longer a standalone nav item NOR a single combined "Approvals"
+lens. Each gate's queue now renders as a **pinned "Pending approvals (N)" section** inside
+its stage tab of the Approvals hub (`partials/buy_plans/hub.html` →
+`approvals_tab_partial`), via `services/approvals/queue.build_queue_view(db, user,
+tab=<gate>)` for that single gate (the function already accepts a fixed `tab`). The shared
+`partials/approvals/_pending_section.html` renders the per-gate **Pending** rows (inline
+approve/reject via `approvals/_macros.html`) plus a small "Recently resolved" disclosure
+(terminal statuses, capped at 10, ordered by `coalesce(resolved_at, updated_at, created_at)
+desc`). The section shows ONLY when the viewer holds that gate's approve right
+(`can_approve_buy_plans` / `can_approve_sales_orders` / `can_approve_pos` /
+`can_approve_prepayments`) AND there is something pending; its inline actions re-fetch the
+SAME stage-tab body into `#bp-hub-body`. Subjects resolve by `subject_type` (buy_plan→`Plan
+#` / plan detail, quality_plan→`QP #` / `/v2/qp/{id}` with the parent deal as a sub-label,
 prepayment→vendor + payment method, linking the parent buy plan). Visibility is **org-wide**
-(every request of that type), but approve/reject render only when the user is an eligible
+(every request of that gate), but approve/reject render only when the user is an eligible
 PENDING recipient (`can_act`, mirroring `decide()`); otherwise the routed-to approver names
-show. Per-tab pills are org-wide REQUESTED counts; with no `?tab=`, the server opens the
-**smart-default** tab (most awaiting the user; tie/zero → Buy Plans). The legacy
-`GET /v2/approvals/queue` now **302-redirects** to `/v2/buy-plans?lens=approvals`.
+show. The standalone combined-lens route (`GET /v2/partials/buy-plans/approvals?tab=`) and
+its four-sub-tab `approvals/_queue.html` are **retired**. The legacy `GET /v2/approvals/queue`
+still **302-redirects** to `/v2/buy-plans?lens=approvals` (which 302s on to the hub).
 `ApprovalRequestActionSource` (`AlertKind.APPROVAL_ACTION`) is registered under the
-**`buy-plans`** tab, so its "awaiting me" count merges onto the Buy Plans nav badge.
+**`buy-plans`** tab, so its "awaiting me" count merges onto the Approvals nav badge.
