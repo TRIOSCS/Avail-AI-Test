@@ -4,7 +4,7 @@
 #       /api/user/profile; Notifications card with two toggle endpoints;
 #       mailbox-sync friendly copy + disconnected empty state).
 # Called by: pytest.
-# Depends on: GET /v2/partials/settings/profile (htmx_views.settings_profile_tab),
+# Depends on: GET /v2/partials/settings/profile (htmx.settings.settings_profile_tab),
 #             the profile.html + _mailbox_sync_card.html partials, and the
 #             `client`, `db_session`, `test_user` fixtures from conftest.
 

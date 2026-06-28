@@ -227,8 +227,8 @@ URL space and the `htmx-views` tag, and `main.py` mounts each one alongside
   `_render_supervise_body`, and the `_APPROVALS_TABS`/`_TAB_APPROVE_ATTR`/`_PO_CUTTER_ROLES`
   constants. Imports `_is_ops_member` from `_shared` (a quotes route in the monolith still uses
   it). **Trap:** the `settings/ops-group|users|scorecard` routes are interleaved in the source
-  between `buy_plan_cancel` and `buy_plan_reset` but belong to the settings domain — they stay
-  in `htmx_views.py`.
+  between `buy_plan_cancel` and `buy_plan_reset` but belong to the settings domain — they now
+  live in `app/routers/htmx/settings.py`.
 - `app/routers/htmx/offers.py` — **deal/sourcing-cluster split (offer/RFQ/follow-up slice)**:
   AI offer parsing (`/v2/partials/requisitions/{id}/parse-email|paste-offer|parse-offer|
   save-parsed-offers`), offer CRUD + review/promote/reject/changelog (`/v2/partials/offers/*`),
@@ -242,6 +242,48 @@ URL space and the `htmx-views` tag, and `main.py` mounts each one alongside
   the self-contained sourcing surface (`/v2/sourcing/*` pages + `/v2/partials/sourcing/*`) —
   results page/stream, manual search trigger, lead detail/status/feedback, and the split-panel
   workspace (page, list, lead panel).
+- `app/routers/htmx/quotes.py` — **tail split (quote slice)**: the quote partials
+  (`/v2/partials/quotes/*` preview/delete/reopen/edit-metadata, recent-terms,
+  `/v2/partials/pricing-history/{mpn}`, the quote detail panel + quote-line CRUD, add-offer,
+  send/result/revise/apply-markup, `/v2/partials/requisitions/{id}/add-offers-to-quote`, and
+  build-buy-plan-from-quote).
+- `app/routers/htmx/prospecting.py` — **tail split (prospecting slice)**: the prospect list/grid,
+  stats, add-domain, detail panel, claim/dismiss/release/enrich + enrich-status poller, and the
+  `/v2/partials/prospects/{id}/reclaim|reassign` admin actions. Owns the prospect-context helpers
+  (`_prospect_card_ctx`/`_prospect_detail_ctx`/`_prospect_stats_ctx`/`_prospect_action_response`/
+  `_status_visible_under_filter`/`_wants_detail`/`_enrich_is_stale`/`_prospect_toast`).
+- `app/routers/htmx/settings.py` — **tail split (settings/ops/user-mgmt slice)**: the
+  `settings/ops-group|users|scorecard|sources|system|profile|data-ops|connectors|api-keys` tabs,
+  inbox scan-now, the `/api/user/*` toggle endpoints, connector test-all + card, and the CRM
+  vendor/company merge + dedup admin actions (`/v2/partials/admin/*`) plus the admin api-health +
+  data-ops partials. Owns `settings_toast` (re-imported by `routers/sources.py` and
+  `routers/admin/buy_plan_ops.py`) and `_run_inbox_scan_now` (re-imported back into `htmx_views.py`
+  because the staying poll-inbox route calls it).
+- `app/routers/htmx/materials.py` — **tail split (materials-partials slice; distinct from the
+  domain router `app/routers/materials.py`)**: the faceted list + filter sidebars
+  (manufacturers/global/tree/sub), manufacturer search/add, AI interpret, faceted results,
+  add-form, enrich-status poller, conflict-accept, FRU lookup, the material detail panel + tabs,
+  card update, and the enrich/find-crosses/insights actions. Owns the shared faceted-filter param
+  parsers (`_parse_filter_json`/`_pop_manufacturers`/`_parse_card_filter_params`).
+- `app/routers/htmx/proactive.py` — **tail split (proactive slice)**: the proactive part-match
+  list, refresh/scan, batch-dismiss, the prepare page + draft + send flow (`/v2/proactive/*`),
+  the legacy send/convert routes, scorecard, badge, and do-not-offer.
+- `app/routers/htmx/parts.py` — **tail split (parts-workspace body slice)**: the parts list, the
+  detail tabs (offers/sourcing/req-details/quotes/activity/comms/notes), the header + inline cell +
+  spec editors, notes save, per-part tasks, and the part archive/unarchive (single + bulk) actions.
+  **Trap:** the workspace SHELL entry (`GET /v2/partials/parts/workspace`) stays in `htmx_views.py`.
+- `app/routers/htmx/archive.py` — **tail split (tasks/tickets lifecycle slice)**: trouble-ticket
+  workspace/list/detail, account + contact + vendor tasks (add-form/create/list), task
+  complete/delete/edit/snooze, and the account/contact + vendor activity add-note forms. Imports
+  `company_tab`/`vendor_tab` (its activity add-note routes re-render those tabs); `htmx_views.py`
+  re-imports `_build_ticket_list_context` for `error_reports.analyze_tickets`.
+
+After this tail split, `htmx_views.py` retains only the cross-cutting surface: the full-page
+entry points (`v2_page` + `/v2/quotes` redirect), global search + the search/sourcing partials,
+the parts-workspace shell, AI digests, the requisitions inline-edit/bulk/row-action +
+requirement CRUD + poll-inbox routes, email integration, the dashboard + AI-insights panels,
+knowledge, the vendor stock-list import (`/v2/partials/vendors/import-stock`), My Day, and the
+shared helpers.
 
 When extracting a domain: move the cohesive route block verbatim into a new
 `app/routers/htmx/<domain>.py` with its own `APIRouter(tags=["htmx-views"])`, pull any

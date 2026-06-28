@@ -102,7 +102,7 @@ def test_prospect_stats_ctx_includes_screened_out_count(db_session, monkeypatch)
     _prospect(db_session, ai_verdict="screened_out", name="Screened Co", domain="screened.com")
     _prospect(db_session, name="Unscreened Co", domain="unscreened.com")
 
-    from app.routers.htmx_views import _prospect_stats_ctx
+    from app.routers.htmx.prospecting import _prospect_stats_ctx
 
     ctx = _prospect_stats_ctx(db_session)
     assert "screened_out" in ctx
