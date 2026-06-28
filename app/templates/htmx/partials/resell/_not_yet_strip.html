@@ -9,12 +9,11 @@
   Depends on: the global modal (offer-buyers panel).
 
   ── My-Day seam (DO NOT build a new My-Day here) ──────────────────────────────────
-  The generalized follow-up Task hook lands in CRM Phase 2. When that ships, a buyer
-  surfaced here should also create a My-Day follow-up Task for the owner so the nudge
-  survives a page close. The router endpoint resell_not_yet_strip is the place to call
-  the Task service; this template only renders the in-page strip today.
-  # TODO(crm-phase2): create My-Day follow-up Task here (in resell_not_yet_strip) for
-  #                   each surfaced buyer, via the generalized Task service.
+  CRM-Phase-2 hook is now live: the router (resell.resell_not_yet_strip) persists each
+  surfaced buyer as an owner-assigned My-Day follow-up task via
+  task_service.auto_create_resell_followup_task (idempotent per list+buyer+owner), so
+  the nudge survives a page close. This template only renders the in-page strip — task
+  creation stays in the router, never in markup.
 #}
 {% set el = list %}
 
