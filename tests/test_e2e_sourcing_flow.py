@@ -275,13 +275,13 @@ class TestBuyPlanFullLifecycle:
         plan = ctx["plan"]
         line = ctx["line"]
 
-        # Submit
+        # Submit → pending (no auto-approve; every plan goes to the manager)
         plan = submit_buy_plan(plan.id, "SO-001", ctx["sales"], db_session)
-        assert plan.status in (BuyPlanStatus.ACTIVE.value, BuyPlanStatus.PENDING.value)
+        assert plan.status == BuyPlanStatus.PENDING.value
 
-        # Auto-approved since total_cost=100 < threshold
+        # Manager approves → active
+        plan = approve_buy_plan(plan.id, "approve", ctx["manager"], db_session)
         assert plan.status == BuyPlanStatus.ACTIVE.value
-        assert plan.auto_approved is True
 
         # Confirm PO
         line = confirm_po(
@@ -344,6 +344,7 @@ class TestBuyPlanFullLifecycle:
         line = ctx["line"]
 
         plan = submit_buy_plan(plan.id, "SO-004", ctx["sales"], db_session)
+        plan = approve_buy_plan(plan.id, "approve", ctx["manager"], db_session)
         assert plan.status == BuyPlanStatus.ACTIVE.value
 
         # Flag issue on line
@@ -376,6 +377,7 @@ class TestBuyPlanFullLifecycle:
         line = ctx["line"]
 
         plan = submit_buy_plan(plan.id, "SO-006", ctx["sales"], db_session)
+        plan = approve_buy_plan(plan.id, "approve", ctx["manager"], db_session)
         line = confirm_po(
             plan.id, line.id, "PO-BAD", datetime(2026, 4, 1, tzinfo=timezone.utc), ctx["buyer"], db_session
         )
