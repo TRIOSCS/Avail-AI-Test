@@ -9,6 +9,8 @@
    Called by: list.html, contacts_list.html (initial include); the saved-views
               GET/POST/DELETE routes (refresh swap into #saved-views-{{ list_key }}).
    Depends on: parent x-data {applyFilters, saveOpen}; accent palette; .input / .btn.
+   Buttons size via the .btn/.btn-sm system (never inline px-/py-, per the
+   static-analysis ratchet) — mirrors the accounts bulk-action buttons.
    Data note: v.filters|tojson lives in a SINGLE-quoted data-* attribute (tojson is
    Markup-safe and escapes single quotes), never inside a double-quoted Alpine attr. #}
 <span class="text-[11px] font-medium text-gray-400 uppercase tracking-wider mr-0.5 select-none">Views</span>
@@ -17,13 +19,13 @@
   <button type="button"
           data-filters='{{ v.filters|tojson }}'
           @click="applyFilters($el)"
-          class="pl-2 pr-1 py-0.5 text-gray-700 hover:bg-accent-50 hover:text-accent-700 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-accent-500"
+          class="btn btn-ghost btn-sm rounded-none font-normal text-gray-700 hover:text-accent-700"
           title="Apply saved view">{{ v.name }}</button>
   <button type="button"
           hx-delete="/v2/partials/customers/saved-views/{{ v.id }}?list_key={{ list_key }}"
           hx-target="#saved-views-{{ list_key }}" hx-swap="innerHTML"
           hx-confirm="Delete saved view '{{ v.name }}'?"
-          class="px-1.5 py-0.5 text-gray-400 hover:bg-rose-50 hover:text-rose-600 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-rose-400"
+          class="btn btn-ghost btn-sm rounded-none border-l border-line-base text-gray-400 hover:text-rose-600"
           aria-label="Delete saved view {{ v.name }}">&times;</button>
 </span>
 {% endfor %}
@@ -31,7 +33,7 @@
 {# + Save current filters as a new (or overwriting) named view #}
 <span class="relative inline-block" @click.outside="saveOpen = false">
   <button type="button" @click="saveOpen = !saveOpen"
-          class="inline-flex items-center px-2 py-0.5 text-xs text-accent-700 hover:bg-accent-50 rounded-full border border-dashed border-accent-300 focus:outline-none focus:ring-2 focus:ring-accent-500">
+          class="btn btn-secondary btn-sm rounded-full border-dashed border-accent-300 text-accent-700">
     + Save view
   </button>
   <div x-show="saveOpen" x-cloak
