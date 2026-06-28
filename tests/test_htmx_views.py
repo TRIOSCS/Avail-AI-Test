@@ -838,7 +838,9 @@ class TestRequisitionImport:
 
     def test_import_parse_with_text(self, client: TestClient):
         mock_result = {"requirements": [{"primary_mpn": "LM317T", "target_qty": 100}], "name": "AI Name"}
-        with patch("app.routers.htmx_views.parse_freeform_rfq", new_callable=AsyncMock, return_value=mock_result):
+        with patch(
+            "app.routers.htmx.requisitions.parse_freeform_rfq", new_callable=AsyncMock, return_value=mock_result
+        ):
             resp = client.post(
                 "/v2/partials/requisitions/import-parse",
                 data={"name": "Import", "raw_text": "LM317T 100pcs"},
@@ -852,7 +854,9 @@ class TestRequisitionImport:
             "name": "AI Name",
             "customer_name": "AI Customer",
         }
-        with patch("app.routers.htmx_views.parse_freeform_rfq", new_callable=AsyncMock, return_value=mock_result):
+        with patch(
+            "app.routers.htmx.requisitions.parse_freeform_rfq", new_callable=AsyncMock, return_value=mock_result
+        ):
             resp = client.post(
                 "/v2/partials/requisitions/import-parse?format=json",
                 data={"name": "Import", "raw_text": "LM317T 100pcs"},

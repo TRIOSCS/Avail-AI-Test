@@ -180,6 +180,31 @@ base.html (app shell: topbar, mobile nav, modal, toast, SSE)
   resized panel use a `flex flex-col h-full min-h-0` root with a `flex-1 min-h-0` scroll
   region (e.g. `unified_modal.html` parts table, `vendor_modal.html` preview).
 
+### HTMX view routers (`htmx_views.py` split)
+
+The HTMX/Alpine frontend partials are served by `app/routers/htmx_views.py` (the
+historical monolith) plus a growing **per-domain package `app/routers/htmx/`** that it
+is being split into one cohesive slice at a time. All sub-routers keep the same `/v2/...`
+URL space and the `htmx-views` tag, and `main.py` mounts each one alongside
+`htmx_views_router` (so URLs are unchanged):
+
+- `app/routers/htmx/_shared.py` — shared module-level helpers/state used by both the
+  monolith and the sub-routers: the Vite manifest loader (`_vite_manifest`/`_vite_assets`),
+  `_base_ctx()` (the common template context), and `_parse_date_safe()`. Single source of
+  truth — `htmx_views.py` re-imports these names so its remaining routes are unchanged.
+- `app/routers/htmx/requisitions.py` — **first extracted domain**: the Requisition partials
+  (`GET/POST /v2/partials/requisitions/*` list, unified create/import modal + AI parse/save,
+  detail shell, requirement add, search-all, detail tabs) plus the AI customer
+  lookup/quick-create (`POST /v2/partials/customers/lookup` + `/quick-create`) that the
+  create modal uses. `htmx_views.py` re-imports `requisitions_list_partial` /
+  `requisition_tab` from here because its offer/response routes re-render those partials.
+
+When extracting a domain: move the cohesive route block verbatim into a new
+`app/routers/htmx/<domain>.py` with its own `APIRouter(tags=["htmx-views"])`, pull any
+genuinely cross-cutting helpers into `_shared.py` (re-imported back into the monolith), and
+register the sub-router in `main.py`. Verify route parity (dump `app.routes` method+path,
+sort, diff — must be empty) before and after.
+
 ### HTMX Conventions
 
 HTMX is the primary client/server interaction layer. Sourcing is strictly

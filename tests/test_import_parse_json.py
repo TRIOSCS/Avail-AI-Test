@@ -14,7 +14,7 @@ def _patch_parse(monkeypatch, result):
     async def mock_parse(text):
         return result
 
-    monkeypatch.setattr("app.routers.htmx_views.parse_freeform_rfq", mock_parse)
+    monkeypatch.setattr("app.routers.htmx.requisitions.parse_freeform_rfq", mock_parse)
 
 
 def test_import_parse_json_format(client, db_session, monkeypatch):

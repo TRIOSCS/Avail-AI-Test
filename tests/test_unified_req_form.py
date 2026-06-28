@@ -61,7 +61,7 @@ def test_import_parse_json_path_returns_data(client, monkeypatch):
     async def mock_parse(text):
         return mock_result
 
-    monkeypatch.setattr("app.routers.htmx_views.parse_freeform_rfq", mock_parse)
+    monkeypatch.setattr("app.routers.htmx.requisitions.parse_freeform_rfq", mock_parse)
     resp = client.post(
         "/v2/partials/requisitions/import-parse?format=json",
         data={"name": "Test RFQ", "raw_text": "LM317T 500 TI"},
@@ -86,7 +86,7 @@ def test_import_parse_html_path_returns_unified_modal(client, monkeypatch):
     async def mock_parse(text):
         return mock_result
 
-    monkeypatch.setattr("app.routers.htmx_views.parse_freeform_rfq", mock_parse)
+    monkeypatch.setattr("app.routers.htmx.requisitions.parse_freeform_rfq", mock_parse)
     resp = client.post(
         "/v2/partials/requisitions/import-parse",
         data={"name": "Test RFQ", "raw_text": "LM317T 100"},

@@ -29,13 +29,13 @@ class TestViteAssetsHelper:
 
     def test_styles_file_prepended_when_absent_from_js_css(self):
         """Line 100: styles entry prepended when htmx_app.js css list lacks it."""
-        from app.routers.htmx_views import _vite_assets
+        from app.routers.htmx._shared import _vite_assets
 
         mock_manifest = {
             "htmx_app.js": {"file": "assets/htmx_app-ABC.js", "css": ["assets/mobile.css"]},
             "styles.css": {"file": "assets/styles-XYZ.css"},
         }
-        with patch("app.routers.htmx_views._vite_manifest", mock_manifest):
+        with patch("app.routers.htmx._shared._vite_manifest", mock_manifest):
             result = _vite_assets()
 
         assert result["js_file"] == "assets/htmx_app-ABC.js"
@@ -44,22 +44,22 @@ class TestViteAssetsHelper:
 
     def test_styles_file_not_duplicated_when_already_present(self):
         """No duplication: styles file already in htmx_app.js css list → line 100 skipped."""
-        from app.routers.htmx_views import _vite_assets
+        from app.routers.htmx._shared import _vite_assets
 
         mock_manifest = {
             "htmx_app.js": {"file": "assets/htmx_app-ABC.js", "css": ["assets/styles-XYZ.css"]},
             "styles.css": {"file": "assets/styles-XYZ.css"},
         }
-        with patch("app.routers.htmx_views._vite_manifest", mock_manifest):
+        with patch("app.routers.htmx._shared._vite_manifest", mock_manifest):
             result = _vite_assets()
 
         assert result["css_files"].count("assets/styles-XYZ.css") == 1
 
     def test_empty_manifest_returns_defaults(self):
         """Empty manifest falls back to default asset paths."""
-        from app.routers.htmx_views import _vite_assets
+        from app.routers.htmx._shared import _vite_assets
 
-        with patch("app.routers.htmx_views._vite_manifest", {}):
+        with patch("app.routers.htmx._shared._vite_manifest", {}):
             result = _vite_assets()
 
         assert result["js_file"] == "assets/htmx_app.js"
