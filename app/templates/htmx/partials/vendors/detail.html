@@ -32,6 +32,9 @@
                 Blacklisted
               </span>
             {% endif %}
+            {% if not vendor.is_active %}
+              <span class="badge font-semibold bg-gray-100 text-gray-600 border-gray-300">Archived</span>
+            {% endif %}
           </div>
           <div class="mt-1 flex flex-wrap items-center gap-2 text-sm text-gray-600">
             {% if vendor.domain %}
@@ -63,6 +66,14 @@
                 data-loading-disable
                 class="px-3 py-1.5 text-xs font-medium rounded-lg {{ 'bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100' if vendor.is_blacklisted else 'bg-gray-50 text-gray-600 border border-gray-200 hover:bg-gray-100' }} transition-colors">
           {{ 'Remove Blacklist' if vendor.is_blacklisted else 'Blacklist' }}
+        </button>
+        {# Archive / Unarchive (soft-archive — hides from default list, never deletes) #}
+        <button hx-post="/v2/partials/vendors/{{ vendor.id }}/{{ 'unarchive' if not vendor.is_active else 'archive' }}"
+                hx-target="#main-content"
+                hx-confirm="{{ 'Restore this vendor to the active list?' if not vendor.is_active else 'Archive this vendor? It will be hidden from the default vendor list (not deleted).' }}"
+                data-loading-disable
+                class="px-3 py-1.5 text-xs font-medium rounded-lg {{ 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100' if not vendor.is_active else 'bg-gray-50 text-gray-600 border border-gray-200 hover:bg-gray-100' }} transition-colors">
+          {{ 'Unarchive' if not vendor.is_active else 'Archive' }}
         </button>
         {# Edit #}
         <button hx-get="/v2/partials/vendors/{{ vendor.id }}/edit-form"

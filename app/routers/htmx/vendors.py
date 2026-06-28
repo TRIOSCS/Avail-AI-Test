@@ -49,6 +49,7 @@ async def vendors_list_partial(
     request: Request,
     q: str = "",
     hide_blacklisted: bool = True,
+    include_archived: bool = False,
     sort: str = "sighting_count",
     dir: str = "desc",
     my_only: bool = False,
@@ -76,6 +77,11 @@ async def vendors_list_partial(
 
     if hide_blacklisted:
         query = query.filter(VendorCard.is_blacklisted.is_(False))
+
+    # Soft-archive: archived vendors are hidden from the default list (mirrors the
+    # customer/company is_active archive). "Show archived" lifts the filter.
+    if not include_archived:
+        query = query.filter(VendorCard.is_active.is_(True))
 
     if q.strip():
         from sqlalchemy import Text, cast
@@ -118,6 +124,7 @@ async def vendors_list_partial(
             "vendors": vendors,
             "q": q,
             "hide_blacklisted": hide_blacklisted,
+            "include_archived": include_archived,
             "sort": sort,
             "dir": dir,
             "total": total,
@@ -155,7 +162,7 @@ async def vendor_contacts_partial(
     query = (
         db.query(VendorContact)
         .join(VendorCard, VendorContact.vendor_card_id == VendorCard.id)
-        .filter(VendorCard.is_blacklisted.is_(False))
+        .filter(VendorCard.is_blacklisted.is_(False), VendorCard.is_active.is_(True))
         .options(joinedload(VendorContact.vendor_card))
     )
     if search.strip():
@@ -283,6 +290,7 @@ async def delete_vendor_partial(
         request=request,
         q="",
         hide_blacklisted=True,
+        include_archived=False,
         sort="sighting_count",
         dir="desc",
         my_only=False,
@@ -720,6 +728,46 @@ async def toggle_vendor_blacklist(
     status = "blacklisted" if vendor.is_blacklisted else "un-blacklisted"
     logger.info("Vendor {} {} by {}", vendor_id, status, user.email)
 
+    return await vendor_detail_partial(request=request, vendor_id=vendor_id, user=user, db=db)
+
+
+@router.post("/v2/partials/vendors/{vendor_id}/archive", response_class=HTMLResponse)
+async def archive_vendor(
+    request: Request,
+    vendor_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Soft-archive a vendor — sets is_active=False; never deletes.
+
+    Mirrors the customer/company archive (deactivate). Archived vendors drop out of the
+    default vendor list/search; "Show archived" surfaces them again. require_user gate
+    matches the vendor blacklist toggle (vendor data is not tenant-scoped).
+    """
+    vendor = get_vendor_card_or_404(db, vendor_id)
+    vendor.is_active = False
+    vendor.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    logger.info("Vendor {} archived by {}", vendor_id, user.email)
+    return await vendor_detail_partial(request=request, vendor_id=vendor_id, user=user, db=db)
+
+
+@router.post("/v2/partials/vendors/{vendor_id}/unarchive", response_class=HTMLResponse)
+async def unarchive_vendor(
+    request: Request,
+    vendor_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Restore a soft-archived vendor — sets is_active=True.
+
+    Mirrors company reactivate.
+    """
+    vendor = get_vendor_card_or_404(db, vendor_id)
+    vendor.is_active = True
+    vendor.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    logger.info("Vendor {} unarchived by {}", vendor_id, user.email)
     return await vendor_detail_partial(request=request, vendor_id=vendor_id, user=user, db=db)
 
 
