@@ -23,7 +23,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "168_enriched_today_date"
-down_revision = "164_sp2_qp_sales_rename"
+down_revision = "165_vendor_is_active"
 branch_labels = None
 depends_on = None
 

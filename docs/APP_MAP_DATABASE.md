@@ -590,6 +590,7 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 | brand_tags / commodity_tags | JSONB | |
 | search_vector | TSVECTOR | Full-text search |
 | is_blacklisted | Boolean | |
+| is_active | Boolean NOT NULL, server_default `true`, indexed (`ix_vendor_cards_is_active`) | Migration 165 (CRM P5). Soft-archive flag — archived vendors (`is_active=False`) are hidden from the default vendor list/search and the global vendor-contacts list, but never deleted. Mirrors `Company.is_active` (migrations 139/149). Flipped via `POST /v2/partials/vendors/{id}/archive` and `/unarchive`; the list lifts the filter with `?include_archived=1` ("Show archived" toggle). |
 | ticker | String 20, nullable | Migration 125. Stock ticker symbol. Written by `apply_enrichment_to_vendor` via the `firmo_tiers` blending ladder; mirrors the `companies` column. |
 | naics | String 20, nullable | Migration 125. NAICS industry code; mirrors `companies.naics`. |
 | revenue_range | String 50, nullable | Migration 125. Annual revenue band; mirrors `companies.revenue_range`. |
