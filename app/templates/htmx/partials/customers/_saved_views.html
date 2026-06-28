@@ -1,0 +1,52 @@
+{# _saved_views.html — Saved Views control (filter presets) for a CRM list.
+   Renders the inner content of the #saved-views-{{ list_key }} wrapper: a chip per
+   saved view (click = apply, × = delete) plus a "+ Save view" popover. The
+   applyFilters() / saveOpen behavior lives on the parent wrapper's x-data (defined in
+   list.html / contacts_list.html) so this partial can be swapped in on save/delete
+   without losing that state.
+   Receives: saved_views (SavedView[]), list_key ('customers'|'contacts'),
+             target_form (id of the filter <form> to apply onto / hx-include).
+   Called by: list.html, contacts_list.html (initial include); the saved-views
+              GET/POST/DELETE routes (refresh swap into #saved-views-{{ list_key }}).
+   Depends on: parent x-data {applyFilters, saveOpen}; accent palette; .input / .btn.
+   Buttons size via the .btn/.btn-sm system (never inline px-/py-, per the
+   static-analysis ratchet) — mirrors the accounts bulk-action buttons.
+   Data note: v.filters|tojson lives in a SINGLE-quoted data-* attribute (tojson is
+   Markup-safe and escapes single quotes), never inside a double-quoted Alpine attr. #}
+<span class="text-[11px] font-medium text-gray-400 uppercase tracking-wider mr-0.5 select-none">Views</span>
+{% for v in saved_views %}
+<span class="inline-flex items-center rounded-full bg-gray-100 border border-line-base text-xs overflow-hidden">
+  <button type="button"
+          data-filters='{{ v.filters|tojson }}'
+          @click="applyFilters($el)"
+          class="btn btn-ghost btn-sm rounded-none font-normal text-gray-700 hover:text-accent-700"
+          title="Apply saved view">{{ v.name }}</button>
+  <button type="button"
+          hx-delete="/v2/partials/customers/saved-views/{{ v.id }}?list_key={{ list_key }}"
+          hx-target="#saved-views-{{ list_key }}" hx-swap="innerHTML"
+          hx-confirm="Delete saved view '{{ v.name }}'?"
+          class="btn btn-ghost btn-sm rounded-none border-l border-line-base text-gray-400 hover:text-rose-600"
+          aria-label="Delete saved view {{ v.name }}">&times;</button>
+</span>
+{% endfor %}
+
+{# + Save current filters as a new (or overwriting) named view #}
+<span class="relative inline-block" @click.outside="saveOpen = false">
+  <button type="button" @click="saveOpen = !saveOpen"
+          class="btn btn-secondary btn-sm rounded-full border-dashed border-accent-300 text-accent-700">
+    + Save view
+  </button>
+  <div x-show="saveOpen" x-cloak
+       class="absolute left-0 top-full mt-1 z-30 bg-white border border-line-base rounded-lg shadow-lg p-2 w-56">
+    <form hx-post="/v2/partials/customers/saved-views"
+          hx-target="#saved-views-{{ list_key }}" hx-swap="innerHTML"
+          hx-include="#{{ target_form }}"
+          @submit="saveOpen = false">
+      <input type="hidden" name="list_key" value="{{ list_key }}">
+      <label class="block text-xs text-gray-600 mb-1">Save current filters as</label>
+      <input name="name" required maxlength="80" placeholder="View name"
+             autocomplete="off" class="input input-sm w-full mb-2">
+      <button type="submit" class="btn btn-primary btn-sm w-full">Save view</button>
+    </form>
+  </div>
+</span>

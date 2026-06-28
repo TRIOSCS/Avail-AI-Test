@@ -4933,6 +4933,53 @@ Three inflows that feed idle CRM accounts into the prospecting pool.
 - Registered in `app/routers/crm/export.py` → included in `app/routers/crm/__init__.py`
 - Export links added to `list.html` below the filter form
 
+## CRM P4 power-UX — bulk on contacts, Saved Views, filter-aware export (migration 167)
+
+Extends the existing accounts power-UX (bulk select on `_account_list.html`, CSV import,
+tags, inline-edit) to the **contacts** list and adds per-user filter presets. New UI is
+minimal and mirrors the accounts pattern; no rearrangement of existing controls.
+
+### Filter-aware CSV export (extends `app/routers/crm/export.py`)
+- `GET /v2/customers/export.csv` now accepts the same filter query params as the accounts
+  list (`search/staleness/account_type/segment/disposition/has_open_reqs/my_only/sort`) and
+  streams the CURRENT filtered view via `cdm_company_query`. Reps stay scoped to their own
+  visible set (`effective_my_only = my_only OR not is_manager_or_admin`); managers can add
+  the My-accounts filter. Unfiltered call = all visible (unchanged default).
+- `GET /v2/customers/contacts/export.csv` now accepts `search/company_id/contact_role/
+  cadence_state` and streams via the role-scoped `customer_contacts_query` (cadence_state is
+  derived → filtered in Python, mirroring `customer_contacts_list_ctx`). Headers unchanged.
+- Both export links are progressive-enhancement anchors: `@click.prevent` rebuilds the
+  download URL from the live filter form (`#cdm-filters` / `#contacts-filters`) via
+  `URLSearchParams(new FormData(...))`; the bare `href` is the no-JS fallback (full export).
+
+### Contacts bulk actions (`POST /v2/partials/contacts/bulk/{action}`, `companies.py`)
+- Actions: `archive` (`SiteContact.is_archived=True`), `dnc` (`do_not_contact=True`) — both
+  wire the existing single-row toggles (`set_contact_archive` / `set_contact_dnc`) to the
+  selected set. Mirrors the accounts `customers_bulk_action` contract.
+- Auth: per-contact via `can_manage_account` on the owning company (manager/admin act on all);
+  non-manageable selections are silently skipped; the summary reports applied vs skipped.
+- `ids` comma-separated form field (`_BULK_MAX_IDS=200`); re-renders `contacts_list.html`
+  scoped to the hx-included `#contacts-filters`; `HX-Trigger: {showToast, clearSelection}`.
+- UI: `contacts_list.html` gains an Alpine select scope (checkbox column + select-all + bulk
+  action bar shown only when ≥1 row checked), mirroring `_account_list.html`.
+
+### Saved Views — per-user filter presets (`app/services/saved_views_service.py`)
+- New `saved_views` table (**migration 167**): `id / user_id (FK users CASCADE) / list_key
+  ('customers'|'contacts') / name / filters (JSON) / created_at`; unique on
+  `(user_id, list_key, name)` → re-saving a name upserts. (No existing per-user prefs/JSON
+  store existed, so a dedicated minimal table was added rather than overloading `User`.)
+- Service whitelists which filter keys persist per `list_key` (`ALLOWED_FILTER_KEYS`) and
+  drops "all" sentinels (`""`, `"0"`); cap 50 views per (user, list_key).
+- Routes (static, precede the `/{company_id}` catch-all):
+  `GET /v2/partials/customers/saved-views?list_key=` (render control),
+  `POST /v2/partials/customers/saved-views` (name + hx-included filter fields → upsert),
+  `DELETE /v2/partials/customers/saved-views/{id}?list_key=` (user-scoped).
+- UI: `_saved_views.html` (chip per view: click = apply, × = delete; `+ Save view` popover),
+  embedded in both filter bars inside a `#saved-views-<list_key>` wrapper. Apply writes the
+  stored filters back onto the filter form fields and dispatches `change`, reusing the normal
+  filter-submit pathway (no new fetch path). `v.filters|tojson` lives in a SINGLE-quoted
+  `data-filters` attr (never a double-quoted Alpine attr) per the quoting rule.
+
 ### Notes excluded from dormancy
 - `app/services/activity_service.get_last_activity_at()` now excludes `NOTE`, `SALES_NOTE`, `CONTACT_NOTE` from the `func.max(created_at)` query
 - `_NOTE_TYPES` frozenset defined at module level for clarity
