@@ -808,6 +808,10 @@ Model: `VendorContactAttachment` (`app/models/vendors.py`).
 > `can_post`/`can_offer` (role-derived capabilities), `submit_offer` (per_line/take_all;
 > part-number-only matching via `normalize_mpn_key`; unmatched/ambiguous rows queued),
 > `recompute_line_rollup`/`withdraw_offer` (min priced active offer -> best_offer_*),
+> `award_offer` (the single chokepoint that flips an offer -> `won`: owner-gated, marks
+> matched lines `awarded`, recomputes rollups, then fires the buyer-score win-hook
+> `buyer_affinity_service.recompute_buyer_score_on_win` BEFORE the commit — no-ops for an
+> offer with no canonical buyer; routed as `POST /api/resell/{id}/offers/{offer_id}/award`),
 > `close_list`, `get_excess_stats` (offer counts), list/line CRUD + import, and
 > `material_card_id` resolution on the import path. The thin router is `app/routers/resell.py`
 > (templates under `app/templates/htmx/partials/resell/*`).
