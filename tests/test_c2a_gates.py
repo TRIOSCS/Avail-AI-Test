@@ -108,20 +108,20 @@ def _make_qp(db: Session, owner: User) -> QualityPlan:
         status=BuyPlanStatus.DRAFT.value,
         so_status="pending",
         total_cost=1000.0,
+        sales_order_number="TSO0190738",  # canonical SO# lives on the buy plan (SP-2)
     )
     db.add(bp)
     db.flush()
 
     # C2b adds a per-section completeness gate to submit_section: the Sales section needs
-    # SO# + condition + quantity + product commodity + testing-required, and Purchasing
-    # needs PO# + condition + product commodity + testing-required, before a gate opens.
-    # Fill both so these C2a routing/gate tests exercise the gate-passing path.
+    # SO# (from buy plan) + condition + quantity + product commodity + testing-required,
+    # and Purchasing needs PO# + condition + product commodity + testing-required, before
+    # a gate opens. Fill both so these C2a routing/gate tests exercise the gate-passing path.
     qp = QualityPlan(
         buy_plan_id=bp.id,
         created_by_id=owner.id,
         order_type="new",
         status="draft",
-        sales_so_number="TSO0190738",
         sales_condition="New",
         sales_quantity=10,
         sales_product_commodity="HDD",

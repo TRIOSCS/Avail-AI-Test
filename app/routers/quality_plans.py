@@ -64,7 +64,6 @@ _BOOL_FALSE = {"false", "off", "0", "no", "n"}
 # Per-section editable fields: model attribute → coercion kind. The PATCH handler only
 # writes attributes listed here, so a stray form field can never set an arbitrary column.
 _SALES_FIELDS: dict[str, str] = {
-    "sales_so_number": "str",
     "sales_condition": "str",
     "sales_quantity": "int",
     "sales_fw_hw_rev": "str",
@@ -448,6 +447,7 @@ def _load_qp_for_edit(db: Session, qp_id: int, user) -> QualityPlan:
         QualityPlan,
         qp_id,
         options=[
+            joinedload(QualityPlan.buy_plan),
             joinedload(QualityPlan.serial_entries).joinedload(QpSerialEntry.buyer),
             joinedload(QualityPlan.serial_entries).joinedload(QpSerialEntry.submitted_by),
             joinedload(QualityPlan.fru_lookups),

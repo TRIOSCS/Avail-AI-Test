@@ -61,10 +61,10 @@ class QualityPlan(Base):
     sampling_rate = Column(String(50), nullable=True)
     notes = Column(Text, nullable=True)
 
-    # ── § SALES "Quality Questions" (C2b) — gated by the SALES_ORDER approval.
+    # ── § SALES "Quality Questions" (C2b) — gated by the QP_SALES approval.
     # All nullable; the completeness gate (validate_sales_section) enforces the
-    # required subset (SO# + the QC-required fields) at submit time, not at the DB.
-    sales_so_number = Column(String(255), nullable=True)
+    # required subset at submit time. SO# is canonical on BuyPlan.sales_order_number
+    # (retired from QP after SP-2 migration 164 Op C).
     sales_condition = Column(String(255), nullable=True)
     sales_quantity = Column(Integer, nullable=True)
     sales_fw_hw_rev = Column(Text, nullable=True)  # FW / HW / REV / Date & Week Codes

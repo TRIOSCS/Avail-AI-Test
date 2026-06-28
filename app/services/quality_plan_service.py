@@ -31,7 +31,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from loguru import logger
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from ..constants import ActivityType, QualityPlanStatus
 from ..models.quality_plan import QualityPlan
@@ -178,11 +178,11 @@ def submit(
     return qp
 
 
-# Sales-section completeness: the SO# plus the QC-required fields a vendor needs to
-# source against. (field, human-readable label) — a field is "missing" when its value is
+# Sales-section completeness: QC-required fields a vendor needs to source against.
+# SO# is checked separately via the linked BuyPlan (see _validate_sales_section).
+# (field, human-readable label) — a field is "missing" when its value is
 # None or an empty/whitespace string. Booleans only require an explicit answer.
 _SALES_REQUIRED: list[tuple[str, str]] = [
-    ("sales_so_number", "Sales Order #"),
     ("sales_condition", "Condition"),
     ("sales_quantity", "Quantity"),
     ("sales_product_commodity", "Product Commodity"),
@@ -214,8 +214,16 @@ def _missing_required(qp: QualityPlan, required: list[tuple[str, str]]) -> list[
 
 
 def _validate_sales_section(qp: QualityPlan) -> list[str]:
-    """Return completeness errors for the Sales section; empty list == submittable."""
-    return _missing_required(qp, _SALES_REQUIRED)
+    """Return completeness errors for the Sales section; empty list == submittable.
+
+    SO# is read from the linked BuyPlan (canonical since SP-2); all other required
+    fields are still on the QP itself.
+    """
+    errors = _missing_required(qp, _SALES_REQUIRED)
+    bp = qp.buy_plan
+    if bp is None or not (bp.sales_order_number or "").strip():
+        errors.append("Sales Order # is required")
+    return errors
 
 
 def _validate_purchasing_section(qp: QualityPlan) -> list[str]:
@@ -314,7 +322,7 @@ def submit_section(db: Session, qp_id: int, gate_type: str, user: Any) -> Any:
     from .approvals.routing import NoEligibleApproverError
     from .approvals.service import create_request
 
-    qp = db.get(QualityPlan, qp_id)
+    qp = db.get(QualityPlan, qp_id, options=[joinedload(QualityPlan.buy_plan)])
     if qp is None:
         raise ValueError(f"QualityPlan {qp_id} not found")
 

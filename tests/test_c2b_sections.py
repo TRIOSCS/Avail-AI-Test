@@ -92,7 +92,7 @@ def _make_qp(db: Session, owner: User, *, fill_sales: bool = False, fill_purchas
     db.flush()
     qp = QualityPlan(buy_plan_id=bp.id, created_by_id=owner.id, order_type="new", status="draft")
     if fill_sales:
-        qp.sales_so_number = "TSO0190738"
+        bp.sales_order_number = "TSO0190738"  # canonical SO# lives on buy plan (SP-2)
         qp.sales_condition = "New"
         qp.sales_quantity = 10
         qp.sales_product_commodity = "HDD"
