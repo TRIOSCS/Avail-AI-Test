@@ -44,7 +44,14 @@ from ..dependencies import require_access, require_fresh_token, require_user
 from ..file_utils import parse_tabular_file
 from ..models import Company, User, VendorCard
 from ..models.excess import CustomerBid, ExcessLineItem, ExcessList, ExcessOffer, ExcessOfferLine, ExcessOutreach
-from ..services import bid_back_service, buyer_affinity_service, excess_mirror, excess_service, resell_outreach_service
+from ..services import (
+    bid_back_service,
+    buyer_affinity_service,
+    excess_mirror,
+    excess_service,
+    resell_outreach_service,
+    task_service,
+)
 from ..template_env import template_response
 
 router = APIRouter(tags=["resell"])
@@ -1059,12 +1066,28 @@ async def resell_not_yet_strip(
 ):
     """The "usually offered, not yet this round" nudge strip (owner-only).
 
-    Wired into the EXISTING detail nudge surface (NOT a new My-Day). Surfaces buyers
-    historically active in this list's commodities with no outreach on THIS list yet.
+    Wired into the EXISTING detail nudge surface AND, per CRM Phase 2, also persists
+    each surfaced buyer as a durable My-Day follow-up task for the list owner so the
+    nudge survives a page close. The in-page strip and the task share the same buyer
+    set; task creation is idempotent per (list, buyer, owner) via the Task service, so
+    reloading the strip never duplicates a buyer's task.
     """
     el = excess_service.get_excess_list(db, list_id)
     _require_owner(el, user)
     buyers = buyer_affinity_service.not_yet_offered_strip(db, excess_list_id=el.id)
+    # Persist the nudge as owner-assigned My-Day follow-up tasks (idempotent). Due today
+    # so it lands under the Tasks page "Due soon" bucket.
+    due = datetime.now(timezone.utc)
+    for b in buyers:
+        task_service.auto_create_resell_followup_task(
+            db,
+            excess_list_id=el.id,
+            vendor_card_id=b.vendor_card_id,
+            owner_id=el.owner_id,
+            buyer_name=b.display_name,
+            list_title=el.title,
+            due_at=due,
+        )
     return template_response(
         "htmx/partials/resell/_not_yet_strip.html",
         {"request": request, "user": user, "list": el, "buyers": buyers},

@@ -1459,7 +1459,8 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     |        +-- GET .../{id}/outreach           (owner-only Outreach tab: tracker rows +
     |        |     'offered N · M responded · K bid' summary; lazy, explicit hx-target)
     |        +-- GET .../{id}/not-yet-strip      (owner-only nudge: not_yet_offered_strip;
-    |              # TODO(crm-phase2) My-Day Task seam lives in resell_not_yet_strip)
+    |              also persists each surfaced buyer as an owner-assigned My-Day follow-up via
+    |              task_service.auto_create_resell_followup_task — idempotent per list+buyer+owner)
     +-- POST /api/resell/lists                          (create → excess_service.create_excess_list)
     +-- POST /api/resell/{id}/lines                     (add line; resolves MaterialCard)
     +-- POST /api/resell/{id}/import-preview|import-confirm  (reuse excess parsers + preview grid)

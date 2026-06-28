@@ -603,6 +603,63 @@ def on_bid_due_soon(db: Session, requisition_id: int, deadline: str, req_name: s
     )
 
 
+def auto_create_resell_followup_task(
+    db: Session,
+    *,
+    excess_list_id: int,
+    vendor_card_id: int,
+    owner_id: int,
+    buyer_name: str,
+    list_title: str | None = None,
+    due_at: datetime | None = None,
+) -> RequisitionTask:
+    """Idempotently create the list owner's My-Day follow-up for a buyer the resell
+    "usually offered, not yet this round" nudge surfaces.
+
+    Scoped to the buyer's vendor card (the buyer-side "who"), assigned to the list
+    owner, so the nudge survives a page close as a durable task. Keyed by (excess list,
+    buyer card, owner) via source_ref + assignee REGARDLESS of status: reloading the
+    strip never duplicates a buyer's task, and a follow-up the owner has already
+    completed is not re-created. Returns the task that now represents the nudge
+    (existing or freshly created).
+    """
+    source_ref = f"resell_notyet:{excess_list_id}:{vendor_card_id}"
+    existing = (
+        db.query(RequisitionTask)
+        .filter(
+            RequisitionTask.source_ref == source_ref,
+            RequisitionTask.assigned_to_id == owner_id,
+        )
+        .first()
+    )
+    if existing:
+        return existing
+    suffix = f" on {list_title}" if list_title else ""
+    title = f"Follow up: offer {buyer_name}{suffix} this round"[:255]
+    task = RequisitionTask(
+        vendor_card_id=vendor_card_id,
+        title=title,
+        task_type="sales",
+        priority=2,
+        assigned_to_id=owner_id,
+        created_by=owner_id,
+        source="system",
+        source_ref=source_ref,
+        due_at=due_at,
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    logger.info(
+        "Resell follow-up task created: {} (list={}, buyer_card={}, owner={})",
+        task.id,
+        excess_list_id,
+        vendor_card_id,
+        owner_id,
+    )
+    return task
+
+
 # ---------------------------------------------------------------------------
 # Task-to-response helper
 # ---------------------------------------------------------------------------
