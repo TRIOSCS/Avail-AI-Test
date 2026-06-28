@@ -142,11 +142,24 @@ class TestMigration123:
 # ── Config ────────────────────────────────────────────────────────────────────
 
 
-def test_sp4_config_defaults():
-    """SP4 config fields have correct defaults."""
+def test_sp4_config_defaults(monkeypatch):
+    """SP4 config fields have correct CODE defaults.
+
+    Builds a fresh Settings with no env file and the relevant vars cleared, so the
+    assertions verify the in-code defaults regardless of any ambient prod ``.env``
+    (e.g. ``ACCOUNT_SWEEP_INACTIVITY_DAYS=35``) that pytest would otherwise load.
+    """
     from app.config import Settings
 
-    s = Settings()
+    for key in (
+        "ACCOUNT_SWEEP_ENABLED",
+        "ACCOUNT_SWEEP_INACTIVITY_DAYS",
+        "ACCOUNT_SWEEP_MANAGER_EMAIL",
+        "ACCOUNT_REACTIVATION_SWEEP_ENABLED",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    s = Settings(_env_file=None)
     assert s.account_sweep_enabled is False
     assert s.account_sweep_inactivity_days == 90
     assert s.account_sweep_manager_email == ""

@@ -122,7 +122,7 @@ class TestBatchRefreshCoverage:
         """Lines 683-688: failed > 0 → level='warning', skipped text appended."""
         _, items = two_items
         # Rate-limit first item
-        items[0].last_searched_at = datetime.utcnow() - timedelta(seconds=5)
+        items[0].last_searched_at = datetime.now(timezone.utc) - timedelta(seconds=5)
         db_session.commit()
         with patch(
             "app.search_service.search_requirement",
