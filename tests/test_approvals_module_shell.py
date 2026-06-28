@@ -147,11 +147,14 @@ def test_purchase_orders_tab_has_orders_and_resource(client: TestClient):
     assert "re-sourcing" in r.text  # resourcing pool metric strip
 
 
-def test_sales_orders_tab_empty_state(client: TestClient):
-    """The Sales Orders tab has no work surface in SP-1 → neutral empty state."""
+def test_sales_orders_tab_renders_board(client: TestClient):
+    """The Sales Orders tab (SP-2) renders the DRAFT/PENDING deal board with column
+    headers."""
     r = client.get("/v2/partials/approvals/sales-orders")
     assert r.status_code == 200
-    assert "No sales orders yet" in r.text
+    # Board columns (Draft / Pending) must appear; the Active column is filtered out.
+    assert "Draft" in r.text
+    assert "Pending" in r.text
 
 
 def test_prepayments_tab_empty_state(client: TestClient):

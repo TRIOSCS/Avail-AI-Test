@@ -11142,7 +11142,12 @@ async def approvals_tab_partial(
         board_scope = _resolve_deal_scope(scope, can_all)
         ctx.update(
             {
-                "board": deals_board(db, user, scope=board_scope),
+                "board": deals_board(
+                    db,
+                    user,
+                    scope=board_scope,
+                    statuses=[BuyPlanStatus.ACTIVE.value, BuyPlanStatus.HALTED.value],
+                ),
                 "scope": board_scope,
                 "archive": completed_archive(db, user, scope=board_scope),
                 "can_see_all_deals": can_all,
@@ -11165,6 +11170,24 @@ async def approvals_tab_partial(
         return template_response("htmx/partials/approvals/_tab_purchase_orders.html", ctx)
 
     if lens == "sales_orders":
+        from ..services.buyplan_hub import completed_archive, deals_board
+
+        can_all = _can_see_all_deals(user, db)
+        board_scope = _resolve_deal_scope(scope, can_all)
+        ctx.update(
+            {
+                "board": deals_board(
+                    db,
+                    user,
+                    scope=board_scope,
+                    statuses=[BuyPlanStatus.DRAFT.value, BuyPlanStatus.PENDING.value],
+                ),
+                "scope": board_scope,
+                "archive": completed_archive(db, user, scope=board_scope),
+                "can_see_all_deals": can_all,
+                "scope_toggle_url": "/v2/partials/approvals/sales-orders",
+            }
+        )
         return template_response("htmx/partials/approvals/_tab_sales_orders.html", ctx)
 
     # prepayments — approval-only stage (no work surface in SP-1)

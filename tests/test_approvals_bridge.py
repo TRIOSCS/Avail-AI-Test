@@ -226,11 +226,14 @@ class TestEngineNativeQueue:
         assert {bp_ar.id, pp_ar.id} <= ids
 
     def test_lens_links_buy_plan_subject_to_detail(self, db_session: Session) -> None:
-        """The Buy Plans stage tab's pinned section renders HTML; a buy_plan-subject row
-        links to the plan detail partial."""
-        user = _make_user(db_session)  # can_approve_buy_plans=True → pinned section shows
-        bp = _make_buy_plan(db_session, user, status="pending")
-        _make_buy_plan_request(db_session, bp, user)
+        """The Buy Plans stage tab board renders HTML; an ACTIVE plan card links to its
+        detail partial.
+
+        (The buy_plans tab is lifecycle-filtered to ACTIVE/HALTED; PENDING plans belong
+        to the Sales Orders tab board.)
+        """
+        user = _make_user(db_session)
+        bp = _make_buy_plan(db_session, user, status="active")
         db_session.commit()
 
         for client in _build_client(db_session, user):

@@ -22,6 +22,7 @@ from ..constants import BuyPlanLineStatus, BuyPlanStatus, SOVerificationStatus
 from ..models.buy_plan import BuyPlan, BuyPlanLine
 from ..models.crm import CustomerSite
 from ..models.quotes import Quote
+from ..models.sourcing import Requisition
 from .buyplan_naming import (
     CARD_KIND_BUY_PLAN,
     CARD_KIND_PO,
@@ -449,8 +450,14 @@ def _deal_card(plan: BuyPlan, user: object) -> dict:
     }
 
 
-def deals_board(db: Session, user: object, *, scope: str) -> dict[str, list[dict]]:
-    """Return the stage-grouped *active* deal board for sales or manager views.
+def deals_board(
+    db: Session,
+    user: object,
+    *,
+    scope: str,
+    statuses: list[str] | None = None,
+) -> dict[str, list[dict]]:
+    """Return the stage-grouped deal board for sales or manager views.
 
     Parameters
     ----------
@@ -462,29 +469,40 @@ def deals_board(db: Session, user: object, *, scope: str) -> dict[str, list[dict
     scope:
         ``"mine"``  — only plans where ``submitted_by_id == user.id``.
         ``"all"``   — all plans regardless of owner.
+    statuses:
+        When provided, filter to only plans whose status is in this list.
+        When ``None`` (default), the original behaviour applies: CANCELLED and
+        COMPLETED are excluded so only in-progress work appears.  Pass explicit
+        status values (``BuyPlanStatus.ACTIVE.value``, etc.) to show a subset of
+        the lifecycle — e.g. the Buy Plans tab passes ``[ACTIVE, HALTED]`` and the
+        Sales Orders tab passes ``[DRAFT, PENDING]``.
 
     Returns
     -------
     dict with keys ``"draft"``, ``"pending"``, ``"active"``.
     Each value is a list of deal dicts ordered newest-first (by ``created_at``
-    descending). COMPLETED plans are excluded here — they live in the paginated
-    archive (see ``completed_archive``); CANCELLED plans are omitted entirely.
+    descending). COMPLETED plans are excluded by default — they live in the
+    paginated archive (see ``completed_archive``); CANCELLED plans are omitted
+    entirely by default.
 
     Each deal dict contains:
         plan_id, customer_name, value, margin_pct, stage_label, blocker,
         po_progress (cut: int, total: int), needs_my_action: bool, is_stock_sale,
         completed_at
     """
+    status_filter = (
+        BuyPlan.status.in_(statuses)
+        if statuses is not None
+        else BuyPlan.status.notin_((BuyPlanStatus.CANCELLED, BuyPlanStatus.COMPLETED))
+    )
     query = (
         db.query(BuyPlan)
-        .filter(
-            BuyPlan.status.notin_(
-                (BuyPlanStatus.CANCELLED, BuyPlanStatus.COMPLETED),
-            )
-        )
+        .filter(status_filter)
         .options(
             # Eager-load quote → customer_site → company (eliminates N+1 per card)
             joinedload(BuyPlan.quote).joinedload(Quote.customer_site).joinedload(CustomerSite.company),
+            # Eager-load requisition → customer_site → company for SO-origin cards (quote_id NULL)
+            joinedload(BuyPlan.requisition).joinedload(Requisition.customer_site).joinedload(CustomerSite.company),
             joinedload(BuyPlan.submitted_by),
             # lines + their requirement feed _primary_mpn / _our_po_numbers on the card
             joinedload(BuyPlan.lines).joinedload(BuyPlanLine.requirement),
