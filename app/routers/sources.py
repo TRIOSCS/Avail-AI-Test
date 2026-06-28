@@ -24,7 +24,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from ..config import settings
-from ..constants import AccessKey
+from ..constants import AccessKey, ApiSourceStatus
 from ..database import get_db
 from ..dependencies import (
     require_access,
@@ -447,8 +447,8 @@ async def list_api_sources(user: User = Depends(require_user), db: Session = Dep
             any_set = any(credential_is_set(db, src.name, v) for v in env_vars)
             # Only downgrade to pending if ALL credentials are missing
             # Never auto-upgrade to "live" — that's the health checker's job
-            if not any_set and src.status not in ("disabled", "error"):
-                src.status = "pending"
+            if not any_set and src.status not in (ApiSourceStatus.DISABLED, ApiSourceStatus.ERROR):
+                src.status = ApiSourceStatus.PENDING
     db.commit()
 
     result = []
@@ -515,7 +515,7 @@ async def run_source_test(src: ApiSource, db: Session) -> dict:
         elapsed_ms = int((time.time() - start) * 1000)
 
         if has_env_vars:
-            src.status = "live"
+            src.status = ApiSourceStatus.LIVE
             src.last_success = datetime.now(timezone.utc)
             src.last_error = None
             src.avg_response_ms = elapsed_ms
@@ -524,7 +524,7 @@ async def run_source_test(src: ApiSource, db: Session) -> dict:
         error = str(e)[:500]
         # Only mark as error if source is configurable (has env_vars)
         if has_env_vars:
-            src.status = "error"
+            src.status = ApiSourceStatus.ERROR
             src.last_error = error
 
     db.commit()
@@ -578,12 +578,12 @@ async def toggle_api_source(
         raise HTTPException(404, "API source not found")
     new_status = payload.status
     # When enabling, auto-detect correct status based on credentials
-    if new_status != "disabled":
+    if new_status != ApiSourceStatus.DISABLED:
         env_vars = src.env_vars or []
         if env_vars and all(credential_is_set(db, src.name, v) for v in env_vars):
-            new_status = "live"
+            new_status = ApiSourceStatus.LIVE
         else:
-            new_status = "pending"
+            new_status = ApiSourceStatus.PENDING
     src.status = new_status
     db.commit()
     return {"ok": True, "status": src.status}
@@ -620,7 +620,7 @@ async def health_summary(
         db.query(ApiSource)
         .filter(
             ApiSource.is_active == True,  # noqa: E712
-            ApiSource.status.in_(["error", "degraded"]),
+            ApiSource.status.in_([ApiSourceStatus.ERROR, ApiSourceStatus.DEGRADED]),
         )
         .all()
     )
@@ -652,7 +652,7 @@ async def system_alerts(
         db.query(ApiSource)
         .filter(
             ApiSource.is_active == True,  # noqa: E712
-            ApiSource.status.in_(["error", "degraded"]),
+            ApiSource.status.in_([ApiSourceStatus.ERROR, ApiSourceStatus.DEGRADED]),
         )
         .order_by(ApiSource.display_name)
         .all()
@@ -774,7 +774,7 @@ async def scan_inbox_for_vendors(request: Request, user: User = Depends(require_
         em_src.last_success = datetime.now(timezone.utc)
         em_src.total_searches = (em_src.total_searches or 0) + 1
         em_src.total_results = (em_src.total_results or 0) + results.get("vendors_found", 0)
-        em_src.status = "live"
+        em_src.status = ApiSourceStatus.LIVE
         db.commit()
 
     return {

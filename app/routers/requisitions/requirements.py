@@ -120,7 +120,7 @@ def _annotate_buyer_outcomes(req: Requisition, results: dict, db: Session) -> No
         )
         .filter(
             Offer.requirement_id.in_(req_ids),
-            Offer.status != "rejected",
+            Offer.status != OfferStatus.REJECTED,
         )
         .all()
     )
@@ -307,7 +307,7 @@ async def list_requirements(req_id: int, user: User = Depends(require_user), db:
             .filter(
                 RequisitionTask.requisition_id == req_id,
                 RequisitionTask.source_ref.in_(part_refs),
-                RequisitionTask.status != "done",
+                RequisitionTask.status != TaskStatus.DONE,
             )
             .group_by(RequisitionTask.source_ref)
             .all()
@@ -795,7 +795,7 @@ async def get_saved_sightings(
             .filter(
                 Offer.requisition_id != req_id,
                 Offer.material_card_id.in_(all_card_ids),
-                Offer.status.in_(["active", "won"]),
+                Offer.status.in_([OfferStatus.ACTIVE, OfferStatus.WON]),
             )
             .options(joinedload(Offer.entered_by))
             .order_by(Offer.created_at.desc())
@@ -1237,7 +1237,7 @@ async def list_requirement_offers(
     current = (
         db.query(Offer)
         .options(joinedload(Offer.entered_by))
-        .filter(Offer.requirement_id == requirement_id, Offer.status.in_(["active", "won"]))
+        .filter(Offer.requirement_id == requirement_id, Offer.status.in_([OfferStatus.ACTIVE, OfferStatus.WON]))
         .order_by(Offer.created_at.desc())
         .all()
     )
@@ -1260,7 +1260,7 @@ async def list_requirement_offers(
             .filter(
                 Offer.requisition_id != req_item.requisition_id,
                 Offer.material_card_id.in_(card_ids),
-                Offer.status.in_(["active", "won"]),
+                Offer.status.in_([OfferStatus.ACTIVE, OfferStatus.WON]),
             )
             .order_by(Offer.created_at.desc())
             .limit(50)
@@ -1559,7 +1559,7 @@ async def list_requirement_history(
         .filter(
             RequisitionTask.requisition_id == req_item.requisition_id,
             RequisitionTask.source_ref.in_(all_refs),
-            RequisitionTask.status == "done",
+            RequisitionTask.status == TaskStatus.DONE,
         )
         .all()
     )

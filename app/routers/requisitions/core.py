@@ -20,7 +20,15 @@ from sqlalchemy import and_, case, exists, literal, or_, select
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
-from ...constants import RESTRICTED_ROLES, ActivityType, RequisitionStatus, UserRole
+from ...constants import (
+    RESTRICTED_ROLES,
+    ActivityType,
+    ContactStatus,
+    ProactiveMatchStatus,
+    QuoteStatus,
+    RequisitionStatus,
+    UserRole,
+)
 from ...database import get_db
 from ...dependencies import get_req_for_user, require_admin, require_user
 from ...models import (
@@ -119,7 +127,7 @@ def _build_requisition_list(q, status, sort, order, limit, offset, user, db):
         select(sqlfunc.count(Contact.id))
         .where(
             Contact.requisition_id == Requisition.id,
-            Contact.status == "sent",
+            Contact.status == ContactStatus.SENT,
         )
         .correlate(Requisition)
         .scalar_subquery()
@@ -141,7 +149,7 @@ def _build_requisition_list(q, status, sort, order, limit, offset, user, db):
     )
     latest_rfq_sent_sq = (
         select(sqlfunc.max(Contact.created_at))
-        .where(Contact.requisition_id == Requisition.id, Contact.status == "sent")
+        .where(Contact.requisition_id == Requisition.id, Contact.status == ContactStatus.SENT)
         .correlate(Requisition)
         .scalar_subquery()
         .label("latest_rfq_sent_at")
@@ -199,10 +207,10 @@ def _build_requisition_list(q, status, sort, order, limit, offset, user, db):
         .label("total_target_value")
     )
     _quote_priority = case(
-        (Quote.status == "won", literal(1)),
-        (Quote.status == "lost", literal(2)),
-        (Quote.status == "sent", literal(3)),
-        (Quote.status == "revised", literal(4)),
+        (Quote.status == QuoteStatus.WON, literal(1)),
+        (Quote.status == QuoteStatus.LOST, literal(2)),
+        (Quote.status == QuoteStatus.SENT, literal(3)),
+        (Quote.status == QuoteStatus.REVISED, literal(4)),
         else_=literal(5),
     )
     quote_status_sq = (
@@ -232,7 +240,7 @@ def _build_requisition_list(q, status, sort, order, limit, offset, user, db):
     )
     quote_won_value_sq = (
         select(sqlfunc.max(Quote.won_revenue))
-        .where(Quote.requisition_id == Requisition.id, Quote.status == "won")
+        .where(Quote.requisition_id == Requisition.id, Quote.status == QuoteStatus.WON)
         .correlate(Requisition)
         .scalar_subquery()
         .label("quote_won_value")
@@ -258,7 +266,7 @@ def _build_requisition_list(q, status, sort, order, limit, offset, user, db):
         select(sqlfunc.count(Contact.id))
         .where(
             Contact.requisition_id == Requisition.id,
-            Contact.status.in_(["sent", "opened"]),
+            Contact.status.in_([ContactStatus.SENT, ContactStatus.OPENED]),
         )
         .correlate(Requisition)
         .scalar_subquery()
@@ -268,7 +276,7 @@ def _build_requisition_list(q, status, sort, order, limit, offset, user, db):
         select(sqlfunc.count(ProactiveMatch.id))
         .where(
             ProactiveMatch.requisition_id == Requisition.id,
-            ProactiveMatch.status != "dismissed",
+            ProactiveMatch.status != ProactiveMatchStatus.DISMISSED,
         )
         .correlate(Requisition)
         .scalar_subquery()
