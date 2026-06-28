@@ -8,6 +8,7 @@ Depends on: buyplan_scoring, models
 
 from datetime import datetime, timezone
 
+from loguru import logger
 from sqlalchemy.orm import Session, joinedload
 
 from ..config import settings
@@ -17,6 +18,8 @@ from ..models import (
     Quote,
     QuoteLine,
     Requirement,
+    Requisition,
+    User,
     VendorCard,
 )
 from ..models.buy_plan import (
@@ -42,7 +45,10 @@ def build_buy_plan(quote_id: int, db: Session) -> BuyPlan:
     4. Assign buyer
     5. Calculate margins
 
-    Returns an unsaved BuyPlan with lines populated (caller saves).
+    Returns an unsaved BuyPlan with lines populated (caller saves). The shared
+    scoring/assignment/line-building/margin/AI-summary core lives in
+    ``_assemble_buy_plan``; this entry point owns only the quote-specific prologue
+    (load quote, WON/SENT + duplicate guards, region/sell-price derivation).
     """
     quote = db.get(
         Quote,
@@ -78,20 +84,128 @@ def build_buy_plan(quote_id: int, db: Session) -> BuyPlan:
     if quote.customer_site:
         customer_region = _country_to_region(quote.customer_site.country or quote.customer_site.state)
 
-    # Get all requirements for this requisition
-    requirements = db.query(Requirement).filter(Requirement.requisition_id == quote.requisition_id).all()
-    if not requirements:
-        raise ValueError(f"No requirements found for requisition {quote.requisition_id}")
-
     # Map requirement_id -> the offer the salesperson CHOSE on the quote, so the buy plan
     # defaults to exactly what was quoted instead of re-scoring from scratch (mirrors the
     # resell CustomerBidLine.selected_offer_id provenance). QuoteLine has no requirement_id,
     # so derive it via the line's offer (Offer.requirement_id) in one join.
     quote_offer_by_req = _quote_chosen_offers(quote_id, db)
 
+    # Quote path carries no per-requirement sell-price overrides — the shared core falls
+    # back to each requirement's target_price (current behavior).
+    plan = _assemble_buy_plan(quote.requisition, quote_offer_by_req, {}, customer_region, db)
+    plan.quote_id = quote_id
+    return plan
+
+
+def find_open_sales_order(db: Session, requisition_id: int) -> BuyPlan | None:
+    """Return the open, quote-less Sales Order for a requisition, or None.
+
+    The canonical "open Sales Order" is a quote-less BuyPlan (``quote_id IS NULL``) in a
+    non-terminal status (DRAFT/PENDING/ACTIVE) for the requisition. Both the SO-origination
+    guard below and the route's duplicate-handling resolve the existing plan through this
+    single query, so the definition can never drift between them.
+    """
+    return (
+        db.query(BuyPlan)
+        .filter(
+            BuyPlan.requisition_id == requisition_id,
+            BuyPlan.quote_id.is_(None),
+            BuyPlan.status.in_(
+                [
+                    BuyPlanStatus.DRAFT.value,
+                    BuyPlanStatus.PENDING.value,
+                    BuyPlanStatus.ACTIVE.value,
+                ]
+            ),
+        )
+        .first()
+    )
+
+
+class DuplicateSalesOrderError(ValueError):
+    """Raised when a requisition already has an open (quote-less, non-terminal) Sales
+    Order.
+
+    Subclasses ``ValueError`` so existing ``pytest.raises(ValueError)`` call sites stay
+    green. Carries ``existing_plan_id`` and ``status`` so the route can load and render the
+    existing plan without re-running the open-SO query.
+    """
+
+    def __init__(self, existing_plan_id: int, status: str) -> None:
+        self.existing_plan_id = existing_plan_id
+        self.status = status
+        super().__init__(f"There is already an open Sales Order (plan #{existing_plan_id}, status: {status})")
+
+
+def create_sales_order_from_offers(
+    requisition_id: int,
+    selections: dict[int, int],
+    sell_prices: dict[int, float],
+    db: Session,
+    user: User,
+) -> BuyPlan:
+    """Originate a DRAFT buy plan (Sales Order) directly from chosen RFQ offers — no
+    quote.
+
+    ``selections`` maps ``requirement_id -> chosen offer_id`` and ``sell_prices`` maps
+    ``requirement_id -> sell price``. Persists a DRAFT BuyPlan with ``quote_id=None`` and
+    raises ``DuplicateSalesOrderError`` (a ValueError subclass) if a non-terminal
+    (DRAFT/PENDING/ACTIVE) quote-less plan already exists for the requisition. Shares the
+    scoring/assignment/line-building core with the quote path via ``_assemble_buy_plan``.
+    """
+    requisition = db.get(Requisition, requisition_id)
+    if requisition is None:
+        raise ValueError(f"Requisition {requisition_id} not found")
+
+    # Guard: only one open Sales Order (quote-less plan) per requisition at a time.
+    existing = find_open_sales_order(db, requisition_id)
+    if existing:
+        raise DuplicateSalesOrderError(existing.id, existing.status)
+
+    customer_region = None
+    if requisition.customer_site:
+        customer_region = _country_to_region(requisition.customer_site.country or requisition.customer_site.state)
+
+    plan = _assemble_buy_plan(requisition, selections, sell_prices, customer_region, db)
+    plan.quote_id = None
+    # The originator owns the Sales Order (it is built from their own requisition), so it
+    # surfaces on their "Mine" deal board and as needs_my_action while in DRAFT.
+    plan.submitted_by_id = getattr(user, "id", None)
+    db.add(plan)
+    db.commit()
+    logger.info(
+        "Created Sales Order buy plan #{} from {} selected offer(s) for requisition {} (user {})",
+        plan.id,
+        len(selections),
+        requisition_id,
+        getattr(user, "id", None),
+    )
+    return plan
+
+
+def _assemble_buy_plan(
+    requisition: Requisition,
+    chosen_offers: dict[int, int],
+    sell_prices: dict[int, float],
+    customer_region: str | None,
+    db: Session,
+) -> BuyPlan:
+    """Build (unsaved) BuyPlan + lines from chosen offers — shared by quote and SO
+    paths.
+
+    ``chosen_offers`` maps ``requirement_id -> offer_id`` (the seeded default offer per
+    requirement). ``sell_prices`` maps ``requirement_id -> float`` and overrides the unit
+    sell price; a requirement absent from the map falls back to its ``target_price``.
+    ``customer_region`` (optional) drives the geo-mismatch AI flag (None skips it). The
+    returned plan has ``requisition_id`` and lines populated but no ``quote_id`` — the
+    caller sets that and persists.
+    """
+    requirements = db.query(Requirement).filter(Requirement.requisition_id == requisition.id).all()
+    if not requirements:
+        raise ValueError(f"No requirements found for requisition {requisition.id}")
+
     plan = BuyPlan(
-        quote_id=quote_id,
-        requisition_id=quote.requisition_id,
+        requisition_id=requisition.id,
         status=BuyPlanStatus.DRAFT.value,
     )
 
@@ -99,7 +213,8 @@ def build_buy_plan(quote_id: int, db: Session) -> BuyPlan:
     total_revenue = 0.0
 
     for req in requirements:
-        lines = _build_lines_for_requirement(req, customer_region, db, quote_offer_by_req.get(req.id))
+        sell_price = sell_prices.get(req.id) if sell_prices else None
+        lines = _build_lines_for_requirement(req, customer_region, db, chosen_offers.get(req.id), sell_price)
         for line in lines:
             line.buy_plan = plan
             # Accumulate financials
@@ -114,9 +229,10 @@ def build_buy_plan(quote_id: int, db: Session) -> BuyPlan:
     if total_revenue and total_revenue > 0:
         plan.total_margin_pct = round(((total_revenue - total_cost) / total_revenue) * 100, 2)
 
-    # Generate AI analysis
+    # Generate AI analysis. Pass customer_region directly so geo flags work before the
+    # caller wires quote_id (the quote path no longer round-trips through plan.quote_id).
     plan.ai_summary = generate_ai_summary(plan)
-    plan.ai_flags = [f.__dict__ if hasattr(f, "__dict__") else f for f in generate_ai_flags(plan, db)]
+    plan.ai_flags = [f.__dict__ if hasattr(f, "__dict__") else f for f in generate_ai_flags(plan, db, customer_region)]
 
     return plan
 
@@ -150,6 +266,7 @@ def _build_lines_for_requirement(
     customer_region: str | None,
     db: Session,
     quote_offer_id: int | None = None,
+    sell_price: float | None = None,
 ) -> list[BuyPlanLine]:
     """Build buy plan lines for a single requirement.
 
@@ -158,7 +275,8 @@ def _build_lines_for_requirement(
     score/auto-split only fills the remaining qty. When no chosen offer is given — or it
     is stale/inactive — falls back to selecting the best offer; if no single offer
     covers the full qty, auto-splits across multiple vendors (prefer fewest splits, best
-    score).
+    score). *sell_price* overrides each line's unit sell price; None falls back to the
+    requirement's target_price.
     """
     target_qty = requirement.target_qty or 1
 
@@ -200,7 +318,7 @@ def _build_lines_for_requirement(
             if qty_avail > 0:
                 alloc = min(qty_avail, remaining)
                 buyer, reason = assign_buyer(offer, vendor_card, db)
-                lines.append(_create_line(requirement, offer, alloc, score, buyer, reason))
+                lines.append(_create_line(requirement, offer, alloc, score, buyer, reason, sell_price))
                 remaining -= alloc
                 used_offer_ids.add(offer.id)
                 if remaining <= 0:
@@ -211,7 +329,7 @@ def _build_lines_for_requirement(
         for offer, vendor_card, score in scored:
             if (offer.qty_available or 0) >= target_qty:
                 buyer, reason = assign_buyer(offer, vendor_card, db)
-                return [_create_line(requirement, offer, target_qty, score, buyer, reason)]
+                return [_create_line(requirement, offer, target_qty, score, buyer, reason, sell_price)]
 
     # Auto-split: greedily assign from best-scored offers to fill remaining qty.
     for offer, vendor_card, score in scored:
@@ -223,7 +341,7 @@ def _build_lines_for_requirement(
 
         alloc = min(qty_avail, remaining)
         buyer, reason = assign_buyer(offer, vendor_card, db)
-        line = _create_line(requirement, offer, alloc, score, buyer, reason)
+        line = _create_line(requirement, offer, alloc, score, buyer, reason, sell_price)
         lines.append(line)
         remaining -= alloc
         used_offer_ids.add(offer.id)
@@ -238,11 +356,19 @@ def _create_line(
     ai_score: float,
     buyer,
     assignment_reason: str,
+    unit_sell: float | None = None,
 ) -> BuyPlanLine:
-    """Create a single BuyPlanLine from a scored offer."""
+    """Create a single BuyPlanLine from a scored offer.
+
+    *unit_sell* (when provided) is the explicit per-line sell price; when None it falls
+    back to the requirement's target_price (the quote-path default).
+    """
     unit_cost = float(offer.unit_price) if offer.unit_price else None
-    # Use target_price from requirement as the sell price
-    unit_sell = float(requirement.target_price) if requirement.target_price else None
+    # Explicit sell price wins; otherwise fall back to the requirement's target_price.
+    if unit_sell is None:
+        unit_sell = float(requirement.target_price) if requirement.target_price else None
+    else:
+        unit_sell = float(unit_sell)
 
     margin_pct = None
     if unit_sell and unit_cost and unit_sell > 0:
@@ -308,7 +434,7 @@ def generate_ai_summary(plan: BuyPlan) -> str:
 # ── AI Flags ────────────────────────────────────────────────────────
 
 
-def generate_ai_flags(plan: BuyPlan, db: Session) -> list[dict]:
+def generate_ai_flags(plan: BuyPlan, db: Session, customer_region: str | None = None) -> list[dict]:
     """Generate AI flags for potential issues in the buy plan.
 
     Checks:
@@ -317,6 +443,10 @@ def generate_ai_flags(plan: BuyPlan, db: Session) -> list[dict]:
     - Quantity gap (splits don't cover full requirement qty)
     - Better offer available (cheaper alternative not selected)
     - Geography mismatch (vendor in different region from customer)
+
+    *customer_region* (when provided) drives the geo-mismatch check directly; this lets
+    the builder pass the region it already derived (and supports quote-less SO plans). It
+    falls back to deriving the region from ``plan.quote_id`` when not supplied.
     """
     flags = []
     now = datetime.now(timezone.utc)
@@ -324,9 +454,9 @@ def generate_ai_flags(plan: BuyPlan, db: Session) -> list[dict]:
     min_margin = settings.buyplan_min_margin_pct
     better_pct = settings.buyplan_better_offer_pct
 
-    # Determine customer region for geo mismatch
-    customer_region = None
-    if plan.quote_id:
+    # Determine customer region for geo mismatch — derive from the quote only when the
+    # caller did not already supply it.
+    if customer_region is None and plan.quote_id:
         quote = db.get(Quote, plan.quote_id)
         if quote and quote.customer_site:
             customer_region = _country_to_region(quote.customer_site.country or quote.customer_site.state)

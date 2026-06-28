@@ -123,7 +123,7 @@
 
   {# ═══ 3. COLLAPSIBLE SECTIONS ═══ #}
 
-  {# ── Section: Sales (SALES_ORDER gate) ── #}
+  {# ── Section: Sales (QP_SALES gate) ── #}
   <div class="mb-3 rounded-lg border border-gray-200 bg-white">
     <div role="button" tabindex="0"
          @click="showSales = !showSales"
@@ -132,6 +132,25 @@
       <div class="flex items-center gap-2">
         <span>Sales</span>
         {{ gate_chip(sales_gate) }}
+        {# Inline approve/reject — shown only to eligible PENDING recipients. Clicking or
+           keying the buttons must not toggle the section: .stop on both pointer and
+           keyboard events keeps the header's @keydown.enter from also firing. #}
+        {% if sales_gate and sales_gate_can_act %}
+        <div class="inline-flex items-center gap-1.5" @click.stop @keydown.enter.stop @keydown.space.stop>
+          <button type="button"
+                  hx-post="/v2/approvals/requests/{{ sales_gate.id }}/decision"
+                  hx-vals='{"action": "approve"}'
+                  hx-swap="none"
+                  hx-on::after-request="if(event.detail.successful) htmx.ajax('GET', '/v2/qp/{{ qp.id }}', {target:'#main-content', indicator:'#main-content'})"
+                  class="btn btn-primary btn-sm">Approve</button>
+          <button type="button"
+                  hx-post="/v2/approvals/requests/{{ sales_gate.id }}/decision"
+                  hx-vals="js:{action: 'reject', comment: prompt('Reason for rejection?') || ''}"
+                  hx-swap="none"
+                  hx-on::after-request="if(event.detail.successful) htmx.ajax('GET', '/v2/qp/{{ qp.id }}', {target:'#main-content', indicator:'#main-content'})"
+                  class="btn btn-danger btn-sm">Reject</button>
+        </div>
+        {% endif %}
       </div>
       <svg class="h-4 w-4 text-gray-400 transition-transform" :class="showSales ? 'rotate-180' : ''"
            fill="none" viewBox="0 0 24 24" stroke="currentColor">

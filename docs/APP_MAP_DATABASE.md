@@ -35,7 +35,7 @@
 | notify_buyplan_email_enabled | Boolean NOT NULL | default True; Profile-tab toggle — suppress buy-plan email notifications (migration 151) |
 | notify_new_offer_alert_enabled | Boolean NOT NULL | default True; Profile-tab toggle — suppress new-offer alert notifications (migration 151) |
 | can_approve_buy_plans | Boolean NOT NULL | default False (server_default `false`); migration 155. **Per-user buy-plan approval right** — admin-toggled in the Users settings tab, gates the buy-plan approve/reject action via `dependencies.require_buyplan_approver` / `can_approve_buy_plans(user)`. Role-independent: admins do NOT auto-qualify, the column is the single source of truth. Migration 155 also sweeps any legacy `role='ops'` rows to `'manager'`. |
-| can_approve_sales_orders | Boolean NOT NULL | default False (server_default `false`); migration 160 (QP Phase C2a). **Per-user QP Sales-section approval right** — admin-toggled in the Users settings tab ("Approve SOs"); `routing.route_request` routes a `SALES_ORDER` gate to every active holder (no amount check). Role-independent (the column is the single source of truth). |
+| can_approve_qp_sales | Boolean NOT NULL | default False (server_default `false`); created as `can_approve_sales_orders` by migration 160 (QP Phase C2a), **renamed to `can_approve_qp_sales` by SP-2 migration 164**. **Per-user QP Sales-section approval right** — admin-toggled in the Users settings tab ("Approve SOs"); `routing.route_request` routes a `QP_SALES` gate to every active holder (no amount check). Role-independent (the column is the single source of truth). The admin route/handler keep their legacy `sales-order-approver` / `set_sales_order_approver` names (intentional asymmetry, SP-2 spec §13). |
 | can_approve_pos | Boolean NOT NULL | default False (server_default `false`); migration 160 (QP Phase C2a). **Per-user QP Purchasing-section approval right** — admin-toggled in the Users settings tab ("Approve POs"); `routing.route_request` routes a `PURCHASE_ORDER` gate to every active holder (no amount check). Role-independent (the column is the single source of truth). |
 | last_login_at | UTCDateTime, nullable | Migration 148. Stamped on every successful OAuth callback. NULL + no azure_id ⇒ an "Invited" (pre-provisioned, never-logged-in) row. |
 | access_overrides | JSON, default `{}` | Migration 148. **Explicit per-user access overrides only**: `{access_key: bool}` keyed by `constants.AccessKey`. An *absent* key means "use the role default" (`constants.ROLE_ACCESS_DEFAULTS`) — the dict never stores the role default, so it stays empty until an admin grants/revokes a specific key. Read by `dependencies.user_has_access` (override wins over role default; admin → all). `ops_verification` is NOT stored here (it lives in `verification_group_members`). |
@@ -288,7 +288,7 @@ Migration 162 also adds the new status value **`resourcing`** to `buy_plan_lines
 | Column | Type | Notes |
 |--------|------|-------|
 | id | Integer PK | |
-| quote_id | FK -> quotes (CASCADE) | |
+| quote_id | FK -> quotes (CASCADE), **nullable** | NULL for Sales-Order-origin buy plans built directly from RFQ offers with no customer quote (SP-2 migration 163); set when the plan derives from an accepted customer quote. |
 | requisition_id | FK -> requisitions (CASCADE) | |
 | sales_order_number | String 100 | |
 | customer_po_number | String 100 | |
@@ -356,9 +356,9 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 | inspection_level | String 50, nullable | e.g. "AQL 1.5" |
 | sampling_rate | String 50, nullable | |
 | notes | Text, nullable | |
-| sales_* (18 cols) | String 255 / Text / Integer / Boolean, all nullable | § Sales "Quality Questions" (QP Phase C2b): `sales_so_number`, `sales_condition`, `sales_quantity` (Int), `sales_fw_hw_rev`, `sales_product_commodity`, `sales_testing_required`/`_option`/`_specifics`, `sales_test_location`, `sales_serial_preapproval_required`, `sales_authorized_ship_early`/`_partial`, `sales_routing_prescreening_whs`, `sales_vendor_rating`, `sales_third_party_pkg_ok`, `sales_pkg_requirements`, `sales_bom_matrix_links`, `sales_notes` (Boolean for Y/N). Completeness gate enforces the required subset at submit, not the DB. |
+| sales_* (17 cols) | String 255 / Text / Integer / Boolean, all nullable | § Sales "Quality Questions" (QP Phase C2b): `sales_condition`, `sales_quantity` (Int), `sales_fw_hw_rev`, `sales_product_commodity`, `sales_testing_required`/`_option`/`_specifics`, `sales_test_location`, `sales_serial_preapproval_required`, `sales_authorized_ship_early`/`_partial`, `sales_routing_prescreening_whs`, `sales_vendor_rating`, `sales_third_party_pkg_ok`, `sales_pkg_requirements`, `sales_bom_matrix_links`, `sales_notes` (Boolean for Y/N). Completeness gate enforces the required subset at submit, not the DB. The canonical SO# now lives on `buy_plans_v3.sales_order_number` (SP-2 migration 164 retired `sales_so_number` from the QP). |
 | purchasing_* (10 cols) | String 255 / Text / Boolean, all nullable | § Purchasing "Quality Questions" (C2b): `purchasing_po_number`, `purchasing_condition`, `purchasing_fw_hw_rev`, `purchasing_product_commodity`, `purchasing_testing_required`/`_option`, `purchasing_routing_prescreening_whs`, `purchasing_packaging`, `purchasing_tpo_ship_complete` (Bool), `purchasing_tpo_notes`. |
-| sales_section_approved_at | UTCDateTime, nullable | Stamped by `_on_section_approved` when the SALES_ORDER gate approves (cleared on reject). |
+| sales_section_approved_at | UTCDateTime, nullable | Stamped by `_on_section_approved` when the QP_SALES gate approves (cleared on reject). |
 | purchasing_section_approved_at | UTCDateTime, nullable | Stamped when the PURCHASE_ORDER gate approves. |
 | created_by_id | FK -> users (SET NULL) | |
 | approved_by_id | FK -> users (SET NULL) | |

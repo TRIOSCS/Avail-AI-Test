@@ -253,7 +253,7 @@ def decide(
     # failure rolls the whole decision back atomically.
     if (
         request.subject_type == ApprovalSubjectType.QUALITY_PLAN
-        and request.gate_type in (ApprovalGateType.SALES_ORDER, ApprovalGateType.PURCHASE_ORDER)
+        and request.gate_type in (ApprovalGateType.QP_SALES, ApprovalGateType.PURCHASE_ORDER)
         and request.subject_id is not None
     ):
         from ..quality_plan_service import _on_section_approved

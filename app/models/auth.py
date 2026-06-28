@@ -74,7 +74,7 @@ class User(Base):
     prepayment_approval_limit = Column(Numeric(12, 2), nullable=True)
 
     # QP Sales-Order gate (Sales section): no dollar limit — approves any amount.
-    can_approve_sales_orders = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    can_approve_qp_sales = Column(Boolean, nullable=False, default=False, server_default=text("false"))
 
     # QP Purchase-Order gate (Purchasing section): no dollar limit — approves any amount.
     can_approve_pos = Column(Boolean, nullable=False, default=False, server_default=text("false"))

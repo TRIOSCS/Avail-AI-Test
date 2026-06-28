@@ -4,7 +4,7 @@ Purpose: Exposes GET /v2/qp/for-buy-plan/{bp_id} (the front door — get-or-crea
          for a buy plan and render its native detail), GET /v2/qp/{id} (QP detail
          partial), POST /v2/qp/{id}/submit (submit-for-review action), the QP Phase C2a
          section gates POST /v2/qp/{id}/submit-sales + /submit-purchasing (open the
-         SALES_ORDER / PURCHASE_ORDER approval gate), and the QP Phase C2b native-section
+         QP_SALES / PURCHASE_ORDER approval gate), and the QP Phase C2b native-section
          editors: PATCH /v2/qp/{id}/sales + /purchasing (inline field edit → refreshed
          section partial), serial CRUD (POST/DELETE /v2/qp/{id}/serial[/{entry_id}]),
          and FRU pin/unpin (POST/DELETE /v2/qp/{id}/fru[/{lookup_id}]). All return the
@@ -30,10 +30,10 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
-from ..constants import ApprovalGateType, ApprovalSubjectType
+from ..constants import ApprovalGateType, ApprovalRecipientStatus, ApprovalRequestStatus, ApprovalSubjectType
 from ..database import get_db
 from ..dependencies import get_buyplan_for_user, require_requisition_access, require_user
-from ..models.approvals import ApprovalRequest
+from ..models.approvals import ApprovalRequest, ApprovalStep, ApprovalStepRecipient
 from ..models.buy_plan import BuyPlan, BuyPlanLine
 from ..models.crm import CustomerSite
 from ..models.fru_link import FruLink
@@ -64,7 +64,6 @@ _BOOL_FALSE = {"false", "off", "0", "no", "n"}
 # Per-section editable fields: model attribute → coercion kind. The PATCH handler only
 # writes attributes listed here, so a stray form field can never set an arbitrary column.
 _SALES_FIELDS: dict[str, str] = {
-    "sales_so_number": "str",
     "sales_condition": "str",
     "sales_quantity": "int",
     "sales_fw_hw_rev": "str",
@@ -148,6 +147,28 @@ def _get_gate(db: Session, qp_id: int, gate_type: str) -> ApprovalRequest | None
     ).scalar_one_or_none()
 
 
+def _is_pending_recipient(db: Session, gate: ApprovalRequest | None, user) -> bool:
+    """Return True if *user* is a PENDING recipient on the given open gate request.
+
+    Mirrors the eligibility check in services/approvals/service.py:decide() so the
+    template shows Approve/Reject buttons only when the server would honour a decision.
+    """
+    if gate is None or gate.status != ApprovalRequestStatus.REQUESTED:
+        return False
+    return (
+        db.execute(
+            select(ApprovalStepRecipient)
+            .join(ApprovalStep, ApprovalStepRecipient.step_id == ApprovalStep.id)
+            .where(
+                ApprovalStep.request_id == gate.id,
+                ApprovalStepRecipient.user_id == user.id,
+                ApprovalStepRecipient.status == ApprovalRecipientStatus.PENDING,
+            )
+        ).scalar_one_or_none()
+        is not None
+    )
+
+
 def _qp_detail_response(
     request: Request,
     user,
@@ -181,6 +202,7 @@ def _qp_detail_response(
     )
 
     errors = validate_complete(qp)
+    sales_gate = _get_gate(db, qp.id, ApprovalGateType.QP_SALES)
 
     ctx = {
         "request": request,
@@ -190,10 +212,11 @@ def _qp_detail_response(
         "bp_lines": (bp.lines or []) if bp else [],
         "errors": errors,
         "section_error": section_error,
-        "sales_errors": validate_section(qp, ApprovalGateType.SALES_ORDER),
+        "sales_errors": validate_section(qp, ApprovalGateType.QP_SALES),
         "purchasing_errors": validate_section(qp, ApprovalGateType.PURCHASE_ORDER),
         "fru_rows": _fru_rows(db, qp),
-        "sales_gate": _get_gate(db, qp.id, ApprovalGateType.SALES_ORDER),
+        "sales_gate": sales_gate,
+        "sales_gate_can_act": _is_pending_recipient(db, sales_gate, user),
         "purchasing_gate": _get_gate(db, qp.id, ApprovalGateType.PURCHASE_ORDER),
         "buy_plan_gate": _get_gate(db, qp.id, ApprovalGateType.BUY_PLAN),
         "prepayment_gate": _get_gate(db, qp.id, ApprovalGateType.PREPAYMENT),
@@ -346,7 +369,7 @@ def qp_submit(
 
 
 def _submit_section_response(request: Request, qp_id: int, gate_type: str, db: Session, user) -> HTMLResponse:
-    """Open a section gate (SALES_ORDER / PURCHASE_ORDER) and refresh the QP detail.
+    """Open a section gate (QP_SALES / PURCHASE_ORDER) and refresh the QP detail.
 
     On IncompleteQPError (a required section field is blank) the inline section_errors
     grid blocks submit, so re-render with no gate opened. On NoSectionApproverError
@@ -390,11 +413,11 @@ def qp_submit_sales(
     db: Session = Depends(get_db),
     user=Depends(require_user),
 ) -> HTMLResponse:
-    """Submit the QP Sales section for approval (opens the SALES_ORDER gate).
+    """Submit the QP Sales section for approval (opens the QP_SALES gate).
 
     Refreshes the detail partial. No eligible approver → inline banner, never a 500.
     """
-    return _submit_section_response(request, qp_id, ApprovalGateType.SALES_ORDER, db, user)
+    return _submit_section_response(request, qp_id, ApprovalGateType.QP_SALES, db, user)
 
 
 @router.post("/v2/qp/{qp_id}/submit-purchasing", response_class=HTMLResponse)
@@ -424,6 +447,7 @@ def _load_qp_for_edit(db: Session, qp_id: int, user) -> QualityPlan:
         QualityPlan,
         qp_id,
         options=[
+            joinedload(QualityPlan.buy_plan),
             joinedload(QualityPlan.serial_entries).joinedload(QpSerialEntry.buyer),
             joinedload(QualityPlan.serial_entries).joinedload(QpSerialEntry.submitted_by),
             joinedload(QualityPlan.fru_lookups),
@@ -437,7 +461,7 @@ def _load_qp_for_edit(db: Session, qp_id: int, user) -> QualityPlan:
 
 def _section_approved(qp: QualityPlan, gate_type: str) -> bool:
     """True when the given section already carries an approved-at stamp (read-only)."""
-    if str(gate_type) == "sales_order":
+    if str(gate_type) == "qp_sales":
         return qp.sales_section_approved_at is not None
     return qp.purchasing_section_approved_at is not None
 
@@ -450,8 +474,8 @@ def _render_sales_section(request: Request, db: Session, qp: QualityPlan, user) 
             "request": request,
             "user": user,
             "qp": qp,
-            "sales_errors": validate_section(qp, ApprovalGateType.SALES_ORDER),
-            "sales_gate": _get_gate(db, qp.id, ApprovalGateType.SALES_ORDER),
+            "sales_errors": validate_section(qp, ApprovalGateType.QP_SALES),
+            "sales_gate": _get_gate(db, qp.id, ApprovalGateType.QP_SALES),
         },
     )
 
@@ -500,7 +524,7 @@ async def qp_patch_sales(
     _SALES_FIELDS are written, so a stray form key can never set an arbitrary column.
     """
     qp = _load_qp_for_edit(db, qp_id, user)
-    if not _section_approved(qp, ApprovalGateType.SALES_ORDER):
+    if not _section_approved(qp, ApprovalGateType.QP_SALES):
         form = await request.form()
         for field, kind in _SALES_FIELDS.items():
             if field in form:

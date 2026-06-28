@@ -1116,6 +1116,10 @@ def generate_case_report(plan: BuyPlan, db: Session) -> str:
             site = quote.customer_site
             co = site.company if hasattr(site, "company") and site.company else None
             customer = co.name if co else (site.site_name or "Unknown")
+    elif plan.requisition and plan.requisition.customer_name:
+        customer = plan.requisition.customer_name
+    elif plan.requisition and plan.requisition.customer_site and plan.requisition.customer_site.company:
+        customer = plan.requisition.customer_site.company.name
 
     # ── Financials
     total_cost = float(plan.total_cost or 0)

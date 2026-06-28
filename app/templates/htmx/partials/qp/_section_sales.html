@@ -31,7 +31,7 @@
       <dd class="font-medium text-gray-800 mt-0.5">{{ 'Yes' if value else ('No' if value is false else '—') }}</dd>
     </div>
     {% endmacro %}
-    {{ ro('Sales Order #', qp.sales_so_number) }}
+    {{ ro('Sales Order #', qp.buy_plan.sales_order_number if qp.buy_plan else none) }}
     {{ ro('Condition', qp.sales_condition) }}
     {{ ro('Quantity', qp.sales_quantity) }}
     {{ ro('FW / HW / REV / Date Codes', qp.sales_fw_hw_rev) }}
@@ -92,7 +92,6 @@
       </select>
     </label>
     {% endmacro %}
-    {{ txt('sales_so_number', 'Sales Order #', qp.sales_so_number) }}
     {{ txt('sales_condition', 'Condition', qp.sales_condition) }}
     {{ num('sales_quantity', 'Quantity', qp.sales_quantity) }}
     {{ txt('sales_product_commodity', 'Product Commodity', qp.sales_product_commodity) }}

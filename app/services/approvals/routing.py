@@ -12,7 +12,7 @@ Purpose: Given an ApprovalRequest, queries active Users for the request's gate_t
 Gate → column map:
   buy_plan       → User.can_approve_buy_plans (no amount limit)
   prepayment     → User.can_approve_prepayments + optional prepayment_approval_limit
-  sales_order    → User.can_approve_sales_orders (no amount limit)
+  qp_sales       → User.can_approve_qp_sales (no amount limit)
   purchase_order → User.can_approve_pos (no amount limit)
 
 Called by: app.services.approvals (re-exported), ApprovalService (Task 4+)
@@ -84,14 +84,14 @@ def route_request(db: Session, request: ApprovalRequest) -> ApprovalStep:
             if u.prepayment_approval_limit is None or (amount is not None and amount <= u.prepayment_approval_limit)
         ]
 
-    elif gate == ApprovalGateType.SALES_ORDER:
-        # QP Sales section: route to every active user holding can_approve_sales_orders.
+    elif gate == ApprovalGateType.QP_SALES:
+        # QP Sales section: route to every active user holding can_approve_qp_sales.
         # No amount check (the SO gate approves the section, not a spend).
         eligible = (
             db.query(User)
             .filter(
                 User.is_active.is_(True),
-                User.can_approve_sales_orders.is_(True),
+                User.can_approve_qp_sales.is_(True),
             )
             .all()
         )

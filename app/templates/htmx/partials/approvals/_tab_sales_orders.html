@@ -1,13 +1,27 @@
 {#
   approvals/_tab_sales_orders.html — Sales Orders stage-tab body.
-  The Sales Order build flow lands in SP-2, so SP-1 has no work surface here — a non-approver
-  sees only a neutral empty state; an approver also sees the pinned sales_order queue section.
-  Receives: view, show_pending (pinned section).
+  Renders the pinned "Pending approvals" section (BUY_PLAN gate) for approvers,
+  then the role-scoped deal board restricted to DRAFT and PENDING plans — the
+  pre-approval work surface where sales reps build and submit orders.
+  Receives: view, show_pending (pinned section);
+            board, scope, can_see_all_deals, scope_toggle_url (deal board — DRAFT/PENDING
+            only; no `archive`, so the shared board omits the Completed section).
   Called by: htmx_views.py approvals_tab_partial (lens=sales_orders). Into #bp-hub-body.
-  Depends on: approvals/_pending_section.html.
+  Depends on: approvals/_pending_section.html, buy_plans/_board.html.
 #}
-{% include "htmx/partials/approvals/_pending_section.html" %}
-<div class="rounded-lg border border-gray-200 bg-white px-6 py-10 text-center">
-  <p class="text-sm text-gray-600">No sales orders yet</p>
-  <p class="text-xs text-gray-400 mt-1">Sales orders will appear here once the build flow ships.</p>
+{# New SO origination entry point — loads the requisition picker into the tab body. #}
+<div class="flex items-center justify-end mb-3">
+  <button hx-get="/v2/partials/approvals/sales-orders/new"
+          hx-target="#bp-hub-body"
+          hx-swap="innerHTML"
+          class="btn btn-primary btn-sm inline-flex items-center gap-1">
+    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+    New Sales Order
+  </button>
 </div>
+{% include "htmx/partials/approvals/_pending_section.html" %}
+{# Two-column board: the SO work surface is pre-approval only (Draft/Pending). The Active
+   column and the Completed archive belong to the Buy Plans tab, so override `columns` and
+   pass no `archive`. #}
+{% set columns = [('draft', 'Draft'), ('pending', 'Pending')] %}
+{% include "htmx/partials/buy_plans/_board.html" %}

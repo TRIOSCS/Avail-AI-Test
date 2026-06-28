@@ -146,7 +146,7 @@ def users_context(db: Session) -> dict:
 
     rows: every real user (excluding the agent service account), ordered by
     name/email, each as {user, status, last_login_at, can_approve_buy_plans,
-    can_approve_prepayments, prepayment_approval_limit, can_approve_sales_orders,
+    can_approve_prepayments, prepayment_approval_limit, can_approve_qp_sales,
     can_approve_pos}. Shared by the GET tab (htmx_views.settings_users_tab) and the
     mutation POSTs below.
     """
@@ -159,7 +159,7 @@ def users_context(db: Session) -> dict:
             "can_approve_buy_plans": u.can_approve_buy_plans,
             "can_approve_prepayments": u.can_approve_prepayments,
             "prepayment_approval_limit": u.prepayment_approval_limit,
-            "can_approve_sales_orders": u.can_approve_sales_orders,
+            "can_approve_qp_sales": u.can_approve_qp_sales,
             "can_approve_pos": u.can_approve_pos,
         }
         for u in users
@@ -401,25 +401,25 @@ async def set_sales_order_approver(
     """Grant or revoke a user's QP Sales-Order approval right; returns the refreshed
     Users partial.
 
-    The right is the per-user User.can_approve_sales_orders column; the QP Sales section
-    (SALES_ORDER gate) routes to its holders. Admin-only (require_admin); each change
+    The right is the per-user User.can_approve_qp_sales column; the QP Sales section
+    (QP_SALES gate) routes to its holders. Admin-only (require_admin); each change
     writes an APPROVAL_GRANT / APPROVAL_REVOKE audit row. A no-op (state unchanged) re-
     renders without auditing, mirroring set_buyplan_approver.
     """
     target = _editable_target(db, user_id)
     grant = str(can_approve).strip().lower() in {"true", "1", "on", "yes"}
 
-    if target.can_approve_sales_orders == grant:
+    if target.can_approve_qp_sales == grant:
         return _render(db, request)  # no-op, nothing to audit
 
-    target.can_approve_sales_orders = grant
+    target.can_approve_qp_sales = grant
     action = UserAuditAction.APPROVAL_GRANT if grant else UserAuditAction.APPROVAL_REVOKE
     record_user_audit(
         db,
         actor_id=admin.id,
         target_user_id=target.id,
         action=action,
-        detail={"gate": "sales_order"},
+        detail={"gate": "qp_sales"},
     )
     db.commit()
     logger.info("User {} sales-order approval {} by {}", target.email, "granted" if grant else "revoked", admin.email)

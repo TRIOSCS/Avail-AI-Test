@@ -549,3 +549,170 @@ def test_completed_archive_empty(db_session, test_user, test_quote, test_requisi
     assert page["total"] == 0
     assert page["deals"] == []
     assert page["next_offset"] is None
+
+
+def test_customer_name_falls_back_to_requisition_for_so_origin(db_session):
+    """SO-origin plan (no quote) resolves customer from requisition.customer_name."""
+    from app.models.sourcing import Requisition
+    from app.services.buyplan_hub import _customer_name
+
+    req = Requisition(name="SO-Test-Req", customer_name="Globex Corp")
+    db_session.add(req)
+    db_session.flush()
+    plan = BuyPlan(quote_id=None, requisition_id=req.id)
+    db_session.add(plan)
+    db_session.flush()
+    plan.requisition = req
+    assert _customer_name(plan) == "Globex Corp"
+
+
+# ── 11. statuses filter ───────────────────────────────────────────────
+
+
+def test_deals_board_statuses_filter_active_only(db_session, test_user, test_quote, test_requisition):
+    """Statuses=[ACTIVE] returns only ACTIVE plans; DRAFT plan is excluded."""
+    from app.constants import BuyPlanStatus
+    from app.services.buyplan_hub import deals_board
+
+    draft_plan = _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.DRAFT,
+    )
+    active_plan = _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.ACTIVE,
+    )
+
+    filtered = deals_board(db_session, test_user, scope="all", statuses=[BuyPlanStatus.ACTIVE.value])
+    filtered_ids = {d["plan_id"] for col in filtered.values() for d in col}
+
+    assert active_plan.id in filtered_ids
+    assert draft_plan.id not in filtered_ids
+
+
+def test_deals_board_statuses_none_is_unchanged(db_session, test_user, test_quote, test_requisition):
+    """Statuses=None (default) keeps the original CANCELLED/COMPLETED-exclusion
+    behaviour."""
+    from app.constants import BuyPlanStatus
+    from app.services.buyplan_hub import deals_board
+
+    draft_plan = _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.DRAFT,
+    )
+    active_plan = _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.ACTIVE,
+    )
+
+    # No statuses arg → default behaviour: both DRAFT and ACTIVE appear; CANCELLED/COMPLETED do not.
+    full = deals_board(db_session, test_user, scope="all")
+    full_ids = {d["plan_id"] for col in full.values() for d in col}
+
+    assert draft_plan.id in full_ids
+    assert active_plan.id in full_ids
+
+
+def test_deals_board_statuses_filtered_subset_of_default(db_session, test_user, test_quote, test_requisition):
+    """Filtered board is always a subset of the default (unfiltered) board."""
+    from app.constants import BuyPlanStatus
+    from app.services.buyplan_hub import deals_board
+
+    for status in (BuyPlanStatus.DRAFT, BuyPlanStatus.PENDING, BuyPlanStatus.ACTIVE, BuyPlanStatus.HALTED):
+        _make_plan(
+            db_session,
+            quote_id=test_quote.id,
+            requisition_id=test_requisition.id,
+            status=status,
+        )
+
+    active_only = deals_board(db_session, test_user, scope="all", statuses=[BuyPlanStatus.ACTIVE.value])
+    active_ids = {d["plan_id"] for col in active_only.values() for d in col}
+
+    full = deals_board(db_session, test_user, scope="all")
+    full_ids = {d["plan_id"] for col in full.values() for d in col}
+
+    assert active_ids.issubset(full_ids)
+
+
+def test_buy_plans_tab_statuses_excludes_draft(db_session, test_user, test_quote, test_requisition):
+    """Buy Plans tab filter (ACTIVE+HALTED) excludes DRAFT plans."""
+    from app.constants import BuyPlanStatus
+    from app.services.buyplan_hub import deals_board
+
+    draft_plan = _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.DRAFT,
+    )
+    active_plan = _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.ACTIVE,
+    )
+    halted_plan = _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.HALTED,
+    )
+
+    board = deals_board(
+        db_session,
+        test_user,
+        scope="all",
+        statuses=[BuyPlanStatus.ACTIVE.value, BuyPlanStatus.HALTED.value],
+    )
+    ids = {d["plan_id"] for col in board.values() for d in col}
+
+    assert active_plan.id in ids
+    assert halted_plan.id in ids
+    assert draft_plan.id not in ids
+
+
+def test_sales_orders_tab_statuses_includes_draft_and_pending(db_session, test_user, test_quote, test_requisition):
+    """Sales Orders tab filter (DRAFT+PENDING) includes DRAFT/PENDING; excludes
+    ACTIVE."""
+    from app.constants import BuyPlanStatus
+    from app.services.buyplan_hub import deals_board
+
+    draft_plan = _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.DRAFT,
+    )
+    pending_plan = _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.PENDING,
+    )
+    active_plan = _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.ACTIVE,
+    )
+
+    board = deals_board(
+        db_session,
+        test_user,
+        scope="all",
+        statuses=[BuyPlanStatus.DRAFT.value, BuyPlanStatus.PENDING.value],
+    )
+    ids = {d["plan_id"] for col in board.values() for d in col}
+
+    assert draft_plan.id in ids
+    assert pending_plan.id in ids
+    assert active_plan.id not in ids

@@ -45,14 +45,14 @@ from app.services.quality_plan_service import (
 # ── Helpers ─────────────────────────────────────────────────────────────
 
 
-def _make_user(db: Session, *, can_approve_sales_orders: bool = False, can_approve_pos: bool = False) -> User:
+def _make_user(db: Session, *, can_approve_qp_sales: bool = False, can_approve_pos: bool = False) -> User:
     u = User(
         email=f"c2b-{uuid.uuid4().hex[:8]}@test.com",
         name="C2b User",
         role="admin",
         azure_id=f"azure-c2b-{uuid.uuid4().hex[:8]}",
         is_active=True,
-        can_approve_sales_orders=can_approve_sales_orders,
+        can_approve_qp_sales=can_approve_qp_sales,
         can_approve_pos=can_approve_pos,
         created_at=datetime.now(timezone.utc),
     )
@@ -92,7 +92,7 @@ def _make_qp(db: Session, owner: User, *, fill_sales: bool = False, fill_purchas
     db.flush()
     qp = QualityPlan(buy_plan_id=bp.id, created_by_id=owner.id, order_type="new", status="draft")
     if fill_sales:
-        qp.sales_so_number = "TSO0190738"
+        bp.sales_order_number = "TSO0190738"  # canonical SO# lives on buy plan (SP-2)
         qp.sales_condition = "New"
         qp.sales_quantity = 10
         qp.sales_product_commodity = "HDD"
@@ -129,7 +129,7 @@ def test_complete_sections_validate_clean(db_session: Session) -> None:
     qp = _make_qp(db_session, _make_user(db_session), fill_sales=True, fill_purchasing=True)
     assert _validate_sales_section(qp) == []
     assert _validate_purchasing_section(qp) == []
-    assert validate_section(qp, ApprovalGateType.SALES_ORDER) == []
+    assert validate_section(qp, ApprovalGateType.QP_SALES) == []
     assert validate_section(qp, ApprovalGateType.PURCHASE_ORDER) == []
 
 
@@ -139,10 +139,10 @@ def test_complete_sections_validate_clean(db_session: Session) -> None:
 def test_submit_incomplete_sales_raises_and_opens_no_gate(db_session: Session) -> None:
     """An incomplete Sales section raises IncompleteQPError and opens no gate
     request."""
-    approver = _make_user(db_session, can_approve_sales_orders=True)
+    approver = _make_user(db_session, can_approve_qp_sales=True)
     qp = _make_qp(db_session, approver)  # not filled
     with pytest.raises(IncompleteQPError):
-        submit_section(db_session, qp.id, ApprovalGateType.SALES_ORDER, approver)
+        submit_section(db_session, qp.id, ApprovalGateType.QP_SALES, approver)
     reqs = db_session.execute(select(QualityPlan).where(QualityPlan.id == qp.id)).scalar_one()
     assert reqs is not None  # QP intact
     from app.models.approvals import ApprovalRequest
@@ -152,11 +152,11 @@ def test_submit_incomplete_sales_raises_and_opens_no_gate(db_session: Session) -
 
 
 def test_submit_complete_sales_opens_gate(db_session: Session) -> None:
-    """A complete Sales section opens the SALES_ORDER request."""
-    approver = _make_user(db_session, can_approve_sales_orders=True)
+    """A complete Sales section opens the QP_SALES request."""
+    approver = _make_user(db_session, can_approve_qp_sales=True)
     qp = _make_qp(db_session, approver, fill_sales=True)
-    req = submit_section(db_session, qp.id, ApprovalGateType.SALES_ORDER, approver)
-    assert req.gate_type == ApprovalGateType.SALES_ORDER
+    req = submit_section(db_session, qp.id, ApprovalGateType.QP_SALES, approver)
+    assert req.gate_type == ApprovalGateType.QP_SALES
     assert req.subject_id == qp.id
 
 
@@ -167,7 +167,7 @@ def test_on_section_approved_stamps_sales_timestamp(db_session: Session) -> None
     """Approving the Sales section sets sales_section_approved_at."""
     qp = _make_qp(db_session, _make_user(db_session), fill_sales=True)
     assert qp.sales_section_approved_at is None
-    _on_section_approved(db_session, qp.id, ApprovalGateType.SALES_ORDER, True)
+    _on_section_approved(db_session, qp.id, ApprovalGateType.QP_SALES, True)
     db_session.refresh(qp)
     assert qp.sales_section_approved_at is not None
     assert qp.purchasing_section_approved_at is None  # unaffected
@@ -186,7 +186,7 @@ def test_on_section_rejected_clears_timestamp(db_session: Session) -> None:
     qp = _make_qp(db_session, _make_user(db_session), fill_sales=True)
     qp.sales_section_approved_at = datetime.now(timezone.utc)
     db_session.flush()
-    _on_section_approved(db_session, qp.id, ApprovalGateType.SALES_ORDER, False)
+    _on_section_approved(db_session, qp.id, ApprovalGateType.QP_SALES, False)
     db_session.refresh(qp)
     assert qp.sales_section_approved_at is None
 
@@ -201,7 +201,7 @@ def qp_client(db_session: Session):
     from app.dependencies import require_user
     from app.main import app
 
-    owner = _make_user(db_session, can_approve_sales_orders=True, can_approve_pos=True)
+    owner = _make_user(db_session, can_approve_qp_sales=True, can_approve_pos=True)
     qp = _make_qp(db_session, owner, fill_sales=True, fill_purchasing=True)
     db_session.commit()
 
@@ -346,7 +346,7 @@ def test_submit_button_disabled_when_section_incomplete(db_session: Session) -> 
     from app.dependencies import require_user
     from app.main import app
 
-    owner = _make_user(db_session, can_approve_sales_orders=True)
+    owner = _make_user(db_session, can_approve_qp_sales=True)
     qp = _make_qp(db_session, owner)  # incomplete
     db_session.commit()
 
@@ -364,3 +364,76 @@ def test_submit_button_disabled_when_section_incomplete(db_session: Session) -> 
 
     assert r.status_code == 200
     assert "Sales Order # is required" in r.text
+
+
+# ── Inline Sales-gate approve/reject (Task 6) ─────────────────────────────────
+
+
+@pytest.fixture()
+def qp_with_open_sales_gate(db_session: Session):
+    """QP + approver with an open QP_SALES gate where the approver is a PENDING
+    recipient."""
+    approver = _make_user(db_session, can_approve_qp_sales=True)
+    qp = _make_qp(db_session, approver, fill_sales=True)
+    submit_section(db_session, qp.id, ApprovalGateType.QP_SALES, approver)
+    db_session.commit()
+    return qp, approver
+
+
+def test_qp_view_renders_inline_sales_approve_for_recipient(qp_with_open_sales_gate, db_session: Session) -> None:
+    """An eligible PENDING recipient sees inline Approve/Reject in the QP Sales
+    header."""
+    from app.database import get_db
+    from app.dependencies import require_user
+    from app.main import app
+
+    qp, approver = qp_with_open_sales_gate
+
+    def _db():
+        yield db_session
+
+    app.dependency_overrides[get_db] = _db
+    app.dependency_overrides[require_user] = lambda: approver
+    try:
+        client = TestClient(app)
+        r = client.get(f"/v2/qp/{qp.id}")
+    finally:
+        for dep in (get_db, require_user):
+            app.dependency_overrides.pop(dep, None)
+
+    assert r.status_code == 200
+    assert "/v2/approvals/requests/" in r.text
+    assert "Approve" in r.text
+    assert "Reject" in r.text
+
+
+def test_qp_view_no_inline_approve_for_non_recipient(qp_with_open_sales_gate, db_session: Session) -> None:
+    """Recipiency — NOT the can_approve_qp_sales permission — gates the inline controls.
+
+    The non-recipient HOLDS can_approve_qp_sales but was never routed THIS request, so
+    the inline Approve/Reject must stay hidden (mirrors decide()'s recipient check).
+    Granting the permission here (rather than using a zero-perm user) is what makes the
+    test prove that recipiency, not the permission flag, gates the controls.
+    """
+    from app.database import get_db
+    from app.dependencies import require_user
+    from app.main import app
+
+    qp, _approver = qp_with_open_sales_gate
+    other_user = _make_user(db_session, can_approve_qp_sales=True)
+    db_session.flush()
+
+    def _db():
+        yield db_session
+
+    app.dependency_overrides[get_db] = _db
+    app.dependency_overrides[require_user] = lambda: other_user
+    try:
+        client = TestClient(app)
+        r = client.get(f"/v2/qp/{qp.id}")
+    finally:
+        for dep in (get_db, require_user):
+            app.dependency_overrides.pop(dep, None)
+
+    assert r.status_code == 200
+    assert "/v2/approvals/requests/" not in r.text

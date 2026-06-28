@@ -74,6 +74,10 @@ def _plan_context(plan: BuyPlan, db: Session) -> dict:
             customer_name = quote.customer_site.company.name
         elif quote.customer_site:
             customer_name = quote.customer_site.site_name or ""
+    elif plan.requisition and plan.requisition.customer_name:
+        customer_name = plan.requisition.customer_name
+    elif plan.requisition and plan.requisition.customer_site and plan.requisition.customer_site.company:
+        customer_name = plan.requisition.customer_site.company.name
     return {
         "submitter": submitter,
         "submitter_name": submitter.name or submitter.email if submitter else "Unknown",

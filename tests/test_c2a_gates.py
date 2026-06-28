@@ -2,7 +2,7 @@
 
 Covers the C2a contract on the shared approvals engine (engine + buy-plan gate already
 live in C1):
-  - route_request for the SALES_ORDER gate routes to can_approve_sales_orders holders;
+  - route_request for the QP_SALES gate routes to can_approve_qp_sales holders;
     for the PURCHASE_ORDER gate to can_approve_pos holders (step rule=ANY, recipients
     PENDING), with no amount check.
   - no eligible approver raises NoEligibleApproverError, and submit_section surfaces it as
@@ -59,7 +59,7 @@ from app.services.quality_plan_service import (
 def _make_user(
     db: Session,
     *,
-    can_approve_sales_orders: bool = False,
+    can_approve_qp_sales: bool = False,
     can_approve_pos: bool = False,
     is_active: bool = True,
     role: str = "buyer",
@@ -70,7 +70,7 @@ def _make_user(
         role=role,
         azure_id=f"azure-c2a-{uuid.uuid4().hex[:8]}",
         is_active=is_active,
-        can_approve_sales_orders=can_approve_sales_orders,
+        can_approve_qp_sales=can_approve_qp_sales,
         can_approve_pos=can_approve_pos,
         created_at=datetime.now(timezone.utc),
     )
@@ -108,20 +108,20 @@ def _make_qp(db: Session, owner: User) -> QualityPlan:
         status=BuyPlanStatus.DRAFT.value,
         so_status="pending",
         total_cost=1000.0,
+        sales_order_number="TSO0190738",  # canonical SO# lives on the buy plan (SP-2)
     )
     db.add(bp)
     db.flush()
 
     # C2b adds a per-section completeness gate to submit_section: the Sales section needs
-    # SO# + condition + quantity + product commodity + testing-required, and Purchasing
-    # needs PO# + condition + product commodity + testing-required, before a gate opens.
-    # Fill both so these C2a routing/gate tests exercise the gate-passing path.
+    # SO# (from buy plan) + condition + quantity + product commodity + testing-required,
+    # and Purchasing needs PO# + condition + product commodity + testing-required, before
+    # a gate opens. Fill both so these C2a routing/gate tests exercise the gate-passing path.
     qp = QualityPlan(
         buy_plan_id=bp.id,
         created_by_id=owner.id,
         order_type="new",
         status="draft",
-        sales_so_number="TSO0190738",
         sales_condition="New",
         sales_quantity=10,
         sales_product_commodity="HDD",
@@ -155,17 +155,17 @@ def _section_requests(db: Session, qp_id: int, gate: ApprovalGateType) -> list[A
     )
 
 
-# ── route_request: SALES_ORDER ───────────────────────────────────────────
+# ── route_request: QP_SALES ───────────────────────────────────────────
 
 
 def test_route_sales_order_routes_to_sales_approvers(db_session: Session) -> None:
-    """SALES_ORDER routes to every active user with can_approve_sales_orders=True."""
-    alice = _make_user(db_session, can_approve_sales_orders=True)
-    bob = _make_user(db_session, can_approve_sales_orders=True)
-    _make_user(db_session, can_approve_sales_orders=False)  # not routed
+    """QP_SALES routes to every active user with can_approve_qp_sales=True."""
+    alice = _make_user(db_session, can_approve_qp_sales=True)
+    bob = _make_user(db_session, can_approve_qp_sales=True)
+    _make_user(db_session, can_approve_qp_sales=False)  # not routed
     _make_user(db_session, can_approve_pos=True)  # wrong gate toggle — not routed
 
-    req = _make_request(db_session, ApprovalGateType.SALES_ORDER)
+    req = _make_request(db_session, ApprovalGateType.QP_SALES)
     step = route_request(db_session, req)
 
     assert step.rule == ApprovalStepRule.ANY
@@ -175,10 +175,10 @@ def test_route_sales_order_routes_to_sales_approvers(db_session: Session) -> Non
 
 def test_route_sales_order_ignores_inactive(db_session: Session) -> None:
     """An inactive sales approver is not routed."""
-    active = _make_user(db_session, can_approve_sales_orders=True)
-    _make_user(db_session, can_approve_sales_orders=True, is_active=False)
+    active = _make_user(db_session, can_approve_qp_sales=True)
+    _make_user(db_session, can_approve_qp_sales=True, is_active=False)
 
-    step = route_request(db_session, _make_request(db_session, ApprovalGateType.SALES_ORDER))
+    step = route_request(db_session, _make_request(db_session, ApprovalGateType.QP_SALES))
     assert {r.user_id for r in step.recipients} == {active.id}
 
 
@@ -189,7 +189,7 @@ def test_route_purchase_order_routes_to_po_approvers(db_session: Session) -> Non
     """PURCHASE_ORDER routes to every active user with can_approve_pos=True."""
     carol = _make_user(db_session, can_approve_pos=True)
     _make_user(db_session, can_approve_pos=False)  # not routed
-    _make_user(db_session, can_approve_sales_orders=True)  # wrong gate toggle — not routed
+    _make_user(db_session, can_approve_qp_sales=True)  # wrong gate toggle — not routed
 
     req = _make_request(db_session, ApprovalGateType.PURCHASE_ORDER)
     step = route_request(db_session, req)
@@ -202,10 +202,10 @@ def test_route_purchase_order_routes_to_po_approvers(db_session: Session) -> Non
 
 
 def test_route_sales_order_no_approver_raises(db_session: Session) -> None:
-    """No can_approve_sales_orders holder → NoEligibleApproverError."""
-    _make_user(db_session, can_approve_sales_orders=False)
+    """No can_approve_qp_sales holder → NoEligibleApproverError."""
+    _make_user(db_session, can_approve_qp_sales=False)
     with pytest.raises(NoEligibleApproverError):
-        route_request(db_session, _make_request(db_session, ApprovalGateType.SALES_ORDER))
+        route_request(db_session, _make_request(db_session, ApprovalGateType.QP_SALES))
 
 
 def test_route_purchase_order_no_approver_raises(db_session: Session) -> None:
@@ -219,14 +219,13 @@ def test_route_purchase_order_no_approver_raises(db_session: Session) -> None:
 
 
 def test_submit_sales_section_creates_sales_order_request(db_session: Session) -> None:
-    """submit_section(SALES_ORDER) opens ONE request on the QP, routed to the
-    approver."""
-    approver = _make_user(db_session, can_approve_sales_orders=True)
+    """submit_section(QP_SALES) opens ONE request on the QP, routed to the approver."""
+    approver = _make_user(db_session, can_approve_qp_sales=True)
     qp = _make_qp(db_session, approver)
 
-    req = submit_section(db_session, qp.id, ApprovalGateType.SALES_ORDER, approver)
+    req = submit_section(db_session, qp.id, ApprovalGateType.QP_SALES, approver)
 
-    assert req.gate_type == ApprovalGateType.SALES_ORDER
+    assert req.gate_type == ApprovalGateType.QP_SALES
     assert req.subject_type == ApprovalSubjectType.QUALITY_PLAN
     assert req.subject_id == qp.id
     assert req.status == ApprovalRequestStatus.REQUESTED
@@ -253,26 +252,26 @@ def test_submit_purchasing_section_creates_purchase_order_request(db_session: Se
 def test_submit_section_no_approver_raises_section_error_no_orphan(db_session: Session) -> None:
     """No eligible approver → NoSectionApproverError (router shows banner, not 500), and
     NO orphan ApprovalRequest is left behind."""
-    submitter = _make_user(db_session, can_approve_sales_orders=False)
+    submitter = _make_user(db_session, can_approve_qp_sales=False)
     qp = _make_qp(db_session, submitter)
 
     with pytest.raises(NoSectionApproverError) as exc:
-        submit_section(db_session, qp.id, ApprovalGateType.SALES_ORDER, submitter)
+        submit_section(db_session, qp.id, ApprovalGateType.QP_SALES, submitter)
     assert exc.value.section == "Sales"
 
     # create_request removed the half-built request — no orphan engine state.
-    assert _section_requests(db_session, qp.id, ApprovalGateType.SALES_ORDER) == []
+    assert _section_requests(db_session, qp.id, ApprovalGateType.QP_SALES) == []
 
 
 # ── decide() dispatches the section on-resolve hook ──────────────────────
 
 
 def test_decide_sales_section_logs_activity_same_session(db_session: Session) -> None:
-    """Decide(approve) on a SALES_ORDER request resolves it AND logs the section
-    activity in the same session before commit (via _on_section_approved)."""
-    approver = _make_user(db_session, can_approve_sales_orders=True)
+    """Decide(approve) on a QP_SALES request resolves it AND logs the section activity
+    in the same session before commit (via _on_section_approved)."""
+    approver = _make_user(db_session, can_approve_qp_sales=True)
     qp = _make_qp(db_session, approver)
-    req = submit_section(db_session, qp.id, ApprovalGateType.SALES_ORDER, approver)
+    req = submit_section(db_session, qp.id, ApprovalGateType.QP_SALES, approver)
 
     resolved = svc_decide(db_session, req.id, approver, "approve", comment="ok")
 
@@ -325,26 +324,26 @@ def _audit_rows(db: Session, action) -> list[UserAdminAudit]:
 
 
 def test_set_sales_order_approver_grants_and_audits(admin_client, db_session: Session) -> None:
-    """The sales-order-approver endpoint flips can_approve_sales_orders + audits."""
+    """The sales-order-approver endpoint flips can_approve_qp_sales + audits."""
     client, _admin = admin_client
     target = _make_user(db_session)
 
     r = client.post(f"/api/admin/users/{target.id}/sales-order-approver", data={"can_approve": "true"})
     assert r.status_code == 200
     db_session.refresh(target)
-    assert target.can_approve_sales_orders is True
+    assert target.can_approve_qp_sales is True
     assert len(_audit_rows(db_session, UserAuditAction.APPROVAL_GRANT)) == 1
 
 
 def test_set_sales_order_approver_revokes(admin_client, db_session: Session) -> None:
     """Revoking flips the column back and writes a revoke audit row."""
     client, _admin = admin_client
-    target = _make_user(db_session, can_approve_sales_orders=True)
+    target = _make_user(db_session, can_approve_qp_sales=True)
 
     r = client.post(f"/api/admin/users/{target.id}/sales-order-approver", data={"can_approve": "false"})
     assert r.status_code == 200
     db_session.refresh(target)
-    assert target.can_approve_sales_orders is False
+    assert target.can_approve_qp_sales is False
     assert len(_audit_rows(db_session, UserAuditAction.APPROVAL_REVOKE)) == 1
 
 
@@ -370,7 +369,7 @@ def qp_client(db_session: Session):
     from app.dependencies import require_user
     from app.main import app
 
-    user = _make_user(db_session, role="admin", can_approve_sales_orders=True, can_approve_pos=True)
+    user = _make_user(db_session, role="admin", can_approve_qp_sales=True, can_approve_pos=True)
     qp = _make_qp(db_session, user)
     db_session.commit()
 
@@ -387,12 +386,12 @@ def qp_client(db_session: Session):
 
 
 def test_submit_sales_endpoint_creates_request(qp_client, db_session: Session) -> None:
-    """POST /v2/qp/{id}/submit-sales opens a SALES_ORDER request and returns 200."""
+    """POST /v2/qp/{id}/submit-sales opens a QP_SALES request and returns 200."""
     client, _user, qp = qp_client
 
     r = client.post(f"/v2/qp/{qp.id}/submit-sales")
     assert r.status_code == 200
-    reqs = _section_requests(db_session, qp.id, ApprovalGateType.SALES_ORDER)
+    reqs = _section_requests(db_session, qp.id, ApprovalGateType.QP_SALES)
     assert len(reqs) == 1
     assert reqs[0].status == ApprovalRequestStatus.REQUESTED
 
@@ -415,7 +414,7 @@ def test_submit_sales_endpoint_no_approver_shows_banner_not_500(db_session: Sess
     from app.dependencies import require_user
     from app.main import app
 
-    user = _make_user(db_session, role="admin", can_approve_sales_orders=False, can_approve_pos=False)
+    user = _make_user(db_session, role="admin", can_approve_qp_sales=False, can_approve_pos=False)
     qp = _make_qp(db_session, user)
     db_session.commit()
 
@@ -433,4 +432,4 @@ def test_submit_sales_endpoint_no_approver_shows_banner_not_500(db_session: Sess
 
     assert r.status_code == 200
     assert "No approver configured" in r.text
-    assert _section_requests(db_session, qp.id, ApprovalGateType.SALES_ORDER) == []
+    assert _section_requests(db_session, qp.id, ApprovalGateType.QP_SALES) == []

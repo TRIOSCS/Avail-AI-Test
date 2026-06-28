@@ -143,11 +143,11 @@
                 <input type="hidden" name="can_approve" value="false">
                 <input type="checkbox" name="can_approve" value="true"
                        class="h-4 w-4 rounded border-gray-300 text-accent-600 focus:ring-accent-500"
-                       {{ 'checked' if row.can_approve_sales_orders else '' }}
+                       {{ 'checked' if row.can_approve_qp_sales else '' }}
                        hx-post="/api/admin/users/{{ row.user.id }}/sales-order-approver"
                        hx-target="#users-content" hx-swap="outerHTML"
                        hx-trigger="change">
-                <span class="ml-2 text-xs text-gray-600">{{ 'Yes' if row.can_approve_sales_orders else 'No' }}</span>
+                <span class="ml-2 text-xs text-gray-600">{{ 'Yes' if row.can_approve_qp_sales else 'No' }}</span>
               </label>
             </td>
             <td class="table-cell">
