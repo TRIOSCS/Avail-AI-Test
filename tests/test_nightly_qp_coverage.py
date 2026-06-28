@@ -1,10 +1,11 @@
-"""tests/test_nightly_qp_coverage.py — Nightly coverage boost for app/routers/quality_plans.py.
+"""tests/test_nightly_qp_coverage.py — Nightly coverage boost for
+app/routers/quality_plans.py.
 
-Targets the uncovered helper functions (_coerce, _parse_date, _section_approved)
-and the error/exception paths in the submit and section-gate route handlers.
+Targets the uncovered helper functions (_coerce, _parse_date, _section_approved) and the
+error/exception paths in the submit and section-gate route handlers.
 
-Called by: pytest (nightly coverage run)
-Depends on: conftest (db_session, client, test_user), test_c2a_gates helpers
+Called by: pytest (nightly coverage run) Depends on: conftest (db_session, client,
+test_user), test_c2a_gates helpers
 """
 
 import os
@@ -221,7 +222,8 @@ class TestQpRouteErrorPaths:
         assert r.status_code == 404
 
     def test_submit_qp_incomplete_returns_200_with_errors(self, _qp_client, db_session: Session):
-        """An incomplete QP hits the IncompleteQPError path → 200 (re-render with errors)."""
+        """An incomplete QP hits the IncompleteQPError path → 200 (re-render with
+        errors)."""
         client, _user, qp = _qp_client
         # Blank out a required field to make submit() raise IncompleteQPError
         qp.sales_so_number = None

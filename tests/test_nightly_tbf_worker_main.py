@@ -1,4 +1,5 @@
-"""tests/test_nightly_tbf_worker_main.py — Coverage tests for tbf_worker/worker.py main loop.
+"""tests/test_nightly_tbf_worker_main.py — Coverage tests for tbf_worker/worker.py main
+loop.
 
 Tests the main() coroutine's various execution branches by mocking all browser/DB/API
 dependencies and letting the loop take one tick before receiving a shutdown signal.
@@ -6,8 +7,7 @@ dependencies and letting the loop take one tick before receiving a shutdown sign
 All symbols imported *inside* main() are patched at their source modules, not on the
 worker module (they're not module-level attributes in worker.py).
 
-Called by: pytest (nightly coverage run)
-Depends on: conftest (db_session)
+Called by: pytest (nightly coverage run) Depends on: conftest (db_session)
 """
 
 import asyncio
@@ -542,7 +542,8 @@ class TestTbfWorkerMain:
 
     @pytest.mark.asyncio
     async def test_session_expired_health_requeues_item(self):
-        """SESSION_EXPIRED page health re-queues the item (mark_status with 'queued')."""
+        """SESSION_EXPIRED page health re-queues the item (mark_status with
+        'queued')."""
         import app.services.tbf_worker.worker as wmod
 
         sm = _make_sm(is_logged_in=True)

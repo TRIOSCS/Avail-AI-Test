@@ -1,10 +1,11 @@
-"""tests/test_nightly_resell_coverage.py — Nightly coverage boost for app/routers/resell.py.
+"""tests/test_nightly_resell_coverage.py — Nightly coverage boost for
+app/routers/resell.py.
 
-Targets uncovered helper functions (_file_extension, _hours_until, _offer_coverage)
-and error paths in route handlers (403/404/409/400 branches).
+Targets uncovered helper functions (_file_extension, _hours_until, _offer_coverage) and
+error paths in route handlers (403/404/409/400 branches).
 
-Called by: pytest (nightly coverage run)
-Depends on: conftest (db_session, client, test_user, test_company)
+Called by: pytest (nightly coverage run) Depends on: conftest (db_session, client,
+test_user, test_company)
 """
 
 import os

@@ -1,11 +1,11 @@
-"""tests/test_nightly_seed_resell.py — Coverage tests for app/management/seed_resell_demo.py.
+"""tests/test_nightly_seed_resell.py — Coverage tests for
+app/management/seed_resell_demo.py.
 
-Tests the idempotent demo-seeder's helper functions and the main seed() / _reset()
-entry points with the test DB, mocking external service calls (excess_service,
-excess_mirror) that would talk to the real supplier APIs.
+Tests the idempotent demo-seeder's helper functions and the main seed() / _reset() entry
+points with the test DB, mocking external service calls (excess_service, excess_mirror)
+that would talk to the real supplier APIs.
 
-Called by: pytest (nightly coverage run)
-Depends on: conftest (db_session)
+Called by: pytest (nightly coverage run) Depends on: conftest (db_session)
 """
 
 import os
