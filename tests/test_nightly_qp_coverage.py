@@ -94,11 +94,11 @@ class TestSectionApproved:
 
     def test_sales_order_not_approved(self):
         qp = self._qp_mock(sales_approved=False)
-        assert _section_approved(qp, "sales_order") is False
+        assert _section_approved(qp, "qp_sales") is False
 
     def test_sales_order_approved(self):
         qp = self._qp_mock(sales_approved=True)
-        assert _section_approved(qp, "sales_order") is True
+        assert _section_approved(qp, "qp_sales") is True
 
     def test_purchase_order_not_approved(self):
         qp = self._qp_mock(purchasing_approved=False)
@@ -119,7 +119,7 @@ def _make_admin_user(db: Session) -> User:
         role="admin",
         azure_id=f"azure-nqp-{uuid.uuid4().hex[:8]}",
         is_active=True,
-        can_approve_sales_orders=True,
+        can_approve_qp_sales=True,
         can_approve_pos=True,
     )
     db.add(u)
@@ -164,7 +164,6 @@ def _make_qp(db: Session, owner: User) -> QualityPlan:
         created_by_id=owner.id,
         order_type="new",
         status="draft",
-        sales_so_number="TSO99999",
         sales_condition="New",
         sales_quantity=5,
         sales_product_commodity="SSD",
@@ -225,8 +224,12 @@ class TestQpRouteErrorPaths:
         """An incomplete QP hits the IncompleteQPError path → 200 (re-render with
         errors)."""
         client, _user, qp = _qp_client
-        # Blank out a required field to make submit() raise IncompleteQPError
-        qp.sales_so_number = None
+        # Blank the canonical Sales Order # (now on the linked BuyPlan) so submit() hits
+        # the IncompleteQPError path → 200 re-render with errors.
+        from app.models.buy_plan import BuyPlan
+
+        bp = db_session.get(BuyPlan, qp.buy_plan_id)
+        bp.sales_order_number = None
         db_session.commit()
         r = client.post(f"/v2/qp/{qp.id}/submit")
         assert r.status_code == 200
@@ -244,10 +247,10 @@ class TestQpRouteErrorPaths:
     def test_patch_sales_when_not_approved_writes_field(self, _qp_client, db_session: Session):
         """PATCH /v2/qp/{id}/sales on an unapproved section updates the field."""
         client, _user, qp = _qp_client
-        r = client.patch(f"/v2/qp/{qp.id}/sales", data={"sales_so_number": "TSO-NEW-99"})
+        r = client.patch(f"/v2/qp/{qp.id}/sales", data={"sales_condition": "Refurbished"})
         assert r.status_code == 200
         db_session.refresh(qp)
-        assert qp.sales_so_number == "TSO-NEW-99"
+        assert qp.sales_condition == "Refurbished"
 
     def test_patch_purchasing_when_not_approved_writes_field(self, _qp_client, db_session: Session):
         """PATCH /v2/qp/{id}/purchasing on an unapproved section updates the field."""
@@ -262,10 +265,10 @@ class TestQpRouteErrorPaths:
         client, _user, qp = _qp_client
         qp.sales_section_approved_at = datetime.now(timezone.utc)
         db_session.commit()
-        r = client.patch(f"/v2/qp/{qp.id}/sales", data={"sales_so_number": "IGNORED"})
+        r = client.patch(f"/v2/qp/{qp.id}/sales", data={"sales_condition": "IGNORED"})
         assert r.status_code == 200
         db_session.refresh(qp)
-        assert qp.sales_so_number == "TSO99999"
+        assert qp.sales_condition == "New"
 
     def test_add_serial_not_found_returns_404(self, _qp_client):
         client, _user, _qp = _qp_client
