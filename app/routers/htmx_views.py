@@ -11194,6 +11194,154 @@ async def approvals_tab_partial(
     return template_response("htmx/partials/approvals/_tab_prepayments.html", ctx)
 
 
+@router.get("/v2/partials/approvals/sales-orders/new", response_class=HTMLResponse)
+async def sales_order_new(
+    request: Request,
+    requisition_id: int | None = None,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """New Sales Order origination surface (requisition picker → offer/sell builder).
+
+    The two-segment path after ``approvals/`` does not collide with the one-segment
+    ``/v2/partials/approvals/{tab}`` converter. With no ``requisition_id`` it lists open
+    (OPEN_PIPELINE) requisitions that carry at least one ACTIVE offer, scoped to what the
+    user may see. With ``requisition_id`` it loads that requisition's per-requirement
+    offer/sell-price form (``get_builder_data`` + ``apply_smart_defaults``), enforcing access
+    via ``get_req_for_user`` (404 for a restricted role that does not own it).
+    """
+    from sqlalchemy import func
+
+    from ..constants import OfferStatus, RequisitionStatus
+    from ..dependencies import get_req_for_user
+    from ..models import Offer, Requirement
+    from ..services.quote_builder_service import apply_smart_defaults, get_builder_data
+
+    ctx = _base_ctx(request, user, "buy-plans")
+
+    if requisition_id is not None:
+        req = get_req_for_user(db, user, requisition_id)
+        lines = get_builder_data(req.id, db)
+        apply_smart_defaults(lines)
+        ctx.update({"selected_req": req, "lines": lines})
+        return template_response("htmx/partials/approvals/_sales_order_new.html", ctx)
+
+    # Picker mode: open requisitions with at least one active offer, scoped to the viewer.
+    has_active_offer = (
+        select(Offer.id)
+        .join(Requirement, Offer.requirement_id == Requirement.id)
+        .where(
+            Requirement.requisition_id == Requisition.id,
+            Offer.status == OfferStatus.ACTIVE,
+        )
+        .exists()
+    )
+    q = db.query(Requisition).filter(
+        Requisition.status.in_(list(RequisitionStatus.OPEN_PIPELINE)),
+        has_active_offer,
+    )
+    if user.role in RESTRICTED_ROLES:
+        q = q.filter(Requisition.created_by == user.id)
+    reqs = q.order_by(Requisition.id.desc()).all()
+
+    counts: dict[int, int] = {}
+    if reqs:
+        counts = dict(
+            db.query(Requirement.requisition_id, func.count(Offer.id))
+            .join(Offer, Offer.requirement_id == Requirement.id)
+            .filter(
+                Requirement.requisition_id.in_([r.id for r in reqs]),
+                Offer.status == OfferStatus.ACTIVE,
+            )
+            .group_by(Requirement.requisition_id)
+            .all()
+        )
+
+    picker_rows = [
+        {"id": r.id, "name": r.name, "customer": r.customer_name or "", "offer_count": counts.get(r.id, 0)}
+        for r in reqs
+    ]
+    ctx.update({"selected_req": None, "picker_rows": picker_rows})
+    return template_response("htmx/partials/approvals/_sales_order_new.html", ctx)
+
+
+@router.post("/v2/partials/approvals/sales-orders/create", response_class=HTMLResponse)
+async def sales_order_create(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Originate a DRAFT buy plan (Sales Order) from the chosen offers, then render its
+    detail.
+
+    Parses ``requisition_id`` + per-requirement ``offer_<rid>`` / ``sell_<rid>`` form fields,
+    enforces requisition access (``require_requisition_access`` — 404 for a restricted role
+    that does not own it), and calls ``create_sales_order_from_offers``. On the builder's
+    duplicate-open-SO ValueError it renders the existing open Sales Order's detail with a
+    toast (never a 500); any other ValueError (e.g. no requirements) is a 400.
+    """
+    from ..dependencies import require_requisition_access
+    from ..services.buyplan_builder import create_sales_order_from_offers
+
+    form = await request.form()
+    raw_req_id = form.get("requisition_id")
+    if not raw_req_id:
+        raise HTTPException(400, "Requisition is required")
+    try:
+        req_id = int(raw_req_id)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Invalid requisition")
+
+    require_requisition_access(db, req_id, user)
+
+    selections: dict[int, int] = {}
+    sell_prices: dict[int, float] = {}
+    for key, value in form.multi_items():
+        if key.startswith("offer_"):
+            try:
+                selections[int(key[len("offer_") :])] = int(value)
+            except (TypeError, ValueError):
+                continue
+        elif key.startswith("sell_"):
+            if value in (None, ""):
+                continue
+            try:
+                sell_prices[int(key[len("sell_") :])] = float(value)
+            except (TypeError, ValueError):
+                continue
+
+    try:
+        plan = create_sales_order_from_offers(req_id, selections, sell_prices, db, user)
+    except ValueError as exc:
+        existing = (
+            db.query(BuyPlan)
+            .filter(
+                BuyPlan.requisition_id == req_id,
+                BuyPlan.quote_id.is_(None),
+                BuyPlan.status.in_(
+                    [BuyPlanStatus.DRAFT.value, BuyPlanStatus.PENDING.value, BuyPlanStatus.ACTIVE.value]
+                ),
+            )
+            .first()
+        )
+        if existing is None:
+            raise HTTPException(400, str(exc))
+        resp = await buy_plan_detail_partial(request, existing.id, user, db)
+        resp.headers["HX-Trigger"] = json.dumps(
+            {
+                "showToast": {
+                    "message": f"There is already an open Sales Order for this requisition (plan #{existing.id}).",
+                    "type": "warning",
+                }
+            }
+        )
+        return resp
+
+    resp = await buy_plan_detail_partial(request, plan.id, user, db)
+    resp.headers["HX-Push-Url"] = f"/v2/buy-plans/{plan.id}"
+    return resp
+
+
 @router.get("/v2/partials/buy-plans/resource", response_class=HTMLResponse)
 async def buy_plans_resource_partial(
     request: Request,

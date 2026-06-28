@@ -8,5 +8,15 @@
   Called by: htmx_views.py approvals_tab_partial (lens=sales_orders). Into #bp-hub-body.
   Depends on: approvals/_pending_section.html, buy_plans/_board.html.
 #}
+{# New SO origination entry point — loads the requisition picker into the tab body. #}
+<div class="flex items-center justify-end mb-3">
+  <button hx-get="/v2/partials/approvals/sales-orders/new"
+          hx-target="#bp-hub-body"
+          hx-swap="innerHTML"
+          class="btn btn-primary btn-sm inline-flex items-center gap-1">
+    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+    New Sales Order
+  </button>
+</div>
 {% include "htmx/partials/approvals/_pending_section.html" %}
 {% include "htmx/partials/buy_plans/_board.html" %}
