@@ -11281,7 +11281,10 @@ async def sales_order_create(
     toast (never a 500); any other ValueError (e.g. no requirements) is a 400.
     """
     from ..dependencies import require_requisition_access
-    from ..services.buyplan_builder import create_sales_order_from_offers
+    from ..services.buyplan_builder import (
+        DuplicateSalesOrderError,
+        create_sales_order_from_offers,
+    )
 
     form = await request.form()
     raw_req_id = form.get("requisition_id")
@@ -11312,30 +11315,25 @@ async def sales_order_create(
 
     try:
         plan = create_sales_order_from_offers(req_id, selections, sell_prices, db, user)
-    except ValueError as exc:
-        existing = (
-            db.query(BuyPlan)
-            .filter(
-                BuyPlan.requisition_id == req_id,
-                BuyPlan.quote_id.is_(None),
-                BuyPlan.status.in_(
-                    [BuyPlanStatus.DRAFT.value, BuyPlanStatus.PENDING.value, BuyPlanStatus.ACTIVE.value]
-                ),
-            )
-            .first()
-        )
-        if existing is None:
-            raise HTTPException(400, str(exc))
-        resp = await buy_plan_detail_partial(request, existing.id, user, db)
+    except DuplicateSalesOrderError as exc:
+        # An open Sales Order already exists for this requisition — open it instead of
+        # 500ing. The exception carries the existing plan id, so no re-query is needed.
+        existing_id = exc.existing_plan_id
+        resp = await buy_plan_detail_partial(request, existing_id, user, db)
         resp.headers["HX-Trigger"] = json.dumps(
             {
                 "showToast": {
-                    "message": f"There is already an open Sales Order for this requisition (plan #{existing.id}).",
+                    "message": f"There is already an open Sales Order for this requisition (plan #{existing_id}).",
                     "type": "warning",
                 }
             }
         )
+        resp.headers["HX-Push-Url"] = f"/v2/buy-plans/{existing_id}"
         return resp
+    except ValueError:
+        # Any other origination failure (e.g. requisition has no requirements). Return a
+        # curated client message rather than echoing the raw builder error.
+        raise HTTPException(400, "Could not originate a Sales Order from the selected offers.")
 
     resp = await buy_plan_detail_partial(request, plan.id, user, db)
     resp.headers["HX-Push-Url"] = f"/v2/buy-plans/{plan.id}"

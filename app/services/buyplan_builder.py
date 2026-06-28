@@ -97,28 +97,15 @@ def build_buy_plan(quote_id: int, db: Session) -> BuyPlan:
     return plan
 
 
-def create_sales_order_from_offers(
-    requisition_id: int,
-    selections: dict[int, int],
-    sell_prices: dict[int, float],
-    db: Session,
-    user: User,
-) -> BuyPlan:
-    """Originate a DRAFT buy plan (Sales Order) directly from chosen RFQ offers — no
-    quote.
+def find_open_sales_order(db: Session, requisition_id: int) -> BuyPlan | None:
+    """Return the open, quote-less Sales Order for a requisition, or None.
 
-    ``selections`` maps ``requirement_id -> chosen offer_id`` and ``sell_prices`` maps
-    ``requirement_id -> sell price``. Persists a DRAFT BuyPlan with ``quote_id=None`` and
-    raises ValueError if a non-terminal (DRAFT/PENDING/ACTIVE) quote-less plan already
-    exists for the requisition. Shares the scoring/assignment/line-building core with the
-    quote path via ``_assemble_buy_plan``.
+    The canonical "open Sales Order" is a quote-less BuyPlan (``quote_id IS NULL``) in a
+    non-terminal status (DRAFT/PENDING/ACTIVE) for the requisition. Both the SO-origination
+    guard below and the route's duplicate-handling resolve the existing plan through this
+    single query, so the definition can never drift between them.
     """
-    requisition = db.get(Requisition, requisition_id)
-    if requisition is None:
-        raise ValueError(f"Requisition {requisition_id} not found")
-
-    # Guard: only one open Sales Order (quote-less plan) per requisition at a time
-    existing = (
+    return (
         db.query(BuyPlan)
         .filter(
             BuyPlan.requisition_id == requisition_id,
@@ -133,11 +120,47 @@ def create_sales_order_from_offers(
         )
         .first()
     )
+
+
+class DuplicateSalesOrderError(ValueError):
+    """Raised when a requisition already has an open (quote-less, non-terminal) Sales
+    Order.
+
+    Subclasses ``ValueError`` so existing ``pytest.raises(ValueError)`` call sites stay
+    green. Carries ``existing_plan_id`` and ``status`` so the route can load and render the
+    existing plan without re-running the open-SO query.
+    """
+
+    def __init__(self, existing_plan_id: int, status: str) -> None:
+        self.existing_plan_id = existing_plan_id
+        self.status = status
+        super().__init__(f"There is already an open Sales Order (plan #{existing_plan_id}, status: {status})")
+
+
+def create_sales_order_from_offers(
+    requisition_id: int,
+    selections: dict[int, int],
+    sell_prices: dict[int, float],
+    db: Session,
+    user: User,
+) -> BuyPlan:
+    """Originate a DRAFT buy plan (Sales Order) directly from chosen RFQ offers — no
+    quote.
+
+    ``selections`` maps ``requirement_id -> chosen offer_id`` and ``sell_prices`` maps
+    ``requirement_id -> sell price``. Persists a DRAFT BuyPlan with ``quote_id=None`` and
+    raises ``DuplicateSalesOrderError`` (a ValueError subclass) if a non-terminal
+    (DRAFT/PENDING/ACTIVE) quote-less plan already exists for the requisition. Shares the
+    scoring/assignment/line-building core with the quote path via ``_assemble_buy_plan``.
+    """
+    requisition = db.get(Requisition, requisition_id)
+    if requisition is None:
+        raise ValueError(f"Requisition {requisition_id} not found")
+
+    # Guard: only one open Sales Order (quote-less plan) per requisition at a time.
+    existing = find_open_sales_order(db, requisition_id)
     if existing:
-        raise ValueError(
-            f"There is already an open Sales Order (plan #{existing.id}, status: {existing.status}) "
-            f"for requisition {requisition_id}"
-        )
+        raise DuplicateSalesOrderError(existing.id, existing.status)
 
     customer_region = None
     if requisition.customer_site:
