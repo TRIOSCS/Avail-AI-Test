@@ -660,8 +660,8 @@ def _make_ops_member(db, user):
 
 
 class TestSubmitBuyPlan:
-    def test_auto_approve_low_cost(self, db_session: Session, test_quote: Quote, test_user: User):
-        """Cost below threshold with no critical flags → auto-approve."""
+    def test_low_cost_goes_to_manager(self, db_session: Session, test_quote: Quote, test_user: User):
+        """Frozen scope: every plan goes to the one manager approval — no auto-approve."""
         plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user, total_cost=500.0)
 
         result = submit_buy_plan(
@@ -670,8 +670,8 @@ class TestSubmitBuyPlan:
             test_user,
             db_session,
         )
-        assert result.status == BuyPlanStatus.ACTIVE.value
-        assert result.auto_approved is True
+        assert result.status == BuyPlanStatus.PENDING.value
+        assert result.auto_approved is not True
         assert result.sales_order_number == "SO-2026-001"
         assert result.submitted_by_id == test_user.id
 
@@ -1287,8 +1287,9 @@ class TestCheckCompletion:
 
 
 class TestResubmitBuyPlan:
-    def test_resubmit_auto_approve(self, db_session: Session, test_quote: Quote, test_user: User):
-        """Resubmit a rejected (draft) plan → auto-approve if under threshold."""
+    def test_resubmit_goes_to_manager(self, db_session: Session, test_quote: Quote, test_user: User):
+        """Resubmit a rejected (draft) plan → back to the one manager approval (no auto-
+        approve)."""
         plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user, total_cost=500.0)
         # Simulate prior rejection
         plan.approval_notes = "Fix the SO number"
@@ -1301,8 +1302,8 @@ class TestResubmitBuyPlan:
             test_user,
             db_session,
         )
-        assert result.status == BuyPlanStatus.ACTIVE.value
-        assert result.auto_approved is True
+        assert result.status == BuyPlanStatus.PENDING.value
+        assert result.auto_approved is not True
         assert result.sales_order_number == "SO-FIXED"
         # SO verification reset
         assert result.so_status == SOVerificationStatus.PENDING.value

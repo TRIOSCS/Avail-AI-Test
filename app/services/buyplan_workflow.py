@@ -70,19 +70,12 @@ def submit_buy_plan(
 
     plan.is_stock_sale = _is_stock_sale(plan, db)
 
-    # Auto-approve decision
-    if _should_auto_approve(plan):
-        plan.status = BuyPlanStatus.ACTIVE.value
-        plan.auto_approved = True
-        plan.approved_at = datetime.now(timezone.utc)
-        logger.info("Buy plan {} auto-approved (cost={:.2f})", plan_id, float(plan.total_cost or 0))
-        _generate_buyer_tasks(plan, db)
-    else:
-        plan.status = BuyPlanStatus.PENDING.value
-        logger.info("Buy plan {} pending approval (cost={:.2f})", plan_id, float(plan.total_cost or 0))
-        # Open the engine gate: route a BUY_PLAN ApprovalRequest to can_approve_buy_plans
-        # holders (cancels any stale open request first — RISK 2).
-        _open_engine_request_for_plan(plan, user, db)
+    # Every plan goes to the one manager approval — no auto-approve (frozen scope).
+    plan.status = BuyPlanStatus.PENDING.value
+    logger.info("Buy plan {} submitted for approval (cost={:.2f})", plan_id, float(plan.total_cost or 0))
+    # Open the engine gate: route a BUY_PLAN ApprovalRequest to can_approve_buy_plans
+    # holders (cancels any stale open request first — RISK 2).
+    _open_engine_request_for_plan(plan, user, db)
 
     db.flush()
     return plan
@@ -850,16 +843,11 @@ def resubmit_buy_plan(
     plan.submitted_at = datetime.now(timezone.utc)
     plan.salesperson_notes = salesperson_notes
 
-    # Auto-approve decision (same logic as initial submit)
-    if _should_auto_approve(plan):
-        plan.status = BuyPlanStatus.ACTIVE.value
-        plan.auto_approved = True
-        plan.approved_at = datetime.now(timezone.utc)
-    else:
-        plan.status = BuyPlanStatus.PENDING.value
-        # Re-open the engine gate. Cancels the stale request from the prior submission so
-        # exactly ONE REQUESTED request exists for this plan (RISK 2).
-        _open_engine_request_for_plan(plan, user, db)
+    # Every plan goes to the one manager approval — no auto-approve (frozen scope).
+    plan.status = BuyPlanStatus.PENDING.value
+    # Re-open the engine gate. Cancels the stale request from the prior submission so
+    # exactly ONE REQUESTED request exists for this plan (RISK 2).
+    _open_engine_request_for_plan(plan, user, db)
 
     db.flush()
     return plan
@@ -898,23 +886,6 @@ def _generate_buyer_tasks(plan: BuyPlan, db: Session) -> None:
             )
         except Exception:
             logger.warning("Buyer task auto-gen failed for plan {} line {}", plan.id, line.id, exc_info=True)
-
-
-# ── Helpers: Auto-Approval ───────────────────────────────────────────
-
-
-def _should_auto_approve(plan: BuyPlan) -> bool:
-    """Decide whether a buy plan should be auto-approved.
-
-    Auto-approves when total cost < threshold AND no critical AI flags. Used by both
-    submit_buy_plan() and resubmit_buy_plan().
-    """
-    total = float(plan.total_cost or 0)
-    has_critical = any(
-        (f.get("severity") if isinstance(f, dict) else getattr(f, "severity", None)) == "critical"
-        for f in (plan.ai_flags or [])
-    )
-    return total < settings.buyplan_auto_approve_threshold and not has_critical
 
 
 # ── Helpers: Line Edits ──────────────────────────────────────────────
