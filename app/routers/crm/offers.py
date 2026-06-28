@@ -9,6 +9,7 @@ from ...constants import (
     AccessKey,
     ActivityType,
     OfferStatus,
+    QuoteStatus,
     RequisitionStatus,
     UserRole,
 )
@@ -114,7 +115,7 @@ async def list_offers(req_id: int, user: User = Depends(require_user), db: Sessi
     query = db.query(Offer).filter(Offer.requisition_id == req_id)
     # Hide draft/pending_review offers from buyers — only sales/admin/manager see them
     if user.role == UserRole.BUYER:
-        query = query.filter(Offer.status != "pending_review")
+        query = query.filter(Offer.status != OfferStatus.PENDING_REVIEW)
     offers = (
         query.options(
             joinedload(Offer.entered_by),
@@ -134,7 +135,7 @@ async def list_offers(req_id: int, user: User = Depends(require_user), db: Sessi
         db.query(Quote)
         .filter(
             Quote.requisition_id == req_id,
-            Quote.status.in_(["draft", "sent", "won"]),
+            Quote.status.in_([QuoteStatus.DRAFT, QuoteStatus.SENT, QuoteStatus.WON]),
         )
         .all()
     )
@@ -249,7 +250,7 @@ async def list_offers(req_id: int, user: User = Depends(require_user), db: Sessi
             .filter(
                 Offer.requisition_id != req_id,
                 Offer.material_card_id.in_(all_card_ids),
-                Offer.status.in_(["active", "won"]),
+                Offer.status.in_([OfferStatus.ACTIVE, OfferStatus.WON]),
             )
             .options(joinedload(Offer.entered_by))
             .order_by(Offer.created_at.desc())
@@ -654,7 +655,7 @@ async def approve_offer(
     if not offer:
         raise HTTPException(404, "Offer not found")
     require_requisition_access(db, offer.requisition_id, user, owner_id=offer.entered_by_id, label="Offer")
-    if offer.status != "pending_review":
+    if offer.status != OfferStatus.PENDING_REVIEW:
         raise HTTPException(400, "Only pending_review offers can be approved")
     old_status = offer.status
     require_valid_transition("offer", offer.status, OfferStatus.ACTIVE)
@@ -684,7 +685,7 @@ async def reject_offer(
     if not offer:
         raise HTTPException(404, "Offer not found")
     require_requisition_access(db, offer.requisition_id, user, owner_id=offer.entered_by_id, label="Offer")
-    if offer.status != "pending_review":
+    if offer.status != OfferStatus.PENDING_REVIEW:
         raise HTTPException(400, "Only pending_review offers can be rejected")
     old_status = offer.status
     require_valid_transition("offer", offer.status, OfferStatus.REJECTED)
@@ -915,7 +916,7 @@ async def list_review_queue(
         db.query(Offer)
         .filter(
             Offer.evidence_tier == "T4",
-            Offer.status == "pending_review",
+            Offer.status == OfferStatus.PENDING_REVIEW,
         )
         .order_by(Offer.created_at.desc())
         .limit(100)
@@ -987,7 +988,7 @@ async def reject_offer_t4_review(
     if not offer:
         raise HTTPException(404, "Offer not found")
     require_requisition_access(db, offer.requisition_id, user, owner_id=offer.entered_by_id, label="Offer")
-    if offer.status != "pending_review":
+    if offer.status != OfferStatus.PENDING_REVIEW:
         raise HTTPException(400, "Only pending_review offers can be rejected")
 
     require_valid_transition("offer", offer.status, OfferStatus.REJECTED)

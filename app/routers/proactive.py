@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
 
 from ..cache.decorators import cached_endpoint
+from ..constants import ProactiveMatchStatus
 from ..database import get_db
 from ..dependencies import can_manage_account, require_user
 from ..models import Company, ProactiveDoNotOffer, ProactiveMatch, SiteContact, User
@@ -80,9 +81,9 @@ async def dismiss_matches(
         .filter(
             ProactiveMatch.id.in_(match_ids),
             ProactiveMatch.salesperson_id == user.id,
-            ProactiveMatch.status == "new",
+            ProactiveMatch.status == ProactiveMatchStatus.NEW,
         )
-        .update({"status": "dismissed"}, synchronize_session=False)
+        .update({"status": ProactiveMatchStatus.DISMISSED}, synchronize_session=False)
     )
     db.commit()
     return {"dismissed": updated}
@@ -136,9 +137,9 @@ async def add_do_not_offer(
             ProactiveMatch.mpn == mpn,
             ProactiveMatch.company_id == item.company_id,
             ProactiveMatch.salesperson_id == user.id,
-            ProactiveMatch.status == "new",
+            ProactiveMatch.status == ProactiveMatchStatus.NEW,
         ).update(
-            {"status": "dismissed", "dismiss_reason": "do_not_offer"},
+            {"status": ProactiveMatchStatus.DISMISSED, "dismiss_reason": "do_not_offer"},
             synchronize_session=False,
         )
 

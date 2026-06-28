@@ -29,6 +29,7 @@ from ..constants import (
     RESTRICTED_ROLES,
     AccessKey,
     ActivityType,
+    ApiSourceStatus,
     AttributionStatus,
     BuyPlanStatus,
     ContactRole,
@@ -43,6 +44,7 @@ from ..constants import (
     TicketSource,
     TicketStatus,
     UserRole,
+    VendorResponseStatus,
 )
 from ..database import get_db
 from ..dependencies import (
@@ -2723,7 +2725,7 @@ async def promote_offer_htmx(
     if not offer:
         raise HTTPException(404, "Offer not found")
     require_requisition_access(db, offer.requisition_id, user, owner_id=offer.entered_by_id, label="Offer")
-    if offer.status != "pending_review":
+    if offer.status != OfferStatus.PENDING_REVIEW:
         raise HTTPException(400, "Only pending_review offers can be promoted")
 
     old_status = offer.status
@@ -2770,7 +2772,7 @@ async def reject_offer_htmx(
     if not offer:
         raise HTTPException(404, "Offer not found")
     require_requisition_access(db, offer.requisition_id, user, owner_id=offer.entered_by_id, label="Offer")
-    if offer.status != "pending_review":
+    if offer.status != OfferStatus.PENDING_REVIEW:
         raise HTTPException(400, "Only pending_review offers can be rejected")
 
     old_status = offer.status
@@ -3506,7 +3508,7 @@ async def send_reply_htmx(
             logger.warning("Vendor reply send failed for response {}: {}", response_id, exc)
 
     if email_sent or is_testing:
-        vr.status = "reviewed"
+        vr.status = VendorResponseStatus.REVIEWED
         db.commit()
 
     logger.info(
@@ -3817,7 +3819,7 @@ def _get_enabled_sources(db: Session) -> list[dict]:
     """
     from ..models import ApiSource
 
-    sources = db.query(ApiSource).filter(ApiSource.status != "disabled").all()
+    sources = db.query(ApiSource).filter(ApiSource.status != ApiSourceStatus.DISABLED).all()
     return [{"name": s.name, "status": s.status} for s in sources]
 
 
@@ -10312,7 +10314,7 @@ async def delete_quote_htmx(
 ):
     """Delete a draft quote and redirect to the requisitions page."""
     quote = get_quote_for_user(db, user, quote_id)
-    if quote.status != "draft":
+    if quote.status != QuoteStatus.DRAFT:
         raise HTTPException(400, "Only draft quotes can be deleted")
 
     db.delete(quote)
@@ -10331,7 +10333,7 @@ async def reopen_quote(
 ):
     """Reopen a sent/closed quote back to draft."""
     quote = get_quote_for_user(db, user, quote_id)
-    if quote.status not in ("sent", "won", "lost"):
+    if quote.status not in (QuoteStatus.SENT, QuoteStatus.WON, QuoteStatus.LOST):
         raise HTTPException(400, "Only sent/won/lost quotes can be reopened")
 
     require_valid_transition("quote", quote.status, QuoteStatus.DRAFT)
@@ -13954,7 +13956,7 @@ async def add_offers_to_draft_quote(
     quote = get_quote_for_user(db, user, quote_id)
     if quote.requisition_id != req_id:
         raise HTTPException(404, "Quote not found")
-    if quote.status != "draft":
+    if quote.status != QuoteStatus.DRAFT:
         raise HTTPException(400, "Can only add to draft quotes")
 
     offers = db.query(Offer).filter(Offer.id.in_(offer_ids), Offer.requisition_id == req_id).all()
@@ -14004,7 +14006,7 @@ async def build_buy_plan_htmx(
     from ..services.buyplan_builder import build_buy_plan
 
     quote = get_quote_for_user(db, user, quote_id)
-    if quote.status != "won":
+    if quote.status != QuoteStatus.WON:
         raise HTTPException(400, "Quote must be won to build a buy plan")
 
     try:

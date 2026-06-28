@@ -21,6 +21,7 @@ from loguru import logger
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from ...constants import ApiSourceStatus
 from ...database import get_db
 from ...dependencies import require_admin, require_settings_access
 from ...models import ApiSource, User
@@ -181,11 +182,11 @@ def api_connector_health(
         total_results = src.total_results or 0
         errors_24h = src.error_count_24h or 0
         # Auto-flag degraded: >50% failure rate over last 24h (min 4 searches)
-        status = src.status or "pending"
+        status = src.status or ApiSourceStatus.PENDING
         if errors_24h >= 4 and total > 0:
             recent_success = max(0, total - errors_24h)
             if errors_24h > recent_success:
-                status = "degraded"
+                status = ApiSourceStatus.DEGRADED
         result.append(
             {
                 "id": src.id,
@@ -364,10 +365,10 @@ def api_delete_credential(
     src.credentials = creds
     # Recheck status -- if credentials are now incomplete, downgrade to pending
     env_vars = src.env_vars or []
-    if env_vars and src.status == "live":
+    if env_vars and src.status == ApiSourceStatus.LIVE:
         all_set = all(credential_is_set(db, src.name, v) for v in env_vars)
         if not all_set:
-            src.status = "pending"
+            src.status = ApiSourceStatus.PENDING
     db.commit()
     logger.info(f"Credential {var_name} removed from {src.name} by {user.email}")
     return {"status": "removed" if removed else "not_found"}
