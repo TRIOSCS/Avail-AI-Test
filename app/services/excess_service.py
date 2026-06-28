@@ -29,6 +29,7 @@ from ..constants import (
 from ..models import Company, User
 from ..models.excess import ExcessLineItem, ExcessList, ExcessOffer, ExcessOfferLine
 from ..utils.normalization import normalize_mpn_key
+from .buyer_affinity_service import recompute_buyer_score_on_win
 
 # ---------------------------------------------------------------------------
 # Resell capabilities — role-derived powers (spec §"Roles & capabilities")
@@ -591,6 +592,49 @@ def withdraw_offer(db: Session, offer_id: int) -> ExcessOffer:
     _safe_commit(db, entity="excess offer withdrawal")
     db.refresh(offer)
     logger.info("Withdrew ExcessOffer id={} ({} lines recomputed)", offer_id, len(affected))
+    return offer
+
+
+def award_offer(db: Session, offer_id: int, owner: User) -> ExcessOffer:
+    """Award an inbound offer — the single chokepoint where an ExcessOffer becomes
+    ``won``.
+
+    Owner-only (the list owner is the only one who may pick a winner): raises 404 if the
+    offer does not exist, 403 if *owner* does not own the offer's list. Flips the offer
+    to ``won``, marks each matched line item ``awarded``, recomputes the best-price
+    rollup of every line the offer touched, then recomputes the winning buyer's
+    ``BuyerScore`` via ``recompute_buyer_score_on_win`` BEFORE the commit (this path owns
+    the transaction; the hook no-ops for an offer with no canonical buyer card). Commits,
+    refreshes, returns the offer. Mirrors ``withdraw_offer`` (the inverse terminal flip).
+    """
+    offer = db.get(ExcessOffer, offer_id)
+    if not offer:
+        raise HTTPException(404, f"ExcessOffer {offer_id} not found")
+
+    excess_list = get_excess_list(db, offer.excess_list_id)
+    if excess_list.owner_id != owner.id:
+        raise HTTPException(403, "Only the list owner can award an offer")
+
+    affected = {line.excess_line_item_id for line in offer.lines if line.excess_line_item_id is not None}
+    offer.status = ExcessOfferStatus.WON
+    for line_item_id in affected:
+        line_item = db.get(ExcessLineItem, line_item_id)
+        if line_item is not None:
+            line_item.status = ExcessLineItemStatus.AWARDED
+    db.flush()
+
+    for line_item_id in affected:
+        recompute_line_rollup(db, line_item_id)
+
+    # Recompute the winning buyer's scorecard before the commit — this path owns the
+    # transaction (the hook returns None / no-ops for an offer with no canonical buyer).
+    recompute_buyer_score_on_win(db, offer)
+
+    _safe_commit(db, entity="excess offer award")
+    db.refresh(offer)
+    logger.info(
+        "Awarded ExcessOffer id={} (status=won, {} lines awarded) by owner={}", offer_id, len(affected), owner.id
+    )
     return offer
 
 

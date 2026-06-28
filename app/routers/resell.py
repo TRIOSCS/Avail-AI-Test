@@ -865,6 +865,26 @@ async def resell_submit_offer(
     return await resell_offers(request, list_id=el.id, user=user, db=db)
 
 
+@router.post("/api/resell/{list_id}/offers/{offer_id}/award", response_class=HTMLResponse)
+async def resell_award_offer(
+    request: Request,
+    list_id: int,
+    offer_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Award an inbound offer (owner-only): flip it to ``won`` and recompute the winning
+    buyer's scorecard, then re-render the detail panel.
+
+    The award is the single path that marks an ExcessOffer ``won``; the service owns the
+    transaction and fires the buyer-score recompute hook before committing. Owner-gated +
+    404 on a missing offer are enforced in ``excess_service.award_offer``.
+    """
+    offer = excess_service.award_offer(db, offer_id, user)
+    el = excess_service.get_excess_list(db, offer.excess_list_id)
+    return template_response("htmx/partials/resell/detail.html", _detail_context(request, db, el, user))
+
+
 # ── Outreach: offer-to-buyers panel + tracker + don't-forget strip ───
 #
 # The trader→buyer half of Resell (the inverse of sourcing's RFQ). Offering excess OUT

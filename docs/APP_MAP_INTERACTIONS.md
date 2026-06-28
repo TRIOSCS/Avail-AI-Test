@@ -1466,6 +1466,9 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     +-- POST /api/resell/{id}/publish                   (excess_mirror.publish_list → Sighting mirror)
     +-- POST /api/resell/{id}/offers                    (excess_service.submit_offer; scope
     |     per_line|take_all; service enforces can_offer + the self-offer guard)
+    +-- POST /api/resell/{id}/offers/{offer_id}/award   (owner-only; excess_service.award_offer:
+    |     the single offer→won chokepoint; marks matched lines awarded, recomputes rollups,
+    |     then fires buyer_affinity_service.recompute_buyer_score_on_win before commit)
     +-- POST /api/resell/{id}/outreach                  (owner-only; channel=email →
           resell_outreach_service.submit_outreach_email [RFQ send engine], else
           submit_outreach [manual log]; re-renders the Outreach tracker)
