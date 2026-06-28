@@ -21,7 +21,6 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from loguru import logger
 from sqlalchemy.orm import Session, joinedload
 
-from ..config import settings
 from ..constants import RESTRICTED_ROLES
 from ..database import get_db
 from ..dependencies import get_req_for_user, is_manager_or_admin, require_user
@@ -78,7 +77,6 @@ def _table_context(request: Request, filters: ReqListFilters, db: Session, user:
         **result,
         "user": user,
         "users": users,
-        "avail_opp_table_v2_enabled": settings.avail_opp_table_v2,
     }
 
 
@@ -370,7 +368,6 @@ async def inline_save(
 
     row_ctx = get_row_context(db, req, user)
     row_ctx["request"] = request
-    row_ctx["avail_opp_table_v2_enabled"] = settings.avail_opp_table_v2
     response = template_response("requisitions2/_single_row.html", row_ctx)
     response.headers["HX-Trigger"] = json.dumps({"showToast": {"message": msg}})
     await broker.publish("requisitions", "table-refresh", msg)
