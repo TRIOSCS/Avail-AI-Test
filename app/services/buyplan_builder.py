@@ -168,6 +168,9 @@ def create_sales_order_from_offers(
 
     plan = _assemble_buy_plan(requisition, selections, sell_prices, customer_region, db)
     plan.quote_id = None
+    # The originator owns the Sales Order (it is built from their own requisition), so it
+    # surfaces on their "Mine" deal board and as needs_my_action while in DRAFT.
+    plan.submitted_by_id = getattr(user, "id", None)
     db.add(plan)
     db.commit()
     logger.info(

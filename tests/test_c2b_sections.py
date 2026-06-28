@@ -408,13 +408,19 @@ def test_qp_view_renders_inline_sales_approve_for_recipient(qp_with_open_sales_g
 
 
 def test_qp_view_no_inline_approve_for_non_recipient(qp_with_open_sales_gate, db_session: Session) -> None:
-    """A non-recipient does NOT see the inline Approve/Reject controls."""
+    """Recipiency — NOT the can_approve_qp_sales permission — gates the inline controls.
+
+    The non-recipient HOLDS can_approve_qp_sales but was never routed THIS request, so
+    the inline Approve/Reject must stay hidden (mirrors decide()'s recipient check).
+    Granting the permission here (rather than using a zero-perm user) is what makes the
+    test prove that recipiency, not the permission flag, gates the controls.
+    """
     from app.database import get_db
     from app.dependencies import require_user
     from app.main import app
 
     qp, _approver = qp_with_open_sales_gate
-    other_user = _make_user(db_session)
+    other_user = _make_user(db_session, can_approve_qp_sales=True)
     db_session.flush()
 
     def _db():

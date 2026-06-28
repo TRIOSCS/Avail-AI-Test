@@ -155,11 +155,11 @@ def _section_requests(db: Session, qp_id: int, gate: ApprovalGateType) -> list[A
     )
 
 
-# ── route_request: SALES_ORDER ───────────────────────────────────────────
+# ── route_request: QP_SALES ───────────────────────────────────────────
 
 
 def test_route_sales_order_routes_to_sales_approvers(db_session: Session) -> None:
-    """SALES_ORDER routes to every active user with can_approve_qp_sales=True."""
+    """QP_SALES routes to every active user with can_approve_qp_sales=True."""
     alice = _make_user(db_session, can_approve_qp_sales=True)
     bob = _make_user(db_session, can_approve_qp_sales=True)
     _make_user(db_session, can_approve_qp_sales=False)  # not routed
@@ -219,8 +219,7 @@ def test_route_purchase_order_no_approver_raises(db_session: Session) -> None:
 
 
 def test_submit_sales_section_creates_sales_order_request(db_session: Session) -> None:
-    """submit_section(SALES_ORDER) opens ONE request on the QP, routed to the
-    approver."""
+    """submit_section(QP_SALES) opens ONE request on the QP, routed to the approver."""
     approver = _make_user(db_session, can_approve_qp_sales=True)
     qp = _make_qp(db_session, approver)
 
@@ -268,8 +267,8 @@ def test_submit_section_no_approver_raises_section_error_no_orphan(db_session: S
 
 
 def test_decide_sales_section_logs_activity_same_session(db_session: Session) -> None:
-    """Decide(approve) on a SALES_ORDER request resolves it AND logs the section
-    activity in the same session before commit (via _on_section_approved)."""
+    """Decide(approve) on a QP_SALES request resolves it AND logs the section activity
+    in the same session before commit (via _on_section_approved)."""
     approver = _make_user(db_session, can_approve_qp_sales=True)
     qp = _make_qp(db_session, approver)
     req = submit_section(db_session, qp.id, ApprovalGateType.QP_SALES, approver)
@@ -387,7 +386,7 @@ def qp_client(db_session: Session):
 
 
 def test_submit_sales_endpoint_creates_request(qp_client, db_session: Session) -> None:
-    """POST /v2/qp/{id}/submit-sales opens a SALES_ORDER request and returns 200."""
+    """POST /v2/qp/{id}/submit-sales opens a QP_SALES request and returns 200."""
     client, _user, qp = qp_client
 
     r = client.post(f"/v2/qp/{qp.id}/submit-sales")

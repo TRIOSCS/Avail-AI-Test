@@ -1340,8 +1340,9 @@ Each stage tab body (`GET /v2/partials/approvals/<stage>`, `approvals_tab_partia
 the re-homed work surface (no new read models) with a **pinned "Pending approvals (N)"
 section** (`approvals/_pending_section.html`) built from `services/approvals/queue.
 build_queue_view(db, user, tab=<gate>)` for that single gate. The pinned section renders ONLY
-when the viewer holds that gate's approve right (`show_pending` = `can_approve_buy_plans` /
-`can_approve_sales_orders` / `can_approve_pos` / `can_approve_prepayments`) AND there is
+when the viewer holds that tab's approve right (`show_pending` = `_TAB_APPROVE_ATTR[tab]`:
+`can_approve_buy_plans` for Sales Orders / `can_approve_pos` for Purchase Orders /
+`can_approve_prepayments` for Vendor Prepayments — the Buy Plans tab is gate-less) AND there is
 something pending; its inline approve/reject re-fetch the SAME stage-tab body into
 `#bp-hub-body`. The standalone four-tab Approvals lens (`/v2/partials/buy-plans/approvals` +
 `approvals/_queue.html`) is **retired** — each gate now renders inside its stage tab.
@@ -1363,20 +1364,26 @@ the pinned section survives a toggle. The standalone `/board` route keeps the de
 ```
 GET /v2/partials/approvals?lens=          (shell: stage-tab switcher + lazy #bp-hub-body)
     |
-    +-- sales_orders    --> GET /partials/approvals/sales-orders
-    |                        pinned sales_order queue (approver-only) + neutral empty state
-    |                        ("No sales orders yet" — SO build flow is SP-2)
+    +-- sales_orders    --> GET /partials/approvals/sales-orders?scope=  (SP-2 work surface)
+    |                        "New Sales Order" button (-> GET /partials/approvals/sales-orders/
+    |                        new requisition picker -> create_sales_order_from_offers) + the
+    |                        BUY_PLAN-gated pinned approvals section (approver-only,
+    |                        can_approve_buy_plans) + buyplan_hub.deals_board filtered to
+    |                        DRAFT/PENDING (columns Draft/Pending only; NO Completed archive —
+    |                        that lives on the Buy Plans tab). Same _resolve_deal_scope +
+    |                        All/Mine toggle (scope_toggle_url=/partials/approvals/sales-orders).
     +-- buy_plans       --> GET /partials/approvals/buy-plans?scope=
-    |                        pinned buy_plan queue (approver-only) + buyplan_hub.deals_board
-    |                        (_board.html: 3 ACTIVE columns Draft/Pending/Active, COMPLETED
-    |                        excluded; + collapsed "Completed (N)" archive below, lazy "Load
-    |                        older" via GET /partials/buy-plans/archive?scope=…&offset=…).
+    |                        GATE-LESS (no pinned approvals section — SP-2 moved the BUY_PLAN
+    |                        gate's pinned queue to the Sales Orders tab) + buyplan_hub.deals_board
+    |                        filtered to ACTIVE/HALTED (_board.html columns Draft/Pending/Active;
+    |                        + collapsed "Completed (N)" archive below, lazy "Load older" via
+    |                        GET /partials/buy-plans/archive?scope=…&offset=…).
     |                        Scope role-defaulted via _resolve_deal_scope (_can_see_all_deals
     |                        users default all + an All/Mine toggle; sales/traders locked to
     |                        mine). The toggle uses scope_toggle_url=/partials/approvals/
-    |                        buy-plans so it reloads the WHOLE tab (pinned section + board),
-    |                        preserving the pinned approvals section. The standalone
-    |                        /partials/buy-plans/board?scope= route is also role-defaulted.
+    |                        buy-plans so it reloads the WHOLE tab (board), preserving tab state.
+    |                        The standalone /partials/buy-plans/board?scope= route is also
+    |                        role-defaulted.
     +-- purchase_orders --> GET /partials/approvals/purchase-orders
     |                        pinned purchase_order queue (approver-only)
     |                        + buyplan_hub.buyer_line_queue (buyer PO-cut queue) +
@@ -1972,7 +1979,7 @@ POST /api/admin/users/{id}/role             → change role
 POST /api/admin/users/{id}/active           → activate / deactivate
 POST /api/admin/users/{id}/buyplan-approver → grant/revoke the per-user buy-plan approval right (User.can_approve_buy_plans); APPROVAL_GRANT/APPROVAL_REVOKE audit
 POST /api/admin/users/{id}/prepayment-approver  → grant/revoke prepayment approval + optional dollar limit (User.can_approve_prepayments / prepayment_approval_limit)
-POST /api/admin/users/{id}/sales-order-approver → grant/revoke QP Sales-section approval right (User.can_approve_sales_orders); APPROVAL_GRANT/APPROVAL_REVOKE audit (QP Phase C2a)
+POST /api/admin/users/{id}/sales-order-approver → grant/revoke QP Sales-section approval right (User.can_approve_qp_sales — column renamed by SP-2 migration 164; route/handler name kept for back-compat, spec §13); APPROVAL_GRANT/APPROVAL_REVOKE audit (QP Phase C2a)
 POST /api/admin/users/{id}/po-approver          → grant/revoke QP Purchasing-section approval right (User.can_approve_pos); APPROVAL_GRANT/APPROVAL_REVOKE audit (QP Phase C2a)
 GET  /api/admin/users/{id}/access-panel     → user_access_panel.html (per-user access editor modal)
 POST /api/admin/users/{id}/access           → grant/revoke/reset ONE key (value ∈ on|off|default)
@@ -5193,7 +5200,7 @@ hx-get).
 
 **QP section gates — Sales / Purchasing (QP Phase C2a):** the QualityPlan is the engine
 subject (`subject_type='quality_plan'`); the `gate_type` discriminates the section.
-`routing.route_request` gains `SALES_ORDER` → every active `can_approve_sales_orders` holder
+`routing.route_request` gains `QP_SALES` → every active `can_approve_qp_sales` holder
 and `PURCHASE_ORDER` → every active `can_approve_pos` holder (no amount check, like
 `BUY_PLAN`). `quality_plan_service.submit_section(db, qp_id, gate_type, user)` calls
 `create_request(gate_type, amount=None, subject=qp, requested_by=owner=user)`; a missing
@@ -5267,9 +5274,10 @@ tab=<gate>)` for that single gate (the function already accepts a fixed `tab`). 
 `partials/approvals/_pending_section.html` renders the per-gate **Pending** rows (inline
 approve/reject via `approvals/_macros.html`) plus a small "Recently resolved" disclosure
 (terminal statuses, capped at 10, ordered by `coalesce(resolved_at, updated_at, created_at)
-desc`). The section shows ONLY when the viewer holds that gate's approve right
-(`can_approve_buy_plans` / `can_approve_sales_orders` / `can_approve_pos` /
-`can_approve_prepayments`) AND there is something pending; its inline actions re-fetch the
+desc`). The section shows ONLY when the viewer holds that tab's approve right
+(`_TAB_APPROVE_ATTR[tab]` — `can_approve_buy_plans` on the Sales Orders tab,
+`can_approve_pos` on Purchase Orders, `can_approve_prepayments` on Vendor Prepayments; the
+Buy Plans tab is gate-less) AND there is something pending; its inline actions re-fetch the
 SAME stage-tab body into `#bp-hub-body`. Subjects resolve by `subject_type` (buy_plan→`Plan
 #` / plan detail, quality_plan→`QP #` / `/v2/qp/{id}` with the parent deal as a sub-label,
 prepayment→vendor + payment method, linking the parent buy plan). Visibility is **org-wide**
@@ -5280,3 +5288,28 @@ its four-sub-tab `approvals/_queue.html` are **retired**. The legacy `GET /v2/ap
 still **302-redirects** to `/v2/buy-plans?lens=approvals` (which 302s on to the hub).
 `ApprovalRequestActionSource` (`AlertKind.APPROVAL_ACTION`) is registered under the
 **`buy-plans`** tab, so its "awaiting me" count merges onto the Approvals nav badge.
+
+**Sales Order origination from RFQ offers (SP-2).** A buy plan no longer requires a
+customer quote: `buy_plans_v3.quote_id` is **nullable** (migration 163). The Sales Orders
+stage tab carries a **"New Sales Order"** button (`partials/approvals/_tab_sales_orders.html`)
+→ `GET /v2/partials/approvals/sales-orders/new` (`sales_order_new`,
+`partials/approvals/_sales_order_new.html`), a dual-mode surface: first a **requisition
+picker** scoped to the viewer's accessible requisitions that have ≥1 ACTIVE offer, then a
+per-requirement **offer + sell-price** form (seeded via `get_builder_data` +
+`apply_smart_defaults`). Submit `POST /v2/partials/approvals/sales-orders/create` runs
+`require_requisition_access` then `buyplan_builder.create_sales_order_from_offers(req_id,
+selections, sell_prices, db, user)` — a sibling of `build_buy_plan` (which stays
+quote-required) sharing the `_assemble_buy_plan` core — producing a **DRAFT, quote-less**
+buy plan and swapping its detail view in with `HX-Push-Url`. A requisition-keyed dup guard
+(`find_open_sales_order` → raises `DuplicateSalesOrderError`, a `ValueError` carrying
+`existing_plan_id`) stops a second open SO for the same requisition; the route catches it
+specifically (curated 400 for other `ValueError`s). The **Sales Orders tab board is filtered
+to DRAFT/PENDING** and the **Buy Plans tab to ACTIVE/HALTED** via the backward-compatible
+`deals_board(..., statuses=…)` param (default `None` = byte-for-byte the old standalone
+`/board`); the Sales Orders tab's approval queue maps to the **`BUY_PLAN` gate**
+(`TAB_GATE["sales_orders"] = ApprovalGateType.BUY_PLAN`, `can_approve_buy_plans`) — there is
+no separate "sales order" gate. The QP Sales-section gate (the QualityPlan, renamed
+`SALES_ORDER`→`QP_SALES`, column `can_approve_qp_sales`, migration 164) is a distinct,
+QP-scoped approval and **leaves** the lifecycle tabs; the canonical SO# is
+`buy_plans_v3.sales_order_number` (the QP's editable `sales_so_number` input was removed and
+the column dropped).

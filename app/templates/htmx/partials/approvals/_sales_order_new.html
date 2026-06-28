@@ -96,7 +96,7 @@
             {% if line.offers %}
             <td class="px-4 py-2">
               <select name="offer_{{ line.requirement_id }}"
-                      class="form-select text-sm w-full max-w-xs">
+                      class="input input-sm w-full max-w-xs">
                 {% for o in line.offers %}
                 <option value="{{ o.id }}" {% if o.id == line.selected_offer_id %}selected{% endif %}>
                   {{ o.vendor_name }} — ${{ '{:,.4f}'.format(o.unit_price) }}
@@ -109,7 +109,7 @@
                      name="sell_{{ line.requirement_id }}"
                      value="{{ line.sell_price if line.sell_price is not none else '' }}"
                      placeholder="Sell"
-                     class="form-input text-sm w-28">
+                     class="input input-sm w-28">
             </td>
             {% else %}
             <td class="px-4 py-2 text-xs text-gray-400" colspan="2">No active offers — not included</td>

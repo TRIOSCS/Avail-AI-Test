@@ -11170,10 +11170,12 @@ async def approvals_tab_partial(
         return template_response("htmx/partials/approvals/_tab_purchase_orders.html", ctx)
 
     if lens == "sales_orders":
-        from ..services.buyplan_hub import completed_archive, deals_board
+        from ..services.buyplan_hub import deals_board
 
         can_all = _can_see_all_deals(user, db)
         board_scope = _resolve_deal_scope(scope, can_all)
+        # DRAFT/PENDING work surface only. No `archive`: the Completed archive belongs to
+        # the Buy Plans tab, and the shared board renders it only when `archive` is passed.
         ctx.update(
             {
                 "board": deals_board(
@@ -11183,7 +11185,6 @@ async def approvals_tab_partial(
                     statuses=[BuyPlanStatus.DRAFT.value, BuyPlanStatus.PENDING.value],
                 ),
                 "scope": board_scope,
-                "archive": completed_archive(db, user, scope=board_scope),
                 "can_see_all_deals": can_all,
                 "scope_toggle_url": "/v2/partials/approvals/sales-orders",
             }

@@ -120,3 +120,44 @@ def test_duplicate_so_for_requisition_is_blocked(db_session, so_origin_fixture):
     create_sales_order_from_offers(req.id, selections, sell_prices, db_session, user)
     with pytest.raises(ValueError, match="already an open"):
         create_sales_order_from_offers(req.id, selections, sell_prices, db_session, user)
+
+
+def test_originated_so_is_owned_by_creator(db_session, so_origin_fixture):
+    """The originator owns the SO (submitted_by_id) so it surfaces on their 'Mine'
+    board."""
+    from app.services.buyplan_builder import create_sales_order_from_offers
+
+    req, selections, sell_prices, user = so_origin_fixture
+    plan = create_sales_order_from_offers(req.id, selections, sell_prices, db_session, user)
+    assert plan.submitted_by_id == user.id
+
+
+@pytest.mark.parametrize("terminal_status", [BuyPlanStatus.COMPLETED.value, BuyPlanStatus.CANCELLED.value])
+def test_terminal_so_does_not_block_new_origination(db_session, so_origin_fixture, terminal_status):
+    """A COMPLETED/CANCELLED Sales Order is not 'open' — a new one may be originated."""
+    from app.services.buyplan_builder import create_sales_order_from_offers
+
+    req, selections, sell_prices, user = so_origin_fixture
+    first = create_sales_order_from_offers(req.id, selections, sell_prices, db_session, user)
+    first.status = terminal_status
+    db_session.commit()
+
+    second = create_sales_order_from_offers(req.id, selections, sell_prices, db_session, user)
+    assert second.id != first.id
+    assert second.quote_id is None
+    assert second.status == BuyPlanStatus.DRAFT.value
+
+
+@pytest.mark.parametrize("open_status", [BuyPlanStatus.PENDING.value, BuyPlanStatus.ACTIVE.value])
+def test_open_non_draft_so_still_blocks_new_origination(db_session, so_origin_fixture, open_status):
+    """A PENDING/ACTIVE (non-terminal) Sales Order still blocks a duplicate."""
+    from app.services.buyplan_builder import DuplicateSalesOrderError, create_sales_order_from_offers
+
+    req, selections, sell_prices, user = so_origin_fixture
+    first = create_sales_order_from_offers(req.id, selections, sell_prices, db_session, user)
+    first.status = open_status
+    db_session.commit()
+
+    with pytest.raises(DuplicateSalesOrderError) as exc:
+        create_sales_order_from_offers(req.id, selections, sell_prices, db_session, user)
+    assert exc.value.existing_plan_id == first.id

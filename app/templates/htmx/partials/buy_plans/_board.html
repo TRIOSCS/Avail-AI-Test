@@ -11,7 +11,9 @@
   Called by: htmx_views.py buy_plans_board_partial; embedded by _supervise.html.
   Depends on: HTMX, Alpine.js (archive toggle), Tailwind CSS with brand palette.
 #}
-{% set columns = [('draft', 'Draft'), ('pending', 'Pending'), ('active', 'Active')] %}
+{# Columns default to the three active stages; a caller (e.g. the Sales Orders tab) may
+   override `columns` to render a narrower, status-filtered board. #}
+{% set columns = columns|default([('draft', 'Draft'), ('pending', 'Pending'), ('active', 'Active')], true) %}
 {% set open_cards = board.draft + board.pending + board.active %}
 {% set open_value = open_cards|map(attribute='value')|select|map('float')|sum %}
 
@@ -124,5 +126,9 @@
   {% endfor %}
 </div>
 
-{# ── Completed archive (collapsed; lives below the active board) ── #}
+{# ── Completed archive (collapsed; lives below the active board). Rendered only when the
+   caller passes `archive` — the standalone /board route, Buy Plans tab and Supervise lens
+   do; the Sales Orders tab omits it (its completed plans archive under the Buy Plans tab). ── #}
+{% if archive is defined %}
 {% include "htmx/partials/buy_plans/_archive.html" %}
+{% endif %}

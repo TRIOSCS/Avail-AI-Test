@@ -123,7 +123,7 @@
 
   {# ═══ 3. COLLAPSIBLE SECTIONS ═══ #}
 
-  {# ── Section: Sales (SALES_ORDER gate) ── #}
+  {# ── Section: Sales (QP_SALES gate) ── #}
   <div class="mb-3 rounded-lg border border-gray-200 bg-white">
     <div role="button" tabindex="0"
          @click="showSales = !showSales"
@@ -132,10 +132,11 @@
       <div class="flex items-center gap-2">
         <span>Sales</span>
         {{ gate_chip(sales_gate) }}
-        {# Inline approve/reject — shown only to eligible PENDING recipients. Clicking
-           the buttons must not toggle the section (@click.stop on the wrapper div). #}
+        {# Inline approve/reject — shown only to eligible PENDING recipients. Clicking or
+           keying the buttons must not toggle the section: .stop on both pointer and
+           keyboard events keeps the header's @keydown.enter from also firing. #}
         {% if sales_gate and sales_gate_can_act %}
-        <div class="inline-flex items-center gap-1.5" @click.stop>
+        <div class="inline-flex items-center gap-1.5" @click.stop @keydown.enter.stop @keydown.space.stop>
           <button type="button"
                   hx-post="/v2/approvals/requests/{{ sales_gate.id }}/decision"
                   hx-vals='{"action": "approve"}'

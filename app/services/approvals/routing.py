@@ -12,7 +12,7 @@ Purpose: Given an ApprovalRequest, queries active Users for the request's gate_t
 Gate → column map:
   buy_plan       → User.can_approve_buy_plans (no amount limit)
   prepayment     → User.can_approve_prepayments + optional prepayment_approval_limit
-  sales_order    → User.can_approve_qp_sales (no amount limit)
+  qp_sales       → User.can_approve_qp_sales (no amount limit)
   purchase_order → User.can_approve_pos (no amount limit)
 
 Called by: app.services.approvals (re-exported), ApprovalService (Task 4+)
