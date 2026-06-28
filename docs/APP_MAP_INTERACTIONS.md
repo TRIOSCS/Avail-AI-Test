@@ -542,6 +542,21 @@ reflects process liveness independent of work, and stays fresh on idle /
 cap-sleep / breaker-open / off-hours paths (a liveness monitor reading
 `last_heartbeat` won't false-alarm "DOWN" while a worker is merely paused).
 
+**Proactive liveness watchdog.** Beyond the on-demand Connectors-page read, a
+scheduler job (`app/jobs/worker_liveness_jobs.py`, registered by
+`register_worker_liveness_jobs`, runs every `settings.worker_liveness_check_minutes`)
+actively consumes `last_heartbeat` for all four singletons (ics, nc, tbf,
+enrichment). When a worker that claims `is_running` has a heartbeat that is
+NULL/never-seen or older than `settings.worker_heartbeat_stale_minutes`, or its
+circuit breaker is open, it emits a debounced alert (Loguru + Sentry via
+`search_worker_base.monitoring.capture_sentry_message` + Teams). Debounce state is
+held per worker in the Redis-backed `intel_cache` keyed `worker_alert:<label>` with
+TTL = `settings.worker_alert_debounce_minutes` (no schema/column). The
+staleness + debounce decision is factored into pure functions
+(`heartbeat_is_stale` / `should_alert_stale_heartbeat`) so it is unit-testable
+without the scheduler or DB. The job is disabled under `TESTING` with the rest of
+the scheduler. Tests: `tests/test_worker_liveness.py`.
+
 **Worker-aware Connectors-page status.** The Settings → Connectors page must
 NOT render a worker-backed source as "broken"/"no API"/"needs setup" just
 because it has no direct API key. `connector_service.is_worker_backed()` (the
