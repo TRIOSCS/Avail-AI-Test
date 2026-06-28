@@ -276,7 +276,7 @@ async def _drive_verify_po(action, db_session, mock_bg):
     The handler imports verify_po/check_completion/run_notify_bg locally from their
     SOURCE modules, so patches must target those modules — not htmx_views.
     """
-    from app.routers import htmx_views
+    from app.routers.htmx import buy_plans as htmx_buy_plans
 
     form = {"action": action}
     if action == "reject":
@@ -286,9 +286,9 @@ async def _drive_verify_po(action, db_session, mock_bg):
         patch("app.services.buyplan_workflow.verify_po"),
         patch("app.services.buyplan_workflow.check_completion", return_value=None),
         patch("app.services.buyplan_notifications.run_notify_bg", mock_bg),
-        patch.object(htmx_views, "buy_plan_detail_partial", new_callable=AsyncMock, return_value="ok"),
+        patch.object(htmx_buy_plans, "buy_plan_detail_partial", new_callable=AsyncMock, return_value="ok"),
     ):
-        await htmx_views.buy_plan_verify_po_partial(req, plan_id=5, line_id=9, user=MagicMock(), db=db_session)
+        await htmx_buy_plans.buy_plan_verify_po_partial(req, plan_id=5, line_id=9, user=MagicMock(), db=db_session)
 
 
 class TestVerifyPoWiring:

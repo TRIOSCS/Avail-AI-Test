@@ -262,7 +262,7 @@ class TestBuyPlanConfirmPoDirect:
     async def test_confirm_po_success(self, db_session: Session, test_user: User):
         """Lines 6098–6120: POST form with po_number → calls confirm_po."""
         from app.models.buy_plan import BuyPlan, BuyPlanLine
-        from app.routers.htmx_views import buy_plan_confirm_po_partial
+        from app.routers.htmx.buy_plans import buy_plan_confirm_po_partial
 
         req = _make_req(db_session, test_user)
         quote = _make_quote(db_session, req, test_user)
@@ -287,7 +287,7 @@ class TestBuyPlanConfirmPoDirect:
         with (
             patch("app.services.buyplan_workflow.confirm_po") as mock_confirm,
             patch("app.services.buyplan_notifications.run_notify_bg", new_callable=AsyncMock),
-            patch("app.routers.htmx_views.buy_plan_detail_partial", new_callable=AsyncMock) as mock_detail,
+            patch("app.routers.htmx.buy_plans.buy_plan_detail_partial", new_callable=AsyncMock) as mock_detail,
         ):
             mock_confirm.return_value = None
             mock_detail.return_value = HTMLResponse("bp detail")
@@ -305,7 +305,7 @@ class TestBuyPlanConfirmPoDirect:
         from fastapi import HTTPException
 
         from app.models.buy_plan import BuyPlan
-        from app.routers.htmx_views import buy_plan_confirm_po_partial
+        from app.routers.htmx.buy_plans import buy_plan_confirm_po_partial
 
         req = _make_req(db_session, test_user)
         quote = _make_quote(db_session, req, test_user)

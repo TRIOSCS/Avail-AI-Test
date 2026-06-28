@@ -92,7 +92,7 @@ class TestEditOfferValueErrorBranchesDirect:
 
     async def test_edit_offer_invalid_qty_continues(self, db_session: Session, test_user: User):
         """Lines 2179–2180: invalid qty_available → ValueError caught, field skipped."""
-        from app.routers.htmx_views import edit_offer
+        from app.routers.htmx.offers import edit_offer
 
         req = _make_req(db_session, test_user)
         offer = _make_offer(db_session, req, test_user)
@@ -104,7 +104,7 @@ class TestEditOfferValueErrorBranchesDirect:
                 "vendor_name": "UpdatedVend",
             }
         )
-        with patch("app.routers.htmx_views.requisition_tab", new_callable=AsyncMock) as mock_tab:
+        with patch("app.routers.htmx.offers.requisition_tab", new_callable=AsyncMock) as mock_tab:
             mock_tab.return_value = HTMLResponse("tab OK")
             result = await edit_offer(
                 request=mock_req,
@@ -120,12 +120,12 @@ class TestEditOfferValueErrorBranchesDirect:
 
     async def test_edit_offer_invalid_unit_price_continues(self, db_session: Session, test_user: User):
         """Lines 2184–2185: invalid unit_price → ValueError caught, field skipped."""
-        from app.routers.htmx_views import edit_offer
+        from app.routers.htmx.offers import edit_offer
 
         req = _make_req(db_session, test_user)
         offer = _make_offer(db_session, req, test_user)
         mock_req = _mock_form_request(fields={"unit_price": "bad-price", "vendor_name": "V2"})
-        with patch("app.routers.htmx_views.requisition_tab", new_callable=AsyncMock) as mock_tab:
+        with patch("app.routers.htmx.offers.requisition_tab", new_callable=AsyncMock) as mock_tab:
             mock_tab.return_value = HTMLResponse("tab OK")
             result = await edit_offer(
                 request=mock_req,
@@ -141,12 +141,12 @@ class TestEditOfferValueErrorBranchesDirect:
     async def test_edit_offer_invalid_valid_until_continues(self, db_session: Session, test_user: User):
         """Lines 2187–2192: invalid valid_until date → ValueError caught, field
         skipped."""
-        from app.routers.htmx_views import edit_offer
+        from app.routers.htmx.offers import edit_offer
 
         req = _make_req(db_session, test_user)
         offer = _make_offer(db_session, req, test_user)
         mock_req = _mock_form_request(fields={"valid_until": "not-a-date", "vendor_name": "V3"})
-        with patch("app.routers.htmx_views.requisition_tab", new_callable=AsyncMock) as mock_tab:
+        with patch("app.routers.htmx.offers.requisition_tab", new_callable=AsyncMock) as mock_tab:
             mock_tab.return_value = HTMLResponse("tab OK")
             result = await edit_offer(
                 request=mock_req,
@@ -160,7 +160,7 @@ class TestEditOfferValueErrorBranchesDirect:
     async def test_edit_offer_with_requirement_id(self, db_session: Session, test_user: User):
         """Line 2208: requirement_id form field sets offer.requirement_id."""
         from app.models.sourcing import Requirement
-        from app.routers.htmx_views import edit_offer
+        from app.routers.htmx.offers import edit_offer
 
         req = _make_req(db_session, test_user)
         item = Requirement(
@@ -174,7 +174,7 @@ class TestEditOfferValueErrorBranchesDirect:
 
         offer = _make_offer(db_session, req, test_user)
         mock_req = _mock_form_request(fields={"requirement_id": str(item.id), "vendor_name": "Vend"})
-        with patch("app.routers.htmx_views.requisition_tab", new_callable=AsyncMock) as mock_tab:
+        with patch("app.routers.htmx.offers.requisition_tab", new_callable=AsyncMock) as mock_tab:
             mock_tab.return_value = HTMLResponse("tab OK")
             result = await edit_offer(
                 request=mock_req,
@@ -195,12 +195,12 @@ class TestReviewResponseHtmxDirect:
     @pytest.mark.parametrize("status", ["reviewed", "rejected"])
     async def test_mark_status_success(self, db_session: Session, test_user: User, status: str):
         """Lines 2803–2815: POST status=reviewed/rejected → vr.status updated."""
-        from app.routers.htmx_views import review_response_htmx
+        from app.routers.htmx.offers import review_response_htmx
 
         req = _make_req(db_session, test_user)
         vr = _make_vendor_response(db_session, req)
         mock_req = _mock_form_request(fields={"status": status})
-        with patch("app.routers.htmx_views.template_response") as mock_tpl:
+        with patch("app.routers.htmx.offers.template_response") as mock_tpl:
             mock_tpl.return_value = HTMLResponse("response card")
             result = await review_response_htmx(
                 request=mock_req,
@@ -217,7 +217,7 @@ class TestReviewResponseHtmxDirect:
         """Invalid status → 400."""
         from fastapi import HTTPException
 
-        from app.routers.htmx_views import review_response_htmx
+        from app.routers.htmx.offers import review_response_htmx
 
         req = _make_req(db_session, test_user)
         vr = _make_vendor_response(db_session, req)
@@ -236,7 +236,7 @@ class TestReviewResponseHtmxDirect:
         """Non-existent response → 404."""
         from fastapi import HTTPException
 
-        from app.routers.htmx_views import review_response_htmx
+        from app.routers.htmx.offers import review_response_htmx
 
         req = _make_req(db_session, test_user)
         mock_req = _mock_form_request(fields={"status": "reviewed"})

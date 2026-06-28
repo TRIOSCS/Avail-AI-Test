@@ -262,7 +262,7 @@ class TestHelperFunctions:
         assert _safe_int("abc") is None
 
     def test_safe_float(self):
-        from app.routers.htmx_views import _safe_float
+        from app.routers.htmx._shared import _safe_float
 
         assert _safe_float("3.14") == 3.14
         assert _safe_float("") is None
@@ -272,7 +272,7 @@ class TestHelperFunctions:
     def test_parse_date_safe(self):
         from datetime import date
 
-        from app.routers.htmx_views import _parse_date_safe
+        from app.routers.htmx._shared import _parse_date_safe
 
         assert _parse_date_safe("", date) is None
         assert _parse_date_safe(None, date) is None

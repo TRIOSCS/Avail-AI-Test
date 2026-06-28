@@ -110,21 +110,21 @@ def test_shell_renders_stage_tabs(nonadmin_client: TestClient):
 
 def test_default_lens_buyer_is_purchase_orders(db_session: Session, test_user: User):
     """Buyers land on the Purchase Orders stage (their PO cut queue)."""
-    from app.routers.htmx_views import _default_lens
+    from app.routers.htmx.buy_plans import _default_lens
 
     assert _default_lens(test_user, db_session) == "purchase_orders"
 
 
 def test_default_lens_manager_is_supervise(db_session: Session, manager_user: User):
     """Managers/ops land on Supervise."""
-    from app.routers.htmx_views import _default_lens
+    from app.routers.htmx.buy_plans import _default_lens
 
     assert _default_lens(manager_user, db_session) == "supervise"
 
 
 def test_default_lens_sales_is_buy_plans(db_session: Session, sales_user: User):
     """Sales/trader land on the Buy Plans deal board."""
-    from app.routers.htmx_views import _default_lens
+    from app.routers.htmx.buy_plans import _default_lens
 
     assert _default_lens(sales_user, db_session) == "buy_plans"
 
