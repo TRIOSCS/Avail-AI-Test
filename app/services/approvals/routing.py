@@ -84,7 +84,7 @@ def route_request(db: Session, request: ApprovalRequest) -> ApprovalStep:
             if u.prepayment_approval_limit is None or (amount is not None and amount <= u.prepayment_approval_limit)
         ]
 
-    elif gate == ApprovalGateType.SALES_ORDER:
+    elif gate == ApprovalGateType.QP_SALES:
         # QP Sales section: route to every active user holding can_approve_qp_sales.
         # No amount check (the SO gate approves the section, not a spend).
         eligible = (

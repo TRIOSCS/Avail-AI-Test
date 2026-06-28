@@ -4,7 +4,7 @@ Purpose: Exposes GET /v2/qp/for-buy-plan/{bp_id} (the front door — get-or-crea
          for a buy plan and render its native detail), GET /v2/qp/{id} (QP detail
          partial), POST /v2/qp/{id}/submit (submit-for-review action), the QP Phase C2a
          section gates POST /v2/qp/{id}/submit-sales + /submit-purchasing (open the
-         SALES_ORDER / PURCHASE_ORDER approval gate), and the QP Phase C2b native-section
+         QP_SALES / PURCHASE_ORDER approval gate), and the QP Phase C2b native-section
          editors: PATCH /v2/qp/{id}/sales + /purchasing (inline field edit → refreshed
          section partial), serial CRUD (POST/DELETE /v2/qp/{id}/serial[/{entry_id}]),
          and FRU pin/unpin (POST/DELETE /v2/qp/{id}/fru[/{lookup_id}]). All return the
@@ -190,10 +190,10 @@ def _qp_detail_response(
         "bp_lines": (bp.lines or []) if bp else [],
         "errors": errors,
         "section_error": section_error,
-        "sales_errors": validate_section(qp, ApprovalGateType.SALES_ORDER),
+        "sales_errors": validate_section(qp, ApprovalGateType.QP_SALES),
         "purchasing_errors": validate_section(qp, ApprovalGateType.PURCHASE_ORDER),
         "fru_rows": _fru_rows(db, qp),
-        "sales_gate": _get_gate(db, qp.id, ApprovalGateType.SALES_ORDER),
+        "sales_gate": _get_gate(db, qp.id, ApprovalGateType.QP_SALES),
         "purchasing_gate": _get_gate(db, qp.id, ApprovalGateType.PURCHASE_ORDER),
         "buy_plan_gate": _get_gate(db, qp.id, ApprovalGateType.BUY_PLAN),
         "prepayment_gate": _get_gate(db, qp.id, ApprovalGateType.PREPAYMENT),
@@ -346,7 +346,7 @@ def qp_submit(
 
 
 def _submit_section_response(request: Request, qp_id: int, gate_type: str, db: Session, user) -> HTMLResponse:
-    """Open a section gate (SALES_ORDER / PURCHASE_ORDER) and refresh the QP detail.
+    """Open a section gate (QP_SALES / PURCHASE_ORDER) and refresh the QP detail.
 
     On IncompleteQPError (a required section field is blank) the inline section_errors
     grid blocks submit, so re-render with no gate opened. On NoSectionApproverError
@@ -390,11 +390,11 @@ def qp_submit_sales(
     db: Session = Depends(get_db),
     user=Depends(require_user),
 ) -> HTMLResponse:
-    """Submit the QP Sales section for approval (opens the SALES_ORDER gate).
+    """Submit the QP Sales section for approval (opens the QP_SALES gate).
 
     Refreshes the detail partial. No eligible approver → inline banner, never a 500.
     """
-    return _submit_section_response(request, qp_id, ApprovalGateType.SALES_ORDER, db, user)
+    return _submit_section_response(request, qp_id, ApprovalGateType.QP_SALES, db, user)
 
 
 @router.post("/v2/qp/{qp_id}/submit-purchasing", response_class=HTMLResponse)
@@ -437,7 +437,7 @@ def _load_qp_for_edit(db: Session, qp_id: int, user) -> QualityPlan:
 
 def _section_approved(qp: QualityPlan, gate_type: str) -> bool:
     """True when the given section already carries an approved-at stamp (read-only)."""
-    if str(gate_type) == "sales_order":
+    if str(gate_type) == "qp_sales":
         return qp.sales_section_approved_at is not None
     return qp.purchasing_section_approved_at is not None
 
@@ -450,8 +450,8 @@ def _render_sales_section(request: Request, db: Session, qp: QualityPlan, user) 
             "request": request,
             "user": user,
             "qp": qp,
-            "sales_errors": validate_section(qp, ApprovalGateType.SALES_ORDER),
-            "sales_gate": _get_gate(db, qp.id, ApprovalGateType.SALES_ORDER),
+            "sales_errors": validate_section(qp, ApprovalGateType.QP_SALES),
+            "sales_gate": _get_gate(db, qp.id, ApprovalGateType.QP_SALES),
         },
     )
 
@@ -500,7 +500,7 @@ async def qp_patch_sales(
     _SALES_FIELDS are written, so a stray form key can never set an arbitrary column.
     """
     qp = _load_qp_for_edit(db, qp_id, user)
-    if not _section_approved(qp, ApprovalGateType.SALES_ORDER):
+    if not _section_approved(qp, ApprovalGateType.QP_SALES):
         form = await request.form()
         for field, kind in _SALES_FIELDS.items():
             if field in form:

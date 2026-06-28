@@ -2,7 +2,7 @@
 
 Covers the C2a contract on the shared approvals engine (engine + buy-plan gate already
 live in C1):
-  - route_request for the SALES_ORDER gate routes to can_approve_qp_sales holders;
+  - route_request for the QP_SALES gate routes to can_approve_qp_sales holders;
     for the PURCHASE_ORDER gate to can_approve_pos holders (step rule=ANY, recipients
     PENDING), with no amount check.
   - no eligible approver raises NoEligibleApproverError, and submit_section surfaces it as
@@ -165,7 +165,7 @@ def test_route_sales_order_routes_to_sales_approvers(db_session: Session) -> Non
     _make_user(db_session, can_approve_qp_sales=False)  # not routed
     _make_user(db_session, can_approve_pos=True)  # wrong gate toggle — not routed
 
-    req = _make_request(db_session, ApprovalGateType.SALES_ORDER)
+    req = _make_request(db_session, ApprovalGateType.QP_SALES)
     step = route_request(db_session, req)
 
     assert step.rule == ApprovalStepRule.ANY
@@ -178,7 +178,7 @@ def test_route_sales_order_ignores_inactive(db_session: Session) -> None:
     active = _make_user(db_session, can_approve_qp_sales=True)
     _make_user(db_session, can_approve_qp_sales=True, is_active=False)
 
-    step = route_request(db_session, _make_request(db_session, ApprovalGateType.SALES_ORDER))
+    step = route_request(db_session, _make_request(db_session, ApprovalGateType.QP_SALES))
     assert {r.user_id for r in step.recipients} == {active.id}
 
 
@@ -205,7 +205,7 @@ def test_route_sales_order_no_approver_raises(db_session: Session) -> None:
     """No can_approve_qp_sales holder → NoEligibleApproverError."""
     _make_user(db_session, can_approve_qp_sales=False)
     with pytest.raises(NoEligibleApproverError):
-        route_request(db_session, _make_request(db_session, ApprovalGateType.SALES_ORDER))
+        route_request(db_session, _make_request(db_session, ApprovalGateType.QP_SALES))
 
 
 def test_route_purchase_order_no_approver_raises(db_session: Session) -> None:
@@ -224,9 +224,9 @@ def test_submit_sales_section_creates_sales_order_request(db_session: Session) -
     approver = _make_user(db_session, can_approve_qp_sales=True)
     qp = _make_qp(db_session, approver)
 
-    req = submit_section(db_session, qp.id, ApprovalGateType.SALES_ORDER, approver)
+    req = submit_section(db_session, qp.id, ApprovalGateType.QP_SALES, approver)
 
-    assert req.gate_type == ApprovalGateType.SALES_ORDER
+    assert req.gate_type == ApprovalGateType.QP_SALES
     assert req.subject_type == ApprovalSubjectType.QUALITY_PLAN
     assert req.subject_id == qp.id
     assert req.status == ApprovalRequestStatus.REQUESTED
@@ -257,11 +257,11 @@ def test_submit_section_no_approver_raises_section_error_no_orphan(db_session: S
     qp = _make_qp(db_session, submitter)
 
     with pytest.raises(NoSectionApproverError) as exc:
-        submit_section(db_session, qp.id, ApprovalGateType.SALES_ORDER, submitter)
+        submit_section(db_session, qp.id, ApprovalGateType.QP_SALES, submitter)
     assert exc.value.section == "Sales"
 
     # create_request removed the half-built request — no orphan engine state.
-    assert _section_requests(db_session, qp.id, ApprovalGateType.SALES_ORDER) == []
+    assert _section_requests(db_session, qp.id, ApprovalGateType.QP_SALES) == []
 
 
 # ── decide() dispatches the section on-resolve hook ──────────────────────
@@ -272,7 +272,7 @@ def test_decide_sales_section_logs_activity_same_session(db_session: Session) ->
     activity in the same session before commit (via _on_section_approved)."""
     approver = _make_user(db_session, can_approve_qp_sales=True)
     qp = _make_qp(db_session, approver)
-    req = submit_section(db_session, qp.id, ApprovalGateType.SALES_ORDER, approver)
+    req = submit_section(db_session, qp.id, ApprovalGateType.QP_SALES, approver)
 
     resolved = svc_decide(db_session, req.id, approver, "approve", comment="ok")
 
@@ -392,7 +392,7 @@ def test_submit_sales_endpoint_creates_request(qp_client, db_session: Session) -
 
     r = client.post(f"/v2/qp/{qp.id}/submit-sales")
     assert r.status_code == 200
-    reqs = _section_requests(db_session, qp.id, ApprovalGateType.SALES_ORDER)
+    reqs = _section_requests(db_session, qp.id, ApprovalGateType.QP_SALES)
     assert len(reqs) == 1
     assert reqs[0].status == ApprovalRequestStatus.REQUESTED
 
@@ -433,4 +433,4 @@ def test_submit_sales_endpoint_no_approver_shows_banner_not_500(db_session: Sess
 
     assert r.status_code == 200
     assert "No approver configured" in r.text
-    assert _section_requests(db_session, qp.id, ApprovalGateType.SALES_ORDER) == []
+    assert _section_requests(db_session, qp.id, ApprovalGateType.QP_SALES) == []

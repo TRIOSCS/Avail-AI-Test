@@ -24,7 +24,11 @@ depends_on = None
 def upgrade() -> None:
     # Op A — rename the QP Sales-section approver toggle column.
     op.alter_column("users", "can_approve_sales_orders", new_column_name="can_approve_qp_sales")
+    # Op B — rewrite persisted QP-sales gate values (free String(50) column, no CHECK).
+    op.execute("UPDATE approval_requests SET gate_type = 'qp_sales' WHERE gate_type = 'sales_order'")
 
 
 def downgrade() -> None:
+    # Op B reverse — restore persisted gate values to the old string.
+    op.execute("UPDATE approval_requests SET gate_type = 'sales_order' WHERE gate_type = 'qp_sales'")
     op.alter_column("users", "can_approve_qp_sales", new_column_name="can_approve_sales_orders")

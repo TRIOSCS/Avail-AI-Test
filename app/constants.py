@@ -1001,7 +1001,7 @@ class ApprovalGateType(StrEnum):
 
     BUY_PLAN = "buy_plan"
     PREPAYMENT = "prepayment"
-    SALES_ORDER = "sales_order"
+    QP_SALES = "qp_sales"
     PURCHASE_ORDER = "purchase_order"
 
 

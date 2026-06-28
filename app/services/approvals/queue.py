@@ -48,7 +48,7 @@ from ...models.quality_plan import Prepayment, QualityPlan
 TAB_ORDER = ["buy_plans", "sales_orders", "purchase_orders", "prepayments"]
 TAB_GATE = {
     "buy_plans": ApprovalGateType.BUY_PLAN,
-    "sales_orders": ApprovalGateType.SALES_ORDER,
+    "sales_orders": ApprovalGateType.QP_SALES,
     "purchase_orders": ApprovalGateType.PURCHASE_ORDER,
     "prepayments": ApprovalGateType.PREPAYMENT,
 }

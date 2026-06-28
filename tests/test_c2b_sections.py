@@ -129,7 +129,7 @@ def test_complete_sections_validate_clean(db_session: Session) -> None:
     qp = _make_qp(db_session, _make_user(db_session), fill_sales=True, fill_purchasing=True)
     assert _validate_sales_section(qp) == []
     assert _validate_purchasing_section(qp) == []
-    assert validate_section(qp, ApprovalGateType.SALES_ORDER) == []
+    assert validate_section(qp, ApprovalGateType.QP_SALES) == []
     assert validate_section(qp, ApprovalGateType.PURCHASE_ORDER) == []
 
 
@@ -142,7 +142,7 @@ def test_submit_incomplete_sales_raises_and_opens_no_gate(db_session: Session) -
     approver = _make_user(db_session, can_approve_qp_sales=True)
     qp = _make_qp(db_session, approver)  # not filled
     with pytest.raises(IncompleteQPError):
-        submit_section(db_session, qp.id, ApprovalGateType.SALES_ORDER, approver)
+        submit_section(db_session, qp.id, ApprovalGateType.QP_SALES, approver)
     reqs = db_session.execute(select(QualityPlan).where(QualityPlan.id == qp.id)).scalar_one()
     assert reqs is not None  # QP intact
     from app.models.approvals import ApprovalRequest
@@ -152,11 +152,11 @@ def test_submit_incomplete_sales_raises_and_opens_no_gate(db_session: Session) -
 
 
 def test_submit_complete_sales_opens_gate(db_session: Session) -> None:
-    """A complete Sales section opens the SALES_ORDER request."""
+    """A complete Sales section opens the QP_SALES request."""
     approver = _make_user(db_session, can_approve_qp_sales=True)
     qp = _make_qp(db_session, approver, fill_sales=True)
-    req = submit_section(db_session, qp.id, ApprovalGateType.SALES_ORDER, approver)
-    assert req.gate_type == ApprovalGateType.SALES_ORDER
+    req = submit_section(db_session, qp.id, ApprovalGateType.QP_SALES, approver)
+    assert req.gate_type == ApprovalGateType.QP_SALES
     assert req.subject_id == qp.id
 
 
@@ -167,7 +167,7 @@ def test_on_section_approved_stamps_sales_timestamp(db_session: Session) -> None
     """Approving the Sales section sets sales_section_approved_at."""
     qp = _make_qp(db_session, _make_user(db_session), fill_sales=True)
     assert qp.sales_section_approved_at is None
-    _on_section_approved(db_session, qp.id, ApprovalGateType.SALES_ORDER, True)
+    _on_section_approved(db_session, qp.id, ApprovalGateType.QP_SALES, True)
     db_session.refresh(qp)
     assert qp.sales_section_approved_at is not None
     assert qp.purchasing_section_approved_at is None  # unaffected
@@ -186,7 +186,7 @@ def test_on_section_rejected_clears_timestamp(db_session: Session) -> None:
     qp = _make_qp(db_session, _make_user(db_session), fill_sales=True)
     qp.sales_section_approved_at = datetime.now(timezone.utc)
     db_session.flush()
-    _on_section_approved(db_session, qp.id, ApprovalGateType.SALES_ORDER, False)
+    _on_section_approved(db_session, qp.id, ApprovalGateType.QP_SALES, False)
     db_session.refresh(qp)
     assert qp.sales_section_approved_at is None
 

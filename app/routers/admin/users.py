@@ -402,7 +402,7 @@ async def set_sales_order_approver(
     Users partial.
 
     The right is the per-user User.can_approve_qp_sales column; the QP Sales section
-    (SALES_ORDER gate) routes to its holders. Admin-only (require_admin); each change
+    (QP_SALES gate) routes to its holders. Admin-only (require_admin); each change
     writes an APPROVAL_GRANT / APPROVAL_REVOKE audit row. A no-op (state unchanged) re-
     renders without auditing, mirroring set_buyplan_approver.
     """
@@ -419,7 +419,7 @@ async def set_sales_order_approver(
         actor_id=admin.id,
         target_user_id=target.id,
         action=action,
-        detail={"gate": "sales_order"},
+        detail={"gate": "qp_sales"},
     )
     db.commit()
     logger.info("User {} sales-order approval {} by {}", target.email, "granted" if grant else "revoked", admin.email)

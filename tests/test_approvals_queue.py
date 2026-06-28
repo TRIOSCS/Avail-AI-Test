@@ -165,7 +165,7 @@ def test_tab_filter_returns_only_that_gate_type(db_session: Session) -> None:
     )
     so = _seed(
         db_session,
-        ApprovalGateType.SALES_ORDER,
+        ApprovalGateType.QP_SALES,
         subject_type=ApprovalSubjectType.QUALITY_PLAN,
         subject_id=qp.id,
         pending_recipients=(me,),
@@ -182,7 +182,7 @@ def test_tab_filter_returns_only_that_gate_type(db_session: Session) -> None:
 
     assert view.active_tab == "sales_orders"
     assert [r.id for r in view.pending_rows] == [so.id]
-    assert all(r.gate_type == "sales_order" for r in view.pending_rows)
+    assert all(r.gate_type == "qp_sales" for r in view.pending_rows)
 
 
 def test_smart_default_picks_gate_with_most_awaiting_me(db_session: Session) -> None:
@@ -224,7 +224,7 @@ def test_smart_default_zero_falls_back_to_buy_plans(db_session: Session) -> None
     # Pending work exists, but routed to someone else — me is awaiting nothing.
     _seed(
         db_session,
-        ApprovalGateType.SALES_ORDER,
+        ApprovalGateType.QP_SALES,
         subject_type=ApprovalSubjectType.QUALITY_PLAN,
         subject_id=qp.id,
         pending_recipients=(other,),
@@ -343,7 +343,7 @@ def test_pill_counts_are_org_wide(db_session: Session) -> None:
     for _ in range(3):
         _seed(
             db_session,
-            ApprovalGateType.SALES_ORDER,
+            ApprovalGateType.QP_SALES,
             subject_type=ApprovalSubjectType.QUALITY_PLAN,
             subject_id=qp.id,
             pending_recipients=(other,),
@@ -416,7 +416,7 @@ def test_subject_label_and_href_per_gate(db_session: Session) -> None:
     )
     _seed(
         db_session,
-        ApprovalGateType.SALES_ORDER,
+        ApprovalGateType.QP_SALES,
         subject_type=ApprovalSubjectType.QUALITY_PLAN,
         subject_id=qp.id,
         pending_recipients=(me,),
@@ -459,7 +459,7 @@ def test_amount_source_per_gate(db_session: Session) -> None:
     )
     _seed(
         db_session,
-        ApprovalGateType.SALES_ORDER,
+        ApprovalGateType.QP_SALES,
         subject_type=ApprovalSubjectType.QUALITY_PLAN,
         subject_id=qp.id,
         amount=None,
@@ -548,9 +548,7 @@ def test_routed_request_via_service_is_actionable(db_session: Session) -> None:
     me = _user(db_session, can_approve_qp_sales=True)
     bp = _bp(db_session, me)
     qp = _qp(db_session, bp, me)
-    create_request(
-        db_session, gate_type=ApprovalGateType.SALES_ORDER, amount=None, subject=qp, requested_by=me, owner=me
-    )
+    create_request(db_session, gate_type=ApprovalGateType.QP_SALES, amount=None, subject=qp, requested_by=me, owner=me)
     db_session.flush()
 
     view = build_queue_view(db_session, me, "sales_orders")

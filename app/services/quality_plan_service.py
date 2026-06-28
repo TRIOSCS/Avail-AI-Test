@@ -12,7 +12,7 @@ Purpose:
 Phase-1 required fields: created_by_id (owner), order_type, buy_plan_id.
 
 QP Phase C2a adds the per-section approval-gate submit/resolve helpers:
-  - submit_section: open a SALES_ORDER / PURCHASE_ORDER ApprovalRequest for the QP
+  - submit_section: open a QP_SALES / PURCHASE_ORDER ApprovalRequest for the QP
     (the QP is the subject; the gate_type discriminates the section). A missing approver
     surfaces NoSectionApproverError so the router can show an inline banner, not a 500.
   - _on_section_approved: the on-resolve hook the engine calls inside decide() (C2a logs
@@ -39,7 +39,7 @@ from ..services.activity_service import log_activity
 
 # Human-readable section name per gate_type, used in activity descriptions / banners.
 _SECTION_LABEL: dict[str, str] = {
-    "sales_order": "Sales",
+    "qp_sales": "Sales",
     "purchase_order": "Purchasing",
 }
 
@@ -227,12 +227,12 @@ def _validate_purchasing_section(qp: QualityPlan) -> list[str]:
 def validate_section(qp: QualityPlan, gate_type: str) -> list[str]:
     """Dispatch to the per-section validator for the given gate_type.
 
-    Returns the Sales validator's errors for the SALES_ORDER gate and the Purchasing
+    Returns the Sales validator's errors for the QP_SALES gate and the Purchasing
     validator's for the PURCHASE_ORDER gate; any other gate has no section fields to
     validate (empty list). The router uses this to render server-driven section_errors
     and to disable the submit button until the section is complete.
     """
-    if str(gate_type) == "sales_order":
+    if str(gate_type) == "qp_sales":
         return _validate_sales_section(qp)
     if str(gate_type) == "purchase_order":
         return _validate_purchasing_section(qp)
@@ -240,7 +240,7 @@ def validate_section(qp: QualityPlan, gate_type: str) -> list[str]:
 
 
 def _on_section_approved(db: Session, qp_id: int, gate_type: str, approved: bool) -> None:
-    """On-resolve hook for a QP section gate (SALES_ORDER / PURCHASE_ORDER).
+    """On-resolve hook for a QP section gate (QP_SALES / PURCHASE_ORDER).
 
     Called by the approval engine inside decide() (lazy import) when a section request
     resolves. On approval it stamps the QualityPlan's matching section-approved
@@ -251,7 +251,7 @@ def _on_section_approved(db: Session, qp_id: int, gate_type: str, approved: bool
     Args:
         db: SQLAlchemy session (sync, 2.0 style).
         qp_id: PK of the QualityPlan whose section resolved.
-        gate_type: The section gate (ApprovalGateType.SALES_ORDER / .PURCHASE_ORDER).
+        gate_type: The section gate (ApprovalGateType.QP_SALES / .PURCHASE_ORDER).
         approved: True if the section was approved, False if rejected.
 
     Returns:
@@ -264,7 +264,7 @@ def _on_section_approved(db: Session, qp_id: int, gate_type: str, approved: bool
 
     # Stamp (or clear) the section's approved-at timestamp.
     stamp = datetime.now(timezone.utc) if approved else None
-    if str(gate_type) == "sales_order":
+    if str(gate_type) == "qp_sales":
         qp.sales_section_approved_at = stamp
     elif str(gate_type) == "purchase_order":
         qp.purchasing_section_approved_at = stamp
@@ -282,7 +282,7 @@ def _on_section_approved(db: Session, qp_id: int, gate_type: str, approved: bool
 
 
 def submit_section(db: Session, qp_id: int, gate_type: str, user: Any) -> Any:
-    """Open a section approval request (SALES_ORDER / PURCHASE_ORDER) for the QP.
+    """Open a section approval request (QP_SALES / PURCHASE_ORDER) for the QP.
 
     The QualityPlan is the engine subject (subject_type=QUALITY_PLAN); the gate_type
     discriminates which section is being submitted. Routes to users holding the matching
@@ -293,7 +293,7 @@ def submit_section(db: Session, qp_id: int, gate_type: str, user: Any) -> Any:
     Args:
         db: SQLAlchemy session (sync, 2.0 style).
         qp_id: PK of the QualityPlan to submit.
-        gate_type: ApprovalGateType.SALES_ORDER or .PURCHASE_ORDER.
+        gate_type: ApprovalGateType.QP_SALES or .PURCHASE_ORDER.
         user: The authenticated User submitting the section (requester + owner).
 
     Returns:
