@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import signal
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -84,6 +84,45 @@ def _record_heartbeat(db: Session, breaker: "EnrichmentCircuitBreaker") -> bool:
         circuit_breaker_reason=(breaker.get_trip_info()["trip_reason"] if breaker_open else None),
     )
     return breaker_open
+
+
+def _load_today_counters(db: Session, today_date: date) -> dict:
+    """Hydrate the worker's in-memory daily counters from the persisted status row.
+
+    The daily-cap budget lives in ``enriched_today`` on the status singleton, tagged
+    with the UTC date it belongs to (``enriched_today_date``). Called once at worker
+    startup so a container restart does NOT hand the worker a fresh budget:
+
+    - Stored date == today  → RESUME: return the persisted per-tier counts with
+      ``last_stats_date = today_date``. The main loop then SKIPS its daily-reset block
+      on the first tick and the daily cap stays enforced across the restart.
+    - Stored date != today / NULL / no row → return zeros with
+      ``last_stats_date = None`` so the normal new-day reset runs on the first tick.
+
+    Returns a dict of the six running totals plus ``last_stats_date``.
+    """
+    from app.models.enrichment_worker_status import EnrichmentWorkerStatus
+
+    status = db.get(EnrichmentWorkerStatus, 1)
+    if status is not None and status.enriched_today_date == today_date:
+        return {
+            "enriched_today": status.enriched_today or 0,
+            "web_sourced_today": status.web_sourced_today or 0,
+            "oem_sourced_today": status.oem_sourced_today or 0,
+            "ai_inferred_today": status.ai_inferred_today or 0,
+            "not_found_today": status.not_found_today or 0,
+            "not_catalogued_today": status.not_catalogued_today or 0,
+            "last_stats_date": today_date,
+        }
+    return {
+        "enriched_today": 0,
+        "web_sourced_today": 0,
+        "oem_sourced_today": 0,
+        "ai_inferred_today": 0,
+        "not_found_today": 0,
+        "not_catalogued_today": 0,
+        "last_stats_date": None,
+    }
 
 
 def select_batch(db: Session, config: "EnrichmentWorkerConfig") -> list:
@@ -817,14 +856,8 @@ async def main() -> None:
     # daily reset alongside the cache's date-keyed counters.
     web_state: dict[str, int] = {"web_calls": 0, "oem_resolves": 0}
 
-    # Running totals for today
-    enriched_today = 0
-    web_sourced_today = 0
-    oem_sourced_today = 0
-    ai_inferred_today = 0
-    not_found_today = 0
-    not_catalogued_today = 0
-    last_stats_date = None
+    # Running totals for today are hydrated from the status row just below (after the
+    # startup heartbeat) so a restart resumes the same-day daily-cap budget.
 
     logger.info(
         "ENRICH_WORKER: starting up (batch_size={}, daily_cap={}, web_daily_cap={})",
@@ -833,7 +866,10 @@ async def main() -> None:
         config.web_daily_cap,
     )
 
-    # Startup heartbeat
+    # Startup heartbeat + resume the persisted daily-cap budget. Reading enriched_today /
+    # enriched_today_date back means a same-day container restart RESUMES the count (the
+    # daily cap stays enforced) instead of handing the worker a fresh budget; a restart on
+    # a new day yields zeros + last_stats_date=None so the new-day reset runs below.
     db = SessionLocal()
     try:
         update_enrichment_worker_status(
@@ -841,8 +877,23 @@ async def main() -> None:
             is_running=True,
             last_heartbeat=datetime.now(timezone.utc),
         )
+        resumed = _load_today_counters(db, datetime.now(timezone.utc).date())
     finally:
         db.close()
+    enriched_today = resumed["enriched_today"]
+    web_sourced_today = resumed["web_sourced_today"]
+    oem_sourced_today = resumed["oem_sourced_today"]
+    ai_inferred_today = resumed["ai_inferred_today"]
+    not_found_today = resumed["not_found_today"]
+    not_catalogued_today = resumed["not_catalogued_today"]
+    last_stats_date = resumed["last_stats_date"]
+    if last_stats_date is not None:
+        logger.info(
+            "ENRICH_WORKER: resumed same-day budget — enriched_today={}/{} (date={})",
+            enriched_today,
+            config.daily_cap,
+            last_stats_date,
+        )
 
     try:
         while True:
@@ -863,8 +914,20 @@ async def main() -> None:
                 now_utc = datetime.now(timezone.utc)
                 today_date = now_utc.date()
 
-                # Daily reset at UTC midnight
+                # Daily reset at UTC midnight (also the fresh-boot-on-a-new-day boundary).
+                # Persist the zeroed counters AND today's date every time the day rolls so
+                # the durable budget tracks the new day; archive yesterday's tallies only
+                # when a prior day actually ran.
                 if last_stats_date != today_date:
+                    reset_kwargs: dict = {
+                        "enriched_today": 0,
+                        "web_sourced_today": 0,
+                        "oem_sourced_today": 0,
+                        "ai_inferred_today": 0,
+                        "not_found_today": 0,
+                        "not_catalogued_today": 0,
+                        "enriched_today_date": today_date,
+                    }
                     if last_stats_date is not None:
                         logger.info(
                             "ENRICH_WORKER daily summary: enriched={}, web={}, oem={}, ai={}, "
@@ -876,28 +939,20 @@ async def main() -> None:
                             not_found_today,
                             not_catalogued_today,
                         )
-                        db = SessionLocal()
-                        try:
-                            update_enrichment_worker_status(
-                                db,
-                                daily_stats_json={
-                                    "date": str(last_stats_date),
-                                    "enriched": enriched_today,
-                                    "web_sourced": web_sourced_today,
-                                    "oem_sourced": oem_sourced_today,
-                                    "ai_inferred": ai_inferred_today,
-                                    "not_found": not_found_today,
-                                    "not_catalogued": not_catalogued_today,
-                                },
-                                enriched_today=0,
-                                web_sourced_today=0,
-                                oem_sourced_today=0,
-                                ai_inferred_today=0,
-                                not_found_today=0,
-                                not_catalogued_today=0,
-                            )
-                        finally:
-                            db.close()
+                        reset_kwargs["daily_stats_json"] = {
+                            "date": str(last_stats_date),
+                            "enriched": enriched_today,
+                            "web_sourced": web_sourced_today,
+                            "oem_sourced": oem_sourced_today,
+                            "ai_inferred": ai_inferred_today,
+                            "not_found": not_found_today,
+                            "not_catalogued": not_catalogued_today,
+                        }
+                    db = SessionLocal()
+                    try:
+                        update_enrichment_worker_status(db, **reset_kwargs)
+                    finally:
+                        db.close()
                     enriched_today = 0
                     web_sourced_today = 0
                     oem_sourced_today = 0
@@ -957,6 +1012,7 @@ async def main() -> None:
                             last_heartbeat=now_ts,
                             last_enriched_at=now_ts,
                             enriched_today=enriched_today,
+                            enriched_today_date=today_date,
                             web_sourced_today=web_sourced_today,
                             oem_sourced_today=oem_sourced_today,
                             ai_inferred_today=ai_inferred_today,

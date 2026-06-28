@@ -17,7 +17,7 @@ Depends on: nothing (standalone table)
 
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, Boolean, CheckConstraint, Column, Integer, Text
+from sqlalchemy import JSON, Boolean, CheckConstraint, Column, Date, Integer, Text
 
 from ..database import UTCDateTime
 from .base import Base
@@ -31,6 +31,11 @@ class EnrichmentWorkerStatus(Base):
     last_heartbeat = Column(UTCDateTime)
     last_enriched_at = Column(UTCDateTime)
     enriched_today = Column(Integer, default=0, server_default="0", nullable=False)
+    # The UTC date that ``enriched_today`` (and the per-tier counters) belong to. The
+    # worker reads this on startup: when it equals today, a same-day container restart
+    # RESUMES the day's count (the daily cap stays enforced) instead of resetting the
+    # budget to 0; when it differs (or is NULL), the counters reset for the new day.
+    enriched_today_date = Column(Date, nullable=True)
     web_sourced_today = Column(Integer, default=0, server_default="0", nullable=False)
     ai_inferred_today = Column(Integer, default=0, server_default="0", nullable=False)
     not_found_today = Column(Integer, default=0, server_default="0", nullable=False)

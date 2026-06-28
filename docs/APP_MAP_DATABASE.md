@@ -1011,6 +1011,19 @@ Verdict values: `pass`, `screened_out`, `insufficient_data`, `disabled`, `cap_re
 
 **`discovery_batches`** — Import batch tracking
 
+**`enrichment_worker_status`** — Singleton (id=1, `ck_enrichment_worker_status_singleton`)
+heartbeat + daily-stats row for the paced material-enrichment worker
+(`app/services/enrichment_worker/worker.py`). Seeded by migration 088; per-tier daily
+counters added in 089. The worker write-throughs `last_heartbeat`, the per-tier
+`*_today` counts, and circuit-breaker state every tick.
+**Durable daily cap (migration 168):** `enriched_today` is tagged with
+`enriched_today_date` (nullable Date, the UTC day it belongs to). On startup the worker
+reads both back (`_load_today_counters`): if the stored date == today it RESUMES the
+count so the `daily_cap` stays enforced across a container restart (a same-day restart no
+longer hands the worker a fresh budget); if the date differs/NULL the counters reset for
+the new day. The UTC-midnight roll persists the zeroed counters + new date, archiving the
+prior day's tallies into `daily_stats_json`.
+
 ---
 
 ### Performance & Scoring
