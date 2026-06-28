@@ -1,7 +1,8 @@
 # Approvals Tab — FROZEN SCOPE (build-ready, minimal)
 
-> **Frozen by the user 2026-06-28. SUPERSEDES the earlier multi-phase / two-gate design** in this
-> folder (`…-vision.md`, `…-phased-plan.md`). Do **not** add anything not listed here.
+> **Frozen by the user 2026-06-28. SUPERSEDES (and replaces) the earlier multi-phase / two-gate design**,
+> whose docs (`…-vision.md`, `…-phased-plan.md`, the old autosave plan) were **deleted** to prevent
+> re-inflation. This file is the only authoritative scope. Do **not** add anything not listed here.
 >
 > **AVAIL does not create Sales Orders or Purchase Orders — Acctivate does.** AVAIL builds and tracks
 > the **buy plan**. The buy plan is the vehicle: one object, moving end to end.
