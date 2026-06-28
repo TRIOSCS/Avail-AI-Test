@@ -25,7 +25,7 @@
       Cancel
     </button>
   </div>
-  <p class="text-sm text-gray-500 mb-4">
+  <p class="text-sm text-gray-600 mb-4">
     Pick a requisition with offers to originate a Sales Order directly from its RFQ offers.
   </p>
   {% if picker_rows %}
@@ -46,7 +46,7 @@
     {% endfor %}
   </div>
   {% else %}
-  <div class="rounded-lg border border-line-base bg-gray-50 px-4 py-8 text-center text-sm text-gray-500">
+  <div class="rounded-lg border border-line-base bg-gray-50 px-4 py-8 text-center text-sm text-gray-600">
     No open requisitions with offers are available to originate a Sales Order.
   </div>
   {% endif %}
@@ -59,7 +59,7 @@
       <h2 class="text-lg font-semibold text-gray-900 truncate">
         New Sales Order — {{ selected_req.name or 'REQ #' ~ selected_req.id }}
       </h2>
-      <p class="text-xs text-gray-500">REQ #{{ selected_req.id }}</p>
+      <p class="text-xs text-gray-600">REQ #{{ selected_req.id }}</p>
     </div>
     <button hx-get="/v2/partials/approvals/sales-orders/new"
             hx-target="#bp-hub-body"
@@ -133,7 +133,7 @@
     </div>
   </form>
   {% else %}
-  <div class="rounded-lg border border-line-base bg-gray-50 px-4 py-8 text-center text-sm text-gray-500">
+  <div class="rounded-lg border border-line-base bg-gray-50 px-4 py-8 text-center text-sm text-gray-600">
     This requisition has no active offers to build a Sales Order from.
   </div>
   {% endif %}
