@@ -95,7 +95,7 @@ def run_startup_migrations() -> None:
         _seed_manufacturers(conn)
         _create_count_triggers(conn)
         _backfill_company_counts(conn)
-        _exec(conn, "UPDATE api_sources SET is_active = false WHERE status = 'disabled' AND is_active = true")
+        _reconcile_connector_active(conn)
         # Normalize legacy site_type 'headquarters' → 'hq' (idempotent)
         _exec(conn, "UPDATE customer_sites SET site_type='hq' WHERE site_type='headquarters'")
         _exec(
@@ -282,6 +282,36 @@ def _exec(conn, stmt: str, params: dict | None = None) -> None:  # noqa: S603
     except (SQLAlchemyError, DBAPIError) as e:
         logger.warning("DDL failed: {}", e)
         conn.rollback()
+
+
+def _reconcile_connector_active(conn) -> None:
+    """Boot-time connector reconciliation seam — intentionally leaves ``is_active``
+    alone.
+
+    ``ApiSource.status`` is the auto-managed health state (set by
+    ``app/services/health_monitor.py``; ``'disabled'`` means "no connector
+    available"); ``ApiSource.is_active`` is the *operator* toggle (set by
+    ``PUT /api/sources/{id}/activate`` in ``app/routers/sources.py``). They are
+    orthogonal concerns. A previous version coupled them here —
+    ``UPDATE api_sources SET is_active = false WHERE status = 'disabled'`` — which
+    silently wiped operator intent on every reboot (the boot-reset defect).
+
+    Root cause: a source the operator turned on simply can't run while it has no
+    connector, but its toggle must be *retained* so it resumes automatically once
+    health recovers. So boot reconciliation must change ``is_active`` in neither
+    direction; only an explicit operator action may flip it. The readers downstream
+    (``app/routers/sources.py``, ``app/services/health_monitor.py``) all merely
+    *filter* on ``is_active`` and never assume "disabled ⇒ inactive", so leaving
+    the toggle intact is safe.
+
+    Kept as a named, directly-testable seam (``run_startup_migrations`` short-
+    circuits under ``TESTING``, so the regression test calls this helper directly).
+    Takes ``conn`` for symmetry with its sibling startup steps and so any future
+    reconciliation has the connection already wired.
+
+    Called by: run_startup_migrations (real boots), tests (directly)
+    Depends on: nothing — a no-op by design; the regression test pins the contract.
+    """
 
 
 # ── Full-text search triggers (PostgreSQL-specific) ─────────────────

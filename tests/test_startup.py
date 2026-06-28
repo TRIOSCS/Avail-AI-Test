@@ -21,7 +21,7 @@ from sqlalchemy import create_engine
 from sqlalchemy import text as sqltext
 from sqlalchemy.pool import StaticPool
 
-from app.startup import _exec, run_startup_migrations
+from app.startup import _exec, _reconcile_connector_active, run_startup_migrations
 
 
 def _make_sqlite_engine():
@@ -1252,3 +1252,43 @@ class TestBackfillSweepCooldown:
 
         db_session.refresh(pa)
         assert pa.reclaim_blocked_until is None
+
+
+def _make_api_sources_engine():
+    """SQLite engine with a minimal ``api_sources`` table for reconciliation tests.
+
+    Mirrors only the two columns ``_reconcile_connector_active`` arbitrates: the
+    auto-managed health ``status`` and the operator ``is_active`` toggle.
+    """
+    eng = _make_sqlite_engine()
+    with eng.connect() as conn:
+        conn.execute(
+            sqltext("CREATE TABLE api_sources (id INTEGER PRIMARY KEY, name TEXT, status TEXT, is_active BOOLEAN)")
+        )
+        # Operator turned this source ON; health later marked it 'disabled' (no connector).
+        conn.execute(
+            sqltext("INSERT INTO api_sources (id, name, status, is_active) VALUES (1, 'brokerbin', 'disabled', 1)")
+        )
+        # Health says 'live' but the operator turned it OFF — reconciliation must not re-enable it.
+        conn.execute(sqltext("INSERT INTO api_sources (id, name, status, is_active) VALUES (2, 'nexar', 'live', 0)"))
+        conn.commit()
+    return eng
+
+
+def test_reconcile_connector_active_preserves_operator_intent():
+    """Boot reconciliation must never clobber the operator's ``is_active`` toggle.
+
+    Regression for the boot-reset defect: startup coupled the auto-managed health
+    ``status`` to the operator ``is_active`` toggle, flipping operator-enabled
+    sources OFF on every reboot. Reconciliation must leave ``is_active`` untouched
+    in BOTH directions — neither disable a health-'disabled' source the operator
+    turned on (so it can run again once health recovers), nor auto-enable a
+    health-'live' source the operator turned off.
+    """
+    eng = _make_api_sources_engine()
+    with eng.connect() as conn:
+        _reconcile_connector_active(conn)
+        rows = dict(conn.execute(sqltext("SELECT name, is_active FROM api_sources")).all())
+
+    assert rows["brokerbin"], "operator-enabled source must stay active despite status='disabled'"
+    assert not rows["nexar"], "reconciliation must not auto-enable an operator-disabled source"
