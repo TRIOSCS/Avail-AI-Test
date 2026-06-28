@@ -227,7 +227,7 @@ class TestAddToRequisitionDirect:
 class TestRfqSendDirect:
     async def test_rfq_send_test_mode_creates_contacts(self, db_session: Session, test_user: User):
         """Lines 2542–2641: TESTING=1 → creates RfqContact without sending email."""
-        from app.routers.htmx_views import rfq_send
+        from app.routers.htmx.offers import rfq_send
 
         req = _make_requisition(db_session, test_user)
         mock_req = _mock_form_request(
@@ -240,14 +240,14 @@ class TestRfqSendDirect:
                 "parts_summary": "BC547 x 100",
             },
         )
-        with patch("app.routers.htmx_views.template_response") as mock_tpl:
+        with patch("app.routers.htmx.offers.template_response") as mock_tpl:
             mock_tpl.return_value = HTMLResponse("OK")
             result = await rfq_send(request=mock_req, req_id=req.id, user=test_user, db=db_session)
         assert result.status_code == 200
 
     async def test_rfq_send_no_vendors_raises_400(self, db_session: Session, test_user: User):
         """Lines 2538–2539: no vendors → HTTPException 400."""
-        from app.routers.htmx_views import rfq_send
+        from app.routers.htmx.offers import rfq_send
 
         req = _make_requisition(db_session, test_user)
         mock_req = _mock_form_request(fields={"vendor_names": []})
@@ -260,7 +260,7 @@ class TestRfqSendDirect:
 
     async def test_rfq_send_vendor_no_email_skipped(self, db_session: Session, test_user: User):
         """Vendor with empty email is skipped in contact creation."""
-        from app.routers.htmx_views import rfq_send
+        from app.routers.htmx.offers import rfq_send
 
         req = _make_requisition(db_session, test_user)
         mock_req = _mock_form_request(
@@ -270,7 +270,7 @@ class TestRfqSendDirect:
                 "subject": "RFQ",
             },
         )
-        with patch("app.routers.htmx_views.template_response") as mock_tpl:
+        with patch("app.routers.htmx.offers.template_response") as mock_tpl:
             mock_tpl.return_value = HTMLResponse("OK")
             result = await rfq_send(request=mock_req, req_id=req.id, user=test_user, db=db_session)
         assert result.status_code == 200
@@ -282,7 +282,7 @@ class TestRfqSendDirect:
 class TestSaveParsedOffersDirect:
     async def test_save_offers_loop_and_creates_offer(self, db_session: Session, test_user: User):
         """Lines 1501–1587: processes offers loop and creates Offer rows."""
-        from app.routers.htmx_views import save_parsed_offers
+        from app.routers.htmx.offers import save_parsed_offers
 
         req = _make_requisition(db_session, test_user)
         fields = {
@@ -293,14 +293,14 @@ class TestSaveParsedOffersDirect:
             "offers[0].condition": "new",
         }
         mock_req = _mock_form_request(path=f"/v2/partials/requisitions/{req.id}/save-parsed-offers", fields=fields)
-        with patch("app.routers.htmx_views.template_response") as mock_tpl:
+        with patch("app.routers.htmx.offers.template_response") as mock_tpl:
             mock_tpl.return_value = HTMLResponse("OK")
             result = await save_parsed_offers(request=mock_req, req_id=req.id, user=test_user, db=db_session)
         assert result.status_code == 200
 
     async def test_save_offers_vendor_name_key(self, db_session: Session, test_user: User):
         """Lines 1504–1507: picks offer row by vendor_name key when mpn is None."""
-        from app.routers.htmx_views import save_parsed_offers
+        from app.routers.htmx.offers import save_parsed_offers
 
         req = _make_requisition(db_session, test_user)
         # Offer without mpn key — uses vendor_name key path
@@ -310,14 +310,14 @@ class TestSaveParsedOffersDirect:
             "offers[0].qty_available": "200",
         }
         mock_req = _mock_form_request(path=f"/v2/partials/requisitions/{req.id}/save-parsed-offers", fields=fields)
-        with patch("app.routers.htmx_views.template_response") as mock_tpl:
+        with patch("app.routers.htmx.offers.template_response") as mock_tpl:
             mock_tpl.return_value = HTMLResponse("OK")
             result = await save_parsed_offers(request=mock_req, req_id=req.id, user=test_user, db=db_session)
         assert result.status_code == 200
 
     async def test_save_offers_empty_form_returns_warning(self, db_session: Session, test_user: User):
         """Lines 1523–1527: no offers → warning HTMLResponse."""
-        from app.routers.htmx_views import save_parsed_offers
+        from app.routers.htmx.offers import save_parsed_offers
 
         req = _make_requisition(db_session, test_user)
         mock_req = _mock_form_request(
@@ -332,7 +332,7 @@ class TestSaveParsedOffersDirect:
         """Lines 1493–1494: requisition not found → 404."""
         from fastapi import HTTPException
 
-        from app.routers.htmx_views import save_parsed_offers
+        from app.routers.htmx.offers import save_parsed_offers
 
         mock_req = _mock_form_request(fields={"vendor_name": "X"})
         with pytest.raises(HTTPException) as exc_info:
@@ -346,7 +346,7 @@ class TestSaveParsedOffersDirect:
 class TestAddOfferDirect:
     async def test_add_offer_creates_offer(self, db_session: Session, test_user: User):
         """Lines 2040–2084: validates input and creates Offer row."""
-        from app.routers.htmx_views import add_offer
+        from app.routers.htmx.offers import add_offer
 
         req = _make_requisition(db_session, test_user)
         mock_req = _mock_form_request(
@@ -361,14 +361,14 @@ class TestAddOfferDirect:
                 "lead_time": "2 weeks",
             },
         )
-        with patch("app.routers.htmx_views.requisition_tab", new_callable=AsyncMock) as mock_tab:
+        with patch("app.routers.htmx.offers.requisition_tab", new_callable=AsyncMock) as mock_tab:
             mock_tab.return_value = HTMLResponse("tab OK")
             result = await add_offer(request=mock_req, req_id=req.id, user=test_user, db=db_session)
         assert result.status_code == 200
 
     async def test_add_offer_missing_required_returns_400(self, db_session: Session, test_user: User):
         """Lines 2042–2046: missing vendor_name or mpn → 400 HTMLResponse."""
-        from app.routers.htmx_views import add_offer
+        from app.routers.htmx.offers import add_offer
 
         req = _make_requisition(db_session, test_user)
         mock_req = _mock_form_request(fields={"vendor_name": "X"})  # missing mpn
@@ -379,7 +379,7 @@ class TestAddOfferDirect:
         """get_requisition_or_404 raises 404 for missing req."""
         from fastapi import HTTPException
 
-        from app.routers.htmx_views import add_offer
+        from app.routers.htmx.offers import add_offer
 
         mock_req = _mock_form_request(fields={"vendor_name": "X", "mpn": "Y"})
         with pytest.raises(HTTPException) as exc_info:
@@ -392,7 +392,7 @@ class TestAddOfferDirect:
         Regression guard: before the gate removal this returned 400. After, the offer
         is created with qualification_status='incomplete' (composed but not blocked).
         """
-        from app.routers.htmx_views import add_offer
+        from app.routers.htmx.offers import add_offer
 
         req = _make_requisition(db_session, test_user)
         mock_req = _mock_form_request(
@@ -406,7 +406,7 @@ class TestAddOfferDirect:
                 # manufacturer intentionally omitted — was a gate trigger
             },
         )
-        with patch("app.routers.htmx_views.requisition_tab", new_callable=AsyncMock) as mock_tab:
+        with patch("app.routers.htmx.offers.requisition_tab", new_callable=AsyncMock) as mock_tab:
             mock_tab.return_value = HTMLResponse("tab OK")
             result = await add_offer(request=mock_req, req_id=req.id, user=test_user, db=db_session)
         assert result.status_code == 200, (
@@ -430,7 +430,7 @@ class TestAddOfferDirect:
 class TestEditOfferDirect:
     async def test_edit_offer_updates_fields(self, db_session: Session, test_user: User):
         """Lines 2151–2215: reads form, updates offer fields, logs changelog."""
-        from app.routers.htmx_views import edit_offer
+        from app.routers.htmx.offers import edit_offer
 
         req = _make_requisition(db_session, test_user)
         offer = _make_offer(db_session, req, test_user)
@@ -448,7 +448,7 @@ class TestEditOfferDirect:
                 "notes": "Updated note",
             },
         )
-        with patch("app.routers.htmx_views.requisition_tab", new_callable=AsyncMock) as mock_tab:
+        with patch("app.routers.htmx.offers.requisition_tab", new_callable=AsyncMock) as mock_tab:
             mock_tab.return_value = HTMLResponse("tab OK")
             result = await edit_offer(
                 request=mock_req,
@@ -465,7 +465,7 @@ class TestEditOfferDirect:
         """Lines 2148–2149: offer not found → 404."""
         from fastapi import HTTPException
 
-        from app.routers.htmx_views import edit_offer
+        from app.routers.htmx.offers import edit_offer
 
         req = _make_requisition(db_session, test_user)
         mock_req = _mock_form_request(fields={"unit_price": "1.00"})
@@ -488,11 +488,11 @@ class TestLogActivityDirect:
     )
     async def test_log_activity_creates_log_entry(self, db_session: Session, test_user: User, fields: dict):
         """Lines 2385–2404: creates ActivityLog and returns activity tab."""
-        from app.routers.htmx_views import log_activity
+        from app.routers.htmx.offers import log_activity
 
         req = _make_requisition(db_session, test_user)
         mock_req = _mock_form_request(path=f"/v2/partials/requisitions/{req.id}/activity", fields=fields)
-        with patch("app.routers.htmx_views.requisition_tab", new_callable=AsyncMock) as mock_tab:
+        with patch("app.routers.htmx.offers.requisition_tab", new_callable=AsyncMock) as mock_tab:
             mock_tab.return_value = HTMLResponse("tab OK")
             result = await log_activity(request=mock_req, req_id=req.id, user=test_user, db=db_session)
         assert result.status_code == 200
@@ -512,12 +512,12 @@ class TestLeadStatusUpdateDirect:
     )
     async def test_update_lead_status_valid(self, db_session: Session, test_user: User, fields: dict):
         """Lines 6539–6607: updates lead status, returns lead card."""
-        from app.routers.htmx_views import lead_status_update
+        from app.routers.htmx.sourcing import lead_status_update
 
         req = _make_requisition(db_session, test_user)
         lead = _make_lead(db_session, req)
         mock_req = _mock_form_request(path=f"/v2/partials/sourcing/leads/{lead.id}/status", fields=fields)
-        with patch("app.routers.htmx_views.template_response") as mock_tpl:
+        with patch("app.routers.htmx.sourcing.template_response") as mock_tpl:
             mock_tpl.return_value = HTMLResponse("lead OK")
             result = await lead_status_update(request=mock_req, lead_id=lead.id, user=test_user, db=db_session)
         assert result.status_code == 200
@@ -526,7 +526,7 @@ class TestLeadStatusUpdateDirect:
         """Invalid status value → HTTPException 400."""
         from fastapi import HTTPException
 
-        from app.routers.htmx_views import lead_status_update
+        from app.routers.htmx.sourcing import lead_status_update
 
         req = _make_requisition(db_session, test_user)
         lead = _make_lead(db_session, req)
@@ -539,7 +539,7 @@ class TestLeadStatusUpdateDirect:
         """Lead not found → HTTPException 404."""
         from fastapi import HTTPException
 
-        from app.routers.htmx_views import lead_status_update
+        from app.routers.htmx.sourcing import lead_status_update
 
         mock_req = _mock_form_request(fields={"status": "has_stock"})
         with pytest.raises(HTTPException) as exc_info:
@@ -553,7 +553,7 @@ class TestLeadStatusUpdateDirect:
 class TestLogPhoneCallDirect:
     async def test_log_phone_call_creates_contact_and_log(self, db_session: Session, test_user: User):
         """Lines 5410–5444: creates RfqContact and ActivityLog for phone call."""
-        from app.routers.htmx_views import log_phone_call
+        from app.routers.htmx.offers import log_phone_call
 
         req = _make_requisition(db_session, test_user)
         mock_req = _mock_form_request(
@@ -564,7 +564,7 @@ class TestLogPhoneCallDirect:
                 "notes": "Discussed pricing for BC547",
             },
         )
-        with patch("app.routers.htmx_views.template_response") as mock_tpl:
+        with patch("app.routers.htmx.offers.template_response") as mock_tpl:
             mock_tpl.return_value = HTMLResponse("phone OK")
             result = await log_phone_call(request=mock_req, req_id=req.id, user=test_user, db=db_session)
         assert result.status_code == 200
@@ -573,7 +573,7 @@ class TestLogPhoneCallDirect:
         """Missing vendor_name or phone → HTTPException 400."""
         from fastapi import HTTPException
 
-        from app.routers.htmx_views import log_phone_call
+        from app.routers.htmx.offers import log_phone_call
 
         req = _make_requisition(db_session, test_user)
         mock_req = _mock_form_request(fields={"vendor_name": "X"})  # missing phone
@@ -585,7 +585,7 @@ class TestLogPhoneCallDirect:
         """Requisition not found → 404."""
         from fastapi import HTTPException
 
-        from app.routers.htmx_views import log_phone_call
+        from app.routers.htmx.offers import log_phone_call
 
         mock_req = _mock_form_request(fields={"vendor_name": "X", "vendor_phone": "555"})
         with pytest.raises(HTTPException) as exc_info:
@@ -599,7 +599,7 @@ class TestLogPhoneCallDirect:
 class TestBuyPlanSubmitDirect:
     async def test_buy_plan_submit_success(self, db_session: Session, test_user: User):
         """Lines 5992–6009: calls submit_buy_plan and returns refreshed detail."""
-        from app.routers.htmx_views import buy_plan_submit_partial
+        from app.routers.htmx.buy_plans import buy_plan_submit_partial
 
         req = _make_requisition(db_session, test_user)
         bp = _make_buy_plan(db_session, req, test_user)
@@ -610,7 +610,7 @@ class TestBuyPlanSubmitDirect:
         with (
             patch("app.services.buyplan_workflow.submit_buy_plan") as mock_submit,
             patch("app.services.buyplan_notifications.run_notify_bg", new_callable=AsyncMock),
-            patch("app.routers.htmx_views.buy_plan_detail_partial", new_callable=AsyncMock) as mock_detail,
+            patch("app.routers.htmx.buy_plans.buy_plan_detail_partial", new_callable=AsyncMock) as mock_detail,
         ):
             mock_submit.return_value = MagicMock(auto_approved=False, id=bp.id)
             mock_detail.return_value = HTMLResponse("bp detail")
@@ -621,7 +621,7 @@ class TestBuyPlanSubmitDirect:
         """Lines 5988–5990: missing SO number → HTTPException 400."""
         from fastapi import HTTPException
 
-        from app.routers.htmx_views import buy_plan_submit_partial
+        from app.routers.htmx.buy_plans import buy_plan_submit_partial
 
         req = _make_requisition(db_session, test_user)
         bp = _make_buy_plan(db_session, req, test_user)
@@ -637,7 +637,7 @@ class TestBuyPlanSubmitDirect:
 class TestBuyPlanApproveDirect:
     async def test_buy_plan_approve_success(self, db_session: Session, test_user: User):
         """Lines 6028–6043: manager approves buy plan."""
-        from app.routers.htmx_views import buy_plan_approve_partial
+        from app.routers.htmx.buy_plans import buy_plan_approve_partial
 
         req = _make_requisition(db_session, test_user)
         bp = _make_buy_plan(db_session, req, test_user)
@@ -658,7 +658,7 @@ class TestBuyPlanApproveDirect:
         with (
             patch("app.services.buyplan_workflow.approve_buy_plan") as mock_approve,
             patch("app.services.buyplan_notifications.run_notify_bg", new_callable=AsyncMock),
-            patch("app.routers.htmx_views.buy_plan_detail_partial", new_callable=AsyncMock) as mock_detail,
+            patch("app.routers.htmx.buy_plans.buy_plan_detail_partial", new_callable=AsyncMock) as mock_detail,
         ):
             mock_approve.return_value = MagicMock(id=bp.id)
             mock_detail.return_value = HTMLResponse("bp detail")
@@ -693,7 +693,7 @@ class TestBuyPlanApproveDirect:
 class TestBuyPlanVerifySoDirect:
     async def test_buy_plan_verify_so_success(self, db_session: Session, test_user: User):
         """Lines 6062–6080: ops verifies SO on buy plan."""
-        from app.routers.htmx_views import buy_plan_verify_so_partial
+        from app.routers.htmx.buy_plans import buy_plan_verify_so_partial
 
         req = _make_requisition(db_session, test_user)
         bp = _make_buy_plan(db_session, req, test_user)
@@ -704,7 +704,7 @@ class TestBuyPlanVerifySoDirect:
         with (
             patch("app.services.buyplan_workflow.verify_so") as mock_verify,
             patch("app.services.buyplan_notifications.run_notify_bg", new_callable=AsyncMock),
-            patch("app.routers.htmx_views.buy_plan_detail_partial", new_callable=AsyncMock) as mock_detail,
+            patch("app.routers.htmx.buy_plans.buy_plan_detail_partial", new_callable=AsyncMock) as mock_detail,
         ):
             mock_verify.return_value = MagicMock(id=bp.id)
             mock_detail.return_value = HTMLResponse("bp detail")

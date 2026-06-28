@@ -110,12 +110,12 @@ def _make_rfq_contact(db: Session, req: Requisition, user: User) -> RfqContact:
 class TestPromoteOfferHtmxDirect:
     async def test_promote_offer_success(self, db_session: Session, test_user: User):
         """Lines 2303–2318: promote pending_review → active."""
-        from app.routers.htmx_views import promote_offer_htmx
+        from app.routers.htmx.offers import promote_offer_htmx
 
         req = _make_req(db_session, test_user)
         offer = _make_offer(db_session, req, test_user, OfferStatus.PENDING_REVIEW)
         mock_req = _mock_get_request()
-        with patch("app.routers.htmx_views.offer_review_queue", new_callable=AsyncMock) as mock_q:
+        with patch("app.routers.htmx.offers.offer_review_queue", new_callable=AsyncMock) as mock_q:
             mock_q.return_value = HTMLResponse("queue")
             result = await promote_offer_htmx(request=mock_req, offer_id=offer.id, user=test_user, db=db_session)
         assert result.status_code == 200
@@ -126,7 +126,7 @@ class TestPromoteOfferHtmxDirect:
         """Promote non-existent → 404."""
         from fastapi import HTTPException
 
-        from app.routers.htmx_views import promote_offer_htmx
+        from app.routers.htmx.offers import promote_offer_htmx
 
         mock_req = _mock_get_request()
         with pytest.raises(HTTPException) as exc_info:
@@ -137,7 +137,7 @@ class TestPromoteOfferHtmxDirect:
         """Promote active offer → 400 (only pending_review can be promoted)."""
         from fastapi import HTTPException
 
-        from app.routers.htmx_views import promote_offer_htmx
+        from app.routers.htmx.offers import promote_offer_htmx
 
         req = _make_req(db_session, test_user)
         offer = _make_offer(db_session, req, test_user, OfferStatus.ACTIVE)
@@ -153,12 +153,12 @@ class TestPromoteOfferHtmxDirect:
 class TestRejectOfferHtmxDirect:
     async def test_reject_offer_success(self, db_session: Session, test_user: User):
         """Lines 2329–2342: reject pending_review → rejected."""
-        from app.routers.htmx_views import reject_offer_htmx
+        from app.routers.htmx.offers import reject_offer_htmx
 
         req = _make_req(db_session, test_user)
         offer = _make_offer(db_session, req, test_user, OfferStatus.PENDING_REVIEW)
         mock_req = _mock_get_request()
-        with patch("app.routers.htmx_views.offer_review_queue", new_callable=AsyncMock) as mock_q:
+        with patch("app.routers.htmx.offers.offer_review_queue", new_callable=AsyncMock) as mock_q:
             mock_q.return_value = HTMLResponse("queue")
             result = await reject_offer_htmx(request=mock_req, offer_id=offer.id, user=test_user, db=db_session)
         assert result.status_code == 200
@@ -169,7 +169,7 @@ class TestRejectOfferHtmxDirect:
         """Reject non-existent → 404."""
         from fastapi import HTTPException
 
-        from app.routers.htmx_views import reject_offer_htmx
+        from app.routers.htmx.offers import reject_offer_htmx
 
         mock_req = _mock_get_request()
         with pytest.raises(HTTPException) as exc_info:
@@ -183,12 +183,12 @@ class TestRejectOfferHtmxDirect:
 class TestOfferChangelogDirect:
     async def test_offer_changelog_success(self, db_session: Session, test_user: User):
         """Lines 2353–2366: render change history for an offer."""
-        from app.routers.htmx_views import offer_changelog
+        from app.routers.htmx.offers import offer_changelog
 
         req = _make_req(db_session, test_user)
         offer = _make_offer(db_session, req, test_user)
         mock_req = _mock_get_request(f"/v2/partials/offers/{offer.id}/changelog")
-        with patch("app.routers.htmx_views.template_response") as mock_tpl:
+        with patch("app.routers.htmx.offers.template_response") as mock_tpl:
             mock_tpl.return_value = HTMLResponse("changelog")
             result = await offer_changelog(request=mock_req, offer_id=offer.id, user=test_user, db=db_session)
         assert result.status_code == 200
@@ -197,7 +197,7 @@ class TestOfferChangelogDirect:
         """Non-existent offer → 404."""
         from fastapi import HTTPException
 
-        from app.routers.htmx_views import offer_changelog
+        from app.routers.htmx.offers import offer_changelog
 
         mock_req = _mock_get_request()
         with pytest.raises(HTTPException) as exc_info:
@@ -211,11 +211,11 @@ class TestOfferChangelogDirect:
 class TestRfqComposeGetDirect:
     async def test_rfq_compose_no_parts(self, db_session: Session, test_user: User):
         """Lines 2415–2470: GET rfq_compose with no parts."""
-        from app.routers.htmx_views import rfq_compose
+        from app.routers.htmx.offers import rfq_compose
 
         req = _make_req(db_session, test_user)
         mock_req = _mock_get_request(f"/v2/partials/requisitions/{req.id}/rfq-compose")
-        with patch("app.routers.htmx_views.template_response") as mock_tpl:
+        with patch("app.routers.htmx.offers.template_response") as mock_tpl:
             mock_tpl.return_value = HTMLResponse("rfq compose")
             result = await rfq_compose(request=mock_req, req_id=req.id, user=test_user, db=db_session)
         assert result.status_code == 200
@@ -224,7 +224,7 @@ class TestRfqComposeGetDirect:
         """Non-existent req → 404."""
         from fastapi import HTTPException
 
-        from app.routers.htmx_views import rfq_compose
+        from app.routers.htmx.offers import rfq_compose
 
         mock_req = _mock_get_request()
         with pytest.raises(HTTPException) as exc_info:
@@ -238,7 +238,7 @@ class TestRfqComposeGetDirect:
 class TestAiCleanupEmailDirect:
     async def test_cleanup_empty_body_returns_warning(self, db_session: Session, test_user: User):
         """Lines 2485–2486: empty body → amber warning HTML."""
-        from app.routers.htmx_views import ai_cleanup_email
+        from app.routers.htmx.offers import ai_cleanup_email
 
         req = _make_req(db_session, test_user)
         mock_req = _mock_get_request()
@@ -248,7 +248,7 @@ class TestAiCleanupEmailDirect:
 
     async def test_cleanup_with_body_calls_claude(self, db_session: Session, test_user: User):
         """Lines 2488–2513: non-empty body → calls claude_text, returns script."""
-        from app.routers.htmx_views import ai_cleanup_email
+        from app.routers.htmx.offers import ai_cleanup_email
 
         req = _make_req(db_session, test_user)
         mock_req = _mock_get_request()
@@ -266,7 +266,7 @@ class TestAiCleanupEmailDirect:
 
     async def test_cleanup_claude_error_returns_original(self, db_session: Session, test_user: User):
         """Lines 2505–2507: claude error → returns original text."""
-        from app.routers.htmx_views import ai_cleanup_email
+        from app.routers.htmx.offers import ai_cleanup_email
 
         req = _make_req(db_session, test_user)
         mock_req = _mock_get_request()
@@ -289,7 +289,7 @@ class TestAiCleanupEmailDirect:
 class TestSendFollowUpHtmxDirect:
     async def test_send_follow_up_testing_mode(self, db_session: Session, test_user: User):
         """Lines 2712–2774: TESTING=1 → marks contact SENT without real email."""
-        from app.routers.htmx_views import send_follow_up_htmx
+        from app.routers.htmx.offers import send_follow_up_htmx
 
         req = _make_req(db_session, test_user)
         contact = _make_rfq_contact(db_session, req, test_user)
@@ -297,7 +297,7 @@ class TestSendFollowUpHtmxDirect:
             path=f"/v2/partials/follow-ups/{contact.id}/send",
             fields={"body": "Follow-up message"},
         )
-        with patch("app.routers.htmx_views.template_response") as mock_tpl:
+        with patch("app.routers.htmx.offers.template_response") as mock_tpl:
             mock_tpl.return_value = HTMLResponse("sent OK")
             result = await send_follow_up_htmx(request=mock_req, contact_id=contact.id, user=test_user, db=db_session)
         assert result.status_code == 200
@@ -308,7 +308,7 @@ class TestSendFollowUpHtmxDirect:
         """Non-existent contact → 404."""
         from fastapi import HTTPException
 
-        from app.routers.htmx_views import send_follow_up_htmx
+        from app.routers.htmx.offers import send_follow_up_htmx
 
         mock_req = _mock_form_request(fields={"body": ""})
         with pytest.raises(HTTPException) as exc_info:

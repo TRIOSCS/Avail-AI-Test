@@ -191,8 +191,10 @@ URL space and the `htmx-views` tag, and `main.py` mounts each one alongside
 - `app/routers/htmx/_shared.py` — shared module-level helpers/state used by both the
   monolith and the sub-routers: the Vite manifest loader (`_vite_manifest`/`_vite_assets`),
   `_base_ctx()` (the common template context), `_parse_date_safe()`, the `_DASH` em-dash
-  fallback, and the CRM list hx-target/push-url allowlists + `_sanitize_hx_params()` (used
-  by both the vendors and companies sub-routers). Single source of truth — sub-routers and
+  fallback, the CRM list hx-target/push-url allowlists + `_sanitize_hx_params()` (used
+  by both the vendors and companies sub-routers), and the form coercers `_safe_int()`/
+  `_safe_float()` + the ops-group check `_is_ops_member()` (each shared between a moved
+  cluster and a route that stayed in the monolith). Single source of truth — sub-routers and
   (where still used) `htmx_views.py` import these names so behavior is unchanged.
 - `app/routers/htmx/requisitions.py` — **first extracted domain**: the Requisition partials
   (`GET/POST /v2/partials/requisitions/*` list, unified create/import modal + AI parse/save,
@@ -215,6 +217,31 @@ URL space and the `htmx-views` tag, and `main.py` mounts each one alongside
   detail shell + tabs, the contacts-tab/suggested-contacts loops, and contact notes/files.
   `htmx_views.py` re-imports `company_tab` (its company activity add-note route re-renders the
   Activity tab); tests import `_staleness_tier` from here.
+- `app/routers/htmx/buy_plans.py` — **deal/sourcing-cluster split (Buy Plans / Approvals slice)**:
+  the Approvals (Buy Plans) hub partials (`/v2/partials/approvals*` shell + `{stage}` bodies,
+  `/v2/partials/approvals/sales-orders/new|create`, the `/v2/partials/buy-plans/*` resource/
+  orders/board/archive/supervise boards, and the per-plan lifecycle actions submit/approve/
+  verify-so/confirm-po/resource/claim/verify-po/issue/cancel/reset) plus the legacy
+  `GET /v2/buy-plans` 302 redirect. Owns the cluster-private helpers `_default_lens`,
+  `_can_supervise`/`_can_resource`/`_can_see_all_deals`/`_resolve_deal_scope`/`_require_po_cutter`,
+  `_render_supervise_body`, and the `_APPROVALS_TABS`/`_TAB_APPROVE_ATTR`/`_PO_CUTTER_ROLES`
+  constants. Imports `_is_ops_member` from `_shared` (a quotes route in the monolith still uses
+  it). **Trap:** the `settings/ops-group|users|scorecard` routes are interleaved in the source
+  between `buy_plan_cancel` and `buy_plan_reset` but belong to the settings domain — they stay
+  in `htmx_views.py`.
+- `app/routers/htmx/offers.py` — **deal/sourcing-cluster split (offer/RFQ/follow-up slice)**:
+  AI offer parsing (`/v2/partials/requisitions/{id}/parse-email|paste-offer|parse-offer|
+  save-parsed-offers`), offer CRUD + review/promote/reject/changelog (`/v2/partials/offers/*`),
+  quote-from-offers, activity logging, RFQ compose/cleanup/rephrase/send, follow-ups
+  (list/send/ai-draft/batch/badge), and vendor-response review/reply. Imports `requisition_tab`
+  from `requisitions` (every offer route re-renders the requisition offers/responses tab) and
+  `_safe_int`/`_safe_float` from `_shared`. **Trap:** the interleaved requisition-management
+  routes (bulk action, inline edit/win-prob/opp-value/row-action, delete/update requirement,
+  poll-inbox) are NOT offers and stay in `htmx_views.py`.
+- `app/routers/htmx/sourcing.py` — **deal/sourcing-cluster split (sourcing-engine slice)**:
+  the self-contained sourcing surface (`/v2/sourcing/*` pages + `/v2/partials/sourcing/*`) —
+  results page/stream, manual search trigger, lead detail/status/feedback, and the split-panel
+  workspace (page, list, lead panel).
 
 When extracting a domain: move the cohesive route block verbatim into a new
 `app/routers/htmx/<domain>.py` with its own `APIRouter(tags=["htmx-views"])`, pull any
@@ -256,7 +283,7 @@ authoritative reference. Static-analysis tests in
 | Tickets | 4 | partials/tickets/ |
 | Settings | 8 | partials/settings/ — tabs: **Connectors** (unified, replaces Sources + API Keys; admin-only), Profile, System, Data Ops, Ops Group, **Users** (admin-only); legacy `/sources` + `/api-keys` routes 302 → Connectors. Users tab = `users.html` (invite/role/activate table) + `user_access_panel.html` (per-user access editor modal) + `users_audit.html` (audit-log viewer); see Authorization & Access Control. |
 | Shared | 18 | partials/shared/ |
-| Approvals | 6 | partials/buy_plans/ + partials/approvals/ — the **Approvals module** (renamed from Buy Plans; SP-1), a lifecycle **stage-tab** shell at `/v2/approvals` (own primary-nav tab; legacy `/v2/buy-plans` 302s to it). `buy_plans/hub.html` is the shell (5 stage tabs Sales Orders / Buy Plans / Purchase Orders / Vendor Prepayments / Supervise + lazy `#bp-hub-body`). Each stage tab body lives under `approvals/` (`_tab_buy_plans.html`/`_tab_purchase_orders.html`/`_tab_sales_orders.html`/`_tab_prepayments.html`) and composes a re-homed work surface (`buy_plans/_board.html`, `_orders_queue.html`, `_resource_queue.html`) with a pinned per-gate `approvals/_pending_section.html` (reusing `approvals/_macros.html`); Supervise reuses `buy_plans/_supervise.html`. Routes (all `routers/htmx_views.py`): `GET /v2/partials/approvals` (shell, alias `/v2/partials/buy-plans`, `lens=` → `_default_lens`), `GET /v2/partials/approvals/{stage}?scope=` (`approvals_tab_partial`), and the unchanged `/orders`, `/board?scope=`, `/resource`, `/supervise`, `/archive` body routes. **Deal-board scope is role-defaulted** via `_can_see_all_deals` + `_resolve_deal_scope` (buyers/managers/ops default `all` + an All/Mine toggle; sales/traders locked to `mine`); the standalone `/board` toggle reloads the board, while the **Buy Plans stage tab adopts the same resolution and points its toggle at `/v2/partials/approvals/buy-plans?scope=`** (via `scope_toggle_url`) so the pinned per-gate approvals section survives a toggle. `detail.html`/`_macros.html` are the single-plan view. Read models in `services/buyplan_hub.py` (`buyer_line_queue`/`deals_board`/`resourcing_pool_queue`/`supervise_overview`) + `services/approvals/queue.py` (`build_queue_view`, per gate). The retired `/v2/reporting` page folded its analytics in here (supervise strip) + the Sales Hub pipeline chip + the CRM coverage chip — `partials/reporting/` and the `reporting_dashboard` route are gone. |
+| Approvals | 6 | partials/buy_plans/ + partials/approvals/ — the **Approvals module** (renamed from Buy Plans; SP-1), a lifecycle **stage-tab** shell at `/v2/approvals` (own primary-nav tab; legacy `/v2/buy-plans` 302s to it). `buy_plans/hub.html` is the shell (5 stage tabs Sales Orders / Buy Plans / Purchase Orders / Vendor Prepayments / Supervise + lazy `#bp-hub-body`). Each stage tab body lives under `approvals/` (`_tab_buy_plans.html`/`_tab_purchase_orders.html`/`_tab_sales_orders.html`/`_tab_prepayments.html`) and composes a re-homed work surface (`buy_plans/_board.html`, `_orders_queue.html`, `_resource_queue.html`) with a pinned per-gate `approvals/_pending_section.html` (reusing `approvals/_macros.html`); Supervise reuses `buy_plans/_supervise.html`. Routes (all `routers/htmx/buy_plans.py`): `GET /v2/partials/approvals` (shell, alias `/v2/partials/buy-plans`, `lens=` → `_default_lens`), `GET /v2/partials/approvals/{stage}?scope=` (`approvals_tab_partial`), and the unchanged `/orders`, `/board?scope=`, `/resource`, `/supervise`, `/archive` body routes. **Deal-board scope is role-defaulted** via `_can_see_all_deals` + `_resolve_deal_scope` (buyers/managers/ops default `all` + an All/Mine toggle; sales/traders locked to `mine`); the standalone `/board` toggle reloads the board, while the **Buy Plans stage tab adopts the same resolution and points its toggle at `/v2/partials/approvals/buy-plans?scope=`** (via `scope_toggle_url`) so the pinned per-gate approvals section survives a toggle. `detail.html`/`_macros.html` are the single-plan view. Read models in `services/buyplan_hub.py` (`buyer_line_queue`/`deals_board`/`resourcing_pool_queue`/`supervise_overview`) + `services/approvals/queue.py` (`build_queue_view`, per gate). The retired `/v2/reporting` page folded its analytics in here (supervise strip) + the Sales Hub pipeline chip + the CRM coverage chip — `partials/reporting/` and the `reporting_dashboard` route are gone. |
 
 ### Shared Template Components
 
