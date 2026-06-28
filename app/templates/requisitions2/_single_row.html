@@ -1,41 +1,7 @@
 {# requisitions2/_single_row.html — Single row after inline save.
    Called by: PATCH /requisitions2/{id}/inline
-   Receives: req (Requisition model), user, customer_display, created_by_name, requirement_count,
-             avail_opp_table_v2_enabled context flag.
+   Receives: req (Requisition model), user, customer_display, created_by_name, requirement_count.
    Depends on: HTMX, Alpine.js
 #}
-{% from "htmx/partials/shared/_macros.html" import status_badge -%}
 {% from "requisitions2/_row_macros.html" import req_row_v2 %}
-{% if avail_opp_table_v2_enabled | default(False) %}
 {{ req_row_v2(req, user, customer_display) }}
-{% else %}
-{# Legacy 5-col rendering — preserved verbatim for flag-off rollback. #}
-<tr id="rq2-row-{{ req.id }}"
-    hx-get="/requisitions2/{{ req.id }}/detail"
-    hx-target="#rq2-detail"
-    hx-swap="innerHTML"
-    class="rq2-row group hover:bg-gray-50 cursor-pointer transition-colors
-           {{ 'border-l-2 border-rose-400' if req.urgency == 'critical' else '' }}">
-  <td class="px-3 py-2" @click.stop>
-    <input aria-label="Select requisition {{ req.name }}" type="checkbox" value="{{ req.id }}"
-           class="rounded border-gray-300 text-brand-500 focus:ring-brand-400">
-  </td>
-  <td class="px-3 py-2">
-    <div class="flex items-center gap-1.5">
-      <span class="text-sm font-medium text-gray-900 truncate max-w-[180px]"
-            hx-get="/requisitions2/{{ req.id }}/edit/name" hx-target="closest td" hx-swap="innerHTML"
-            @click.stop>{{ req.name }}</span>
-      {% if req.urgency == 'hot' %}
-      <span class="inline-flex h-4 px-1 text-xs font-semibold rounded bg-amber-50 text-amber-700">HOT</span>
-      {% elif req.urgency == 'critical' %}
-      <span class="inline-flex h-4 px-1 text-xs font-semibold rounded bg-rose-50 text-rose-700" title="critical">CRIT</span>
-      {% endif %}
-    </div>
-  </td>
-  <td class="px-3 py-2">
-    {{ status_badge(req.status) }}
-  </td>
-  <td class="px-3 py-2 text-sm text-gray-600 truncate max-w-[140px]">{{ customer_display or '—' }}</td>
-  <td class="px-3 py-2 text-sm text-right text-gray-800">{{ requirement_count }}</td>
-</tr>
-{% endif %}

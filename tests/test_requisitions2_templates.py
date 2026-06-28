@@ -139,28 +139,14 @@ def test_sales_user_no_owner_filter(client, db_session, sales_user):
 # ── Table structure (GET /requisitions2/table) ───────────────────────
 
 
-def test_table_has_sortable_headers(client, test_requisition, monkeypatch):
-    """Legacy table headers have hx-get for sorting.
+def test_table_has_sortable_headers(client, test_requisition):
+    """Table headers carry hx-get sort links.
 
-    v2 also carries sort links on Name/Status/Customer — see
-    test_v2_thead_name_status_customer_are_sortable for the v2 assertion. This test
-    remains flag-off to verify the legacy thead specifically.
+    See test_v2_thead_name_status_customer_are_sortable for the per-column assertion.
     """
-    from app.config import settings as app_settings
-
-    monkeypatch.setattr(app_settings, "avail_opp_table_v2", False)
     resp = client.get("/requisitions2/table", params={"status": "all"})
     assert "hx-get" in resp.text
     assert "sort=" in resp.text
-
-
-def test_table_has_select_all_checkbox(client, test_requisition, monkeypatch):
-    """Legacy table has a select-all checkbox in the header (v2 omits select-all)."""
-    from app.config import settings as app_settings
-
-    monkeypatch.setattr(app_settings, "avail_opp_table_v2", False)
-    resp = client.get("/requisitions2/table", params={"status": "all"})
-    assert "toggleAll" in resp.text
 
 
 def test_table_row_has_checkbox(client, test_requisition):
@@ -186,19 +172,14 @@ def test_table_row_shows_status_badge(client, test_requisition, db_session):
     assert "Open" in resp.text
 
 
-def test_table_row_shows_urgency_badge(client, test_requisition, db_session, monkeypatch):
-    """Critical urgency shows a compact CRIT badge in legacy rows; v2 uses accent
-    class."""
-    from app.config import settings as app_settings
-
+def test_table_row_shows_urgency_badge(client, test_requisition, db_session):
+    """Critical urgency renders the v2 row urgency-accent class."""
     test_requisition.status = "open"
     test_requisition.urgency = "critical"
     db_session.commit()
 
-    # Legacy rendering shows CRIT text badge
-    monkeypatch.setattr(app_settings, "avail_opp_table_v2", False)
     resp = client.get("/requisitions2/table", params={"status": "open"})
-    assert "CRIT" in resp.text
+    assert "opp-row--urgent" in resp.text
 
 
 def test_empty_table_shows_message(client):
@@ -367,11 +348,11 @@ def test_pagination_no_controls_for_single_page(client, test_requisition):
     assert "Next" not in resp.text
 
 
-# ── v2 flag gating ───────────────────────────────────────────────────
+# ── v2 opportunity-table rendering ───────────────────────────────────
 
 
-def test_v2_flag_on_renders_opp_col_header(client, test_requisition):
-    """When avail_opp_table_v2 is True, thead renders v2 opp-col-header."""
+def test_v2_renders_opp_col_header(client, test_requisition):
+    """The opportunity-table thead renders v2 opp-col-header cells."""
     resp = client.get("/requisitions2/table", params={"status": "all"})
     assert "opp-col-header" in resp.text
 
@@ -387,15 +368,3 @@ def test_v2_thead_name_status_customer_are_sortable(client, test_requisition):
         assert f"sort={col}" in html, f"v2 thead missing sort link for {col}"
     assert "sort=coverage" not in html
     assert "sort=deal" not in html
-
-
-def test_v2_flag_off_renders_legacy(client, test_requisition, monkeypatch):
-    """When avail_opp_table_v2 is False, thead renders legacy columns (no opp-col-
-    header)."""
-    from app.config import settings as app_settings
-
-    monkeypatch.setattr(app_settings, "avail_opp_table_v2", False)
-    resp = client.get("/requisitions2/table", params={"status": "all"})
-    assert "opp-col-header" not in resp.text
-    # Legacy thead has the parts-count # column header as a unique marker
-    assert "#" in resp.text
