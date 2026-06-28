@@ -11324,7 +11324,7 @@ async def sales_order_create(
         resp.headers["HX-Trigger"] = json.dumps(
             {
                 "showToast": {
-                    "message": f"There is already an open Sales Order for this requisition (plan #{existing_id}).",
+                    "message": f"There is already an open buy plan for this requisition (plan #{existing_id}).",
                     "type": "warning",
                 }
             }
@@ -11334,7 +11334,7 @@ async def sales_order_create(
     except ValueError:
         # Any other origination failure (e.g. requisition has no requirements). Return a
         # curated client message rather than echoing the raw builder error.
-        raise HTTPException(400, "Could not originate a Sales Order from the selected offers.")
+        raise HTTPException(400, "Could not build a buy plan from the selected offers.")
 
     resp = await buy_plan_detail_partial(request, plan.id, user, db)
     resp.headers["HX-Push-Url"] = f"/v2/buy-plans/{plan.id}"
