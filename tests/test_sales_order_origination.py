@@ -201,6 +201,20 @@ def test_new_sales_order_picker_renders_offer_form_for_requisition(nonadmin_clie
     assert str(offer.id) in r.text
 
 
+def test_builder_labels_say_buy_plan_not_sales_order(nonadmin_client: TestClient, so_setup):
+    """Frozen-scope naming: the builder surface says 'buy plan', not 'Sales Order'.
+
+    The buy plan is the object being built; 'Sales Order' was the old misnomer. The
+    Acctivate SO# *field* labels (e.g. 'Sales Order #') are kept separately."""
+    req, _requirement, _offer = so_setup
+    r = nonadmin_client.get(f"/v2/partials/approvals/sales-orders/new?requisition_id={req.id}")
+    assert r.status_code == 200
+    assert "New Buy Plan" in r.text  # builder heading
+    assert "Build Buy Plan" in r.text  # primary action
+    assert "New Sales Order" not in r.text  # old object label gone
+    assert "Create Sales Order" not in r.text
+
+
 def test_create_sales_order_returns_draft_detail(nonadmin_client: TestClient, so_setup):
     """Posting the offer/sell selections creates a DRAFT buy plan and renders its detail
     (with the Submit form)."""

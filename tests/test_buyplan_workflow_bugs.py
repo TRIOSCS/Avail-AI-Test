@@ -3,7 +3,6 @@
 Covers:
 - check_completion idempotency (no duplicate case reports)
 - approve_buy_plan requires manager/admin role
-- _should_auto_approve consistency between submit and resubmit
 
 Called by: pytest
 Depends on: conftest fixtures, app/services/buyplan_workflow.py
@@ -23,11 +22,8 @@ from app.models.buy_plan import (
     SOVerificationStatus,
 )
 from app.services.buyplan_workflow import (
-    _should_auto_approve,
     approve_buy_plan,
     check_completion,
-    resubmit_buy_plan,
-    submit_buy_plan,
 )
 
 # ── Helpers ────────────────────────────────────────────────────────────
@@ -244,56 +240,3 @@ class TestApproveBuyPlanRoleCheck:
 
         assert result.status == BuyPlanStatus.DRAFT.value
         assert result.approval_notes == "Needs revision"
-
-
-# ── _should_auto_approve consistency ──────────────────────────────────
-
-
-class TestShouldAutoApprove:
-    @pytest.mark.parametrize(
-        ("total_cost", "ai_flags", "expected"),
-        [
-            pytest.param(100.0, [], True, id="low_cost_no_flags_auto_approves"),
-            pytest.param(10000.0, [], False, id="high_cost_does_not_auto_approve"),
-            pytest.param(
-                100.0,
-                [{"type": "stale_offer", "severity": "critical", "message": "test"}],
-                False,
-                id="critical_flags_prevent_auto_approve",
-            ),
-            pytest.param(
-                100.0,
-                [{"type": "low_margin", "severity": "warning", "message": "test"}],
-                True,
-                id="warning_flags_allow_auto_approve",
-            ),
-        ],
-    )
-    def test_auto_approve_decision(self, db_session, total_cost, ai_flags, expected):
-        plan, _ = _make_plan_with_lines(
-            db_session,
-            total_cost=total_cost,
-            ai_flags=ai_flags,
-        )
-        assert _should_auto_approve(plan) is expected
-
-    def test_submit_and_resubmit_use_same_logic(self, db_session):
-        """Verify submit and resubmit produce same auto-approve decision."""
-        plan, user = _make_plan_with_lines(
-            db_session,
-            total_cost=100.0,
-            ai_flags=[],
-        )
-        result1 = submit_buy_plan(plan.id, "SO-001", user, db_session)
-        status_after_submit = result1.status
-        auto_after_submit = result1.auto_approved
-
-        # Reset to draft for resubmit
-        plan.status = BuyPlanStatus.DRAFT.value
-        plan.auto_approved = False
-        plan.approved_at = None
-        db_session.flush()
-
-        result2 = resubmit_buy_plan(plan.id, "SO-002", user, db_session)
-        assert result2.status == status_after_submit
-        assert result2.auto_approved == auto_after_submit

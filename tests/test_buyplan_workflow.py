@@ -28,7 +28,6 @@ from app.services.buyplan_workflow import (
     _generate_buyer_tasks,
     _is_stock_sale,
     _recalculate_financials,
-    _should_auto_approve,
     approve_buy_plan,
     cancel_buy_plan,
     check_completion,
@@ -108,23 +107,22 @@ def _make_verification_member(db: Session, user: User) -> VerificationGroupMembe
 class TestSubmitBuyPlan:
     """Tests for submit_buy_plan()."""
 
-    def test_submit_auto_approve_low_cost(
+    def test_submit_low_cost_goes_to_manager(
         self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
     ):
-        """Plans under threshold with no critical flags get auto-approved."""
+        """Frozen scope: every plan goes to the one manager approval — no auto-approve,
+        regardless of cost. A low-cost plan that used to auto-approve now lands PENDING."""
         plan = _make_plan(db_session, test_user, test_quote, test_requisition, total_cost=100.00)
         _make_line(db_session, plan)
         db_session.refresh(plan)
 
-        with patch("app.services.buyplan_workflow._generate_buyer_tasks"):
-            result = submit_buy_plan(plan.id, "SO-001", test_user, db_session)
+        result = submit_buy_plan(plan.id, "SO-001", test_user, db_session)
 
-        assert result.status == BuyPlanStatus.ACTIVE.value
-        assert result.auto_approved is True
+        assert result.status == BuyPlanStatus.PENDING.value
+        assert result.auto_approved is not True
         assert result.sales_order_number == "SO-001"
         assert result.submitted_by_id == test_user.id
         assert result.submitted_at is not None
-        assert result.approved_at is not None
 
     def test_submit_pending_approval_high_cost(
         self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
@@ -211,7 +209,7 @@ class TestSubmitBuyPlan:
                 with patch("app.services.buyplan_workflow.score_offer", return_value=85.0):
                     result = submit_buy_plan(plan.id, "SO-005", test_user, db_session, line_edits=edits)
 
-        assert result.status == BuyPlanStatus.ACTIVE.value
+        assert result.status == BuyPlanStatus.PENDING.value
 
 
 # ── Approve Buy Plan ─────────────────────────────────────────────────
@@ -780,7 +778,7 @@ class TestResetAndResubmit:
         with pytest.raises(ValueError, match="Only halted/cancelled"):
             reset_buy_plan_to_draft(plan.id, test_user, db_session)
 
-    def test_resubmit_auto_approve(
+    def test_resubmit_goes_to_manager(
         self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
     ):
         plan = _make_plan(db_session, test_user, test_quote, test_requisition, total_cost=50.00)
@@ -789,8 +787,8 @@ class TestResetAndResubmit:
 
         result = resubmit_buy_plan(plan.id, "SO-RESUB", test_user, db_session, customer_po_number="PO-R1")
 
-        assert result.status == BuyPlanStatus.ACTIVE.value
-        assert result.auto_approved is True
+        assert result.status == BuyPlanStatus.PENDING.value
+        assert result.auto_approved is not True
         assert result.sales_order_number == "SO-RESUB"
         assert result.customer_po_number == "PO-R1"
 
@@ -826,50 +824,6 @@ class TestResetAndResubmit:
 
 class TestHelpers:
     """Tests for private helper functions."""
-
-    def test_should_auto_approve_low_cost_no_flags(
-        self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
-    ):
-        plan = _make_plan(db_session, test_user, test_quote, test_requisition, total_cost=100.00, ai_flags=[])
-        assert _should_auto_approve(plan) is True
-
-    def test_should_not_auto_approve_high_cost(
-        self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
-    ):
-        plan = _make_plan(db_session, test_user, test_quote, test_requisition, total_cost=10000.00, ai_flags=[])
-        assert _should_auto_approve(plan) is False
-
-    def test_should_not_auto_approve_critical_flags(
-        self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
-    ):
-        plan = _make_plan(
-            db_session,
-            test_user,
-            test_quote,
-            test_requisition,
-            total_cost=100.00,
-            ai_flags=[{"severity": "critical", "type": "test"}],
-        )
-        assert _should_auto_approve(plan) is False
-
-    def test_should_auto_approve_warning_flags_ok(
-        self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
-    ):
-        plan = _make_plan(
-            db_session,
-            test_user,
-            test_quote,
-            test_requisition,
-            total_cost=100.00,
-            ai_flags=[{"severity": "warning", "type": "test"}],
-        )
-        assert _should_auto_approve(plan) is True
-
-    def test_should_auto_approve_none_cost(
-        self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
-    ):
-        plan = _make_plan(db_session, test_user, test_quote, test_requisition, total_cost=None, ai_flags=[])
-        assert _should_auto_approve(plan) is True
 
     def test_recalculate_financials(
         self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition

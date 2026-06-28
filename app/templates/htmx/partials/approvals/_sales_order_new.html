@@ -17,7 +17,7 @@
 {# ── Mode 1: requisition picker ── #}
 <div>
   <div class="flex items-center justify-between mb-4">
-    <h2 class="text-lg font-semibold text-gray-900">New Sales Order</h2>
+    <h2 class="text-lg font-semibold text-gray-900">New Buy Plan</h2>
     <button hx-get="/v2/partials/approvals/sales-orders"
             hx-target="#bp-hub-body"
             hx-swap="innerHTML"
@@ -26,7 +26,7 @@
     </button>
   </div>
   <p class="text-sm text-gray-600 mb-4">
-    Pick a requisition with offers to originate a Sales Order directly from its RFQ offers.
+    Pick a requisition with offers to build a buy plan directly from its RFQ offers.
   </p>
   {% if picker_rows %}
   <div class="divide-y divide-line-base rounded-lg border border-line-base bg-white">
@@ -47,7 +47,7 @@
   </div>
   {% else %}
   <div class="rounded-lg border border-line-base bg-gray-50 px-4 py-8 text-center text-sm text-gray-600">
-    No open requisitions with offers are available to originate a Sales Order.
+    No open requisitions with offers are available to build a buy plan.
   </div>
   {% endif %}
 </div>
@@ -57,7 +57,7 @@
   <div class="flex items-center justify-between mb-4">
     <div class="min-w-0">
       <h2 class="text-lg font-semibold text-gray-900 truncate">
-        New Sales Order — {{ selected_req.name or 'REQ #' ~ selected_req.id }}
+        New Buy Plan — {{ selected_req.name or 'REQ #' ~ selected_req.id }}
       </h2>
       <p class="text-xs text-gray-600">REQ #{{ selected_req.id }}</p>
     </div>
@@ -128,13 +128,13 @@
         Cancel
       </button>
       <button type="submit" data-loading-disable class="btn btn-primary btn-sm">
-        Create Sales Order
+        Build Buy Plan
       </button>
     </div>
   </form>
   {% else %}
   <div class="rounded-lg border border-line-base bg-gray-50 px-4 py-8 text-center text-sm text-gray-600">
-    This requisition has no active offers to build a Sales Order from.
+    This requisition has no active offers to build a buy plan from.
   </div>
   {% endif %}
 </div>
