@@ -49,7 +49,7 @@ async def _call_bulk(handler, payload, user, db):
     Returns ``(result, mock_list)`` so callers can assert on both the response and
     the patched partial.
     """
-    with patch("app.routers.htmx_views.parts_list_partial", new_callable=AsyncMock) as mock_list:
+    with patch("app.routers.htmx.parts.parts_list_partial", new_callable=AsyncMock) as mock_list:
         mock_list.return_value = HTMLResponse("<div>ok</div>")
         result = await handler(request=_json_request(payload), user=user, db=db)
     return result, mock_list
@@ -83,7 +83,7 @@ class TestBulkArchiveDirect:
 
     async def test_empty_payload_covers_body_lines(self, db_session: Session, test_user: User):
         """Lines 9866–9868: body parsed; empty lists skip both if-branches."""
-        from app.routers.htmx_views import bulk_archive
+        from app.routers.htmx.parts import bulk_archive
 
         result, mock_list = await _call_bulk(
             bulk_archive, {"requirement_ids": [], "requisition_ids": []}, test_user, db_session
@@ -94,7 +94,7 @@ class TestBulkArchiveDirect:
 
     async def test_requirement_ids_branch_covered(self, db_session: Session, test_user: User):
         """Lines 9871–9874: requirement_ids is non-empty → bulk UPDATE executed."""
-        from app.routers.htmx_views import bulk_archive
+        from app.routers.htmx.parts import bulk_archive
 
         req = _make_requisition(db_session, test_user)
         part = _make_requirement(db_session, req)
@@ -109,7 +109,7 @@ class TestBulkArchiveDirect:
 
     async def test_requisition_ids_branch_covered(self, db_session: Session, test_user: User):
         """Lines 9877–9884: requisition_ids non-empty → status ARCHIVED + cascade."""
-        from app.routers.htmx_views import bulk_archive
+        from app.routers.htmx.parts import bulk_archive
 
         req = _make_requisition(db_session, test_user)
         part = _make_requirement(db_session, req)
@@ -124,7 +124,7 @@ class TestBulkArchiveDirect:
 
     async def test_both_branches_covered(self, db_session: Session, test_user: User):
         """Lines 9866–9889: both requirement_ids and requisition_ids populated."""
-        from app.routers.htmx_views import bulk_archive
+        from app.routers.htmx.parts import bulk_archive
 
         req = _make_requisition(db_session, test_user)
         part = _make_requirement(db_session, req)
@@ -144,7 +144,7 @@ class TestBulkUnarchiveDirect:
 
     async def test_empty_payload_covers_body_lines(self, db_session: Session, test_user: User):
         """Lines 9902–9904: body parsed; empty lists skip both if-branches."""
-        from app.routers.htmx_views import bulk_unarchive
+        from app.routers.htmx.parts import bulk_unarchive
 
         result, mock_list = await _call_bulk(
             bulk_unarchive, {"requirement_ids": [], "requisition_ids": []}, test_user, db_session
@@ -156,7 +156,7 @@ class TestBulkUnarchiveDirect:
     async def test_requirement_ids_branch_covered(self, db_session: Session, test_user: User):
         """Lines 9907–9911: requirement_ids non-empty → archived parts restored to
         open."""
-        from app.routers.htmx_views import bulk_unarchive
+        from app.routers.htmx.parts import bulk_unarchive
 
         req = _make_requisition(db_session, test_user)
         part = _make_requirement(db_session, req)
@@ -175,7 +175,7 @@ class TestBulkUnarchiveDirect:
     async def test_requisition_ids_branch_covered(self, db_session: Session, test_user: User):
         """Lines 9914–9922: requisition_ids non-empty → archived parts restored to
         open."""
-        from app.routers.htmx_views import bulk_unarchive
+        from app.routers.htmx.parts import bulk_unarchive
 
         req = _make_requisition(db_session, test_user)
         part = _make_requirement(db_session, req)
@@ -192,7 +192,7 @@ class TestBulkUnarchiveDirect:
 
     async def test_both_branches_covered(self, db_session: Session, test_user: User):
         """Lines 9902–9929: both requirement_ids and requisition_ids populated."""
-        from app.routers.htmx_views import bulk_unarchive
+        from app.routers.htmx.parts import bulk_unarchive
 
         req = _make_requisition(db_session, test_user)
         part = _make_requirement(db_session, req)

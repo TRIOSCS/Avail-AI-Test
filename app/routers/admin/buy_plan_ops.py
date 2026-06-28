@@ -29,7 +29,7 @@ from ...database import get_db
 from ...dependencies import require_admin
 from ...models import User
 from ...models.buy_plan import VerificationGroupMember
-from ...routers.htmx_views import settings_toast
+from ...routers.htmx.settings import settings_toast
 from ...template_env import template_response
 
 router = APIRouter(tags=["admin"])
