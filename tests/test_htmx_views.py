@@ -229,24 +229,24 @@ class TestHelperFunctions:
     """Test _parse_filter_json, _safe_int, _safe_float, _parse_date_safe."""
 
     def test_parse_filter_json_empty(self):
-        from app.routers.htmx_views import _parse_filter_json
+        from app.routers.htmx.materials import _parse_filter_json
 
         assert _parse_filter_json("") == {}
         assert _parse_filter_json(None) == {}
 
     def test_parse_filter_json_valid(self):
-        from app.routers.htmx_views import _parse_filter_json
+        from app.routers.htmx.materials import _parse_filter_json
 
         result = _parse_filter_json('{"key": "val"}')
         assert result == {"key": "val"}
 
     def test_parse_filter_json_invalid(self):
-        from app.routers.htmx_views import _parse_filter_json
+        from app.routers.htmx.materials import _parse_filter_json
 
         assert _parse_filter_json("not json") == {}
 
     def test_parse_filter_json_coerce_numeric(self):
-        from app.routers.htmx_views import _parse_filter_json
+        from app.routers.htmx.materials import _parse_filter_json
 
         result = _parse_filter_json('{"price_min": "10.5", "price_max": "bad", "name": "test"}', coerce_numeric=True)
         assert result["price_min"] == 10.5
@@ -262,7 +262,7 @@ class TestHelperFunctions:
         assert _safe_int("abc") is None
 
     def test_safe_float(self):
-        from app.routers.htmx_views import _safe_float
+        from app.routers.htmx._shared import _safe_float
 
         assert _safe_float("3.14") == 3.14
         assert _safe_float("") is None
@@ -272,7 +272,7 @@ class TestHelperFunctions:
     def test_parse_date_safe(self):
         from datetime import date
 
-        from app.routers.htmx_views import _parse_date_safe
+        from app.routers.htmx._shared import _parse_date_safe
 
         assert _parse_date_safe("", date) is None
         assert _parse_date_safe(None, date) is None

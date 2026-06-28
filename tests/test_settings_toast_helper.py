@@ -1,12 +1,12 @@
 # tests/test_settings_toast_helper.py
 # Tests for the shared settings_toast HX-Trigger helper.
 # Called by: this test suite only (verifies the helper imported from htmx_views).
-# Depends on: app.routers.htmx_views.settings_toast, starlette.responses.Response
+# Depends on: app.routers.htmx.settings.settings_toast, starlette.responses.Response
 import json
 
 from starlette.responses import Response
 
-from app.routers.htmx_views import settings_toast
+from app.routers.htmx.settings import settings_toast
 
 
 def test_settings_toast_sets_hx_trigger():

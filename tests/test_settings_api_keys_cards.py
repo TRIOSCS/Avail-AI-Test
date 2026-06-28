@@ -109,7 +109,7 @@ def _seed_sources(db_session) -> list[ApiSource]:
 def _stub_clay_oauth(monkeypatch):
     """Stub clay_oauth helpers so they don't open a raw SessionLocal connection (which
     bypasses the test-DB override and hits a missing table)."""
-    import app.routers.htmx_views as v
+    import app.routers.htmx.settings as v
 
     monkeypatch.setattr(v.clay_oauth, "is_connected", lambda: False)
     monkeypatch.setattr(v.clay_oauth, "needs_reconnect", lambda: False)
@@ -161,7 +161,7 @@ def test_put_hunter_credentials(admin_client):
 
 
 def test_clay_card_shows_connect_when_disconnected(admin_client, monkeypatch):
-    import app.routers.htmx_views as v
+    import app.routers.htmx.settings as v
 
     monkeypatch.setattr(v.clay_oauth, "is_connected", lambda: False)
     monkeypatch.setattr(v.clay_oauth, "needs_reconnect", lambda: False)
@@ -171,7 +171,7 @@ def test_clay_card_shows_connect_when_disconnected(admin_client, monkeypatch):
 
 
 def test_clay_card_shows_connected(admin_client, monkeypatch):
-    import app.routers.htmx_views as v
+    import app.routers.htmx.settings as v
 
     monkeypatch.setattr(v.clay_oauth, "is_connected", lambda: True)
     monkeypatch.setattr(v.clay_oauth, "needs_reconnect", lambda: False)
@@ -181,7 +181,7 @@ def test_clay_card_shows_connected(admin_client, monkeypatch):
 
 
 def test_clay_card_shows_needs_reconnect(admin_client, monkeypatch):
-    import app.routers.htmx_views as v
+    import app.routers.htmx.settings as v
 
     monkeypatch.setattr(v.clay_oauth, "is_connected", lambda: False)
     monkeypatch.setattr(v.clay_oauth, "needs_reconnect", lambda: True)

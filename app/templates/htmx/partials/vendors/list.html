@@ -136,6 +136,15 @@
             Hide blacklisted
           </label>
         </div>
+        <div x-data="{ includeArchived: {{ 'true' if include_archived else 'false' }} }">
+          <input type="hidden" name="include_archived" :value="includeArchived">
+          <label class="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+            <input type="checkbox" x-model="includeArchived"
+                   @change="htmx.trigger(document.querySelector('#vendor-filters [name=q]'), 'changed')"
+                   class="h-4 w-4 rounded border-gray-200 input-focus text-accent-500">
+            Show archived
+          </label>
+        </div>
         <button type="button"
                 @click="view = view === 'cards' ? 'table' : 'cards'; $nextTick(() => htmx.trigger(document.querySelector('#vendor-filters [name=q]'), 'changed'))"
                 class="btn btn-secondary btn-sm"
@@ -191,7 +200,7 @@
       </thead>
       <tbody>
         {% for v in vendors %}
-        <tr class="{{ 'bg-rose-50' if v.is_blacklisted else '' }} cursor-pointer focus:outline-none focus:ring-2 focus:ring-inset focus:ring-accent-500"
+        <tr class="{{ 'bg-rose-50' if v.is_blacklisted else ('opacity-60' if not v.is_active else '') }} cursor-pointer focus:outline-none focus:ring-2 focus:ring-inset focus:ring-accent-500"
             role="button" tabindex="0"
             hx-get="/v2/partials/vendors/{{ v.id }}"
             hx-target="{{ hx_target|default('#main-content') }}"
@@ -214,6 +223,8 @@
           <td>
             {% if v.is_blacklisted %}
               {{ badge('Blacklisted', 'danger') }}
+            {% elif not v.is_active %}
+              {{ badge('Archived', 'neutral') }}
             {% elif v.vendor_score %}
               <span class="badge badge-success">{{ "%.0f"|format(v.vendor_score) }}</span>
             {% else %}

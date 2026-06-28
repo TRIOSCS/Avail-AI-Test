@@ -168,7 +168,7 @@ class TestProspectingAddDomain:
         assert "domain" in resp.text.lower()
 
     def test_add_domain_success(self, client: TestClient):
-        with patch("app.routers.htmx_views.add_prospect_domain.__wrapped__", None, create=True):
+        with patch("app.routers.htmx.prospecting.add_prospect_domain.__wrapped__", None, create=True):
             with patch("app.services.prospect_claim.add_prospect_manually") as mock_add:
                 mock_add.return_value = MagicMock(id=42)
                 resp = client.post(

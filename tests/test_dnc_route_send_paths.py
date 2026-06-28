@@ -58,7 +58,7 @@ class TestFollowUpDNC:
 
     @pytest.mark.asyncio
     async def test_dnc_vendor_not_emailed(self, db_session: Session, test_user, test_requisition, dnc_site_contact):
-        from app.routers.htmx_views import send_follow_up_htmx
+        from app.routers.htmx.offers import send_follow_up_htmx
 
         contact = RfqContact(
             requisition_id=test_requisition.id,
@@ -90,7 +90,7 @@ class TestFollowUpDNC:
     @pytest.mark.asyncio
     async def test_non_dnc_vendor_proceeds(self, db_session: Session, test_user, test_requisition):
         """A non-DNC vendor follows the normal (TESTING) success path — no block."""
-        from app.routers.htmx_views import send_follow_up_htmx
+        from app.routers.htmx.offers import send_follow_up_htmx
 
         contact = RfqContact(
             requisition_id=test_requisition.id,

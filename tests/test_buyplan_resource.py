@@ -389,7 +389,7 @@ class TestResourceRoutes:
     async def test_resource_route_pools_line_and_fires_alert(
         self, db_session: Session, test_user, test_quote, test_requisition, test_vendor_card
     ):
-        from app.routers import htmx_views
+        from app.routers.htmx import buy_plans as htmx_buy_plans
 
         plan = _make_plan(db_session, test_quote, test_requisition)
         requirement = test_requisition.requirements[0]
@@ -401,9 +401,9 @@ class TestResourceRoutes:
         req = _FakeRequest({"reason_code": "sold_elsewhere", "scope": "line"})
         with (
             patch("app.services.buyplan_notifications.run_notify_bg", mock_bg),
-            patch.object(htmx_views, "buy_plan_detail_partial", new_callable=AsyncMock, return_value="ok"),
+            patch.object(htmx_buy_plans, "buy_plan_detail_partial", new_callable=AsyncMock, return_value="ok"),
         ):
-            result = await htmx_views.buy_plan_resource_line_partial(
+            result = await htmx_buy_plans.buy_plan_resource_line_partial(
                 req, plan.id, line.id, user=test_user, db=db_session
             )
 
@@ -417,7 +417,7 @@ class TestResourceRoutes:
     async def test_escalation_fires_one_alert_per_resourced_line(
         self, db_session: Session, test_user, test_quote, test_requisition, test_vendor_card
     ):
-        from app.routers import htmx_views
+        from app.routers.htmx import buy_plans as htmx_buy_plans
 
         plan = _make_plan(db_session, test_quote, test_requisition)
         requirement = test_requisition.requirements[0]
@@ -431,27 +431,27 @@ class TestResourceRoutes:
         req = _FakeRequest({"reason_code": "sold_elsewhere", "scope": "plan", "also_line_ids": [str(line_b.id)]})
         with (
             patch("app.services.buyplan_notifications.run_notify_bg", mock_bg),
-            patch.object(htmx_views, "buy_plan_detail_partial", new_callable=AsyncMock, return_value="ok"),
+            patch.object(htmx_buy_plans, "buy_plan_detail_partial", new_callable=AsyncMock, return_value="ok"),
         ):
-            await htmx_views.buy_plan_resource_line_partial(req, plan.id, line_a.id, user=test_user, db=db_session)
+            await htmx_buy_plans.buy_plan_resource_line_partial(req, plan.id, line_a.id, user=test_user, db=db_session)
 
         alerted_line_ids = {c.kwargs["line_id"] for c in mock_bg.await_args_list}
         assert alerted_line_ids == {line_a.id, line_b.id}
 
     @pytest.mark.asyncio
     async def test_claim_forbidden_for_non_po_cutter(self, db_session: Session, sales_user):
-        from app.routers import htmx_views
+        from app.routers.htmx import buy_plans as htmx_buy_plans
 
         req = _FakeRequest({})
         with pytest.raises(HTTPException) as exc:
-            await htmx_views.buy_plan_claim_line_partial(req, 1, 1, user=sales_user, db=db_session)
+            await htmx_buy_plans.buy_plan_claim_line_partial(req, 1, 1, user=sales_user, db=db_session)
         assert exc.value.status_code == 403
 
     @pytest.mark.asyncio
     async def test_losing_claim_returns_409(
         self, db_session: Session, test_user, test_quote, test_requisition, test_vendor_card
     ):
-        from app.routers import htmx_views
+        from app.routers.htmx import buy_plans as htmx_buy_plans
 
         plan = _make_plan(db_session, test_quote, test_requisition)
         requirement = test_requisition.requirements[0]
@@ -462,8 +462,8 @@ class TestResourceRoutes:
 
         winner = _second_buyer(db_session)
         req = _FakeRequest({})
-        with patch.object(htmx_views, "buy_plan_detail_partial", new_callable=AsyncMock, return_value="ok"):
-            await htmx_views.buy_plan_claim_line_partial(req, plan.id, line.id, user=winner, db=db_session)
+        with patch.object(htmx_buy_plans, "buy_plan_detail_partial", new_callable=AsyncMock, return_value="ok"):
+            await htmx_buy_plans.buy_plan_claim_line_partial(req, plan.id, line.id, user=winner, db=db_session)
             with pytest.raises(HTTPException) as exc:
-                await htmx_views.buy_plan_claim_line_partial(req, plan.id, line.id, user=test_user, db=db_session)
+                await htmx_buy_plans.buy_plan_claim_line_partial(req, plan.id, line.id, user=test_user, db=db_session)
         assert exc.value.status_code == 409

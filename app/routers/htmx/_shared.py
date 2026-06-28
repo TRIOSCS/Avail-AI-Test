@@ -15,9 +15,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import Request
+from sqlalchemy.orm import Session
 
 from ...constants import UserRole
-from ...models import User
+from ...models import User, VerificationGroupMember
 
 # Vite manifest for asset fingerprinting — read once at import time.
 _MANIFEST_PATH = Path("app/static/dist/.vite/manifest.json")
@@ -86,3 +87,28 @@ def _sanitize_hx_params(hx_target: str, push_url_base: str, default_push: str) -
     if push_url_base not in _ALLOWED_PUSH_URL_BASES:
         push_url_base = default_push
     return hx_target, push_url_base
+
+
+def _safe_int(val) -> int | None:
+    """Safely convert form value to int."""
+    if not val:
+        return None
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return None
+
+
+def _safe_float(val) -> float | None:
+    """Safely convert form value to float."""
+    if not val:
+        return None
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return None
+
+
+def _is_ops_member(user: User, db: Session) -> bool:
+    """Check if user is in the ops verification group."""
+    return db.query(VerificationGroupMember).filter_by(user_id=user.id, is_active=True).first() is not None

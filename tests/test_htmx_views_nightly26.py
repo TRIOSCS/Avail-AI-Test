@@ -231,12 +231,12 @@ class TestEditSiteDirect:
 class TestEditQuoteMetadataDirect:
     async def test_edit_quote_metadata_success(self, db_session: Session, test_user: User):
         """Lines 5315–5328: POST form updates quote metadata fields."""
-        from app.routers.htmx_views import edit_quote_metadata
+        from app.routers.htmx.quotes import edit_quote_metadata
 
         req = _make_req(db_session, test_user)
         quote = _make_quote(db_session, req, test_user)
         mock_req = _mock_form_request(fields={"payment_terms": "Net30", "shipping_terms": "FOB", "notes": "Rush order"})
-        with patch("app.routers.htmx_views.quote_detail_partial", new_callable=AsyncMock) as mock_detail:
+        with patch("app.routers.htmx.quotes.quote_detail_partial", new_callable=AsyncMock) as mock_detail:
             mock_detail.return_value = HTMLResponse("quote detail")
             result = await edit_quote_metadata(request=mock_req, quote_id=quote.id, user=test_user, db=db_session)
         assert result.status_code == 200
@@ -247,7 +247,7 @@ class TestEditQuoteMetadataDirect:
         """Non-existent quote → 404."""
         from fastapi import HTTPException
 
-        from app.routers.htmx_views import edit_quote_metadata
+        from app.routers.htmx.quotes import edit_quote_metadata
 
         mock_req = _mock_form_request(fields={"payment_terms": "Net30"})
         with pytest.raises(HTTPException) as exc_info:
@@ -262,7 +262,7 @@ class TestBuyPlanConfirmPoDirect:
     async def test_confirm_po_success(self, db_session: Session, test_user: User):
         """Lines 6098–6120: POST form with po_number → calls confirm_po."""
         from app.models.buy_plan import BuyPlan, BuyPlanLine
-        from app.routers.htmx_views import buy_plan_confirm_po_partial
+        from app.routers.htmx.buy_plans import buy_plan_confirm_po_partial
 
         req = _make_req(db_session, test_user)
         quote = _make_quote(db_session, req, test_user)
@@ -287,7 +287,7 @@ class TestBuyPlanConfirmPoDirect:
         with (
             patch("app.services.buyplan_workflow.confirm_po") as mock_confirm,
             patch("app.services.buyplan_notifications.run_notify_bg", new_callable=AsyncMock),
-            patch("app.routers.htmx_views.buy_plan_detail_partial", new_callable=AsyncMock) as mock_detail,
+            patch("app.routers.htmx.buy_plans.buy_plan_detail_partial", new_callable=AsyncMock) as mock_detail,
         ):
             mock_confirm.return_value = None
             mock_detail.return_value = HTMLResponse("bp detail")
@@ -305,7 +305,7 @@ class TestBuyPlanConfirmPoDirect:
         from fastapi import HTTPException
 
         from app.models.buy_plan import BuyPlan
-        from app.routers.htmx_views import buy_plan_confirm_po_partial
+        from app.routers.htmx.buy_plans import buy_plan_confirm_po_partial
 
         req = _make_req(db_session, test_user)
         quote = _make_quote(db_session, req, test_user)
@@ -326,13 +326,13 @@ class TestBuyPlanConfirmPoDirect:
 class TestUpdateMaterialCardDirect:
     async def test_update_material_card_success(self, db_session: Session, test_user: User):
         """Lines 7359–7380: POST form updates material card fields."""
-        from app.routers.htmx_views import update_material_card
+        from app.routers.htmx.materials import update_material_card
 
         card = _make_material_card(db_session)
         mock_req = _mock_form_request(
             fields={"manufacturer": "TI", "description": "Voltage regulator", "category": "Linear"}
         )
-        with patch("app.routers.htmx_views.material_detail_partial", new_callable=AsyncMock) as mock_detail:
+        with patch("app.routers.htmx.materials.material_detail_partial", new_callable=AsyncMock) as mock_detail:
             mock_detail.return_value = HTMLResponse("card detail")
             result = await update_material_card(request=mock_req, card_id=card.id, user=test_user, db=db_session)
         assert result.status_code == 200
@@ -343,7 +343,7 @@ class TestUpdateMaterialCardDirect:
         """Non-existent card → 404."""
         from fastapi import HTTPException
 
-        from app.routers.htmx_views import update_material_card
+        from app.routers.htmx.materials import update_material_card
 
         mock_req = _mock_form_request(fields={"manufacturer": "TI"})
         with pytest.raises(HTTPException) as exc_info:
@@ -357,13 +357,13 @@ class TestUpdateMaterialCardDirect:
 class TestUpdateQuoteLineDirect:
     async def test_update_quote_line_success(self, db_session: Session, test_user: User):
         """Lines 7456–7480: POST form updates quote line fields."""
-        from app.routers.htmx_views import update_quote_line
+        from app.routers.htmx.quotes import update_quote_line
 
         req = _make_req(db_session, test_user)
         quote = _make_quote(db_session, req, test_user)
         line = _make_quote_line(db_session, quote)
         mock_req = _mock_form_request(fields={"qty": "200", "cost_price": "0.08", "sell_price": "0.12"})
-        with patch("app.routers.htmx_views.template_response") as mock_tpl:
+        with patch("app.routers.htmx.quotes.template_response") as mock_tpl:
             mock_tpl.return_value = HTMLResponse("line row")
             result = await update_quote_line(
                 request=mock_req,
@@ -380,7 +380,7 @@ class TestUpdateQuoteLineDirect:
         """Non-existent line → 404."""
         from fastapi import HTTPException
 
-        from app.routers.htmx_views import update_quote_line
+        from app.routers.htmx.quotes import update_quote_line
 
         req = _make_req(db_session, test_user)
         quote = _make_quote(db_session, req, test_user)
@@ -393,7 +393,7 @@ class TestUpdateQuoteLineDirect:
         """Non-integer qty → 400."""
         from fastapi import HTTPException
 
-        from app.routers.htmx_views import update_quote_line
+        from app.routers.htmx.quotes import update_quote_line
 
         req = _make_req(db_session, test_user)
         quote = _make_quote(db_session, req, test_user)
@@ -410,7 +410,7 @@ class TestUpdateQuoteLineDirect:
 class TestProactiveDraftDirect:
     async def test_draft_no_match_ids_returns_error(self, db_session: Session, test_user: User):
         """Lines 8307–8308: empty match_ids → error HTML."""
-        from app.routers.htmx_views import proactive_draft_for_prepare
+        from app.routers.htmx.proactive import proactive_draft_for_prepare
 
         mock_req = _mock_form_request(fields={"match_ids": [], "contact_ids": []})
         result = await proactive_draft_for_prepare(request=mock_req, user=test_user, db=db_session)
@@ -419,7 +419,7 @@ class TestProactiveDraftDirect:
 
     async def test_draft_invalid_match_ids_returns_error(self, db_session: Session, test_user: User):
         """Lines 8315–8316: match_ids that don't belong to user → error HTML."""
-        from app.routers.htmx_views import proactive_draft_for_prepare
+        from app.routers.htmx.proactive import proactive_draft_for_prepare
 
         mock_req = _mock_form_request(fields={"match_ids": ["99999"], "contact_ids": []})
         result = await proactive_draft_for_prepare(request=mock_req, user=test_user, db=db_session)

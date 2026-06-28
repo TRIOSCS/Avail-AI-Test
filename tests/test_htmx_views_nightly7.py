@@ -540,7 +540,7 @@ class TestBuyPlanSubmit:
         mock_plan.auto_approved = False
 
         with (
-            patch("app.routers.htmx_views.buy_plan_detail_partial", new_callable=AsyncMock) as mock_detail,
+            patch("app.routers.htmx.buy_plans.buy_plan_detail_partial", new_callable=AsyncMock) as mock_detail,
             patch("app.services.buyplan_workflow.submit_buy_plan", return_value=mock_plan),
             patch("app.services.buyplan_notifications.run_notify_bg", new_callable=AsyncMock),
         ):
@@ -577,7 +577,7 @@ class TestBuyPlanVerifySo:
         mock_plan.id = plan.id
 
         with (
-            patch("app.routers.htmx_views.buy_plan_detail_partial", new_callable=AsyncMock) as mock_detail,
+            patch("app.routers.htmx.buy_plans.buy_plan_detail_partial", new_callable=AsyncMock) as mock_detail,
             patch("app.services.buyplan_workflow.verify_so", return_value=mock_plan),
             patch("app.services.buyplan_notifications.run_notify_bg", new_callable=AsyncMock),
         ):
@@ -607,7 +607,7 @@ class TestBuyPlanVerifySo:
         mock_plan.id = plan.id
 
         with (
-            patch("app.routers.htmx_views.buy_plan_detail_partial", new_callable=AsyncMock) as mock_detail,
+            patch("app.routers.htmx.buy_plans.buy_plan_detail_partial", new_callable=AsyncMock) as mock_detail,
             patch("app.services.buyplan_workflow.verify_so", return_value=mock_plan),
             patch("app.services.buyplan_notifications.run_notify_bg", new_callable=AsyncMock),
         ):
@@ -635,7 +635,7 @@ class TestBuyPlanVerifyPo:
         mock_completed_plan.status = BuyPlanStatus.DRAFT  # Not completed
 
         with (
-            patch("app.routers.htmx_views.buy_plan_detail_partial", new_callable=AsyncMock) as mock_detail,
+            patch("app.routers.htmx.buy_plans.buy_plan_detail_partial", new_callable=AsyncMock) as mock_detail,
             patch("app.services.buyplan_workflow.verify_po"),
             patch("app.services.buyplan_workflow.check_completion", return_value=mock_completed_plan),
             patch("app.services.buyplan_notifications.run_notify_bg", new_callable=AsyncMock),
@@ -672,7 +672,7 @@ class TestBuyPlanFlagIssue:
         line = _make_buy_plan_line(db_session, plan, req)
 
         with (
-            patch("app.routers.htmx_views.buy_plan_detail_partial", new_callable=AsyncMock) as mock_detail,
+            patch("app.routers.htmx.buy_plans.buy_plan_detail_partial", new_callable=AsyncMock) as mock_detail,
             patch("app.services.buyplan_workflow.flag_line_issue"),
         ):
             from fastapi.responses import HTMLResponse

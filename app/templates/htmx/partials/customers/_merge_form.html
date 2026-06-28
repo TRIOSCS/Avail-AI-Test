@@ -65,19 +65,25 @@
         const sel = document.getElementById('merge-remove-select');
         if (!inp || !sel) return;
 
-        inp.addEventListener('input', async function () {
+        inp.addEventListener('input', function () {
           const q = inp.value.trim();
           if (q.length < 2) { sel.classList.add('hidden'); return; }
-          const resp = await fetch('/v2/partials/customers/typeahead?q=' + encodeURIComponent(q));
-          const html = await resp.text();
-          sel.innerHTML = html;
-          sel.classList.toggle('hidden', !html.trim());
+          // htmx swap (not a raw innerHTML assignment) — the server fragment goes
+          // through htmx's sanctioned swap pipeline, mirroring the @change handler above.
+          const url = '/v2/partials/customers/typeahead?q=' + encodeURIComponent(q);
+          htmx.ajax('GET', url, {
+            target: sel,
+            swap: 'innerHTML',
+            indicator: '#merge-preview-indicator',
+          }).then(function () {
+            sel.classList.toggle('hidden', sel.options.length === 0);
+          });
         });
       })();
     </script>
 
     {# Loading indicator for the merge preview htmx.ajax call #}
-    <div id="merge-preview-indicator" class="htmx-indicator text-sm text-gray-400 py-2">Loading preview…</div>
+    <div id="merge-preview-indicator" class="htmx-indicator text-sm text-gray-400 py-2">Loading…</div>
 
     {# Preview loads here after a company is selected #}
     <div id="merge-preview-area" class="mt-4"></div>

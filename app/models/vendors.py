@@ -19,6 +19,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import relationship, validates
@@ -43,6 +44,9 @@ class VendorCard(Base):
     sighting_count = Column(Integer, default=0)
     is_blacklisted = Column(Boolean, default=False)
     is_broadcast = Column(Boolean, default=False)  # Always include in stock inquiries
+    # Soft-archive (CRM P5): archived vendors (is_active=False) are hidden from the
+    # default vendor list/search but never deleted. Mirrors Company.is_active.
+    is_active = Column(Boolean, nullable=False, default=True, server_default=text("true"), index=True)
     source = Column(String(50))
 
     # Enrichment fields (shared structure with Company)
