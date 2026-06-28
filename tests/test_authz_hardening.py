@@ -107,7 +107,7 @@ def _requisition(db_session, owner_id, *, name="REQ-AUTHZ", site_id=None):
 
 # ══════════════════════════════════════════════════════════════════════════
 # FIX GROUP 1 — edit_company owner reassignment needs the TEAM gate
-# Route: POST /v2/partials/customers/{company_id}/edit  (htmx_views.edit_company)
+# Route: POST /v2/partials/customers/{company_id}/edit  (htmx.companies.edit_company)
 # Helper: can_manage_account_team
 # ══════════════════════════════════════════════════════════════════════════
 
@@ -637,7 +637,7 @@ def test_g8_qp_detail_allows_manager(client, db_session, test_user, admin_user):
 
 # ══════════════════════════════════════════════════════════════════════════
 # FIX GROUP 9 — create_company owner assignment needs manager gate + active user
-# Route: POST /v2/partials/customers/create  (htmx_views.create_company)
+# Route: POST /v2/partials/customers/create  (htmx.companies.create_company)
 # Helper: is_manager_or_admin (+ active-user validation)
 # ══════════════════════════════════════════════════════════════════════════
 

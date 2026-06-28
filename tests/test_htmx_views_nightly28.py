@@ -70,7 +70,7 @@ class TestStalenessHelper:
     """Tests for _staleness_tier() — all four return values."""
 
     def test_none_returns_new(self):
-        from app.routers.htmx_views import _staleness_tier
+        from app.routers.htmx.companies import _staleness_tier
 
         assert _staleness_tier(None) == "new"
 
@@ -83,7 +83,7 @@ class TestStalenessHelper:
         ],
     )
     def test_aware_timestamp_tier(self, days_ago, expected):
-        from app.routers.htmx_views import _staleness_tier
+        from app.routers.htmx.companies import _staleness_tier
 
         ts = datetime.now(timezone.utc) - timedelta(days=days_ago)
         assert _staleness_tier(ts) == expected
@@ -91,7 +91,7 @@ class TestStalenessHelper:
     def test_naive_datetime_treated_as_utc(self):
         """Naive datetime (no tzinfo) → line 4283 adds UTC, staleness computed
         correctly."""
-        from app.routers.htmx_views import _staleness_tier
+        from app.routers.htmx.companies import _staleness_tier
 
         naive = datetime.now() - timedelta(days=40)
         assert naive.tzinfo is None
@@ -133,7 +133,7 @@ class TestSanitizeHxParams:
         ],
     )
     def test_sanitize_hx_params(self, hx_target, push_url_base, default_push, expected_target, expected_push):
-        from app.routers.htmx_views import _sanitize_hx_params
+        from app.routers.htmx._shared import _sanitize_hx_params
 
         target, push = _sanitize_hx_params(hx_target, push_url_base, default_push)
         assert target == expected_target

@@ -688,7 +688,9 @@ from .routers.crm import router as crm_router
 from .routers.documents import router as documents_router
 from .routers.error_reports import router as error_reports_router
 from .routers.events import router as events_router
+from .routers.htmx.companies import router as htmx_companies_router
 from .routers.htmx.requisitions import router as htmx_requisitions_router
+from .routers.htmx.vendors import router as htmx_vendors_router
 from .routers.htmx_views import router as htmx_views_router
 from .routers.materials import router as materials_router
 from .routers.part_dossier import router as part_dossier_router
@@ -737,3 +739,5 @@ app.include_router(vendors_crud_router)
 app.include_router(quote_builder_router)
 app.include_router(htmx_views_router)
 app.include_router(htmx_requisitions_router)
+app.include_router(htmx_vendors_router)
+app.include_router(htmx_companies_router)

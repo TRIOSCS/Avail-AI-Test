@@ -4,7 +4,8 @@ Holds cross-cutting helpers/state used by both htmx_views.py and the per-domain
 sub-routers under app/routers/htmx/. Single source of truth — htmx_views.py
 re-imports these names so its remaining routes keep working unchanged.
 
-Called by: app/routers/htmx_views.py, app/routers/htmx/requisitions.py
+Called by: app/routers/htmx_views.py, app/routers/htmx/requisitions.py,
+    app/routers/htmx/vendors.py, app/routers/htmx/companies.py
 Depends on: app.constants, app.models, app.routers.admin.users (lazy)
 """
 
@@ -69,3 +70,19 @@ def _parse_date_safe(val, date_cls):
         return date_cls.fromisoformat(val)
     except (ValueError, TypeError):
         return None
+
+
+_DASH = "\u2014"  # em-dash for template fallbacks
+
+# hx-target / push-url allowlists for the CRM list partials (vendors + customers).
+_ALLOWED_HX_TARGETS = {"#main-content", "#crm-tab-content"}
+_ALLOWED_PUSH_URL_BASES = {"/v2/vendors", "/v2/customers", "/v2/crm"}
+
+
+def _sanitize_hx_params(hx_target: str, push_url_base: str, default_push: str) -> tuple[str, str]:
+    """Validate hx_target and push_url_base against allowlists."""
+    if hx_target not in _ALLOWED_HX_TARGETS:
+        hx_target = "#main-content"
+    if push_url_base not in _ALLOWED_PUSH_URL_BASES:
+        push_url_base = default_push
+    return hx_target, push_url_base

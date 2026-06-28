@@ -120,12 +120,12 @@ def _make_material_card(db: Session) -> MaterialCard:
 class TestCreateCompanyDirect:
     async def test_create_company_success(self, db_session: Session, test_user: User):
         """Lines 4384–4417: POST form creates Company + default site."""
-        from app.routers.htmx_views import create_company
+        from app.routers.htmx.companies import create_company
 
         mock_req = _mock_form_request(
             fields={"name": "NewCo N26", "website": "https://newco.com", "industry": "Electronics"}
         )
-        with patch("app.routers.htmx_views.company_detail_partial", new_callable=AsyncMock) as mock_detail:
+        with patch("app.routers.htmx.companies.company_detail_partial", new_callable=AsyncMock) as mock_detail:
             mock_detail.return_value = HTMLResponse("company detail")
             result = await create_company(request=mock_req, user=test_user, db=db_session)
         assert result.status_code == 200
@@ -137,7 +137,7 @@ class TestCreateCompanyDirect:
         """Empty name → 400."""
         from fastapi import HTTPException
 
-        from app.routers.htmx_views import create_company
+        from app.routers.htmx.companies import create_company
 
         mock_req = _mock_form_request(fields={"name": ""})
         with pytest.raises(HTTPException) as exc_info:
@@ -148,7 +148,7 @@ class TestCreateCompanyDirect:
         """Duplicate name → 409."""
         from fastapi import HTTPException
 
-        from app.routers.htmx_views import create_company
+        from app.routers.htmx.companies import create_company
 
         _make_company(db_session)  # creates "TestCo N26"
         mock_req = _mock_form_request(fields={"name": "TestCo N26"})
@@ -163,13 +163,13 @@ class TestCreateCompanyDirect:
 class TestEditCompanyDirect:
     async def test_edit_company_success(self, db_session: Session, test_user: User):
         """Lines 5038–5057: POST form updates Company fields."""
-        from app.routers.htmx_views import edit_company
+        from app.routers.htmx.companies import edit_company
 
         company = _make_company(db_session, owner=test_user)
         mock_req = _mock_form_request(
             fields={"name": "Updated N26", "website": "https://updated.com", "industry": "Tech"}
         )
-        with patch("app.routers.htmx_views.company_detail_partial", new_callable=AsyncMock) as mock_detail:
+        with patch("app.routers.htmx.companies.company_detail_partial", new_callable=AsyncMock) as mock_detail:
             mock_detail.return_value = HTMLResponse("company detail")
             result = await edit_company(request=mock_req, company_id=company.id, user=test_user, db=db_session)
         assert result.status_code == 200
@@ -180,7 +180,7 @@ class TestEditCompanyDirect:
         """Non-existent company → 404."""
         from fastapi import HTTPException
 
-        from app.routers.htmx_views import edit_company
+        from app.routers.htmx.companies import edit_company
 
         mock_req = _mock_form_request(fields={"name": "X"})
         with pytest.raises(HTTPException) as exc_info:
@@ -194,12 +194,12 @@ class TestEditCompanyDirect:
 class TestEditSiteDirect:
     async def test_edit_site_success(self, db_session: Session, test_user: User):
         """Lines 5074–5083: POST form updates CustomerSite fields."""
-        from app.routers.htmx_views import edit_site
+        from app.routers.htmx.companies import edit_site
 
         company = _make_company(db_session, owner=test_user)
         site = _make_site(db_session, company)
         mock_req = _mock_form_request(fields={"site_name": "Branch Office", "city": "Austin", "country": "US"})
-        with patch("app.routers.htmx_views.company_tab", new_callable=AsyncMock) as mock_tab:
+        with patch("app.routers.htmx.companies.company_tab", new_callable=AsyncMock) as mock_tab:
             mock_tab.return_value = HTMLResponse("sites tab")
             result = await edit_site(
                 request=mock_req,
@@ -216,7 +216,7 @@ class TestEditSiteDirect:
         """Non-existent site → 404."""
         from fastapi import HTTPException
 
-        from app.routers.htmx_views import edit_site
+        from app.routers.htmx.companies import edit_site
 
         company = _make_company(db_session)
         mock_req = _mock_form_request(fields={"site_name": "X"})

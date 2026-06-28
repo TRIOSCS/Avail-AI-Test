@@ -1501,7 +1501,7 @@ class TestUnifiedTimelineHelper:
         from decimal import Decimal
         from types import SimpleNamespace
 
-        from app.routers.htmx_views import build_account_timeline
+        from app.routers.htmx.companies import build_account_timeline
 
         t1 = datetime(2026, 6, 10, tzinfo=timezone.utc)
         t2 = datetime(2026, 6, 11, tzinfo=timezone.utc)
@@ -1552,7 +1552,7 @@ class TestUnifiedTimelineHelper:
         from datetime import datetime, timezone
         from types import SimpleNamespace
 
-        from app.routers.htmx_views import build_account_timeline
+        from app.routers.htmx.companies import build_account_timeline
 
         old = datetime(2026, 6, 1, tzinfo=timezone.utc)
         mid = datetime(2026, 6, 5, tzinfo=timezone.utc)

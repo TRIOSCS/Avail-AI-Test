@@ -78,7 +78,7 @@ class TestContactRoleSourceOfTruth:
         assert [r.value for r in ContactRole] == ["buyer", "manager", "engineer", "planner", "other"]
 
     def test_canonical_roles_and_jinja_global_derive_from_enum(self):
-        from app.routers.htmx_views import _VALID_ROLES, CANONICAL_ROLES
+        from app.routers.htmx.companies import _VALID_ROLES, CANONICAL_ROLES
         from app.template_env import _CANONICAL_ROLES
 
         assert tuple(CANONICAL_ROLES) == tuple(ContactRole)
