@@ -132,6 +132,24 @@
       <div class="flex items-center gap-2">
         <span>Sales</span>
         {{ gate_chip(sales_gate) }}
+        {# Inline approve/reject — shown only to eligible PENDING recipients. Clicking
+           the buttons must not toggle the section (@click.stop on the wrapper div). #}
+        {% if sales_gate and sales_gate_can_act %}
+        <div class="inline-flex items-center gap-1.5" @click.stop>
+          <button type="button"
+                  hx-post="/v2/approvals/requests/{{ sales_gate.id }}/decision"
+                  hx-vals='{"action": "approve"}'
+                  hx-swap="none"
+                  hx-on::after-request="if(event.detail.successful) htmx.ajax('GET', '/v2/qp/{{ qp.id }}', {target:'#main-content'})"
+                  class="btn btn-primary btn-sm">Approve</button>
+          <button type="button"
+                  hx-post="/v2/approvals/requests/{{ sales_gate.id }}/decision"
+                  hx-vals="js:{action: 'reject', comment: prompt('Reason for rejection?') || ''}"
+                  hx-swap="none"
+                  hx-on::after-request="if(event.detail.successful) htmx.ajax('GET', '/v2/qp/{{ qp.id }}', {target:'#main-content'})"
+                  class="btn btn-danger btn-sm">Reject</button>
+        </div>
+        {% endif %}
       </div>
       <svg class="h-4 w-4 text-gray-400 transition-transform" :class="showSales ? 'rotate-180' : ''"
            fill="none" viewBox="0 0 24 24" stroke="currentColor">

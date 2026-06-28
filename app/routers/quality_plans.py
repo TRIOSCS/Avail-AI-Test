@@ -30,10 +30,10 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
-from ..constants import ApprovalGateType, ApprovalSubjectType
+from ..constants import ApprovalGateType, ApprovalRecipientStatus, ApprovalRequestStatus, ApprovalSubjectType
 from ..database import get_db
 from ..dependencies import get_buyplan_for_user, require_requisition_access, require_user
-from ..models.approvals import ApprovalRequest
+from ..models.approvals import ApprovalRequest, ApprovalStep, ApprovalStepRecipient
 from ..models.buy_plan import BuyPlan, BuyPlanLine
 from ..models.crm import CustomerSite
 from ..models.fru_link import FruLink
@@ -148,6 +148,28 @@ def _get_gate(db: Session, qp_id: int, gate_type: str) -> ApprovalRequest | None
     ).scalar_one_or_none()
 
 
+def _is_pending_recipient(db: Session, gate: ApprovalRequest | None, user) -> bool:
+    """Return True if *user* is a PENDING recipient on the given open gate request.
+
+    Mirrors the eligibility check in services/approvals/service.py:decide() so the
+    template shows Approve/Reject buttons only when the server would honour a decision.
+    """
+    if gate is None or gate.status != ApprovalRequestStatus.REQUESTED:
+        return False
+    return (
+        db.execute(
+            select(ApprovalStepRecipient)
+            .join(ApprovalStep, ApprovalStepRecipient.step_id == ApprovalStep.id)
+            .where(
+                ApprovalStep.request_id == gate.id,
+                ApprovalStepRecipient.user_id == user.id,
+                ApprovalStepRecipient.status == ApprovalRecipientStatus.PENDING,
+            )
+        ).scalar_one_or_none()
+        is not None
+    )
+
+
 def _qp_detail_response(
     request: Request,
     user,
@@ -181,6 +203,7 @@ def _qp_detail_response(
     )
 
     errors = validate_complete(qp)
+    sales_gate = _get_gate(db, qp.id, ApprovalGateType.QP_SALES)
 
     ctx = {
         "request": request,
@@ -193,7 +216,8 @@ def _qp_detail_response(
         "sales_errors": validate_section(qp, ApprovalGateType.QP_SALES),
         "purchasing_errors": validate_section(qp, ApprovalGateType.PURCHASE_ORDER),
         "fru_rows": _fru_rows(db, qp),
-        "sales_gate": _get_gate(db, qp.id, ApprovalGateType.QP_SALES),
+        "sales_gate": sales_gate,
+        "sales_gate_can_act": _is_pending_recipient(db, sales_gate, user),
         "purchasing_gate": _get_gate(db, qp.id, ApprovalGateType.PURCHASE_ORDER),
         "buy_plan_gate": _get_gate(db, qp.id, ApprovalGateType.BUY_PLAN),
         "prepayment_gate": _get_gate(db, qp.id, ApprovalGateType.PREPAYMENT),

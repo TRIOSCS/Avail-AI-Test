@@ -364,3 +364,70 @@ def test_submit_button_disabled_when_section_incomplete(db_session: Session) -> 
 
     assert r.status_code == 200
     assert "Sales Order # is required" in r.text
+
+
+# ── Inline Sales-gate approve/reject (Task 6) ─────────────────────────────────
+
+
+@pytest.fixture()
+def qp_with_open_sales_gate(db_session: Session):
+    """QP + approver with an open QP_SALES gate where the approver is a PENDING
+    recipient."""
+    approver = _make_user(db_session, can_approve_qp_sales=True)
+    qp = _make_qp(db_session, approver, fill_sales=True)
+    submit_section(db_session, qp.id, ApprovalGateType.QP_SALES, approver)
+    db_session.commit()
+    return qp, approver
+
+
+def test_qp_view_renders_inline_sales_approve_for_recipient(qp_with_open_sales_gate, db_session: Session) -> None:
+    """An eligible PENDING recipient sees inline Approve/Reject in the QP Sales
+    header."""
+    from app.database import get_db
+    from app.dependencies import require_user
+    from app.main import app
+
+    qp, approver = qp_with_open_sales_gate
+
+    def _db():
+        yield db_session
+
+    app.dependency_overrides[get_db] = _db
+    app.dependency_overrides[require_user] = lambda: approver
+    try:
+        client = TestClient(app)
+        r = client.get(f"/v2/qp/{qp.id}")
+    finally:
+        for dep in (get_db, require_user):
+            app.dependency_overrides.pop(dep, None)
+
+    assert r.status_code == 200
+    assert "/v2/approvals/requests/" in r.text
+    assert "Approve" in r.text
+    assert "Reject" in r.text
+
+
+def test_qp_view_no_inline_approve_for_non_recipient(qp_with_open_sales_gate, db_session: Session) -> None:
+    """A non-recipient does NOT see the inline Approve/Reject controls."""
+    from app.database import get_db
+    from app.dependencies import require_user
+    from app.main import app
+
+    qp, _approver = qp_with_open_sales_gate
+    other_user = _make_user(db_session)
+    db_session.flush()
+
+    def _db():
+        yield db_session
+
+    app.dependency_overrides[get_db] = _db
+    app.dependency_overrides[require_user] = lambda: other_user
+    try:
+        client = TestClient(app)
+        r = client.get(f"/v2/qp/{qp.id}")
+    finally:
+        for dep in (get_db, require_user):
+            app.dependency_overrides.pop(dep, None)
+
+    assert r.status_code == 200
+    assert "/v2/approvals/requests/" not in r.text
