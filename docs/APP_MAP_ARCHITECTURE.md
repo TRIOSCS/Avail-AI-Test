@@ -190,14 +190,31 @@ URL space and the `htmx-views` tag, and `main.py` mounts each one alongside
 
 - `app/routers/htmx/_shared.py` — shared module-level helpers/state used by both the
   monolith and the sub-routers: the Vite manifest loader (`_vite_manifest`/`_vite_assets`),
-  `_base_ctx()` (the common template context), and `_parse_date_safe()`. Single source of
-  truth — `htmx_views.py` re-imports these names so its remaining routes are unchanged.
+  `_base_ctx()` (the common template context), `_parse_date_safe()`, the `_DASH` em-dash
+  fallback, and the CRM list hx-target/push-url allowlists + `_sanitize_hx_params()` (used
+  by both the vendors and companies sub-routers). Single source of truth — sub-routers and
+  (where still used) `htmx_views.py` import these names so behavior is unchanged.
 - `app/routers/htmx/requisitions.py` — **first extracted domain**: the Requisition partials
   (`GET/POST /v2/partials/requisitions/*` list, unified create/import modal + AI parse/save,
   detail shell, requirement add, search-all, detail tabs) plus the AI customer
   lookup/quick-create (`POST /v2/partials/customers/lookup` + `/quick-create`) that the
   create modal uses. `htmx_views.py` re-imports `requisitions_list_partial` /
   `requisition_tab` from here because its offer/response routes re-render those partials.
+- `app/routers/htmx/vendors.py` — **CRM-cluster split (vendor slice)**: the vendor + vendor-
+  contact partials (`/v2/partials/vendors/*` + `/v2/partials/vendor-contacts`) — vendor list,
+  global vendor-contacts list, vendor CRUD, detail shell + tabs, vendor-contact CRUD, vendor
+  ownership (claim/release/badge), vendor custom fields, reviews/nudges, and the AI contact
+  finder (find/save/promote/delete). `htmx_views.py` re-imports `vendor_tab` (its vendor
+  activity add-note route re-renders the Activity tab).
+- `app/routers/htmx/companies.py` — **CRM-cluster split (company/customer + contact slice)**:
+  the company/customer + contact partials (`/v2/partials/customers/*` + `/v2/partials/companies/*`
+  redirects + `/v2/partials/contacts/*`) — customers (account) list, global customer-contacts
+  list, company CRUD, CSV import (companies + contacts), bulk actions, segment/contact tags,
+  the inline-edit field registry + account/contact inline editors, custom fields, company +
+  contact merge, contact move, sites & site-contacts CRUD, account collaborators, the company
+  detail shell + tabs, the contacts-tab/suggested-contacts loops, and contact notes/files.
+  `htmx_views.py` re-imports `company_tab` (its company activity add-note route re-renders the
+  Activity tab); tests import `_staleness_tier` from here.
 
 When extracting a domain: move the cohesive route block verbatim into a new
 `app/routers/htmx/<domain>.py` with its own `APIRouter(tags=["htmx-views"])`, pull any

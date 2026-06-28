@@ -158,7 +158,7 @@ class TestVendorActivityTypeSections:
         import asyncio
         from unittest.mock import MagicMock
 
-        from app.routers.htmx_views import vendor_tab
+        from app.routers.htmx.vendors import vendor_tab
 
         _vendor_log(db_session, test_vendor_card, test_user, ActivityType.CALL_LOGGED, "Rang the desk")
         _vendor_log(db_session, test_vendor_card, test_user, ActivityType.EMAIL_SENT, "Sent quote request")
