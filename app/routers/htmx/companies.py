@@ -126,6 +126,7 @@ async def companies_list_partial(
             include_users=is_manager_or_admin(user),
         )
     )
+    ctx.update(_saved_views_ctx(request, user, db, "customers"))
     return template_response("htmx/partials/customers/list.html", ctx)
 
 
@@ -207,6 +208,7 @@ async def customer_contacts_partial(
         )
     )
     ctx["contact_roles"] = CANONICAL_ROLES
+    ctx.update(_saved_views_ctx(request, user, db, "contacts"))
     return template_response("htmx/partials/customers/contacts_list.html", ctx)
 
 
@@ -361,6 +363,192 @@ async def customers_bulk_action(
             "clearSelection": True,
         }
     )
+    return resp
+
+
+# ── Saved views (filter presets) — static, MUST precede /{company_id} ─────
+# Per-user named snapshots of a list's filter query params (list_key='customers'
+# | 'contacts'). The control lives in both filter bars (list.html /
+# contacts_list.html); these routes refresh the #saved-views-<list_key> wrapper.
+
+# Map list_key → the filter <form> id its presets apply onto (used by the partial).
+_SAVED_VIEW_FORMS = {"customers": "cdm-filters", "contacts": "contacts-filters"}
+
+
+def _saved_views_ctx(request: Request, user: User, db: Session, list_key: str) -> dict:
+    """Context for the _saved_views.html partial (and the list shells that embed it)."""
+    from ...services.saved_views_service import list_saved_views
+
+    return {
+        "request": request,
+        "user": user,
+        "saved_views": list_saved_views(db, user, list_key),
+        "list_key": list_key,
+        "target_form": _SAVED_VIEW_FORMS.get(list_key, "cdm-filters"),
+    }
+
+
+@router.get("/v2/partials/customers/saved-views", response_class=HTMLResponse)
+async def saved_views_list(
+    request: Request,
+    list_key: str = "customers",
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render the saved-views control for *list_key* ('customers' | 'contacts')."""
+    from ...services.saved_views_service import valid_list_key
+
+    if not valid_list_key(list_key):
+        raise HTTPException(400, "Unknown list_key")
+    ctx = _saved_views_ctx(request, user, db, list_key)
+    return template_response("htmx/partials/customers/_saved_views.html", ctx)
+
+
+@router.post("/v2/partials/customers/saved-views", response_class=HTMLResponse)
+async def saved_views_create(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Save the submitted filter set as a named view (upsert on name).
+
+    Reads list_key + name + the hx-included filter form fields; the service whitelists
+    which keys are persisted.
+    """
+    from ...services.saved_views_service import create_saved_view, valid_list_key
+
+    form = await request.form()
+    list_key = (form.get("list_key") or "customers").strip()
+    if not valid_list_key(list_key):
+        raise HTTPException(400, "Unknown list_key")
+    name = form.get("name") or ""
+    raw_filters = {k: v for k, v in form.items() if k not in ("list_key", "name")}
+    try:
+        view = create_saved_view(db, user, list_key, name, raw_filters)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+    logger.info("Saved view {!r} ({}) created by {}", view.name, list_key, user.email)
+    ctx = _saved_views_ctx(request, user, db, list_key)
+    resp = template_response("htmx/partials/customers/_saved_views.html", ctx)
+    resp.headers["HX-Trigger"] = json.dumps({"showToast": {"message": f"Saved view '{view.name}'"}})
+    return resp
+
+
+@router.delete("/v2/partials/customers/saved-views/{view_id}", response_class=HTMLResponse)
+async def saved_views_delete(
+    request: Request,
+    view_id: int,
+    list_key: str = "customers",
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Delete one of the caller's saved views, then re-render the control."""
+    from ...services.saved_views_service import delete_saved_view, valid_list_key
+
+    if not valid_list_key(list_key):
+        raise HTTPException(400, "Unknown list_key")
+    deleted = delete_saved_view(db, user, view_id)
+    ctx = _saved_views_ctx(request, user, db, list_key)
+    resp = template_response("htmx/partials/customers/_saved_views.html", ctx)
+    if deleted:
+        resp.headers["HX-Trigger"] = json.dumps({"showToast": {"message": "View deleted"}})
+    return resp
+
+
+# ── Contacts bulk actions (static — global cross-company contacts list) ────
+# Mirrors the accounts bulk pattern (customers_bulk_action): per-contact auth via
+# can_manage_account on the owning company; manager/admin act on all. Selected
+# contacts the caller cannot manage are silently skipped (summary reports both).
+_VALID_BULK_CONTACT_ACTIONS = frozenset({"archive", "dnc"})
+
+
+def _form_int(form, key: str, default: int = 0) -> int:
+    raw = (form.get(key) or "").strip()
+    return int(raw) if raw.isdigit() else default
+
+
+def _contacts_list_response(request: Request, user: User, db: Session, form) -> HTMLResponse:
+    """Re-render the global contacts list from the hx-included filter fields."""
+    from ...services.crm_service import customer_contacts_list_ctx
+
+    ctx = _base_ctx(request, user, "crm")
+    ctx.update(
+        customer_contacts_list_ctx(
+            db,
+            user,
+            search=(form.get("search") or "").strip(),
+            company_id=_form_int(form, "company_id"),
+            contact_role=(form.get("contact_role") or "").strip(),
+            cadence_state=(form.get("cadence_state") or "").strip(),
+            limit=_form_int(form, "limit", 50),
+            offset=_form_int(form, "offset", 0),
+        )
+    )
+    ctx["contact_roles"] = CANONICAL_ROLES
+    ctx.update(_saved_views_ctx(request, user, db, "contacts"))
+    return template_response("htmx/partials/customers/contacts_list.html", ctx)
+
+
+@router.post("/v2/partials/contacts/bulk/{action}", response_class=HTMLResponse)
+async def contacts_bulk_action(
+    request: Request,
+    action: str,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Apply a bulk action (archive | dnc) to selected contacts.
+
+    Auth: per-contact via can_manage_account on the owning company (manager/admin
+    act on all). Non-manageable contacts are silently skipped; the summary reports
+    applied vs skipped. Re-renders the contacts list scoped to the included filters.
+    """
+    if action not in _VALID_BULK_CONTACT_ACTIONS:
+        raise HTTPException(400, f"Invalid action '{action}'. Allowed: {sorted(_VALID_BULK_CONTACT_ACTIONS)}")
+
+    form = await request.form()
+    ids_str = form.get("ids", "") or ""
+    ids = [int(x.strip()) for x in ids_str.split(",") if x.strip().isdigit()]
+    if len(ids) > _BULK_MAX_IDS:
+        raise HTTPException(400, f"Maximum {_BULK_MAX_IDS} contacts per bulk action")
+
+    applied = 0
+    skipped = 0
+    if ids:
+        rows = (
+            db.query(SiteContact, Company)
+            .join(CustomerSite, SiteContact.customer_site_id == CustomerSite.id)
+            .join(Company, CustomerSite.company_id == Company.id)
+            .filter(SiteContact.id.in_(ids))
+            .all()
+        )
+        for contact, company in rows:
+            if is_manager_or_admin(user) or can_manage_account(user, company, db):
+                if action == "archive":
+                    contact.is_archived = True
+                elif action == "dnc":
+                    contact.do_not_contact = True
+                applied += 1
+            else:
+                skipped += 1
+        if applied:
+            db.commit()
+            logger.info(
+                "Bulk contact {} applied to {} contacts ({} skipped) by {}",
+                action,
+                applied,
+                skipped,
+                user.email,
+            )
+
+    label = {"archive": "Archived", "dnc": "Marked Do-Not-Contact"}.get(action, action.title())
+    if skipped:
+        msg = f"{label} {applied} of {applied + skipped} ({skipped} skipped — not yours)"
+    else:
+        msg = f"{label} {applied} contact{'s' if applied != 1 else ''}"
+
+    resp = _contacts_list_response(request, user, db, form)
+    resp.headers["HX-Trigger"] = json.dumps({"showToast": {"message": msg}, "clearSelection": True})
     return resp
 
 

@@ -1,22 +1,26 @@
 """CRM CSV export endpoints.
 
-Exports companies and contacts visible to the requesting user.
-Visibility mirrors cdm_company_query: managers/admins see all; reps see own+site-owned.
+Exports the CURRENT FILTERED customers/contacts view visible to the requesting
+user. Visibility mirrors the list routes: managers/admins see all; reps see
+own + site-owned (effective_my_only). The same filter query params the list
+routes accept are honored here so "Export CSV" matches what is on screen.
 
 Routes:
   GET /v2/customers/export.csv         — StreamingResponse, companies CSV
   GET /v2/customers/contacts/export.csv — StreamingResponse, contacts CSV
 
 Called by: app/routers/crm/__init__.py (included into crm_router)
-Depends on: app/services/crm_service.cdm_company_query,
+Depends on: app/services/crm_service (cdm_company_query, customer_contacts_query,
+            cadence_state_of, CONTACT_CADENCE_DOTS),
             app/dependencies.is_manager_or_admin,
             app/models/crm.py (Company, CustomerSite, SiteContact)
 """
 
 import csv
 import io
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -24,8 +28,12 @@ from app.constants import AccessKey
 from app.database import get_db
 from app.dependencies import is_manager_or_admin, require_access
 from app.models import User
-from app.models.crm import Company, CustomerSite, SiteContact
-from app.services.crm_service import cdm_company_query
+from app.services.crm_service import (
+    CONTACT_CADENCE_DOTS,
+    cadence_state_of,
+    cdm_company_query,
+    customer_contacts_query,
+)
 
 _FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
 
@@ -40,22 +48,40 @@ def _safe_cell(v: object) -> str:
 router = APIRouter()
 
 
-def _companies_generator(db: Session, user: User):
-    """Yield CSV rows for the companies the user may see."""
+def _companies_generator(
+    db: Session,
+    user: User,
+    *,
+    search: str,
+    staleness: str,
+    account_type: str,
+    segment: int,
+    disposition: str,
+    has_open_reqs: bool,
+    my_only: bool,
+    sort: str,
+):
+    """Yield CSV rows for the filtered companies the user may see."""
     header = ["name", "domain", "phone", "industry", "account_type", "owner_name", "hq_city", "hq_state", "created_at"]
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(header)
     yield buf.getvalue()
 
+    # Reps are always scoped to their own visible set; managers can additionally
+    # opt into "My accounts" via the my_only filter.
+    effective_my_only = my_only or not is_manager_or_admin(user)
     q = cdm_company_query(
         db,
         user,
-        search="",
-        staleness="",
-        account_type="",
-        my_only=not is_manager_or_admin(user),
-        sort="name_asc",
+        search=search,
+        staleness=staleness,
+        account_type=account_type,
+        my_only=effective_my_only,
+        sort=sort or "name_asc",
+        segment=segment,
+        disposition=disposition or None,
+        has_open_reqs=has_open_reqs,
     )
     for company in q.yield_per(200):
         buf = io.StringIO()
@@ -76,43 +102,35 @@ def _companies_generator(db: Session, user: User):
         yield buf.getvalue()
 
 
-def _contacts_generator(db: Session, user: User):
-    """Yield CSV rows for the contacts reachable via the user's visible companies."""
+def _contacts_generator(
+    db: Session,
+    user: User,
+    *,
+    search: str,
+    company_id: int,
+    contact_role: str,
+    cadence_state: str,
+):
+    """Yield CSV rows for the filtered contacts reachable in the user's scope."""
     header = ["full_name", "title", "email", "phone", "contact_role", "company_name", "site_name", "is_primary"]
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(header)
     yield buf.getvalue()
 
-    company_q = cdm_company_query(
-        db,
-        user,
-        search="",
-        staleness="",
-        account_type="",
-        my_only=not is_manager_or_admin(user),
-        sort="name_asc",
-    )
-    company_ids = [c.id for c in company_q.with_entities(Company.id)]
+    # customer_contacts_query is role-scoped (reps see only manageable accounts)
+    # and applies search/company_id/contact_role. cadence_state is derived, so it
+    # is filtered in Python (mirrors customer_contacts_list_ctx).
+    base = customer_contacts_query(db, user, search=search, company_id=company_id, contact_role=contact_role)
+    if cadence_state in CONTACT_CADENCE_DOTS:
+        now = datetime.now(timezone.utc)
+        rows = [c for c in base.all() if cadence_state_of(c, now) == cadence_state]
+    else:
+        rows = base.yield_per(200)
 
-    rows = (
-        db.query(SiteContact, CustomerSite)
-        .join(CustomerSite, SiteContact.customer_site_id == CustomerSite.id)
-        .filter(
-            CustomerSite.company_id.in_(company_ids),
-            CustomerSite.is_active.is_(True),
-            SiteContact.is_active.is_(True),
-        )
-        .order_by(SiteContact.full_name)
-        .yield_per(200)
-    )
-    # Build a company-id → name lookup to avoid N+1
-    company_name_map: dict[int, str] = {}
-
-    for contact, site in rows:
-        if site.company_id not in company_name_map:
-            co = db.get(Company, site.company_id)
-            company_name_map[site.company_id] = co.name if co else ""
+    for contact in rows:
+        site = contact.customer_site
+        company = site.company if site else None
         buf = io.StringIO()
         writer = csv.writer(buf)
         writer.writerow(
@@ -122,8 +140,8 @@ def _contacts_generator(db: Session, user: User):
                 _safe_cell(contact.email),
                 _safe_cell(contact.phone),
                 _safe_cell(contact.contact_role),
-                _safe_cell(company_name_map.get(site.company_id, "")),
-                _safe_cell(site.site_name),
+                _safe_cell(company.name if company else ""),
+                _safe_cell(site.site_name if site else ""),
                 "true" if contact.is_primary else "false",
             ]
         )
@@ -132,12 +150,31 @@ def _contacts_generator(db: Session, user: User):
 
 @router.get("/v2/customers/export.csv")
 async def export_companies_csv(
+    search: str = "",
+    staleness: str = "",
+    account_type: str = "",
+    segment: int = Query(0, ge=0),
+    disposition: str = "",
+    has_open_reqs: bool = False,
+    my_only: bool = False,
+    sort: str = "name_asc",
     user: User = Depends(require_access(AccessKey.EXPORT_DATA)),
     db: Session = Depends(get_db),
 ):
-    """Export visible companies as a CSV download."""
+    """Export the current filtered companies view as a CSV download."""
     return StreamingResponse(
-        _companies_generator(db, user),
+        _companies_generator(
+            db,
+            user,
+            search=search,
+            staleness=staleness,
+            account_type=account_type,
+            segment=segment,
+            disposition=disposition,
+            has_open_reqs=has_open_reqs,
+            my_only=my_only,
+            sort=sort,
+        ),
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=customers.csv"},
     )
@@ -145,12 +182,23 @@ async def export_companies_csv(
 
 @router.get("/v2/customers/contacts/export.csv")
 async def export_contacts_csv(
+    search: str = "",
+    company_id: int = Query(0, ge=0),
+    contact_role: str = "",
+    cadence_state: str = "",
     user: User = Depends(require_access(AccessKey.EXPORT_DATA)),
     db: Session = Depends(get_db),
 ):
-    """Export contacts for visible companies as a CSV download."""
+    """Export the current filtered contacts view as a CSV download."""
     return StreamingResponse(
-        _contacts_generator(db, user),
+        _contacts_generator(
+            db,
+            user,
+            search=search,
+            company_id=company_id,
+            contact_role=contact_role,
+            cadence_state=cadence_state,
+        ),
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=contacts.csv"},
     )

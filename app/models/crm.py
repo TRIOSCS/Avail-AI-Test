@@ -487,3 +487,31 @@ class SiteContactAttachment(Base):
     uploaded_by = relationship("User", foreign_keys=[uploaded_by_id])
 
     __table_args__ = (Index("ix_site_contact_attachments_contact", "site_contact_id"),)
+
+
+class SavedView(Base):
+    """Per-user filter preset for a CRM list (customers or contacts).
+
+    A saved view captures the filter/sort state of a list as a JSON blob so the
+    user can re-apply it with one click. ``list_key`` scopes the preset to a
+    surface ('customers' | 'contacts'); ``filters`` is a whitelisted dict of the
+    list's filter query params. Unique per (user, list_key, name) so re-saving a
+    name overwrites in place (the service upserts).
+
+    Called by: app/services/saved_views_service.py,
+        app/routers/htmx/companies.py (saved-views routes)
+    Depends on: User
+    """
+
+    __tablename__ = "saved_views"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    list_key = Column(String(32), nullable=False)
+    name = Column(String(80), nullable=False)
+    filters = Column(JSON, nullable=False, default=dict)
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "list_key", "name", name="uq_saved_view_user_key_name"),
+        Index("ix_saved_views_user_key", "user_id", "list_key"),
+    )
