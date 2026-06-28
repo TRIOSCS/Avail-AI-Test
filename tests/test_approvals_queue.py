@@ -156,16 +156,17 @@ def test_tab_filter_returns_only_that_gate_type(db_session: Session) -> None:
     bp = _bp(db_session, me)
     qp = _qp(db_session, bp, me)
     pp = _prepay(db_session, bp, me)
-    _seed(
+    # sales_orders tab now surfaces the BUY_PLAN gate (SP-2 repoint).
+    so = _seed(
         db_session,
         ApprovalGateType.BUY_PLAN,
         subject_type=ApprovalSubjectType.BUY_PLAN,
         subject_id=bp.id,
         pending_recipients=(me,),
     )
-    so = _seed(
+    _seed(
         db_session,
-        ApprovalGateType.QP_SALES,
+        ApprovalGateType.PURCHASE_ORDER,
         subject_type=ApprovalSubjectType.QUALITY_PLAN,
         subject_id=qp.id,
         pending_recipients=(me,),
@@ -182,7 +183,7 @@ def test_tab_filter_returns_only_that_gate_type(db_session: Session) -> None:
 
     assert view.active_tab == "sales_orders"
     assert [r.id for r in view.pending_rows] == [so.id]
-    assert all(r.gate_type == "qp_sales" for r in view.pending_rows)
+    assert all(r.gate_type == "buy_plan" for r in view.pending_rows)
 
 
 def test_smart_default_picks_gate_with_most_awaiting_me(db_session: Session) -> None:
@@ -216,23 +217,22 @@ def test_smart_default_picks_gate_with_most_awaiting_me(db_session: Session) -> 
     assert view.active_tab == "purchase_orders"
 
 
-def test_smart_default_zero_falls_back_to_buy_plans(db_session: Session) -> None:
+def test_smart_default_zero_falls_back_to_sales_orders(db_session: Session) -> None:
     me = _user(db_session)
     other = _user(db_session)
     bp = _bp(db_session, other)
-    qp = _qp(db_session, bp, other)
     # Pending work exists, but routed to someone else — me is awaiting nothing.
     _seed(
         db_session,
-        ApprovalGateType.QP_SALES,
-        subject_type=ApprovalSubjectType.QUALITY_PLAN,
-        subject_id=qp.id,
+        ApprovalGateType.BUY_PLAN,
+        subject_type=ApprovalSubjectType.BUY_PLAN,
+        subject_id=bp.id,
         pending_recipients=(other,),
     )
 
     view = build_queue_view(db_session, me, None)
 
-    assert view.active_tab == "buy_plans"
+    assert view.active_tab == "sales_orders"
 
 
 def test_explicit_tab_overrides_smart_default(db_session: Session) -> None:
@@ -294,7 +294,7 @@ def test_pending_vs_resolved_split(db_session: Session) -> None:
         status=ApprovalRequestStatus.CANCELLED,
     )  # resolved_at None
 
-    view = build_queue_view(db_session, me, "buy_plans")
+    view = build_queue_view(db_session, me, "sales_orders")
 
     assert [r.id for r in view.pending_rows] == [pending.id]
     assert len(view.resolved_rows) == 3
@@ -326,7 +326,7 @@ def test_resolved_capped_at_10_and_coalesce_ordered(db_session: Session) -> None
         created_at=base + timedelta(days=100),
     )
 
-    view = build_queue_view(db_session, me, "buy_plans")
+    view = build_queue_view(db_session, me, "sales_orders")
 
     assert len(view.resolved_rows) == 10
     assert view.resolved_rows[0].id == cancelled.id  # coalesce(resolved_at, updated_at, created_at) newest
@@ -339,13 +339,13 @@ def test_pill_counts_are_org_wide(db_session: Session) -> None:
     me = _user(db_session)
     other = _user(db_session)
     bp = _bp(db_session, other)
-    qp = _qp(db_session, bp, other)
+    # sales_orders tab surfaces the BUY_PLAN gate (SP-2 repoint).
     for _ in range(3):
         _seed(
             db_session,
-            ApprovalGateType.QP_SALES,
-            subject_type=ApprovalSubjectType.QUALITY_PLAN,
-            subject_id=qp.id,
+            ApprovalGateType.BUY_PLAN,
+            subject_type=ApprovalSubjectType.BUY_PLAN,
+            subject_id=bp.id,
             pending_recipients=(other,),
         )
 
@@ -407,6 +407,7 @@ def test_subject_label_and_href_per_gate(db_session: Session) -> None:
     bp = _bp(db_session, me, customer="ACME Corp")
     qp = _qp(db_session, bp, me)
     pp = _prepay(db_session, bp, me, method=PaymentMethod.WIRE, vendor="Acme Components")
+    # sales_orders tab → BUY_PLAN gate → BuyPlan subject.
     _seed(
         db_session,
         ApprovalGateType.BUY_PLAN,
@@ -414,9 +415,10 @@ def test_subject_label_and_href_per_gate(db_session: Session) -> None:
         subject_id=bp.id,
         pending_recipients=(me,),
     )
+    # purchase_orders tab → PURCHASE_ORDER gate — keep QP-subject coverage here.
     _seed(
         db_session,
-        ApprovalGateType.QP_SALES,
+        ApprovalGateType.PURCHASE_ORDER,
         subject_type=ApprovalSubjectType.QUALITY_PLAN,
         subject_id=qp.id,
         pending_recipients=(me,),
@@ -429,14 +431,14 @@ def test_subject_label_and_href_per_gate(db_session: Session) -> None:
         pending_recipients=(me,),
     )
 
-    bp_row = build_queue_view(db_session, me, "buy_plans").pending_rows[0]
-    assert bp_row.subject_label == f"Plan #{bp.id}"
-    assert bp_row.subject_href == f"/v2/partials/buy-plans/{bp.id}"
-
     so_row = build_queue_view(db_session, me, "sales_orders").pending_rows[0]
-    assert so_row.subject_label == f"QP #{qp.id}"
-    assert so_row.subject_href == f"/v2/qp/{qp.id}"
-    assert so_row.parent_label and "ACME Corp" in so_row.parent_label
+    assert so_row.subject_label == f"Plan #{bp.id}"
+    assert so_row.subject_href == f"/v2/partials/buy-plans/{bp.id}"
+
+    po_row = build_queue_view(db_session, me, "purchase_orders").pending_rows[0]
+    assert po_row.subject_label == f"QP #{qp.id}"
+    assert po_row.subject_href == f"/v2/qp/{qp.id}"
+    assert po_row.parent_label and "ACME Corp" in po_row.parent_label
 
     pp_row = build_queue_view(db_session, me, "prepayments").pending_rows[0]
     assert "Acme Components" in pp_row.subject_label
@@ -449,6 +451,7 @@ def test_amount_source_per_gate(db_session: Session) -> None:
     bp = _bp(db_session, me)
     qp = _qp(db_session, bp, me)
     pp = _prepay(db_session, bp, me)
+    # sales_orders tab → BUY_PLAN gate.
     _seed(
         db_session,
         ApprovalGateType.BUY_PLAN,
@@ -457,9 +460,10 @@ def test_amount_source_per_gate(db_session: Session) -> None:
         amount=Decimal("4200.00"),
         pending_recipients=(me,),
     )
+    # purchase_orders tab → PURCHASE_ORDER gate (QP-subject coverage moved here).
     _seed(
         db_session,
-        ApprovalGateType.QP_SALES,
+        ApprovalGateType.PURCHASE_ORDER,
         subject_type=ApprovalSubjectType.QUALITY_PLAN,
         subject_id=qp.id,
         amount=None,
@@ -474,8 +478,8 @@ def test_amount_source_per_gate(db_session: Session) -> None:
         pending_recipients=(me,),
     )
 
-    assert build_queue_view(db_session, me, "buy_plans").pending_rows[0].amount == Decimal("4200.00")
-    assert build_queue_view(db_session, me, "sales_orders").pending_rows[0].amount is None
+    assert build_queue_view(db_session, me, "sales_orders").pending_rows[0].amount == Decimal("4200.00")
+    assert build_queue_view(db_session, me, "purchase_orders").pending_rows[0].amount is None
     assert build_queue_view(db_session, me, "prepayments").pending_rows[0].amount == Decimal("2500.00")
 
 
@@ -498,7 +502,7 @@ def test_invalid_tab_falls_back_to_smart_default(db_session: Session) -> None:
 
     view = build_queue_view(db_session, me, "garbage")
 
-    assert view.active_tab in ("buy_plans", "sales_orders", "purchase_orders", "prepayments")
+    assert view.active_tab in ("sales_orders", "purchase_orders", "prepayments")
     assert view.active_tab == "purchase_orders"  # equals the smart default (most awaiting me)
 
 
@@ -536,7 +540,7 @@ def test_pending_capped_oldest_first(db_session, monkeypatch) -> None:
         created_at=base + timedelta(days=2),
     )
 
-    view = build_queue_view(db_session, me, "buy_plans")
+    view = build_queue_view(db_session, me, "sales_orders")
 
     assert [r.id for r in view.pending_rows] == [oldest.id, second.id]
 
@@ -545,10 +549,9 @@ def test_routed_request_via_service_is_actionable(db_session: Session) -> None:
     """Integration: a request created through the real create_request/route path is can_act for its approver."""
     from app.services.approvals.service import create_request
 
-    me = _user(db_session, can_approve_qp_sales=True)
+    me = _user(db_session, can_approve_buy_plans=True)
     bp = _bp(db_session, me)
-    qp = _qp(db_session, bp, me)
-    create_request(db_session, gate_type=ApprovalGateType.QP_SALES, amount=None, subject=qp, requested_by=me, owner=me)
+    create_request(db_session, gate_type=ApprovalGateType.BUY_PLAN, amount=None, subject=bp, requested_by=me, owner=me)
     db_session.flush()
 
     view = build_queue_view(db_session, me, "sales_orders")

@@ -1,15 +1,15 @@
-"""queue.py — read-side view-model builder for the four-tab approvals queue.
+"""queue.py — read-side view-model builder for the three-tab approvals queue.
 
 Purpose: build_queue_view assembles everything the approvals lens body renders, with a
          constant number of queries (no N+1 regardless of row count):
-           - four tabs segmented by ApprovalRequest.gate_type
-             (buy_plans / sales_orders / purchase_orders / prepayments);
+           - three tabs segmented by ApprovalRequest.gate_type
+             (sales_orders / purchase_orders / prepayments);
            - a Pending section (REQUESTED, org-wide) + a Recently-resolved section
              (terminal statuses, capped, coalesce-ordered so cancelled rows with a NULL
              resolved_at still sort sanely);
            - per-tab pill counts that are ORG-WIDE pending totals;
            - a smart-default tab (the gate with the most items awaiting THIS user; tie or
-             zero → Buy Plans) used only when no explicit tab is requested;
+             zero → Sales Orders) used only when no explicit tab is requested;
            - per-row can_act (True only when the user is an eligible PENDING recipient —
              mirrors the engine's decide() gate), plus the routed-to approver names so an
              org-wide viewer sees who owns a request they cannot action.
@@ -45,20 +45,18 @@ from ...models.quality_plan import Prepayment, QualityPlan
 
 # tab key → gate_type. Order is the on-screen left-to-right order and the smart-default
 # tie-break order (leftmost wins).
-TAB_ORDER = ["buy_plans", "sales_orders", "purchase_orders", "prepayments"]
+TAB_ORDER = ["sales_orders", "purchase_orders", "prepayments"]
 TAB_GATE = {
-    "buy_plans": ApprovalGateType.BUY_PLAN,
-    "sales_orders": ApprovalGateType.QP_SALES,
+    "sales_orders": ApprovalGateType.BUY_PLAN,
     "purchase_orders": ApprovalGateType.PURCHASE_ORDER,
     "prepayments": ApprovalGateType.PREPAYMENT,
 }
 TAB_LABEL = {
-    "buy_plans": "Buy Plans",
     "sales_orders": "Sales Orders",
     "purchase_orders": "Purchase Orders",
     "prepayments": "Vendor Prepayments",
 }
-DEFAULT_TAB = "buy_plans"
+DEFAULT_TAB = "sales_orders"
 
 RESOLVED_STATUSES = (
     ApprovalRequestStatus.APPROVED,
@@ -184,7 +182,8 @@ def _awaiting_me_counts(db: Session, user: User) -> dict[str, int]:
 
 
 def _smart_default_tab(db: Session, user: User) -> str:
-    """Tab with the most items awaiting *user*; tie or zero → leftmost (Buy Plans)."""
+    """Tab with the most items awaiting *user*; tie or zero → leftmost (Sales
+    Orders)."""
     counts = _awaiting_me_counts(db, user)
     best_tab, best_count = DEFAULT_TAB, -1
     for tab_key in TAB_ORDER:

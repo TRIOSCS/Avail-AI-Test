@@ -54,15 +54,15 @@ class TestPinnedApprovalSection:
 
     def test_section_shown_for_approver(self, client, test_user, db_session):
         """Granting can_approve_buy_plans surfaces the pinned section with its pending
-        row inside the Buy Plans tab."""
+        row inside the Sales Orders tab (BUY_PLAN gate after SP-2 repoint)."""
         test_user.can_approve_buy_plans = True
         _seed_pending_buy_plan_approval(db_session, test_user)
         db_session.commit()
-        resp = client.get("/v2/partials/approvals/buy-plans")
+        resp = client.get("/v2/partials/approvals/sales-orders")
         assert resp.status_code == 200
         assert "Pending approvals" in resp.text
         # The inline approve/reject refetches the SAME stage-tab body into #bp-hub-body.
-        assert "/v2/partials/approvals/buy-plans" in resp.text
+        assert "/v2/partials/approvals/sales-orders" in resp.text
 
     def test_full_page_threads_lens_to_lazy_partial(self, nonadmin_client):
         """A full-page load of /v2/approvals?lens=buy_plans threads ?lens= into the lazy

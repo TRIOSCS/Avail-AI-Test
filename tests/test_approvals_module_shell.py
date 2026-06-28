@@ -185,21 +185,21 @@ def test_unknown_tab_404s(client: TestClient):
 
 
 def test_pending_section_absent_for_non_approver(client: TestClient, test_user: User, db_session: Session):
-    """The default buyer lacks can_approve_buy_plans → no pinned section on Buy
-    Plans."""
+    """The default buyer lacks can_approve_buy_plans → no pinned section on Sales Orders
+    (the BUY_PLAN gate tab after SP-2 repoint)."""
     _seed_pending_buy_plan_approval(db_session, test_user)
     db_session.commit()
-    r = client.get("/v2/partials/approvals/buy-plans")
+    r = client.get("/v2/partials/approvals/sales-orders")
     assert r.status_code == 200
     assert "Pending approvals" not in r.text
 
 
 def test_pending_section_present_for_approver(client: TestClient, test_user: User, db_session: Session):
-    """Granting the gate's approve flag surfaces the pinned section with the pending
-    row."""
+    """Granting the gate's approve flag surfaces the pinned section with the pending row
+    on the Sales Orders tab (BUY_PLAN gate after SP-2 repoint)."""
     test_user.can_approve_buy_plans = True
     _seed_pending_buy_plan_approval(db_session, test_user)
     db_session.commit()
-    r = client.get("/v2/partials/approvals/buy-plans")
+    r = client.get("/v2/partials/approvals/sales-orders")
     assert r.status_code == 200
     assert "Pending approvals" in r.text

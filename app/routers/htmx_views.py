@@ -11041,9 +11041,9 @@ _APPROVALS_TABS = ("sales_orders", "buy_plans", "purchase_orders", "prepayments"
 
 # Per-gate approve-right attribute that gates each stage tab's pinned "Pending approvals"
 # section. The keys match services.approvals.queue.TAB_GATE; the values are User columns.
+# buy_plans is intentionally absent — that tab is gate-less (board only, no pending section).
 _TAB_APPROVE_ATTR = {
-    "buy_plans": "can_approve_buy_plans",
-    "sales_orders": "can_approve_qp_sales",
+    "sales_orders": "can_approve_buy_plans",
     "purchase_orders": "can_approve_pos",
     "prepayments": "can_approve_prepayments",
 }
@@ -11125,11 +11125,12 @@ async def approvals_tab_partial(
     if lens == "supervise":
         return _render_supervise_body(request, user, db)
 
-    from ..services.approvals.queue import build_queue_view
-
     ctx = _base_ctx(request, user, "buy-plans")
-    ctx["view"] = build_queue_view(db, user, lens)
-    ctx["show_pending"] = bool(getattr(user, _TAB_APPROVE_ATTR[lens], False))
+    if lens in _TAB_APPROVE_ATTR:
+        from ..services.approvals.queue import build_queue_view
+
+        ctx["view"] = build_queue_view(db, user, lens)
+        ctx["show_pending"] = bool(getattr(user, _TAB_APPROVE_ATTR[lens], False))
 
     if lens == "buy_plans":
         from ..services.buyplan_hub import completed_archive, deals_board

@@ -253,7 +253,7 @@ class TestEngineNativeQueue:
         db_session.commit()
 
         for client in _build_client(db_session, user):
-            resp = client.get("/v2/partials/approvals/buy-plans")
+            resp = client.get("/v2/partials/approvals/sales-orders")
 
         assert resp.status_code == 200
         assert "Pending" in resp.text
