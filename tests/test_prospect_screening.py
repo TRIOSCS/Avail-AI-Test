@@ -36,11 +36,28 @@ def _prospect(db: Session, **kw) -> ProspectAccount:
 # ── Config tests ─────────────────────────────────────────────────────
 
 
-def test_sp3_config_defaults():
-    assert settings.ai_screen_enabled is False
-    assert settings.ai_screen_min_match == 40
-    assert settings.ai_screen_daily_cap == 200
-    assert settings.ai_screen_web_search_enabled is False
+def test_sp3_config_defaults(monkeypatch):
+    """AI-screen config CODE defaults, independent of any ambient prod ``.env``.
+
+    A fresh Settings is built with no env file and the relevant vars cleared so the
+    assertions verify the in-code defaults even when pytest runs from a checkout that
+    carries a prod ``.env`` (e.g. ``AI_SCREEN_ENABLED=true``).
+    """
+    from app.config import Settings
+
+    for key in (
+        "AI_SCREEN_ENABLED",
+        "AI_SCREEN_MIN_MATCH",
+        "AI_SCREEN_DAILY_CAP",
+        "AI_SCREEN_WEB_SEARCH_ENABLED",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    s = Settings(_env_file=None)
+    assert s.ai_screen_enabled is False
+    assert s.ai_screen_min_match == 40
+    assert s.ai_screen_daily_cap == 200
+    assert s.ai_screen_web_search_enabled is False
 
 
 # ── Screen service tests ─────────────────────────────────────────────
