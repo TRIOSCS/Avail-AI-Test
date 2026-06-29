@@ -2,7 +2,7 @@
 
 Covers model changes not addressed by prior migrations:
 - ondelete clauses on 20+ FK columns across buy_plan, config, enrichment,
-  error_report, intelligence, offers, performance, prospect_account, sourcing
+  intelligence, offers, performance, prospect_account, sourcing
 - server_default=func.now() on timestamp columns in excess, trouble_ticket,
   root_cause_group
 - Missing indexes on enrichment (started_by, reviewed_by, saved_by),
@@ -37,8 +37,21 @@ def _recreate_fk(
     ref_column: str,
     ondelete: str | None,
 ) -> None:
-    """Drop and recreate a FK constraint with the specified ondelete behavior."""
+    """Drop and recreate a FK constraint with the specified ondelete behavior.
+
+    Defensive: on a full ``downgrade base`` chain replay this migration runs
+    while later migrations' table drops are still in effect, so the target
+    table (or column) may not exist. Skip silently in that case instead of
+    raising ``NoSuchTableError`` — there is no FK to fix on a table that isn't
+    present. Combined with no longer hard-coding since-dropped tables (e.g.
+    ``error_reports``, dropped by a3f9c1d82e47), this keeps chain replays green.
+    """
     conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    if not inspector.has_table(table):
+        return
+    if column not in {col["name"] for col in inspector.get_columns(table)}:
+        return
     result = conn.execute(
         sa.text(
             """
@@ -105,8 +118,6 @@ def upgrade() -> None:
         ("enrichment_jobs", "started_by_id", "users", "id"),
         ("enrichment_queue", "reviewed_by_id", "users", "id"),
         ("prospect_contacts", "saved_by_id", "users", "id"),
-        # error_report.py
-        ("error_reports", "resolved_by_id", "users", "id"),
         # intelligence.py
         ("proactive_matches", "customer_site_id", "customer_sites", "id"),
         ("proactive_matches", "salesperson_id", "users", "id"),
@@ -139,8 +150,6 @@ def upgrade() -> None:
     CASCADE_FKS = [
         # config.py
         ("graph_subscriptions", "user_id", "users", "id"),
-        # error_report.py
-        ("error_reports", "user_id", "users", "id"),
         # performance.py (StockListHash)
         ("stock_list_hashes", "user_id", "users", "id"),
     ]
@@ -226,7 +235,6 @@ def downgrade() -> None:
     # -----------------------------------------------------------------------
     CASCADE_FKS = [
         ("stock_list_hashes", "user_id", "users", "id"),
-        ("error_reports", "user_id", "users", "id"),
         ("graph_subscriptions", "user_id", "users", "id"),
     ]
 
@@ -253,7 +261,6 @@ def downgrade() -> None:
         ("proactive_offers", "converted_requisition_id", "requisitions", "id"),
         ("proactive_matches", "salesperson_id", "users", "id"),
         ("proactive_matches", "customer_site_id", "customer_sites", "id"),
-        ("error_reports", "resolved_by_id", "users", "id"),
         ("prospect_contacts", "saved_by_id", "users", "id"),
         ("enrichment_queue", "reviewed_by_id", "users", "id"),
         ("enrichment_jobs", "started_by_id", "users", "id"),

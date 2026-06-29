@@ -126,9 +126,13 @@ fi
 # unset, the backup stays plaintext (restore.sh transparently handles both).
 if [ -n "$GPG_PASSPHRASE" ]; then
     log "Encrypting backup (gpg symmetric, AES256)..."
-    gpg --batch --yes --quiet \
+    # Passphrase via stdin (--passphrase-fd 0), never the command line, so it
+    # never appears in `ps`/argv. --pinentry-mode loopback is required for a
+    # non-interactive fd passphrase under --batch (gpg 2.1+). The plaintext .gz
+    # is read from the file argument, so stdin carries only the passphrase.
+    printf '%s' "$GPG_PASSPHRASE" | gpg --batch --yes --quiet \
+        --pinentry-mode loopback --passphrase-fd 0 \
         --cipher-algo AES256 \
-        --passphrase "$GPG_PASSPHRASE" \
         --symmetric \
         --output "${BACKUP_FILE_GZ}.gpg" \
         "$BACKUP_FILE_GZ" \

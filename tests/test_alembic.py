@@ -11,8 +11,6 @@ import importlib.util
 import inspect
 from pathlib import Path
 
-import pytest
-
 MIGRATION_DIR = Path(__file__).parent.parent / "alembic" / "versions"
 ENV_PY = Path(__file__).parent.parent / "alembic" / "env.py"
 
@@ -170,29 +168,18 @@ def test_no_create_all_in_main():
     assert "create_all" not in content, "Remove Base.metadata.create_all — use Alembic"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Known break (post-PR-108 follow-up): d2bea118f720 _recreate_fk iterates a "
-        "hard-coded FK list that includes the 'error_reports' table, but "
-        "a3f9c1d82e47_drop_dead_tables drops 'error_reports' earlier in the chain. "
-        "On a `downgrade base` chain replay, d2bea118f720 runs before a3f9c1d82e47's "
-        "downgrade restores the table, so reflection inside _recreate_fk raises "
-        "NoSuchTableError: error_reports. Fix is a has_table guard before each "
-        "recreate (or de-hardcoding the FK list). This static-analysis test pins "
-        "the fragile pattern so the next refactor can't silently fix-or-paper-over."
-    ),
-)
 def test_d2bea_recreate_fk_does_not_hardcode_dropped_tables():
-    """Pin the known `error_reports` downgrade-chain break.
+    """Regression: d2bea118f720 must not hard-code a since-dropped table.
 
-    Static check: the d2bea118f720 migration source contains the literal string
-    'error_reports' inside its hard-coded FK lists, AND a3f9c1d82e47 drops that
-    same table. Until the migration is reworked to guard each `_recreate_fk`
-    call with `has_table()` (or stops hard-coding now-dropped tables), this
-    pattern will break `alembic downgrade base` chain replays. xfail(strict)
-    means the day someone fixes the underlying bug, this test must be
-    deleted/updated — silently passing here would defeat the pin.
+    Fixed in the hardening(devops) PR: d2bea118f720 used to iterate a hard-coded
+    FK list that included the 'error_reports' table, but a3f9c1d82e47 drops that
+    table earlier in the chain — so a `downgrade base` chain replay ran
+    d2bea118f720 while 'error_reports' didn't exist and reflection inside
+    `_recreate_fk` raised NoSuchTableError. The fix removed the 'error_reports'
+    entries from d2bea's FK lists AND made `_recreate_fk` guard each call with
+    `inspect(conn).has_table()`. This static check keeps the bad pattern from
+    reappearing: it fails if d2bea ever re-hard-codes a table that a3f9c1d82e47
+    drops.
     """
     versions = MIGRATION_DIR
     d2bea_src = (versions / "d2bea118f720_fix_remaining_ondelete_server_default_.py").read_text()

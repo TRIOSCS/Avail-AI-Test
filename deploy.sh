@@ -36,11 +36,15 @@ if [ "$NO_COMMIT" = false ]; then
     if git diff --quiet && git diff --cached --quiet; then
         echo "No changes to commit — skipping commit step"
     else
-        git add -A
-        # Last line of defence before `git add -A` lands something in history.
-        # .gitignore should already exclude these, but the moment it misses a
-        # new untracked file (a secret, an SSH key, a DB dump) `git add -A`
-        # stages it. Abort the deploy rather than commit it.
+        # Stage only modifications/deletions to already-TRACKED files (`-u`),
+        # never new untracked files. The old `git add -A` swept in everything, so
+        # the moment .gitignore missed a new untracked secret / SSH key / DB dump
+        # it landed in history (CRIT-DEVOPS-2). `-u` removes that entire class at
+        # the source: a brand-new file is committed only if the operator
+        # deliberately `git add`ed it first — already-staged paths are preserved.
+        git add -u
+        # Defence in depth for anything deliberately pre-staged: refuse to commit
+        # files matching known-sensitive patterns even when explicitly added.
         DANGER=$(git diff --cached --name-only | grep -iE \
             '(^|/)\.env($|\.)|\.(pem|key|p12|pfx|sql|sqlite3?|dump)$|(^|/)(credentials|service-account|id_rsa|id_ed25519)[^/]*$' \
             || true)
