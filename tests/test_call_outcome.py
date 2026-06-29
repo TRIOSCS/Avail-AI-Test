@@ -21,11 +21,11 @@ from app.models import ActivityLog
 
 @pytest.fixture(autouse=True)
 def _clear_rate_limit():
-    from app.routers.activity import _call_log
+    from app.rate_limit import reset_rate_limit_state
 
-    _call_log.clear()
+    reset_rate_limit_state()
     yield
-    _call_log.clear()
+    reset_rate_limit_state()
 
 
 @pytest.fixture

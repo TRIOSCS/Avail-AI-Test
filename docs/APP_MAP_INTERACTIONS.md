@@ -2106,7 +2106,12 @@ Delegated click listener in app/static/htmx_app.js
 activity.py router -> log_outreach_initiated(db, user_id=..., channel=...,
     |                                          contact_value=..., ...)
     |   - rate limit: per-user "outreach" bucket (30/min), separate from the
-    |     click-to-call bucket (10/min) so channels never starve each other
+    |     click-to-call bucket (10/min) so channels never starve each other.
+    |     Enforced by app.rate_limit.check_rate_limit — an atomic fixed-window
+    |     INCR counter on the shared Redis substrate (app.cache.intel_cache), so
+    |     the limit holds across worker processes/restarts; degrades to a
+    |     per-process in-memory counter when Redis is down (same fallback posture
+    |     as the slowapi limiter). call-outcome stamps use a third bucket.
     |   - nonexistent OR mismatched company/site/contact ids (site not under
     |     the company, contact not under the site) are nulled out with a
     |     warning (stale DOM ids must not FK-crash the insert or bump an
