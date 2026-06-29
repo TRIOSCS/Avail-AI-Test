@@ -29,6 +29,7 @@ from ..constants import (
 from ..models import Company, User
 from ..models.excess import ExcessLineItem, ExcessList, ExcessOffer, ExcessOfferLine
 from ..utils.normalization import normalize_mpn_key
+from ..utils.sql_helpers import escape_like
 from .buyer_affinity_service import recompute_buyer_score_on_win
 
 # ---------------------------------------------------------------------------
@@ -244,7 +245,7 @@ def list_excess_lists(
     query = db.query(ExcessList)
 
     if q:
-        query = query.filter(ExcessList.title.ilike(f"%{q}%"))
+        query = query.filter(ExcessList.title.ilike(f"%{escape_like(q)}%", escape="\\"))
     if status:
         query = query.filter(ExcessList.status == status)
 

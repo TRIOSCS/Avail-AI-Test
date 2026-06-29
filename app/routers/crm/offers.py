@@ -36,6 +36,7 @@ from ...services.status_machine import require_valid_transition
 from ...services.vendor_unavailability import maybe_release_on_offer
 from ...utils.async_helpers import safe_background_task
 from ...utils.normalization import normalize_mpn_key
+from ...utils.sql_helpers import escape_like
 from ...vendor_utils import normalize_vendor_name
 from ._helpers import _preload_last_quoted_prices, record_changes
 
@@ -337,7 +338,12 @@ async def create_offer(
 
         prefix = norm_name.split()[0] if norm_name else ""
         if prefix and len(prefix) >= 2:
-            candidates = db.query(VendorCard).filter(VendorCard.normalized_name.ilike(f"{prefix}%")).limit(20).all()
+            candidates = (
+                db.query(VendorCard)
+                .filter(VendorCard.normalized_name.ilike(f"{escape_like(prefix)}%", escape="\\"))
+                .limit(20)
+                .all()
+            )
             if candidates:
                 matches = fuzzy_match_vendor(
                     payload.vendor_name,

@@ -43,7 +43,9 @@ class SearchBuilder:
         if not self.q:
             return sa_true()
         pattern = f"{self.safe}%" if prefix else f"%{self.safe}%"
-        return or_(*[col.ilike(pattern) for col in columns])
+        # escape="\\" so escape_like()'s \%, \_, \\ are matched literally
+        # (PostgreSQL defaults LIKE's escape to \, but SQLite/tests do not).
+        return or_(*[col.ilike(pattern, escape="\\") for col in columns])
 
     def fts_or_fallback(self, query, model, fallback_columns, *, min_len=3):
         """Try PostgreSQL full-text search, fall back to ILIKE.

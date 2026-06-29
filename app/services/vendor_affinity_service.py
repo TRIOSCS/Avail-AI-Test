@@ -185,7 +185,7 @@ def find_affinity_vendors_l3(mpn: str, manufacturer: str | None, db: Session) ->
             func.count(func.distinct(Sighting.normalized_mpn)).label("mpn_count"),
         )
         .join(MaterialCard, Sighting.material_card_id == MaterialCard.id)
-        .filter(MaterialCard.category.ilike(f"%{escape_like(category)}%"))
+        .filter(MaterialCard.category.ilike(f"%{escape_like(category)}%", escape="\\"))
         .group_by(Sighting.vendor_name_normalized, Sighting.vendor_name)
         .order_by(func.count(func.distinct(Sighting.normalized_mpn)).desc())
         .limit(20)

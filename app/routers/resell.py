@@ -53,6 +53,7 @@ from ..services import (
     task_service,
 )
 from ..template_env import template_response
+from ..utils.sql_helpers import escape_like
 
 router = APIRouter(tags=["resell"])
 
@@ -313,7 +314,7 @@ async def resell_lists(
     if stage:
         query = query.filter(ExcessList.status == stage)
     if q:
-        query = query.filter(ExcessList.title.ilike(f"%{q}%"))
+        query = query.filter(ExcessList.title.ilike(f"%{escape_like(q)}%", escape="\\"))
 
     lists = query.order_by(ExcessList.updated_at.desc().nullslast(), ExcessList.id.desc()).all()
     cards = [_list_card(db, el, can_see_customer=can_see_customer) for el in lists]

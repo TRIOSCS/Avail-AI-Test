@@ -353,7 +353,7 @@ async def autocomplete_names(
     # Primary: match on normalized_name
     vendors_by_name = (
         db.query(VendorCard)
-        .filter(VendorCard.normalized_name.ilike(f"%{sb.safe}%"))
+        .filter(VendorCard.normalized_name.ilike(f"%{sb.safe}%", escape="\\"))
         .order_by(VendorCard.sighting_count.desc().nullslast(), VendorCard.display_name)
         .limit(limit)
         .all()
@@ -364,7 +364,7 @@ async def autocomplete_names(
     vendors_by_alt = (
         db.query(VendorCard)
         .filter(
-            cast(VendorCard.alternate_names, String).ilike(f"%{sb.safe}%"),
+            cast(VendorCard.alternate_names, String).ilike(f"%{sb.safe}%", escape="\\"),
             VendorCard.id.notin_(seen_ids) if seen_ids else True,
         )
         .order_by(VendorCard.sighting_count.desc().nullslast(), VendorCard.display_name)
@@ -374,7 +374,7 @@ async def autocomplete_names(
 
     companies = (
         db.query(Company.id, Company.name)
-        .filter(Company.is_active, Company.name.ilike(f"%{sb.safe}%"))
+        .filter(Company.is_active, Company.name.ilike(f"%{sb.safe}%", escape="\\"))
         .order_by(Company.name)
         .limit(limit)
         .all()

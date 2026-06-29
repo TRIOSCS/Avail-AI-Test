@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.models.strategic import StrategicVendor
 from app.models.vendors import VendorCard
+from app.utils.sql_helpers import escape_like
 
 MAX_STRATEGIC_VENDORS = 10
 TTL_DAYS = 39
@@ -281,7 +282,7 @@ def get_open_pool(
     q = db.query(VendorCard).filter(VendorCard.id.notin_(claimed_sub))
 
     if search:
-        q = q.filter(VendorCard.display_name.ilike(f"%{search}%"))
+        q = q.filter(VendorCard.display_name.ilike(f"%{escape_like(search)}%", escape="\\"))
 
     total = q.count()
     vendors = q.order_by(VendorCard.display_name).offset(offset).limit(limit).all()

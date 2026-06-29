@@ -52,6 +52,7 @@ from ..services.sighting_ingest import sighting_from_row
 from ..services.vendor_unavailability import apply_to_fresh_sightings
 from ..template_env import page_response, template_response, templates
 from ..utils.search_builder import SearchBuilder
+from ..utils.sql_helpers import escape_like
 from ._lookup_helpers import get_requisition_or_404
 from .auth import _password_login_enabled
 from .htmx._shared import _base_ctx, _safe_int, _vite_assets
@@ -1210,7 +1211,7 @@ async def search_lead_detail(
     if vendor_name:
         lead_row = (
             db.query(SourcingLead)
-            .filter(SourcingLead.vendor_name.ilike(vendor_name))
+            .filter(SourcingLead.vendor_name.ilike(escape_like(vendor_name), escape="\\"))
             .order_by(SourcingLead.created_at.desc())
             .first()
         )

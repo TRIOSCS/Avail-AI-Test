@@ -70,7 +70,7 @@ Legend: ✅ FIXED · ◐ PARTIAL · ⚠️ STILL OPEN
 |----|--------|------|
 | HIGH-SEC-1 | ⚠️ STILL OPEN | `{{ title_attr\|safe }}` still at `_macros.html:158`. |
 | HIGH-SEC-2 | ⚠️ STILL OPEN | `thread_viewer.html:59` now uses `\|sanitize_html\|safe`, but `class` is still in the wildcard allowlist (`template_env.py:140`); `nh3` still `>=` pinned. |
-| HIGH-SEC-3 | ⚠️ STILL OPEN | Unescaped ILIKE wildcards still at `htmx_views.py:3330, 6924` (`f"%{q.strip()}%"`). |
+| HIGH-SEC-3 | ✅ RESOLVED | All user-input ILIKE/LIKE search sites now route through `escape_like()` + `.ilike(..., escape="\\")`; shared `SearchBuilder.ilike_filter` carries the escape. Regression test `tests/test_ilike_wildcard_escaping.py`. (Domain-field `%@{domain}` analytics deliberately excluded — structured column, not user search.) |
 | HIGH-SEC-4 | ⚠️ STILL OPEN | Graph webhook validation echo — carried over from 2026-05-04 review, not individually re-verified; conservatively open. |
 | HIGH-BE-1 | ⚠️ STILL OPEN | `htmx_views.py` is 9,918 lines (was 10,024) — not split. |
 | HIGH-BE-2 | ⚠️ STILL OPEN | God files persist (`htmx_views.py` 9918, `search_service.py` 2348, `email_service.py` 1277). |
@@ -146,9 +146,17 @@ The detailed bodies below are retained verbatim from the 2026-05-04 review for e
   `app/templates/htmx/partials/emails/thread_viewer.html:59` (now `|sanitize_html|safe`), allowlist in `app/template_env.py:107–147` — `class` is allowed on every element (`template_env.py:140`); URL schemes need to be re-verified per `nh3` version. Vendor email is fully attacker-controlled.
   *Fix:* remove `class` from the wildcard allowlist; pin `nh3`; consider sandboxed `<iframe srcdoc>` for email bodies.
 
-- **HIGH-SEC-3 — Unescaped wildcards in ILIKE patterns.** ⚠️ STILL OPEN
-  `app/routers/htmx_views.py:3330, 6924` — `term = f"%{q.strip()}%"` for brand/commodity/manufacturer search. Not SQLi (parameterized) but `%`/`_` from the user forces full-table scans.
-  *Fix:* call `escape_like()` and pass `escape='!'` to `ilike()`, or use `SearchBuilder.safe`.
+- **HIGH-SEC-3 — Unescaped wildcards in ILIKE patterns.** ✅ RESOLVED
+  The originally-flagged `htmx_views.py` sites were split into `app/routers/htmx/`
+  modules and services. Every user-controlled ILIKE/LIKE search/filter site now runs
+  its term through `escape_like()` and passes `escape="\\"` so `%`/`_`/`\` match
+  literally (the shared `SearchBuilder.ilike_filter` carries the escape, fixing all its
+  callers). Not SQLi (always parameterized) — the harm was full-table scans / unintended
+  wildcard matches. Regression: `tests/test_ilike_wildcard_escaping.py`.
+  *Deliberately excluded:* `%@{domain}` email-domain analytics
+  (`engagement_scorer`/`response_analytics`/`vendor_scorecard`/`prospect_warm_intros`)
+  read a structured `.domain` column, not a free-text search box; constant LIKE patterns
+  (`"%@availai.local"`, sample-data tags); and the in-flight files under concurrent work.
 
 - **HIGH-SEC-4 — Graph webhook `validationToken` echo is unauthenticated.** ⚠️ STILL OPEN (not individually re-verified)
   `app/routers/v13_features/activity.py:49–51, 88–90` — Required by Graph protocol; mitigate at edge.

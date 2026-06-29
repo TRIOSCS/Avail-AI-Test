@@ -432,8 +432,8 @@ def _apply_card_filters(
             query = query.filter(
                 or_(
                     MaterialCard.search_vector.op("@@")(ts_query),
-                    MaterialCard.display_mpn.ilike(f"%{sb.safe}%"),
-                    MaterialCard.normalized_mpn.ilike(f"%{sb.safe}%"),
+                    MaterialCard.display_mpn.ilike(f"%{sb.safe}%", escape="\\"),
+                    MaterialCard.normalized_mpn.ilike(f"%{sb.safe}%", escape="\\"),
                 )
             )
         else:

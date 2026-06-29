@@ -23,6 +23,7 @@ from ..models import (
     VendorCard,
     VendorContact,
 )
+from ..utils.sql_helpers import escape_like
 from ..vendor_utils import normalize_vendor_name
 
 
@@ -73,15 +74,16 @@ async def find_vendors_for_parts(
 
 def _query_db_for_part(mpn_upper: str, db: Session) -> list[dict]:
     """Query all internal sources for vendors of a specific MPN."""
-    like_pattern = f"%{mpn_upper}%"
+    safe_mpn = escape_like(mpn_upper)
+    like_pattern = f"%{safe_mpn}%"
     vendors: dict[str, dict] = {}  # normalized_name -> vendor info
 
     # 1. Sightings — vendors who listed this part on APIs
     sightings = (
         db.query(Sighting)
         .filter(
-            sqlfunc.upper(Sighting.normalized_mpn).like(like_pattern)
-            | sqlfunc.upper(sqlfunc.coalesce(Sighting.mpn_matched, "")).like(like_pattern)
+            sqlfunc.upper(Sighting.normalized_mpn).like(like_pattern, escape="\\")
+            | sqlfunc.upper(sqlfunc.coalesce(Sighting.mpn_matched, "")).like(like_pattern, escape="\\")
         )
         .order_by(Sighting.created_at.desc())
         .limit(200)
@@ -132,7 +134,7 @@ def _query_db_for_part(mpn_upper: str, db: Session) -> list[dict]:
         history_rows = (
             db.query(MaterialVendorHistory)
             .join(MaterialCard)
-            .filter(sqlfunc.upper(MaterialCard.mpn).like(like_pattern))
+            .filter(sqlfunc.upper(MaterialCard.mpn).like(like_pattern, escape="\\"))
             .order_by(MaterialVendorHistory.times_seen.desc())
             .limit(50)
             .all()
@@ -167,7 +169,7 @@ def _query_db_for_part(mpn_upper: str, db: Session) -> list[dict]:
             .filter(
                 sqlfunc.cast(
                     EmailIntelligence.parts_detected, db.bind.dialect.name == "postgresql" and "TEXT" or "VARCHAR"
-                ).ilike(f"%{mpn_upper}%")
+                ).ilike(f"%{safe_mpn}%", escape="\\")
             )
             .order_by(EmailIntelligence.received_at.desc())
             .limit(30)
@@ -180,7 +182,7 @@ def _query_db_for_part(mpn_upper: str, db: Session) -> list[dict]:
 
             ei_rows = (
                 db.query(EmailIntelligence)
-                .filter(cast(EmailIntelligence.parts_detected, String).ilike(f"%{mpn_upper}%"))
+                .filter(cast(EmailIntelligence.parts_detected, String).ilike(f"%{safe_mpn}%", escape="\\"))
                 .order_by(EmailIntelligence.received_at.desc())
                 .limit(30)
                 .all()

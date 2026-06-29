@@ -441,19 +441,19 @@ def list_requisitions(
         mpn_match = exists(
             select(Requirement.id).where(
                 Requirement.requisition_id == Requisition.id,
-                Requirement.primary_mpn.ilike(f"%{safe_q}%"),
+                Requirement.primary_mpn.ilike(f"%{safe_q}%", escape="\\"),
             )
         )
         subs_match = exists(
             select(Requirement.id).where(
                 Requirement.requisition_id == Requisition.id,
-                Requirement.substitutes_text.ilike(f"%{safe_q}%"),
+                Requirement.substitutes_text.ilike(f"%{safe_q}%", escape="\\"),
             )
         )
         query = query.filter(
             or_(
-                Requisition.name.ilike(f"%{safe_q}%"),
-                Requisition.customer_name.ilike(f"%{safe_q}%"),
+                Requisition.name.ilike(f"%{safe_q}%", escape="\\"),
+                Requisition.customer_name.ilike(f"%{safe_q}%", escape="\\"),
                 mpn_match,
                 subs_match,
             )

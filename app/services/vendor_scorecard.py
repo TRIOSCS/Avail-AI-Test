@@ -357,7 +357,7 @@ def get_vendor_scorecard_list(
     )
 
     if search:
-        q = q.filter(VendorCard.display_name.ilike(f"%{escape_like(search)}%"))
+        q = q.filter(VendorCard.display_name.ilike(f"%{escape_like(search)}%", escape="\\"))
 
     # Count before pagination
     total = q.count()
