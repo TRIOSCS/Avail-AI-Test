@@ -2508,3 +2508,216 @@ class TestConditionAwareRecord:
         assert len(records) == 1
         assert records[0].condition is None
         assert records[0].qty_at_mark == 100  # max across new(100) + refurb(5)
+
+
+# ── Task 5: condition-aware apply (multimap) + release + RFQ exclusion ───────
+
+
+class TestApplyConditionGate:
+    """apply_to_fresh_sightings condition gate: a record suppresses only sightings
+    whose canonical condition matches (or the record has NULL = all-conditions)."""
+
+    def test_new_record_does_not_stamp_refurb_sighting(self, db_session: Session):
+        """A 'new'-condition record must NOT stamp a 'refurb' sighting."""
+        requirement = _make_requirement(db_session)
+        _make_record(db_session, condition="new")
+        row = _make_sighting(db_session, requirement, "Acme Components", mpn_matched="ST3300657SS", condition="refurb")
+
+        count = apply_to_fresh_sightings(db_session, requirement, [row])
+
+        assert count == 0
+        assert bool(row.is_unavailable) is False
+
+    def test_new_record_stamps_new_sighting(self, db_session: Session):
+        """A 'new'-condition record stamps a 'new' sighting."""
+        requirement = _make_requirement(db_session)
+        _make_record(db_session, condition="new")
+        row = _make_sighting(db_session, requirement, "Acme Components", mpn_matched="ST3300657SS", condition="new")
+
+        count = apply_to_fresh_sightings(db_session, requirement, [row])
+
+        assert count == 1
+        assert row.is_unavailable is True
+
+    def test_null_record_stamps_all_condition_sightings(self, db_session: Session):
+        """A NULL (all-conditions) record stamps sightings of any condition, including
+        refurb, new, and None."""
+        requirement = _make_requirement(db_session)
+        _make_record(db_session, condition=None)
+        row_new = _make_sighting(db_session, requirement, "Acme Components", mpn_matched="ST3300657SS", condition="new")
+        row_refurb = _make_sighting(
+            db_session, requirement, "Acme Components", mpn_matched="ST3300657SS", condition="refurb"
+        )
+        row_none = _make_sighting(db_session, requirement, "Acme Components", mpn_matched="ST3300657SS", condition=None)
+
+        count = apply_to_fresh_sightings(db_session, requirement, [row_new, row_refurb, row_none])
+
+        assert count == 3
+        assert row_new.is_unavailable is True
+        assert row_refurb.is_unavailable is True
+        assert row_none.is_unavailable is True
+
+    def test_new_record_condition_uses_normalized_sighting_condition(self, db_session: Session):
+        """normalize_condition is applied to s.condition before the gate — a raw
+        'Refurb' sighting should NOT be stamped by a 'new' record."""
+        requirement = _make_requirement(db_session)
+        _make_record(db_session, condition="new")
+        # Simulate a sighting whose .condition holds a raw display string
+        # (DB stores canonical but test confirms the normalize_condition call)
+        row = _make_sighting(db_session, requirement, "Acme Components", mpn_matched="ST3300657SS", condition="refurb")
+
+        count = apply_to_fresh_sightings(db_session, requirement, [row])
+
+        assert count == 0
+        assert bool(row.is_unavailable) is False
+
+
+class TestApplyMultimap:
+    """apply_to_fresh_sightings multimap: both NULL and condition-specific records
+    for the same (vendor, key) must be evaluated — not just whichever the dict
+    comprehension happened to keep last."""
+
+    def test_null_active_new_released_stamps_refurb(self, db_session: Session):
+        """(vendor, key) with an ACTIVE NULL record and a RELEASED 'new' record.
+
+        The old dict-comprehension keeps one record; if it keeps the released 'new'
+        record the function incorrectly returns 0. The multimap fix evaluates both: the
+        NULL (active) record fires → stamps the refurb sighting.
+        """
+        requirement = _make_requirement(db_session)
+        # NULL record: active
+        _make_record(db_session, condition=None)
+        # 'new' record: released — must not block the NULL from stamping
+        _make_record(
+            db_session,
+            condition="new",
+            released_at=datetime.now(timezone.utc),
+            release_trigger=ReleaseTrigger.OFFER_RECEIVED,
+        )
+
+        row = _make_sighting(db_session, requirement, "Acme Components", mpn_matched="ST3300657SS", condition="refurb")
+
+        count = apply_to_fresh_sightings(db_session, requirement, [row])
+
+        assert count == 1
+        assert row.is_unavailable is True
+
+    def test_refurb_sighting_stamped_by_null_record_never_by_new_alone(self, db_session: Session):
+        """With both NULL (active) and 'new' (active) records, a REFURB sighting is
+        stamped because the NULL matches; removing the NULL makes it 0."""
+        requirement = _make_requirement(db_session)
+        _make_record(db_session, condition=None)  # active, matches all
+        _make_record(db_session, condition="new")  # active, matches only 'new'
+
+        row = _make_sighting(db_session, requirement, "Acme Components", mpn_matched="ST3300657SS", condition="refurb")
+
+        count = apply_to_fresh_sightings(db_session, requirement, [row])
+
+        # NULL record → should stamp the refurb sighting
+        assert count == 1
+        assert row.is_unavailable is True
+
+
+class TestReleaseConditionAware:
+    """release_on_offer condition-aware filtering: a known offer_condition releases
+    matching + NULL records but leaves other-condition records intact; unknown
+    (None) offer_condition releases all active non-different_part records."""
+
+    def test_known_condition_releases_matching_and_null_leaves_other(self, db_session: Session, test_user: User):
+        """offer_condition='new' releases the 'new' record AND the NULL (all-conditions)
+        record, but leaves the 'refurb' record untouched."""
+        requirement = _make_requirement(db_session, primary_mpn="ST3300657SS")
+        _make_sighting(db_session, requirement, "Acme Components", mpn_matched="ST3300657SS")
+
+        rec_new = _make_record(db_session, condition="new", requirement_id=requirement.id)
+        rec_refurb = _make_record(db_session, condition="refurb", requirement_id=requirement.id)
+        rec_null = _make_record(db_session, condition=None, requirement_id=requirement.id)
+        db_session.commit()
+
+        released = release_on_offer(db_session, requirement, "Acme Components", test_user, offer_condition="new")
+        db_session.commit()
+
+        assert released == 2  # 'new' + NULL
+        assert rec_new.released_at is not None
+        assert rec_new.release_trigger == ReleaseTrigger.OFFER_RECEIVED
+        assert rec_null.released_at is not None
+        assert rec_null.release_trigger == ReleaseTrigger.OFFER_RECEIVED
+        assert rec_refurb.released_at is None  # left intact
+
+    def test_none_condition_releases_all_active_non_different_part(self, db_session: Session, test_user: User):
+        """offer_condition=None (unknown) → v1 behavior: all active non-different_part
+        records are released regardless of their condition."""
+        requirement = _make_requirement(db_session, primary_mpn="ST3300657SS")
+        _make_sighting(db_session, requirement, "Acme Components", mpn_matched="ST3300657SS")
+
+        rec_new = _make_record(db_session, condition="new", requirement_id=requirement.id)
+        rec_refurb = _make_record(db_session, condition="refurb", requirement_id=requirement.id)
+        rec_null = _make_record(db_session, condition=None, requirement_id=requirement.id)
+        db_session.commit()
+
+        released = release_on_offer(db_session, requirement, "Acme Components", test_user, offer_condition=None)
+        db_session.commit()
+
+        assert released == 3  # all active records released
+        assert rec_new.released_at is not None
+        assert rec_refurb.released_at is not None
+        assert rec_null.released_at is not None
+
+    def test_off_vocab_condition_normalizes_to_none_releases_all(self, db_session: Session, test_user: User):
+        """offer_condition='other' normalizes to None → releases all active non-
+        different_part records (same as None)."""
+        requirement = _make_requirement(db_session, primary_mpn="ST3300657SS")
+        _make_sighting(db_session, requirement, "Acme Components", mpn_matched="ST3300657SS")
+
+        rec_new = _make_record(db_session, condition="new", requirement_id=requirement.id)
+        rec_refurb = _make_record(db_session, condition="refurb", requirement_id=requirement.id)
+        db_session.commit()
+
+        # "other" → normalize_condition → None → v1 behavior
+        released = release_on_offer(db_session, requirement, "Acme Components", test_user, offer_condition="other")
+        db_session.commit()
+
+        assert released == 2
+        assert rec_new.released_at is not None
+        assert rec_refurb.released_at is not None
+
+    def test_maybe_release_threads_offer_condition(self, db_session: Session, test_user: User):
+        """maybe_release_on_offer forwards offer_condition to release_on_offer."""
+        requirement = _make_requirement(db_session, primary_mpn="ST3300657SS")
+        _make_sighting(db_session, requirement, "Acme Components", mpn_matched="ST3300657SS")
+
+        rec_new = _make_record(db_session, condition="new", requirement_id=requirement.id)
+        rec_refurb = _make_record(db_session, condition="refurb", requirement_id=requirement.id)
+        db_session.commit()
+
+        released = maybe_release_on_offer(
+            db_session, requirement.id, "Acme Components", test_user, offer_condition="new"
+        )
+        db_session.commit()
+
+        assert released == 1  # only 'new' released; NULL record absent, refurb untouched
+        assert rec_new.released_at is not None
+        assert rec_refurb.released_at is None
+
+
+class TestRFQExclusionConditionAware:
+    """excluded_vendor_norms condition-aware: only NULL (all-conditions) active records
+    exclude; condition-specific records do not (RFQ resumes for untouched conditions)."""
+
+    def test_new_only_active_record_does_not_exclude(self, db_session: Session):
+        """A 'new'-condition active record does NOT put the vendor in
+        excluded_vendor_norms."""
+        requirement = _make_requirement(db_session, primary_mpn="ST3300657SS")
+        _make_record(db_session, condition="new")
+        db_session.commit()
+
+        assert excluded_vendor_norms(db_session, [requirement]) == set()
+
+    def test_null_active_record_excludes(self, db_session: Session):
+        """A NULL (all-conditions) active record puts the vendor in
+        excluded_vendor_norms."""
+        requirement = _make_requirement(db_session, primary_mpn="ST3300657SS")
+        _make_record(db_session, condition=None)
+        db_session.commit()
+
+        assert excluded_vendor_norms(db_session, [requirement]) == {"acme components"}

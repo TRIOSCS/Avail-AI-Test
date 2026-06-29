@@ -22,10 +22,10 @@ equality. Functions never commit; callers own the transaction.
 
 Called by: app/routers/sightings.py (mark-unavailable / mark-available routes),
            the user-initiated offer sites via maybe_release_on_offer
-           (routers/crm/offers.py create_offer + approve_offer + promote_offer,
-           routers/htmx_views.py add_offer + save_parsed_offers +
+           (app/routers/crm/offers.py create_offer + approve_offer + promote_offer,
+           app/routers/htmx/offers.py add_offer + save_parsed_offers +
            promote_offer_htmx + review_offer approve,
-           services/ai_offer_service.py save_freeform_offers),
+           app/services/ai_offer_service.py save_freeform_offers),
            app/services/sighting_status.py (reader-authority Batch 4),
            sighting-persistence paths via apply_to_fresh_sightings()
            (search_service, ICS/NC sighting writers, sources import,
@@ -589,15 +589,16 @@ def apply_to_fresh_sightings(
     if not candidates:
         return 0
 
-    records: dict[tuple[str, str], VendorPartUnavailability] = {
-        (rec.vendor_name_normalized, rec.normalized_mpn): rec
-        for rec in db.query(VendorPartUnavailability)
+    records: dict[tuple[str, str], list[VendorPartUnavailability]] = {}
+    for rec in (
+        db.query(VendorPartUnavailability)
         .filter(
             VendorPartUnavailability.vendor_name_normalized.in_(norms),
             VendorPartUnavailability.normalized_mpn.in_(keys),
         )
         .all()
-    }
+    ):
+        records.setdefault((rec.vendor_name_normalized, rec.normalized_mpn), []).append(rec)
     if not records:
         return 0
 
@@ -605,38 +606,39 @@ def apply_to_fresh_sightings(
     count = 0
     for s, norm, cand_keys in candidates:
         stamp = False
+        sighting_cond = normalize_condition(s.condition)
         for key in cand_keys:
-            rec = records.get((norm, key))
-            if rec is None or not is_active(rec, now):
-                continue  # no/expired/released record — never stamp from it
-            verdict = _override_verdict(rec, s)  # class-dispatched: O1 / O2 / O3
-            if verdict == _VERDICT_SURFACE:  # O1 live truth / O2 restock — row-level only
-                continue
-            if verdict == _VERDICT_RELEASE:
-                # O3 vendor document — RELEASE only fires for HUMAN_DIRECT rows
-                # (source_type='email_attachment'), which only the user-initiated
-                # sources.py attachment import creates today; background writers
-                # (brokerbin/ICS/NC/inventory/clones) use other source_types
-                # (inventory_jobs tags raw_data import_method='email_attachment'
-                # but its source_type is 'email_auto_import') and can never reach
-                # this branch — so the record mutation here is safe regardless of
-                # caller context.
-                _release_record(
-                    db,
-                    requirement,
-                    rec,
-                    ReleaseTrigger.VENDOR_EMAIL,
-                    s.vendor_name or rec.vendor_name_normalized,
-                    (
-                        f"Vendor email shows qty {s.qty_available} for "
-                        f"{s.mpn_matched or _mpn_display(requirement, [s])} — "
-                        f"released unavailability mark for {s.vendor_name or rec.vendor_name_normalized}"
-                    ),
-                    None,
-                    now,
-                )
-                continue
-            stamp = True
+            for rec in records.get((norm, key), []):
+                if not is_active(rec, now) or not _condition_matches(rec, sighting_cond):
+                    continue  # inactive or condition mismatch — never stamp from it
+                verdict = _override_verdict(rec, s)  # class-dispatched: O1 / O2 / O3
+                if verdict == _VERDICT_SURFACE:  # O1 live truth / O2 restock — row-level only
+                    continue
+                if verdict == _VERDICT_RELEASE:
+                    # O3 vendor document — RELEASE only fires for HUMAN_DIRECT rows
+                    # (source_type='email_attachment'), which only the user-initiated
+                    # sources.py attachment import creates today; background writers
+                    # (brokerbin/ICS/NC/inventory/clones) use other source_types
+                    # (inventory_jobs tags raw_data import_method='email_attachment'
+                    # but its source_type is 'email_auto_import') and can never reach
+                    # this branch — so the record mutation here is safe regardless of
+                    # caller context.
+                    _release_record(
+                        db,
+                        requirement,
+                        rec,
+                        ReleaseTrigger.VENDOR_EMAIL,
+                        s.vendor_name or rec.vendor_name_normalized,
+                        (
+                            f"Vendor email shows qty {s.qty_available} for "
+                            f"{s.mpn_matched or _mpn_display(requirement, [s])} — "
+                            f"released unavailability mark for {s.vendor_name or rec.vendor_name_normalized}"
+                        ),
+                        None,
+                        now,
+                    )
+                    continue
+                stamp = True
         if stamp:
             s.is_unavailable = True
             count += 1
@@ -654,6 +656,7 @@ def release_on_offer(
     requirement: Requirement,
     vendor_name: str,
     user: User | None,
+    offer_condition: str | None = None,
 ) -> int:
     """Offer hook: an incoming offer is proof of availability — release the vendor's
     matching ACTIVE records across the requirement's keys.
@@ -662,6 +665,12 @@ def release_on_offer(
     identity knowledge). Sets ``released_at``/``release_trigger='offer_received'``
     and writes one ActivityLog entry. No-op (0) when nothing matches. Does NOT
     commit. Returns records released.
+
+    ``offer_condition`` (optional): when a known condition is supplied, only the
+    matching condition record AND the NULL (all-conditions) record are released;
+    other-condition records are left intact (the offer is condition-specific proof).
+    When ``offer_condition`` normalizes to ``None`` (unknown or not supplied) all
+    active non-different_part records are released — v1 behavior.
     """
     vendor_norm = normalize_vendor_name(vendor_name)
     if not vendor_norm:
@@ -680,12 +689,15 @@ def release_on_offer(
         .all()
     )
     now = datetime.now(timezone.utc)
+    oc = normalize_condition(offer_condition)
     released = 0
     for rec in records:
         if rec.reason == UnavailabilityReason.DIFFERENT_PART:
             continue
         if not is_active(rec, now):
             continue
+        if oc is not None and rec.condition is not None and rec.condition != oc:
+            continue  # known offer condition X: leave other-specific-condition records intact
         rec.release(ReleaseTrigger.OFFER_RECEIVED, now)
         released += 1
     if released:
@@ -714,6 +726,7 @@ def maybe_release_on_offer(
     requirement_id: int | None,
     vendor_name: str | None,
     user: User | None,
+    offer_condition: str | None = None,
 ) -> int:
     """The single offer-hook gate every user-initiated offer site calls.
 
@@ -728,6 +741,9 @@ def maybe_release_on_offer(
     ``requirement_id`` that resolves to no row is a caller anomaly (dangling id) —
     still 0, but logged so a silently-skipped release is observable. Does NOT
     commit.
+
+    ``offer_condition`` is forwarded to ``release_on_offer`` — see its docstring for
+    the condition-aware release semantics.
     """
     if not requirement_id or not vendor_name or not vendor_name.strip():
         return 0
@@ -739,7 +755,7 @@ def maybe_release_on_offer(
             vendor_name,
         )
         return 0
-    return release_on_offer(db, requirement, vendor_name, user)
+    return release_on_offer(db, requirement, vendor_name, user, offer_condition=offer_condition)
 
 
 def excluded_vendor_norms(db: Session, requirements: Iterable[Requirement]) -> set[str]:
@@ -766,4 +782,4 @@ def excluded_vendor_norms(db: Session, requirements: Iterable[Requirement]) -> s
         return set()
     now = datetime.now(timezone.utc)
     rows = db.query(VendorPartUnavailability).filter(VendorPartUnavailability.normalized_mpn.in_(sorted(keys))).all()
-    return {rec.vendor_name_normalized for rec in rows if is_active(rec, now)}
+    return {rec.vendor_name_normalized for rec in rows if is_active(rec, now) and rec.condition is None}
