@@ -62,12 +62,12 @@ def dnc_company(db_session: Session, test_user):
 
 @pytest.fixture(autouse=True)
 def _clear_rate_limit():
-    """Clear in-memory rate limiter between tests."""
-    from app.routers.activity import _call_log
+    """Reset the shared rate limiter's in-memory fallback between tests."""
+    from app.rate_limit import reset_rate_limit_state
 
-    _call_log.clear()
+    reset_rate_limit_state()
     yield
-    _call_log.clear()
+    reset_rate_limit_state()
 
 
 # ── Toggle DNC ────────────────────────────────────────────────────────

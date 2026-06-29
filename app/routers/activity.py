@@ -4,7 +4,7 @@ Logs phone_call activity_log entries when a user clicks a tel: link.
 This is a fire-and-forget endpoint — it must never visibly fail.
 
 Business rules:
-- Rate limit: 10 calls per user per minute (in-memory)
+- Rate limit: 10 calls per user per minute (Redis-backed, shared across workers)
 - Invalid entity IDs are warned, not rejected
 - Phone must parse to E.164 or return 400
 - Entire handler wrapped in try/except — returns 201 on any internal error
@@ -13,8 +13,6 @@ Called by: app/static/app.js (logCallInitiated), app/static/crm.js
 Depends on: app/utils/phone_utils.py, app/services/activity_service.py
 """
 
-import time
-from collections import defaultdict
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -33,6 +31,7 @@ from ..constants import (
 from ..database import get_db
 from ..dependencies import can_manage_account, require_user
 from ..models import ActivityLog, Company, CustomerSite, SiteContact, User, VendorCard
+from ..rate_limit import check_rate_limit
 from ..schemas.activity import (
     ActivityTimelineResponse,
     CallInitiatedRequest,
@@ -44,28 +43,16 @@ from ..utils.phone_utils import format_phone_display, format_phone_e164
 
 router = APIRouter(prefix="/api/activity", tags=["activity"])
 
-# ── In-memory rate limiter ─────────────────────────────────────────────
+# ── Rate-limit budgets ─────────────────────────────────────────────────
 # Buckets are keyed per user AND per endpoint family so a rep's heavy phone
 # use never silently blocks their email/Teams outreach logging (and vice
 # versa). Outreach gets a higher budget: the CDM call-list workflow can
-# legitimately produce several logs per contact per minute.
-_call_log: dict[str, list[float]] = defaultdict(list)
+# legitimately produce several logs per contact per minute. The counter
+# itself is the shared Redis-backed limiter in app/rate_limit.py, so these
+# limits hold across worker processes and restarts (in-memory fallback when
+# Redis is down).
 _RATE_LIMIT = 10  # max click-to-call logs per user per minute
 _OUTREACH_RATE_LIMIT = 30  # max outreach logs per user per minute
-
-
-def _check_rate_limit(user_id: int, bucket: str = "call", limit: int = _RATE_LIMIT) -> bool:
-    """Return True if user is within rate limit, False if exceeded."""
-    key = f"{user_id}:{bucket}"
-    now = time.time()
-    window = now - 60
-    timestamps = _call_log[key]
-    # Prune old entries
-    _call_log[key] = [t for t in timestamps if t > window]
-    if len(_call_log[key]) >= limit:
-        return False
-    _call_log[key].append(now)
-    return True
 
 
 def _validated_entity_ids(
@@ -153,7 +140,7 @@ def call_initiated(
             raise HTTPException(400, "Invalid phone number")
 
         # Rate limit
-        if not _check_rate_limit(user.id):
+        if not check_rate_limit(user.id, bucket="call", limit=_RATE_LIMIT):
             raise HTTPException(429, "Too many calls — try again in a minute")
 
         phone_display = format_phone_display(body.phone_number)
@@ -247,7 +234,7 @@ def outreach_initiated(
         elif not contact_value:
             raise HTTPException(400, "Contact value is required")
 
-        if not _check_rate_limit(user.id, bucket="outreach", limit=_OUTREACH_RATE_LIMIT):
+        if not check_rate_limit(user.id, bucket="outreach", limit=_OUTREACH_RATE_LIMIT):
             raise HTTPException(429, "Too many outreach logs — try again in a minute")
 
         company_id, customer_site_id, site_contact_id, dropped = _validated_entity_ids(
@@ -300,7 +287,7 @@ def record_call_outcome(
     not spend outreach tokens).
     """
     try:
-        if not _check_rate_limit(user.id, bucket="call_outcome", limit=_OUTREACH_RATE_LIMIT):
+        if not check_rate_limit(user.id, bucket="call_outcome", limit=_OUTREACH_RATE_LIMIT):
             raise HTTPException(429, "Too many requests — try again in a minute")
 
         record = db.get(ActivityLog, activity_id)

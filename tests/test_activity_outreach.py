@@ -14,12 +14,12 @@ from app.models.crm import Company, CustomerSite, SiteContact
 
 @pytest.fixture(autouse=True)
 def _clear_rate_limit():
-    """Clear in-memory rate limiter between tests."""
-    from app.routers.activity import _call_log
+    """Reset the shared rate limiter's in-memory fallback between tests."""
+    from app.rate_limit import reset_rate_limit_state
 
-    _call_log.clear()
+    reset_rate_limit_state()
     yield
-    _call_log.clear()
+    reset_rate_limit_state()
 
 
 @pytest.fixture
@@ -154,16 +154,18 @@ class TestOutreachInitiated:
         assert "Call to +14155551234" in record.subject
 
     def test_rate_limit_returns_429(self, client, cdm_company):
+        from app import rate_limit
         from app.routers import activity as activity_router
 
-        user_buckets = activity_router._call_log
         # Outreach has its own (higher) budget, separate from call-initiated
         for _ in range(activity_router._OUTREACH_RATE_LIMIT):
             resp = self._post(client, cdm_company, "phone", "+14155551234")
             assert resp.status_code == 201
         resp = self._post(client, cdm_company, "phone", "+14155551234")
         assert resp.status_code == 429
-        assert user_buckets  # sanity: limiter actually tracked the user
+        # Sanity: the shared limiter's fallback store actually tracked the user
+        # (Redis is unavailable under TESTING, so the in-memory path is exercised).
+        assert rate_limit._fallback_counts
 
     def test_rate_limit_bucket_separate_from_call_initiated(self, client, cdm_company):
         """Exhausting the click-to-call budget must not block outreach logging."""
