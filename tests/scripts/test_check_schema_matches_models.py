@@ -67,6 +67,39 @@ def test_grandfathered_add_constraint_keyed_by_table_and_columns():
     assert filter_allowlist(novel) == novel
 
 
+def test_reconciled_indexes_surface_but_intentional_ones_stay_grandfathered():
+    """#464 (migration 172) declared the raw-DDL pg_trgm/GIN/btree/partial indexes on
+    the models, so a ``remove_index`` for a reconciled name must now SURFACE as real
+    drift, while DANGER/orphan-table and PG-only expression indexes stay
+    grandfathered."""
+
+    class _Ix:
+        def __init__(self, name):
+            self.name = name
+
+    reconciled = [("remove_index", _Ix("ix_companies_name_trgm"))]
+    danger = [("remove_index", _Ix("ix_buyplans_token"))]
+    pg_expression = [("remove_index", _Ix("ix_vendor_cards_domain_lower"))]
+
+    # Reconciled (now model-declared) → no longer filtered → surfaces as drift.
+    assert filter_allowlist(reconciled) == reconciled
+    # Still intentional raw-DDL / DANGER → filtered out.
+    assert filter_allowlist(danger) == []
+    assert filter_allowlist(pg_expression) == []
+
+
+def test_reports_to_phantom_add_index_no_longer_grandfathered():
+    """The site_contacts reports_to index was renamed to the DB's ix_sc_reports_to, so
+    the phantom ``add_index`` for ix_site_contacts_reports_to_id must now surface."""
+
+    class _Ix:
+        def __init__(self, name):
+            self.name = name
+
+    phantom = [("add_index", _Ix("ix_site_contacts_reports_to_id"))]
+    assert filter_allowlist(phantom) == phantom
+
+
 def test_format_diffs_renders_human_readable():
     """Output must list the diff kind + table + column for each entry."""
     diffs = [

@@ -40,6 +40,14 @@ class Requisition(Base):
         Index("ix_requisitions_urgency", "urgency"),
         Index("ix_requisitions_company", "company_id"),
         Index("ix_requisitions_scratch_user", "created_by", postgresql_where=text("is_scratch")),
+        # Raw-DDL pg_trgm GIN indexes reconciled into the model so the drift gate sees them (#464).
+        Index(
+            "ix_requisitions_customer_name_trgm",
+            "customer_name",
+            postgresql_using="gin",
+            postgresql_ops={"customer_name": "gin_trgm_ops"},
+        ),
+        Index("ix_requisitions_name_trgm", "name", postgresql_using="gin", postgresql_ops={"name": "gin_trgm_ops"}),
     )
     id = Column(Integer, primary_key=True)
     name = Column(String(255), nullable=False)
@@ -184,6 +192,19 @@ class Requirement(Base):
         Index("ix_req_primary_mpn", "primary_mpn"),
         Index("ix_requirements_material_card", "material_card_id"),
         Index("ix_requirements_sourcing_status", "sourcing_status"),
+        # Raw-DDL pg_trgm GIN indexes reconciled into the model so the drift gate sees them (#464).
+        Index(
+            "ix_requirements_normalized_mpn_trgm",
+            "normalized_mpn",
+            postgresql_using="gin",
+            postgresql_ops={"normalized_mpn": "gin_trgm_ops"},
+        ),
+        Index(
+            "ix_requirements_primary_mpn_trgm",
+            "primary_mpn",
+            postgresql_using="gin",
+            postgresql_ops={"primary_mpn": "gin_trgm_ops"},
+        ),
     )
 
 
@@ -297,6 +318,16 @@ class Sighting(Base):
         Index("ix_sightings_req_score", "requirement_id", score.desc()),
         Index("ix_sightings_material_card", "material_card_id"),
         Index("ix_sightings_mpn_vendor_norm", "normalized_mpn", "vendor_name_normalized"),
+        # Raw-DDL indexes reconciled into the model so the drift gate sees them (#464):
+        # a vendor-email pg_trgm GIN index (warm-intro lookup) + plain btree indexes.
+        Index("ix_sightings_evidence_tier", "evidence_tier"),
+        Index("ix_sighting_cache_lookup", "normalized_mpn", "source_type", "created_at"),
+        Index(
+            "ix_sightings_vendor_email_trgm",
+            "vendor_email",
+            postgresql_using="gin",
+            postgresql_ops={"vendor_email": "gin_trgm_ops"},
+        ),
     )
 
 

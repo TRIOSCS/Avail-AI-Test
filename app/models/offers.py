@@ -207,6 +207,17 @@ class Offer(Base):
         Index("ix_offers_vendor_name", "vendor_name"),
         Index("ix_offers_vendor_norm", "vendor_name_normalized"),
         Index("ix_offers_material_card", "material_card_id"),
+        # Raw-DDL indexes reconciled into the model so the drift gate sees them (#464):
+        # pg_trgm GIN (fuzzy MPN/vendor search) + plain btree indexes.
+        Index("ix_offers_evidence_tier", "evidence_tier"),
+        Index("ix_offers_excess_line_item", "excess_line_item_id"),
+        Index("ix_offers_mpn_trgm", "mpn", postgresql_using="gin", postgresql_ops={"mpn": "gin_trgm_ops"}),
+        Index(
+            "ix_offers_vendor_name_trgm",
+            "vendor_name",
+            postgresql_using="gin",
+            postgresql_ops={"vendor_name": "gin_trgm_ops"},
+        ),
     )
 
 
