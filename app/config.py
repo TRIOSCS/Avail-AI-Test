@@ -336,9 +336,14 @@ class Settings(BaseSettings):
     acs_callback_url: str = ""
 
     # --- MVP Mode ---
-    # When True, disables: Dashboard/Analytics, Enrichment, Teams, Task Manager
-    # Set MVP_MODE=false in .env to re-enable all features
-    mvp_mode: bool = True
+    # Now gates ONLY the Teams chat integration: the POST /api/webhooks/teams endpoint
+    # (returns 404 when True) and Graph Teams-chat subscription creation in
+    # ensure_all_users_subscribed. Dashboard/Analytics, Enrichment, and Task Manager were
+    # un-gated by the module consolidation and are always-on regardless of this flag.
+    # Default is False ("no MVP" — full surface incl. Teams; Teams subscription creation
+    # degrades gracefully if the public webhook callback isn't configured yet).
+    # Set MVP_MODE=true in .env only to suppress the Teams integration.
+    mvp_mode: bool = False
 
     # --- On-demand enrichment orchestrator ---
     on_demand_enrichment_enabled: bool = True
