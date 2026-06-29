@@ -1135,6 +1135,25 @@ ai_offer_service.py (if confidence >= 0.8)
     +---> sse_broker.py --> SSE push ("new offer parsed")
 ```
 
+**Email-mining daily budget cap (Wave 6).** The inbox-parse path turns every pending
+vendor reply into one fast-tier Claude request — `_submit_parse_batch` submits them to the
+Anthropic Batch API with `cost_bucket="email_mining"` (or, if submit raises,
+`_parse_sequential_fallback` calls `parse_response_ai` per reply). Spend was *metered*
+(`claude_usage:email_mining:{tier}:{metric}:{date}` via `_meter_usage` on results poll —
+readout `python -m app.management.enrichment_spend --bucket email_mining`) but nothing
+*gated* it, so a large first-time inbox backfill could dispatch thousands of requests
+unbounded. `poll_inbox` now trims the day's batch via `_enforce_email_mining_cap(pending)`
+**before** either path spends credits (so the sequential fallback can't bypass the cap):
+`settings.email_mining_batch_daily_cap` (env `EMAIL_MINING_BATCH_DAILY_CAP`, default 1000
+calls/UTC-day; `<= 0` disables → pre-cap behavior) minus today's spend
+`_email_mining_calls_today()` = `max(`metered `claude_usage:email_mining:*:calls:{date}`,
+the submit-time `email_mining:batch:submitted:{date}` counter `_record_email_mining_calls`
+bumps after each dispatch`)`. At/over cap → the batch stops enqueuing and logs (Loguru);
+trimmed-off replies stay raw (`status='new'/'matched'`, re-parsable via the ai.py reparse
+endpoint after the UTC rollover — no data lost, only Claude spend bounded). Mirrors the
+enrichment-worker `daily_cap` / `ai_screen_daily_cap` count-cap pattern; reuses the
+`intel_cache` Redis/PG counter substrate (no migration).
+
 ### 4a. Graph webhook endpoint (push) + validation-echo hardening
 
 Real-time complement to the polling job above. `webhook_service.create_mail_subscription`

@@ -880,12 +880,20 @@ async def poll_inbox(token: str, db: Session, requisition_id: int = None, scanne
             continue
 
     # ── Submit AI batch or fall back to sequential parsing ──
+    # Gate on the daily email-mining budget cap BEFORE either path spends Claude credits.
+    # Trimming here (rather than inside _submit_parse_batch) keeps the batch and its
+    # sequential fallback under the same ceiling — the fallback can't bypass the cap.
     if pending_parse:
-        try:
-            await _submit_parse_batch(pending_parse, db)
-        except Exception as e:
-            logger.warning(f"Batch submit failed, falling back to sequential: {e}")
-            await _parse_sequential_fallback(pending_parse, db)
+        to_parse = _enforce_email_mining_cap(pending_parse)
+        if to_parse:
+            try:
+                await _submit_parse_batch(to_parse, db)
+            except Exception as e:
+                logger.warning(f"Batch submit failed, falling back to sequential: {e}")
+                await _parse_sequential_fallback(to_parse, db)
+            # Bill the day's counter for the calls just dispatched (batch or fallback),
+            # so successive scans within the same UTC day respect the cap.
+            _record_email_mining_calls(len(to_parse))
 
     # ── Post-parse: update contact status for OOO/bounce classifications ──
     # Only the sequential fallback sets vr.classification synchronously; batch
@@ -1144,6 +1152,91 @@ async def parse_response_ai(body: str, subject: str) -> dict | None:
 
 
 # ── Batch AI Processing ─────────────────────────────────────────────────
+
+
+def _mining_submit_key() -> str:
+    """Redis key for today's count of dispatched email-mining Claude requests (UTC
+    date)."""
+    return "email_mining:batch:submitted:" + datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def _email_mining_calls_today() -> int:
+    """Today's email-mining Claude request count for the daily budget gate.
+
+    Returns ``max(metered, submitted)`` so the cap holds even before a batch's own usage
+    is metered:
+      * ``metered`` sums the ``claude_usage:email_mining:{tier}:calls:{date}`` counters
+        that ``claude_client._meter_usage`` writes on batch-results poll (lags submit);
+      * ``submitted`` is the ``email_mining:batch:submitted:{date}`` counter this path
+        bumps at dispatch time (covers the metering lag).
+    Mirrors the enrichment worker's ``max(intel_cache.get_count(...), in_process_floor)``
+    reconciliation. Best-effort: any cache error degrades to 0 (no cap) — never raises.
+    """
+    from app.cache import intel_cache
+
+    try:
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        metered = sum(
+            intel_cache.get_count(f"claude_usage:email_mining:{tier}:calls:{today}")
+            for tier in ("fast", "smart", "opus")
+        )
+        submitted = intel_cache.get_count(_mining_submit_key())
+        return max(metered, submitted)
+    except Exception as e:  # cap accounting must never break the inbox poll
+        logger.debug("email-mining spend read skipped: {}", e)
+        return 0
+
+
+def _enforce_email_mining_cap(pending: list[VendorResponse]) -> list[VendorResponse]:
+    """Trim today's email-mining batch to the remaining daily Claude-call budget.
+
+    Returns the slice of *pending* that may be AI-parsed today (the highest-volume order
+    is preserved). A non-positive ``email_mining_batch_daily_cap`` disables the cap →
+    pre-cap unbounded behavior. Logs (Loguru) when the cap trims or fully blocks the
+    batch; trimmed-off responses stay raw (status 'new'/'matched') and remain re-parsable
+    later (manual ai.py reparse), so no data is lost — only Claude spend is bounded.
+    """
+    from app.config import settings
+
+    cap = settings.email_mining_batch_daily_cap
+    if cap <= 0:
+        return pending
+
+    already = _email_mining_calls_today()
+    remaining = cap - already
+    if remaining <= 0:
+        logger.warning(
+            "Email-mining daily budget cap reached ({}/{}) — skipping AI parse of {} "
+            "vendor response(s) this cycle (raw rows kept; re-parsable after UTC rollover)",
+            already,
+            cap,
+            len(pending),
+        )
+        return []
+    if len(pending) > remaining:
+        logger.warning(
+            "Email-mining daily budget cap: trimming batch {}->{} request(s) (today {}/{}); "
+            "{} response(s) stay raw this cycle",
+            len(pending),
+            remaining,
+            already,
+            cap,
+            len(pending) - remaining,
+        )
+        return pending[:remaining]
+    return pending
+
+
+def _record_email_mining_calls(count: int) -> None:
+    """Bump today's email-mining submitted-call counter by *count* (best-effort)."""
+    if count <= 0:
+        return
+    from app.cache import intel_cache
+
+    try:
+        intel_cache.incr_count(_mining_submit_key(), amount=count, ttl_days=1.0)
+    except Exception as e:  # metering is best-effort; never break the inbox poll
+        logger.debug("email-mining submit-count bump skipped: {}", e)
 
 
 async def _submit_parse_batch(

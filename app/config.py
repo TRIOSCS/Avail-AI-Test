@@ -205,6 +205,16 @@ class Settings(BaseSettings):
     # match per batch. The long tail is created unenriched and enriched on demand later.
     # This is the only metered-spend lever for the email-mining path.
     email_mining_enrich_cap: int = 25
+    # Daily ceiling on the number of Claude requests the email-mining inbox-parse BATCH
+    # path (email_service._submit_parse_batch / its sequential fallback) may dispatch per
+    # UTC day. Every pending vendor reply = one fast-tier Claude call billed to
+    # cost_bucket="email_mining"; without a cap a large first-time inbox backfill could
+    # submit thousands of requests unbounded. When the day's metered+submitted call count
+    # reaches this cap the batch stops enqueuing and logs (raw rows stay re-parsable next
+    # day). Reuses the claude_usage:email_mining metering counters as today's spend and
+    # mirrors the enrichment-worker daily_cap / ai_screen_daily_cap count-cap pattern.
+    # 0 (or negative) disables the cap -> pre-cap unbounded behavior (graceful default).
+    email_mining_batch_daily_cap: int = 1000
 
     # --- M365 Integration v2 ---
     inbox_scan_interval_min: int = 30

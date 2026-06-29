@@ -32,10 +32,13 @@ from app.email_service import (
     _apply_parsed_result,
     _build_html_body,
     _classify_response,
+    _email_mining_calls_today,
+    _enforce_email_mining_cap,
     _find_sent_message,
     _is_noise_email,
     _parse_sequential_fallback,
     _progress_contact_status,
+    _record_email_mining_calls,
     _scope_thread_contacts_to_sender,
     _submit_parse_batch,
     log_phone_contact,
@@ -1772,6 +1775,177 @@ class TestSubmitParseBatch:
             pytest.raises(RuntimeError, match="no batch_id"),
         ):
             await _submit_parse_batch([vr], db_session)
+
+
+# ── Email-mining daily budget cap (Wave 6) ───────────────────────────
+
+
+class TestEmailMiningBudgetCap:
+    """The daily Claude-spend cap on the email-mining inbox-parse batch path."""
+
+    def test_cap_disabled_returns_all(self, monkeypatch):
+        """Cap <= 0 disables the cap (graceful default = pre-cap unbounded behavior)."""
+        from app.config import settings
+
+        pending = [MagicMock() for _ in range(5)]
+        for disabled in (0, -1):
+            monkeypatch.setattr(settings, "email_mining_batch_daily_cap", disabled)
+            # _email_mining_calls_today must NOT even be consulted when the cap is off.
+            with patch("app.email_service._email_mining_calls_today", side_effect=AssertionError):
+                assert _enforce_email_mining_cap(pending) == pending
+
+    def test_under_cap_returns_all(self, monkeypatch):
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "email_mining_batch_daily_cap", 10)
+        pending = [MagicMock() for _ in range(3)]
+        with patch("app.email_service._email_mining_calls_today", return_value=0):
+            assert _enforce_email_mining_cap(pending) == pending
+
+    def test_at_cap_returns_empty_and_logs(self, monkeypatch):
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "email_mining_batch_daily_cap", 5)
+        pending = [MagicMock() for _ in range(4)]
+        with (
+            patch("app.email_service._email_mining_calls_today", return_value=5),
+            patch("app.email_service.logger.warning") as mock_warn,
+        ):
+            assert _enforce_email_mining_cap(pending) == []
+        mock_warn.assert_called_once()
+        assert "cap reached" in mock_warn.call_args[0][0]
+
+    def test_over_cap_returns_empty(self, monkeypatch):
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "email_mining_batch_daily_cap", 5)
+        pending = [MagicMock() for _ in range(4)]
+        with patch("app.email_service._email_mining_calls_today", return_value=99):
+            assert _enforce_email_mining_cap(pending) == []
+
+    def test_trims_to_remaining_budget(self, monkeypatch):
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "email_mining_batch_daily_cap", 10)
+        pending = [MagicMock() for _ in range(5)]
+        with (
+            patch("app.email_service._email_mining_calls_today", return_value=8),
+            patch("app.email_service.logger.warning") as mock_warn,
+        ):
+            result = _enforce_email_mining_cap(pending)
+        # remaining = 10 - 8 = 2; highest-volume order preserved
+        assert result == pending[:2]
+        mock_warn.assert_called_once()
+
+    def test_calls_today_is_max_of_metered_and_submitted(self):
+        """Today's count reconciles the metered claude_usage calls with the submit
+        counter."""
+
+        def fake_count(key):
+            return {
+                "claude_usage:email_mining:fast:calls:": 3,  # metered (fast tier)
+                "email_mining:batch:submitted:": 7,  # submit-time counter
+            }.get(
+                next(
+                    (
+                        p
+                        for p in (
+                            "claude_usage:email_mining:fast:calls:",
+                            "email_mining:batch:submitted:",
+                        )
+                        if key.startswith(p)
+                    ),
+                    "",
+                ),
+                0,
+            )
+
+        with patch("app.cache.intel_cache.get_count", side_effect=fake_count):
+            # metered total = 3 (fast) + 0 (smart) + 0 (opus) = 3; submitted = 7 -> max 7
+            assert _email_mining_calls_today() == 7
+
+    def test_calls_today_swallows_cache_errors(self):
+        with patch("app.cache.intel_cache.get_count", side_effect=RuntimeError("redis down")):
+            assert _email_mining_calls_today() == 0
+
+    def test_record_calls_increments_counter(self):
+        with patch("app.cache.intel_cache.incr_count") as mock_incr:
+            _record_email_mining_calls(4)
+        mock_incr.assert_called_once()
+        assert mock_incr.call_args.kwargs.get("amount") == 4
+
+    def test_record_calls_noop_on_zero(self):
+        with patch("app.cache.intel_cache.incr_count") as mock_incr:
+            _record_email_mining_calls(0)
+        mock_incr.assert_not_called()
+
+
+class TestPollInboxBudgetCap:
+    """poll_inbox enforces the cap before BOTH the batch and its sequential fallback."""
+
+    def _make_inbox_message(self):
+        return {
+            "id": "cap-msg-1",
+            "subject": "RE: RFQ",
+            "from": {"emailAddress": {"address": "vendor@parts.com", "name": "Vendor"}},
+            "bodyPreview": "Quote attached",
+            "body": {"content": "<p>Quote attached</p>"},
+            "conversationId": "cap-conv-1",
+            "receivedDateTime": None,
+        }
+
+    @pytest.mark.asyncio
+    async def test_under_cap_submits_batch(self, db_session, test_user, test_requisition, monkeypatch):
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "email_mining_batch_daily_cap", 1000)
+        mock_gc = AsyncMock()
+        mock_gc.get_json.return_value = {"value": [self._make_inbox_message()]}
+
+        with (
+            patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+            patch("app.email_service.get_credential_cached", return_value="fake-key"),
+            patch("app.email_service._email_mining_calls_today", return_value=0),
+            patch("app.cache.intel_cache.incr_count") as mock_incr,
+            patch(
+                "app.utils.claude_client.claude_batch_submit",
+                new_callable=AsyncMock,
+                return_value="batch-cap-1",
+            ) as mock_submit,
+            patch("app.services.response_parser.clean_email_body", return_value="cleaned"),
+            patch("app.services.response_parser.RESPONSE_PARSE_SCHEMA", {"type": "object"}),
+            patch("app.services.response_parser.SYSTEM_PROMPT", "System prompt"),
+        ):
+            results = await poll_inbox(token="fake-token", db=db_session, requisition_id=test_requisition.id)
+
+        assert len(results) == 1
+        mock_submit.assert_called_once()  # under cap -> batch dispatched
+        mock_incr.assert_called_once()  # today's submit counter billed
+
+    @pytest.mark.asyncio
+    async def test_over_cap_skips_batch_and_fallback(self, db_session, test_user, test_requisition, monkeypatch):
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "email_mining_batch_daily_cap", 5)
+        mock_gc = AsyncMock()
+        mock_gc.get_json.return_value = {"value": [self._make_inbox_message()]}
+
+        with (
+            patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+            patch("app.email_service.get_credential_cached", return_value="fake-key"),
+            patch("app.email_service._email_mining_calls_today", return_value=5),
+            patch(
+                "app.utils.claude_client.claude_batch_submit",
+                new_callable=AsyncMock,
+            ) as mock_submit,
+            patch("app.email_service._parse_sequential_fallback", new_callable=AsyncMock) as mock_seq,
+        ):
+            results = await poll_inbox(token="fake-token", db=db_session, requisition_id=test_requisition.id)
+
+        # Raw response row is still saved (data not lost), but NO Claude spend occurs.
+        assert len(results) == 1
+        mock_submit.assert_not_called()
+        mock_seq.assert_not_called()
 
 
 # ── _parse_sequential_fallback ───────────────────────────────────────
