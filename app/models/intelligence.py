@@ -14,6 +14,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import relationship, validates
@@ -157,6 +158,35 @@ class MaterialCard(Base):
             postgresql_where=Column("has_validation_conflict"),
             sqlite_where=Column("has_validation_conflict"),
         ),
+        # Raw-DDL indexes reconciled into the model so the drift gate sees them (#464):
+        # pg_trgm GIN (fuzzy MPN/description/manufacturer search), the FTS tsvector GIN,
+        # and a partial last-searched index.
+        Index("ix_material_cards_search_vector", "search_vector", postgresql_using="gin"),
+        Index(
+            "ix_material_cards_trgm_mpn",
+            "display_mpn",
+            postgresql_using="gin",
+            postgresql_ops={"display_mpn": "gin_trgm_ops"},
+        ),
+        Index(
+            "ix_mc_trgm_description",
+            "description",
+            postgresql_using="gin",
+            postgresql_ops={"description": "gin_trgm_ops"},
+        ),
+        Index(
+            "ix_mc_trgm_manufacturer",
+            "manufacturer",
+            postgresql_using="gin",
+            postgresql_ops={"manufacturer": "gin_trgm_ops"},
+        ),
+        Index(
+            "ix_mc_trgm_norm_mpn",
+            "normalized_mpn",
+            postgresql_using="gin",
+            postgresql_ops={"normalized_mpn": "gin_trgm_ops"},
+        ),
+        Index("ix_mc_last_searched", "last_searched_at", postgresql_where=text("last_searched_at IS NOT NULL")),
     )
 
     # --- Validators ---
@@ -543,6 +573,10 @@ class ActivityLog(Base):
             "created_at",
             postgresql_where=Column("excess_list_id").isnot(None),
         ),
+        # Raw-DDL indexes reconciled into the model so the drift gate sees them (#464):
+        # a composite user/channel index + a partial index over un-scored activity rows.
+        Index("ix_activity_user_channel_created", "user_id", "channel", "created_at"),
+        Index("ix_activity_unscored", "quality_assessed_at", postgresql_where=text("quality_assessed_at IS NULL")),
     )
 
 

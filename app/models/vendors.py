@@ -187,6 +187,26 @@ class VendorCard(Base):
             "created_at",
             postgresql_where=Column("is_blacklisted").is_(False),
         ),
+        # Raw-DDL indexes reconciled into the model so the drift gate sees them (#464):
+        # pg_trgm GIN (fuzzy ILIKE), GIN on JSONB tag arrays, and a partial broadcast index.
+        Index("ix_vendor_cards_brand_tags_gin", "brand_tags", postgresql_using="gin"),
+        Index("ix_vendor_cards_commodity_tags_gin", "commodity_tags", postgresql_using="gin"),
+        Index("ix_vendor_cards_broadcast", "is_broadcast", postgresql_where=text("is_broadcast = true")),
+        Index(
+            "ix_vendor_cards_display_name_trgm",
+            "display_name",
+            postgresql_using="gin",
+            postgresql_ops={"display_name": "gin_trgm_ops"},
+        ),
+        Index(
+            "ix_vendor_cards_domain_trgm", "domain", postgresql_using="gin", postgresql_ops={"domain": "gin_trgm_ops"}
+        ),
+        Index(
+            "ix_vendor_cards_normalized_name_trgm",
+            "normalized_name",
+            postgresql_using="gin",
+            postgresql_ops={"normalized_name": "gin_trgm_ops"},
+        ),
     )
 
 
@@ -256,6 +276,16 @@ class VendorContact(Base):
         Index("ix_vendor_contacts_card", "vendor_card_id"),
         Index("ix_vendor_contacts_email", "email"),
         Index("ix_vendor_contacts_card_email", "vendor_card_id", "email", unique=True),
+        # Raw-DDL pg_trgm GIN indexes reconciled into the model so the drift gate sees them (#464).
+        Index(
+            "ix_vendor_contacts_email_trgm", "email", postgresql_using="gin", postgresql_ops={"email": "gin_trgm_ops"}
+        ),
+        Index(
+            "ix_vendor_contacts_full_name_trgm",
+            "full_name",
+            postgresql_using="gin",
+            postgresql_ops={"full_name": "gin_trgm_ops"},
+        ),
     )
 
 
