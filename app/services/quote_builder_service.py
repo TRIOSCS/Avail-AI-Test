@@ -513,6 +513,10 @@ def save_quote_from_builder(
         validity_days=payload.validity_days,
         notes=payload.notes,
         created_by_id=user.id,
+        # A revision inherits revenue attribution from its parent so a
+        # proactive-sourced quote stays attributed through revisions (Wave 6).
+        # A fresh build has no parent → source stays None (set elsewhere on origin).
+        source=old_quote.source if old_quote else None,
     )
     db.add(quote)
     db.flush()

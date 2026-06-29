@@ -442,6 +442,9 @@ async def revise_quote_htmx(
         notes=quote.notes,
         status=QuoteStatus.DRAFT,
         created_by_id=user.id,
+        # Carry revenue attribution forward so a revision of a proactive-sourced
+        # quote stays attributed to proactive selling (Wave 6).
+        source=quote.source,
     )
     db.add(new_quote)
     db.commit()
