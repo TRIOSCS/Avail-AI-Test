@@ -1253,6 +1253,14 @@ reflects the chosen offer. The choice rides the existing assemble payload
 (`offer_id`) through `save_quote_from_builder` onto `QuoteLine.offer_id`. Vendor
 identity stays internal — the customer doc/export strips it (`quote_export_context`).
 
+**Revision source attribution (Wave 6).** `Quote.source` (e.g. `'proactive'`; migration
+113) is revenue-attribution provenance. Both quote-revision chokepoints inherit it from the
+parent so attribution survives a revision: the htmx "Revise" button
+(`htmx/quotes.py::revise_quote_htmx`, `source=quote.source`) and the builder revise branch
+(`save_quote_from_builder`, `source=old_quote.source if old_quote else None`). A fresh
+(non-revision) build has no parent so `source` stays NULL — it is set only at origin
+(e.g. `proactive_service.py` sets `'proactive'`).
+
 ## 6. Buy Plan Workflow
 
 ```

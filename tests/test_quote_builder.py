@@ -303,6 +303,47 @@ def test_save_quote_revision(db_session, test_user):
     assert old_quote.status == "revised"
 
 
+def test_save_quote_revision_inherits_source(db_session, test_user):
+    """A revision must inherit ``source`` from its parent (Wave 6 revenue attribution).
+
+    A fresh (non-revision) build keeps the default ``source`` of None.
+    """
+    from app.schemas.quote_builder import QuoteBuilderLine, QuoteBuilderSaveRequest
+    from app.services.quote_builder_service import save_quote_from_builder
+
+    req, r1 = _seed_requirement(db_session, test_user)
+
+    def _payload(quote_id=None):
+        return QuoteBuilderSaveRequest(
+            lines=[
+                QuoteBuilderLine(
+                    requirement_id=r1.id,
+                    mpn="LM358DR",
+                    manufacturer="TI",
+                    qty=500,
+                    cost_price=0.24,
+                    sell_price=0.31,
+                    margin_pct=22.6,
+                )
+            ],
+            quote_id=quote_id,
+        )
+
+    # Fresh build → no proactive origin → source stays None.
+    result1 = save_quote_from_builder(db_session, req_id=req.id, payload=_payload(), user=test_user)
+    parent = db_session.get(Quote, result1["quote_id"])
+    assert parent.source is None
+
+    # Mark the parent as proactive-originated, then revise it.
+    parent.source = "proactive"
+    db_session.commit()
+
+    result2 = save_quote_from_builder(db_session, req_id=req.id, payload=_payload(quote_id=parent.id), user=test_user)
+    revision = db_session.get(Quote, result2["quote_id"])
+    assert revision.id != parent.id
+    assert revision.source == "proactive"  # attribution propagates through the revision
+
+
 def test_builder_modal_endpoint_404_bad_req(client):
     resp = client.get("/v2/partials/quote-builder/99999")
     assert resp.status_code == 404

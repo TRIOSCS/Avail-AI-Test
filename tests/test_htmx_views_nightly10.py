@@ -525,6 +525,41 @@ class TestReviseQuoteHtmx:
         resp = client.post("/v2/partials/quotes/99999/revise")
         assert resp.status_code == 404
 
+    def test_revise_inherits_proactive_source(
+        self,
+        client: TestClient,
+        db_session: Session,
+        test_requisition: Requisition,
+        test_customer_site: CustomerSite,
+        test_user: User,
+    ):
+        """Revising a proactive-sourced quote keeps source='proactive' on the revision
+        (Wave 6 revenue attribution)."""
+        quote = _draft_quote(db_session, test_requisition, test_customer_site, test_user, source="proactive")
+        resp = client.post(f"/v2/partials/quotes/{quote.id}/revise")
+        assert resp.status_code == 200
+        revision = (
+            db_session.query(Quote).filter(Quote.requisition_id == test_requisition.id, Quote.id != quote.id).one()
+        )
+        assert revision.source == "proactive"
+
+    def test_revise_preserves_null_source(
+        self,
+        client: TestClient,
+        db_session: Session,
+        test_requisition: Requisition,
+        test_customer_site: CustomerSite,
+        test_user: User,
+    ):
+        """A non-proactive quote (source=None) yields a revision with source=None."""
+        quote = _draft_quote(db_session, test_requisition, test_customer_site, test_user)
+        resp = client.post(f"/v2/partials/quotes/{quote.id}/revise")
+        assert resp.status_code == 200
+        revision = (
+            db_session.query(Quote).filter(Quote.requisition_id == test_requisition.id, Quote.id != quote.id).one()
+        )
+        assert revision.source is None
+
 
 class TestApplyMarkupHtmx:
     """Covers POST /v2/partials/quotes/{quote_id}/apply-markup."""
