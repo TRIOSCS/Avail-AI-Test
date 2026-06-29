@@ -7,20 +7,24 @@
    Called by: _vendor_row.html "Mark Unavail" / "Verify availability" / "Verify restock"
    buttons via $dispatch('open-modal', {url: ...}); served by sightings_unavailable_form.
    Receives: requirement, vendor_name, reasons (UnavailabilityReason list),
-             current (annotated intel dict | None).
+             current (annotated intel dict | None), conditions (list[str]),
+             specific_reason_values (list[str]).
    On success: re-renders #sightings-detail and closes the modal. #}
 <div class="p-4">
   <h3 class="text-sm font-semibold text-gray-900 mb-1">Mark unavailable — {{ vendor_name }}</h3>
   <p class="text-[11px] text-gray-600 mb-3">
-    This applies to all of this vendor's listings of this MPN{% if requirement.primary_mpn %}
-    ({{ requirement.primary_mpn }}){% endif %} — every condition and variant shares one record.
-    While the mark is active, {{ vendor_name }} is left out of RFQ suggestions for this part.
+    A <strong>condition-specific</strong> mark (New / Refurb / Used) only suppresses
+    {{ vendor_name }}'s listings of {% if requirement.primary_mpn %}{{ requirement.primary_mpn }}{% else %}this part{% endif %}
+    in that condition — the vendor's other-condition listings and RFQ eligibility remain
+    intact. An <strong>All conditions</strong> mark suppresses everything (the default v1 behavior).
+    While active, {{ vendor_name }} is left out of RFQ suggestions for the affected condition(s).
   </p>
 
   {% if current %}
   <div class="mb-3 rounded-lg bg-gray-50 border border-gray-200 px-3 py-2 text-xs text-gray-600">
     <div>
-      Currently marked: <span class="font-medium">{{ current.reason_label }}</span>
+      Currently marked:
+      {% if current.condition %}<span class="font-medium">{{ current.condition|capitalize }}</span> — {% endif %}<span class="font-medium">{{ current.reason_label }}</span>
       {%- if current.note %} — <span class="italic">{{ current.note }}</span>{% endif %}
       · {{ current.age_days }}d ago{% if not current.is_active %} (no longer active){% endif %}
     </div>
@@ -38,7 +42,8 @@
   <form hx-post="/v2/partials/sightings/{{ requirement.id }}/mark-unavailable"
         hx-target="#sightings-detail" hx-swap="innerHTML"
         hx-on::after-request="if(event.detail.successful) $dispatch('close-modal')"
-        data-loading-disable class="space-y-3">
+        data-loading-disable class="space-y-3"
+        x-data='{{ {"specific": specific_reason_values, "reasonValue": (current.reason if current else "")}|tojson }}'>
 
     <input type="hidden" name="vendor_name" value="{{ vendor_name }}">
 
@@ -48,6 +53,7 @@
         {% for reason in reasons %}
         <label class="flex items-center gap-2 px-2 py-1 rounded hover:bg-gray-50 cursor-pointer">
           <input type="radio" name="reason" value="{{ reason.value }}" required
+                 x-model="reasonValue"
                  {% if current and current.reason == reason.value %}checked{% endif %}
                  class="border-gray-300 text-accent-600 focus:ring-accent-500">
           <span class="text-sm text-gray-700">{{ reason.label }}</span>
@@ -55,6 +61,19 @@
         {% endfor %}
       </div>
     </fieldset>
+
+    <div x-show="specific.includes(reasonValue)" x-cloak>
+      <label class="block text-xs text-gray-600 mb-1">Condition (optional)</label>
+      <select name="condition"
+              class="input text-sm">
+        <option value="">All conditions (catch-all)</option>
+        {% for c in conditions %}
+        <option value="{{ c }}"
+                {% if current and current.condition == c %}selected{% endif %}>{{ c|capitalize }}</option>
+        {% endfor %}
+      </select>
+      <p class="text-[11px] text-gray-400 mt-0.5">Leave as "All conditions" to suppress every condition.</p>
+    </div>
 
     <div>
       <label class="block text-xs text-gray-600 mb-1">Note (optional)</label>

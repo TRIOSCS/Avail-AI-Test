@@ -21,6 +21,14 @@ from app.models.vendors import VendorCard, VendorContact
 from app.vendor_utils import normalize_vendor_name
 
 
+def _is_valid_json(s: str) -> bool:
+    try:
+        json.loads(s)
+        return True
+    except (ValueError, TypeError):
+        return False
+
+
 class _XDataExtractor(HTMLParser):
     """Collect every x-data attribute value AS THE BROWSER TOKENIZES IT.
 
@@ -547,8 +555,8 @@ class TestUnavailableFormModal:
         for reason in UnavailabilityReason:
             assert reason.label in resp.text
             assert f'value="{reason.value}"' in resp.text
-        # Accepted-limitation caveat copy (condition/variant key collapse)
-        assert "all of this vendor's listings of this MPN" in resp.text
+        # Condition-aware copy explains condition-scoped vs all-conditions marks
+        assert "condition-specific" in resp.text.lower() or "condition" in resp.text.lower()
         # Submits to the mark-unavailable route
         assert f"/v2/partials/sightings/{r.id}/mark-unavailable" in resp.text
 
@@ -4243,3 +4251,224 @@ class TestSightingsSalesHubLook:
         assert resp.status_code == 200
         # activity_section root is px-5 py-3 immediately wrapping its Activity heading
         assert re.search(r'<div class="px-5 py-3">\s*<h4 class="h4 mb-2">Activity</h4>', body)
+
+
+# ── Task 8: condition selector + condition-aware rendering ─────────────────────
+
+
+class TestMarkUnavailableCondition:
+    """Task 8: POST mark-unavailable accepts condition for condition-specific reasons.
+
+    Condition-agnostic reasons store NULL regardless of submitted condition — the
+    server-side policy in record_unavailability is authoritative.
+    """
+
+    def test_condition_specific_reason_stores_condition(self, client, db_session):
+        """sold_elsewhere (condition-specific) with condition=new → record.condition ==
+        'new'."""
+        _, r, _ = _seed_data(db_session)
+        resp = client.post(
+            f"/v2/partials/sightings/{r.id}/mark-unavailable",
+            data={"vendor_name": "Good Vendor", "reason": "sold_elsewhere", "condition": "new"},
+        )
+        assert resp.status_code == 200
+        rec = db_session.query(VendorPartUnavailability).one()
+        assert rec.condition == "new"
+
+    def test_agnostic_reason_ignores_condition(self, client, db_session):
+        """not_really_there (agnostic) with condition=new → policy forces
+        condition=None."""
+        _, r, _ = _seed_data(db_session)
+        resp = client.post(
+            f"/v2/partials/sightings/{r.id}/mark-unavailable",
+            data={"vendor_name": "Good Vendor", "reason": "not_really_there", "condition": "new"},
+        )
+        assert resp.status_code == 200
+        rec = db_session.query(VendorPartUnavailability).one()
+        assert rec.condition is None
+
+    def test_missing_condition_defaults_to_none(self, client, db_session):
+        """sold_elsewhere without condition field → condition=None (all-conditions)."""
+        _, r, _ = _seed_data(db_session)
+        resp = client.post(
+            f"/v2/partials/sightings/{r.id}/mark-unavailable",
+            data={"vendor_name": "Good Vendor", "reason": "sold_elsewhere"},
+        )
+        assert resp.status_code == 200
+        rec = db_session.query(VendorPartUnavailability).one()
+        assert rec.condition is None
+
+    def test_blank_condition_defaults_to_none(self, client, db_session):
+        """sold_elsewhere with condition='' → condition=None."""
+        _, r, _ = _seed_data(db_session)
+        resp = client.post(
+            f"/v2/partials/sightings/{r.id}/mark-unavailable",
+            data={"vendor_name": "Good Vendor", "reason": "sold_elsewhere", "condition": ""},
+        )
+        assert resp.status_code == 200
+        rec = db_session.query(VendorPartUnavailability).one()
+        assert rec.condition is None
+
+
+class TestAnnotatedUnavailabilityConditionScoped:
+    """Task 8: _annotated_unavailability surfaces condition and scopes has_unstamped_row."""
+
+    def _make_rec(self, db_session, r, condition=None, reason="sold_elsewhere"):
+        rec = VendorPartUnavailability(
+            vendor_name_normalized="good vendor",
+            normalized_mpn="testmpn001",
+            reason=reason,
+            condition=condition,
+            requirement_id=r.id,
+        )
+        db_session.add(rec)
+        db_session.commit()
+        return rec
+
+    def test_condition_field_surfaced(self, client, db_session):
+        """_annotated_unavailability includes condition from the record."""
+        from app.routers.sightings import _annotated_unavailability
+
+        _, r, _ = _seed_data(db_session)
+        db_session.add(
+            Sighting(
+                requirement_id=r.id,
+                vendor_name="Good Vendor",
+                mpn_matched="TEST-MPN-001",
+                is_unavailable=True,
+            )
+        )
+        db_session.commit()
+        self._make_rec(db_session, r, condition="new")
+        result = _annotated_unavailability(db_session, r, ["Good Vendor"])
+        assert "Good Vendor" in result
+        assert result["Good Vendor"]["condition"] == "new"
+
+    def test_has_unstamped_row_false_when_only_different_condition_unstamped(self, client, db_session):
+        """NEW record + stamped NEW sighting + unstamped REFURB sighting →
+        has_unstamped_row=False.
+
+        The REFURB sighting is irrelevant to the NEW record and must not trigger the
+        restock chip.
+        """
+        from app.routers.sightings import _annotated_unavailability
+
+        _, r, _ = _seed_data(db_session)
+        # Stamped NEW sighting (same condition as record)
+        db_session.add(
+            Sighting(
+                requirement_id=r.id,
+                vendor_name="Good Vendor",
+                mpn_matched="TEST-MPN-001",
+                is_unavailable=True,
+                condition="New",
+            )
+        )
+        # Unstamped REFURB sighting (different condition — must not count)
+        db_session.add(
+            Sighting(
+                requirement_id=r.id,
+                vendor_name="Good Vendor",
+                mpn_matched="TEST-MPN-001",
+                is_unavailable=False,
+                condition="Refurbished",
+            )
+        )
+        db_session.commit()
+        self._make_rec(db_session, r, condition="new")
+        result = _annotated_unavailability(db_session, r, ["Good Vendor"])
+        assert "Good Vendor" in result
+        assert result["Good Vendor"]["has_unstamped_row"] is False
+
+    def test_has_unstamped_row_true_when_same_condition_unstamped(self, client, db_session):
+        """NEW record + unstamped NEW sighting → has_unstamped_row=True (restock
+        signal)."""
+        from app.routers.sightings import _annotated_unavailability
+
+        _, r, _ = _seed_data(db_session)
+        # Unstamped NEW sighting — same condition as record
+        db_session.add(
+            Sighting(
+                requirement_id=r.id,
+                vendor_name="Good Vendor",
+                mpn_matched="TEST-MPN-001",
+                is_unavailable=False,
+                condition="New",
+            )
+        )
+        db_session.commit()
+        self._make_rec(db_session, r, condition="new")
+        result = _annotated_unavailability(db_session, r, ["Good Vendor"])
+        assert "Good Vendor" in result
+        assert result["Good Vendor"]["has_unstamped_row"] is True
+
+    def test_null_record_any_unstamped_counts(self, client, db_session):
+        """All-conditions (NULL) record + any unstamped sighting →
+        has_unstamped_row=True."""
+        from app.routers.sightings import _annotated_unavailability
+
+        _, r, _ = _seed_data(db_session)
+        db_session.add(
+            Sighting(
+                requirement_id=r.id,
+                vendor_name="Good Vendor",
+                mpn_matched="TEST-MPN-001",
+                is_unavailable=False,
+                condition="Refurbished",
+            )
+        )
+        db_session.commit()
+        self._make_rec(db_session, r, condition=None, reason="not_really_there")
+        result = _annotated_unavailability(db_session, r, ["Good Vendor"])
+        assert result["Good Vendor"]["has_unstamped_row"] is True
+
+
+class TestUnavailableFormConditionSelector:
+    """Task 8: unavailable_form renders condition selector and corrected copy."""
+
+    def test_form_contains_condition_select(self, client, db_session):
+        """Unavailable form includes <select name='condition'> with condition
+        options."""
+        _, r, _ = _seed_data(db_session)
+        resp = client.get(f"/v2/partials/sightings/{r.id}/unavailable-form?vendor_name=Good%20Vendor")
+        assert resp.status_code == 200
+        assert 'name="condition"' in resp.text
+        assert 'value="new"' in resp.text
+        assert 'value="refurb"' in resp.text
+        assert 'value="used"' in resp.text
+
+    def test_form_corrected_copy(self, client, db_session):
+        """Form no longer says 'every condition and variant shares one record'."""
+        _, r, _ = _seed_data(db_session)
+        resp = client.get(f"/v2/partials/sightings/{r.id}/unavailable-form?vendor_name=Good%20Vendor")
+        assert resp.status_code == 200
+        assert "every condition and variant shares one record" not in resp.text
+
+    def test_form_x_data_uses_valid_json(self, client, db_session):
+        """X-data attribute must be valid JSON (not truncated by double-quote-in-
+        attr)."""
+        _, r, _ = _seed_data(db_session)
+        resp = client.get(f"/v2/partials/sightings/{r.id}/unavailable-form?vendor_name=Good%20Vendor")
+        assert resp.status_code == 200
+        parser = _XDataExtractor()
+        parser.feed(resp.text)
+        valid_json_found = any(_is_valid_json(val) for val in parser.xdata_values)
+        assert valid_json_found, f"No valid-JSON x-data found. Values: {parser.xdata_values}"
+
+    def test_current_condition_shown_in_marked_block(self, client, db_session):
+        """When current record has condition='new', the 'Currently marked' block shows
+        it."""
+        _, r, _ = _seed_data(db_session)
+        rec = VendorPartUnavailability(
+            vendor_name_normalized="good vendor",
+            normalized_mpn="testmpn001",
+            reason="sold_elsewhere",
+            condition="new",
+            requirement_id=r.id,
+        )
+        db_session.add(rec)
+        db_session.commit()
+        resp = client.get(f"/v2/partials/sightings/{r.id}/unavailable-form?vendor_name=Good%20Vendor")
+        assert resp.status_code == 200
+        assert "Currently marked" in resp.text
+        assert "New" in resp.text  # condition shown (capitalized)

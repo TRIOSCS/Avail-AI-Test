@@ -31,6 +31,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from ..config import settings
 from ..constants import (
+    CONDITION_SPECIFIC_REASONS,
     AccessKey,
     ActivityType,
     OfferStatus,
@@ -73,6 +74,7 @@ from ..services.vendor_unavailability import (
 )
 from ..template_env import template_response
 from ..utils import safe_float, safe_int
+from ..utils.normalization import normalize_condition
 from ..utils.sql_helpers import escape_like
 from ..vendor_utils import normalize_vendor_name
 
@@ -201,7 +203,10 @@ def _annotated_unavailability(
     if not raw:
         return {}
     rows = db.query(Sighting).filter(Sighting.requirement_id == requirement.id).all()
-    unstamped_norms = {sighting_vendor_norm(s) for s in rows if not s.is_unavailable}
+    # Group sightings by vendor norm for condition-scoped has_unstamped_row computation.
+    sightings_by_vendor: dict[str, list[Sighting]] = {}
+    for s in rows:
+        sightings_by_vendor.setdefault(sighting_vendor_norm(s), []).append(s)
     creator_ids = {i.record.created_by_id for i in raw.values() if i.record.created_by_id is not None}
     creator_names: dict[int, str] = (
         dict(db.query(User.id, User.name).filter(User.id.in_(creator_ids)).all()) if creator_ids else {}
@@ -209,6 +214,15 @@ def _annotated_unavailability(
     annotated: dict[str, dict[str, Any]] = {}
     for vendor_name, item in raw.items():
         rec = item.record
+        vendor_norm = normalize_vendor_name(vendor_name)
+        # An unstamped sighting only counts when it matches the record's condition:
+        # NULL record (all-conditions) → any unstamped sighting counts.
+        # Specific-condition record → only same-condition unstamped sightings count.
+        rec_cond = rec.condition
+        has_unstamped_row = any(
+            not s.is_unavailable and (rec_cond is None or normalize_condition(s.condition) == rec_cond)
+            for s in sightings_by_vendor.get(vendor_norm, [])
+        )
         annotated[vendor_name] = {
             "is_active": item.is_active,
             "age_days": item.age_days,
@@ -221,7 +235,8 @@ def _annotated_unavailability(
             "note": rec.note,
             "qty_at_mark": rec.qty_at_mark,
             "marked_by": creator_names.get(rec.created_by_id),
-            "has_unstamped_row": normalize_vendor_name(vendor_name) in unstamped_norms,
+            "condition": rec_cond,
+            "has_unstamped_row": has_unstamped_row,
         }
     return annotated
 
@@ -1061,6 +1076,8 @@ async def sightings_unavailable_form(
         "vendor_name": vendor_name,
         "reasons": list(UnavailabilityReason),
         "current": current,
+        "conditions": ["new", "refurb", "used", "other"],
+        "specific_reason_values": [r.value for r in CONDITION_SPECIFIC_REASONS],
     }
     return template_response("htmx/partials/sightings/unavailable_form.html", ctx)
 
@@ -1114,6 +1131,7 @@ async def sightings_mark_unavailable(
             request, requirement_id, db, user, f"reason is required and must be one of: {valid}"
         )
     note = str(form.get("note") or "") or None
+    condition = str(form.get("condition") or "").strip() or None
 
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
@@ -1121,7 +1139,7 @@ async def sightings_mark_unavailable(
     require_requisition_access(db, requirement.requisition_id, user)
 
     try:
-        record_unavailability(db, requirement, vendor_name, reason, note, user)
+        record_unavailability(db, requirement, vendor_name, reason, note, user, condition=condition)
     except ValueError as exc:
         db.rollback()
         return await _mark_error_response(request, requirement_id, db, user, str(exc))
