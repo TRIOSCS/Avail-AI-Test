@@ -286,3 +286,25 @@ class TestSaveFreeformOffers:
         offer = db_session.get(Offer, result["offer_ids"][0])
         assert offer.condition == "new"
         assert offer.currency == "USD"
+
+    @patch("app.search_service.resolve_material_card", return_value=None)
+    @patch("app.services.ai_offer_service.maybe_release_on_offer")
+    def test_forwards_offer_condition_to_release_hook(
+        self, mock_release, mock_resolve, db_session: Session, test_requisition, test_user
+    ):
+        """save_freeform_offers must forward offer.condition as offer_condition to
+        maybe_release_on_offer.
+
+        RED before Task-7 adds offer_condition=offer.condition to the call site.
+        """
+        offer_in = _make_offer_input(condition="refurbished")
+        save_freeform_offers(db_session, test_requisition.id, [offer_in], test_user.id)
+
+        assert mock_release.called, "maybe_release_on_offer was not called at all"
+        _args, kwargs = mock_release.call_args
+        forwarded_condition = kwargs.get("offer_condition", _args[4] if len(_args) > 4 else "NOT_PASSED")
+        assert forwarded_condition == "refurbished", (
+            f"Expected offer_condition='refurbished' forwarded to maybe_release_on_offer "
+            f"but got: {forwarded_condition!r}. "
+            "Task-7: add offer_condition=offer.condition to the call site."
+        )

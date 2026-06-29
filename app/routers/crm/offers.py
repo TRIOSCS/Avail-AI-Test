@@ -451,7 +451,7 @@ async def create_offer(
     # vendor's matching active unavailability records ('offer_received'). Same
     # session/commit as the offer itself.
     if offer.status == OfferStatus.ACTIVE:
-        maybe_release_on_offer(db, offer.requirement_id, offer.vendor_name, user)
+        maybe_release_on_offer(db, offer.requirement_id, offer.vendor_name, user, offer_condition=offer.condition)
 
     log_activity(
         db,
@@ -673,7 +673,7 @@ async def approve_offer(
     record_changes(db, "offer", offer_id, user.id, {"status": old_status}, {"status": "active"}, ["status"])
     # Offer hook: user approval of a pending offer is user-initiated proof of
     # availability — release the vendor's matching active unavailability records.
-    maybe_release_on_offer(db, offer.requirement_id, offer.vendor_name, user)
+    maybe_release_on_offer(db, offer.requirement_id, offer.vendor_name, user, offer_condition=offer.condition)
     _log_offer_status_change(db, offer, old_status, user)
     db.commit()
     return {"ok": True, "status": "active"}
@@ -971,7 +971,7 @@ async def promote_offer(
     offer.promoted_at = datetime.now(timezone.utc)
     # Offer hook: user promotion of a pending offer is user-initiated proof of
     # availability — release the vendor's matching active unavailability records.
-    maybe_release_on_offer(db, offer.requirement_id, offer.vendor_name, user)
+    maybe_release_on_offer(db, offer.requirement_id, offer.vendor_name, user, offer_condition=offer.condition)
     _log_offer_status_change(db, offer, old_status, user)
     db.commit()
 

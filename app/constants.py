@@ -942,6 +942,16 @@ class UnavailabilityReason(StrEnum):
         """Human display label for this reason."""
         return _UNAVAILABILITY_REASON_LABELS[self]
 
+    @property
+    def condition_specific(self) -> bool:
+        """True if this reason's mark is condition-scoped (a specific lot/unit is gone;
+        the vendor may still have other-condition stock).
+
+        False if condition-agnostic (the part isn't there in ANY condition) and the mark
+        always stores condition = NULL.
+        """
+        return self in CONDITION_SPECIFIC_REASONS
+
 
 # Display labels for UnavailabilityReason, kept beside the enum. The .label property
 # is the only reader — templates/services go through it, never duplicate these strings.
@@ -953,6 +963,13 @@ _UNAVAILABILITY_REASON_LABELS: dict[UnavailabilityReason, str] = {
     UnavailabilityReason.DIFFERENT_PART: "Different part number",
     UnavailabilityReason.OTHER: "Other",
 }
+
+# Reasons whose mark is condition-scoped (a specific lot/unit is gone; the vendor
+# may still have other-condition stock). The other reasons are condition-agnostic
+# (the part isn't there in ANY condition) and always store condition = NULL.
+CONDITION_SPECIFIC_REASONS: frozenset[UnavailabilityReason] = frozenset(
+    {UnavailabilityReason.BOUGHT_BY_US, UnavailabilityReason.SOLD_ELSEWHERE, UnavailabilityReason.BROKEN}
+)
 
 
 class ReleaseTrigger(StrEnum):

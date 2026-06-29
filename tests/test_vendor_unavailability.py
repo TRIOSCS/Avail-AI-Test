@@ -144,6 +144,123 @@ class TestVendorPartUnavailabilityModel:
             db_session.commit()
         db_session.rollback()
 
+    def test_condition_validator_accepts_valid_values(self, db_session: Session):
+        for cond in ("new", "refurb", "used", None):
+            record = VendorPartUnavailability(
+                vendor_name_normalized="acme components",
+                normalized_mpn="CONDVALID",
+                reason=UnavailabilityReason.OTHER,
+                condition=cond,
+            )
+            db_session.add(record)
+            db_session.flush()
+            assert record.condition == cond
+            db_session.rollback()
+
+    def test_condition_validator_rejects_other(self):
+        """'other' is no longer a valid condition vocab for vendor_part_unavailability —
+        normalize_condition() never produces it, so a stored 'other' would be
+        permanently inert (never matches any sighting)."""
+        with pytest.raises(ValueError):
+            VendorPartUnavailability(
+                vendor_name_normalized="acme components",
+                normalized_mpn="CONDTEST",
+                reason=UnavailabilityReason.OTHER,
+                condition="other",
+            )
+
+    def test_condition_validator_rejects_off_vocab(self):
+        with pytest.raises(ValueError):
+            VendorPartUnavailability(
+                vendor_name_normalized="acme components",
+                normalized_mpn="CONDTEST",
+                reason=UnavailabilityReason.OTHER,
+                condition="broken",  # not in the condition vocabulary
+            )
+
+    def test_two_same_condition_rows_same_vendor_mpn_raises_integrity_error(self, db_session: Session):
+        """Two rows with the same non-NULL condition → hits the partial unique index
+        WHERE condition IS NOT NULL."""
+        db_session.add(
+            VendorPartUnavailability(
+                vendor_name_normalized="acme components",
+                normalized_mpn="CONDDUP",
+                reason=UnavailabilityReason.BROKEN,
+                condition="new",
+            )
+        )
+        db_session.commit()
+
+        db_session.add(
+            VendorPartUnavailability(
+                vendor_name_normalized="acme components",
+                normalized_mpn="CONDDUP",
+                reason=UnavailabilityReason.SOLD_ELSEWHERE,
+                condition="new",
+            )
+        )
+        with pytest.raises(IntegrityError):
+            db_session.commit()
+        db_session.rollback()
+
+    def test_two_null_condition_rows_same_vendor_mpn_raises_integrity_error(self, db_session: Session):
+        """Two rows with condition=NULL → hits the partial unique index WHERE condition
+        IS NULL."""
+        db_session.add(
+            VendorPartUnavailability(
+                vendor_name_normalized="acme components",
+                normalized_mpn="NULLDUP",
+                reason=UnavailabilityReason.BROKEN,
+                condition=None,
+            )
+        )
+        db_session.commit()
+
+        db_session.add(
+            VendorPartUnavailability(
+                vendor_name_normalized="acme components",
+                normalized_mpn="NULLDUP",
+                reason=UnavailabilityReason.SOLD_ELSEWHERE,
+                condition=None,
+            )
+        )
+        with pytest.raises(IntegrityError):
+            db_session.commit()
+        db_session.rollback()
+
+    def test_distinct_conditions_coexist(self, db_session: Session):
+        """New + refurb + NULL rows for one (vendor, mpn) must coexist without error."""
+        db_session.add_all(
+            [
+                VendorPartUnavailability(
+                    vendor_name_normalized="acme components",
+                    normalized_mpn="COEXIST",
+                    reason=UnavailabilityReason.BROKEN,
+                    condition="new",
+                ),
+                VendorPartUnavailability(
+                    vendor_name_normalized="acme components",
+                    normalized_mpn="COEXIST",
+                    reason=UnavailabilityReason.SOLD_ELSEWHERE,
+                    condition="refurb",
+                ),
+                VendorPartUnavailability(
+                    vendor_name_normalized="acme components",
+                    normalized_mpn="COEXIST",
+                    reason=UnavailabilityReason.OTHER,
+                    condition=None,
+                ),
+            ]
+        )
+        db_session.commit()  # must not raise
+
+        rows = (
+            db_session.query(VendorPartUnavailability)
+            .filter_by(vendor_name_normalized="acme components", normalized_mpn="coexist")
+            .all()
+        )
+        assert len(rows) == 3
+
     def test_same_mpn_different_vendor_is_allowed(self, db_session: Session):
         db_session.add(
             VendorPartUnavailability(
@@ -192,6 +309,7 @@ def _make_sighting(
     source_type: str | None = None,
     is_authorized: bool = False,
     vendor_name_normalized: str | None = "__derive__",
+    condition: str | None = None,
 ) -> Sighting:
     s = Sighting(
         requirement_id=requirement.id,
@@ -203,6 +321,7 @@ def _make_sighting(
         qty_available=qty_available,
         source_type=source_type,
         is_authorized=is_authorized,
+        condition=condition,
     )
     db_session.add(s)
     db_session.flush()
@@ -219,6 +338,7 @@ def _make_record(
     released_at: datetime | None = None,
     release_trigger: str | None = None,
     requirement_id: int | None = None,
+    condition: str | None = None,
 ) -> VendorPartUnavailability:
     rec = VendorPartUnavailability(
         vendor_name_normalized=vendor_norm,
@@ -229,6 +349,7 @@ def _make_record(
         released_at=released_at,
         release_trigger=release_trigger,
         requirement_id=requirement_id,
+        condition=condition,
     )
     db_session.add(rec)
     db_session.flush()
@@ -368,6 +489,32 @@ class TestRecordUnavailability:
 
 
 class TestClearUnavailability:
+    def test_clear_removes_all_coexisting_condition_rows(self, db_session: Session, test_user: User):
+        """clear_unavailability is condition-blind — it must remove ALL coexisting
+        (vendor, key) rows regardless of their condition (NULL + 'new' + 'refurb').
+
+        Guards against a future bug where clearing only targets the NULL record and
+        leaves condition-specific rows as ghosts.
+        """
+        requirement = _make_requirement(db_session, primary_mpn="ST3300657SS")
+        _make_sighting(db_session, requirement, "Acme Components", mpn_matched="ST3300657SS")
+        # Seed three coexisting rows for the same (vendor, key)
+        _make_record(db_session, condition=None, requirement_id=requirement.id)
+        _make_record(db_session, condition="new", requirement_id=requirement.id)
+        _make_record(db_session, condition="refurb", requirement_id=requirement.id)
+        db_session.commit()
+        assert (
+            db_session.query(VendorPartUnavailability).filter_by(vendor_name_normalized="acme components").count() == 3
+        )
+
+        deleted = clear_unavailability(db_session, requirement, "Acme Components", test_user)
+        db_session.commit()
+
+        assert deleted == 3
+        assert (
+            db_session.query(VendorPartUnavailability).filter_by(vendor_name_normalized="acme components").count() == 0
+        )
+
     def test_clear_deletes_records_unflags_sightings_logs_activity(self, db_session: Session, test_user: User):
         requirement = _make_requirement(db_session, primary_mpn="ST3300657SS")
         s1 = _make_sighting(db_session, requirement, "Acme Components", mpn_matched="ALT-123")
@@ -538,6 +685,39 @@ class TestUnavailabilityForRequirement:
         # release_trigger is read through the record — the ORM object is the single
         # source of truth (no copied field on the dataclass).
         assert released.record.release_trigger == ReleaseTrigger.OFFER_RECEIVED
+
+    def test_prefers_active_null_record_over_newer_specific_condition(self, db_session: Session):
+        """FIX 4: with an active NULL catch-all (older) and an active 'new' record
+        (newer), the annotation must reflect the NULL record — it is the broadest
+        active suppressor and the one that actually pins the vendor as fully dark."""
+        requirement = _make_requirement(db_session, primary_mpn="AAA-111")
+
+        # Older NULL record — should be preferred because it is the broadest suppressor
+        null_rec = VendorPartUnavailability(
+            vendor_name_normalized="acme components",
+            normalized_mpn=normalize_mpn_key("AAA-111"),
+            reason=UnavailabilityReason.SOLD_ELSEWHERE,
+            created_at=datetime.now(timezone.utc) - timedelta(days=5),
+            condition=None,
+        )
+        # Newer specific-condition record — newer but narrower
+        new_rec = VendorPartUnavailability(
+            vendor_name_normalized="acme components",
+            normalized_mpn=normalize_mpn_key("AAA-111"),
+            reason=UnavailabilityReason.BOUGHT_BY_US,
+            created_at=datetime.now(timezone.utc),
+            condition="new",
+        )
+        db_session.add_all([null_rec, new_rec])
+        db_session.commit()
+
+        intel = unavailability_for_requirement(db_session, requirement, ["Acme Components"])
+
+        assert "Acme Components" in intel
+        assert intel["Acme Components"].record.id == null_rec.id, (
+            "Active NULL catch-all must be preferred over a newer specific-condition record"
+        )
+        assert intel["Acme Components"].record.condition is None
 
     def test_empty_vendor_names(self, db_session: Session):
         requirement = _make_requirement(db_session, primary_mpn="AAA-111")
@@ -2203,3 +2383,481 @@ class TestModelTransitionsAndConstraints:
     def test_empty_key_normalization_raises(self, column: str):
         with pytest.raises(ValueError):
             self._record(**{column: "   "})
+
+
+# ── Task 4: condition-aware record_unavailability ─────────────────────────────
+
+
+class TestConditionAwareRecord:
+    """record_unavailability condition param: specific reasons store condition,
+    agnostic reasons ignore it; stamp loop is condition-scoped; per-(key,condition)
+    qty snapshots; two coexisting rows for different conditions; backward compat."""
+
+    def test_specific_reason_stores_condition_and_stamps_only_matching_sightings(
+        self, db_session: Session, test_user: User
+    ):
+        """SOLD_ELSEWHERE + condition='new' → record.condition='new'; stamps only
+        sightings with condition='new', not refurb or None."""
+        requirement = _make_requirement(db_session, primary_mpn="ST3300657SS")
+        s_new = _make_sighting(db_session, requirement, "Acme Components", mpn_matched="ST3300657SS", condition="new")
+        s_refurb = _make_sighting(
+            db_session, requirement, "Acme Components", mpn_matched="ST3300657SS", condition="refurb"
+        )
+        s_none = _make_sighting(db_session, requirement, "Acme Components", mpn_matched="ST3300657SS", condition=None)
+
+        written = record_unavailability(
+            db_session,
+            requirement,
+            "Acme Components",
+            UnavailabilityReason.SOLD_ELSEWHERE,
+            None,
+            test_user,
+            condition="new",
+        )
+        db_session.commit()
+
+        assert written == 1
+        records = _records(db_session, "acme components")
+        assert len(records) == 1
+        assert records[0].condition == "new"
+        assert s_new.is_unavailable is True
+        assert bool(s_refurb.is_unavailable) is False
+        assert bool(s_none.is_unavailable) is False
+
+    def test_agnostic_reason_ignores_condition_param_stores_none_stamps_all(self, db_session: Session, test_user: User):
+        """NOT_REALLY_THERE + condition='new' → stored condition=None, stamps all
+        sightings regardless of condition."""
+        requirement = _make_requirement(db_session, primary_mpn="ST3300657SS")
+        s_new = _make_sighting(db_session, requirement, "Acme Components", mpn_matched="ST3300657SS", condition="new")
+        s_refurb = _make_sighting(
+            db_session, requirement, "Acme Components", mpn_matched="ST3300657SS", condition="refurb"
+        )
+        s_none = _make_sighting(db_session, requirement, "Acme Components", mpn_matched="ST3300657SS", condition=None)
+
+        record_unavailability(
+            db_session,
+            requirement,
+            "Acme Components",
+            UnavailabilityReason.NOT_REALLY_THERE,
+            None,
+            test_user,
+            condition="new",
+        )
+        db_session.commit()
+
+        records = _records(db_session, "acme components")
+        assert len(records) == 1
+        assert records[0].condition is None
+        assert s_new.is_unavailable is True
+        assert s_refurb.is_unavailable is True
+        assert s_none.is_unavailable is True
+
+    def test_off_vocab_condition_for_specific_reason_stores_none(self, db_session: Session, test_user: User):
+        """Off-vocab condition string for a specific reason normalizes to None."""
+        requirement = _make_requirement(db_session, primary_mpn="ST3300657SS")
+        _make_sighting(db_session, requirement, "Acme Components", mpn_matched="ST3300657SS")
+
+        record_unavailability(
+            db_session,
+            requirement,
+            "Acme Components",
+            UnavailabilityReason.SOLD_ELSEWHERE,
+            None,
+            test_user,
+            condition="garbage_vocab",
+        )
+        db_session.commit()
+
+        records = _records(db_session, "acme components")
+        assert len(records) == 1
+        assert records[0].condition is None
+
+    def test_none_condition_for_specific_reason_stores_none(self, db_session: Session, test_user: User):
+        """None condition for a specific reason → stored condition=None."""
+        requirement = _make_requirement(db_session, primary_mpn="ST3300657SS")
+        _make_sighting(db_session, requirement, "Acme Components", mpn_matched="ST3300657SS")
+
+        record_unavailability(
+            db_session,
+            requirement,
+            "Acme Components",
+            UnavailabilityReason.BOUGHT_BY_US,
+            None,
+            test_user,
+            condition=None,
+        )
+        db_session.commit()
+
+        records = _records(db_session, "acme components")
+        assert len(records) == 1
+        assert records[0].condition is None
+
+    def test_remark_new_then_refurb_creates_two_coexisting_rows(self, db_session: Session, test_user: User):
+        """Re-marking same (vendor,key) with condition='new' then condition='refurb'
+        creates two coexisting rows — different conditions are different rows."""
+        requirement = _make_requirement(db_session, primary_mpn="ST3300657SS")
+        _make_sighting(db_session, requirement, "Acme Components", mpn_matched="ST3300657SS")
+
+        record_unavailability(
+            db_session,
+            requirement,
+            "Acme Components",
+            UnavailabilityReason.SOLD_ELSEWHERE,
+            None,
+            test_user,
+            condition="new",
+        )
+        db_session.commit()
+
+        record_unavailability(
+            db_session,
+            requirement,
+            "Acme Components",
+            UnavailabilityReason.SOLD_ELSEWHERE,
+            None,
+            test_user,
+            condition="refurb",
+        )
+        db_session.commit()
+
+        records = _records(db_session, "acme components")
+        assert len(records) == 2
+        conditions = {r.condition for r in records}
+        assert conditions == {"new", "refurb"}
+
+    def test_qty_at_mark_per_key_condition_snapshots(self, db_session: Session, test_user: User):
+        """Refurb mark snapshots the refurb-sighting max; NULL mark snapshots the all-
+        conditions max across both."""
+        requirement = _make_requirement(db_session, primary_mpn="ST3300657SS")
+        _make_sighting(
+            db_session, requirement, "Acme Components", mpn_matched="ST3300657SS", qty_available=100, condition="new"
+        )
+        _make_sighting(
+            db_session, requirement, "Acme Components", mpn_matched="ST3300657SS", qty_available=5, condition="refurb"
+        )
+
+        # refurb mark → snapshots only refurb qty
+        record_unavailability(
+            db_session,
+            requirement,
+            "Acme Components",
+            UnavailabilityReason.SOLD_ELSEWHERE,
+            None,
+            test_user,
+            condition="refurb",
+        )
+        db_session.commit()
+
+        records = _records(db_session, "acme components")
+        assert len(records) == 1
+        assert records[0].condition == "refurb"
+        assert records[0].qty_at_mark == 5
+
+    def test_null_mark_snapshots_all_conditions_max(self, db_session: Session, test_user: User):
+        """A NULL-condition mark (agnostic or off-vocab) snapshots max across all
+        sightings for the key regardless of their condition."""
+        requirement = _make_requirement(db_session, primary_mpn="ST3300657SS")
+        _make_sighting(
+            db_session, requirement, "Acme Components", mpn_matched="ST3300657SS", qty_available=100, condition="new"
+        )
+        _make_sighting(
+            db_session, requirement, "Acme Components", mpn_matched="ST3300657SS", qty_available=5, condition="refurb"
+        )
+
+        record_unavailability(
+            db_session,
+            requirement,
+            "Acme Components",
+            UnavailabilityReason.NOT_REALLY_THERE,  # agnostic — cond=None
+            None,
+            test_user,
+            condition="new",  # ignored for agnostic reason
+        )
+        db_session.commit()
+
+        records = _records(db_session, "acme components")
+        assert len(records) == 1
+        assert records[0].condition is None
+        assert records[0].qty_at_mark == 100  # max across new(100) + refurb(5)
+
+
+# ── Task 5: condition-aware apply (multimap) + release + RFQ exclusion ───────
+
+
+class TestApplyConditionGate:
+    """apply_to_fresh_sightings condition gate: a record suppresses only sightings
+    whose canonical condition matches (or the record has NULL = all-conditions)."""
+
+    def test_new_record_does_not_stamp_refurb_sighting(self, db_session: Session):
+        """A 'new'-condition record must NOT stamp a 'refurb' sighting."""
+        requirement = _make_requirement(db_session)
+        _make_record(db_session, condition="new")
+        row = _make_sighting(db_session, requirement, "Acme Components", mpn_matched="ST3300657SS", condition="refurb")
+
+        count = apply_to_fresh_sightings(db_session, requirement, [row])
+
+        assert count == 0
+        assert bool(row.is_unavailable) is False
+
+    def test_new_record_stamps_new_sighting(self, db_session: Session):
+        """A 'new'-condition record stamps a 'new' sighting."""
+        requirement = _make_requirement(db_session)
+        _make_record(db_session, condition="new")
+        row = _make_sighting(db_session, requirement, "Acme Components", mpn_matched="ST3300657SS", condition="new")
+
+        count = apply_to_fresh_sightings(db_session, requirement, [row])
+
+        assert count == 1
+        assert row.is_unavailable is True
+
+    def test_null_record_stamps_all_condition_sightings(self, db_session: Session):
+        """A NULL (all-conditions) record stamps sightings of any condition, including
+        refurb, new, and None."""
+        requirement = _make_requirement(db_session)
+        _make_record(db_session, condition=None)
+        row_new = _make_sighting(db_session, requirement, "Acme Components", mpn_matched="ST3300657SS", condition="new")
+        row_refurb = _make_sighting(
+            db_session, requirement, "Acme Components", mpn_matched="ST3300657SS", condition="refurb"
+        )
+        row_none = _make_sighting(db_session, requirement, "Acme Components", mpn_matched="ST3300657SS", condition=None)
+
+        count = apply_to_fresh_sightings(db_session, requirement, [row_new, row_refurb, row_none])
+
+        assert count == 3
+        assert row_new.is_unavailable is True
+        assert row_refurb.is_unavailable is True
+        assert row_none.is_unavailable is True
+
+    def test_new_record_condition_uses_normalized_sighting_condition(self, db_session: Session):
+        """normalize_condition is called on s.condition before the gate, so a raw
+        display string that normalizes to 'refurb' IS stamped by a 'refurb' record.
+
+        Uses sighting condition='Refurbished' (raw) which normalize_condition maps to
+        'refurb' — if the normalization call were absent, 'Refurbished' != 'refurb' and
+        the test would return count==0 (false negative). This exercises the real
+        normalize_condition path, not a pre-canonicalized value.
+        """
+        requirement = _make_requirement(db_session)
+        _make_record(db_session, condition="refurb")
+        # 'Refurbished' is a raw display form; normalize_condition → 'refurb'
+        row = _make_sighting(
+            db_session, requirement, "Acme Components", mpn_matched="ST3300657SS", condition="Refurbished"
+        )
+
+        count = apply_to_fresh_sightings(db_session, requirement, [row])
+
+        assert count == 1
+        assert row.is_unavailable is True
+
+
+class TestApplyMultimap:
+    """apply_to_fresh_sightings multimap: both NULL and condition-specific records
+    for the same (vendor, key) must be evaluated — not just whichever the dict
+    comprehension happened to keep last."""
+
+    def test_null_active_new_released_stamps_refurb(self, db_session: Session):
+        """(vendor, key) with an ACTIVE NULL record and a RELEASED 'new' record.
+
+        The old dict-comprehension keeps one record; if it keeps the released 'new'
+        record the function incorrectly returns 0. The multimap fix evaluates both: the
+        NULL (active) record fires → stamps the refurb sighting.
+        """
+        requirement = _make_requirement(db_session)
+        # NULL record: active
+        _make_record(db_session, condition=None)
+        # 'new' record: released — must not block the NULL from stamping
+        _make_record(
+            db_session,
+            condition="new",
+            released_at=datetime.now(timezone.utc),
+            release_trigger=ReleaseTrigger.OFFER_RECEIVED,
+        )
+
+        row = _make_sighting(db_session, requirement, "Acme Components", mpn_matched="ST3300657SS", condition="refurb")
+
+        count = apply_to_fresh_sightings(db_session, requirement, [row])
+
+        assert count == 1
+        assert row.is_unavailable is True
+
+    def test_refurb_sighting_stamped_by_null_record_never_by_new_alone(self, db_session: Session):
+        """With both NULL (active) and 'new' (active) records, a REFURB sighting is
+        stamped because the NULL matches; removing the NULL makes it 0."""
+        requirement = _make_requirement(db_session)
+        _make_record(db_session, condition=None)  # active, matches all
+        _make_record(db_session, condition="new")  # active, matches only 'new'
+
+        row = _make_sighting(db_session, requirement, "Acme Components", mpn_matched="ST3300657SS", condition="refurb")
+
+        count = apply_to_fresh_sightings(db_session, requirement, [row])
+
+        # NULL record → should stamp the refurb sighting
+        assert count == 1
+        assert row.is_unavailable is True
+
+
+class TestReleaseConditionAware:
+    """release_on_offer condition-aware filtering: a known offer_condition releases
+    matching + NULL records but leaves other-condition records intact; unknown
+    (None) offer_condition releases all active non-different_part records."""
+
+    def test_known_condition_releases_matching_and_null_leaves_other(self, db_session: Session, test_user: User):
+        """offer_condition='new' releases the 'new' record AND the NULL (all-conditions)
+        record, but leaves the 'refurb' record untouched."""
+        requirement = _make_requirement(db_session, primary_mpn="ST3300657SS")
+        _make_sighting(db_session, requirement, "Acme Components", mpn_matched="ST3300657SS")
+
+        rec_new = _make_record(db_session, condition="new", requirement_id=requirement.id)
+        rec_refurb = _make_record(db_session, condition="refurb", requirement_id=requirement.id)
+        rec_null = _make_record(db_session, condition=None, requirement_id=requirement.id)
+        db_session.commit()
+
+        released = release_on_offer(db_session, requirement, "Acme Components", test_user, offer_condition="new")
+        db_session.commit()
+
+        assert released == 2  # 'new' + NULL
+        assert rec_new.released_at is not None
+        assert rec_new.release_trigger == ReleaseTrigger.OFFER_RECEIVED
+        assert rec_null.released_at is not None
+        assert rec_null.release_trigger == ReleaseTrigger.OFFER_RECEIVED
+        assert rec_refurb.released_at is None  # left intact
+
+    def test_none_condition_releases_all_active_non_different_part(self, db_session: Session, test_user: User):
+        """offer_condition=None (unknown) → v1 behavior: all active non-different_part
+        records are released regardless of their condition."""
+        requirement = _make_requirement(db_session, primary_mpn="ST3300657SS")
+        _make_sighting(db_session, requirement, "Acme Components", mpn_matched="ST3300657SS")
+
+        rec_new = _make_record(db_session, condition="new", requirement_id=requirement.id)
+        rec_refurb = _make_record(db_session, condition="refurb", requirement_id=requirement.id)
+        rec_null = _make_record(db_session, condition=None, requirement_id=requirement.id)
+        db_session.commit()
+
+        released = release_on_offer(db_session, requirement, "Acme Components", test_user, offer_condition=None)
+        db_session.commit()
+
+        assert released == 3  # all active records released
+        assert rec_new.released_at is not None
+        assert rec_refurb.released_at is not None
+        assert rec_null.released_at is not None
+
+    def test_off_vocab_condition_normalizes_to_none_releases_all(self, db_session: Session, test_user: User):
+        """offer_condition='other' normalizes to None → releases all active non-
+        different_part records (same as None)."""
+        requirement = _make_requirement(db_session, primary_mpn="ST3300657SS")
+        _make_sighting(db_session, requirement, "Acme Components", mpn_matched="ST3300657SS")
+
+        rec_new = _make_record(db_session, condition="new", requirement_id=requirement.id)
+        rec_refurb = _make_record(db_session, condition="refurb", requirement_id=requirement.id)
+        db_session.commit()
+
+        # "other" → normalize_condition → None → v1 behavior
+        released = release_on_offer(db_session, requirement, "Acme Components", test_user, offer_condition="other")
+        db_session.commit()
+
+        assert released == 2
+        assert rec_new.released_at is not None
+        assert rec_refurb.released_at is not None
+
+    def test_maybe_release_threads_offer_condition(self, db_session: Session, test_user: User):
+        """maybe_release_on_offer forwards offer_condition to release_on_offer."""
+        requirement = _make_requirement(db_session, primary_mpn="ST3300657SS")
+        _make_sighting(db_session, requirement, "Acme Components", mpn_matched="ST3300657SS")
+
+        rec_new = _make_record(db_session, condition="new", requirement_id=requirement.id)
+        rec_refurb = _make_record(db_session, condition="refurb", requirement_id=requirement.id)
+        db_session.commit()
+
+        released = maybe_release_on_offer(
+            db_session, requirement.id, "Acme Components", test_user, offer_condition="new"
+        )
+        db_session.commit()
+
+        assert released == 1  # only 'new' released; NULL record absent, refurb untouched
+        assert rec_new.released_at is not None
+        assert rec_refurb.released_at is None
+
+
+class TestRFQExclusionConditionAware:
+    """excluded_vendor_norms condition-aware: only NULL (all-conditions) active records
+    exclude; condition-specific records do not (RFQ resumes for untouched conditions)."""
+
+    def test_new_only_active_record_does_not_exclude(self, db_session: Session):
+        """A 'new'-condition active record does NOT put the vendor in
+        excluded_vendor_norms."""
+        requirement = _make_requirement(db_session, primary_mpn="ST3300657SS")
+        _make_record(db_session, condition="new")
+        db_session.commit()
+
+        assert excluded_vendor_norms(db_session, [requirement]) == set()
+
+    def test_null_active_record_excludes(self, db_session: Session):
+        """A NULL (all-conditions) active record puts the vendor in
+        excluded_vendor_norms."""
+        requirement = _make_requirement(db_session, primary_mpn="ST3300657SS")
+        _make_record(db_session, condition=None)
+        db_session.commit()
+
+        assert excluded_vendor_norms(db_session, [requirement]) == {"acme components"}
+
+
+class TestOfferConditionForwardingCoverage:
+    """FIX 8: router-site offer_condition forwarding coverage.
+
+    Each user-initiated offer creation site must forward offer.condition as
+    offer_condition to maybe_release_on_offer. These tests mock the gate and
+    assert the kwarg is passed correctly, complementing the integration tests in
+    TestOfferHookReleasingSites (which verify the full release end-to-end).
+    """
+
+    def test_crm_create_offer_forwards_condition(self, client, db_session: Session, test_requisition):
+        """app/routers/crm/offers.py::create_offer forwards offer.condition as
+        offer_condition to maybe_release_on_offer."""
+        from unittest.mock import patch
+
+        requirement = test_requisition.requirements[0]
+        with patch("app.routers.crm.offers.maybe_release_on_offer") as mock_release:
+            resp = client.post(
+                f"/api/requisitions/{test_requisition.id}/offers",
+                json={
+                    "requirement_id": requirement.id,
+                    "vendor_name": "Arrow Electronics",
+                    "mpn": "LM317T",
+                    "qty_available": 500,
+                    "unit_price": 0.45,
+                    "condition": "refurb",
+                },
+            )
+        assert resp.status_code == 200
+        assert mock_release.called, "maybe_release_on_offer was not called at all"
+        _args, kwargs = mock_release.call_args
+        forwarded = kwargs.get("offer_condition", _args[4] if len(_args) > 4 else "NOT_PASSED")
+        assert forwarded == "refurb", (
+            f"create_offer must forward offer.condition='refurb' as offer_condition; got {forwarded!r}"
+        )
+
+    def test_htmx_add_offer_forwards_condition(self, client, db_session: Session, test_requisition):
+        """app/routers/htmx/offers.py::add_offer forwards offer.condition as
+        offer_condition to maybe_release_on_offer."""
+        from unittest.mock import patch
+
+        requirement = test_requisition.requirements[0]
+        with patch("app.routers.htmx.offers.maybe_release_on_offer") as mock_release:
+            resp = client.post(
+                f"/v2/partials/requisitions/{test_requisition.id}/add-offer",
+                data={
+                    "vendor_name": "Arrow Electronics",
+                    "mpn": "LM317T",
+                    "qty_available": "500",
+                    "unit_price": "0.45",
+                    "condition": "refurb",
+                    "requirement_id": str(requirement.id),
+                },
+            )
+        assert resp.status_code == 200
+        assert mock_release.called, "maybe_release_on_offer was not called at all"
+        _args, kwargs = mock_release.call_args
+        forwarded = kwargs.get("offer_condition", _args[4] if len(_args) > 4 else "NOT_PASSED")
+        assert forwarded == "refurb", (
+            f"add_offer must forward offer.condition='refurb' as offer_condition; got {forwarded!r}"
+        )

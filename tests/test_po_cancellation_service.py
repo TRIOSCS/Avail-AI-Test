@@ -34,7 +34,9 @@ def _requirement(db, req):
     return db.query(Requirement).filter(Requirement.requisition_id == req.id).first()
 
 
-def _make_offer(db, req, user, card, *, mpn="LM317T", normalized_mpn=None, vendor_name="Arrow Electronics"):
+def _make_offer(
+    db, req, user, card, *, mpn="LM317T", normalized_mpn=None, vendor_name="Arrow Electronics", condition=None
+):
     o = Offer(
         requisition_id=req.id,
         requirement_id=_requirement(db, req).id,
@@ -47,6 +49,7 @@ def _make_offer(db, req, user, card, *, mpn="LM317T", normalized_mpn=None, vendo
         unit_price=1.00,
         entered_by_id=user.id,
         status="active",
+        condition=condition,
         created_at=datetime.now(timezone.utc),
     )
     db.add(o)
@@ -229,6 +232,41 @@ class TestMarkVendorUnavailable:
         )
         assert rec is not None
         assert rec.reason == "not_really_there"
+
+    def test_condition_new_is_forwarded_to_unavailability_record(
+        self, db_session, test_requisition, test_user, test_vendor_card
+    ):
+        """mark_vendor_unavailable must forward offer.condition into
+        record_unavailability.
+
+        A sold_elsewhere reason is condition-specific; when the offer has
+        condition="new" the resulting VendorPartUnavailability row must store
+        condition="new" (normalised). RED before Task-7 wires condition=offer.condition
+        into the call site.
+        """
+        req = test_requisition
+        offer = _make_offer(db_session, req, test_user, test_vendor_card, condition="new")
+
+        count = mark_vendor_unavailable(
+            db_session,
+            requirement=_requirement(db_session, req),
+            offer=offer,
+            reason_code="sold_elsewhere",  # condition-specific reason
+            note="sold new stock elsewhere",
+            user=test_user,
+        )
+        assert count >= 1
+        db_session.flush()
+        rec = (
+            db_session.query(VendorPartUnavailability)
+            .filter(VendorPartUnavailability.vendor_name_normalized == normalize_vendor_name("Arrow Electronics"))
+            .first()
+        )
+        assert rec is not None
+        assert rec.condition == "new", (
+            f"Expected condition='new' but got condition={rec.condition!r}. "
+            "mark_vendor_unavailable must pass condition=offer.condition to record_unavailability."
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════
