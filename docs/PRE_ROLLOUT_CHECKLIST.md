@@ -154,28 +154,40 @@ If yes, renewal works via TXT records without needing the droplet reachable by h
 
 `users.refresh_token`, `users.access_token`, `users.password_hash` are `EncryptedText` columns whose Fernet key derives from `SECRET_KEY` + `ENCRYPTION_SALT` (falling back to a hard-coded legacy salt when `ENCRYPTION_SALT` is unset).
 
+> **Blast radius — API credentials share the salt.** `ENCRYPTION_SALT` *also* keys `app/services/credential_service.py`, which encrypts `api_sources.credentials` (supplier API keys). That path **degrades gracefully** — on a decrypt miss it falls back to the env-var credential and logs — so it does **not** block a salt rotation, but the DB-stored supplier keys become unreadable until re-entered (admin → Connectors) or supplied via env vars. The three `users` token/password columns do **not** degrade gracefully (orphaned tokens force re-login; an orphaned `password_hash` breaks password login), which is why the rotation command targets them. Re-enter any DB-stored supplier keys after rotating.
+
 ### Gate 4a — Decide the rotation plan NOW, not after the import
 
 Options:
 - **Keep the legacy salt fallback** (`ENCRYPTION_SALT` unset). Simplest, already works. Defense-in-depth is weaker; acceptable for small team / internal tool.
-- **Rotate to a fresh per-deployment salt** BEFORE the import, with a migration that re-encrypts the existing 3 non-null rows. After the import, you can't rotate without re-encrypting the whole `users` table plus any new encrypted columns SFDC adds.
+- **Rotate to a fresh per-deployment salt** BEFORE the import, using the rotation command below to re-encrypt the existing non-null rows. After the import, you can still rotate, but the command must cover the whole `users` table plus any new encrypted columns SFDC adds.
 
 ### Gate 4b — If keeping legacy salt
 
-Document explicitly in `STABLE.md` that `SECRET_KEY` is jointly load-bearing with the hard-coded legacy salt in `app/utils/encrypted_type.py::_LEGACY_SALT`. Changing either invalidates all encrypted rows.
+Document explicitly in `STABLE.md` that `SECRET_KEY` is jointly load-bearing with the hard-coded legacy salts in `app/utils/encrypted_type.py::_LEGACY_SALT` and `app/services/credential_service.py::_LEGACY_CREDENTIAL_SALT`. Changing either `SECRET_KEY` invalidates all encrypted rows. (Already captured in `STABLE.md` → *Encryption*.)
 
 ### Gate 4c — If rotating
 
-1. Generate: `openssl rand -base64 32`
-2. Write migration `scripts/migrate_encryption_salt.py` that:
-   - Loads all `users` rows with non-null encrypted columns.
-   - Decrypts with the legacy salt (in-memory).
-   - Sets `settings.encryption_salt` to the new value + resets `_fernet_instance`.
-   - Re-encrypts and saves.
-   - Commits.
-3. Add `ENCRYPTION_SALT=...` to `.env` **after** the migration runs.
-4. Add the new salt to the `.env` backup (Gate 2) immediately.
-5. Document in `STABLE.md` that `SECRET_KEY` + `ENCRYPTION_SALT` are jointly load-bearing.
+Use the management command **`app/management/rotate_encryption_salt.py`**. It decrypts every `users` EncryptedText cell with the OLD salt's key and re-encrypts with the NEW salt's key in one transaction. The crypto is keyed off the values you pass (**not** the live config), so you can run it before *or* after editing `.env`. It is **idempotent/resumable** (a value already on the NEW salt is detected and skipped) and **never discards** a value it can't decrypt (it reports `undecryptable` and leaves the row intact).
+
+1. **Back up first** — confirm Gate 2 (`.env`) and Gate 9 (DB snapshot). A rotation rewrites encrypted cells.
+2. **Generate the new salt:** `openssl rand -base64 32`
+3. **Dry-run** (reads + reports, writes nothing). With `.env` still on the OLD salt:
+   ```bash
+   docker compose exec -T app python -m app.management.rotate_encryption_salt \
+       --new-salt "<NEW_SALT>" --dry-run
+   ```
+   Confirm **`undecryptable=0`** for every column. If any value is undecryptable, **STOP** — the OLD salt / `SECRET_KEY` assumption is wrong; do not proceed.
+4. **Rotate for real** (same NEW salt):
+   ```bash
+   docker compose exec -T app python -m app.management.rotate_encryption_salt \
+       --new-salt "<NEW_SALT>"
+   ```
+   (The default OLD salt is the live `settings.encryption_salt`. If `.env` has already been changed to the new value, pass the previous salt explicitly with `--old-salt "<OLD_SALT>"`. `--new-salt` may also come from the `NEW_ENCRYPTION_SALT` env var.)
+5. Set **`ENCRYPTION_SALT=<NEW_SALT>`** in `.env`, then recreate the `app` + `enrichment-worker` containers so the live key matches the re-encrypted data.
+6. Add the new salt to the `.env` backup (Gate 2) and the offsite store **immediately**.
+7. **Verify** a user can still authenticate / password-login (the three columns decrypt), then re-enter any DB-stored supplier credentials (blast-radius note above).
+8. Confirm `STABLE.md` → *Encryption* still states that `SECRET_KEY` + `ENCRYPTION_SALT` are jointly load-bearing.
 
 ---
 
