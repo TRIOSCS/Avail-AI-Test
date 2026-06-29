@@ -25,8 +25,6 @@ from ..models.quotes import Quote
 from ..models.sourcing import Requisition
 from .buyplan_naming import (
     CARD_KIND_BUY_PLAN,
-    CARD_KIND_PO,
-    CARD_KIND_SALES_ORDER,
     build_card_title,
 )
 
@@ -607,9 +605,31 @@ _OPEN_STATUSES: frozenset[str] = frozenset(
     }
 )
 
+#: Risk-first priority tier for each action-queue row kind (1 = highest risk,
+#: surfaced first). The supervise lens sorts the unified queue by
+#: ``(priority, waiting_since)`` so the riskiest, oldest items lead.
+_QUEUE_PRIORITY: dict[str, int] = {
+    "halted": 1,
+    "flagged": 2,
+    "overdue": 3,
+    "approve": 4,
+    "verify_so": 5,
+    "verify_po": 6,
+}
+
+#: Human-readable pill label for each action-queue row kind.
+_QUEUE_LABEL: dict[str, str] = {
+    "halted": "Halted",
+    "flagged": "Flagged",
+    "overdue": "Overdue PO",
+    "approve": "Approve",
+    "verify_so": "Verify SO",
+    "verify_po": "Verify PO",
+}
+
 
 def supervise_overview(db: Session) -> dict:
-    """Return the manager metric strip and needs-attention triage for the supervise
+    """Return the manager metric strip and a unified action queue for the supervise
     lens.
 
     Strip metrics
@@ -630,18 +650,29 @@ def supervise_overview(db: Session) -> dict:
                        overrides take effect.
     flagged_count    : lines with status==ISSUE.
 
-    Triage lists
+    Action queue
     ------------
-    approvals        : list of plan dicts for plans awaiting approval.
-    so_pending       : list of plan dicts for ACTIVE plans with so_status PENDING.
-    halted           : list of plan dicts for halted plans.
-    overdue_pos      : list of line dicts for overdue AWAITING_PO lines.
-    po_pending_verify: list of line dicts for PENDING_VERIFY lines.
-    flagged          : list of line dicts for ISSUE lines.
+    queue : one flat, risk-first-ordered list of uniform row dicts — every item
+            that needs the supervisor, reshaped from the same six source queries
+            (approvals, SO-verify, halted, overdue POs, PO-verify, flagged). Each
+            row has the identical shape::
 
-    Plan dicts contain: plan_id, customer_name, value, submitted_by_name.
-    Line dicts contain: line_id, plan_id, mpn, vendor_name, buyer_name,
-                        plus issue_type for flagged items.
+                kind, label, priority, plan_id, line_id, customer_name, so_number,
+                mpn, vendor_name, owner_name, owner_role, value, margin_pct,
+                waiting_since, issue_reason
+
+            ``kind`` is one of ``halted``/``flagged``/``overdue``/``approve``/
+            ``verify_so``/``verify_po``. Plan kinds (approve/verify_so/halted) carry
+            ``owner_role="AM"`` (the Account Manager = ``submitted_by``) and a NULL
+            ``line_id``/``mpn``/``vendor_name``; line kinds (overdue/verify_po/flagged)
+            carry ``owner_role="Buyer"`` (``line.buyer``) plus the offer ``mpn`` /
+            ``vendor_name``. ``value`` / ``margin_pct`` are always the *parent plan's*
+            ``total_cost`` / ``total_margin_pct`` (uniform "deal value/margin"), and
+            ``issue_reason`` is populated only on ``flagged`` rows. ``waiting_since``
+            (the age + sort clock) is ``plan.created_at`` for approve/verify_so/halted,
+            ``coalesce(line.last_nudge_at, plan.approved_at)`` for overdue, and
+            ``line.created_at`` for verify_po/flagged. The list is sorted by
+            ``(priority, waiting_since)`` — risk-first, oldest-first within each tier.
     """
     nudge_threshold = datetime.now(timezone.utc) - timedelta(hours=settings.buyplan_nudge_buyer_hours)
 
@@ -757,55 +788,73 @@ def supervise_overview(db: Session) -> dict:
         .all()
     )
 
-    # ── Helpers ──────────────────────────────────────────────────────
-    def _plan_dict(plan: BuyPlan, *, kind: str | None = None) -> dict:
-        """Plan triage row.
+    # ── Uniform row builders ─────────────────────────────────────────
+    def _plan_row(plan: BuyPlan, *, kind: str, waiting_since: datetime) -> dict:
+        """Map a plan-source row (approve/verify_so/halted) into the uniform shape.
 
-        With ``kind`` set (e.g. "SO"), include the canonical
-        ``{SO#} - {Customer} - {Owner} - {kind}`` title; Owner is the Account Manager.
+        Owner is the Account Manager (``submitted_by``); ``value`` / ``margin_pct`` are
+        the plan's own deal totals. Line-only fields stay NULL.
         """
-        customer_name = _customer_name(plan)
-        owner_name = _user_name(plan.submitted_by)
-        row = {
+        return {
+            "kind": kind,
+            "label": _QUEUE_LABEL[kind],
+            "priority": _QUEUE_PRIORITY[kind],
             "plan_id": plan.id,
-            "customer_name": customer_name,
+            "line_id": None,
+            "customer_name": _customer_name(plan),
+            "so_number": plan.sales_order_number,
+            "mpn": None,
+            "vendor_name": None,
+            "owner_name": _user_name(plan.submitted_by),
+            "owner_role": "AM",
             "value": plan.total_cost,
-            "submitted_by_name": owner_name,
+            "margin_pct": plan.total_margin_pct,
+            "waiting_since": waiting_since,
+            "issue_reason": None,
         }
-        if kind is not None:
-            row["card_title"] = build_card_title(
-                sales_order_number=plan.sales_order_number,
-                customer_name=customer_name,
-                owner_name=owner_name,
-                kind=kind,
-            )
-        return row
 
-    def _line_dict(ln: BuyPlanLine, *, include_issue_type: bool = False, kind: str | None = None) -> dict:
+    def _line_row(ln: BuyPlanLine, *, kind: str, waiting_since: datetime) -> dict:
+        """Map a line-source row (overdue/verify_po/flagged) into the uniform shape.
+
+        Owner is the Buyer (``line.buyer``); ``value`` / ``margin_pct`` come from the
+        *parent plan* so a line row shows the deal's value/margin uniformly.
+        ``issue_reason`` is populated only for flagged lines.
+        """
         offer = ln.offer
-        buyer = ln.buyer
         plan = ln.buy_plan
-        row = {
-            "line_id": ln.id,
+        return {
+            "kind": kind,
+            "label": _QUEUE_LABEL[kind],
+            "priority": _QUEUE_PRIORITY[kind],
             "plan_id": ln.buy_plan_id,
+            "line_id": ln.id,
+            "customer_name": _customer_name(plan) if plan else None,
+            "so_number": plan.sales_order_number if plan else None,
             "mpn": offer.mpn if offer else None,
             "vendor_name": offer.vendor_name if offer else None,
-            "buyer_name": _user_name(buyer),
+            "owner_name": _user_name(ln.buyer),
+            "owner_role": "Buyer",
+            "value": plan.total_cost if plan else None,
+            "margin_pct": plan.total_margin_pct if plan else None,
+            "waiting_since": waiting_since,
+            "issue_reason": _issue_reason(ln) if kind == "flagged" else None,
         }
-        if include_issue_type:
-            # Human-readable issue reason: the buyer's free-text note when present,
-            # else the issue-type label (underscores → spaces). Falls back to "issue".
-            row["issue_type"] = ln.issue_type
-            row["issue_reason"] = _issue_reason(ln)
-        if kind is not None:
-            # PO approval row: Owner is the Buyer (per-line procurement owner).
-            row["card_title"] = build_card_title(
-                sales_order_number=plan.sales_order_number if plan else None,
-                customer_name=_customer_name(plan) if plan else None,
-                owner_name=_user_name(buyer),
-                kind=kind,
-            )
-        return row
+
+    # ── Assemble the single uniform queue, then sort risk-first / oldest-first ──
+    queue = (
+        [_plan_row(p, kind="approve", waiting_since=p.created_at) for p in approval_plans]
+        + [_plan_row(p, kind="verify_so", waiting_since=p.created_at) for p in so_pending_plans]
+        + [_plan_row(p, kind="halted", waiting_since=p.created_at) for p in halted_plans]
+        # overdue uses the exact SLA clock the overdue predicate keys off of.
+        + [
+            _line_row(ln, kind="overdue", waiting_since=ln.last_nudge_at or ln.buy_plan.approved_at)
+            for ln in overdue_lines
+        ]
+        + [_line_row(ln, kind="verify_po", waiting_since=ln.created_at) for ln in po_pending_verify_lines]
+        + [_line_row(ln, kind="flagged", waiting_since=ln.created_at) for ln in flagged_lines]
+    )
+    # Ascending datetime ⇒ oldest-first within each priority tier.
+    queue.sort(key=lambda r: (r["priority"], r["waiting_since"]))
 
     return {
         "strip": {
@@ -818,14 +867,5 @@ def supervise_overview(db: Session) -> dict:
             "po_pending_verify_count": len(po_pending_verify_lines),
             "flagged_count": len(flagged_lines),
         },
-        "triage": {
-            "approvals": [_plan_dict(p) for p in approval_plans],
-            # SO-approval rows carry the "{SO#} - {Customer} - {AcctMgr} - SO" title.
-            "so_pending": [_plan_dict(p, kind=CARD_KIND_SALES_ORDER) for p in so_pending_plans],
-            "halted": [_plan_dict(p) for p in halted_plans],
-            "overdue_pos": [_line_dict(ln) for ln in overdue_lines],
-            # PO-approval rows carry the "{SO#} - {Customer} - {Buyer} - PO" title.
-            "po_pending_verify": [_line_dict(ln, kind=CARD_KIND_PO) for ln in po_pending_verify_lines],
-            "flagged": [_line_dict(ln, include_issue_type=True) for ln in flagged_lines],
-        },
+        "queue": queue,
     }

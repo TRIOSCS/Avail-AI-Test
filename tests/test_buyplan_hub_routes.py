@@ -640,8 +640,15 @@ def test_supervise_manager_shows_strip_and_approvals(
         app.dependency_overrides.pop(require_user, None)
     assert resp.status_code == 200
     body = resp.text
-    assert "open value" in body  # metric strip
-    assert "Approvals waiting" in body
+    # Calm header: money subline + headline count.
+    assert "avg margin" in body
+    assert "items need you" in body
+    # ONE hero action queue card (not 6 sections).
+    assert "Needs you now" in body
+    # Filter chips with live per-kind counts.
+    assert "All (1)" in body
+    assert "Approve (1)" in body
+    # The approve row keeps the existing route/target + origin=supervise hidden field.
     assert f"/v2/partials/buy-plans/{plan.id}/approve" in body
     assert 'name="origin"' in body
     assert 'value="supervise"' in body
@@ -676,9 +683,11 @@ def test_supervise_ops_shows_verify_sections(
         app.dependency_overrides.pop(require_user, None)
     assert resp.status_code == 200
     body = resp.text
-    assert "Needs SO verification" in body
+    # Verify rows surface in the unified queue (pill labels) with their routes intact.
+    assert "Needs you now" in body
+    assert "Verify SO" in body
     assert f"/v2/partials/buy-plans/{so_plan.id}/verify-so" in body
-    assert "POs awaiting verification" in body
+    assert "Verify PO" in body
     assert f"/v2/partials/buy-plans/{pv_plan.id}/lines/{pv_line.id}/verify-po" in body
 
 
@@ -700,9 +709,33 @@ def test_supervise_non_supervisor_no_leak(
     # Default client user is a plain buyer (not ops, not manager).
     resp = client.get("/v2/partials/buy-plans/supervise")
     assert resp.status_code == 200
-    # No triage panel and no leak of another user's plan.
-    assert "Approvals waiting" not in resp.text
+    # No action-queue panel (the mine-scope board is served instead) and no leak.
+    assert "Needs you now" not in resp.text
     assert f"/v2/partials/buy-plans/{other_plan.id}" not in resp.text
+
+
+def test_supervise_empty_queue_shows_all_caught_up(
+    client: TestClient, db_session: Session, manager_user, test_requisition
+):
+    """A supervisor with nothing actionable sees the calm 'all caught up' empty-
+    state."""
+    from app.dependencies import require_user
+    from app.main import app
+
+    manager_user.can_approve_buy_plans = True
+    db_session.commit()
+
+    app.dependency_overrides[require_user] = lambda: manager_user
+    try:
+        resp = client.get("/v2/partials/buy-plans/supervise")
+    finally:
+        app.dependency_overrides.pop(require_user, None)
+    assert resp.status_code == 200
+    body = resp.text
+    # Headline + empty-state line both render; no per-kind filter chips when the queue is empty.
+    assert "You're all caught up" in body
+    assert "nothing needs you right now" in body
+    assert "items need you" not in body
 
 
 def test_approve_origin_supervise_returns_supervise_body(
@@ -738,8 +771,8 @@ def test_approve_origin_supervise_returns_supervise_body(
         app.dependency_overrides.pop(require_buyplan_approver, None)
     assert resp.status_code == 200
     body = resp.text
-    # Supervise body carries the metric strip; the detail "Line Items" header is absent.
-    assert "open value" in body
+    # Supervise body carries the calm-header money subline; the detail "Line Items" header is absent.
+    assert "avg margin" in body
     assert "Line Items" not in body
 
 

@@ -1,211 +1,207 @@
 {#
-  buy_plans/_supervise.html — Manager/ops "Supervise" lens body.
-  A slim metric strip + needs-attention triage sections above the all-scope deal board.
-  Triage action forms post with origin=supervise so the handler re-renders THIS body
-  into #bp-hub-body (not the single-plan detail). Sections render only when non-empty.
-  Receives: overview (dict from buyplan_hub.supervise_overview: strip + triage),
-            board (dict from deals_board scope=all), is_ops (bool), is_manager (bool),
-            user.
-  Called by: htmx_views.py buy_plans_supervise_partial + the approve/verify-so/verify-po
+  buy_plans/_supervise.html — Manager/ops "Supervise" lens body (unified action queue).
+  Three calm zones replace the old metric-strip + six triage sections:
+    1. Calm header — one headline count + money subline + client-side filter chips (Alpine qf).
+    2. The Action Queue (hero) — ONE card, one uniform row per item, risk-first ordered.
+    3. Pipeline monitor (demoted) — the all-scope deal board, collapsed behind a summary;
+       the Completed archive renders (collapsed) via _board.html as before.
+  Rows come from overview.queue (buyplan_hub.supervise_overview): a flat, pre-sorted list
+  of uniform row dicts keyed by `kind`. Action forms post origin=supervise so the handler
+  re-renders THIS body into #bp-hub-body (not the single-plan detail).
+
+  Role gating (behaviour-preserving): the queue from the service carries every kind, but —
+  exactly as the old sectioned view did — `approve` rows show only to approvers (can_approve)
+  and `verify_so`/`verify_po` rows only to ops (is_ops); overdue/flagged/halted show to every
+  supervisor. We build `visible_queue` once so the headline, chips and rows all agree.
+
+  Receives: overview (dict: strip + queue), board (dict from deals_board scope=all),
+            archive (dict, passed through to _board.html), is_ops (bool), is_manager (bool),
+            can_approve (bool), user.
+  Called by: htmx/buy_plans.py _render_supervise_body + the approve/verify-so/verify-po
              handlers when origin=supervise.
-  Depends on: HTMX, Tailwind CSS with brand palette; _board.html (embedded board).
+  Depends on: HTMX, Alpine.js, Tailwind (accent/brand palette), .chip + .badge-* primitives,
+              timeago filter, now() global; _board.html (embedded, collapsed board + archive).
 #}
 {% set strip = overview.strip %}
-{% set tri = overview.triage %}
-{% set nothing = not (tri.approvals or tri.so_pending or tri.overdue_pos or tri.po_pending_verify or tri.flagged or tri.halted) %}
 
-{# ── Slim metric strip (contextual, non-dominating) ── #}
-<div class="flex flex-wrap items-center gap-x-4 gap-y-1 mb-4 text-xs text-gray-600">
-  <span>${{ '{:,.0f}'.format(strip.open_value) }} open value</span>
-  <span>{{ '{:.1f}'.format(strip.avg_margin) }}% avg margin</span>
-  <span>{{ strip.approval_count }} approval{{ 's' if strip.approval_count != 1 }} waiting</span>
-  <span>{{ strip.halted_count }} halted</span>
-  <span>{{ strip.overdue_po_count }} overdue PO{{ 's' if strip.overdue_po_count != 1 }}</span>
-  <span>{{ strip.flagged_count }} flagged</span>
-  {% if is_ops %}
-  <span>{{ strip.so_pending_count }} SO{{ 's' if strip.so_pending_count != 1 }} to verify</span>
-  <span>{{ strip.po_pending_verify_count }} PO{{ 's' if strip.po_pending_verify_count != 1 }} to verify</span>
+{# ── Role-gated visible queue (see header note) ── #}
+{% set visible_queue = [] %}
+{% for r in overview.queue %}
+  {% if r.kind in ('halted', 'overdue', 'flagged')
+        or (r.kind == 'approve' and can_approve)
+        or (r.kind in ('verify_so', 'verify_po') and is_ops) %}
+    {% set _ = visible_queue.append(r) %}
   {% endif %}
+{% endfor %}
+
+{# ── One uniform row for every queue item ── #}
+{% macro queue_row(row) %}
+{% set pill = {
+  'halted':    'bg-gray-100 text-gray-600 border-gray-200',
+  'flagged':   'bg-rose-50 text-rose-700 border-rose-200',
+  'overdue':   'bg-amber-50 text-amber-700 border-amber-200',
+  'approve':   'bg-accent-50 text-accent-700 border-accent-200',
+  'verify_so': 'bg-purple-50 text-purple-700 border-purple-200',
+  'verify_po': 'bg-brand-100 text-brand-600 border-brand-200',
+} %}
+{% set is_link = row.kind in ('halted', 'overdue', 'flagged') %}
+{% set m = row.margin_pct|float if row.margin_pct is not none else 0 %}
+{% set aged = (now() - row.waiting_since).total_seconds() > 259200 %}
+<div x-show="qf === 'all' || qf === '{{ row.kind }}'"
+     class="flex items-center gap-3 px-4 py-2.5
+            {% if is_link %}cursor-pointer hover:bg-gray-50 focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:outline-none{% endif %}"
+     {% if is_link %}
+     hx-get="/v2/partials/buy-plans/{{ row.plan_id }}"
+     hx-target="#main-content"
+     hx-push-url="/v2/buy-plans/{{ row.plan_id }}"
+     preload="mouseover"
+     tabindex="0"
+     role="link"
+     @keydown.enter.prevent="$el.click()"
+     @keydown.space.prevent="$el.click()"
+     {% endif %}>
+
+  {# Left / identity: kind pill · customer · muted fact line #}
+  <div class="flex items-center gap-2 min-w-0 flex-1">
+    <span class="chip {{ pill[row.kind] }} flex-shrink-0">{{ row.label }}</span>
+    <div class="min-w-0">
+      <div class="text-sm font-bold text-gray-900 truncate">{{ row.customer_name or '—' }}</div>
+      <div class="text-xs text-gray-400 truncate">
+        {% set ns = namespace(shown=false) %}
+        {%- if row.so_number -%}
+          <span class="font-mono">SO {{ row.so_number }}</span>{% set ns.shown = true %}
+        {%- endif -%}
+        {%- if row.mpn -%}
+          {% if ns.shown %}<span class="text-gray-300" aria-hidden="true"> · </span>{% endif %}<span class="font-mono">{{ row.mpn }}</span>{% set ns.shown = true %}
+        {%- endif -%}
+        {%- if row.vendor_name -%}
+          {% if ns.shown %}<span class="text-gray-300" aria-hidden="true"> · </span>{% endif %}{{ row.vendor_name }}{% set ns.shown = true %}
+        {%- endif -%}
+        {%- if row.owner_name -%}
+          {% if ns.shown %}<span class="text-gray-300" aria-hidden="true"> · </span>{% endif %}{{ row.owner_role }} {{ row.owner_name }}{% set ns.shown = true %}
+        {%- endif -%}
+        {%- if row.kind == 'flagged' and row.issue_reason -%}
+          {% if ns.shown %}<span class="text-gray-300" aria-hidden="true"> · </span>{% endif %}<span class="text-rose-600">{{ row.issue_reason }}</span>
+        {%- endif -%}
+      </div>
+    </div>
+  </div>
+
+  {# Signals: age · value · margin badge (right-aligned, tabular) #}
+  <div class="flex items-center gap-3 flex-shrink-0 tabular-nums">
+    <span class="text-xs {% if aged %}text-amber-600 font-medium{% else %}text-gray-600{% endif %}">{{ row.waiting_since | timeago }}</span>
+    <span class="text-sm font-semibold text-gray-900 w-20 text-right">${{ '{:,.0f}'.format(row.value|float) if row.value else '0' }}</span>
+    <span class="{% if m >= 30 %}badge-success{% elif m >= 15 %}badge-warning{% else %}badge-danger{% endif %} w-12 justify-center">{{ '{:.0f}'.format(m) }}%</span>
+  </div>
+
+  {# Action — preserves today's routes/targets verbatim #}
+  <div class="flex-shrink-0">
+    {% if row.kind == 'approve' %}
+    <form hx-post="/v2/partials/buy-plans/{{ row.plan_id }}/approve"
+          hx-target="#bp-hub-body" hx-swap="innerHTML" class="flex items-center gap-1.5">
+      <input type="hidden" name="origin" value="supervise">
+      <button type="submit" name="action" value="approve" data-loading-disable class="btn btn-primary btn-sm">Approve</button>
+      {# Reject requires a reason — open the detail screen where the reason modal lives. #}
+      <a hx-get="/v2/partials/buy-plans/{{ row.plan_id }}"
+         hx-target="#main-content"
+         hx-push-url="/v2/buy-plans/{{ row.plan_id }}"
+         class="btn btn-danger btn-sm cursor-pointer">Review</a>
+    </form>
+    {% elif row.kind == 'verify_so' %}
+    <form hx-post="/v2/partials/buy-plans/{{ row.plan_id }}/verify-so"
+          hx-target="#bp-hub-body" hx-swap="innerHTML" class="flex items-center gap-1.5">
+      <input type="hidden" name="origin" value="supervise">
+      <button type="submit" name="action" value="approve" data-loading-disable class="btn btn-primary btn-sm">Verify SO</button>
+    </form>
+    {% elif row.kind == 'verify_po' %}
+    <form hx-post="/v2/partials/buy-plans/{{ row.plan_id }}/lines/{{ row.line_id }}/verify-po"
+          hx-target="#bp-hub-body" hx-swap="innerHTML" class="flex items-center gap-1.5">
+      <input type="hidden" name="origin" value="supervise">
+      <button type="submit" name="action" value="approve" data-loading-disable class="btn btn-primary btn-sm">Verify PO</button>
+      <button type="submit" name="action" value="reject" data-loading-disable
+              hx-confirm="Kick this PO back to the buyer?" class="btn btn-danger btn-sm">Reject</button>
+    </form>
+    {% else %}
+    <span class="text-xs font-medium text-accent-600">Open →</span>
+    {% endif %}
+  </div>
 </div>
+{% endmacro %}
 
-{% if nothing %}
-<div class="mb-4 text-sm text-gray-400">Nothing needs attention.</div>
-{% endif %}
+{# Ordered (kind, label) list for the filter chips — risk-first, matching the queue order. #}
+{% set chip_kinds = [
+  ('halted', 'Halted'), ('flagged', 'Flagged'), ('overdue', 'Overdue PO'),
+  ('approve', 'Approve'), ('verify_so', 'Verify SO'), ('verify_po', 'Verify PO')
+] %}
 
-<div class="space-y-3 mb-6">
+{# ── Zones 1–2 share one Alpine root for the client-side filter ── #}
+<div x-data="{ qf: 'all' }">
 
-  {# ── Approvals (users holding the buy-plan approval right) ── #}
-  {% if can_approve and tri.approvals %}
-  {# Finding #5: section card border-line-base/subtle #}
-  <div class="bg-white rounded-lg shadow-sm border border-amber-200">
-    <div class="px-4 py-2 border-b border-line-subtle text-xs font-semibold text-gray-600 uppercase tracking-wider">
-      Approvals waiting ({{ tri.approvals|length }})
+  {# Zone 1 — calm header + filter chips #}
+  <div class="mb-4">
+    <div class="text-lg font-semibold text-gray-900">
+      {% if visible_queue %}{{ visible_queue|length }} items need you{% else %}You're all caught up{% endif %}
     </div>
-    <div class="divide-y divide-line-subtle">
-      {% for p in tri.approvals %}
-      <div class="flex items-center justify-between gap-3 px-4 py-2">
-        <div class="min-w-0">
-          <span class="text-sm font-bold text-gray-900">{{ p.customer_name or '—' }}</span>
-          <span class="ml-2 text-xs text-gray-400">{{ p.submitted_by_name or '—' }}</span>
-        </div>
-        <div class="flex items-center gap-3 flex-shrink-0">
-          <span class="text-sm font-semibold text-gray-700">${{ '{:,.2f}'.format(p.value|float) if p.value else '0.00' }}</span>
-          {# Finding #4: raw emerald/rose buttons → .btn family #}
-          <form hx-post="/v2/partials/buy-plans/{{ p.plan_id }}/approve"
-                hx-target="#bp-hub-body" hx-swap="innerHTML" class="flex items-center gap-1.5">
-            <input type="hidden" name="origin" value="supervise">
-            <button type="submit" name="action" value="approve" data-loading-disable
-                    class="btn btn-primary btn-sm">
-              Approve
-            </button>
-            {# Reject requires a reason — open the click-in review screen where the reason
-               modal lives (single place reasons are captured) rather than a blind reject. #}
-            <a hx-get="/v2/partials/buy-plans/{{ p.plan_id }}"
-               hx-target="#main-content"
-               hx-push-url="/v2/buy-plans/{{ p.plan_id }}"
-               class="btn btn-danger btn-sm cursor-pointer">
-              Review / Reject
-            </a>
-          </form>
-        </div>
-      </div>
+    <div class="text-sm text-gray-600">
+      ${{ '{:,.0f}'.format(strip.open_value) }} open · {{ '{:.0f}'.format(strip.avg_margin) }}% avg margin
+    </div>
+    {% if visible_queue %}
+    <div class="mt-3 flex flex-wrap items-center gap-2">
+      <button type="button" @click="qf = 'all'"
+              :class="qf === 'all' ? 'bg-accent-600 text-white' : 'bg-brand-100 text-brand-600 hover:bg-brand-200'"
+              class="px-3 py-1 rounded-full text-xs font-medium transition-colors">All ({{ visible_queue|length }})</button>
+      {% for k, lbl in chip_kinds %}
+      {% set c = visible_queue|selectattr('kind', 'equalto', k)|list|length %}
+      {% if c %}
+      <button type="button" @click="qf = '{{ k }}'"
+              :class="qf === '{{ k }}' ? 'bg-accent-600 text-white' : 'bg-brand-100 text-brand-600 hover:bg-brand-200'"
+              class="px-3 py-1 rounded-full text-xs font-medium transition-colors">{{ lbl }} ({{ c }})</button>
+      {% endif %}
       {% endfor %}
     </div>
+    {% endif %}
   </div>
-  {% endif %}
 
-  {# ── Needs SO verification (ops) ── #}
-  {% if is_ops and tri.so_pending %}
-  <div class="bg-white rounded-lg shadow-sm border border-line-base">
+  {# Zone 2 — the Action Queue (hero) #}
+  <div class="bg-white rounded-lg shadow-sm border border-line-base mb-6">
     <div class="px-4 py-2 border-b border-line-subtle text-xs font-semibold text-gray-600 uppercase tracking-wider">
-      Needs SO verification ({{ tri.so_pending|length }})
+      Needs you now
     </div>
+    {% if visible_queue %}
     <div class="divide-y divide-line-subtle">
-      {% for p in tri.so_pending %}
-      <div class="flex items-center justify-between gap-3 px-4 py-2">
-        <div class="min-w-0">
-          <span class="text-sm font-bold text-gray-900 truncate" title="{{ p.card_title }}">{{ p.card_title }}</span>
-        </div>
-        <div class="flex items-center gap-3 flex-shrink-0">
-          <span class="text-sm font-semibold text-gray-700">${{ '{:,.2f}'.format(p.value|float) if p.value else '0.00' }}</span>
-          <form hx-post="/v2/partials/buy-plans/{{ p.plan_id }}/verify-so"
-                hx-target="#bp-hub-body" hx-swap="innerHTML" class="flex items-center gap-1.5">
-            <input type="hidden" name="origin" value="supervise">
-            <button type="submit" name="action" value="approve" data-loading-disable
-                    class="btn btn-primary btn-sm">
-              Verify SO
-            </button>
-          </form>
-        </div>
-      </div>
-      {% endfor %}
+      {% for row in visible_queue %}{{ queue_row(row) }}{% endfor %}
     </div>
+    {% else %}
+    <div class="px-4 py-6 text-sm text-gray-400">You're all caught up — nothing needs you right now.</div>
+    {% endif %}
   </div>
-  {% endif %}
-
-  {# ── POs awaiting verification (ops) ── #}
-  {% if is_ops and tri.po_pending_verify %}
-  <div class="bg-white rounded-lg shadow-sm border border-line-base">
-    <div class="px-4 py-2 border-b border-line-subtle text-xs font-semibold text-gray-600 uppercase tracking-wider">
-      POs awaiting verification ({{ tri.po_pending_verify|length }})
-    </div>
-    <div class="divide-y divide-line-subtle">
-      {% for ln in tri.po_pending_verify %}
-      <div class="flex items-center justify-between gap-3 px-4 py-2">
-        <div class="min-w-0">
-          <span class="text-sm font-bold text-gray-900 truncate" title="{{ ln.card_title }}">{{ ln.card_title }}</span>
-          <span class="ml-2 text-xs text-gray-400">{{ ln.mpn or '—' }} · {{ ln.vendor_name or '—' }}</span>
-        </div>
-        <form hx-post="/v2/partials/buy-plans/{{ ln.plan_id }}/lines/{{ ln.line_id }}/verify-po"
-              hx-target="#bp-hub-body" hx-swap="innerHTML" class="flex items-center gap-1.5 flex-shrink-0">
-          <input type="hidden" name="origin" value="supervise">
-          <button type="submit" name="action" value="approve" data-loading-disable
-                  class="btn btn-primary btn-sm">
-            Verify PO
-          </button>
-          <button type="submit" name="action" value="reject" data-loading-disable
-                  hx-confirm="Kick this PO back to the buyer?"
-                  class="btn btn-danger btn-sm">
-            Reject
-          </button>
-        </form>
-      </div>
-      {% endfor %}
-    </div>
-  </div>
-  {% endif %}
-
-  {# ── Overdue POs ── #}
-  {% if tri.overdue_pos %}
-  <div class="bg-white rounded-lg shadow-sm border border-rose-200">
-    <div class="px-4 py-2 border-b border-line-subtle text-xs font-semibold text-gray-600 uppercase tracking-wider">
-      Overdue POs ({{ tri.overdue_pos|length }})
-    </div>
-    {# Finding #9: real focusable links for keyboard nav on triage rows #}
-    <div class="divide-y divide-line-subtle">
-      {% for ln in tri.overdue_pos %}
-      <a hx-get="/v2/partials/buy-plans/{{ ln.plan_id }}"
-         hx-target="#main-content"
-         hx-push-url="/v2/buy-plans/{{ ln.plan_id }}"
-         preload="mouseover"
-         class="flex items-center justify-between gap-3 px-4 py-2 cursor-pointer hover:bg-rose-50/40
-                focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:outline-none focus-visible:bg-rose-50/40">
-        <span class="text-sm font-mono font-medium text-gray-900">{{ ln.mpn or '—' }}</span>
-        <span class="text-xs text-gray-400 flex-shrink-0">{{ ln.vendor_name or '—' }} · {{ ln.buyer_name or '—' }}</span>
-      </a>
-      {% endfor %}
-    </div>
-  </div>
-  {% endif %}
-
-  {# ── Flagged issues ── #}
-  {% if tri.flagged %}
-  <div class="bg-white rounded-lg shadow-sm border border-rose-200">
-    <div class="px-4 py-2 border-b border-line-subtle text-xs font-semibold text-gray-600 uppercase tracking-wider">
-      Flagged issues ({{ tri.flagged|length }})
-    </div>
-    <div class="divide-y divide-line-subtle">
-      {% for ln in tri.flagged %}
-      <a hx-get="/v2/partials/buy-plans/{{ ln.plan_id }}"
-         hx-target="#main-content"
-         hx-push-url="/v2/buy-plans/{{ ln.plan_id }}"
-         preload="mouseover"
-         class="flex items-center justify-between gap-3 px-4 py-2 cursor-pointer hover:bg-rose-50/40
-                focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:outline-none focus-visible:bg-rose-50/40">
-        <span class="text-sm font-mono font-medium text-gray-900 flex-shrink-0">{{ ln.mpn or '—' }}</span>
-        {# Real flag reason at a glance — the buyer's note, else the humanised issue type. #}
-        <span class="text-xs text-rose-600 truncate text-right" title="{{ ln.issue_reason }}">{{ ln.issue_reason }}</span>
-      </a>
-      {% endfor %}
-    </div>
-  </div>
-  {% endif %}
-
-  {# ── Halted ── #}
-  {% if tri.halted %}
-  <div class="bg-white rounded-lg shadow-sm border border-line-base">
-    <div class="px-4 py-2 border-b border-line-subtle text-xs font-semibold text-gray-600 uppercase tracking-wider">
-      Halted ({{ tri.halted|length }})
-    </div>
-    <div class="divide-y divide-line-subtle">
-      {% for p in tri.halted %}
-      <a hx-get="/v2/partials/buy-plans/{{ p.plan_id }}"
-         hx-target="#main-content"
-         hx-push-url="/v2/buy-plans/{{ p.plan_id }}"
-         preload="mouseover"
-         class="flex items-center justify-between gap-3 px-4 py-2 cursor-pointer hover:bg-gray-50
-                focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:outline-none">
-        <span class="text-sm font-bold text-gray-900">{{ p.customer_name or '—' }}</span>
-        <span class="text-xs text-gray-400 flex-shrink-0">{{ p.submitted_by_name or '—' }}</span>
-      </a>
-      {% endfor %}
-    </div>
-  </div>
-  {% endif %}
 
 </div>
 
-{# ── All-scope deal board (own strip suppressed; supervise strip is above) ── #}
-{% set scope = 'all' %}
-{% set hide_strip = True %}
-{% include "htmx/partials/buy_plans/_board.html" %}
+{# Zone 3 — Pipeline monitor (demoted, collapsed by default) #}
+{% set open_cards = board.draft + board.pending + board.active %}
+{% set open_value = open_cards|map(attribute='value')|select|map('float')|sum %}
+<div x-data="{ open: false }">
+  <div class="flex items-center gap-2 bg-white rounded-lg border border-line-base px-4 py-2 text-xs text-gray-600">
+    <button type="button" @click="open = !open" class="flex flex-1 items-center gap-2 text-left min-w-0">
+      <span x-show="!open" aria-hidden="true">▸</span>
+      <span x-show="open" aria-hidden="true">▾</span>
+      <span class="font-medium text-gray-700">Pipeline</span>
+      <span class="text-gray-300" aria-hidden="true">·</span>
+      <span>{{ open_cards|length }} open deal{{ 's' if open_cards|length != 1 }}</span>
+      <span class="text-gray-300" aria-hidden="true">·</span>
+      <span>${{ '{:,.0f}'.format(open_value) }} open</span>
+      <span class="text-gray-300 hidden sm:inline" aria-hidden="true">·</span>
+      <span class="hidden sm:inline">Draft {{ board.draft|length }} · Pending {{ board.pending|length }} · Active {{ board.active|length }}</span>
+    </button>
+    <button type="button" @click="open = !open" class="flex-shrink-0 font-medium text-accent-600">
+      <span x-show="!open">Show board</span>
+      <span x-show="open">Hide board</span>
+    </button>
+  </div>
+  <div x-show="open" x-cloak class="mt-3">
+    {% set scope = 'all' %}
+    {% set hide_strip = True %}
+    {% include "htmx/partials/buy_plans/_board.html" %}
+  </div>
+</div>
