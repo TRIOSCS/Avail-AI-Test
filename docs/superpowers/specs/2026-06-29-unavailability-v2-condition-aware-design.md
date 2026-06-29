@@ -1,6 +1,6 @@
 # Unavailability v2 — Condition-Aware Snapshots
 
-**Status:** Design approved (brainstorm), pending implementation plan.
+**Status:** ✅ BUILT — implemented on branch `feat/unavailability-v2-condition-aware`; PR #579 open, CI green, awaiting review/merge. Delete this spec and its plan once #579 merges.
 **Date:** 2026-06-29
 **Supersedes/extends:** the v1 "Two Windows, Real Proof" temporal policy
 (`docs/superpowers/specs/2026-06-10-unavailability-temporal-policy.md`) — that policy is

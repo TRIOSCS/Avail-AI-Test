@@ -1,7 +1,6 @@
 """Cross-app alert framework — reusable AlertSource primitive + registry.
 
 The alert layer behind the per-tab green nav badges and the in-tab fluid spotlight.
-See docs/superpowers/specs/2026-06-18-comm-ledger-alerts-design.md.
 """
 
 # Importing the sources package registers every concrete AlertSource against its nav tab

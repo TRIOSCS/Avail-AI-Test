@@ -1,5 +1,7 @@
 # Unavailability v2 (Condition-Aware) Implementation Plan
 
+> **Status (2026-06-29):** ✅ BUILT — PR #579 open, CI green, awaiting human review/merge (brings alembic head 170→171). **Delete this plan and its design spec once #579 merges.**
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax.
 
 **Goal:** Make `VendorPartUnavailability` condition-aware so a vendor marked unavailable in one condition (e.g. NEW) no longer masks their other-condition stock (e.g. REFURB).

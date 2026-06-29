@@ -1,7 +1,6 @@
 """tests/test_crm_disposition.py — Increment 1: account/contact disposition.
 
-TDD spec for the disposition feature (docs/superpowers/specs/
-2026-06-18-crm-disposition-ia-aiorg-design.md, "Increment 1 — Disposition").
+TDD spec for the disposition feature ("Increment 1 — Disposition").
 
 Covers:
   * prospect_claim.send_company_to_prospecting (ownership clear + pool dedupe +

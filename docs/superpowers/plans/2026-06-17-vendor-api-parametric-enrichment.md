@@ -1,5 +1,7 @@
 # Vendor-API Parametric Enrichment — Implementation Plan
 
+> **Status (2026-06-29):** PARTIAL — capacitor/resistor extractors shipped. REMAINING = MOSFET (+ other non-passive) extractor mapping; run `backfill_vendor_specs --apply` once real inventory exists (DB currently empty).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Populate the deep materials filter facets (capacitance/voltage/tolerance/package/resistance/…) for the high-demand commodity subset by harvesting structured parametrics from the Mouser & Element14 APIs, demand-ordered and quota-paced.

@@ -561,7 +561,7 @@ def test_modal_uses_canonical_close_class():
     assert "top-2.5 right-2.5" not in html, "modal close button still uses magic-number positioning — use .modal-close"
 
 
-# Page-shell width policy (see docs/superpowers/specs/2026-06-22-horizontal-space-optimization-design.md):
+# Page-shell width policy:
 # dense data pages fill the viewport via .page-fluid; reading/form pages keep a comfortable
 # ~1152px measure via .page-readable. The shell wrapper must carry the semantic class rather
 # than an ad-hoc `max-w-*xl mx-auto` cap (which leaves empty gutters on wide monitors).

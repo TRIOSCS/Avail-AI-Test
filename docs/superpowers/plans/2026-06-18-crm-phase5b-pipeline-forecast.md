@@ -1,5 +1,7 @@
 # CRM Phase 5b — Pipeline / Forecast Implementation Plan
 
+> **Status (2026-06-29):** PARTIAL — `app/services/forecast_service.py` engine is built, but the Reporting page/route is not wired: `pipeline_by_account` / `pipeline_by_owner` / `conversion_funnel` are dead code (no callers); only `pipeline_summary` surfaces (as a chip). REMAINING = build the Reporting destination or drop the unused rollups.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add an honest, real-time pipeline/forecast rollup to the Reporting section — the Requisition IS the opportunity (value × stage win-probability), rolled up by account and by owner, plus an interactions→RFQs→quotes→orders conversion funnel.

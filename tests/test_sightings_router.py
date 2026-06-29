@@ -2432,8 +2432,7 @@ class TestCrossRequisitionTracking:
 
 
 class TestSightingsVendorRowStatusTreatment:
-    """Row-level visual treatment keyed off computed vendor status (spec
-    2026-06-10-sightings-status-row-treatment-design.md)."""
+    """Row-level visual treatment keyed off computed vendor status."""
 
     def test_unavailable_vendor_gets_red_row_treatment(self, client, db_session):
         _, r, _ = _seed_data(db_session)

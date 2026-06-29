@@ -63,5 +63,3 @@ tertiary, separator. Component classes: `.opp-status-dot`, `.opp-status-label`,
 `.opp-deal--computed`, `.opp-deal--partial`, `.opp-coverage-seg`,
 `.opp-row--urgent-{24h,72h}`, `.opp-col-header`, `.opp-chip-row`,
 `.opp-chip-more`, `.opp-name-cell`, `.opp-action-rail*`, `.truncate-tip`.
-
-**Spec:** `docs/superpowers/specs/2026-04-21-opportunity-table-merged-design.md`.

@@ -63,7 +63,7 @@ class Company(Base):
     # Step 3: Parent company (self-referential hierarchy)
     parent_company_id = Column(Integer, ForeignKey("companies.id", ondelete="SET NULL"))
 
-    # CRM cadence — two clocks + tier (see docs/superpowers/plans/2026-06-17-crm-data-foundation.md)
+    # CRM cadence — two clocks + tier
     last_outbound_at = Column(UTCDateTime, index=True)
     last_reply_at = Column(UTCDateTime, index=True)
     tier = Column(String(20), index=True)  # key | core | standard | prospect (NULL => standard)

@@ -11,7 +11,7 @@ Depends on: nothing (pure functions).
 
 Coverage is deliberately CONSERVATIVE: a decoder emits a spec only when the part-number
 scheme expresses it unambiguously. Expand per-vendor tables as the dry-run surfaces real
-inventory. See docs/superpowers/specs/2026-06-08-mpn-decode-enrichment-design.md.
+inventory.
 """
 
 from app.services.mpn_decoder._common import DecodeResult
