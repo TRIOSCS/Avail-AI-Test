@@ -18,7 +18,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "169_crm_field_history"
-down_revision = "167_saved_views"
+down_revision = "166_sp3_po_receiving"
 branch_labels = None
 depends_on = None
 
