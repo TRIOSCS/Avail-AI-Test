@@ -67,8 +67,7 @@ clobber the new panel with a stale response.
 
 Historical note: prior to 2026-05-14, the row click also fired a
 parallel POST `/refresh` (LEG B) so every click ran the full connector
-pipeline. Sourcing is now strictly explicit — see
-`docs/superpowers/specs/2026-05-14-search-button-only-sourcing-design.md`.
+pipeline. Sourcing is now strictly explicit.
 
 ### DO NOT: publish SSE events from a handler that was itself triggered by an SSE event
 If an SSE event fires a POST that publishes a new SSE event, and the client

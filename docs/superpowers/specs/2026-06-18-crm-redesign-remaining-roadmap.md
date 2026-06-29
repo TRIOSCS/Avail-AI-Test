@@ -1,7 +1,7 @@
 # CRM Redesign — Remaining Work, Phased Roadmap
 
 **Created:** 2026-06-18
-**Status:** Active roadmap for the work remaining after the cockpit shipped
+**Status:** Active roadmap. **(2026-06-29 note:** many listed items have since shipped — cross-check current code / this session's crash-recovery audit before starting. Known still-open: Phase 5 Reporting page (forecast engine built but unwired — see `docs/superpowers/plans/2026-06-18-crm-phase5b-pipeline-forecast.md`), AI-suggest-a-tier.)**
 **Parent spec:** `docs/superpowers/specs/2026-06-17-crm-redesign-design.md` (the approved design — locked decisions live there)
 
 ## Where we are

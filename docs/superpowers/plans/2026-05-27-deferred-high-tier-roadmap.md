@@ -1,5 +1,7 @@
 # 2026-05-27 — Phased Roadmap: Deferred High-Tier Cleanup
 
+> **Status (2026-06-29):** PARTIAL. The `htmx_views.py` god-file split (HIGH-BE-1/2) SHIPPED. Still open: **HIGH-DB-2** (`Column(DateTime)`→`UTCDateTime`), **HIGH-SEC-4** (Graph webhook edge hardening — app-layer token mitigation shipped, IP/ServiceTag allowlist not), **HIGH-BE-11** (`db.query`→2.0, now ~1,567 callsites). See this session's crash-recovery audit for the consolidated current backlog.
+
 **Author:** Claude (Opus 4.7, 1M-context session 2026-05-27)
 **Driver of this plan:** TRIOSCS / mkhoury — original brief said "Hold these till I say go." That go-ahead was given on 2026-05-27 23:30 UTC, after the cleanup-queue cascade landed (PRs #149, #150, #151, #161, #168, #169, plus 5 dependabot bumps).
 

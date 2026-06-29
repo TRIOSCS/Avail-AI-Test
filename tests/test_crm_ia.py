@@ -1,7 +1,6 @@
 """tests/test_crm_ia.py — CRM IA redesign: one unified account workspace.
 
-TDD spec for the IA redesign (docs/superpowers/specs/
-2026-06-23-crm-ia-redesign.md, Stage A "Unify workspace + Contacts canonical").
+TDD spec for the IA redesign (Stage A "Unify workspace + Contacts canonical").
 
 The old single-vs-multi-site fork is GONE: every account row — regardless of
 site_count — loads the SAME unified detail at /v2/partials/customers/{id}, with

@@ -1,5 +1,7 @@
 # Approvals Tab (Frozen Scope) — Implementation Plan
 
+> **Status (2026-06-29):** SP1–SP4 shipped & deployed. **REMAINING (stranded):** fold SO-verification into the single manager approval — `verify_so` is still a separate blocking gate (`app/services/buyplan_workflow.py`). This is the one open item left in the frozen scope.
+
 > **For agentic workers:** Use superpowers:test-driven-development per task (failing test first).
 > Scope is **frozen** — see `docs/superpowers/specs/2026-06-28-approvals-rework-acceptance.md`. Build only
 > what is listed there. Steps use checkbox (`- [ ]`) syntax.

@@ -1,5 +1,7 @@
 # SP4 — Account Reclamation & Park Inflows
 
+> **Status (2026-06-29):** PARTIAL — backend + migration 123 shipped (dormant behind `account_sweep_enabled`). REMAINING = reclaim/park UI buttons, a `park_company_in_prospecting()` wrapper, and passing justification from the reclaim form.
+
 **For agentic workers / REQUIRED SUB-SKILL: superpowers:subagent-driven-development**
 
 **Goal:** Add three inflows that feed idle CRM accounts into the prospecting pool — manual
