@@ -48,12 +48,16 @@ export AWS_SECRET_ACCESS_KEY="$DO_SPACES_SECRET"
 export AWS_DEFAULT_REGION="${DO_SPACES_REGION:-nyc3}"
 
 # ─── Upload ──────────────────────────────────────────────────────────────────
-log "Uploading ${FILENAME} to s3://${DO_SPACES_BUCKET}/db-backups/"
+# --sse AES256 requests server-side encryption (SSE-S3) so the object is
+# encrypted at rest in Spaces even when the local backup is not gpg-encrypted.
+# Defense in depth: combines with backup.sh's optional gpg-at-rest encryption.
+log "Uploading ${FILENAME} to s3://${DO_SPACES_BUCKET}/db-backups/ (SSE AES256)"
 
 aws s3 cp \
     "$BACKUP_FILE" \
     "s3://${DO_SPACES_BUCKET}/db-backups/${FILENAME}" \
     --endpoint-url "$ENDPOINT" \
+    --sse AES256 \
     --storage-class STANDARD
 
 # Also upload checksum if it exists
@@ -61,7 +65,8 @@ if [ -f "${BACKUP_FILE}.sha256" ]; then
     aws s3 cp \
         "${BACKUP_FILE}.sha256" \
         "s3://${DO_SPACES_BUCKET}/db-backups/${FILENAME}.sha256" \
-        --endpoint-url "$ENDPOINT"
+        --endpoint-url "$ENDPOINT" \
+        --sse AES256
 fi
 
 log "Upload complete"
