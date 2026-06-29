@@ -2981,10 +2981,16 @@ crosswalk-pass pattern; both passes gated by settings.oem_crosswalk_enrich_enabl
 migration 100, spec: SPEC_OEM_WEB_RESOLUTION):
 
     Pass A — paced resolution (network). Batch cards whose display_mpn classifies
-    "hpe" (Phase A — HP/HPE via PartSurfer at https://partsurfer.hp.com; the
-    classifier gained the `\d{6}-B\d{2}` option-kit and `L\d{5}-\d{3}` L-series
-    shapes) and have NO fresh oem_crosswalk row are resolved via
-    enrichment_worker/oem_crosswalk_resolver.resolve_oem_spare — Claude web_search
+    to a vendor in SOURCE_BY_VENDOR — "hpe" (HP/HPE via PartSurfer at
+    https://partsurfer.hp.com; the classifier gained the `\d{6}-B\d{2}` option-kit
+    and `L\d{5}-\d{3}` L-series shapes) or "lenovo" (Wave 6 — Lenovo via PSREF at
+    https://psref.lenovo.com; the classic/modern FRU shapes already in the
+    classifier) — and have NO fresh oem_crosswalk row are resolved via
+    enrichment_worker/oem_crosswalk_resolver.resolve_oem_spare. Both vendors run the
+    SAME grounded resolver, negative cache and crosswalk writer; only the per-spare
+    vendor label differs (it steers the lookup hint PartSurfer-vs-PSREF and tags the
+    row). pending_resolution is selected per vendor (it is vendor-scoped) and merged —
+    Claude web_search
     grounded extraction (claude_json + five Python trust gates, HARDER than the
     ephemeral oem_extractor contract because the outcome is permanent with no
     distributor re-verification: (1) the SINGLE source_url the quote was taken from
