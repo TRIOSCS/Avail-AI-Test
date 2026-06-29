@@ -24,7 +24,8 @@
 {% set show_verify_banner = bp.status == 'active' and is_ops_member and pending_verify_lines|length > 0 %}
 {% set show_rejected_banner = bp.status == 'draft' and (bp.cancellation_reason or (bp.approved_at and bp.approval_notes)) %}
 {% set show_draft_banner = bp.status == 'draft' and not show_rejected_banner %}
-{% set has_action_banner = show_buyer_banner or show_approval_banner or show_so_banner or show_verify_banner or show_rejected_banner or show_draft_banner %}
+{% set show_inbound_banner = bp.status == 'inbound' %}
+{% set has_action_banner = show_buyer_banner or show_approval_banner or show_so_banner or show_verify_banner or show_rejected_banner or show_draft_banner or show_inbound_banner %}
 
 <div class="page-fluid" x-data="{ showModal: false, modalType: '', showAi: false, showNotes: false, showSo: false }">
 
@@ -126,6 +127,9 @@
   {% elif bp.status == 'active' %}
     {% set filled = 4 %}
     {% set step_label = 'PO Execution' %}
+  {% elif bp.status == 'inbound' %}
+    {% set filled = 4 %}
+    {% set step_label = 'Inbound (awaiting receipt)' %}
   {% elif bp.status == 'completed' %}
     {% set filled = 5 %}
     {% set step_label = 'Complete' %}
@@ -246,6 +250,22 @@
     <button @click="modalType = 'submit'; showModal = true"
             class="flex-shrink-0 btn btn-primary btn-sm">
       Submit
+    </button>
+  </div>
+  {% endif %}
+
+  {# Buyer: PO approved, goods inbound — mark received to complete (SP-3) #}
+  {% if show_inbound_banner %}
+  <div class="mb-4 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex items-center justify-between gap-3">
+    <div class="flex items-center gap-3">
+      <span class="flex-shrink-0 w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center justify-center">!</span>
+      <span class="text-sm text-blue-800">Purchase Order approved — goods are inbound. Mark received to complete the deal.</span>
+    </div>
+    <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/receive"
+            hx-target="#main-content" hx-swap="innerHTML"
+            hx-confirm="Mark this buy plan received and complete it?"
+            class="flex-shrink-0 btn btn-primary btn-sm">
+      Mark Received
     </button>
   </div>
   {% endif %}

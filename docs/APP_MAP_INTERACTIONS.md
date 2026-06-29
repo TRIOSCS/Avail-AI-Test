@@ -1356,7 +1356,7 @@ the re-homed work surface (no new read models) with a **pinned "Pending approval
 section** (`approvals/_pending_section.html`) built from `services/approvals/queue.
 build_queue_view(db, user, tab=<gate>)` for that single gate. The pinned section renders ONLY
 when the viewer holds that tab's approve right (`show_pending` = `_TAB_APPROVE_ATTR[tab]`:
-`can_approve_buy_plans` for Sales Orders / `can_approve_pos` for Purchase Orders /
+`can_approve_buy_plans` for Sales Orders / `can_approve_purchase_orders` for Purchase Orders /
 `can_approve_prepayments` for Vendor Prepayments — the Buy Plans tab is gate-less) AND there is
 something pending; its inline approve/reject re-fetch the SAME stage-tab body into
 `#bp-hub-body`. The standalone four-tab Approvals lens (`/v2/partials/buy-plans/approvals` +
@@ -1999,7 +1999,8 @@ POST /api/admin/users/{id}/active           → activate / deactivate
 POST /api/admin/users/{id}/buyplan-approver → grant/revoke the per-user buy-plan approval right (User.can_approve_buy_plans); APPROVAL_GRANT/APPROVAL_REVOKE audit
 POST /api/admin/users/{id}/prepayment-approver  → grant/revoke prepayment approval + optional dollar limit (User.can_approve_prepayments / prepayment_approval_limit)
 POST /api/admin/users/{id}/sales-order-approver → grant/revoke QP Sales-section approval right (User.can_approve_qp_sales — column renamed by SP-2 migration 164; route/handler name kept for back-compat, spec §13); APPROVAL_GRANT/APPROVAL_REVOKE audit (QP Phase C2a)
-POST /api/admin/users/{id}/po-approver          → grant/revoke QP Purchasing-section approval right (User.can_approve_pos); APPROVAL_GRANT/APPROVAL_REVOKE audit (QP Phase C2a)
+POST /api/admin/users/{id}/po-approver          → grant/revoke QP Purchasing-section approval right (User.can_approve_qp_purchasing — column renamed by SP-3 migration 166; route/handler name kept for back-compat); APPROVAL_GRANT/APPROVAL_REVOKE audit
+POST /api/admin/users/{id}/purchase-order-approver → grant/revoke deal-level PO approval right + optional dollar limit (User.can_approve_purchase_orders / purchase_order_approval_limit); APPROVAL_GRANT/APPROVAL_REVOKE audit (SP-3, mirrors prepayment-approver)
 GET  /api/admin/users/{id}/access-panel     → user_access_panel.html (per-user access editor modal)
 POST /api/admin/users/{id}/access           → grant/revoke/reset ONE key (value ∈ on|off|default)
 GET  /api/admin/users/audit                 → users_audit.html (audit-log viewer modal)
@@ -5220,20 +5221,39 @@ hx-get).
 **QP section gates — Sales / Purchasing (QP Phase C2a):** the QualityPlan is the engine
 subject (`subject_type='quality_plan'`); the `gate_type` discriminates the section.
 `routing.route_request` gains `QP_SALES` → every active `can_approve_qp_sales` holder
-and `PURCHASE_ORDER` → every active `can_approve_pos` holder (no amount check, like
-`BUY_PLAN`). `quality_plan_service.submit_section(db, qp_id, gate_type, user)` calls
+and `QP_PURCHASING` → every active `can_approve_qp_purchasing` holder (no amount check, like
+`BUY_PLAN`; `QP_PURCHASING` de-collided from the deal-level `PURCHASE_ORDER` gate in SP-3).
+`quality_plan_service.submit_section(db, qp_id, gate_type, user)` calls
 `create_request(gate_type, amount=None, subject=qp, requested_by=owner=user)`; a missing
 approver raises `NoEligibleApproverError`, which `submit_section` re-raises as
 `NoSectionApproverError` — the router (`POST /v2/qp/{id}/submit-sales`,
 `/submit-purchasing`) catches it and re-renders the QP detail with an inline "no approver
 configured" banner (NEVER a 500), with no orphan request (`create_request` already deleted
 the half-built row). On resolution, `decide()`'s on-resolve dispatch — after the BUY_PLAN
-block — runs for `subject_type=='quality_plan'` AND `gate_type ∈ {sales_order,
-purchase_order}`: a LAZY import (circular-safe) of
+block — runs for `subject_type=='quality_plan'` AND `gate_type ∈ {qp_sales,
+qp_purchasing}`: a LAZY import (circular-safe) of
 `quality_plan_service._on_section_approved(db, qp_id, gate_type, approved)`, which logs
 an `APPROVAL_APPROVED`/`APPROVAL_REJECTED` `ActivityLog`. The QP detail renders a per-section
 gate-status chip from `_get_gate(db, qp_id, gate_type)` (latest `ApprovalRequest` for the QP
-+ gate), and the "Submit … for Approval" button is hidden once a non-rejected request exists.
++ gate), with an inline Approve/Reject affordance on BOTH the Sales (`sales_gate_can_act`) and
+Purchasing (`purchasing_gate_can_act`, added in SP-3) section headers for eligible PENDING
+recipients, and the "Submit … for Approval" button is hidden once a non-rejected request exists.
+
+**Deal-level PO gate + receiving (SP-3):** distinct from the QP Purchasing **section** gate
+above, the deal-level `PURCHASE_ORDER` gate approves a buy plan's PO **spend** (subject =
+BuyPlan). When the `BUY_PLAN` gate is approved, `_run_approve_side_effects` calls
+`_maybe_open_po_gate(plan, user, db)`: a plan whose `total_cost` is below
+`settings.po_auto_approve_threshold` (default $5,000) auto-skips (stays ACTIVE, no gate); at or
+above it a `PURCHASE_ORDER` `ApprovalRequest` opens (amount = plan total), routed to
+`can_approve_purchase_orders` holders within their `purchase_order_approval_limit` (mirrors the
+prepayment amount-filter). `decide()` discriminates it from the `BUY_PLAN` gate by **gate_type**
+(both carry a BuyPlan subject): on approve it runs `_run_po_approve_side_effects`, moving the
+plan **ACTIVE → INBOUND** (goods inbound). The buyer then completes the deal via
+`receive_buy_plan` (`POST /v2/partials/buy-plans/{id}/receive`, the "Mark Received" banner on an
+INBOUND plan), which moves **INBOUND → COMPLETED** through the shared `_complete_plan` (same case
+report as auto-completion). The deal-level gate surfaces under the **Purchase Orders** stage tab
+(`_TAB_APPROVE_ATTR['purchase_orders'] = can_approve_purchase_orders`); the QP Purchasing
+section gate is now QP-view inline only (no tab).
 
 **QP native sections (QP Phase C2b):** the QP detail (`qp/detail.html`) `{% include %}`s four
 section partials — `qp/_section_sales.html`, `_section_purchasing.html`, `_section_serial.html`,
@@ -5264,8 +5284,11 @@ close that request or it would orphan a row in the approvals queue/badge — and
 an approver pull the stale request and resurrect the plan. `cancel_buy_plan` and the
 `verify_so` **HALT** branch therefore call
 `_cancel_open_engine_requests_for_plan(plan, user, db)` (the stale-cancel loop factored out
-of `_open_engine_request_for_plan`) **at/before the transition, only when the plan is still
-PENDING**. That helper cancels each open request on behalf of the request's OWN
+of `_open_engine_request_for_plan`) at/before the transition. `cancel_buy_plan` calls it
+**unconditionally** (SP-3) so it also closes a live deal-level `PURCHASE_ORDER` gate on an
+ACTIVE/INBOUND plan (the helper matches by `subject_type=buy_plan` + `REQUESTED`, so it covers
+both the `BUY_PLAN` and `PURCHASE_ORDER` gates, and is a no-op when none are open); the
+`verify_so` HALT branch still guards on PENDING. That helper cancels each open request on behalf of the request's OWN
 `requested_by`/`owner` (the original submitter), so the `events.cancel` authz
 (requester/owner OR manager/admin) is satisfied for EVERY caller — including a `verify_so`
 HALT driven by an ops-group member who is neither the submitter nor a manager/admin. As a
@@ -5295,7 +5318,7 @@ approve/reject via `approvals/_macros.html`) plus a small "Recently resolved" di
 (terminal statuses, capped at 10, ordered by `coalesce(resolved_at, updated_at, created_at)
 desc`). The section shows ONLY when the viewer holds that tab's approve right
 (`_TAB_APPROVE_ATTR[tab]` — `can_approve_buy_plans` on the Sales Orders tab,
-`can_approve_pos` on Purchase Orders, `can_approve_prepayments` on Vendor Prepayments; the
+`can_approve_purchase_orders` on Purchase Orders, `can_approve_prepayments` on Vendor Prepayments; the
 Buy Plans tab is gate-less) AND there is something pending; its inline actions re-fetch the
 SAME stage-tab body into `#bp-hub-body`. Subjects resolve by `subject_type` (buy_plan→`Plan
 #` / plan detail, quality_plan→`QP #` / `/v2/qp/{id}` with the parent deal as a sub-label,

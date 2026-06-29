@@ -113,7 +113,9 @@ _APPROVALS_TABS = ("sales_orders", "buy_plans", "purchase_orders", "prepayments"
 
 _TAB_APPROVE_ATTR = {
     "sales_orders": "can_approve_buy_plans",
-    "purchase_orders": "can_approve_pos",
+    # SP-3: the Purchase Orders tab now surfaces the deal-level PURCHASE_ORDER gate, so it
+    # gates on the deal-level PO approver (the QP Purchasing section moved to QP-view inline).
+    "purchase_orders": "can_approve_purchase_orders",
     "prepayments": "can_approve_prepayments",
 }
 
@@ -753,6 +755,33 @@ async def buy_plan_verify_so_partial(
 
     if origin == "supervise":
         return _render_supervise_body(request, user, db)
+
+    return await buy_plan_detail_partial(request, plan_id, user, db)
+
+
+@router.post("/v2/partials/buy-plans/{plan_id}/receive", response_class=HTMLResponse)
+async def buy_plan_receive_partial(
+    request: Request,
+    plan_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Buyer marks an inbound buy plan received — completes the deal (SP-3).
+
+    The deal-level PO gate moved the plan to INBOUND; this terminal action moves it to
+    COMPLETED and generates its case report. Per-record ownership is enforced exactly
+    like confirm-po (non-owner SALES/TRADER → 404). The workflow guards status==INBOUND.
+    """
+    from ...services.buyplan_workflow import receive_buy_plan
+
+    # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation.
+    get_buyplan_for_user(db, user, plan_id)
+
+    try:
+        receive_buy_plan(plan_id, user, db)
+        db.commit()
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
     return await buy_plan_detail_partial(request, plan_id, user, db)
 

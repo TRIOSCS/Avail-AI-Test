@@ -102,11 +102,11 @@ class TestSectionApproved:
 
     def test_purchase_order_not_approved(self):
         qp = self._qp_mock(purchasing_approved=False)
-        assert _section_approved(qp, "purchase_order") is False
+        assert _section_approved(qp, "qp_purchasing") is False
 
     def test_purchase_order_approved(self):
         qp = self._qp_mock(purchasing_approved=True)
-        assert _section_approved(qp, "purchase_order") is True
+        assert _section_approved(qp, "qp_purchasing") is True
 
 
 # ── Helpers (mirrors test_c2a_gates._make_qp) ─────────────────────────────────
@@ -120,7 +120,7 @@ def _make_admin_user(db: Session) -> User:
         azure_id=f"azure-nqp-{uuid.uuid4().hex[:8]}",
         is_active=True,
         can_approve_qp_sales=True,
-        can_approve_pos=True,
+        can_approve_qp_purchasing=True,
     )
     db.add(u)
     db.flush()

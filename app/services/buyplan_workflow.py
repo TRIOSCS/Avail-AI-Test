@@ -161,6 +161,8 @@ def _run_approve_side_effects(
     logger.info("Buy plan {} approved by {}", plan.id, user.email)
     _generate_buyer_tasks(plan, db)
     _log_approval_activity(plan, "approve", user, notes, db)
+    # SP-3: a plan that clears the PO threshold opens a deal-level PURCHASE_ORDER gate.
+    _maybe_open_po_gate(plan, user, db)
 
 
 def _run_reject_side_effects(plan: BuyPlan, user: User, db: Session, *, reason: str) -> None:
@@ -267,6 +269,80 @@ def _open_engine_request_for_plan(plan: BuyPlan, user: User, db: Session) -> Non
         )
     except NoEligibleApproverError:
         logger.warning("Buy plan {} pending but no BUY_PLAN approver configured", plan.id)
+
+
+# ── Workflow: Deal-level PO gate + Receiving (SP-3) ──────────────────
+
+
+def _maybe_open_po_gate(plan: BuyPlan, user: User, db: Session) -> None:
+    """Open a deal-level PURCHASE_ORDER gate for a just-activated plan, unless it auto-
+    skips.
+
+    Called from ``_run_approve_side_effects`` right after a plan goes ACTIVE. A plan whose
+    total cost is below ``settings.po_auto_approve_threshold`` needs no PO approval
+    (auto-skip): it stays ACTIVE and completes through the existing line flow. At or above
+    the threshold a PURCHASE_ORDER ApprovalRequest opens (subject=plan, amount=plan total),
+    routed to ``can_approve_purchase_orders`` holders within their dollar limit. No eligible
+    approver → log a WARNING and leave the plan ACTIVE with no orphan engine state (the
+    create_request flush is the only write and is rolled into the caller's transaction).
+
+    Lazy imports avoid the circular import (the approvals service imports buyplan_workflow).
+    """
+    from ..constants import ApprovalGateType
+    from .approvals.routing import NoEligibleApproverError
+    from .approvals.service import create_request
+
+    total = float(plan.total_cost or 0)
+    if total < settings.po_auto_approve_threshold:
+        logger.info("Buy plan {} PO gate auto-skipped (total {:.2f} below threshold)", plan.id, total)
+        return
+
+    try:
+        create_request(
+            db,
+            gate_type=ApprovalGateType.PURCHASE_ORDER,
+            amount=plan.total_cost,
+            subject=plan,
+            requested_by=user,
+            owner=user,
+        )
+    except NoEligibleApproverError:
+        logger.warning("Buy plan {} over PO threshold but no PURCHASE_ORDER approver configured", plan.id)
+
+
+def _run_po_approve_side_effects(plan: BuyPlan, user: User, db: Session) -> None:
+    """On deal-level PO approval: move an ACTIVE plan to INBOUND (goods inbound).
+
+    The single arbitration point for the PURCHASE_ORDER gate's approve effect, called by the
+    approvals-engine ``decide()`` dispatch. State guard FIRST: only an ACTIVE plan may move to
+    INBOUND, so deciding a stale PO request whose plan already left ACTIVE (cancelled/halted)
+    raises cleanly (→ router 400 / idempotent no-op) rather than resurrecting it. The caller
+    owns the flush/commit.
+    """
+    if plan.status != BuyPlanStatus.ACTIVE.value:
+        raise ValueError(f"Can only approve a PO for an active plan (current: {plan.status})")
+    plan.status = BuyPlanStatus.INBOUND.value
+    logger.info("Buy plan {} PO approved → INBOUND by {}", plan.id, user.email)
+
+
+def receive_buy_plan(plan_id: int, user: User, db: Session) -> BuyPlan:
+    """Buyer marks an inbound buy plan received — the completion terminal.
+
+    Only an INBOUND plan (deal-level PO approved, goods inbound) can be received. Moves the
+    plan to COMPLETED and generates its case report via the shared ``_complete_plan`` helper
+    so the receiving path produces the same archive record as auto-completion. The caller
+    owns the commit.
+    """
+    plan = db.get(BuyPlan, plan_id, options=[joinedload(BuyPlan.lines)])
+    if not plan:
+        raise ValueError(f"Buy plan {plan_id} not found")
+    if plan.status != BuyPlanStatus.INBOUND.value:
+        raise ValueError(f"Can only mark received an inbound plan (current: {plan.status})")
+
+    _complete_plan(plan, db)
+    logger.info("Buy plan {} marked received → COMPLETED by {}", plan_id, user.email)
+    db.flush()
+    return plan
 
 
 def _log_approval_activity(plan: BuyPlan, action: str, user: User, notes: str | None, db: Session) -> None:
@@ -773,14 +849,14 @@ def cancel_buy_plan(plan_id: int, user: User, db: Session, *, reason: str | None
     if plan.status in (BuyPlanStatus.COMPLETED.value, BuyPlanStatus.CANCELLED.value):
         raise ValueError(f"Cannot cancel plan in '{plan.status}' status")
 
-    # If the plan is still PENDING, close its open engine request BEFORE the transition so
-    # no REQUESTED row is orphaned in the approvals queue/badge — and, critically, so an
-    # approver can no longer pull a stale request out of the queue and resurrect this
-    # cancelled plan to ACTIVE. The helper cancels on behalf of each request's own
-    # requester/owner, so the engine cancel authz is satisfied even when the canceller is
-    # the (non-manager) plan owner.
-    if plan.status == BuyPlanStatus.PENDING.value:
-        _cancel_open_engine_requests_for_plan(plan, user, db)
+    # Close any open engine gate BEFORE the transition so no REQUESTED row is orphaned in
+    # the approvals queue/badge — and, critically, so an approver can no longer pull a stale
+    # request out of the queue and resurrect this cancelled plan. This covers the BUY_PLAN
+    # gate while PENDING AND the deal-level PURCHASE_ORDER gate while ACTIVE/INBOUND (SP-3);
+    # the helper is a no-op when none are open. It cancels on behalf of each request's own
+    # requester/owner, so the engine cancel authz is satisfied even when the canceller is the
+    # (non-manager) plan owner.
+    _cancel_open_engine_requests_for_plan(plan, user, db)
 
     plan.status = BuyPlanStatus.CANCELLED.value
     plan.cancelled_at = datetime.now(timezone.utc)

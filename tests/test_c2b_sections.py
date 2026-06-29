@@ -45,7 +45,7 @@ from app.services.quality_plan_service import (
 # ── Helpers ─────────────────────────────────────────────────────────────
 
 
-def _make_user(db: Session, *, can_approve_qp_sales: bool = False, can_approve_pos: bool = False) -> User:
+def _make_user(db: Session, *, can_approve_qp_sales: bool = False, can_approve_qp_purchasing: bool = False) -> User:
     u = User(
         email=f"c2b-{uuid.uuid4().hex[:8]}@test.com",
         name="C2b User",
@@ -53,7 +53,7 @@ def _make_user(db: Session, *, can_approve_qp_sales: bool = False, can_approve_p
         azure_id=f"azure-c2b-{uuid.uuid4().hex[:8]}",
         is_active=True,
         can_approve_qp_sales=can_approve_qp_sales,
-        can_approve_pos=can_approve_pos,
+        can_approve_qp_purchasing=can_approve_qp_purchasing,
         created_at=datetime.now(timezone.utc),
     )
     db.add(u)
@@ -130,7 +130,7 @@ def test_complete_sections_validate_clean(db_session: Session) -> None:
     assert _validate_sales_section(qp) == []
     assert _validate_purchasing_section(qp) == []
     assert validate_section(qp, ApprovalGateType.QP_SALES) == []
-    assert validate_section(qp, ApprovalGateType.PURCHASE_ORDER) == []
+    assert validate_section(qp, ApprovalGateType.QP_PURCHASING) == []
 
 
 # ── submit_section gating ────────────────────────────────────────────────
@@ -176,7 +176,7 @@ def test_on_section_approved_stamps_sales_timestamp(db_session: Session) -> None
 def test_on_section_approved_stamps_purchasing_timestamp(db_session: Session) -> None:
     """Approving the Purchasing section sets purchasing_section_approved_at."""
     qp = _make_qp(db_session, _make_user(db_session), fill_purchasing=True)
-    _on_section_approved(db_session, qp.id, ApprovalGateType.PURCHASE_ORDER, True)
+    _on_section_approved(db_session, qp.id, ApprovalGateType.QP_PURCHASING, True)
     db_session.refresh(qp)
     assert qp.purchasing_section_approved_at is not None
 
@@ -201,7 +201,7 @@ def qp_client(db_session: Session):
     from app.dependencies import require_user
     from app.main import app
 
-    owner = _make_user(db_session, can_approve_qp_sales=True, can_approve_pos=True)
+    owner = _make_user(db_session, can_approve_qp_sales=True, can_approve_qp_purchasing=True)
     qp = _make_qp(db_session, owner, fill_sales=True, fill_purchasing=True)
     db_session.commit()
 

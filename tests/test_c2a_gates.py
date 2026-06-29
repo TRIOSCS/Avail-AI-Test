@@ -3,7 +3,7 @@
 Covers the C2a contract on the shared approvals engine (engine + buy-plan gate already
 live in C1):
   - route_request for the QP_SALES gate routes to can_approve_qp_sales holders;
-    for the PURCHASE_ORDER gate to can_approve_pos holders (step rule=ANY, recipients
+    for the QP_PURCHASING gate to can_approve_qp_purchasing holders (step rule=ANY, recipients
     PENDING), with no amount check.
   - no eligible approver raises NoEligibleApproverError, and submit_section surfaces it as
     NoSectionApproverError (the router → inline banner, never a 500) leaving NO orphan
@@ -60,7 +60,8 @@ def _make_user(
     db: Session,
     *,
     can_approve_qp_sales: bool = False,
-    can_approve_pos: bool = False,
+    can_approve_qp_purchasing: bool = False,
+    can_approve_purchase_orders: bool = False,
     is_active: bool = True,
     role: str = "buyer",
 ) -> User:
@@ -71,7 +72,8 @@ def _make_user(
         azure_id=f"azure-c2a-{uuid.uuid4().hex[:8]}",
         is_active=is_active,
         can_approve_qp_sales=can_approve_qp_sales,
-        can_approve_pos=can_approve_pos,
+        can_approve_qp_purchasing=can_approve_qp_purchasing,
+        can_approve_purchase_orders=can_approve_purchase_orders,
         created_at=datetime.now(timezone.utc),
     )
     db.add(u)
@@ -163,7 +165,7 @@ def test_route_sales_order_routes_to_sales_approvers(db_session: Session) -> Non
     alice = _make_user(db_session, can_approve_qp_sales=True)
     bob = _make_user(db_session, can_approve_qp_sales=True)
     _make_user(db_session, can_approve_qp_sales=False)  # not routed
-    _make_user(db_session, can_approve_pos=True)  # wrong gate toggle — not routed
+    _make_user(db_session, can_approve_qp_purchasing=True)  # wrong gate toggle — not routed
 
     req = _make_request(db_session, ApprovalGateType.QP_SALES)
     step = route_request(db_session, req)
@@ -182,16 +184,16 @@ def test_route_sales_order_ignores_inactive(db_session: Session) -> None:
     assert {r.user_id for r in step.recipients} == {active.id}
 
 
-# ── route_request: PURCHASE_ORDER ────────────────────────────────────────
+# ── route_request: QP_PURCHASING ────────────────────────────────────────
 
 
-def test_route_purchase_order_routes_to_po_approvers(db_session: Session) -> None:
-    """PURCHASE_ORDER routes to every active user with can_approve_pos=True."""
-    carol = _make_user(db_session, can_approve_pos=True)
-    _make_user(db_session, can_approve_pos=False)  # not routed
+def test_route_qp_purchasing_routes_to_purchasing_approvers(db_session: Session) -> None:
+    """QP_PURCHASING routes to every active user with can_approve_qp_purchasing=True."""
+    carol = _make_user(db_session, can_approve_qp_purchasing=True)
+    _make_user(db_session, can_approve_qp_purchasing=False)  # not routed
     _make_user(db_session, can_approve_qp_sales=True)  # wrong gate toggle — not routed
 
-    req = _make_request(db_session, ApprovalGateType.PURCHASE_ORDER)
+    req = _make_request(db_session, ApprovalGateType.QP_PURCHASING)
     step = route_request(db_session, req)
 
     assert {r.user_id for r in step.recipients} == {carol.id}
@@ -208,9 +210,40 @@ def test_route_sales_order_no_approver_raises(db_session: Session) -> None:
         route_request(db_session, _make_request(db_session, ApprovalGateType.QP_SALES))
 
 
+def test_route_qp_purchasing_no_approver_raises(db_session: Session) -> None:
+    """No can_approve_qp_purchasing holder → NoEligibleApproverError."""
+    _make_user(db_session, can_approve_qp_purchasing=False)
+    with pytest.raises(NoEligibleApproverError):
+        route_request(db_session, _make_request(db_session, ApprovalGateType.QP_PURCHASING))
+
+
+# ── route_request: deal-level PURCHASE_ORDER gate (SP-3) ──────────────────
+
+
+def test_route_purchase_order_routes_within_dollar_limit(db_session: Session) -> None:
+    """The deal-level PURCHASE_ORDER gate routes to can_approve_purchase_orders holders,
+    filtered by their optional dollar limit (mirrors the prepayment amount-filter)."""
+    from decimal import Decimal
+
+    unlimited = _make_user(db_session, can_approve_purchase_orders=True)  # limit NULL
+    small = _make_user(db_session, can_approve_purchase_orders=True)
+    small.purchase_order_approval_limit = Decimal("1000")
+    _make_user(db_session, can_approve_purchase_orders=False)  # not routed
+    _make_user(db_session, can_approve_qp_purchasing=True)  # wrong gate toggle — not routed
+    db_session.flush()
+
+    req = ApprovalRequest(gate_type=ApprovalGateType.PURCHASE_ORDER, amount=Decimal("2500"))
+    db_session.add(req)
+    db_session.flush()
+    step = route_request(db_session, req)
+
+    # $2,500 > small's $1,000 cap → only the unlimited approver is eligible.
+    assert {r.user_id for r in step.recipients} == {unlimited.id}
+
+
 def test_route_purchase_order_no_approver_raises(db_session: Session) -> None:
-    """No can_approve_pos holder → NoEligibleApproverError."""
-    _make_user(db_session, can_approve_pos=False)
+    """No can_approve_purchase_orders holder → NoEligibleApproverError."""
+    _make_user(db_session, can_approve_purchase_orders=False)
     with pytest.raises(NoEligibleApproverError):
         route_request(db_session, _make_request(db_session, ApprovalGateType.PURCHASE_ORDER))
 
@@ -238,13 +271,13 @@ def test_submit_sales_section_creates_sales_order_request(db_session: Session) -
 
 
 def test_submit_purchasing_section_creates_purchase_order_request(db_session: Session) -> None:
-    """submit_section(PURCHASE_ORDER) opens the PURCHASE_ORDER request on the QP."""
-    approver = _make_user(db_session, can_approve_pos=True)
+    """submit_section(QP_PURCHASING) opens the QP_PURCHASING request on the QP."""
+    approver = _make_user(db_session, can_approve_qp_purchasing=True)
     qp = _make_qp(db_session, approver)
 
-    req = submit_section(db_session, qp.id, ApprovalGateType.PURCHASE_ORDER, approver)
+    req = submit_section(db_session, qp.id, ApprovalGateType.QP_PURCHASING, approver)
 
-    assert req.gate_type == ApprovalGateType.PURCHASE_ORDER
+    assert req.gate_type == ApprovalGateType.QP_PURCHASING
     assert req.subject_type == ApprovalSubjectType.QUALITY_PLAN
     assert req.subject_id == qp.id
 
@@ -291,7 +324,7 @@ def test_decide_sales_section_logs_activity_same_session(db_session: Session) ->
 
 def test_on_section_approved_missing_qp_is_noop(db_session: Session) -> None:
     """_on_section_approved on a deleted QP is a no-op warning, not an error."""
-    _on_section_approved(db_session, 999_999, ApprovalGateType.PURCHASE_ORDER, True)  # must not raise
+    _on_section_approved(db_session, 999_999, ApprovalGateType.QP_PURCHASING, True)  # must not raise
 
 
 # ── Admin toggle endpoints flip the column ───────────────────────────────
@@ -348,14 +381,14 @@ def test_set_sales_order_approver_revokes(admin_client, db_session: Session) -> 
 
 
 def test_set_po_approver_grants_and_audits(admin_client, db_session: Session) -> None:
-    """The po-approver endpoint flips can_approve_pos + audits."""
+    """The po-approver endpoint flips can_approve_qp_purchasing + audits."""
     client, _admin = admin_client
     target = _make_user(db_session)
 
     r = client.post(f"/api/admin/users/{target.id}/po-approver", data={"can_approve": "true"})
     assert r.status_code == 200
     db_session.refresh(target)
-    assert target.can_approve_pos is True
+    assert target.can_approve_qp_purchasing is True
     assert len(_audit_rows(db_session, UserAuditAction.APPROVAL_GRANT)) == 1
 
 
@@ -369,7 +402,7 @@ def qp_client(db_session: Session):
     from app.dependencies import require_user
     from app.main import app
 
-    user = _make_user(db_session, role="admin", can_approve_qp_sales=True, can_approve_pos=True)
+    user = _make_user(db_session, role="admin", can_approve_qp_sales=True, can_approve_qp_purchasing=True)
     qp = _make_qp(db_session, user)
     db_session.commit()
 
@@ -397,13 +430,13 @@ def test_submit_sales_endpoint_creates_request(qp_client, db_session: Session) -
 
 
 def test_submit_purchasing_endpoint_creates_request(qp_client, db_session: Session) -> None:
-    """POST /v2/qp/{id}/submit-purchasing opens a PURCHASE_ORDER request and returns
+    """POST /v2/qp/{id}/submit-purchasing opens a QP_PURCHASING request and returns
     200."""
     client, _user, qp = qp_client
 
     r = client.post(f"/v2/qp/{qp.id}/submit-purchasing")
     assert r.status_code == 200
-    reqs = _section_requests(db_session, qp.id, ApprovalGateType.PURCHASE_ORDER)
+    reqs = _section_requests(db_session, qp.id, ApprovalGateType.QP_PURCHASING)
     assert len(reqs) == 1
 
 
@@ -414,7 +447,7 @@ def test_submit_sales_endpoint_no_approver_shows_banner_not_500(db_session: Sess
     from app.dependencies import require_user
     from app.main import app
 
-    user = _make_user(db_session, role="admin", can_approve_qp_sales=False, can_approve_pos=False)
+    user = _make_user(db_session, role="admin", can_approve_qp_sales=False, can_approve_qp_purchasing=False)
     qp = _make_qp(db_session, user)
     db_session.commit()
 
