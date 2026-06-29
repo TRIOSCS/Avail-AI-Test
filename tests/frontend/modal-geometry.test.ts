@@ -109,6 +109,16 @@ describe('moveGeometry', () => {
   });
 });
 
+describe('minimum-size floor — raised min-height (#461 review fix d)', () => {
+  it('keeps MIN_H/MIN_W above the sliver thresholds so a modal stays usable', () => {
+    // The #461 adversarial review raised MIN_H off 240 (where a shrunk panel clipped its
+    // header + the New-Requisition customer-picker dropdown) to a usable floor. Guard the
+    // value so a future edit can't silently collapse a modal back to an unusable sliver.
+    expect(MIN_H).toBeGreaterThanOrEqual(360);
+    expect(MIN_W).toBeGreaterThanOrEqual(320);
+  });
+});
+
 describe('clampToViewport — restore onto a smaller screen', () => {
   it('leaves a fitting geometry untouched', () => {
     expect(clampToViewport(start, VW, VH)).toEqual(start);

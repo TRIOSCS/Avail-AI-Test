@@ -703,3 +703,73 @@ def test_dedup_services_fail_closed_on_detach_error():
         for m in re.finditer(r"except Exception as e:(.*?)(?=\n {0,8}\w|\Z)", region, re.DOTALL):
             block = m.group(1)
             assert "raise" in block, f"{func}: detach/purge except block fails open (no re-raise):\n{block}"
+
+
+def test_resizable_modal_review_fixes_locked_in():
+    """REGRESSION (#461 adversarial-review follow-ups): lock in the five resizable-modal
+    polish fixes at the source level so a future refactor can't silently revert them.
+
+    Runtime behavior for (b) re-clamp and (c) pointercancel teardown is exercised
+    against the shipped Alpine factory in tests/frontend/resizable-modal.test.ts; the
+    MIN_H/MIN_W floor (d) in tests/frontend/modal-geometry.test.ts. This test guards the
+    template/CSS/JS-source invariants those behaviors depend on (and adds the only
+    coverage for the purely-presentational fixes (a) the visible grip and (e) the shrunk
+    picker).
+
+    (a) VISIBLE drag grip — a real, painted handle, not the old transparent overlay
+    strip. (b) Re-clamp a floating panel on window resize (listener added AND torn
+    down). (c) Tear down the drag on pointercancel (not only pointerup) — no stuck-drag
+    state. (d) Min-height raised off the sliver value (240 -> 400) so a modal stays
+    usable. (e) New-Requisition customer-picker dropdown shrunk to max-h-40.
+    """
+    base = Path("app/templates/htmx/base.html").read_text()
+    css = Path("app/static/styles.css").read_text()
+    js = Path("app/static/htmx_app.js").read_text()
+    geom = Path("app/static/modal_geometry.js").read_text()
+    unified = Path("app/templates/htmx/partials/requisitions/unified_modal.html").read_text()
+
+    # (a) Visible grip: markup wired to startMove with a painted handle child, and the
+    # handle has a real (non-transparent) background — i.e. NOT an invisible drag strip.
+    assert 'class="modal-grip"' in base and "startMove($event)" in base, (
+        "base.html lost the drag-to-move grip wired to startMove()."
+    )
+    assert "modal-grip-handle" in base, "base.html grip lost its visible handle child."
+    handle = re.search(r"\.modal-grip-handle\s*\{([^}]*)\}", css)
+    assert handle, ".modal-grip-handle CSS rule is missing — the grip would be invisible."
+    handle_body = handle.group(1)
+    assert (
+        "background:" in handle_body and "transparent" not in handle_body and "background: none" not in handle_body
+    ), (
+        "the grip handle must paint a visible background so users can see the drag "
+        "affordance — it must not revert to an invisible/transparent strip."
+    )
+
+    # (b) Window-resize re-clamp: a 'resize' listener is added AND removed (no leak), and
+    # the handler clamps the panel back onto the viewport.
+    assert "addEventListener('resize'" in js and "removeEventListener('resize'" in js, (
+        "resizableModal must add AND remove a window 'resize' listener (re-clamp + no leak)."
+    )
+    assert "clampToViewport(" in js, "the resize handler must clampToViewport() the panel."
+
+    # (c) pointercancel teardown: bound and removed alongside pointerup.
+    assert "addEventListener('pointercancel'" in js and "removeEventListener('pointercancel'" in js, (
+        "drag must tear down on pointercancel (not only pointerup) to avoid stuck-drag state."
+    )
+
+    # (d) Raised min-height: can't collapse to a sliver.
+    min_h = re.search(r"MIN_H\s*=\s*(\d+)", geom)
+    assert min_h and int(min_h.group(1)) >= 360, (
+        "MIN_H must stay raised (>=360) so a modal can't be shrunk to an unusable sliver; "
+        f"got {min_h.group(1) if min_h else 'missing'}."
+    )
+
+    # (e) Customer-picker dropdown shrunk: the picker's absolute dropdown (the only one in
+    # this template using `left-0 right-0`) must cap at max-h-40, not a taller max-h-48/56/...
+    picker_dropdown = next(
+        (ln for ln in unified.splitlines() if "left-0 right-0" in ln and "max-h-" in ln),
+        None,
+    )
+    assert picker_dropdown is not None, "customer-picker dropdown row not found in unified_modal.html."
+    assert "max-h-40" in picker_dropdown, (
+        f"customer-picker dropdown must stay shrunk at max-h-40; got: {picker_dropdown.strip()!r}"
+    )
