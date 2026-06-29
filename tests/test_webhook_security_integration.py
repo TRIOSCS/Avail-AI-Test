@@ -265,3 +265,80 @@ def test_admin_health_rate_limited_endpoint(admin_client):
 def test_admin_config_rate_limited_endpoint(admin_client):
     r = admin_client.get("/api/admin/config")
     assert r.status_code == 200
+
+
+# ── Validation-echo hardening (HIGH-SEC-4) ───────────────────────────
+
+
+def test_validation_handshake_is_text_plain_and_nosniff(admin_client):
+    """A genuine handshake echoes the raw token as bounded text/plain + nosniff."""
+    r = admin_client.post("/api/webhooks/graph?validationToken=hello-graph-123")
+    assert r.status_code == 200
+    assert r.text == "hello-graph-123"
+    assert r.headers["content-type"] == "text/plain; charset=utf-8"
+    assert r.headers["x-content-type-options"] == "nosniff"
+
+
+def test_oversized_validation_token_rejected(admin_client):
+    """A validationToken longer than the bound is rejected (no oversized echo)."""
+    huge = "a" * 5000
+    r = admin_client.post("/api/webhooks/graph", params={"validationToken": huge})
+    assert r.status_code == 400
+    assert huge not in r.text
+
+
+def test_html_validation_token_rejected(admin_client):
+    """A validationToken carrying HTML/script is rejected, not reflected."""
+    payload = "<script>alert(document.cookie)</script>"
+    r = admin_client.post("/api/webhooks/graph", params={"validationToken": payload})
+    assert r.status_code == 400
+    assert "<script>" not in r.text
+
+
+def test_control_char_validation_token_rejected(admin_client):
+    """A validationToken with non-printable/control characters is rejected."""
+    r = admin_client.post("/api/webhooks/graph", params={"validationToken": "abc\ndef\x00"})
+    assert r.status_code == 400
+
+
+def test_teams_validation_handshake_is_bounded(admin_client):
+    """Teams shares the same bounded echo; HTML is rejected there too."""
+    with patch("app.routers.v13_features.activity.settings") as mock_settings:
+        mock_settings.mvp_mode = False
+        good = admin_client.post("/api/webhooks/teams?validationToken=teams-ok-123")
+        bad = admin_client.post("/api/webhooks/teams", params={"validationToken": "<img src=x onerror=alert(1)>"})
+    assert good.status_code == 200
+    assert good.text == "teams-ok-123"
+    assert good.headers["x-content-type-options"] == "nosniff"
+    assert bad.status_code == 400
+
+
+def test_missing_client_state_rejected(admin_client, sub1):
+    """A change notification omitting clientState (real sub has one) is rejected."""
+    notification = {
+        "subscriptionId": "sub-sec-001",
+        "changeType": "created",
+        "resource": "Users('a')/Messages('m-missing-state')",
+    }  # no clientState key at all
+    r = webhook_post(admin_client, {"value": [notification]})
+    assert r.status_code == 403
+
+
+def test_empty_client_state_rejected(admin_client, sub1):
+    """An empty clientState against a secret-bearing subscription is rejected."""
+    r = webhook_post(admin_client, {"value": [notif("sub-sec-001", "")]})
+    assert r.status_code == 403
+
+
+def test_is_safe_validation_token_bounds():
+    """Unit-level charset/length bounds for the validation-echo guard."""
+    from app.services.webhook_service import MAX_VALIDATION_TOKEN_LEN, is_safe_validation_token
+
+    assert is_safe_validation_token("hello-graph-123") is True
+    assert is_safe_validation_token("a" * MAX_VALIDATION_TOKEN_LEN) is True
+    assert is_safe_validation_token("a" * (MAX_VALIDATION_TOKEN_LEN + 1)) is False
+    assert is_safe_validation_token("") is False
+    assert is_safe_validation_token("<b>") is False
+    assert is_safe_validation_token("line\nbreak") is False
+    assert is_safe_validation_token("nul\x00byte") is False
+    assert is_safe_validation_token("héllo") is False  # non-ASCII

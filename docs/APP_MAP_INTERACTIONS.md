@@ -1135,6 +1135,32 @@ ai_offer_service.py (if confidence >= 0.8)
     +---> sse_broker.py --> SSE push ("new offer parsed")
 ```
 
+### 4a. Graph webhook endpoint (push) + validation-echo hardening
+
+Real-time complement to the polling job above. `webhook_service.create_mail_subscription`
+(and `create_teams_subscription`) register a Graph subscription whose `notificationUrl`
+is `POST /api/webhooks/graph` (`/api/webhooks/teams` for Teams), storing a random
+per-subscription `clientState` (`secrets.token_hex(16)`) on `graph_subscriptions`.
+
+`graph_webhook` (`app/routers/v13_features/activity.py`) handles two request shapes:
+
+- **Subscription-validation handshake** — Graph creates the subscription by calling the
+  endpoint with a `?validationToken=` query param and REQUIRES the raw token echoed back
+  with HTTP 200 as `text/plain`. The echo is unauthenticated (Graph has no token yet), so
+  it is hardened by `_validation_echo_response` → `webhook_service.is_safe_validation_token`:
+  length-bounded (`MAX_VALIDATION_TOKEN_LEN = 2048`) + printable-ASCII-only + no angle
+  brackets (reject → 400), and the 200 response pins `text/plain; charset=utf-8` with
+  `X-Content-Type-Options: nosniff` so the endpoint can't be coerced into reflecting
+  oversized or HTML/script payloads.
+- **Change notifications** — validated by `validate_notifications`: unknown
+  `subscriptionId` rejected, `clientState` checked against the stored secret with a
+  timing-safe `hmac.compare_digest` (wrong/missing/empty → rejected), plus a 5-min
+  replay window keyed on `subscriptionId:resource`. An all-invalid batch → 403; valid
+  `created` notifications fetch the message and feed the same activity-log + inbox-poll
+  path as section 4. The Teams endpoint shares this contract but is gated off in
+  `MVP_MODE` (returns 404); the mail/graph endpoint runs in MVP mode (mail subscriptions
+  are created regardless of `MVP_MODE`).
+
 ## 5. Quote Building
 
 **Where quotes are surfaced.** The standalone Quotes nav tab was retired

@@ -36,6 +36,29 @@ router = APIRouter(tags=["v13"])
 # ═══════════════════════════════════════════════════════════════════════
 
 
+def _validation_echo_response(validation_token: str) -> PlainTextResponse:
+    """Echo Graph's subscription-validation token under strict bounds.
+
+    Graph REQUIRES the raw ``validationToken`` returned with HTTP 200 as
+    text/plain on subscription creation, so we must mirror it. To keep this
+    unauthenticated echo from reflecting oversized or HTML/script payloads we
+    (1) bound length + charset via ``is_safe_validation_token`` (reject with
+    400 otherwise) and (2) pin an explicit ``text/plain; charset=utf-8`` body
+    with ``X-Content-Type-Options: nosniff`` so no browser will content-sniff
+    it into HTML.
+    """
+    from app.services.webhook_service import is_safe_validation_token
+
+    if not is_safe_validation_token(validation_token):
+        raise HTTPException(400, "Invalid validation token")
+    return PlainTextResponse(
+        content=validation_token,
+        status_code=200,
+        media_type="text/plain; charset=utf-8",
+        headers={"X-Content-Type-Options": "nosniff"},
+    )
+
+
 @router.post("/api/webhooks/graph")
 @limiter.limit("60/minute")
 async def graph_webhook(
@@ -48,7 +71,7 @@ async def graph_webhook(
     """
     validation_token = request.query_params.get("validationToken")
     if validation_token:
-        return PlainTextResponse(content=validation_token, status_code=200)
+        return _validation_echo_response(validation_token)
 
     try:
         raw = await request.json()
@@ -87,7 +110,7 @@ async def teams_webhook(
 
     validation_token = request.query_params.get("validationToken")
     if validation_token:
-        return PlainTextResponse(content=validation_token, status_code=200)
+        return _validation_echo_response(validation_token)
 
     try:
         raw = await request.json()

@@ -43,6 +43,31 @@ _M365_SUB_ERROR_MSG = "Email tracking degraded — Graph subscription renewal fa
 REPLAY_WINDOW_SECONDS = 300  # 5 minutes
 _seen_notifications: dict[str, float] = {}  # key -> timestamp
 
+# Validation-echo bounds. Microsoft Graph requires the raw ``validationToken``
+# query param to be echoed back as text/plain on subscription creation. Graph's
+# token is a short, randomly generated, URL-safe string, so we bound its length
+# and restrict its charset before reflecting it — this keeps the unauthenticated
+# echo endpoint from being coerced into mirroring oversized or HTML/script
+# payloads (defense in depth alongside the text/plain + nosniff response).
+MAX_VALIDATION_TOKEN_LEN = 2048
+# Angle brackets can never appear in a genuine Graph validation token; rejecting
+# them makes "the echo cannot reflect HTML" true at the input boundary, not just
+# via the response content-type.
+_DISALLOWED_TOKEN_CHARS = frozenset("<>")
+
+
+def is_safe_validation_token(token: str) -> bool:
+    """Return ``True`` if *token* is a plausible Graph validation token.
+
+    Graph sends a short, randomly generated string. We accept only non-empty, length-
+    bounded, printable-ASCII tokens with no angle brackets so the unauthenticated
+    validation-echo endpoint cannot reflect oversized or non-text (HTML/script/binary)
+    payloads.
+    """
+    if not token or len(token) > MAX_VALIDATION_TOKEN_LEN:
+        return False
+    return all(0x20 <= ord(ch) <= 0x7E and ch not in _DISALLOWED_TOKEN_CHARS for ch in token)
+
 
 # ═══════════════════════════════════════════════════════════════════════
 #  SUBSCRIPTION MANAGEMENT
