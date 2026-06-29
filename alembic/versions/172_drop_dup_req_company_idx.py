@@ -1,4 +1,5 @@
-"""Schema-drift reconciliation (#464): drop the redundant ix_requisitions_company_id index.
+"""Schema-drift reconciliation (#464): drop the redundant ix_requisitions_company_id
+index.
 
 What:
   - ``requisitions(company_id)`` carries TWO identical btree indexes: ``ix_requisitions_company``

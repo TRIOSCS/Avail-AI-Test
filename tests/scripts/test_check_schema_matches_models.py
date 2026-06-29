@@ -68,9 +68,10 @@ def test_grandfathered_add_constraint_keyed_by_table_and_columns():
 
 
 def test_reconciled_indexes_surface_but_intentional_ones_stay_grandfathered():
-    """#464 (migration 172) declared the raw-DDL pg_trgm/GIN/btree/partial indexes on the
-    models, so a ``remove_index`` for a reconciled name must now SURFACE as real drift,
-    while DANGER/orphan-table and PG-only expression indexes stay grandfathered."""
+    """#464 (migration 172) declared the raw-DDL pg_trgm/GIN/btree/partial indexes on
+    the models, so a ``remove_index`` for a reconciled name must now SURFACE as real
+    drift, while DANGER/orphan-table and PG-only expression indexes stay
+    grandfathered."""
 
     class _Ix:
         def __init__(self, name):
@@ -88,8 +89,8 @@ def test_reconciled_indexes_surface_but_intentional_ones_stay_grandfathered():
 
 
 def test_reports_to_phantom_add_index_no_longer_grandfathered():
-    """The site_contacts reports_to index was renamed to the DB's ix_sc_reports_to, so the
-    phantom ``add_index`` for ix_site_contacts_reports_to_id must now surface."""
+    """The site_contacts reports_to index was renamed to the DB's ix_sc_reports_to, so
+    the phantom ``add_index`` for ix_site_contacts_reports_to_id must now surface."""
 
     class _Ix:
         def __init__(self, name):
