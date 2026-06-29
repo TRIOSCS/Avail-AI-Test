@@ -3703,6 +3703,17 @@ on `prospect_accounts` (SQL-sortable for `ai_match_desc` sort); full verdict →
 `enrichment_data['ai_screen']` (JSONB). Scores only written for `pass`/`screened_out`;
 `insufficient_data` sets `needs_more_enrichment=True` without writing scores.
 
+**Buyer-ready ranking cache:** `prospect_priority.build_priority_snapshot()` is the source of
+truth for the composite `buyer_ready_score`; a `ProspectAccount` before_insert/before_update
+mapper listener (`app/models/prospect_account.py`) writes it through to the persisted, indexed
+`buyer_ready_score` column on every flush, so the `buyer_ready_desc` list sort ranks +
+paginates in SQL instead of loading + snapshotting every row O(N) per request. Migration 170
+backfills existing rows. The single-prospect card/detail still recomputes the full snapshot
+(reasons/proof-points are not cached). **Warm-intro lookup** (`prospect_warm_intros.detect_warm_intros`)
+scans `sightings.vendor_email` and `site_contacts.email` with a leading-wildcard ILIKE
+(`%@<domain>`); both are pg_trgm GIN-indexed (`ix_sightings_vendor_email_trgm` added in
+migration 170; `ix_site_contacts_email_trgm` pre-existing from a513288799de).
+
 **Gate:** `ai_screen_enabled=False` (default) → no LLM call; returns `{"verdict": "disabled"}`.
 
 **Screened-out bucket:** `verdict=screened_out` hides account from main queue grid when

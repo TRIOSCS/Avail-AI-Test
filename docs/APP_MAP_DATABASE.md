@@ -1014,6 +1014,7 @@ Key columns:
 |---|---|---|
 | trio_match_score | Integer | default 0, indexed; AI procurement-fit score (0-100); 0 until screened (SP3) |
 | opportunity_score | Integer | default 0, indexed; AI opportunity size score (0-100); 0 until screened (SP3) |
+| buyer_ready_score | Integer | nullable, indexed (`ix_prospect_accounts_buyer_ready_score`); write-through CACHE of `prospect_priority.build_priority_snapshot()`'s composite score, kept in lockstep by the `ProspectAccount` before_insert/before_update listener so the `buyer_ready_desc` list sort ranks in SQL. Recompute stays the source of truth; backfilled in migration 170 |
 | swept_from_owner_id | INT FK users (SET NULL) | owner whose account was auto-swept by the daily 90-day sweep (SP4) |
 | swept_at | UTCDateTime | when the account was swept into the pool (SP4) |
 | parked_by_id | INT FK users (SET NULL) | user who manually parked the account via the sales-park flow (SP4) |

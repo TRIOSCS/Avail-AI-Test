@@ -230,18 +230,18 @@ async def prospecting_list_partial(
         prospects = rows[offset : offset + per_page]
     elif sort == "buyer_ready_desc":
         screened_out_rows = []
-        # buyer_ready_score is a Python composite (no SQL column), so rank in memory.
-        rows = base.all()
-        snapshots = {p.id: build_priority_snapshot(p) for p in rows}
-        rows.sort(
-            key=lambda p: (
-                -snapshots[p.id]["buyer_ready_score"],
-                -(p.fit_score or 0),
-                -(p.readiness_score or 0),
-                (p.name or "").lower(),
-            )
+        # Rank by the persisted buyer_ready_score cache (kept in lockstep with
+        # build_priority_snapshot by the ProspectAccount before_insert/before_update
+        # listener), so we page in SQL instead of loading + snapshotting every row.
+        # coalesce(.,0) keeps ordering deterministic and dialect-portable even if a row
+        # somehow predates the backfill.
+        base = base.order_by(
+            sqlfunc.coalesce(ProspectAccount.buyer_ready_score, 0).desc(),
+            ProspectAccount.fit_score.desc(),
+            ProspectAccount.readiness_score.desc(),
+            sqlfunc.lower(ProspectAccount.name),
         )
-        prospects = rows[offset : offset + per_page]
+        prospects = base.offset(offset).limit(per_page).all()
     else:
         screened_out_rows = []
         if sort == "fit_desc":

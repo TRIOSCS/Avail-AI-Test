@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Column, ForeignKey, Index, Integer, String, Text, event
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 
@@ -42,6 +42,13 @@ class ProspectAccount(Base):
     # AI screening scores (SP3) — populated by prospect_screening.screen_prospect
     trio_match_score = Column(Integer, default=0)
     opportunity_score = Column(Integer, default=0)
+
+    # Persisted CACHE of the composite buyer-ready score. build_priority_snapshot()
+    # remains the source of truth; the before_insert/before_update listener below keeps
+    # this column in lockstep on every flush so the prospecting list can rank in SQL
+    # (order_by + offset/limit) instead of snapshotting every row O(N) per request.
+    # Nullable only so a brand-new row exists before the first flush populates it.
+    buyer_ready_score = Column(Integer, nullable=True)
 
     # Discovery tracking
     discovery_source = Column(String(50), nullable=False)
@@ -110,4 +117,25 @@ class ProspectAccount(Base):
         ),
         Index("ix_prospect_accounts_trio_match_score", "trio_match_score"),
         Index("ix_prospect_accounts_opportunity_score", "opportunity_score"),
+        Index("ix_prospect_accounts_buyer_ready_score", "buyer_ready_score"),
     )
+
+
+def _sync_buyer_ready_score(_mapper, _connection, target: "ProspectAccount") -> None:
+    """Write-through the ``buyer_ready_score`` cache before every insert/update.
+
+    build_priority_snapshot() is the single source of truth for the composite buyer-
+    ready score; recomputing here on each flush keeps the persisted column consistent
+    with it so the prospecting list ranks in SQL instead of snapshotting every row in
+    memory. The scorer is a pure function of the instance's own attributes (no DB/IO),
+    so this is safe inside a flush. Imported lazily to keep the model layer free of a
+    hard service import (prospect_priority itself imports nothing from app, so there is
+    no cycle either way).
+    """
+    from ..services.prospect_priority import build_priority_snapshot
+
+    target.buyer_ready_score = build_priority_snapshot(target)["buyer_ready_score"]
+
+
+event.listen(ProspectAccount, "before_insert", _sync_buyer_ready_score)
+event.listen(ProspectAccount, "before_update", _sync_buyer_ready_score)
