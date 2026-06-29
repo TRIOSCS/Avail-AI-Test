@@ -487,6 +487,22 @@ reader (>= 0.85) — see APP_MAP_INTERACTIONS "Worker second-pass ordering":
 | Script | Purpose |
 |--------|---------|
 | `backfill_oem_enrichment.py` | Dry-run-first backfill over `not_found` / `not_catalogued` cards through the OEM tiers. Writes a coverage CSV; rolls back unless `--commit`. Shared `web_meter` budget cap (`--max-web-calls`, default 300) halts mid-run to prevent API overspend. The paced worker drains any remainder. |
+| `backup.sh` / `restore.sh` | `pg_dump` custom-format backups (verify → optional encrypt → checksum → rotate) and their restore. Optional at-rest encryption: when `BACKUP_GPG_PASSPHRASE` is set, the verified `.gz` is gpg-symmetric AES256-encrypted (`.dump.gz.gpg`) and the plaintext removed; unset → plaintext with a loud warning. The passphrase is fed via **stdin** (`--passphrase-fd 0`), never argv, so it never appears in `ps`. `restore.sh` transparently decrypts `.gpg` backups (needs the same passphrase) and encrypts its pre-restore safety dump too. (Repo-root `backup.sh` is the equivalent host-cron variant.) |
+| `backup-to-spaces.sh` | Off-site upload of the latest backup to DigitalOcean Spaces. Requests server-side encryption (`SPACES_SSE`, default `AES256`; set `SPACES_SSE=none` to disable) — defence-in-depth on top of the optional gpg-at-rest encryption. Skips cleanly when `DO_SPACES_*` is unset. |
+
+## CI & DevOps
+
+- **CI (`.github/workflows/ci.yml`)** — per-PR runs the cheap, high-value Alembic
+  checks: single-head assertion, fresh `upgrade head` + schema-drift gate, and a
+  single-step `downgrade -1` reversibility check on the new migration. The
+  expensive full chain-replay (`downgrade base → upgrade head` over all
+  migrations, needs `ALEMBIC_ALLOW_CASCADE`) runs **nightly** via the `schedule`
+  trigger as the `migration-full-cycle` job, not on every PR (HIGH-DEVOPS-7).
+- **Deploy (`deploy.sh`)** — the commit step stages with `git add -u`
+  (tracked-file modifications/deletions only), never untracked files, so a stray
+  secret/key/DB dump can't be swept into a deploy commit (CRIT-DEVOPS-2); brand-new
+  files must be `git add`ed deliberately first. A sensitive-path denylist is the
+  defence-in-depth backstop.
 
 ## Key Numbers
 

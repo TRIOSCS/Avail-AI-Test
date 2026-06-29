@@ -47,14 +47,16 @@ fi
 
 # ── 2b. Optional at-rest encryption (gpg symmetric AES256) ──
 # When BACKUP_GPG_PASSPHRASE is set, encrypt the verified dump and remove the
-# plaintext so nothing readable lands on disk. Decrypt+restore later with:
-#   gpg --batch --decrypt --passphrase "$BACKUP_GPG_PASSPHRASE" FILE.dump.gpg \
-#     | pg_restore -U availai -d availai
+# plaintext so nothing readable lands on disk. The passphrase is fed via stdin
+# (--passphrase-fd 0), never the command line, so it never appears in `ps`/argv.
+# Decrypt+restore later (passphrase via stdin too):
+#   printf '%s' "$BACKUP_GPG_PASSPHRASE" | gpg --batch --pinentry-mode loopback \
+#     --passphrase-fd 0 --decrypt FILE.dump.gpg | pg_restore -U availai -d availai
 if [ -n "${BACKUP_GPG_PASSPHRASE:-}" ]; then
     log "Encrypting backup (gpg symmetric, AES256)..."
-    if gpg --batch --yes --quiet --cipher-algo AES256 \
-           --passphrase "${BACKUP_GPG_PASSPHRASE}" --symmetric \
-           --output "${BACKUP_FILE}.gpg" "$BACKUP_FILE"; then
+    if printf '%s' "${BACKUP_GPG_PASSPHRASE}" | gpg --batch --yes --quiet \
+           --pinentry-mode loopback --passphrase-fd 0 --cipher-algo AES256 \
+           --symmetric --output "${BACKUP_FILE}.gpg" "$BACKUP_FILE"; then
         rm -f "$BACKUP_FILE"
         BACKUP_FILE="${BACKUP_FILE}.gpg"
         SIZE=$(du -h "$BACKUP_FILE" | cut -f1)

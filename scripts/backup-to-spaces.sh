@@ -19,6 +19,13 @@ set -euo pipefail
 BACKUP_DIR="${BACKUP_DIR:-/backups}"
 SPACES_RETENTION_DAYS="${SPACES_RETENTION_DAYS:-90}"
 ENDPOINT="https://${DO_SPACES_REGION:-nyc3}.digitaloceanspaces.com"
+# Server-side encryption for objects at rest in Spaces. Defaults to AES256
+# (SSE-S3 — Spaces-managed keys, no key material to manage, no size change so the
+# upload-size verification below still holds). Set SPACES_SSE=none to disable if a
+# target endpoint doesn't support SSE, so it degrades gracefully. Backups are ALSO
+# gpg-encrypted at rest by backup.sh when BACKUP_GPG_PASSPHRASE is set — this is
+# defence-in-depth on top of that.
+SPACES_SSE="${SPACES_SSE:-AES256}"
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] [spaces] $1"; }
 die() { log "FATAL: $1"; exit 1; }
@@ -48,17 +55,24 @@ export AWS_SECRET_ACCESS_KEY="$DO_SPACES_SECRET"
 export AWS_DEFAULT_REGION="${DO_SPACES_REGION:-nyc3}"
 
 # ─── Upload ──────────────────────────────────────────────────────────────────
-# --sse AES256 requests server-side encryption (SSE-S3) so the object is
-# encrypted at rest in Spaces even when the local backup is not gpg-encrypted.
-# Defense in depth: combines with backup.sh's optional gpg-at-rest encryption.
-log "Uploading ${FILENAME} to s3://${DO_SPACES_BUCKET}/db-backups/ (SSE AES256)"
+# Build the optional server-side-encryption flag. An empty array expands to
+# nothing under `set -u` (bash 4.4+), so SPACES_SSE=none cleanly disables SSE.
+SSE_ARGS=()
+if [ -n "$SPACES_SSE" ] && [ "$SPACES_SSE" != "none" ]; then
+    SSE_ARGS=(--sse "$SPACES_SSE")
+fi
+
+# Server-side encryption (default SSE-S3 AES256) keeps the object encrypted at
+# rest in Spaces even when the local backup is not gpg-encrypted — defence in
+# depth on top of backup.sh's optional gpg-at-rest encryption.
+log "Uploading ${FILENAME} to s3://${DO_SPACES_BUCKET}/db-backups/ (SSE: ${SPACES_SSE})"
 
 aws s3 cp \
     "$BACKUP_FILE" \
     "s3://${DO_SPACES_BUCKET}/db-backups/${FILENAME}" \
     --endpoint-url "$ENDPOINT" \
-    --sse AES256 \
-    --storage-class STANDARD
+    --storage-class STANDARD \
+    "${SSE_ARGS[@]}"
 
 # Also upload checksum if it exists
 if [ -f "${BACKUP_FILE}.sha256" ]; then
@@ -66,7 +80,7 @@ if [ -f "${BACKUP_FILE}.sha256" ]; then
         "${BACKUP_FILE}.sha256" \
         "s3://${DO_SPACES_BUCKET}/db-backups/${FILENAME}.sha256" \
         --endpoint-url "$ENDPOINT" \
-        --sse AES256
+        "${SSE_ARGS[@]}"
 fi
 
 log "Upload complete"
