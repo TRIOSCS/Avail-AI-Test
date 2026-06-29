@@ -11,6 +11,19 @@ Do not refactor these without explicit approval. Changes here can break startup,
 ## Auth & dependencies
 - `app/dependencies.py` — require_user, require_buyer, auth middleware
 
+## Encryption (at-rest secrets)
+
+- `app/utils/encrypted_type.py` — `EncryptedText` SQLAlchemy type + `build_fernet()`
+  key derivation for `users.refresh_token` / `access_token` / `password_hash`.
+- `app/services/credential_service.py` — the **same** `ENCRYPTION_SALT` keys
+  `api_sources.credentials` (supplier API keys; graceful env-var fallback on a decrypt miss).
+- **`SECRET_KEY` + `ENCRYPTION_SALT` are jointly load-bearing.** Both feed the Fernet
+  key (PBKDF2). Changing either orphans every encrypted cell. When `ENCRYPTION_SALT` is
+  unset, the hard-coded legacy salts (`_LEGACY_SALT`, `_LEGACY_CREDENTIAL_SALT`) stand in,
+  so `SECRET_KEY` alone is load-bearing in that mode. Never change these casually.
+- **Rotate the salt** with `python -m app.management.rotate_encryption_salt` (`--dry-run`
+  first; idempotent/resumable). Full procedure: `docs/PRE_ROLLOUT_CHECKLIST.md` Gate 4.
+
 ## Critical routers (thin entry points; logic in services)
 - `app/routers/auth.py`
 - `app/routers/requisitions/` (core, requirements, attachments)

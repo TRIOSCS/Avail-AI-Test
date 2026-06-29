@@ -42,7 +42,10 @@
 | last_login_at | UTCDateTime, nullable | Migration 148. Stamped on every successful OAuth callback. NULL + no azure_id ⇒ an "Invited" (pre-provisioned, never-logged-in) row. |
 | access_overrides | JSON, default `{}` | Migration 148. **Explicit per-user access overrides only**: `{access_key: bool}` keyed by `constants.AccessKey`. An *absent* key means "use the role default" (`constants.ROLE_ACCESS_DEFAULTS`) — the dict never stores the role default, so it stays empty until an admin grants/revokes a specific key. Read by `dependencies.user_has_access` (override wins over role default; admin → all). `ops_verification` is NOT stored here (it lives in `verification_group_members`). |
 | invited_by_id | FK -> users (SET NULL), nullable | Migration 148. The admin who invited this user (set by the Users-tab invite flow); SET NULL so the row survives the inviter's deletion. |
+| password_hash | EncryptedText, nullable | PBKDF2 password hash (`<salt_b64>$<hash_b64>`), encrypted at rest. Only used when password login is enabled. |
 | avatar_path | String 255, nullable | Migration 156. Stored basename of the uploaded profile photo under `avatars.AVATARS_DIR` (`/app/uploads/avatars`, e.g. `user_12_a1b2c3d4.png`); set by `POST /api/user/avatar` (own-profile only, `require_user`), served by `GET /api/user/avatar/{filename}`. NULL ⇒ the shared `user_avatar` macro renders the initials fallback. |
+
+> **`EncryptedText` columns (`refresh_token`, `access_token`, `password_hash`)** are Fernet-encrypted at rest via `app/utils/encrypted_type.py`, keyed by `SECRET_KEY` + `ENCRYPTION_SALT` (legacy static salt when unset). `SECRET_KEY`/`ENCRYPTION_SALT` are jointly load-bearing — see `STABLE.md` → *Encryption*. Rotate the salt without orphaning ciphertext via `python -m app.management.rotate_encryption_salt` (decrypt-old → re-encrypt-new, idempotent, `--dry-run`); full procedure in `docs/PRE_ROLLOUT_CHECKLIST.md` Gate 4.
 
 **`user_admin_audit`** — Append-only trail of admin actions against users (Migration 148)
 | Column | Type | Notes |
