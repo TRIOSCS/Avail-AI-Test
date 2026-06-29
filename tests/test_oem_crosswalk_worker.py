@@ -29,6 +29,18 @@ RESOLVED = OemResolveResult(
     confidence=0.95,
     payload={"canonical_mpn": "ST4000NM0035"},
 )
+# Lenovo resolves through the SAME grounded resolver, just steered at PSREF and minted
+# with vendor='lenovo' (Pass B then sources it from psref — see SOURCE_BY_VENDOR).
+LENOVO_RESOLVED = OemResolveResult(
+    status="resolved",
+    canonical_mpn="ST4000NM0035",
+    manufacturer="Seagate",
+    title="ThinkSystem 4TB 7.2K SAS 12Gb Hot Swap 512n HDD",
+    source_url="https://psref.lenovo.com/Detail/01HW917",
+    source_domain="psref.lenovo.com",
+    confidence=0.95,
+    payload={"canonical_mpn": "ST4000NM0035"},
+)
 NO_MATCH = OemResolveResult(status="no_match", payload={"canonical_mpn": None})
 
 
@@ -44,11 +56,11 @@ def _seed_card(db, mpn: str, status: str = MaterialEnrichmentStatus.UNENRICHED) 
     return card
 
 
-def _seed_no_match_row(db, mpn: str, age_days: int) -> OemCrosswalk:
+def _seed_no_match_row(db, mpn: str, age_days: int, vendor: str = "hpe") -> OemCrosswalk:
     row = OemCrosswalk(
         spare_raw=mpn,
         spare_norm=normalize_mpn_key(mpn),
-        vendor="hpe",
+        vendor=vendor,
         status=OemCrosswalkStatus.NO_MATCH,
         looked_up_at=datetime.now(timezone.utc) - timedelta(days=age_days),
     )
@@ -184,15 +196,121 @@ def test_pass_a_resolved_row_fields(db_session):
     assert web_state["oem_resolves"] == 1
 
 
-def test_pass_a_skips_non_hpe_cards(db_session):
-    # Phase A is HPE-only: Lenovo FRUs and generic MPNs never reach the resolver.
-    _seed_card(db_session, "01HW917")  # lenovo
-    _seed_card(db_session, "LM2596S-5.0")  # generic
+def test_pass_a_skips_unsupported_vendor_cards(db_session):
+    # Pass A only resolves vendors with a grounded crosswalk source (SOURCE_BY_VENDOR =
+    # hpe, lenovo). A generic MPN (classifies to None) and a Dell spare (classifies to
+    # 'dell' — has NO grounded resolver) never reach the resolver.
+    _seed_card(db_session, "HV52W")  # dell — classified but not in SOURCE_BY_VENDOR
+    _seed_card(db_session, "LM2596S-5.0")  # generic — classifies to None
     resolve_mock = AsyncMock(return_value=RESOLVED)
 
     _run(db_session, resolve_mock)
 
     resolve_mock.assert_not_awaited()
+    assert db_session.query(OemCrosswalk).count() == 0
+
+
+def test_pass_a_resolves_lenovo_spare(db_session):
+    # Wave 6: a Lenovo FRU now enters Pass A, resolves through the SAME grounded
+    # resolver steered at PSREF, and is minted as an oem_crosswalk row with
+    # vendor='lenovo'. Mirrors test_pass_a_resolved_row_fields for HP/HPE.
+    _seed_card(db_session, "01HW917")  # lenovo classic FRU
+    resolve_mock = AsyncMock(return_value=LENOVO_RESOLVED)
+
+    _, web_state, _ = _run(db_session, resolve_mock)
+
+    # The grounded resolver was called with the lenovo vendor label (it steers the
+    # PSREF lookup hint and the domain gate).
+    assert resolve_mock.await_count == 1
+    assert resolve_mock.await_args.args == ("01HW917", "01hw917", "lenovo")
+    row = db_session.query(OemCrosswalk).one()
+    assert row.spare_raw == "01HW917"
+    assert row.spare_norm == "01hw917"
+    assert row.vendor == "lenovo"
+    assert row.status == OemCrosswalkStatus.RESOLVED
+    assert row.canonical_mpn_raw == "ST4000NM0035"
+    assert row.source_domain == "psref.lenovo.com"
+    # Same billing as HP/HPE: one resolve = one web call + one oem-resolve sub-cap tick.
+    assert web_state["web_calls"] == 1
+    assert web_state["oem_resolves"] == 1
+
+
+def test_pass_a_resolves_hpe_and_lenovo_in_one_batch(db_session):
+    # Both vendors are candidates in the same batch; each is resolved under its own
+    # vendor label and minted as its own row.
+    _seed_card(db_session, "695510-001")  # hpe
+    _seed_card(db_session, "01HW917")  # lenovo
+    resolve_mock = AsyncMock(side_effect=[RESOLVED, LENOVO_RESOLVED])
+
+    _run(db_session, resolve_mock, cfg=EnrichmentWorkerConfig(batch_size=5, oem_resolve_per_batch=2))
+
+    assert resolve_mock.await_count == 2
+    vendors_called = {call.args[2] for call in resolve_mock.await_args_list}
+    assert vendors_called == {"hpe", "lenovo"}
+    rows = db_session.query(OemCrosswalk).all()
+    assert {r.vendor for r in rows} == {"hpe", "lenovo"}
+    assert all(r.status == OemCrosswalkStatus.RESOLVED for r in rows)
+
+
+def test_pass_a_lenovo_fresh_no_match_blocks_resolution(db_session):
+    # The 90-day negative cache is vendor-scoped: a fresh lenovo no_match row blocks the
+    # lenovo spare exactly as the hpe path is blocked.
+    _seed_card(db_session, "01HW917")
+    _seed_no_match_row(db_session, "01HW917", age_days=10, vendor="lenovo")
+    resolve_mock = AsyncMock(return_value=LENOVO_RESOLVED)
+
+    _run(db_session, resolve_mock)
+
+    resolve_mock.assert_not_awaited()
+
+
+def test_pass_a_lenovo_stale_no_match_retried_in_place(db_session):
+    # A 91-day-old lenovo no_match row is stale: the spare re-resolves and the SAME row
+    # is updated in place (upsert on the unique key — no second row). Mirrors hpe.
+    _seed_card(db_session, "01HW917")
+    stale = _seed_no_match_row(db_session, "01HW917", age_days=91, vendor="lenovo")
+    resolve_mock = AsyncMock(return_value=LENOVO_RESOLVED)
+
+    _run(db_session, resolve_mock)
+
+    assert resolve_mock.await_count == 1
+    rows = db_session.query(OemCrosswalk).all()
+    assert len(rows) == 1
+    assert rows[0].id == stale.id
+    assert rows[0].status == OemCrosswalkStatus.RESOLVED
+    assert rows[0].vendor == "lenovo"
+
+
+def test_pass_b_lenovo_upgrade_sources_from_psref(db_session):
+    # End-to-end PSREF path: a seeded resolved lenovo row lets Pass B upgrade the spare
+    # card to oem_sourced and stamp enrichment_source='psref' (SOURCE_BY_VENDOR[lenovo]).
+    from app.services.commodity_registry import seed_commodity_schemas
+
+    seed_commodity_schemas(db_session)
+    card = _seed_card(db_session, "01HW917")
+    row = OemCrosswalk(
+        spare_raw="01HW917",
+        spare_norm="01hw917",
+        vendor="lenovo",
+        status=OemCrosswalkStatus.RESOLVED,
+        canonical_mpn_raw="ST4000NM0035",
+        canonical_mpn_norm="st4000nm0035",
+        canonical_manufacturer="Seagate",
+        confidence=0.95,
+        looked_up_at=datetime.now(timezone.utc),
+    )
+    db_session.add(row)
+    db_session.flush()
+    resolve_mock = AsyncMock(return_value=LENOVO_RESOLVED)
+
+    counts, web_state, _ = _run(db_session, resolve_mock)
+
+    resolve_mock.assert_not_awaited()  # resolved row is fresh — Pass A no-ops
+    assert card.enrichment_status == MaterialEnrichmentStatus.OEM_SOURCED
+    assert card.enrichment_source == "psref"
+    assert card.category == "hdd"
+    assert counts == {MaterialEnrichmentStatus.OEM_SOURCED: 1}
+    assert web_state["web_calls"] == 0  # the early-return saved the card's web calls
 
 
 @pytest.mark.parametrize(

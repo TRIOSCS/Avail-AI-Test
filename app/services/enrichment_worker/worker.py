@@ -225,9 +225,12 @@ async def _oem_resolution_pass(
 ) -> int:
     """Pass A — paced OEM spare→canonical resolution over this batch (network).
 
-    Candidates are batch cards classified ``hpe`` (Phase A) with no fresh
-    ``oem_crosswalk`` row (resolved rows are permanent; no_match rows block for 90
-    days). At most ``config.oem_resolve_per_batch`` resolves per batch, each gated on
+    Candidates are batch cards classified ``hpe`` or ``lenovo`` — the vendors with a
+    grounded crosswalk source (``SOURCE_BY_VENDOR``) — with no fresh ``oem_crosswalk``
+    row (resolved rows are permanent; no_match rows block for 90 days). Both vendors run
+    the same Claude-grounded resolver, negative cache and crosswalk writer; only the
+    per-spare vendor label differs (it steers PartSurfer vs PSREF and tags the row).
+    At most ``config.oem_resolve_per_batch`` resolves per batch, each gated on
     BOTH daily caps — the web cap (every resolve is a billable web call, counted
     INSIDE ``web_daily_cap``) and the OEM sub-cap (``oem_resolve_daily_cap``, tallied
     at ``enrichment_worker:oem_resolves:{date}`` with the same max-of-cache-and-
@@ -252,21 +255,40 @@ async def _oem_resolution_pass(
     """
     from app.services.enrichment_worker.oem_classifier import classify_oem_vendor
     from app.services.enrichment_worker.oem_crosswalk_resolver import resolve_oem_spare
-    from app.services.oem_crosswalk_enrich import apply_resolution, pending_resolution
+    from app.services.oem_crosswalk_enrich import (
+        SOURCE_BY_VENDOR,
+        apply_resolution,
+        pending_resolution,
+    )
     from app.utils.normalization import normalize_mpn_key
 
-    # Phase A: HP/HPE only. Dedupe by spare norm (one resolve covers every card
-    # sharing it, forever).
+    # HP/HPE + Lenovo — the vendors with a grounded crosswalk source (SOURCE_BY_VENDOR:
+    # hpe->partsurfer, lenovo->psref). Both resolve through the same Claude web_search
+    # grounding (no direct OEM HTTP), the same negative cache and the same crosswalk
+    # writer — only the vendor label differs (it steers the resolver's lookup hint and
+    # tags the row). Dedupe by spare norm (one resolve covers every card sharing it,
+    # forever) and remember each norm's classified vendor — the negative-cache selector,
+    # the grounded resolver and apply_resolution are all vendor-scoped.
     candidates: dict[str, str] = {}
+    candidate_vendors: dict[str, str] = {}
     for card in batch:
-        if classify_oem_vendor(card.display_mpn) == "hpe":
+        vendor = classify_oem_vendor(card.display_mpn)
+        if vendor in SOURCE_BY_VENDOR:
             norm = normalize_mpn_key(card.display_mpn)
             if norm and norm not in candidates:
                 candidates[norm] = card.display_mpn
+                candidate_vendors[norm] = vendor
     if not candidates:
         return web_calls_today
 
-    pending = pending_resolution(db, candidates.keys(), "hpe")
+    # pending_resolution is vendor-scoped (it queries oem_crosswalk WHERE vendor=...), so
+    # select per vendor and merge. A norm classifies to exactly one vendor, so the merged
+    # map has no cross-vendor key collisions.
+    pending: dict = {}
+    for vendor in SOURCE_BY_VENDOR:
+        vendor_norms = [n for n, v in candidate_vendors.items() if v == vendor]
+        if vendor_norms:
+            pending.update(pending_resolution(db, vendor_norms, vendor))
     if not pending:
         return web_calls_today
 
@@ -295,6 +317,7 @@ async def _oem_resolution_pass(
             break
         taken += 1
         display_mpn = candidates[norm]
+        vendor = candidate_vendors[norm]
         # Bill BEFORE the await (the WebMeter reserve discipline, made durable):
         # incr_count advances the shared date counters atomically (no lost updates
         # against the drain CLI) and web_state mirrors them up front, so a call that
@@ -304,7 +327,7 @@ async def _oem_resolution_pass(
         web_state["web_calls"] = web_calls_today
         web_state["oem_resolves"] = oem_resolves_today
         try:
-            result = await resolve_oem_spare(display_mpn, norm, "hpe")
+            result = await resolve_oem_spare(display_mpn, norm, vendor)
         except ClaudeError as e:
             # Transient backend failure (incl. an unparseable response): feed the
             # breaker, write NO row — the spare is retried next batch for free.
@@ -320,7 +343,7 @@ async def _oem_resolution_pass(
         # batch session. The batch-final commit owns durability.
         try:
             with db.begin_nested():
-                row = apply_resolution(stale_row, result, display_mpn=display_mpn, spare_norm=norm, vendor="hpe")
+                row = apply_resolution(stale_row, result, display_mpn=display_mpn, spare_norm=norm, vendor=vendor)
                 if stale_row is None:
                     db.add(row)
                 # Flush so Pass B (same batch, same session) sees the row even on
@@ -595,9 +618,9 @@ async def run_one_batch(
     # per the crosswalk-pass pattern (worker-level queries between awaits are fine;
     # enrich_card's per-card no-query-after-await invariant is untouched).
     #
-    # Pass A — paced resolution (network): resolve uncached HP/HPE spare PNs in this
-    # batch via Claude-grounded PartSurfer lookup and upsert oem_crosswalk rows
-    # (incl. 90-day-negative no_match rows). Bounded by oem_resolve_per_batch and
+    # Pass A — paced resolution (network): resolve uncached HP/HPE + Lenovo spare PNs in
+    # this batch via Claude-grounded PartSurfer/PSREF lookup and upsert oem_crosswalk
+    # rows (incl. 90-day-negative no_match rows). Bounded by oem_resolve_per_batch and
     # BOTH daily caps; every call bills the web counter (counted INSIDE web_daily_cap).
     #
     # Pass B — deterministic writer (zero network): cards whose display_mpn norm has a
