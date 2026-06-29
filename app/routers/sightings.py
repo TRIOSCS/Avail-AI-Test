@@ -67,6 +67,7 @@ from ..services.status_machine import SOURCING_TRANSITIONS, require_valid_transi
 from ..services.vendor_duplicates import check_vendor_duplicate
 from ..services.vendor_unavailability import (
     clear_unavailability,
+    condition_matches,
     excluded_vendor_norms,
     record_unavailability,
     sighting_vendor_norm,
@@ -220,7 +221,7 @@ def _annotated_unavailability(
         # Specific-condition record → only same-condition unstamped sightings count.
         rec_cond = rec.condition
         has_unstamped_row = any(
-            not s.is_unavailable and (rec_cond is None or normalize_condition(s.condition) == rec_cond)
+            not s.is_unavailable and condition_matches(rec_cond, normalize_condition(s.condition))
             for s in sightings_by_vendor.get(vendor_norm, [])
         )
         annotated[vendor_name] = {
@@ -1076,7 +1077,7 @@ async def sightings_unavailable_form(
         "vendor_name": vendor_name,
         "reasons": list(UnavailabilityReason),
         "current": current,
-        "conditions": ["new", "refurb", "used", "other"],
+        "conditions": ["new", "refurb", "used"],
         "specific_reason_values": [r.value for r in CONDITION_SPECIFIC_REASONS],
     }
     return template_response("htmx/partials/sightings/unavailable_form.html", ctx)

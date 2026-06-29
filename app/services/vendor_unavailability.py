@@ -326,10 +326,23 @@ def _release_record(
     )
 
 
+def condition_matches(record_condition: str | None, sighting_condition: str | None) -> bool:
+    """Scalar condition-match predicate — THE single definition of the suppression rule.
+
+    A record of ``record_condition`` suppresses a sighting of canonical condition
+    ``sighting_condition`` iff the record is all-conditions (NULL) or the two are equal.
+    Both the apply loop and the annotation helper delegate here so the rule has one home.
+    """
+    return record_condition is None or record_condition == sighting_condition
+
+
 def _condition_matches(record: VendorPartUnavailability, sighting_condition: str | None) -> bool:
     """A record suppresses a sighting iff the record is all-conditions (NULL) or their
-    canonical conditions are equal."""
-    return record.condition is None or record.condition == sighting_condition
+    canonical conditions are equal.
+
+    Delegates to the scalar helper.
+    """
+    return condition_matches(record.condition, sighting_condition)
 
 
 # ── Service surface ───────────────────────────────────────────────────────────
@@ -397,7 +410,6 @@ def record_unavailability(
             rec.note = note
             rec.created_by_id = user.id if user else None
             rec.created_at = now
-            rec.condition = cond
             if snap is not None:  # keep-old-on-NULL: no cross-requirement clobber
                 rec.qty_at_mark = snap
             rec.re_arm()  # NULL the release pair together — record suppresses again
@@ -418,7 +430,7 @@ def record_unavailability(
             )
 
     for s in sightings:
-        if cond is None or cond == normalize_condition(s.condition):
+        if condition_matches(cond, normalize_condition(s.condition)):
             s.is_unavailable = True
 
     notes = f"Marked {vendor_name} unavailable for {_mpn_display(requirement, sightings)}: {reason.label}"
@@ -525,7 +537,10 @@ def unavailability_for_requirement(
     if not all_keys:
         return {}
 
-    # Most-recent first; per display vendor the first matching record wins.
+    # Most-recent first; per display vendor the first matching record wins (newest-wins
+    # default), except we prefer an active NULL-condition (broadest suppressor) if one
+    # exists — a specific-condition record is never the right annotation when there is
+    # an active catch-all keeping the vendor fully dark.
     records = (
         db.query(VendorPartUnavailability)
         .filter(
@@ -542,15 +557,21 @@ def unavailability_for_requirement(
     result: dict[str, UnavailabilityIntel] = {}
     for display, norm in norm_by_display.items():
         keys = keys_by_norm.get(norm, set())
-        for rec in records:
-            if rec.vendor_name_normalized == norm and rec.normalized_mpn in keys:
-                age = (now - _as_utc(rec.created_at)).days if rec.created_at else 0
-                result[display] = UnavailabilityIntel(
-                    record=rec,
-                    is_active=is_active(rec, now),
-                    age_days=max(0, age),
-                )
-                break
+        matching = [rec for rec in records if rec.vendor_name_normalized == norm and rec.normalized_mpn in keys]
+        if not matching:
+            continue
+        # Prefer broadest active suppressor: an active NULL-condition record over any
+        # specific-condition record; otherwise fall back to newest-wins (first in list).
+        preferred = next(
+            (rec for rec in matching if rec.condition is None and is_active(rec, now)),
+            matching[0],
+        )
+        age = (now - _as_utc(preferred.created_at)).days if preferred.created_at else 0
+        result[display] = UnavailabilityIntel(
+            record=preferred,
+            is_active=is_active(preferred, now),
+            age_days=max(0, age),
+        )
     return result
 
 

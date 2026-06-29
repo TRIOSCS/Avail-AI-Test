@@ -145,7 +145,7 @@ class TestVendorPartUnavailabilityModel:
         db_session.rollback()
 
     def test_condition_validator_accepts_valid_values(self, db_session: Session):
-        for cond in ("new", "refurb", "used", "other", None):
+        for cond in ("new", "refurb", "used", None):
             record = VendorPartUnavailability(
                 vendor_name_normalized="acme components",
                 normalized_mpn="CONDVALID",
@@ -156,6 +156,18 @@ class TestVendorPartUnavailabilityModel:
             db_session.flush()
             assert record.condition == cond
             db_session.rollback()
+
+    def test_condition_validator_rejects_other(self):
+        """'other' is no longer a valid condition vocab for vendor_part_unavailability —
+        normalize_condition() never produces it, so a stored 'other' would be
+        permanently inert (never matches any sighting)."""
+        with pytest.raises(ValueError):
+            VendorPartUnavailability(
+                vendor_name_normalized="acme components",
+                normalized_mpn="CONDTEST",
+                reason=UnavailabilityReason.OTHER,
+                condition="other",
+            )
 
     def test_condition_validator_rejects_off_vocab(self):
         with pytest.raises(ValueError):
@@ -477,6 +489,32 @@ class TestRecordUnavailability:
 
 
 class TestClearUnavailability:
+    def test_clear_removes_all_coexisting_condition_rows(self, db_session: Session, test_user: User):
+        """clear_unavailability is condition-blind — it must remove ALL coexisting
+        (vendor, key) rows regardless of their condition (NULL + 'new' + 'refurb').
+
+        Guards against a future bug where clearing only targets the NULL record and
+        leaves condition-specific rows as ghosts.
+        """
+        requirement = _make_requirement(db_session, primary_mpn="ST3300657SS")
+        _make_sighting(db_session, requirement, "Acme Components", mpn_matched="ST3300657SS")
+        # Seed three coexisting rows for the same (vendor, key)
+        _make_record(db_session, condition=None, requirement_id=requirement.id)
+        _make_record(db_session, condition="new", requirement_id=requirement.id)
+        _make_record(db_session, condition="refurb", requirement_id=requirement.id)
+        db_session.commit()
+        assert (
+            db_session.query(VendorPartUnavailability).filter_by(vendor_name_normalized="acme components").count() == 3
+        )
+
+        deleted = clear_unavailability(db_session, requirement, "Acme Components", test_user)
+        db_session.commit()
+
+        assert deleted == 3
+        assert (
+            db_session.query(VendorPartUnavailability).filter_by(vendor_name_normalized="acme components").count() == 0
+        )
+
     def test_clear_deletes_records_unflags_sightings_logs_activity(self, db_session: Session, test_user: User):
         requirement = _make_requirement(db_session, primary_mpn="ST3300657SS")
         s1 = _make_sighting(db_session, requirement, "Acme Components", mpn_matched="ALT-123")
@@ -647,6 +685,39 @@ class TestUnavailabilityForRequirement:
         # release_trigger is read through the record — the ORM object is the single
         # source of truth (no copied field on the dataclass).
         assert released.record.release_trigger == ReleaseTrigger.OFFER_RECEIVED
+
+    def test_prefers_active_null_record_over_newer_specific_condition(self, db_session: Session):
+        """FIX 4: with an active NULL catch-all (older) and an active 'new' record
+        (newer), the annotation must reflect the NULL record — it is the broadest
+        active suppressor and the one that actually pins the vendor as fully dark."""
+        requirement = _make_requirement(db_session, primary_mpn="AAA-111")
+
+        # Older NULL record — should be preferred because it is the broadest suppressor
+        null_rec = VendorPartUnavailability(
+            vendor_name_normalized="acme components",
+            normalized_mpn=normalize_mpn_key("AAA-111"),
+            reason=UnavailabilityReason.SOLD_ELSEWHERE,
+            created_at=datetime.now(timezone.utc) - timedelta(days=5),
+            condition=None,
+        )
+        # Newer specific-condition record — newer but narrower
+        new_rec = VendorPartUnavailability(
+            vendor_name_normalized="acme components",
+            normalized_mpn=normalize_mpn_key("AAA-111"),
+            reason=UnavailabilityReason.BOUGHT_BY_US,
+            created_at=datetime.now(timezone.utc),
+            condition="new",
+        )
+        db_session.add_all([null_rec, new_rec])
+        db_session.commit()
+
+        intel = unavailability_for_requirement(db_session, requirement, ["Acme Components"])
+
+        assert "Acme Components" in intel
+        assert intel["Acme Components"].record.id == null_rec.id, (
+            "Active NULL catch-all must be preferred over a newer specific-condition record"
+        )
+        assert intel["Acme Components"].record.condition is None
 
     def test_empty_vendor_names(self, db_session: Session):
         requirement = _make_requirement(db_session, primary_mpn="AAA-111")
@@ -2558,18 +2629,25 @@ class TestApplyConditionGate:
         assert row_none.is_unavailable is True
 
     def test_new_record_condition_uses_normalized_sighting_condition(self, db_session: Session):
-        """normalize_condition is applied to s.condition before the gate — a raw
-        'Refurb' sighting should NOT be stamped by a 'new' record."""
+        """normalize_condition is called on s.condition before the gate, so a raw
+        display string that normalizes to 'refurb' IS stamped by a 'refurb' record.
+
+        Uses sighting condition='Refurbished' (raw) which normalize_condition maps to
+        'refurb' — if the normalization call were absent, 'Refurbished' != 'refurb' and
+        the test would return count==0 (false negative). This exercises the real
+        normalize_condition path, not a pre-canonicalized value.
+        """
         requirement = _make_requirement(db_session)
-        _make_record(db_session, condition="new")
-        # Simulate a sighting whose .condition holds a raw display string
-        # (DB stores canonical but test confirms the normalize_condition call)
-        row = _make_sighting(db_session, requirement, "Acme Components", mpn_matched="ST3300657SS", condition="refurb")
+        _make_record(db_session, condition="refurb")
+        # 'Refurbished' is a raw display form; normalize_condition → 'refurb'
+        row = _make_sighting(
+            db_session, requirement, "Acme Components", mpn_matched="ST3300657SS", condition="Refurbished"
+        )
 
         count = apply_to_fresh_sightings(db_session, requirement, [row])
 
-        assert count == 0
-        assert bool(row.is_unavailable) is False
+        assert count == 1
+        assert row.is_unavailable is True
 
 
 class TestApplyMultimap:
@@ -2721,3 +2799,65 @@ class TestRFQExclusionConditionAware:
         db_session.commit()
 
         assert excluded_vendor_norms(db_session, [requirement]) == {"acme components"}
+
+
+class TestOfferConditionForwardingCoverage:
+    """FIX 8: router-site offer_condition forwarding coverage.
+
+    Each user-initiated offer creation site must forward offer.condition as
+    offer_condition to maybe_release_on_offer. These tests mock the gate and
+    assert the kwarg is passed correctly, complementing the integration tests in
+    TestOfferHookReleasingSites (which verify the full release end-to-end).
+    """
+
+    def test_crm_create_offer_forwards_condition(self, client, db_session: Session, test_requisition):
+        """app/routers/crm/offers.py::create_offer forwards offer.condition as
+        offer_condition to maybe_release_on_offer."""
+        from unittest.mock import patch
+
+        requirement = test_requisition.requirements[0]
+        with patch("app.routers.crm.offers.maybe_release_on_offer") as mock_release:
+            resp = client.post(
+                f"/api/requisitions/{test_requisition.id}/offers",
+                json={
+                    "requirement_id": requirement.id,
+                    "vendor_name": "Arrow Electronics",
+                    "mpn": "LM317T",
+                    "qty_available": 500,
+                    "unit_price": 0.45,
+                    "condition": "refurb",
+                },
+            )
+        assert resp.status_code == 200
+        assert mock_release.called, "maybe_release_on_offer was not called at all"
+        _args, kwargs = mock_release.call_args
+        forwarded = kwargs.get("offer_condition", _args[4] if len(_args) > 4 else "NOT_PASSED")
+        assert forwarded == "refurb", (
+            f"create_offer must forward offer.condition='refurb' as offer_condition; got {forwarded!r}"
+        )
+
+    def test_htmx_add_offer_forwards_condition(self, client, db_session: Session, test_requisition):
+        """app/routers/htmx/offers.py::add_offer forwards offer.condition as
+        offer_condition to maybe_release_on_offer."""
+        from unittest.mock import patch
+
+        requirement = test_requisition.requirements[0]
+        with patch("app.routers.htmx.offers.maybe_release_on_offer") as mock_release:
+            resp = client.post(
+                f"/v2/partials/requisitions/{test_requisition.id}/add-offer",
+                data={
+                    "vendor_name": "Arrow Electronics",
+                    "mpn": "LM317T",
+                    "qty_available": "500",
+                    "unit_price": "0.45",
+                    "condition": "refurb",
+                    "requirement_id": str(requirement.id),
+                },
+            )
+        assert resp.status_code == 200
+        assert mock_release.called, "maybe_release_on_offer was not called at all"
+        _args, kwargs = mock_release.call_args
+        forwarded = kwargs.get("offer_condition", _args[4] if len(_args) > 4 else "NOT_PASSED")
+        assert forwarded == "refurb", (
+            f"add_offer must forward offer.condition='refurb' as offer_condition; got {forwarded!r}"
+        )

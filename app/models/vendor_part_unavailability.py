@@ -44,7 +44,7 @@ class VendorPartUnavailability(Base):
     # same key space offers use, so matched-MPN and primary-MPN lookups line up.
     # Re-normalized via @validates.
     normalized_mpn = Column(String(255), nullable=False)
-    condition = Column(String(16))  # NULL = all-conditions catch-all; else new/refurb/used/other
+    condition = Column(String(16))  # NULL = all-conditions catch-all; else new/refurb/used
 
     reason = Column(String(32), nullable=False)  # UnavailabilityReason value
     note = Column(Text)  # free-text "what we learned"
@@ -101,8 +101,8 @@ class VendorPartUnavailability(Base):
     def _validate_condition(self, _key, value):
         if value is None:
             return None
-        if value not in {"new", "refurb", "used", "other"}:
-            raise ValueError(f"condition={value!r} not in new/refurb/used/other")
+        if value not in {"new", "refurb", "used"}:
+            raise ValueError(f"condition={value!r} not in new/refurb/used")
         return value
 
     @validates("vendor_name_normalized", "normalized_mpn")

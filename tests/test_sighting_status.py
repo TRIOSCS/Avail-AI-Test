@@ -106,7 +106,7 @@ class TestComputeVendorStatusesConditionGate:
         db_session.commit()
 
         result = compute_vendor_statuses(r.id, req.id, db_session)
-        assert result.get("Good Vendor") != "unavailable", (
+        assert result.get("Good Vendor") == "sighting", (
             "A 'new'-condition record must not pin the pill for a vendor with only refurb sightings"
         )
 
@@ -163,4 +163,4 @@ class TestComputeVendorStatusesConditionGate:
         db_session.commit()
 
         result = compute_vendor_statuses(r.id, req.id, db_session)
-        assert result.get("Good Vendor") != "unavailable"
+        assert result.get("Good Vendor") == "sighting"
