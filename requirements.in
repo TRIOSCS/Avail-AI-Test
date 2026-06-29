@@ -56,7 +56,7 @@ anthropic>=0.111.0,<1.0
 # HTML sanitization for untrusted email content (XSS prevention)
 nh3==0.3.6
 # Safe XML parsing (XXE prevention)
-defusedxml>=0.7.1
+defusedxml>=0.7.1,<1.0
 # Azure Communication Services (click-to-call)
 azure-communication-callautomation>=1.5.0,<2.0
 azure-communication-identity>=1.5.0,<2.0

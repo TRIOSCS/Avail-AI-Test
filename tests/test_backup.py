@@ -107,6 +107,28 @@ class TestBackupScriptContent:
         content = _read_script("backup.sh")
         assert "LATEST" in content, "backup.sh must write a LATEST marker file"
 
+    def test_backup_supports_at_rest_encryption(self):
+        """Optional gpg-symmetric AES-256 at-rest encryption, keyed from env."""
+        content = _read_script("backup.sh")
+        assert "BACKUP_GPG_PASSPHRASE" in content, "backup.sh must read the encryption key from BACKUP_GPG_PASSPHRASE"
+        assert "--symmetric" in content and "AES256" in content, "backup.sh encryption must use gpg symmetric AES-256"
+
+    def test_backup_encryption_is_opt_in(self):
+        """Encryption must be guarded so an unset key still yields a usable backup."""
+        content = _read_script("backup.sh")
+        assert 'if [ -n "$GPG_PASSPHRASE" ]' in content, (
+            "backup.sh must guard encryption on the passphrase being set (plaintext otherwise)"
+        )
+
+    def test_backup_verifies_before_encrypting(self):
+        """pg_restore --list must run on the plaintext dump, before encryption."""
+        content = _read_script("backup.sh")
+        verify_idx = content.index("pg_restore --list")
+        encrypt_idx = content.index("--symmetric")
+        assert verify_idx < encrypt_idx, (
+            "backup.sh must verify the dump before encrypting it (pg_restore can't read a .gpg blob)"
+        )
+
 
 class TestRestoreScriptContent:
     """Verify restore.sh has required safety features."""
@@ -139,6 +161,14 @@ class TestRestoreScriptContent:
         content = _read_script("restore.sh")
         assert "RESTORE COMPLETE" in content, "restore.sh must verify and report after restore"
 
+    def test_restore_decrypts_encrypted_backups(self):
+        """restore.sh must transparently decrypt gpg-encrypted (.gpg) backups."""
+        content = _read_script("restore.sh")
+        assert "--decrypt" in content and "BACKUP_GPG_PASSPHRASE" in content, (
+            "restore.sh must gpg --decrypt .gpg backups using BACKUP_GPG_PASSPHRASE"
+        )
+        assert ".gpg" in content, "restore.sh must recognise the .gpg encrypted-backup suffix"
+
 
 class TestSpacesScriptContent:
     """Verify backup-to-spaces.sh handles missing config gracefully."""
@@ -156,6 +186,13 @@ class TestSpacesScriptContent:
     def test_spaces_has_remote_rotation(self):
         content = _read_script("backup-to-spaces.sh")
         assert "SPACES_RETENTION_DAYS" in content, "backup-to-spaces.sh must support remote rotation"
+
+    def test_spaces_uses_server_side_encryption(self):
+        """Off-site uploads must request server-side encryption (SSE-S3)."""
+        content = _read_script("backup-to-spaces.sh")
+        assert "--sse AES256" in content, (
+            "backup-to-spaces.sh must upload with --sse AES256 (server-side encryption at rest)"
+        )
 
 
 class TestDockerComposeBackup:

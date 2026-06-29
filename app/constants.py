@@ -422,6 +422,9 @@ class BuyPlanStatus(StrEnum):
     DRAFT = "draft"
     PENDING = "pending"
     ACTIVE = "active"
+    # Deal-level PO approved (SP-3): goods are inbound, awaiting buyer receipt.
+    # Terminal-precursor — the buyer's "mark received" completes the plan from here.
+    INBOUND = "inbound"
     HALTED = "halted"
     COMPLETED = "completed"
     CANCELLED = "cancelled"
@@ -1030,6 +1033,10 @@ class ApprovalGateType(StrEnum):
     BUY_PLAN = "buy_plan"
     PREPAYMENT = "prepayment"
     QP_SALES = "qp_sales"
+    # QP Purchasing-section gate (SP-3 de-collision). Was squatting on PURCHASE_ORDER.
+    QP_PURCHASING = "qp_purchasing"
+    # Deal-level Purchase Order gate (SP-3): a buy plan's PO spend that clears the
+    # po_auto_approve_threshold routes here to can_approve_purchase_orders holders.
     PURCHASE_ORDER = "purchase_order"
 
 

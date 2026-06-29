@@ -144,7 +144,7 @@ jobs:
           assert len(heads) <= 1, f'Multiple migration heads detected: {heads}'
           "
 
-      - name: Alembic upgrade/downgrade smoke test
+      - name: Alembic upgrade + schema-drift gate (fresh DB)
         env:
           DATABASE_URL: postgresql://availai:availai@localhost:5432/availai
           SECRET_KEY: ci-secret-key
@@ -154,17 +154,17 @@ jobs:
           # root must be importable (python runs the script with sys.path[0]=scripts/, not
           # the cwd). Without this the schema-drift gate dies on ModuleNotFoundError.
           PYTHONPATH: ${{ github.workspace }}
-          # Allow chain-replay downgrade-base to cascade-drop tables. The 001
-          # explicit-DDL baseline + incremental 002+ chain don't share a clean
-          # reverse drop ordering, so unwinding to base needs cascade. Production
-          # never sets this; single-step downgrades there still fail loudly on
-          # FK-dependency errors.
-          ALEMBIC_ALLOW_CASCADE: "1"
         run: |
+          # Apply the full migration chain forward onto a fresh DB, then assert the
+          # resulting schema matches the ORM models (the schema-drift gate). We do NOT
+          # replay `alembic downgrade base` here every PR: single-head-ness is already
+          # asserted in "Validate Alembic migrations" above, and per-migration
+          # reversibility is covered by the single-step downgrade smoke test below.
+          # Unwinding the whole 001-baseline + 002+ chain to base needed an
+          # ALEMBIC_ALLOW_CASCADE hack (the chain has no clean reverse drop ordering)
+          # and was slow/fragile without adding coverage those two checks don't give.
           alembic upgrade head
           python scripts/check_schema_matches_models.py
-          alembic downgrade base
-          alembic upgrade head
 
       - name: Alembic single-step downgrade smoke test (no cascade)
         env:

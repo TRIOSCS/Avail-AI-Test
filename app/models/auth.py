@@ -76,8 +76,15 @@ class User(Base):
     # QP Sales-Order gate (Sales section): no dollar limit — approves any amount.
     can_approve_qp_sales = Column(Boolean, nullable=False, default=False, server_default=text("false"))
 
-    # QP Purchase-Order gate (Purchasing section): no dollar limit — approves any amount.
-    can_approve_pos = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    # QP Purchasing-section gate (qp_purchasing): no dollar limit — approves any amount.
+    # Renamed from can_approve_pos in SP-3 when the deal-level PO gate de-collided.
+    can_approve_qp_purchasing = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+
+    # Deal-level Purchase-Order gate (SP-3): requires the toggle AND an amount check.
+    # purchase_order_approval_limit=NULL means unlimited; e.g. limit=10000 routes only
+    # PO spends ≤ $10,000 to this user (mirrors the prepayment gate's money guard).
+    can_approve_purchase_orders = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    purchase_order_approval_limit = Column(Numeric(12, 2), nullable=True)
 
     created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
 
