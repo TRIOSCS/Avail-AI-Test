@@ -94,6 +94,7 @@ _GRANDFATHERED_REMOVE_INDEXES = {
     "ix_self_heal_log_ticket_id",
     "ix_sighting_cache_lookup",
     "ix_sightings_evidence_tier",
+    "ix_sightings_vendor_email_trgm",
     "ix_site_contacts_email_trgm",
     "ix_site_contacts_full_name_trgm",
     "ix_vendor_cards_brand_tags_gin",
