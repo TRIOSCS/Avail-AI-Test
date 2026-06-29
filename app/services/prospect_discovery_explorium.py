@@ -1,7 +1,13 @@
 """Explorium/Vibe Prospecting discovery service — primary discovery source.
 
-Finds companies matching ICP segments with firmographics + intent/hiring/event signals
-in a single API call. Normalizes results into ProspectAccountCreate schemas.
+Finds companies matching ICP segments (firmographics) and normalizes any
+intent/hiring/event signals present on each record into ProspectAccountCreate schemas.
+
+Discovery routes through the verified connector — ``app.connectors.explorium``
+``discover_businesses()`` calls the documented ``POST /v1/businesses`` Fetch endpoint
+(``api_key`` header, ``{"filters": {...}, "size": N}`` body, ``data`` array response) —
+the same machinery that powers the CRM enrichment path. (The previous bulk
+``/v1/businesses/search`` endpoint was never a real Explorium route.)
 
 For point-enrichment of a known domain (not discovery), use app.connectors.explorium
 directly: explorium.enrich_company(domain, name, api_key) /
@@ -13,14 +19,18 @@ import asyncio
 from loguru import logger
 
 from app.config import settings
-from app.http_client import http
+from app.connectors import explorium
 from app.schemas.prospect_account import ProspectAccountCreate
 from app.services.prospect_scoring import (
     calculate_fit_score,
     calculate_readiness_score,
 )
 
+# Kept for backward-compatible imports (app.services.prospect_signals reads these).
 EXPLORIUM_BASE = getattr(settings, "explorium_api_base_url", "https://api.explorium.ai")
+
+# How many businesses to request per ICP-segment x region Fetch call.
+DISCOVERY_PAGE_SIZE = 50
 
 # ── Segment search definitions ───────────────────────────────────────
 
@@ -86,9 +96,13 @@ def _get_api_key() -> str:
 
 
 async def discover_companies_with_signals(segment_key: str, region_key: str) -> list[dict]:
-    """Call Explorium API to find companies matching an ICP segment + region.
+    """Find companies matching an ICP segment + region via the verified connector.
 
-    Returns raw normalized dicts with company data + signal data combined.
+    Builds an Explorium business-filter envelope and routes through
+    ``app.connectors.explorium.discover_businesses`` (documented ``POST /v1/businesses``
+    Fetch endpoint). Returns normalized dicts (firmographics + any signals present on the
+    record). Returns ``[]`` when the key is missing, the segment is unknown, or the API
+    errors out (including quota / ProviderQuotaError).
     """
     api_key = _get_api_key()
     if not api_key:
@@ -102,44 +116,18 @@ async def discover_companies_with_signals(segment_key: str, region_key: str) -> 
 
     country_codes = REGIONS.get(region_key, ["US"])
 
-    payload = {
-        "linkedin_categories": seg["linkedin_categories"],
-        "naics_codes": seg["naics_codes"],
-        "company_size": SIZE_RANGES,
-        "company_country_code": country_codes,
-        "business_intent_topics": SHARED_INTENT_TOPICS + seg["intent_keywords"],
-        "limit": 50,
+    # Explorium business-filter envelope: each filter is `{"values": [...]}` (the same
+    # request shape the verified /prospects search uses). ICP intent keywords are NOT a
+    # documented business filter — intent is read back off each record in normalization.
+    filters = {
+        "linkedin_category": {"values": seg["linkedin_categories"]},
+        "naics_category": {"values": seg["naics_codes"]},
+        "company_size": {"values": SIZE_RANGES},
+        "country_code": {"values": [c.lower() for c in country_codes]},
     }
 
     try:
-        # Use same header format as app.connectors.explorium (api_key: not Authorization: Bearer)
-        # NOTE: This /v1/businesses/search bulk-discovery endpoint is unverified against the
-        # current Explorium API and should be rewired to the documented /v1/businesses fetch
-        # in a follow-up (out of scope for the current prospecting feature).
-        resp = await http.post(
-            f"{EXPLORIUM_BASE}/v1/businesses/search",
-            json=payload,
-            headers={
-                "Content-Type": "application/json",
-                "api_key": api_key,
-            },
-            timeout=60,
-        )
-
-        if resp.status_code != 200:
-            logger.warning(
-                "Explorium search failed for {}/{}: {} {}",
-                segment_key,
-                region_key,
-                resp.status_code,
-                resp.text[:200],
-            )
-            return []
-
-        data = resp.json()
-        businesses = data.get("businesses", data.get("results", []))
-        if not isinstance(businesses, list):
-            businesses = []
+        businesses = await explorium.discover_businesses(filters, DISCOVERY_PAGE_SIZE, api_key)
 
         logger.info(
             "Explorium {}/{}: {} raw results",
@@ -151,7 +139,7 @@ async def discover_companies_with_signals(segment_key: str, region_key: str) -> 
         return [normalize_explorium_result(b, segment_key) for b in businesses]
 
     except Exception as e:
-        logger.error("Explorium API error for {}/{}: {}", segment_key, region_key, e)
+        logger.error("Explorium discovery error for {}/{}: {}", segment_key, region_key, e)
         return []
 
 
@@ -160,7 +148,11 @@ def normalize_explorium_result(raw: dict, segment_key: str) -> dict:
 
     Extracts firmographics + signals into a unified dict ready for scoring.
     """
-    domain = (raw.get("domain") or raw.get("website_domain") or "").strip().lower()
+    domain = (
+        (raw.get("domain") or raw.get("website_domain") or _domain_from_website(raw.get("website")) or "")
+        .strip()
+        .lower()
+    )
     if domain.startswith("www."):
         domain = domain[4:]
 
@@ -169,10 +161,12 @@ def normalize_explorium_result(raw: dict, segment_key: str) -> dict:
         "name": raw.get("company_name") or raw.get("name") or "",
         "domain": domain,
         "website": raw.get("website") or raw.get("website_url"),
-        "industry": raw.get("industry") or raw.get("linkedin_industry"),
-        "naics_code": raw.get("naics_code") or raw.get("primary_naics_code"),
+        "industry": raw.get("industry") or raw.get("linkedin_industry") or raw.get("linkedin_industry_category"),
+        "naics_code": raw.get("naics_code") or raw.get("primary_naics_code") or raw.get("naics"),
         "employee_count_range": _normalize_size(raw),
-        "revenue_range": raw.get("annual_revenue") or raw.get("revenue_range"),
+        "revenue_range": (
+            raw.get("annual_revenue") or raw.get("revenue_range") or _fmt_band(raw.get("yearly_revenue_range"))
+        ),
         "hq_location": _build_location(raw),
         "region": _detect_region(raw),
         "description": raw.get("description") or raw.get("short_description"),
@@ -260,6 +254,26 @@ def normalize_explorium_result(raw: dict, segment_key: str) -> dict:
     return result
 
 
+def _domain_from_website(website: str | None) -> str:
+    """Derive a bare domain from a website URL (strips scheme + path)."""
+    if not website:
+        return ""
+    return website.replace("https://", "").replace("http://", "").split("/")[0]
+
+
+def _fmt_band(obj) -> str | None:
+    """Format a {min, max} range dict as 'min-max', 'min+', or 'max'."""
+    if isinstance(obj, dict):
+        lo, hi = obj.get("min"), obj.get("max")
+        if lo is not None and hi is not None:
+            return f"{lo}-{hi}"
+        if lo is not None:
+            return f"{lo}+"
+        if hi is not None:
+            return str(hi)
+    return None
+
+
 def _normalize_size(raw: dict) -> str | None:
     """Extract employee count range from various Explorium fields."""
     size = raw.get("company_size") or raw.get("employee_count") or raw.get("estimated_num_employees")
@@ -281,15 +295,16 @@ def _normalize_size(raw: dict) -> str | None:
             return "5001-10000"
         else:
             return "10001+"
-    return None
+    # Real /v1/businesses Fetch records carry a {min, max} range dict.
+    return _fmt_band(raw.get("number_of_employees_range"))
 
 
 def _build_location(raw: dict) -> str | None:
     """Build location string from city/state/country fields."""
     parts = [
-        raw.get("city") or raw.get("hq_city"),
-        raw.get("state") or raw.get("hq_state"),
-        raw.get("country") or raw.get("hq_country") or raw.get("country_code"),
+        raw.get("city") or raw.get("hq_city") or raw.get("city_name"),
+        raw.get("state") or raw.get("hq_state") or raw.get("region_name"),
+        raw.get("country") or raw.get("hq_country") or raw.get("country_code") or raw.get("country_name"),
     ]
     location = ", ".join(filter(None, parts))
     return location or None
@@ -301,7 +316,7 @@ def _detect_region(raw: dict) -> str | None:
     The Explorium connector emits the human-readable ``hq_country`` name (e.g. "Germany"),
     while the discovery search API supplies ``country_code`` — so match on both.
     """
-    cc = (raw.get("country_code") or raw.get("hq_country") or "").upper()
+    cc = (raw.get("country_code") or raw.get("hq_country") or raw.get("country_name") or "").upper()
     if cc in ("US", "USA", "UNITED STATES"):
         return "US"
     _EU = (

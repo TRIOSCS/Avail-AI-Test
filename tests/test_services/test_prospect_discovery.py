@@ -10,7 +10,7 @@ os.environ["TESTING"] = "1"
 os.environ["RATE_LIMIT_ENABLED"] = "false"
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from sqlalchemy.orm import Session
@@ -55,17 +55,6 @@ EXPLORIUM_NO_DOMAIN = {
     "company_name": "Ghost Corp",
     "industry": "Unknown",
 }
-
-
-def _mock_response(status_code, *, json_body=None, text=None):
-    """Build a MagicMock httpx-style response for Explorium API patches."""
-    mock_resp = MagicMock()
-    mock_resp.status_code = status_code
-    if json_body is not None:
-        mock_resp.json.return_value = json_body
-    if text is not None:
-        mock_resp.text = text
-    return mock_resp
 
 
 # ── Explorium Tests ──────────────────────────────────────────────────
@@ -137,6 +126,33 @@ class TestExploriumNormalization:
         result = normalize_explorium_result(raw, "ems_electronics")
         assert result["employee_count_range"] == "1001-5000"
 
+    def test_real_fetch_businesses_record(self):
+        """Real POST /v1/businesses Fetch record field names map correctly."""
+        from app.services.prospect_discovery_explorium import normalize_explorium_result
+
+        raw = {
+            "business_id": "abc123",
+            "name": "Avnet",
+            "website": "https://www.avnet.com/",
+            "linkedin_industry_category": "Electronics",
+            "naics": "423690",
+            "number_of_employees_range": {"min": 5001, "max": 10000},
+            "yearly_revenue_range": {"min": 1_000_000_000},
+            "city_name": "Phoenix",
+            "region_name": "Arizona",
+            "country_name": "United States",
+        }
+        result = normalize_explorium_result(raw, "ems_electronics")
+
+        assert result["name"] == "Avnet"
+        assert result["domain"] == "avnet.com"  # derived from website, www. stripped
+        assert result["industry"] == "Electronics"
+        assert result["naics_code"] == "423690"
+        assert result["employee_count_range"] == "5001-10000"
+        assert result["revenue_range"] == "1000000000+"
+        assert result["hq_location"] == "Phoenix, Arizona, United States"
+        assert result["region"] == "US"
+
     def test_string_events(self):
         """Events as strings instead of dicts."""
         from app.services.prospect_discovery_explorium import normalize_explorium_result
@@ -185,25 +201,53 @@ class TestExploriumDiscovery:
     async def test_successful_search(self):
         from app.services.prospect_discovery_explorium import discover_companies_with_signals
 
-        mock_resp = _mock_response(200, json_body={"businesses": [EXPLORIUM_RAW_RESULT]})
-
         with patch("app.services.prospect_discovery_explorium._get_api_key", return_value="key"):
-            with patch("app.services.prospect_discovery_explorium.http") as mock_http:
-                mock_http.post = AsyncMock(return_value=mock_resp)
+            with patch(
+                "app.services.prospect_discovery_explorium.explorium.discover_businesses",
+                new_callable=AsyncMock,
+                return_value=[EXPLORIUM_RAW_RESULT],
+            ):
                 results = await discover_companies_with_signals("aerospace_defense", "US")
 
         assert len(results) == 1
         assert results[0]["domain"] == "raytheon-sensors.com"
 
     @pytest.mark.asyncio
+    async def test_routes_through_verified_businesses_fetch(self):
+        """Discovery builds the Explorium business-filter envelope and calls the
+        verified connector (POST /v1/businesses) — NOT the unverified /businesses/search
+        bulk route."""
+        from app.services.prospect_discovery_explorium import (
+            DISCOVERY_PAGE_SIZE,
+            discover_companies_with_signals,
+        )
+
+        mock_discover = AsyncMock(return_value=[])
+        with patch("app.services.prospect_discovery_explorium._get_api_key", return_value="key"):
+            with patch(
+                "app.services.prospect_discovery_explorium.explorium.discover_businesses",
+                mock_discover,
+            ):
+                await discover_companies_with_signals("aerospace_defense", "EU")
+
+        filters, size, api_key = mock_discover.call_args.args
+        assert api_key == "key"
+        assert size == DISCOVERY_PAGE_SIZE
+        assert "linkedin_category" in filters and "values" in filters["linkedin_category"]
+        assert filters["naics_category"]["values"] == ["336412", "336413"]
+        assert filters["country_code"]["values"] == ["de", "gb", "fr", "nl", "se"]  # lowercased
+
+    @pytest.mark.asyncio
     async def test_api_error_returns_empty(self):
         from app.services.prospect_discovery_explorium import discover_companies_with_signals
 
-        mock_resp = _mock_response(500, text="Internal Server Error")
-
+        # Connector degrades non-200 to [] internally → discovery sees an empty list.
         with patch("app.services.prospect_discovery_explorium._get_api_key", return_value="key"):
-            with patch("app.services.prospect_discovery_explorium.http") as mock_http:
-                mock_http.post = AsyncMock(return_value=mock_resp)
+            with patch(
+                "app.services.prospect_discovery_explorium.explorium.discover_businesses",
+                new_callable=AsyncMock,
+                return_value=[],
+            ):
                 results = await discover_companies_with_signals("aerospace_defense", "US")
 
         assert results == []
@@ -213,8 +257,11 @@ class TestExploriumDiscovery:
         from app.services.prospect_discovery_explorium import discover_companies_with_signals
 
         with patch("app.services.prospect_discovery_explorium._get_api_key", return_value="key"):
-            with patch("app.services.prospect_discovery_explorium.http") as mock_http:
-                mock_http.post = AsyncMock(side_effect=Exception("timeout"))
+            with patch(
+                "app.services.prospect_discovery_explorium.explorium.discover_businesses",
+                new_callable=AsyncMock,
+                side_effect=Exception("timeout"),
+            ):
                 results = await discover_companies_with_signals("aerospace_defense", "US")
 
         assert results == []
@@ -228,14 +275,16 @@ class TestExploriumBatch:
     async def test_dedup_existing_domains(self):
         from app.services.prospect_discovery_explorium import run_explorium_discovery_batch
 
-        mock_resp = _mock_response(200, json_body={"businesses": [EXPLORIUM_RAW_RESULT]})
-
         existing = {"raytheon-sensors.com"}  # already in pool
 
         with patch("app.services.prospect_discovery_explorium._get_api_key", return_value="key"):
-            with patch("app.services.prospect_discovery_explorium.http") as mock_http:
-                mock_http.post = AsyncMock(return_value=mock_resp)
-                results = await run_explorium_discovery_batch("test-batch", existing)
+            with patch(
+                "app.services.prospect_discovery_explorium.explorium.discover_businesses",
+                new_callable=AsyncMock,
+                return_value=[EXPLORIUM_RAW_RESULT],
+            ):
+                with patch("asyncio.sleep", new_callable=AsyncMock):
+                    results = await run_explorium_discovery_batch("test-batch", existing)
 
         assert len(results) == 0  # deduped away
 
@@ -252,11 +301,12 @@ class TestExploriumBatch:
     async def test_batch_returns_prospect_creates(self):
         from app.services.prospect_discovery_explorium import run_explorium_discovery_batch
 
-        mock_resp = _mock_response(200, json_body={"businesses": [EXPLORIUM_RAW_RESULT]})
-
         with patch("app.services.prospect_discovery_explorium._get_api_key", return_value="key"):
-            with patch("app.services.prospect_discovery_explorium.http") as mock_http:
-                mock_http.post = AsyncMock(return_value=mock_resp)
+            with patch(
+                "app.services.prospect_discovery_explorium.explorium.discover_businesses",
+                new_callable=AsyncMock,
+                return_value=[EXPLORIUM_RAW_RESULT],
+            ):
                 with patch("asyncio.sleep", new_callable=AsyncMock):
                     results = await run_explorium_discovery_batch("test-batch", set())
 
@@ -466,12 +516,12 @@ class TestDedupLogic:
         """Same domain from multiple segment searches is deduped."""
         from app.services.prospect_discovery_explorium import run_explorium_discovery_batch
 
-        # Same company appears in every search
-        mock_resp = _mock_response(200, json_body={"businesses": [EXPLORIUM_RAW_RESULT]})
-
         with patch("app.services.prospect_discovery_explorium._get_api_key", return_value="key"):
-            with patch("app.services.prospect_discovery_explorium.http") as mock_http:
-                mock_http.post = AsyncMock(return_value=mock_resp)
+            with patch(
+                "app.services.prospect_discovery_explorium.explorium.discover_businesses",
+                new_callable=AsyncMock,
+                return_value=[EXPLORIUM_RAW_RESULT],  # same company in every search
+            ):
                 with patch("asyncio.sleep", new_callable=AsyncMock):
                     results = await run_explorium_discovery_batch("dedup-batch", set())
 
@@ -491,8 +541,11 @@ class TestGracefulDegradation:
         from app.services.prospect_discovery_explorium import run_explorium_discovery_batch
 
         with patch("app.services.prospect_discovery_explorium._get_api_key", return_value="key"):
-            with patch("app.services.prospect_discovery_explorium.http") as mock_http:
-                mock_http.post = AsyncMock(side_effect=Exception("Connection refused"))
+            with patch(
+                "app.services.prospect_discovery_explorium.explorium.discover_businesses",
+                new_callable=AsyncMock,
+                side_effect=Exception("Connection refused"),
+            ):
                 with patch("asyncio.sleep", new_callable=AsyncMock):
                     results = await run_explorium_discovery_batch("fail-batch", set())
 
@@ -525,16 +578,17 @@ class TestExploriumCoverageGaps:
             result = _get_api_key()
         assert result == ""
 
-    def test_businesses_not_list(self):
-        """Line 133: businesses is not a list, gets reset to []."""
+    def test_empty_discovery_returns_empty(self):
+        """Connector returns [] (e.g. non-list/empty data) → discovery yields []."""
         from app.services.prospect_discovery_explorium import discover_companies_with_signals
-
-        mock_resp = _mock_response(200, json_body={"businesses": "not-a-list"})
 
         async def run():
             with patch("app.services.prospect_discovery_explorium._get_api_key", return_value="key"):
-                with patch("app.services.prospect_discovery_explorium.http") as mock_http:
-                    mock_http.post = AsyncMock(return_value=mock_resp)
+                with patch(
+                    "app.services.prospect_discovery_explorium.explorium.discover_businesses",
+                    new_callable=AsyncMock,
+                    return_value=[],
+                ):
                     return await discover_companies_with_signals("aerospace_defense", "US")
 
         results = asyncio.get_event_loop().run_until_complete(run())
@@ -616,11 +670,12 @@ class TestExploriumCoverageGaps:
             "industry": "Unknown",
         }
 
-        mock_resp = _mock_response(200, json_body={"businesses": [no_domain_result]})
-
         with patch("app.services.prospect_discovery_explorium._get_api_key", return_value="key"):
-            with patch("app.services.prospect_discovery_explorium.http") as mock_http:
-                mock_http.post = AsyncMock(return_value=mock_resp)
+            with patch(
+                "app.services.prospect_discovery_explorium.explorium.discover_businesses",
+                new_callable=AsyncMock,
+                return_value=[no_domain_result],
+            ):
                 with patch("asyncio.sleep", new_callable=AsyncMock):
                     results = await run_explorium_discovery_batch("test-batch", set())
 
