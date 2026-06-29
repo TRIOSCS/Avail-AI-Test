@@ -35,7 +35,7 @@ async def list_tags(
     if tag_type:
         query = query.filter(Tag.tag_type == tag_type)
     if q:
-        query = query.filter(Tag.name.ilike(f"%{escape_like(q)}%"))
+        query = query.filter(Tag.name.ilike(f"%{escape_like(q)}%", escape="\\"))
 
     total = query.count()
     tags = query.order_by(Tag.name).offset(offset).limit(limit).all()

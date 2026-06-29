@@ -314,19 +314,19 @@ async def sightings_list(
         query = query.filter(Requirement.sourcing_status == filters.status)
     if filters.sales_person:
         safe = escape_like(filters.sales_person)
-        query = query.join(User, Requisition.created_by == User.id).filter(User.name.ilike(f"%{safe}%"))
+        query = query.join(User, Requisition.created_by == User.id).filter(User.name.ilike(f"%{safe}%", escape="\\"))
     if filters.assigned == "mine":
         query = query.filter(Requirement.assigned_buyer_id == user.id)
     if filters.q:
         safe_q = escape_like(filters.q)
         query = query.filter(
-            Requirement.primary_mpn.ilike(f"%{safe_q}%")
-            | Requisition.customer_name.ilike(f"%{safe_q}%")
-            | Requirement.substitutes_text.ilike(f"%{safe_q}%")
+            Requirement.primary_mpn.ilike(f"%{safe_q}%", escape="\\")
+            | Requisition.customer_name.ilike(f"%{safe_q}%", escape="\\")
+            | Requirement.substitutes_text.ilike(f"%{safe_q}%", escape="\\")
         )
     if filters.manufacturer:
         safe_mfr = escape_like(filters.manufacturer)
-        query = query.filter(Requirement.manufacturer.ilike(f"%{safe_mfr}%"))
+        query = query.filter(Requirement.manufacturer.ilike(f"%{safe_mfr}%", escape="\\"))
 
     total = query.count()
 

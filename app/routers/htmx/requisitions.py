@@ -41,6 +41,7 @@ from ...models import (
 from ...services.freeform_parser_service import parse_freeform_rfq
 from ...template_env import template_response
 from ...utils.search_builder import SearchBuilder
+from ...utils.sql_helpers import escape_like
 from .._lookup_helpers import get_requisition_or_404
 from ._shared import _base_ctx, _parse_date_safe
 
@@ -585,7 +586,7 @@ async def customer_quick_create(
     from app.cache.decorators import invalidate_prefix
 
     # Check for duplicates
-    existing = db.query(Company).filter(Company.name.ilike(company_name.strip())).first()
+    existing = db.query(Company).filter(Company.name.ilike(escape_like(company_name.strip()), escape="\\")).first()
     if existing:
         site = existing.sites[0] if existing.sites else None
         site_id = site.id if site else ""

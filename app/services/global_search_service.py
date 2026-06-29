@@ -600,13 +600,13 @@ def _run_intent_query(search_op: dict, db: Session, user: User | None = None) ->
         if filter_name == "email_domain":
             # Domain filter: ILIKE %@domain
             sb_filter = SearchBuilder(str(filter_value))
-            q = q.filter(col.ilike(f"%@{sb_filter.safe}%"))
+            q = q.filter(col.ilike(f"%@{sb_filter.safe}%", escape="\\"))
         elif filter_name == "is_blacklisted":
             q = q.filter(col == filter_value)
         else:
             # Exact-ish match via ILIKE for text filters
             sb_filter = SearchBuilder(str(filter_value))
-            q = q.filter(col.ilike(f"%{sb_filter.safe}%"))
+            q = q.filter(col.ilike(f"%{sb_filter.safe}%", escape="\\"))
 
     # Dedup parts by normalized_mpn, offers by (mpn, vendor_name), sightings by (mpn, vendor)
     if entity_type == "part":

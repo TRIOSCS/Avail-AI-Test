@@ -99,16 +99,20 @@ def _build_vendor_history(vendor_name: str, db: Session) -> dict:
     total_rfqs = (
         db.query(func.count(Contact.id))
         .filter(
-            Contact.vendor_name.ilike(f"%{safe_vendor}%"),
+            Contact.vendor_name.ilike(f"%{safe_vendor}%", escape="\\"),
             Contact.contact_type == "email",
         )
         .scalar()
     ) or 0
 
-    total_offers = (db.query(func.count(Offer.id)).filter(Offer.vendor_name.ilike(f"%{safe_vendor}%")).scalar()) or 0
+    total_offers = (
+        db.query(func.count(Offer.id)).filter(Offer.vendor_name.ilike(f"%{safe_vendor}%", escape="\\")).scalar()
+    ) or 0
 
     last_contact_date = (
-        db.query(func.max(Contact.created_at)).filter(Contact.vendor_name.ilike(f"%{safe_vendor}%")).scalar()
+        db.query(func.max(Contact.created_at))
+        .filter(Contact.vendor_name.ilike(f"%{safe_vendor}%", escape="\\"))
+        .scalar()
     )
 
     return {
