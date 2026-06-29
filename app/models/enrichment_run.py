@@ -1,9 +1,18 @@
-"""Enrichment run model — tracks autonomous enrichment pipeline state.
+"""Enrichment run model — legacy autonomous-enrichment pipeline state.
 
-Persists batch IDs, request maps, and progress so the pipeline can resume
-after container restarts. Each phase creates one or more EnrichmentRun rows.
+Persisted batch IDs, request maps, and progress so the old phase-based
+orchestrator could resume after container restarts. That orchestrator
+(``scripts/enrich_orchestrator.py`` + ``enrichment-entrypoint.sh``) was removed
+when the paced ``app.services.enrichment_worker`` superseded it, so nothing
+writes these rows anymore.
 
-Called by: scripts/enrich_orchestrator.py
+The ``enrichment_runs`` table still exists in the live schema (migrations
+``001`` / ``071``), so this model is retained purely to keep
+``Base.metadata`` in sync with the database and the schema-drift gate
+(``scripts/check_schema_matches_models.py``) green. Dropping the table is a
+separate, riskier decision (a real DROP migration), deliberately out of scope
+for the dead-code cleanup that removed the orchestrator.
+
 Depends on: app.models.base.Base
 """
 
