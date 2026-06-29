@@ -36,7 +36,7 @@ from ..models.sourcing import Requirement, Sighting
 from ..models.vendor_part_unavailability import VendorPartUnavailability
 from ..models.vendor_sighting_summary import VendorSightingSummary
 from ..models.vendors import VendorCard
-from ..utils.normalization import normalize_mpn_key
+from ..utils.normalization import normalize_condition, normalize_mpn_key
 from ..vendor_utils import normalize_vendor_name
 from .vendor_unavailability import is_active, sighting_vendor_norm
 
@@ -111,11 +111,16 @@ def compute_vendor_statuses(
 
     keys_by_norm: dict[str, set[str]] = {n: ({primary_key} if primary_key else set()) for n in norm_set}
     vendor_flags: dict[str, list[bool]] = {}
+    conds_by_norm: dict[str, set] = {}
     for s in sight_rows:
         norm = sighting_vendor_norm(s)
         if not norm:
             continue
         vendor_flags.setdefault(norm, []).append(bool(s.is_unavailable))
+        # Collect the normalized conditions this vendor has sightings for, so
+        # the gate below can require that a covering record's condition matches
+        # at least one condition the vendor actually carries (NULL = catch-all).
+        conds_by_norm.setdefault(norm, set()).add(normalize_condition(s.condition))
         if norm in keys_by_norm:
             key = normalize_mpn_key(s.mpn_matched)
             if key:
@@ -143,7 +148,14 @@ def compute_vendor_statuses(
         flags = vendor_flags.get(norm, [])
         if matching:
             # Rows-win: any unstamped row flips the pill off "unavailable".
-            if any(is_active(rec, now) for rec in matching) and all(flags):
+            # Condition gate: a covering record must be NULL (all-conditions
+            # catch-all) OR its condition must match one the vendor actually
+            # has sightings for — prevents a stray other-condition record from
+            # pinning the pill.
+            if any(
+                is_active(rec, now) and (rec.condition is None or rec.condition in conds_by_norm.get(norm, set()))
+                for rec in matching
+            ) and all(flags):
                 unavail_norms.add(norm)
         elif flags and all(flags):
             unavail_norms.add(norm)  # true legacy: flagged rows, no record at all

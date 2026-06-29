@@ -732,21 +732,27 @@ stays thin.
 
 **Mark (and re-arm).** Row "Mark Unavail" → `$dispatch('open-modal')` →
 `GET /v2/partials/sightings/{requirement_id}/unavailable-form` (reason radios
-from `UnavailabilityReason`, optional note, the "applies to all of this vendor's
-listings of this MPN" caveat) → `POST .../mark-unavailable`:
+from `UnavailabilityReason`, optional note, condition selector — blank = NULL
+all-conditions catch-all; the selector is shown only for condition-specific
+reasons: bought_by_us/sold_elsewhere/broken) → `POST .../mark-unavailable`:
 
 ```
 sightings_mark_unavailable (router; reason required + enum-validated, else 400)
     |
     v
-record_unavailability(db, requirement, vendor_name, reason, note, user)
+record_unavailability(db, requirement, vendor_name, reason, note, user,
+                      condition=None)
     |
     +---> ValueError on empty vendor norm or zero derivable MPN keys
     |       --> router maps to 400 JSON error; NOTHING written (no ActivityLog)
     |
-    +---> UPSERT one record per derivable key (matched-sighting MPN keys +
-    |     primary-MPN key): reason/note/created_by/created_at refreshed;
-    |     per-key qty_at_mark snapshot (keep-old-on-NULL);
+    +---> reason→condition coercion: condition-specific reasons
+    |     (bought_by_us/sold_elsewhere/broken) store normalize_condition(passed);
+    |     agnostic reasons (not_really_there/different_part/other) always store NULL
+    |
+    +---> UPSERT one record per (derivable key, condition) pair (matched-sighting
+    |     MPN keys + primary-MPN key): reason/note/created_by/created_at refreshed;
+    |     per-(key,condition) qty_at_mark snapshot (keep-old-on-NULL);
     |     released_at/release_trigger NULLed; requirement_id provenance refreshed
     |
     +---> stamps is_unavailable=True on the vendor's sightings via the ONE
@@ -763,13 +769,14 @@ baseline). There is NO separate verify endpoint: the advisory/restock "verify"
 affordance maps onto re-arm (the mark-unavailable modal) and clear
 (mark-available).
 
-**Clear.** `POST .../mark-available` → `clear_unavailability`: DELETEs records
-matching the vendor norm AND (key in the requirement's current keys OR
-`requirement_id == requirement.id` — the provenance arm catches zombie records
-whose key no longer matches), unflags the vendor's sightings via the same shared
-helper, writes an ActivityLog entry. DELETE is deliberate (explicit human
-"forget it"); history survives in the activity timeline. Auto-expiry and
-overrides O1/O2 never delete.
+**Clear.** `POST .../mark-available` → `clear_unavailability`: DELETEs ALL
+condition variants (NULL and specific) for the matching (vendor, key) pair — the
+single affordance means "vendor is generally available again." Predicate: vendor
+norm AND (key in the requirement's current keys OR `requirement_id ==
+requirement.id` — the provenance arm catches zombie records whose key no longer
+matches). Unflags the vendor's sightings via the same shared helper, writes an
+ActivityLog entry. DELETE is deliberate (explicit human "forget it"); history
+survives in the activity timeline. Auto-expiry and overrides O1/O2 never delete.
 
 **Feedback.** Both routes re-render the detail panel with an appended OOB
 toast fragment (success: "Marked {vendor} unavailable — {reason label}" /
@@ -786,9 +793,18 @@ window(reason))` — pure Python cutoffs, no cron, no lazy writes. Windows: **30
 for lot reasons (bought_by_us/sold_elsewhere/broken/other; knob
 `unavailability_suppress_days`), **180d** for the phantom-listing reason
 (not_really_there; knob `unavailability_listing_suppress_days`), **never** for
-different_part (identity knowledge — hard-coded, not a knob). While a record is
-active, fresh rows are evaluated by overrides **dispatched on the row's source
-class** (mutually exclusive — never priority order): LIVE
+different_part (identity knowledge — hard-coded, not a knob).
+
+**Condition-aware suppression (migration 171).** A sighting/offer of canonical
+condition X (X = `normalize_condition(stored)`, may be None) is suppressed iff
+an `is_active` record exists where `record.condition == X OR record.condition IS
+NULL`. A None-condition sighting (unknown/unlabeled) matches ONLY NULL catch-all
+records — never a specific-condition record — so a "bought by us (new)" mark
+does not suppress unlabeled listings (anti-over-suppression). Suppression check
+is read-time: `suppressed_by(record, sighting_condition)`.
+
+While a record is active, fresh rows are evaluated by overrides **dispatched on
+the row's source class** (mutually exclusive — never priority order): LIVE
 (digikey/mouser/element14 or `is_authorized`) → **O1**: qty > 0 and ≠
 `qty_at_mark` leaves the row unstamped (advisory; applies to ALL reasons);
 HUMAN_DIRECT (`email_attachment` only) → **O3**: qty > 0 releases the record
@@ -796,17 +812,18 @@ HUMAN_DIRECT (`email_attachment` only) → **O3**: qty > 0 releases the record
 everything else is listing-class → **O2**: fresh qty > snapshot AND ≥ snapshot ×
 `unavailability_qty_jump_factor` (2.0) leaves the row unstamped with no record
 mutation (stateless, self-healing). O2/O3 — and the offer hook — are disabled
-for different_part. **Offer-release hook:** `released_at` is written only by
-user-initiated proof — the offer entry/save/approval sites (canonical
-`create_offer` incl. the sightings route that delegates to it, manual
-add-offer, the save-parsed-offers route, `save_freeform_offers`,
-pending-review approve, plus its three approval twins: the htmx review-queue
-promote, the T4→T5 API promote, and the requisition offers-tab review
-approve) call the shared `maybe_release_on_offer(...)` gate after the offer
-persists (same transaction) — `release_trigger='offer_received'`;
-auto-created offers (inbox monitor, excess matching) and clone paths never
-release. Expired/released records render as labeled advisory states, never
-silent suppression.
+for different_part. **Offer-release hook (condition-aware):** an offer/email
+proof of condition X releases the matching X record AND the NULL catch-all (the
+all-conditions record is also resolved); an unknown-condition proof releases all
+active non-different_part records for the (vendor, key). The hook is invoked at
+the offer entry/save/approval sites (canonical `create_offer` incl. the sightings
+route that delegates to it, manual add-offer, the save-parsed-offers route,
+`save_freeform_offers`, pending-review approve, plus its three approval twins:
+the htmx review-queue promote, the T4→T5 API promote, and the requisition
+offers-tab review approve) after the offer persists (same transaction) —
+`release_trigger='offer_received'`; auto-created offers (inbox monitor, excess
+matching) and clone paths never release. Expired/released records render as
+labeled advisory states, never silent suppression.
 
 **Re-stamping at every sighting-persistence path.** Each of the eight code paths
 that persist fresh Sighting rows calls `apply_to_fresh_sightings(db,
@@ -857,19 +874,22 @@ flag is a render cache that every reader reinterprets:
 Races across the eight writers leave at most a stale flag that the next render
 reinterprets correctly — no reconciliation pass, no read-path writes.
 
-**RFQ exclusion (active-only, with visible skip).** The RFQ vendor modal
-(`sightings_vendor_modal`) excludes vendors in
-`excluded_vendor_norms(db, requirements)` — vendors with an ACTIVE record whose
-key matches a selected requirement's primary-MPN key; excluded if unavailable
-for ANY selected part (deliberately conservative). Expired/released/cleared →
-the vendor returns to suggestions. `sightings_send_inquiry` and
-`sightings_preview_inquiry` re-validate the submitted vendor names against the
-same active-only set at request time (closing the TOCTOU the modal filter alone
-leaves open): excluded vendors are dropped from the send AND visibly reported
-("Skipped (marked unavailable): …" in the result toast + the
-`X-RFQ-Unavailable` count header) — never a silent drop. Override-surfaced
-(possible-restock) rows do NOT re-enable RFQ while the record is active; the
-exits are window expiry, offer/email release, or manual clear.
+**RFQ exclusion (active NULL-condition records only, with visible skip).** The
+RFQ vendor modal (`sightings_vendor_modal`) excludes vendors in
+`excluded_vendor_norms(db, requirements)` — vendors with an ACTIVE **NULL-condition**
+(all-conditions catch-all) record whose key matches a selected requirement's
+primary-MPN key. Condition-specific records (e.g. "bought by us — new") do NOT
+exclude the vendor from RFQ, so unlabeled/different-condition offers can still be
+solicited (anti-over-suppression by design). Excluded if unavailable for ANY
+selected part (deliberately conservative). Expired/released/cleared → the vendor
+returns to suggestions. `sightings_send_inquiry` and `sightings_preview_inquiry`
+re-validate the submitted vendor names against the same active NULL-condition set
+at request time (closing the TOCTOU the modal filter alone leaves open): excluded
+vendors are dropped from the send AND visibly reported ("Skipped (marked
+unavailable): …" in the result toast + the `X-RFQ-Unavailable` count header) —
+never a silent drop. Override-surfaced (possible-restock) rows do NOT re-enable
+RFQ while the record is active; the exits are window expiry, offer/email release,
+or manual clear.
 
 ## 3. RFQ Email Sending
 

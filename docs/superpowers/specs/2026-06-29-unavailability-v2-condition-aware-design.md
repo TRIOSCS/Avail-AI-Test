@@ -47,11 +47,20 @@ suppressing everything.
 ### Condition model: nullable, "specific OR all"
 Add `condition` to `vendor_part_unavailability`:
 - Type `String(16)`, **nullable**. `NULL` ≡ "all conditions" (the catch-all).
-- Allowed non-NULL values: the canonical vocab `new` / `refurb` / `used` / `other`,
-  enforced by an `@validates("condition")` that accepts a value already in that set or
-  `None`. (Marks in practice produce `new`/`refurb`/`used`/`NULL`; `other` is accepted so
-  a read-side `condition='other'` sighting *could* be matched by an explicit `other` mark,
-  but no automatic path produces `other` — those become `NULL`.)
+- Allowed non-NULL values: `new` / `refurb` / `used`, enforced by an
+  `@validates("condition")` that accepts a value already in that set or `None`.
+  (Marks in practice produce `new`/`refurb`/`used`/`NULL`.)
+  **Implementation deviation (post-review):** the design originally also accepted `other`
+  on this column, on the premise that a `condition='other'` sighting *could* be matched by
+  an explicit `other` mark. That premise is false — `normalize_condition()` never emits
+  `other` (it returns `None`), so a read-side `other` sighting normalizes to `None` and is
+  matched only by NULL records, and an `other` mark would match nothing. Worse, the mark
+  form offering "Other" silently collapsed (via `normalize_condition`) to a NULL
+  all-conditions record — the maximal over-suppression this feature exists to prevent. So
+  `other` was dropped from this column's vocabulary (form + `@validates`); the existing
+  "All conditions" (NULL) option already covers the broad case. (The separate
+  `chk_sight_condition`/`chk_offer_condition` vocab on the Sighting/Offer columns is
+  unchanged.)
 
 ### Uniqueness (DB-enforced, replaces the single unique constraint)
 Drop `uq_vendor_part_unavail_vendor_mpn`. Add **two partial unique indexes** so the
@@ -141,7 +150,7 @@ is `170_prospecting_persistence` at design time, so likely `171`)
    confirm a single alembic head. Claim line appended to `MIGRATION_NUMBERS_IN_FLIGHT.txt`.
 
 ## Testing plan
-- **Model:** `@validates("condition")` (accepts `new/refurb/used/other`/`None`, rejects
+- **Model:** `@validates("condition")` (accepts `new/refurb/used`/`None`, rejects
   off-vocab); the two partial indexes (reject a 2nd NEW row and a 2nd NULL row for a
   `(vendor, mpn)`; allow NEW + REFURB + NULL coexisting).
 - **Mark:** reason→condition coercion (each agnostic reason forces NULL; each specific

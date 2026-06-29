@@ -329,7 +329,7 @@ def save_freeform_offers(
         db.flush()
         # Offer hook: freeform offers are saved ACTIVE after user review — user-
         # initiated proof of availability, release matching active records.
-        maybe_release_on_offer(db, req_id, offer.vendor_name, user)
+        maybe_release_on_offer(db, req_id, offer.vendor_name, user, offer_condition=offer.condition)
         _log_offer_created(db, offer, user_id)
         created.append(offer.id)
 

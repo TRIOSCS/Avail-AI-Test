@@ -22,10 +22,10 @@ equality. Functions never commit; callers own the transaction.
 
 Called by: app/routers/sightings.py (mark-unavailable / mark-available routes),
            the user-initiated offer sites via maybe_release_on_offer
-           (routers/crm/offers.py create_offer + approve_offer + promote_offer,
-           routers/htmx_views.py add_offer + save_parsed_offers +
+           (app/routers/crm/offers.py create_offer + approve_offer + promote_offer,
+           app/routers/htmx/offers.py add_offer + save_parsed_offers +
            promote_offer_htmx + review_offer approve,
-           services/ai_offer_service.py save_freeform_offers),
+           app/services/ai_offer_service.py save_freeform_offers),
            app/services/sighting_status.py (reader-authority Batch 4),
            sighting-persistence paths via apply_to_fresh_sightings()
            (search_service, ICS/NC sighting writers, sources import,
@@ -53,7 +53,7 @@ from ..models.auth import User
 from ..models.intelligence import ActivityLog
 from ..models.sourcing import Requirement, Sighting
 from ..models.vendor_part_unavailability import VendorPartUnavailability
-from ..utils.normalization import normalize_mpn_key
+from ..utils.normalization import normalize_condition, normalize_mpn_key
 from ..vendor_utils import normalize_vendor_name
 
 # ── Temporal-policy constants ─────────────────────────────────────────────────
@@ -234,23 +234,33 @@ def _keys_for_vendor(requirement: Requirement, sightings: Sequence[Sighting]) ->
     return keys
 
 
-def _qty_snapshots(requirement: Requirement, sightings: Sequence[Sighting]) -> dict[str, int]:
-    """Per-key snapshot: max non-NULL qty_available over the vendor's sightings
-    whose key equals the record's key.
+def _qty_snapshots(
+    requirement: Requirement, sightings: Sequence[Sighting]
+) -> tuple[dict[str, int], dict[tuple[str, str], int]]:
+    """Per-key all-conditions max AND per-(key,condition) max over the vendor's
+    sightings.
+
+    Returns ``(by_all, by_cond)`` where:
+    - ``by_all[key]`` is the max qty across ALL sightings for that key (any condition).
+    - ``by_cond[(key, cs)]`` is the max qty for sightings whose canonical condition == cs.
 
     Rows with empty ``mpn_matched`` count toward the primary-key record (mirroring
     apply_to_fresh_sightings' key fallback). Never max-across-keys, never a
-    cross-key fallback.
+    cross-key fallback. Uses -1 as sentinel so qty=0 is correctly captured.
     """
     primary_key = normalize_mpn_key(requirement.primary_mpn)
-    snaps: dict[str, int] = {}
+    by_all: dict[str, int] = {}
+    by_cond: dict[tuple[str, str], int] = {}
     for s in sightings:
         key = normalize_mpn_key(s.mpn_matched) or primary_key
         if not key or s.qty_available is None:
             continue
-        if key not in snaps or s.qty_available > snaps[key]:
-            snaps[key] = s.qty_available
-    return snaps
+        if s.qty_available > by_all.get(key, -1):
+            by_all[key] = s.qty_available
+        cs = normalize_condition(s.condition)
+        if cs is not None and s.qty_available > by_cond.get((key, cs), -1):
+            by_cond[(key, cs)] = s.qty_available
+    return by_all, by_cond
 
 
 def _mpn_display(requirement: Requirement, sightings: Sequence[Sighting]) -> str:
@@ -316,6 +326,25 @@ def _release_record(
     )
 
 
+def condition_matches(record_condition: str | None, sighting_condition: str | None) -> bool:
+    """Scalar condition-match predicate — THE single definition of the suppression rule.
+
+    A record of ``record_condition`` suppresses a sighting of canonical condition
+    ``sighting_condition`` iff the record is all-conditions (NULL) or the two are equal.
+    Both the apply loop and the annotation helper delegate here so the rule has one home.
+    """
+    return record_condition is None or record_condition == sighting_condition
+
+
+def _condition_matches(record: VendorPartUnavailability, sighting_condition: str | None) -> bool:
+    """A record suppresses a sighting iff the record is all-conditions (NULL) or their
+    canonical conditions are equal.
+
+    Delegates to the scalar helper.
+    """
+    return condition_matches(record.condition, sighting_condition)
+
+
 # ── Service surface ───────────────────────────────────────────────────────────
 
 
@@ -326,15 +355,23 @@ def record_unavailability(
     reason: UnavailabilityReason | str,
     note: str | None,
     user: User | None,
+    condition: str | None = None,
 ) -> int:
     """Record that this vendor's stock of this requirement's part(s) is gone.
 
     Upserts one VendorPartUnavailability per normalized MPN key — an existing
-    (vendor, key) row is updated: reason/note/created_by/created_at refreshed,
-    ``released_at``/``release_trigger`` NULLed, ``requirement_id`` provenance
-    refreshed, and ``qty_at_mark`` re-snapshot per key keeping the old value when
-    the new computation is NULL. Flags the vendor's sightings via the shared
-    matching helper and writes ONE ActivityLog entry.
+    (vendor, key, condition) row is updated: reason/note/created_by/created_at
+    refreshed, ``released_at``/``release_trigger`` NULLed, ``requirement_id``
+    provenance refreshed, and ``qty_at_mark`` re-snapshot per key keeping the old
+    value when the new computation is NULL. Flags the vendor's matching sightings
+    via the shared matching helper and writes ONE ActivityLog entry.
+
+    ``condition`` is honoured only for condition-specific reasons
+    (BOUGHT_BY_US / SOLD_ELSEWHERE / BROKEN); all other reasons store NULL and
+    stamp all sightings regardless of condition. Off-vocab or None values for a
+    specific reason are coerced to NULL (all-conditions). The stamp loop is
+    condition-scoped: only sightings whose canonical condition matches ``cond`` are
+    flagged when ``cond`` is non-NULL.
 
     Raises ValueError when the vendor name normalizes to nothing (IMPORTANT-4) or
     when zero MPN keys are derivable (CRITICAL-1) — nothing is written in either
@@ -342,6 +379,7 @@ def record_unavailability(
     """
     reason = UnavailabilityReason(reason)
     note = (note or "").strip() or None
+    cond = normalize_condition(condition) if reason.condition_specific else None
     vendor_norm = normalize_vendor_name(vendor_name)
     if not vendor_norm:
         raise ValueError(f"vendor name {vendor_name!r} normalizes to nothing — cannot record unavailability")
@@ -354,9 +392,9 @@ def record_unavailability(
         )
 
     now = datetime.now(timezone.utc)
-    snapshots = _qty_snapshots(requirement, sightings)
-    existing: dict[str, VendorPartUnavailability] = {
-        rec.normalized_mpn: rec
+    by_all, by_cond = _qty_snapshots(requirement, sightings)
+    existing: dict[tuple[str, str | None], VendorPartUnavailability] = {
+        (rec.normalized_mpn, rec.condition): rec
         for rec in db.query(VendorPartUnavailability)
         .filter(
             VendorPartUnavailability.vendor_name_normalized == vendor_norm,
@@ -365,15 +403,15 @@ def record_unavailability(
         .all()
     }
     for key in keys:
-        snapshot = snapshots.get(key)
-        rec = existing.get(key)
+        snap = by_all.get(key) if cond is None else by_cond.get((key, cond))
+        rec = existing.get((key, cond))
         if rec is not None:
             rec.reason = reason.value
             rec.note = note
             rec.created_by_id = user.id if user else None
             rec.created_at = now
-            if snapshot is not None:  # keep-old-on-NULL: no cross-requirement clobber
-                rec.qty_at_mark = snapshot
+            if snap is not None:  # keep-old-on-NULL: no cross-requirement clobber
+                rec.qty_at_mark = snap
             rec.re_arm()  # NULL the release pair together — record suppresses again
             rec.requirement_id = requirement.id
         else:
@@ -385,13 +423,15 @@ def record_unavailability(
                     note=note,
                     created_by_id=user.id if user else None,
                     created_at=now,
-                    qty_at_mark=snapshot,
+                    qty_at_mark=snap,
                     requirement_id=requirement.id,
+                    condition=cond,
                 )
             )
 
     for s in sightings:
-        s.is_unavailable = True
+        if condition_matches(cond, normalize_condition(s.condition)):
+            s.is_unavailable = True
 
     notes = f"Marked {vendor_name} unavailable for {_mpn_display(requirement, sightings)}: {reason.label}"
     if note:
@@ -399,11 +439,12 @@ def record_unavailability(
     _log_activity(db, requirement, user, ActivityType.VENDOR_UNAVAILABLE, vendor_name, notes)
 
     logger.info(
-        "Recorded unavailability: vendor={} requirement={} keys={} reason={}",
+        "Recorded unavailability: vendor={} requirement={} keys={} reason={} condition={}",
         vendor_norm,
         requirement.id,
         sorted(keys),
         reason.value,
+        cond,
     )
     return len(keys)
 
@@ -496,7 +537,10 @@ def unavailability_for_requirement(
     if not all_keys:
         return {}
 
-    # Most-recent first; per display vendor the first matching record wins.
+    # Most-recent first; per display vendor the first matching record wins (newest-wins
+    # default), except we prefer an active NULL-condition (broadest suppressor) if one
+    # exists — a specific-condition record is never the right annotation when there is
+    # an active catch-all keeping the vendor fully dark.
     records = (
         db.query(VendorPartUnavailability)
         .filter(
@@ -513,15 +557,21 @@ def unavailability_for_requirement(
     result: dict[str, UnavailabilityIntel] = {}
     for display, norm in norm_by_display.items():
         keys = keys_by_norm.get(norm, set())
-        for rec in records:
-            if rec.vendor_name_normalized == norm and rec.normalized_mpn in keys:
-                age = (now - _as_utc(rec.created_at)).days if rec.created_at else 0
-                result[display] = UnavailabilityIntel(
-                    record=rec,
-                    is_active=is_active(rec, now),
-                    age_days=max(0, age),
-                )
-                break
+        matching = [rec for rec in records if rec.vendor_name_normalized == norm and rec.normalized_mpn in keys]
+        if not matching:
+            continue
+        # Prefer broadest active suppressor: an active NULL-condition record over any
+        # specific-condition record; otherwise fall back to newest-wins (first in list).
+        preferred = next(
+            (rec for rec in matching if rec.condition is None and is_active(rec, now)),
+            matching[0],
+        )
+        age = (now - _as_utc(preferred.created_at)).days if preferred.created_at else 0
+        result[display] = UnavailabilityIntel(
+            record=preferred,
+            is_active=is_active(preferred, now),
+            age_days=max(0, age),
+        )
     return result
 
 
@@ -560,15 +610,16 @@ def apply_to_fresh_sightings(
     if not candidates:
         return 0
 
-    records: dict[tuple[str, str], VendorPartUnavailability] = {
-        (rec.vendor_name_normalized, rec.normalized_mpn): rec
-        for rec in db.query(VendorPartUnavailability)
+    records: dict[tuple[str, str], list[VendorPartUnavailability]] = {}
+    for rec in (
+        db.query(VendorPartUnavailability)
         .filter(
             VendorPartUnavailability.vendor_name_normalized.in_(norms),
             VendorPartUnavailability.normalized_mpn.in_(keys),
         )
         .all()
-    }
+    ):
+        records.setdefault((rec.vendor_name_normalized, rec.normalized_mpn), []).append(rec)
     if not records:
         return 0
 
@@ -576,38 +627,39 @@ def apply_to_fresh_sightings(
     count = 0
     for s, norm, cand_keys in candidates:
         stamp = False
+        sighting_cond = normalize_condition(s.condition)
         for key in cand_keys:
-            rec = records.get((norm, key))
-            if rec is None or not is_active(rec, now):
-                continue  # no/expired/released record — never stamp from it
-            verdict = _override_verdict(rec, s)  # class-dispatched: O1 / O2 / O3
-            if verdict == _VERDICT_SURFACE:  # O1 live truth / O2 restock — row-level only
-                continue
-            if verdict == _VERDICT_RELEASE:
-                # O3 vendor document — RELEASE only fires for HUMAN_DIRECT rows
-                # (source_type='email_attachment'), which only the user-initiated
-                # sources.py attachment import creates today; background writers
-                # (brokerbin/ICS/NC/inventory/clones) use other source_types
-                # (inventory_jobs tags raw_data import_method='email_attachment'
-                # but its source_type is 'email_auto_import') and can never reach
-                # this branch — so the record mutation here is safe regardless of
-                # caller context.
-                _release_record(
-                    db,
-                    requirement,
-                    rec,
-                    ReleaseTrigger.VENDOR_EMAIL,
-                    s.vendor_name or rec.vendor_name_normalized,
-                    (
-                        f"Vendor email shows qty {s.qty_available} for "
-                        f"{s.mpn_matched or _mpn_display(requirement, [s])} — "
-                        f"released unavailability mark for {s.vendor_name or rec.vendor_name_normalized}"
-                    ),
-                    None,
-                    now,
-                )
-                continue
-            stamp = True
+            for rec in records.get((norm, key), []):
+                if not is_active(rec, now) or not _condition_matches(rec, sighting_cond):
+                    continue  # inactive or condition mismatch — never stamp from it
+                verdict = _override_verdict(rec, s)  # class-dispatched: O1 / O2 / O3
+                if verdict == _VERDICT_SURFACE:  # O1 live truth / O2 restock — row-level only
+                    continue
+                if verdict == _VERDICT_RELEASE:
+                    # O3 vendor document — RELEASE only fires for HUMAN_DIRECT rows
+                    # (source_type='email_attachment'), which only the user-initiated
+                    # sources.py attachment import creates today; background writers
+                    # (brokerbin/ICS/NC/inventory/clones) use other source_types
+                    # (inventory_jobs tags raw_data import_method='email_attachment'
+                    # but its source_type is 'email_auto_import') and can never reach
+                    # this branch — so the record mutation here is safe regardless of
+                    # caller context.
+                    _release_record(
+                        db,
+                        requirement,
+                        rec,
+                        ReleaseTrigger.VENDOR_EMAIL,
+                        s.vendor_name or rec.vendor_name_normalized,
+                        (
+                            f"Vendor email shows qty {s.qty_available} for "
+                            f"{s.mpn_matched or _mpn_display(requirement, [s])} — "
+                            f"released unavailability mark for {s.vendor_name or rec.vendor_name_normalized}"
+                        ),
+                        None,
+                        now,
+                    )
+                    continue
+                stamp = True
         if stamp:
             s.is_unavailable = True
             count += 1
@@ -625,6 +677,7 @@ def release_on_offer(
     requirement: Requirement,
     vendor_name: str,
     user: User | None,
+    offer_condition: str | None = None,
 ) -> int:
     """Offer hook: an incoming offer is proof of availability — release the vendor's
     matching ACTIVE records across the requirement's keys.
@@ -633,6 +686,12 @@ def release_on_offer(
     identity knowledge). Sets ``released_at``/``release_trigger='offer_received'``
     and writes one ActivityLog entry. No-op (0) when nothing matches. Does NOT
     commit. Returns records released.
+
+    ``offer_condition`` (optional): when a known condition is supplied, only the
+    matching condition record AND the NULL (all-conditions) record are released;
+    other-condition records are left intact (the offer is condition-specific proof).
+    When ``offer_condition`` normalizes to ``None`` (unknown or not supplied) all
+    active non-different_part records are released — v1 behavior.
     """
     vendor_norm = normalize_vendor_name(vendor_name)
     if not vendor_norm:
@@ -651,12 +710,15 @@ def release_on_offer(
         .all()
     )
     now = datetime.now(timezone.utc)
+    oc = normalize_condition(offer_condition)
     released = 0
     for rec in records:
         if rec.reason == UnavailabilityReason.DIFFERENT_PART:
             continue
         if not is_active(rec, now):
             continue
+        if oc is not None and rec.condition is not None and rec.condition != oc:
+            continue  # known offer condition X: leave other-specific-condition records intact
         rec.release(ReleaseTrigger.OFFER_RECEIVED, now)
         released += 1
     if released:
@@ -685,6 +747,7 @@ def maybe_release_on_offer(
     requirement_id: int | None,
     vendor_name: str | None,
     user: User | None,
+    offer_condition: str | None = None,
 ) -> int:
     """The single offer-hook gate every user-initiated offer site calls.
 
@@ -699,6 +762,9 @@ def maybe_release_on_offer(
     ``requirement_id`` that resolves to no row is a caller anomaly (dangling id) —
     still 0, but logged so a silently-skipped release is observable. Does NOT
     commit.
+
+    ``offer_condition`` is forwarded to ``release_on_offer`` — see its docstring for
+    the condition-aware release semantics.
     """
     if not requirement_id or not vendor_name or not vendor_name.strip():
         return 0
@@ -710,7 +776,7 @@ def maybe_release_on_offer(
             vendor_name,
         )
         return 0
-    return release_on_offer(db, requirement, vendor_name, user)
+    return release_on_offer(db, requirement, vendor_name, user, offer_condition=offer_condition)
 
 
 def excluded_vendor_norms(db: Session, requirements: Iterable[Requirement]) -> set[str]:
@@ -737,4 +803,4 @@ def excluded_vendor_norms(db: Session, requirements: Iterable[Requirement]) -> s
         return set()
     now = datetime.now(timezone.utc)
     rows = db.query(VendorPartUnavailability).filter(VendorPartUnavailability.normalized_mpn.in_(sorted(keys))).all()
-    return {rec.vendor_name_normalized for rec in rows if is_active(rec, now)}
+    return {rec.vendor_name_normalized for rec in rows if is_active(rec, now) and rec.condition is None}

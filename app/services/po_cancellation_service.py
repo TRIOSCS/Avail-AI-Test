@@ -168,7 +168,9 @@ def mark_vendor_unavailable(db: Session, *, requirement, offer, reason_code, not
     unavailability_reason = RESOURCE_TO_UNAVAILABILITY_REASON.get(
         reason_code, UnavailabilityReason.SOLD_ELSEWHERE.value
     )
-    return record_unavailability(db, requirement, offer.vendor_name, unavailability_reason, note, user)
+    return record_unavailability(
+        db, requirement, offer.vendor_name, unavailability_reason, note, user, condition=offer.condition
+    )
 
 
 def refresh_vendor_cancellation_metrics(db: Session, vendor_card_id) -> None:

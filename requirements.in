@@ -1,7 +1,7 @@
 # Production dependency SOURCE (hand-authored). Edit this file, then regenerate the
 # pinned lock with:  pip-compile --no-header requirements.in
 # Do NOT edit requirements.txt by hand — it is the compiled, fully-pinned output.
-fastapi==0.138.0
+fastapi==0.138.1
 uvicorn[standard]==0.49.0
 sqlalchemy==2.0.51
 psycopg2-binary==2.9.12
@@ -32,19 +32,19 @@ rapidfuzz>=3.0.0,<4.0
 # PDF generation
 weasyprint==69.0
 # PDF text extraction (datasheet verification)
-pypdf==6.13.3
+pypdf==6.14.2
 # Scheduling
-apscheduler>=3.11.2,<4.0
+apscheduler>=3.11.3,<4.0
 # Migrations
-alembic==1.18.4
+alembic==1.18.5
 # Caching
-redis[hiredis]==8.0.0
+redis[hiredis]==8.0.1
 orjson>=3.11.9,<4.0
 # CSRF protection
 starlette-csrf==3.0.0
 # NetComponents integration
 beautifulsoup4==4.15.0
-patchright==1.60.1
+patchright==1.61.1
 # Phone number parsing / E.164 normalization (Google libphonenumber Python port)
 phonenumbers==9.0.33
 # Typed settings from env vars (fail-fast validation at startup)
@@ -52,11 +52,11 @@ pydantic-settings==2.14.2
 # SSE streaming for HTMX sourcing progress
 sse-starlette>=3.4.5,<4.0
 # Anthropic Claude API (used by claude_client, enrichment, batch extraction)
-anthropic>=0.111.0,<1.0
+anthropic>=0.112.0,<1.0
 # HTML sanitization for untrusted email content (XSS prevention)
 nh3==0.3.6
 # Safe XML parsing (XXE prevention)
 defusedxml>=0.7.1,<1.0
 # Azure Communication Services (click-to-call)
-azure-communication-callautomation>=1.5.0,<2.0
+azure-communication-callautomation>=1.6.0,<2.0
 azure-communication-identity>=1.5.0,<2.0
