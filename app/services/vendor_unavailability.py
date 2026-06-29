@@ -53,7 +53,7 @@ from ..models.auth import User
 from ..models.intelligence import ActivityLog
 from ..models.sourcing import Requirement, Sighting
 from ..models.vendor_part_unavailability import VendorPartUnavailability
-from ..utils.normalization import normalize_mpn_key
+from ..utils.normalization import normalize_condition, normalize_mpn_key
 from ..vendor_utils import normalize_vendor_name
 
 # ── Temporal-policy constants ─────────────────────────────────────────────────
@@ -234,23 +234,33 @@ def _keys_for_vendor(requirement: Requirement, sightings: Sequence[Sighting]) ->
     return keys
 
 
-def _qty_snapshots(requirement: Requirement, sightings: Sequence[Sighting]) -> dict[str, int]:
-    """Per-key snapshot: max non-NULL qty_available over the vendor's sightings
-    whose key equals the record's key.
+def _qty_snapshots(
+    requirement: Requirement, sightings: Sequence[Sighting]
+) -> tuple[dict[str, int], dict[tuple[str, str], int]]:
+    """Per-key all-conditions max AND per-(key,condition) max over the vendor's
+    sightings.
+
+    Returns ``(by_all, by_cond)`` where:
+    - ``by_all[key]`` is the max qty across ALL sightings for that key (any condition).
+    - ``by_cond[(key, cs)]`` is the max qty for sightings whose canonical condition == cs.
 
     Rows with empty ``mpn_matched`` count toward the primary-key record (mirroring
     apply_to_fresh_sightings' key fallback). Never max-across-keys, never a
-    cross-key fallback.
+    cross-key fallback. Uses -1 as sentinel so qty=0 is correctly captured.
     """
     primary_key = normalize_mpn_key(requirement.primary_mpn)
-    snaps: dict[str, int] = {}
+    by_all: dict[str, int] = {}
+    by_cond: dict[tuple[str, str], int] = {}
     for s in sightings:
         key = normalize_mpn_key(s.mpn_matched) or primary_key
         if not key or s.qty_available is None:
             continue
-        if key not in snaps or s.qty_available > snaps[key]:
-            snaps[key] = s.qty_available
-    return snaps
+        if s.qty_available > by_all.get(key, -1):
+            by_all[key] = s.qty_available
+        cs = normalize_condition(s.condition)
+        if cs is not None and s.qty_available > by_cond.get((key, cs), -1):
+            by_cond[(key, cs)] = s.qty_available
+    return by_all, by_cond
 
 
 def _mpn_display(requirement: Requirement, sightings: Sequence[Sighting]) -> str:
@@ -316,6 +326,12 @@ def _release_record(
     )
 
 
+def _condition_matches(record: VendorPartUnavailability, sighting_condition: str | None) -> bool:
+    """A record suppresses a sighting iff the record is all-conditions (NULL) or their
+    canonical conditions are equal."""
+    return record.condition is None or record.condition == sighting_condition
+
+
 # ── Service surface ───────────────────────────────────────────────────────────
 
 
@@ -326,15 +342,23 @@ def record_unavailability(
     reason: UnavailabilityReason | str,
     note: str | None,
     user: User | None,
+    condition: str | None = None,
 ) -> int:
     """Record that this vendor's stock of this requirement's part(s) is gone.
 
     Upserts one VendorPartUnavailability per normalized MPN key — an existing
-    (vendor, key) row is updated: reason/note/created_by/created_at refreshed,
-    ``released_at``/``release_trigger`` NULLed, ``requirement_id`` provenance
-    refreshed, and ``qty_at_mark`` re-snapshot per key keeping the old value when
-    the new computation is NULL. Flags the vendor's sightings via the shared
-    matching helper and writes ONE ActivityLog entry.
+    (vendor, key, condition) row is updated: reason/note/created_by/created_at
+    refreshed, ``released_at``/``release_trigger`` NULLed, ``requirement_id``
+    provenance refreshed, and ``qty_at_mark`` re-snapshot per key keeping the old
+    value when the new computation is NULL. Flags the vendor's matching sightings
+    via the shared matching helper and writes ONE ActivityLog entry.
+
+    ``condition`` is honoured only for condition-specific reasons
+    (BOUGHT_BY_US / SOLD_ELSEWHERE / BROKEN); all other reasons store NULL and
+    stamp all sightings regardless of condition. Off-vocab or None values for a
+    specific reason are coerced to NULL (all-conditions). The stamp loop is
+    condition-scoped: only sightings whose canonical condition matches ``cond`` are
+    flagged when ``cond`` is non-NULL.
 
     Raises ValueError when the vendor name normalizes to nothing (IMPORTANT-4) or
     when zero MPN keys are derivable (CRITICAL-1) — nothing is written in either
@@ -342,6 +366,7 @@ def record_unavailability(
     """
     reason = UnavailabilityReason(reason)
     note = (note or "").strip() or None
+    cond = normalize_condition(condition) if reason.condition_specific else None
     vendor_norm = normalize_vendor_name(vendor_name)
     if not vendor_norm:
         raise ValueError(f"vendor name {vendor_name!r} normalizes to nothing — cannot record unavailability")
@@ -354,9 +379,9 @@ def record_unavailability(
         )
 
     now = datetime.now(timezone.utc)
-    snapshots = _qty_snapshots(requirement, sightings)
-    existing: dict[str, VendorPartUnavailability] = {
-        rec.normalized_mpn: rec
+    by_all, by_cond = _qty_snapshots(requirement, sightings)
+    existing: dict[tuple[str, str | None], VendorPartUnavailability] = {
+        (rec.normalized_mpn, rec.condition): rec
         for rec in db.query(VendorPartUnavailability)
         .filter(
             VendorPartUnavailability.vendor_name_normalized == vendor_norm,
@@ -365,15 +390,16 @@ def record_unavailability(
         .all()
     }
     for key in keys:
-        snapshot = snapshots.get(key)
-        rec = existing.get(key)
+        snap = by_all.get(key) if cond is None else by_cond.get((key, cond))
+        rec = existing.get((key, cond))
         if rec is not None:
             rec.reason = reason.value
             rec.note = note
             rec.created_by_id = user.id if user else None
             rec.created_at = now
-            if snapshot is not None:  # keep-old-on-NULL: no cross-requirement clobber
-                rec.qty_at_mark = snapshot
+            rec.condition = cond
+            if snap is not None:  # keep-old-on-NULL: no cross-requirement clobber
+                rec.qty_at_mark = snap
             rec.re_arm()  # NULL the release pair together — record suppresses again
             rec.requirement_id = requirement.id
         else:
@@ -385,13 +411,15 @@ def record_unavailability(
                     note=note,
                     created_by_id=user.id if user else None,
                     created_at=now,
-                    qty_at_mark=snapshot,
+                    qty_at_mark=snap,
                     requirement_id=requirement.id,
+                    condition=cond,
                 )
             )
 
     for s in sightings:
-        s.is_unavailable = True
+        if cond is None or cond == normalize_condition(s.condition):
+            s.is_unavailable = True
 
     notes = f"Marked {vendor_name} unavailable for {_mpn_display(requirement, sightings)}: {reason.label}"
     if note:
@@ -399,11 +427,12 @@ def record_unavailability(
     _log_activity(db, requirement, user, ActivityType.VENDOR_UNAVAILABLE, vendor_name, notes)
 
     logger.info(
-        "Recorded unavailability: vendor={} requirement={} keys={} reason={}",
+        "Recorded unavailability: vendor={} requirement={} keys={} reason={} condition={}",
         vendor_norm,
         requirement.id,
         sorted(keys),
         reason.value,
+        cond,
     )
     return len(keys)
 
