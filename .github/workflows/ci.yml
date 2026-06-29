@@ -6,6 +6,11 @@ on:
   # Run CI for PRs targeting any branch — supports stacked PRs where a feature
   # PR is based on another open feature branch rather than directly on main.
   pull_request:
+  schedule:
+    # Nightly full migration chain-replay (downgrade base → upgrade head). Too
+    # slow/fragile to gate every PR with 160+ migrations, so it runs here on a
+    # schedule instead — see the `migration-full-cycle` job below (HIGH-DEVOPS-7).
+    - cron: "0 7 * * *"
 
 jobs:
   test:
@@ -219,3 +224,66 @@ jobs:
           path: |
             test-results.xml
             coverage.xml
+
+  migration-full-cycle:
+    # HIGH-DEVOPS-7: full chain-replay (downgrade base → re-upgrade head) of all
+    # 160+ migrations. Too slow/fragile to gate every PR, so it runs nightly via
+    # the `schedule` trigger instead. Per-PR CI keeps the cheap, high-value
+    # checks: single-head assertion ("Validate Alembic migrations"), a fresh
+    # `upgrade head` + schema-drift gate ("Alembic upgrade + schema-drift gate"),
+    # and a single-step `downgrade -1` reversibility check on the new migration.
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: availai
+          POSTGRES_PASSWORD: availai
+          POSTGRES_DB: availai
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U availai -d availai"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 \
+            libffi-dev shared-mime-info
+
+      - name: Install Python dependencies
+        # Prod lock only — alembic env.py imports the app models, which need the
+        # runtime deps; the dev/test toolchain isn't required for a migration replay.
+        run: pip install -r requirements.txt
+
+      - name: Full migration chain-replay (downgrade base → upgrade head)
+        env:
+          DATABASE_URL: postgresql://availai:availai@localhost:5432/availai
+          SECRET_KEY: ci-secret-key
+          SESSION_SECRET: ci-session-secret
+          TESTING: "0"
+          PYTHONPATH: ${{ github.workspace }}
+          # The 001 explicit-DDL baseline + incremental 002+ chain don't share a
+          # clean reverse drop ordering, so unwinding to base needs cascade.
+          # Production never sets this; single-step downgrades there still fail
+          # loudly on FK-dependency errors.
+          ALEMBIC_ALLOW_CASCADE: "1"
+        run: |
+          alembic upgrade head
+          alembic downgrade base
+          alembic upgrade head

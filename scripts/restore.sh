@@ -25,7 +25,11 @@ decompress() {
     if [[ "$f" == *.gpg ]]; then
         [ -n "${BACKUP_GPG_PASSPHRASE:-}" ] \
             || die "Backup '${f}' is gpg-encrypted but BACKUP_GPG_PASSPHRASE is not set"
-        gpg --batch --quiet --decrypt --passphrase "${BACKUP_GPG_PASSPHRASE}" "$f" 2>/dev/null | gunzip -c
+        # Passphrase via stdin (--passphrase-fd 0), never the command line, so it
+        # never appears in `ps`/argv. The ciphertext is read from the file arg.
+        printf '%s' "${BACKUP_GPG_PASSPHRASE}" \
+            | gpg --batch --quiet --pinentry-mode loopback --passphrase-fd 0 --decrypt "$f" 2>/dev/null \
+            | gunzip -c
     else
         gunzip -c "$f"
     fi
@@ -187,11 +191,18 @@ if [ "$SKIP_SAFETY" = false ]; then
 
     # Match backup.sh's at-rest policy: when a passphrase is configured, the
     # pre-restore safety dump is encrypted too (never leave plaintext on disk).
+    # Best-effort — a failure here must NOT abort the restore. Passphrase via
+    # stdin (--passphrase-fd 0), never the command line, so it never hits argv.
     if [ -n "${BACKUP_GPG_PASSPHRASE:-}" ] && [ -s "$SAFETY_FILE" ]; then
-        gpg --batch --yes --quiet --cipher-algo AES256 \
-            --passphrase "${BACKUP_GPG_PASSPHRASE}" --symmetric \
-            --output "${SAFETY_FILE}.gpg" "$SAFETY_FILE" \
-            && rm -f "$SAFETY_FILE" && SAFETY_FILE="${SAFETY_FILE}.gpg"
+        if printf '%s' "${BACKUP_GPG_PASSPHRASE}" \
+            | gpg --batch --yes --quiet --pinentry-mode loopback --passphrase-fd 0 \
+                --cipher-algo AES256 --symmetric \
+                --output "${SAFETY_FILE}.gpg" "$SAFETY_FILE"; then
+            rm -f "$SAFETY_FILE"
+            SAFETY_FILE="${SAFETY_FILE}.gpg"
+        else
+            log "WARNING: failed to encrypt safety backup; leaving plaintext ${SAFETY_FILE}"
+        fi
     fi
 
     SAFETY_SIZE=$(stat -c%s "$SAFETY_FILE" 2>/dev/null || stat -f%z "$SAFETY_FILE" 2>/dev/null || echo "0")

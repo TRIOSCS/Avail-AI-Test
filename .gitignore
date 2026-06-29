@@ -58,3 +58,7 @@ docs/superpowers/specs/2026-03-28-coverage-report.txt
 reports/
 node_modules
 .superpowers/
+
+# pip-installed packages that land in repo root during container setup
+nest_asyncio.py
+nest_asyncio-*.dist-info/
