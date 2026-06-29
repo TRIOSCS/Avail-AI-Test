@@ -148,7 +148,9 @@ def rotate_salt(
 
     stats = RotationStats()
     select_cols = ", ".join(COLUMNS)
-    rows = db.execute(text(f"SELECT id, {select_cols} FROM {TABLE}")).mappings().all()
+    # B608: TABLE + COLUMNS are hardcoded module constants (no user input); SQL
+    # identifiers cannot be bind-parameterized.
+    rows = db.execute(text(f"SELECT id, {select_cols} FROM {TABLE}")).mappings().all()  # nosec B608
 
     for row in rows:
         stats.users_scanned += 1
@@ -174,7 +176,8 @@ def rotate_salt(
             if not dry_run:
                 set_clause = ", ".join(f"{c} = :{c}" for c in updates)
                 db.execute(
-                    text(f"UPDATE {TABLE} SET {set_clause} WHERE id = :_id"),
+                    # B608: TABLE constant + set_clause is COLUMNS constants; values are bound params.
+                    text(f"UPDATE {TABLE} SET {set_clause} WHERE id = :_id"),  # nosec B608
                     {**updates, "_id": row["id"]},
                 )
 
