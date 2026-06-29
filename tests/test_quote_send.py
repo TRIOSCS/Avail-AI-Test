@@ -51,7 +51,7 @@ def test_htmx_send_triggers_real_send_email(client, db_session, test_requisition
     In TESTING mode the service skips the real Graph POST but still marks sent, so we
     assert send_quote_email itself was called for our quote.
     """
-    from app.routers import htmx_views
+    from app.routers.htmx import quotes
 
     quote = _draft_quote(db_session, test_requisition, test_customer_site, test_user)
 
@@ -69,7 +69,7 @@ def test_htmx_send_triggers_real_send_email(client, db_session, test_requisition
             graph_message_id=None,
         )
 
-    with patch.object(htmx_views, "send_quote_email", new=AsyncMock(side_effect=_fake)) as mock_send:
+    with patch.object(quotes, "send_quote_email", new=AsyncMock(side_effect=_fake)) as mock_send:
         resp = client.post(f"/v2/partials/quotes/{quote.id}/send")
 
     assert resp.status_code == 200

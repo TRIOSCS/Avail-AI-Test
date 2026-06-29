@@ -229,24 +229,24 @@ class TestHelperFunctions:
     """Test _parse_filter_json, _safe_int, _safe_float, _parse_date_safe."""
 
     def test_parse_filter_json_empty(self):
-        from app.routers.htmx_views import _parse_filter_json
+        from app.routers.htmx.materials import _parse_filter_json
 
         assert _parse_filter_json("") == {}
         assert _parse_filter_json(None) == {}
 
     def test_parse_filter_json_valid(self):
-        from app.routers.htmx_views import _parse_filter_json
+        from app.routers.htmx.materials import _parse_filter_json
 
         result = _parse_filter_json('{"key": "val"}')
         assert result == {"key": "val"}
 
     def test_parse_filter_json_invalid(self):
-        from app.routers.htmx_views import _parse_filter_json
+        from app.routers.htmx.materials import _parse_filter_json
 
         assert _parse_filter_json("not json") == {}
 
     def test_parse_filter_json_coerce_numeric(self):
-        from app.routers.htmx_views import _parse_filter_json
+        from app.routers.htmx.materials import _parse_filter_json
 
         result = _parse_filter_json('{"price_min": "10.5", "price_max": "bad", "name": "test"}', coerce_numeric=True)
         assert result["price_min"] == 10.5

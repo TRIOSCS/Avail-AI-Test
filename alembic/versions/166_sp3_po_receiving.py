@@ -27,7 +27,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "166_sp3_po_receiving"
-down_revision = "165_vendor_is_active"
+down_revision = "167_saved_views"
 branch_labels = None
 depends_on = None
 

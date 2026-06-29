@@ -33,6 +33,7 @@ from .crm import (  # noqa: F401
     Company,
     CompanyAttachment,
     CustomerSite,
+    SavedView,
     SiteContact,
     SiteContactAttachment,
 )

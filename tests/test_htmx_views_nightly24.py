@@ -390,7 +390,7 @@ class TestUpdateRequirementDirect:
 class TestAddOffersToDraftQuoteDirect:
     async def test_add_offers_to_draft_quote(self, db_session: Session, test_user: User):
         """Lines 7683–7733: parses body, creates QuoteLines."""
-        from app.routers.htmx_views import add_offers_to_draft_quote
+        from app.routers.htmx.quotes import add_offers_to_draft_quote
 
         req = _make_req(db_session, test_user)
         offer = _make_offer(db_session, req, test_user)
@@ -410,7 +410,7 @@ class TestAddOffersToDraftQuoteDirect:
         """Lines 7685–7686: invalid JSON body → HTTPException 400."""
         from fastapi import HTTPException
 
-        from app.routers.htmx_views import add_offers_to_draft_quote
+        from app.routers.htmx.quotes import add_offers_to_draft_quote
 
         req = _make_req(db_session, test_user)
         mock_req = _mock_body_request(body_bytes=b"not json")
@@ -424,7 +424,7 @@ class TestAddOffersToDraftQuoteDirect:
 
         from fastapi import HTTPException
 
-        from app.routers.htmx_views import add_offers_to_draft_quote
+        from app.routers.htmx.quotes import add_offers_to_draft_quote
 
         req = _make_req(db_session, test_user)
         body = json.dumps({"offer_ids": [], "quote_id": 0}).encode()
@@ -439,7 +439,7 @@ class TestAddOffersToDraftQuoteDirect:
 
         from fastapi import HTTPException
 
-        from app.routers.htmx_views import add_offers_to_draft_quote
+        from app.routers.htmx.quotes import add_offers_to_draft_quote
 
         req = _make_req(db_session, test_user)
         offer = _make_offer(db_session, req, test_user)

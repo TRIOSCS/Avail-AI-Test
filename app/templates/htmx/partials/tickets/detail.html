@@ -24,7 +24,7 @@
       <select x-model="status"
               @change="fetch('/api/trouble-tickets/' + {{ ticket.id }}, {
                 method: 'PATCH',
-                headers: {'Content-Type': 'application/json'},
+                headers: {'Content-Type': 'application/json', 'X-CSRFToken': (document.cookie.match(/csrftoken=([^;]+)/)?.[1] || '')},
                 body: JSON.stringify({status: status})
               }).then(function(r){
                 var t = Alpine.store('toast');

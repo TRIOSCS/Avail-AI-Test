@@ -597,7 +597,7 @@ async def toggle_source_active(
     db: Session = Depends(get_db),
 ):
     """Toggle is_active flag on a source (settings access required)."""
-    from ..routers.htmx_views import settings_toast
+    from ..routers.htmx.settings import settings_toast
 
     src = db.get(ApiSource, source_id)
     if not src:
@@ -689,7 +689,7 @@ async def update_source_credentials(
 
     Skips blank values (preserves existing).
     """
-    from ..routers.htmx_views import settings_toast
+    from ..routers.htmx.settings import settings_toast
     from ..services.credential_service import _cred_cache, encrypt_value
 
     src = db.query(ApiSource).filter_by(name=source_name).first()

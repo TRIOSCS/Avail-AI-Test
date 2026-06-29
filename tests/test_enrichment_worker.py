@@ -31,6 +31,7 @@ def test_worker_status_model_importable():
         "last_heartbeat",
         "last_enriched_at",
         "enriched_today",
+        "enriched_today_date",
         "web_sourced_today",
         "ai_inferred_today",
         "not_found_today",
@@ -1290,3 +1291,126 @@ def test_run_one_batch_no_spec_extraction_when_all_not_found(db_session):
         asyncio.run(run_one_batch(db_session, cfg, {}, breaker, set(), {"web_calls": 0}))
 
     spec_mock.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# Persisted daily-cap counter — survives container restart (_load_today_counters)
+#
+# enriched_today / enriched_today_date are persisted to the status singleton so a
+# same-day restart RESUMES the day's count (the cap stays enforced) instead of
+# resetting the budget to 0; a restart on a NEW day resets it.
+# ---------------------------------------------------------------------------
+
+
+def test_load_today_counters_resumes_same_day(db_session):
+    """A same-day restart hydrates the persisted per-tier counts and pins
+    last_stats_date to today, so the daily-reset path is skipped on the first tick."""
+    from datetime import date
+
+    from app.models.enrichment_worker_status import EnrichmentWorkerStatus
+    from app.services.enrichment_worker.worker import _load_today_counters
+
+    today = date(2026, 6, 28)
+    db_session.add(
+        EnrichmentWorkerStatus(
+            id=1,
+            enriched_today=150,
+            enriched_today_date=today,
+            web_sourced_today=40,
+            oem_sourced_today=10,
+            ai_inferred_today=80,
+            not_found_today=15,
+            not_catalogued_today=5,
+        )
+    )
+    db_session.commit()
+
+    state = _load_today_counters(db_session, today)
+
+    assert state["enriched_today"] == 150
+    assert state["web_sourced_today"] == 40
+    assert state["oem_sourced_today"] == 10
+    assert state["ai_inferred_today"] == 80
+    assert state["not_found_today"] == 15
+    assert state["not_catalogued_today"] == 5
+    # last_stats_date == today => the main loop SKIPS the daily reset on the first tick.
+    assert state["last_stats_date"] == today
+
+
+def test_same_day_restart_keeps_daily_cap_enforced(db_session):
+    """The resumed count is still measured against daily_cap — a restart cannot hand the
+    worker a fresh budget.
+
+    With 150 already done and a cap of 100, the worker would immediately hit the cap
+    (enriched_today >= daily_cap).
+    """
+    from datetime import date
+
+    from app.models.enrichment_worker_status import EnrichmentWorkerStatus
+    from app.services.enrichment_worker.config import EnrichmentWorkerConfig
+    from app.services.enrichment_worker.worker import _load_today_counters
+
+    today = date(2026, 6, 28)
+    db_session.add(EnrichmentWorkerStatus(id=1, enriched_today=150, enriched_today_date=today))
+    db_session.commit()
+
+    state = _load_today_counters(db_session, today)
+    cfg = EnrichmentWorkerConfig(daily_cap=100)
+
+    # The same gate the main loop applies: cap is still enforced after a restart.
+    assert state["enriched_today"] >= cfg.daily_cap
+
+
+def test_load_today_counters_resets_on_new_day(db_session):
+    """A restart on a DIFFERENT day must NOT resume yesterday's count — it returns zeros
+    and a None last_stats_date so the normal new-day reset runs on the first tick."""
+    from datetime import date
+
+    from app.models.enrichment_worker_status import EnrichmentWorkerStatus
+    from app.services.enrichment_worker.worker import _load_today_counters
+
+    yesterday = date(2026, 6, 27)
+    today = date(2026, 6, 28)
+    db_session.add(EnrichmentWorkerStatus(id=1, enriched_today=150, enriched_today_date=yesterday))
+    db_session.commit()
+
+    state = _load_today_counters(db_session, today)
+
+    assert state["enriched_today"] == 0
+    assert state["web_sourced_today"] == 0
+    assert state["last_stats_date"] is None
+
+
+def test_load_today_counters_no_row_returns_zeros(db_session):
+    """No singleton row (pre-migration / SQLite without seed) => zeros, last_stats_date
+    None."""
+    from datetime import date
+
+    from app.services.enrichment_worker.worker import _load_today_counters
+
+    state = _load_today_counters(db_session, date(2026, 6, 28))
+
+    assert state["enriched_today"] == 0
+    assert state["last_stats_date"] is None
+
+
+def test_increment_write_through_persists_count_and_date(db_session):
+    """The per-batch write-through persists both the running count AND today's date, so
+    a same-day restart can resume from it."""
+    from datetime import date
+
+    from app.models.enrichment_worker_status import (
+        EnrichmentWorkerStatus,
+        update_enrichment_worker_status,
+    )
+
+    today = date(2026, 6, 28)
+    db_session.add(EnrichmentWorkerStatus(id=1))
+    db_session.commit()
+
+    update_enrichment_worker_status(db_session, enriched_today=5, enriched_today_date=today)
+
+    db_session.expire_all()
+    row = db_session.get(EnrichmentWorkerStatus, 1)
+    assert row.enriched_today == 5
+    assert row.enriched_today_date == today

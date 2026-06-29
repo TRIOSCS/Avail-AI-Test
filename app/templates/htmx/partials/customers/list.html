@@ -101,12 +101,28 @@
     <span class="htmx-indicator text-gray-400 text-xs">Loading...</span>
   </form>
 
+  {# Saved views — per-user filter presets for the accounts list. The wrapper holds the
+     apply/save Alpine behavior; #saved-views-customers is the hx swap target for
+     save/delete. applyFilters writes a preset's stored filters back onto #cdm-filters
+     and dispatches change (reusing the normal filter-submit pathway). x-data uses ONLY
+     single-quoted JS strings (no literal double-quote, no // comment) so Alpine init is
+     not broken per the CLAUDE.md attribute-quoting rule. #}
+  <div id="saved-views-customers"
+       class="flex items-center gap-1.5 flex-wrap pb-1 flex-shrink-0"
+       x-data="{ saveOpen: false, applyFilters(el){ const form=document.getElementById('cdm-filters'); if(!form){ return } let filters={}; try{ filters=JSON.parse(el.dataset.filters||'{}') }catch(e){} Array.from(form.elements).forEach(function(field){ if(!field.name||field.type==='hidden'){ return } if(field.type==='checkbox'){ field.checked=!!filters[field.name]; return } if(field.tagName==='SELECT'){ field.value=(filters[field.name]!==undefined)?String(filters[field.name]):(field.options.length?field.options[0].value:''); return } field.value=(filters[field.name]!==undefined)?filters[field.name]:''; }); form.dispatchEvent(new Event('change',{bubbles:true})); } }">
+    {% include "htmx/partials/customers/_saved_views.html" %}
+  </div>
+
   {# Export + cross-company contacts links + Import — below the filter bar, above the split workspace #}
   {# Import modal uses the shared modal-* primitives to match vendors import and the rest of the app. #}
   <div class="flex justify-end gap-3 text-xs text-gray-600 mb-0.5" x-data="{ importOpen: false }">
     <a hx-get="/v2/partials/contacts" hx-target="#main-content" hx-push-url="/v2/contacts"
        class="hover:text-accent-600 hover:underline cursor-pointer">All contacts</a>
-    <a href="/v2/customers/export.csv" class="hover:text-accent-600 hover:underline">Export CSV</a>
+    {# Export honors the CURRENT filtered view: @click.prevent rebuilds the download URL
+       from the live #cdm-filters form; the bare href is the no-JS fallback (full export). #}
+    <a href="/v2/customers/export.csv"
+       @click.prevent="window.location = '/v2/customers/export.csv?' + new URLSearchParams(new FormData(document.getElementById('cdm-filters'))).toString()"
+       class="hover:text-accent-600 hover:underline cursor-pointer">Export CSV</a>
     <a href="/v2/customers/contacts/export.csv" class="hover:text-accent-600 hover:underline">Export contacts</a>
     <button type="button" @click="importOpen = true"
             class="hover:text-accent-600 hover:underline cursor-pointer">Import CSV</button>

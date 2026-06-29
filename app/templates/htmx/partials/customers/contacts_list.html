@@ -3,9 +3,11 @@
    MANAGER/ADMIN see all (scoping enforced in crm_service.customer_contacts_query).
    Receives: contacts (SiteContact[], each with .cadence_state), companies (id,name)[],
              contact_roles, search, company_id, contact_role, cadence_state,
-             total, limit, offset.
-   Called by: customer_contacts_partial route (htmx_views.py).
-   Depends on: brand palette, timeago filter, .table-cell / .compact-cell utilities.
+             total, limit, offset, saved_views, list_key, target_form.
+   Called by: customer_contacts_partial + contacts_bulk_action routes (companies.py).
+   Depends on: brand palette, timeago filter, .table-cell / .compact-cell utilities,
+               _saved_views.html.
+   Power-UX (P4): bulk select + actions (archive/DNC), Saved Views, filtered CSV export.
 #}
 <div class="page-fluid">
   <div class="flex items-center justify-between mb-4">
@@ -13,13 +15,21 @@
       <h2 class="h3">Customer Contacts</h2>
       <p class="text-sm text-gray-600 mt-1">{{ total }} contact{{ "s" if total != 1 }} across your accounts</p>
     </div>
-    <a href="/v2/customers"
-       hx-get="/v2/partials/customers"
-       hx-target="#main-content"
-       hx-push-url="/v2/customers"
-       class="btn btn-secondary btn-sm">
-      Accounts
-    </a>
+    {# x-data="{}" makes the export anchor part of an Alpine scope so @click.prevent runs. #}
+    <div class="flex items-center gap-2" x-data="{}">
+      {# Export honors the CURRENT filtered view: @click.prevent rebuilds the download URL
+         from the live #contacts-filters form; the bare href is the no-JS fallback. #}
+      <a href="/v2/customers/contacts/export.csv"
+         @click.prevent="window.location = '/v2/customers/contacts/export.csv?' + new URLSearchParams(new FormData(document.getElementById('contacts-filters'))).toString()"
+         class="btn btn-secondary btn-sm">Export CSV</a>
+      <a href="/v2/customers"
+         hx-get="/v2/partials/customers"
+         hx-target="#main-content"
+         hx-push-url="/v2/customers"
+         class="btn btn-secondary btn-sm">
+        Accounts
+      </a>
+    </div>
   </div>
 
   {# Filter bar #}
@@ -57,6 +67,16 @@
       <input type="hidden" name="limit" value="{{ limit }}">
       <span class="htmx-indicator text-gray-400 text-xs">Loading...</span>
     </form>
+
+    {# Saved views — per-user filter presets for the contacts list. applyFilters writes a
+       preset's stored filters back onto #contacts-filters and dispatches change (reusing
+       the normal filter-submit pathway). x-data uses ONLY single-quoted JS strings (no
+       literal double-quote, no // comment) per the CLAUDE.md attribute-quoting rule. #}
+    <div id="saved-views-contacts"
+         class="flex items-center gap-1.5 flex-wrap mt-3 pt-3 border-t border-gray-100"
+         x-data="{ saveOpen: false, applyFilters(el){ const form=document.getElementById('contacts-filters'); if(!form){ return } let filters={}; try{ filters=JSON.parse(el.dataset.filters||'{}') }catch(e){} Array.from(form.elements).forEach(function(field){ if(!field.name||field.type==='hidden'){ return } if(field.type==='checkbox'){ field.checked=!!filters[field.name]; return } if(field.tagName==='SELECT'){ field.value=(filters[field.name]!==undefined)?String(filters[field.name]):(field.options.length?field.options[0].value:''); return } field.value=(filters[field.name]!==undefined)?filters[field.name]:''; }); form.dispatchEvent(new Event('change',{bubbles:true})); } }">
+      {% include "htmx/partials/customers/_saved_views.html" %}
+    </div>
   </div>
 
   {# Cadence dot color map — same keys as customer _account_list / vendor list #}
@@ -70,12 +90,49 @@
     <span class="inline-flex items-center gap-1.5"><span class="inline-block h-2 w-2 rounded-full {{ dot_colors['overdue'] }}"></span>Overdue</span>
   </div>
 
+  {# ── Bulk select + actions (mirrors _account_list.html) ──────────────────
+     selectedIds: Object used as a Set — keys are contact id strings. The list is
+     re-rendered into #main-content on a bulk apply, so the scope resets fresh. #}
+  <div x-data="{
+    selectedIds: {},
+    get count() { return Object.keys(this.selectedIds).length },
+    get allSelected() { return {{ contacts|length }} > 0 && Object.keys(this.selectedIds).length === {{ contacts|length }} },
+    toggle(id) { if (this.selectedIds[id]) { delete this.selectedIds[id] } else { this.selectedIds[id] = true } },
+    toggleAll(checked) { if (checked) { {% for c in contacts %}this.selectedIds['{{ c.id }}'] = true;{% endfor %} } else { this.selectedIds = {} } },
+    idsStr() { return Object.keys(this.selectedIds).join(',') },
+    clear() { this.selectedIds = {} }
+  }" @clear-selection.window="clear()">
+
+  {# Bulk action bar — visible only when ≥1 row is checked #}
+  <div x-show="count > 0" x-cloak class="mb-3 flex items-center gap-2 flex-wrap rounded-lg border border-brand-200 bg-brand-50 px-3 py-2">
+    <span class="text-xs font-medium text-brand-700" x-text="count + ' selected'"></span>
+    <form hx-post="/v2/partials/contacts/bulk/archive"
+          hx-target="#main-content" hx-swap="innerHTML"
+          hx-include="#contacts-filters" class="inline">
+      <input type="hidden" name="ids" :value="idsStr()">
+      <button type="submit" class="btn btn-secondary btn-sm">Archive</button>
+    </form>
+    <form hx-post="/v2/partials/contacts/bulk/dnc"
+          hx-target="#main-content" hx-swap="innerHTML"
+          hx-include="#contacts-filters" class="inline">
+      <input type="hidden" name="ids" :value="idsStr()">
+      <button type="submit" class="btn btn-secondary btn-sm">Mark Do-Not-Contact</button>
+    </form>
+    <button type="button" @click="clear()" class="btn btn-ghost btn-sm">Clear</button>
+  </div>
+
   {% if contacts %}
   <div class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
     <div class="overflow-x-auto">
       <table class="min-w-full divide-y divide-gray-200">
         <thead class="bg-gray-50">
           <tr>
+            <th class="compact-cell--head w-6">
+              <input type="checkbox" class="rounded border-gray-300 input-focus text-brand-500"
+                     :checked="allSelected"
+                     @change="toggleAll($event.target.checked)"
+                     aria-label="Select all contacts on this page">
+            </th>
             <th class="compact-cell--head w-6"></th>
             <th class="table-cell--head text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Name</th>
             <th class="table-cell--head text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Company</th>
@@ -98,6 +155,13 @@
               hx-trigger="click, keyup[key=='Enter']"
               preload="mouseover"
               {% endif %}>
+            {# Checkbox — @click.stop so ticking a row doesn't also navigate to the account #}
+            <td class="compact-cell">
+              <input type="checkbox" class="rounded border-gray-300 input-focus text-brand-500"
+                     :checked="selectedIds['{{ c.id }}']"
+                     @click.stop="toggle('{{ c.id }}')"
+                     aria-label="Select {{ c.full_name or c.email or 'contact' }}">
+            </td>
             <td class="compact-cell">
               <span class="w-2.5 h-2.5 rounded-full flex-shrink-0 inline-block {{ dot_colors.get(c.cadence_state, 'bg-gray-300') }}"
                     role="img"
@@ -153,4 +217,6 @@
     <p class="mt-2 text-sm text-gray-600">No contacts found</p>
   </div>
   {% endif %}
+
+  </div>{# /bulk-select Alpine scope #}
 </div>

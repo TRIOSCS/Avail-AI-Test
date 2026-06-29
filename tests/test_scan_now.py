@@ -28,7 +28,7 @@ def test_requisition_poll_inbox_returns_responses_tab(client, test_requisition):
 async def test_run_inbox_scan_now_calls_scanner_when_not_testing(monkeypatch):
     from types import SimpleNamespace
 
-    import app.routers.htmx_views as hv
+    import app.routers.htmx.settings as hv
 
     monkeypatch.setenv("TESTING", "0")  # bypass the hermetic guard for this call
     calls = {"n": 0}
@@ -46,7 +46,7 @@ async def test_run_inbox_scan_now_swallows_timeout(monkeypatch):
     import asyncio
     from types import SimpleNamespace
 
-    import app.routers.htmx_views as hv
+    import app.routers.htmx.settings as hv
 
     monkeypatch.setenv("TESTING", "0")
 
