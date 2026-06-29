@@ -313,11 +313,15 @@ class Settings(BaseSettings):
     prospect_enrich_contacts_per_account: int = 5  # cap for paid contact pulls
 
     # --- Hunter.io Enrichment ---
-    hunter_enrichment_enabled: bool = False  # feature gate; off → Hunter not triggered
+    # On by default; degrades cleanly when HUNTER_API_KEY is absent (no key → contact
+    # fetch returns [] without an outbound call — never raises).
+    hunter_enrichment_enabled: bool = True  # feature gate; off → Hunter not triggered
     hunter_cooldown_minutes: int = 15  # quota/rate-limit (402/429) circuit cooldown
 
     # --- SAM.gov Enrichment ---
-    sam_gov_enrichment_enabled: bool = False  # feature gate; off → SAM.gov not triggered
+    # On by default; free public API. When SAM_GOV_API_KEY is absent the connector uses
+    # the public DEMO_KEY tier and degrades to None on any error — never raises.
+    sam_gov_enrichment_enabled: bool = True  # feature gate; off → SAM.gov not triggered
 
     # --- Worker liveness watchdog (scheduler job in the supervised app) ---
     # Workers heartbeat every loop tick; this job alerts when one that should be
