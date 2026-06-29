@@ -539,15 +539,19 @@ def resource_line(
     db: Session,
     also_line_ids: list[int] | None = None,
 ) -> dict:
-    """Re-source one (default) or several cut-PO lines back into the open claim pool.
+    """Re-source one (default) or several fallen-down lines back into the open claim
+    pool.
 
-    A vendor fell down (sold elsewhere / can't deliver), the buyer cancelled the PO in
-    Acctivate, and now the line must be backfilled. For each target line this:
+    The single fall-down → re-source engine for BOTH triggers (do NOT build a parallel
+    one): the SP-3 vendor-cancel (the buyer cancelled a cut PO before delivery) and the
+    SP-4 receiving-reject (parts arrived but were rejected at receiving — defective /
+    wrong / short). For each target line this:
       1. records an immutable POCancellation (vendor-performance fact),
       2. marks the vendor's offer SOLD + the vendor unavailable for that part,
       3. resets the line into the pool (unassigned, no PO/offer, status RESOURCING),
-    then reopens the plan if it had auto-completed and refreshes the canceled vendors'
-    cancellation metrics. Returns a payload the route hands to the urgent-alert fan-out.
+    then reopens the plan if it had auto-completed (COMPLETED) OR was awaiting receipt
+    (INBOUND) and refreshes the canceled vendors' cancellation metrics. Returns a payload
+    the route hands to the urgent-alert fan-out.
 
     Escalation: ``also_line_ids`` re-sources sibling lines on the SAME plan in one action
     (the hybrid scope — default is just ``line_id``).
@@ -564,12 +568,17 @@ def resource_line(
     if not plan:
         raise ValueError(f"Buy plan {plan_id} not found")
 
-    # Only ACTIVE (live) or COMPLETED (auto-completed, reopened below) plans can be
-    # re-sourced. A VERIFIED line can survive on a CANCELLED/HALTED plan (cancel only
-    # cascades open lines), but re-sourcing it would dead-end — claim → confirm_po needs
-    # an ACTIVE plan, which a cancelled/halted plan can never become here.
-    if plan.status not in (BuyPlanStatus.ACTIVE.value, BuyPlanStatus.COMPLETED.value):
-        raise ValueError(f"Cannot re-source on a {plan.status} plan (must be active or completed)")
+    # Only ACTIVE (live), COMPLETED (auto-completed) or INBOUND (SP-4 receiving-reject) plans
+    # can be re-sourced — COMPLETED/INBOUND are reopened to ACTIVE below. A VERIFIED line can
+    # survive on a CANCELLED/HALTED plan (cancel only cascades open lines), but re-sourcing it
+    # would dead-end — claim → confirm_po needs an ACTIVE plan, which a cancelled/halted plan
+    # can never become here.
+    if plan.status not in (
+        BuyPlanStatus.ACTIVE.value,
+        BuyPlanStatus.COMPLETED.value,
+        BuyPlanStatus.INBOUND.value,
+    ):
+        raise ValueError(f"Cannot re-source on a {plan.status} plan (must be active, inbound, or completed)")
 
     reason_code = LineResourceReason(reason_code).value  # validate the dropdown value
 
@@ -645,9 +654,11 @@ def resource_line(
         line.last_nudge_at = None
         line.status = BuyPlanLineStatus.RESOURCING.value
 
-    # A verified line auto-completes its plan; re-sourcing it must reopen the plan so the
-    # re-claimed line's PO flow (confirm_po requires an ACTIVE plan) works again.
-    if plan.status == BuyPlanStatus.COMPLETED.value:
+    # A COMPLETED (auto-completed) or INBOUND (awaiting receipt, SP-4 reject) plan must reopen
+    # to ACTIVE so the re-claimed line's PO flow (confirm_po requires an ACTIVE plan) works
+    # again. completed_at/case_report are only set on COMPLETED; clearing them is a harmless
+    # no-op for an INBOUND plan.
+    if plan.status in (BuyPlanStatus.COMPLETED.value, BuyPlanStatus.INBOUND.value):
         plan.status = BuyPlanStatus.ACTIVE.value
         plan.completed_at = None
         plan.case_report = None
