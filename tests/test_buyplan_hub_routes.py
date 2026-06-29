@@ -21,12 +21,14 @@ from __future__ import annotations
 import uuid
 from contextlib import contextmanager
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.constants import BuyPlanLineStatus, BuyPlanStatus, SOVerificationStatus
 from app.models.buy_plan import BuyPlan, BuyPlanLine
 from app.models.quotes import Quote
+from app.routers.htmx.buy_plans import _can_see_all_deals, _resolve_deal_scope
 
 
 @contextmanager
@@ -774,3 +776,70 @@ def test_approve_default_origin_returns_detail(
         app.dependency_overrides.pop(require_buyplan_approver, None)
     assert resp.status_code == 200
     assert "Line Items" in resp.text
+
+
+# ── Role-scope predicate + resolver (lock the deal-scope contract directly) ──
+#
+# The board/archive/tab routes are exercised above. These unit-level tests pin the
+# two helpers those routes lean on — `_can_see_all_deals` (who may see every owner's
+# deals) and `_resolve_deal_scope` (how a requested scope is normalized) — so the
+# role contract is locked independently of any template/route plumbing.
+
+
+@pytest.mark.parametrize("fixture_name", ["test_user", "manager_user", "admin_user"])
+def test_can_see_all_deals_true_for_po_cutters(request, db_session: Session, fixture_name):
+    """PO-cutters (buyer/manager/admin) may view every owner's deals."""
+    user = request.getfixturevalue(fixture_name)
+    assert _can_see_all_deals(user, db_session) is True
+
+
+@pytest.mark.parametrize("fixture_name", ["sales_user", "trader_user"])
+def test_can_see_all_deals_false_for_restricted_roles(request, db_session: Session, fixture_name):
+    """Sales/traders are scoped to their own deals — no cross-owner visibility."""
+    user = request.getfixturevalue(fixture_name)
+    assert _can_see_all_deals(user, db_session) is False
+
+
+def test_can_see_all_deals_ops_membership_elevates_restricted_role(db_session: Session, sales_user):
+    """The ops arm: a sales user gains all-deals visibility once in the ops group."""
+    assert _can_see_all_deals(sales_user, db_session) is False
+    _add_ops(db_session, sales_user)
+    db_session.flush()
+    assert _can_see_all_deals(sales_user, db_session) is True
+
+
+@pytest.mark.parametrize(
+    "scope,can_see_all,expected",
+    [
+        # can_see_all=True (PO-cutter / ops): default → all, explicit honored both ways.
+        ("", True, "all"),  # role default
+        ("garbage", True, "all"),  # unknown → role default
+        ("all", True, "all"),
+        ("mine", True, "mine"),  # narrow-to-mine via the toggle
+        # can_see_all=False (sales/trader): default → mine, all coerced to mine (no leak).
+        ("", False, "mine"),  # role default
+        ("garbage", False, "mine"),  # unknown → role default
+        ("all", False, "mine"),  # forced to mine — no cross-owner leak
+        ("mine", False, "mine"),
+    ],
+)
+def test_resolve_deal_scope_contract(scope, can_see_all, expected):
+    """Normalize a requested scope against the viewer's visibility, per role."""
+    assert _resolve_deal_scope(scope, can_see_all) == expected
+
+
+def test_board_buyer_narrows_to_mine_excludes_other_owner(
+    client: TestClient, db_session: Session, test_user, manager_user, test_requisition
+):
+    """A buyer (can_see_all) narrowing via the Mine toggle (?scope=mine) sees only their
+    own deals — another owner's plan is excluded.
+
+    The default client acts as the buyer, so this proves the toggle actually narrows for
+    a privileged user (not just defaults).
+    """
+    mine = _make_owned_plan(db_session, test_user, test_requisition)
+    other = _make_owned_plan(db_session, manager_user, test_requisition)
+    resp = client.get("/v2/partials/buy-plans/board?scope=mine")
+    assert resp.status_code == 200
+    assert f"/v2/partials/buy-plans/{mine.id}" in resp.text
+    assert f"/v2/partials/buy-plans/{other.id}" not in resp.text
