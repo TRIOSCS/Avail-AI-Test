@@ -175,3 +175,66 @@ class TestHxTriggerEventFilterPlacement:
             "htmx [filter] must immediately follow the event name (keyup[cond]); "
             "trailing a modifier throws htmx:syntax:error. Offenders: " + str(offenders)
         )
+
+
+class TestSplitPanelMobileStacking:
+    """Wave 7: the two desktop-first split-panel workspaces (requisitions2 page and
+    the CDM account workspace) must stack vertically on phones and keep the
+    side-by-side split on md:+ .
+
+    The mechanism (mirrored from sightings/list.html): the container is
+    ``flex flex-col md:flex-row``; the inline ``:style`` width binding is guarded by
+    ``window.innerWidth >= 768`` so it is empty on phones and the ``w-full`` class
+    governs (no !important needed), while the exact desktop width is preserved
+    unchanged at md:+ ; the drag divider is ``hidden md:block`` (desktop-only).
+
+    Static assertions on the template source — desktop classes must remain literally
+    present (byte-identical split) and the mobile-stacking classes must be added.
+    """
+
+    # (relative template path, split-container id, splitPanel panel key)
+    _SURFACES = [
+        ("app/templates/requisitions2/page.html", "split-rq2", "rq2"),
+        ("app/templates/htmx/partials/customers/list.html", "split-cdm", "cdm"),
+    ]
+
+    def test_container_stacks_on_mobile_splits_on_desktop(self):
+        for rel, container_id, _ in self._SURFACES:
+            html = _read_template(rel)
+            assert f'id="{container_id}"' in html, f"{rel}: split container {container_id} missing"
+            # Container: vertical stack on phones, horizontal split at md:+ .
+            assert "flex flex-col md:flex-row" in html, (
+                f"{rel}: split container must be 'flex flex-col md:flex-row' (stack on phones, side-by-side on desktop)"
+            )
+
+    def test_width_binding_guarded_so_w_full_wins_on_mobile(self):
+        for rel, _, _ in self._SURFACES:
+            html = _read_template(rel)
+            # The inline width must only apply at >=768px, otherwise it would beat the
+            # w-full class on phones (inline style > class) and the panel would not
+            # go full-width.
+            assert "window.innerWidth >= 768 ? ('width: ' + leftWidth + '%') : ''" in html, (
+                f"{rel}: left-panel :style width must be guarded by window.innerWidth >= 768 "
+                "so w-full governs on phones"
+            )
+            # The mobile full-width / desktop inline-width handoff class pair.
+            assert "w-full md:w-auto" in html, f"{rel}: left panel must be 'w-full md:w-auto'"
+
+    def test_divider_is_desktop_only(self):
+        for rel, _, _ in self._SURFACES:
+            html = _read_template(rel)
+            assert "hidden md:block w-1" in html, (
+                f"{rel}: the col-resize drag divider must be 'hidden md:block' "
+                "(useless thin sliver when stacked on phones)"
+            )
+
+    def test_desktop_split_preserved(self):
+        for rel, _, panel in self._SURFACES:
+            html = _read_template(rel)
+            # The resizable splitPanel component and its drag affordance survive — the
+            # change is presentation-only at the small-screen breakpoint.
+            assert f"splitPanel('{panel}'," in html, f"{rel}: splitPanel('{panel}', ...) removed"
+            assert "cursor-col-resize" in html, f"{rel}: drag-resize affordance removed"
+            # Quote-balanced :style binding (no stray double-quote breaking Alpine).
+            for m in re.finditer(r':style="([^"]*)"', html):
+                assert '"' not in m.group(1), f"{rel}: stray double-quote inside :style binding"
