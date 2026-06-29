@@ -32,8 +32,13 @@
 
       <div>
         <label class="block text-sm font-medium text-gray-700 mb-1">Industry</label>
-        <input type="text" name="industry" placeholder="e.g. Electronic Components"
-               class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+        <select name="industry"
+                class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+          <option value="">— Select industry —</option>
+          {% for val in crm_industries %}
+          <option value="{{ val }}">{{ val }}</option>
+          {% endfor %}
+        </select>
       </div>
 
       <!-- Company Details -->

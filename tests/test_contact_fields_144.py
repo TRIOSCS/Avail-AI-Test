@@ -308,7 +308,8 @@ class TestInlineEditSecondaryFields:
         )
         assert resp.status_code == 200
         db_session.refresh(alice)
-        assert alice.secondary_phone == "+1-800-555-4444"
+        # CRM P5 trust: contact phone fields normalize to E.164 on save.
+        assert alice.secondary_phone == "+18005554444"
 
 
 # ── 3. reports_to select endpoint ────────────────────────────────────────────

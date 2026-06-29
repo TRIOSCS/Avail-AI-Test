@@ -2424,6 +2424,45 @@ Invariants:
 - Company detail template (`htmx/partials/customers/detail.html`) renders
   "Created by {name} · Updated by {name}" inside the collapsible account-settings panel.
 
+### CRM P5 trust — field-history, completeness, phone-normalize, industry pick-list
+
+These extend the audit trail above (migration 169 + reuse of existing primitives):
+
+1. **Field-history (old→new)** — `crm_field_history` table + `app/services/crm_field_history.py`.
+   The inline single-field POST handlers (`company_field_post` / `contact_field_post` in
+   `app/routers/htmx/companies.py`) capture the attribute value *before* and *after*
+   `apply_company_field` / `apply_contact_field`, then call `record_field_change` (which
+   writes a row only when the canonical value actually changed; None↔"" is a no-op) before
+   the same `db.commit()` so the history row and the edit land atomically. `changed_by_id`
+   comes from the route's `user` (not the audit contextvar) so it is always set on
+   user-driven edits. Surfaced via `field_history_for` on the account **History** tab
+   (`GET …/tab/history` → `tabs/history_tab.html`) and the contact **History** modal
+   (`GET …/contacts/{id}/history-modal` → `_contact_history_modal.html`), both rendering the
+   shared `_field_history_list.html` (raw `field_name` → label via `FIELD_LABELS`).
+
+2. **Completeness score** — `app/services/crm_completeness.py` scores a Company/SiteContact
+   over a fixed key-field set → `{pct, filled, total, missing}`. The account header renders
+   a colored % badge (context `account_completeness`); the contact row renders a small pill
+   when incomplete via the `crm_completeness` Jinja2 global (registered in
+   `app/template_env.py`, dispatches on entity type). The missing-field list is the badge
+   tooltip; the **existing** `enrich_button.html` (`POST /api/enrich/company/{id}`) adjacent
+   in the header is the reused "enrich to fill" affordance — no new enrichment trigger.
+   (Contact rows have no inline enrich button; the seam is the same `enrich_button.html`.)
+
+3. **Phone normalize on save** — already enforced for `Company.phone` (the model's
+   `_sync_normalized_phone` `@validates` keeps `normalized_phone`, and `apply_company_field`
+   stores E.164 via `normalize_phone_e164`). P5 extends the **same** util to the contact
+   inline path: `apply_contact_field` now normalizes `phone` + `secondary_phone` to E.164
+   (`normalize_phone_e164(v) or v` — keeps raw if unparseable, never silent data loss).
+
+4. **Industry pick-list** — `CRM_INDUSTRIES` (`app/constants.py`) is the canonical list,
+   exposed as the `crm_industries` Jinja2 global. `EDITABLE_ACCOUNT_FIELDS["industry"]` is a
+   `select`; the create/edit forms and the inline editor render it from `crm_industries`.
+   `apply_company_field` accepts a canonical value, a blank (clear), OR the **unchanged**
+   current value — the last clause preserves legacy free-text industries on no-op saves while
+   constraining every new value (mirrors the ContactRole legacy policy). The select widgets
+   inject any out-of-list current value as a "(current)" option so it stays selectable.
+
 ---
 
 ## 11. Cross-App Alerts (Nav Badges + In-Tab Spotlight)

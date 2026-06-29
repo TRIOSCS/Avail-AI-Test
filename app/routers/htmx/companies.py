@@ -28,7 +28,7 @@ from sqlalchemy import func as sqlfunc
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
-from ...constants import ActivityType, ContactRole, RequisitionStatus, UserRole
+from ...constants import CRM_INDUSTRIES, ActivityType, ContactRole, RequisitionStatus, UserRole
 from ...database import get_db
 from ...dependencies import can_manage_account, can_manage_account_team, is_manager_or_admin, require_user
 from ...models import (
@@ -40,6 +40,19 @@ from ...models import (
     Requisition,
     SiteContact,
     User,
+)
+from ...services.crm_completeness import company_completeness as _company_completeness
+from ...services.crm_field_history import (
+    ENTITY_COMPANY as _ENTITY_COMPANY,
+)
+from ...services.crm_field_history import (
+    ENTITY_CONTACT as _ENTITY_CONTACT,
+)
+from ...services.crm_field_history import (
+    field_history_for as _field_history_for,
+)
+from ...services.crm_field_history import (
+    record_field_change as _record_field_change,
 )
 from ...services.crm_service import cadence_state as _cadence_state
 from ...services.crm_service import cdm_list_ctx as _cdm_list_ctx
@@ -1594,7 +1607,7 @@ _VALID_ROLES = frozenset(CANONICAL_ROLES)
 # have dedicated controls and are excluded. owner inline deferred to WS2.
 
 EDITABLE_ACCOUNT_FIELDS: dict[str, dict] = {
-    "industry": {"label": "Industry", "kind": "text"},
+    "industry": {"label": "Industry", "kind": "select", "choices": list(CRM_INDUSTRIES)},
     "phone": {"label": "Phone", "kind": "text"},
     "employee_size": {"label": "Employees", "kind": "text"},
     "credit_terms": {"label": "Credit Terms", "kind": "text"},
@@ -1657,6 +1670,14 @@ KNOWN_ACCOUNT_FIELDS: list[tuple[str, str, str, list[str] | None]] = [
 ]
 
 
+# Field-name → human label, for rendering the field-history surfaces (company
+# History tab + contact History modal). Merges both inline-edit registries so a
+# history row's raw field_name resolves to its display label.
+FIELD_LABELS: dict[str, str] = {
+    field: meta["label"] for field, meta in {**EDITABLE_ACCOUNT_FIELDS, **EDITABLE_CONTACT_FIELDS}.items()
+}
+
+
 def apply_company_field(company: Company, field: str, value: str) -> None:
     """Apply a single inline-edited account field to *company* (does NOT commit).
 
@@ -1679,6 +1700,12 @@ def apply_company_field(company: Company, field: str, value: str) -> None:
             raise HTTPException(400, f"Invalid account_type '{v}'. Valid: {choices}")
         company.account_type = v or None
     elif field == "industry":
+        # Constrained pick-list (CRM_INDUSTRIES). Accept a canonical value, a blank
+        # (clear), OR the unchanged current value — the last clause preserves legacy
+        # free-text industries on no-op saves while constraining every NEW value.
+        choices = EDITABLE_ACCOUNT_FIELDS["industry"]["choices"]
+        if v and v not in choices and v != (company.industry or ""):
+            raise HTTPException(400, f"Invalid industry '{v}'. Valid: {choices}")
         company.industry = v or None
     elif field == "website":
         # Reuse the Company schema's website validator so the inline-edit + edit_company
@@ -1743,8 +1770,10 @@ def apply_contact_field(
             if dup:
                 raise HTTPException(409, f"Another contact at this site already uses {v}")
         contact.email = v or None
-    elif field == "phone":
-        contact.phone = v or None
+    elif field in ("phone", "secondary_phone"):
+        # Normalize to E.164 on save, mirroring the account phone path
+        # (apply_company_field) — reuses the shared normalize_phone_e164 util.
+        setattr(contact, field, (normalize_phone_e164(v) or v) if v else None)
     elif field == "contact_role":
         contact.contact_role = _validate_role(v)
     else:
@@ -2324,7 +2353,9 @@ async def company_apply_name(
     return HTMLResponse("")
 
 
-_VALID_CUSTOMER_TABS = frozenset({"contacts", "sites", "requisitions", "activity", "quotes", "buy_plans", "files"})
+_VALID_CUSTOMER_TABS = frozenset(
+    {"contacts", "sites", "requisitions", "activity", "quotes", "buy_plans", "files", "history"}
+)
 
 
 def _get_next_account_task(db: Session, company_id: int):
@@ -2454,6 +2485,9 @@ async def company_detail_partial(
             # Computed server-side (mirrors archived_list.html pattern) so the
             # template never inspects raw role strings.
             "can_reactivate": is_manager_or_admin(user),
+            # CRM P5 trust: data-completeness score for the header badge. The
+            # adjacent Enrich button is the "enrich to fill" affordance.
+            "account_completeness": _company_completeness(company),
         }
     )
     return template_response("htmx/partials/customers/detail.html", ctx)
@@ -2473,7 +2507,7 @@ async def company_tab(
     if not company:
         raise HTTPException(404, "Company not found")
 
-    valid_tabs = {"sites", "contacts", "requisitions", "activity", "quotes", "buy_plans", "files"}
+    valid_tabs = {"sites", "contacts", "requisitions", "activity", "quotes", "buy_plans", "files", "history"}
     if tab not in valid_tabs:
         raise HTTPException(404, f"Unknown tab: {tab}")
 
@@ -2576,6 +2610,19 @@ async def company_tab(
         ctx = _base_ctx(request, user, "customers")
         ctx["company"] = company
         return template_response("htmx/partials/customers/tabs/files_tab.html", ctx)
+
+    elif tab == "history":
+        history = _field_history_for(db, _ENTITY_COMPANY, company_id)
+        ctx = _base_ctx(request, user, "customers")
+        ctx.update(
+            {
+                "company": company,
+                "history": history,
+                "field_labels": FIELD_LABELS,
+                "now_utc": datetime.now(timezone.utc),
+            }
+        )
+        return template_response("htmx/partials/customers/tabs/history_tab.html", ctx)
 
     else:  # activity
         from sqlalchemy import or_ as or_clause
@@ -3854,7 +3901,17 @@ async def company_field_post(
     if field not in EDITABLE_ACCOUNT_FIELDS:
         raise HTTPException(404, f"Unknown editable field: {field!r}")
     value = form.get("value") or ""
+    old_value = getattr(company, field, None)
     apply_company_field(company, field, value)
+    _record_field_change(
+        db,
+        entity_type=_ENTITY_COMPANY,
+        entity_id=company.id,
+        field_name=field,
+        old_value=old_value,
+        new_value=getattr(company, field, None),
+        user_id=user.id,
+    )
     db.commit()
     logger.info("Company {} field {} edited inline by {}", company_id, field, user.email)
     meta = EDITABLE_ACCOUNT_FIELDS[field]
@@ -3982,7 +4039,17 @@ async def contact_field_post(
     if field not in EDITABLE_CONTACT_FIELDS:
         raise HTTPException(404, f"Unknown editable contact field: {field!r}")
     value = form.get("value") or ""
+    old_value = getattr(contact, field, None)
     apply_contact_field(contact, field, value, contact.customer_site_id, db)
+    _record_field_change(
+        db,
+        entity_type=_ENTITY_CONTACT,
+        entity_id=contact.id,
+        field_name=field,
+        old_value=old_value,
+        new_value=getattr(contact, field, None),
+        user_id=user.id,
+    )
     db.commit()
     logger.info("Contact {} field {} edited inline by {}", contact_id, field, user.email)
     meta = EDITABLE_CONTACT_FIELDS[field]
@@ -4900,6 +4967,40 @@ async def contact_notes_modal(
         raise HTTPException(404, "Company not found")
     contact = _contact_under_company(db, company_id, contact_id)
     return _render_contact_notes_modal(request, company, contact, db, can_manage=can_manage_account(user, company, db))
+
+
+@router.get(
+    "/v2/partials/customers/{company_id}/contacts/{contact_id}/history-modal",
+    response_class=HTMLResponse,
+)
+async def contact_history_modal(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the global-modal body with a contact's field-change history.
+
+    Loaded by the contact-card kebab "History" action via $dispatch('open-modal'). 404
+    if the contact is not under this company (IDOR guard via the shared lookup).
+    """
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+    contact = _contact_under_company(db, company_id, contact_id)
+    history = _field_history_for(db, _ENTITY_CONTACT, contact.id)
+    ctx = _base_ctx(request, user)
+    ctx.update(
+        {
+            "company": company,
+            "contact": contact,
+            "history": history,
+            "field_labels": FIELD_LABELS,
+            "now_utc": datetime.now(timezone.utc),
+        }
+    )
+    return template_response("htmx/partials/customers/_contact_history_modal.html", ctx)
 
 
 @router.post(

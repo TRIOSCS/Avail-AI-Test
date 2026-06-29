@@ -571,6 +571,20 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 | uploaded_by_id | FK -> users (SET NULL) | |
 | created_at | UTCDateTime | |
 
+**`crm_field_history`** — Per-record field-change audit trail (Migration 169, CRM P5 trust, new table)
+| Column | Type | Notes |
+|--------|------|-------|
+| id | Integer PK | |
+| entity_type | String 20, not null | `'company'` \| `'contact'` — polymorphic discriminator (mirrors `approval_requests.subject_type`); pairs with `entity_id` to scope a record's history without two near-identical tables |
+| entity_id | Integer, not null | `companies.id` or `site_contacts.id` (no FK — polymorphic) |
+| field_name | String 64, not null | raw inline-edit field key (e.g. `industry`, `title`); display label resolved via `FIELD_LABELS` in `companies.py` |
+| old_value | Text, nullable | canonical (stripped) prior value; NULL when previously empty |
+| new_value | Text, nullable | canonical new value; NULL when cleared |
+| changed_by_id | FK -> users (SET NULL), nullable | the editing user (passed explicitly from the route, not the audit contextvar) |
+| created_at | UTCDateTime | indexed via `ix_crm_field_history_entity` (entity_type, entity_id, created_at) |
+
+Written by `app/services/crm_field_history.py:record_field_change` from the inline single-field POST handlers (`company_field_post` / `contact_field_post`) — one row per edit that actually changed a value (no-op edits and None↔"" write nothing). This is the field-DIFF log; complements `companies/site_contacts.modified_by_id` (latest-editor only) and is distinct from `ActivityLog` (outreach timeline). Surfaced on the account **History** tab and the contact **History** modal.
+
 ---
 
 ### Vendors

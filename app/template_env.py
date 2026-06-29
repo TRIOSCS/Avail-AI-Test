@@ -353,3 +353,28 @@ templates.env.globals["roles"] = _CANONICAL_ROLES
 from .dependencies import can_approve_buy_plans  # noqa: E402
 
 templates.env.globals["can_approve_buy_plans"] = can_approve_buy_plans
+
+# CRM P5 trust — canonical industry pick-list exposed to the create/edit account
+# forms (single source of truth in app/constants.py; the SAME tuple the inline
+# editor + apply_company_field validate against).
+from .constants import CRM_INDUSTRIES  # noqa: E402
+
+templates.env.globals["crm_industries"] = CRM_INDUSTRIES
+
+# CRM P5 trust — data-completeness scorer exposed as a Jinja2 global so the contact
+# row macro (which doesn't inherit route context) can render a small completeness
+# badge. Auto-dispatches on entity kind: Company → company_completeness, SiteContact
+# → contact_completeness.
+from .models.crm import Company as _Company  # noqa: E402
+from .services.crm_completeness import company_completeness as _company_compl  # noqa: E402
+from .services.crm_completeness import contact_completeness as _contact_compl  # noqa: E402
+
+
+def _crm_completeness(obj):
+    """Return the completeness dict for a Company or SiteContact."""
+    if isinstance(obj, _Company):
+        return _company_compl(obj)
+    return _contact_compl(obj)
+
+
+templates.env.globals["crm_completeness"] = _crm_completeness
