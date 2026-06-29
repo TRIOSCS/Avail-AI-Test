@@ -2761,9 +2761,15 @@ scheduler. Contact discovery degrades gracefully: a provider failure renders an 
 - `app/connectors/sam_gov_company.py` — name→firmographics adapter wrapping the public
   SAM.gov entity-information API (`api.sam.gov/entity-information/v3/entities`).
 
-**Config flags** (all boolean, default `False` unless noted; set in `.env`):
-`hunter_enrichment_enabled`, `sam_gov_enrichment_enabled`,
-`clay_enrichment_enabled`, `explorium_enrichment_enabled`, `lusha_enrichment_enabled`.
+**Config flags** (all boolean, set in `.env`):
+`hunter_enrichment_enabled` (default `True`), `sam_gov_enrichment_enabled` (default `True`),
+`clay_enrichment_enabled` (default `False`), `explorium_enrichment_enabled` (default `False`),
+`lusha_enrichment_enabled` (default `False`).
+The feature flag is the **only** gate the enrichment chain consults — the `api_sources`
+row (`seed_api_sources`) drives the Connectors UI / health monitor, not provider dispatch.
+The two keyless/free providers default on and degrade cleanly when their key is absent:
+**Hunter** returns `[]` (no outbound call) when `HUNTER_API_KEY` is unset, and **SAM.gov**
+falls back to the public `DEMO_KEY` tier and degrades to `None` on error — neither raises.
 Each metered provider also has a `*_cooldown_minutes` knob used by the circuit breaker.
 Hunter, Clay, Explorium, and Lusha raise `ProviderQuotaError` on 402/429 (circuit-guarded).
 
