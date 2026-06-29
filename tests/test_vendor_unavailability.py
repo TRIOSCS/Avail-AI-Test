@@ -144,6 +144,111 @@ class TestVendorPartUnavailabilityModel:
             db_session.commit()
         db_session.rollback()
 
+    def test_condition_validator_accepts_valid_values(self, db_session: Session):
+        for cond in ("new", "refurb", "used", "other", None):
+            record = VendorPartUnavailability(
+                vendor_name_normalized="acme components",
+                normalized_mpn="CONDVALID",
+                reason=UnavailabilityReason.OTHER,
+                condition=cond,
+            )
+            db_session.add(record)
+            db_session.flush()
+            assert record.condition == cond
+            db_session.rollback()
+
+    def test_condition_validator_rejects_off_vocab(self):
+        with pytest.raises(ValueError):
+            VendorPartUnavailability(
+                vendor_name_normalized="acme components",
+                normalized_mpn="CONDTEST",
+                reason=UnavailabilityReason.OTHER,
+                condition="broken",  # not in the condition vocabulary
+            )
+
+    def test_two_same_condition_rows_same_vendor_mpn_raises_integrity_error(self, db_session: Session):
+        """Two rows with the same non-NULL condition → hits the partial unique index
+        WHERE condition IS NOT NULL."""
+        db_session.add(
+            VendorPartUnavailability(
+                vendor_name_normalized="acme components",
+                normalized_mpn="CONDDUP",
+                reason=UnavailabilityReason.BROKEN,
+                condition="new",
+            )
+        )
+        db_session.commit()
+
+        db_session.add(
+            VendorPartUnavailability(
+                vendor_name_normalized="acme components",
+                normalized_mpn="CONDDUP",
+                reason=UnavailabilityReason.SOLD_ELSEWHERE,
+                condition="new",
+            )
+        )
+        with pytest.raises(IntegrityError):
+            db_session.commit()
+        db_session.rollback()
+
+    def test_two_null_condition_rows_same_vendor_mpn_raises_integrity_error(self, db_session: Session):
+        """Two rows with condition=NULL → hits the partial unique index WHERE condition
+        IS NULL."""
+        db_session.add(
+            VendorPartUnavailability(
+                vendor_name_normalized="acme components",
+                normalized_mpn="NULLDUP",
+                reason=UnavailabilityReason.BROKEN,
+                condition=None,
+            )
+        )
+        db_session.commit()
+
+        db_session.add(
+            VendorPartUnavailability(
+                vendor_name_normalized="acme components",
+                normalized_mpn="NULLDUP",
+                reason=UnavailabilityReason.SOLD_ELSEWHERE,
+                condition=None,
+            )
+        )
+        with pytest.raises(IntegrityError):
+            db_session.commit()
+        db_session.rollback()
+
+    def test_distinct_conditions_coexist(self, db_session: Session):
+        """New + refurb + NULL rows for one (vendor, mpn) must coexist without error."""
+        db_session.add_all(
+            [
+                VendorPartUnavailability(
+                    vendor_name_normalized="acme components",
+                    normalized_mpn="COEXIST",
+                    reason=UnavailabilityReason.BROKEN,
+                    condition="new",
+                ),
+                VendorPartUnavailability(
+                    vendor_name_normalized="acme components",
+                    normalized_mpn="COEXIST",
+                    reason=UnavailabilityReason.SOLD_ELSEWHERE,
+                    condition="refurb",
+                ),
+                VendorPartUnavailability(
+                    vendor_name_normalized="acme components",
+                    normalized_mpn="COEXIST",
+                    reason=UnavailabilityReason.OTHER,
+                    condition=None,
+                ),
+            ]
+        )
+        db_session.commit()  # must not raise
+
+        rows = (
+            db_session.query(VendorPartUnavailability)
+            .filter_by(vendor_name_normalized="acme components", normalized_mpn="coexist")
+            .all()
+        )
+        assert len(rows) == 3
+
     def test_same_mpn_different_vendor_is_allowed(self, db_session: Session):
         db_session.add(
             VendorPartUnavailability(
