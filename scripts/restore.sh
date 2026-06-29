@@ -17,6 +17,20 @@ DB_USER="${POSTGRES_USER:-availai}"
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"; }
 die() { log "FATAL: $1"; exit 1; }
 
+# Emit the decompressed (and gpg-decrypted, if the file ends in .gpg) backup
+# stream to stdout, so the rest of the script is agnostic to whether a backup
+# was encrypted at rest by backup.sh. Encrypted backups need BACKUP_GPG_PASSPHRASE.
+decompress() {
+    local f="$1"
+    if [[ "$f" == *.gpg ]]; then
+        [ -n "${BACKUP_GPG_PASSPHRASE:-}" ] \
+            || die "Backup '${f}' is gpg-encrypted but BACKUP_GPG_PASSPHRASE is not set"
+        gpg --batch --quiet --decrypt --passphrase "${BACKUP_GPG_PASSPHRASE}" "$f" 2>/dev/null | gunzip -c
+    else
+        gunzip -c "$f"
+    fi
+}
+
 usage() {
     echo "Usage: $0 [backup_file.dump.gz]"
     echo ""
@@ -54,7 +68,7 @@ list_backups() {
             fi
             echo "  ${f}  (${size_human}, ${date_str}, ${checksum_status})"
             count=$((count + 1))
-        done < <(find "$BACKUP_DIR" -name "${DB_NAME}_*.dump.gz" -type f | sort -r)
+        done < <(find "$BACKUP_DIR" \( -name "${DB_NAME}_*.dump.gz" -o -name "${DB_NAME}_*.dump.gz.gpg" \) -type f | sort -r)
         echo ""
         echo "Total: ${count} backups"
     else
@@ -84,7 +98,7 @@ verify_backup() {
 
     # List contents
     local table_count
-    table_count=$(gunzip -c "$file" | pg_restore --list 2>/dev/null | grep "TABLE " | wc -l || true)
+    table_count=$(decompress "$file" | pg_restore --list 2>/dev/null | grep "TABLE " | wc -l || true)
     log "Tables in backup: ${table_count}"
 
     if [ "$table_count" -lt 5 ]; then
@@ -117,7 +131,7 @@ if [ -z "$BACKUP_FILE" ]; then
     if [ -f "${BACKUP_DIR}/LATEST" ]; then
         BACKUP_FILE=$(cat "${BACKUP_DIR}/LATEST")
     else
-        BACKUP_FILE=$(find "$BACKUP_DIR" -name "${DB_NAME}_*.dump.gz" -type f | sort -r | head -1)
+        BACKUP_FILE=$(find "$BACKUP_DIR" \( -name "${DB_NAME}_*.dump.gz" -o -name "${DB_NAME}_*.dump.gz.gpg" \) -type f | sort -r | head -1)
     fi
 fi
 
@@ -146,7 +160,7 @@ if [ -f "${BACKUP_FILE}.sha256" ]; then
     fi
 fi
 
-TABLE_COUNT=$(gunzip -c "$BACKUP_FILE" | pg_restore --list 2>/dev/null | grep "TABLE " | wc -l || true)
+TABLE_COUNT=$(decompress "$BACKUP_FILE" | pg_restore --list 2>/dev/null | grep "TABLE " | wc -l || true)
 if [ "$TABLE_COUNT" -lt 5 ]; then
     die "Backup appears corrupt — only ${TABLE_COUNT} tables. Aborting."
 fi
@@ -171,6 +185,15 @@ if [ "$SKIP_SAFETY" = false ]; then
         --format=custom --no-owner --no-acl --compress=0 \
         2>/dev/null | gzip -9 > "$SAFETY_FILE" || true
 
+    # Match backup.sh's at-rest policy: when a passphrase is configured, the
+    # pre-restore safety dump is encrypted too (never leave plaintext on disk).
+    if [ -n "${BACKUP_GPG_PASSPHRASE:-}" ] && [ -s "$SAFETY_FILE" ]; then
+        gpg --batch --yes --quiet --cipher-algo AES256 \
+            --passphrase "${BACKUP_GPG_PASSPHRASE}" --symmetric \
+            --output "${SAFETY_FILE}.gpg" "$SAFETY_FILE" \
+            && rm -f "$SAFETY_FILE" && SAFETY_FILE="${SAFETY_FILE}.gpg"
+    fi
+
     SAFETY_SIZE=$(stat -c%s "$SAFETY_FILE" 2>/dev/null || stat -f%z "$SAFETY_FILE" 2>/dev/null || echo "0")
     if [ "$SAFETY_SIZE" -gt 1024 ]; then
         log "Safety backup created: ${SAFETY_FILE} ($(numfmt --to=iec-i --suffix=B "$SAFETY_SIZE" 2>/dev/null || echo "${SAFETY_SIZE} bytes"))"
@@ -194,7 +217,7 @@ psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d postgres -c \
     2>/dev/null
 
 log "Restoring from ${BACKUP_FILE}..."
-gunzip -c "$BACKUP_FILE" | pg_restore \
+decompress "$BACKUP_FILE" | pg_restore \
     -h "$DB_HOST" \
     -p "$DB_PORT" \
     -U "$DB_USER" \

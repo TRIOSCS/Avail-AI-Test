@@ -19,6 +19,12 @@ BACKUP_FILE_GZ="${BACKUP_FILE}.gz"
 CHECKSUM_FILE="${BACKUP_FILE_GZ}.sha256"
 LOG_FILE="${BACKUP_DIR}/backup.log"
 
+# Optional at-rest encryption. When BACKUP_GPG_PASSPHRASE is set, the compressed
+# dump is encrypted with gpg symmetric AES256 before the checksum/rotation steps,
+# so backups on disk (and any off-site copy made from them) are never plaintext.
+# Unset → plaintext output (local/dev convenience). Restore handles both.
+GPG_PASSPHRASE="${BACKUP_GPG_PASSPHRASE:-}"
+
 # ─── Functions ───────────────────────────────────────────────────────────────
 log() {
     local msg="[$(date '+%Y-%m-%d %H:%M:%S')] $1"
@@ -102,16 +108,11 @@ if [ ! -f "$BACKUP_FILE_GZ" ]; then
     die "Compression failed — gzip output missing"
 fi
 
-GZ_SIZE=$(stat -c%s "$BACKUP_FILE_GZ" 2>/dev/null || stat -f%z "$BACKUP_FILE_GZ")
-
 # ─── Verification ────────────────────────────────────────────────────────────
+# Verify the dump can be listed (proves format is valid). This MUST run on the
+# plaintext .gz, before any encryption — pg_restore can't read a .gpg blob.
 log "Verifying backup integrity..."
 
-# 1. SHA-256 checksum
-sha256sum "$BACKUP_FILE_GZ" > "$CHECKSUM_FILE"
-log "Checksum: $(cat "$CHECKSUM_FILE")"
-
-# 2. Verify the dump can be listed (proves format is valid)
 RESTORE_TABLE_COUNT=$(gunzip -c "$BACKUP_FILE_GZ" | pg_restore --list 2>/dev/null | grep "TABLE " | wc -l || true)
 log "Verified: backup contains ${RESTORE_TABLE_COUNT} TABLE entries"
 
@@ -119,17 +120,44 @@ if [ "$RESTORE_TABLE_COUNT" -lt 5 ]; then
     die "Backup verification failed — only ${RESTORE_TABLE_COUNT} tables found (expected many more)"
 fi
 
+# ─── At-rest encryption (gpg symmetric AES256, opt-in) ───────────────────────
+# Guarded on BACKUP_GPG_PASSPHRASE: when set, the verified .gz is encrypted and
+# the plaintext removed, so nothing readable lands on disk or off-site. When
+# unset, the backup stays plaintext (restore.sh transparently handles both).
+if [ -n "$GPG_PASSPHRASE" ]; then
+    log "Encrypting backup (gpg symmetric, AES256)..."
+    gpg --batch --yes --quiet \
+        --cipher-algo AES256 \
+        --passphrase "$GPG_PASSPHRASE" \
+        --symmetric \
+        --output "${BACKUP_FILE_GZ}.gpg" \
+        "$BACKUP_FILE_GZ" \
+        || die "gpg encryption failed"
+    rm -f "$BACKUP_FILE_GZ"
+    BACKUP_FILE_GZ="${BACKUP_FILE_GZ}.gpg"
+    CHECKSUM_FILE="${BACKUP_FILE_GZ}.sha256"
+    log "Encrypted → ${BACKUP_FILE_GZ}"
+else
+    log "BACKUP_GPG_PASSPHRASE not set — backup stored UNENCRYPTED (set it to enable AES256 at-rest encryption)"
+fi
+
+GZ_SIZE=$(stat -c%s "$BACKUP_FILE_GZ" 2>/dev/null || stat -f%z "$BACKUP_FILE_GZ")
+
+# ─── Checksum (over the final on-disk artifact) ──────────────────────────────
+sha256sum "$BACKUP_FILE_GZ" > "$CHECKSUM_FILE"
+log "Checksum: $(cat "$CHECKSUM_FILE")"
+
 # ─── Rotation ────────────────────────────────────────────────────────────────
 DELETED_COUNT=0
 if [ "$RETENTION_DAYS" -gt 0 ]; then
     while IFS= read -r old_file; do
         rm -f "$old_file" "${old_file}.sha256"
         DELETED_COUNT=$((DELETED_COUNT + 1))
-    done < <(find "$BACKUP_DIR" -name "${DB_NAME}_*.dump.gz" -mtime +"$RETENTION_DAYS" -type f 2>/dev/null)
+    done < <(find "$BACKUP_DIR" \( -name "${DB_NAME}_*.dump.gz" -o -name "${DB_NAME}_*.dump.gz.gpg" \) -mtime +"$RETENTION_DAYS" -type f 2>/dev/null)
 fi
 
-# Count remaining backups
-BACKUP_COUNT=$(find "$BACKUP_DIR" -name "${DB_NAME}_*.dump.gz" -type f 2>/dev/null | wc -l)
+# Count remaining backups (plaintext + encrypted)
+BACKUP_COUNT=$(find "$BACKUP_DIR" \( -name "${DB_NAME}_*.dump.gz" -o -name "${DB_NAME}_*.dump.gz.gpg" \) -type f 2>/dev/null | wc -l)
 
 # ─── Summary ─────────────────────────────────────────────────────────────────
 log "╔══════════════════════════════════════════════════════════════╗"
