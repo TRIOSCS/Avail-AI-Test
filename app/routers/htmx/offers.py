@@ -281,7 +281,7 @@ async def save_parsed_offers(
         db.add(offer)
         # Offer hook: the user reviewed and saved this parse ACTIVE — user-initiated
         # proof of availability, release the vendor's matching active records.
-        maybe_release_on_offer(db, req_match_id, offer.vendor_name, user)
+        maybe_release_on_offer(db, req_match_id, offer.vendor_name, user, offer_condition=offer.condition)
         saved_count += 1
 
     db.commit()
@@ -405,7 +405,7 @@ async def review_offer(
         offer.approved_at = datetime.now(timezone.utc)
         # Offer hook: user approval of a pending offer is user-initiated proof of
         # availability — release the vendor's matching active unavailability records.
-        maybe_release_on_offer(db, offer.requirement_id, offer.vendor_name, user)
+        maybe_release_on_offer(db, offer.requirement_id, offer.vendor_name, user, offer_condition=offer.condition)
     else:
         require_valid_transition("offer", offer.status, OfferStatus.REJECTED)
         offer.status = OfferStatus.REJECTED
@@ -524,7 +524,7 @@ async def add_offer(
     db.flush()  # offer.id populated; activity row + offer committed together below
     # Offer hook: a manually entered offer is user-initiated proof of availability —
     # release the vendor's matching active unavailability records.
-    maybe_release_on_offer(db, offer.requirement_id, offer.vendor_name, user)
+    maybe_release_on_offer(db, offer.requirement_id, offer.vendor_name, user, offer_condition=offer.condition)
     logger.info("Manual offer created: {} on req {} by {}", mpn, req_id, user.email)
 
     _log_activity(
@@ -818,7 +818,7 @@ async def promote_offer_htmx(
 
     # Offer hook: user approval of a pending offer is user-initiated proof of
     # availability — release the vendor's matching active unavailability records.
-    maybe_release_on_offer(db, offer.requirement_id, offer.vendor_name, user)
+    maybe_release_on_offer(db, offer.requirement_id, offer.vendor_name, user, offer_condition=offer.condition)
 
     _log_activity(
         db,
