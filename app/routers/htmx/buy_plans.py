@@ -837,6 +837,44 @@ async def buy_plan_confirm_po_partial(
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
 
+async def _resource_lines_and_alert(
+    plan_id: int,
+    line_id: int,
+    reason_code: str,
+    reason_note: str | None,
+    also_line_ids: list[int],
+    user: User,
+    db: Session,
+) -> dict:
+    """Shared fall-down → re-source core for BOTH triggers (vendor-cancel + receiving-
+    reject).
+
+    Pools the target line(s) via the single ``resource_line`` engine, commits, and fans out
+    one URGENT backfill alert per pooled line. Both routes funnel here so the receiving-reject
+    path reuses the same pool/alert as the vendor-cancel path (no parallel queue). Returns the
+    service payload; raises HTTP 400 on a service ValueError (with a server-side log first).
+    """
+    from ...services.buyplan_notifications import notify_resource_requested, run_notify_bg
+    from ...services.buyplan_workflow import resource_line
+
+    try:
+        payload = resource_line(plan_id, line_id, reason_code, reason_note, user, db, also_line_ids=also_line_ids)
+        db.commit()
+    except ValueError as e:
+        # Log before re-raising so a real failure (e.g. an un-keyable requirement deep in
+        # the service) leaves a server trace instead of a silent, mislabeled 400.
+        logger.warning("Re-source failed for plan {} line {}: {}", plan_id, line_id, e)
+        raise HTTPException(400, str(e))
+
+    # Broadcast one urgent alert PER pooled line (scope=plan re-sources siblings too, and
+    # each pooled line needs its own claim).
+    for resourced in payload["resourced_lines"]:
+        await run_notify_bg(
+            notify_resource_requested, plan_id, line_id=resourced["line_id"], actor_id=user.id, reason=reason_code
+        )
+    return payload
+
+
 @router.post("/v2/partials/buy-plans/{plan_id}/lines/{line_id}/resource", response_class=HTMLResponse)
 async def buy_plan_resource_line_partial(
     request: Request,
@@ -845,15 +883,12 @@ async def buy_plan_resource_line_partial(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Re-source a line whose vendor PO was cancelled.
+    """Re-source a line whose vendor PO was cancelled (SP-3 vendor-cancel fall-down).
 
     Records the cancellation (vendor performance), marks the offer sold + the vendor
     unavailable, drops the line into the open claim pool, and fires the URGENT backfill
     alert to all other buyers. ``scope=plan`` re-sources the plan's other cut lines too.
     """
-    from ...services.buyplan_notifications import notify_resource_requested, run_notify_bg
-    from ...services.buyplan_workflow import resource_line
-
     # Per-record ownership (non-owner SALES/TRADER → 404) + PO-cutter role gate (403).
     get_buyplan_for_user(db, user, plan_id)
     _require_po_cutter(user)
@@ -868,24 +903,44 @@ async def buy_plan_resource_line_partial(
     if not reason_code:
         raise HTTPException(400, "A re-source reason is required")
 
-    try:
-        payload = resource_line(plan_id, line_id, reason_code, reason_note, user, db, also_line_ids=also_line_ids)
-        db.commit()
-    except ValueError as e:
-        # Log before re-raising so a real failure (e.g. an un-keyable requirement deep in
-        # the service) leaves a server trace instead of a silent, mislabeled 400.
-        logger.warning("Re-source failed for plan {} line {}: {}", plan_id, line_id, e)
-        raise HTTPException(400, str(e))
-
-    # Broadcast one urgent alert PER re-sourced line (scope=plan re-sources siblings too,
-    # and each pooled line needs its own claim).
-    for resourced in payload["resourced_lines"]:
-        await run_notify_bg(
-            notify_resource_requested, plan_id, line_id=resourced["line_id"], actor_id=user.id, reason=reason_code
-        )
+    await _resource_lines_and_alert(plan_id, line_id, reason_code, reason_note, also_line_ids, user, db)
 
     if origin == "resource":
         return await buy_plans_resource_partial(request, user, db)
+    return await buy_plan_detail_partial(request, plan_id, user, db)
+
+
+@router.post("/v2/partials/buy-plans/{plan_id}/lines/{line_id}/reject-received", response_class=HTMLResponse)
+async def buy_plan_reject_received_line_partial(
+    request: Request,
+    plan_id: int,
+    line_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Reject a line at receiving — SP-4 fall-down (wrong / defective / short parts).
+
+    The vendor delivered, but the parts failed receiving. This drops the line into the SAME
+    open re-source pool the vendor-cancel Re-source uses (reusing ``resource_line``), reopens
+    the INBOUND plan to ACTIVE so the line can be re-claimed/re-cut from another vendor, and
+    fires the URGENT backfill alert. Owner- + buyer-gated exactly like the re-source route.
+    ``scope=plan`` rejects the plan's other received lines too.
+    """
+    # Per-record ownership (non-owner SALES/TRADER → 404) + PO-cutter role gate (403).
+    get_buyplan_for_user(db, user, plan_id)
+    _require_po_cutter(user)
+
+    form = await request.form()
+    reason_code = form.get("reason_code", "").strip()
+    reason_note = (form.get("reason_note") or "").strip() or None
+    scope = form.get("scope", "line")
+    also_line_ids = [int(i) for i in form.getlist("also_line_ids")] if scope == "plan" else []
+
+    if not reason_code:
+        raise HTTPException(400, "A rejection reason is required")
+
+    await _resource_lines_and_alert(plan_id, line_id, reason_code, reason_note, also_line_ids, user, db)
+
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
 

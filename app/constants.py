@@ -461,17 +461,25 @@ class LineIssueType(StrEnum):
 
 
 class LineResourceReason(StrEnum):
-    """Why a buyer is re-sourcing a line whose PO was cancelled.
+    """Why a buyer is re-sourcing a line whose PO fell down.
 
     This flow is VENDOR-fall-down only (customer cancellations are handled elsewhere and
     never enter here), so every value here counts against the vendor's cancellation
-    performance.
+    performance. Two triggers feed the same re-source pool:
+      - PO-cancel (SP-3 vendor-cancel): the vendor fell down BEFORE delivery; and
+      - receiving-reject (SP-4): the vendor delivered, but the parts were rejected at
+        receiving (defective / wrong / short). Same fall-down, discovered later.
     """
 
+    # ── PO-cancel (vendor fell down before delivery) ──
     SOLD_ELSEWHERE = "sold_elsewhere"  # vendor sold the part to someone else
     CANNOT_DELIVER = "cannot_deliver"  # vendor can't fulfill the PO
     NO_STOCK = "no_stock"  # stock evaporated after the PO was cut
     PRICE_CHANGE = "price_change"  # vendor repriced / reneged
+    # ── Receiving-reject (SP-4: parts arrived but failed receiving) ──
+    DEFECTIVE = "defective"  # parts arrived defective / bad condition
+    WRONG_PART = "wrong_part"  # vendor shipped the wrong part
+    SHORT_SHIP = "short_ship"  # short quantity received
     OTHER = "other"
 
 
@@ -483,6 +491,10 @@ RESOURCE_TO_UNAVAILABILITY_REASON: dict[str, str] = {
     LineResourceReason.CANNOT_DELIVER.value: "not_really_there",
     LineResourceReason.NO_STOCK.value: "not_really_there",
     LineResourceReason.PRICE_CHANGE.value: "sold_elsewhere",
+    # Receiving-reject reasons map to the matching durable unavailability reason.
+    LineResourceReason.DEFECTIVE.value: "broken",
+    LineResourceReason.WRONG_PART.value: "different_part",
+    LineResourceReason.SHORT_SHIP.value: "not_really_there",
     LineResourceReason.OTHER.value: "sold_elsewhere",
 }
 
@@ -499,6 +511,10 @@ class POCancellationReason(StrEnum):
     CANNOT_DELIVER = "cannot_deliver"
     NO_STOCK = "no_stock"
     PRICE_CHANGE = "price_change"
+    # Receiving-reject (SP-4): the vendor delivered but the parts failed receiving.
+    DEFECTIVE = "defective"
+    WRONG_PART = "wrong_part"
+    SHORT_SHIP = "short_ship"
     OTHER = "other"
 
 

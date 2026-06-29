@@ -1303,15 +1303,29 @@ buyplan_workflow.py (state machine)
             ops (PO unverified >2h) until lines advance; idempotent via buy_plan_lines.last_nudge_at
 ```
 
-### 6e. Re-source (cancelled PO → open claim pool → urgent buyer backfill)
+### 6e. Re-source (fall-down → open claim pool → urgent buyer backfill)
 
-A buyer records a PO on a line to close it out in Acctivate; when a **vendor falls down**
-(sells elsewhere / can't deliver) the buyer cancels that PO in Acctivate and clicks
-**Re-source** on the line (`POST /v2/partials/buy-plans/{plan}/lines/{line}/resource`;
-gated by `get_buyplan_for_user` ownership + `_require_po_cutter` role). The button shows
-on `pending_verify`/`verified` lines even when the plan auto-completed (the late-fall-down
-case). `buyplan_workflow.resource_line` (default one line; `scope=plan` escalates to the
-plan's other cut lines) for each target, in one transaction:
+`buyplan_workflow.resource_line` is the **single** fall-down → re-source engine, fed by
+**two triggers** (never a parallel queue):
+
+- **Vendor-cancel (SP-3):** a buyer records a PO on a line in Acctivate; when a **vendor
+  falls down** (sells elsewhere / can't deliver) the buyer cancels that PO and clicks
+  **Re-source** on the line (`POST /v2/partials/buy-plans/{plan}/lines/{line}/resource`).
+  Shown on `pending_verify`/`verified` lines of an `active`/`completed` plan (the button
+  survives even when the plan auto-completed — the late-fall-down case).
+- **Receiving-reject (SP-4):** the vendor delivered, but the parts were rejected at
+  receiving (**defective / wrong / short**). On an **INBOUND** plan the buyer clicks
+  **Reject** on the line (`POST /v2/partials/buy-plans/{plan}/lines/{line}/reject-received`,
+  the per-line counterpart to the plan-level "Mark Received") instead of completing the
+  deal. The reject reasons (`defective`/`wrong_part`/`short_ship`) are receiving-specific
+  `LineResourceReason`/`POCancellationReason` values (free strings on the `String` reason
+  columns — **no migration**); each maps to a durable vendor-unavailability reason
+  (`broken`/`different_part`/`not_really_there`). The plan reopens **INBOUND → active**.
+
+Both triggers are gated by `get_buyplan_for_user` ownership + `_require_po_cutter` role and
+both funnel through the router helper `_resource_lines_and_alert` (pool + commit + alert
+fan-out). `buyplan_workflow.resource_line` (default one line; `scope=plan` escalates to the
+plan's other cut/received lines) for each target, in one transaction:
 
 1. `po_cancellation_service.record_po_cancellation` — append the immutable `po_cancellations`
    row (vendor-performance fact; `days_to_cancel` from `po_confirmed_at`).
@@ -1319,7 +1333,8 @@ plan's other cut lines) for each target, in one transaction:
 3. `mark_vendor_unavailable` — `record_unavailability(SOLD_ELSEWHERE-mapped)` so the vendor
    shows **unavailable** for that part on the Sightings tab (§2d).
 4. Reset the line into the pool: clear buyer/offer/PO fields, `status = resourcing`; reopen
-   the plan to `active` if it had auto-completed.
+   the plan to `active` if it had auto-completed (`completed`) or was awaiting receipt
+   (`inbound`), so `claim_line` → `confirm_po` (needs an active plan) works again.
 5. `refresh_vendor_cancellation_metrics` — recompute the vendor's `cancellation_rate` /
    `avg_days_to_cancel` / `slow_cancel_count` (a slow cancel, >7d, dampens `vendor_score`
    harder — `vendor_score._cancel_dampener`).
@@ -5295,10 +5310,14 @@ above it a `PURCHASE_ORDER` `ApprovalRequest` opens (amount = plan total), route
 `can_approve_purchase_orders` holders within their `purchase_order_approval_limit` (mirrors the
 prepayment amount-filter). `decide()` discriminates it from the `BUY_PLAN` gate by **gate_type**
 (both carry a BuyPlan subject): on approve it runs `_run_po_approve_side_effects`, moving the
-plan **ACTIVE → INBOUND** (goods inbound). The buyer then completes the deal via
-`receive_buy_plan` (`POST /v2/partials/buy-plans/{id}/receive`, the "Mark Received" banner on an
-INBOUND plan), which moves **INBOUND → COMPLETED** through the shared `_complete_plan` (same case
-report as auto-completion). The deal-level gate surfaces under the **Purchase Orders** stage tab
+plan **ACTIVE → INBOUND** (goods inbound). On an INBOUND plan the buyer either completes the
+deal via `receive_buy_plan` (`POST /v2/partials/buy-plans/{id}/receive`, the "Mark Received"
+banner), which moves **INBOUND → COMPLETED** through the shared `_complete_plan` (same case
+report as auto-completion); **or (SP-4 fall-down)** rejects line(s) at receiving
+(`POST .../lines/{line}/reject-received`, the per-line "Reject" affordance) when the parts
+arrive defective/wrong/short — those lines fall into the **same re-source pool** as a
+vendor-cancel fall-down (§6e: `resource_line` reopens the plan INBOUND → ACTIVE so the line
+can be re-claimed/re-cut). The deal-level gate surfaces under the **Purchase Orders** stage tab
 (`_TAB_APPROVE_ATTR['purchase_orders'] = can_approve_purchase_orders`); the QP Purchasing
 section gate is now QP-view inline only (no tab).
 
