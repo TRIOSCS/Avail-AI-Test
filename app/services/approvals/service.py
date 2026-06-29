@@ -234,7 +234,11 @@ def decide(
     # swallowing try/except — a side-effect failure must propagate so the router's
     # transaction rolls back the whole decision atomically (RISK 1: no APPROVED-request /
     # PENDING-plan split-brain).
-    if request.subject_type == ApprovalSubjectType.BUY_PLAN and request.subject_id is not None:
+    if (
+        request.gate_type == ApprovalGateType.BUY_PLAN
+        and request.subject_type == ApprovalSubjectType.BUY_PLAN
+        and request.subject_id is not None
+    ):
         from ..buyplan_workflow import _run_approve_side_effects, _run_reject_side_effects
 
         plan = db.get(BuyPlan, request.subject_id)
@@ -245,6 +249,22 @@ def decide(
                 _run_reject_side_effects(plan, user, db, reason=comment or "Rejected")
             db.flush()
 
+    # Deal-level PO gate (SP-3). A PURCHASE_ORDER request also has a BuyPlan subject, so it
+    # is discriminated from the BUY_PLAN gate above by gate_type. On approval the plan moves
+    # ACTIVE → INBOUND (goods inbound, awaiting buyer receipt); a rejection leaves the plan
+    # ACTIVE so it can be re-evaluated. Same no-swallow contract as the BUY_PLAN block.
+    if (
+        request.gate_type == ApprovalGateType.PURCHASE_ORDER
+        and request.subject_type == ApprovalSubjectType.BUY_PLAN
+        and request.subject_id is not None
+    ):
+        from ..buyplan_workflow import _run_po_approve_side_effects
+
+        plan = db.get(BuyPlan, request.subject_id)
+        if plan is not None and approved:
+            _run_po_approve_side_effects(plan, user, db)
+            db.flush()
+
     # QP section gates (C2a). The QP is the subject (subject_type=QUALITY_PLAN); the
     # gate_type discriminates which section resolved. On resolution, dispatch the section
     # side effect (C2a: log an activity; C2b writes the section timestamp). Lazy import:
@@ -253,7 +273,7 @@ def decide(
     # failure rolls the whole decision back atomically.
     if (
         request.subject_type == ApprovalSubjectType.QUALITY_PLAN
-        and request.gate_type in (ApprovalGateType.QP_SALES, ApprovalGateType.PURCHASE_ORDER)
+        and request.gate_type in (ApprovalGateType.QP_SALES, ApprovalGateType.QP_PURCHASING)
         and request.subject_id is not None
     ):
         from ..quality_plan_service import _on_section_approved

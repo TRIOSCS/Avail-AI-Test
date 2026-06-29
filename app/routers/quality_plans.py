@@ -4,7 +4,7 @@ Purpose: Exposes GET /v2/qp/for-buy-plan/{bp_id} (the front door — get-or-crea
          for a buy plan and render its native detail), GET /v2/qp/{id} (QP detail
          partial), POST /v2/qp/{id}/submit (submit-for-review action), the QP Phase C2a
          section gates POST /v2/qp/{id}/submit-sales + /submit-purchasing (open the
-         QP_SALES / PURCHASE_ORDER approval gate), and the QP Phase C2b native-section
+         QP_SALES / QP_PURCHASING approval gate), and the QP Phase C2b native-section
          editors: PATCH /v2/qp/{id}/sales + /purchasing (inline field edit → refreshed
          section partial), serial CRUD (POST/DELETE /v2/qp/{id}/serial[/{entry_id}]),
          and FRU pin/unpin (POST/DELETE /v2/qp/{id}/fru[/{lookup_id}]). All return the
@@ -203,6 +203,7 @@ def _qp_detail_response(
 
     errors = validate_complete(qp)
     sales_gate = _get_gate(db, qp.id, ApprovalGateType.QP_SALES)
+    purchasing_gate = _get_gate(db, qp.id, ApprovalGateType.QP_PURCHASING)
 
     ctx = {
         "request": request,
@@ -213,11 +214,12 @@ def _qp_detail_response(
         "errors": errors,
         "section_error": section_error,
         "sales_errors": validate_section(qp, ApprovalGateType.QP_SALES),
-        "purchasing_errors": validate_section(qp, ApprovalGateType.PURCHASE_ORDER),
+        "purchasing_errors": validate_section(qp, ApprovalGateType.QP_PURCHASING),
         "fru_rows": _fru_rows(db, qp),
         "sales_gate": sales_gate,
         "sales_gate_can_act": _is_pending_recipient(db, sales_gate, user),
-        "purchasing_gate": _get_gate(db, qp.id, ApprovalGateType.PURCHASE_ORDER),
+        "purchasing_gate": purchasing_gate,
+        "purchasing_gate_can_act": _is_pending_recipient(db, purchasing_gate, user),
         "buy_plan_gate": _get_gate(db, qp.id, ApprovalGateType.BUY_PLAN),
         "prepayment_gate": _get_gate(db, qp.id, ApprovalGateType.PREPAYMENT),
     }
@@ -369,7 +371,7 @@ def qp_submit(
 
 
 def _submit_section_response(request: Request, qp_id: int, gate_type: str, db: Session, user) -> HTMLResponse:
-    """Open a section gate (QP_SALES / PURCHASE_ORDER) and refresh the QP detail.
+    """Open a section gate (QP_SALES / QP_PURCHASING) and refresh the QP detail.
 
     On IncompleteQPError (a required section field is blank) the inline section_errors
     grid blocks submit, so re-render with no gate opened. On NoSectionApproverError
@@ -427,11 +429,11 @@ def qp_submit_purchasing(
     db: Session = Depends(get_db),
     user=Depends(require_user),
 ) -> HTMLResponse:
-    """Submit the QP Purchasing section for approval (opens the PURCHASE_ORDER gate).
+    """Submit the QP Purchasing section for approval (opens the QP_PURCHASING gate).
 
     Refreshes the detail partial. No eligible approver → inline banner, never a 500.
     """
-    return _submit_section_response(request, qp_id, ApprovalGateType.PURCHASE_ORDER, db, user)
+    return _submit_section_response(request, qp_id, ApprovalGateType.QP_PURCHASING, db, user)
 
 
 # ── C2b: native-section editors ──────────────────────────────────────────────────
@@ -488,8 +490,8 @@ def _render_purchasing_section(request: Request, db: Session, qp: QualityPlan, u
             "request": request,
             "user": user,
             "qp": qp,
-            "purchasing_errors": validate_section(qp, ApprovalGateType.PURCHASE_ORDER),
-            "purchasing_gate": _get_gate(db, qp.id, ApprovalGateType.PURCHASE_ORDER),
+            "purchasing_errors": validate_section(qp, ApprovalGateType.QP_PURCHASING),
+            "purchasing_gate": _get_gate(db, qp.id, ApprovalGateType.QP_PURCHASING),
         },
     )
 
@@ -547,7 +549,7 @@ async def qp_patch_purchasing(
     _PURCHASING_FIELDS are written.
     """
     qp = _load_qp_for_edit(db, qp_id, user)
-    if not _section_approved(qp, ApprovalGateType.PURCHASE_ORDER):
+    if not _section_approved(qp, ApprovalGateType.QP_PURCHASING):
         form = await request.form()
         for field, kind in _PURCHASING_FIELDS.items():
             if field in form:

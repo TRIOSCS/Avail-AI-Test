@@ -13,7 +13,8 @@ Gate → column map:
   buy_plan       → User.can_approve_buy_plans (no amount limit)
   prepayment     → User.can_approve_prepayments + optional prepayment_approval_limit
   qp_sales       → User.can_approve_qp_sales (no amount limit)
-  purchase_order → User.can_approve_pos (no amount limit)
+  qp_purchasing  → User.can_approve_qp_purchasing (no amount limit)
+  purchase_order → User.can_approve_purchase_orders + optional purchase_order_approval_limit
 
 Called by: app.services.approvals (re-exported), ApprovalService (Task 4+)
 Depends on: app.models.approvals, app.models.auth, app.constants
@@ -86,7 +87,7 @@ def route_request(db: Session, request: ApprovalRequest) -> ApprovalStep:
 
     elif gate == ApprovalGateType.QP_SALES:
         # QP Sales section: route to every active user holding can_approve_qp_sales.
-        # No amount check (the SO gate approves the section, not a spend).
+        # No amount check (the section gate approves the section, not a spend).
         eligible = (
             db.query(User)
             .filter(
@@ -96,17 +97,36 @@ def route_request(db: Session, request: ApprovalRequest) -> ApprovalStep:
             .all()
         )
 
-    elif gate == ApprovalGateType.PURCHASE_ORDER:
-        # QP Purchasing section: route to every active user holding can_approve_pos.
-        # No amount check (the PO gate approves the section, not a spend).
+    elif gate == ApprovalGateType.QP_PURCHASING:
+        # QP Purchasing section: route to every active user holding can_approve_qp_purchasing.
+        # No amount check (the section gate approves the section, not a spend).
         eligible = (
             db.query(User)
             .filter(
                 User.is_active.is_(True),
-                User.can_approve_pos.is_(True),
+                User.can_approve_qp_purchasing.is_(True),
             )
             .all()
         )
+
+    elif gate == ApprovalGateType.PURCHASE_ORDER:
+        # Deal-level PO gate: route to active can_approve_purchase_orders holders, filtered
+        # by their optional dollar limit (mirrors the prepayment amount-filter exactly).
+        candidates = (
+            db.query(User)
+            .filter(
+                User.is_active.is_(True),
+                User.can_approve_purchase_orders.is_(True),
+            )
+            .all()
+        )
+        amount = request.amount
+        eligible = [
+            u
+            for u in candidates
+            if u.purchase_order_approval_limit is None
+            or (amount is not None and amount <= u.purchase_order_approval_limit)
+        ]
 
     else:
         raise NoEligibleApproverError(f"No routing rule defined for gate={gate!r}")

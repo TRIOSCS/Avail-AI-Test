@@ -36,7 +36,9 @@
 | notify_new_offer_alert_enabled | Boolean NOT NULL | default True; Profile-tab toggle — suppress new-offer alert notifications (migration 151) |
 | can_approve_buy_plans | Boolean NOT NULL | default False (server_default `false`); migration 155. **Per-user buy-plan approval right** — admin-toggled in the Users settings tab, gates the buy-plan approve/reject action via `dependencies.require_buyplan_approver` / `can_approve_buy_plans(user)`. Role-independent: admins do NOT auto-qualify, the column is the single source of truth. Migration 155 also sweeps any legacy `role='ops'` rows to `'manager'`. |
 | can_approve_qp_sales | Boolean NOT NULL | default False (server_default `false`); created as `can_approve_sales_orders` by migration 160 (QP Phase C2a), **renamed to `can_approve_qp_sales` by SP-2 migration 164**. **Per-user QP Sales-section approval right** — admin-toggled in the Users settings tab ("Approve SOs"); `routing.route_request` routes a `QP_SALES` gate to every active holder (no amount check). Role-independent (the column is the single source of truth). The admin route/handler keep their legacy `sales-order-approver` / `set_sales_order_approver` names (intentional asymmetry, SP-2 spec §13). |
-| can_approve_pos | Boolean NOT NULL | default False (server_default `false`); migration 160 (QP Phase C2a). **Per-user QP Purchasing-section approval right** — admin-toggled in the Users settings tab ("Approve POs"); `routing.route_request` routes a `PURCHASE_ORDER` gate to every active holder (no amount check). Role-independent (the column is the single source of truth). |
+| can_approve_qp_purchasing | Boolean NOT NULL | default False (server_default `false`); created as `can_approve_pos` by migration 160 (QP Phase C2a), **renamed to `can_approve_qp_purchasing` by SP-3 migration 166** (de-collided from the deal-level PO gate). **Per-user QP Purchasing-section approval right** — admin-toggled in the Users settings tab ("QP Purchasing"); `routing.route_request` routes a `QP_PURCHASING` gate to every active holder (no amount check). The admin route/handler keep their legacy `po-approver` / `set_po_approver` names (intentional asymmetry, mirrors SP-2's SO handling). |
+| can_approve_purchase_orders | Boolean NOT NULL | default False (server_default `false`); migration 166 (SP-3). **Per-user deal-level Purchase-Order approval right** — admin-toggled in the Users settings tab ("Approve POs"); `routing.route_request` routes a `PURCHASE_ORDER` gate (subject=BuyPlan) to active holders whose `purchase_order_approval_limit` is NULL or ≥ the plan total (mirrors the prepayment gate). Role-independent (the column is the single source of truth). |
+| purchase_order_approval_limit | Numeric(12,2), nullable | Migration 166 (SP-3). Optional dollar cap on the deal-level PO gate. NULL = unlimited; e.g. `10000` routes only PO spends ≤ $10,000 to this user. |
 | last_login_at | UTCDateTime, nullable | Migration 148. Stamped on every successful OAuth callback. NULL + no azure_id ⇒ an "Invited" (pre-provisioned, never-logged-in) row. |
 | access_overrides | JSON, default `{}` | Migration 148. **Explicit per-user access overrides only**: `{access_key: bool}` keyed by `constants.AccessKey`. An *absent* key means "use the role default" (`constants.ROLE_ACCESS_DEFAULTS`) — the dict never stores the role default, so it stays empty until an admin grants/revokes a specific key. Read by `dependencies.user_has_access` (override wins over role default; admin → all). `ops_verification` is NOT stored here (it lives in `verification_group_members`). |
 | invited_by_id | FK -> users (SET NULL), nullable | Migration 148. The admin who invited this user (set by the Users-tab invite flow); SET NULL so the row survives the inviter's deletion. |
@@ -292,7 +294,7 @@ Migration 162 also adds the new status value **`resourcing`** to `buy_plan_lines
 | requisition_id | FK -> requisitions (CASCADE) | |
 | sales_order_number | String 100 | |
 | customer_po_number | String 100 | |
-| status | String 30 | draft -> pending -> active -> completed (also halted / cancelled) |
+| status | String 30 | `BuyPlanStatus`: draft -> pending -> active -> completed (also `inbound` / halted / cancelled). **inbound** (SP-3): the deal-level PO gate approved — goods inbound, awaiting buyer receipt; the buyer's "mark received" action completes the plan (terminal). |
 | so_status | String 30 | pending -> approved / rejected (ops SO-verify track) |
 | total_cost / total_revenue / total_margin_pct | Numeric | |
 | purchase_history_recorded_at | UTCDateTime, nullable | Idempotency stamp set by `record_buyplan_purchase_history` when CPH rows have been written for this plan (migration `bp_cph_recorded_at`). NULL = not yet recorded; non-NULL = safe to skip on retry/backfill. |
@@ -340,7 +342,7 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 | Column | Type | Notes |
 |--------|------|-------|
 | id | Integer PK | |
-| gate_type | String 50 | `ApprovalGateType` enum: `buy_plan`\|`prepayment`\|`sales_order`\|`purchase_order` |
+| gate_type | String 50 | `ApprovalGateType` enum: `buy_plan`\|`prepayment`\|`qp_sales`\|`qp_purchasing`\|`purchase_order` |
 | approver_user_id | FK -> users (CASCADE) | |
 | max_amount | Numeric 12,2, nullable | NULL = applies to any amount |
 | active | Boolean NOT NULL | server_default true; only one active row per gate type expected |
@@ -359,7 +361,7 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 | sales_* (17 cols) | String 255 / Text / Integer / Boolean, all nullable | § Sales "Quality Questions" (QP Phase C2b): `sales_condition`, `sales_quantity` (Int), `sales_fw_hw_rev`, `sales_product_commodity`, `sales_testing_required`/`_option`/`_specifics`, `sales_test_location`, `sales_serial_preapproval_required`, `sales_authorized_ship_early`/`_partial`, `sales_routing_prescreening_whs`, `sales_vendor_rating`, `sales_third_party_pkg_ok`, `sales_pkg_requirements`, `sales_bom_matrix_links`, `sales_notes` (Boolean for Y/N). Completeness gate enforces the required subset at submit, not the DB. The canonical SO# now lives on `buy_plans_v3.sales_order_number` (SP-2 migration 164 retired `sales_so_number` from the QP). |
 | purchasing_* (10 cols) | String 255 / Text / Boolean, all nullable | § Purchasing "Quality Questions" (C2b): `purchasing_po_number`, `purchasing_condition`, `purchasing_fw_hw_rev`, `purchasing_product_commodity`, `purchasing_testing_required`/`_option`, `purchasing_routing_prescreening_whs`, `purchasing_packaging`, `purchasing_tpo_ship_complete` (Bool), `purchasing_tpo_notes`. |
 | sales_section_approved_at | UTCDateTime, nullable | Stamped by `_on_section_approved` when the QP_SALES gate approves (cleared on reject). |
-| purchasing_section_approved_at | UTCDateTime, nullable | Stamped when the PURCHASE_ORDER gate approves. |
+| purchasing_section_approved_at | UTCDateTime, nullable | Stamped when the QP_PURCHASING gate approves. |
 | created_by_id | FK -> users (SET NULL) | |
 | approved_by_id | FK -> users (SET NULL) | |
 | approved_at | UTCDateTime, nullable | |

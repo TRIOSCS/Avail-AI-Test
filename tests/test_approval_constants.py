@@ -22,18 +22,20 @@ from app.constants import (
 def test_gate_types_are_strenum_values() -> None:
     """Brief from task-1: verbatim assertions required by the spec."""
     assert ApprovalGateType.PREPAYMENT == "prepayment"
-    assert set(ApprovalGateType) >= {"buy_plan", "prepayment", "qp_sales", "purchase_order"}
+    assert set(ApprovalGateType) >= {"buy_plan", "prepayment", "qp_sales", "qp_purchasing", "purchase_order"}
     assert ApprovalRequestStatus.REQUESTED == "requested"
     assert PaymentMethod.WIRE == "wire"
 
 
 def test_approval_gate_type_members() -> None:
-    """All four gate-type members present with correct values."""
+    """All five gate-type members present with correct values (SP-3 added QP_PURCHASING,
+    de-collided from the deal-level PURCHASE_ORDER gate)."""
     assert ApprovalGateType.BUY_PLAN == "buy_plan"
     assert ApprovalGateType.PREPAYMENT == "prepayment"
     assert ApprovalGateType.QP_SALES == "qp_sales"
+    assert ApprovalGateType.QP_PURCHASING == "qp_purchasing"
     assert ApprovalGateType.PURCHASE_ORDER == "purchase_order"
-    assert len(ApprovalGateType) == 4
+    assert len(ApprovalGateType) == 5
 
 
 def test_approval_request_status_members() -> None:
