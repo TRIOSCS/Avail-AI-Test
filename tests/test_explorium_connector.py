@@ -325,3 +325,90 @@ async def test_search_contacts_drops_prospect_with_no_name(monkeypatch):
 
     assert len(contacts) == 1
     assert contacts[0]["full_name"] == "Bob Smith"
+
+
+# ── discover_businesses (Fetch Businesses /v1/businesses) ─────────────
+
+
+@pytest.mark.asyncio
+async def test_discover_businesses_posts_filters_and_parses_data(monkeypatch):
+    """Discovery hits the documented POST /v1/businesses Fetch endpoint with the
+    verified `api_key` header + `{filters, size}` body, and parses the `data` array."""
+    from app.connectors import explorium
+
+    calls = []
+
+    async def fake_post(url, **k):
+        calls.append((url, k.get("headers", {}), k.get("json")))
+        return Resp(200, {"total_results": 2, "data": [{"name": "Arrow"}, {"name": "Avnet"}]})
+
+    monkeypatch.setattr(explorium.http, "post", fake_post, raising=False)
+    filters = {"country_code": {"values": ["us"]}}
+    rows = await explorium.discover_businesses(filters, 50, "K")
+
+    url, headers, body = calls[0]
+    assert url.endswith("/businesses")  # NOT /businesses/search
+    assert headers["api_key"] == "K"
+    assert "Authorization" not in headers
+    assert body["filters"] == filters
+    assert body["size"] == 50
+    assert [r["name"] for r in rows] == ["Arrow", "Avnet"]
+
+
+@pytest.mark.asyncio
+async def test_discover_businesses_empty_data(monkeypatch):
+    from app.connectors import explorium
+
+    async def fake_post(url, **k):
+        return Resp(200, {"data": []})
+
+    monkeypatch.setattr(explorium.http, "post", fake_post, raising=False)
+    assert await explorium.discover_businesses({}, 50, "K") == []
+
+
+@pytest.mark.asyncio
+async def test_discover_businesses_data_not_list(monkeypatch):
+    from app.connectors import explorium
+
+    async def fake_post(url, **k):
+        return Resp(200, {"data": "oops"})
+
+    monkeypatch.setattr(explorium.http, "post", fake_post, raising=False)
+    assert await explorium.discover_businesses({}, 50, "K") == []
+
+
+@pytest.mark.asyncio
+async def test_discover_businesses_non_200_returns_empty(monkeypatch):
+    from app.connectors import explorium
+
+    async def fake_post(url, **k):
+        return Resp(500, {})
+
+    monkeypatch.setattr(explorium.http, "post", fake_post, raising=False)
+    assert await explorium.discover_businesses({}, 50, "K") == []
+
+
+@pytest.mark.asyncio
+async def test_discover_businesses_quota_raises(monkeypatch):
+    """402/403/429 propagate as ProviderQuotaError (not swallowed)."""
+    from app.connectors import explorium
+
+    async def fake_post(url, **k):
+        return Resp(429, {})
+
+    monkeypatch.setattr(explorium.http, "post", fake_post, raising=False)
+    with pytest.raises(ProviderQuotaError):
+        await explorium.discover_businesses({}, 50, "K")
+
+
+@pytest.mark.asyncio
+async def test_discover_businesses_transport_error_returns_empty(monkeypatch):
+    import httpx
+
+    from app.connectors import explorium
+
+    async def fake_post(url, **k):
+        raise httpx.ConnectError("boom")
+
+    monkeypatch.setattr(explorium.http, "post", fake_post, raising=False)
+    assert await explorium.discover_businesses({}, 50, "K") == []

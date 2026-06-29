@@ -221,13 +221,13 @@ class TestDiscoverCompaniesWithSignals:
 
     @pytest.mark.asyncio
     async def test_api_error(self):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 500
-        mock_resp.text = "Internal Server Error"
+        # Connector degrades transport/HTTP errors to [] → discovery yields [].
         with (
             patch("app.services.prospect_discovery_explorium._get_api_key", return_value="key"),
             patch(
-                "app.services.prospect_discovery_explorium.http.post", new_callable=AsyncMock, return_value=mock_resp
+                "app.services.prospect_discovery_explorium.explorium.discover_businesses",
+                new_callable=AsyncMock,
+                return_value=[],
             ),
         ):
             result = await discover_companies_with_signals("aerospace_defense", "US")
@@ -235,15 +235,12 @@ class TestDiscoverCompaniesWithSignals:
 
     @pytest.mark.asyncio
     async def test_successful_discovery(self):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            "businesses": [{"company_name": "Test Corp", "domain": "test.com", "country_code": "US"}]
-        }
         with (
             patch("app.services.prospect_discovery_explorium._get_api_key", return_value="key"),
             patch(
-                "app.services.prospect_discovery_explorium.http.post", new_callable=AsyncMock, return_value=mock_resp
+                "app.services.prospect_discovery_explorium.explorium.discover_businesses",
+                new_callable=AsyncMock,
+                return_value=[{"company_name": "Test Corp", "domain": "test.com", "country_code": "US"}],
             ),
         ):
             result = await discover_companies_with_signals("aerospace_defense", "US")
@@ -255,7 +252,7 @@ class TestDiscoverCompaniesWithSignals:
         with (
             patch("app.services.prospect_discovery_explorium._get_api_key", return_value="key"),
             patch(
-                "app.services.prospect_discovery_explorium.http.post",
+                "app.services.prospect_discovery_explorium.explorium.discover_businesses",
                 new_callable=AsyncMock,
                 side_effect=Exception("timeout"),
             ),
@@ -274,18 +271,15 @@ class TestRunExploriumDiscoveryBatch:
     @pytest.mark.asyncio
     async def test_dedup_known_domains(self):
         """Domains in existing_domains should be skipped."""
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            "businesses": [
-                {"company_name": "Known Co", "domain": "known.com", "country_code": "US"},
-                {"company_name": "New Co", "domain": "new.com", "country_code": "US"},
-            ]
-        }
         with (
             patch("app.services.prospect_discovery_explorium._get_api_key", return_value="key"),
             patch(
-                "app.services.prospect_discovery_explorium.http.post", new_callable=AsyncMock, return_value=mock_resp
+                "app.services.prospect_discovery_explorium.explorium.discover_businesses",
+                new_callable=AsyncMock,
+                return_value=[
+                    {"company_name": "Known Co", "domain": "known.com", "country_code": "US"},
+                    {"company_name": "New Co", "domain": "new.com", "country_code": "US"},
+                ],
             ),
             patch("app.services.prospect_discovery_explorium.calculate_fit_score", return_value=(70, "Good fit")),
             patch("app.services.prospect_discovery_explorium.calculate_readiness_score", return_value=(50, {})),
@@ -298,13 +292,12 @@ class TestRunExploriumDiscoveryBatch:
 
     @pytest.mark.asyncio
     async def test_skips_empty_domains(self):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {"businesses": [{"company_name": "No Domain", "domain": ""}]}
         with (
             patch("app.services.prospect_discovery_explorium._get_api_key", return_value="key"),
             patch(
-                "app.services.prospect_discovery_explorium.http.post", new_callable=AsyncMock, return_value=mock_resp
+                "app.services.prospect_discovery_explorium.explorium.discover_businesses",
+                new_callable=AsyncMock,
+                return_value=[{"company_name": "No Domain", "domain": ""}],
             ),
             patch("asyncio.sleep", new_callable=AsyncMock),
         ):

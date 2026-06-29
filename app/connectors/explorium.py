@@ -54,6 +54,28 @@ async def _post(path: str, api_key: str, body: dict):
     return resp
 
 
+async def discover_businesses(filters: dict, size: int, api_key: str) -> list[dict]:
+    """Discover businesses matching ICP filters via Explorium's documented Fetch
+    Businesses endpoint (``POST /v1/businesses``).
+
+    Uses the same verified machinery as ``enrich_company`` / ``search_contacts``: the
+    ``api_key`` header, a ``{"filters": {...}, "size": N}`` request body, and a ``data``
+    array response. 402/403/429 → ProviderQuotaError (propagated to the caller).
+    Transport/parse errors → ``[]``. No results → ``[]``.
+    """
+    try:
+        resp = await _post(
+            "/businesses",
+            api_key,
+            {"mode": "full", "size": size, "filters": filters},
+        )
+        rows = (resp.json().get("data") if resp else None) or []
+        return rows if isinstance(rows, list) else []
+    except (httpx.HTTPError, KeyError, ValueError) as e:
+        logger.warning("Explorium discover_businesses error: {}", e)
+        return []
+
+
 async def _match_business_id(domain: str, name: str, api_key: str) -> str | None:
     """Call /businesses/match and return the first matched business_id, or None."""
     resp = await _post(

@@ -2677,8 +2677,15 @@ scheduler. Contact discovery degrades gracefully: a provider failure renders an 
 
 - `app/connectors/explorium.py` — 2-call pipeline: `/businesses/match` → business_id,
   then `/businesses/firmographics/enrich`; contacts via `/prospects` +
-  `/prospects/contacts_information/enrich`. Auth: `api_key:` header (NOT
+  `/prospects/contacts_information/enrich`. ICP discovery via `discover_businesses()` →
+  `/businesses` Fetch endpoint (`{"filters": {...}, "size": N}` body, `data` array
+  response — same shape as the `/prospects` search). Auth: `api_key:` header (NOT
   `Authorization: Bearer`). 402/403/429 → `ProviderQuotaError`.
+  - `app/services/prospect_discovery_explorium.py` (prospecting discovery) routes through
+    `explorium.discover_businesses()` and normalizes each business into a scoring-ready
+    dict. It previously hit an unverified `/v1/businesses/search` bulk route — now retired.
+    (Note: `app/services/prospect_signals.py` signal-backfill still calls the old
+    `/v1/businesses/search` with a `Bearer` header — a separate follow-up.)
 - `app/connectors/clay_mcp.py` — backend MCP client (JSON-RPC 2.0 over HTTPS to
   `https://api.clay.com/v3/mcp`). Clay speaks **MCP Streamable HTTP**: every
   `tools/call` requires a session, so the connector first runs the handshake
