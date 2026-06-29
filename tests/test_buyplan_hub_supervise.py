@@ -1,11 +1,12 @@
-"""Tests for buyplan_hub.supervise_overview — manager metric strip + triage.
+"""Tests for buyplan_hub.supervise_overview — manager metric strip + unified queue.
 
-Covers:
-- PENDING plan with no approver appears in approvals strip count + triage list.
-- HALTED plan appears in halted strip count + triage list.
-- ISSUE line appears in flagged strip count + triage list (with issue_type).
+Covers (each source query surfaces the right record into the flat ``queue`` list,
+keyed by ``kind``, plus the unchanged strip aggregates):
+- PENDING plan with no approver appears in approval_count + an ``approve`` queue row.
+- HALTED plan appears in halted_count + a ``halted`` queue row.
+- ISSUE line appears in flagged_count + a ``flagged`` queue row (with issue_reason).
 - Old AWAITING_PO line on ACTIVE plan with old approved_at appears in overdue_po
-  strip count + triage list (anchor is BuyPlan.approved_at, not line.created_at).
+  count + an ``overdue`` queue row (anchor is BuyPlan.approved_at, not line.created_at).
 - Freshly-approved plan's AWAITING_PO line is NOT overdue (within SLA).
 - Strip open_value sums non-terminal plan costs; COMPLETED/CANCELLED excluded.
 - Strip avg_margin averages non-terminal plan margins; NULL rows skipped.
@@ -115,12 +116,13 @@ def test_supervise_approvals(db_session, test_user, test_quote, test_requisition
     result = supervise_overview(db_session)
 
     assert result["strip"]["approval_count"] >= 1
-    approval_ids = [d["plan_id"] for d in result["triage"]["approvals"]]
-    assert plan.id in approval_ids
+    approve_rows = [r for r in result["queue"] if r["kind"] == "approve"]
+    assert plan.id in [r["plan_id"] for r in approve_rows]
 
-    # Check plan dict has required keys
-    row = next(d for d in result["triage"]["approvals"] if d["plan_id"] == plan.id)
-    assert set(row.keys()) == {"plan_id", "customer_name", "value", "submitted_by_name"}
+    # The approve row is owned by the Account Manager (submitted_by).
+    row = next(r for r in approve_rows if r["plan_id"] == plan.id)
+    assert row["owner_role"] == "AM"
+    assert row["label"] == "Approve"
 
 
 def test_supervise_approved_plan_not_in_approvals(db_session, manager_user, test_quote, test_requisition):
@@ -136,7 +138,7 @@ def test_supervise_approved_plan_not_in_approvals(db_session, manager_user, test
     )
 
     result = supervise_overview(db_session)
-    approval_ids = [d["plan_id"] for d in result["triage"]["approvals"]]
+    approval_ids = [r["plan_id"] for r in result["queue"] if r["kind"] == "approve"]
     assert plan.id not in approval_ids
 
 
@@ -158,11 +160,12 @@ def test_supervise_halted(db_session, test_user, test_quote, test_requisition):
     result = supervise_overview(db_session)
 
     assert result["strip"]["halted_count"] >= 1
-    halted_ids = [d["plan_id"] for d in result["triage"]["halted"]]
-    assert plan.id in halted_ids
+    halted_rows = [r for r in result["queue"] if r["kind"] == "halted"]
+    assert plan.id in [r["plan_id"] for r in halted_rows]
 
-    row = next(d for d in result["triage"]["halted"] if d["plan_id"] == plan.id)
-    assert set(row.keys()) == {"plan_id", "customer_name", "value", "submitted_by_name"}
+    row = next(r for r in halted_rows if r["plan_id"] == plan.id)
+    assert row["owner_role"] == "AM"
+    assert row["label"] == "Halted"
 
 
 # ── 3. Flagged (ISSUE) lines ─────────────────────────────────────────
@@ -189,12 +192,11 @@ def test_supervise_flagged(db_session, test_user, test_quote, test_requisition):
     result = supervise_overview(db_session)
 
     assert result["strip"]["flagged_count"] >= 1
-    flagged_ids = [d["line_id"] for d in result["triage"]["flagged"]]
-    assert line.id in flagged_ids
+    flagged_rows = [r for r in result["queue"] if r["kind"] == "flagged"]
+    assert line.id in [r["line_id"] for r in flagged_rows]
 
-    row = next(d for d in result["triage"]["flagged"] if d["line_id"] == line.id)
-    assert "issue_type" in row
-    assert row["issue_type"] == LineIssueType.LEAD_TIME_CHANGED
+    row = next(r for r in flagged_rows if r["line_id"] == line.id)
+    assert row["owner_role"] == "Buyer"
     assert row["plan_id"] == plan.id
     # The flagged row states the ACTUAL reason (Part 4): humanised type code when no note.
     assert row["issue_reason"] == "Lead time changed"
@@ -221,7 +223,7 @@ def test_supervise_flagged_reason_prefers_note(db_session, test_user, test_quote
     db_session.flush()
 
     result = supervise_overview(db_session)
-    row = next(d for d in result["triage"]["flagged"] if d["line_id"] == line.id)
+    row = next(r for r in result["queue"] if r["kind"] == "flagged" and r["line_id"] == line.id)
     # The specific note wins over the generic type label.
     assert row["issue_reason"] == "Vendor MOQ doubled — needs reprice"
 
@@ -257,12 +259,14 @@ def test_supervise_overdue_po(db_session, test_user, test_quote, test_requisitio
     result = supervise_overview(db_session)
 
     assert result["strip"]["overdue_po_count"] >= 1
-    overdue_ids = [d["line_id"] for d in result["triage"]["overdue_pos"]]
-    assert line.id in overdue_ids
+    overdue_rows = [r for r in result["queue"] if r["kind"] == "overdue"]
+    assert line.id in [r["line_id"] for r in overdue_rows]
 
-    row = next(d for d in result["triage"]["overdue_pos"] if d["line_id"] == line.id)
-    assert set(row.keys()) == {"line_id", "plan_id", "mpn", "vendor_name", "buyer_name"}
+    row = next(r for r in overdue_rows if r["line_id"] == line.id)
+    assert row["owner_role"] == "Buyer"
     assert row["plan_id"] == plan.id
+    # overdue waiting_since is anchored on the plan's approval clock, not line.created_at.
+    assert row["waiting_since"] == plan.approved_at
 
 
 def test_supervise_fresh_awaiting_po_not_overdue(db_session, test_user, test_quote, test_requisition):
@@ -285,7 +289,7 @@ def test_supervise_fresh_awaiting_po_not_overdue(db_session, test_user, test_quo
     )
 
     result = supervise_overview(db_session)
-    overdue_ids = [d["line_id"] for d in result["triage"]["overdue_pos"]]
+    overdue_ids = [r["line_id"] for r in result["queue"] if r["kind"] == "overdue"]
     assert line.id not in overdue_ids
 
 
@@ -309,7 +313,7 @@ def test_supervise_no_approved_at_not_overdue(db_session, test_user, test_quote,
     )
 
     result = supervise_overview(db_session)
-    overdue_ids = [d["line_id"] for d in result["triage"]["overdue_pos"]]
+    overdue_ids = [r["line_id"] for r in result["queue"] if r["kind"] == "overdue"]
     assert line.id not in overdue_ids
 
 
@@ -396,14 +400,14 @@ def test_supervise_so_pending(db_session, test_user, test_quote, test_requisitio
     result = supervise_overview(db_session)
 
     assert result["strip"]["so_pending_count"] >= 1
-    so_ids = [d["plan_id"] for d in result["triage"]["so_pending"]]
-    assert plan.id in so_ids
+    so_rows = [r for r in result["queue"] if r["kind"] == "verify_so"]
+    assert plan.id in [r["plan_id"] for r in so_rows]
 
-    row = next(d for d in result["triage"]["so_pending"] if d["plan_id"] == plan.id)
-    assert set(row.keys()) == {"plan_id", "customer_name", "value", "submitted_by_name", "card_title"}
-    # SO-approval row carries the canonical title ending "- SO"; Owner = Account Manager.
-    assert row["card_title"].endswith(" - SO")
-    assert (test_user.name or test_user.email) in row["card_title"]
+    row = next(r for r in so_rows if r["plan_id"] == plan.id)
+    assert row["label"] == "Verify SO"
+    # SO-verify row is owned by the Account Manager (submitted_by).
+    assert row["owner_role"] == "AM"
+    assert row["owner_name"] == (test_user.name or test_user.email)
 
 
 def test_supervise_so_approved_not_pending(db_session, test_quote, test_requisition):
@@ -419,7 +423,7 @@ def test_supervise_so_approved_not_pending(db_session, test_quote, test_requisit
     )
 
     result = supervise_overview(db_session)
-    so_ids = [d["plan_id"] for d in result["triage"]["so_pending"]]
+    so_ids = [r["plan_id"] for r in result["queue"] if r["kind"] == "verify_so"]
     assert plan.id not in so_ids
 
 
@@ -446,15 +450,15 @@ def test_supervise_po_pending_verify(db_session, test_user, test_quote, test_req
     result = supervise_overview(db_session)
 
     assert result["strip"]["po_pending_verify_count"] >= 1
-    pv_ids = [d["line_id"] for d in result["triage"]["po_pending_verify"]]
-    assert line.id in pv_ids
+    pv_rows = [r for r in result["queue"] if r["kind"] == "verify_po"]
+    assert line.id in [r["line_id"] for r in pv_rows]
 
-    row = next(d for d in result["triage"]["po_pending_verify"] if d["line_id"] == line.id)
-    assert set(row.keys()) == {"line_id", "plan_id", "mpn", "vendor_name", "buyer_name", "card_title"}
+    row = next(r for r in pv_rows if r["line_id"] == line.id)
+    assert row["label"] == "Verify PO"
     assert row["plan_id"] == plan.id
-    # PO-approval row carries the canonical title ending "- PO"; Owner = the Buyer.
-    assert row["card_title"].endswith(" - PO")
-    assert (test_user.name or test_user.email) in row["card_title"]
+    # PO-verify row is owned by the Buyer (per-line procurement owner).
+    assert row["owner_role"] == "Buyer"
+    assert row["owner_name"] == (test_user.name or test_user.email)
 
 
 def test_supervise_awaiting_po_not_pending_verify(db_session, test_user, test_quote, test_requisition):
@@ -475,7 +479,7 @@ def test_supervise_awaiting_po_not_pending_verify(db_session, test_user, test_qu
     )
 
     result = supervise_overview(db_session)
-    pv_ids = [d["line_id"] for d in result["triage"]["po_pending_verify"]]
+    pv_ids = [r["line_id"] for r in result["queue"] if r["kind"] == "verify_po"]
     assert line.id not in pv_ids
 
 
@@ -498,10 +502,5 @@ def test_supervise_empty_db(db_session):
     assert strip["po_pending_verify_count"] == 0
     assert strip["flagged_count"] == 0
 
-    triage = result["triage"]
-    assert triage["approvals"] == []
-    assert triage["so_pending"] == []
-    assert triage["halted"] == []
-    assert triage["overdue_pos"] == []
-    assert triage["po_pending_verify"] == []
-    assert triage["flagged"] == []
+    # The unified action queue is empty on a clean DB.
+    assert result["queue"] == []

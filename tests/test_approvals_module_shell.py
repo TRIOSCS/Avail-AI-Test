@@ -165,7 +165,7 @@ def test_prepayments_tab_empty_state(client: TestClient):
 
 
 def test_supervise_tab_renders_for_manager(client: TestClient, manager_user: User):
-    """The Supervise tab reuses the manager triage body (all-scope strip)."""
+    """The Supervise tab renders the unified action-queue body (calm header subline)."""
     from app.dependencies import require_user
     from app.main import app
 
@@ -175,7 +175,8 @@ def test_supervise_tab_renders_for_manager(client: TestClient, manager_user: Use
     finally:
         app.dependency_overrides.pop(require_user, None)
     assert r.status_code == 200
-    assert "open value" in r.text
+    # Calm-header money subline always renders for a supervisor.
+    assert "avg margin" in r.text
 
 
 def test_unknown_tab_404s(client: TestClient):

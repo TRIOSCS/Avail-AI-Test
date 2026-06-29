@@ -1497,22 +1497,51 @@ GET /v2/partials/approvals?lens=          (shell: stage-tab switcher + lazy #bp-
     |                        pinned prepayment queue (approver-only) + neutral empty state
     |                        ("No prepayment requests" — approval-only stage)
     +-- supervise       --> GET /partials/approvals/supervise   (_render_supervise_body)
-                             services/buyplan_hub.supervise_overview (triage strip:
-                             approvals / SO+PO verify / overdue / flagged / halted)
-                             + deals_board(scope=all) + completed_archive(scope=all).
-                             Triage forms post origin=supervise so the action re-renders
-                             THIS body into #bp-hub-body.
+                             services/buyplan_hub.supervise_overview (strip + a single
+                             unified `queue` — see below) + deals_board(scope=all)
+                             + completed_archive(scope=all). Action forms post
+                             origin=supervise so the action re-renders THIS body into
+                             #bp-hub-body.
 ```
 
-**Deal-card naming + denser tiles.** `services/buyplan_naming.build_card_title` is the
-single shared title helper — every actionable surface derives the identical
-`{SalesOrder#} - {Customer} - {Owner} - {Type}` title (missing fields → em dash):
-deal-board cards end `- BP` (Owner = the Account Manager / `BuyPlan.submitted_by`),
-SO-approval triage rows end `- SO` (Owner = the Account Manager), PO-approval
-(`po_pending_verify`) triage rows end `- PO` (Owner = the Buyer / `BuyPlanLine.buyer`).
-`_deal_card` also exposes `tso` (`sales_order_number`), `po_numbers` (distinct
-`BuyPlanLine.po_number`s — OUR vendor POs, not `customer_po_number`) and `primary_mpn`
-so the tile shows the deal at a glance without opening it. **Flagged-issue honesty:**
+**Supervise lens — unified action queue (presentation-only).** The Supervise lens
+(`_supervise.html`) renders **one risk-first action queue** instead of the former six
+differently-styled triage sections. `supervise_overview` now returns
+`{strip, queue}` (the old `triage` key is removed): the six source queries (approvals,
+SO-verify, halted, overdue POs, PO-verify, flagged) are reshaped into ONE flat list of
+**uniform row dicts** keyed by `kind`
+(`halted`/`flagged`/`overdue`/`approve`/`verify_so`/`verify_po`), each carrying
+`label, priority, plan_id, line_id, customer_name, so_number, mpn, vendor_name,
+owner_name, owner_role` (`AM` for plan kinds / `Buyer` for line kinds), `value` +
+`margin_pct` (always the parent plan's deal totals), `waiting_since` (the age/sort clock
+— `plan.created_at` for approve/verify_so/halted, `coalesce(line.last_nudge_at,
+plan.approved_at)` for overdue, `line.created_at` for verify_po/flagged) and
+`issue_reason` (flagged only). The list is sorted `(priority, waiting_since)` —
+risk-first (`halted→flagged→overdue→approve→verify_so→verify_po`), oldest-first within
+each tier (`_QUEUE_PRIORITY` / `_QUEUE_LABEL` module consts). The template wraps a calm
+header (headline count + money subline) and Alpine `qf` filter chips with live per-kind
+counts, then one hero "Needs you now" card (a `queue_row(row)` Jinja macro: kind pill +
+customer + muted fact line + age/value/margin signals + the SAME per-kind action
+routes/targets as before), then a collapsed pipeline board (`_board.html` embedded,
+scope=all, archive passthrough). The template role-gates rows exactly as the old sections
+did — `approve` only when `can_approve`, `verify_so`/`verify_po` only when `is_ops` — and
+derives the headline/chips/rows from that one filtered list so they always agree. The
+queue is data-driven, so the later approvals-workflow rework (drop auto-approve, fold
+verify-SO into the single manager approval) simply stops emitting those kinds with NO
+template change. This is the reference "My Queue" pattern for the broader approvals module.
+
+**Deal-card naming + de-noised tiles.** `services/buyplan_naming.build_card_title` remains
+the single shared title helper — `_deal_card` still computes the canonical
+`{SalesOrder#} - {Customer} - {Owner} - {Type}` title into `card_title` for any caller
+that wants the one-string form — but the **de-noised board card** (`_board.html`, shared by
+the Buy Plans / Sales Orders / Supervise surfaces) now renders **discrete fields** instead:
+a bold **Customer** headline, then a muted `SO {tso} · {owner_name}` line (Owner = the
+Account Manager / `BuyPlan.submitted_by`), the value + one margin badge, and a light
+part/PO fact line. The unified supervise queue rows likewise use discrete fields (kind
+pill + customer + middot fact line), not `card_title`. `_deal_card` still exposes `tso`
+(`sales_order_number`), `po_numbers` (distinct `BuyPlanLine.po_number`s — OUR vendor POs,
+not `customer_po_number`) and `primary_mpn` so the tile shows the deal at a glance without
+opening it. **Flagged-issue honesty:**
 `supervise_overview` flagged rows carry `issue_reason` (`buyplan_hub._issue_reason`:
 buyer's `issue_note` when set, else the humanised `issue_type`); the detail page's
 "AI Insights" indicator shows the worst flag's verbatim reason via
