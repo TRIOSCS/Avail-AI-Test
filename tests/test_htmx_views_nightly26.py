@@ -167,7 +167,7 @@ class TestEditCompanyDirect:
 
         company = _make_company(db_session, owner=test_user)
         mock_req = _mock_form_request(
-            fields={"name": "Updated N26", "website": "https://updated.com", "industry": "Tech"}
+            fields={"name": "Updated N26", "website": "https://updated.com", "industry": "Aerospace"}
         )
         with patch("app.routers.htmx.companies.company_detail_partial", new_callable=AsyncMock) as mock_detail:
             mock_detail.return_value = HTMLResponse("company detail")

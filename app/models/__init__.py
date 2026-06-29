@@ -32,6 +32,7 @@ from .crm import (  # noqa: F401
     AccountCollaborator,
     Company,
     CompanyAttachment,
+    CrmFieldHistory,
     CustomerSite,
     SavedView,
     SiteContact,

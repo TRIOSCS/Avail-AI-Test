@@ -268,6 +268,15 @@
         {% if contact.is_archived %}
         <span class='px-1 py-0.5 text-[11px] font-semibold rounded bg-gray-200 text-gray-600 flex-shrink-0'>Archived</span>
         {% endif %}
+        {# CRM P5 trust — completeness pill (only when incomplete; mirrors the role/DNC pills). #}
+        {% set _compl = crm_completeness(contact) %}
+        {% if _compl.pct < 100 %}
+        <span class='px-1 py-0.5 text-[11px] font-medium rounded flex-shrink-0
+                     {% if _compl.pct >= 50 %}bg-amber-100 text-amber-700{% else %}bg-rose-100 text-rose-700{% endif %}'
+              title='Profile {{ _compl.pct }}% complete{% if _compl.missing %} — missing: {{ _compl.missing|join(", ") }}{% endif %}'>
+          {{ _compl.pct }}%
+        </span>
+        {% endif %}
       </div>
     </td>
     {# Title cell #}
@@ -360,6 +369,14 @@
                 <path stroke-linecap='round' stroke-linejoin='round' d='M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13'/>
               </svg>
               Files
+            </button>
+            <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/customers/{{ company.id }}/contacts/{{ contact.id }}/history-modal'}); km=false"
+                    role='menuitem'
+                    class='w-full flex items-center gap-1.5 text-left px-3 py-1.5 text-gray-600 hover:bg-gray-50'>
+              <svg class='h-3.5 w-3.5 text-gray-400' fill='none' viewBox='0 0 24 24' stroke='currentColor' stroke-width='2'>
+                <path stroke-linecap='round' stroke-linejoin='round' d='M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z'/>
+              </svg>
+              History
             </button>
             {% if not contact.is_primary %}
             <button hx-post='/v2/partials/customers/{{ company.id }}/sites/{{ contact.customer_site_id }}/contacts/{{ contact.id }}/primary'

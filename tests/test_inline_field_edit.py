@@ -113,9 +113,16 @@ def site_and_contact(db_session: Session, test_company: Company):
 
 class TestCompanyFieldEdit:
     def test_get_edit_text_field_returns_input(self, owner_client, test_company):
-        resp = owner_client.get(f"/v2/partials/customers/{test_company.id}/field/edit/industry")
+        resp = owner_client.get(f"/v2/partials/customers/{test_company.id}/field/edit/website")
         assert resp.status_code == 200
         assert "<input" in resp.text
+
+    def test_get_edit_industry_returns_select(self, owner_client, test_company):
+        # CRM P5 trust: industry is now a constrained pick-list (select, not free text).
+        resp = owner_client.get(f"/v2/partials/customers/{test_company.id}/field/edit/industry")
+        assert resp.status_code == 200
+        assert "<select" in resp.text
+        assert "Aerospace" in resp.text
 
     def test_get_edit_select_field_returns_select(self, owner_client, test_company):
         resp = owner_client.get(f"/v2/partials/customers/{test_company.id}/field/edit/account_type")

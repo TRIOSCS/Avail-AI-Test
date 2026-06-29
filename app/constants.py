@@ -756,6 +756,34 @@ class ContactRole(StrEnum):
     OTHER = "other"
 
 
+# Canonical CRM company-industry pick-list (CRM P5 trust). Constrains the inline
+# industry editor + the create/edit account forms to a defined vocabulary so the
+# field stays clean/segmentable. Enforcement lives in
+# app/routers/htmx/companies.py:apply_company_field (accepts a value in this list
+# OR unchanged-from-current, so legacy free-text values are preserved on no-op
+# saves but new values are constrained). Exposed to templates as the
+# ``crm_industries`` Jinja2 global (app/template_env.py).
+CRM_INDUSTRIES: tuple[str, ...] = (
+    "Aerospace",
+    "Defense",
+    "Automotive",
+    "Medical Devices",
+    "Industrial",
+    "Telecommunications",
+    "Consumer Electronics",
+    "Computing & Data Center",
+    "Contract Manufacturing (EMS)",
+    "Distribution",
+    "Energy & Power",
+    "Semiconductor",
+    "Networking",
+    "Test & Measurement",
+    "Education & Research",
+    "Government",
+    "Other",
+)
+
+
 class EventType(StrEnum):
     """Canonical activity_log.event_type values (Communication-Intelligence kind)."""
 

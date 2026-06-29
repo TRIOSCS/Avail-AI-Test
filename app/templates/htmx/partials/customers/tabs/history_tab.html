@@ -1,0 +1,25 @@
+{# history_tab.html — Account History tab: per-field change audit trail.
+   A compact, read-only feed of who changed which field (old→new) and when —
+   the field-DIFF complement to the Activity tab's outreach timeline.
+
+   Receives: company (Company), history (list[CrmFieldHistory], newest-first),
+             field_labels (dict[str, str]).
+   Called by: company_tab route (tab=="history") in app/routers/htmx/companies.py.
+   Depends on: _field_history_list.html, Tailwind CSS.
+#}
+<div class="space-y-4" id="history-tab-{{ company.id }}">
+  <div class="bg-white rounded-lg border border-gray-200 overflow-hidden">
+    <div class="px-4 py-2.5 bg-gray-50 border-b flex items-center gap-2">
+      <svg class="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+      </svg>
+      <h3 class="text-sm font-semibold text-gray-700">Field changes</h3>
+      {% if history %}
+      <span class="inline-flex items-center px-1.5 py-0.5 text-xs font-medium rounded-full bg-gray-100 text-gray-600">{{ history|length }}</span>
+      {% endif %}
+    </div>
+    <div class="px-4 py-3">
+      {% include "htmx/partials/customers/_field_history_list.html" %}
+    </div>
+  </div>
+</div>

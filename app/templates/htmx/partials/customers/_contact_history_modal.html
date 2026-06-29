@@ -1,0 +1,20 @@
+{# _contact_history_modal.html — global-modal body: a SiteContact's field-change
+   history (CRM P5 trust). Loaded into #modal-content via
+   $dispatch('open-modal', {url: '/v2/partials/customers/{company_id}/contacts/{contact_id}/history-modal'})
+   from the contact-card kebab "History" action. The base modal renders the
+   ✕ / backdrop / Escape affordances.
+
+   Receives: company (Company), contact (SiteContact),
+             history (list[CrmFieldHistory], newest-first), field_labels (dict).
+   Called by: GET /v2/partials/customers/{company_id}/contacts/{contact_id}/history-modal
+   Depends on: the global modal wrapper, _field_history_list.html.
+#}
+<div id="contact-history-modal-body" class="p-5">
+  <h3 id="modal-title" class="text-sm font-semibold text-gray-900">
+    Field history
+    <span class="font-normal text-gray-600">· {{ contact.full_name or "Contact" }}</span>
+  </h3>
+  <div class="mt-4">
+    {% include "htmx/partials/customers/_field_history_list.html" %}
+  </div>
+</div>

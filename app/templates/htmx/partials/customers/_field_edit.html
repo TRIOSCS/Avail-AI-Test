@@ -21,6 +21,11 @@
             class='text-sm border border-brand-300 rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-brand-500 bg-white'
             x-init='$el.focus()'>
       <option value=''>— clear —</option>
+      {# Preserve a legacy / out-of-list current value so it stays selectable
+         (apply_company_field accepts an unchanged value). #}
+      {% if _val and _val not in meta.choices %}
+      <option value='{{ _val }}' selected>{{ _val }} (current)</option>
+      {% endif %}
       {% for c in meta.choices %}
       <option value='{{ c }}' {% if _val == c %}selected{% endif %}>{{ c }}</option>
       {% endfor %}

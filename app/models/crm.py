@@ -396,6 +396,40 @@ class SiteContact(Base):
     )
 
 
+class CrmFieldHistory(Base):
+    """Per-record field-change audit trail for CRM companies + site contacts.
+
+    One row per single-field inline edit that actually changed a value (old→new,
+    field, who, when). Polymorphic by (entity_type, entity_id) — mirroring the
+    approval_requests subject pair (migration 159) and alert_seen.ref_id — so the
+    same table serves both Company ('company') and SiteContact ('contact') without
+    two near-identical tables. This is the field-DIFF log; the outreach/activity
+    timeline (ActivityLog) is a separate concern (calls/emails/notes).
+
+    Distinct from companies/site_contacts.modified_by_id (auto-stamped by
+    app/audit_listeners.py), which only records the LATEST editor — this table keeps
+    the full ordered history of what each field was before and after.
+
+    Called by: app/services/crm_field_history.py (record/query),
+        app/routers/htmx/companies.py (inline field POST handlers + history views)
+    Depends on: User
+    """
+
+    __tablename__ = "crm_field_history"
+    id = Column(Integer, primary_key=True)
+    entity_type = Column(String(20), nullable=False)  # 'company' | 'contact'
+    entity_id = Column(Integer, nullable=False)
+    field_name = Column(String(64), nullable=False)
+    old_value = Column(Text)
+    new_value = Column(Text)
+    changed_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+
+    changed_by = relationship("User", foreign_keys=[changed_by_id])
+
+    __table_args__ = (Index("ix_crm_field_history_entity", "entity_type", "entity_id", "created_at"),)
+
+
 class AccountCollaborator(Base):
     """Account-level collaborator — a user with helper access to a CRM company.
 
