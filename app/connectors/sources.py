@@ -2,6 +2,7 @@
 
 import asyncio
 import random
+import re
 import threading
 import time
 from abc import ABC, abstractmethod
@@ -13,6 +14,30 @@ from loguru import logger
 from ..utils import safe_float, safe_int
 from ._core_attrs import clean_str
 from .errors import ConnectorAuthError, ConnectorError, ConnectorQuotaError, ConnectorRateLimitError
+
+# ── Secret redaction for logged exception text ───────────────────────
+# Connectors that authenticate with the API key as a URL query param (Mouser,
+# element14, OEMSecrets, Nexar REST) leak that key the moment httpx raises an
+# HTTPStatusError: str(HTTPStatusError) embeds the FULL request URL, including
+# ``?apiKey=SECRET``. BaseConnector logs that string at WARNING, which fans out
+# to every loguru sink (stdout / file / docker logs). Sentry's before_send hook
+# only scrubs events shipped to Sentry — it does NOT touch the local log sinks —
+# so the raw key would otherwise sit in plaintext logs. Redact before logging.
+# The secret keyword may be the whole param name (``apiKey``) or the suffix of a
+# dotted/underscored one (element14's ``callInfo.apiKey``); a preceding separator
+# (start-of-name, ``.``, ``_`` or ``-``) keeps ``monkey``/``donkey`` from matching.
+_SECRET_QS_RE = re.compile(r"(?i)([?&](?:[\w.-]*[._-])?(?:api[_-]?key|apikey|key|token)=)[^&\s'\"]+")
+
+
+def _redact_secrets(text: str) -> str:
+    """Replace secret query-param values (apiKey/api_key/key/apikey/token) with
+    REDACTED.
+
+    Used to sanitize an exception's ``str()`` before it is written to the logs,
+    since httpx error messages embed the full request URL with its query string.
+    """
+    return _SECRET_QS_RE.sub(r"\1REDACTED", text)
+
 
 # ── Async-compatible circuit breaker ─────────────────────────────────
 # Opens after `fail_max` consecutive failures, resets after `reset_timeout` seconds.
@@ -153,14 +178,14 @@ class BaseConnector(ABC):
                 if attempt < self.max_retries:
                     await asyncio.sleep(2**attempt + random.uniform(0, 1))
                 else:
-                    logger.warning(f"{self.__class__.__name__} failed for {part_number}: {e}")
+                    logger.warning(f"{self.__class__.__name__} failed for {part_number}: {_redact_secrets(str(e))}")
             except Exception as e:
                 self._breaker.record_failure()
                 last_err = e
                 if attempt < self.max_retries:
                     await asyncio.sleep(2**attempt + random.uniform(0, 1))
                 else:
-                    logger.warning(f"{self.__class__.__name__} failed for {part_number}: {e}")
+                    logger.warning(f"{self.__class__.__name__} failed for {part_number}: {_redact_secrets(str(e))}")
         if last_err is not None:
             raise last_err  # propagate so caller can track the error
         raise RuntimeError(
