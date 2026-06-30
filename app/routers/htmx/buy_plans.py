@@ -108,7 +108,7 @@ def _require_po_cutter(user: User) -> None:
         raise HTTPException(403, "Only buyers and managers can re-source / claim lines")
 
 
-_APPROVALS_TABS = ("my_queue", "sales_orders", "buy_plans", "purchase_orders", "prepayments", "supervise")
+_APPROVALS_TABS = ("my_queue", "pipeline", "sales_orders", "buy_plans", "purchase_orders", "prepayments", "supervise")
 
 
 _TAB_APPROVE_ATTR = {
@@ -123,12 +123,12 @@ _TAB_APPROVE_ATTR = {
 def _default_lens(user: User, db: Session) -> str:
     """Pick the landing stage tab for the Approvals hub based on the user's role.
 
-    - managers/admins/ops land on Supervise (until the Pipeline surface ships in Phase C),
+    - managers/admins/ops land on Pipeline — the 4-stage deal board (Phase C),
     - everyone else (buyers, sales, traders) lands on My Queue — their personal,
       role-aware "what needs YOU now" surface.
     """
     if _can_supervise(user, db):
-        return "supervise"
+        return "pipeline"
     return "my_queue"
 
 
@@ -196,6 +196,9 @@ async def approvals_tab_partial(
 
     if lens == "my_queue":
         return _render_my_queue_body(request, user, db)
+
+    if lens == "pipeline":
+        return _render_pipeline_body(request, user, db, scope)
 
     ctx = _base_ctx(request, user, "buy-plans")
     if lens in _TAB_APPROVE_ATTR:
@@ -525,6 +528,45 @@ def _render_my_queue_body(request: Request, user: User, db: Session) -> HTMLResp
     ctx = _base_ctx(request, user, "buy-plans")
     ctx.update({"queue": my_queue(db, user), "user": user})
     return template_response("htmx/partials/approvals/_surface_my_queue.html", ctx)
+
+
+def _render_pipeline_body(request: Request, user: User, db: Session, scope: str = "") -> HTMLResponse:
+    """Build + render the Pipeline surface body for ``user`` into ``#bp-hub-body``.
+
+    The Pipeline is the deal flow as cards in the four canonical stages: three visible
+    columns Build (DRAFT) · Approve (PENDING) · Purchase (ACTIVE|INBOUND), plus a collapsed
+    Done (COMPLETED) summary below. Each column is one ``deals_board`` call with an explicit
+    status filter so the read model stays the single source of truth (see Phase B / the
+    rework design's "Two surfaces via lens values"). Done comes from ``completed_archive``.
+
+    Scope is role-resolved exactly like the standalone board: PO-cutters + ops may toggle
+    All/Mine; sales/traders are locked to ``mine`` so no other rep's deals leak. The Mine/All
+    toggle reloads THIS body in place (hx-target #bp-hub-body, hx-push-url="false").
+    """
+    from ...services.buyplan_hub import completed_archive, deals_board
+
+    can_all = _can_see_all_deals(user, db)
+    board_scope = _resolve_deal_scope(scope, can_all)
+
+    build = deals_board(db, user, scope=board_scope, statuses=[BuyPlanStatus.DRAFT.value])
+    approve = deals_board(db, user, scope=board_scope, statuses=[BuyPlanStatus.PENDING.value])
+    purchase = deals_board(
+        db, user, scope=board_scope, statuses=[BuyPlanStatus.ACTIVE.value, BuyPlanStatus.INBOUND.value]
+    )
+
+    ctx = _base_ctx(request, user, "buy-plans")
+    ctx.update(
+        {
+            "build_col": build["draft"],
+            "approve_col": approve["pending"],
+            "purchase_col": purchase["active"],
+            "archive": completed_archive(db, user, scope=board_scope),
+            "scope": board_scope,
+            "can_see_all_deals": can_all,
+            "user": user,
+        }
+    )
+    return template_response("htmx/partials/approvals/_surface_pipeline.html", ctx)
 
 
 def _render_supervise_body(request: Request, user: User, db: Session) -> HTMLResponse:

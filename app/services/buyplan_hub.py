@@ -307,6 +307,10 @@ _STATUS_TO_COLUMN: dict[str, str] = {
     BuyPlanStatus.PENDING: "pending",
     BuyPlanStatus.ACTIVE: "active",
     BuyPlanStatus.HALTED: "active",
+    # INBOUND is a sub-status of the Purchase stage (goods inbound, awaiting receipt) —
+    # it buckets with ACTIVE so the Pipeline's Purchase column (statuses=[ACTIVE, INBOUND])
+    # surfaces it. Previously dropped by the safety net, which silently hid inbound deals.
+    BuyPlanStatus.INBOUND: "active",
     # COMPLETED → archive section (see completed_archive), not an active column
     # CANCELLED → omitted (no entry)
 }
@@ -451,6 +455,10 @@ def _deal_card(plan: BuyPlan, user: object) -> dict:
         "primary_mpn": _primary_mpn(plan),
         "value": plan.total_cost,
         "margin_pct": plan.total_margin_pct,
+        # Raw lifecycle status — the Pipeline card maps it to a 4-stage index for the
+        # "who-has-the-ball" pip stepper (DRAFT→Build, PENDING→Approve,
+        # ACTIVE|INBOUND→Purchase, COMPLETED→Done). stage_label keeps the legacy vocabulary.
+        "status": plan.status,
         "stage_label": _STAGE_LABELS.get(plan.status, plan.status),
         "blocker": _compute_blocker(plan),
         "po_progress": (verified_count, len(active_lines)),

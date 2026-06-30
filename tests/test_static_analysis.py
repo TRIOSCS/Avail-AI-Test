@@ -545,7 +545,7 @@ def test_inline_button_sizing_does_not_grow():
 
     Macro files are the canonical source and are excluded. Ratchet.
     """
-    BASELINE = 228  # +2 My Queue surface filter-chip pills (same rounded-full lens/scope pill pattern, no .btn-* equivalent; Approvals rework Phase B); was 226 (+2 supervise filter-chips), 224 after the UI program (was 280)
+    BASELINE = 229  # +1 Pipeline surface Mine/All scope-toggle pill (same rounded-full lens/scope pill pattern as _board.html, no .btn-* equivalent; Approvals rework Phase C); was 228 (+2 My Queue filter-chip pills), 226 (+2 supervise filter-chips), 224 after the UI program (was 280)
     count = _tpl_regex_count(r'<button[^>]*class="[^"]*\bp[xy]-[0-9]', exclude={"_macros.html"})
     assert count <= BASELINE, (
         f"inline-sized <button> rose to {count} (baseline {BASELINE}). Use .btn-sm/md/lg or the btn_* macros."

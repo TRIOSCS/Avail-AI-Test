@@ -165,8 +165,8 @@ def test_buy_plans_tab_sales_locked_to_mine_no_toggle(client: TestClient, sales_
     assert "?scope=mine" not in resp.text
 
 
-def test_hub_shell_manager_defaults_to_supervise(client: TestClient, manager_user):
-    """A manager with no lens lands on the Supervise tab body."""
+def test_hub_shell_manager_defaults_to_pipeline(client: TestClient, manager_user):
+    """A manager with no lens lands on the Pipeline tab body (Phase C default)."""
     from app.dependencies import require_user
     from app.main import app
 
@@ -176,7 +176,7 @@ def test_hub_shell_manager_defaults_to_supervise(client: TestClient, manager_use
     finally:
         app.dependency_overrides.pop(require_user, None)
     assert resp.status_code == 200
-    assert "/v2/partials/approvals/supervise" in resp.text
+    assert "/v2/partials/approvals/pipeline" in resp.text
 
 
 def test_hub_supervise_button_hidden_for_sales(client: TestClient, sales_user):
