@@ -609,7 +609,7 @@ async def vendor_tab(
     else:  # offers
         offers = (
             db.query(Offer)
-            .filter(Offer.vendor_name == vendor.display_name)
+            .filter(Offer.vendor_name_normalized == vendor.normalized_name)
             .order_by(Offer.created_at.desc().nullslast())
             .limit(50)
             .all()
