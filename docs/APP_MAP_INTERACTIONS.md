@@ -1428,12 +1428,14 @@ flow. See APP_MAP_DATABASE `po_cancellations`.
 
 **Approvals module — lifecycle stage-tab read flow (SP-1).** `/v2/approvals` is its own
 primary-nav tab (legacy `/v2/buy-plans` 302-redirects to it, preserving `?lens=`) rendering
-a stage-tab shell (`partials/buy_plans/hub.html`): a switcher over the five **lifecycle
-stages** + a lazy `#bp-hub-body` that loads the active stage tab body. The shell route
-`GET /v2/partials/approvals?lens=` (alias `/v2/partials/buy-plans`) resolves the stage
-(`sales_orders`/`buy_plans`/`purchase_orders`/`prepayments`/`supervise`), falling back to a
-**role-derived default** (`_default_lens`): managers/admins/ops → Supervise, buyers →
-Purchase Orders, everyone else → Buy Plans. Only the **Supervise** tab is gate-rendered
+a stage-tab shell (`partials/buy_plans/hub.html`): a switcher over **My Queue** + the five
+**lifecycle stages** + a lazy `#bp-hub-body` that loads the active tab body. The shell route
+`GET /v2/partials/approvals?lens=` (alias `/v2/partials/buy-plans`) resolves the tab
+(`my_queue`/`sales_orders`/`buy_plans`/`purchase_orders`/`prepayments`/`supervise`), falling
+back to a **role-derived default** (`_default_lens`): managers/admins/ops → Supervise,
+everyone else (buyers/sales/traders) → **My Queue** (the Approvals-rework Phase B role-aware
+"what needs YOU now" surface; Pipeline replaces Supervise as the supervisor default in
+Phase C). Only the **Supervise** tab is gate-rendered
 (`_can_supervise` = manager/admin OR ops verification-group member); the other four stage
 tabs are always shown — the *work surface* and the *pinned approval section* inside each
 gate further by role. URL paths are dash-cased (`/v2/partials/approvals/<stage>`); lens keys
@@ -1530,7 +1532,25 @@ queue is data-driven, so the later approvals-workflow rework (drop auto-approve,
 verify-SO into the single manager approval) simply stops emitting those kinds with NO
 template change. This is the reference "My Queue" pattern for the broader approvals module.
 
-**My Queue foundation (Approvals rework Phase A — service-layer only, no UI yet).**
+**My Queue surface (Approvals rework Phase B — UI over the Phase A foundation).** The
+`my_queue` lens renders `approvals/_surface_my_queue.html` via `_render_my_queue_body` (the
+`approvals_tab_partial` dispatch branch, shared by the approve / verify-po handlers when an
+inline button posts `origin=my_queue` so the action re-renders the refreshed queue into
+`#bp-hub-body`). The surface is one calm header (`{n} items need you` / `You're all caught
+up` + money subline + Alpine `qf` filter chips with live counts) over ONE hero card of
+uniform rows. Each row is a CSS grid (`16px 84px 1fr auto auto auto auto`): a **3-band risk
+dot** (At-risk `bg-rose-500` = halted/returned/overdue; Decide `bg-accent-500` =
+approve/prepay; Routine `bg-brand-400` = verify/claim/cut-po/receive/draft) + uppercase
+microlabel · customer · muted secondary line · age (>72h amber) · value · margin badge
+(`badge-success ≥30 / badge-warning ≥15 / badge-danger`) · action rail. Two kinds carry
+**inline one-click actions** (`plan_approve` → Approve/Review, `po_verify` → Verify/Reject)
+posting the existing routes with `hx-push-url="false"` + `hx-target="#bp-hub-body"`; every
+other kind is a **whole-row link** to its detail screen (where its form / multi-step action
+lives), trailing `{action} →`. There is NO colored left rail (the dot + risk-first sort
+already encode risk). `prepay_approve` is a navigation row (its decision endpoint returns
+JSON, not a partial — inline one-click lands in Phase D).
+
+**My Queue foundation (Approvals rework Phase A — the service-layer read model).**
 `buyplan_hub.my_queue(db, user) -> list[QueueRow]` is the role-aware "what needs YOU now"
 read model. The six source queries supervise composes are extracted into module-level
 `_query_*` helpers (`_query_approval_plans`, `_query_so_pending_plans`,

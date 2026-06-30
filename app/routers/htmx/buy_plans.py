@@ -108,7 +108,7 @@ def _require_po_cutter(user: User) -> None:
         raise HTTPException(403, "Only buyers and managers can re-source / claim lines")
 
 
-_APPROVALS_TABS = ("sales_orders", "buy_plans", "purchase_orders", "prepayments", "supervise")
+_APPROVALS_TABS = ("my_queue", "sales_orders", "buy_plans", "purchase_orders", "prepayments", "supervise")
 
 
 _TAB_APPROVE_ATTR = {
@@ -123,15 +123,13 @@ _TAB_APPROVE_ATTR = {
 def _default_lens(user: User, db: Session) -> str:
     """Pick the landing stage tab for the Approvals hub based on the user's role.
 
-    - buyers land on the Purchase Orders stage (their PO cut queue),
-    - managers/admins/ops land on Supervise,
-    - everyone else (sales/trader) lands on the Buy Plans deal board.
+    - managers/admins/ops land on Supervise (until the Pipeline surface ships in Phase C),
+    - everyone else (buyers, sales, traders) lands on My Queue — their personal,
+      role-aware "what needs YOU now" surface.
     """
-    if user.role == UserRole.BUYER:
-        return "purchase_orders"
     if _can_supervise(user, db):
         return "supervise"
-    return "buy_plans"
+    return "my_queue"
 
 
 @router.get("/v2/partials/approvals", response_class=HTMLResponse)
@@ -195,6 +193,9 @@ async def approvals_tab_partial(
 
     if lens == "supervise":
         return _render_supervise_body(request, user, db)
+
+    if lens == "my_queue":
+        return _render_my_queue_body(request, user, db)
 
     ctx = _base_ctx(request, user, "buy-plans")
     if lens in _TAB_APPROVE_ATTR:
@@ -510,6 +511,22 @@ async def buy_plans_archive_partial(
     return template_response("htmx/partials/buy_plans/_archive_rows.html", ctx)
 
 
+def _render_my_queue_body(request: Request, user: User, db: Session) -> HTMLResponse:
+    """Build + render the My Queue surface body for ``user`` into ``#bp-hub-body``.
+
+    Shared by the ``my_queue`` lens dispatch and the my-queue-origin inline action returns
+    (approve / verify-po), so a one-click action re-renders the refreshed queue in place
+    rather than swapping in the single-plan detail. ``my_queue`` is already fully role-aware
+    (it gates which kinds it emits by the viewer's rights / role / ownership), so no extra
+    gating is needed here — Jinja consumes only the resolved ``QueueRow`` list.
+    """
+    from ...services.buyplan_hub import my_queue
+
+    ctx = _base_ctx(request, user, "buy-plans")
+    ctx.update({"queue": my_queue(db, user), "user": user})
+    return template_response("htmx/partials/approvals/_surface_my_queue.html", ctx)
+
+
 def _render_supervise_body(request: Request, user: User, db: Session) -> HTMLResponse:
     """Build + render the supervise lens body for ``user``.
 
@@ -714,6 +731,8 @@ async def buy_plan_approve_partial(
 
     if origin == "supervise":
         return _render_supervise_body(request, user, db)
+    if origin == "my_queue":
+        return _render_my_queue_body(request, user, db)
 
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
@@ -1010,6 +1029,8 @@ async def buy_plan_verify_po_partial(
 
     if origin == "supervise":
         return _render_supervise_body(request, user, db)
+    if origin == "my_queue":
+        return _render_my_queue_body(request, user, db)
 
     return await buy_plan_detail_partial(request, plan_id, user, db)
 

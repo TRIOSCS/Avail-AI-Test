@@ -1,12 +1,14 @@
 {#
   buy_plans/hub.html — Approvals hub shell with a lifecycle stage-tab switcher.
-  Five stages: Sales Orders, Buy Plans, Purchase Orders, Vendor Prepayments, Supervise.
-  The body lazy-loads the active stage tab partial into #bp-hub-body.
-  Receives: lens (str: 'sales_orders'|'buy_plans'|'purchase_orders'|'prepayments'|
-            'supervise'), can_supervise (bool), alert_markers (dict).
-  Called by: htmx_views.py buy_plans_list_partial (GET /v2/partials/approvals).
-  Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette; the per-stage tab bodies
-              under approvals/ (lazy-loaded into #bp-hub-body).
+  Tabs: My Queue (the role-aware "what needs YOU now" surface — the default landing for
+  non-supervisors), then the five lifecycle stages Sales Orders, Buy Plans, Purchase
+  Orders, Vendor Prepayments, Supervise. The body lazy-loads the active tab partial into
+  #bp-hub-body.
+  Receives: lens (str: 'my_queue'|'sales_orders'|'buy_plans'|'purchase_orders'|
+            'prepayments'|'supervise'), can_supervise (bool), alert_markers (dict).
+  Called by: htmx/buy_plans.py buy_plans_list_partial (GET /v2/partials/approvals).
+  Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette; the per-tab bodies under
+              approvals/ (lazy-loaded into #bp-hub-body) — my-queue → _surface_my_queue.html.
 #}
 <title hx-swap-oob="true">Approvals — AvailAI</title>
 
@@ -17,7 +19,7 @@
      (can_supervise). The work surface + the pinned approval section INSIDE each stage are
      what gate further by role. #}
   <div class="flex flex-wrap items-center gap-2 mb-5">
-    {% for l, label in [('sales_orders', 'Sales Orders'), ('buy_plans', 'Buy Plans'), ('purchase_orders', 'Purchase Orders'), ('prepayments', 'Vendor Prepayments'), ('supervise', 'Supervise')] %}
+    {% for l, label in [('my_queue', 'My Queue'), ('sales_orders', 'Sales Orders'), ('buy_plans', 'Buy Plans'), ('purchase_orders', 'Purchase Orders'), ('prepayments', 'Vendor Prepayments'), ('supervise', 'Supervise')] %}
     {% if l != 'supervise' or can_supervise %}
     {# Highlight is Alpine-reactive (:class on lens) so the active pill updates the
        instant a tab is clicked — before the server swap returns — and stays correct

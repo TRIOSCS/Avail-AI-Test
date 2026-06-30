@@ -1,0 +1,180 @@
+{#
+  approvals/_surface_my_queue.html — the "My Queue" surface body (Approvals rework Phase B).
+  The role-aware "what needs YOU now" queue: one calm header (count + money subline +
+  client-side filter chips), then ONE hero card with one uniform row per item, risk-first.
+
+  Row language (per the rework design system):
+    grid 16px · 84px · 1fr · auto · auto · auto · auto
+    → risk-band dot · KIND microlabel · identity (customer + muted line) · age · value
+      · margin badge · action rail.
+  Three risk bands (NOT one hue per kind): At-risk (rose-500) = halted/returned/overdue;
+  Decide (accent-500) = approve/prepay; Routine (brand-400) = verify/claim/cut-po/receive/
+  draft. The dot + risk-first sort encode risk — there is NO colored left rail.
+
+  Two kinds carry inline one-click actions (Approve, Verify); every other kind is a
+  whole-row link to its detail screen (where its form / multi-step action lives), trailing
+  "{action} →". Inline action forms post the EXISTING action routes with origin=my_queue so
+  the handler re-renders THIS body into #bp-hub-body; each sets hx-push-url="false".
+
+  Receives: queue (list[buyplan_hub.QueueRow], pre-sorted risk-first), user.
+  Called by: htmx/buy_plans.py _render_my_queue_body (the my_queue lens dispatch + the
+             approve / verify-po handlers when origin=my_queue).
+  Depends on: HTMX, Alpine.js, Tailwind (accent/brand/line palette), .btn-*/.badge-*/
+              .text-tertiary primitives. Jinja consumes ONLY QueueRow (no ORM access).
+#}
+
+{# ── Per-kind maps: risk band, dot/microlabel color, and the filter token ──
+   The filter token collapses plan_approve + prepay_approve into one "approve" chip and
+   po_verify into "verify" (mirrors the spec's Verify-SO+PO collapse). Rows x-show on it. #}
+{% set band_of = {
+  'halted': 'risk', 'plan_returned': 'risk', 'cut_po_overdue': 'risk',
+  'plan_approve': 'decide', 'prepay_approve': 'decide',
+  'po_verify': 'routine', 'claim': 'routine', 'cut_po': 'routine',
+  'receive': 'routine', 'plan_draft': 'routine'
+} %}
+{% set dot_of = {'risk': 'bg-rose-500', 'decide': 'bg-accent-500', 'routine': 'bg-brand-400'} %}
+{% set label_color_of = {'risk': 'text-rose-600', 'decide': 'text-accent-600', 'routine': 'text-brand-500'} %}
+{% set token_of = {
+  'halted': 'halted', 'plan_returned': 'returned', 'cut_po_overdue': 'overdue',
+  'plan_approve': 'approve', 'prepay_approve': 'approve', 'po_verify': 'verify',
+  'claim': 'claim', 'cut_po': 'cut_po', 'receive': 'receive', 'plan_draft': 'draft'
+} %}
+
+{# ── One uniform My-Queue row ── #}
+{% macro queue_row(row, band_of, dot_of, label_color_of, token_of) %}
+{% set band = band_of[row.kind] %}
+{% set token = token_of[row.kind] %}
+{% set inline_action = row.kind in ('plan_approve', 'po_verify') %}
+{% set m = row.extra.get('margin_pct') | float if row.extra.get('margin_pct') is not none else 0 %}
+{% set detail_url = row.detail_href %}
+{% set push_url = detail_url | replace('/partials', '') if detail_url else '' %}
+{% set ah = row.age_hours %}
+<div x-show="qf === 'all' || qf === '{{ token }}'"
+     class="grid grid-cols-[16px_84px_minmax(0,1fr)_auto_auto_auto_auto] items-center gap-3 px-4 py-2.5
+            {% if inline_action %}ring-1 ring-inset ring-accent-400{% else %}cursor-pointer hover:bg-brand-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500{% endif %}"
+     {% if not inline_action and detail_url %}
+     hx-get="{{ detail_url }}"
+     hx-target="#main-content"
+     hx-push-url="{{ push_url }}"
+     preload="mouseover"
+     tabindex="0"
+     role="link"
+     @keydown.enter.prevent="$el.click()"
+     @keydown.space.prevent="$el.click()"
+     {% endif %}>
+
+  {# 1 — risk-band dot (who-has-the-ball, micro scale) #}
+  <span class="h-2.5 w-2.5 rounded-full {{ dot_of[band] }}" aria-hidden="true"></span>
+
+  {# 2 — KIND microlabel #}
+  <span class="text-[11px] font-semibold uppercase tracking-wide {{ label_color_of[band] }}">{{ row.label }}</span>
+
+  {# 3 — identity: customer (the one bold thing) + muted, present-only secondary line #}
+  <div class="min-w-0">
+    <div class="text-sm font-semibold text-gray-900 truncate">{{ row.customer_name or '—' }}</div>
+    <div class="text-tertiary truncate">
+      {% set ns = namespace(shown=false) %}
+      {%- if row.tso -%}
+        <span class="font-mono">SO {{ row.tso }}</span>{% set ns.shown = true %}
+      {%- endif -%}
+      {%- if row.primary_mpn -%}
+        {% if ns.shown %}<span class="text-brand-300" aria-hidden="true"> · </span>{% endif %}<span class="font-mono">{{ row.primary_mpn }}</span>{% set ns.shown = true %}
+      {%- endif -%}
+      {%- if row.extra.get('vendor_name') -%}
+        {% if ns.shown %}<span class="text-brand-300" aria-hidden="true"> · </span>{% endif %}{{ row.extra.get('vendor_name') }}{% set ns.shown = true %}
+      {%- endif -%}
+      {%- if row.extra.get('owner_name') -%}
+        {% if ns.shown %}<span class="text-brand-300" aria-hidden="true"> · </span>{% endif %}{{ row.extra.get('owner_role') }} {{ row.extra.get('owner_name') }}{% set ns.shown = true %}
+      {%- endif -%}
+      {%- if row.extra.get('amount') is not none -%}
+        {% if ns.shown %}<span class="text-brand-300" aria-hidden="true"> · </span>{% endif %}${{ '{:,.0f}'.format(row.extra.get('amount') | float) }} prepay
+      {%- endif -%}
+    </div>
+  </div>
+
+  {# 4 — age (the only aging cue: >72h turns amber) #}
+  <span class="text-xs tabular-nums {% if ah > 72 %}text-amber-600 font-medium{% else %}text-gray-500{% endif %}">
+    {%- if ah < 1 -%}&lt;1h{%- elif ah < 24 -%}{{ ah | int }}h{%- else -%}{{ (ah / 24) | int }}d{%- endif -%}
+  </span>
+
+  {# 5 — value (second-loudest, right-aligned, tabular) #}
+  <span class="text-sm font-semibold tabular-nums text-gray-900 w-20 text-right">${{ '{:,.0f}'.format(row.value | float) if row.value else '0' }}</span>
+
+  {# 6 — margin health badge (exact _board thresholds) #}
+  <span class="{% if m >= 30 %}badge-success{% elif m >= 15 %}badge-warning{% else %}badge-danger{% endif %} w-12 justify-center">{{ '{:.0f}'.format(m) }}%</span>
+
+  {# 7 — action rail (quiet) #}
+  <div class="justify-self-end">
+    {% if row.kind == 'plan_approve' %}
+    <form hx-post="{{ row.action_url }}" hx-target="#bp-hub-body" hx-swap="innerHTML" hx-push-url="false" class="flex items-center gap-1.5">
+      <input type="hidden" name="origin" value="my_queue">
+      <button type="submit" name="action" value="approve" data-loading-disable class="btn-primary btn-sm">Approve</button>
+      {# Reject needs a reason — open the detail screen where the reason modal lives. #}
+      <a hx-get="{{ detail_url }}" hx-target="#main-content" hx-push-url="{{ push_url }}" class="btn-secondary btn-sm cursor-pointer">Review</a>
+    </form>
+    {% elif row.kind == 'po_verify' %}
+    <form hx-post="{{ row.action_url }}" hx-target="#bp-hub-body" hx-swap="innerHTML" hx-push-url="false" class="flex items-center gap-1.5">
+      <input type="hidden" name="origin" value="my_queue">
+      <button type="submit" name="action" value="approve" data-loading-disable class="btn-primary btn-sm">Verify</button>
+      <button type="submit" name="action" value="reject" data-loading-disable
+              hx-confirm="Send this PO back to the buyer?" class="btn-danger btn-sm">Reject</button>
+    </form>
+    {% else %}
+    <span class="text-xs font-medium text-accent-600 whitespace-nowrap">{{ row.action_label }} →</span>
+    {% endif %}
+  </div>
+</div>
+{% endmacro %}
+
+{# ── Filter-chip counts: tally the queue by filter token (collapsed kinds share one) ── #}
+{% set counts = {} %}
+{% for r in queue %}
+  {% set t = token_of[r.kind] %}
+  {% set _ = counts.update({t: counts.get(t, 0) + 1}) %}
+{% endfor %}
+{# Risk-first chip order; each renders only when present (live counts). #}
+{% set chip_order = [
+  ('halted', 'Halted'), ('returned', 'Returned'), ('overdue', 'Overdue'),
+  ('approve', 'Approve'), ('verify', 'Verify'), ('claim', 'Claim'),
+  ('cut_po', 'Cut PO'), ('receive', 'Receive'), ('draft', 'Draft')
+] %}
+{% set total_value = queue | map(attribute='value') | select | map('float') | sum %}
+
+{# ── Header + hero card share one Alpine root for the client-side filter ── #}
+<div x-data="{ qf: 'all' }">
+
+  {# Calm header — count + money subline + filter chips #}
+  <div class="mb-4">
+    <div class="text-lg font-semibold text-gray-900">
+      {% if queue %}{{ queue | length }} item{{ 's' if queue | length != 1 }} need{{ '' if queue | length != 1 else 's' }} you{% else %}You're all caught up{% endif %}
+    </div>
+    {% if queue %}
+    <div class="text-sm text-gray-600">${{ '{:,.0f}'.format(total_value) }} in play</div>
+    <div class="mt-3 flex flex-wrap items-center gap-2">
+      <button type="button" @click="qf = 'all'"
+              :class="qf === 'all' ? 'bg-accent-600 text-white' : 'bg-brand-100 text-brand-600 hover:bg-brand-200'"
+              class="px-3 py-1 rounded-full text-xs font-medium transition-colors">All ({{ queue | length }})</button>
+      {% for token, label in chip_order %}
+      {% set c = counts.get(token, 0) %}
+      {% if c %}
+      <button type="button" @click="qf = '{{ token }}'"
+              :class="qf === '{{ token }}' ? 'bg-accent-600 text-white' : 'bg-brand-100 text-brand-600 hover:bg-brand-200'"
+              class="px-3 py-1 rounded-full text-xs font-medium transition-colors">{{ label }} ({{ c }})</button>
+      {% endif %}
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+
+  {# Hero card — one uniform row per item #}
+  {% if queue %}
+  <div class="bg-white rounded-lg border border-line-base shadow-card divide-y divide-line-subtle overflow-hidden">
+    {% for row in queue %}{{ queue_row(row, band_of, dot_of, label_color_of, token_of) }}{% endfor %}
+  </div>
+  {% else %}
+  <div class="bg-white rounded-lg border border-line-base shadow-card px-4 py-10 text-center text-sm text-brand-400">
+    You're all caught up. Nothing needs you right now.
+  </div>
+  {% endif %}
+
+</div>
