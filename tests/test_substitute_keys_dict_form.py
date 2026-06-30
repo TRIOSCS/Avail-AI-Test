@@ -43,5 +43,19 @@ def test_substitute_keys_skips_empty_dict_mpn():
     assert _substitute_keys(req) == [normalize_mpn_key("LM338T")]
 
 
+def test_substitute_keys_skips_none_dict_mpn():
+    # {"mpn": None} previously crashed: dict.get("mpn", "") returns None (the key
+    # exists), then None.strip() raised AttributeError. Must skip, not crash.
+    req = _req([{"mpn": None, "manufacturer": "TI"}, {"mpn": "LM338T"}])
+    assert _substitute_keys(req) == [normalize_mpn_key("LM338T")]
+
+
+def test_substitute_keys_skips_malformed_entries():
+    # Non-str/non-dict entries (None, ints) in the list previously crashed on
+    # .get()/.strip(); they must be skipped while valid entries still resolve.
+    req = _req([None, 12345, {"mpn": "LM338T"}, "LM317T"])
+    assert _substitute_keys(req) == [normalize_mpn_key("LM338T"), normalize_mpn_key("LM317T")]
+
+
 def test_substitute_keys_none():
     assert _substitute_keys(_req(None)) == []
