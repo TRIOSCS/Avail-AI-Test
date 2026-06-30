@@ -918,77 +918,11 @@ class TestJobContactDedup:
         mock_db.commit.assert_called_once()
         mock_db.close.assert_called_once()
 
-    def test_merges_duplicate_contacts(self):
-        """Duplicate contacts are merged — best kept, others deleted."""
-        mock_db = MagicMock()
-
-        # Simulate 1 duplicate group found
-        dupe = SimpleNamespace(customer_site_id=1, em="john@test.com", cnt=2)
-        dupe_query = MagicMock()
-        dupe_query.filter.return_value.group_by.return_value.having.return_value.all.return_value = [dupe]
-
-        # Create mock contacts for the duplicate group
-        contact1 = MagicMock(id=1, full_name=None, title=None, phone=None, notes=None, linkedin_url=None)
-        contact2 = MagicMock(
-            id=2, full_name="John Doe", title="Buyer", phone="555-1234", notes="Primary", linkedin_url=None
-        )
-
-        contacts_query = MagicMock()
-        contacts_query.filter.return_value.order_by.return_value.all.return_value = [contact1, contact2]
-
-        call_count = [0]
-
-        def side_effect_query(model, *args):
-            call_count[0] += 1
-            if call_count[0] == 1:
-                return dupe_query
-            return contacts_query
-
-        mock_db.query.side_effect = side_effect_query
-
-        with patch("app.database.SessionLocal", return_value=mock_db):
-            from app.jobs.maintenance_jobs import _job_contact_dedup
-
-            asyncio.run(_job_contact_dedup())
-
-        # contact1 (fewer fields) should be deleted
-        mock_db.delete.assert_called_once_with(contact1)
-        mock_db.commit.assert_called_once()
-        mock_db.close.assert_called_once()
-
-    def test_merges_fields_from_deleted_into_best(self):
-        """Best contact gets missing fields from duplicate before deletion."""
-        mock_db = MagicMock()
-
-        dupe = SimpleNamespace(customer_site_id=1, em="jane@test.com", cnt=2)
-        dupe_query = MagicMock()
-        dupe_query.filter.return_value.group_by.return_value.having.return_value.all.return_value = [dupe]
-
-        # contact1 has phone only, contact2 has name+title (more fields = best)
-        contact1 = MagicMock(id=1, full_name=None, title=None, phone="555-9999", notes=None, linkedin_url=None)
-        contact2 = MagicMock(id=2, full_name="Jane Smith", title="Manager", phone=None, notes=None, linkedin_url=None)
-
-        contacts_query = MagicMock()
-        contacts_query.filter.return_value.order_by.return_value.all.return_value = [contact1, contact2]
-
-        call_count = [0]
-
-        def side_effect_query(model, *args):
-            call_count[0] += 1
-            if call_count[0] == 1:
-                return dupe_query
-            return contacts_query
-
-        mock_db.query.side_effect = side_effect_query
-
-        with patch("app.database.SessionLocal", return_value=mock_db):
-            from app.jobs.maintenance_jobs import _job_contact_dedup
-
-            asyncio.run(_job_contact_dedup())
-
-        # contact1 deleted, contact2 (best) should absorb phone from contact1
-        mock_db.delete.assert_called_once_with(contact1)
-        mock_db.commit.assert_called_once()
+    # Merge behaviour (keeper selection, loser deletion, scalar backfill, and the
+    # critical child-row reassignment so attachments/tasks are NOT cascade-deleted)
+    # is covered against the real DB in tests/test_maintenance_jobs_dedup_cascade.py.
+    # A mock session can't exercise the real ORM cascade the old delete-based code
+    # data-lost on, so those assertions live there, not here.
 
     def test_error_rollback_and_reraise(self):
         """DB error triggers rollback and re-raises."""
