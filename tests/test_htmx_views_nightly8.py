@@ -785,8 +785,10 @@ class TestBuyPlansListPartial:
 
     @pytest.mark.parametrize(
         "query",
+        # The lens contract is now my_queue|pipeline; every non-empty value here is an
+        # UNKNOWN lens that falls back to the role-default lens and still renders the shell.
         ["", "?lens=deals", "?lens=orders", "?lens=supervise"],
-        ids=["default_lens", "lens_deals", "lens_orders", "lens_supervise"],
+        ids=["default_lens", "lens_deals", "lens_orders", "lens_supervise_unknown"],
     )
     def test_buy_plans_list(self, client: TestClient, db_session: Session, query):
         resp = client.get(f"/v2/partials/buy-plans{query}")

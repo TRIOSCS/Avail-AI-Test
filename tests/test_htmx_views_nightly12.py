@@ -363,15 +363,15 @@ class TestBuyPlanListPartial:
         assert resp.status_code == 200
         assert 'id="bp-hub-body"' in resp.text
 
-    def test_buy_plan_list_lens_buy_plans(self, client: TestClient) -> None:
-        resp = client.get("/v2/partials/approvals?lens=buy_plans")
+    def test_buy_plan_list_lens_pipeline(self, client: TestClient) -> None:
+        resp = client.get("/v2/partials/approvals?lens=pipeline")
         assert resp.status_code == 200
         assert 'hx-target="#bp-hub-body"' in resp.text
 
-    def test_buy_plan_list_lens_purchase_orders(self, client: TestClient) -> None:
-        resp = client.get("/v2/partials/approvals?lens=purchase_orders")
+    def test_buy_plan_list_lens_my_queue(self, client: TestClient) -> None:
+        resp = client.get("/v2/partials/approvals?lens=my_queue")
         assert resp.status_code == 200
-        assert "Purchase Orders" in resp.text
+        assert "My Queue" in resp.text
 
 
 class TestBuyPlanDetailPartial:

@@ -1,11 +1,9 @@
 """routers/htmx/buy_plans.py — Buy Plans / Approvals partial views (HTMX + Alpine).
 
-Server-rendered HTML partials for the Approvals (Buy Plans) hub: the stage-tab
-lens shell, sales-order new/create, the resource/orders/board/archive/supervise
-boards, and per-plan lifecycle actions (submit, approve, halt, confirm-po,
-resource, claim, verify-po, issue, cancel, reset). Plus the legacy /v2/buy-plans
-full-page redirect. Extracted verbatim from htmx_views.py (same `/v2` paths, same
-`htmx-views` tag).
+Server-rendered HTML partials for the Approvals (Buy Plans) hub: the two-tab lens
+shell (My Queue + Pipeline), sales-order new/create, buy-plan detail, and per-plan
+lifecycle actions (submit, approve, halt, confirm-po, resource, claim, verify-po,
+issue, cancel, reset). Plus the legacy /v2/buy-plans full-page redirect.
 
 Called by: app/main.py (router mount).
 Depends on: app.models, app.dependencies, app.database, app.services.approvals,
@@ -29,7 +27,6 @@ from ...constants import (
 )
 from ...database import get_db
 from ...dependencies import (
-    can_approve_buy_plans,
     get_buyplan_for_user,
     require_access,
     require_buyplan_approver,
@@ -109,16 +106,7 @@ def _require_po_cutter(user: User) -> None:
         raise HTTPException(403, "Only buyers and managers can re-source / claim lines")
 
 
-_APPROVALS_TABS = ("my_queue", "pipeline", "sales_orders", "buy_plans", "purchase_orders", "prepayments", "supervise")
-
-
-_TAB_APPROVE_ATTR = {
-    "sales_orders": "can_approve_buy_plans",
-    # SP-3: the Purchase Orders tab now surfaces the deal-level PURCHASE_ORDER gate, so it
-    # gates on the deal-level PO approver (the QP Purchasing section moved to QP-view inline).
-    "purchase_orders": "can_approve_purchase_orders",
-    "prepayments": "can_approve_prepayments",
-}
+_APPROVALS_TABS = ("my_queue", "pipeline")
 
 
 def _default_lens(user: User, db: Session) -> str:
@@ -141,10 +129,10 @@ async def buy_plans_list_partial(
     user: User = Depends(require_access(AccessKey.BUY_PLANS)),
     db: Session = Depends(get_db),
 ):
-    """Return the Approvals hub shell (stage-tab switcher).
+    """Return the Approvals hub shell (My Queue + Pipeline tab switcher).
 
-    The shell renders the five lifecycle stage tabs + a lazy body that loads the active
-    stage tab partial into ``#bp-hub-body``. Row data is fetched by the body, not here.
+    The shell renders the two lens tabs + a lazy body that loads the active tab partial
+    into ``#bp-hub-body``. Row data is fetched by the body, not here.
     ``/v2/partials/buy-plans`` is kept as a back-compat alias for in-flight htmx.
     """
     active_lens = lens if lens in _APPROVALS_TABS else _default_lens(user, db)
@@ -160,9 +148,6 @@ async def buy_plans_list_partial(
         {
             "lens": active_lens,
             "alert_markers": alert_markers,
-            # Only Supervise is gate-rendered in the shell; the four stage tabs are always
-            # shown (their work surface + pinned approval section gate by role inside).
-            "can_supervise": _can_supervise(user, db),
         }
     )
     return template_response("htmx/partials/buy_plans/hub.html", ctx)
@@ -182,8 +167,7 @@ async def pipeline_archive_partial(
     returns the next page of those cards (newest-completed first) so a "Load older" click
     appends in place. Scope is role-resolved exactly like the board so no other rep's
     completed deals leak. MUST be registered BEFORE the one-segment ``{tab}`` catch-all
-    below, or FastAPI routes "pipeline-archive" there as an unknown tab (404). Mirrors
-    ``buy_plans_archive_partial`` (the board's lazy archive page).
+    below, or FastAPI routes "pipeline-archive" there as an unknown tab (404).
     """
     from ...services.buyplan_hub import completed_archive
 
@@ -207,99 +191,23 @@ async def approvals_tab_partial(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Render one Approvals stage-tab body into ``#bp-hub-body``.
+    """Render one Approvals lens body into ``#bp-hub-body``.
 
-    Composes the re-homed work surface for the stage (deal board / buyer orders +
-    re-sourcing pool / neutral empty state) with a pinned per-gate "Pending approvals"
-    section (services.approvals.queue.build_queue_view), shown only when the viewer holds
-    that gate's approve right. ``supervise`` reuses the manager triage body. ``tab`` arrives
-    dash-cased (e.g. purchase-orders) and maps to the underscored stage key.
+    Two lenses survive the Phase F retirement: ``my_queue`` (the role-aware "what needs YOU
+    now" surface) and ``pipeline`` (the 4-stage deal board). ``tab`` arrives dash-cased
+    (e.g. my-queue) and maps to the underscored lens key; any other value 404s.
 
-    ``scope`` applies to the Buy Plans stage's deal board only: it is role-resolved exactly
-    like the standalone board (sales/traders locked to ``mine``), and its All/Mine toggle
-    reloads THIS whole tab body so the pinned approval section survives the swap.
+    ``scope`` applies to the Pipeline board only: it is role-resolved (sales/traders locked
+    to ``mine``), and its All/Mine toggle reloads THIS whole body in place.
     """
     lens = tab.replace("-", "_")
     if lens not in _APPROVALS_TABS:
         raise HTTPException(404, "Unknown approvals tab")
 
-    if lens == "supervise":
-        return _render_supervise_body(request, user, db)
-
     if lens == "my_queue":
         return _render_my_queue_body(request, user, db)
 
-    if lens == "pipeline":
-        return _render_pipeline_body(request, user, db, scope)
-
-    ctx = _base_ctx(request, user, "buy-plans")
-    if lens in _TAB_APPROVE_ATTR:
-        from ...services.approvals.queue import build_queue_view
-
-        ctx["view"] = build_queue_view(db, user, lens)
-        ctx["show_pending"] = bool(getattr(user, _TAB_APPROVE_ATTR[lens], False))
-
-    if lens == "buy_plans":
-        from ...services.buyplan_hub import completed_archive, deals_board
-
-        # Role-resolve the deal-board scope exactly like the standalone /board route, but
-        # point the All/Mine toggle at THIS tab URL so a toggle reloads the whole tab body
-        # (pinned approval section + board) rather than swapping in the bare board.
-        can_all = _can_see_all_deals(user, db)
-        board_scope = _resolve_deal_scope(scope, can_all)
-        ctx.update(
-            {
-                "board": deals_board(
-                    db,
-                    user,
-                    scope=board_scope,
-                    statuses=[BuyPlanStatus.ACTIVE.value, BuyPlanStatus.HALTED.value],
-                ),
-                "scope": board_scope,
-                "archive": completed_archive(db, user, scope=board_scope),
-                "can_see_all_deals": can_all,
-                "scope_toggle_url": "/v2/partials/approvals/buy-plans",
-            }
-        )
-        return template_response("htmx/partials/approvals/_tab_buy_plans.html", ctx)
-
-    if lens == "purchase_orders":
-        from ...services.buyplan_hub import buyer_line_queue, resourcing_pool_queue, team_line_queue
-
-        ctx.update(
-            {
-                "orders_queue": buyer_line_queue(db, user),
-                "team": team_line_queue(db, user),
-                "resource_queue": resourcing_pool_queue(db),
-                "can_claim": _can_resource(user),
-            }
-        )
-        return template_response("htmx/partials/approvals/_tab_purchase_orders.html", ctx)
-
-    if lens == "sales_orders":
-        from ...services.buyplan_hub import deals_board
-
-        can_all = _can_see_all_deals(user, db)
-        board_scope = _resolve_deal_scope(scope, can_all)
-        # DRAFT/PENDING work surface only. No `archive`: the Completed archive belongs to
-        # the Buy Plans tab, and the shared board renders it only when `archive` is passed.
-        ctx.update(
-            {
-                "board": deals_board(
-                    db,
-                    user,
-                    scope=board_scope,
-                    statuses=[BuyPlanStatus.DRAFT.value, BuyPlanStatus.PENDING.value],
-                ),
-                "scope": board_scope,
-                "can_see_all_deals": can_all,
-                "scope_toggle_url": "/v2/partials/approvals/sales-orders",
-            }
-        )
-        return template_response("htmx/partials/approvals/_tab_sales_orders.html", ctx)
-
-    # prepayments — approval-only stage (no work surface in SP-1)
-    return template_response("htmx/partials/approvals/_tab_prepayments.html", ctx)
+    return _render_pipeline_body(request, user, db, scope)
 
 
 @router.get("/v2/partials/approvals/sales-orders/new", response_class=HTMLResponse)
@@ -484,104 +392,6 @@ async def prepay_request_decide(
     return _render_my_queue_body(request, user, db)
 
 
-@router.get("/v2/partials/buy-plans/resource", response_class=HTMLResponse)
-async def buy_plans_resource_partial(
-    request: Request,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Open-claim queue body for the "Needs Re-sourcing" lens (pool-wide).
-
-    Lists every line whose cut PO was cancelled (vendor fell down) and is unassigned,
-    awaiting any PO-cutter to claim + backfill.
-    """
-    from ...services.buyplan_hub import resourcing_pool_queue
-
-    ctx = _base_ctx(request, user, "buy-plans")
-    ctx["queue"] = resourcing_pool_queue(db)
-    ctx["can_claim"] = _can_resource(user)
-    return template_response("htmx/partials/buy_plans/_resource_queue.html", ctx)
-
-
-@router.get("/v2/partials/buy-plans/orders", response_class=HTMLResponse)
-async def buy_plans_orders_partial(
-    request: Request,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Buyer Orders body (re-homed under the Purchase Orders stage tab): the actionable
-    per-line PO cut queue.
-
-    Also includes a read-only "Team Orders" awareness section listing open lines
-    assigned to OTHER buyers (see ``team_line_queue``).
-    """
-    from ...services.buyplan_hub import buyer_line_queue, team_line_queue
-
-    ctx = _base_ctx(request, user, "buy-plans")
-    ctx["queue"] = buyer_line_queue(db, user)
-    ctx["team"] = team_line_queue(db, user)
-    return template_response("htmx/partials/buy_plans/_orders_queue.html", ctx)
-
-
-@router.get("/v2/partials/buy-plans/board", response_class=HTMLResponse)
-async def buy_plans_board_partial(
-    request: Request,
-    scope: str = "",
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Deal board body (re-homed under the Buy Plans / Supervise stage tabs): stage-
-    grouped deal cards.
-
-    Scope is role-defaulted: PO-cutters + ops (``_can_see_all_deals``) default to
-    ``all`` and may toggle to ``mine``; sales/traders are locked to ``mine`` so no
-    other rep's plans leak.
-    """
-    from ...services.buyplan_hub import completed_archive, deals_board
-
-    can_all = _can_see_all_deals(user, db)
-    scope = _resolve_deal_scope(scope, can_all)
-
-    ctx = _base_ctx(request, user, "buy-plans")
-    ctx.update(
-        {
-            "board": deals_board(db, user, scope=scope),
-            "scope": scope,
-            "archive": completed_archive(db, user, scope=scope),
-            "can_see_all_deals": can_all,
-        }
-    )
-    return template_response("htmx/partials/buy_plans/_board.html", ctx)
-
-
-@router.get("/v2/partials/buy-plans/archive", response_class=HTMLResponse)
-async def buy_plans_archive_partial(
-    request: Request,
-    scope: str = "",
-    offset: int = 0,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Completed-transactions archive page (lazy "load older" chunk).
-
-    Returns just the rows partial (not the whole section) so an htmx "Load older" click
-    can append the next page in place. Scope is role-resolved exactly like the board so
-    no other rep's completed plans leak to a sales/trader user.
-    """
-    from ...services.buyplan_hub import completed_archive
-
-    scope = _resolve_deal_scope(scope, _can_see_all_deals(user, db))
-
-    ctx = _base_ctx(request, user, "buy-plans")
-    ctx.update(
-        {
-            "archive": completed_archive(db, user, scope=scope, offset=offset),
-            "scope": scope,
-        }
-    )
-    return template_response("htmx/partials/buy_plans/_archive_rows.html", ctx)
-
-
 def _render_my_queue_body(request: Request, user: User, db: Session) -> HTMLResponse:
     """Build + render the My Queue surface body for ``user`` into ``#bp-hub-body``.
 
@@ -641,55 +451,6 @@ def _render_pipeline_body(request: Request, user: User, db: Session, scope: str 
         }
     )
     return template_response("htmx/partials/approvals/_surface_pipeline.html", ctx)
-
-
-def _render_supervise_body(request: Request, user: User, db: Session) -> HTMLResponse:
-    """Build + render the supervise lens body for ``user``.
-
-    Shared by the ``GET /supervise`` route and the supervise-origin action returns.
-    Non-supervisors never see cross-user data: they get the mine-scope board instead
-    (defense in depth — the hub also hides the Supervise button for them).
-    """
-    from ...services.buyplan_hub import completed_archive, deals_board, supervise_overview
-
-    if not _can_supervise(user, db):
-        ctx = _base_ctx(request, user, "buy-plans")
-        ctx.update(
-            {
-                "board": deals_board(db, user, scope="mine"),
-                "scope": "mine",
-                "archive": completed_archive(db, user, scope="mine"),
-            }
-        )
-        return template_response("htmx/partials/buy_plans/_board.html", ctx)
-
-    ctx = _base_ctx(request, user, "buy-plans")
-    ctx.update(
-        {
-            "overview": supervise_overview(db),
-            "board": deals_board(db, user, scope="all"),
-            "archive": completed_archive(db, user, scope="all"),
-            "is_ops": _is_ops_member(user, db),
-            "is_manager": user.role in (UserRole.MANAGER, UserRole.ADMIN),
-            "can_approve": can_approve_buy_plans(user),
-            "user": user,
-        }
-    )
-    return template_response("htmx/partials/buy_plans/_supervise.html", ctx)
-
-
-@router.get("/v2/partials/buy-plans/supervise", response_class=HTMLResponse)
-async def buy_plans_supervise_partial(
-    request: Request,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Manager/ops "Supervise" lens body: triage panel + all-scope deal board.
-
-    Role-gated — a non-supervisor is served the mine-scope board so no other
-    user's plans leak (see ``_render_supervise_body``).
-    """
-    return _render_supervise_body(request, user, db)
 
 
 @router.get("/v2/partials/buy-plans/{plan_id}", response_class=HTMLResponse)
@@ -845,8 +606,6 @@ async def buy_plan_approve_partial(
     except ValueError as e:
         raise HTTPException(400, str(e))
 
-    if origin == "supervise":
-        return _render_supervise_body(request, user, db)
     if origin == "my_queue":
         return _render_my_queue_body(request, user, db)
 
@@ -881,8 +640,6 @@ async def buy_plan_halt_partial(
     except ValueError as e:
         raise HTTPException(400, str(e))
 
-    if origin == "supervise":
-        return _render_supervise_body(request, user, db)
     if origin == "my_queue":
         return _render_my_queue_body(request, user, db)
 
@@ -924,13 +681,7 @@ async def buy_plan_confirm_po_partial(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Buyer confirms PO.
-
-    Returns the refreshed detail partial by default (``origin=""``, the original
-    behavior). When ``origin == "queue"`` the call came from the buyer's Orders lens
-    and we return the re-rendered orders queue so the confirmed line drops out.
-    """
-
+    """Buyer confirms PO — returns the refreshed detail partial."""
     from ...services.buyplan_notifications import notify_po_confirmed, run_notify_bg
     from ...services.buyplan_workflow import confirm_po
 
@@ -940,7 +691,6 @@ async def buy_plan_confirm_po_partial(
     form = await request.form()
     po_number = form.get("po_number", "").strip()
     ship_date_str = form.get("estimated_ship_date", "")
-    origin = form.get("origin", "")
 
     if not po_number:
         raise HTTPException(400, "PO number is required")
@@ -960,9 +710,6 @@ async def buy_plan_confirm_po_partial(
         await run_notify_bg(notify_po_confirmed, plan_id, line_id=line_id)
     except ValueError as e:
         raise HTTPException(400, str(e))
-
-    if origin == "queue":
-        return await buy_plans_orders_partial(request, user, db)
 
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
@@ -1027,7 +774,6 @@ async def buy_plan_resource_line_partial(
     reason_code = form.get("reason_code", "").strip()
     reason_note = (form.get("reason_note") or "").strip() or None
     scope = form.get("scope", "line")
-    origin = form.get("origin", "")
     also_line_ids = [int(i) for i in form.getlist("also_line_ids")] if scope == "plan" else []
 
     if not reason_code:
@@ -1035,8 +781,6 @@ async def buy_plan_resource_line_partial(
 
     await _resource_lines_and_alert(plan_id, line_id, reason_code, reason_note, also_line_ids, user, db)
 
-    if origin == "resource":
-        return await buy_plans_resource_partial(request, user, db)
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
 
@@ -1091,9 +835,6 @@ async def buy_plan_claim_line_partial(
 
     _require_po_cutter(user)
 
-    form = await request.form()
-    origin = form.get("origin", "")
-
     try:
         claim_line(plan_id, line_id, user, db)
         db.commit()
@@ -1101,8 +842,6 @@ async def buy_plan_claim_line_partial(
         logger.info("Claim lost/invalid for plan {} line {} by {}: {}", plan_id, line_id, user.id, e)
         raise HTTPException(409, str(e))
 
-    if origin == "resource":
-        return await buy_plans_resource_partial(request, user, db)
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
 
@@ -1138,8 +877,6 @@ async def buy_plan_verify_po_partial(
     except (ValueError, PermissionError) as e:
         raise HTTPException(400, str(e))
 
-    if origin == "supervise":
-        return _render_supervise_body(request, user, db)
     if origin == "my_queue":
         return _render_my_queue_body(request, user, db)
 

@@ -1,12 +1,9 @@
 {#
-  buy_plans/hub.html — Approvals hub shell with a lifecycle stage-tab switcher.
+  buy_plans/hub.html — Approvals hub shell with a two-lens tab switcher.
   Tabs: My Queue (the role-aware "what needs YOU now" surface — the default landing for
   non-supervisors) + Pipeline (the 4-stage deal board — the default landing for
-  supervisors), then the five lifecycle stages Sales Orders, Buy Plans, Purchase Orders,
-  Vendor Prepayments, Supervise. The body lazy-loads the active tab partial into
-  #bp-hub-body.
-  Receives: lens (str: 'my_queue'|'pipeline'|'sales_orders'|'buy_plans'|'purchase_orders'|
-            'prepayments'|'supervise'), can_supervise (bool), alert_markers (dict).
+  supervisors). The body lazy-loads the active tab partial into #bp-hub-body.
+  Receives: lens (str: 'my_queue'|'pipeline'), alert_markers (dict).
   Called by: htmx/buy_plans.py buy_plans_list_partial (GET /v2/partials/approvals).
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette; the per-tab bodies under
               approvals/ (lazy-loaded into #bp-hub-body) — my-queue → _surface_my_queue.html,
@@ -16,13 +13,11 @@
 
 <div class="page-fluid" x-data="{ lens: '{{ lens }}' }">
 
-  {# ── Stage-tab switcher ──
-     The four lifecycle stages are always shown; Supervise is gated to managers/admins/ops
-     (can_supervise). The work surface + the pinned approval section INSIDE each stage are
-     what gate further by role. #}
+  {# ── Lens tab switcher ──
+     Two lenses: My Queue (the role-aware "what needs YOU now" surface) and Pipeline (the
+     4-stage deal board). Both are always shown; each body gates its work surface by role. #}
   <div class="flex flex-wrap items-center gap-2 mb-5">
-    {% for l, label in [('my_queue', 'My Queue'), ('pipeline', 'Pipeline'), ('sales_orders', 'Sales Orders'), ('buy_plans', 'Buy Plans'), ('purchase_orders', 'Purchase Orders'), ('prepayments', 'Vendor Prepayments'), ('supervise', 'Supervise')] %}
-    {% if l != 'supervise' or can_supervise %}
+    {% for l, label in [('my_queue', 'My Queue'), ('pipeline', 'Pipeline')] %}
     {# Highlight is Alpine-reactive (:class on lens) so the active pill updates the
        instant a tab is clicked — before the server swap returns — and stays correct
        after the re-rendered hub re-inits x-data with the server lens. Mirrors the
@@ -39,7 +34,6 @@
             class="px-3.5 py-1.5 text-sm font-medium rounded-full transition-colors">
       {{ label }}
     </button>
-    {% endif %}
     {% endfor %}
 
     {# ── New Buy Plan origination ──

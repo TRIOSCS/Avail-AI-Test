@@ -244,13 +244,13 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         partial_url = f"/v2/partials/settings?tab={quote(tab_qs)}" if tab_qs else "/v2/partials/settings"
     elif current_view in ("buy-plans", "approvals"):
         # Thread ?lens= through so a deep-link / redirect and a reload/bookmark of a pushed
-        # stage URL paint the right stage tab on first full-page load instead of falling to
-        # _default_lens. Lens keys are the five lifecycle stages. A detail URL
-        # (/buy-plans/{id}) is overridden by the _DETAIL_VIEWS block below.
+        # lens URL paint the right lens on first full-page load instead of falling to
+        # _default_lens. Lens keys are the two surviving lenses (My Queue + Pipeline). A
+        # detail URL (/buy-plans/{id}) is overridden by the _DETAIL_VIEWS block below.
         lens_qs = request.query_params.get("lens", "").strip()
         partial_url = (
             f"/v2/partials/approvals?lens={quote(lens_qs)}"
-            if lens_qs in ("sales_orders", "buy_plans", "purchase_orders", "prepayments", "supervise")
+            if lens_qs in ("my_queue", "pipeline")
             else "/v2/partials/approvals"
         )
     else:

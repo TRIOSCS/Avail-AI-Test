@@ -1,17 +1,16 @@
-"""Route tests for the Approvals hub stage-tab shell + buyer Orders + deal board bodies.
+"""Route tests for the Approvals hub two-lens shell (My Queue + Pipeline).
 
 Covers:
-- /v2/partials/approvals renders the stage-tab switcher + lazy body with the explicit
-  hx-target="#bp-hub-body" (guards the cards-vanish landmine) and the role-default load.
-- /v2/partials/approvals?lens=buy_plans loads the Buy Plans stage-tab body, scope role-defaulted.
-- /v2/partials/buy-plans/orders shows a buyer's AWAITING_PO line, an origin=queue confirm
-  form, and the rejection note on kicked-back rows.
-- /v2/partials/buy-plans/board?scope=mine renders 4 columns and rings needs_my_action cards.
-- /v2/partials/buy-plans/board?scope=all is allowed for a buyer/manager (can_see_all_deals)
-  but forced to mine for sales/traders (no leak); the All/Mine toggle shows only for the former.
-- confirm-po with origin=queue returns the queue partial; default origin returns detail.
+- /v2/partials/approvals renders the two-lens switcher (My Queue + Pipeline) + lazy body
+  with the explicit hx-target="#bp-hub-body" (guards the cards-vanish landmine) and the
+  role-default load.
+- /v2/partials/approvals?lens=pipeline lazy-loads the Pipeline tab body.
+- confirm-po / approve with the default origin return the detail partial.
+- the role-scope predicate + resolver contract (_can_see_all_deals / _resolve_deal_scope).
+- the persistent New Buy Plan origination button, the My Queue prepay-decide inline action,
+  and the Pipeline's lazy Done (completed) archive paging.
 
-Depends on: app/routers/htmx_views (hub routes), app/services/buyplan_hub,
+Depends on: app/routers/htmx/buy_plans (hub routes), app/services/buyplan_hub,
             conftest fixtures (client, db_session, test_user, sales_user, manager_user,
             test_quote, test_requisition).
 """
@@ -83,20 +82,26 @@ def _make_line(db: Session, *, plan_id: int, **kw) -> BuyPlanLine:
     return line
 
 
+def _add_ops(db: Session, user) -> None:
+    """Register ``user`` as an active ops verification-group member."""
+    from app.models.buy_plan import VerificationGroupMember
+
+    db.add(VerificationGroupMember(user_id=user.id, is_active=True))
+    db.flush()
+
+
 # ── Shell + lens routing ──────────────────────────────────────────────────
 
 
 def test_hub_shell_buyer_defaults_to_my_queue(client: TestClient):
-    """Buyer hub: tab switcher present (My Queue prepended), lazy body carries explicit
-    target + the My Queue tab-body URL (the buyer's default landing surface, Phase B)."""
+    """Buyer hub: the two lens tabs (My Queue + Pipeline) render, the lazy body carries its
+    explicit target, and the buyer's default landing is the My Queue body (Phase B)."""
     resp = client.get("/v2/partials/approvals")
     assert resp.status_code == 200
     body = resp.text
-    # Tab switcher — My Queue + the four stages for everyone; Supervise gated (hidden for buyer)
+    # Two-lens switcher: My Queue + Pipeline. The retired stage lenses are gone.
     assert "My Queue" in body
-    assert "Sales Orders" in body
-    assert "Buy Plans" in body
-    assert "Purchase Orders" in body
+    assert "Pipeline" in body
     assert "?lens=supervise" not in body
     # Lazy body + the landmine guard: explicit hx-target on the load container
     assert 'id="bp-hub-body"' in body
@@ -112,22 +117,21 @@ def test_hub_lens_highlight_is_alpine_reactive(client: TestClient):
     The shell must carry the lens state in x-data and bind the active pill class to it,
     not bake the highlight into static Jinja (which goes stale on the @click).
     """
-    resp = client.get("/v2/partials/approvals?lens=purchase_orders")
+    resp = client.get("/v2/partials/approvals?lens=pipeline")
     assert resp.status_code == 200
     body = resp.text
     # Alpine holds the lens state, seeded from the server-resolved lens.
-    assert "x-data=\"{ lens: 'purchase_orders' }\"" in body
+    assert "x-data=\"{ lens: 'pipeline' }\"" in body
     # Active-pill highlight is bound reactively to that lens var.
     assert ':class="lens ===' in body
     assert "bg-accent-600 text-white shadow-sm" in body
 
 
-def test_hub_shell_lens_buy_plans_loads_tab_body(client: TestClient):
-    """Lens=buy_plans lazy-loads the Buy Plans tab body (deal board + pinned
-    section)."""
-    resp = client.get("/v2/partials/approvals?lens=buy_plans")
+def test_hub_shell_lens_pipeline_loads_tab_body(client: TestClient):
+    """Lens=pipeline lazy-loads the Pipeline tab body (the 4-stage deal board)."""
+    resp = client.get("/v2/partials/approvals?lens=pipeline")
     assert resp.status_code == 200
-    assert "/v2/partials/approvals/buy-plans" in resp.text
+    assert "/v2/partials/approvals/pipeline" in resp.text
     assert 'hx-target="#bp-hub-body"' in resp.text
 
 
@@ -138,31 +142,6 @@ def test_hub_shell_sales_defaults_to_my_queue(client: TestClient, sales_user):
         resp = client.get("/v2/partials/approvals")
     assert resp.status_code == 200
     assert "/v2/partials/approvals/my-queue" in resp.text
-
-
-def test_buy_plans_tab_scope_toggle_points_at_tab(client: TestClient):
-    """The Buy Plans stage tab's All/Mine toggle reloads the TAB (not the bare board),
-    so the pinned approval section survives a toggle.
-
-    Default client is a buyer (can_see_all).
-    """
-    resp = client.get("/v2/partials/approvals/buy-plans")
-    assert resp.status_code == 200
-    # Toggle pills target the tab URL, carrying scope — so the swap re-renders pinned + board.
-    assert "/v2/partials/approvals/buy-plans?scope=all" in resp.text
-    assert "/v2/partials/approvals/buy-plans?scope=mine" in resp.text
-    # And NOT the standalone board route (which would drop the pinned section).
-    assert "/v2/partials/buy-plans/board?scope=" not in resp.text
-
-
-def test_buy_plans_tab_sales_locked_to_mine_no_toggle(client: TestClient, sales_user):
-    """A sales/trader user gets no scope toggle on the Buy Plans tab and scope=all is
-    refused (no other rep's deals leak), exactly like the standalone board."""
-    with _acting_as(sales_user):
-        resp = client.get("/v2/partials/approvals/buy-plans?scope=all")
-    assert resp.status_code == 200
-    assert "?scope=all" not in resp.text
-    assert "?scope=mine" not in resp.text
 
 
 def test_hub_shell_manager_defaults_to_pipeline(client: TestClient, manager_user):
@@ -179,415 +158,7 @@ def test_hub_shell_manager_defaults_to_pipeline(client: TestClient, manager_user
     assert "/v2/partials/approvals/pipeline" in resp.text
 
 
-def test_hub_supervise_button_hidden_for_sales(client: TestClient, sales_user):
-    """The Supervise stage tab is hidden for a non-supervisor (sales)."""
-    from app.dependencies import require_user
-    from app.main import app
-
-    app.dependency_overrides[require_user] = lambda: sales_user
-    try:
-        resp = client.get("/v2/partials/approvals")
-    finally:
-        app.dependency_overrides.pop(require_user, None)
-    assert resp.status_code == 200
-    assert "?lens=supervise" not in resp.text
-
-
-def test_hub_supervise_button_shown_for_manager(client: TestClient, manager_user):
-    """The Supervise stage tab is present for a manager."""
-    from app.dependencies import require_user
-    from app.main import app
-
-    app.dependency_overrides[require_user] = lambda: manager_user
-    try:
-        resp = client.get("/v2/partials/approvals")
-    finally:
-        app.dependency_overrides.pop(require_user, None)
-    assert resp.status_code == 200
-    assert "?lens=supervise" in resp.text
-
-
-# ── Orders queue (buyer) ───────────────────────────────────────────────────
-
-
-def test_orders_queue_shows_my_awaiting_line(client: TestClient, db_session: Session, test_user, test_quote):
-    """A buyer's AWAITING_PO line on an ACTIVE approved plan appears with an
-    origin=queue form."""
-    plan = _make_plan(db_session, quote_id=test_quote.id, req_id=test_quote.requisition_id)
-    line = _make_line(db_session, plan_id=plan.id, buyer_id=test_user.id)
-    db_session.commit()
-
-    resp = client.get("/v2/partials/buy-plans/orders")
-    assert resp.status_code == 200
-    body = resp.text
-    assert f'id="bp-line-{line.id}"' in body
-    # Confirm form posts to the existing confirm-po route with origin=queue hidden field
-    assert f"/v2/partials/buy-plans/{plan.id}/lines/{line.id}/confirm-po" in body
-    assert 'name="origin"' in body
-    assert 'value="queue"' in body
-
-
-def test_orders_queue_kicked_back_shows_note(client: TestClient, db_session: Session, test_user, test_quote):
-    """A kicked-back line surfaces its po_rejection_note prominently."""
-    plan = _make_plan(db_session, quote_id=test_quote.id, req_id=test_quote.requisition_id)
-    _make_line(
-        db_session,
-        plan_id=plan.id,
-        buyer_id=test_user.id,
-        po_rejection_note="Wrong vendor — re-cut to Arrow",
-    )
-    db_session.commit()
-
-    resp = client.get("/v2/partials/buy-plans/orders")
-    assert resp.status_code == 200
-    assert "Wrong vendor — re-cut to Arrow" in resp.text
-
-
-def test_orders_queue_empty_state(client: TestClient):
-    """No actionable lines → friendly empty state."""
-    resp = client.get("/v2/partials/buy-plans/orders")
-    assert resp.status_code == 200
-    assert "all caught up" in resp.text.lower()
-
-
-def test_orders_queue_team_section_read_only(
-    client: TestClient, db_session: Session, test_user, manager_user, test_quote
-):
-    """The Team Orders section shows another buyer's open line + name, read-only.
-
-    The team row must carry NO action form (no confirm-po / issue endpoint), while the
-    caller's own actionable row keeps its confirm form.
-    """
-    plan = _make_plan(db_session, quote_id=test_quote.id, req_id=test_quote.requisition_id)
-    # My own actionable line (keeps its form).
-    my_line = _make_line(db_session, plan_id=plan.id, buyer_id=test_user.id)
-    # Another buyer's open line — surfaces in Team Orders, read-only.
-    team_line = _make_line(
-        db_session,
-        plan_id=plan.id,
-        buyer_id=manager_user.id,
-        status=BuyPlanLineStatus.PENDING_VERIFY,
-    )
-    db_session.commit()
-
-    resp = client.get("/v2/partials/buy-plans/orders")
-    assert resp.status_code == 200
-    body = resp.text
-    assert "Team Orders" in body
-    assert manager_user.name in body
-    # My own row still has its confirm-po form.
-    assert f"/v2/partials/buy-plans/{plan.id}/lines/{my_line.id}/confirm-po" in body
-    # The team line has NO action form (no confirm-po / issue endpoint for it).
-    assert f"/lines/{team_line.id}/confirm-po" not in body
-    assert f"/lines/{team_line.id}/issue" not in body
-
-
-def test_orders_queue_no_team_section_when_alone(client: TestClient, db_session: Session, test_user, test_quote):
-    """With no other-buyer open lines, the Team Orders section is omitted."""
-    plan = _make_plan(db_session, quote_id=test_quote.id, req_id=test_quote.requisition_id)
-    _make_line(db_session, plan_id=plan.id, buyer_id=test_user.id)
-    db_session.commit()
-
-    resp = client.get("/v2/partials/buy-plans/orders")
-    assert resp.status_code == 200
-    assert "Team Orders" not in resp.text
-
-
-# ── Deals board (sales / manager) ──────────────────────────────────────────
-
-
-def test_board_mine_rings_needs_my_action(client: TestClient, db_session: Session, test_user, test_requisition):
-    """A DRAFT plan owned by me shows the needs_my_action ring class in its column."""
-    q = _make_quote(db_session, test_requisition.id)
-    _make_plan(
-        db_session,
-        quote_id=q.id,
-        req_id=test_requisition.id,
-        status=BuyPlanStatus.DRAFT,
-        so_status=SOVerificationStatus.PENDING,
-        submitted_by_id=test_user.id,
-    )
-    db_session.commit()
-
-    resp = client.get("/v2/partials/buy-plans/board?scope=mine")
-    assert resp.status_code == 200
-    body = resp.text
-    # 3 active columns — "Done" is gone; completed work lives in the archive.
-    for col in ("Draft", "Pending", "Active"):
-        assert col in body
-    assert ">Done<" not in body
-    # Completed archive section is present below the board.
-    assert "Completed" in body
-    # needs_my_action ring
-    assert "ring-2 ring-amber-400" in body
-
-
-def _make_owned_plan(db_session, owner, req, *, status=BuyPlanStatus.DRAFT, **kw):
-    """A DRAFT (or given-status) plan owned by ``owner`` — used to prove cross-owner
-    visibility.
-
-    Returns the plan.
-    """
-    q = _make_quote(db_session, req.id)
-    plan = _make_plan(
-        db_session,
-        quote_id=q.id,
-        req_id=req.id,
-        status=status,
-        submitted_by_id=owner.id,
-        **kw,
-    )
-    db_session.commit()
-    return plan
-
-
-def test_board_default_scope_all_for_buyer(
-    client: TestClient, db_session: Session, test_user, manager_user, test_requisition
-):
-    """A buyer opening the deals board with NO scope param defaults to all deals."""
-    other = _make_owned_plan(db_session, manager_user, test_requisition)
-    resp = client.get("/v2/partials/buy-plans/board")
-    assert resp.status_code == 200
-    assert f"/v2/partials/buy-plans/{other.id}" in resp.text
-
-
-def test_board_scope_all_allowed_for_buyer(
-    client: TestClient, db_session: Session, test_user, manager_user, test_requisition
-):
-    """A buyer is a PO-cutter (can_see_all_deals): scope=all shows every owner's
-    deals."""
-    other = _make_owned_plan(db_session, manager_user, test_requisition)
-    resp = client.get("/v2/partials/buy-plans/board?scope=all")
-    assert resp.status_code == 200
-    assert f"/v2/partials/buy-plans/{other.id}" in resp.text
-
-
-def test_board_default_scope_mine_for_sales(
-    client: TestClient, db_session: Session, sales_user, manager_user, test_requisition
-):
-    """A sales user defaults to their OWN deals: their own plan appears, another owner's
-    does not (proves mine-scope is non-empty, not just leak-free)."""
-    other = _make_owned_plan(db_session, manager_user, test_requisition)
-    mine = _make_owned_plan(db_session, sales_user, test_requisition)
-    with _acting_as(sales_user):
-        resp = client.get("/v2/partials/buy-plans/board")
-    assert resp.status_code == 200
-    assert f"/v2/partials/buy-plans/{mine.id}" in resp.text
-    assert f"/v2/partials/buy-plans/{other.id}" not in resp.text
-
-
-def test_board_scope_all_forced_to_mine_for_sales(
-    client: TestClient, db_session: Session, sales_user, manager_user, test_requisition
-):
-    """Scope=all requested by a sales user must NOT leak another user's plans."""
-    other = _make_owned_plan(db_session, manager_user, test_requisition)
-    with _acting_as(sales_user):
-        resp = client.get("/v2/partials/buy-plans/board?scope=all")
-    assert resp.status_code == 200
-    assert f"/v2/partials/buy-plans/{other.id}" not in resp.text
-
-
-def test_board_scope_all_forced_to_mine_for_trader(
-    client: TestClient, db_session: Session, trader_user, manager_user, test_requisition
-):
-    """Scope=all requested by a trader is also forced to mine (no leak)."""
-    other = _make_owned_plan(db_session, manager_user, test_requisition)
-    with _acting_as(trader_user):
-        resp = client.get("/v2/partials/buy-plans/board?scope=all")
-    assert resp.status_code == 200
-    assert f"/v2/partials/buy-plans/{other.id}" not in resp.text
-
-
-def test_board_scope_toggle_shown_for_buyer(client: TestClient):
-    """The All/Mine scope toggle renders for a can_see_all_deals user (buyer)."""
-    resp = client.get("/v2/partials/buy-plans/board")
-    assert resp.status_code == 200
-    assert "/v2/partials/buy-plans/board?scope=all" in resp.text
-    assert "/v2/partials/buy-plans/board?scope=mine" in resp.text
-
-
-def test_board_scope_toggle_hidden_for_sales(client: TestClient, sales_user):
-    """Sales/traders have no scope toggle — they are locked to their own deals."""
-    with _acting_as(sales_user):
-        resp = client.get("/v2/partials/buy-plans/board")
-    assert resp.status_code == 200
-    assert "/v2/partials/buy-plans/board?scope=all" not in resp.text
-
-
-def test_board_ops_member_sees_all_deals(
-    client: TestClient, db_session: Session, sales_user, manager_user, test_requisition
-):
-    """The ops arm of _can_see_all_deals: an ops verification-group member is elevated to
-    all-deals visibility even from a RESTRICTED role — a sales user with ops membership
-    defaults to scope=all AND gets the All/Mine toggle."""
-    other = _make_owned_plan(db_session, manager_user, test_requisition)
-    _add_ops(db_session, sales_user)
-    db_session.commit()
-    with _acting_as(sales_user):
-        resp = client.get("/v2/partials/buy-plans/board")
-    assert resp.status_code == 200
-    assert f"/v2/partials/buy-plans/{other.id}" in resp.text
-    assert "/v2/partials/buy-plans/board?scope=all" in resp.text
-    assert "/v2/partials/buy-plans/board?scope=mine" in resp.text
-
-
-def test_board_scope_all_allowed_for_manager(
-    client: TestClient, db_session: Session, manager_user, sales_user, test_requisition
-):
-    """A manager CAN see all plans with scope=all."""
-    from app.dependencies import require_user
-    from app.main import app
-
-    q = _make_quote(db_session, test_requisition.id)
-    sales_plan = _make_plan(
-        db_session,
-        quote_id=q.id,
-        req_id=test_requisition.id,
-        status=BuyPlanStatus.DRAFT,
-        submitted_by_id=sales_user.id,
-    )
-    db_session.commit()
-
-    app.dependency_overrides[require_user] = lambda: manager_user
-    try:
-        resp = client.get("/v2/partials/buy-plans/board?scope=all")
-    finally:
-        app.dependency_overrides.pop(require_user, None)
-    assert resp.status_code == 200
-    assert f"/v2/partials/buy-plans/{sales_plan.id}" in resp.text
-
-
-# ── Completed archive ──────────────────────────────────────────────────────
-
-
-def test_board_archive_shows_completed_count(client: TestClient, db_session: Session, test_user, test_requisition):
-    """The board's archive section shows the completed count and a completed card."""
-    from datetime import datetime, timezone
-
-    q = _make_quote(db_session, test_requisition.id)
-    done_plan = _make_plan(
-        db_session,
-        quote_id=q.id,
-        req_id=test_requisition.id,
-        status=BuyPlanStatus.COMPLETED,
-        submitted_by_id=test_user.id,
-        completed_at=datetime.now(timezone.utc),
-    )
-    db_session.commit()
-
-    resp = client.get("/v2/partials/buy-plans/board?scope=mine")
-    assert resp.status_code == 200
-    body = resp.text
-    # Count badge "(1)" rendered with the accent figure class.
-    assert "Completed" in body
-    assert "(1)" in body
-    # Completed plan is an openable archive card, NOT in an active column.
-    assert f"/v2/partials/buy-plans/{done_plan.id}" in body
-
-
-def test_archive_partial_returns_rows(client: TestClient, db_session: Session, test_user, test_requisition):
-    """The lazy archive route returns completed rows for the requested page."""
-    from datetime import datetime, timedelta, timezone
-
-    q = _make_quote(db_session, test_requisition.id)
-    now = datetime.now(timezone.utc)
-    plan = _make_plan(
-        db_session,
-        quote_id=q.id,
-        req_id=test_requisition.id,
-        status=BuyPlanStatus.COMPLETED,
-        submitted_by_id=test_user.id,
-        completed_at=now - timedelta(days=3),
-    )
-    db_session.commit()
-
-    resp = client.get("/v2/partials/buy-plans/archive?scope=mine&offset=0")
-    assert resp.status_code == 200
-    assert f"/v2/partials/buy-plans/{plan.id}" in resp.text
-
-
-def test_archive_scope_all_allowed_for_buyer(
-    client: TestClient, db_session: Session, test_user, manager_user, test_requisition
-):
-    """A buyer (can_see_all_deals) sees every owner's completed plans on the archive
-    route."""
-    from datetime import datetime, timezone
-
-    other = _make_owned_plan(
-        db_session,
-        manager_user,
-        test_requisition,
-        status=BuyPlanStatus.COMPLETED,
-        completed_at=datetime.now(timezone.utc),
-    )
-
-    resp = client.get("/v2/partials/buy-plans/archive?scope=all")
-    assert resp.status_code == 200
-    assert f"/v2/partials/buy-plans/{other.id}" in resp.text
-
-
-def test_archive_scope_all_forced_to_mine_for_sales(
-    client: TestClient, db_session: Session, sales_user, manager_user, test_requisition
-):
-    """Scope=all on the archive route must not leak another user's completed plans to
-    sales."""
-    from datetime import datetime, timezone
-
-    other = _make_owned_plan(
-        db_session,
-        manager_user,
-        test_requisition,
-        status=BuyPlanStatus.COMPLETED,
-        completed_at=datetime.now(timezone.utc),
-    )
-
-    with _acting_as(sales_user):
-        resp = client.get("/v2/partials/buy-plans/archive?scope=all")
-    assert resp.status_code == 200
-    assert f"/v2/partials/buy-plans/{other.id}" not in resp.text
-
-
-def test_archive_ops_member_sees_all_completed(
-    client: TestClient, db_session: Session, sales_user, manager_user, test_requisition
-):
-    """The ops arm on the archive route: an ops member (even from a sales role) sees every
-    owner's completed deals."""
-    from datetime import datetime, timezone
-
-    other = _make_owned_plan(
-        db_session,
-        manager_user,
-        test_requisition,
-        status=BuyPlanStatus.COMPLETED,
-        completed_at=datetime.now(timezone.utc),
-    )
-    _add_ops(db_session, sales_user)
-    db_session.commit()
-
-    with _acting_as(sales_user):
-        resp = client.get("/v2/partials/buy-plans/archive?scope=all")
-    assert resp.status_code == 200
-    assert f"/v2/partials/buy-plans/{other.id}" in resp.text
-
-
-# ── confirm-po origin behavior ─────────────────────────────────────────────
-
-
-def test_confirm_po_origin_queue_returns_queue(client: TestClient, db_session: Session, test_user, test_quote):
-    """Origin=queue → re-rendered orders queue (not the full detail)."""
-    plan = _make_plan(db_session, quote_id=test_quote.id, req_id=test_quote.requisition_id)
-    line = _make_line(db_session, plan_id=plan.id, buyer_id=test_user.id)
-    db_session.commit()
-
-    resp = client.post(
-        f"/v2/partials/buy-plans/{plan.id}/lines/{line.id}/confirm-po",
-        data={"po_number": "PO-12345", "origin": "queue"},
-    )
-    assert resp.status_code == 200
-    body = resp.text
-    # The queue partial carries the orders-specific empty/heading markers, not the detail title.
-    assert "PO(s) to cut" in body or "all caught up" in body.lower()
-    assert "Line Items" not in body  # detail.html section header must be absent
+# ── confirm-po + approve origin behavior ───────────────────────────────────
 
 
 def test_confirm_po_default_origin_returns_detail(client: TestClient, db_session: Session, test_user, test_quote):
@@ -604,203 +175,6 @@ def test_confirm_po_default_origin_returns_detail(client: TestClient, db_session
     assert resp.status_code == 200
     # Detail partial has the "Line Items" section header.
     assert "Line Items" in resp.text
-
-
-# ── Supervise lens ─────────────────────────────────────────────────────────
-
-
-def _add_ops(db: Session, user) -> None:
-    """Register ``user`` as an active ops verification-group member."""
-    from app.models.buy_plan import VerificationGroupMember
-
-    db.add(VerificationGroupMember(user_id=user.id, is_active=True))
-    db.flush()
-
-
-def test_supervise_manager_shows_strip_and_approvals(
-    client: TestClient, db_session: Session, manager_user, sales_user, test_requisition
-):
-    """As a manager: strip + Approvals section with an Approve form posting origin=supervise."""
-    from app.dependencies import require_user
-    from app.main import app
-
-    q = _make_quote(db_session, test_requisition.id)
-    plan = _make_plan(
-        db_session,
-        quote_id=q.id,
-        req_id=test_requisition.id,
-        status=BuyPlanStatus.PENDING,
-        submitted_by_id=sales_user.id,
-    )
-    manager_user.can_approve_buy_plans = True  # approval right gates the Approvals section
-    db_session.commit()
-
-    app.dependency_overrides[require_user] = lambda: manager_user
-    try:
-        resp = client.get("/v2/partials/buy-plans/supervise")
-    finally:
-        app.dependency_overrides.pop(require_user, None)
-    assert resp.status_code == 200
-    body = resp.text
-    # Calm header: money subline + headline count.
-    assert "avg margin" in body
-    assert "items need you" in body
-    # ONE hero action queue card (not 6 sections).
-    assert "Needs you now" in body
-    # Filter chips with live per-kind counts.
-    assert "All (1)" in body
-    assert "Approve (1)" in body
-    # The approve row keeps the existing route/target + origin=supervise hidden field.
-    assert f"/v2/partials/buy-plans/{plan.id}/approve" in body
-    assert 'name="origin"' in body
-    assert 'value="supervise"' in body
-    # The embedded board carries an explicit hx-target (no cards-vanish landmine)
-    assert 'hx-target="#main-content"' in body
-
-
-def test_supervise_po_approver_shows_verify_po_section(
-    client: TestClient, db_session: Session, test_user, manager_user, test_requisition
-):
-    """A PO approver (can_approve_purchase_orders) sees the PO-verify rows + forms.
-
-    Phase D: verify-PO visibility is gated on the SAME per-user right the POST enforces
-    (require_buyplan_po_approver), NOT ops-group membership. (And the SO fold means there is
-    no verify-SO row.)
-    """
-    from app.dependencies import require_user
-    from app.main import app
-
-    manager_user.can_approve_purchase_orders = True
-    q = _make_quote(db_session, test_requisition.id)
-    pv_plan = _make_plan(db_session, quote_id=q.id, req_id=test_requisition.id, status=BuyPlanStatus.ACTIVE)
-    pv_line = _make_line(db_session, plan_id=pv_plan.id, buyer_id=test_user.id, status=BuyPlanLineStatus.PENDING_VERIFY)
-    db_session.commit()
-
-    app.dependency_overrides[require_user] = lambda: manager_user
-    try:
-        resp = client.get("/v2/partials/buy-plans/supervise")
-    finally:
-        app.dependency_overrides.pop(require_user, None)
-    assert resp.status_code == 200
-    body = resp.text
-    # Verify rows surface in the unified queue (pill labels) with their routes intact.
-    assert "Needs you now" in body
-    assert "Verify SO" not in body
-    assert "Verify PO" in body
-    assert f"/v2/partials/buy-plans/{pv_plan.id}/lines/{pv_line.id}/verify-po" in body
-
-
-def test_supervise_ops_without_po_right_hides_verify_po(
-    client: TestClient, db_session: Session, test_user, manager_user, test_requisition
-):
-    """An ops member WITHOUT can_approve_purchase_orders must NOT see verify-PO rows.
-
-    Phase D moved the verify-PO gate off ops membership onto the per-user right, so a
-    row the user would 403 on (require_buyplan_po_approver) must never render — no dead
-    button on the primary triage surface.
-    """
-    from app.dependencies import require_user
-    from app.main import app
-
-    _add_ops(db_session, manager_user)  # ops member (grants halt authority), but no PO right
-    manager_user.can_approve_purchase_orders = False
-    q = _make_quote(db_session, test_requisition.id)
-    pv_plan = _make_plan(db_session, quote_id=q.id, req_id=test_requisition.id, status=BuyPlanStatus.ACTIVE)
-    _make_line(db_session, plan_id=pv_plan.id, buyer_id=test_user.id, status=BuyPlanLineStatus.PENDING_VERIFY)
-    db_session.commit()
-
-    app.dependency_overrides[require_user] = lambda: manager_user
-    try:
-        resp = client.get("/v2/partials/buy-plans/supervise")
-    finally:
-        app.dependency_overrides.pop(require_user, None)
-    assert resp.status_code == 200
-    assert "Verify PO" not in resp.text
-
-
-def test_supervise_non_supervisor_no_leak(
-    client: TestClient, db_session: Session, test_user, manager_user, test_requisition
-):
-    """A plain buyer hitting /supervise gets the mine-scope board, NOT other users'
-    plans."""
-    q = _make_quote(db_session, test_requisition.id)
-    other_plan = _make_plan(
-        db_session,
-        quote_id=q.id,
-        req_id=test_requisition.id,
-        status=BuyPlanStatus.DRAFT,
-        submitted_by_id=manager_user.id,
-    )
-    db_session.commit()
-
-    # Default client user is a plain buyer (not ops, not manager).
-    resp = client.get("/v2/partials/buy-plans/supervise")
-    assert resp.status_code == 200
-    # No action-queue panel (the mine-scope board is served instead) and no leak.
-    assert "Needs you now" not in resp.text
-    assert f"/v2/partials/buy-plans/{other_plan.id}" not in resp.text
-
-
-def test_supervise_empty_queue_shows_all_caught_up(
-    client: TestClient, db_session: Session, manager_user, test_requisition
-):
-    """A supervisor with nothing actionable sees the calm 'all caught up' empty-
-    state."""
-    from app.dependencies import require_user
-    from app.main import app
-
-    manager_user.can_approve_buy_plans = True
-    db_session.commit()
-
-    app.dependency_overrides[require_user] = lambda: manager_user
-    try:
-        resp = client.get("/v2/partials/buy-plans/supervise")
-    finally:
-        app.dependency_overrides.pop(require_user, None)
-    assert resp.status_code == 200
-    body = resp.text
-    # Headline + empty-state line both render; no per-kind filter chips when the queue is empty.
-    assert "You're all caught up" in body
-    assert "nothing needs you right now" in body
-    assert "items need you" not in body
-
-
-def test_approve_origin_supervise_returns_supervise_body(
-    client: TestClient, db_session: Session, manager_user, sales_user, test_requisition
-):
-    """Approve with origin=supervise returns the supervise body (not the full
-    detail)."""
-    from app.dependencies import require_user
-    from app.main import app
-
-    q = _make_quote(db_session, test_requisition.id)
-    plan = _make_plan(
-        db_session,
-        quote_id=q.id,
-        req_id=test_requisition.id,
-        status=BuyPlanStatus.PENDING,
-        submitted_by_id=sales_user.id,
-    )
-    manager_user.can_approve_buy_plans = True  # require_buyplan_approver gates the POST
-    db_session.commit()
-
-    from app.dependencies import require_buyplan_approver
-
-    app.dependency_overrides[require_user] = lambda: manager_user
-    app.dependency_overrides[require_buyplan_approver] = lambda: manager_user
-    try:
-        resp = client.post(
-            f"/v2/partials/buy-plans/{plan.id}/approve",
-            data={"action": "approve", "origin": "supervise"},
-        )
-    finally:
-        app.dependency_overrides.pop(require_user, None)
-        app.dependency_overrides.pop(require_buyplan_approver, None)
-    assert resp.status_code == 200
-    body = resp.text
-    # Supervise body carries the calm-header money subline; the detail "Line Items" header is absent.
-    assert "avg margin" in body
-    assert "Line Items" not in body
 
 
 def test_approve_default_origin_returns_detail(
@@ -840,10 +214,10 @@ def test_approve_default_origin_returns_detail(
 
 # ── Role-scope predicate + resolver (lock the deal-scope contract directly) ──
 #
-# The board/archive/tab routes are exercised above. These unit-level tests pin the
-# two helpers those routes lean on — `_can_see_all_deals` (who may see every owner's
-# deals) and `_resolve_deal_scope` (how a requested scope is normalized) — so the
-# role contract is locked independently of any template/route plumbing.
+# The Pipeline board route is exercised elsewhere. These unit-level tests pin the two
+# helpers it leans on — `_can_see_all_deals` (who may see every owner's deals) and
+# `_resolve_deal_scope` (how a requested scope is normalized) — so the role contract is
+# locked independently of any template/route plumbing.
 
 
 @pytest.mark.parametrize("fixture_name", ["test_user", "manager_user", "admin_user"])
@@ -1025,20 +399,3 @@ def test_pipeline_archive_next_page_button(client: TestClient, db_session: Sessi
     body = resp.text
     assert "Load older" in body
     assert f"/v2/partials/approvals/pipeline-archive?scope=mine&offset={ARCHIVE_PAGE_SIZE}" in body
-
-
-def test_board_buyer_narrows_to_mine_excludes_other_owner(
-    client: TestClient, db_session: Session, test_user, manager_user, test_requisition
-):
-    """A buyer (can_see_all) narrowing via the Mine toggle (?scope=mine) sees only their
-    own deals — another owner's plan is excluded.
-
-    The default client acts as the buyer, so this proves the toggle actually narrows for
-    a privileged user (not just defaults).
-    """
-    mine = _make_owned_plan(db_session, test_user, test_requisition)
-    other = _make_owned_plan(db_session, manager_user, test_requisition)
-    resp = client.get("/v2/partials/buy-plans/board?scope=mine")
-    assert resp.status_code == 200
-    assert f"/v2/partials/buy-plans/{mine.id}" in resp.text
-    assert f"/v2/partials/buy-plans/{other.id}" not in resp.text
