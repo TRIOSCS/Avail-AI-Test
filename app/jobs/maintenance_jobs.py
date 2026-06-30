@@ -145,6 +145,8 @@ async def _job_contact_dedup():
     try:
         from sqlalchemy import func
 
+        from ..services.contact_merge_service import merge_contacts
+
         dupes = (
             db.query(
                 SiteContact.customer_site_id,
@@ -173,11 +175,16 @@ async def _job_contact_dedup():
             for other in contacts:
                 if other.id == best.id:
                     continue
-                for col in _CONTACT_MERGE_FIELDS:
-                    if getattr(best, col, None) is None and getattr(other, col, None) is not None:
-                        setattr(best, col, getattr(other, col))
-                db.delete(other)
-                merged += 1
+                # Route through the canonical merge so child rows (attachments,
+                # tasks, activities, primary-contact link) are REPOINTED to the
+                # keeper, not cascade-deleted. Per-pair savepoint isolates a bad
+                # pair so it can't abort the whole nightly run.
+                try:
+                    with db.begin_nested():
+                        merge_contacts(best.id, other.id, db)
+                    merged += 1
+                except Exception:
+                    logger.exception("Contact dedup: merge of {} into {} failed; skipping", other.id, best.id)
         db.commit()
         if merged:
             logger.info(f"Contact dedup: merged {merged} duplicate contacts")
