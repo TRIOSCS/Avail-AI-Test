@@ -151,6 +151,22 @@ class TestCheckCompanyDuplicate:
 # ── Company Detail ────────────────────────────────────────────────────────
 
 
+@pytest.fixture()
+def _grant_account_management(test_user: User, db_session: Session) -> None:
+    """Promote the buyer ``test_user`` to MANAGER so it can_manage every account.
+
+    Company detail + tab partials (``GET /v2/partials/customers/{id}`` and
+    ``.../tab/{tab}``) now gate on ``can_manage_account``. The classes below GET those
+    endpoints as ``test_user`` on companies they create without assigning ownership, so
+    promote the actor to MANAGER (``can_manage_account`` is True for managers, exactly as
+    for the account owner) to exercise the authorized render path. Applied per-class via
+    ``@pytest.mark.usefixtures`` — scoped narrowly so role-based list tests are untouched.
+    """
+    test_user.role = "manager"
+    db_session.commit()
+
+
+@pytest.mark.usefixtures("_grant_account_management")
 class TestCompanyDetailPartial:
     def test_detail_success(self, client: TestClient, test_company: Company):
         resp = client.get(f"/v2/partials/customers/{test_company.id}")
@@ -164,6 +180,7 @@ class TestCompanyDetailPartial:
 # ── Company Tabs ──────────────────────────────────────────────────────────
 
 
+@pytest.mark.usefixtures("_grant_account_management")
 class TestCompanyTab:
     @pytest.mark.parametrize("tab", ["sites", "contacts", "requisitions", "activity"])
     def test_tab_valid(self, client: TestClient, test_company: Company, tab: str):

@@ -311,6 +311,8 @@ class TestDetailRendersCreatedBy:
             name="TemplateAuditCo",
             created_by_id=test_user.id,
             modified_by_id=test_user.id,
+            # company detail now gates on can_manage_account
+            account_owner_id=test_user.id,
         )
         db_session.add(co)
         db_session.commit()

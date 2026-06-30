@@ -377,6 +377,22 @@ class TestDispositionRoute:
         assert co.disposition in (None, CompanyDisposition.ACTIVE)
 
 
+@pytest.fixture()
+def _grant_account_management(test_user: User, db_session: Session) -> None:
+    """Promote the buyer ``test_user`` to MANAGER so it can_manage every account.
+
+    The send-to-prospecting route clears the company's ``account_owner_id`` and then
+    re-renders the company detail partial, which now gates on ``can_manage_account``.
+    Once ownership is cleared the buyer would 404 on that re-render, so promote the actor
+    to MANAGER (``can_manage_account`` stays True regardless of ownership) to exercise the
+    authorized render path. The clears-ownership assertion is unaffected — the service
+    still nulls ``account_owner_id``.
+    """
+    test_user.role = "manager"
+    db_session.commit()
+
+
+@pytest.mark.usefixtures("_grant_account_management")
 class TestSendToProspectingRoute:
     def test_route_clears_ownership(self, client, db_session: Session, test_user: User):
         co = _make_company(db_session, name="SendRoute", owner_id=test_user.id, domain="sendroute.com")

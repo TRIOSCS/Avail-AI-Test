@@ -218,6 +218,8 @@ def _company_with_site(db_session, *, name="Acme Corp"):
 
 def test_company_quotes_tab_unions_site_and_requisition(client, db_session, test_user):
     company, site = _company_with_site(db_session)
+    company.account_owner_id = test_user.id  # company detail/tab now gates on can_manage_account
+    db_session.commit()
     reqn, _ = _req_with_part(db_session, test_user, company_id=company.id)
     # Quote linked only via the customer site:
     _quote(db_session, requisition_id=reqn.id, number="Q-SITE-1", site_id=site.id)
@@ -231,6 +233,8 @@ def test_company_quotes_tab_unions_site_and_requisition(client, db_session, test
 
 def test_company_quotes_tab_empty_state(client, db_session, test_user):
     company, _ = _company_with_site(db_session)
+    company.account_owner_id = test_user.id  # company detail/tab now gates on can_manage_account
+    db_session.commit()
     resp = client.get(f"/v2/partials/customers/{company.id}/tab/quotes")
     assert resp.status_code == 200
     assert "No quotes" in resp.text
@@ -243,6 +247,8 @@ def test_company_unknown_tab_still_404(client, db_session, test_user):
 
 def test_company_detail_shows_quotes_tab_button(client, db_session, test_user):
     company, _ = _company_with_site(db_session)
+    company.account_owner_id = test_user.id  # company detail/tab now gates on can_manage_account
+    db_session.commit()
     resp = client.get(f"/v2/partials/customers/{company.id}")
     assert resp.status_code == 200
     assert "tab/quotes" in resp.text
