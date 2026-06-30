@@ -12,7 +12,6 @@ Depends on: models (Requirement, Requisition, Sighting, VendorSightingSummary,
 """
 
 import asyncio
-import html as html_mod
 import json
 import re
 import time
@@ -121,13 +120,20 @@ _SORT_COLUMNS = {
 def _oob_toast_html(msg: str, level: str = "success") -> str:
     """The OOB toast fragment — swaps into #toast-trigger and fires $store.toast.
 
-    msg/level are embedded as JS string literals via json.dumps (safe against quotes,
-    backslashes, newlines), then the whole x-init expression is HTML-escaped for the
-    attribute. Alpine decodes the attribute and evaluates the JS — so a payload like
-    ``\\';alert(1)//`` stays inert data inside the string instead of breaking out.
+    msg is embedded in a single-quoted JS string inside the x-init attribute. Escape
+    ``&`` FIRST: the browser HTML-decodes the attribute before Alpine evaluates the JS,
+    so an injected entity like ``&#39;`` would otherwise decode into a real quote and
+    break out of the string. Then backslash (so a ``\\'`` payload can't escape the
+    escaper's own backslash), then the single quote (JS string), then the double quote
+    (the surrounding attribute). ``level`` is a server-controlled constant.
     """
-    inner = f"$store.toast.message={json.dumps(msg)};$store.toast.type={json.dumps(level)};$store.toast.show=true"
-    return f'<div hx-swap-oob="true" id="toast-trigger" x-init="{html_mod.escape(inner)}"></div>'
+    safe_msg = msg.replace("&", "&amp;").replace("\\", "\\\\").replace("'", "\\'").replace('"', "&quot;")
+    return (
+        f'<div hx-swap-oob="true" id="toast-trigger"'
+        f" x-init=\"$store.toast.message='{safe_msg}';"
+        f"$store.toast.type='{level}';"
+        f'$store.toast.show=true"></div>'
+    )
 
 
 def _oob_toast(msg: str, level: str = "success") -> HTMLResponse:

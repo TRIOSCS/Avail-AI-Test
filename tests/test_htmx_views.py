@@ -22,6 +22,7 @@ from app.constants import (
     QuoteStatus,
     RequisitionStatus,
     SourcingStatus,
+    UserRole,
 )
 from app.models import (
     BuyPlan,
@@ -664,6 +665,8 @@ class TestRequisitionInlineEdit:
     def test_inline_save_owner(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user)
         db_session.commit()
+        test_user.role = UserRole.MANAGER
+        db_session.commit()
         resp = client.patch(
             f"/v2/partials/requisitions/{req.id}/inline",
             data={"field": "owner", "value": str(test_user.id), "context": "row"},
@@ -739,6 +742,8 @@ class TestRequisitionBulkActions:
 
     def test_bulk_assign(self, client: TestClient, db_session: Session, test_user: User):
         r1 = _make_requisition(db_session, test_user)
+        db_session.commit()
+        test_user.role = UserRole.MANAGER
         db_session.commit()
         resp = client.post(
             "/v2/partials/requisitions/bulk/assign",
