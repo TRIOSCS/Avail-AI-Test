@@ -19,6 +19,7 @@ Depends on: app/routers/htmx/buy_plans (my-queue lens dispatch),
 from __future__ import annotations
 
 from contextlib import contextmanager
+from datetime import datetime, timezone
 
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -220,3 +221,116 @@ def test_my_queue_surface_sales_sees_own_draft(
     assert f'hx-get="/v2/partials/buy-plans/{draft.id}"' in body
     # Sales is not a PO-cutter/approver → no inline action forms.
     assert 'name="origin" value="my_queue"' not in body
+
+
+# ── Flagged triage row (supervisor, Phase F-1 gap-fill) ────────────────────
+
+
+def test_my_queue_surface_flagged_row_supervisor(
+    client: TestClient, db_session: Session, manager_user: User, test_user: User, test_quote, test_requisition
+):
+    """A supervisor's My Queue shows a flagged (rose At-risk) row with the issue reason
+    and a Flagged filter chip."""
+    plan = _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.ACTIVE,
+    )
+    line = _make_line(
+        db_session,
+        buy_plan_id=plan.id,
+        buyer_id=test_user.id,
+        status=BuyPlanLineStatus.ISSUE,
+        issue_type="sold_out",
+    )
+    line.issue_note = "Vendor sold the lot"
+    db_session.flush()
+
+    with _acting_as(manager_user):
+        resp = client.get(MY_QUEUE_URL)
+    assert resp.status_code == 200
+    body = resp.text
+    assert "Flagged (" in body  # the Flagged filter chip with a live count
+    assert "Vendor sold the lot" in body  # the issue reason surfaced (rose)
+    assert "bg-rose-500" in body  # At-risk band dot
+    # A flagged row is a whole-row link to detail (no inline action form).
+    assert f'hx-get="/v2/partials/buy-plans/{plan.id}"' in body
+
+
+# ── Prepay inline action (Phase F-1 gap-fill) ──────────────────────────────
+
+
+def test_my_queue_surface_prepay_inline_action(
+    client: TestClient, db_session: Session, manager_user: User, test_quote, test_requisition
+):
+    """A routed prepay row renders an inline Approve form + a Reject reveal posting the
+    prepay decide route into #bp-hub-body (push-url off)."""
+    from tests.test_my_queue import _grant, _make_prepay_request
+
+    plan = _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.ACTIVE,
+        total_cost="5000.00",
+    )
+    _grant(db_session, manager_user, can_approve_prepayments=True)
+    ar, _pp = _make_prepay_request(db_session, recipient=manager_user, buy_plan_id=plan.id, amount="2500.00")
+
+    with _acting_as(manager_user):
+        resp = client.get(MY_QUEUE_URL)
+    assert resp.status_code == 200
+    body = resp.text
+    assert f"/v2/partials/approvals/prepay-requests/{ar.id}/decide" in body
+    assert 'hx-target="#bp-hub-body"' in body
+    assert 'hx-push-url="false"' in body
+    assert "rejectOpen" in body  # the reject reveal toggle
+    assert "$2,500 prepay" in body  # the amount surfaced on the muted line
+
+
+# ── Header avg-margin + kicked-back surfacing (Phase F-1 gap-fill) ─────────
+
+
+def test_my_queue_surface_header_shows_avg_margin(
+    client: TestClient, db_session: Session, test_user: User, test_quote, test_requisition
+):
+    """The My Queue header money subline appends the open-book avg margin."""
+    plan = _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.ACTIVE,
+        total_cost="5000.00",
+        total_margin_pct=25,
+        approved_at=datetime.now(timezone.utc),
+    )
+    _make_line(db_session, buy_plan_id=plan.id, buyer_id=test_user.id, status=BuyPlanLineStatus.AWAITING_PO)
+
+    resp = client.get(MY_QUEUE_URL)
+    assert resp.status_code == 200
+    assert "avg margin" in resp.text
+
+
+def test_my_queue_surface_kicked_back_surfacing(
+    client: TestClient, db_session: Session, test_user: User, test_quote, test_requisition
+):
+    """A kicked-back cut_po row surfaces a rose 'kicked back' header line, the rejection
+    note, and a rose-tinted row."""
+    plan = _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.ACTIVE,
+        approved_at=datetime.now(timezone.utc),
+    )
+    line = _make_line(db_session, buy_plan_id=plan.id, buyer_id=test_user.id, status=BuyPlanLineStatus.AWAITING_PO)
+    line.po_rejection_note = "Wrong vendor — re-cut to Arrow"
+    db_session.flush()
+
+    resp = client.get(MY_QUEUE_URL)
+    assert resp.status_code == 200
+    body = resp.text
+    assert "kicked back" in body
+    assert "Wrong vendor — re-cut to Arrow" in body
+    assert "bg-rose-50" in body  # the row gets a rose tint

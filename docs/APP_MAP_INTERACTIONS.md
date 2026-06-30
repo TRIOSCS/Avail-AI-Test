@@ -1566,8 +1566,13 @@ microlabel · customer · muted secondary line · age (>72h amber) · value · m
 posting the existing routes with `hx-push-url="false"` + `hx-target="#bp-hub-body"`; every
 other kind is a **whole-row link** to its detail screen (where its form / multi-step action
 lives), trailing `{action} →`. There is NO colored left rail (the dot + risk-first sort
-already encode risk). `prepay_approve` is a navigation row (its decision endpoint returns
-JSON, not a partial — inline one-click lands in Phase D).
+already encode risk). `prepay_approve` now carries inline **Approve / Reject-with-reason** posting the new
+`POST /v2/partials/approvals/prepay-requests/{id}/decide` (wraps `approvals.service.decide`
+and re-renders the My Queue body; reject requires a comment → 400 otherwise, 403 for a
+non-recipient — authz is enforced inside `decide`). The supervisor-only **`flagged`** kind
+(P2, ISSUE lines via the shared `_query_flagged_lines`) and kicked-back `cut_po` rows surface
+the issue / PO-rejection reason inline (rose); the header adds `· N% avg margin`
+(`open_avg_margin`) and a rose `N kicked back` tally (Phase F-1 parity restoration).
 
 **Pipeline surface (Approvals rework Phase C — the 4-stage deal board).** The `pipeline`
 lens renders `approvals/_surface_pipeline.html` via `_render_pipeline_body` (the
@@ -1581,12 +1586,18 @@ Done is `completed_archive`. Cards render through the shared `deal_card` macro
 (`approvals/_pipeline_macros.html`): the signature **4-pip "who-has-the-ball" stepper**
 (`●●○○` — done pips `bg-brand-500`, the single live ball `bg-accent-500`, upcoming hollow
 `border-brand-200`) computed from the card's `status`→stage index (DRAFT 0 / PENDING 1 /
-ACTIVE|INBOUND 2 / COMPLETED 3) **replaces the old blocker line + PO progress bar**, plus
+ACTIVE|INBOUND 2 / COMPLETED 3) now sits ALONGSIDE the **restored blocker line +
+verified/total PO-progress bar + headline MPN + cut-PO#(s) + a rose `Returned` badge**
+(distinguishing a kicked-back DRAFT from a fresh one — Phase F-1 parity restoration), plus
 Customer + tabular value + a muted `SO · owner` line + ONE margin-health badge + the `stock`
 chip; a card needing the viewer's action (own DRAFT) gains a `ring-accent-400` (not amber).
 Scope is role-resolved exactly like the board (`_resolve_deal_scope` + `_can_see_all_deals`);
 the **Mine/All toggle** reloads this body in place (`hx-target="#bp-hub-body"`,
-`hx-push-url="false"`). A light `metric_strip` macro shows the open count + value.
+`hx-push-url="false"`). A light `metric_strip` macro shows the open count + value + `· N% avg margin`
+(`open_avg_margin`). A rose **Halted column** renders for `can_see_all_deals` viewers (so
+buyers regain halted visibility); the Done section pages via
+`GET /v2/partials/approvals/pipeline-archive` (`_pipeline_archive_rows.html` — a
+self-replacing **Load older** button consuming `archive.next_offset`) (Phase F-1).
 
 **My Queue foundation (Approvals rework Phase A — the service-layer read model).**
 `buyplan_hub.my_queue(db, user) -> list[QueueRow]` is the role-aware "what needs YOU now"

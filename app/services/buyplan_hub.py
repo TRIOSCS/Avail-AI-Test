@@ -625,6 +625,25 @@ _OPEN_STATUSES: frozenset[str] = frozenset(
     }
 )
 
+
+def open_avg_margin(db: Session) -> float:
+    """Average ``total_margin_pct`` across all open (non-terminal) plans; ``0.0`` if
+    none.
+
+    The single cheap aggregate behind the "avg margin" figure shown on BOTH the My Queue
+    header and the Pipeline metric strip. Mirrors the avg_margin aggregation in
+    :func:`supervise_overview` (same ``_OPEN_STATUSES`` set; NULL margins excluded by AVG,
+    coalesced to 0) but as a standalone query so the two lighter surfaces don't pay for the
+    full supervise overview build.
+    """
+    avg = (
+        db.query(func.coalesce(func.avg(BuyPlan.total_margin_pct), 0))
+        .filter(BuyPlan.status.in_(_OPEN_STATUSES))
+        .scalar()
+    )
+    return float(avg or 0.0)
+
+
 #: Risk-first priority tier for each *supervise-lens* action-queue row kind
 #: (1 = highest risk, surfaced first). The supervise lens sorts its unified queue by
 #: ``(priority, waiting_since)`` so the riskiest, oldest items lead. Distinct from the
@@ -1044,6 +1063,7 @@ class QueueRow:
 _QUEUE_PRIORITY: dict[str, int] = {
     "halted": 1,
     "plan_returned": 2,
+    "flagged": 2,
     "plan_approve": 3,
     "prepay_approve": 3,
     "po_verify": 4,
@@ -1058,6 +1078,7 @@ _QUEUE_PRIORITY: dict[str, int] = {
 _QUEUE_LABEL: dict[str, str] = {
     "halted": "Halted",
     "plan_returned": "Returned",
+    "flagged": "Flagged",
     "plan_approve": "Approve",
     "prepay_approve": "Prepay",
     "po_verify": "Verify",
@@ -1072,6 +1093,7 @@ _QUEUE_LABEL: dict[str, str] = {
 _QUEUE_ACTION_LABEL: dict[str, str] = {
     "halted": "Open",
     "plan_returned": "Resubmit",
+    "flagged": "Open",
     "plan_approve": "Approve",
     "prepay_approve": "Approve",
     "po_verify": "Verify",
@@ -1192,6 +1214,20 @@ def _make_line_row(line: BuyPlanLine, *, kind: str, since: datetime | None, cuto
     Touches only eager-loaded relationships (buy_plan, offer, buyer, requirement).
     """
     plan = line.buy_plan
+    extra: dict = {
+        "margin_pct": plan.total_margin_pct if plan else None,
+        "vendor_name": line.offer.vendor_name if line.offer else None,
+        "owner_name": _user_name(line.buyer),
+        "owner_role": "Buyer",
+    }
+    # flagged rows carry the buyer's issue reason for at-a-glance triage; cut-PO rows expose
+    # whether they were kicked back (manager/ops rejected the PO) + the rejection note so the
+    # My Queue surface can flag + explain the re-cut, mirroring the buyer Orders lens.
+    if kind == "flagged":
+        extra["issue_reason"] = _issue_reason(line)
+    elif kind in ("cut_po", "cut_po_overdue"):
+        extra["kicked_back"] = line.po_rejection_note is not None
+        extra["po_rejection_note"] = line.po_rejection_note
     return QueueRow(
         kind=kind,
         priority=_QUEUE_PRIORITY[kind],
@@ -1207,12 +1243,7 @@ def _make_line_row(line: BuyPlanLine, *, kind: str, since: datetime | None, cuto
         action_url=_action_url(kind, plan_id=line.buy_plan_id, line_id=line.id, request_id=None),
         action_label=_QUEUE_ACTION_LABEL[kind],
         detail_href=f"/v2/partials/buy-plans/{line.buy_plan_id}",
-        extra={
-            "margin_pct": plan.total_margin_pct if plan else None,
-            "vendor_name": line.offer.vendor_name if line.offer else None,
-            "owner_name": _user_name(line.buyer),
-            "owner_role": "Buyer",
-        },
+        extra=extra,
     )
 
 
@@ -1287,6 +1318,9 @@ def _prepay_rows(db: Session, user: object) -> list[QueueRow]:
                     "vendor_name": (pp.vendor_card.display_name if pp and pp.vendor_card else None),
                     "amount": ar.amount,
                     "owner_role": "Approver",
+                    # The engine request id so the My Queue inline action can build the
+                    # decide URL (the QueueRow.action_url stays the JSON decision route).
+                    "request_id": ar.id,
                 },
             )
         )
@@ -1333,6 +1367,14 @@ def my_queue(db: Session, user: object) -> list[QueueRow]:
         kind = "plan_returned" if _is_returned(plan) else "plan_draft"
         since = plan.approved_at if kind == "plan_returned" else plan.created_at
         rows.append(_make_plan_row(plan, kind=kind, since=since or plan.created_at))
+
+    # flagged (P2): buyer-flagged (ISSUE) lines are a supervisor triage surface — the buyer
+    # who raised them can't self-resolve, so they route to managers/admins/ops only (parity
+    # with the supervise lens). Shares _query_flagged_lines with supervise_overview.
+    if is_supervisor:
+        rows += [
+            _make_line_row(ln, kind="flagged", since=ln.created_at, cutoff=cutoff) for ln in _query_flagged_lines(db)
+        ]
 
     # plan_approve (P3): buy-plan approvers see every pending plan.
     if is_approver:

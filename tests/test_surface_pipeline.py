@@ -22,8 +22,8 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.constants import BuyPlanStatus
-from tests.test_buyplan_hub_board import _make_plan
+from app.constants import BuyPlanLineStatus, BuyPlanStatus, SOVerificationStatus
+from tests.test_buyplan_hub_board import _make_line, _make_plan
 
 PIPELINE_URL = "/v2/partials/approvals/pipeline"
 
@@ -176,3 +176,139 @@ def test_pipeline_sales_locked_to_mine_no_toggle(client: TestClient, sales_user)
     assert resp.status_code == 200
     assert "?scope=all" not in resp.text
     assert "?scope=mine" not in resp.text
+
+
+# ── Halted column (buyer HALTED visibility, Phase F-1) ───────────────────────
+
+
+def test_pipeline_halted_column_for_can_see_all(
+    client: TestClient, db_session: Session, test_user, test_quote, test_requisition
+):
+    """A can-see-all viewer (buyer) gets a 4th Halted column rendering halted plans."""
+    halted = _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.HALTED,
+    )
+    resp = client.get(PIPELINE_URL)
+    assert resp.status_code == 200
+    body = resp.text
+    assert "lg:grid-cols-4" in body  # the grid widens to 4 columns
+    assert "Halted" in body  # the column header
+    assert f'hx-get="/v2/partials/buy-plans/{halted.id}"' in body  # the halted card links to detail
+
+
+def test_pipeline_halted_column_hidden_for_sales(
+    client: TestClient, sales_user, db_session, test_quote, test_requisition
+):
+    """A sales user (no cross-owner visibility) gets the 3-column grid (no Halted
+    lane)."""
+    from app.dependencies import require_user
+    from app.main import app
+
+    _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.HALTED,
+        submitted_by_id=sales_user.id,
+    )
+    app.dependency_overrides[require_user] = lambda: sales_user
+    try:
+        resp = client.get(PIPELINE_URL)
+    finally:
+        app.dependency_overrides.pop(require_user, None)
+    assert resp.status_code == 200
+    body = resp.text
+    assert "lg:grid-cols-4" not in body
+    assert "lg:grid-cols-3" in body
+
+
+# ── Metric strip avg margin (parity, Phase F-1) ──────────────────────────────
+
+
+def test_pipeline_metric_strip_shows_avg_margin(
+    client: TestClient, db_session: Session, test_user, test_quote, test_requisition
+):
+    """The Pipeline metric strip surfaces the open-book avg margin."""
+    _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.ACTIVE,
+        total_margin_pct=22,
+    )
+    resp = client.get(PIPELINE_URL)
+    assert resp.status_code == 200
+    assert "avg margin" in resp.text
+
+
+# ── Richer deal card (parity, Phase F-1) ─────────────────────────────────────
+
+
+def test_pipeline_deal_card_returned_badge(
+    client: TestClient, db_session: Session, test_user, test_quote, test_requisition
+):
+    """A returned (rejected-resubmit) DRAFT card shows a Returned badge."""
+    _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.DRAFT,
+        so_status=SOVerificationStatus.REJECTED,
+    )
+    resp = client.get(PIPELINE_URL)
+    assert resp.status_code == 200
+    body = resp.text
+    assert "Returned" in body
+    assert "badge-danger" in body
+
+
+def test_pipeline_deal_card_po_progress_and_blocker(
+    client: TestClient, db_session: Session, test_user, test_quote, test_requisition
+):
+    """An ACTIVE card shows the PO-progress bar (verified/total) and the blocker
+    text."""
+    plan = _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.ACTIVE,
+    )
+    _make_line(db_session, buy_plan_id=plan.id, status=BuyPlanLineStatus.VERIFIED)
+    _make_line(db_session, buy_plan_id=plan.id, status=BuyPlanLineStatus.AWAITING_PO)
+    resp = client.get(PIPELINE_URL)
+    assert resp.status_code == 200
+    body = resp.text
+    assert "bg-emerald-500" in body  # PO-progress fill
+    assert "1/2" in body  # verified/total
+    assert "1 POs to cut" in body  # the blocker text
+
+
+# ── Done section uses the shared archive-rows include (Phase F-1) ────────────
+
+
+def test_pipeline_done_uses_archive_rows_include(
+    client: TestClient, db_session: Session, test_user, test_quote, test_requisition
+):
+    """The Done section renders completed deals via the shared archive-rows partial;
+    with more than one page it offers a Load older button hitting pipeline-archive."""
+    from datetime import datetime, timedelta, timezone
+
+    from app.services.buyplan_hub import ARCHIVE_PAGE_SIZE
+
+    now = datetime.now(timezone.utc)
+    for i in range(ARCHIVE_PAGE_SIZE + 1):
+        _make_plan(
+            db_session,
+            quote_id=test_quote.id,
+            requisition_id=test_requisition.id,
+            status=BuyPlanStatus.COMPLETED,
+            completed_at=now - timedelta(hours=i),
+        )
+    resp = client.get(PIPELINE_URL)
+    assert resp.status_code == 200
+    body = resp.text
+    assert "/v2/partials/approvals/pipeline-archive?scope=" in body
+    assert "Load older" in body
