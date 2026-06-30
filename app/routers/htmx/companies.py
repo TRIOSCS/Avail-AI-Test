@@ -2387,6 +2387,8 @@ async def company_detail_partial(
     )
     if not company:
         raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(404, "Company not found")  # scope detail to match the contacts list
 
     sites = [s for s in (company.sites or []) if s.is_active]
 
@@ -2506,6 +2508,8 @@ async def company_tab(
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(404, "Company not found")  # scope detail to match the contacts list
 
     valid_tabs = {"sites", "contacts", "requisitions", "activity", "quotes", "buy_plans", "files", "history"}
     if tab not in valid_tabs:
