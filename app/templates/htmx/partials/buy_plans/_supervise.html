@@ -9,27 +9,35 @@
   of uniform row dicts keyed by `kind`. Action forms post origin=supervise so the handler
   re-renders THIS body into #bp-hub-body (not the single-plan detail).
 
-  Role gating (behaviour-preserving): the queue from the service carries every kind, but —
-  exactly as the old sectioned view did — `approve` rows show only to approvers (can_approve)
-  and `verify_so`/`verify_po` rows only to ops (is_ops); overdue/flagged/halted show to every
-  supervisor. We build `visible_queue` once so the headline, chips and rows all agree.
+  Role gating: the queue from the service carries every kind, but `approve` rows show only to
+  buy-plan approvers (can_approve) and `verify_po` rows only to PO approvers
+  (can_approve_purchase_orders — the SAME per-user right the verify-PO POST enforces via
+  require_buyplan_po_approver, so the queue never shows a 403 button nor hides PO work from a
+  holder); overdue/flagged/halted show to every supervisor. We build `visible_queue` once so
+  the headline, chips and rows all agree.
+  (Phase D folded SO verification into the single approval, so there is no verify-SO kind.)
 
   Receives: overview (dict: strip + queue), board (dict from deals_board scope=all),
             archive (dict, passed through to _board.html), is_ops (bool), is_manager (bool),
             can_approve (bool), user.
-  Called by: htmx/buy_plans.py _render_supervise_body + the approve/verify-so/verify-po
+  Called by: htmx/buy_plans.py _render_supervise_body + the approve/verify-po
              handlers when origin=supervise.
   Depends on: HTMX, Alpine.js, Tailwind (accent/brand palette), .chip + .badge-* primitives,
               timeago filter, now() global; _board.html (embedded, collapsed board + archive).
 #}
 {% set strip = overview.strip %}
 
+{# verify-PO visibility uses the SAME predicate the POST enforces (require_buyplan_po_approver
+   → can_approve_purchase_orders), NOT ops membership (Phase D moved the gate), so the triage
+   queue never surfaces a 403 button nor hides PO work from a holder. #}
+{% set can_verify_po = can_approve_purchase_orders(user) %}
+
 {# ── Role-gated visible queue (see header note) ── #}
 {% set visible_queue = [] %}
 {% for r in overview.queue %}
   {% if r.kind in ('halted', 'overdue', 'flagged')
         or (r.kind == 'approve' and can_approve)
-        or (r.kind in ('verify_so', 'verify_po') and is_ops) %}
+        or (r.kind == 'verify_po' and can_verify_po) %}
     {% set _ = visible_queue.append(r) %}
   {% endif %}
 {% endfor %}
@@ -41,7 +49,6 @@
   'flagged':   'bg-rose-50 text-rose-700 border-rose-200',
   'overdue':   'bg-amber-50 text-amber-700 border-amber-200',
   'approve':   'bg-accent-50 text-accent-700 border-accent-200',
-  'verify_so': 'bg-purple-50 text-purple-700 border-purple-200',
   'verify_po': 'bg-brand-100 text-brand-600 border-brand-200',
 } %}
 {% set is_link = row.kind in ('halted', 'overdue', 'flagged') %}
@@ -107,12 +114,6 @@
          hx-push-url="/v2/buy-plans/{{ row.plan_id }}"
          class="btn btn-danger btn-sm cursor-pointer">Review</a>
     </form>
-    {% elif row.kind == 'verify_so' %}
-    <form hx-post="/v2/partials/buy-plans/{{ row.plan_id }}/verify-so"
-          hx-target="#bp-hub-body" hx-swap="innerHTML" class="flex items-center gap-1.5">
-      <input type="hidden" name="origin" value="supervise">
-      <button type="submit" name="action" value="approve" data-loading-disable class="btn btn-primary btn-sm">Verify SO</button>
-    </form>
     {% elif row.kind == 'verify_po' %}
     <form hx-post="/v2/partials/buy-plans/{{ row.plan_id }}/lines/{{ row.line_id }}/verify-po"
           hx-target="#bp-hub-body" hx-swap="innerHTML" class="flex items-center gap-1.5">
@@ -131,7 +132,7 @@
 {# Ordered (kind, label) list for the filter chips — risk-first, matching the queue order. #}
 {% set chip_kinds = [
   ('halted', 'Halted'), ('flagged', 'Flagged'), ('overdue', 'Overdue PO'),
-  ('approve', 'Approve'), ('verify_so', 'Verify SO'), ('verify_po', 'Verify PO')
+  ('approve', 'Approve'), ('verify_po', 'Verify PO')
 ] %}
 
 {# ── Zones 1–2 share one Alpine root for the client-side filter ── #}

@@ -3,9 +3,11 @@
 Routes:
 - POST /api/admin/ops-group/toggle — add or (de/re)activate a user's ops-group membership
 
-The ops verification group gates SO/PO verification and buy-plan completion (see
-services/buyplan_workflow.py verify_so / verify_po / check_completion). With no active
-members, no buy plan can complete, so this admin surface is how the group is curated.
+The ops verification group authorizes the standalone Halt action (see
+services/buyplan_workflow.halt_plan) and was the grandfather basis for the per-user
+purchase-order approval right (Phase D folded SO verification into the single approval and
+moved verify-PO onto users.can_approve_purchase_orders). This admin surface is how the
+group is curated.
 Membership uses an is_active toggle (not delete) because verification_group_members.user_id
 is UNIQUE — toggling preserves added_at and avoids an IntegrityError race on re-add.
 

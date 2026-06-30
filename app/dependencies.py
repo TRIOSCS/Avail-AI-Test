@@ -270,6 +270,32 @@ def require_buyplan_approver(request: Request, db: Session = Depends(get_db)) ->
     return user
 
 
+def can_approve_purchase_orders(user: User | None) -> bool:
+    """True if *user* holds the per-user purchase-order approval right.
+
+    Reads the User.can_approve_purchase_orders column directly (single source of truth —
+    the grant is admin-toggled in Users settings, not role-derived). Parallel to
+    :func:`can_approve_buy_plans`: it is the shared gate so any surface that hides the
+    verify-PO UI checks the SAME flag the POST enforces via require_buyplan_po_approver.
+    The deal-level PURCHASE_ORDER approval engine routes on the same column.
+    """
+    return bool(user is not None and getattr(user, "can_approve_purchase_orders", False))
+
+
+def require_buyplan_po_approver(request: Request, db: Session = Depends(get_db)) -> User:
+    """Dependency: 403 unless the current user holds the purchase-order approval right.
+
+    Gates the buy-plan line verify-PO action. Parallel to ``require_buyplan_approver``:
+    the right is a per-user grant (User.can_approve_purchase_orders), not a role — see
+    can_approve_purchase_orders. (Phase D: PO verification moved off the ops
+    verification-group membership onto this manager-held right.)
+    """
+    user = require_user(request, db)
+    if not can_approve_purchase_orders(user):
+        raise HTTPException(403, "Purchase-order approval right required for this action")
+    return user
+
+
 def require_approval_gatekeeper(
     request: Request,
     db: Session = Depends(get_db),

@@ -2,7 +2,7 @@
 
 Server-rendered HTML partials for the Approvals (Buy Plans) hub: the stage-tab
 lens shell, sales-order new/create, the resource/orders/board/archive/supervise
-boards, and per-plan lifecycle actions (submit, approve, verify-so, confirm-po,
+boards, and per-plan lifecycle actions (submit, approve, halt, confirm-po,
 resource, claim, verify-po, issue, cancel, reset). Plus the legacy /v2/buy-plans
 full-page redirect. Extracted verbatim from htmx_views.py (same `/v2` paths, same
 `htmx-views` tag).
@@ -33,6 +33,7 @@ from ...dependencies import (
     get_buyplan_for_user,
     require_access,
     require_buyplan_approver,
+    require_buyplan_po_approver,
     require_user,
 )
 from ...models import (
@@ -779,43 +780,38 @@ async def buy_plan_approve_partial(
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
 
-@router.post("/v2/partials/buy-plans/{plan_id}/verify-so", response_class=HTMLResponse)
-async def buy_plan_verify_so_partial(
+@router.post("/v2/partials/buy-plans/{plan_id}/halt", response_class=HTMLResponse)
+async def buy_plan_halt_partial(
     request: Request,
     plan_id: int,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Ops verifies SO — returns refreshed detail."""
-    from ...services.buyplan_notifications import (
-        notify_so_rejected,
-        notify_so_verified,
-        run_notify_bg,
-    )
-    from ...services.buyplan_workflow import verify_so
+    """Halt an in-flight buy plan — the standalone off-ramp (Phase D).
+
+    Auth is enforced in the service (``halt_plan`` raises PermissionError unless the user
+    is a supervisor/ops member → mapped to 403 here). Reuses ``notify_so_rejected`` with
+    ``action="halt"`` so the salesperson still gets the halt + reason notification.
+    """
+    from ...services.buyplan_notifications import notify_so_rejected, run_notify_bg
+    from ...services.buyplan_workflow import halt_plan
 
     form = await request.form()
-    action = form.get("action", "approve")
     origin = form.get("origin", "")
 
     try:
-        plan = verify_so(
-            plan_id,
-            action,
-            user,
-            db,
-            rejection_note=form.get("rejection_note"),
-        )
+        plan = halt_plan(plan_id, user, db, reason=form.get("reason"))
         db.commit()
-        if action == "approve":
-            await run_notify_bg(notify_so_verified, plan.id)
-        else:
-            await run_notify_bg(notify_so_rejected, plan.id, action=action)
-    except (ValueError, PermissionError) as e:
+        await run_notify_bg(notify_so_rejected, plan.id, action="halt")
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
+    except ValueError as e:
         raise HTTPException(400, str(e))
 
     if origin == "supervise":
         return _render_supervise_body(request, user, db)
+    if origin == "my_queue":
+        return _render_my_queue_body(request, user, db)
 
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
@@ -1042,7 +1038,7 @@ async def buy_plan_verify_po_partial(
     request: Request,
     plan_id: int,
     line_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_buyplan_po_approver),
     db: Session = Depends(get_db),
 ):
     """Ops verifies PO — returns refreshed detail."""

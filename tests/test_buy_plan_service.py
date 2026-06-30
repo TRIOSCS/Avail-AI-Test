@@ -44,11 +44,11 @@ from app.services.buyplan_service import (
     generate_ai_flags,
     generate_ai_summary,
     generate_case_report,
+    halt_plan,
     resubmit_buy_plan,
     score_offer,
     submit_buy_plan,
     verify_po,
-    verify_so,
 )
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -656,6 +656,15 @@ def _make_ops_member(db, user):
     return member
 
 
+def _grant_po_approver(db, user):
+    """Grant the per-user purchase-order approval right (Phase D: verify-PO gates on the
+    can_approve_purchase_orders column, not ops verification-group membership)."""
+    user.can_approve_purchase_orders = True
+    db.add(user)
+    db.flush()
+    return user
+
+
 # ── Submit Buy Plan ─────────────────────────────────────────────────
 
 
@@ -919,50 +928,10 @@ class TestApproveBuyPlan:
             approve_buy_plan(plan.id, "maybe", manager_user, db_session)
 
 
-# ── SO Verification ─────────────────────────────────────────────────
+# ── Halt (the single off-ramp; Phase D folded SO verification into approval) ──
 
 
-class TestVerifySO:
-    def test_approve(
-        self,
-        db_session: Session,
-        test_quote: Quote,
-        test_user: User,
-        admin_user: User,
-    ):
-        """Ops approves SO → so_status=approved."""
-        plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.ACTIVE.value
-        _make_ops_member(db_session, admin_user)
-        db_session.flush()
-
-        result = verify_so(plan.id, "approve", admin_user, db_session)
-        assert result.so_status == SOVerificationStatus.APPROVED.value
-        assert result.so_verified_by_id == admin_user.id
-
-    def test_reject(
-        self,
-        db_session: Session,
-        test_quote: Quote,
-        test_user: User,
-        admin_user: User,
-    ):
-        """Ops rejects SO → so_status=rejected."""
-        plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.ACTIVE.value
-        _make_ops_member(db_session, admin_user)
-        db_session.flush()
-
-        result = verify_so(
-            plan.id,
-            "reject",
-            admin_user,
-            db_session,
-            rejection_note="Wrong SO number",
-        )
-        assert result.so_status == SOVerificationStatus.REJECTED.value
-        assert result.so_rejection_note == "Wrong SO number"
-
+class TestHaltPlan:
     def test_halt_stops_plan(
         self,
         db_session: Session,
@@ -970,53 +939,45 @@ class TestVerifySO:
         test_user: User,
         admin_user: User,
     ):
-        """Halt → plan.status=halted (everything stops)."""
+        """Halt → plan.status=halted (everything stops); reason recorded."""
         plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
         plan.status = BuyPlanStatus.ACTIVE.value
-        _make_ops_member(db_session, admin_user)
         db_session.flush()
 
-        result = verify_so(
-            plan.id,
-            "halt",
-            admin_user,
-            db_session,
-            rejection_note="Fraud suspected",
-        )
+        result = halt_plan(plan.id, admin_user, db_session, reason="Fraud suspected")
         assert result.status == BuyPlanStatus.HALTED.value
+        assert result.so_status == SOVerificationStatus.REJECTED.value
+        assert result.so_rejection_note == "Fraud suspected"
         assert result.halted_by_id == admin_user.id
 
-    def test_non_ops_member_rejected(
+    def test_ops_member_can_halt(
         self,
         db_session: Session,
         test_quote: Quote,
         test_user: User,
-        manager_user: User,
     ):
-        """Non-ops user cannot verify SO."""
+        """An active ops verification-group member (buyer role) may halt."""
         plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
         plan.status = BuyPlanStatus.ACTIVE.value
+        _make_ops_member(db_session, test_user)  # test_user is role="buyer"
         db_session.flush()
 
-        with pytest.raises(PermissionError, match="verification group"):
-            verify_so(plan.id, "approve", manager_user, db_session)
+        result = halt_plan(plan.id, test_user, db_session, reason="ops halt")
+        assert result.status == BuyPlanStatus.HALTED.value
 
-    def test_already_verified(
+    def test_non_supervisor_rejected(
         self,
         db_session: Session,
         test_quote: Quote,
         test_user: User,
-        admin_user: User,
     ):
-        """Cannot re-verify an already-verified SO."""
+        """A plain buyer (no manager role, no ops membership) cannot halt."""
         plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
         plan.status = BuyPlanStatus.ACTIVE.value
-        plan.so_status = SOVerificationStatus.APPROVED.value
-        _make_ops_member(db_session, admin_user)
         db_session.flush()
 
-        with pytest.raises(ValueError, match="already verified"):
-            verify_so(plan.id, "approve", admin_user, db_session)
+        with pytest.raises(PermissionError, match="supervisor or ops"):
+            halt_plan(plan.id, test_user, db_session, reason="nope")
 
 
 # ── Confirm PO ──────────────────────────────────────────────────────
@@ -1086,12 +1047,12 @@ class TestVerifyPO:
         test_user: User,
         admin_user: User,
     ):
-        """Ops approves PO → line verified."""
+        """A PO approver approves PO → line verified."""
         plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
         plan.status = BuyPlanStatus.ACTIVE.value
         line.status = BuyPlanLineStatus.PENDING_VERIFY.value
         line.po_number = "PO-001"
-        _make_ops_member(db_session, admin_user)
+        _grant_po_approver(db_session, admin_user)
         db_session.flush()
 
         result = verify_po(plan.id, line.id, "approve", admin_user, db_session)
@@ -1112,7 +1073,7 @@ class TestVerifyPO:
         line.po_number = "PO-001"
         line.estimated_ship_date = datetime(2026, 3, 15, tzinfo=timezone.utc)
         line.po_confirmed_at = datetime.now(timezone.utc)
-        _make_ops_member(db_session, admin_user)
+        _grant_po_approver(db_session, admin_user)
         db_session.flush()
 
         result = verify_po(
@@ -1128,20 +1089,20 @@ class TestVerifyPO:
         assert result.estimated_ship_date is None
         assert result.po_rejection_note == "Wrong PO amount"
 
-    def test_non_ops_rejected(
+    def test_without_po_right_rejected(
         self,
         db_session: Session,
         test_quote: Quote,
         test_user: User,
         manager_user: User,
     ):
-        """Non-ops user cannot verify PO."""
+        """A user without can_approve_purchase_orders cannot verify PO (Phase D)."""
         plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
         plan.status = BuyPlanStatus.ACTIVE.value
         line.status = BuyPlanLineStatus.PENDING_VERIFY.value
         db_session.flush()
 
-        with pytest.raises(PermissionError, match="verification group"):
+        with pytest.raises(PermissionError, match="Purchase-order approval right required"):
             verify_po(plan.id, line.id, "approve", manager_user, db_session)
 
 
@@ -1354,7 +1315,7 @@ class TestAutoCompleteViaPOVerify:
         plan.so_status = SOVerificationStatus.APPROVED.value
         line.status = BuyPlanLineStatus.PENDING_VERIFY.value
         line.po_number = "PO-LAST"
-        _make_ops_member(db_session, admin_user)
+        _grant_po_approver(db_session, admin_user)
         db_session.flush()
 
         verify_po(plan.id, line.id, "approve", admin_user, db_session)
@@ -1369,41 +1330,19 @@ class TestAutoCompleteViaPOVerify:
 class TestBuyPlanCoverageGaps:
     """Cover specific uncovered lines in buy_plan_service."""
 
-    def test_verify_so_plan_not_found(self, db_session, test_user):
-        """Line 752: verify_so raises when plan not found."""
+    def test_halt_plan_not_found(self, db_session, admin_user):
+        """halt_plan raises when plan not found."""
         with pytest.raises(ValueError, match="not found"):
-            verify_so(99999, "approve", test_user, db_session)
+            halt_plan(99999, admin_user, db_session, reason="x")
 
-    def test_verify_so_already_verified(self, db_session, test_quote, test_user):
-        """Line 756 (approx): verify_so raises when SO already verified."""
-        plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.ACTIVE.value
-        plan.so_status = SOVerificationStatus.APPROVED.value
-        db_session.flush()
-
-        with pytest.raises(ValueError, match="already verified"):
-            verify_so(plan.id, "approve", test_user, db_session)
-
-    def test_verify_so_plan_halted(self, db_session, test_quote, test_user):
-        """Line 756: verify_so raises when plan is halted."""
+    def test_halt_already_halted(self, db_session, test_quote, test_user, admin_user):
+        """halt_plan refuses a non-in-flight (already HALTED) plan."""
         plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
         plan.status = BuyPlanStatus.HALTED.value
-        plan.so_status = SOVerificationStatus.PENDING.value
         db_session.flush()
 
-        with pytest.raises(ValueError, match="halted"):
-            verify_so(plan.id, "approve", test_user, db_session)
-
-    def test_verify_so_invalid_action(self, db_session, test_quote, test_user, admin_user):
-        """Line 785: invalid SO verification action."""
-        plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.ACTIVE.value
-        plan.so_status = SOVerificationStatus.PENDING.value
-        _make_ops_member(db_session, admin_user)
-        db_session.flush()
-
-        with pytest.raises(ValueError, match="Invalid SO verification"):
-            verify_so(plan.id, "bogus", admin_user, db_session)
+        with pytest.raises(ValueError, match="Cannot halt a halted plan"):
+            halt_plan(plan.id, admin_user, db_session, reason="again")
 
     def test_confirm_po_plan_not_found(self, db_session, test_user):
         """Line 808: confirm_po raises when plan not found."""
@@ -1438,7 +1377,7 @@ class TestBuyPlanCoverageGaps:
         plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
         plan.status = BuyPlanStatus.ACTIVE.value
         line.status = BuyPlanLineStatus.AWAITING_PO.value
-        _make_ops_member(db_session, admin_user)
+        _grant_po_approver(db_session, admin_user)
         db_session.flush()
 
         with pytest.raises(ValueError, match="pending verification"):
@@ -1449,7 +1388,7 @@ class TestBuyPlanCoverageGaps:
         plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
         plan.status = BuyPlanStatus.ACTIVE.value
         line.status = BuyPlanLineStatus.PENDING_VERIFY.value
-        _make_ops_member(db_session, admin_user)
+        _grant_po_approver(db_session, admin_user)
         db_session.flush()
 
         with pytest.raises(ValueError, match="Invalid PO verification"):

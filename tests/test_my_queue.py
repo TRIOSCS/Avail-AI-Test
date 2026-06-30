@@ -276,18 +276,24 @@ def test_my_queue_po_verify_gated(db_session, test_user, manager_user, test_quot
     assert "po_verify" not in _kinds(my_queue(db_session, test_user))
 
 
-def test_my_queue_po_verify_for_ops_member(db_session, test_user, test_quote, test_requisition):
-    """An ops verification-group member still verifies POs (capability preserved)."""
+def test_my_queue_po_verify_excludes_ops_without_right(db_session, test_user, test_quote, test_requisition):
+    """An ops member WITHOUT can_approve_purchase_orders does NOT get po_verify rows.
+
+    Phase D moved the verify-PO gate onto the per-user right; My Queue must not surface
+    a verify action the user would 403 on (ops membership alone no longer grants it).
+    Existing ops verifiers keep the capability because migration 173 grandfathers them
+    into the right.
+    """
     plan = _make_plan(
         db_session,
         quote_id=test_quote.id,
         requisition_id=test_requisition.id,
         status=BuyPlanStatus.ACTIVE,
     )
-    line = _make_line(db_session, buy_plan_id=plan.id, status=BuyPlanLineStatus.PENDING_VERIFY)
-    _add_ops(db_session, test_user)
+    _make_line(db_session, buy_plan_id=plan.id, status=BuyPlanLineStatus.PENDING_VERIFY)
+    _add_ops(db_session, test_user)  # ops member (halt authority), but no PO-approval right
 
-    assert line.id in [r.line_id for r in my_queue(db_session, test_user) if r.kind == "po_verify"]
+    assert "po_verify" not in _kinds(my_queue(db_session, test_user))
 
 
 # ── claim (P5) ────────────────────────────────────────────────────────
@@ -491,7 +497,6 @@ def test_supervise_overview_contract_unchanged(db_session):
         "open_value",
         "avg_margin",
         "approval_count",
-        "so_pending_count",
         "halted_count",
         "overdue_po_count",
         "po_pending_verify_count",

@@ -155,6 +155,13 @@ def _run_approve_side_effects(
     if line_overrides:
         _apply_line_overrides(plan, line_overrides, db)
     plan.status = BuyPlanStatus.ACTIVE.value
+    # Phase D — one approval absorbs SO verification: the single manager approval IS the
+    # SO sign-off, so stamp so_status=APPROVED here. ``check_completion``'s
+    # ``so_status == APPROVED`` gate then passes for every new approval with no separate
+    # verify-SO step. (The retired verify-SO route used to stamp these so_verified fields.)
+    plan.so_status = SOVerificationStatus.APPROVED.value
+    plan.so_verified_by_id = user.id
+    plan.so_verified_at = now
     plan.approved_by_id = user.id
     plan.approved_at = now
     plan.approval_notes = notes
@@ -193,7 +200,7 @@ def _cancel_open_engine_requests_for_plan(plan: BuyPlan, user: User, db: Session
     The single point that closes a plan's engine gate when the plan leaves PENDING — called
     by ``_open_engine_request_for_plan`` (before opening a fresh request, RISK 2: never two
     live REQUESTED rows) AND by the non-decide transitions that take a plan out of PENDING
-    (``cancel_buy_plan``, ``verify_so`` HALT). Cancelling the open request there means no
+    (``cancel_buy_plan``, ``halt_plan``). Cancelling the open request there means no
     REQUESTED row is orphaned in the approvals queue/badge for a plan that no longer exists
     to approve — and, crucially, closes the resurrection vector (an approver can no longer
     pick a stale request out of the queue and re-activate a cancelled plan).
@@ -202,7 +209,7 @@ def _cancel_open_engine_requests_for_plan(plan: BuyPlan, user: User, db: Session
     ``owner``), the user who originally submitted the plan — so the engine ``cancel`` authz
     (requester/owner OR manager/admin) is satisfied for EVERY transition caller, regardless
     of whether the user driving the transition is the submitter, a manager/admin, or an
-    ops-group member who is neither (the verify_so HALT case). The plan-level audit of who
+    ops-group member who is neither (the ``halt_plan`` case). The plan-level audit of who
     cancelled/halted the plan is already captured on the plan + its activity log; this
     cancel is a system-driven consequence of the plan leaving PENDING, not a separate
     user-initiated cancel of someone else's request. ``user`` is used only as a final
@@ -369,64 +376,68 @@ def _log_approval_activity(plan: BuyPlan, action: str, user: User, notes: str | 
     )
 
 
-# ── Workflow: SO Verification ────────────────────────────────────────
+# ── Workflow: Halt (the single off-ramp) ─────────────────────────────
+
+# A plan can be halted only while it is still in flight. COMPLETED/CANCELLED are terminal
+# and HALTED is idempotent — halting any of those raises. (Preserves the reachability of
+# the retired verify-SO halt, which fired while a plan was PENDING or ACTIVE.)
+HALTABLE_STATUSES = {BuyPlanStatus.PENDING.value, BuyPlanStatus.ACTIVE.value}
 
 
-def verify_so(
-    plan_id: int,
-    action: str,
-    user: User,
-    db: Session,
-    *,
-    rejection_note: str | None = None,
-) -> BuyPlan:
-    """Ops verifies (or rejects/halts) the Sales Order in Acctivate.
+def _can_halt(user: User, db: Session) -> bool:
+    """True when *user* may halt a plan: a manager/admin OR an active ops-group member.
 
-    Approve → so_status=approved. Reject → so_status=rejected. Halt → plan.status=halted
-    (stops everything).
+    Mirrors the router's ``_can_supervise`` predicate (role OR active
+    VerificationGroupMember) so the standalone halt action carries the same authority the
+    retired verify-SO halt did.
+    """
+    from ..constants import UserRole
+
+    if user.role in (UserRole.MANAGER, UserRole.ADMIN):
+        return True
+    return db.query(VerificationGroupMember).filter_by(user_id=user.id, is_active=True).first() is not None
+
+
+def halt_plan(plan_id: int, user: User, db: Session, *, reason: str | None = None) -> BuyPlan:
+    """Halt an in-flight buy plan — the single, standalone halt path (Phase D).
+
+    Extracted from the retired ``verify_so(action="halt")`` body and hardened: any open
+    engine request is cancelled FIRST (so no REQUESTED row is orphaned in the approvals
+    queue and the plan can never be resurrected by approving a stale request) — this covers
+    the BUY_PLAN gate while PENDING AND the deal-level PURCHASE_ORDER gate while ACTIVE,
+    matching ``cancel_buy_plan`` — then the plan moves to HALTED. ``so_status`` is set to
+    REJECTED
+    (SOVerificationStatus has no dedicated HALTED value; the halt is distinguished by
+    ``plan.status == HALTED``) and the supplied reason is stored on ``so_rejection_note``
+    so the case report and salesperson notification carry it.
+
+    Auth: supervisor/ops (manager·admin·active ops member — see :func:`_can_halt`). A
+    halted plan is resubmittable via ``reset_buy_plan_to_draft``. The caller owns the
+    commit.
     """
     plan = db.get(BuyPlan, plan_id)
     if not plan:
         raise ValueError(f"Buy plan {plan_id} not found")
-    if plan.so_status != SOVerificationStatus.PENDING.value:
-        raise ValueError(f"SO already verified (status: {plan.so_status})")
-    if plan.status == BuyPlanStatus.HALTED.value:
-        raise ValueError("Plan is halted")
-
-    member = db.query(VerificationGroupMember).filter_by(user_id=user.id, is_active=True).first()
-    if not member:
-        raise PermissionError("User is not in the ops verification group")
+    if not _can_halt(user, db):
+        raise PermissionError("Only a supervisor or ops member can halt a buy plan")
+    if plan.status not in HALTABLE_STATUSES:
+        raise ValueError(f"Cannot halt a {plan.status} plan")
 
     now = datetime.now(timezone.utc)
-    plan.so_verified_by_id = user.id
-    plan.so_verified_at = now
-
-    if action == "approve":
-        plan.so_status = SOVerificationStatus.APPROVED.value
-        logger.info("SO verified for plan {} by {}", plan_id, user.email)
-    elif action == "reject":
-        plan.so_status = SOVerificationStatus.REJECTED.value
-        plan.so_rejection_note = rejection_note
-        logger.info("SO rejected for plan {}: {}", plan_id, rejection_note)
-    elif action == "halt":
-        # SOVerificationStatus has no dedicated HALTED value, so a halt reuses REJECTED
-        # for so_status; it is distinguished from a plain reject by plan.status == HALTED
-        # (set just below).
-        # If the plan is still PENDING when halted, close its open engine request BEFORE the
-        # transition so no REQUESTED row is orphaned in the approvals queue/badge and the
-        # plan can never be resurrected by approving a stale request (the canceller is an
-        # ops member who may be neither the submitter nor a manager/admin, so the helper
-        # cancels on behalf of each request's own requester/owner — authz always satisfied).
-        if plan.status == BuyPlanStatus.PENDING.value:
-            _cancel_open_engine_requests_for_plan(plan, user, db)
-        plan.so_status = SOVerificationStatus.REJECTED.value
-        plan.so_rejection_note = rejection_note
-        plan.status = BuyPlanStatus.HALTED.value
-        plan.halted_by_id = user.id
-        plan.halted_at = now
-        logger.info("Plan {} HALTED by {}: {}", plan_id, user.email, rejection_note)
-    else:
-        raise ValueError(f"Invalid SO verification action: {action}")
+    # Close any open engine gate BEFORE the transition so no REQUESTED row is orphaned in the
+    # approvals queue/badge — and so a stale request can't be pulled from the queue to
+    # resurrect this plan. Covers the BUY_PLAN gate while PENDING AND the deal-level
+    # PURCHASE_ORDER gate while ACTIVE (the helper is a no-op when none are open). Called
+    # UNCONDITIONALLY, matching cancel_buy_plan: the canceller may be an ops member who is
+    # neither submitter nor manager/admin, so the helper cancels on behalf of each request's
+    # own requester/owner — engine-cancel authz always satisfied.
+    _cancel_open_engine_requests_for_plan(plan, user, db)
+    plan.so_status = SOVerificationStatus.REJECTED.value
+    plan.so_rejection_note = reason
+    plan.status = BuyPlanStatus.HALTED.value
+    plan.halted_by_id = user.id
+    plan.halted_at = now
+    logger.info("Plan {} HALTED by {}: {}", plan_id, user.email, reason)
 
     db.flush()
     return plan
@@ -478,11 +489,17 @@ def verify_po(
     *,
     rejection_note: str | None = None,
 ) -> BuyPlanLine:
-    """Ops verifies a PO was properly entered.
+    """A purchase-order approver verifies a PO was properly entered.
 
     Approve → line verified. Reject → back to awaiting_po. After approval, checks if all
     lines are done → auto-complete.
+
+    Phase D: the gate moved off ops verification-group membership onto the per-user
+    ``can_approve_purchase_orders`` right (the same column the deal-level PURCHASE_ORDER
+    engine routes on) — verify-PO is now a manager-held action.
     """
+    from ..dependencies import can_approve_purchase_orders
+
     plan = db.get(BuyPlan, plan_id)
     if not plan:
         raise ValueError(f"Buy plan {plan_id} not found")
@@ -493,9 +510,8 @@ def verify_po(
     if line.status != BuyPlanLineStatus.PENDING_VERIFY.value:
         raise ValueError(f"Line must be pending verification (current: {line.status})")
 
-    member = db.query(VerificationGroupMember).filter_by(user_id=user.id, is_active=True).first()
-    if not member:
-        raise PermissionError("User is not in the ops verification group")
+    if not can_approve_purchase_orders(user):
+        raise PermissionError("Purchase-order approval right required to verify a PO")
 
     now = datetime.now(timezone.utc)
     if action == "approve":

@@ -62,10 +62,10 @@ from app.services.buyplan_workflow import (  # noqa: F401
     detect_favoritism,
     flag_line_issue,
     generate_case_report,
+    halt_plan,
     reset_buy_plan_to_draft,
     resubmit_buy_plan,
     submit_buy_plan,
     verify_po,
     verify_po_sent,
-    verify_so,
 )

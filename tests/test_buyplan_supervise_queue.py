@@ -1,11 +1,11 @@
 """Tests for buyplan_hub.supervise_overview — the unified action *queue*.
 
-The supervise lens reshapes its six source queries (approvals, SO-verify, halted,
-overdue POs, PO-verify, flagged) into ONE flat, risk-first-ordered list of uniform
-row dicts (``overview["queue"]``). This module covers that queue:
+The supervise lens reshapes its five source queries (approvals, halted, overdue POs,
+PO-verify, flagged) into ONE flat, risk-first-ordered list of uniform row dicts
+(``overview["queue"]``). This module covers that queue:
 
 - Every row carries the identical key set (uniform shape).
-- Risk-first tier order (halted → flagged → overdue → approve → verify_so → verify_po)
+- Risk-first tier order (halted → flagged → overdue → approve → verify_po)
   with oldest-first within each tier.
 - Field population: value/margin from the parent plan, owner_role (AM vs Buyer),
   waiting_since per kind, issue_reason only on flagged, line-only fields only on
@@ -154,26 +154,21 @@ def test_queue_rows_have_uniform_shape(db_session, test_user, test_quote, test_r
     assert len(queue) >= 2
     for row in queue:
         assert set(row.keys()) == _ROW_KEYS
-        assert row["kind"] in {"halted", "flagged", "overdue", "approve", "verify_so", "verify_po"}
+        assert row["kind"] in {"halted", "flagged", "overdue", "approve", "verify_po"}
 
 
 # ── Risk-first + oldest-first ordering ─────────────────────────────────
 
 
 def test_queue_risk_first_ordering(db_session, test_user, test_quote, test_requisition, test_offer):
-    """The queue is ordered halted → flagged → overdue → approve → verify_so →
-    verify_po."""
+    """The queue is ordered halted → flagged → overdue → approve → verify_po.
+
+    (Phase D folded SO verification into the single approval, so there is no verify_so
+    kind.)
+    """
     from app.services.buyplan_hub import supervise_overview
 
     # One plan/line per kind, in DELIBERATELY scrambled insertion order.
-    verify_so_plan = _make_plan(
-        db_session,
-        quote_id=test_quote.id,
-        requisition_id=test_requisition.id,
-        status=BuyPlanStatus.ACTIVE,
-        so_status=SOVerificationStatus.PENDING,
-        submitted_by_id=test_user.id,
-    )
     approve_plan = _make_plan(
         db_session,
         quote_id=test_quote.id,
@@ -232,17 +227,16 @@ def test_queue_risk_first_ordering(db_session, test_user, test_quote, test_requi
 
     queue = supervise_overview(db_session)["queue"]
     kinds = [r["kind"] for r in queue]
-    assert kinds == ["halted", "flagged", "overdue", "approve", "verify_so", "verify_po"]
+    assert kinds == ["halted", "flagged", "overdue", "approve", "verify_po"]
     # priority values are strictly ascending across the queue.
     priorities = [r["priority"] for r in queue]
     assert priorities == sorted(priorities)
-    assert priorities == [1, 2, 3, 4, 5, 6]
+    assert priorities == [1, 2, 3, 4, 5]
 
     # Spot-check the row identities line up with their source records.
     by_kind = {r["kind"]: r for r in queue}
     assert by_kind["halted"]["plan_id"] == halted_plan.id
     assert by_kind["approve"]["plan_id"] == approve_plan.id
-    assert by_kind["verify_so"]["plan_id"] == verify_so_plan.id
     assert by_kind["overdue"]["line_id"] == overdue_line.id
     assert by_kind["verify_po"]["line_id"] == verify_po_line.id
     assert by_kind["flagged"]["line_id"] == flagged_line.id
