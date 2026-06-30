@@ -86,13 +86,14 @@ def _make_line(db: Session, *, plan_id: int, **kw) -> BuyPlanLine:
 # ── Shell + lens routing ──────────────────────────────────────────────────
 
 
-def test_hub_shell_buyer_defaults_to_purchase_orders(client: TestClient):
-    """Buyer hub: stage-tab switcher present, lazy body carries explicit target + the
-    Purchase Orders tab-body URL (the buyer's default landing stage)."""
+def test_hub_shell_buyer_defaults_to_my_queue(client: TestClient):
+    """Buyer hub: tab switcher present (My Queue prepended), lazy body carries explicit
+    target + the My Queue tab-body URL (the buyer's default landing surface, Phase B)."""
     resp = client.get("/v2/partials/approvals")
     assert resp.status_code == 200
     body = resp.text
-    # Stage-tab switcher — the four stages for everyone; Supervise is gated (hidden for buyer)
+    # Tab switcher — My Queue + the four stages for everyone; Supervise gated (hidden for buyer)
+    assert "My Queue" in body
     assert "Sales Orders" in body
     assert "Buy Plans" in body
     assert "Purchase Orders" in body
@@ -100,8 +101,8 @@ def test_hub_shell_buyer_defaults_to_purchase_orders(client: TestClient):
     # Lazy body + the landmine guard: explicit hx-target on the load container
     assert 'id="bp-hub-body"' in body
     assert 'hx-target="#bp-hub-body"' in body
-    # Buyer default loads the Purchase Orders tab body
-    assert "/v2/partials/approvals/purchase-orders" in body
+    # Buyer default loads the My Queue tab body
+    assert "/v2/partials/approvals/my-queue" in body
 
 
 def test_hub_lens_highlight_is_alpine_reactive(client: TestClient):
@@ -130,12 +131,13 @@ def test_hub_shell_lens_buy_plans_loads_tab_body(client: TestClient):
     assert 'hx-target="#bp-hub-body"' in resp.text
 
 
-def test_hub_shell_sales_defaults_to_buy_plans(client: TestClient, sales_user):
-    """A sales user with no lens lands on the Buy Plans deal board tab."""
+def test_hub_shell_sales_defaults_to_my_queue(client: TestClient, sales_user):
+    """A sales user with no lens lands on the My Queue surface (every non-supervisor
+    does)."""
     with _acting_as(sales_user):
         resp = client.get("/v2/partials/approvals")
     assert resp.status_code == 200
-    assert "/v2/partials/approvals/buy-plans" in resp.text
+    assert "/v2/partials/approvals/my-queue" in resp.text
 
 
 def test_buy_plans_tab_scope_toggle_points_at_tab(client: TestClient):

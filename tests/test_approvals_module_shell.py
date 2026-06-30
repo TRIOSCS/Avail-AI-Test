@@ -108,25 +108,26 @@ def test_shell_renders_stage_tabs(nonadmin_client: TestClient):
 # ── Per-role default landing tab (_default_lens) ────────────────────────────
 
 
-def test_default_lens_buyer_is_purchase_orders(db_session: Session, test_user: User):
-    """Buyers land on the Purchase Orders stage (their PO cut queue)."""
+def test_default_lens_buyer_is_my_queue(db_session: Session, test_user: User):
+    """Buyers land on My Queue — their role-aware "what needs YOU now" surface (Phase
+    B)."""
     from app.routers.htmx.buy_plans import _default_lens
 
-    assert _default_lens(test_user, db_session) == "purchase_orders"
+    assert _default_lens(test_user, db_session) == "my_queue"
 
 
 def test_default_lens_manager_is_supervise(db_session: Session, manager_user: User):
-    """Managers/ops land on Supervise."""
+    """Managers/ops land on Supervise (until the Pipeline surface ships in Phase C)."""
     from app.routers.htmx.buy_plans import _default_lens
 
     assert _default_lens(manager_user, db_session) == "supervise"
 
 
-def test_default_lens_sales_is_buy_plans(db_session: Session, sales_user: User):
-    """Sales/trader land on the Buy Plans deal board."""
+def test_default_lens_sales_is_my_queue(db_session: Session, sales_user: User):
+    """Sales/trader land on My Queue too (every non-supervisor defaults there)."""
     from app.routers.htmx.buy_plans import _default_lens
 
-    assert _default_lens(sales_user, db_session) == "buy_plans"
+    assert _default_lens(sales_user, db_session) == "my_queue"
 
 
 # ── Stage-tab bodies (re-homed work surfaces) ───────────────────────────────
