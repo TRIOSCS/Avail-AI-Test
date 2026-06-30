@@ -1344,7 +1344,8 @@ def my_queue(db: Session, user: object) -> list[QueueRow]:
     # prepay_approve (P3): prepayment requests routed to this user.
     rows += _prepay_rows(db, user)
 
-    # po_verify (P4): PO approvers / ops members verify every pending-verify line.
+    # po_verify (P4): PO approvers (can_approve_purchase_orders) verify every pending-verify
+    # line. Ops membership alone no longer grants this (Phase D) — see is_po_approver above.
     if is_po_approver:
         rows += [
             _make_line_row(ln, kind="po_verify", since=ln.po_confirmed_at or ln.created_at, cutoff=cutoff)
