@@ -436,7 +436,7 @@ def parse_substitute_mpns(
             sub = {"mpn": sub}
         elif not isinstance(sub, dict):
             continue
-        raw_mpn = (sub.get("mpn") or "").strip()
+        raw_mpn = str(sub.get("mpn") or "").strip()
         if not raw_mpn:
             continue
         ns = normalize_mpn(raw_mpn) or raw_mpn
@@ -445,7 +445,7 @@ def parse_substitute_mpns(
             seen_keys.add(key)
             entry = {
                 "mpn": ns,
-                "manufacturer": (sub.get("manufacturer") or "").strip(),
+                "manufacturer": str(sub.get("manufacturer") or "").strip(),
             }
             source = sub.get("source")
             if isinstance(source, str) and source.strip():

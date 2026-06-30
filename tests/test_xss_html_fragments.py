@@ -39,3 +39,54 @@ def test_manufacturer_add_escapes_reflected_name(client, db_session):
     assert resp.status_code == 200
     assert _XSS not in resp.text
     assert "&lt;img" in resp.text
+
+
+def test_vendor_offers_tab_escapes_mpn_and_does_not_500(client, db_session, test_requisition, test_user):
+    """vendor_tab binds a local `html` string var, so the escape must use the module
+    alias — else any vendor-with-offers 500s (UnboundLocalError).
+
+    Also o.mpn escaped.
+    """
+    from app.models import Offer, VendorCard
+
+    vc = VendorCard(normalized_name="xss vend", display_name="XSS Vend")
+    db_session.add(vc)
+    db_session.commit()
+    db_session.add(
+        Offer(
+            requisition_id=test_requisition.id,
+            vendor_name="XSS Vend",
+            mpn=_XSS,
+            qty_available=10,
+            unit_price=1.0,
+            entered_by_id=test_user.id,
+            status="pending_review",
+            evidence_tier="T4",
+        )
+    )
+    db_session.commit()
+    resp = client.get(f"/v2/partials/vendors/{vc.id}/tab/offers")
+    assert resp.status_code == 200  # regression: was UnboundLocalError 500
+    assert _XSS not in resp.text
+    assert "&lt;img" in resp.text
+
+
+def test_quote_recent_terms_escapes_payment_terms(client, db_session, test_requisition):
+    """Recent-terms serves DISTINCT terms across ALL quotes into every user's quote
+    builder datalist — stored cross-user sink; payment_terms must be escaped."""
+    from app.models.quotes import Quote
+
+    db_session.add(
+        Quote(
+            requisition_id=test_requisition.id,
+            quote_number="Q-XSS-1",
+            line_items=[],
+            status="draft",
+            payment_terms=f"Net30 {_XSS}",
+        )
+    )
+    db_session.commit()
+    resp = client.get("/v2/partials/quotes/recent-terms")
+    assert resp.status_code == 200
+    assert _XSS not in resp.text
+    assert "&lt;img" in resp.text

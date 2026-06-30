@@ -1359,7 +1359,7 @@ async def add_to_requisition(
     count = len(items)
     return HTMLResponse(
         f'<div class="text-sm text-emerald-600 p-2">'
-        f"Added {count} result{'s' if count != 1 else ''} to requisition &ldquo;{req.name}&rdquo;"
+        f"Added {count} result{'s' if count != 1 else ''} to requisition &ldquo;{html_mod.escape(req.name or '')}&rdquo;"
         f"</div>"
     )
 

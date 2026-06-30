@@ -1303,6 +1303,7 @@ async def list_requirement_notes(
     req = db.query(Requirement).filter(Requirement.id == requirement_id).first()
     if not req:
         raise HTTPException(404, "Requirement not found")
+    require_requisition_access(db, req.requisition_id, user, label="Requirement")
     # Gather notes from offers that have non-empty notes
     offer_notes = (
         db.query(Offer)
@@ -1360,6 +1361,7 @@ async def list_requirement_tasks(
     req_item = db.query(Requirement).filter(Requirement.id == requirement_id).first()
     if not req_item:
         raise HTTPException(404, "Requirement not found")
+    require_requisition_access(db, req_item.requisition_id, user, label="Requirement")
 
     # Part-level tasks
     part_ref = f"requirement:{requirement_id}"
