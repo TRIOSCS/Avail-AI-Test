@@ -70,7 +70,10 @@ class Quote(Base):
     requisition = relationship("Requisition", back_populates="quotes")
     customer_site = relationship("CustomerSite", foreign_keys=[customer_site_id])
     created_by = relationship("User", foreign_keys=[created_by_id])
-    quote_lines = relationship("QuoteLine", back_populates="quote")
+    # cascade + passive_deletes: quote_lines.quote_id is NOT NULL with DB
+    # ondelete=CASCADE, so let the DB cascade the delete instead of the ORM
+    # NULLing children first (which would violate NOT NULL → IntegrityError).
+    quote_lines = relationship("QuoteLine", back_populates="quote", cascade="all, delete-orphan", passive_deletes=True)
 
     @validates("status")
     def _validate_status(self, _key, value):

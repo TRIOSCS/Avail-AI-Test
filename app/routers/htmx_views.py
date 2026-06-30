@@ -30,6 +30,7 @@ from ..database import get_db
 from ..dependencies import (
     get_req_for_user,
     get_user,
+    is_manager_or_admin,
     require_access,
     require_buyer,
     require_requisition_access,
@@ -432,6 +433,8 @@ async def requisitions_bulk_action(
         require_requisition_access(db, r.id, user)
 
     if action == "assign":
+        if not is_manager_or_admin(user):
+            raise HTTPException(403, "Only managers or admins can reassign requisition owners")
         owner_id = form.get("owner_id")
         if owner_id:
             new_owner = _safe_int(owner_id)
@@ -532,6 +535,8 @@ async def requisition_inline_save(
         req.deadline = value if value else None
         msg = f"Deadline {'→ ' + value if value else 'cleared'}"
     elif field == "owner":
+        if not is_manager_or_admin(user):
+            raise HTTPException(403, "Only managers or admins can reassign requisition owners")
         if value and value.isdigit():
             req.created_by = int(value)
             msg = "Owner reassigned"
@@ -1354,7 +1359,7 @@ async def add_to_requisition(
     count = len(items)
     return HTMLResponse(
         f'<div class="text-sm text-emerald-600 p-2">'
-        f"Added {count} result{'s' if count != 1 else ''} to requisition &ldquo;{req.name}&rdquo;"
+        f"Added {count} result{'s' if count != 1 else ''} to requisition &ldquo;{html_mod.escape(req.name or '')}&rdquo;"
         f"</div>"
     )
 

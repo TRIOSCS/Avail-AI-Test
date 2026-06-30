@@ -127,6 +127,18 @@ class TestOobToast:
         assert "\\'" in body
         assert "&quot;" in body
 
+    def test_escapes_ampersand_to_block_entity_decode_bypass(self):
+        """The x-init attribute is HTML-decoded before Alpine evals the JS, so an
+        injected &#39; would decode into a real quote and break out of the JS string.
+
+        Escaping & first neutralizes it.
+        """
+        from app.routers.sightings import _oob_toast
+
+        body = _oob_toast("x&#39;);alert(1)//").body.decode()
+        assert "&amp;#39;" in body  # ampersand escaped → entity can't decode to a quote
+        assert "&#39;);alert" not in body  # raw entity-quote payload neutralized
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Sightings list — filter/sort branches

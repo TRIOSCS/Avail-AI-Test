@@ -118,8 +118,16 @@ _SORT_COLUMNS = {
 
 
 def _oob_toast_html(msg: str, level: str = "success") -> str:
-    """The OOB toast fragment — swaps into #toast-trigger and fires $store.toast."""
-    safe_msg = msg.replace("'", "\\'").replace('"', "&quot;")
+    """The OOB toast fragment — swaps into #toast-trigger and fires $store.toast.
+
+    msg is embedded in a single-quoted JS string inside the x-init attribute. Escape
+    ``&`` FIRST: the browser HTML-decodes the attribute before Alpine evaluates the JS,
+    so an injected entity like ``&#39;`` would otherwise decode into a real quote and
+    break out of the string. Then backslash (so a ``\\'`` payload can't escape the
+    escaper's own backslash), then the single quote (JS string), then the double quote
+    (the surrounding attribute). ``level`` is a server-controlled constant.
+    """
+    safe_msg = msg.replace("&", "&amp;").replace("\\", "\\\\").replace("'", "\\'").replace('"', "&quot;")
     return (
         f'<div hx-swap-oob="true" id="toast-trigger"'
         f" x-init=\"$store.toast.message='{safe_msg}';"

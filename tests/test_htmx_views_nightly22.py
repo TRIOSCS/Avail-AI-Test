@@ -37,7 +37,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.constants import BuyPlanStatus, OfferStatus, QuoteStatus, SOVerificationStatus
+from app.constants import BuyPlanStatus, OfferStatus, QuoteStatus, SOVerificationStatus, UserRole
 from app.models import Company, CustomerSite, Requisition, User, VendorCard
 from app.models.offers import Offer, VendorResponse
 from app.models.quotes import Quote, QuoteLine
@@ -748,6 +748,8 @@ class TestRequisitionsBulkAction:
     @pytest.mark.parametrize("action", ["assign"])
     def test_bulk_action_success(self, client: TestClient, db_session: Session, test_user: User, action: str):
         req = _make_req(db_session, test_user)
+        test_user.role = UserRole.MANAGER
+        db_session.commit()
         resp = client.post(
             f"/v2/partials/requisitions/bulk/{action}",
             data={"ids": str(req.id)},

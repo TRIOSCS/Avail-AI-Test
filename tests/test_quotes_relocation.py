@@ -104,6 +104,29 @@ def _quote_line(db_session, *, quote_id, mpn, material_card_id=None, qty=10):
     return ql
 
 
+def test_delete_quote_with_lines_cascades_no_integrity_error(db_session, test_user):
+    """Deleting a quote that HAS QuoteLines must cascade-delete the lines, not raise
+    IntegrityError.
+
+    quote_lines.quote_id is NOT NULL with ondelete=CASCADE, so the ORM relationship
+    needs cascade='all, delete-orphan' + passive_deletes=True; otherwise the unit-of-
+    work NULLs the children first and violates NOT NULL. (The existing delete test only
+    covered line-less quotes, which is why this hid.)
+    """
+    from app.models.quotes import Quote, QuoteLine
+
+    reqn, _ = _req_with_part(db_session, test_user)
+    q = _quote(db_session, requisition_id=reqn.id, number="Q-CASC-1")
+    line = _quote_line(db_session, quote_id=q.id, mpn="LM317T")
+    line_id, quote_id = line.id, q.id
+
+    db_session.delete(q)
+    db_session.commit()
+
+    assert db_session.get(Quote, quote_id) is None
+    assert db_session.get(QuoteLine, line_id) is None, "lines must cascade-delete with the quote"
+
+
 def _make_material_card(db_session):
     """Create a minimal valid MaterialCard (normalized_mpn and display_mpn are NOT
     NULL)."""
