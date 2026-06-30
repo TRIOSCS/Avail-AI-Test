@@ -12,17 +12,29 @@ Depends on: models.buy_plan (BuyPlan, BuyPlanLine), models.auth (User),
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 
-from sqlalchemy import func
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from ..config import settings
-from ..constants import BuyPlanLineStatus, BuyPlanStatus, SOVerificationStatus
-from ..models.buy_plan import BuyPlan, BuyPlanLine
+from ..constants import (
+    ApprovalGateType,
+    BuyPlanLineStatus,
+    BuyPlanStatus,
+    SOVerificationStatus,
+    UserRole,
+)
+from ..dependencies import can_approve_buy_plans
+from ..models.approvals import ApprovalRequest
+from ..models.buy_plan import BuyPlan, BuyPlanLine, VerificationGroupMember
 from ..models.crm import CustomerSite
+from ..models.quality_plan import Prepayment
 from ..models.quotes import Quote
 from ..models.sourcing import Requisition
+from .approvals.queue import _actionable_request_ids
 from .buyplan_naming import (
     CARD_KIND_BUY_PLAN,
     build_card_title,
@@ -605,10 +617,11 @@ _OPEN_STATUSES: frozenset[str] = frozenset(
     }
 )
 
-#: Risk-first priority tier for each action-queue row kind (1 = highest risk,
-#: surfaced first). The supervise lens sorts the unified queue by
-#: ``(priority, waiting_since)`` so the riskiest, oldest items lead.
-_QUEUE_PRIORITY: dict[str, int] = {
+#: Risk-first priority tier for each *supervise-lens* action-queue row kind
+#: (1 = highest risk, surfaced first). The supervise lens sorts its unified queue by
+#: ``(priority, waiting_since)`` so the riskiest, oldest items lead. Distinct from the
+#: role-aware ``_QUEUE_PRIORITY`` used by :func:`my_queue` (different kind vocabulary).
+_SUPERVISE_QUEUE_PRIORITY: dict[str, int] = {
     "halted": 1,
     "flagged": 2,
     "overdue": 3,
@@ -617,8 +630,8 @@ _QUEUE_PRIORITY: dict[str, int] = {
     "verify_po": 6,
 }
 
-#: Human-readable pill label for each action-queue row kind.
-_QUEUE_LABEL: dict[str, str] = {
+#: Human-readable pill label for each supervise-lens action-queue row kind.
+_SUPERVISE_QUEUE_LABEL: dict[str, str] = {
     "halted": "Halted",
     "flagged": "Flagged",
     "overdue": "Overdue PO",
@@ -626,6 +639,229 @@ _QUEUE_LABEL: dict[str, str] = {
     "verify_so": "Verify SO",
     "verify_po": "Verify PO",
 }
+
+
+# ── Shared SLA rule (single source of truth for the overdue-PO clock) ──────────────
+# Both the SQL-side overdue filter (_query_overdue_lines, org-wide) and the Python-side
+# per-row is_overdue flag (_line_overdue, used by my_queue's cut_po split) key off the
+# SAME buyer-nudge SLA so the two surfaces never disagree on what "overdue" means.
+
+
+def _nudge_cutoff() -> datetime:
+    """Datetime before which an un-actioned AWAITING_PO line counts as overdue.
+
+    Mirrors the buyer-nudge predicate in inventory_jobs.py: a line is overdue when its
+    nudge clock (``coalesce(last_nudge_at, plan.approved_at)``) is older than
+    ``settings.buyplan_nudge_buyer_hours``. Read at call time so test overrides apply.
+    """
+    return datetime.now(timezone.utc) - timedelta(hours=settings.buyplan_nudge_buyer_hours)
+
+
+def _line_overdue(line: BuyPlanLine, cutoff: datetime) -> bool:
+    """Python form of the overdue-PO rule, for a single eager-loaded line.
+
+    True only for an AWAITING_PO line on an ACTIVE, approved plan whose nudge clock
+    predates *cutoff*. Touches only the (already eager-loaded) parent plan — never a
+    lazy relationship. Mirrors the SQL predicate in :func:`_query_overdue_lines`.
+    """
+    if line.status != BuyPlanLineStatus.AWAITING_PO:
+        return False
+    plan = line.buy_plan
+    if plan is None or plan.status != BuyPlanStatus.ACTIVE or plan.approved_at is None:
+        return False
+    anchor = line.last_nudge_at or plan.approved_at
+    return anchor < cutoff
+
+
+# ── Source queries (single source of truth, shared by supervise_overview + my_queue) ──
+# Each ``_query_*`` helper owns ONE source query. supervise_overview composes the org-wide
+# set; my_queue composes the role-/owner-scoped set (passing buyer_id/owner_id). Keeping
+# the queries here means a workflow change just stops emitting a kind from one builder.
+
+# Eager-load chains reused below: a plan card needs the customer (quote OR requisition
+# path), the AM (submitted_by) and its lines' requirements (headline MPN); a line card
+# needs its parent plan's customer, the offer (MPN/vendor), the buyer and the requirement.
+_PLAN_CUSTOMER_LOADS = (
+    joinedload(BuyPlan.quote).joinedload(Quote.customer_site).joinedload(CustomerSite.company),
+    joinedload(BuyPlan.requisition).joinedload(Requisition.customer_site).joinedload(CustomerSite.company),
+)
+_LINE_PLAN_LOADS = (
+    joinedload(BuyPlanLine.buy_plan)
+    .joinedload(BuyPlan.quote)
+    .joinedload(Quote.customer_site)
+    .joinedload(CustomerSite.company),
+    joinedload(BuyPlanLine.buy_plan)
+    .joinedload(BuyPlan.requisition)
+    .joinedload(Requisition.customer_site)
+    .joinedload(CustomerSite.company),
+    joinedload(BuyPlanLine.offer),
+    joinedload(BuyPlanLine.buyer),
+    joinedload(BuyPlanLine.requirement),
+)
+
+
+def _query_approval_plans(db: Session) -> list[BuyPlan]:
+    """PENDING plans awaiting a first approval decision (org-wide), oldest first."""
+    return (
+        db.query(BuyPlan)
+        .filter(BuyPlan.status == BuyPlanStatus.PENDING, BuyPlan.approved_by_id.is_(None))
+        .options(
+            *_PLAN_CUSTOMER_LOADS,
+            joinedload(BuyPlan.submitted_by),
+            selectinload(BuyPlan.lines).selectinload(BuyPlanLine.requirement),
+        )
+        .order_by(BuyPlan.created_at.asc())
+        .all()
+    )
+
+
+def _query_so_pending_plans(db: Session) -> list[BuyPlan]:
+    """ACTIVE plans still awaiting SO verification (org-wide), oldest first."""
+    return (
+        db.query(BuyPlan)
+        .filter(BuyPlan.status == BuyPlanStatus.ACTIVE, BuyPlan.so_status == SOVerificationStatus.PENDING)
+        .options(
+            joinedload(BuyPlan.quote).joinedload(Quote.customer_site).joinedload(CustomerSite.company),
+            joinedload(BuyPlan.submitted_by),
+        )
+        .order_by(BuyPlan.created_at.asc())
+        .all()
+    )
+
+
+def _query_halted_plans(db: Session, *, owner_id: int | None = None) -> list[BuyPlan]:
+    """HALTED plans, oldest first; ``owner_id`` scopes to a single AM (my_queue)."""
+    q = db.query(BuyPlan).filter(BuyPlan.status == BuyPlanStatus.HALTED)
+    if owner_id is not None:
+        q = q.filter(BuyPlan.submitted_by_id == owner_id)
+    return (
+        q.options(
+            *_PLAN_CUSTOMER_LOADS,
+            joinedload(BuyPlan.submitted_by),
+            selectinload(BuyPlan.lines).selectinload(BuyPlanLine.requirement),
+        )
+        .order_by(BuyPlan.created_at.asc())
+        .all()
+    )
+
+
+def _query_overdue_lines(db: Session, *, buyer_id: int | None = None) -> list[BuyPlanLine]:
+    """AWAITING_PO lines past the buyer-nudge SLA on ACTIVE/approved plans, oldest
+    first.
+
+    Org-wide for supervise; ``buyer_id`` scopes to one buyer for my_queue's cut_po_overdue.
+    """
+    cutoff = _nudge_cutoff()
+    q = (
+        db.query(BuyPlanLine)
+        .join(BuyPlan, BuyPlanLine.buy_plan_id == BuyPlan.id)
+        .filter(
+            BuyPlanLine.status == BuyPlanLineStatus.AWAITING_PO,
+            BuyPlan.status == BuyPlanStatus.ACTIVE,
+            BuyPlan.approved_at.isnot(None),
+            func.coalesce(BuyPlanLine.last_nudge_at, BuyPlan.approved_at) < cutoff,
+        )
+    )
+    if buyer_id is not None:
+        q = q.filter(BuyPlanLine.buyer_id == buyer_id)
+    return q.options(*_LINE_PLAN_LOADS).order_by(BuyPlanLine.created_at.asc()).all()
+
+
+def _query_po_pending_verify(db: Session) -> list[BuyPlanLine]:
+    """PENDING_VERIFY lines awaiting PO verification (org-wide), oldest first."""
+    return (
+        db.query(BuyPlanLine)
+        .filter(BuyPlanLine.status == BuyPlanLineStatus.PENDING_VERIFY)
+        .options(*_LINE_PLAN_LOADS)
+        .order_by(BuyPlanLine.created_at.asc())
+        .all()
+    )
+
+
+def _query_flagged_lines(db: Session) -> list[BuyPlanLine]:
+    """ISSUE (buyer-flagged) lines (org-wide), oldest first."""
+    return (
+        db.query(BuyPlanLine)
+        .filter(BuyPlanLine.status == BuyPlanLineStatus.ISSUE)
+        .options(*_LINE_PLAN_LOADS)
+        .order_by(BuyPlanLine.created_at.asc())
+        .all()
+    )
+
+
+def _query_inbound_plans(db: Session, *, buyer_id: int | None = None) -> list[BuyPlan]:
+    """INBOUND plans awaiting receipt, oldest first.
+
+    ``buyer_id`` scopes to plans where that buyer holds a line (the receiver), via an
+    EXISTS subquery (no row multiplication).
+    """
+    q = db.query(BuyPlan).filter(BuyPlan.status == BuyPlanStatus.INBOUND)
+    if buyer_id is not None:
+        q = q.filter(BuyPlan.lines.any(BuyPlanLine.buyer_id == buyer_id))
+    return (
+        q.options(
+            *_PLAN_CUSTOMER_LOADS,
+            joinedload(BuyPlan.submitted_by),
+            selectinload(BuyPlan.lines).selectinload(BuyPlanLine.requirement),
+        )
+        .order_by(BuyPlan.created_at.asc())
+        .all()
+    )
+
+
+def _query_resourcing_pool(db: Session) -> list[BuyPlanLine]:
+    """Unclaimed RESOURCING-pool lines on ACTIVE plans (pool-wide), oldest first."""
+    return (
+        db.query(BuyPlanLine)
+        .join(BuyPlan, BuyPlanLine.buy_plan_id == BuyPlan.id)
+        .filter(
+            BuyPlanLine.status == BuyPlanLineStatus.RESOURCING,
+            BuyPlanLine.buyer_id.is_(None),
+            BuyPlan.status == BuyPlanStatus.ACTIVE,
+        )
+        .options(*_LINE_PLAN_LOADS)
+        .order_by(BuyPlanLine.created_at.asc())
+        .all()
+    )
+
+
+def _query_owner_draft_plans(db: Session, *, owner_id: int) -> list[BuyPlan]:
+    """DRAFT plans owned (submitted) by ``owner_id``, oldest first.
+
+    Feeds both plan_draft (fresh) and plan_returned (sent back by an approver); the
+    caller partitions them via :func:`_is_returned`.
+    """
+    return (
+        db.query(BuyPlan)
+        .filter(BuyPlan.status == BuyPlanStatus.DRAFT, BuyPlan.submitted_by_id == owner_id)
+        .options(
+            *_PLAN_CUSTOMER_LOADS,
+            joinedload(BuyPlan.submitted_by),
+            selectinload(BuyPlan.lines).selectinload(BuyPlanLine.requirement),
+        )
+        .order_by(BuyPlan.created_at.asc())
+        .all()
+    )
+
+
+def _query_buyer_awaiting_po_lines(db: Session, *, buyer_id: int) -> list[BuyPlanLine]:
+    """A buyer's AWAITING_PO lines on ACTIVE plans (overdue + not), oldest first.
+
+    The caller splits these into cut_po_overdue / cut_po via :func:`_line_overdue` so the
+    overdue clock is computed once, in the row builder, with no extra query.
+    """
+    return (
+        db.query(BuyPlanLine)
+        .join(BuyPlan, BuyPlanLine.buy_plan_id == BuyPlan.id)
+        .filter(
+            BuyPlanLine.status == BuyPlanLineStatus.AWAITING_PO,
+            BuyPlan.status == BuyPlanStatus.ACTIVE,
+            BuyPlanLine.buyer_id == buyer_id,
+        )
+        .options(*_LINE_PLAN_LOADS)
+        .order_by(BuyPlanLine.created_at.asc())
+        .all()
+    )
 
 
 def supervise_overview(db: Session) -> dict:
@@ -674,8 +910,6 @@ def supervise_overview(db: Session) -> dict:
             ``line.created_at`` for verify_po/flagged. The list is sorted by
             ``(priority, waiting_since)`` — risk-first, oldest-first within each tier.
     """
-    nudge_threshold = datetime.now(timezone.utc) - timedelta(hours=settings.buyplan_nudge_buyer_hours)
-
     # ── Strip aggregates (single query) ──────────────────────────────
     agg = (
         db.query(
@@ -688,105 +922,13 @@ def supervise_overview(db: Session) -> dict:
     open_value = float(agg.open_value)
     avg_margin = float(agg.avg_margin)
 
-    # ── Approval queue ───────────────────────────────────────────────
-    approval_plans = (
-        db.query(BuyPlan)
-        .filter(
-            BuyPlan.status == BuyPlanStatus.PENDING,
-            BuyPlan.approved_by_id.is_(None),
-        )
-        .options(
-            joinedload(BuyPlan.quote).joinedload(Quote.customer_site).joinedload(CustomerSite.company),
-            joinedload(BuyPlan.submitted_by),
-        )
-        .order_by(BuyPlan.created_at.asc())
-        .all()
-    )
-
-    # ── ACTIVE plans needing SO verification ─────────────────────────
-    so_pending_plans = (
-        db.query(BuyPlan)
-        .filter(
-            BuyPlan.status == BuyPlanStatus.ACTIVE,
-            BuyPlan.so_status == SOVerificationStatus.PENDING,
-        )
-        .options(
-            joinedload(BuyPlan.quote).joinedload(Quote.customer_site).joinedload(CustomerSite.company),
-            joinedload(BuyPlan.submitted_by),
-        )
-        .order_by(BuyPlan.created_at.asc())
-        .all()
-    )
-
-    # ── Halted plans ─────────────────────────────────────────────────
-    halted_plans = (
-        db.query(BuyPlan)
-        .filter(BuyPlan.status == BuyPlanStatus.HALTED)
-        .options(
-            joinedload(BuyPlan.quote).joinedload(Quote.customer_site).joinedload(CustomerSite.company),
-            joinedload(BuyPlan.submitted_by),
-        )
-        .order_by(BuyPlan.created_at.asc())
-        .all()
-    )
-
-    # ── Overdue AWAITING_PO lines on ACTIVE plans ────────────────────
-    # Mirrors the buyer-nudge predicate in inventory_jobs.py:
-    #   plan must be ACTIVE + approved_at set (approval is the start clock);
-    #   coalesce(last_nudge_at, approved_at) < threshold (line has not been
-    #   recently nudged, falling back to the plan approval timestamp).
-    overdue_lines = (
-        db.query(BuyPlanLine)
-        .join(BuyPlan, BuyPlanLine.buy_plan_id == BuyPlan.id)
-        .filter(
-            BuyPlanLine.status == BuyPlanLineStatus.AWAITING_PO,
-            BuyPlan.status == BuyPlanStatus.ACTIVE,
-            BuyPlan.approved_at.isnot(None),
-            func.coalesce(BuyPlanLine.last_nudge_at, BuyPlan.approved_at) < nudge_threshold,
-        )
-        .options(
-            joinedload(BuyPlanLine.buy_plan)
-            .joinedload(BuyPlan.quote)
-            .joinedload(Quote.customer_site)
-            .joinedload(CustomerSite.company),
-            joinedload(BuyPlanLine.offer),
-            joinedload(BuyPlanLine.buyer),
-        )
-        .order_by(BuyPlanLine.created_at.asc())
-        .all()
-    )
-
-    # ── PENDING_VERIFY lines awaiting ops PO verification ────────────
-    po_pending_verify_lines = (
-        db.query(BuyPlanLine)
-        .filter(BuyPlanLine.status == BuyPlanLineStatus.PENDING_VERIFY)
-        .options(
-            joinedload(BuyPlanLine.buy_plan)
-            .joinedload(BuyPlan.quote)
-            .joinedload(Quote.customer_site)
-            .joinedload(CustomerSite.company),
-            joinedload(BuyPlanLine.offer),
-            joinedload(BuyPlanLine.buyer),
-        )
-        .order_by(BuyPlanLine.created_at.asc())
-        .all()
-    )
-
-    # ── Flagged (ISSUE) lines ────────────────────────────────────────
-    flagged_lines = (
-        db.query(BuyPlanLine)
-        .filter(BuyPlanLine.status == BuyPlanLineStatus.ISSUE)
-        .options(
-            joinedload(BuyPlanLine.buy_plan)
-            .joinedload(BuyPlan.quote)
-            .joinedload(Quote.customer_site)
-            .joinedload(CustomerSite.company),
-            joinedload(BuyPlanLine.offer),
-            joinedload(BuyPlanLine.buyer),
-        )
-        .order_by(BuyPlanLine.created_at.asc())
-        .all()
-    )
+    # ── Source queries (shared single source of truth with my_queue) ──
+    approval_plans = _query_approval_plans(db)
+    so_pending_plans = _query_so_pending_plans(db)
+    halted_plans = _query_halted_plans(db)
+    overdue_lines = _query_overdue_lines(db)
+    po_pending_verify_lines = _query_po_pending_verify(db)
+    flagged_lines = _query_flagged_lines(db)
 
     # ── Uniform row builders ─────────────────────────────────────────
     def _plan_row(plan: BuyPlan, *, kind: str, waiting_since: datetime) -> dict:
@@ -797,8 +939,8 @@ def supervise_overview(db: Session) -> dict:
         """
         return {
             "kind": kind,
-            "label": _QUEUE_LABEL[kind],
-            "priority": _QUEUE_PRIORITY[kind],
+            "label": _SUPERVISE_QUEUE_LABEL[kind],
+            "priority": _SUPERVISE_QUEUE_PRIORITY[kind],
             "plan_id": plan.id,
             "line_id": None,
             "customer_name": _customer_name(plan),
@@ -824,8 +966,8 @@ def supervise_overview(db: Session) -> dict:
         plan = ln.buy_plan
         return {
             "kind": kind,
-            "label": _QUEUE_LABEL[kind],
-            "priority": _QUEUE_PRIORITY[kind],
+            "label": _SUPERVISE_QUEUE_LABEL[kind],
+            "priority": _SUPERVISE_QUEUE_PRIORITY[kind],
             "plan_id": ln.buy_plan_id,
             "line_id": ln.id,
             "customer_name": _customer_name(plan) if plan else None,
@@ -869,3 +1011,377 @@ def supervise_overview(db: Session) -> dict:
         },
         "queue": queue,
     }
+
+
+# ── My Queue — one role-aware builder ─────────────────────────────────
+# my_queue(db, user) is the single read model behind the "what needs YOU now" surface.
+# It reuses the same _query_* helpers as supervise_overview (single source of truth) but
+# gates which KINDS it emits by the viewer's rights/role/ownership, then sorts risk-first.
+# Jinja consumes ONLY QueueRow — every ORM access stays inside this module.
+
+
+@dataclass(frozen=True)
+class QueueRow:
+    """One actionable item for a single user, fully resolved (no ORM access in Jinja).
+
+    ``value``/``tso`` are always the parent plan's deal value / sales-order number so a
+    row reads uniformly regardless of kind. ``primary_mpn`` is the headline part (line MPN
+    for line kinds, first non-cancelled line's MPN for plan kinds). ``age_hours`` is the
+    wait clock used both for display and the oldest-first sort; ``is_overdue`` is True only
+    for an AWAITING_PO line past its buyer-nudge SLA. ``extra`` carries kind-specific
+    secondary-line fields (``margin_pct``, ``vendor_name``, ``owner_name``, ``owner_role``,
+    and ``amount`` on prepay rows) the template renders below the identity line.
+    """
+
+    kind: str
+    priority: int
+    label: str
+    plan_id: int | None
+    line_id: int | None
+    customer_name: str | None
+    primary_mpn: str | None
+    tso: str | None
+    value: Decimal | None
+    age_hours: float
+    is_overdue: bool
+    action_url: str | None
+    action_label: str | None
+    detail_href: str | None
+    extra: dict = field(default_factory=dict)
+
+
+#: Risk-first priority tier per my_queue kind (1 = highest risk, surfaced first). The
+#: queue sorts by ``(priority, -age_hours)`` — risk-first, oldest-first within each tier.
+_QUEUE_PRIORITY: dict[str, int] = {
+    "halted": 1,
+    "plan_returned": 2,
+    "plan_approve": 3,
+    "prepay_approve": 3,
+    "po_verify": 4,
+    "claim": 5,
+    "cut_po_overdue": 6,
+    "cut_po": 7,
+    "receive": 8,
+    "plan_draft": 9,
+}
+
+#: Short uppercase microlabel shown in the row's KIND column.
+_QUEUE_LABEL: dict[str, str] = {
+    "halted": "Halted",
+    "plan_returned": "Returned",
+    "plan_approve": "Approve",
+    "prepay_approve": "Prepay",
+    "po_verify": "Verify",
+    "claim": "Claim",
+    "cut_po_overdue": "Overdue",
+    "cut_po": "Cut PO",
+    "receive": "Receive",
+    "plan_draft": "Draft",
+}
+
+#: Primary action-button verb per kind (the right-rail CTA).
+_QUEUE_ACTION_LABEL: dict[str, str] = {
+    "halted": "Open",
+    "plan_returned": "Resubmit",
+    "plan_approve": "Approve",
+    "prepay_approve": "Approve",
+    "po_verify": "Verify",
+    "claim": "Claim",
+    "cut_po_overdue": "Cut PO",
+    "cut_po": "Cut PO",
+    "receive": "Receive",
+    "plan_draft": "Submit",
+}
+
+#: Roles that may cut/claim POs and receive goods (line-execution kinds).
+_PO_CUTTER_ROLES: frozenset[str] = frozenset({UserRole.BUYER, UserRole.MANAGER, UserRole.ADMIN})
+
+
+def _is_ops_member(db: Session, user: object) -> bool:
+    """True when *user* is an active ops verification-group member.
+
+    Queries VerificationGroupMember directly (the single source of truth) so this read
+    model carries no dependency on the HTMX router layer.
+    """
+    return db.query(VerificationGroupMember).filter_by(user_id=user.id, is_active=True).first() is not None
+
+
+def _is_returned(plan: BuyPlan) -> bool:
+    """True when a DRAFT plan was sent back by an approver (vs a fresh, never-submitted
+    draft).
+
+    Mirrors the rejected branch of :func:`_compute_blocker`: an approval decision timestamp,
+    a rejected SO, or rejection wording in the approval notes all mark a returned draft.
+    """
+    return (
+        plan.approved_at is not None
+        or plan.so_status == SOVerificationStatus.REJECTED
+        or bool(plan.approval_notes and "reject" in plan.approval_notes.lower())
+    )
+
+
+def _age_hours(since: datetime | None) -> float:
+    """Whole-and-fractional hours from *since* until now (UTC), floored at 0.
+
+    Naive datetimes are treated as UTC (defensive — UTCDateTime returns aware values, but
+    raw back-dated test rows can be naive). ``None`` → 0.0.
+    """
+    if since is None:
+        return 0.0
+    if since.tzinfo is None:
+        since = since.replace(tzinfo=timezone.utc)
+    return max(0.0, (datetime.now(timezone.utc) - since).total_seconds() / 3600.0)
+
+
+def _line_mpn(line: BuyPlanLine) -> str | None:
+    """Headline MPN for a line row: the offer's MPN, falling back to the requirement's.
+
+    Both relationships are eager-loaded by the ``_LINE_PLAN_LOADS`` chain (no N+1); the
+    requirement fallback covers RESOURCING-pool lines whose offer fell down.
+    """
+    if line.offer and line.offer.mpn:
+        return line.offer.mpn
+    if line.requirement and line.requirement.primary_mpn:
+        return line.requirement.primary_mpn
+    return None
+
+
+def _action_url(kind: str, *, plan_id: int | None, line_id: int | None, request_id: int | None) -> str | None:
+    """Build the primary-action endpoint for a row (``None`` for whole-row open
+    kinds)."""
+    base = f"/v2/partials/buy-plans/{plan_id}"
+    if kind in ("plan_draft", "plan_returned"):
+        return f"{base}/submit"
+    if kind == "plan_approve":
+        return f"{base}/approve"
+    if kind == "prepay_approve":
+        return f"/v2/approvals/requests/{request_id}/decision"
+    if kind == "po_verify":
+        return f"{base}/lines/{line_id}/verify-po"
+    if kind == "claim":
+        return f"{base}/lines/{line_id}/claim"
+    if kind in ("cut_po", "cut_po_overdue"):
+        return f"{base}/lines/{line_id}/confirm-po"
+    if kind == "receive":
+        return f"{base}/receive"
+    # halted → whole row links to detail; no distinct action endpoint.
+    return None
+
+
+def _make_plan_row(plan: BuyPlan, *, kind: str, since: datetime | None) -> QueueRow:
+    """Build a plan-level QueueRow. Owner is the Account Manager (``submitted_by``).
+
+    Touches only eager-loaded relationships (customer, submitted_by, lines→requirement).
+    """
+    return QueueRow(
+        kind=kind,
+        priority=_QUEUE_PRIORITY[kind],
+        label=_QUEUE_LABEL[kind],
+        plan_id=plan.id,
+        line_id=None,
+        customer_name=_customer_name(plan),
+        primary_mpn=_primary_mpn(plan),
+        tso=plan.sales_order_number,
+        value=plan.total_cost,
+        age_hours=_age_hours(since),
+        is_overdue=False,
+        action_url=_action_url(kind, plan_id=plan.id, line_id=None, request_id=None),
+        action_label=_QUEUE_ACTION_LABEL[kind],
+        detail_href=f"/v2/partials/buy-plans/{plan.id}",
+        extra={
+            "margin_pct": plan.total_margin_pct,
+            "owner_name": _user_name(plan.submitted_by),
+            "owner_role": "AM",
+        },
+    )
+
+
+def _make_line_row(line: BuyPlanLine, *, kind: str, since: datetime | None, cutoff: datetime) -> QueueRow:
+    """Build a line-level QueueRow. Owner is the Buyer; value/margin come from the
+    parent plan.
+
+    Touches only eager-loaded relationships (buy_plan, offer, buyer, requirement).
+    """
+    plan = line.buy_plan
+    return QueueRow(
+        kind=kind,
+        priority=_QUEUE_PRIORITY[kind],
+        label=_QUEUE_LABEL[kind],
+        plan_id=line.buy_plan_id,
+        line_id=line.id,
+        customer_name=_customer_name(plan) if plan else None,
+        primary_mpn=_line_mpn(line),
+        tso=plan.sales_order_number if plan else None,
+        value=plan.total_cost if plan else None,
+        age_hours=_age_hours(since),
+        is_overdue=_line_overdue(line, cutoff),
+        action_url=_action_url(kind, plan_id=line.buy_plan_id, line_id=line.id, request_id=None),
+        action_label=_QUEUE_ACTION_LABEL[kind],
+        detail_href=f"/v2/partials/buy-plans/{line.buy_plan_id}",
+        extra={
+            "margin_pct": plan.total_margin_pct if plan else None,
+            "vendor_name": line.offer.vendor_name if line.offer else None,
+            "owner_name": _user_name(line.buyer),
+            "owner_role": "Buyer",
+        },
+    )
+
+
+def _prepay_rows(db: Session, user: object) -> list[QueueRow]:
+    """Prepayment-approval rows the *user* may decide.
+
+    Reuses the approvals engine's ``_actionable_request_ids`` (REQUESTED requests where the
+    user holds a PENDING recipient row), filtered to the PREPAYMENT gate — never duplicating
+    that query. Subjects (with vendor + parent plan customer) are batch-loaded to avoid N+1.
+    """
+    actionable = _actionable_request_ids(db, user)
+    if not actionable:
+        return []
+
+    reqs = list(
+        db.execute(
+            select(ApprovalRequest)
+            .where(ApprovalRequest.id.in_(actionable), ApprovalRequest.gate_type == ApprovalGateType.PREPAYMENT)
+            .order_by(ApprovalRequest.created_at.asc())
+        ).scalars()
+    )
+    if not reqs:
+        return []
+
+    subject_ids = [ar.subject_id for ar in reqs if ar.subject_id]
+    prepayments: dict[int, Prepayment] = {}
+    if subject_ids:
+        loaded = (
+            db.execute(
+                select(Prepayment)
+                .options(
+                    joinedload(Prepayment.vendor_card),
+                    joinedload(Prepayment.buy_plan)
+                    .joinedload(BuyPlan.quote)
+                    .joinedload(Quote.customer_site)
+                    .joinedload(CustomerSite.company),
+                    joinedload(Prepayment.buy_plan)
+                    .joinedload(BuyPlan.requisition)
+                    .joinedload(Requisition.customer_site)
+                    .joinedload(CustomerSite.company),
+                )
+                .where(Prepayment.id.in_(subject_ids))
+            )
+            .unique()
+            .scalars()
+        )
+        prepayments = {pp.id: pp for pp in loaded}
+
+    rows: list[QueueRow] = []
+    for ar in reqs:
+        pp = prepayments.get(ar.subject_id) if ar.subject_id else None
+        plan = pp.buy_plan if pp else None
+        plan_id = pp.buy_plan_id if pp else None
+        rows.append(
+            QueueRow(
+                kind="prepay_approve",
+                priority=_QUEUE_PRIORITY["prepay_approve"],
+                label=_QUEUE_LABEL["prepay_approve"],
+                plan_id=plan_id,
+                line_id=None,
+                customer_name=_customer_name(plan) if plan else None,
+                primary_mpn=None,
+                tso=plan.sales_order_number if plan else None,
+                value=plan.total_cost if plan else None,
+                age_hours=_age_hours(ar.created_at),
+                is_overdue=False,
+                action_url=f"/v2/approvals/requests/{ar.id}/decision",
+                action_label=_QUEUE_ACTION_LABEL["prepay_approve"],
+                detail_href=f"/v2/partials/buy-plans/{plan_id}" if plan_id else None,
+                extra={
+                    "margin_pct": plan.total_margin_pct if plan else None,
+                    "vendor_name": (pp.vendor_card.display_name if pp and pp.vendor_card else None),
+                    "amount": ar.amount,
+                    "owner_role": "Approver",
+                },
+            )
+        )
+    return rows
+
+
+def my_queue(db: Session, user: object) -> list[QueueRow]:
+    """Return the role-aware "what needs YOU now" queue for *user*, risk-first.
+
+    Emits a uniform :class:`QueueRow` per actionable item, gated by the viewer's rights /
+    role / ownership:
+
+    - **halted** (P1): own halted plans; supervisors (manager/admin/ops) see all.
+    - **plan_returned** (P2) / **plan_draft** (P9): DRAFT plans the user submitted, split
+      by :func:`_is_returned`.
+    - **plan_approve** (P3): all pending plans — buy-plan approvers (``can_approve_buy_plans``).
+    - **prepay_approve** (P3): prepayment requests routed to the user (engine-actionable).
+    - **po_verify** (P4): all pending-verify lines — PO approvers (``can_approve_purchase_orders``)
+      or ops members.
+    - **claim** (P5): the whole RESOURCING pool — PO-cutters.
+    - **cut_po_overdue** (P6) / **cut_po** (P7): the user's own AWAITING_PO lines, split by
+      the buyer-nudge SLA.
+    - **receive** (P8): INBOUND plans where the user holds a line — PO-cutters.
+
+    Sorted by ``(priority, -age_hours)``: highest-risk tier first, oldest-first within it.
+    """
+    cutoff = _nudge_cutoff()
+    is_approver = can_approve_buy_plans(user)
+    is_ops = _is_ops_member(db, user)
+    is_supervisor = user.role in (UserRole.MANAGER, UserRole.ADMIN) or is_ops
+    is_po_approver = bool(getattr(user, "can_approve_purchase_orders", False)) or is_ops
+    is_po_cutter = user.role in _PO_CUTTER_ROLES
+
+    rows: list[QueueRow] = []
+
+    # halted (P1): own plans always; supervisors see the whole risk surface.
+    halted = _query_halted_plans(db) if is_supervisor else _query_halted_plans(db, owner_id=user.id)
+    rows += [_make_plan_row(p, kind="halted", since=p.halted_at or p.created_at) for p in halted]
+
+    # plan_returned (P2) + plan_draft (P9): the user's own DRAFT plans.
+    for plan in _query_owner_draft_plans(db, owner_id=user.id):
+        kind = "plan_returned" if _is_returned(plan) else "plan_draft"
+        since = plan.approved_at if kind == "plan_returned" else plan.created_at
+        rows.append(_make_plan_row(plan, kind=kind, since=since or plan.created_at))
+
+    # plan_approve (P3): buy-plan approvers see every pending plan.
+    if is_approver:
+        rows += [
+            _make_plan_row(p, kind="plan_approve", since=p.submitted_at or p.created_at)
+            for p in _query_approval_plans(db)
+        ]
+
+    # prepay_approve (P3): prepayment requests routed to this user.
+    rows += _prepay_rows(db, user)
+
+    # po_verify (P4): PO approvers / ops members verify every pending-verify line.
+    if is_po_approver:
+        rows += [
+            _make_line_row(ln, kind="po_verify", since=ln.po_confirmed_at or ln.created_at, cutoff=cutoff)
+            for ln in _query_po_pending_verify(db)
+        ]
+
+    # claim (P5): any PO-cutter may claim a pooled line.
+    if is_po_cutter:
+        rows += [
+            _make_line_row(ln, kind="claim", since=ln.updated_at or ln.created_at, cutoff=cutoff)
+            for ln in _query_resourcing_pool(db)
+        ]
+
+    # cut_po_overdue (P6) + cut_po (P7): the user's own AWAITING_PO lines, SLA-split.
+    if is_po_cutter:
+        for ln in _query_buyer_awaiting_po_lines(db, buyer_id=user.id):
+            overdue = _line_overdue(ln, cutoff)
+            kind = "cut_po_overdue" if overdue else "cut_po"
+            since = (ln.last_nudge_at or ln.buy_plan.approved_at or ln.created_at) if ln.buy_plan else ln.created_at
+            rows.append(_make_line_row(ln, kind=kind, since=since, cutoff=cutoff))
+
+    # receive (P8): INBOUND plans where the user holds a line.
+    if is_po_cutter:
+        rows += [
+            _make_plan_row(p, kind="receive", since=p.updated_at or p.created_at)
+            for p in _query_inbound_plans(db, buyer_id=user.id)
+        ]
+
+    # Risk-first, then oldest-first (largest age) within each priority tier.
+    rows.sort(key=lambda r: (r.priority, -r.age_hours))
+    return rows

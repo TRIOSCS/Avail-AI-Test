@@ -1530,6 +1530,30 @@ queue is data-driven, so the later approvals-workflow rework (drop auto-approve,
 verify-SO into the single manager approval) simply stops emitting those kinds with NO
 template change. This is the reference "My Queue" pattern for the broader approvals module.
 
+**My Queue foundation (Approvals rework Phase A — service-layer only, no UI yet).**
+`buyplan_hub.my_queue(db, user) -> list[QueueRow]` is the role-aware "what needs YOU now"
+read model. The six source queries supervise composes are extracted into module-level
+`_query_*` helpers (`_query_approval_plans`, `_query_so_pending_plans`,
+`_query_halted_plans`, `_query_overdue_lines`, `_query_po_pending_verify`,
+`_query_flagged_lines`) and `supervise_overview` now CALLS them (return shape unchanged);
+`my_queue` reuses those plus `_query_inbound_plans`, `_query_resourcing_pool`,
+`_query_owner_draft_plans`, `_query_buyer_awaiting_po_lines` — single source of truth, so a
+workflow change just stops a builder emitting a kind. `QueueRow` is a frozen dataclass
+(`kind, priority, label, plan_id, line_id, customer_name, primary_mpn, tso, value,
+age_hours, is_overdue, action_url, action_label, detail_href, extra`); Jinja (Phase B) will
+consume ONLY `QueueRow` — all ORM access stays in the service. Kinds + risk-first priorities
+(`_QUEUE_PRIORITY`/`_QUEUE_LABEL`, distinct from supervise's `_SUPERVISE_QUEUE_*`): halted 1,
+plan_returned 2, plan_approve/prepay_approve 3, po_verify 4, claim 5, cut_po_overdue 6,
+cut_po 7, receive 8, plan_draft 9; sorted `(priority, -age_hours)` (risk-first, oldest-first
+within a tier). Role gating: halted = own plans (supervisor=manager/admin/ops sees all);
+plan_draft/plan_returned = own DRAFTs (split by `_is_returned`); plan_approve =
+`can_approve_buy_plans`; prepay_approve = the engine's `_actionable_request_ids` filtered to
+the PREPAYMENT gate (NOT re-queried); po_verify = `can_approve_purchase_orders` or ops
+member; claim/cut_po/cut_po_overdue/receive = PO-cutters (buyer/manager/admin), buyer-scoped
+by `buyer_id`. The overdue-PO SLA is single-sourced in `_nudge_cutoff()`/`_line_overdue()`
+(the same rule `_query_overdue_lines` encodes in SQL); cut_po vs cut_po_overdue is the
+Python split on that rule, computed in the row builder.
+
 **Deal-card naming + de-noised tiles.** `services/buyplan_naming.build_card_title` remains
 the single shared title helper — `_deal_card` still computes the canonical
 `{SalesOrder#} - {Customer} - {Owner} - {Type}` title into `card_title` for any caller
