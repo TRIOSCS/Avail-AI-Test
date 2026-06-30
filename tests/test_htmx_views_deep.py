@@ -212,8 +212,7 @@ class TestBuyPlansRoutes:
         "path",
         [
             "/v2/partials/buy-plans",  # default → role-derived lens
-            "/v2/partials/buy-plans?lens=deals",
-            "/v2/partials/buy-plans?lens=supervise",
+            "/v2/partials/buy-plans?lens=deals",  # unknown lens → role-default fallback
         ],
     )
     def test_buy_plans_list_ok(self, client: TestClient, path: str):

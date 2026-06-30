@@ -132,7 +132,7 @@
     {% elif row.kind == 'prepay_approve' %}
     {# Prepay decide — one-click Approve; Reject reveals a required-comment textarea (the
        engine refuses a blank reject). Both post the HTML decide sibling that re-renders this
-       body; mirrors the _orders_queue showPo reveal pattern. #}
+       body. #}
     {% set decide_url = '/v2/partials/approvals/prepay-requests/' ~ row.extra.get('request_id') ~ '/decide' %}
     <div x-data="{ rejectOpen: false }" class="flex flex-col items-end gap-1.5">
       <div class="flex items-center gap-1.5">

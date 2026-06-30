@@ -10,7 +10,7 @@
 
   Append idiom: the "Load older" button targets ITSELF with hx-swap="outerHTML", so the next
   page's cards replace the button in place (and carry their own button if more remain). The
-  cards are emitted as siblings before it. Mirrors buy_plans/_archive_rows.html.
+  cards are emitted as siblings before it.
 #}
 {% from "htmx/partials/approvals/_pipeline_macros.html" import deal_card %}
 {% for card in archive.deals %}{{ deal_card(card) }}{% endfor %}

@@ -379,12 +379,6 @@ class _FakeRequest:
 
 
 class TestResourceRoutes:
-    def test_resource_lens_renders(self, client):
-        # Empty pool → the calm empty state. Exercises real template rendering.
-        resp = client.get("/v2/partials/buy-plans/resource")
-        assert resp.status_code == 200
-        assert "re-source" in resp.text.lower()
-
     @pytest.mark.asyncio
     async def test_resource_route_pools_line_and_fires_alert(
         self, db_session: Session, test_user, test_quote, test_requisition, test_vendor_card
