@@ -116,11 +116,11 @@ def test_default_lens_buyer_is_my_queue(db_session: Session, test_user: User):
     assert _default_lens(test_user, db_session) == "my_queue"
 
 
-def test_default_lens_manager_is_supervise(db_session: Session, manager_user: User):
-    """Managers/ops land on Supervise (until the Pipeline surface ships in Phase C)."""
+def test_default_lens_manager_is_pipeline(db_session: Session, manager_user: User):
+    """Managers/ops land on Pipeline — the 4-stage deal board (Phase C)."""
     from app.routers.htmx.buy_plans import _default_lens
 
-    assert _default_lens(manager_user, db_session) == "supervise"
+    assert _default_lens(manager_user, db_session) == "pipeline"
 
 
 def test_default_lens_sales_is_my_queue(db_session: Session, sales_user: User):

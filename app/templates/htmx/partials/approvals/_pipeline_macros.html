@@ -1,0 +1,82 @@
+{#
+  approvals/_pipeline_macros.html — shared macros for the Pipeline surface (Approvals
+  rework Phase C): the de-noised deal card with the signature 4-pip "who-has-the-ball"
+  stepper, and the parameterized open-count/value metric strip.
+
+  deal_card(card) — one calm deal tile, built from a buyplan_hub._deal_card dict. The
+    4-pip stepper (●●○○) replaces the old blocker line + PO progress bar: done pips fill
+    brand-500, the live "ball" (current stage) is the single accent-500 node, upcoming
+    pips are hollow brand-200 outlines. The ball position is the card's status mapped to a
+    4-stage index (DRAFT→Build 0, PENDING→Approve 1, ACTIVE|INBOUND→Purchase 2,
+    COMPLETED→Done 3). Customer is the one bold line; value is tabular; SO · owner is a
+    muted secondary line; ONE margin-health badge; the stock chip is kept. A card that
+    needs the viewer's action (own DRAFT) gains an accent ring (not amber — single-accent
+    rule). The whole tile is a keyboard-navigable link to the plan detail.
+
+  metric_strip(open_count, open_value) — the light contextual strip (N open deals · $value).
+
+  Used by: approvals/_surface_pipeline.html.
+  Depends on: HTMX, Alpine.js (card keyboard activation), Tailwind brand/accent/line palette,
+              .chip + .badge-* + .text-tertiary primitives. Jinja consumes only the card dict.
+#}
+
+{# status → 4-stage index for the pip stepper (the canonical Build/Approve/Purchase/Done
+   mapping). HALTED is an off-ramp that never reaches the Pipeline board; default to 0. #}
+{% set _STAGE_INDEX = {'draft': 0, 'pending': 1, 'active': 2, 'inbound': 2, 'completed': 3, 'halted': 0} %}
+{% set _STAGE_LABELS = ['Build', 'Approve', 'Purchase', 'Done'] %}
+
+
+{% macro deal_card(card) %}
+{% set m = card.margin_pct | float if card.margin_pct is not none else 0 %}
+{% set s = _STAGE_INDEX.get(card.status, 0) %}
+<div hx-get="/v2/partials/buy-plans/{{ card.plan_id }}"
+     hx-target="#main-content"
+     hx-push-url="/v2/buy-plans/{{ card.plan_id }}"
+     preload="mouseover"
+     tabindex="0"
+     role="link"
+     @keydown.enter.prevent="$el.click()"
+     @keydown.space.prevent="$el.click()"
+     class="bg-white rounded-md border border-line-base px-2.5 py-2 cursor-pointer hover:shadow-sm transition-shadow
+            focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:outline-none
+            {% if card.needs_my_action %}ring-2 ring-accent-400{% endif %}">
+
+  {# Customer headline (the one bold line) + stock chip #}
+  <div class="flex items-start justify-between gap-2">
+    <span class="text-sm font-semibold text-gray-900 leading-tight truncate" title="{{ card.customer_name or '—' }}">{{ card.customer_name or '—' }}</span>
+    {% if card.is_stock_sale %}
+    <span class="chip bg-purple-50 text-purple-700 border-purple-200 flex-shrink-0">stock</span>
+    {% endif %}
+  </div>
+
+  {# Muted SO · owner line #}
+  <div class="text-tertiary truncate">
+    SO <span class="font-mono">{{ card.tso or '—' }}</span>
+    {% if card.owner_name %}<span class="text-brand-300" aria-hidden="true"> · </span>{{ card.owner_name }}{% endif %}
+  </div>
+
+  {# Value (tabular) + ONE margin-health badge #}
+  <div class="mt-1 flex items-center justify-between gap-2">
+    <span class="text-sm font-semibold tabular-nums text-gray-900">${{ '{:,.2f}'.format(card.value | float) if card.value else '0.00' }}</span>
+    <span class="{% if m >= 30 %}badge-success{% elif m >= 15 %}badge-warning{% else %}badge-danger{% endif %}">{{ '{:.1f}'.format(m) }}%</span>
+  </div>
+
+  {# Signature 4-pip "who-has-the-ball" stepper + stage caption (replaces blocker + bar) #}
+  <div class="mt-1.5 flex items-center gap-2" title="Stage: {{ _STAGE_LABELS[s] }} ({{ s + 1 }} of 4)">
+    <div class="flex items-center gap-1" aria-hidden="true">
+      {% for i in range(4) %}
+      <span class="h-1.5 w-1.5 rounded-full {% if i < s %}bg-brand-500{% elif i == s %}bg-accent-500{% else %}border border-brand-200{% endif %}"></span>
+      {% endfor %}
+    </div>
+    <span class="text-[11px] font-medium text-tertiary">{{ _STAGE_LABELS[s] }}</span>
+  </div>
+</div>
+{% endmacro %}
+
+
+{% macro metric_strip(open_count, open_value) %}
+<div class="flex items-center gap-4 text-xs text-gray-600">
+  <span>{{ open_count }} open deal{{ 's' if open_count != 1 }}</span>
+  <span>${{ '{:,.0f}'.format(open_value) }} open value</span>
+</div>
+{% endmacro %}

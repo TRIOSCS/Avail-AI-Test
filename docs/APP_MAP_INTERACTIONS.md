@@ -1428,14 +1428,14 @@ flow. See APP_MAP_DATABASE `po_cancellations`.
 
 **Approvals module — lifecycle stage-tab read flow (SP-1).** `/v2/approvals` is its own
 primary-nav tab (legacy `/v2/buy-plans` 302-redirects to it, preserving `?lens=`) rendering
-a stage-tab shell (`partials/buy_plans/hub.html`): a switcher over **My Queue** + the five
-**lifecycle stages** + a lazy `#bp-hub-body` that loads the active tab body. The shell route
-`GET /v2/partials/approvals?lens=` (alias `/v2/partials/buy-plans`) resolves the tab
-(`my_queue`/`sales_orders`/`buy_plans`/`purchase_orders`/`prepayments`/`supervise`), falling
-back to a **role-derived default** (`_default_lens`): managers/admins/ops → Supervise,
-everyone else (buyers/sales/traders) → **My Queue** (the Approvals-rework Phase B role-aware
-"what needs YOU now" surface; Pipeline replaces Supervise as the supervisor default in
-Phase C). Only the **Supervise** tab is gate-rendered
+a stage-tab shell (`partials/buy_plans/hub.html`): a switcher over **My Queue** + **Pipeline**
++ the five **lifecycle stages** + a lazy `#bp-hub-body` that loads the active tab body. The
+shell route `GET /v2/partials/approvals?lens=` (alias `/v2/partials/buy-plans`) resolves the
+tab (`my_queue`/`pipeline`/`sales_orders`/`buy_plans`/`purchase_orders`/`prepayments`/
+`supervise`), falling back to a **role-derived default** (`_default_lens`): managers/admins/ops
+→ **Pipeline** (the Approvals-rework Phase C 4-stage deal board), everyone else
+(buyers/sales/traders) → **My Queue** (the Phase B role-aware "what needs YOU now" surface).
+Only the **Supervise** tab is gate-rendered
 (`_can_supervise` = manager/admin OR ops verification-group member); the other four stage
 tabs are always shown — the *work surface* and the *pinned approval section* inside each
 gate further by role. URL paths are dash-cased (`/v2/partials/approvals/<stage>`); lens keys
@@ -1469,6 +1469,13 @@ the pinned section survives a toggle. The standalone `/board` route keeps the de
 ```
 GET /v2/partials/approvals?lens=          (shell: stage-tab switcher + lazy #bp-hub-body)
     |
+    +-- pipeline        --> GET /partials/approvals/pipeline?scope=  (_render_pipeline_body)
+    |                        buyplan_hub.deals_board called ONCE PER COLUMN with an explicit
+    |                        status filter — Build=[DRAFT], Approve=[PENDING],
+    |                        Purchase=[ACTIVE,INBOUND] — + completed_archive for the collapsed
+    |                        Done column. Same _resolve_deal_scope + All/Mine toggle (reloads
+    |                        #bp-hub-body, hx-push-url=false). Cards via the deal_card macro
+    |                        (4-pip "who-has-the-ball" stepper). See the Pipeline surface note.
     +-- sales_orders    --> GET /partials/approvals/sales-orders?scope=  (SP-2 work surface)
     |                        "New Sales Order" button (-> GET /partials/approvals/sales-orders/
     |                        new requisition picker -> create_sales_order_from_offers) + the
@@ -1549,6 +1556,25 @@ other kind is a **whole-row link** to its detail screen (where its form / multi-
 lives), trailing `{action} →`. There is NO colored left rail (the dot + risk-first sort
 already encode risk). `prepay_approve` is a navigation row (its decision endpoint returns
 JSON, not a partial — inline one-click lands in Phase D).
+
+**Pipeline surface (Approvals rework Phase C — the 4-stage deal board).** The `pipeline`
+lens renders `approvals/_surface_pipeline.html` via `_render_pipeline_body` (the
+`approvals_tab_partial` dispatch branch). It shows the deal flow as cards in the four
+canonical stages **Build → Approve → Purchase → Done** (retiring the Draft/Pending/Active
+vocabulary). Three columns are visible (Build / Approve / Purchase) with a **collapsed Done
+summary bar** below (Alpine `x-show`, default closed). Each column is ONE
+`buyplan_hub.deals_board` call with an explicit status filter (`[DRAFT]`, `[PENDING]`,
+`[ACTIVE, INBOUND]` — `INBOUND` now buckets to the `active` column via `_STATUS_TO_COLUMN`);
+Done is `completed_archive`. Cards render through the shared `deal_card` macro
+(`approvals/_pipeline_macros.html`): the signature **4-pip "who-has-the-ball" stepper**
+(`●●○○` — done pips `bg-brand-500`, the single live ball `bg-accent-500`, upcoming hollow
+`border-brand-200`) computed from the card's `status`→stage index (DRAFT 0 / PENDING 1 /
+ACTIVE|INBOUND 2 / COMPLETED 3) **replaces the old blocker line + PO progress bar**, plus
+Customer + tabular value + a muted `SO · owner` line + ONE margin-health badge + the `stock`
+chip; a card needing the viewer's action (own DRAFT) gains a `ring-accent-400` (not amber).
+Scope is role-resolved exactly like the board (`_resolve_deal_scope` + `_can_see_all_deals`);
+the **Mine/All toggle** reloads this body in place (`hx-target="#bp-hub-body"`,
+`hx-push-url="false"`). A light `metric_strip` macro shows the open count + value.
 
 **My Queue foundation (Approvals rework Phase A — the service-layer read model).**
 `buyplan_hub.my_queue(db, user) -> list[QueueRow]` is the role-aware "what needs YOU now"
