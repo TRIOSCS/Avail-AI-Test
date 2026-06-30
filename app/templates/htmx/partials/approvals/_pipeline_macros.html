@@ -3,17 +3,20 @@
   rework Phase C): the de-noised deal card with the signature 4-pip "who-has-the-ball"
   stepper, and the parameterized open-count/value metric strip.
 
-  deal_card(card) — one calm deal tile, built from a buyplan_hub._deal_card dict. The
-    4-pip stepper (●●○○) replaces the old blocker line + PO progress bar: done pips fill
-    brand-500, the live "ball" (current stage) is the single accent-500 node, upcoming
-    pips are hollow brand-200 outlines. The ball position is the card's status mapped to a
-    4-stage index (DRAFT→Build 0, PENDING→Approve 1, ACTIVE|INBOUND→Purchase 2,
-    COMPLETED→Done 3). Customer is the one bold line; value is tabular; SO · owner is a
-    muted secondary line; ONE margin-health badge; the stock chip is kept. A card that
-    needs the viewer's action (own DRAFT) gains an accent ring (not amber — single-accent
-    rule). The whole tile is a keyboard-navigable link to the plan detail.
+  deal_card(card) — one calm deal tile, built from a buyplan_hub._deal_card dict. Customer is
+    the one bold line; value is tabular; SO · owner is a muted secondary line; ONE
+    margin-health badge; the stock chip is kept. Below the money row sit a light fact line
+    (primary part / our PO numbers), a Returned badge for a rejected-resubmit draft else the
+    blocker text, and a thin verified/total PO-progress bar (Phase F-1 parity additions). The
+    signature 4-pip stepper (●●○○) stays LAST: done pips fill brand-500, the live "ball"
+    (current stage) is the single accent-500 node, upcoming pips are hollow brand-200
+    outlines. The ball position is the card's status mapped to a 4-stage index (DRAFT→Build 0,
+    PENDING→Approve 1, ACTIVE|INBOUND→Purchase 2, COMPLETED→Done 3). A card that needs the
+    viewer's action (own DRAFT) gains an accent ring (not amber — single-accent rule). The
+    whole tile is a keyboard-navigable link to the plan detail.
 
-  metric_strip(open_count, open_value) — the light contextual strip (N open deals · $value).
+  metric_strip(open_count, open_value, avg_margin=none) — the light contextual strip
+    (N open deals · $value · N% avg margin when avg_margin is truthy).
 
   Used by: approvals/_surface_pipeline.html.
   Depends on: HTMX, Alpine.js (card keyboard activation), Tailwind brand/accent/line palette,
@@ -61,7 +64,46 @@
     <span class="{% if m >= 30 %}badge-success{% elif m >= 15 %}badge-warning{% else %}badge-danger{% endif %}">{{ '{:.1f}'.format(m) }}%</span>
   </div>
 
-  {# Signature 4-pip "who-has-the-ball" stepper + stage caption (replaces blocker + bar) #}
+  {# Light fact line: primary part / our PO(s) — at-a-glance scan without opening the deal
+     (mirror _board's fact line; brand-400 to stay quiet under the money row). #}
+  {% if card.primary_mpn or card.po_numbers %}
+  <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-brand-400">
+    {% if card.primary_mpn %}
+    <span class="font-mono truncate max-w-[10rem]" title="Primary part {{ card.primary_mpn }}">{{ card.primary_mpn }}</span>
+    {% endif %}
+    {% if card.po_numbers %}
+    {% if card.primary_mpn %}<span class="text-brand-300" aria-hidden="true">·</span>{% endif %}
+    <span title="PO(s): {{ card.po_numbers | join(', ') }}">PO <span class="font-mono">{{ card.po_numbers | join(', ') }}</span></span>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {# Returned / blocker line — a returned (rejected-resubmit) draft gets a loud Returned
+     badge; every other state shows its calm blocker text (rework parity). #}
+  {% if card.blocker %}
+  <div class="mt-1">
+    {% if 'rejected' in card.blocker %}
+    <span class="badge-danger">Returned</span>
+    {% else %}
+    <span class="text-xs text-gray-600">{{ card.blocker }}</span>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {# PO-progress bar (thin/subtle, verified/total) — mirror _board. #}
+  {% if card.po_progress[1] %}
+  <div class="mt-1.5">
+    <div class="flex items-center justify-between text-[11px] text-tertiary mb-0.5">
+      <span>POs</span>
+      <span>{{ card.po_progress[0] }}/{{ card.po_progress[1] }}</span>
+    </div>
+    <div class="h-1 w-full bg-gray-200 rounded-full overflow-hidden">
+      <div class="h-full bg-emerald-500 rounded-full" style="width: {{ (100 * card.po_progress[0] / card.po_progress[1]) | round(0, 'floor') | int }}%"></div>
+    </div>
+  </div>
+  {% endif %}
+
+  {# Signature 4-pip "who-has-the-ball" stepper + stage caption #}
   <div class="mt-1.5 flex items-center gap-2" title="Stage: {{ _STAGE_LABELS[s] }} ({{ s + 1 }} of 4)">
     <div class="flex items-center gap-1" aria-hidden="true">
       {% for i in range(4) %}
@@ -74,9 +116,10 @@
 {% endmacro %}
 
 
-{% macro metric_strip(open_count, open_value) %}
+{% macro metric_strip(open_count, open_value, avg_margin=none) %}
 <div class="flex items-center gap-4 text-xs text-gray-600">
   <span>{{ open_count }} open deal{{ 's' if open_count != 1 }}</span>
   <span>${{ '{:,.0f}'.format(open_value) }} open value</span>
+  {% if avg_margin %}<span>{{ '{:.0f}'.format(avg_margin) }}% avg margin</span>{% endif %}
 </div>
 {% endmacro %}

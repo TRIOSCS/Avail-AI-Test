@@ -888,6 +888,145 @@ def test_resolve_deal_scope_contract(scope, can_see_all, expected):
     assert _resolve_deal_scope(scope, can_see_all) == expected
 
 
+# ── New Buy Plan origination button (hub shell, Phase F-1) ──────────────────
+
+
+def test_hub_shell_has_new_buy_plan_button(client: TestClient):
+    """The hub shell carries a persistent New Buy Plan origination button targeting the
+    sales-order-new picker into the hub body (so it survives lens switches)."""
+    resp = client.get("/v2/partials/approvals")
+    assert resp.status_code == 200
+    body = resp.text
+    assert "New Buy Plan" in body
+    assert 'hx-get="/v2/partials/approvals/sales-orders/new"' in body
+    assert 'hx-target="#bp-hub-body"' in body
+
+
+# ── Prepay decide (My Queue inline action, Phase F-1) ───────────────────────
+
+
+def _prepay_setup(db_session, recipient, test_requisition, *, amount="1000.00"):
+    """A committed ACTIVE plan + a REQUESTED prepayment routed to ``recipient``."""
+    from tests.test_my_queue import _grant, _make_prepay_request
+
+    q = _make_quote(db_session, test_requisition.id)
+    plan = _make_plan(db_session, quote_id=q.id, req_id=test_requisition.id)
+    _grant(db_session, recipient, can_approve_prepayments=True)
+    ar, _pp = _make_prepay_request(db_session, recipient=recipient, buy_plan_id=plan.id, amount=amount)
+    db_session.commit()
+    return ar
+
+
+def test_prepay_decide_approve_returns_my_queue_html(
+    client: TestClient, db_session: Session, manager_user, test_requisition
+):
+    """Approve via the inline decide route → 200 + the re-rendered My Queue body (HTML,
+    not JSON)."""
+    ar = _prepay_setup(db_session, manager_user, test_requisition)
+    with _acting_as(manager_user):
+        resp = client.post(
+            f"/v2/partials/approvals/prepay-requests/{ar.id}/decide",
+            data={"action": "approve"},
+        )
+    assert resp.status_code == 200
+    body = resp.text
+    # My Queue surface re-rendered (calm-header copy), never the JSON decision payload.
+    assert "in play" in body or "caught up" in body.lower()
+    assert "Line Items" not in body
+    assert '"status"' not in body  # not the JSON decision response
+
+
+def test_prepay_decide_reject_with_comment_ok(client: TestClient, db_session: Session, manager_user, test_requisition):
+    """Reject with a comment → 200 + My Queue body."""
+    ar = _prepay_setup(db_session, manager_user, test_requisition)
+    with _acting_as(manager_user):
+        resp = client.post(
+            f"/v2/partials/approvals/prepay-requests/{ar.id}/decide",
+            data={"action": "reject", "comment": "Too expensive — renegotiate terms."},
+        )
+    assert resp.status_code == 200
+    assert "Line Items" not in resp.text
+
+
+def test_prepay_decide_reject_without_comment_400(
+    client: TestClient, db_session: Session, manager_user, test_requisition
+):
+    """Reject without a comment is refused (400) — a prepayment reject needs a
+    reason."""
+    ar = _prepay_setup(db_session, manager_user, test_requisition)
+    with _acting_as(manager_user):
+        resp = client.post(
+            f"/v2/partials/approvals/prepay-requests/{ar.id}/decide",
+            data={"action": "reject"},
+        )
+    assert resp.status_code == 400
+
+
+def test_prepay_decide_non_recipient_403(
+    client: TestClient, db_session: Session, manager_user, test_user, test_requisition
+):
+    """A user with no PENDING recipient slot on the request gets 403 (engine
+    PermissionError)."""
+    ar = _prepay_setup(db_session, manager_user, test_requisition)
+    # Default client acts as test_user (a buyer), who is NOT a recipient of the request.
+    resp = client.post(
+        f"/v2/partials/approvals/prepay-requests/{ar.id}/decide",
+        data={"action": "approve"},
+    )
+    assert resp.status_code == 403
+
+
+# ── Pipeline archive (lazy Done paging, Phase F-1) ──────────────────────────
+
+
+def test_pipeline_archive_returns_rows(client: TestClient, db_session: Session, test_user, test_requisition):
+    """The Pipeline archive route returns completed deal cards for the requested
+    page."""
+    from datetime import datetime, timezone
+
+    q = _make_quote(db_session, test_requisition.id)
+    plan = _make_plan(
+        db_session,
+        quote_id=q.id,
+        req_id=test_requisition.id,
+        status=BuyPlanStatus.COMPLETED,
+        submitted_by_id=test_user.id,
+        completed_at=datetime.now(timezone.utc),
+    )
+    db_session.commit()
+
+    resp = client.get("/v2/partials/approvals/pipeline-archive?scope=mine&offset=0")
+    assert resp.status_code == 200
+    assert f"/v2/partials/buy-plans/{plan.id}" in resp.text
+
+
+def test_pipeline_archive_next_page_button(client: TestClient, db_session: Session, test_user, test_requisition):
+    """More than one page of completed deals → a Load older button pointing at the next
+    offset on the pipeline-archive route (not the legacy board archive)."""
+    from datetime import datetime, timedelta, timezone
+
+    from app.services.buyplan_hub import ARCHIVE_PAGE_SIZE
+
+    q = _make_quote(db_session, test_requisition.id)
+    now = datetime.now(timezone.utc)
+    for i in range(ARCHIVE_PAGE_SIZE + 1):
+        _make_plan(
+            db_session,
+            quote_id=q.id,
+            req_id=test_requisition.id,
+            status=BuyPlanStatus.COMPLETED,
+            submitted_by_id=test_user.id,
+            completed_at=now - timedelta(hours=i),
+        )
+    db_session.commit()
+
+    resp = client.get("/v2/partials/approvals/pipeline-archive?scope=mine&offset=0")
+    assert resp.status_code == 200
+    body = resp.text
+    assert "Load older" in body
+    assert f"/v2/partials/approvals/pipeline-archive?scope=mine&offset={ARCHIVE_PAGE_SIZE}" in body
+
+
 def test_board_buyer_narrows_to_mine_excludes_other_owner(
     client: TestClient, db_session: Session, test_user, manager_user, test_requisition
 ):

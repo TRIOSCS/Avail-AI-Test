@@ -34,7 +34,7 @@
    (pending/active) plan. Mirrors the service-side _can_halt + HALTABLE_STATUSES guard. #}
 {% set can_halt = bp.status in ('pending', 'active') and (is_ops_member or user.role in ('manager', 'admin')) %}
 
-<div class="page-fluid" x-data="{ showModal: false, modalType: '', showAi: false, showNotes: false, showSo: false }">
+<div class="page-fluid" x-data="{ showModal: false, modalType: '', modalLineId: 0, showAi: false, showNotes: false, showSo: false }">
 
   {# ═══ 1. COMPACT HEADER WITH INLINE STATS ═══ #}
   <div class="mb-4">
@@ -178,6 +178,42 @@
                     @click="showModal = false"
                     class="btn btn-primary">
               Submit
+            </button>
+          </div>
+        </div>
+      </template>
+
+      {# Issue modal — a buyer flags a problem on a line (re-homed from the inline orders
+         affordance so origination/flagging works from the deal detail too). modalLineId is
+         set by the line's Issue button in _detail_lines; the Flag Issue button drives the
+         existing per-line issue route via htmx.ajax — NOT a dynamic :hx-post bind, which
+         would resolve before this x-if template inits and post a stale line id. Field names
+         (issue_type, note) match buy_plan_flag_issue_partial. #}
+      <template x-if="modalType === 'issue'" x-cloak>
+        <div x-data="{ issue_type: 'sold_out', note: '' }">
+          <h3 class="text-lg font-semibold text-gray-900 mb-4">Flag an Issue</h3>
+          <div class="space-y-3">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">What's wrong?</label>
+              <select x-model="issue_type" class="input w-full">
+                <option value="sold_out">Sold out / no stock</option>
+                <option value="price_changed">Price changed</option>
+                <option value="lead_time_changed">Lead time changed</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Note (optional)</label>
+              <textarea x-model="note" rows="3" class="input w-full" placeholder="Add any detail for the team."></textarea>
+            </div>
+          </div>
+          <div class="mt-5 flex justify-end gap-2">
+            {{ modal_cancel_btn() }}
+            <button type="button"
+                    @click.prevent="htmx.ajax('POST', '/v2/partials/buy-plans/{{ bp.id }}/lines/' + modalLineId + '/issue', {target: '#main-content', swap: 'innerHTML', indicator: '#main-content', values: {issue_type: issue_type, note: note}}); showModal = false"
+                    data-loading-disable
+                    class="btn btn-danger">
+              Flag Issue
             </button>
           </div>
         </div>

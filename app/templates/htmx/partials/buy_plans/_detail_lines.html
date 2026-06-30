@@ -103,7 +103,7 @@
                                 class="btn btn-primary btn-sm">
                           Confirm
                         </button>
-                        <button @click="$dispatch('open-modal', { type: 'issue-{{ line.id }}' }); modalType = 'issue-{{ line.id }}'; showModal = true"
+                        <button @click="modalType = 'issue'; modalLineId = {{ line.id }}; showModal = true"
                                 class="btn btn-danger btn-sm">
                           Issue
                         </button>

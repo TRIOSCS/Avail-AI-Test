@@ -41,6 +41,20 @@
     </button>
     {% endif %}
     {% endfor %}
+
+    {# ── New Buy Plan origination ──
+       Lives in the hub shell (right-aligned via ml-auto) so it persists across every lens
+       switch. Loads the Sales-Order-new requisition picker into the hub body (not a page
+       push) — origination starts a DRAFT buy plan from an open requisition's offers. #}
+    <button hx-get="/v2/partials/approvals/sales-orders/new"
+            hx-target="#bp-hub-body"
+            hx-swap="innerHTML"
+            hx-push-url="false"
+            data-loading-disable
+            class="btn btn-primary btn-sm ml-auto inline-flex items-center gap-1">
+      <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+      New Buy Plan
+    </button>
   </div>
 
   {# ── Lazy body ──

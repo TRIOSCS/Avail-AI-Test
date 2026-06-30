@@ -27,7 +27,7 @@
    The filter token collapses plan_approve + prepay_approve into one "approve" chip and
    po_verify into "verify" (mirrors the spec's Verify-SO+PO collapse). Rows x-show on it. #}
 {% set band_of = {
-  'halted': 'risk', 'plan_returned': 'risk', 'cut_po_overdue': 'risk',
+  'halted': 'risk', 'plan_returned': 'risk', 'flagged': 'risk', 'cut_po_overdue': 'risk',
   'plan_approve': 'decide', 'prepay_approve': 'decide',
   'po_verify': 'routine', 'claim': 'routine', 'cut_po': 'routine',
   'receive': 'routine', 'plan_draft': 'routine'
@@ -35,7 +35,7 @@
 {% set dot_of = {'risk': 'bg-rose-500', 'decide': 'bg-accent-500', 'routine': 'bg-brand-400'} %}
 {% set label_color_of = {'risk': 'text-rose-600', 'decide': 'text-accent-600', 'routine': 'text-brand-500'} %}
 {% set token_of = {
-  'halted': 'halted', 'plan_returned': 'returned', 'cut_po_overdue': 'overdue',
+  'halted': 'halted', 'plan_returned': 'returned', 'flagged': 'flagged', 'cut_po_overdue': 'overdue',
   'plan_approve': 'approve', 'prepay_approve': 'approve', 'po_verify': 'verify',
   'claim': 'claim', 'cut_po': 'cut_po', 'receive': 'receive', 'plan_draft': 'draft'
 } %}
@@ -44,13 +44,15 @@
 {% macro queue_row(row, band_of, dot_of, label_color_of, token_of) %}
 {% set band = band_of[row.kind] %}
 {% set token = token_of[row.kind] %}
-{% set inline_action = row.kind in ('plan_approve', 'po_verify') %}
+{% set inline_action = row.kind in ('plan_approve', 'po_verify', 'prepay_approve') %}
+{% set kicked = row.extra.get('kicked_back') %}
 {% set m = row.extra.get('margin_pct') | float if row.extra.get('margin_pct') is not none else 0 %}
 {% set detail_url = row.detail_href %}
 {% set push_url = detail_url | replace('/partials', '') if detail_url else '' %}
 {% set ah = row.age_hours %}
 <div x-show="qf === 'all' || qf === '{{ token }}'"
      class="grid grid-cols-[16px_84px_minmax(0,1fr)_auto_auto_auto_auto] items-center gap-3 px-4 py-2.5
+            {% if kicked %}bg-rose-50{% endif %}
             {% if inline_action %}ring-1 ring-inset ring-accent-400{% else %}cursor-pointer hover:bg-brand-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500{% endif %}"
      {% if not inline_action and detail_url %}
      hx-get="{{ detail_url }}"
@@ -87,7 +89,15 @@
         {% if ns.shown %}<span class="text-brand-300" aria-hidden="true"> · </span>{% endif %}{{ row.extra.get('owner_role') }} {{ row.extra.get('owner_name') }}{% set ns.shown = true %}
       {%- endif -%}
       {%- if row.extra.get('amount') is not none -%}
-        {% if ns.shown %}<span class="text-brand-300" aria-hidden="true"> · </span>{% endif %}${{ '{:,.0f}'.format(row.extra.get('amount') | float) }} prepay
+        {% if ns.shown %}<span class="text-brand-300" aria-hidden="true"> · </span>{% endif %}${{ '{:,.0f}'.format(row.extra.get('amount') | float) }} prepay{% set ns.shown = true %}
+      {%- endif -%}
+      {# flagged: the buyer's issue reason in rose (mirror _supervise) #}
+      {%- if row.kind == 'flagged' and row.extra.get('issue_reason') -%}
+        {% if ns.shown %}<span class="text-brand-300" aria-hidden="true"> · </span>{% endif %}<span class="text-rose-600">{{ row.extra.get('issue_reason') }}</span>{% set ns.shown = true %}
+      {%- endif -%}
+      {# kicked-back cut PO: warning glyph + the manager/ops rejection note in rose #}
+      {%- if kicked and row.extra.get('po_rejection_note') -%}
+        {% if ns.shown %}<span class="text-brand-300" aria-hidden="true"> · </span>{% endif %}<span class="text-rose-700">⚠ {{ row.extra.get('po_rejection_note') }}</span>
       {%- endif -%}
     </div>
   </div>
@@ -119,6 +129,28 @@
       <button type="submit" name="action" value="reject" data-loading-disable
               hx-confirm="Send this PO back to the buyer?" class="btn-danger btn-sm">Reject</button>
     </form>
+    {% elif row.kind == 'prepay_approve' %}
+    {# Prepay decide — one-click Approve; Reject reveals a required-comment textarea (the
+       engine refuses a blank reject). Both post the HTML decide sibling that re-renders this
+       body; mirrors the _orders_queue showPo reveal pattern. #}
+    {% set decide_url = '/v2/partials/approvals/prepay-requests/' ~ row.extra.get('request_id') ~ '/decide' %}
+    <div x-data="{ rejectOpen: false }" class="flex flex-col items-end gap-1.5">
+      <div class="flex items-center gap-1.5">
+        <form hx-post="{{ decide_url }}" hx-target="#bp-hub-body" hx-swap="innerHTML" hx-push-url="false">
+          <input type="hidden" name="action" value="approve">
+          <button type="submit" data-loading-disable class="btn-primary btn-sm">Approve</button>
+        </form>
+        <button type="button" @click="rejectOpen = !rejectOpen" class="btn-danger btn-sm">Reject</button>
+      </div>
+      <form x-show="rejectOpen" x-cloak x-collapse
+            hx-post="{{ decide_url }}" hx-target="#bp-hub-body" hx-swap="innerHTML" hx-push-url="false"
+            class="space-y-1.5">
+        <input type="hidden" name="action" value="reject">
+        <textarea name="comment" rows="2" required placeholder="Why reject this prepayment?"
+                  class="input input-sm w-48"></textarea>
+        <button type="submit" data-loading-disable class="btn-danger btn-sm">Confirm reject</button>
+      </form>
+    </div>
     {% else %}
     <span class="text-xs font-medium text-accent-600 whitespace-nowrap">{{ row.action_label }} →</span>
     {% endif %}
@@ -134,11 +166,15 @@
 {% endfor %}
 {# Risk-first chip order; each renders only when present (live counts). #}
 {% set chip_order = [
-  ('halted', 'Halted'), ('returned', 'Returned'), ('overdue', 'Overdue'),
+  ('halted', 'Halted'), ('returned', 'Returned'), ('flagged', 'Flagged'), ('overdue', 'Overdue'),
   ('approve', 'Approve'), ('verify', 'Verify'), ('claim', 'Claim'),
   ('cut_po', 'Cut PO'), ('receive', 'Receive'), ('draft', 'Draft')
 ] %}
 {% set total_value = queue | map(attribute='value') | select | map('float') | sum %}
+{# Kicked-back tally over the queue (cut-PO rows the manager/ops sent back) — surfaced as a
+   rose header cue, mirroring the buyer Orders lens. #}
+{% set kb = namespace(n=0) %}
+{% for r in queue %}{% if r.extra.get('kicked_back') %}{% set kb.n = kb.n + 1 %}{% endif %}{% endfor %}
 
 {# ── Header + hero card share one Alpine root for the client-side filter ── #}
 <div x-data="{ qf: 'all' }">
@@ -149,7 +185,10 @@
       {% if queue %}{{ queue | length }} item{{ 's' if queue | length != 1 }} need{{ '' if queue | length != 1 else 's' }} you{% else %}You're all caught up{% endif %}
     </div>
     {% if queue %}
-    <div class="text-sm text-gray-600">${{ '{:,.0f}'.format(total_value) }} in play</div>
+    <div class="text-sm text-gray-600">${{ '{:,.0f}'.format(total_value) }} in play{% if avg_margin %} · {{ '{:.0f}'.format(avg_margin) }}% avg margin{% endif %}</div>
+    {% if kb.n %}
+    <div class="text-sm text-rose-600 font-medium">{{ kb.n }} kicked back</div>
+    {% endif %}
     <div class="mt-3 flex flex-wrap items-center gap-2">
       <button type="button" @click="qf = 'all'"
               :class="qf === 'all' ? 'bg-accent-600 text-white' : 'bg-brand-100 text-brand-600 hover:bg-brand-200'"

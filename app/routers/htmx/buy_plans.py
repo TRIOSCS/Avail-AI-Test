@@ -15,7 +15,7 @@ Depends on: app.models, app.dependencies, app.database, app.services.approvals,
 import json
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from loguru import logger
 from sqlalchemy import select
@@ -166,6 +166,37 @@ async def buy_plans_list_partial(
         }
     )
     return template_response("htmx/partials/buy_plans/hub.html", ctx)
+
+
+@router.get("/v2/partials/approvals/pipeline-archive", response_class=HTMLResponse)
+async def pipeline_archive_partial(
+    request: Request,
+    scope: str = "",
+    offset: int = 0,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Lazy "load older" page of the Pipeline's Done (completed) deals.
+
+    The Pipeline surface renders its Done cards via the shared archive-rows partial; this
+    returns the next page of those cards (newest-completed first) so a "Load older" click
+    appends in place. Scope is role-resolved exactly like the board so no other rep's
+    completed deals leak. MUST be registered BEFORE the one-segment ``{tab}`` catch-all
+    below, or FastAPI routes "pipeline-archive" there as an unknown tab (404). Mirrors
+    ``buy_plans_archive_partial`` (the board's lazy archive page).
+    """
+    from ...services.buyplan_hub import completed_archive
+
+    scope = _resolve_deal_scope(scope, _can_see_all_deals(user, db))
+
+    ctx = _base_ctx(request, user, "buy-plans")
+    ctx.update(
+        {
+            "archive": completed_archive(db, user, scope=scope, offset=offset),
+            "scope": scope,
+        }
+    )
+    return template_response("htmx/partials/approvals/_pipeline_archive_rows.html", ctx)
 
 
 @router.get("/v2/partials/approvals/{tab}", response_class=HTMLResponse)
@@ -417,6 +448,42 @@ async def sales_order_create(
     return resp
 
 
+@router.post("/v2/partials/approvals/prepay-requests/{request_id}/decide", response_class=HTMLResponse)
+async def prepay_request_decide(
+    request: Request,
+    request_id: int,
+    action: str = Form("approve"),
+    comment: str | None = Form(None),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Decide a prepayment ApprovalRequest from the My Queue inline action (HTML re-
+    render).
+
+    The standalone decision route (POST /v2/approvals/requests/{id}/decision) returns JSON;
+    My Queue instead needs the refreshed queue body swapped into ``#bp-hub-body``. This thin
+    sibling resolves the request via the SAME approvals-engine ``decide`` (no duplicated
+    logic), then re-renders the My Queue surface (origin=my_queue parity with the approve /
+    verify-po handlers). Reject requires a non-blank comment (400 otherwise); a caller who
+    holds no PENDING recipient slot is 403 (engine PermissionError); a stale/decided request
+    is 400 (engine ValueError).
+    """
+    from ...services.approvals.service import decide as svc_decide
+
+    if action == "reject" and not (comment or "").strip():
+        raise HTTPException(400, "A reason is required to reject a prepayment.")
+
+    try:
+        svc_decide(db, request_id, user, action, comment=comment or None)
+        db.commit()
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    return _render_my_queue_body(request, user, db)
+
+
 @router.get("/v2/partials/buy-plans/resource", response_class=HTMLResponse)
 async def buy_plans_resource_partial(
     request: Request,
@@ -524,10 +591,10 @@ def _render_my_queue_body(request: Request, user: User, db: Session) -> HTMLResp
     (it gates which kinds it emits by the viewer's rights / role / ownership), so no extra
     gating is needed here — Jinja consumes only the resolved ``QueueRow`` list.
     """
-    from ...services.buyplan_hub import my_queue
+    from ...services.buyplan_hub import my_queue, open_avg_margin
 
     ctx = _base_ctx(request, user, "buy-plans")
-    ctx.update({"queue": my_queue(db, user), "user": user})
+    ctx.update({"queue": my_queue(db, user), "avg_margin": open_avg_margin(db), "user": user})
     return template_response("htmx/partials/approvals/_surface_my_queue.html", ctx)
 
 
@@ -544,7 +611,7 @@ def _render_pipeline_body(request: Request, user: User, db: Session, scope: str 
     All/Mine; sales/traders are locked to ``mine`` so no other rep's deals leak. The Mine/All
     toggle reloads THIS body in place (hx-target #bp-hub-body, hx-push-url="false").
     """
-    from ...services.buyplan_hub import completed_archive, deals_board
+    from ...services.buyplan_hub import completed_archive, deals_board, open_avg_margin
 
     can_all = _can_see_all_deals(user, db)
     board_scope = _resolve_deal_scope(scope, can_all)
@@ -554,6 +621,10 @@ def _render_pipeline_body(request: Request, user: User, db: Session, scope: str 
     purchase = deals_board(
         db, user, scope=board_scope, statuses=[BuyPlanStatus.ACTIVE.value, BuyPlanStatus.INBOUND.value]
     )
+    # HALTED is the off-ramp — buyers regain its visibility via a dedicated Halted column
+    # (rework parity). HALTED maps to the "active" bucket in _STATUS_TO_COLUMN. The column
+    # only renders for can_see_all_deals viewers (see the surface template).
+    halted = deals_board(db, user, scope=board_scope, statuses=[BuyPlanStatus.HALTED.value])
 
     ctx = _base_ctx(request, user, "buy-plans")
     ctx.update(
@@ -561,9 +632,11 @@ def _render_pipeline_body(request: Request, user: User, db: Session, scope: str 
             "build_col": build["draft"],
             "approve_col": approve["pending"],
             "purchase_col": purchase["active"],
+            "halted_col": halted["active"],
             "archive": completed_archive(db, user, scope=board_scope),
             "scope": board_scope,
             "can_see_all_deals": can_all,
+            "avg_margin": open_avg_margin(db),
             "user": user,
         }
     )
