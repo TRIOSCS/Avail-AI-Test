@@ -809,6 +809,47 @@ class TestAvailScoreCoverageGaps:
         # Offer should be in quoted + po_confirmed sets
         assert result["total_score"] >= 0
 
+    def test_o2_o4_count_offer_in_quote_and_completed_buyplan(self, db_session):
+        """O2 (offers_in_quotes) + O4 (bp_confirmed) must count a user's offer in a sent
+        quote and a completed buy plan.
+
+        Removing the arbitrary .limit(10000) on those global scans is the fix (the cap
+        silently dropped offers past it, undercounting scores that drive real payouts);
+        a >10000-row truncation can't be unit-tested cheaply, so this guards the
+        underlying O2/O4 computation instead.
+        """
+        from app.models.buy_plan import BuyPlanLine
+
+        buyer = _make_user(db_session, "O2O4 Buyer", "buyer", "o2o4")
+        reqn = _make_req(db_session, buyer.id, created_at=NOW)
+        offer = _make_offer(db_session, reqn.id, buyer.id, created_at=NOW)
+        db_session.flush()
+        quote = Quote(
+            requisition_id=reqn.id,
+            quote_number=f"Q-O2O4-{offer.id}",
+            status="sent",
+            line_items=[{"offer_id": offer.id, "qty": 50}],
+            created_by_id=buyer.id,
+            created_at=NOW,
+        )
+        db_session.add(quote)
+        db_session.flush()
+        bp = BuyPlan(
+            requisition_id=reqn.id,
+            quote_id=quote.id,
+            status="completed",
+            submitted_by_id=buyer.id,
+            created_at=NOW,
+        )
+        db_session.add(bp)
+        db_session.flush()
+        db_session.add(BuyPlanLine(buy_plan_id=bp.id, offer_id=offer.id, quantity=50))
+        db_session.commit()
+
+        result = compute_buyer_avail_score(db_session, buyer.id, MONTH)
+        assert "(1/" in result["o2_raw"]  # offer counted in quotes (O2)
+        assert "(1/" in result["o4_raw"]  # offer counted as PO-confirmed (O4)
+
     def test_req_without_created_at_skipped(self, db_session):
         """Line 385: req with no created_at is skipped in B4 pipeline hygiene."""
         buyer = _make_user(db_session, "NoDt Buyer", "buyer", "nodt")

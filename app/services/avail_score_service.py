@@ -124,7 +124,9 @@ def compute_buyer_avail_score(db: Session, user_id: int, month: date) -> dict:
 
     # Pre-load offer IDs in quotes and buy plans (same pattern as existing leaderboard)
     quoted_offer_ids = set()
-    for (items,) in db.query(Quote.line_items).filter(Quote.status.in_(["sent", "won", "lost"])).limit(10000).all():
+    # No arbitrary row cap: a global .limit() silently dropped offers past the cap and
+    # undercounted O2/O4 (which drive real payouts). Scan all sent/won/lost quotes.
+    for (items,) in db.query(Quote.line_items).filter(Quote.status.in_(["sent", "won", "lost"])).all():
         for item in items or []:
             oid = item.get("offer_id")
             if oid:
@@ -136,7 +138,6 @@ def compute_buyer_avail_score(db: Session, user_id: int, month: date) -> dict:
         db.query(BuyPlan.status, BuyPlanLine.offer_id)
         .join(BuyPlanLine, BuyPlanLine.buy_plan_id == BuyPlan.id)
         .filter(BuyPlanLine.offer_id.isnot(None))
-        .limit(10000)
         .all()
     ):
         bp_offer_ids.add(offer_id)
