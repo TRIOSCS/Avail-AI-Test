@@ -5411,8 +5411,9 @@ empty 200 + `HX-Trigger` {avatarUpdated:{filename}, showToast}); `DELETE /api/us
 guarded against `realpath` leaving `AVATARS_DIR`, like the screenshot serve route). The
 uploader lives in `settings/profile.html`; the shared `user_avatar(user, size)` macro
 (`shared/_macros.html`) renders the photo or an accent-tinted initials circle and is
-applied in the `activity_row` macro (comm-ledger actor `a.user`) and `buy_plans/detail.html`
-(line assignee `line.buyer`).
+applied in the `activity_row` macro (comm-ledger actor `a.user`) and
+`buy_plans/_detail_lines.html` (the line-items partial included by detail.html; line
+assignee `line.buyer`).
 
 Pan/zoom face-centering (client-side, route unchanged): picking a file in the profile-photo
 card no longer auto-uploads — it opens a circular crop viewport driven by the vanilla
