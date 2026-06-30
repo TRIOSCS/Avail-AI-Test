@@ -39,6 +39,17 @@ def _redact_secrets(text: str) -> str:
     return _SECRET_QS_RE.sub(r"\1REDACTED", text)
 
 
+def _safe_connector_error(exc: BaseException) -> "ConnectorError":
+    """Wrap a propagating exception so neither its message NOR its traceback can leak a
+    secret URL query param to downstream sinks (the orchestrator's logger.exception, the
+    source-stats row str(e), the SSE error field).
+
+    Raise it ``from None`` so the original
+    secret-bearing exception is dropped from the __context__/__cause__ chain.
+    """
+    return ConnectorError(f"{type(exc).__name__}: {_redact_secrets(str(exc))}")
+
+
 # ── Async-compatible circuit breaker ─────────────────────────────────
 # Opens after `fail_max` consecutive failures, resets after `reset_timeout` seconds.
 
@@ -171,7 +182,7 @@ class BaseConnector(ABC):
                 if status in (401, 403, 422):
                     self._breaker.record_failure()
                     logger.warning(f"{self.__class__.__name__} auth error {status} for {part_number} — not retrying")
-                    raise
+                    raise _safe_connector_error(e) from None  # e's URL holds ?apiKey=SECRET
 
                 self._breaker.record_failure()
                 last_err = e
@@ -187,7 +198,8 @@ class BaseConnector(ABC):
                 else:
                     logger.warning(f"{self.__class__.__name__} failed for {part_number}: {_redact_secrets(str(e))}")
         if last_err is not None:
-            raise last_err  # propagate so caller can track the error
+            # Sanitize: last_err may be an httpx error whose URL holds ?apiKey=SECRET.
+            raise _safe_connector_error(last_err) from None
         raise RuntimeError(
             f"{self.__class__.__name__}: search loop completed without result or error for {part_number}"
         )

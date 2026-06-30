@@ -16,6 +16,7 @@ import httpx
 import pytest
 from loguru import logger
 
+from app.connectors.errors import ConnectorError
 from app.connectors.sources import BaseConnector, _redact_secrets
 
 SECRET = "SUPERSECRETKEY1234567890"
@@ -98,7 +99,9 @@ async def test_search_with_retry_does_not_log_api_key():
     captured: list[str] = []
     sink_id = logger.add(captured.append, level="WARNING", format="{message}")
     try:
-        with pytest.raises(httpx.HTTPStatusError):
+        # _search_with_retry now wraps the propagating httpx error in a sanitized
+        # ConnectorError (from None) so the secret can't reach the orchestrator's logs.
+        with pytest.raises(ConnectorError):
             await _LeakyConnector()._search_with_retry("ABC123")
     finally:
         logger.remove(sink_id)

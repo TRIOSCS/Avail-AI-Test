@@ -26,7 +26,7 @@ from .connectors.element14 import Element14Connector
 from .connectors.mouser import MouserConnector
 from .connectors.oemsecrets import OEMSecretsConnector
 from .connectors.sourcengine import SourcengineConnector
-from .connectors.sources import BrokerBinConnector, NexarConnector
+from .connectors.sources import BrokerBinConnector, NexarConnector, _redact_secrets
 from .constants import FRU_ALIAS_SOURCE, ActivityType, ApiSourceStatus, SourceRunStatus
 from .database import SessionLocal
 from .models import (
@@ -1453,10 +1453,10 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
         except Exception as e:
             elapsed_ms = int((time.time() - start) * 1000)
             logger.opt(exception=True).error(
-                "Search {} via {} failed ({}ms): {}", pn, conn.__class__.__name__, elapsed_ms, e
+                "Search {} via {} failed ({}ms): {}", pn, conn.__class__.__name__, elapsed_ms, _redact_secrets(str(e))
             )
             if source_name:
-                stats_updates.append((source_name, 0, elapsed_ms, str(e)[:500]))
+                stats_updates.append((source_name, 0, elapsed_ms, _redact_secrets(str(e))[:500]))
             return []
 
     # Fire all connector×PN combos in parallel (with concurrency limit)
@@ -2751,7 +2751,7 @@ async def stream_search_mpn(search_id: str, mpn: str) -> None:
                                 {
                                     "source": source_name,
                                     "status": SourceRunStatus.ERROR.value,
-                                    "error": str(e)[:500],
+                                    "error": _redact_secrets(str(e))[:500],
                                     "results": 0,
                                     "ms": 0,
                                 },
