@@ -209,9 +209,13 @@ class TestParentCompanyEndpoint:
         db_session: Session,
         company_a: Company,
         company_b: Company,
+        test_user: User,
     ):
         """After setting company_a's parent to company_b, company_b has 1 child."""
         company_a.parent_company_id = company_b.id
+        # company detail now gates on can_manage_account; test_user owns company_a but the
+        # rendered account here is company_b, so make test_user its owner too.
+        company_b.account_owner_id = test_user.id
         db_session.commit()
 
         # Render company_b detail — should mention 1 child account

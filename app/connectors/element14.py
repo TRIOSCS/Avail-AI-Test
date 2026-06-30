@@ -81,6 +81,11 @@ class Element14Connector(BaseConnector):
 
     async def _api_search(self, term: str, part_number: str) -> list[dict]:
         """Run a single search against the element14 API."""
+        # callInfo.apiKey rides in the URL query string. On an unhandled HTTP
+        # status the full URL lands inside the raised httpx.HTTPStatusError's
+        # str(); BaseConnector redacts secret query params via _redact_secrets
+        # BEFORE logging, so the key never reaches the loguru sinks. (Sentry's
+        # before_send only scrubs Sentry events — redaction is at the log sink.)
         params = {
             "term": term,
             "storeInfo.id": "www.newark.com",

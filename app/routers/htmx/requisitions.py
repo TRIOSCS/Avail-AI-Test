@@ -24,7 +24,7 @@ from sqlalchemy import case, exists, or_, select
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from ...constants import QuoteStatus, RequisitionStatus, SourcingStatus, UserRole
+from ...constants import RESTRICTED_ROLES, QuoteStatus, RequisitionStatus, SourcingStatus
 from ...database import get_db
 from ...dependencies import require_requisition_access, require_user
 from ...models import (
@@ -117,8 +117,8 @@ async def requisitions_list_partial(
         except ValueError:
             pass
 
-    # Sales users only see their own
-    if user.role == UserRole.SALES:
+    # Restricted roles (sales/trader) only see their own
+    if user.role in RESTRICTED_ROLES:
         query = query.filter(Requisition.created_by == user.id)
 
     total = query.count()
@@ -198,9 +198,9 @@ async def requisitions_list_partial(
             if reason and reason in match_counts:
                 match_counts[reason] += 1
 
-    # Fetch team users for owner dropdown (non-sales only)
+    # Fetch team users for owner dropdown (unrestricted roles only)
     users = []
-    if user.role != UserRole.SALES:
+    if user.role not in RESTRICTED_ROLES:
         users = db.query(User).order_by(User.name).all()
 
     from ...services.activity_service import get_inbox_sync_status

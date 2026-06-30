@@ -212,8 +212,14 @@ def test_scorecard_sales_own(mock_fn, sales_client):
 # ── Site Contacts ────────────────────────────────────────────────────
 
 
-def test_contacts_for_site(client, db_session, test_customer_site):
-    """Returns site contacts."""
+def test_contacts_for_site(client, db_session, test_user, test_company, test_customer_site):
+    """Returns site contacts.
+
+    get_site_contacts now scopes to can_manage_account, so test_user must own the site's
+    company to pass the gate.
+    """
+    test_company.account_owner_id = test_user.id
+    db_session.commit()
     contact = SiteContact(
         customer_site_id=test_customer_site.id,
         full_name="Jane Doe",
@@ -231,9 +237,15 @@ def test_contacts_for_site(client, db_session, test_customer_site):
     assert data[0]["is_primary"] is True
 
 
-def test_contacts_site_empty(client):
-    """Invalid/empty site_id -> empty list."""
-    resp = client.get("/api/proactive/contacts/99999")
+def test_contacts_site_empty(client, db_session, test_user, test_company, test_customer_site):
+    """Owned site with no contacts -> empty list.
+
+    get_site_contacts now 404s for an unmanaged/unknown site, so exercise the empty-list
+    path on a real site whose company test_user owns.
+    """
+    test_company.account_owner_id = test_user.id
+    db_session.commit()
+    resp = client.get(f"/api/proactive/contacts/{test_customer_site.id}")
     assert resp.status_code == 200
     assert resp.json() == []
 
@@ -429,8 +441,13 @@ class TestDraftEndpoint:
 
 
 class TestContactsExtended:
-    def test_contacts_multiple_for_site(self, client, db_session, test_customer_site):
-        """Multiple contacts ordered by is_primary desc, then full_name."""
+    def test_contacts_multiple_for_site(self, client, db_session, test_user, test_company, test_customer_site):
+        """Multiple contacts ordered by is_primary desc, then full_name.
+
+        test_user owns the site's company so the can_manage_account gate passes.
+        """
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         c1 = SiteContact(
             customer_site_id=test_customer_site.id,
             full_name="Alice Smith",

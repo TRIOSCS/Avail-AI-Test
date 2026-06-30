@@ -2,6 +2,7 @@
 
 import asyncio
 import random
+import re
 import threading
 import time
 from abc import ABC, abstractmethod
@@ -13,6 +14,41 @@ from loguru import logger
 from ..utils import safe_float, safe_int
 from ._core_attrs import clean_str
 from .errors import ConnectorAuthError, ConnectorError, ConnectorQuotaError, ConnectorRateLimitError
+
+# ── Secret redaction for logged exception text ───────────────────────
+# Connectors that authenticate with the API key as a URL query param (Mouser,
+# element14, OEMSecrets, Nexar REST) leak that key the moment httpx raises an
+# HTTPStatusError: str(HTTPStatusError) embeds the FULL request URL, including
+# ``?apiKey=SECRET``. BaseConnector logs that string at WARNING, which fans out
+# to every loguru sink (stdout / file / docker logs). Sentry's before_send hook
+# only scrubs events shipped to Sentry — it does NOT touch the local log sinks —
+# so the raw key would otherwise sit in plaintext logs. Redact before logging.
+# The secret keyword may be the whole param name (``apiKey``) or the suffix of a
+# dotted/underscored one (element14's ``callInfo.apiKey``); a preceding separator
+# (start-of-name, ``.``, ``_`` or ``-``) keeps ``monkey``/``donkey`` from matching.
+_SECRET_QS_RE = re.compile(r"(?i)([?&](?:[\w.-]*[._-])?(?:api[_-]?key|apikey|key|token)=)[^&\s'\"]+")
+
+
+def _redact_secrets(text: str) -> str:
+    """Replace secret query-param values (apiKey/api_key/key/apikey/token) with
+    REDACTED.
+
+    Used to sanitize an exception's ``str()`` before it is written to the logs,
+    since httpx error messages embed the full request URL with its query string.
+    """
+    return _SECRET_QS_RE.sub(r"\1REDACTED", text)
+
+
+def _safe_connector_error(exc: BaseException) -> "ConnectorError":
+    """Wrap a propagating exception so neither its message NOR its traceback can leak a
+    secret URL query param to downstream sinks (the orchestrator's logger.exception, the
+    source-stats row str(e), the SSE error field).
+
+    Raise it ``from None`` so the original
+    secret-bearing exception is dropped from the __context__/__cause__ chain.
+    """
+    return ConnectorError(f"{type(exc).__name__}: {_redact_secrets(str(exc))}")
+
 
 # ── Async-compatible circuit breaker ─────────────────────────────────
 # Opens after `fail_max` consecutive failures, resets after `reset_timeout` seconds.
@@ -146,23 +182,28 @@ class BaseConnector(ABC):
                 if status in (401, 403, 422):
                     self._breaker.record_failure()
                     logger.warning(f"{self.__class__.__name__} auth error {status} for {part_number} — not retrying")
-                    raise
+                    raise _safe_connector_error(e) from None  # e's URL holds ?apiKey=SECRET
 
                 self._breaker.record_failure()
                 last_err = e
                 if attempt < self.max_retries:
                     await asyncio.sleep(2**attempt + random.uniform(0, 1))
                 else:
-                    logger.warning(f"{self.__class__.__name__} failed for {part_number}: {e}")
+                    logger.warning(f"{self.__class__.__name__} failed for {part_number}: {_redact_secrets(str(e))}")
             except Exception as e:
                 self._breaker.record_failure()
                 last_err = e
                 if attempt < self.max_retries:
                     await asyncio.sleep(2**attempt + random.uniform(0, 1))
                 else:
-                    logger.warning(f"{self.__class__.__name__} failed for {part_number}: {e}")
+                    logger.warning(f"{self.__class__.__name__} failed for {part_number}: {_redact_secrets(str(e))}")
         if last_err is not None:
-            raise last_err  # propagate so caller can track the error
+            # An exhausted httpx HTTPStatusError embeds the request URL (?apiKey=SECRET)
+            # in its message — sanitize it. Other exception types carry no secret, so
+            # propagate them unchanged (preserves their type for callers / health checks).
+            if isinstance(last_err, httpx.HTTPStatusError):
+                raise _safe_connector_error(last_err) from None
+            raise last_err
         raise RuntimeError(
             f"{self.__class__.__name__}: search loop completed without result or error for {part_number}"
         )

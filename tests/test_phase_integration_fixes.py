@@ -274,7 +274,8 @@ class TestCompanyActivityTab:
         from app.models import Company
         from app.models.offers import Contact as RfqContact
 
-        company = Company(name="Activity Co", account_type="customer")
+        # account_owner_id: company detail/tab now gates on can_manage_account
+        company = Company(name="Activity Co", account_type="customer", account_owner_id=test_user.id)
         db_session.add(company)
         db_session.flush()
 
@@ -312,7 +313,8 @@ class TestCompanyActivityTab:
         """Empty company activity tab shows placeholder."""
         from app.models import Company
 
-        company = Company(name="Empty Co", account_type="customer")
+        # account_owner_id: company detail/tab now gates on can_manage_account
+        company = Company(name="Empty Co", account_type="customer", account_owner_id=test_user.id)
         db_session.add(company)
         db_session.commit()
 
@@ -329,7 +331,8 @@ class TestCompanyActivityTab:
         from app.models.intelligence import ActivityLog
         from app.models.offers import Contact as RfqContact
 
-        company = Company(name="Mixed Emails Co", account_type="customer")
+        # account_owner_id: company detail/tab now gates on can_manage_account
+        company = Company(name="Mixed Emails Co", account_type="customer", account_owner_id=test_user.id)
         db_session.add(company)
         db_session.flush()
 

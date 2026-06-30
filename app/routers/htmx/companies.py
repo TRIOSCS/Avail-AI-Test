@@ -1117,7 +1117,7 @@ async def create_company(
     db.commit()
     logger.info("Company {} created by {}", company.id, user.email)
 
-    return await company_detail_partial(request=request, company_id=company.id, user=user, db=db)
+    return await _render_company_detail(request, company.id, user, db)
 
 
 @router.get("/v2/partials/customers/typeahead", response_class=HTMLResponse)
@@ -2039,7 +2039,7 @@ async def deactivate_company(
     invalidate_prefix("companies_typeahead")
 
     logger.info("Company {} archived (DNC) by {}, reason={!r}", company_id, user.email, disposition_reason)
-    return await company_detail_partial(request=request, company_id=company_id, user=user, db=db)
+    return await _render_company_detail(request, company_id, user, db)
 
 
 @router.post("/v2/partials/customers/{company_id}/reactivate", response_class=HTMLResponse)
@@ -2081,7 +2081,7 @@ async def reactivate_company(
         )
         return template_response("htmx/partials/customers/archived_list.html", ctx)
 
-    return await company_detail_partial(request=request, company_id=company_id, user=user, db=db)
+    return await _render_company_detail(request, company_id, user, db)
 
 
 @router.get("/v2/partials/customers/archived", response_class=HTMLResponse)
@@ -2378,6 +2378,23 @@ async def company_detail_partial(
     ``tab`` deep-links to the specified tab on first load (default: contacts).
     Invalid tab values silently fall back to contacts.
     """
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(404, "Company not found")  # scope detail to match the contacts list
+    return await _render_company_detail(request, company_id, user, db, tab=tab)
+
+
+async def _render_company_detail(
+    request: Request, company_id: int, user: User, db: Session, *, tab: str = "contacts"
+) -> HTMLResponse:
+    """Render company detail (NO access gate).
+
+    company_detail_partial gates with can_manage_account then calls this; create_company
+    / edit_company call it directly after authorizing their own mutation (the actor just
+    created/edited the account, so the post-mutation render is trusted).
+    """
     active_tab = tab if tab in _VALID_CUSTOMER_TABS else "contacts"
     company = (
         db.query(Company)
@@ -2506,6 +2523,8 @@ async def company_tab(
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(404, "Company not found")  # scope detail to match the contacts list
 
     valid_tabs = {"sites", "contacts", "requisitions", "activity", "quotes", "buy_plans", "files", "history"}
     if tab not in valid_tabs:
@@ -3509,7 +3528,7 @@ async def set_account_primary_contact(
     db.refresh(company)
     logger.info("Company {} primary contact set to {} by {}", company_id, contact_id, user.email)
 
-    return await company_detail_partial(request=request, company_id=company_id, user=user, db=db)
+    return await _render_company_detail(request, company_id, user, db)
 
 
 @router.post(
@@ -3544,7 +3563,7 @@ async def set_parent_company(
     db.refresh(company)
     logger.info("Company {} parent set to {} by {}", company_id, raw or "None", user.email)
 
-    return await company_detail_partial(request=request, company_id=company_id, user=user, db=db)
+    return await _render_company_detail(request, company_id, user, db)
 
 
 # ── Shared helper — parent-company validation used by set_parent_company + edit_company ──
@@ -3785,6 +3804,12 @@ async def edit_company(
         if new_owner_id != company.account_owner_id:
             if not can_manage_account_team(user, company):
                 raise HTTPException(403, "Only the account owner or a manager can change the primary owner")
+            # The new owner must be a real active user — mirrors create_company and the
+            # bulk assign-owner path, so a deactivated/non-existent id can't silently take
+            # ownership (or raise an unhandled FK IntegrityError on commit).
+            target = db.get(User, new_owner_id)
+            if not target or not target.is_active:
+                raise HTTPException(400, "Owner must be an active user")
             company.account_owner_id = new_owner_id
 
     parent_company_id_raw = form.get("parent_company_id", "").strip()
@@ -3811,7 +3836,7 @@ async def edit_company(
     db.commit()
     logger.info("Company {} edited by {}", company_id, user.email)
 
-    return await company_detail_partial(request=request, company_id=company_id, user=user, db=db)
+    return await _render_company_detail(request, company_id, user, db)
 
 
 # ── Inline Field Edit — Account (WS1) ─────────────────────────────────────

@@ -931,7 +931,7 @@ class TestScrapeWebsiteContacts:
                 patch("app.cache.intel_cache.get_cached", return_value=None),
                 patch("app.cache.intel_cache.set_cached"),
                 patch("app.utils.vendor_helpers.is_private_url", return_value=False),
-                patch("app.utils.vendor_helpers.http_redirect", mock_http),
+                patch("app.utils.vendor_helpers.http", mock_http),
             ):
                 return await scrape_website_contacts("https://vendor.com")
 
@@ -954,7 +954,7 @@ class TestScrapeWebsiteContacts:
                 patch("app.cache.intel_cache.get_cached", return_value=None),
                 patch("app.cache.intel_cache.set_cached"),
                 patch("app.utils.vendor_helpers.is_private_url", return_value=False),
-                patch("app.utils.vendor_helpers.http_redirect", mock_http),
+                patch("app.utils.vendor_helpers.http", mock_http),
             ):
                 return await scrape_website_contacts("https://downsite.com")
 
@@ -988,7 +988,7 @@ class TestScrapeWebsiteContacts:
                 patch("app.cache.intel_cache.get_cached", return_value=None),
                 patch("app.cache.intel_cache.set_cached"),
                 patch("app.utils.vendor_helpers.is_private_url", return_value=False),
-                patch("app.utils.vendor_helpers.http_redirect", mock_http),
+                patch("app.utils.vendor_helpers.http", mock_http),
             ):
                 return await scrape_website_contacts("https://forbidden.com")
 
