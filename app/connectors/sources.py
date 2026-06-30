@@ -198,8 +198,12 @@ class BaseConnector(ABC):
                 else:
                     logger.warning(f"{self.__class__.__name__} failed for {part_number}: {_redact_secrets(str(e))}")
         if last_err is not None:
-            # Sanitize: last_err may be an httpx error whose URL holds ?apiKey=SECRET.
-            raise _safe_connector_error(last_err) from None
+            # An exhausted httpx HTTPStatusError embeds the request URL (?apiKey=SECRET)
+            # in its message — sanitize it. Other exception types carry no secret, so
+            # propagate them unchanged (preserves their type for callers / health checks).
+            if isinstance(last_err, httpx.HTTPStatusError):
+                raise _safe_connector_error(last_err) from None
+            raise last_err
         raise RuntimeError(
             f"{self.__class__.__name__}: search loop completed without result or error for {part_number}"
         )
