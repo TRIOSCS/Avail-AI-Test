@@ -619,10 +619,10 @@ async def vendor_tab(
             date_str = o.created_at.strftime("%b %d, %Y") if o.created_at else _DASH
             qty_str = f"{o.qty_available:,}" if o.qty_available else _DASH
             rows.append(f"""<tr class="hover:bg-brand-50">
-              <td class="px-4 py-2 text-sm font-mono text-gray-900">{o.mpn or _DASH}</td>
+              <td class="px-4 py-2 text-sm font-mono text-gray-900">{html.escape(o.mpn or _DASH)}</td>
               <td class="px-4 py-2 text-sm text-gray-500 text-right">{qty_str}</td>
               <td class="px-4 py-2 text-sm text-right">{price_str}</td>
-              <td class="px-4 py-2 text-sm text-gray-500">{o.lead_time or _DASH}</td>
+              <td class="px-4 py-2 text-sm text-gray-500">{html.escape(o.lead_time or _DASH)}</td>
               <td class="px-4 py-2 text-sm text-gray-500">{date_str}</td>
             </tr>""")
         if rows:

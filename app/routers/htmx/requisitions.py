@@ -673,6 +673,7 @@ async def requisition_detail_partial(
     )
     if not req:
         raise HTTPException(404, "Requisition not found")
+    require_requisition_access(db, req_id, user)
 
     requirements = req.requirements or []
     for r in requirements:
@@ -908,6 +909,7 @@ async def requisition_tab(
 ):
     """Return a specific tab partial for requisition detail."""
     req = get_requisition_or_404(db, req_id)
+    require_requisition_access(db, req_id, user)
 
     valid_tabs = {"parts", "offers", "quotes", "buy_plans", "tasks", "activity", "responses"}
     if tab not in valid_tabs:

@@ -12,6 +12,7 @@ Called by: app/main.py (router mount).
 Depends on: app.models, app.dependencies, app.database, app.services, ._shared
 """
 
+import html
 import json
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
@@ -327,7 +328,7 @@ async def manufacturer_add(
         db.commit()
 
     return HTMLResponse(
-        f'<div class="px-3 py-1.5 text-xs font-medium text-brand-600" data-mfr-name="{name}">Added: {name}</div>'
+        f'<div class="px-3 py-1.5 text-xs font-medium text-brand-600" data-mfr-name="{html.escape(name)}">Added: {html.escape(name)}</div>'
     )
 
 

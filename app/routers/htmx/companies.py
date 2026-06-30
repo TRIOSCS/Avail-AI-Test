@@ -1139,7 +1139,7 @@ async def company_typeahead(
         .limit(10)
         .all()
     )
-    rows = [f'<option value="{c.id}">{c.name}</option>' for c in companies]
+    rows = [f'<option value="{c.id}">{html_mod.escape(c.name or "")}</option>' for c in companies]
     return HTMLResponse("\n".join(rows))
 
 
@@ -1164,7 +1164,7 @@ async def check_company_duplicate(
     )
     if existing:
         return HTMLResponse(
-            f'<p class="text-sm text-amber-600">A company named "{existing.name}" already exists (ID {existing.id}).</p>'
+            f'<p class="text-sm text-amber-600">A company named "{html_mod.escape(existing.name or "")}" already exists (ID {existing.id}).</p>'
         )
     return HTMLResponse("")
 
@@ -2571,8 +2571,8 @@ async def company_tab(
                 hx-get="/v2/partials/requisitions/{r.id}"
                 hx-target="#main-content"
                 hx-push-url="/v2/requisitions/{r.id}">
-              <td class="px-4 py-2 text-sm font-medium text-brand-500">{r.name}</td>
-              <td class="px-4 py-2 text-sm text-gray-500">{r.status or _DASH}</td>
+              <td class="px-4 py-2 text-sm font-medium text-brand-500">{html_mod.escape(r.name or "")}</td>
+              <td class="px-4 py-2 text-sm text-gray-500">{html_mod.escape(r.status or _DASH)}</td>
               <td class="px-4 py-2 text-sm text-gray-500">{date_str}</td>
             </tr>""")
         if rows:

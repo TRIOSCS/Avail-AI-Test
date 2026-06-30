@@ -1195,6 +1195,7 @@ async def list_requirement_offers(
     req_item = db.query(Requirement).filter(Requirement.id == requirement_id).first()
     if not req_item:
         raise HTTPException(404, "Requirement not found")
+    require_requisition_access(db, req_item.requisition_id, user, label="Requirement")
 
     def _offer_dict(o, *, is_historical=False, is_substitute=False, source_req_id=None):
         age_days = 0
@@ -1459,6 +1460,7 @@ async def list_requirement_history(
     req_item = db.query(Requirement).filter(Requirement.id == requirement_id).first()
     if not req_item:
         raise HTTPException(404, "Requirement not found")
+    require_requisition_access(db, req_item.requisition_id, user, label="Requirement")
 
     events = []
 
