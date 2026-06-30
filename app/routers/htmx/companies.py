@@ -3785,6 +3785,12 @@ async def edit_company(
         if new_owner_id != company.account_owner_id:
             if not can_manage_account_team(user, company):
                 raise HTTPException(403, "Only the account owner or a manager can change the primary owner")
+            # The new owner must be a real active user — mirrors create_company and the
+            # bulk assign-owner path, so a deactivated/non-existent id can't silently take
+            # ownership (or raise an unhandled FK IntegrityError on commit).
+            target = db.get(User, new_owner_id)
+            if not target or not target.is_active:
+                raise HTTPException(400, "Owner must be an active user")
             company.account_owner_id = new_owner_id
 
     parent_company_id_raw = form.get("parent_company_id", "").strip()
