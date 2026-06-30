@@ -20,7 +20,7 @@ from sqlalchemy import text as sqltext
 from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlalchemy.orm import Session
 
-from ..http_client import http_redirect
+from ..http_client import http
 from ..models import VendorCard, VendorReview
 from ..services.credential_service import get_credential_cached
 from ..services.specialty_detector import commodity_slug_to_display
@@ -422,6 +422,38 @@ def is_private_url(url: str) -> bool:
         return True  # Can't resolve = block it
 
 
+_REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
+
+
+async def _safe_get(url: str, *, headers: dict, timeout: int, max_redirects: int = 4):
+    """GET ``url`` with a non-redirecting client, re-validating every redirect hop.
+
+    The shared ``http`` client has ``follow_redirects=False``, so each 3xx is returned
+    rather than silently followed. We resolve the ``Location`` target, re-run
+    ``is_private_url`` against it, and only then continue — so a vendor page that 302s to
+    an internal host or cloud metadata (e.g. http://169.254.169.254/...) is never fetched
+    (SSRF). Returns the final non-redirect ``httpx.Response``, or ``None`` if a hop
+    resolves to a private/internal address or the redirect budget is exhausted. Network
+    errors propagate to the caller (handled by ``asyncio.gather(return_exceptions=True)``).
+    """
+    from urllib.parse import urljoin
+
+    loop = asyncio.get_running_loop()
+    current = url
+    for _ in range(max_redirects + 1):
+        if await loop.run_in_executor(None, is_private_url, current):
+            logger.warning(f"SSRF blocked (redirect hop): {current}")
+            return None
+        resp = await http.get(current, headers=headers, timeout=timeout)
+        location = resp.headers.get("location") if resp.status_code in _REDIRECT_STATUSES else None
+        if location:
+            current = urljoin(current, location)
+            continue
+        return resp
+    logger.warning(f"SSRF blocked (too many redirects): {url}")
+    return None
+
+
 async def scrape_website_contacts(url: str) -> dict:
     """Fetch vendor website homepage + /contact page, extract emails and phones.
 
@@ -462,12 +494,13 @@ async def scrape_website_contacts(url: str) -> dict:
         "Accept": "text/html,application/xhtml+xml",
     }
 
-    # Fetch all pages concurrently instead of sequentially
-    tasks = [http_redirect.get(page_url, headers=headers, timeout=10) for page_url in pages_to_try]
+    # Fetch all pages concurrently instead of sequentially. _safe_get re-validates every
+    # redirect hop so a 302 to an internal host / cloud metadata is never followed.
+    tasks = [_safe_get(page_url, headers=headers, timeout=10) for page_url in pages_to_try]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     for resp in results:
-        if isinstance(resp, Exception):
+        if resp is None or isinstance(resp, Exception):
             continue
         if resp.status_code != 200:
             continue
