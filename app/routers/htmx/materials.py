@@ -175,11 +175,14 @@ def _parse_card_filter_params(
 @router.get("/v2/partials/materials", response_class=HTMLResponse)
 async def materials_list_partial(
     request: Request,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.MATERIALS)),
     db: Session = Depends(get_db),
 ):
-    """Redirect to faceted workspace — all materials browsing uses the sidebar
-    layout."""
+    """Redirect to faceted workspace — all materials browsing uses the sidebar layout.
+
+    Gated by MATERIALS access (it calls workspace_partial directly, so the inner route's
+    Depends would otherwise never run).
+    """
     return await materials_workspace_partial(request, user, db)
 
 
