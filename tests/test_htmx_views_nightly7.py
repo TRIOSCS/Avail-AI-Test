@@ -8,7 +8,7 @@ Targets uncovered sections:
 - create_company (POST /v2/partials/customers/create)
 - lead_status_update (POST /v2/partials/sourcing/leads/{lead_id}/status)
 - buy_plan_submit_partial (POST /v2/partials/buy-plans/{plan_id}/submit)
-- buy_plan_verify_so_partial (POST /v2/partials/buy-plans/{plan_id}/verify-so)
+- buy_plan_halt_partial (POST /v2/partials/buy-plans/{plan_id}/halt)
 - buy_plan_verify_po_partial (POST /v2/partials/buy-plans/{plan_id}/lines/{line_id}/verify-po)
 - buy_plan_flag_issue_partial (POST /v2/partials/buy-plans/{plan_id}/lines/{line_id}/issue)
 - proactive_draft_for_prepare (POST /v2/partials/proactive/draft)
@@ -564,13 +564,13 @@ class TestBuyPlanSubmit:
         assert resp.status_code == 400
 
 
-# ── Section 8: buy_plan_verify_so_partial ────────────────────────────
+# ── Section 8: buy_plan_halt_partial (Phase D — replaces verify-so) ──
 
 
-class TestBuyPlanVerifySo:
-    """Tests for POST /v2/partials/buy-plans/{plan_id}/verify-so."""
+class TestBuyPlanHalt:
+    """Tests for POST /v2/partials/buy-plans/{plan_id}/halt."""
 
-    def test_verify_so_success(self, client, db_session, test_user):
+    def test_halt_success(self, client, db_session, test_user):
         _req, plan = _make_plan_with_quote(db_session, test_user)
 
         mock_plan = MagicMock()
@@ -578,86 +578,94 @@ class TestBuyPlanVerifySo:
 
         with (
             patch("app.routers.htmx.buy_plans.buy_plan_detail_partial", new_callable=AsyncMock) as mock_detail,
-            patch("app.services.buyplan_workflow.verify_so", return_value=mock_plan),
+            patch("app.services.buyplan_workflow.halt_plan", return_value=mock_plan),
             patch("app.services.buyplan_notifications.run_notify_bg", new_callable=AsyncMock),
         ):
             from fastapi.responses import HTMLResponse
 
-            mock_detail.return_value = HTMLResponse("<div>SO verified</div>")
+            mock_detail.return_value = HTMLResponse("<div>halted</div>")
             resp = client.post(
-                f"/v2/partials/buy-plans/{plan.id}/verify-so",
-                data={"action": "approve"},
+                f"/v2/partials/buy-plans/{plan.id}/halt",
+                data={"reason": "stop everything"},
             )
         assert resp.status_code == 200
 
-    def test_verify_so_value_error_returns_400(self, client, db_session, test_user):
+    def test_halt_value_error_returns_400(self, client, db_session, test_user):
         _req, plan = _make_plan_with_quote(db_session, test_user)
 
-        with patch("app.services.buyplan_workflow.verify_so", side_effect=ValueError("Invalid state")):
+        with patch("app.services.buyplan_workflow.halt_plan", side_effect=ValueError("Cannot halt a completed plan")):
             resp = client.post(
-                f"/v2/partials/buy-plans/{plan.id}/verify-so",
-                data={"action": "approve"},
+                f"/v2/partials/buy-plans/{plan.id}/halt",
+                data={"reason": "x"},
             )
         assert resp.status_code == 400
 
-    def test_verify_so_reject_action(self, client, db_session, test_user):
+    def test_halt_permission_error_returns_403(self, client, db_session, test_user):
         _req, plan = _make_plan_with_quote(db_session, test_user)
 
-        mock_plan = MagicMock()
-        mock_plan.id = plan.id
-
-        with (
-            patch("app.routers.htmx.buy_plans.buy_plan_detail_partial", new_callable=AsyncMock) as mock_detail,
-            patch("app.services.buyplan_workflow.verify_so", return_value=mock_plan),
-            patch("app.services.buyplan_notifications.run_notify_bg", new_callable=AsyncMock),
-        ):
-            from fastapi.responses import HTMLResponse
-
-            mock_detail.return_value = HTMLResponse("<div>SO rejected</div>")
+        with patch("app.services.buyplan_workflow.halt_plan", side_effect=PermissionError("not a supervisor")):
             resp = client.post(
-                f"/v2/partials/buy-plans/{plan.id}/verify-so",
-                data={"action": "reject", "rejection_note": "SO number invalid"},
+                f"/v2/partials/buy-plans/{plan.id}/halt",
+                data={"reason": "x"},
             )
-        assert resp.status_code == 200
+        assert resp.status_code == 403
 
 
 # ── Section 9: buy_plan_verify_po_partial ────────────────────────────
 
 
 class TestBuyPlanVerifyPo:
-    """Tests for POST /v2/partials/buy-plans/{plan_id}/lines/{line_id}/verify-po."""
+    """Tests for POST /v2/partials/buy-plans/{plan_id}/lines/{line_id}/verify-po.
+
+    Phase D: the route is gated by require_buyplan_po_approver, overridden here so the
+    handler runs (the service verify_po is itself patched).
+    """
 
     def test_verify_po_success(self, client, db_session, test_user):
+        from app.dependencies import require_buyplan_po_approver
+        from app.main import app
+
         req, plan = _make_plan_with_quote(db_session, test_user)
         line = _make_buy_plan_line(db_session, plan, req)
 
         mock_completed_plan = MagicMock()
         mock_completed_plan.status = BuyPlanStatus.DRAFT  # Not completed
 
-        with (
-            patch("app.routers.htmx.buy_plans.buy_plan_detail_partial", new_callable=AsyncMock) as mock_detail,
-            patch("app.services.buyplan_workflow.verify_po"),
-            patch("app.services.buyplan_workflow.check_completion", return_value=mock_completed_plan),
-            patch("app.services.buyplan_notifications.run_notify_bg", new_callable=AsyncMock),
-        ):
-            from fastapi.responses import HTMLResponse
+        app.dependency_overrides[require_buyplan_po_approver] = lambda: test_user
+        try:
+            with (
+                patch("app.routers.htmx.buy_plans.buy_plan_detail_partial", new_callable=AsyncMock) as mock_detail,
+                patch("app.services.buyplan_workflow.verify_po"),
+                patch("app.services.buyplan_workflow.check_completion", return_value=mock_completed_plan),
+                patch("app.services.buyplan_notifications.run_notify_bg", new_callable=AsyncMock),
+            ):
+                from fastapi.responses import HTMLResponse
 
-            mock_detail.return_value = HTMLResponse("<div>PO verified</div>")
-            resp = client.post(
-                f"/v2/partials/buy-plans/{plan.id}/lines/{line.id}/verify-po",
-                data={"action": "approve"},
-            )
+                mock_detail.return_value = HTMLResponse("<div>PO verified</div>")
+                resp = client.post(
+                    f"/v2/partials/buy-plans/{plan.id}/lines/{line.id}/verify-po",
+                    data={"action": "approve"},
+                )
+        finally:
+            app.dependency_overrides.pop(require_buyplan_po_approver, None)
         assert resp.status_code == 200
 
     def test_verify_po_value_error_returns_400(self, client, db_session, test_user):
+        from app.dependencies import require_buyplan_po_approver
+        from app.main import app
+
         req, plan = _make_plan_with_quote(db_session, test_user)
         line = _make_buy_plan_line(db_session, plan, req)
 
-        with patch("app.services.buyplan_workflow.verify_po", side_effect=ValueError("Line not found")):
-            resp = client.post(
-                f"/v2/partials/buy-plans/{plan.id}/lines/{line.id}/verify-po",
-                data={"action": "approve"},
-            )
+        app.dependency_overrides[require_buyplan_po_approver] = lambda: test_user
+        try:
+            with patch("app.services.buyplan_workflow.verify_po", side_effect=ValueError("Line not found")):
+                resp = client.post(
+                    f"/v2/partials/buy-plans/{plan.id}/lines/{line.id}/verify-po",
+                    data={"action": "approve"},
+                )
+        finally:
+            app.dependency_overrides.pop(require_buyplan_po_approver, None)
         assert resp.status_code == 400
 
 

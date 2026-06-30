@@ -384,47 +384,9 @@ def test_supervise_null_cost_treated_as_zero(db_session, test_quote, test_requis
 # ── 6. SO needs verification (ops) ────────────────────────────────────
 
 
-def test_supervise_so_pending(db_session, test_user, test_quote, test_requisition):
-    """ACTIVE plan with so_status PENDING appears in so_pending_count + triage."""
-    from app.services.buyplan_hub import supervise_overview
-
-    plan = _make_plan(
-        db_session,
-        quote_id=test_quote.id,
-        requisition_id=test_requisition.id,
-        status=BuyPlanStatus.ACTIVE,
-        so_status=SOVerificationStatus.PENDING,
-        submitted_by_id=test_user.id,
-    )
-
-    result = supervise_overview(db_session)
-
-    assert result["strip"]["so_pending_count"] >= 1
-    so_rows = [r for r in result["queue"] if r["kind"] == "verify_so"]
-    assert plan.id in [r["plan_id"] for r in so_rows]
-
-    row = next(r for r in so_rows if r["plan_id"] == plan.id)
-    assert row["label"] == "Verify SO"
-    # SO-verify row is owned by the Account Manager (submitted_by).
-    assert row["owner_role"] == "AM"
-    assert row["owner_name"] == (test_user.name or test_user.email)
-
-
-def test_supervise_so_approved_not_pending(db_session, test_quote, test_requisition):
-    """An ACTIVE plan with so_status APPROVED is NOT in the so_pending bucket."""
-    from app.services.buyplan_hub import supervise_overview
-
-    plan = _make_plan(
-        db_session,
-        quote_id=test_quote.id,
-        requisition_id=test_requisition.id,
-        status=BuyPlanStatus.ACTIVE,
-        so_status=SOVerificationStatus.APPROVED,
-    )
-
-    result = supervise_overview(db_session)
-    so_ids = [r["plan_id"] for r in result["queue"] if r["kind"] == "verify_so"]
-    assert plan.id not in so_ids
+# Phase D folded SO verification into the single approval — supervise_overview no longer
+# emits a verify_so kind or a so_pending_count, so the old SO-pending triage tests were
+# removed (the approval path is covered by test_supervise_approvals / the workflow suite).
 
 
 # ── 7. POs awaiting verification (ops) ────────────────────────────────
@@ -496,7 +458,6 @@ def test_supervise_empty_db(db_session):
     assert strip["open_value"] == 0.0
     assert strip["avg_margin"] == 0.0
     assert strip["approval_count"] == 0
-    assert strip["so_pending_count"] == 0
     assert strip["halted_count"] == 0
     assert strip["overdue_po_count"] == 0
     assert strip["po_pending_verify_count"] == 0

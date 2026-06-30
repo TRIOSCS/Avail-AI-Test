@@ -20,12 +20,16 @@
 {# Determine if action banner handles actions (suppresses standalone action bar) #}
 {% set show_buyer_banner = my_awaiting_lines|length > 0 and bp.status == 'active' %}
 {% set show_approval_banner = bp.status == 'pending' and can_approve_buy_plans(user) %}
-{% set show_so_banner = bp.status == 'active' and is_ops_member and bp.so_status == 'pending' %}
-{% set show_verify_banner = bp.status == 'active' and is_ops_member and pending_verify_lines|length > 0 %}
+{# Phase D: verify-PO moved off ops membership onto the per-user can_approve_purchase_orders
+   right, so the banner + inline buttons hide with the SAME predicate the POST enforces. #}
+{% set show_verify_banner = bp.status == 'active' and can_approve_purchase_orders(user) and pending_verify_lines|length > 0 %}
 {% set show_rejected_banner = bp.status == 'draft' and (bp.cancellation_reason or (bp.approved_at and bp.approval_notes)) %}
 {% set show_draft_banner = bp.status == 'draft' and not show_rejected_banner %}
 {% set show_inbound_banner = bp.status == 'inbound' %}
-{% set has_action_banner = show_buyer_banner or show_approval_banner or show_so_banner or show_verify_banner or show_rejected_banner or show_draft_banner or show_inbound_banner %}
+{% set has_action_banner = show_buyer_banner or show_approval_banner or show_verify_banner or show_rejected_banner or show_draft_banner or show_inbound_banner %}
+{# Halt is the single off-ramp (Phase D): a supervisor/ops member may halt an in-flight
+   (pending/active) plan. Mirrors the service-side _can_halt + HALTABLE_STATUSES guard. #}
+{% set can_halt = bp.status in ('pending', 'active') and (is_ops_member or user.role in ('manager', 'admin')) %}
 
 <div class="page-fluid" x-data="{ showModal: false, modalType: '', showAi: false, showNotes: false, showSo: false }">
 
@@ -63,6 +67,14 @@
           <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
           Quality Plan
         </button>
+        {# Halt — the single off-ramp (Phase D). Always shown (independent of the action
+           banner) so a supervisor/ops member can halt an in-flight plan from any state. #}
+        {% if can_halt %}
+        <button @click="modalType = 'halt'; showModal = true"
+                class="btn btn-danger btn-sm">
+          Halt
+        </button>
+        {% endif %}
         {# Cancel/Reset only shown here when NOT in action banner #}
         {% if not has_action_banner %}
           {% if bp.status in ('halted', 'cancelled') %}
@@ -110,31 +122,28 @@
     </div>
   </div>
 
-  {# ═══ 2. PROGRESS BAR STEPPER ═══ #}
-  {% set steps = ['Draft', 'Submit', 'Approve', 'PO Exec', 'Complete'] %}
+  {# ═══ 2. PROGRESS BAR STEPPER — 4 canonical stages (Phase D) ═══ #}
+  {# Build · Approve · Purchase · Done. INBOUND is a Purchase sub-label (goods inbound).
+     status→stage: draft→Build, pending→Approve, active|inbound→Purchase, completed→Done.
+     Halted is the off-ramp (rose at the Purchase node); cancelled greys the whole bar. #}
+  {% set steps = ['Build', 'Approve', 'Purchase', 'Done'] %}
   {% if bp.status == 'draft' %}
     {% set filled = 1 %}
-    {% set step_label = 'Draft' %}
+    {% set step_label = 'Build' %}
   {% elif bp.status == 'pending' %}
     {% set filled = 2 %}
-    {% set step_label = 'Pending Approval' %}
-  {% elif bp.status == 'active' and bp.so_status == 'pending' %}
-    {% set filled = 3 %}
-    {% set step_label = 'Active (SO Pending)' %}
-  {% elif bp.status == 'active' and awaiting_po_lines|length == lines|length %}
-    {% set filled = 3 %}
-    {% set step_label = 'PO Execution' %}
+    {% set step_label = 'Approve' %}
   {% elif bp.status == 'active' %}
-    {% set filled = 4 %}
-    {% set step_label = 'PO Execution' %}
-  {% elif bp.status == 'inbound' %}
-    {% set filled = 4 %}
-    {% set step_label = 'Inbound (awaiting receipt)' %}
-  {% elif bp.status == 'completed' %}
-    {% set filled = 5 %}
-    {% set step_label = 'Complete' %}
-  {% elif bp.status == 'halted' %}
     {% set filled = 3 %}
+    {% set step_label = 'Purchase' %}
+  {% elif bp.status == 'inbound' %}
+    {% set filled = 3 %}
+    {% set step_label = 'Purchase · Inbound' %}
+  {% elif bp.status == 'completed' %}
+    {% set filled = 4 %}
+    {% set step_label = 'Done' %}
+  {% elif bp.status == 'halted' %}
+    {% set filled = 2 %}
     {% set step_label = 'Halted' %}
   {% elif bp.status == 'cancelled' %}
     {% set filled = 0 %}
@@ -146,17 +155,17 @@
 
   <div class="mb-5 bg-white rounded-lg border border-line-base px-5 py-4">
     <div class="flex gap-1.5">
-      {% for i in range(1, 6) %}
+      {% for i in range(1, 5) %}
         {% if bp.status == 'cancelled' %}
-          <div class="flex-1 h-2.5 rounded-{% if i == 1 %}l{% elif i == 5 %}r{% endif %}-md bg-gray-300"></div>
+          <div class="flex-1 h-2.5 rounded-{% if i == 1 %}l{% elif i == 4 %}r{% endif %}-md bg-gray-300"></div>
         {% elif bp.status == 'halted' and i == 3 %}
-          <div class="flex-1 h-2.5 rounded-{% if i == 1 %}l{% elif i == 5 %}r{% endif %}-md bg-rose-500"></div>
+          <div class="flex-1 h-2.5 rounded-{% if i == 1 %}l{% elif i == 4 %}r{% endif %}-md bg-rose-500"></div>
         {% elif i <= filled %}
-          <div class="flex-1 h-2.5 rounded-{% if i == 1 %}l{% elif i == 5 %}r{% endif %}-md bg-emerald-500"></div>
+          <div class="flex-1 h-2.5 rounded-{% if i == 1 %}l{% elif i == 4 %}r{% endif %}-md bg-emerald-500"></div>
         {% elif i == filled + 1 %}
-          <div class="flex-1 h-2.5 rounded-{% if i == 1 %}l{% elif i == 5 %}r{% endif %}-md bg-amber-400"></div>
+          <div class="flex-1 h-2.5 rounded-{% if i == 1 %}l{% elif i == 4 %}r{% endif %}-md bg-amber-400"></div>
         {% else %}
-          <div class="flex-1 h-2.5 rounded-{% if i == 1 %}l{% elif i == 5 %}r{% endif %}-md bg-gray-200"></div>
+          <div class="flex-1 h-2.5 rounded-{% if i == 1 %}l{% elif i == 4 %}r{% endif %}-md bg-gray-200"></div>
         {% endif %}
       {% endfor %}
     </div>
@@ -202,22 +211,8 @@
   </div>
   {% endif %}
 
-  {# Ops: SO needs verification #}
-  {% if show_so_banner %}
-  <div class="mb-4 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex items-center justify-between gap-3">
-    <div class="flex items-center gap-3">
-      <span class="flex-shrink-0 w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center justify-center">!</span>
-      <span class="text-sm text-blue-800">Sales Order {{ bp.sales_order_number or '#' }} needs verification.</span>
-    </div>
-    <button @click="modalType = 'verify-so'; showModal = true"
-            class="flex-shrink-0 btn btn-primary btn-sm">
-      Verify SO
-    </button>
-  </div>
-  {% endif %}
-
-  {# Ops: POs pending verification #}
-  {% if show_verify_banner and not show_so_banner %}
+  {# PO approvers: POs pending verification #}
+  {% if show_verify_banner %}
   <div class="mb-4 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex items-center gap-3">
     <span class="flex-shrink-0 w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center justify-center">{{ pending_verify_lines|length }}</span>
     <span class="text-sm text-blue-800">{{ pending_verify_lines|length }} PO{{ 's' if pending_verify_lines|length != 1 }} need{{ '' if pending_verify_lines|length != 1 else 's' }} verification.</span>
@@ -365,7 +360,7 @@
                       </div>
                     </div>
                   </div>
-                {% elif line.status == 'pending_verify' and is_ops_member %}
+                {% elif line.status == 'pending_verify' and can_approve_purchase_orders(user) %}
                   <div class="flex gap-1">
                     <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/lines/{{ line.id }}/verify-po"
                             hx-target="#main-content"
@@ -739,42 +734,34 @@
       </template>
       {% endif %}
 
-      {# Verify SO modal #}
-      <template x-if="modalType === 'verify-so'" x-cloak>
-        <div x-data="{ action: 'approve', note: '' }">
-          <h3 class="text-lg font-semibold text-gray-900 mb-4">Verify Sales Order</h3>
-          <div class="space-y-3">
-            <div class="flex gap-4">
-              <label class="flex items-center gap-1.5 text-sm cursor-pointer">
-                <input type="radio" x-model="action" value="approve" class="text-emerald-600 focus:ring-emerald-500"> Approve
-              </label>
-              <label class="flex items-center gap-1.5 text-sm cursor-pointer">
-                <input type="radio" x-model="action" value="reject" class="text-rose-600 focus:ring-rose-500"> Reject
-              </label>
-              <label class="flex items-center gap-1.5 text-sm cursor-pointer">
-                <input type="radio" x-model="action" value="halt" class="text-rose-600 focus:ring-rose-500"> Halt
-              </label>
-            </div>
-            <div x-show="action !== 'approve'" x-cloak x-collapse>
-              <label class="block text-sm font-medium text-gray-700 mb-1">Note <span class="text-rose-500">*</span></label>
-              <textarea x-model="note" rows="2"
-                        class="input w-full"
-                        placeholder="Reason for rejection or halt..."></textarea>
-            </div>
+      {# Halt modal — the single off-ramp (Phase D). Gated to supervisor/ops (can_halt), so
+         a non-supervisor's DOM carries no orphaned halt form; the POST is also gated
+         server-side (halt_plan raises PermissionError → 403). #}
+      {% if can_halt %}
+      <template x-if="modalType === 'halt'" x-cloak>
+        <div x-data="{ reason: '' }">
+          <h3 class="text-lg font-semibold text-gray-900 mb-4">Halt Buy Plan</h3>
+          <p class="text-sm text-gray-600 mb-3">This stops everything. The plan can be reset to draft and resubmitted later.</p>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Reason</label>
+            <textarea x-model="reason" rows="2"
+                      class="input w-full"
+                      placeholder="Why is this being halted?"></textarea>
           </div>
           <div class="mt-5 flex justify-end gap-2">
             {{ modal_cancel_btn() }}
-            <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/verify-so"
+            <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/halt"
                     hx-target="#main-content"
-                    :hx-vals="JSON.stringify({action: action, rejection_note: note})"
+                    :hx-vals="JSON.stringify({reason: reason})"
                     data-loading-disable
                     @click="showModal = false"
-                    class="btn btn-primary">
-              Confirm
+                    class="btn btn-danger">
+              Halt Plan
             </button>
           </div>
         </div>
       </template>
+      {% endif %}
 
       {# Cancel modal #}
       <template x-if="modalType === 'cancel'" x-cloak>

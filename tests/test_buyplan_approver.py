@@ -27,7 +27,12 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app.constants import UserAuditAction
-from app.dependencies import can_approve_buy_plans, require_buyplan_approver
+from app.dependencies import (
+    can_approve_buy_plans,
+    can_approve_purchase_orders,
+    require_buyplan_approver,
+    require_buyplan_po_approver,
+)
 from app.models import User, UserAdminAudit
 
 _AGENT_EMAIL = "agent@availai.local"
@@ -184,4 +189,44 @@ class TestRequireBuyplanApprover:
         monkeypatch.setattr("app.dependencies.require_user", lambda request, db: u)
         with pytest.raises(HTTPException) as exc:
             require_buyplan_approver(request=None, db=db_session)
+        assert exc.value.status_code == 403
+
+
+# ── Phase D: purchase-order approval right (verify-PO gate) ───────────
+
+
+class TestPurchaseOrderApprovalRight:
+    """can_approve_purchase_orders predicate + require_buyplan_po_approver
+    dependency."""
+
+    def test_predicate_true_when_flag_set(self, db_session):
+        u = _make_user(db_session, email="po-true@trioscs.com")
+        u.can_approve_purchase_orders = True
+        db_session.commit()
+        assert can_approve_purchase_orders(u) is True
+
+    def test_predicate_false_when_flag_unset(self, db_session):
+        u = _make_user(db_session, email="po-false@trioscs.com")
+        assert can_approve_purchase_orders(u) is False
+
+    def test_predicate_false_for_none(self):
+        assert can_approve_purchase_orders(None) is False
+
+    def test_predicate_false_for_admin_without_flag(self, db_session):
+        # Role does NOT auto-qualify: the column is the single source of truth.
+        u = _make_user(db_session, email="po-admin-noflag@trioscs.com", role="admin")
+        assert can_approve_purchase_orders(u) is False
+
+    def test_dependency_passes_when_flag_set(self, db_session, monkeypatch):
+        u = _make_user(db_session, email="po-dep-ok@trioscs.com")
+        u.can_approve_purchase_orders = True
+        db_session.commit()
+        monkeypatch.setattr("app.dependencies.require_user", lambda request, db: u)
+        assert require_buyplan_po_approver(request=None, db=db_session) is u
+
+    def test_dependency_403_when_flag_unset(self, db_session, monkeypatch):
+        u = _make_user(db_session, email="po-dep-403@trioscs.com")
+        monkeypatch.setattr("app.dependencies.require_user", lambda request, db: u)
+        with pytest.raises(HTTPException) as exc:
+            require_buyplan_po_approver(request=None, db=db_session)
         assert exc.value.status_code == 403

@@ -634,8 +634,7 @@ _SUPERVISE_QUEUE_PRIORITY: dict[str, int] = {
     "flagged": 2,
     "overdue": 3,
     "approve": 4,
-    "verify_so": 5,
-    "verify_po": 6,
+    "verify_po": 5,
 }
 
 #: Human-readable pill label for each supervise-lens action-queue row kind.
@@ -644,7 +643,6 @@ _SUPERVISE_QUEUE_LABEL: dict[str, str] = {
     "flagged": "Flagged",
     "overdue": "Overdue PO",
     "approve": "Approve",
-    "verify_so": "Verify SO",
     "verify_po": "Verify PO",
 }
 
@@ -717,20 +715,6 @@ def _query_approval_plans(db: Session) -> list[BuyPlan]:
             *_PLAN_CUSTOMER_LOADS,
             joinedload(BuyPlan.submitted_by),
             selectinload(BuyPlan.lines).selectinload(BuyPlanLine.requirement),
-        )
-        .order_by(BuyPlan.created_at.asc())
-        .all()
-    )
-
-
-def _query_so_pending_plans(db: Session) -> list[BuyPlan]:
-    """ACTIVE plans still awaiting SO verification (org-wide), oldest first."""
-    return (
-        db.query(BuyPlan)
-        .filter(BuyPlan.status == BuyPlanStatus.ACTIVE, BuyPlan.so_status == SOVerificationStatus.PENDING)
-        .options(
-            joinedload(BuyPlan.quote).joinedload(Quote.customer_site).joinedload(CustomerSite.company),
-            joinedload(BuyPlan.submitted_by),
         )
         .order_by(BuyPlan.created_at.asc())
         .all()
@@ -897,23 +881,23 @@ def supervise_overview(db: Session) -> dict:
     Action queue
     ------------
     queue : one flat, risk-first-ordered list of uniform row dicts — every item
-            that needs the supervisor, reshaped from the same six source queries
-            (approvals, SO-verify, halted, overdue POs, PO-verify, flagged). Each
-            row has the identical shape::
+            that needs the supervisor, reshaped from the same five source queries
+            (approvals, halted, overdue POs, PO-verify, flagged). Each row has the
+            identical shape::
 
                 kind, label, priority, plan_id, line_id, customer_name, so_number,
                 mpn, vendor_name, owner_name, owner_role, value, margin_pct,
                 waiting_since, issue_reason
 
             ``kind`` is one of ``halted``/``flagged``/``overdue``/``approve``/
-            ``verify_so``/``verify_po``. Plan kinds (approve/verify_so/halted) carry
+            ``verify_po``. Plan kinds (approve/halted) carry
             ``owner_role="AM"`` (the Account Manager = ``submitted_by``) and a NULL
             ``line_id``/``mpn``/``vendor_name``; line kinds (overdue/verify_po/flagged)
             carry ``owner_role="Buyer"`` (``line.buyer``) plus the offer ``mpn`` /
             ``vendor_name``. ``value`` / ``margin_pct`` are always the *parent plan's*
             ``total_cost`` / ``total_margin_pct`` (uniform "deal value/margin"), and
             ``issue_reason`` is populated only on ``flagged`` rows. ``waiting_since``
-            (the age + sort clock) is ``plan.created_at`` for approve/verify_so/halted,
+            (the age + sort clock) is ``plan.created_at`` for approve/halted,
             ``coalesce(line.last_nudge_at, plan.approved_at)`` for overdue, and
             ``line.created_at`` for verify_po/flagged. The list is sorted by
             ``(priority, waiting_since)`` — risk-first, oldest-first within each tier.
@@ -932,7 +916,6 @@ def supervise_overview(db: Session) -> dict:
 
     # ── Source queries (shared single source of truth with my_queue) ──
     approval_plans = _query_approval_plans(db)
-    so_pending_plans = _query_so_pending_plans(db)
     halted_plans = _query_halted_plans(db)
     overdue_lines = _query_overdue_lines(db)
     po_pending_verify_lines = _query_po_pending_verify(db)
@@ -940,7 +923,7 @@ def supervise_overview(db: Session) -> dict:
 
     # ── Uniform row builders ─────────────────────────────────────────
     def _plan_row(plan: BuyPlan, *, kind: str, waiting_since: datetime) -> dict:
-        """Map a plan-source row (approve/verify_so/halted) into the uniform shape.
+        """Map a plan-source row (approve/halted) into the uniform shape.
 
         Owner is the Account Manager (``submitted_by``); ``value`` / ``margin_pct`` are
         the plan's own deal totals. Line-only fields stay NULL.
@@ -993,7 +976,6 @@ def supervise_overview(db: Session) -> dict:
     # ── Assemble the single uniform queue, then sort risk-first / oldest-first ──
     queue = (
         [_plan_row(p, kind="approve", waiting_since=p.created_at) for p in approval_plans]
-        + [_plan_row(p, kind="verify_so", waiting_since=p.created_at) for p in so_pending_plans]
         + [_plan_row(p, kind="halted", waiting_since=p.created_at) for p in halted_plans]
         # overdue uses the exact SLA clock the overdue predicate keys off of.
         + [
@@ -1011,7 +993,6 @@ def supervise_overview(db: Session) -> dict:
             "open_value": open_value,
             "avg_margin": avg_margin,
             "approval_count": len(approval_plans),
-            "so_pending_count": len(so_pending_plans),
             "halted_count": len(halted_plans),
             "overdue_po_count": len(overdue_lines),
             "po_pending_verify_count": len(po_pending_verify_lines),

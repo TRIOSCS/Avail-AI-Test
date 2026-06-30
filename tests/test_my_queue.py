@@ -491,7 +491,6 @@ def test_supervise_overview_contract_unchanged(db_session):
         "open_value",
         "avg_margin",
         "approval_count",
-        "so_pending_count",
         "halted_count",
         "overdue_po_count",
         "po_pending_verify_count",

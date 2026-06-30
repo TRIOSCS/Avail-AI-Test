@@ -1359,14 +1359,26 @@ buyplan_workflow.py (state machine)
     |   draft's "ready to submit"). submit_buy_plan clears the prior decision on resubmit.
     |   approve AND reject each write a BUYPLAN_APPROVED/BUYPLAN_REJECTED ActivityLog (plan-scoped).
     |
-    |  Per-line (active):  awaiting_po --confirm_po--> pending_verify --verify_po(ops)--> verified
+    |  Per-line (active):  awaiting_po --confirm_po--> pending_verify --verify_po(PO approver)--> verified
     |  Re-source (§6e):    pending_verify|verified --resource_line--> resourcing --claim_line--> awaiting_po
-    |  Ops SO track:       so_status: pending --verify_so(ops)--> approved / rejected
-    |  Completion gate:    all lines terminal AND so_status=approved. verify_so/verify_po require a
-    |                      VerificationGroupMember (manage via Settings > Ops Group; seeded from ADMIN_EMAILS).
-    |                      admin/buy_plan_ops.toggle_ops_member guards the toggle: it refuses to
-    |                      deactivate the LAST active member or to let the acting admin deactivate
-    |                      themselves (both -> 400 JSON, auto-toasted); success fires a showToast.
+    |  SO fold (Phase D):  the single manager approval IS the SO sign-off — _run_approve_side_effects
+    |                      stamps so_status=approved + so_verified_by/at at approval time; there is no
+    |                      separate verify-SO step (route/modal/queue-kind retired). sales_order_number
+    |                      + so_status columns kept.
+    |  Halt (Phase D):     halt_plan(plan_id, user, reason) is the single off-ramp (POST .../halt,
+    |                      surfaced on detail). Auth = supervisor/ops (_can_halt: manager/admin role OR
+    |                      active VerificationGroupMember). Haltable from pending/active; sets
+    |                      status=halted + so_status=rejected + halted_by/at; resubmittable via reset.
+    |  Completion gate:    all lines terminal AND so_status=approved (the fold guarantees the SO gate).
+    |  verify-PO gate:     Phase D moved verify_po off ops membership onto the per-user
+    |                      can_approve_purchase_orders right — the POST route depends on
+    |                      require_buyplan_po_approver (403 otherwise), verify_po re-checks the predicate,
+    |                      and detail hides the controls via the can_approve_purchase_orders Jinja global.
+    |  Ops group:          VerificationGroupMember (Settings > Ops Group; seeded from ADMIN_EMAILS) now
+    |                      authorizes Halt + was the grandfather basis for can_approve_purchase_orders
+    |                      (migration 173). admin/buy_plan_ops.toggle_ops_member guards the toggle: it
+    |                      refuses to deactivate the LAST active member or to let the acting admin
+    |                      deactivate themselves (both -> 400 JSON, auto-toasted); success fires a showToast.
     |
     +---> buyplan_notifications.py (submit/approve/reject/SO/PO/completed/cancelled + buyer/ops nudges)
     |       +---> teams_notifications.py --> Teams webhook / DM

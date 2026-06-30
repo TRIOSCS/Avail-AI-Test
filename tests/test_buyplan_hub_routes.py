@@ -658,22 +658,18 @@ def test_supervise_manager_shows_strip_and_approvals(
     assert 'hx-target="#main-content"' in body
 
 
-def test_supervise_ops_shows_verify_sections(
+def test_supervise_ops_shows_verify_po_section(
     client: TestClient, db_session: Session, test_user, manager_user, test_requisition
 ):
-    """As an ops member: SO-verify and PO-verify sections render with their forms."""
+    """As an ops member: the PO-verify rows render with their forms.
+
+    (Phase D folded SO verification into the single approval, so there is no verify-SO row.)
+    """
     from app.dependencies import require_user
     from app.main import app
 
     _add_ops(db_session, manager_user)
     q = _make_quote(db_session, test_requisition.id)
-    so_plan = _make_plan(
-        db_session,
-        quote_id=q.id,
-        req_id=test_requisition.id,
-        status=BuyPlanStatus.ACTIVE,
-        so_status=SOVerificationStatus.PENDING,
-    )
     pv_plan = _make_plan(db_session, quote_id=q.id, req_id=test_requisition.id, status=BuyPlanStatus.ACTIVE)
     pv_line = _make_line(db_session, plan_id=pv_plan.id, buyer_id=test_user.id, status=BuyPlanLineStatus.PENDING_VERIFY)
     db_session.commit()
@@ -687,8 +683,7 @@ def test_supervise_ops_shows_verify_sections(
     body = resp.text
     # Verify rows surface in the unified queue (pill labels) with their routes intact.
     assert "Needs you now" in body
-    assert "Verify SO" in body
-    assert f"/v2/partials/buy-plans/{so_plan.id}/verify-so" in body
+    assert "Verify SO" not in body
     assert "Verify PO" in body
     assert f"/v2/partials/buy-plans/{pv_plan.id}/lines/{pv_line.id}/verify-po" in body
 
