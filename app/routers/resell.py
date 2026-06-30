@@ -657,11 +657,14 @@ async def resell_offer_form(
     db: Session = Depends(get_db),
 ):
     """Render the submit-offer modal (per-line / take-all scope toggle)."""
-    el = excess_service.get_excess_list(db, list_id)
+    # Load-and-authorize: non-owners 404 on a draft (existence not revealed).
+    el, is_owner = _get_list_for_user(db, list_id, user)
     if not excess_service.can_offer(user):
         raise HTTPException(403, "You do not have permission to submit offers")
-    if el.owner_id == user.id:
+    if is_owner:
         raise HTTPException(403, "You cannot offer on your own excess list")
+    if el.status not in {s.value for s in _POSTED_STATUSES}:
+        raise HTTPException(404, "List not found")
     return template_response(
         "htmx/partials/resell/offer_form.html",
         {"request": request, "list": el},
@@ -842,6 +845,12 @@ async def resell_submit_offer(
     the same preview grid (import_preview) and lands here per-row. The service enforces
     can_offer + the self-offer guard.
     """
+    # Load-and-authorize: non-owners 404 on a draft (existence not revealed), and offers
+    # are only accepted on a posted/published list — never on an unpublished draft.
+    el, _ = _get_list_for_user(db, list_id, user)
+    if el.status not in {s.value for s in _POSTED_STATUSES}:
+        raise HTTPException(404, "List not found")
+
     scope = ExcessOfferScope(scope).value if scope in (s.value for s in ExcessOfferScope) else ExcessOfferScope.PER_LINE
 
     lines = None
