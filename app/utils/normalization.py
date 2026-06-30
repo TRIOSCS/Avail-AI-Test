@@ -204,7 +204,9 @@ def normalize_lead_time(raw: Any) -> int | None:
         multiplier = 7
     elif any(w in s for w in ("month", "mo")):
         multiplier = 30
-    elif any(w in s for w in ("day", "dy", "d ", "aro", "business")):
+    elif any(w in s for w in ("day", "dy", "d ", "aro", "business")) or re.search(r"\d\s*d\b", s):
+        # Compact day shorthand ("30d", "5d", "14 d") has no trailing space, so
+        # match a digit immediately followed by a standalone "d".
         multiplier = 1
     else:
         # Ambiguous — assume weeks if >0 and <52, days otherwise
@@ -291,8 +293,17 @@ def normalize_moq(raw: Any) -> int | None:
     if raw is None:
         return None
     s = str(raw).strip()
-    # Strip common prefixes
+    # Strip common leading prefixes ("MOQ:", "Minimum", "Min")
     s = re.sub(r"^(?:moq|minimum|min)[:\s]*", "", s, flags=re.IGNORECASE).strip()
+    # Strip trailing qualifier words ("10K minimum", "500 pcs", "250 each") before
+    # quantity parsing — otherwise a trailing "minimum" makes the string end in "m"
+    # and normalize_quantity mistakes it for the 1e6 multiplier suffix → None.
+    s = re.sub(
+        r"[\s:]*(?:minimum|min|pcs|pieces|piece|units|unit|each|ea|qty|quantity)\.?$",
+        "",
+        s,
+        flags=re.IGNORECASE,
+    ).strip()
     return normalize_quantity(s)
 
 
