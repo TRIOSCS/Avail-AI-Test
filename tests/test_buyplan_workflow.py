@@ -459,6 +459,24 @@ class TestHaltPlan:
         cancel_mock.assert_called_once()
         assert result.status == BuyPlanStatus.HALTED.value
 
+    def test_halt_active_plan_cancels_open_engine_request(
+        self, db_session: Session, manager_user: User, test_user: User, test_quote: Quote, test_requisition: Requisition
+    ):
+        """Halting an ACTIVE plan ALSO cancels its open engine request (the deal-level
+        PURCHASE_ORDER gate opened at approval for over-threshold plans).
+
+        Halt is the single off-ramp and must not orphan a REQUESTED row — the cancel is
+        unconditional, matching cancel_buy_plan (regression guard for the ACTIVE-halt
+        orphan).
+        """
+        plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.ACTIVE.value)
+
+        with patch("app.services.buyplan_workflow._cancel_open_engine_requests_for_plan") as cancel_mock:
+            result = halt_plan(plan.id, manager_user, db_session, reason="halt it")
+
+        cancel_mock.assert_called_once()
+        assert result.status == BuyPlanStatus.HALTED.value
+
     def test_halt_by_ops_member(
         self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
     ):

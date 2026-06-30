@@ -9,10 +9,12 @@
   of uniform row dicts keyed by `kind`. Action forms post origin=supervise so the handler
   re-renders THIS body into #bp-hub-body (not the single-plan detail).
 
-  Role gating (behaviour-preserving): the queue from the service carries every kind, but —
-  exactly as the old sectioned view did — `approve` rows show only to approvers (can_approve)
-  and `verify_po` rows only to ops (is_ops); overdue/flagged/halted show to every
-  supervisor. We build `visible_queue` once so the headline, chips and rows all agree.
+  Role gating: the queue from the service carries every kind, but `approve` rows show only to
+  buy-plan approvers (can_approve) and `verify_po` rows only to PO approvers
+  (can_approve_purchase_orders — the SAME per-user right the verify-PO POST enforces via
+  require_buyplan_po_approver, so the queue never shows a 403 button nor hides PO work from a
+  holder); overdue/flagged/halted show to every supervisor. We build `visible_queue` once so
+  the headline, chips and rows all agree.
   (Phase D folded SO verification into the single approval, so there is no verify-SO kind.)
 
   Receives: overview (dict: strip + queue), board (dict from deals_board scope=all),
@@ -25,12 +27,17 @@
 #}
 {% set strip = overview.strip %}
 
+{# verify-PO visibility uses the SAME predicate the POST enforces (require_buyplan_po_approver
+   → can_approve_purchase_orders), NOT ops membership (Phase D moved the gate), so the triage
+   queue never surfaces a 403 button nor hides PO work from a holder. #}
+{% set can_verify_po = can_approve_purchase_orders(user) %}
+
 {# ── Role-gated visible queue (see header note) ── #}
 {% set visible_queue = [] %}
 {% for r in overview.queue %}
   {% if r.kind in ('halted', 'overdue', 'flagged')
         or (r.kind == 'approve' and can_approve)
-        or (r.kind == 'verify_po' and is_ops) %}
+        or (r.kind == 'verify_po' and can_verify_po) %}
     {% set _ = visible_queue.append(r) %}
   {% endif %}
 {% endfor %}

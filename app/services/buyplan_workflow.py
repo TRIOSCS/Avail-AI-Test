@@ -401,10 +401,12 @@ def _can_halt(user: User, db: Session) -> bool:
 def halt_plan(plan_id: int, user: User, db: Session, *, reason: str | None = None) -> BuyPlan:
     """Halt an in-flight buy plan — the single, standalone halt path (Phase D).
 
-    Extracted verbatim from the retired ``verify_so(action="halt")`` body: if the plan is
-    still PENDING its open engine request is cancelled FIRST (so no REQUESTED row is
-    orphaned in the approvals queue and the plan can never be resurrected by approving a
-    stale request), then the plan moves to HALTED. ``so_status`` is set to REJECTED
+    Extracted from the retired ``verify_so(action="halt")`` body and hardened: any open
+    engine request is cancelled FIRST (so no REQUESTED row is orphaned in the approvals
+    queue and the plan can never be resurrected by approving a stale request) — this covers
+    the BUY_PLAN gate while PENDING AND the deal-level PURCHASE_ORDER gate while ACTIVE,
+    matching ``cancel_buy_plan`` — then the plan moves to HALTED. ``so_status`` is set to
+    REJECTED
     (SOVerificationStatus has no dedicated HALTED value; the halt is distinguished by
     ``plan.status == HALTED``) and the supplied reason is stored on ``so_rejection_note``
     so the case report and salesperson notification carry it.
@@ -422,12 +424,14 @@ def halt_plan(plan_id: int, user: User, db: Session, *, reason: str | None = Non
         raise ValueError(f"Cannot halt a {plan.status} plan")
 
     now = datetime.now(timezone.utc)
-    # If the plan is still PENDING when halted, close its open engine request BEFORE the
-    # transition (the canceller is an ops member who may be neither the submitter nor a
-    # manager/admin, so the helper cancels on behalf of each request's own requester/owner —
-    # authz always satisfied).
-    if plan.status == BuyPlanStatus.PENDING.value:
-        _cancel_open_engine_requests_for_plan(plan, user, db)
+    # Close any open engine gate BEFORE the transition so no REQUESTED row is orphaned in the
+    # approvals queue/badge — and so a stale request can't be pulled from the queue to
+    # resurrect this plan. Covers the BUY_PLAN gate while PENDING AND the deal-level
+    # PURCHASE_ORDER gate while ACTIVE (the helper is a no-op when none are open). Called
+    # UNCONDITIONALLY, matching cancel_buy_plan: the canceller may be an ops member who is
+    # neither submitter nor manager/admin, so the helper cancels on behalf of each request's
+    # own requester/owner — engine-cancel authz always satisfied.
+    _cancel_open_engine_requests_for_plan(plan, user, db)
     plan.so_status = SOVerificationStatus.REJECTED.value
     plan.so_rejection_note = reason
     plan.status = BuyPlanStatus.HALTED.value

@@ -1304,8 +1304,8 @@ def my_queue(db: Session, user: object) -> list[QueueRow]:
       by :func:`_is_returned`.
     - **plan_approve** (P3): all pending plans — buy-plan approvers (``can_approve_buy_plans``).
     - **prepay_approve** (P3): prepayment requests routed to the user (engine-actionable).
-    - **po_verify** (P4): all pending-verify lines — PO approvers (``can_approve_purchase_orders``)
-      or ops members.
+    - **po_verify** (P4): all pending-verify lines — PO approvers
+      (``can_approve_purchase_orders`` — the same per-user right the verify-PO POST enforces).
     - **claim** (P5): the whole RESOURCING pool — PO-cutters.
     - **cut_po_overdue** (P6) / **cut_po** (P7): the user's own AWAITING_PO lines, split by
       the buyer-nudge SLA.
@@ -1317,7 +1317,9 @@ def my_queue(db: Session, user: object) -> list[QueueRow]:
     is_approver = can_approve_buy_plans(user)
     is_ops = _is_ops_member(db, user)
     is_supervisor = user.role in (UserRole.MANAGER, UserRole.ADMIN) or is_ops
-    is_po_approver = bool(getattr(user, "can_approve_purchase_orders", False)) or is_ops
+    # verify-PO is gated solely on the per-user right (Phase D moved it off ops membership);
+    # `or is_ops` would re-introduce a dead 403 button for ops members lacking the right.
+    is_po_approver = bool(getattr(user, "can_approve_purchase_orders", False))
     is_po_cutter = user.role in _PO_CUTTER_ROLES
 
     rows: list[QueueRow] = []

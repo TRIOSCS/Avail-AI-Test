@@ -658,17 +658,19 @@ def test_supervise_manager_shows_strip_and_approvals(
     assert 'hx-target="#main-content"' in body
 
 
-def test_supervise_ops_shows_verify_po_section(
+def test_supervise_po_approver_shows_verify_po_section(
     client: TestClient, db_session: Session, test_user, manager_user, test_requisition
 ):
-    """As an ops member: the PO-verify rows render with their forms.
+    """A PO approver (can_approve_purchase_orders) sees the PO-verify rows + forms.
 
-    (Phase D folded SO verification into the single approval, so there is no verify-SO row.)
+    Phase D: verify-PO visibility is gated on the SAME per-user right the POST enforces
+    (require_buyplan_po_approver), NOT ops-group membership. (And the SO fold means there is
+    no verify-SO row.)
     """
     from app.dependencies import require_user
     from app.main import app
 
-    _add_ops(db_session, manager_user)
+    manager_user.can_approve_purchase_orders = True
     q = _make_quote(db_session, test_requisition.id)
     pv_plan = _make_plan(db_session, quote_id=q.id, req_id=test_requisition.id, status=BuyPlanStatus.ACTIVE)
     pv_line = _make_line(db_session, plan_id=pv_plan.id, buyer_id=test_user.id, status=BuyPlanLineStatus.PENDING_VERIFY)
@@ -686,6 +688,34 @@ def test_supervise_ops_shows_verify_po_section(
     assert "Verify SO" not in body
     assert "Verify PO" in body
     assert f"/v2/partials/buy-plans/{pv_plan.id}/lines/{pv_line.id}/verify-po" in body
+
+
+def test_supervise_ops_without_po_right_hides_verify_po(
+    client: TestClient, db_session: Session, test_user, manager_user, test_requisition
+):
+    """An ops member WITHOUT can_approve_purchase_orders must NOT see verify-PO rows.
+
+    Phase D moved the verify-PO gate off ops membership onto the per-user right, so a
+    row the user would 403 on (require_buyplan_po_approver) must never render — no dead
+    button on the primary triage surface.
+    """
+    from app.dependencies import require_user
+    from app.main import app
+
+    _add_ops(db_session, manager_user)  # ops member (grants halt authority), but no PO right
+    manager_user.can_approve_purchase_orders = False
+    q = _make_quote(db_session, test_requisition.id)
+    pv_plan = _make_plan(db_session, quote_id=q.id, req_id=test_requisition.id, status=BuyPlanStatus.ACTIVE)
+    _make_line(db_session, plan_id=pv_plan.id, buyer_id=test_user.id, status=BuyPlanLineStatus.PENDING_VERIFY)
+    db_session.commit()
+
+    app.dependency_overrides[require_user] = lambda: manager_user
+    try:
+        resp = client.get("/v2/partials/buy-plans/supervise")
+    finally:
+        app.dependency_overrides.pop(require_user, None)
+    assert resp.status_code == 200
+    assert "Verify PO" not in resp.text
 
 
 def test_supervise_non_supervisor_no_leak(
