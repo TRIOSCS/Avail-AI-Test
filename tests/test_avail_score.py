@@ -369,6 +369,42 @@ class TestSalesAvailScore:
         result = compute_sales_avail_score(db_session, sales.id, MONTH)
         assert result["b1_score"] == 8  # 80% coverage
 
+    def test_b6_interaction_quality_excluded_from_total(self, db_session):
+        """B6 (Interaction Quality) is a displayed diagnostic, NOT scored into the
+        total.
+
+        Regression: sales summed b1..b6 → a 0-110 scale vs buyers' 0-100, and b6 was
+        never persisted so the breakdown could not reconcile. The score must stay 0-100
+        (5 behaviors + 5 outcomes) with behavior_total == b1..b5, while b6 remains visible.
+        """
+        sales = _make_user(db_session, "Quality Sales", "sales", "quality-sales")
+        # High-quality, meaningful, quality-assessed activities make b6 fire (> 0).
+        for _ in range(3):
+            db_session.add(
+                ActivityLog(
+                    user_id=sales.id,
+                    activity_type="email_sent",
+                    channel="email",
+                    created_at=NOW,
+                    is_meaningful=True,
+                    quality_assessed_at=NOW,
+                    quality_score=90.0,
+                )
+            )
+        db_session.commit()
+
+        result = compute_sales_avail_score(db_session, sales.id, MONTH)
+
+        # b6 fired and is still surfaced as a diagnostic …
+        assert result["b6"] > 0
+        assert result["b6_label"] == "Interaction Quality"
+        # … but it is NOT part of behavior_total (only b1..b5 are) …
+        assert result["behavior_total"] == sum(result[f"b{i}_score"] for i in range(1, 6))
+        # … so both the behavior subtotal and the grand total stay on the 0-100 scale.
+        assert result["behavior_total"] <= 50
+        assert result["total_score"] == result["behavior_total"] + result["outcome_total"]
+        assert result["total_score"] <= 100
+
     def test_outreach_consistency(self, db_session):
         """Sales active on 15 days gets 8 on B2."""
         sales = _make_user(db_session, "Consistent Sales", "sales", "consistent")
