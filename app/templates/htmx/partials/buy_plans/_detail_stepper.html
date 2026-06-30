@@ -1,0 +1,61 @@
+{#
+  _detail_stepper.html — Buy-plan 4-stage progress stepper (Build · Approve · Purchase · Done).
+  Included by: htmx/partials/buy_plans/detail.html (in place of the old "PROGRESS BAR STEPPER" section).
+  Inherits context (default `with context` include): reads `bp` (BuyPlan ORM object); all stepper
+  state (`steps`, `filled`, `step_label`) is computed locally from `bp.status`.
+  No macro imports needed.
+#}
+  {# ═══ 2. PROGRESS BAR STEPPER — 4 canonical stages (Phase D) ═══ #}
+  {# Build · Approve · Purchase · Done. INBOUND is a Purchase sub-label (goods inbound).
+     status→stage: draft→Build, pending→Approve, active|inbound→Purchase, completed→Done.
+     Halted is the off-ramp (rose at the Purchase node); cancelled greys the whole bar. #}
+  {% set steps = ['Build', 'Approve', 'Purchase', 'Done'] %}
+  {% if bp.status == 'draft' %}
+    {% set filled = 1 %}
+    {% set step_label = 'Build' %}
+  {% elif bp.status == 'pending' %}
+    {% set filled = 2 %}
+    {% set step_label = 'Approve' %}
+  {% elif bp.status == 'active' %}
+    {% set filled = 3 %}
+    {% set step_label = 'Purchase' %}
+  {% elif bp.status == 'inbound' %}
+    {% set filled = 3 %}
+    {% set step_label = 'Purchase · Inbound' %}
+  {% elif bp.status == 'completed' %}
+    {% set filled = 4 %}
+    {% set step_label = 'Done' %}
+  {% elif bp.status == 'halted' %}
+    {% set filled = 2 %}
+    {% set step_label = 'Halted' %}
+  {% elif bp.status == 'cancelled' %}
+    {% set filled = 0 %}
+    {% set step_label = 'Cancelled' %}
+  {% else %}
+    {% set filled = 1 %}
+    {% set step_label = bp.status|capitalize %}
+  {% endif %}
+
+  <div class="mb-5 bg-white rounded-lg border border-line-base px-5 py-4">
+    <div class="flex gap-1.5">
+      {% for i in range(1, 5) %}
+        {% if bp.status == 'cancelled' %}
+          <div class="flex-1 h-2.5 rounded-{% if i == 1 %}l{% elif i == 4 %}r{% endif %}-md bg-gray-300"></div>
+        {% elif bp.status == 'halted' and i == 3 %}
+          <div class="flex-1 h-2.5 rounded-{% if i == 1 %}l{% elif i == 4 %}r{% endif %}-md bg-rose-500"></div>
+        {% elif i <= filled %}
+          <div class="flex-1 h-2.5 rounded-{% if i == 1 %}l{% elif i == 4 %}r{% endif %}-md bg-emerald-500"></div>
+        {% elif i == filled + 1 %}
+          <div class="flex-1 h-2.5 rounded-{% if i == 1 %}l{% elif i == 4 %}r{% endif %}-md bg-amber-400"></div>
+        {% else %}
+          <div class="flex-1 h-2.5 rounded-{% if i == 1 %}l{% elif i == 4 %}r{% endif %}-md bg-gray-200"></div>
+        {% endif %}
+      {% endfor %}
+    </div>
+    <div class="flex justify-between mt-2">
+      {% for s in steps %}
+        <span class="text-xs {% if loop.index <= filled %}text-gray-700 font-semibold{% elif loop.index == filled + 1 %}text-amber-600 font-medium{% else %}text-gray-400{% endif %}">{{ s }}</span>
+      {% endfor %}
+    </div>
+    <div class="text-sm font-medium mt-1 {% if bp.status == 'completed' %}text-emerald-600{% elif bp.status == 'halted' %}text-rose-600{% elif bp.status == 'cancelled' %}text-gray-400{% else %}text-gray-600{% endif %}">{{ step_label }}</div>
+  </div>
