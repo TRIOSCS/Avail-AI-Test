@@ -158,7 +158,7 @@
       </div>
       {# Structured substitute rows — initialised from data-subs JSON attribute #}
       <div x-data="{ subs: JSON.parse($el.dataset.subs || '[]') }"
-           data-subs="{{ r.substitutes | tojson if r.substitutes else '[]' }}">
+           data-subs='{{ r.substitutes | tojson if r.substitutes else "[]" }}'>
         <div class="text-xs text-gray-600 mb-1">Substitutes</div>
         <template x-for="(sub, idx) in subs" :key="idx">
           <div class="flex gap-1.5 items-center mb-1">

@@ -74,7 +74,7 @@
       {% if draft_quote %}
       <button x-show="selectedOffers.length > 0" x-cloak
               @click="
-                var csrf = document.cookie.match(/csrftoken=([^;]+)/) ? RegExp.$1 : '';
+                let csrf = document.cookie.match(/csrftoken=([^;]+)/) ? RegExp.$1 : '';
                 fetch('/v2/partials/requisitions/{{ req.id }}/add-offers-to-quote', {
                   method: 'POST',
                   headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrf},

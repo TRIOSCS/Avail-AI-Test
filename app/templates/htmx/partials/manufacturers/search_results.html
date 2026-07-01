@@ -8,8 +8,12 @@
 {% from "htmx/partials/manufacturers/_picker_macros.html" import mfr_picker_apply -%}
 {% if results is defined and results %}
   {% for mfr in results %}
+  {# tojson emits a leading/trailing " that would close a double-quoted attr, and the
+     onclick body is full of single quotes so it can't be single-quoted — stash the name in
+     a single-quoted data- attr (tojson-safe) and read it via dataset in the handler. #}
   <div class="px-3 py-1.5 text-xs hover:bg-brand-50 cursor-pointer transition-colors"
-       onclick="(function(el, name){ {{ mfr_picker_apply('el', 'name') }} })(this, {{ mfr.canonical_name|tojson }})">
+       data-mfr-name='{{ mfr.canonical_name|tojson }}'
+       onclick="(function(el, name){ {{ mfr_picker_apply('el', 'name') }} })(this, JSON.parse(this.dataset.mfrName))">
     <span class="font-medium">{{ mfr.canonical_name }}</span>
     {% if mfr.aliases %}
     <span class="text-gray-400 ml-1">({{ mfr.aliases|join(', ') }})</span>
