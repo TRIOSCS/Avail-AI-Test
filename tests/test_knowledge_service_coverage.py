@@ -837,3 +837,50 @@ class TestGeneratePipelineInsights:
         with patch("app.utils.claude_client.claude_structured", new=_mock):
             result = await knowledge_service.generate_pipeline_insights(db_session)
         assert len(result) == 1
+
+
+class TestKnowledgeEntryAuthzAndSavepoint:
+    """Update/delete enforce creator-only; capture_quote_fact is savepoint-isolated."""
+
+    def test_update_entry_non_creator_raises(self, db_session, test_user):
+        import pytest
+
+        from app.services import knowledge_service
+
+        entry = knowledge_service.create_entry(db_session, user_id=test_user.id, entry_type="note", content="mine")
+        with pytest.raises(PermissionError):
+            knowledge_service.update_entry(db_session, entry.id, user_id=test_user.id + 999, content="hacked")
+        # creator can still update
+        updated = knowledge_service.update_entry(db_session, entry.id, user_id=test_user.id, content="ok")
+        assert updated is not None and updated.content == "ok"
+
+    def test_delete_entry_non_creator_raises(self, db_session, test_user):
+        import pytest
+
+        from app.services import knowledge_service
+
+        entry = knowledge_service.create_entry(db_session, user_id=test_user.id, entry_type="note", content="mine")
+        with pytest.raises(PermissionError):
+            knowledge_service.delete_entry(db_session, entry.id, user_id=test_user.id + 999)
+        assert knowledge_service.delete_entry(db_session, entry.id, user_id=test_user.id) is True
+
+    def test_capture_quote_fact_failure_is_savepoint_isolated(self, db_session, test_user):
+        """A create failure inside capture_quote_fact rolls back only its savepoint and
+        does NOT poison the caller's transaction (the just-created quote survives)."""
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        from sqlalchemy import text
+
+        from app.services import knowledge_service
+
+        quote = SimpleNamespace(
+            line_items=[{"mpn": "LM317T", "unit_sell": 1.5, "qty": 10, "vendor_name": "Arrow"}],
+            quote_number="Q-KS-1",
+            requisition_id=None,
+        )
+        with patch.object(knowledge_service, "create_entry", side_effect=RuntimeError("boom")):
+            result = knowledge_service.capture_quote_fact(db_session, quote=quote, user_id=test_user.id)
+        assert result is None
+        # The outer transaction is intact (not aborted) — a follow-up query works.
+        assert db_session.execute(text("SELECT 1")).scalar() == 1
