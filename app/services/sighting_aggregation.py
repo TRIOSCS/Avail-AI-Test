@@ -66,6 +66,10 @@ def _estimate_qty_with_ai(qty_values: list[int | None]) -> dict:
             model=MODELS["fast"],
             max_tokens=20,
             messages=[{"role": "user", "content": prompt}],
+            # Bound the request so a hung API can't block this synchronous
+            # rebuild (runs in the post-search thread-pool worker) for the SDK
+            # ~600s default. Matches the shared claude_client's ~30s timeout.
+            timeout=30,
         )
         text = resp.content[0].text.strip()
         return {"qty": int(text), "approximate": False}
