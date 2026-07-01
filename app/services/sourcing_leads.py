@@ -575,7 +575,7 @@ def _count_dedup_signals(
     if not other.vendor_card_id:
         return signals
 
-    other_card = db.query(VendorCard).filter(VendorCard.id == other.vendor_card_id).first()
+    other_card = db.get(VendorCard, other.vendor_card_id)
     if not other_card:
         return signals
 
@@ -745,7 +745,7 @@ def sync_leads_for_sightings(db: Session, requirement: Requirement, sightings: l
         append_evidence_from_sighting(db, lead, sighting)
         db.flush()
         _refresh_lead_evidence_rollups(db, lead)
-        vc = db.query(VendorCard).filter(VendorCard.id == lead.vendor_card_id).first() if lead.vendor_card_id else None
+        vc = db.get(VendorCard, lead.vendor_card_id) if lead.vendor_card_id else None
         _check_duplicate_candidates(db, lead, vc)
         synced += 1
     try:
@@ -811,7 +811,7 @@ def _propagate_outcome_to_vendor(db: Session, lead: SourcingLead, status: str) -
     """
     if not lead.vendor_card_id:
         return
-    vendor_card = db.query(VendorCard).filter(VendorCard.id == lead.vendor_card_id).first()
+    vendor_card = db.get(VendorCard, lead.vendor_card_id)
     if not vendor_card:
         return
 
@@ -862,7 +862,7 @@ def update_lead_status(
     if status not in BUYER_STATUSES:
         raise ValueError(f"Unsupported lead status: {status}")
 
-    lead = db.query(SourcingLead).filter(SourcingLead.id == lead_id).first()
+    lead = db.get(SourcingLead, lead_id)
     if not lead:
         return None
 
@@ -918,7 +918,7 @@ def append_lead_feedback(
     contact_attempt_count: int = 0,
     actor_user_id: int | None = None,
 ) -> SourcingLead | None:
-    lead = db.query(SourcingLead).filter(SourcingLead.id == lead_id).first()
+    lead = db.get(SourcingLead, lead_id)
     if not lead:
         return None
 
