@@ -85,13 +85,15 @@ class TestNcConfig:
     def test_defaults(self):
         cfg = NcConfig()
         assert cfg.NC_MAX_DAILY_SEARCHES == 75
-        assert cfg.NC_MAX_HOURLY_SEARCHES == 12
         assert cfg.NC_MIN_DELAY_SECONDS == 120
         assert cfg.NC_MAX_DELAY_SECONDS == 420
         assert cfg.NC_TYPICAL_DELAY_SECONDS == 240
         assert cfg.NC_DEDUP_WINDOW_DAYS == 7
-        assert cfg.NC_BUSINESS_HOURS_START == 8
-        assert cfg.NC_BUSINESS_HOURS_END == 18
+        # Dead knobs removed: hourly cap was never enforced and business-hours
+        # window is hardcoded in the scheduler, not read from config.
+        assert not hasattr(cfg, "NC_MAX_HOURLY_SEARCHES")
+        assert not hasattr(cfg, "NC_BUSINESS_HOURS_START")
+        assert not hasattr(cfg, "NC_BUSINESS_HOURS_END")
 
     def test_env_override(self):
         with patch.dict(os.environ, {"NC_MAX_DAILY_SEARCHES": "50", "NC_USERNAME": "foo@bar.com"}):
