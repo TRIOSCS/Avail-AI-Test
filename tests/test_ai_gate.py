@@ -203,6 +203,46 @@ class TestProcessAIGate:
         assert item.gate_decision == "search"
 
     @pytest.mark.asyncio
+    async def test_case_shifted_mpn_still_classified(self):
+        """Model echoing the MPN in a different case still matches (normalized lookup).
+
+        Regression: keying result_map on the exact returned string left case/whitespace
+        echoes unmatched -> item stayed 'pending' and the pending fetch re-selected it
+        every cycle (poison starvation).
+        """
+        item = self._make_item("STM32F407")
+        model = MagicMock()
+        db_mock = self._db_with_items([item])
+
+        gate = AIGate(model, "ICsource", "search_ics")
+        # Model returns the mpn lower-cased (a common echo drift)
+        classifications = [{"mpn": "stm32f407", "search_ics": True, "commodity": "semiconductor", "reason": "mcu"}]
+        with patch.object(gate, "classify_parts_batch", new_callable=AsyncMock, return_value=classifications):
+            await gate.process_ai_gate(db_mock)
+
+        assert item.status == "queued"  # classified, NOT left pending
+        assert item.gate_decision == "search"
+
+    @pytest.mark.asyncio
+    async def test_omitted_mpn_fails_open_not_pending(self):
+        """An item the model omits is failed-open to search, never left 'pending'."""
+        returned = self._make_item("STM32F407")
+        omitted = self._make_item("LM358")
+        model = MagicMock()
+        db_mock = self._db_with_items([returned, omitted])
+
+        gate = AIGate(model, "ICsource", "search_ics")
+        classifications = [{"mpn": "STM32F407", "search_ics": True, "commodity": "semiconductor", "reason": "mcu"}]
+        with patch.object(gate, "classify_parts_batch", new_callable=AsyncMock, return_value=classifications):
+            await gate.process_ai_gate(db_mock)
+
+        assert returned.gate_decision == "search"
+        # The omitted item must be failed-open, not left to recycle as a poison row.
+        assert omitted.status == "queued"
+        assert omitted.gate_decision == "search"
+        assert "no classification" in omitted.gate_reason
+
+    @pytest.mark.asyncio
     async def test_gated_out_when_skip(self):
         item = self._make_item("RC0402")
 
@@ -219,16 +259,17 @@ class TestProcessAIGate:
         assert item.gate_decision == "skip"
 
     @pytest.mark.asyncio
-    async def test_missing_mpn_in_results_leaves_pending(self):
+    async def test_missing_mpn_in_results_fails_open(self):
         item = self._make_item("UNKNOWNPART")
 
         model = MagicMock()
         db_mock = self._db_with_items([item])
 
         gate = AIGate(model, "ICsource", "search_ics")
-        # Classification doesn't include this MPN
+        # Classification doesn't include this MPN (empty results)
         with patch.object(gate, "classify_parts_batch", new_callable=AsyncMock, return_value=[]):
             await gate.process_ai_gate(db_mock)
 
-        # Status should remain "pending"
-        assert item.status == "pending"
+        # Fail open, not left 'pending' — otherwise the item recycles as a poison row.
+        assert item.status == "queued"
+        assert item.gate_decision == "search"

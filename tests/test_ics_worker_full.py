@@ -2501,8 +2501,8 @@ class TestAiGateFull:
 
     @pytest.mark.asyncio
     async def test_process_ai_gate_missing_classification(self, db_session, test_requisition):
-        """process_ai_gate handles when model doesn't return a classification for an
-        MPN."""
+        """An MPN the model omits is failed-open to search, not left 'pending'
+        (poison)."""
         from app.services.ics_worker.ai_gate import clear_classification_cache, process_ai_gate
 
         clear_classification_cache()
@@ -2524,7 +2524,8 @@ class TestAiGateFull:
             await process_ai_gate(db_session)
 
         db_session.refresh(item)
-        assert item.status == "pending"
+        assert item.status == "queued"  # failed open, not left pending
+        assert item.gate_decision == "search"
 
 
 # ═══════════════════════════════════════════════════════════════════════
