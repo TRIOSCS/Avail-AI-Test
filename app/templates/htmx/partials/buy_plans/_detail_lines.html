@@ -135,6 +135,17 @@
                   </span>
                 {% elif line.status == 'issue' %}
                   <span class="text-xs text-rose-600 font-medium">{{ line.issue_type|replace('_', ' ')|capitalize if line.issue_type else 'Issue' }}</span>
+                  {# Supervisors/ops clear a flagged issue → line back to awaiting_po (the buyer
+                     who raised it can't self-resolve; otherwise ISSUE is a dead-end). #}
+                  {% if can_supervise %}
+                  <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/lines/{{ line.id }}/resolve-issue"
+                          hx-target="#main-content" hx-swap="innerHTML"
+                          hx-confirm="Clear this issue and return the line to awaiting PO?"
+                          data-loading-disable
+                          class="btn btn-primary btn-sm ml-2">
+                    Resolve
+                  </button>
+                  {% endif %}
                 {% endif %}
               {% endif %}
 

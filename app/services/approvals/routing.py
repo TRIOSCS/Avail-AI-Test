@@ -35,6 +35,51 @@ class NoEligibleApproverError(Exception):
     """Raised when no active, amount-eligible approver exists for the gate."""
 
 
+def _eligible_approvers(db: Session, gate: str, amount) -> list[User]:
+    """Active users eligible to approve *gate* for *amount* (per-gate per-user toggles).
+
+    The single source of truth for approver eligibility, shared by ``route_request`` (which
+    creates the recipients) and ``has_eligible_approver`` (which only asks whether any exist).
+    Amount-limited gates (prepayment, purchase_order) filter their NULL-means-unlimited limit
+    in Python.
+    """
+    if gate == ApprovalGateType.BUY_PLAN:
+        return db.query(User).filter(User.is_active.is_(True), User.can_approve_buy_plans.is_(True)).all()
+    if gate == ApprovalGateType.PREPAYMENT:
+        candidates = db.query(User).filter(User.is_active.is_(True), User.can_approve_prepayments.is_(True)).all()
+        return [
+            u
+            for u in candidates
+            if u.prepayment_approval_limit is None or (amount is not None and amount <= u.prepayment_approval_limit)
+        ]
+    if gate == ApprovalGateType.QP_SALES:
+        return db.query(User).filter(User.is_active.is_(True), User.can_approve_qp_sales.is_(True)).all()
+    if gate == ApprovalGateType.QP_PURCHASING:
+        return db.query(User).filter(User.is_active.is_(True), User.can_approve_qp_purchasing.is_(True)).all()
+    if gate == ApprovalGateType.PURCHASE_ORDER:
+        candidates = db.query(User).filter(User.is_active.is_(True), User.can_approve_purchase_orders.is_(True)).all()
+        return [
+            u
+            for u in candidates
+            if u.purchase_order_approval_limit is None
+            or (amount is not None and amount <= u.purchase_order_approval_limit)
+        ]
+    raise NoEligibleApproverError(f"No routing rule defined for gate={gate!r}")
+
+
+def has_eligible_approver(db: Session, gate: ApprovalGateType, amount=None) -> bool:
+    """True if at least one active user can approve *gate* for *amount*.
+
+    Read-only counterpart to ``route_request``'s eligibility. Used to detect (and surface in
+    the UI) a plan that will silently stall because no approver is configured for its open
+    gate — otherwise ``NoEligibleApproverError`` is only logged and the plan sits invisibly.
+    """
+    try:
+        return bool(_eligible_approvers(db, gate, amount))
+    except NoEligibleApproverError:
+        return False
+
+
 def route_request(db: Session, request: ApprovalRequest) -> ApprovalStep:
     """Create one ApprovalStep + one ApprovalStepRecipient per eligible approver.
 
@@ -55,82 +100,7 @@ def route_request(db: Session, request: ApprovalRequest) -> ApprovalStep:
         NoEligibleApproverError: If zero eligible users exist for the gate.
     """
     gate = request.gate_type
-
-    if gate == ApprovalGateType.BUY_PLAN:
-        candidates = (
-            db.query(User)
-            .filter(
-                User.is_active.is_(True),
-                User.can_approve_buy_plans.is_(True),
-            )
-            .all()
-        )
-        # No amount check for buy_plan gate
-        eligible = candidates
-
-    elif gate == ApprovalGateType.PREPAYMENT:
-        candidates = (
-            db.query(User)
-            .filter(
-                User.is_active.is_(True),
-                User.can_approve_prepayments.is_(True),
-            )
-            .all()
-        )
-        # Filter in Python to handle NULL limit (unlimited) vs capped limit
-        amount = request.amount
-        eligible = [
-            u
-            for u in candidates
-            if u.prepayment_approval_limit is None or (amount is not None and amount <= u.prepayment_approval_limit)
-        ]
-
-    elif gate == ApprovalGateType.QP_SALES:
-        # QP Sales section: route to every active user holding can_approve_qp_sales.
-        # No amount check (the section gate approves the section, not a spend).
-        eligible = (
-            db.query(User)
-            .filter(
-                User.is_active.is_(True),
-                User.can_approve_qp_sales.is_(True),
-            )
-            .all()
-        )
-
-    elif gate == ApprovalGateType.QP_PURCHASING:
-        # QP Purchasing section: route to every active user holding can_approve_qp_purchasing.
-        # No amount check (the section gate approves the section, not a spend).
-        eligible = (
-            db.query(User)
-            .filter(
-                User.is_active.is_(True),
-                User.can_approve_qp_purchasing.is_(True),
-            )
-            .all()
-        )
-
-    elif gate == ApprovalGateType.PURCHASE_ORDER:
-        # Deal-level PO gate: route to active can_approve_purchase_orders holders, filtered
-        # by their optional dollar limit (mirrors the prepayment amount-filter exactly).
-        candidates = (
-            db.query(User)
-            .filter(
-                User.is_active.is_(True),
-                User.can_approve_purchase_orders.is_(True),
-            )
-            .all()
-        )
-        amount = request.amount
-        eligible = [
-            u
-            for u in candidates
-            if u.purchase_order_approval_limit is None
-            or (amount is not None and amount <= u.purchase_order_approval_limit)
-        ]
-
-    else:
-        raise NoEligibleApproverError(f"No routing rule defined for gate={gate!r}")
-
+    eligible = _eligible_approvers(db, gate, request.amount)
     if not eligible:
         raise NoEligibleApproverError(f"No eligible approver for gate={gate!r} amount={request.amount}")
 

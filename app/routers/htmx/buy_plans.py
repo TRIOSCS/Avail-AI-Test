@@ -476,6 +476,8 @@ async def buy_plan_detail_partial(
         ],
     )
 
+    from ...services.buyplan_workflow import plan_needs_approver_reason
+
     ctx = _base_ctx(request, user, "buy-plans")
     ctx.update(
         {
@@ -483,9 +485,13 @@ async def buy_plan_detail_partial(
             "lines": bp.lines or [],
             "is_ops_member": _is_ops_member(user, db),
             "can_resource": _can_resource(user),
+            # Supervisors/ops resolve flagged-issue lines (the buyer who raised them can't).
+            "can_supervise": _can_supervise(user, db),
             "user": user,
             # Most-urgent flag reason so the indicator states the issue at first glance.
             "top_flag": summarize_top_flag(bp.ai_flags),
+            # Why the plan is silently stalled for lack of a configured approver (or None).
+            "no_approver_reason": plan_needs_approver_reason(bp, db),
         }
     )
     return template_response("htmx/partials/buy_plans/detail.html", ctx)
@@ -904,6 +910,34 @@ async def buy_plan_flag_issue_partial(
     try:
         flag_line_issue(plan_id, line_id, issue_type, user, db, note=note)
         db.commit()
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    return await buy_plan_detail_partial(request, plan_id, user, db)
+
+
+@router.post("/v2/partials/buy-plans/{plan_id}/lines/{line_id}/resolve-issue", response_class=HTMLResponse)
+async def buy_plan_resolve_issue_partial(
+    request: Request,
+    plan_id: int,
+    line_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Supervisor clears a flagged issue → line back to awaiting_po.
+
+    Returns refreshed detail.
+    """
+    from ...services.buyplan_workflow import resolve_line_issue
+
+    # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation.
+    get_buyplan_for_user(db, user, plan_id)
+
+    try:
+        resolve_line_issue(plan_id, line_id, user, db)
+        db.commit()
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
     except ValueError as e:
         raise HTTPException(400, str(e))
 

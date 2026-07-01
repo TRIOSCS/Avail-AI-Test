@@ -1062,6 +1062,7 @@ class QueueRow:
 #: queue sorts by ``(priority, -age_hours)`` — risk-first, oldest-first within each tier.
 _QUEUE_PRIORITY: dict[str, int] = {
     "halted": 1,
+    "no_approver": 2,
     "plan_returned": 2,
     "flagged": 2,
     "plan_approve": 3,
@@ -1077,6 +1078,7 @@ _QUEUE_PRIORITY: dict[str, int] = {
 #: Short uppercase microlabel shown in the row's KIND column.
 _QUEUE_LABEL: dict[str, str] = {
     "halted": "Halted",
+    "no_approver": "No approver",
     "plan_returned": "Returned",
     "flagged": "Flagged",
     "plan_approve": "Approve",
@@ -1092,6 +1094,7 @@ _QUEUE_LABEL: dict[str, str] = {
 #: Primary action-button verb per kind (the right-rail CTA).
 _QUEUE_ACTION_LABEL: dict[str, str] = {
     "halted": "Open",
+    "no_approver": "Open",
     "plan_returned": "Resubmit",
     "flagged": "Open",
     "plan_approve": "Approve",
@@ -1327,6 +1330,46 @@ def _prepay_rows(db: Session, user: object) -> list[QueueRow]:
     return rows
 
 
+def _query_stuck_no_approver_plans(db: Session, *, owner_id: int | None = None) -> list[BuyPlan]:
+    """Plans silently stalled because no approver is configured for their open gate.
+
+    Emitted only in the rare, config-level case that no active user holds the approving
+    right (otherwise the plan is merely awaiting a real approver). ``owner_id`` scopes to a
+    single AM (my_queue); ``None`` returns every stuck plan (admins, so they can fix the
+    config). BUY_PLAN eligibility is global — one check gates every PENDING plan — while
+    PURCHASE_ORDER is amount-sensitive, so each over-threshold ACTIVE plan is checked against
+    its own total.
+    """
+    from ..config import settings
+    from ..constants import ApprovalGateType
+    from .approvals.routing import has_eligible_approver
+
+    loads = (
+        *_PLAN_CUSTOMER_LOADS,
+        joinedload(BuyPlan.submitted_by),
+        selectinload(BuyPlan.lines).selectinload(BuyPlanLine.requirement),
+    )
+    out: list[BuyPlan] = []
+
+    if not has_eligible_approver(db, ApprovalGateType.BUY_PLAN):
+        q = db.query(BuyPlan).filter(BuyPlan.status == BuyPlanStatus.PENDING)
+        if owner_id is not None:
+            q = q.filter(BuyPlan.submitted_by_id == owner_id)
+        out += q.options(*loads).order_by(BuyPlan.created_at.asc()).all()
+
+    q = db.query(BuyPlan).filter(
+        BuyPlan.status == BuyPlanStatus.ACTIVE,
+        BuyPlan.total_cost >= settings.po_auto_approve_threshold,
+    )
+    if owner_id is not None:
+        q = q.filter(BuyPlan.submitted_by_id == owner_id)
+    for plan in q.options(*loads).order_by(BuyPlan.created_at.asc()).all():
+        if not has_eligible_approver(db, ApprovalGateType.PURCHASE_ORDER, plan.total_cost):
+            out.append(plan)
+
+    return out
+
+
 def my_queue(db: Session, user: object) -> list[QueueRow]:
     """Return the role-aware "what needs YOU now" queue for *user*, risk-first.
 
@@ -1361,6 +1404,16 @@ def my_queue(db: Session, user: object) -> list[QueueRow]:
     # halted (P1): own plans always; supervisors see the whole risk surface.
     halted = _query_halted_plans(db) if is_supervisor else _query_halted_plans(db, owner_id=user.id)
     rows += [_make_plan_row(p, kind="halted", since=p.halted_at or p.created_at) for p in halted]
+
+    # no_approver (P2): plans stalled because no approver is configured for the open gate.
+    # Owner-scoped — a submitted plan leaves the AM's draft queue and no approver exists to
+    # see it, so without this the owner has NO signal at all; admins see every stuck plan so
+    # they can fix the config (grant someone the approving right).
+    stuck_owner = None if user.role == UserRole.ADMIN else user.id
+    rows += [
+        _make_plan_row(p, kind="no_approver", since=p.submitted_at or p.created_at)
+        for p in _query_stuck_no_approver_plans(db, owner_id=stuck_owner)
+    ]
 
     # plan_returned (P2) + plan_draft (P9): the user's own DRAFT plans.
     for plan in _query_owner_draft_plans(db, owner_id=user.id):
