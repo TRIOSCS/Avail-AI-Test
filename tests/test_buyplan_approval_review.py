@@ -284,6 +284,45 @@ def test_pending_badge_renders_on_review(
     assert "badge" in body
 
 
+def test_detail_issue_modal_present_for_awaiting_line(
+    client: TestClient, db_session: Session, test_user, sales_user, test_requisition
+):
+    """An ACTIVE plan with the buyer's AWAITING_PO line renders the Flag-Issue modal (a
+    re-homed origination affordance) and the line Issue button wires modalLineId so the
+    modal posts to that line's issue route via htmx.ajax (Phase F-1 gap-fill)."""
+    q = _make_quote(db_session, test_requisition.id)
+    plan = BuyPlan(
+        quote_id=q.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.ACTIVE.value,
+        so_status=SOVerificationStatus.APPROVED.value,
+        submitted_by_id=sales_user.id,
+    )
+    db_session.add(plan)
+    db_session.flush()
+    line = BuyPlanLine(
+        buy_plan_id=plan.id,
+        quantity=10,
+        unit_cost=100.00,
+        status=BuyPlanLineStatus.AWAITING_PO.value,
+        buyer_id=test_user.id,
+    )
+    db_session.add(line)
+    db_session.flush()
+    db_session.commit()
+
+    body = client.get(f"/v2/partials/buy-plans/{plan.id}").text
+    # Outer modal state carries modalLineId; the line Issue button wires it to this line.
+    assert "modalLineId" in body
+    assert f"modalLineId = {line.id}" in body
+    assert "modalType = 'issue'" in body
+    # The modal posts to the per-line issue route via htmx.ajax (not a stale :hx-post bind).
+    assert "Flag Issue" in body
+    assert f"/v2/partials/buy-plans/{plan.id}/lines/' + modalLineId + '/issue" in body
+    # The dead $dispatch('open-modal') affordance is gone.
+    assert "open-modal" not in body
+
+
 def test_rejected_draft_blocker_distinguishes_from_fresh(db_session: Session, test_user, sales_user, test_requisition):
     """A rejected plan returns to DRAFT but the hub blocker marks it 'rejected —
     resubmit' (via approved_at), distinguishing it from a never-submitted draft."""

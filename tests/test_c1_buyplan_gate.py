@@ -46,9 +46,9 @@ from app.services.approvals.service import decide as svc_decide
 from app.services.buyplan_workflow import (
     approve_buy_plan,
     cancel_buy_plan,
+    halt_plan,
     resubmit_buy_plan,
     submit_buy_plan,
-    verify_so,
 )
 
 # ── Helpers ─────────────────────────────────────────────────────────────
@@ -500,8 +500,8 @@ def test_orphan_request_approval_does_not_resurrect_cancelled_plan(db_session: S
     assert task_calls == [], "buyer tasks must NOT be generated for a cancelled plan"
 
 
-def test_verify_so_halt_cancels_open_request(db_session: Session) -> None:
-    """(c) HALTing a PENDING plan (via verify_so) cancels its open engine request, even
+def test_halt_plan_cancels_open_request(db_session: Session) -> None:
+    """(c) HALTing a PENDING plan (via halt_plan) cancels its open engine request, even
     when the halting ops member is a plain buyer (not submitter, not manager/admin) —
     the helper cancels on behalf of the request's own requester/owner so authz holds."""
     approver = _make_approver(db_session)
@@ -511,7 +511,7 @@ def test_verify_so_halt_cancels_open_request(db_session: Session) -> None:
     ar_id = _open_requests(db_session, plan.id)[0].id
     assert plan.status == BuyPlanStatus.PENDING.value
 
-    verify_so(plan.id, "halt", ops, db_session, rejection_note="SO mismatch in Acctivate")
+    halt_plan(plan.id, ops, db_session, reason="SO mismatch in Acctivate")
 
     db_session.refresh(plan)
     assert plan.status == BuyPlanStatus.HALTED.value

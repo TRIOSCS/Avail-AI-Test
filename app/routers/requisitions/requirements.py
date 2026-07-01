@@ -87,11 +87,21 @@ def _dedupe_substitutes(subs: list[str], primary_mpn: str) -> list[dict]:
 
 
 def _substitute_keys(requirement: Requirement) -> list[str]:
-    """Return normalized MPN keys for a requirement's substitutes (string or dict
-    form)."""
+    """Return normalized MPN keys for a requirement's substitutes.
+
+    Handles both the canonical dict form ({"mpn": ..., "manufacturer": ...})
+    and the legacy plain-string form.
+    """
     keys = []
     for sub in requirement.substitutes or []:
-        sub_str = (sub if isinstance(sub, str) else "").strip()
+        # Robust to legacy strings, dict form (incl. {"mpn": None}), and malformed
+        # non-str/non-dict entries — mirrors parse_substitute_mpns.
+        if isinstance(sub, str):
+            sub_str = sub.strip()
+        elif isinstance(sub, dict):
+            sub_str = str(sub.get("mpn") or "").strip()
+        else:
+            continue
         if sub_str:
             sub_key = normalize_mpn_key(sub_str)
             if sub_key:
@@ -1195,6 +1205,7 @@ async def list_requirement_offers(
     req_item = db.query(Requirement).filter(Requirement.id == requirement_id).first()
     if not req_item:
         raise HTTPException(404, "Requirement not found")
+    require_requisition_access(db, req_item.requisition_id, user, label="Requirement")
 
     def _offer_dict(o, *, is_historical=False, is_substitute=False, source_req_id=None):
         age_days = 0
@@ -1302,6 +1313,7 @@ async def list_requirement_notes(
     req = db.query(Requirement).filter(Requirement.id == requirement_id).first()
     if not req:
         raise HTTPException(404, "Requirement not found")
+    require_requisition_access(db, req.requisition_id, user, label="Requirement")
     # Gather notes from offers that have non-empty notes
     offer_notes = (
         db.query(Offer)
@@ -1359,6 +1371,7 @@ async def list_requirement_tasks(
     req_item = db.query(Requirement).filter(Requirement.id == requirement_id).first()
     if not req_item:
         raise HTTPException(404, "Requirement not found")
+    require_requisition_access(db, req_item.requisition_id, user, label="Requirement")
 
     # Part-level tasks
     part_ref = f"requirement:{requirement_id}"
@@ -1459,6 +1472,7 @@ async def list_requirement_history(
     req_item = db.query(Requirement).filter(Requirement.id == requirement_id).first()
     if not req_item:
         raise HTTPException(404, "Requirement not found")
+    require_requisition_access(db, req_item.requisition_id, user, label="Requirement")
 
     events = []
 

@@ -60,6 +60,18 @@ def test_update_helper_noop_when_no_row(db_session):
     update_enrichment_worker_status(db_session, is_running=True, enriched_today=5)
 
 
+def test_update_helper_rejects_unknown_kwarg(db_session):
+    """A typo'd/non-column kwarg raises loudly instead of being silently dropped.
+
+    The old hasattr-guard skipped unknown keys (e.g. a misspelled counter), so the write
+    was a silent no-op while the heartbeat still committed — the bug now fails fast.
+    """
+    from app.models.enrichment_worker_status import update_enrichment_worker_status
+
+    with pytest.raises(AttributeError, match="enriched_todays"):
+        update_enrichment_worker_status(db_session, enriched_todays=5)
+
+
 def test_update_helper_sets_fields(db_session):
     """update_enrichment_worker_status sets columns on the singleton row."""
 

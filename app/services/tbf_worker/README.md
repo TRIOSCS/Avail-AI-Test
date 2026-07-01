@@ -48,13 +48,10 @@ tbf_worker/
 | `TBF_USERNAME` | (empty) | TBF member login username |
 | `TBF_PASSWORD` | (empty) | TBF member login password |
 | `TBF_MAX_DAILY_SEARCHES` | 50 | Max searches per day |
-| `TBF_MAX_HOURLY_SEARCHES` | 10 | Max searches per hour |
 | `TBF_MIN_DELAY_SECONDS` | 180 | Min seconds between searches |
 | `TBF_TYPICAL_DELAY_SECONDS` | 300 | Typical delay (log-normal center) |
 | `TBF_MAX_DELAY_SECONDS` | 600 | Max seconds between searches |
 | `TBF_DEDUP_WINDOW_DAYS` | 7 | Skip re-searching same MPN within N days |
-| `TBF_BUSINESS_HOURS_START` | 8 | Start hour (Eastern time) |
-| `TBF_BUSINESS_HOURS_END` | 18 | End hour (Eastern time) |
 | `TBF_BROWSER_PROFILE_DIR` | `/root/tbf_browser_profile` | Persistent cookie storage |
 | `TBF_SEARCH_TIMEOUT_SECONDS` | 150 | Hard cap on one search |
 | `TBF_BREAKER_COOLDOWN_MINUTES` | 30 | Circuit-breaker self-heal cooldown |

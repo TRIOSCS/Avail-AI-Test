@@ -145,15 +145,20 @@ class TestDedupVendors:
         """Near-identical names (score >= 98) should auto-merge."""
         from app.services.auto_dedup_service import _dedup_vendors
 
-        # "arrow electronics corporation" vs "arrow electronics corporatio" = score ~98.2 (rapidfuzz)
+        # normalized_name values are already suffix-stripped (as in production, where
+        # normalize_vendor_name() populates the column). fuzzy_score_vendor re-normalizes
+        # idempotently, so a 1-char tail diff scores >= 98 → auto-merge.
         _make_vendor(
             db_session,
-            "Arrow Electronics Corporation",
-            normalized_name="arrow electronics corporation",
+            "Arrow Electronics Distribution",
+            normalized_name="arrow electronics distribution",
             sighting_count=20,
         )
         _make_vendor(
-            db_session, "Arrow Electronics Corporatio", normalized_name="arrow electronics corporatio", sighting_count=5
+            db_session,
+            "Arrow Electronics Distributio",
+            normalized_name="arrow electronics distributio",
+            sighting_count=5,
         )
         db_session.commit()
 
@@ -165,10 +170,10 @@ class TestDedupVendors:
         from app.services.auto_dedup_service import _dedup_vendors
 
         v1 = _make_vendor(
-            db_session, "Arrow Electronics Corp", normalized_name="arrow electronics corp", sighting_count=5
+            db_session, "Arrow Electronics Worldwide", normalized_name="arrow electronics worldwide", sighting_count=5
         )
         v2 = _make_vendor(
-            db_session, "Arrow Electronics Cor", normalized_name="arrow electronics cor", sighting_count=20
+            db_session, "Arrow Electronics Worldwid", normalized_name="arrow electronics worldwid", sighting_count=20
         )
         db_session.commit()
 
@@ -207,8 +212,18 @@ class TestDedupVendors:
 
         # Create 50 vendors in pairs with high similarity
         for i in range(25):
-            _make_vendor(db_session, f"Vendor{i} Corp", normalized_name=f"vendor{i} corp", sighting_count=100)
-            _make_vendor(db_session, f"Vendor{i} Cor", normalized_name=f"vendor{i} cor", sighting_count=50)
+            _make_vendor(
+                db_session,
+                f"Vendor{i} Electronics Group",
+                normalized_name=f"vendor{i} electronics group",
+                sighting_count=100,
+            )
+            _make_vendor(
+                db_session,
+                f"Vendor{i} Electronics Grp",
+                normalized_name=f"vendor{i} electronics grp",
+                sighting_count=50,
+            )
         db_session.commit()
 
         merged = _dedup_vendors(db_session)
@@ -218,8 +233,8 @@ class TestDedupVendors:
         """If one merge fails, should continue processing."""
         from app.services.auto_dedup_service import _dedup_vendors
 
-        _make_vendor(db_session, "Same Name A", normalized_name="same name a", sighting_count=20)
-        _make_vendor(db_session, "Same Name", normalized_name="same name", sighting_count=10)
+        _make_vendor(db_session, "Same Brand Electronics", normalized_name="same brand electronics", sighting_count=20)
+        _make_vendor(db_session, "Same Brand Electronic", normalized_name="same brand electronic", sighting_count=10)
         db_session.commit()
 
         with patch("app.services.vendor_merge_service.merge_vendor_cards", side_effect=RuntimeError("merge failed")):
@@ -230,8 +245,10 @@ class TestDedupVendors:
         """Score 92-97 with AI approval should merge."""
         from app.services.auto_dedup_service import _dedup_vendors
 
-        _make_vendor(db_session, "Arrow Electronics Inc", normalized_name="arrow electronics inc", sighting_count=20)
-        _make_vendor(db_session, "Arrow Elect LLC", normalized_name="arrow elect llc", sighting_count=5)
+        _make_vendor(
+            db_session, "Arrow Electronics Group", normalized_name="arrow electronics group", sighting_count=20
+        )
+        _make_vendor(db_session, "Arrow Electronics Grp", normalized_name="arrow electronics grp", sighting_count=5)
         db_session.commit()
 
         with patch("app.services.auto_dedup_service._ai_confirm_vendor_merge", return_value=True):
@@ -561,8 +578,8 @@ class TestDedupVendorsCoverageGaps:
         # A and C are similar (score=98), B is unrelated
         _make_vendor(
             db_session,
-            "Xyzzy Electronics Corporation Inc",
-            normalized_name="xyzzy electronics corporation inc",
+            "Xyzzy Electronics Distribution",
+            normalized_name="xyzzy electronics distribution",
             sighting_count=100,
         )
         _make_vendor(
@@ -570,8 +587,8 @@ class TestDedupVendorsCoverageGaps:
         )
         _make_vendor(
             db_session,
-            "Xyzzy Electronics Corporation In",
-            normalized_name="xyzzy electronics corporation in",
+            "Xyzzy Electronics Distributio",
+            normalized_name="xyzzy electronics distributio",
             sighting_count=10,
         )
         db_session.commit()
@@ -584,8 +601,8 @@ class TestDedupVendorsCoverageGaps:
         """Lines 112-114: merge exception is caught and rolled back."""
         from app.services.auto_dedup_service import _dedup_vendors
 
-        _make_vendor(db_session, "Fail Merge Corp", normalized_name="fail merge corp", sighting_count=20)
-        _make_vendor(db_session, "Fail Merge Cor", normalized_name="fail merge cor", sighting_count=10)
+        _make_vendor(db_session, "Fail Merge Electronics", normalized_name="fail merge electronics", sighting_count=20)
+        _make_vendor(db_session, "Fail Merge Electronic", normalized_name="fail merge electronic", sighting_count=10)
         db_session.commit()
 
         with patch("app.services.vendor_merge_service.merge_vendor_cards", side_effect=RuntimeError("merge exploded")):
@@ -601,17 +618,64 @@ class TestDedupVendorsCoverageGaps:
         for i in range(55):
             _make_vendor(
                 db_session,
-                f"Corp{i:03d} Electronics Incorporated",
-                normalized_name=f"corp{i:03d} electronics incorporated",
+                f"Corp{i:03d} Electronics Distribution",
+                normalized_name=f"corp{i:03d} electronics distribution",
                 sighting_count=100,
             )
             _make_vendor(
                 db_session,
-                f"Corp{i:03d} Electronics Incorporate",
-                normalized_name=f"corp{i:03d} electronics incorporate",
+                f"Corp{i:03d} Electronics Distributio",
+                normalized_name=f"corp{i:03d} electronics distributio",
                 sighting_count=50,
             )
         db_session.commit()
 
         merged = _dedup_vendors(db_session)
         assert merged == 50
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Shared fuzzy scorer usage (project rule: never inline fuzzy)
+# ══════════════════════════════════════════════════════════════════════
+
+
+class TestUsesSharedFuzzyScorer:
+    def test_dedup_vendors_calls_shared_helper(self, db_session):
+        """_dedup_vendors must score via vendor_utils.fuzzy_score_vendor, not inline
+        fuzz."""
+        from app.services.auto_dedup_service import _dedup_vendors
+
+        _make_vendor(
+            db_session, "Nimbus Electronics Group", normalized_name="nimbus electronics group", sighting_count=20
+        )
+        _make_vendor(db_session, "Nimbus Electronics Grp", normalized_name="nimbus electronics grp", sighting_count=5)
+        db_session.commit()
+
+        # _dedup_vendors imports the helper lazily, so patch it at the source module.
+        with patch("app.vendor_utils.fuzzy_score_vendor", return_value=99) as mock_score:
+            merged = _dedup_vendors(db_session)
+
+        # Shared helper was consulted, and its returned score (>= 98) drove an auto-merge.
+        assert mock_score.called
+        assert merged == 1
+
+    def test_score_matches_shared_helper(self, db_session):
+        """The score threshold uses exactly what fuzzy_score_vendor returns.
+
+        A pair the shared helper scores < 92 must NOT merge even though a raw inline
+        token_sort_ratio (no re-normalization) would score >= 92.
+        """
+        from app.services.auto_dedup_service import _dedup_vendors
+        from app.vendor_utils import fuzzy_score_vendor
+
+        # Shared helper strips the "corporation" suffix, dropping the score below 92;
+        # a naive inline fuzz.token_sort_ratio on the raw strings would clear 92.
+        a, b = "arrow electronics corporation", "arrow electronics corporatio"
+        assert fuzzy_score_vendor(a, b) < 92
+
+        _make_vendor(db_session, "Arrow Electronics Corporation", normalized_name=a, sighting_count=20)
+        _make_vendor(db_session, "Arrow Electronics Corporatio", normalized_name=b, sighting_count=5)
+        db_session.commit()
+
+        merged = _dedup_vendors(db_session)
+        assert merged == 0

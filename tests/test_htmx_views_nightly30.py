@@ -746,26 +746,6 @@ class TestBuyPlanListViews:
         resp = client.get("/v2/partials/buy-plans", headers=HX)
         assert resp.status_code == 200
 
-    def test_resource_view(self, client: TestClient):
-        resp = client.get("/v2/partials/buy-plans/resource", headers=HX)
-        assert resp.status_code == 200
-
-    def test_orders_view(self, client: TestClient):
-        resp = client.get("/v2/partials/buy-plans/orders", headers=HX)
-        assert resp.status_code == 200
-
-    def test_board_view(self, client: TestClient):
-        resp = client.get("/v2/partials/buy-plans/board", headers=HX)
-        assert resp.status_code == 200
-
-    def test_archive_view(self, client: TestClient):
-        resp = client.get("/v2/partials/buy-plans/archive", headers=HX)
-        assert resp.status_code == 200
-
-    def test_supervise_view(self, client: TestClient):
-        resp = client.get("/v2/partials/buy-plans/supervise", headers=HX)
-        assert resp.status_code == 200
-
     def test_approvals_list(self, client: TestClient):
         resp = client.get("/v2/partials/approvals", headers=HX)
         assert resp.status_code == 200

@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from loguru import logger
 from sqlalchemy.orm import Session, joinedload
 
-from ...constants import QuoteStatus, RequisitionStatus, UserRole
+from ...constants import RESTRICTED_ROLES, QuoteStatus, RequisitionStatus
 from ...database import get_db
 from ...dependencies import require_user
 from ...models import ActivityLog, CustomerSite, Offer, Quote, Requisition, User
@@ -578,7 +578,7 @@ async def pricing_history(mpn: str, user: User = Depends(require_user), db: Sess
         .options(joinedload(Quote.customer_site).joinedload(CustomerSite.company))
         .filter(Quote.status.in_(_PRICED_STATUSES))
     )
-    if user.role == UserRole.SALES:
+    if user.role in RESTRICTED_ROLES:
         quotes = quotes.join(Requisition, Quote.requisition_id == Requisition.id).filter(
             Requisition.created_by == user.id
         )

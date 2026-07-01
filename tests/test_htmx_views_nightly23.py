@@ -15,7 +15,7 @@ Target line ranges (brings 76% → 85%+):
   - log_phone_call          5410–5444  (~35 lines) form
   - buy_plan_submit         5992–6009  (~18 lines) form with mocks
   - buy_plan_approve        6028–6043  (~16 lines) form with mocks
-  - buy_plan_verify_so      6062–6080  (~19 lines) form with mocks
+  - buy_plan_halt           (Phase D — replaces verify-so) form with mocks
 
 Called by: pytest autodiscovery (asyncio_mode = auto)
 Depends on: conftest.py fixtures, app.routers.htmx_views
@@ -687,26 +687,26 @@ class TestBuyPlanApproveDirect:
         assert exc_info.value.status_code == 403
 
 
-# ── buy_plan_verify_so (6062–6080) ───────────────────────────────────────
+# ── buy_plan_halt (Phase D — replaces verify-so) ─────────────────────────
 
 
-class TestBuyPlanVerifySoDirect:
-    async def test_buy_plan_verify_so_success(self, db_session: Session, test_user: User):
-        """Lines 6062–6080: ops verifies SO on buy plan."""
-        from app.routers.htmx.buy_plans import buy_plan_verify_so_partial
+class TestBuyPlanHaltDirect:
+    async def test_buy_plan_halt_success(self, db_session: Session, test_user: User):
+        """The halt handler commits the service result and returns refreshed detail."""
+        from app.routers.htmx.buy_plans import buy_plan_halt_partial
 
         req = _make_requisition(db_session, test_user)
         bp = _make_buy_plan(db_session, req, test_user)
         mock_req = _mock_form_request(
-            path=f"/v2/partials/buy-plans/{bp.id}/verify-so",
-            fields={"action": "approve"},
+            path=f"/v2/partials/buy-plans/{bp.id}/halt",
+            fields={"reason": "stop everything"},
         )
         with (
-            patch("app.services.buyplan_workflow.verify_so") as mock_verify,
+            patch("app.services.buyplan_workflow.halt_plan") as mock_halt,
             patch("app.services.buyplan_notifications.run_notify_bg", new_callable=AsyncMock),
             patch("app.routers.htmx.buy_plans.buy_plan_detail_partial", new_callable=AsyncMock) as mock_detail,
         ):
-            mock_verify.return_value = MagicMock(id=bp.id)
+            mock_halt.return_value = MagicMock(id=bp.id)
             mock_detail.return_value = HTMLResponse("bp detail")
-            result = await buy_plan_verify_so_partial(request=mock_req, plan_id=bp.id, user=test_user, db=db_session)
+            result = await buy_plan_halt_partial(request=mock_req, plan_id=bp.id, user=test_user, db=db_session)
         assert result.status_code == 200

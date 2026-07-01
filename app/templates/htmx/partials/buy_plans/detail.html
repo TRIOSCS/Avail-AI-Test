@@ -4,9 +4,12 @@
   Receives: bp (BuyPlan ORM object), lines (list), user, is_admin, is_ops_member.
   Called by: htmx_views.py buy_plan_detail_partial endpoint.
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
+  Sections 2–5 are delegated to sibling partials (included with context, so they inherit
+  the `{% set %}` vars computed below): _detail_stepper.html, _detail_action_banner.html,
+  _detail_lines.html, _detail_sidebar.html.
 #}
-{% from "htmx/partials/shared/_macros.html" import status_badge, user_avatar %}
-{% from "htmx/partials/buy_plans/_macros.html" import collapse_chevron, modal_cancel_btn -%}
+{% from "htmx/partials/shared/_macros.html" import status_badge %}
+{% from "htmx/partials/buy_plans/_macros.html" import modal_cancel_btn -%}
 <title hx-swap-oob="true">Buy Plan #{{ bp.id }} — AvailAI</title>
 
 {# ── Compute variables used throughout ── #}
@@ -20,14 +23,18 @@
 {# Determine if action banner handles actions (suppresses standalone action bar) #}
 {% set show_buyer_banner = my_awaiting_lines|length > 0 and bp.status == 'active' %}
 {% set show_approval_banner = bp.status == 'pending' and can_approve_buy_plans(user) %}
-{% set show_so_banner = bp.status == 'active' and is_ops_member and bp.so_status == 'pending' %}
-{% set show_verify_banner = bp.status == 'active' and is_ops_member and pending_verify_lines|length > 0 %}
+{# Phase D: verify-PO moved off ops membership onto the per-user can_approve_purchase_orders
+   right, so the banner + inline buttons hide with the SAME predicate the POST enforces. #}
+{% set show_verify_banner = bp.status == 'active' and can_approve_purchase_orders(user) and pending_verify_lines|length > 0 %}
 {% set show_rejected_banner = bp.status == 'draft' and (bp.cancellation_reason or (bp.approved_at and bp.approval_notes)) %}
 {% set show_draft_banner = bp.status == 'draft' and not show_rejected_banner %}
 {% set show_inbound_banner = bp.status == 'inbound' %}
-{% set has_action_banner = show_buyer_banner or show_approval_banner or show_so_banner or show_verify_banner or show_rejected_banner or show_draft_banner or show_inbound_banner %}
+{% set has_action_banner = show_buyer_banner or show_approval_banner or show_verify_banner or show_rejected_banner or show_draft_banner or show_inbound_banner %}
+{# Halt is the single off-ramp (Phase D): a supervisor/ops member may halt an in-flight
+   (pending/active) plan. Mirrors the service-side _can_halt + HALTABLE_STATUSES guard. #}
+{% set can_halt = bp.status in ('pending', 'active') and (is_ops_member or user.role in ('manager', 'admin')) %}
 
-<div class="page-fluid" x-data="{ showModal: false, modalType: '', showAi: false, showNotes: false, showSo: false }">
+<div class="page-fluid" x-data="{ showModal: false, modalType: '', modalLineId: 0, showAi: false, showNotes: false, showSo: false }">
 
   {# ═══ 1. COMPACT HEADER WITH INLINE STATS ═══ #}
   <div class="mb-4">
@@ -40,6 +47,15 @@
         <span class="chip bg-purple-50 text-purple-700 border-purple-200 inline-flex items-center gap-1">
           <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
           Stock Sale
+        </span>
+        {% endif %}
+        {# Phase-D fold made explicit: the single plan approval IS the SO sign-off (previously
+           silent). Surface who signed so the fold isn't invisible. #}
+        {% if bp.so_status == 'approved' and bp.approved_by %}
+        <span class="chip bg-emerald-50 text-emerald-700 border-emerald-200 inline-flex items-center gap-1"
+              title="Approving this buy plan also signed off the sales order — one approval covers both.">
+          <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          SO signed · {{ bp.approved_by.name or bp.approved_by.email }}
         </span>
         {% endif %}
       </div>
@@ -63,6 +79,14 @@
           <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
           Quality Plan
         </button>
+        {# Halt — the single off-ramp (Phase D). Always shown (independent of the action
+           banner) so a supervisor/ops member can halt an in-flight plan from any state. #}
+        {% if can_halt %}
+        <button @click="modalType = 'halt'; showModal = true"
+                class="btn btn-danger btn-sm">
+          Halt
+        </button>
+        {% endif %}
         {# Cancel/Reset only shown here when NOT in action banner #}
         {% if not has_action_banner %}
           {% if bp.status in ('halted', 'cancelled') %}
@@ -110,531 +134,13 @@
     </div>
   </div>
 
-  {# ═══ 2. PROGRESS BAR STEPPER ═══ #}
-  {% set steps = ['Draft', 'Submit', 'Approve', 'PO Exec', 'Complete'] %}
-  {% if bp.status == 'draft' %}
-    {% set filled = 1 %}
-    {% set step_label = 'Draft' %}
-  {% elif bp.status == 'pending' %}
-    {% set filled = 2 %}
-    {% set step_label = 'Pending Approval' %}
-  {% elif bp.status == 'active' and bp.so_status == 'pending' %}
-    {% set filled = 3 %}
-    {% set step_label = 'Active (SO Pending)' %}
-  {% elif bp.status == 'active' and awaiting_po_lines|length == lines|length %}
-    {% set filled = 3 %}
-    {% set step_label = 'PO Execution' %}
-  {% elif bp.status == 'active' %}
-    {% set filled = 4 %}
-    {% set step_label = 'PO Execution' %}
-  {% elif bp.status == 'inbound' %}
-    {% set filled = 4 %}
-    {% set step_label = 'Inbound (awaiting receipt)' %}
-  {% elif bp.status == 'completed' %}
-    {% set filled = 5 %}
-    {% set step_label = 'Complete' %}
-  {% elif bp.status == 'halted' %}
-    {% set filled = 3 %}
-    {% set step_label = 'Halted' %}
-  {% elif bp.status == 'cancelled' %}
-    {% set filled = 0 %}
-    {% set step_label = 'Cancelled' %}
-  {% else %}
-    {% set filled = 1 %}
-    {% set step_label = bp.status|capitalize %}
-  {% endif %}
+  {% include "htmx/partials/buy_plans/_detail_stepper.html" %}
 
-  <div class="mb-5 bg-white rounded-lg border border-line-base px-5 py-4">
-    <div class="flex gap-1.5">
-      {% for i in range(1, 6) %}
-        {% if bp.status == 'cancelled' %}
-          <div class="flex-1 h-2.5 rounded-{% if i == 1 %}l{% elif i == 5 %}r{% endif %}-md bg-gray-300"></div>
-        {% elif bp.status == 'halted' and i == 3 %}
-          <div class="flex-1 h-2.5 rounded-{% if i == 1 %}l{% elif i == 5 %}r{% endif %}-md bg-rose-500"></div>
-        {% elif i <= filled %}
-          <div class="flex-1 h-2.5 rounded-{% if i == 1 %}l{% elif i == 5 %}r{% endif %}-md bg-emerald-500"></div>
-        {% elif i == filled + 1 %}
-          <div class="flex-1 h-2.5 rounded-{% if i == 1 %}l{% elif i == 5 %}r{% endif %}-md bg-amber-400"></div>
-        {% else %}
-          <div class="flex-1 h-2.5 rounded-{% if i == 1 %}l{% elif i == 5 %}r{% endif %}-md bg-gray-200"></div>
-        {% endif %}
-      {% endfor %}
-    </div>
-    <div class="flex justify-between mt-2">
-      {% for s in steps %}
-        <span class="text-xs {% if loop.index <= filled %}text-gray-700 font-semibold{% elif loop.index == filled + 1 %}text-amber-600 font-medium{% else %}text-gray-400{% endif %}">{{ s }}</span>
-      {% endfor %}
-    </div>
-    <div class="text-sm font-medium mt-1 {% if bp.status == 'completed' %}text-emerald-600{% elif bp.status == 'halted' %}text-rose-600{% elif bp.status == 'cancelled' %}text-gray-400{% else %}text-gray-600{% endif %}">{{ step_label }}</div>
-  </div>
+  {% include "htmx/partials/buy_plans/_detail_action_banner.html" %}
 
-  {# ═══ 3. ROLE-AWARE ACTION BANNER ═══ #}
+  {% include "htmx/partials/buy_plans/_detail_lines.html" %}
 
-  {# Buyer: lines awaiting PO assigned to them #}
-  {% if show_buyer_banner %}
-  <div class="mb-4 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex items-center gap-3">
-    <span class="flex-shrink-0 w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center justify-center">{{ my_awaiting_lines|length }}</span>
-    <span class="text-sm text-blue-800">
-      PO{{ 's' if my_awaiting_lines|length != 1 }} need{{ '' if my_awaiting_lines|length != 1 else 's' }} to be cut.
-      {% for l in my_awaiting_lines[:5] %}{{ l.requirement.primary_mpn if l.requirement else 'Line ' ~ l.id }}{% if not loop.last %}, {% endif %}{% endfor %}{% if my_awaiting_lines|length > 5 %} +{{ my_awaiting_lines|length - 5 }} more{% endif %}
-    </span>
-  </div>
-  {% endif %}
-
-  {# Manager/Admin: plan pending approval #}
-  {# Finding #4: raw bg-emerald-600/bg-rose-600 banner buttons → .btn family #}
-  {% if show_approval_banner %}
-  <div class="mb-4 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex items-center justify-between gap-3">
-    <div class="flex items-center gap-3">
-      <span class="flex-shrink-0 w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center justify-center">!</span>
-      <span class="text-sm text-blue-800">This plan needs your approval. ${{ '{:,.2f}'.format(total_cost) }} total.</span>
-    </div>
-    <div class="flex gap-2 flex-shrink-0">
-      <button @click="modalType = 'approve'; showModal = true"
-              class="btn btn-primary btn-sm">
-        Approve
-      </button>
-      <button @click="modalType = 'reject'; showModal = true"
-              class="btn btn-danger btn-sm">
-        Reject
-      </button>
-    </div>
-  </div>
-  {% endif %}
-
-  {# Ops: SO needs verification #}
-  {% if show_so_banner %}
-  <div class="mb-4 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex items-center justify-between gap-3">
-    <div class="flex items-center gap-3">
-      <span class="flex-shrink-0 w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center justify-center">!</span>
-      <span class="text-sm text-blue-800">Sales Order {{ bp.sales_order_number or '#' }} needs verification.</span>
-    </div>
-    <button @click="modalType = 'verify-so'; showModal = true"
-            class="flex-shrink-0 btn btn-primary btn-sm">
-      Verify SO
-    </button>
-  </div>
-  {% endif %}
-
-  {# Ops: POs pending verification #}
-  {% if show_verify_banner and not show_so_banner %}
-  <div class="mb-4 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex items-center gap-3">
-    <span class="flex-shrink-0 w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center justify-center">{{ pending_verify_lines|length }}</span>
-    <span class="text-sm text-blue-800">{{ pending_verify_lines|length }} PO{{ 's' if pending_verify_lines|length != 1 }} need{{ '' if pending_verify_lines|length != 1 else 's' }} verification.</span>
-  </div>
-  {% endif %}
-
-  {# Submitter: plan was rejected #}
-  {% if show_rejected_banner %}
-  <div class="mb-4 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex items-center justify-between gap-3">
-    <div class="flex items-center gap-3">
-      <span class="flex-shrink-0 w-6 h-6 rounded-full bg-rose-500 text-white text-xs font-bold flex items-center justify-center">!</span>
-      <span class="text-sm text-blue-800">Plan was rejected. Review notes and resubmit.</span>
-    </div>
-    <button @click="modalType = 'submit'; showModal = true"
-            class="flex-shrink-0 btn btn-primary btn-sm">
-      Submit
-    </button>
-  </div>
-  {% endif %}
-
-  {# Submitter: draft ready to submit #}
-  {% if show_draft_banner %}
-  <div class="mb-4 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex items-center justify-between gap-3">
-    <div class="flex items-center gap-3">
-      <span class="flex-shrink-0 w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center justify-center">
-        <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-      </span>
-      <span class="text-sm text-blue-800">Ready to submit. Add SO# to proceed.</span>
-    </div>
-    <button @click="modalType = 'submit'; showModal = true"
-            class="flex-shrink-0 btn btn-primary btn-sm">
-      Submit
-    </button>
-  </div>
-  {% endif %}
-
-  {# Buyer: PO approved, goods inbound — mark received to complete (SP-3) #}
-  {% if show_inbound_banner %}
-  <div class="mb-4 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex items-center justify-between gap-3">
-    <div class="flex items-center gap-3">
-      <span class="flex-shrink-0 w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center justify-center">!</span>
-      <span class="text-sm text-blue-800">Purchase Order approved — goods are inbound. Mark received to complete the deal.</span>
-    </div>
-    <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/receive"
-            hx-target="#main-content" hx-swap="innerHTML"
-            hx-confirm="Mark this buy plan received and complete it?"
-            class="flex-shrink-0 btn btn-primary btn-sm">
-      Mark Received
-    </button>
-  </div>
-  {% endif %}
-
-  {# ═══ 4. SIMPLIFIED LINE ITEMS TABLE ═══ #}
-  {# Finding #1: convert to data-table, drop per-cell px-4 py-3 and per-th font-medium text-gray-500 uppercase #}
-  <div class="bg-white rounded-lg shadow-sm overflow-hidden border border-line-base mb-6">
-    <div class="px-4 py-3 bg-gray-50 border-b border-line-base">
-      <h2 class="text-lg font-semibold text-gray-900">Line Items
-        <span class="ml-1 text-sm font-normal text-gray-600">({{ lines|length }})</span>
-      </h2>
-    </div>
-    <div class="overflow-x-auto">
-      <table class="data-table w-full">
-        <thead>
-          <tr>
-            <th class="text-left">Part</th>
-            <th class="text-left">Description</th>
-            <th class="text-left">Vendor</th>
-            <th class="text-right">Qty</th>
-            <th class="text-right">Unit Cost</th>
-            <th class="text-left">Status</th>
-            <th class="text-left">Action</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for line in lines %}
-          <tr id="bp-line-{{ line.id }}" class="transition-colors">
-            {# Part (MPN) #}
-            <td class="font-mono font-medium text-gray-900">
-              {{ line.requirement.primary_mpn if line.requirement else '-' }}
-            </td>
-            {# Description — from MaterialCard (source of truth) #}
-            {% set desc = line.requirement|part_description if line.requirement else '' %}
-            <td class="text-gray-600 truncate max-w-[200px]" title="{{ desc }}">
-              {{ desc or '-' }}
-            </td>
-            {# Vendor + buyer (assignee) below #}
-            <td>
-              <div class="text-gray-900">{{ line.offer.vendor_name if line.offer else '-' }}</div>
-              {% if line.buyer %}
-              <div class="flex items-center gap-1.5 mt-0.5">
-                {{ user_avatar(line.buyer) }}
-                <span class="text-xs text-gray-400">{{ line.buyer.name }}</span>
-              </div>
-              {% endif %}
-            </td>
-            {# Qty #}
-            <td class="text-right text-gray-600">{{ '{:,}'.format(line.quantity) }}</td>
-            {# Unit Cost #}
-            <td class="text-right text-gray-600">${{ '{:,.4f}'.format(line.unit_cost|float) if line.unit_cost else '-' }}</td>
-            {# Status + PO# #}
-            <td>
-              {% set line_colors = {
-                'awaiting_po': 'bg-amber-50 text-amber-700',
-                'pending_verify': 'bg-brand-100 text-brand-600',
-                'verified': 'bg-emerald-50 text-emerald-700',
-                'issue': 'bg-rose-50 text-rose-700',
-                'resourcing': 'bg-violet-50 text-violet-700',
-                'cancelled': 'bg-gray-100 text-gray-600'
-              } %}
-              {{ status_badge(line.status, status_map=line_colors) }}
-              {% if line.po_number %}
-              <div class="font-mono text-xs text-gray-600 mt-0.5">{{ line.po_number }}</div>
-              {% endif %}
-            </td>
-            {# Action — Finding #4: bespoke bg-emerald/rose buttons → .btn family #}
-            <td>
-              {% if bp.status == 'active' %}
-                {% if line.status == 'awaiting_po' %}
-                  <div x-data="{ showPo: false, poNum: '', shipDate: '' }">
-                    <a @click="showPo = !showPo" class="text-sm text-brand-500 hover:text-brand-600 font-medium cursor-pointer">
-                      Enter PO &rarr;
-                    </a>
-                    <div x-show="showPo" x-cloak x-collapse class="mt-2 space-y-1.5">
-                      {# Finding #3: bespoke border+focus-ring → .input .input-sm #}
-                      <div>
-                        <input aria-label="PO#" x-model="poNum" type="text" placeholder="PO#"
-                               class="input input-sm w-28">
-                      </div>
-                      <div>
-                        <input aria-label="Estimated ship date" x-model="shipDate" type="date"
-                               class="input input-sm w-28">
-                      </div>
-                      <div class="flex gap-1">
-                        <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/lines/{{ line.id }}/confirm-po"
-                                hx-target="#main-content"
-                                :hx-vals="JSON.stringify({po_number: poNum, estimated_ship_date: shipDate})"
-                                data-loading-disable
-                                class="btn btn-primary btn-sm">
-                          Confirm
-                        </button>
-                        <button @click="$dispatch('open-modal', { type: 'issue-{{ line.id }}' }); modalType = 'issue-{{ line.id }}'; showModal = true"
-                                class="btn btn-danger btn-sm">
-                          Issue
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                {% elif line.status == 'pending_verify' and is_ops_member %}
-                  <div class="flex gap-1">
-                    <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/lines/{{ line.id }}/verify-po"
-                            hx-target="#main-content"
-                            hx-vals='{"action": "approve"}'
-                            data-loading-disable
-                            class="btn btn-primary btn-sm">
-                      Verify
-                    </button>
-                    <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/lines/{{ line.id }}/verify-po"
-                            hx-target="#main-content"
-                            hx-vals='{"action": "reject"}'
-                            data-loading-disable
-                            hx-confirm="Reject this PO?"
-                            class="btn btn-danger btn-sm">
-                      Reject
-                    </button>
-                  </div>
-                {% elif line.status == 'verified' %}
-                  <span class="text-xs text-emerald-600 font-medium flex items-center gap-0.5">
-                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-                    Done
-                  </span>
-                {% elif line.status == 'issue' %}
-                  <span class="text-xs text-rose-600 font-medium">{{ line.issue_type|replace('_', ' ')|capitalize if line.issue_type else 'Issue' }}</span>
-                {% endif %}
-              {% endif %}
-
-              {# ── Re-source: a cut PO (pending_verify/verified) the vendor fell down on.
-                   Visible even when the plan auto-completed (bp.status == 'completed'),
-                   since that is exactly the late-fall-down case. ── #}
-              {% if can_resource and line.status in ['pending_verify', 'verified'] and bp.status in ['active', 'completed'] %}
-              {% set other_cut = lines|selectattr('status', 'in', ['pending_verify', 'verified'])|rejectattr('id', 'eq', line.id)|list %}
-              <div x-data="{ showR: false, escalate: false }" class="mt-1.5">
-                <a @click="showR = !showR" class="text-xs text-rose-500 hover:text-rose-700 font-medium cursor-pointer">Re-source &rarr;</a>
-                <div x-show="showR" x-cloak x-collapse class="mt-2">
-                  <form hx-post="/v2/partials/buy-plans/{{ bp.id }}/lines/{{ line.id }}/resource"
-                        hx-target="#main-content" hx-swap="innerHTML"
-                        hx-confirm="Re-source this line? This marks the vendor's offer Sold + unavailable and alerts ALL buyers to backfill."
-                        class="space-y-1.5">
-                    <input type="hidden" name="scope" :value="escalate ? 'plan' : 'line'">
-                    <select name="reason_code" aria-label="Re-source reason" class="input input-sm w-44">
-                      <option value="sold_elsewhere">Vendor sold elsewhere</option>
-                      <option value="cannot_deliver">Vendor can't deliver</option>
-                      <option value="no_stock">No stock</option>
-                      <option value="price_change">Price changed / reneged</option>
-                      <option value="other">Other</option>
-                    </select>
-                    <textarea name="reason_note" rows="2" placeholder="What happened? (optional)"
-                              class="input input-sm w-44"></textarea>
-                    {% if other_cut %}
-                    <label class="flex items-center gap-1.5 text-xs text-gray-600">
-                      <input type="checkbox" x-model="escalate"> Also re-source other cut POs on this deal
-                    </label>
-                    <div x-show="escalate" x-cloak class="pl-4 space-y-0.5">
-                      {% for o in other_cut %}
-                      <label class="flex items-center gap-1.5 text-xs text-gray-500">
-                        <input type="checkbox" name="also_line_ids" value="{{ o.id }}" checked>
-                        <span class="font-mono">{{ o.requirement.primary_mpn if o.requirement else ('line ' ~ o.id) }}</span>
-                      </label>
-                      {% endfor %}
-                    </div>
-                    {% endif %}
-                    <button type="submit" data-loading-disable class="btn btn-danger btn-sm">
-                      Re-source &amp; alert
-                    </button>
-                  </form>
-                </div>
-              </div>
-              {% endif %}
-
-              {# ── SP-4: reject at receiving (wrong/defective/short). Falls into the SAME
-                   re-source pool as a vendor-cancel fall-down. Shown only while the deal is
-                   INBOUND (PO approved, goods arriving) on a cut line — the per-line
-                   counterpart to the plan-level "Mark Received" affordance. ── #}
-              {% if can_resource and bp.status == 'inbound' and line.status in ['pending_verify', 'verified'] %}
-              {% set other_recv = lines|selectattr('status', 'in', ['pending_verify', 'verified'])|rejectattr('id', 'eq', line.id)|list %}
-              <div x-data="{ showJ: false, escalate: false }" class="mt-1.5">
-                <a @click="showJ = !showJ" class="text-xs text-rose-500 hover:text-rose-700 font-medium cursor-pointer">Reject &rarr;</a>
-                <div x-show="showJ" x-cloak x-collapse class="mt-2">
-                  <form hx-post="/v2/partials/buy-plans/{{ bp.id }}/lines/{{ line.id }}/reject-received"
-                        hx-target="#main-content" hx-swap="innerHTML"
-                        hx-confirm="Reject this line at receiving? The parts fall back into the re-source pool, mark the vendor's offer Sold + unavailable, and alert ALL buyers to backfill."
-                        class="space-y-1.5">
-                    <input type="hidden" name="scope" :value="escalate ? 'plan' : 'line'">
-                    <select name="reason_code" aria-label="Rejection reason" class="input input-sm w-44">
-                      <option value="defective">Defective / bad parts</option>
-                      <option value="wrong_part">Wrong part shipped</option>
-                      <option value="short_ship">Short shipment</option>
-                      <option value="other">Other</option>
-                    </select>
-                    <textarea name="reason_note" rows="2" placeholder="What was wrong? (optional)"
-                              class="input input-sm w-44"></textarea>
-                    {% if other_recv %}
-                    <label class="flex items-center gap-1.5 text-xs text-gray-600">
-                      <input type="checkbox" x-model="escalate"> Also reject other received lines on this deal
-                    </label>
-                    <div x-show="escalate" x-cloak class="pl-4 space-y-0.5">
-                      {% for o in other_recv %}
-                      <label class="flex items-center gap-1.5 text-xs text-gray-500">
-                        <input type="checkbox" name="also_line_ids" value="{{ o.id }}" checked>
-                        <span class="font-mono">{{ o.requirement.primary_mpn if o.requirement else ('line ' ~ o.id) }}</span>
-                      </label>
-                      {% endfor %}
-                    </div>
-                    {% endif %}
-                    <button type="submit" data-loading-disable class="btn btn-danger btn-sm">
-                      Reject &amp; re-source
-                    </button>
-                  </form>
-                </div>
-              </div>
-              {% endif %}
-
-              {# ── Open pool: a re-sourced line awaiting a claim. Any PO-cutter can grab it. ── #}
-              {% if line.status == 'resourcing' %}
-                {% if can_resource %}
-                <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/lines/{{ line.id }}/claim"
-                        hx-target="#main-content" hx-swap="innerHTML"
-                        data-loading-disable
-                        class="btn btn-primary btn-sm">
-                  Claim &rarr;
-                </button>
-                {% else %}
-                <span class="text-xs text-violet-600 font-medium">In re-sourcing pool</span>
-                {% endif %}
-              {% endif %}
-            </td>
-          </tr>
-          {% endfor %}
-          {% if not lines %}
-          <tr>
-            <td colspan="7" class="py-6 sm:py-8 text-center">
-              <svg class="mx-auto h-8 w-8 text-gray-300 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/>
-              </svg>
-              <p class="text-sm text-gray-600">No line items.</p>
-            </td>
-          </tr>
-          {% endif %}
-        </tbody>
-      </table>
-    </div>
-  </div>
-
-  {# ═══ 5. COLLAPSIBLE SECONDARY SECTIONS ═══ #}
-
-  {# AI Insights #}
-  {% set flag_count = bp.ai_flags|length if bp.ai_flags else 0 %}
-  {% if bp.ai_summary or flag_count > 0 %}
-  <div class="border-t border-gray-100">
-    {% set top_flag = top_flag if top_flag is defined else None %}
-    <button @click="showAi = !showAi" class="w-full px-4 py-2 flex items-center justify-between gap-3 text-left hover:bg-gray-50 transition-colors">
-      <div class="flex items-center gap-2 min-w-0">
-        <svg class="w-4 h-4 flex-shrink-0 text-brand-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
-        <span class="text-sm font-semibold text-gray-700 flex-shrink-0">AI Insights</span>
-        {% if flag_count > 0 %}
-        <span class="inline-flex items-center justify-center w-5 h-5 flex-shrink-0 rounded-full bg-amber-100 text-amber-700 text-xs font-bold">{{ flag_count }}</span>
-        {% endif %}
-        {# State the actual top issue at first glance — the verbatim flag reason, not just a count. #}
-        {% if top_flag and top_flag.message %}
-        <span class="text-xs truncate
-                     {% if top_flag.severity == 'critical' %}text-rose-600{% elif top_flag.severity == 'warning' %}text-amber-700{% else %}text-gray-500{% endif %}"
-              title="{{ top_flag.message }}">{{ top_flag.message }}</span>
-        {% endif %}
-      </div>
-      {{ collapse_chevron("showAi") }}
-    </button>
-    <div x-show="showAi" x-cloak x-collapse class="px-4 pb-4 space-y-3">
-      {% if bp.ai_summary %}
-      <div class="bg-brand-50 border border-brand-200 rounded-lg p-3">
-        <p class="text-sm text-brand-700 leading-relaxed">{{ bp.ai_summary }}</p>
-      </div>
-      {% endif %}
-      {% if bp.ai_flags %}
-        {% for flag in bp.ai_flags %}
-        {% set flag_colors = {
-          'critical': 'bg-rose-50 text-rose-700 border-rose-200',
-          'warning': 'bg-amber-50 text-amber-700 border-amber-200',
-          'info': 'bg-brand-50 text-brand-600 border-brand-200'
-        } %}
-        <div class="border rounded-lg p-3 flex items-start gap-2 {{ flag_colors.get(flag.severity, flag_colors.info) }}">
-          {% if flag.severity == 'critical' or flag.severity == 'warning' %}
-          <svg class="w-4 h-4 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>
-          {% else %}
-          <svg class="w-4 h-4 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-          {% endif %}
-          <div class="text-sm">
-            <span class="font-semibold uppercase text-xs tracking-wider">{{ flag.severity }}</span>
-            <span class="ml-1">{{ flag.message }}</span>
-          </div>
-        </div>
-        {% endfor %}
-      {% endif %}
-    </div>
-  </div>
-  {% endif %}
-
-  {# Notes #}
-  {% if bp.salesperson_notes or bp.approval_notes or bp.case_report %}
-  <div class="border-t border-gray-100">
-    <button @click="showNotes = !showNotes" class="w-full px-4 py-2 flex items-center justify-between text-left hover:bg-gray-50 transition-colors">
-      <div class="flex items-center gap-2">
-        <svg class="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
-        <span class="text-sm font-semibold text-gray-700">Notes</span>
-      </div>
-      {{ collapse_chevron("showNotes") }}
-    </button>
-    <div x-show="showNotes" x-cloak x-collapse class="px-4 pb-4 space-y-3">
-      {% if bp.salesperson_notes %}
-      <div>
-        <div class="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Salesperson Notes</div>
-        <p class="text-sm text-gray-600 leading-relaxed">{{ bp.salesperson_notes }}</p>
-      </div>
-      {% endif %}
-      {% if bp.approval_notes %}
-      <div>
-        <div class="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Approval Notes</div>
-        <p class="text-sm text-gray-600 leading-relaxed">{{ bp.approval_notes }}</p>
-      </div>
-      {% endif %}
-      {% if bp.case_report %}
-      <div>
-        <div class="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Case Report</div>
-        <pre class="text-xs text-gray-600 whitespace-pre-wrap font-mono bg-gray-50 rounded p-3 leading-relaxed">{{ bp.case_report }}</pre>
-      </div>
-      {% endif %}
-    </div>
-  </div>
-  {% endif %}
-
-  {# SO Verification #}
-  <div class="border-t border-gray-100">
-    <button @click="showSo = !showSo" class="w-full px-4 py-2 flex items-center justify-between text-left hover:bg-gray-50 transition-colors">
-      <div class="flex items-center gap-2">
-        <svg class="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
-        <span class="text-sm font-semibold text-gray-700">SO Verification</span>
-        {% if bp.so_status == 'approved' %}
-        <svg class="w-4 h-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-        {% else %}
-        {# Finding #7: bespoke inline pill → .badge primitive #}
-        <span class="badge-warning">pending</span>
-        {% endif %}
-      </div>
-      {{ collapse_chevron("showSo") }}
-    </button>
-    <div x-show="showSo" x-cloak x-collapse class="px-4 pb-4">
-      <div class="flex items-center gap-3 text-sm">
-        {% set so_badge = {
-          'pending': 'badge-warning',
-          'approved': 'badge-success',
-          'rejected': 'badge-danger'
-        } %}
-        <span class="text-gray-600">Status:</span>
-        {# Finding #7: bespoke SO status pill → .badge primitive #}
-        <span class="{{ so_badge.get(bp.so_status, 'badge') }}">
-          {{ bp.so_status|capitalize if bp.so_status else 'Pending' }}
-        </span>
-        {% if bp.so_verified_by %}
-        <span class="text-gray-600">by {{ bp.so_verified_by.name }}</span>
-        {% endif %}
-      </div>
-      {% if bp.so_rejection_note %}
-      <div class="mt-2 text-sm text-rose-600 flex items-center gap-1">
-        <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>
-        {{ bp.so_rejection_note }}
-      </div>
-      {% endif %}
-    </div>
-  </div>
+  {% include "htmx/partials/buy_plans/_detail_sidebar.html" %}
 
   {# ═══ 6. MODALS ═══ #}
   <div x-show="showModal" x-cloak
@@ -681,6 +187,42 @@
                     @click="showModal = false"
                     class="btn btn-primary">
               Submit
+            </button>
+          </div>
+        </div>
+      </template>
+
+      {# Issue modal — a buyer flags a problem on a line (re-homed from the inline orders
+         affordance so origination/flagging works from the deal detail too). modalLineId is
+         set by the line's Issue button in _detail_lines; the Flag Issue button drives the
+         existing per-line issue route via htmx.ajax — NOT a dynamic :hx-post bind, which
+         would resolve before this x-if template inits and post a stale line id. Field names
+         (issue_type, note) match buy_plan_flag_issue_partial. #}
+      <template x-if="modalType === 'issue'" x-cloak>
+        <div x-data="{ issue_type: 'sold_out', note: '' }">
+          <h3 class="text-lg font-semibold text-gray-900 mb-4">Flag an Issue</h3>
+          <div class="space-y-3">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">What's wrong?</label>
+              <select x-model="issue_type" class="input w-full">
+                <option value="sold_out">Sold out / no stock</option>
+                <option value="price_changed">Price changed</option>
+                <option value="lead_time_changed">Lead time changed</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Note (optional)</label>
+              <textarea x-model="note" rows="3" class="input w-full" placeholder="Add any detail for the team."></textarea>
+            </div>
+          </div>
+          <div class="mt-5 flex justify-end gap-2">
+            {{ modal_cancel_btn() }}
+            <button type="button"
+                    @click.prevent="htmx.ajax('POST', '/v2/partials/buy-plans/{{ bp.id }}/lines/' + modalLineId + '/issue', {target: '#main-content', swap: 'innerHTML', indicator: '#main-content', values: {issue_type: issue_type, note: note}}); showModal = false"
+                    data-loading-disable
+                    class="btn btn-danger">
+              Flag Issue
             </button>
           </div>
         </div>
@@ -739,42 +281,34 @@
       </template>
       {% endif %}
 
-      {# Verify SO modal #}
-      <template x-if="modalType === 'verify-so'" x-cloak>
-        <div x-data="{ action: 'approve', note: '' }">
-          <h3 class="text-lg font-semibold text-gray-900 mb-4">Verify Sales Order</h3>
-          <div class="space-y-3">
-            <div class="flex gap-4">
-              <label class="flex items-center gap-1.5 text-sm cursor-pointer">
-                <input type="radio" x-model="action" value="approve" class="text-emerald-600 focus:ring-emerald-500"> Approve
-              </label>
-              <label class="flex items-center gap-1.5 text-sm cursor-pointer">
-                <input type="radio" x-model="action" value="reject" class="text-rose-600 focus:ring-rose-500"> Reject
-              </label>
-              <label class="flex items-center gap-1.5 text-sm cursor-pointer">
-                <input type="radio" x-model="action" value="halt" class="text-rose-600 focus:ring-rose-500"> Halt
-              </label>
-            </div>
-            <div x-show="action !== 'approve'" x-cloak x-collapse>
-              <label class="block text-sm font-medium text-gray-700 mb-1">Note <span class="text-rose-500">*</span></label>
-              <textarea x-model="note" rows="2"
-                        class="input w-full"
-                        placeholder="Reason for rejection or halt..."></textarea>
-            </div>
+      {# Halt modal — the single off-ramp (Phase D). Gated to supervisor/ops (can_halt), so
+         a non-supervisor's DOM carries no orphaned halt form; the POST is also gated
+         server-side (halt_plan raises PermissionError → 403). #}
+      {% if can_halt %}
+      <template x-if="modalType === 'halt'" x-cloak>
+        <div x-data="{ reason: '' }">
+          <h3 class="text-lg font-semibold text-gray-900 mb-4">Halt Buy Plan</h3>
+          <p class="text-sm text-gray-600 mb-3">This stops everything. The plan can be reset to draft and resubmitted later.</p>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Reason</label>
+            <textarea x-model="reason" rows="2"
+                      class="input w-full"
+                      placeholder="Why is this being halted?"></textarea>
           </div>
           <div class="mt-5 flex justify-end gap-2">
             {{ modal_cancel_btn() }}
-            <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/verify-so"
+            <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/halt"
                     hx-target="#main-content"
-                    :hx-vals="JSON.stringify({action: action, rejection_note: note})"
+                    :hx-vals="JSON.stringify({reason: reason})"
                     data-loading-disable
                     @click="showModal = false"
-                    class="btn btn-primary">
-              Confirm
+                    class="btn btn-danger">
+              Halt Plan
             </button>
           </div>
         </div>
       </template>
+      {% endif %}
 
       {# Cancel modal #}
       <template x-if="modalType === 'cancel'" x-cloak>

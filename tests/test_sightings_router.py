@@ -3523,15 +3523,17 @@ class TestBatchStatus:
 
     def test_skips_invalid_transitions(self, client, db_session):
         _, r, _ = _seed_data(db_session)
-        # open -> won is NOT valid (must go open -> sourcing -> offered -> quoted -> won)
+        # won -> sourcing is NOT valid (won only transitions to lost/archived).
+        r.sourcing_status = "won"
+        db_session.commit()
         resp = client.post(
             "/v2/partials/sightings/batch-status",
-            data={"requirement_ids": json.dumps([r.id]), "status": "won"},
+            data={"requirement_ids": json.dumps([r.id]), "status": "sourcing"},
         )
         assert resp.status_code == 200
         assert "skipped" in resp.text.lower()
         db_session.refresh(r)
-        assert r.sourcing_status == "open"
+        assert r.sourcing_status == "won"
 
     def test_mixed_valid_and_invalid(self, client, db_session):
         req = Requisition(name="Mix RFQ", status="open", customer_name="Mix Corp")
@@ -4471,3 +4473,61 @@ class TestUnavailableFormConditionSelector:
         assert resp.status_code == 200
         assert "Currently marked" in resp.text
         assert "New" in resp.text  # condition shown (capitalized)
+
+
+class TestSightingsOwnershipScoping:
+    """Restricted roles (SALES/TRADER) only see their OWN requisitions' sightings —
+    regression guard for the sightings_detail read-IDOR and sightings_list
+    enumeration."""
+
+    def _trader_client(self, db_session, trader_user):
+        from fastapi.testclient import TestClient
+
+        from app.database import get_db
+        from app.dependencies import require_user
+        from app.main import app
+
+        app.dependency_overrides[get_db] = lambda: db_session
+        app.dependency_overrides[require_user] = lambda: trader_user
+        return TestClient(app), app, [get_db, require_user]
+
+    @staticmethod
+    def _req_with_requirement(db_session, owner_id, mpn):
+        req = Requisition(name=f"RFQ-{mpn}", status="open", customer_name="Acme", created_by=owner_id)
+        db_session.add(req)
+        db_session.flush()
+        r = Requirement(requisition_id=req.id, primary_mpn=mpn, sourcing_status="open")
+        db_session.add(r)
+        db_session.commit()
+        return r
+
+    def test_detail_idor_blocked_for_non_owner_trader(self, db_session, trader_user, test_user):
+        r = self._req_with_requirement(db_session, owner_id=test_user.id, mpn="OTHERS-MPN")
+        c, app, deps = self._trader_client(db_session, trader_user)
+        try:
+            resp = c.get(f"/v2/partials/sightings/{r.id}/detail")
+            assert resp.status_code == 404  # 404 (not 403) so existence isn't leaked
+        finally:
+            for d in deps:
+                app.dependency_overrides.pop(d, None)
+
+    def test_detail_allowed_for_owner_trader(self, db_session, trader_user):
+        r = self._req_with_requirement(db_session, owner_id=trader_user.id, mpn="MINE-MPN")
+        c, app, deps = self._trader_client(db_session, trader_user)
+        try:
+            assert c.get(f"/v2/partials/sightings/{r.id}/detail").status_code == 200
+        finally:
+            for d in deps:
+                app.dependency_overrides.pop(d, None)
+
+    def test_list_excludes_other_owners_for_trader(self, db_session, trader_user, test_user):
+        self._req_with_requirement(db_session, owner_id=trader_user.id, mpn="TRADER-OWNS")
+        self._req_with_requirement(db_session, owner_id=test_user.id, mpn="SOMEONE-ELSE")
+        c, app, deps = self._trader_client(db_session, trader_user)
+        try:
+            body = c.get("/v2/partials/sightings").text
+            assert "TRADER-OWNS" in body
+            assert "SOMEONE-ELSE" not in body  # other owner's part not enumerable
+        finally:
+            for d in deps:
+                app.dependency_overrides.pop(d, None)

@@ -33,6 +33,11 @@ class OEMSecretsConnector(BaseConnector):
         if not self.api_key:
             return []
 
+        # apiKey rides in the URL query string. On an unhandled HTTP status the
+        # full URL lands inside the raised httpx.HTTPStatusError's str();
+        # BaseConnector redacts secret query params via _redact_secrets BEFORE
+        # logging, so the key never reaches the loguru sinks. (Sentry's
+        # before_send only scrubs Sentry events — redaction is at the log sink.)
         params = {
             "apiKey": self.api_key,
             "searchTerm": part_number,
@@ -129,10 +134,12 @@ class OEMSecretsConnector(BaseConnector):
                 continue
             seen.add(key)
 
-            # Authorization status
+            # Authorization status. OEMSecrets is a 140+-distributor gray-market
+            # meta-aggregator, so an unknown/absent signal must NOT be treated as
+            # authorized — default False and flip to True only on a positive signal.
             auth_status = item.get("distributor_authorisation_status", "")
             is_auth = (
-                auth_status == "authorised" if auth_status else item.get("authorized", item.get("is_authorized", True))
+                auth_status == "authorised" if auth_status else item.get("authorized", item.get("is_authorized", False))
             )
 
             # Core attributes (optional — None when absent)

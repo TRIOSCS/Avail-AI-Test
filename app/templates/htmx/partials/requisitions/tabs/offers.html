@@ -74,7 +74,7 @@
       {% if draft_quote %}
       <button x-show="selectedOffers.length > 0" x-cloak
               @click="
-                var csrf = document.cookie.match(/csrftoken=([^;]+)/) ? RegExp.$1 : '';
+                let csrf = document.cookie.match(/csrftoken=([^;]+)/) ? RegExp.$1 : '';
                 fetch('/v2/partials/requisitions/{{ req.id }}/add-offers-to-quote', {
                   method: 'POST',
                   headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrf},
@@ -264,7 +264,14 @@
     <p class="text-xs text-gray-400 mt-1">Try selecting a different filter above or clear the filter to see all offers.</p>
     {% else %}
     <p class="text-sm font-medium text-gray-600 mt-3">No offers received yet.</p>
-    <p class="text-xs text-gray-400 mt-1">Offers appear here when vendors respond to RFQs or when leads are promoted.</p>
+    <p class="text-xs text-gray-400 mt-1">Offers appear when vendors respond to RFQs, when leads are promoted, or from searching all supplier sources.</p>
+    {# Next step: the sourcing engine (Search All Sources) lives on the Parts tab. #}
+    <button @click="activeTab = 'parts'"
+            hx-get="/v2/partials/requisitions/{{ req.id }}/tab/parts"
+            hx-target="#tab-content" hx-swap="innerHTML"
+            class="btn btn-primary btn-sm mt-3">
+      Search all sources &rarr;
+    </button>
     {% endif %}
   </div>
   {% endif %}

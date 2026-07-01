@@ -543,7 +543,7 @@ async def test_scrape_website_contacts_extracts_data():
     with patch("app.cache.intel_cache.get_cached", return_value=None):
         with patch("app.cache.intel_cache.set_cached"):
             with patch("app.utils.vendor_helpers.is_private_url", return_value=False):
-                with patch("app.utils.vendor_helpers.http_redirect") as mock_http:
+                with patch("app.utils.vendor_helpers.http") as mock_http:
                     mock_http.get = AsyncMock(return_value=mock_resp)
                     result = await scrape_website_contacts("https://vendor.com")
 
@@ -557,7 +557,7 @@ async def test_scrape_website_contacts_handles_errors():
     with patch("app.cache.intel_cache.get_cached", return_value=None):
         with patch("app.cache.intel_cache.set_cached"):
             with patch("app.utils.vendor_helpers.is_private_url", return_value=False):
-                with patch("app.utils.vendor_helpers.http_redirect") as mock_http:
+                with patch("app.utils.vendor_helpers.http") as mock_http:
                     mock_http.get = AsyncMock(side_effect=Exception("Connection failed"))
                     result = await scrape_website_contacts("https://dead-site.com")
 
@@ -575,7 +575,7 @@ async def test_scrape_website_contacts_non_200():
     with patch("app.cache.intel_cache.get_cached", return_value=None):
         with patch("app.cache.intel_cache.set_cached"):
             with patch("app.utils.vendor_helpers.is_private_url", return_value=False):
-                with patch("app.utils.vendor_helpers.http_redirect") as mock_http:
+                with patch("app.utils.vendor_helpers.http") as mock_http:
                     mock_http.get = AsyncMock(return_value=mock_resp)
                     result = await scrape_website_contacts("https://no-contact.com")
 
@@ -593,7 +593,7 @@ async def test_scrape_website_contacts_no_scheme():
     with patch("app.cache.intel_cache.get_cached", return_value=None):
         with patch("app.cache.intel_cache.set_cached"):
             with patch("app.utils.vendor_helpers.is_private_url", return_value=False):
-                with patch("app.utils.vendor_helpers.http_redirect") as mock_http:
+                with patch("app.utils.vendor_helpers.http") as mock_http:
                     mock_http.get = AsyncMock(return_value=mock_resp)
                     result = await scrape_website_contacts("bare.com")
 
@@ -606,7 +606,7 @@ async def test_scrape_website_contacts_domain_index_error():
     with patch("app.cache.intel_cache.get_cached", return_value=None):
         with patch("app.cache.intel_cache.set_cached"):
             with patch("app.utils.vendor_helpers.is_private_url", return_value=False):
-                with patch("app.utils.vendor_helpers.http_redirect") as mock_http:
+                with patch("app.utils.vendor_helpers.http") as mock_http:
                     mock_http.get = AsyncMock(return_value=MagicMock(status_code=404, text=""))
                     result = await scrape_website_contacts("https://")
     # Should still return valid (empty) result

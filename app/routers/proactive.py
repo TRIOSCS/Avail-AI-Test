@@ -320,6 +320,12 @@ async def get_site_contacts(
     db: Session = Depends(get_db),
 ):
     """Get SiteContacts for a customer site (for the send modal contact picker)."""
+    from ..models import CustomerSite
+
+    site = db.get(CustomerSite, site_id)
+    company = db.get(Company, site.company_id) if site else None
+    if not company or not can_manage_account(user, company, db):
+        raise HTTPException(404, "Site not found")  # scope site-contacts to match the contacts list
     contacts = (
         db.query(SiteContact)
         .filter(

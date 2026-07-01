@@ -447,6 +447,21 @@ class TestContactFormOwnerSelect:
 # ── full_name still renders ───────────────────────────────────────────────────
 
 
+@pytest.fixture()
+def _grant_account_management(test_user: User, db_session: Session) -> None:
+    """Promote the buyer ``test_user`` to MANAGER so it can_manage every account.
+
+    The contacts tab is reached via the company detail partial
+    (``GET /v2/partials/customers/{id}``), which now gates on ``can_manage_account``. The
+    class below GETs that endpoint as ``test_user`` on ``test_company`` without assigning
+    ownership, so promote the actor to MANAGER (``can_manage_account`` is True for managers,
+    exactly as for the account owner) to exercise the authorized render path.
+    """
+    test_user.role = "manager"
+    db_session.commit()
+
+
+@pytest.mark.usefixtures("_grant_account_management")
 class TestFullNameStillRenders:
     """full_name is still the display field everywhere."""
 

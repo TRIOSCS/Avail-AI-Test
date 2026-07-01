@@ -1,6 +1,12 @@
-"""Tests for app/jobs/maintenance_jobs.py — _job_contact_dedup function.
+"""Tests for app/jobs/maintenance_jobs.py — _job_contact_dedup control flow.
 
-Covers: duplicate merging, no-dupes path, error rollback.
+Covers the mock-level control flow (no-dupes path, error rollback). The actual
+merge behaviour — keeper selection, loser deletion, scalar backfill, and the
+CRITICAL child-row reassignment (attachments/tasks must not cascade-delete) — is
+covered against the real DB in test_maintenance_jobs_dedup_cascade.py (a mock
+session can't exercise the real ORM cascade, which is how the cascade data-loss
+bug originally slipped through).
+
 Called by: pytest
 Depends on: app.jobs.maintenance_jobs
 """
@@ -17,36 +23,11 @@ def _run(coro):
     return loop.run_until_complete(coro)
 
 
-class _FakeContact:
-    """Minimal stand-in for SiteContact with attribute tracking."""
-
-    def __init__(
-        self, id, customer_site_id, email, full_name=None, title=None, phone=None, notes=None, linkedin_url=None
-    ):
-        self.id = id
-        self.customer_site_id = customer_site_id
-        self.email = email
-        self.full_name = full_name
-        self.title = title
-        self.phone = phone
-        self.notes = notes
-        self.linkedin_url = linkedin_url
-
-
-class _FakeDupeRow:
-    """Mimics a SQLAlchemy keyed-tuple result from the group-by query."""
-
-    def __init__(self, customer_site_id, em, cnt):
-        self.customer_site_id = customer_site_id
-        self.em = em
-        self.cnt = cnt
-
-
 def _build_mock_db(dupe_rows, contacts_by_group):
     """Build a mock DB session with controlled query chains.
 
-    dupe_rows: list of _FakeDupeRow for the group-by query
-    contacts_by_group: list of list[_FakeContact] — one per dupe_row
+    dupe_rows: list of group-by result rows
+    contacts_by_group: list of list — one contact list per dupe_row
     """
     db = MagicMock()
 
@@ -72,76 +53,7 @@ def _build_mock_db(dupe_rows, contacts_by_group):
 
 
 class TestJobContactDedup:
-    """Tests for the _job_contact_dedup scheduler job."""
-
-    @patch("app.database.SessionLocal")
-    def test_dedup_merges_and_deletes(self, mock_session_local):
-        """Two contacts with same site+email: best keeps fields, loser deleted."""
-        contact_a = _FakeContact(
-            id=1,
-            customer_site_id=10,
-            email="alice@example.com",
-            full_name="Alice Smith",
-            phone="+15551234567",
-        )
-        contact_b = _FakeContact(
-            id=2,
-            customer_site_id=10,
-            email="Alice@example.com",
-            title="VP Sales",
-            notes="Met at trade show",
-        )
-        dupe_row = _FakeDupeRow(customer_site_id=10, em="alice@example.com", cnt=2)
-
-        db = _build_mock_db([dupe_row], [[contact_a, contact_b]])
-        mock_session_local.return_value = db
-
-        from app.jobs.maintenance_jobs import _job_contact_dedup
-
-        _run(_job_contact_dedup())
-
-        db.delete.assert_called_once()
-        db.commit.assert_called_once()
-        db.close.assert_called_once()
-
-        # Verify the winner got the loser's fields merged
-        deleted_contact = db.delete.call_args[0][0]
-        if deleted_contact is contact_b:
-            assert contact_a.title == "VP Sales"
-            assert contact_a.notes == "Met at trade show"
-        else:
-            assert contact_b.full_name == "Alice Smith"
-            assert contact_b.phone == "+15551234567"
-
-    @patch("app.database.SessionLocal")
-    def test_dedup_best_has_most_fields(self, mock_session_local):
-        """Contact with more filled fields is kept as the winner."""
-        winner = _FakeContact(
-            id=1,
-            customer_site_id=10,
-            email="bob@example.com",
-            full_name="Bob",
-            title="CTO",
-            phone="+15559999999",
-            notes="Important",
-            linkedin_url="https://linkedin.com/in/bob",
-        )
-        loser = _FakeContact(
-            id=2,
-            customer_site_id=10,
-            email="bob@example.com",
-            full_name="Robert",
-        )
-        dupe_row = _FakeDupeRow(customer_site_id=10, em="bob@example.com", cnt=2)
-        db = _build_mock_db([dupe_row], [[winner, loser]])
-        mock_session_local.return_value = db
-
-        from app.jobs.maintenance_jobs import _job_contact_dedup
-
-        _run(_job_contact_dedup())
-
-        db.delete.assert_called_once_with(loser)
-        db.commit.assert_called_once()
+    """Control-flow tests for the _job_contact_dedup scheduler job."""
 
     @patch("app.database.SessionLocal")
     def test_no_dupes_no_changes(self, mock_session_local):

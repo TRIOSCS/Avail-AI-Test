@@ -276,18 +276,24 @@ def test_my_queue_po_verify_gated(db_session, test_user, manager_user, test_quot
     assert "po_verify" not in _kinds(my_queue(db_session, test_user))
 
 
-def test_my_queue_po_verify_for_ops_member(db_session, test_user, test_quote, test_requisition):
-    """An ops verification-group member still verifies POs (capability preserved)."""
+def test_my_queue_po_verify_excludes_ops_without_right(db_session, test_user, test_quote, test_requisition):
+    """An ops member WITHOUT can_approve_purchase_orders does NOT get po_verify rows.
+
+    Phase D moved the verify-PO gate onto the per-user right; My Queue must not surface
+    a verify action the user would 403 on (ops membership alone no longer grants it).
+    Existing ops verifiers keep the capability because migration 173 grandfathers them
+    into the right.
+    """
     plan = _make_plan(
         db_session,
         quote_id=test_quote.id,
         requisition_id=test_requisition.id,
         status=BuyPlanStatus.ACTIVE,
     )
-    line = _make_line(db_session, buy_plan_id=plan.id, status=BuyPlanLineStatus.PENDING_VERIFY)
-    _add_ops(db_session, test_user)
+    _make_line(db_session, buy_plan_id=plan.id, status=BuyPlanLineStatus.PENDING_VERIFY)
+    _add_ops(db_session, test_user)  # ops member (halt authority), but no PO-approval right
 
-    assert line.id in [r.line_id for r in my_queue(db_session, test_user) if r.kind == "po_verify"]
+    assert "po_verify" not in _kinds(my_queue(db_session, test_user))
 
 
 # ── claim (P5) ────────────────────────────────────────────────────────
@@ -441,13 +447,16 @@ def test_my_queue_oldest_first_within_tier(db_session, test_user, test_quote, te
 # ── Role gating summary (sales sees only owner-scoped work) ────────────
 
 
-def test_my_queue_sales_sees_only_owned_drafts(db_session, sales_user, test_quote, test_requisition):
+def test_my_queue_sales_sees_only_owned_drafts(db_session, sales_user, manager_user, test_quote, test_requisition):
     """A sales user is not a PO-cutter/approver: they only see their own
     draft/returned/halted.
 
     A PENDING plan they own routes to approvers, not to them; a RESOURCING pool line is
     invisible to non-cutters.
     """
+    # A real buy-plan approver exists, so the owned PENDING plan is normally-pending (routed
+    # to the manager) rather than config-stuck — it must NOT surface to sales as no_approver.
+    _grant(db_session, manager_user, can_approve_buy_plans=True)
     own_draft = _make_plan(
         db_session,
         quote_id=test_quote.id,
@@ -477,6 +486,143 @@ def test_my_queue_sales_sees_only_owned_drafts(db_session, sales_user, test_quot
     assert rows[0].plan_id == own_draft.id
 
 
+# ── flagged (P2) — supervisor-only triage (Phase F-1 gap-fill) ─────────
+
+
+def test_my_queue_flagged_supervisor_only(db_session, test_user, manager_user, test_quote, test_requisition):
+    """An ISSUE (buyer-flagged) line surfaces as a P2 flagged row to a supervisor only.
+
+    The row carries the issue reason in extra, no inline action (action_url None), and
+    links to the plan detail; a non-supervisor never sees the flagged kind.
+    """
+    plan = _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.ACTIVE,
+    )
+    line = _make_line(
+        db_session,
+        buy_plan_id=plan.id,
+        buyer_id=test_user.id,
+        status=BuyPlanLineStatus.ISSUE,
+        issue_type="sold_out",
+    )
+    line.issue_note = "Vendor sold the lot"
+    db_session.flush()
+
+    rows = my_queue(db_session, manager_user)
+    assert "flagged" in _kinds(rows)
+    row = _row(rows, "flagged")
+    assert row.line_id == line.id
+    assert row.priority == 2
+    assert row.action_url is None
+    assert row.detail_href == f"/v2/partials/buy-plans/{plan.id}"
+    assert row.extra["issue_reason"] == "Vendor sold the lot"
+
+    # A plain buyer (non-supervisor) never sees the flagged kind.
+    assert "flagged" not in _kinds(my_queue(db_session, test_user))
+
+
+# ── cut_po kicked-back extra (Phase F-1 gap-fill) ──────────────────────
+
+
+def test_my_queue_cut_po_kicked_back_extra(db_session, test_user, test_quote, test_requisition):
+    """A kicked-back AWAITING_PO line carries kicked_back + po_rejection_note in
+    extra."""
+    plan = _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.ACTIVE,
+        approved_at=datetime.now(timezone.utc),
+    )
+    line = _make_line(db_session, buy_plan_id=plan.id, buyer_id=test_user.id, status=BuyPlanLineStatus.AWAITING_PO)
+    line.po_rejection_note = "Wrong vendor — re-cut to Arrow"
+    db_session.flush()
+
+    row = _row(my_queue(db_session, test_user), "cut_po")
+    assert row.extra["kicked_back"] is True
+    assert row.extra["po_rejection_note"] == "Wrong vendor — re-cut to Arrow"
+
+
+def test_my_queue_cut_po_not_kicked_back_extra(db_session, test_user, test_quote, test_requisition):
+    """A normal AWAITING_PO line reports kicked_back=False and a None rejection note."""
+    plan = _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.ACTIVE,
+        approved_at=datetime.now(timezone.utc),
+    )
+    _make_line(db_session, buy_plan_id=plan.id, buyer_id=test_user.id, status=BuyPlanLineStatus.AWAITING_PO)
+
+    row = _row(my_queue(db_session, test_user), "cut_po")
+    assert row.extra["kicked_back"] is False
+    assert row.extra["po_rejection_note"] is None
+
+
+# ── prepay row carries request_id (Phase F-1 gap-fill) ─────────────────
+
+
+def test_my_queue_prepay_row_carries_request_id(db_session, manager_user, test_quote, test_requisition):
+    """A prepay_approve row exposes the originating ApprovalRequest id so the inline My
+    Queue action can build the decide URL."""
+    plan = _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.ACTIVE,
+        total_cost="5000.00",
+    )
+    _grant(db_session, manager_user, can_approve_prepayments=True)
+    ar, _pp = _make_prepay_request(db_session, recipient=manager_user, buy_plan_id=plan.id, amount="2500.00")
+
+    row = _row(my_queue(db_session, manager_user), "prepay_approve")
+    assert row.extra["request_id"] == ar.id
+
+
+# ── open_avg_margin (My Queue + Pipeline metric parity, Phase F-1) ─────
+
+
+def test_open_avg_margin_zero_when_no_open_plans(db_session):
+    """No open plans → 0.0 (AVG of an empty set, coalesced)."""
+    from app.services.buyplan_hub import open_avg_margin
+
+    assert open_avg_margin(db_session) == 0.0
+
+
+def test_open_avg_margin_averages_open_plans_only(db_session, test_quote, test_requisition):
+    """Averages total_margin_pct across OPEN plans; terminal (COMPLETED) plans
+    excluded."""
+    from app.services.buyplan_hub import open_avg_margin
+
+    _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.ACTIVE,
+        total_margin_pct=20,
+    )
+    _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.PENDING,
+        total_margin_pct=40,
+    )
+    # COMPLETED is terminal → excluded from the open-book average.
+    _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.COMPLETED,
+        total_margin_pct=100,
+    )
+
+    assert open_avg_margin(db_session) == 30.0
+
+
 # ── supervise_overview contract unchanged (R4) ────────────────────────
 
 
@@ -491,10 +637,49 @@ def test_supervise_overview_contract_unchanged(db_session):
         "open_value",
         "avg_margin",
         "approval_count",
-        "so_pending_count",
         "halted_count",
         "overdue_po_count",
         "po_pending_verify_count",
         "flagged_count",
     }
     assert result["queue"] == []
+
+
+class TestNoApproverKind:
+    """no_approver — a plan silently stalled because no approver is configured surfaces
+    to its owner (who otherwise has no signal) and to admins (who can fix the
+    config)."""
+
+    def test_surfaces_stuck_pending_plan_to_owner(self, db_session, test_user, test_quote, test_requisition):
+        _make_plan(
+            db_session,
+            quote_id=test_quote.id,
+            requisition_id=test_requisition.id,
+            status=BuyPlanStatus.PENDING,
+            submitted_by_id=test_user.id,
+        )
+        assert "no_approver" in _kinds(my_queue(db_session, test_user))
+
+    def test_absent_when_buy_plan_approver_configured(
+        self, db_session, test_user, manager_user, test_quote, test_requisition
+    ):
+        _grant(db_session, manager_user, can_approve_buy_plans=True)
+        _make_plan(
+            db_session,
+            quote_id=test_quote.id,
+            requisition_id=test_requisition.id,
+            status=BuyPlanStatus.PENDING,
+            submitted_by_id=test_user.id,
+        )
+        assert "no_approver" not in _kinds(my_queue(db_session, test_user))
+
+    def test_over_threshold_active_without_po_approver(self, db_session, test_user, test_quote, test_requisition):
+        _make_plan(
+            db_session,
+            quote_id=test_quote.id,
+            requisition_id=test_requisition.id,
+            status=BuyPlanStatus.ACTIVE,
+            submitted_by_id=test_user.id,
+            total_cost=Decimal("10000"),
+        )
+        assert "no_approver" in _kinds(my_queue(db_session, test_user))

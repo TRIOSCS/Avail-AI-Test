@@ -130,8 +130,8 @@ async def recent_terms(
         .limit(20)
         .all()
     )
-    payment_opts = [f'<option value="{t[0]}">' for t in payment_terms if t[0]]
-    shipping_opts = [f'<option value="{t[0]}">' for t in shipping_terms if t[0]]
+    payment_opts = [f'<option value="{html_mod.escape(t[0])}">' for t in payment_terms if t[0]]
+    shipping_opts = [f'<option value="{html_mod.escape(t[0])}">' for t in shipping_terms if t[0]]
     html = f'<datalist id="payment-terms">{"".join(payment_opts)}</datalist>'
     html += f'<datalist id="shipping-terms">{"".join(shipping_opts)}</datalist>'
     return HTMLResponse(html)

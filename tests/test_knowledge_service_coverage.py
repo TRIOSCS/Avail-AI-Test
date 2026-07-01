@@ -289,6 +289,24 @@ class TestCaptureQuoteFact:
         result = knowledge_service.capture_quote_fact(db_session, quote=mock_quote, user_id=test_user.id)
         assert result is None
 
+    def test_quote_fact_survives_caller_rollback(self, db_session: Session, test_user: User, requisition: Requisition):
+        """Regression: create_quote/build_quote return WITHOUT committing after this call,
+        so the captured fact must be durably committed here — it must survive the caller
+        rolling back its transaction (pre-fix it was only flushed and vanished)."""
+        from app.models.knowledge import KnowledgeEntry
+
+        mock_quote = MagicMock()
+        mock_quote.quote_number = "Q-DURABLE-1"
+        mock_quote.requisition_id = requisition.id
+        mock_quote.line_items = [{"mpn": "LM317T", "unit_sell": 1.50, "qty": 100, "vendor_name": "Arrow"}]
+        entry = knowledge_service.capture_quote_fact(db_session, quote=mock_quote, user_id=test_user.id)
+        assert entry is not None
+
+        db_session.rollback()  # caller discards its own transaction without committing
+
+        surviving = db_session.query(KnowledgeEntry).filter(KnowledgeEntry.content.like("%Q-DURABLE-1%")).all()
+        assert len(surviving) == 1
+
 
 class TestCaptureOfferFact:
     def test_captures_offer(self, db_session: Session, test_user: User, requisition: Requisition):
@@ -316,6 +334,30 @@ class TestCaptureOfferFact:
         mock_offer.requisition_id = None
         result = knowledge_service.capture_offer_fact(db_session, offer=mock_offer)
         assert result is None
+
+    def test_offer_fact_survives_caller_rollback(self, db_session: Session, test_user: User, requisition: Requisition):
+        """Regression: offer callers don't reliably commit after this call, so the fact
+        must be durably committed here — it must survive a caller rollback."""
+        from types import SimpleNamespace
+
+        from app.models.knowledge import KnowledgeEntry
+
+        offer = SimpleNamespace(
+            mpn="LM317T-DURABLE",
+            unit_price=0.75,
+            quantity=500,
+            vendor_name="Arrow",
+            lead_time=None,
+            vendor_card_id=None,
+            requisition_id=requisition.id,
+        )
+        entry = knowledge_service.capture_offer_fact(db_session, offer=offer, user_id=test_user.id)
+        assert entry is not None
+
+        db_session.rollback()
+
+        surviving = db_session.query(KnowledgeEntry).filter(KnowledgeEntry.mpn == "LM317T-DURABLE").all()
+        assert len(surviving) == 1
 
 
 class TestCaptureRfqResponseFact:
@@ -522,6 +564,72 @@ class TestGenerateInsights:
         # Old one deleted, new one added
         assert len(all_insights) == 1
         assert all_insights[0].content == "New insight"
+
+    async def test_generate_insights_failure_preserves_cached(
+        self, db_session: Session, test_user: User, requisition: Requisition
+    ):
+        # Regression: a failed AI regen must NOT wipe the previously-cached insights.
+        from app.utils.claude_errors import ClaudeError
+
+        knowledge_service.create_entry(
+            db_session,
+            user_id=test_user.id,
+            entry_type="ai_insight",
+            content="Cached insight worth keeping",
+            requisition_id=requisition.id,
+        )
+        entry = knowledge_service.create_entry(
+            db_session,
+            user_id=test_user.id,
+            entry_type="fact",
+            content="LM317T data",
+            requisition_id=requisition.id,
+        )
+        entry.created_at = datetime.now(timezone.utc)
+        db_session.commit()
+
+        async def _raise(*a, **kw):
+            raise ClaudeError("AI regen blew up")
+
+        with patch("app.utils.claude_client.claude_structured", new=_raise):
+            result = await knowledge_service.generate_insights(db_session, requisition.id)
+        assert result == []
+
+        surviving = knowledge_service.get_cached_insights(db_session, requisition.id)
+        assert len(surviving) == 1
+        assert surviving[0].content == "Cached insight worth keeping"
+
+    async def test_generate_insights_empty_result_preserves_cached(
+        self, db_session: Session, test_user: User, requisition: Requisition
+    ):
+        # Regression: an empty AI result must NOT wipe the previously-cached insights.
+        knowledge_service.create_entry(
+            db_session,
+            user_id=test_user.id,
+            entry_type="ai_insight",
+            content="Cached insight worth keeping",
+            requisition_id=requisition.id,
+        )
+        entry = knowledge_service.create_entry(
+            db_session,
+            user_id=test_user.id,
+            entry_type="fact",
+            content="LM317T data",
+            requisition_id=requisition.id,
+        )
+        entry.created_at = datetime.now(timezone.utc)
+        db_session.commit()
+
+        async def _mock_empty(*a, **kw):
+            return {"insights": []}
+
+        with patch("app.utils.claude_client.claude_structured", new=_mock_empty):
+            result = await knowledge_service.generate_insights(db_session, requisition.id)
+        assert result == []
+
+        surviving = knowledge_service.get_cached_insights(db_session, requisition.id)
+        assert len(surviving) == 1
+        assert surviving[0].content == "Cached insight worth keeping"
 
 
 class TestBuildMpnContext:
@@ -771,3 +879,50 @@ class TestGeneratePipelineInsights:
         with patch("app.utils.claude_client.claude_structured", new=_mock):
             result = await knowledge_service.generate_pipeline_insights(db_session)
         assert len(result) == 1
+
+
+class TestKnowledgeEntryAuthzAndSavepoint:
+    """Update/delete enforce creator-only; capture_quote_fact is savepoint-isolated."""
+
+    def test_update_entry_non_creator_raises(self, db_session, test_user):
+        import pytest
+
+        from app.services import knowledge_service
+
+        entry = knowledge_service.create_entry(db_session, user_id=test_user.id, entry_type="note", content="mine")
+        with pytest.raises(PermissionError):
+            knowledge_service.update_entry(db_session, entry.id, user_id=test_user.id + 999, content="hacked")
+        # creator can still update
+        updated = knowledge_service.update_entry(db_session, entry.id, user_id=test_user.id, content="ok")
+        assert updated is not None and updated.content == "ok"
+
+    def test_delete_entry_non_creator_raises(self, db_session, test_user):
+        import pytest
+
+        from app.services import knowledge_service
+
+        entry = knowledge_service.create_entry(db_session, user_id=test_user.id, entry_type="note", content="mine")
+        with pytest.raises(PermissionError):
+            knowledge_service.delete_entry(db_session, entry.id, user_id=test_user.id + 999)
+        assert knowledge_service.delete_entry(db_session, entry.id, user_id=test_user.id) is True
+
+    def test_capture_quote_fact_failure_is_savepoint_isolated(self, db_session, test_user):
+        """A create failure inside capture_quote_fact rolls back only its savepoint and
+        does NOT poison the caller's transaction (the just-created quote survives)."""
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        from sqlalchemy import text
+
+        from app.services import knowledge_service
+
+        quote = SimpleNamespace(
+            line_items=[{"mpn": "LM317T", "unit_sell": 1.5, "qty": 10, "vendor_name": "Arrow"}],
+            quote_number="Q-KS-1",
+            requisition_id=None,
+        )
+        with patch.object(knowledge_service, "create_entry", side_effect=RuntimeError("boom")):
+            result = knowledge_service.capture_quote_fact(db_session, quote=quote, user_id=test_user.id)
+        assert result is None
+        # The outer transaction is intact (not aborted) — a follow-up query works.
+        assert db_session.execute(text("SELECT 1")).scalar() == 1

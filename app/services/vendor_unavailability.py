@@ -780,13 +780,15 @@ def maybe_release_on_offer(
 
 
 def excluded_vendor_norms(db: Session, requirements: Iterable[Requirement]) -> set[str]:
-    """Vendor norms with an ACTIVE record on any of the requirements' primary-MPN keys.
+    """Vendor norms with an ACTIVE, all-conditions record on any of the requirements'
+    primary-MPN keys.
 
-    Fetches full rows and filters with ``is_active`` in Python — expired/released
-    records do not exclude (RFQ resumes, and the tab agrees). Deliberate boundary:
-    matches primary keys only (no substitute-MPN matching). Logs a warning when a
-    requirement contributes no derivable key (IMPORTANT-6) — it must not silently
-    widen RFQ suggestions.
+    Fetches full rows and filters in Python: a row excludes only when ``is_active`` AND
+    its ``condition`` is NULL (the all-conditions catch-all). Expired/released records and
+    condition-specific rows (new/refurb/used) do NOT exclude (RFQ resumes, and the tab
+    agrees). Deliberate boundary: matches primary keys only (no substitute-MPN matching).
+    Logs a warning when a requirement contributes no derivable key (IMPORTANT-6) — it must
+    not silently widen RFQ suggestions.
     """
     keys: set[str] = set()
     for r in requirements:

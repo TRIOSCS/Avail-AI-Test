@@ -10,7 +10,9 @@ unioned into one count + spotlight list:
      double-count); only a pre-C1 transition-window plan (no engine request) still surfaces
      here so it never goes invisible.
   3. Ops verify — a buy plan whose SO is still PENDING and unverified, where I am an
-     active member of the ops verification group (the same rule verify_so enforces).
+     active member of the ops verification group. (Phase D folded SO verification into the
+     single approval, so newly-approved plans are stamped so_status=approved and never
+     surface here; this remains only for any legacy active+pending plan.)
 
 As an ACTION source the count derives PURELY from work-state: it does NOT subtract
 seen_ref_ids. ``alert_seen`` only gates the cosmetic one-time in-tab pulse (handled

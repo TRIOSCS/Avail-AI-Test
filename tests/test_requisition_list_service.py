@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 import pytest
 
 from app.models import Requisition
-from app.schemas.requisitions2 import ReqListFilters, ReqStatus, SortColumn, SortOrder
+from app.schemas.requisition_list import ReqListFilters, ReqStatus, SortColumn, SortOrder
 from app.services.requisition_list_service import (
     _build_row_mpn_chips,
     _hours_until_bid_due,
@@ -267,7 +267,7 @@ def test_list_filter_by_urgency(db_session, test_user):
     _make_req(db_session, "NORMAL-REQ", test_user.id, urgency="normal")
     db_session.commit()
 
-    from app.schemas.requisitions2 import Urgency
+    from app.schemas.requisition_list import Urgency
 
     filters = ReqListFilters(status=ReqStatus.open, urgency=Urgency.hot)
     result = list_requisitions(db_session, filters, test_user.id, "buyer")

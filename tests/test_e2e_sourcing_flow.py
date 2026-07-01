@@ -36,7 +36,6 @@ from app.services.buyplan_workflow import (
     resubmit_buy_plan,
     submit_buy_plan,
     verify_po,
-    verify_so,
 )
 from app.services.requirement_status import (
     on_offer_created,
@@ -80,6 +79,8 @@ def _full_setup(db: Session):
         name="Ops",
         role="admin",
         azure_id="az-ops-e2e",
+        # Phase D: verify-PO gates on this per-user right (not ops-group membership).
+        can_approve_purchase_orders=True,
         created_at=datetime.now(timezone.utc),
     )
     db.add_all([sales, manager, buyer, ops])
@@ -293,8 +294,8 @@ class TestBuyPlanFullLifecycle:
         line = verify_po(plan.id, line.id, "approve", ctx["ops"], db_session)
         assert line.status == BuyPlanLineStatus.VERIFIED.value
 
-        # Verify SO
-        plan = verify_so(plan.id, "approve", ctx["ops"], db_session)
+        # Phase D: the manager approval already folded SO verification (so_status=approved),
+        # so there is no separate verify-SO step before completion.
         assert plan.so_status == SOVerificationStatus.APPROVED.value
 
         # Check completion
@@ -351,8 +352,8 @@ class TestBuyPlanFullLifecycle:
         line = flag_line_issue(plan.id, line.id, "price_changed", ctx["buyer"], db_session, note="Price went up 20%")
         assert line.status == BuyPlanLineStatus.ISSUE.value
 
-        # SO approved
-        plan = verify_so(plan.id, "approve", ctx["ops"], db_session)
+        # SO already approved by the manager approval (Phase D fold) — no verify-SO step.
+        assert plan.so_status == SOVerificationStatus.APPROVED.value
 
         # Check completion — should NOT complete (line has issue)
         db_session.refresh(plan)

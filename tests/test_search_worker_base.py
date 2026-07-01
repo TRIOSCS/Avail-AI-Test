@@ -326,8 +326,6 @@ class TestSearchScheduler:
         config.ICS_TYPICAL_DELAY_SECONDS = 270
         config.ICS_MIN_DELAY_SECONDS = 150
         config.ICS_MAX_DELAY_SECONDS = 420
-        config.ICS_BUSINESS_HOURS_START = 8
-        config.ICS_BUSINESS_HOURS_END = 18
         return SearchScheduler(config, prefix="ICS")
 
     def test_next_delay_within_bounds(self):
@@ -386,6 +384,11 @@ class TestWorkerConfig:
         assert cfg["TEST_MAX_DAILY_SEARCHES"] == 50
         assert cfg["TEST_MIN_DELAY_SECONDS"] == 150
         assert cfg["TEST_DEDUP_WINDOW_DAYS"] == 7
+        # Dead knobs removed from the shared factory: hourly cap was never
+        # enforced and business-hours window is hardcoded in the scheduler.
+        assert "TEST_MAX_HOURLY_SEARCHES" not in cfg
+        assert "TEST_BUSINESS_HOURS_START" not in cfg
+        assert "TEST_BUSINESS_HOURS_END" not in cfg
 
     def test_build_worker_config_with_env(self):
         from app.services.search_worker_base.config import build_worker_config

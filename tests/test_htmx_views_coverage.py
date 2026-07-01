@@ -218,6 +218,22 @@ class TestVendorDetailMpnFilter:
 # ══════════════════════════════════════════════════════════════════════════
 
 
+@pytest.fixture()
+def _grant_account_management(test_user: User, db_session: Session) -> None:
+    """Promote the buyer ``test_user`` to MANAGER so it can_manage every account.
+
+    Company detail + tab partials (``GET /v2/partials/customers/{id}`` and
+    ``.../tab/{tab}``) now gate on ``can_manage_account``. The classes below GET those
+    endpoints as ``test_user`` on companies they create without assigning ownership, so
+    promote the actor to MANAGER (``can_manage_account`` is True for managers, exactly as
+    for the account owner) to exercise the authorized render path. Applied per-class via
+    ``@pytest.mark.usefixtures`` — scoped narrowly so role-based list tests are untouched.
+    """
+    test_user.role = "manager"
+    db_session.commit()
+
+
+@pytest.mark.usefixtures("_grant_account_management")
 class TestCustomerTabs:
     @pytest.mark.parametrize(
         ("tab", "expected_status"),
@@ -253,6 +269,7 @@ class TestCustomerTabs:
 # ══════════════════════════════════════════════════════════════════════════
 
 
+@pytest.mark.usefixtures("_grant_account_management")
 class TestCustomerDetail:
     def test_customer_detail(self, client: TestClient, db_session: Session):
         co = _make_company(db_session)
@@ -270,6 +287,7 @@ class TestCustomerDetail:
 # ══════════════════════════════════════════════════════════════════════════
 
 
+@pytest.mark.usefixtures("_grant_account_management")
 class TestCompanyNameCheck:
     def test_company_detail_with_open_req(self, client: TestClient, db_session: Session, test_user: User):
         co = _make_company(db_session, name="OpenReqCo")
@@ -770,6 +788,35 @@ class TestReviewResponse:
             data={"status": "reviewed"},
         )
         assert resp.status_code == 200
+
+    @pytest.mark.parametrize("action", ["reviewed", "rejected"])
+    def test_review_response_persists_enum_value(
+        self, client: TestClient, db_session: Session, test_user: User, action: str
+    ):
+        """review_response_htmx maps the form action to the in-vocabulary
+        VendorResponseStatus member so the persisted status matches enum-based
+        filters."""
+        from app.constants import VendorResponseStatus
+        from app.models.offers import VendorResponse
+
+        req = _make_requisition(db_session, test_user)
+        db_session.commit()
+        vr = VendorResponse(
+            requisition_id=req.id,
+            vendor_name="Arrow",
+            body="Quote: LM317T $0.50",
+            status="unread",
+            received_at=datetime.now(timezone.utc),
+        )
+        db_session.add(vr)
+        db_session.commit()
+        resp = client.post(
+            f"/v2/partials/requisitions/{req.id}/responses/{vr.id}/review",
+            data={"status": action},
+        )
+        assert resp.status_code == 200
+        db_session.refresh(vr)
+        assert vr.status == VendorResponseStatus(action).value
 
 
 # ══════════════════════════════════════════════════════════════════════════

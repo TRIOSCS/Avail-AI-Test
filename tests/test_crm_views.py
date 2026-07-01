@@ -51,6 +51,21 @@ def test_contact(db_session: Session, test_site):
     return contact
 
 
+@pytest.fixture()
+def _grant_account_management(test_user: User, db_session: Session) -> None:
+    """Promote the buyer ``test_user`` to MANAGER so it can_manage every account.
+
+    Company detail + tab partials (``GET /v2/partials/customers/{id}`` and
+    ``.../tab/{tab}``) now gate on ``can_manage_account``. The classes below GET those
+    endpoints as ``test_user`` on companies they create without assigning ownership, so
+    promote the actor to MANAGER (``can_manage_account`` is True for managers, exactly as
+    for the account owner) to exercise the authorized render path. Applied per-class via
+    ``@pytest.mark.usefixtures`` — scoped narrowly so role-based list tests are untouched.
+    """
+    test_user.role = "manager"
+    db_session.commit()
+
+
 class TestCRMShell:
     """Test CRM shell partial route."""
 
@@ -531,6 +546,7 @@ class TestCustomerStaleness:
         assert pos_new < pos_old < pos_recent
 
 
+@pytest.mark.usefixtures("_grant_account_management")
 class TestContactPanel:
     """Test the contacts panel (default detail tab) with outreach actions."""
 
@@ -741,6 +757,7 @@ class TestContactPanel:
         assert "1 contact" in html, "Site group should show 1 contact, not 2"
 
 
+@pytest.mark.usefixtures("_grant_account_management")
 class TestEmailIntelligenceInActivity:
     """Test email intelligence data shown in activity tabs."""
 
@@ -811,6 +828,7 @@ class TestPerformanceRetired:
         assert resp.status_code == 404
 
 
+@pytest.mark.usefixtures("_grant_account_management")
 class TestContactsTabP33:
     """P3-3 TDD: accordion by site, role chips, per-contact clocks, honest empty states.
 
@@ -1029,6 +1047,7 @@ class TestContactsTabP33:
         assert "No contacts" in resp.text or "no contacts" in resp.text.lower()
 
 
+@pytest.mark.usefixtures("_grant_account_management")
 class TestCompanyDetailCadenceCard:
     """Tests for the new account-cadence card + commercial-context strip in the company
     detail partial.
@@ -1222,6 +1241,7 @@ class TestCompanyDetailCadenceCard:
 # ────────────────────────────────────────────────────────────────────────────
 
 
+@pytest.mark.usefixtures("_grant_account_management")
 class TestUnifiedActivityTimeline:
     """P3-4 / Step-1 CRM regroup: activity tab shows type-sectioned ActivityLog feed.
 
@@ -1492,111 +1512,51 @@ class TestUnifiedActivityTimeline:
         assert "Activity Log" not in resp.text, "Old 'Activity Log' section still present"
 
 
-class TestUnifiedTimelineHelper:
-    """Unit tests for the build_account_timeline helper function."""
+class TestManageableCompanyIdsBatch:
+    """Batched ownership check (_manageable_company_ids) — parity with
+    can_manage_account.
 
-    def test_build_timeline_merges_three_sources(self):
-        """build_account_timeline produces events from all 3 source lists."""
-        from datetime import datetime, timezone
-        from decimal import Decimal
-        from types import SimpleNamespace
+    The bulk/import loops call this once instead of ``can_manage_account`` per row. It
+    must return exactly the subset of company ids a non-manager rep may manage, via the
+    three ownership paths: primary account owner, site owner, and named collaborator.
+    """
 
-        from app.routers.htmx.companies import build_account_timeline
+    def test_batched_matches_per_row_can_manage_account(self, db_session: Session, test_user: User):
+        """The batched set equals the per-row can_manage_account verdict for every
+        candidate."""
+        from app.dependencies import can_manage_account
+        from app.models.crm import AccountCollaborator, CustomerSite
+        from app.routers.htmx.companies import _manageable_company_ids
 
-        t1 = datetime(2026, 6, 10, tzinfo=timezone.utc)
-        t2 = datetime(2026, 6, 11, tzinfo=timezone.utc)
-        t3 = datetime(2026, 6, 12, tzinfo=timezone.utc)
+        # Non-manager: exercise the ownership paths, not the is_manager_or_admin short-circuit.
+        test_user.role = "sales"
 
-        rfq = SimpleNamespace(
-            vendor_name="Acme",
-            vendor_contact=None,
-            subject="Test RFQ",
-            status="sent",
-            created_at=t1,
-            requisition_id=1,
-        )
-        quote = SimpleNamespace(
-            id=1,
-            quote_number="QT-001",
-            subtotal=Decimal("500.00"),
-            total_cost=Decimal("490.00"),
-            won_revenue=None,
-            status="sent",
-            created_at=t2,
-        )
-        act = SimpleNamespace(
-            activity_type="email_received",
-            channel="email",
-            direction="inbound",
-            subject="Hello",
-            summary=None,
-            notes=None,
-            is_meaningful=True,
-            quality_score=0.8,
-            quality_classification="meaningful",
-            occurred_at=None,
-            created_at=t3,
-            contact_name="Alice",
-            vendor_card_id=None,
-            vendor_card=None,
-        )
+        owned = Company(name="Batch Owned Co", is_active=True, account_owner_id=test_user.id)
+        via_site = Company(name="Batch SiteOwned Co", is_active=True, account_owner_id=None)
+        via_collab = Company(name="Batch Collab Co", is_active=True, account_owner_id=None)
+        not_mine = Company(name="Batch NotMine Co", is_active=True, account_owner_id=None)
+        db_session.add_all([owned, via_site, via_collab, not_mine])
+        db_session.commit()
 
-        events = build_account_timeline([rfq], [quote], [act], req_map={1: SimpleNamespace(id=1)})
-        kinds = {e["kind"] for e in events}
-        assert "rfq" in kinds
-        assert "quote" in kinds
-        assert "activity" in kinds
+        db_session.add(CustomerSite(company_id=via_site.id, site_name="HQ", is_active=True, owner_id=test_user.id))
+        db_session.add(AccountCollaborator(company_id=via_collab.id, user_id=test_user.id, role="helper"))
+        db_session.commit()
 
-    def test_build_timeline_sorted_desc(self):
-        """Events are sorted newest-first."""
-        from datetime import datetime, timezone
-        from types import SimpleNamespace
+        companies = [owned, via_site, via_collab, not_mine]
+        result = _manageable_company_ids(test_user, companies, db_session)
 
-        from app.routers.htmx.companies import build_account_timeline
+        assert result == {owned.id, via_site.id, via_collab.id}
+        for co in companies:
+            assert (co.id in result) == can_manage_account(test_user, co, db_session)
 
-        old = datetime(2026, 6, 1, tzinfo=timezone.utc)
-        mid = datetime(2026, 6, 5, tzinfo=timezone.utc)
-        new = datetime(2026, 6, 9, tzinfo=timezone.utc)
+    def test_empty_input_returns_empty_set(self, db_session: Session, test_user: User):
+        """No candidate companies → empty set, and no queries needed."""
+        from app.routers.htmx.companies import _manageable_company_ids
 
-        rfq = SimpleNamespace(
-            vendor_name="V",
-            vendor_contact=None,
-            subject=None,
-            status="sent",
-            created_at=old,
-            requisition_id=None,
-        )
-        quote = SimpleNamespace(
-            id=2,
-            quote_number="Q",
-            subtotal=None,
-            total_cost=None,
-            won_revenue=None,
-            status="draft",
-            created_at=mid,
-        )
-        act = SimpleNamespace(
-            activity_type="sales_note",
-            channel="manual",
-            direction=None,
-            subject=None,
-            summary=None,
-            notes="note",
-            is_meaningful=True,
-            quality_score=None,
-            quality_classification=None,
-            occurred_at=None,
-            created_at=new,
-            contact_name=None,
-            vendor_card_id=None,
-            vendor_card=None,
-        )
-
-        events = build_account_timeline([rfq], [quote], [act], req_map={})
-        assert events[0]["ts"] == new
-        assert events[-1]["ts"] == old
+        assert _manageable_company_ids(test_user, [], db_session) == set()
 
 
+@pytest.mark.usefixtures("_grant_account_management")
 class TestActivityTabTruncation:
     """Test that the activity tab indicates when ActivityLog results are truncated.
 
@@ -1940,6 +1900,7 @@ class TestVendorDetailCadenceHero:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+@pytest.mark.usefixtures("_grant_account_management")
 class TestSegmentTagViews:
     """Tests for segment-tag UI endpoints.
 
@@ -2266,6 +2227,7 @@ class TestBuyingRoleSetter:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+@pytest.mark.usefixtures("_grant_account_management")
 class TestRoleChipLegacy:
     """Tests that role_chip renders both legacy and new canonical values.
 
@@ -2584,6 +2546,7 @@ class TestEditContact:
         assert resp.status_code == 400
 
 
+@pytest.mark.usefixtures("_grant_account_management")
 class TestManualCompanyMerge:
     """Manual merge-duplicate accounts (P2e).
 
@@ -2795,6 +2758,7 @@ class TestManualCompanyMerge:
 # ────────────────────────────────────────────────────────────────────────────
 
 
+@pytest.mark.usefixtures("_grant_account_management")
 class TestAccountBuyPlansTab:
     """P3: account detail exposes a Buy Plans tab listing all buy-plans whose
     requisition belongs to the company (via company_id FK or name match).
@@ -2905,6 +2869,7 @@ class TestAccountBuyPlansTab:
         assert "Buy Plans" in resp.text, "Buy Plans tab label must appear in detail"
 
 
+@pytest.mark.usefixtures("_grant_account_management")
 class TestCRMMacroDedup:
     """Route-level guards for the CRM template-macro dedup (refactor/crm-template-
     macros).
@@ -3065,6 +3030,7 @@ class TestCRMMacroDedup:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+@pytest.mark.usefixtures("_grant_account_management")
 class TestContactsTabHome:
     """C2 TDD: Unified add/edit form + editable role + tab wrapper.
 
@@ -3530,6 +3496,7 @@ class TestContactsTabHome:
         assert "engineer" in resp.text
 
 
+@pytest.mark.usefixtures("_grant_account_management")
 class TestC3KebabActionsAndCadence:
     """C3 TDD: kebab (Edit/Delete/Set-Primary) on Contacts tab + cadence badge/sort.
 
@@ -3817,6 +3784,7 @@ class TestC3KebabActionsAndCadence:
         assert real_rows[0]["cadence"] == "new"
 
 
+@pytest.mark.usefixtures("_grant_account_management")
 class TestC4SuggestedContactsUI:
     """C4 TDD: Suggested-contacts UI loop.
 
@@ -4077,6 +4045,7 @@ class TestC4SuggestedContactsUI:
         assert sc is not None
 
 
+@pytest.mark.usefixtures("_grant_account_management")
 class TestFullWidthContactsForwardLayout:
     """Pin the full-width, contacts-forward customer + vendor detail reshape.
 
@@ -4548,6 +4517,7 @@ class TestCompanyPhase0FormFields:
         assert co.source == "apollo", f"Expected source 'apollo' preserved, got {co.source!r}"
 
 
+@pytest.mark.usefixtures("_grant_account_management")
 class TestCustomerTabDeepLink:
     """Phase-0 Task B: account-detail tabs are deep-linkable via ?tab= param.
 
@@ -4811,6 +4781,7 @@ class TestDispositionFilter:
         assert "checked" in resp.text
 
 
+@pytest.mark.usefixtures("_grant_account_management")
 class TestAccountActivityTab:
     """Tests for the company Activity tab — type-sectioned feed (Step 1 of core-CRM
     plan).
@@ -5018,6 +4989,7 @@ class TestAccountActivityTab:
         assert ">Calls<" not in html
 
 
+@pytest.mark.usefixtures("_grant_account_management")
 class TestKnownFieldGrid:
     """WS2: account detail renders a known-field grid; empty fields show '+ Add <label>'."""
 

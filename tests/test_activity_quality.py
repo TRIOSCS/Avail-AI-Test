@@ -170,7 +170,8 @@ class TestActivityTimelineEnrichment:
         """Customer activity tab shows AI summary when available."""
         from app.models.crm import Company
 
-        company = Company(name="Timeline Test Co", is_active=True)
+        # account_owner_id: company tab now gates on can_manage_account
+        company = Company(name="Timeline Test Co", is_active=True, account_owner_id=test_user.id)
         db_session.add(company)
         db_session.flush()
 

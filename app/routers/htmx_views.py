@@ -30,6 +30,7 @@ from ..database import get_db
 from ..dependencies import (
     get_req_for_user,
     get_user,
+    is_manager_or_admin,
     require_access,
     require_buyer,
     require_requisition_access,
@@ -62,12 +63,12 @@ from .htmx.settings import _run_inbox_scan_now
 router = APIRouter(tags=["htmx-views"])
 
 # Nav-id aliases: routes that were demoted into a parent nav item highlight the parent
-# instead. Empty now: the standalone Quotes list redirects to /v2/requisitions and the
-# Reporting surface was retired, so no view needs to borrow another tab's highlight.
-# Quote detail (/v2/quotes/{id}) falls through to "quotes", which matches no nav item —
-# correct, since it has no parent tab to highlight.
-# The global contact lists live under the CRM nav item (twins of Customers/Vendors),
-# so they borrow the "crm" highlight.
+# instead. The standalone Quotes list redirects to /v2/requisitions and the Reporting
+# surface was retired, so neither needs an alias. Quote detail (/v2/quotes/{id}) falls
+# through to "quotes", which matches no nav item — correct, since it has no parent tab to
+# highlight.
+# Current aliases: the global contact lists live under the CRM nav item (twins of
+# Customers/Vendors) so they borrow "crm", and the Approvals surface borrows "buy-plans".
 _NAV_ID_ALIAS: dict[str, str] = {"contacts": "crm", "vendor-contacts": "crm", "approvals": "buy-plans"}
 
 
@@ -244,13 +245,13 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         partial_url = f"/v2/partials/settings?tab={quote(tab_qs)}" if tab_qs else "/v2/partials/settings"
     elif current_view in ("buy-plans", "approvals"):
         # Thread ?lens= through so a deep-link / redirect and a reload/bookmark of a pushed
-        # stage URL paint the right stage tab on first full-page load instead of falling to
-        # _default_lens. Lens keys are the five lifecycle stages. A detail URL
-        # (/buy-plans/{id}) is overridden by the _DETAIL_VIEWS block below.
+        # lens URL paint the right lens on first full-page load instead of falling to
+        # _default_lens. Lens keys are the two surviving lenses (My Queue + Pipeline). A
+        # detail URL (/buy-plans/{id}) is overridden by the _DETAIL_VIEWS block below.
         lens_qs = request.query_params.get("lens", "").strip()
         partial_url = (
             f"/v2/partials/approvals?lens={quote(lens_qs)}"
-            if lens_qs in ("sales_orders", "buy_plans", "purchase_orders", "prepayments", "supervise")
+            if lens_qs in ("my_queue", "pipeline")
             else "/v2/partials/approvals"
         )
     else:
@@ -432,6 +433,8 @@ async def requisitions_bulk_action(
         require_requisition_access(db, r.id, user)
 
     if action == "assign":
+        if not is_manager_or_admin(user):
+            raise HTTPException(403, "Only managers or admins can reassign requisition owners")
         owner_id = form.get("owner_id")
         if owner_id:
             new_owner = _safe_int(owner_id)
@@ -532,6 +535,8 @@ async def requisition_inline_save(
         req.deadline = value if value else None
         msg = f"Deadline {'→ ' + value if value else 'cleared'}"
     elif field == "owner":
+        if not is_manager_or_admin(user):
+            raise HTTPException(403, "Only managers or admins can reassign requisition owners")
         if value and value.isdigit():
             req.created_by = int(value)
             msg = "Owner reassigned"
@@ -1327,10 +1332,18 @@ async def add_to_requisition(
     )
 
     if not requirement:
+        # Mirror update_requirement: store the canonical key-form normalized_mpn
+        # (lowercase, separators stripped) so part-history / material-card joins
+        # line up, and resolve the MaterialCard up front.
+        from ..search_service import resolve_material_card
+        from ..utils.normalization import normalize_mpn_key
+
+        card = resolve_material_card(mpn, db)
         requirement = Requirement(
             requisition_id=requisition_id,
             primary_mpn=mpn,
-            normalized_mpn=mpn.strip().upper(),
+            normalized_mpn=normalize_mpn_key(mpn),
+            material_card_id=card.id if card else None,
             target_qty=None,
             sourcing_status=SourcingStatus.OPEN,
         )
@@ -1354,7 +1367,7 @@ async def add_to_requisition(
     count = len(items)
     return HTMLResponse(
         f'<div class="text-sm text-emerald-600 p-2">'
-        f"Added {count} result{'s' if count != 1 else ''} to requisition &ldquo;{req.name}&rdquo;"
+        f"Added {count} result{'s' if count != 1 else ''} to requisition &ldquo;{html_mod.escape(req.name or '')}&rdquo;"
         f"</div>"
     )
 

@@ -12,6 +12,7 @@ Called by: app/main.py (router mount).
 Depends on: app.models, app.dependencies, app.database, app.services, ._shared
 """
 
+import html
 import json
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
@@ -28,7 +29,6 @@ from ...dependencies import (
     has_buyer_role,
     require_access,
     require_buyer,
-    require_user,
 )
 from ...models import (
     Offer,
@@ -174,11 +174,14 @@ def _parse_card_filter_params(
 @router.get("/v2/partials/materials", response_class=HTMLResponse)
 async def materials_list_partial(
     request: Request,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.MATERIALS)),
     db: Session = Depends(get_db),
 ):
-    """Redirect to faceted workspace — all materials browsing uses the sidebar
-    layout."""
+    """Redirect to faceted workspace — all materials browsing uses the sidebar layout.
+
+    Gated by MATERIALS access (it calls workspace_partial directly, so the inner route's
+    Depends would otherwise never run).
+    """
     return await materials_workspace_partial(request, user, db)
 
 
@@ -197,7 +200,7 @@ async def materials_workspace_partial(
     ctx["total_materials"] = total_materials
     ctx["display_names"] = {sub: get_display_name(sub) for sub in all_subs}
     ctx["global_facet_counts"] = get_global_facet_counts(db)
-    # The workspace is require_user, but POST /api/materials/add is require_buyer —
+    # The workspace is MATERIALS-gated, but POST /api/materials/add is require_buyer —
     # hide the "Add part" button from roles whose submit would 403 (dead-end otherwise).
     ctx["can_add_parts"] = has_buyer_role(user)
     return template_response("htmx/partials/materials/workspace.html", ctx)
@@ -207,7 +210,7 @@ async def materials_workspace_partial(
 async def materials_filters_manufacturers_partial(
     request: Request,
     commodity: str = "",
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.MATERIALS)),
     db: Session = Depends(get_db),
 ):
     """Render manufacturer filter dropdown."""
@@ -237,7 +240,7 @@ async def materials_filters_global_partial(
     internal: str = "all",
     searched_within: str = "any",
     min_searches: str = "0",
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.MATERIALS)),
     db: Session = Depends(get_db),
 ):
     """Render global facets (lifecycle / RoHS / condition / has-datasheet) with live
@@ -275,7 +278,7 @@ async def materials_filters_global_partial(
 async def manufacturer_search(
     request: Request,
     q: str = "",
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.MATERIALS)),
     db: Session = Depends(get_db),
 ):
     """Typeahead search for manufacturers by name or alias."""
@@ -310,7 +313,7 @@ async def manufacturer_search(
 async def manufacturer_add(
     request: Request,
     name: str = Form(...),
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.MATERIALS)),
     db: Session = Depends(get_db),
 ):
     """Add a new manufacturer on the fly from typeahead."""
@@ -327,7 +330,7 @@ async def manufacturer_add(
         db.commit()
 
     return HTMLResponse(
-        f'<div class="px-3 py-1.5 text-xs font-medium text-brand-600" data-mfr-name="{name}">Added: {name}</div>'
+        f'<div class="px-3 py-1.5 text-xs font-medium text-brand-600" data-mfr-name="{html.escape(name)}">Added: {html.escape(name)}</div>'
     )
 
 
@@ -335,7 +338,7 @@ async def manufacturer_add(
 async def materials_filters_tree_partial(
     request: Request,
     commodity: str = "",
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.MATERIALS)),
     db: Session = Depends(get_db),
 ):
     """Render the commodity category tree for the faceted sidebar."""
@@ -373,7 +376,7 @@ async def materials_filters_sub_partial(
     internal: str = "all",
     searched_within: str = "any",
     min_searches: str = "0",
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.MATERIALS)),
     db: Session = Depends(get_db),
 ):
     """Render sub-filters for a selected commodity with live facet counts.
@@ -431,7 +434,7 @@ async def materials_filters_sub_partial(
 async def materials_ai_interpret_partial(
     request: Request,
     q: str = "",
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.MATERIALS)),
     db: Session = Depends(get_db),
 ):
     """Interpret a natural language query using AI and return pre-selection chip."""
@@ -471,7 +474,7 @@ async def materials_faceted_partial(
     internal: str = Query("all"),
     searched_within: str = Query("any"),
     min_searches: str = Query("0"),
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.MATERIALS)),
     db: Session = Depends(get_db),
 ):
     """Return faceted-search material list as HTML partial."""
@@ -671,7 +674,7 @@ async def material_add_form_partial(
 async def material_enrich_status_partial(
     request: Request,
     card_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.MATERIALS)),
     db: Session = Depends(get_db),
 ):
     """Render the enrichment-status badge for the card detail header.
@@ -705,7 +708,7 @@ async def material_conflict_accept(
     request: Request,
     card_id: int,
     key: str,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.MATERIALS)),
     db: Session = Depends(get_db),
 ):
     """Accept a validation conflict's evidence value — a human decision.
@@ -784,7 +787,7 @@ async def material_conflict_accept(
 async def fru_lookup_partial(
     request: Request,
     q: str = Query("", max_length=100),
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.MATERIALS)),
     db: Session = Depends(get_db),
 ):
     """FRU crosswalk lookup: render whichever view matches the part number.
@@ -814,7 +817,7 @@ async def fru_lookup_partial(
 async def material_detail_partial(
     request: Request,
     card_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.MATERIALS)),
     db: Session = Depends(get_db),
 ):
     """Return material card detail as HTML partial."""
@@ -858,7 +861,7 @@ async def material_tab_partial(
     request: Request,
     card_id: int,
     tab_name: str,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.MATERIALS)),
     db: Session = Depends(get_db),
 ):
     """Return a material detail tab partial."""
@@ -912,7 +915,7 @@ async def material_tab_partial(
 async def update_material_card(
     request: Request,
     card_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.MATERIALS)),
     db: Session = Depends(get_db),
 ):
     """Update material card fields.
@@ -1038,7 +1041,7 @@ async def update_material_card(
 async def enrich_material(
     request: Request,
     material_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.MATERIALS)),
     db: Session = Depends(get_db),
 ):
     """Trigger authoritative enrichment for a material card.
@@ -1103,7 +1106,7 @@ async def find_crosses(
     request: Request,
     material_id: int,
     refresh: bool = Form(False),
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.MATERIALS)),
     db: Session = Depends(get_db),
 ):
     """On-demand AI search for crosses & substitutes for a single material card.
@@ -1186,7 +1189,7 @@ async def find_crosses(
 async def material_insights(
     request: Request,
     material_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.MATERIALS)),
     db: Session = Depends(get_db),
 ):
     """Return MPN insights panel for a material card."""

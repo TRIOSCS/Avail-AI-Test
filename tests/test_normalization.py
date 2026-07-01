@@ -452,6 +452,23 @@ class TestParseSubstituteMpns:
         assert len(result) == 1
         assert result[0]["manufacturer"] == ""
 
+    def test_legacy_string_form_substitutes_do_not_crash(self):
+        # Legacy DB rows hold plain strings, e.g. ["LM338T"] — must not raise.
+        result = parse_substitute_mpns(["LM338T"], "LM317T")
+        assert len(result) == 1
+        assert result[0]["mpn"] == "LM338T"
+        assert result[0]["manufacturer"] == ""
+
+    def test_mixed_string_and_dict_forms(self):
+        result = parse_substitute_mpns(["ABC123", {"mpn": "DEF456", "manufacturer": "TI"}], "LM317T")
+        mpns = {r["mpn"] for r in result}
+        assert mpns == {"ABC123", "DEF456"}
+
+    def test_dict_with_none_mpn_skipped_not_crash(self):
+        result = parse_substitute_mpns([{"mpn": None}, {"mpn": "LM317AT"}], "LM317T")
+        assert len(result) == 1
+        assert result[0]["mpn"] == "LM317AT"
+
     def test_mpn_normalized_to_uppercase(self):
         subs = [{"mpn": "lm317at", "manufacturer": "TI"}]
         result = parse_substitute_mpns(subs, "LM317T")

@@ -22,6 +22,7 @@ from app.constants import (
     QuoteStatus,
     RequisitionStatus,
     SourcingStatus,
+    UserRole,
 )
 from app.models import (
     BuyPlan,
@@ -596,6 +597,17 @@ class TestRequisitionDetail:
         resp = client.get(f"/v2/partials/requisitions/{req.id}/tab/offers")
         assert resp.status_code == 200
 
+    def test_tab_offers_empty_shows_search_cta(self, client: TestClient, db_session: Session, test_user: User):
+        """Empty offers tab points to sourcing (Search all sources → Parts tab) instead
+        of dead-ending with a message the user can't act on."""
+        req = _make_requisition(db_session, test_user)
+        db_session.commit()
+        resp = client.get(f"/v2/partials/requisitions/{req.id}/tab/offers")
+        assert resp.status_code == 200
+        assert "No offers received yet" in resp.text
+        assert "Search all sources" in resp.text
+        assert f"/v2/partials/requisitions/{req.id}/tab/parts" in resp.text
+
     @pytest.mark.parametrize(
         "tab, expected_status",
         [
@@ -663,6 +675,8 @@ class TestRequisitionInlineEdit:
 
     def test_inline_save_owner(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user)
+        db_session.commit()
+        test_user.role = UserRole.MANAGER
         db_session.commit()
         resp = client.patch(
             f"/v2/partials/requisitions/{req.id}/inline",
@@ -739,6 +753,8 @@ class TestRequisitionBulkActions:
 
     def test_bulk_assign(self, client: TestClient, db_session: Session, test_user: User):
         r1 = _make_requisition(db_session, test_user)
+        db_session.commit()
+        test_user.role = UserRole.MANAGER
         db_session.commit()
         resp = client.post(
             "/v2/partials/requisitions/bulk/assign",
@@ -1209,6 +1225,22 @@ class TestCustomersList:
         assert resp.status_code == 200
 
 
+@pytest.fixture()
+def _grant_account_management(test_user: User, db_session: Session) -> None:
+    """Promote the buyer ``test_user`` to MANAGER so it can_manage every account.
+
+    Company detail + tab partials (``GET /v2/partials/customers/{id}`` and
+    ``.../tab/{tab}``) now gate on ``can_manage_account``. The class below GETs those
+    endpoints as ``test_user`` on companies it creates without assigning ownership, so
+    promote the actor to MANAGER (``can_manage_account`` is True for managers, exactly as
+    for the account owner) to exercise the authorized render path. Applied per-class via
+    ``@pytest.mark.usefixtures`` — scoped narrowly so role-based list tests are untouched.
+    """
+    test_user.role = "manager"
+    db_session.commit()
+
+
+@pytest.mark.usefixtures("_grant_account_management")
 class TestCustomerDetail:
     """Test customer detail and tabs."""
 

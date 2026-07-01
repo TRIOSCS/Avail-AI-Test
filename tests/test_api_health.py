@@ -823,6 +823,7 @@ async def test_connector_skips_retry_on_401(db_session):
     """401 errors skip retry and fail immediately."""
     import httpx
 
+    from app.connectors.errors import ConnectorError
     from app.connectors.sources import BaseConnector
 
     class MockConnector(BaseConnector):
@@ -831,7 +832,9 @@ async def test_connector_skips_retry_on_401(db_session):
             raise httpx.HTTPStatusError("401 Unauthorized", request=resp.request, response=resp)
 
     conn = MockConnector(max_retries=2)
-    with pytest.raises(httpx.HTTPStatusError):
+    # Fix 6: the 401/403 path now raises a sanitized ConnectorError (from None) so the
+    # secret URL can't leak downstream; it still skips retry and trips the breaker.
+    with pytest.raises(ConnectorError):
         await conn.search("LM317")
 
     # Should only have been called once (no retries)
@@ -843,6 +846,7 @@ async def test_connector_skips_retry_on_403(db_session):
     """403 errors skip retry and fail immediately."""
     import httpx
 
+    from app.connectors.errors import ConnectorError
     from app.connectors.sources import BaseConnector
 
     class MockConnector(BaseConnector):
@@ -854,7 +858,9 @@ async def test_connector_skips_retry_on_403(db_session):
             raise httpx.HTTPStatusError("403 Forbidden", request=resp.request, response=resp)
 
     conn = MockConnector(max_retries=2)
-    with pytest.raises(httpx.HTTPStatusError):
+    # Fix 6: the 401/403 path now raises a sanitized ConnectorError (from None) so the
+    # secret URL can't leak downstream; it still skips retry and trips the breaker.
+    with pytest.raises(ConnectorError):
         await conn.search("LM317")
 
     # Only 1 call, no retries for auth errors

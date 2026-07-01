@@ -242,3 +242,26 @@ class TestCredentialServiceSalt:
         encrypted = cs_mod.encrypt_value("super-secret-api-key")
         assert encrypted != "super-secret-api-key"
         assert cs_mod.decrypt_value(encrypted) == "super-secret-api-key"
+
+
+def test_encryption_canary_bootstrap_verify_and_wrong_key(db_session):
+    """The boot canary bootstraps on first run, verifies under the same key, and FAILS
+    LOUD when the key changes (wrong ENCRYPTION_SALT) — instead of silently emptying
+    every encrypted credential app-wide."""
+    import app.utils.encrypted_type as et
+    from app.models.config import SystemConfig
+    from app.utils.encrypted_type import _CANARY_KEY, build_fernet, verify_encryption_canary
+
+    # First boot under key A: no canary row yet → bootstrap (no raise).
+    et._fernet_instance = build_fernet("secret", "saltA")
+    verify_encryption_canary(db_session)
+    row = db_session.query(SystemConfig).filter(SystemConfig.key == _CANARY_KEY).first()
+    assert row is not None and row.value  # stored ciphertext
+
+    # Later boot, SAME key: verifies cleanly.
+    verify_encryption_canary(db_session)  # no raise
+
+    # Boot with a WRONG salt (different-but-valid key): must fail loudly, not silently None.
+    et._fernet_instance = build_fernet("secret", "saltB")
+    with pytest.raises(RuntimeError, match="ENCRYPTION MISCONFIG"):
+        verify_encryption_canary(db_session)

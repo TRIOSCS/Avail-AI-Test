@@ -5,12 +5,7 @@ Pure Python, no AI. Used by:
   - schemas/*.py (write-path validation)
 """
 
-import re
-
 # ── Phone normalization ──────────────────────────────────────────────
-
-# North American Numbering Plan: 10-digit numbers starting with area code
-_NANP_PATTERN = re.compile(r"^1?(\d{10})$")
 
 
 def normalize_phone_e164(raw: str | None) -> str | None:
@@ -26,41 +21,13 @@ def normalize_phone_e164(raw: str | None) -> str | None:
         "1-800-555-0100"     → "+18005550100"
         "ext 123"            → None
     """
-    if not raw:
-        return None
+    # Delegate to the single canonical lenient E.164 normalizer (app/utils/phone_utils.py)
+    # rather than carry a near-duplicate: it applies the E.164 15-digit cap (protecting the
+    # String(100) phone snapshot columns) and rejects sub-10-digit partials, both of which
+    # this copy silently allowed. Behaviour is identical on every real phone shape.
+    from app.utils.phone_utils import format_phone_e164
 
-    s = str(raw).strip()
-    if not s:
-        return None
-
-    # Strip extensions before processing
-    s = re.split(r"(?i)\s*(?:ext\.?|x|extension)\s*:?\s*\d+", s)[0].strip()
-
-    # Preserve leading +
-    has_plus = s.startswith("+")
-
-    # Strip to digits only
-    digits = re.sub(r"\D", "", s)
-
-    if len(digits) < 7:
-        return None
-
-    if has_plus:
-        # Already has country code
-        return f"+{digits}"
-
-    # NANP: 10 digits (or 11 starting with 1)
-    m = _NANP_PATTERN.match(digits)
-    if m:
-        return f"+1{m.group(1)}"
-
-    # 11+ digits — assume country code is included
-    if len(digits) >= 11:
-        return f"+{digits}"
-
-    # 7-10 digits — assume US domestic (missing area code or partial)
-    # Return as-is with +1 prefix for consistency
-    return f"+1{digits}"
+    return format_phone_e164(str(raw) if raw is not None else None)
 
 
 # ── Country normalization ────────────────────────────────────────────

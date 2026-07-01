@@ -123,11 +123,15 @@ def get_entry(db: Session, entry_id: int) -> KnowledgeEntry | None:
 def update_entry(db: Session, entry_id: int, user_id: int, **kwargs) -> KnowledgeEntry | None:
     """Update an entry.
 
-    Only the creator can update.
+    Only the creator may update — enforced (the docstring claimed it but the check was
+    never wired, a latent IDOR if exposed via a router). A non-creator (or a user acting
+    on a system entry whose created_by is None) raises PermissionError.
     """
     entry = db.get(KnowledgeEntry, entry_id)
     if not entry:
         return None
+    if entry.created_by != user_id:
+        raise PermissionError(f"User {user_id} may not update knowledge entry {entry_id} (creator: {entry.created_by})")
     for key, value in kwargs.items():
         if value is not None and hasattr(entry, key):
             setattr(entry, key, value)
@@ -139,11 +143,14 @@ def update_entry(db: Session, entry_id: int, user_id: int, **kwargs) -> Knowledg
 def delete_entry(db: Session, entry_id: int, user_id: int) -> bool:
     """Delete an entry.
 
-    Returns True if deleted.
+    Only the creator may delete (enforced — latent IDOR otherwise). Returns True if
+    deleted; raises PermissionError for a non-creator.
     """
     entry = db.get(KnowledgeEntry, entry_id)
     if not entry:
         return False
+    if entry.created_by != user_id:
+        raise PermissionError(f"User {user_id} may not delete knowledge entry {entry_id} (creator: {entry.created_by})")
     db.delete(entry)
     db.commit()
     logger.info("Knowledge entry deleted: id={} by user={}", entry_id, user_id)
@@ -228,11 +235,18 @@ def post_answer(
 def capture_quote_fact(db: Session, *, quote, user_id: int) -> KnowledgeEntry | None:
     """Auto-capture price facts when a quote is created.
 
-    Called from: app/routers/crm/quotes.py after quote creation.
+    Uses a savepoint so a create failure doesn't corrupt the caller's transaction (the
+    quote it just created), then commits its own entry. Callers treat this as fire-and-
+    forget and several (create_quote, build_quote) return without a further commit, so
+    the capture MUST persist the entry itself or it rolls back at session close. Mirrors
+    capture_offer_fact. Called from: app/routers/crm/quotes.py and
+    app/services/quote_builder_service.py after quote creation.
     """
+    nested = db.begin_nested()
     try:
         line_items = quote.line_items or []
         if not line_items:
+            nested.rollback()
             return None
 
         facts = []
@@ -249,10 +263,11 @@ def capture_quote_fact(db: Session, *, quote, user_id: int) -> KnowledgeEntry | 
                 )
 
         if not facts:
+            nested.rollback()
             return None
 
         content = "Quote #{} — {}".format(quote.quote_number, "; ".join(facts))
-        return create_entry(
+        entry = create_entry(
             db,
             user_id=user_id,
             entry_type="fact",
@@ -261,17 +276,32 @@ def capture_quote_fact(db: Session, *, quote, user_id: int) -> KnowledgeEntry | 
             confidence=1.0,
             expires_at=datetime.now(timezone.utc) + timedelta(days=EXPIRY_PRICE_FACT),
             requisition_id=quote.requisition_id,
+            commit=False,
         )
+        nested.commit()
     except Exception as e:
+        nested.rollback()
         logger.warning("Failed to capture quote fact: {}", e)
         return None
+    # Persist the released savepoint. Kept OUTSIDE the savepoint block so a commit error
+    # can't roll back an already-released savepoint; the caller's own (already-committed)
+    # work is unaffected either way.
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.warning("Failed to persist quote fact: {}", e)
+        return None
+    return entry
 
 
 def capture_offer_fact(db: Session, *, offer, user_id: int | None = None) -> KnowledgeEntry | None:
     """Auto-capture facts when an offer is created (manual or parsed).
 
-    Uses a savepoint so FK failures don't corrupt the caller's transaction.
-    Called from: app/routers/crm/offers.py, app/email_service.py
+    Uses a savepoint so FK failures don't corrupt the caller's transaction, then commits
+    its own entry — callers treat this as fire-and-forget and don't reliably commit
+    afterward, so the capture must persist the entry itself or it rolls back at session
+    close. Called from: app/routers/crm/offers.py, app/email_service.py
     """
     nested = db.begin_nested()
     try:
@@ -312,11 +342,19 @@ def capture_offer_fact(db: Session, *, offer, user_id: int | None = None) -> Kno
             commit=False,
         )
         nested.commit()
-        return entry
     except Exception as e:
         nested.rollback()
         logger.warning("Failed to capture offer fact: {}", e)
         return None
+    # Persist the released savepoint (see capture_quote_fact — kept outside the savepoint
+    # block so a commit error can't roll back an already-released savepoint).
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.warning("Failed to persist offer fact: {}", e)
+        return None
+    return entry
 
 
 def capture_rfq_response_fact(
@@ -545,10 +583,10 @@ async def _regenerate_insights(
         logger.debug(no_context_log)
         return []
 
+    # Snapshot (but do NOT yet delete) the cached insights. We only replace them
+    # once fresh insights are in hand — a failed/empty AI call must leave the old
+    # rows intact rather than wiping the cache with nothing to show for it.
     old_insights = db.query(KnowledgeEntry).filter(*delete_filters).all()
-    for old in old_insights:
-        db.delete(old)
-    db.flush()
 
     try:
         result = await claude_structured(
@@ -566,9 +604,14 @@ async def _regenerate_insights(
         logger.warning(failed_log, e)
         return []
 
-    if not result or "insights" not in result:
+    if not result or not result.get("insights"):
         logger.warning(no_results_log)
         return []
+
+    # Fresh insights are available — safe to swap out the old cached rows now.
+    for old in old_insights:
+        db.delete(old)
+    db.flush()
 
     entries = []
     now = datetime.now(timezone.utc)

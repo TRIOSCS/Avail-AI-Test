@@ -155,6 +155,13 @@ def _run_approve_side_effects(
     if line_overrides:
         _apply_line_overrides(plan, line_overrides, db)
     plan.status = BuyPlanStatus.ACTIVE.value
+    # Phase D — one approval absorbs SO verification: the single manager approval IS the
+    # SO sign-off, so stamp so_status=APPROVED here. ``check_completion``'s
+    # ``so_status == APPROVED`` gate then passes for every new approval with no separate
+    # verify-SO step. (The retired verify-SO route used to stamp these so_verified fields.)
+    plan.so_status = SOVerificationStatus.APPROVED.value
+    plan.so_verified_by_id = user.id
+    plan.so_verified_at = now
     plan.approved_by_id = user.id
     plan.approved_at = now
     plan.approval_notes = notes
@@ -187,13 +194,13 @@ def _run_reject_side_effects(plan: BuyPlan, user: User, db: Session, *, reason: 
     _log_approval_activity(plan, "reject", user, reason, db)
 
 
-def _cancel_open_engine_requests_for_plan(plan: BuyPlan, user: User, db: Session) -> int:
+def _cancel_open_engine_requests_for_plan(plan: BuyPlan, user: User | None, db: Session) -> int:
     """Cancel every open (REQUESTED) BUY_PLAN ApprovalRequest for *plan* via the engine.
 
     The single point that closes a plan's engine gate when the plan leaves PENDING — called
     by ``_open_engine_request_for_plan`` (before opening a fresh request, RISK 2: never two
     live REQUESTED rows) AND by the non-decide transitions that take a plan out of PENDING
-    (``cancel_buy_plan``, ``verify_so`` HALT). Cancelling the open request there means no
+    (``cancel_buy_plan``, ``halt_plan``). Cancelling the open request there means no
     REQUESTED row is orphaned in the approvals queue/badge for a plan that no longer exists
     to approve — and, crucially, closes the resurrection vector (an approver can no longer
     pick a stale request out of the queue and re-activate a cancelled plan).
@@ -202,7 +209,7 @@ def _cancel_open_engine_requests_for_plan(plan: BuyPlan, user: User, db: Session
     ``owner``), the user who originally submitted the plan — so the engine ``cancel`` authz
     (requester/owner OR manager/admin) is satisfied for EVERY transition caller, regardless
     of whether the user driving the transition is the submitter, a manager/admin, or an
-    ops-group member who is neither (the verify_so HALT case). The plan-level audit of who
+    ops-group member who is neither (the ``halt_plan`` case). The plan-level audit of who
     cancelled/halted the plan is already captured on the plan + its activity log; this
     cancel is a system-driven consequence of the plan leaving PENDING, not a separate
     user-initiated cancel of someone else's request. ``user`` is used only as a final
@@ -369,64 +376,68 @@ def _log_approval_activity(plan: BuyPlan, action: str, user: User, notes: str | 
     )
 
 
-# ── Workflow: SO Verification ────────────────────────────────────────
+# ── Workflow: Halt (the single off-ramp) ─────────────────────────────
+
+# A plan can be halted only while it is still in flight. COMPLETED/CANCELLED are terminal
+# and HALTED is idempotent — halting any of those raises. (Preserves the reachability of
+# the retired verify-SO halt, which fired while a plan was PENDING or ACTIVE.)
+HALTABLE_STATUSES = {BuyPlanStatus.PENDING.value, BuyPlanStatus.ACTIVE.value}
 
 
-def verify_so(
-    plan_id: int,
-    action: str,
-    user: User,
-    db: Session,
-    *,
-    rejection_note: str | None = None,
-) -> BuyPlan:
-    """Ops verifies (or rejects/halts) the Sales Order in Acctivate.
+def _can_halt(user: User, db: Session) -> bool:
+    """True when *user* may halt a plan: a manager/admin OR an active ops-group member.
 
-    Approve → so_status=approved. Reject → so_status=rejected. Halt → plan.status=halted
-    (stops everything).
+    Mirrors the router's ``_can_supervise`` predicate (role OR active
+    VerificationGroupMember) so the standalone halt action carries the same authority the
+    retired verify-SO halt did.
+    """
+    from ..constants import UserRole
+
+    if user.role in (UserRole.MANAGER, UserRole.ADMIN):
+        return True
+    return db.query(VerificationGroupMember).filter_by(user_id=user.id, is_active=True).first() is not None
+
+
+def halt_plan(plan_id: int, user: User, db: Session, *, reason: str | None = None) -> BuyPlan:
+    """Halt an in-flight buy plan — the single, standalone halt path (Phase D).
+
+    Extracted from the retired ``verify_so(action="halt")`` body and hardened: any open
+    engine request is cancelled FIRST (so no REQUESTED row is orphaned in the approvals
+    queue and the plan can never be resurrected by approving a stale request) — this covers
+    the BUY_PLAN gate while PENDING AND the deal-level PURCHASE_ORDER gate while ACTIVE,
+    matching ``cancel_buy_plan`` — then the plan moves to HALTED. ``so_status`` is set to
+    REJECTED
+    (SOVerificationStatus has no dedicated HALTED value; the halt is distinguished by
+    ``plan.status == HALTED``) and the supplied reason is stored on ``so_rejection_note``
+    so the case report and salesperson notification carry it.
+
+    Auth: supervisor/ops (manager·admin·active ops member — see :func:`_can_halt`). A
+    halted plan is resubmittable via ``reset_buy_plan_to_draft``. The caller owns the
+    commit.
     """
     plan = db.get(BuyPlan, plan_id)
     if not plan:
         raise ValueError(f"Buy plan {plan_id} not found")
-    if plan.so_status != SOVerificationStatus.PENDING.value:
-        raise ValueError(f"SO already verified (status: {plan.so_status})")
-    if plan.status == BuyPlanStatus.HALTED.value:
-        raise ValueError("Plan is halted")
-
-    member = db.query(VerificationGroupMember).filter_by(user_id=user.id, is_active=True).first()
-    if not member:
-        raise PermissionError("User is not in the ops verification group")
+    if not _can_halt(user, db):
+        raise PermissionError("Only a supervisor or ops member can halt a buy plan")
+    if plan.status not in HALTABLE_STATUSES:
+        raise ValueError(f"Cannot halt a {plan.status} plan")
 
     now = datetime.now(timezone.utc)
-    plan.so_verified_by_id = user.id
-    plan.so_verified_at = now
-
-    if action == "approve":
-        plan.so_status = SOVerificationStatus.APPROVED.value
-        logger.info("SO verified for plan {} by {}", plan_id, user.email)
-    elif action == "reject":
-        plan.so_status = SOVerificationStatus.REJECTED.value
-        plan.so_rejection_note = rejection_note
-        logger.info("SO rejected for plan {}: {}", plan_id, rejection_note)
-    elif action == "halt":
-        # SOVerificationStatus has no dedicated HALTED value, so a halt reuses REJECTED
-        # for so_status; it is distinguished from a plain reject by plan.status == HALTED
-        # (set just below).
-        # If the plan is still PENDING when halted, close its open engine request BEFORE the
-        # transition so no REQUESTED row is orphaned in the approvals queue/badge and the
-        # plan can never be resurrected by approving a stale request (the canceller is an
-        # ops member who may be neither the submitter nor a manager/admin, so the helper
-        # cancels on behalf of each request's own requester/owner — authz always satisfied).
-        if plan.status == BuyPlanStatus.PENDING.value:
-            _cancel_open_engine_requests_for_plan(plan, user, db)
-        plan.so_status = SOVerificationStatus.REJECTED.value
-        plan.so_rejection_note = rejection_note
-        plan.status = BuyPlanStatus.HALTED.value
-        plan.halted_by_id = user.id
-        plan.halted_at = now
-        logger.info("Plan {} HALTED by {}: {}", plan_id, user.email, rejection_note)
-    else:
-        raise ValueError(f"Invalid SO verification action: {action}")
+    # Close any open engine gate BEFORE the transition so no REQUESTED row is orphaned in the
+    # approvals queue/badge — and so a stale request can't be pulled from the queue to
+    # resurrect this plan. Covers the BUY_PLAN gate while PENDING AND the deal-level
+    # PURCHASE_ORDER gate while ACTIVE (the helper is a no-op when none are open). Called
+    # UNCONDITIONALLY, matching cancel_buy_plan: the canceller may be an ops member who is
+    # neither submitter nor manager/admin, so the helper cancels on behalf of each request's
+    # own requester/owner — engine-cancel authz always satisfied.
+    _cancel_open_engine_requests_for_plan(plan, user, db)
+    plan.so_status = SOVerificationStatus.REJECTED.value
+    plan.so_rejection_note = reason
+    plan.status = BuyPlanStatus.HALTED.value
+    plan.halted_by_id = user.id
+    plan.halted_at = now
+    logger.info("Plan {} HALTED by {}: {}", plan_id, user.email, reason)
 
     db.flush()
     return plan
@@ -450,8 +461,12 @@ def confirm_po(
     plan = db.get(BuyPlan, plan_id)
     if not plan:
         raise ValueError(f"Buy plan {plan_id} not found")
-    if plan.status != BuyPlanStatus.ACTIVE.value:
-        raise ValueError(f"Plan must be active (current: {plan.status})")
+    # ACTIVE or INBOUND: over-threshold plans move ACTIVE→INBOUND when the deal-level PO
+    # gate is approved, but their lines can still be AWAITING_PO — the buyer must be able to
+    # record the individual line PO# in either state (else the deal-PO approval strands the
+    # AWAITING_PO lines with no way to confirm their POs).
+    if plan.status not in (BuyPlanStatus.ACTIVE.value, BuyPlanStatus.INBOUND.value):
+        raise ValueError(f"Plan must be active or inbound (current: {plan.status})")
 
     line = db.get(BuyPlanLine, line_id)
     if not line or line.buy_plan_id != plan_id:
@@ -478,11 +493,17 @@ def verify_po(
     *,
     rejection_note: str | None = None,
 ) -> BuyPlanLine:
-    """Ops verifies a PO was properly entered.
+    """A purchase-order approver verifies a PO was properly entered.
 
     Approve → line verified. Reject → back to awaiting_po. After approval, checks if all
     lines are done → auto-complete.
+
+    Phase D: the gate moved off ops verification-group membership onto the per-user
+    ``can_approve_purchase_orders`` right (the same column the deal-level PURCHASE_ORDER
+    engine routes on) — verify-PO is now a manager-held action.
     """
+    from ..dependencies import can_approve_purchase_orders
+
     plan = db.get(BuyPlan, plan_id)
     if not plan:
         raise ValueError(f"Buy plan {plan_id} not found")
@@ -493,9 +514,8 @@ def verify_po(
     if line.status != BuyPlanLineStatus.PENDING_VERIFY.value:
         raise ValueError(f"Line must be pending verification (current: {line.status})")
 
-    member = db.query(VerificationGroupMember).filter_by(user_id=user.id, is_active=True).first()
-    if not member:
-        raise PermissionError("User is not in the ops verification group")
+    if not can_approve_purchase_orders(user):
+        raise PermissionError("Purchase-order approval right required to verify a PO")
 
     now = datetime.now(timezone.utc)
     if action == "approve":
@@ -762,6 +782,70 @@ def flag_line_issue(
     return line
 
 
+def resolve_line_issue(plan_id: int, line_id: int, user: User, db: Session) -> BuyPlanLine:
+    """Clear a flagged issue on a line, returning it to awaiting_po so the buyer can re-
+    cut.
+
+    The counterpart to :func:`flag_line_issue`. Without it an ISSUE line was a dead-end — the
+    UI showed only a badge and re-source rejects the ISSUE status, so the only escape was
+    halting the whole plan. Flagged lines route to supervisors on the My Queue (the buyer who
+    raised the issue can't self-resolve), so this action carries the same supervisor/ops
+    authority as :func:`halt_plan`. The PO-confirmation fields are cleared alongside the issue
+    so ``awaiting_po`` means what it always means (no confirmed PO); the buyer re-confirms.
+    """
+    plan = db.get(BuyPlan, plan_id)
+    if not plan:
+        raise ValueError(f"Buy plan {plan_id} not found")
+    if plan.status != BuyPlanStatus.ACTIVE.value:
+        raise ValueError(f"Plan must be active (current: {plan.status})")
+
+    if not _can_halt(user, db):
+        raise PermissionError("Only a supervisor or ops member can resolve a flagged issue")
+
+    line = db.get(BuyPlanLine, line_id)
+    if not line or line.buy_plan_id != plan_id:
+        raise ValueError(f"Line {line_id} not found in plan {plan_id}")
+    if line.status != BuyPlanLineStatus.ISSUE.value:
+        raise ValueError(f"Line has no issue to resolve (current: {line.status})")
+
+    line.status = BuyPlanLineStatus.AWAITING_PO.value
+    line.issue_type = None
+    line.issue_note = None
+    line.po_number = None
+    line.estimated_ship_date = None
+    line.po_confirmed_at = None
+    line.last_nudge_at = None
+    logger.info("Issue resolved on line {} (plan {}) by {}", line_id, plan_id, user.email)
+
+    db.flush()
+    return line
+
+
+def plan_needs_approver_reason(plan: BuyPlan, db: Session) -> str | None:
+    """Why *plan* is stalled for lack of a configured approver, else ``None``.
+
+    A submitted plan stalls silently when no active user holds the approving right for its
+    open gate: ``create_request`` raises ``NoEligibleApproverError``, which is only logged,
+    and the plan sits invisibly (the owner no longer sees a PENDING plan and no approver
+    exists to see it). This read-only check lets the UI surface it instead. Returns
+    ``"buy_plan"`` (PENDING, no buy-plan approver) or ``"purchase_order"`` (ACTIVE over the
+    PO threshold, no approver within the required limit), else ``None``.
+    """
+    from ..constants import ApprovalGateType
+    from .approvals.routing import has_eligible_approver
+
+    if plan.status == BuyPlanStatus.PENDING.value:
+        if not has_eligible_approver(db, ApprovalGateType.BUY_PLAN):
+            return "buy_plan"
+    elif plan.status == BuyPlanStatus.ACTIVE.value:
+        total = float(plan.total_cost or 0)
+        if total >= settings.po_auto_approve_threshold and not has_eligible_approver(
+            db, ApprovalGateType.PURCHASE_ORDER, plan.total_cost
+        ):
+            return "purchase_order"
+    return None
+
+
 # ── Workflow: Completion ─────────────────────────────────────────────
 
 
@@ -771,6 +855,15 @@ def _complete_plan(plan: BuyPlan, db: Session) -> None:
     Shared by check_completion (normal auto-complete) and the stock-sale auto-complete
     job so both completion paths produce a case report.
     """
+    # Close any open engine gate BEFORE completing so no REQUESTED row is orphaned in the
+    # approvals queue/badge. When the line flow runs to terminal before a deal-level
+    # PURCHASE_ORDER approver decides, that gate is still open; leaving it live orphaned a
+    # REQUESTED row (a later decision then hit the plan.status != ACTIVE guard → 400) AND
+    # silently bypassed the SP-3 large-PO sign-off. Mirrors cancel_buy_plan / halt_plan; the
+    # helper is a no-op when nothing is open. Cancels on behalf of each request's own
+    # requester/owner (submitted_by is only a last-resort fallback actor).
+    _cancel_open_engine_requests_for_plan(plan, plan.submitted_by, db)
+
     plan.status = BuyPlanStatus.COMPLETED.value
     plan.completed_at = datetime.now(timezone.utc)
     plan.case_report = generate_case_report(plan, db)
@@ -1299,10 +1392,15 @@ Generated: {now.strftime("%Y-%m-%d %H:%M UTC")}
 
 
 async def verify_po_sent(plan: "BuyPlan", db: "Session") -> list[dict]:
-    """Scan buyer's Outlook sent folder for PO emails matching each line.
+    """Scan buyer's Outlook sent folder for PO emails matching each line (detection
+    only).
 
     For each line with a po_number, searches Graph API for emails containing that PO
-    number. Returns list of verification results per line.
+    number and reports whether one was found. This is a NON-AUTHORITATIVE signal: it does
+    NOT verify the line or complete the plan — verification is gated behind verify_po's
+    ``can_approve_purchase_orders`` right (Phase D). Each result carries
+    ``awaiting_approver_verification`` so callers can flag PENDING_VERIFY lines whose PO
+    email was detected for an approver to sign off.
     """
     from ..utils.graph_client import GraphClient
     from ..utils.token_manager import get_valid_token
@@ -1355,9 +1453,13 @@ async def verify_po_sent(plan: "BuyPlan", db: "Session") -> list[dict]:
             )
 
             found = len(messages) > 0
-            if found and line.status == BuyPlanLineStatus.PENDING_VERIFY.value:
-                line.status = BuyPlanLineStatus.VERIFIED.value
-                line.po_verified_at = datetime.now(timezone.utc)
+            # DETECTION ONLY — finding the PO email in the buyer's sent folder is a signal,
+            # NOT verification. Flipping the line to VERIFIED here bypassed the Phase-D
+            # purchase-order-approver gate (can_approve_purchase_orders) that the interactive
+            # verify_po enforces, and left po_verified_by_id NULL — letting a buyer who merely
+            # emailed a PO complete the deal with no approver signing off. Line verification
+            # must go through verify_po; here we only flag lines awaiting that approval.
+            awaiting = found and line.status == BuyPlanLineStatus.PENDING_VERIFY.value
 
             results.append(
                 {
@@ -1365,15 +1467,15 @@ async def verify_po_sent(plan: "BuyPlan", db: "Session") -> list[dict]:
                     "po_number": line.po_number,
                     "found": found,
                     "message_count": len(messages),
+                    "awaiting_approver_verification": awaiting,
                 }
             )
         except Exception as e:
             logger.error("PO verification failed for line {}: {}", line.id, e)
             results.append({"line_id": line.id, "po_number": line.po_number, "found": False, "error": str(e)})
 
-    # Use centralized completion check (respects SO verification requirement)
-    check_completion(plan.id, db)
-
+    # No completion side-effect: this scan never verifies a line, so it cannot drive
+    # completion. Verified lines complete through verify_po's gated (approver) path.
     # NOTE: flush (not commit) — the caller (PO-verify job) owns the transaction.
     db.flush()
     return results

@@ -63,8 +63,13 @@ def _make_line(
 
 
 @pytest.mark.asyncio
-async def test_po_found(db_session, test_user, test_quote, test_requisition):
-    """When Graph API finds PO emails, line status changes to verified."""
+async def test_po_found_flags_but_does_not_verify(db_session, test_user, test_quote, test_requisition):
+    """Finding a PO email FLAGS the line but must NOT verify it.
+
+    Regression: auto-verifying here bypassed the Phase-D can_approve_purchase_orders gate
+    (verify_po) and left po_verified_by_id NULL — a buyer emailing a PO could complete the
+    deal with no approver signing off. Detection is a signal, not verification.
+    """
     plan = _make_plan(db_session, test_user, test_quote, test_requisition)
     line = _make_line(db_session, plan, buyer=test_user, po_number="PO-12345")
     db_session.commit()
@@ -83,10 +88,12 @@ async def test_po_found(db_session, test_user, test_quote, test_requisition):
     assert results[0]["found"] is True
     assert results[0]["message_count"] == 1
     assert results[0]["po_number"] == "PO-12345"
-    # Line should now be verified
+    assert results[0]["awaiting_approver_verification"] is True
+    # Line is flagged, NOT verified — no gate bypass, no NULL-approver stamp.
     db_session.refresh(line)
-    assert line.status == BuyPlanLineStatus.VERIFIED.value
-    assert line.po_verified_at is not None
+    assert line.status == BuyPlanLineStatus.PENDING_VERIFY.value
+    assert line.po_verified_at is None
+    assert line.po_verified_by_id is None
 
 
 @pytest.mark.asyncio
@@ -109,6 +116,7 @@ async def test_po_not_found(db_session, test_user, test_quote, test_requisition)
     assert len(results) == 1
     assert results[0]["found"] is False
     assert results[0]["message_count"] == 0
+    assert results[0]["awaiting_approver_verification"] is False
     db_session.refresh(line)
     assert line.status == BuyPlanLineStatus.PENDING_VERIFY.value
 
@@ -137,8 +145,13 @@ async def test_graph_error(db_session, test_user, test_quote, test_requisition):
 
 
 @pytest.mark.asyncio
-async def test_all_verified_auto_completes(db_session, test_user, test_quote, test_requisition):
-    """When all PO lines are verified, plan auto-completes."""
+async def test_detection_does_not_complete_plan(db_session, test_user, test_quote, test_requisition):
+    """Detecting PO emails on every line must NOT auto-complete the plan.
+
+    Completion requires each line to be VERIFIED through the gated verify_po path; a
+    mail scan that merely finds the PO emails leaves the lines PENDING_VERIFY and the
+    plan ACTIVE.
+    """
     plan = _make_plan(db_session, test_user, test_quote, test_requisition)
     line1 = _make_line(db_session, plan, buyer=test_user, po_number="PO-001")
     line2 = _make_line(db_session, plan, buyer=test_user, po_number="PO-002")
@@ -156,9 +169,14 @@ async def test_all_verified_auto_completes(db_session, test_user, test_quote, te
 
     assert len(results) == 2
     assert all(r["found"] for r in results)
+    assert all(r["awaiting_approver_verification"] for r in results)
+    # Lines stay pending; plan stays active — no completion without approver verification.
     db_session.refresh(plan)
-    assert plan.status == BuyPlanStatus.COMPLETED.value
-    assert plan.completed_at is not None
+    assert plan.status == BuyPlanStatus.ACTIVE.value
+    assert plan.completed_at is None
+    for ln in (line1, line2):
+        db_session.refresh(ln)
+        assert ln.status == BuyPlanLineStatus.PENDING_VERIFY.value
 
 
 @pytest.mark.asyncio

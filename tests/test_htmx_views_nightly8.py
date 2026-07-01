@@ -25,6 +25,7 @@ from app.constants import (  # noqa: E402
     QuoteStatus,
     RequisitionStatus,
     SourcingStatus,
+    UserRole,
 )
 from app.models import (  # noqa: E402
     BuyPlan,
@@ -195,6 +196,8 @@ class TestBulkActionAssign:
 
     def test_bulk_assign_owner(self, client: TestClient, db_session: Session, test_user: User):
         r1 = _req(db_session, test_user)
+        test_user.role = UserRole.MANAGER
+        db_session.commit()
         resp = client.post(
             "/v2/partials/requisitions/bulk/assign",
             data={"ids": str(r1.id), "owner_id": str(test_user.id)},
@@ -203,6 +206,8 @@ class TestBulkActionAssign:
 
     def test_bulk_assign_no_owner_id(self, client: TestClient, db_session: Session, test_user: User):
         r1 = _req(db_session, test_user)
+        test_user.role = UserRole.MANAGER
+        db_session.commit()
         resp = client.post(
             "/v2/partials/requisitions/bulk/assign",
             data={"ids": str(r1.id)},
@@ -212,6 +217,8 @@ class TestBulkActionAssign:
 
     def test_bulk_assign_invalid_owner_id(self, client: TestClient, db_session: Session, test_user: User):
         r1 = _req(db_session, test_user)
+        test_user.role = UserRole.MANAGER
+        db_session.commit()
         resp = client.post(
             "/v2/partials/requisitions/bulk/assign",
             data={"ids": str(r1.id), "owner_id": "not-a-number"},
@@ -785,8 +792,10 @@ class TestBuyPlansListPartial:
 
     @pytest.mark.parametrize(
         "query",
+        # The lens contract is now my_queue|pipeline; every non-empty value here is an
+        # UNKNOWN lens that falls back to the role-default lens and still renders the shell.
         ["", "?lens=deals", "?lens=orders", "?lens=supervise"],
-        ids=["default_lens", "lens_deals", "lens_orders", "lens_supervise"],
+        ids=["default_lens", "lens_deals", "lens_orders", "lens_supervise_unknown"],
     )
     def test_buy_plans_list(self, client: TestClient, db_session: Session, query):
         resp = client.get(f"/v2/partials/buy-plans{query}")
@@ -977,6 +986,8 @@ class TestRequisitionInlineSave:
     )
     def test_inline_save_field(self, client: TestClient, db_session: Session, test_user: User, field, value, context):
         req = _req(db_session, test_user)
+        test_user.role = UserRole.MANAGER
+        db_session.commit()
         resolved_value = str(test_user.id) if field == "owner" else value
         resp = client.patch(
             f"/v2/partials/requisitions/{req.id}/inline",

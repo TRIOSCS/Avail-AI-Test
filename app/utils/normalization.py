@@ -204,7 +204,9 @@ def normalize_lead_time(raw: Any) -> int | None:
         multiplier = 7
     elif any(w in s for w in ("month", "mo")):
         multiplier = 30
-    elif any(w in s for w in ("day", "dy", "d ", "aro", "business")):
+    elif any(w in s for w in ("day", "dy", "d ", "aro", "business")) or re.search(r"\d\s*d\b", s):
+        # Compact day shorthand ("30d", "5d", "14 d") has no trailing space, so
+        # match a digit immediately followed by a standalone "d".
         multiplier = 1
     else:
         # Ambiguous — assume weeks if >0 and <52, days otherwise
@@ -291,8 +293,17 @@ def normalize_moq(raw: Any) -> int | None:
     if raw is None:
         return None
     s = str(raw).strip()
-    # Strip common prefixes
+    # Strip common leading prefixes ("MOQ:", "Minimum", "Min")
     s = re.sub(r"^(?:moq|minimum|min)[:\s]*", "", s, flags=re.IGNORECASE).strip()
+    # Strip trailing qualifier words ("10K minimum", "500 pcs", "250 each") before
+    # quantity parsing — otherwise a trailing "minimum" makes the string end in "m"
+    # and normalize_quantity mistakes it for the 1e6 multiplier suffix → None.
+    s = re.sub(
+        r"[\s:]*(?:minimum|min|pcs|pieces|piece|units|unit|each|ea|qty|quantity)\.?$",
+        "",
+        s,
+        flags=re.IGNORECASE,
+    ).strip()
     return normalize_quantity(s)
 
 
@@ -411,13 +422,16 @@ def fuzzy_mpn_match(mpn_a: str | None, mpn_b: str | None) -> bool:
 MAX_SUBSTITUTES = 20
 
 
-def parse_substitute_mpns(subs: list[dict], primary_mpn: str, *, limit: int = MAX_SUBSTITUTES) -> list[dict]:
+def parse_substitute_mpns(
+    subs: list[dict | str] | None, primary_mpn: str, *, limit: int = MAX_SUBSTITUTES
+) -> list[dict]:
     """Parse structured substitute list, normalize MPNs, and deduplicate.
 
-    Each sub is a dict with 'mpn' and 'manufacturer' keys, plus an optional
-    'source' provenance key (e.g. constants.FRU_ALIAS_SOURCE for system-derived
-    FRU-crosswalk aliases) which is preserved when present.
-    Returns normalized, deduped list capped at limit.
+    Each sub is normally a dict with 'mpn' and 'manufacturer' keys, plus an
+    optional 'source' provenance key (e.g. constants.FRU_ALIAS_SOURCE for
+    system-derived FRU-crosswalk aliases) which is preserved when present.
+    Legacy DB rows may hold plain MPN strings (["LM338T"]); those are accepted
+    too. Returns a normalized, deduped list capped at limit.
 
     Called by: htmx_views.py (add/update/header-save endpoints)
     Depends on: normalize_mpn, normalize_mpn_key
@@ -427,7 +441,13 @@ def parse_substitute_mpns(subs: list[dict], primary_mpn: str, *, limit: int = MA
         return result
     seen_keys = {normalize_mpn_key(primary_mpn)}
     for sub in subs:
-        raw_mpn = sub.get("mpn", "").strip()
+        # Legacy DB rows hold plain strings (e.g. ["LM338T"]); modern rows hold
+        # dicts. Coerce both so an unguarded caller can't crash on legacy data.
+        if isinstance(sub, str):
+            sub = {"mpn": sub}
+        elif not isinstance(sub, dict):
+            continue
+        raw_mpn = str(sub.get("mpn") or "").strip()
         if not raw_mpn:
             continue
         ns = normalize_mpn(raw_mpn) or raw_mpn
@@ -436,7 +456,7 @@ def parse_substitute_mpns(subs: list[dict], primary_mpn: str, *, limit: int = MA
             seen_keys.add(key)
             entry = {
                 "mpn": ns,
-                "manufacturer": sub.get("manufacturer", "").strip(),
+                "manufacturer": str(sub.get("manufacturer") or "").strip(),
             }
             source = sub.get("source")
             if isinstance(source, str) and source.strip():

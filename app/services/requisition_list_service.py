@@ -28,7 +28,7 @@ from app.models import (
     User,
     VendorResponse,
 )
-from app.schemas.requisitions2 import PaginationContext, ReqListFilters
+from app.schemas.requisition_list import PaginationContext, ReqListFilters
 from app.services.sourcing_score import compute_sourcing_score_safe
 from app.utils.sql_helpers import escape_like
 

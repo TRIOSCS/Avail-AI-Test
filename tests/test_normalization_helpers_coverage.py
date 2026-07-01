@@ -36,7 +36,7 @@ class TestNormalizePhoneE164:
             ("+44 20 7946 0958", "+442079460958"),  # UK number with plus
             # 12 digits, not NANP (doesn't start with 1 followed by 10) -> +{digits}
             ("442079460958", "+442079460958"),
-            ("5551234", "+15551234"),  # 7 digits — assume US domestic
+            ("5551234", None),  # 7 digits — invalid E.164 partial, rejected (canonical normalizer)
             ("(555) 123-4567 ext. 100", "+15551234567"),  # extension stripped
             ("555-123-4567 x200", "+15551234567"),  # extension x format stripped
             ("1-800-555-0100", "+18005550100"),  # dashes stripped
@@ -45,10 +45,10 @@ class TestNormalizePhoneE164:
     def test_normalize(self, raw, expected):
         assert normalize_phone_e164(raw) == expected
 
-    def test_8_digit_number_assumed_us(self):
-        result = normalize_phone_e164("55512345")
-        assert result is not None
-        assert result.startswith("+1")
+    def test_8_digit_partial_rejected(self):
+        # An 8-digit number is an invalid E.164 partial (US needs 10) — the canonical
+        # normalizer rejects it rather than emitting a garbage "+155512345".
+        assert normalize_phone_e164("55512345") is None
 
 
 class TestNormalizeCountry:

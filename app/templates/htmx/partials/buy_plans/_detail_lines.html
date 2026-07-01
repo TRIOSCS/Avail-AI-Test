@@ -1,0 +1,267 @@
+{#
+  _detail_lines.html — Buy-plan simplified line-items table (Part · Description · Vendor · Qty ·
+  Unit Cost · Status · Action) with the per-line PO/verify/re-source/reject/claim affordances.
+  Included by: htmx/partials/buy_plans/detail.html (in place of the old "SIMPLIFIED LINE ITEMS
+  TABLE" section).
+  Inherits context (default `with context` include): reads `lines`, `bp`, `user`, `can_resource`
+  (context), `can_approve_purchase_orders` (Jinja global), and the `part_description` filter.
+  Imports `status_badge`, `user_avatar` from shared/_macros.html; defines a local
+  `line_status_pill(line)` macro for the Status cell.
+#}
+{% from "htmx/partials/shared/_macros.html" import status_badge, user_avatar %}
+
+{# ── Status cell: status badge + optional PO# (extracted verbatim from the inline block) ── #}
+{% macro line_status_pill(line) %}
+              {% set line_colors = {
+                'awaiting_po': 'bg-amber-50 text-amber-700',
+                'pending_verify': 'bg-brand-100 text-brand-600',
+                'verified': 'bg-emerald-50 text-emerald-700',
+                'issue': 'bg-rose-50 text-rose-700',
+                'resourcing': 'bg-violet-50 text-violet-700',
+                'cancelled': 'bg-gray-100 text-gray-600'
+              } %}
+              {{ status_badge(line.status, status_map=line_colors) }}
+              {% if line.po_number %}
+              <div class="font-mono text-xs text-gray-600 mt-0.5">{{ line.po_number }}</div>
+              {% endif %}
+{% endmacro %}
+
+  {# ═══ 4. SIMPLIFIED LINE ITEMS TABLE ═══ #}
+  {# Finding #1: convert to data-table, drop per-cell px-4 py-3 and per-th font-medium text-gray-500 uppercase #}
+  <div class="bg-white rounded-lg shadow-sm overflow-hidden border border-line-base mb-6">
+    <div class="px-4 py-3 bg-gray-50 border-b border-line-base">
+      <h2 class="text-lg font-semibold text-gray-900">Line Items
+        <span class="ml-1 text-sm font-normal text-gray-600">({{ lines|length }})</span>
+      </h2>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="data-table w-full">
+        <thead>
+          <tr>
+            <th class="text-left">Part</th>
+            <th class="text-left">Description</th>
+            <th class="text-left">Vendor</th>
+            <th class="text-right">Qty</th>
+            <th class="text-right">Unit Cost</th>
+            <th class="text-left">Status</th>
+            <th class="text-left">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for line in lines %}
+          <tr id="bp-line-{{ line.id }}" class="transition-colors">
+            {# Part (MPN) #}
+            <td class="font-mono font-medium text-gray-900">
+              {{ line.requirement.primary_mpn if line.requirement else '-' }}
+            </td>
+            {# Description — from MaterialCard (source of truth) #}
+            {% set desc = line.requirement|part_description if line.requirement else '' %}
+            <td class="text-gray-600 truncate max-w-[200px]" title="{{ desc }}">
+              {{ desc or '-' }}
+            </td>
+            {# Vendor + buyer (assignee) below #}
+            <td>
+              <div class="text-gray-900">{{ line.offer.vendor_name if line.offer else '-' }}</div>
+              {% if line.buyer %}
+              <div class="flex items-center gap-1.5 mt-0.5">
+                {{ user_avatar(line.buyer) }}
+                <span class="text-xs text-gray-400">{{ line.buyer.name }}</span>
+              </div>
+              {% endif %}
+            </td>
+            {# Qty #}
+            <td class="text-right text-gray-600">{{ '{:,}'.format(line.quantity) }}</td>
+            {# Unit Cost #}
+            <td class="text-right text-gray-600">${{ '{:,.4f}'.format(line.unit_cost|float) if line.unit_cost else '-' }}</td>
+            {# Status + PO# #}
+            <td>
+              {{ line_status_pill(line) }}
+            </td>
+            {# Action — Finding #4: bespoke bg-emerald/rose buttons → .btn family #}
+            <td>
+              {% if bp.status == 'active' %}
+                {% if line.status == 'awaiting_po' %}
+                  <div x-data="{ showPo: false, poNum: '', shipDate: '' }">
+                    <a @click="showPo = !showPo" class="text-sm text-brand-500 hover:text-brand-600 font-medium cursor-pointer">
+                      Enter PO &rarr;
+                    </a>
+                    <div x-show="showPo" x-cloak x-collapse class="mt-2 space-y-1.5">
+                      {# Finding #3: bespoke border+focus-ring → .input .input-sm #}
+                      <div>
+                        <input aria-label="PO#" x-model="poNum" type="text" placeholder="PO#"
+                               class="input input-sm w-28">
+                      </div>
+                      <div>
+                        <input aria-label="Estimated ship date" x-model="shipDate" type="date"
+                               class="input input-sm w-28">
+                      </div>
+                      <div class="flex gap-1">
+                        <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/lines/{{ line.id }}/confirm-po"
+                                hx-target="#main-content"
+                                :hx-vals="JSON.stringify({po_number: poNum, estimated_ship_date: shipDate})"
+                                data-loading-disable
+                                class="btn btn-primary btn-sm">
+                          Confirm
+                        </button>
+                        <button @click="modalType = 'issue'; modalLineId = {{ line.id }}; showModal = true"
+                                class="btn btn-danger btn-sm">
+                          Issue
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                {% elif line.status == 'pending_verify' and can_approve_purchase_orders(user) %}
+                  <div class="flex gap-1">
+                    <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/lines/{{ line.id }}/verify-po"
+                            hx-target="#main-content"
+                            hx-vals='{"action": "approve"}'
+                            data-loading-disable
+                            class="btn btn-primary btn-sm">
+                      Verify
+                    </button>
+                    <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/lines/{{ line.id }}/verify-po"
+                            hx-target="#main-content"
+                            hx-vals='{"action": "reject"}'
+                            data-loading-disable
+                            hx-confirm="Reject this PO?"
+                            class="btn btn-danger btn-sm">
+                      Reject
+                    </button>
+                  </div>
+                {% elif line.status == 'verified' %}
+                  <span class="text-xs text-emerald-600 font-medium flex items-center gap-0.5">
+                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                    Done
+                  </span>
+                {% elif line.status == 'issue' %}
+                  <span class="text-xs text-rose-600 font-medium">{{ line.issue_type|replace('_', ' ')|capitalize if line.issue_type else 'Issue' }}</span>
+                  {# Supervisors/ops clear a flagged issue → line back to awaiting_po (the buyer
+                     who raised it can't self-resolve; otherwise ISSUE is a dead-end). #}
+                  {% if can_supervise %}
+                  <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/lines/{{ line.id }}/resolve-issue"
+                          hx-target="#main-content" hx-swap="innerHTML"
+                          hx-confirm="Clear this issue and return the line to awaiting PO?"
+                          data-loading-disable
+                          class="btn btn-primary btn-sm ml-2">
+                    Resolve
+                  </button>
+                  {% endif %}
+                {% endif %}
+              {% endif %}
+
+              {# ── Re-source: a cut PO (pending_verify/verified) the vendor fell down on.
+                   Visible even when the plan auto-completed (bp.status == 'completed'),
+                   since that is exactly the late-fall-down case. ── #}
+              {% if can_resource and line.status in ['pending_verify', 'verified'] and bp.status in ['active', 'completed'] %}
+              {% set other_cut = lines|selectattr('status', 'in', ['pending_verify', 'verified'])|rejectattr('id', 'eq', line.id)|list %}
+              <div x-data="{ showR: false, escalate: false }" class="mt-1.5">
+                <a @click="showR = !showR" class="text-xs text-rose-500 hover:text-rose-700 font-medium cursor-pointer">Re-source &rarr;</a>
+                <div x-show="showR" x-cloak x-collapse class="mt-2">
+                  <form hx-post="/v2/partials/buy-plans/{{ bp.id }}/lines/{{ line.id }}/resource"
+                        hx-target="#main-content" hx-swap="innerHTML"
+                        hx-confirm="Re-source this line? This marks the vendor's offer Sold + unavailable and alerts ALL buyers to backfill."
+                        class="space-y-1.5">
+                    <input type="hidden" name="scope" :value="escalate ? 'plan' : 'line'">
+                    <select name="reason_code" aria-label="Re-source reason" class="input input-sm w-44">
+                      <option value="sold_elsewhere">Vendor sold elsewhere</option>
+                      <option value="cannot_deliver">Vendor can't deliver</option>
+                      <option value="no_stock">No stock</option>
+                      <option value="price_change">Price changed / reneged</option>
+                      <option value="other">Other</option>
+                    </select>
+                    <textarea name="reason_note" rows="2" placeholder="What happened? (optional)"
+                              class="input input-sm w-44"></textarea>
+                    {% if other_cut %}
+                    <label class="flex items-center gap-1.5 text-xs text-gray-600">
+                      <input type="checkbox" x-model="escalate"> Also re-source other cut POs on this deal
+                    </label>
+                    <div x-show="escalate" x-cloak class="pl-4 space-y-0.5">
+                      {% for o in other_cut %}
+                      <label class="flex items-center gap-1.5 text-xs text-gray-500">
+                        <input type="checkbox" name="also_line_ids" value="{{ o.id }}" checked>
+                        <span class="font-mono">{{ o.requirement.primary_mpn if o.requirement else ('line ' ~ o.id) }}</span>
+                      </label>
+                      {% endfor %}
+                    </div>
+                    {% endif %}
+                    <button type="submit" data-loading-disable class="btn btn-danger btn-sm">
+                      Re-source &amp; alert
+                    </button>
+                  </form>
+                </div>
+              </div>
+              {% endif %}
+
+              {# ── SP-4: reject at receiving (wrong/defective/short). Falls into the SAME
+                   re-source pool as a vendor-cancel fall-down. Shown only while the deal is
+                   INBOUND (PO approved, goods arriving) on a cut line — the per-line
+                   counterpart to the plan-level "Mark Received" affordance. ── #}
+              {% if can_resource and bp.status == 'inbound' and line.status in ['pending_verify', 'verified'] %}
+              {% set other_recv = lines|selectattr('status', 'in', ['pending_verify', 'verified'])|rejectattr('id', 'eq', line.id)|list %}
+              <div x-data="{ showJ: false, escalate: false }" class="mt-1.5">
+                <a @click="showJ = !showJ" class="text-xs text-rose-500 hover:text-rose-700 font-medium cursor-pointer">Reject &rarr;</a>
+                <div x-show="showJ" x-cloak x-collapse class="mt-2">
+                  <form hx-post="/v2/partials/buy-plans/{{ bp.id }}/lines/{{ line.id }}/reject-received"
+                        hx-target="#main-content" hx-swap="innerHTML"
+                        hx-confirm="Reject this line at receiving? The parts fall back into the re-source pool, mark the vendor's offer Sold + unavailable, and alert ALL buyers to backfill."
+                        class="space-y-1.5">
+                    <input type="hidden" name="scope" :value="escalate ? 'plan' : 'line'">
+                    <select name="reason_code" aria-label="Rejection reason" class="input input-sm w-44">
+                      <option value="defective">Defective / bad parts</option>
+                      <option value="wrong_part">Wrong part shipped</option>
+                      <option value="short_ship">Short shipment</option>
+                      <option value="other">Other</option>
+                    </select>
+                    <textarea name="reason_note" rows="2" placeholder="What was wrong? (optional)"
+                              class="input input-sm w-44"></textarea>
+                    {% if other_recv %}
+                    <label class="flex items-center gap-1.5 text-xs text-gray-600">
+                      <input type="checkbox" x-model="escalate"> Also reject other received lines on this deal
+                    </label>
+                    <div x-show="escalate" x-cloak class="pl-4 space-y-0.5">
+                      {% for o in other_recv %}
+                      <label class="flex items-center gap-1.5 text-xs text-gray-500">
+                        <input type="checkbox" name="also_line_ids" value="{{ o.id }}" checked>
+                        <span class="font-mono">{{ o.requirement.primary_mpn if o.requirement else ('line ' ~ o.id) }}</span>
+                      </label>
+                      {% endfor %}
+                    </div>
+                    {% endif %}
+                    <button type="submit" data-loading-disable class="btn btn-danger btn-sm">
+                      Reject &amp; re-source
+                    </button>
+                  </form>
+                </div>
+              </div>
+              {% endif %}
+
+              {# ── Open pool: a re-sourced line awaiting a claim. Any PO-cutter can grab it. ── #}
+              {% if line.status == 'resourcing' %}
+                {% if can_resource %}
+                <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/lines/{{ line.id }}/claim"
+                        hx-target="#main-content" hx-swap="innerHTML"
+                        data-loading-disable
+                        class="btn btn-primary btn-sm">
+                  Claim &rarr;
+                </button>
+                {% else %}
+                <span class="text-xs text-violet-600 font-medium">In re-sourcing pool</span>
+                {% endif %}
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+          {% if not lines %}
+          <tr>
+            <td colspan="7" class="py-6 sm:py-8 text-center">
+              <svg class="mx-auto h-8 w-8 text-gray-300 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/>
+              </svg>
+              <p class="text-sm text-gray-600">No line items.</p>
+            </td>
+          </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>

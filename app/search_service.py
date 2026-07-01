@@ -26,7 +26,7 @@ from .connectors.element14 import Element14Connector
 from .connectors.mouser import MouserConnector
 from .connectors.oemsecrets import OEMSecretsConnector
 from .connectors.sourcengine import SourcengineConnector
-from .connectors.sources import BrokerBinConnector, NexarConnector
+from .connectors.sources import BrokerBinConnector, NexarConnector, _redact_secrets
 from .constants import FRU_ALIAS_SOURCE, ActivityType, ApiSourceStatus, SourceRunStatus
 from .database import SessionLocal
 from .models import (
@@ -1394,6 +1394,29 @@ def get_market_source_health(db: Session) -> dict:
     }
 
 
+def _any_pn_obsolete(db: Session, pns: list[str]) -> bool:
+    """True if any of ``pns`` maps to a MaterialCard marked obsolete.
+
+    ``pns`` are display-form MPNs (uppercase, dashes preserved) as produced by
+    ``get_all_pns``, but ``MaterialCard.normalized_mpn`` stores the canonical
+    KEY form (``normalize_mpn_key``: lowercase, non-alphanumerics stripped).
+    Query with the key form — a raw display-form ``filter_by`` never matches.
+    All keys are batched into a single indexed ``.in_()`` query to avoid an N+1.
+    """
+    keys = [k for k in (normalize_mpn_key(pn) for pn in pns) if k]
+    if not keys:
+        return False
+    return (
+        db.query(MaterialCard.id)
+        .filter(
+            MaterialCard.normalized_mpn.in_(keys),
+            MaterialCard.lifecycle_status == "obsolete",
+        )
+        .first()
+        is not None
+    )
+
+
 async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[dict]]:
     """Run all enabled connectors against pns and return (results, source_stats).
 
@@ -1453,10 +1476,10 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
         except Exception as e:
             elapsed_ms = int((time.time() - start) * 1000)
             logger.opt(exception=True).error(
-                "Search {} via {} failed ({}ms): {}", pn, conn.__class__.__name__, elapsed_ms, e
+                "Search {} via {} failed ({}ms): {}", pn, conn.__class__.__name__, elapsed_ms, _redact_secrets(str(e))
             )
             if source_name:
-                stats_updates.append((source_name, 0, elapsed_ms, str(e)[:500]))
+                stats_updates.append((source_name, 0, elapsed_ms, _redact_secrets(str(e))[:500]))
             return []
 
     # Fire all connector×PN combos in parallel (with concurrency limit)
@@ -1566,12 +1589,7 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
         api_result_count = len(out)
         has_price_below_target = any(r.get("unit_price") is not None and r["unit_price"] > 0 for r in out)
         # Check obsolete status from MaterialCard if available
-        is_obsolete = False
-        for pn in pns:
-            card = db.query(MaterialCard).filter_by(normalized_mpn=pn).first()
-            if card and getattr(card, "lifecycle_status", None) == "obsolete":
-                is_obsolete = True
-                break
+        is_obsolete = _any_pn_obsolete(db, pns)
 
         # Months since last sighting for primary PN.
         # NOTE: Sighting has no `mpn` column — the stored fields are
@@ -2751,7 +2769,7 @@ async def stream_search_mpn(search_id: str, mpn: str) -> None:
                                 {
                                     "source": source_name,
                                     "status": SourceRunStatus.ERROR.value,
-                                    "error": str(e)[:500],
+                                    "error": _redact_secrets(str(e))[:500],
                                     "results": 0,
                                     "ms": 0,
                                 },

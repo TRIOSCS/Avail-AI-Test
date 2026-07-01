@@ -136,6 +136,38 @@ def test_merge_missing_company_raises(db_session):
         merge_companies(co.id, 99999, db_session)
 
 
+def test_merge_reassign_failure_aborts_and_preserves_remove(db_session):
+    """A failed FK-reassignment must fail CLOSED: merge re-raises and does NOT delete
+    the removed company (mirrors vendor_merge_service / delete_companies).
+
+    Regression: previously the loop swallowed the exception and proceeded to
+    db.delete(remove)/flush anyway, orphaning or cascade-deleting the un-reassigned rows.
+    """
+    from app.models import ActivityLog
+
+    keep, remove = _make_pair(db_session, {"name": "F Corp"}, {"name": "F Corporation"})
+    remove_id = remove.id
+    db_session.commit()
+
+    real_query = db_session.query
+
+    def _boom_on_activity_log(model, *args, **kwargs):
+        if model is ActivityLog:
+            raise RuntimeError("simulated bulk UPDATE failure (unique-constraint conflict)")
+        return real_query(model, *args, **kwargs)
+
+    db_session.query = _boom_on_activity_log
+    try:
+        with pytest.raises(ValueError, match="Company merge aborted"):
+            merge_companies(keep.id, remove_id, db_session)
+    finally:
+        db_session.query = real_query
+
+    db_session.rollback()
+    # The removed company must still exist — merge aborted before deleting it.
+    assert db_session.get(Company, remove_id) is not None
+
+
 def test_merge_renames_colliding_sites(db_session):
     """Sites with duplicate names get prefixed with removed company name."""
     keep, remove = _make_pair(db_session, {"name": "E Corp"}, {"name": "E Corporation"})

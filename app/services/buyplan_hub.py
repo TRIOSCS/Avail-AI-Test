@@ -307,6 +307,10 @@ _STATUS_TO_COLUMN: dict[str, str] = {
     BuyPlanStatus.PENDING: "pending",
     BuyPlanStatus.ACTIVE: "active",
     BuyPlanStatus.HALTED: "active",
+    # INBOUND is a sub-status of the Purchase stage (goods inbound, awaiting receipt) —
+    # it buckets with ACTIVE so the Pipeline's Purchase column (statuses=[ACTIVE, INBOUND])
+    # surfaces it. Previously dropped by the safety net, which silently hid inbound deals.
+    BuyPlanStatus.INBOUND: "active",
     # COMPLETED → archive section (see completed_archive), not an active column
     # CANCELLED → omitted (no entry)
 }
@@ -451,6 +455,10 @@ def _deal_card(plan: BuyPlan, user: object) -> dict:
         "primary_mpn": _primary_mpn(plan),
         "value": plan.total_cost,
         "margin_pct": plan.total_margin_pct,
+        # Raw lifecycle status — the Pipeline card maps it to a 4-stage index for the
+        # "who-has-the-ball" pip stepper (DRAFT→Build, PENDING→Approve,
+        # ACTIVE|INBOUND→Purchase, COMPLETED→Done). stage_label keeps the legacy vocabulary.
+        "status": plan.status,
         "stage_label": _STAGE_LABELS.get(plan.status, plan.status),
         "blocker": _compute_blocker(plan),
         "po_progress": (verified_count, len(active_lines)),
@@ -617,6 +625,25 @@ _OPEN_STATUSES: frozenset[str] = frozenset(
     }
 )
 
+
+def open_avg_margin(db: Session) -> float:
+    """Average ``total_margin_pct`` across all open (non-terminal) plans; ``0.0`` if
+    none.
+
+    The single cheap aggregate behind the "avg margin" figure shown on BOTH the My Queue
+    header and the Pipeline metric strip. Mirrors the avg_margin aggregation in
+    :func:`supervise_overview` (same ``_OPEN_STATUSES`` set; NULL margins excluded by AVG,
+    coalesced to 0) but as a standalone query so the two lighter surfaces don't pay for the
+    full supervise overview build.
+    """
+    avg = (
+        db.query(func.coalesce(func.avg(BuyPlan.total_margin_pct), 0))
+        .filter(BuyPlan.status.in_(_OPEN_STATUSES))
+        .scalar()
+    )
+    return float(avg or 0.0)
+
+
 #: Risk-first priority tier for each *supervise-lens* action-queue row kind
 #: (1 = highest risk, surfaced first). The supervise lens sorts its unified queue by
 #: ``(priority, waiting_since)`` so the riskiest, oldest items lead. Distinct from the
@@ -626,8 +653,7 @@ _SUPERVISE_QUEUE_PRIORITY: dict[str, int] = {
     "flagged": 2,
     "overdue": 3,
     "approve": 4,
-    "verify_so": 5,
-    "verify_po": 6,
+    "verify_po": 5,
 }
 
 #: Human-readable pill label for each supervise-lens action-queue row kind.
@@ -636,7 +662,6 @@ _SUPERVISE_QUEUE_LABEL: dict[str, str] = {
     "flagged": "Flagged",
     "overdue": "Overdue PO",
     "approve": "Approve",
-    "verify_so": "Verify SO",
     "verify_po": "Verify PO",
 }
 
@@ -709,20 +734,6 @@ def _query_approval_plans(db: Session) -> list[BuyPlan]:
             *_PLAN_CUSTOMER_LOADS,
             joinedload(BuyPlan.submitted_by),
             selectinload(BuyPlan.lines).selectinload(BuyPlanLine.requirement),
-        )
-        .order_by(BuyPlan.created_at.asc())
-        .all()
-    )
-
-
-def _query_so_pending_plans(db: Session) -> list[BuyPlan]:
-    """ACTIVE plans still awaiting SO verification (org-wide), oldest first."""
-    return (
-        db.query(BuyPlan)
-        .filter(BuyPlan.status == BuyPlanStatus.ACTIVE, BuyPlan.so_status == SOVerificationStatus.PENDING)
-        .options(
-            joinedload(BuyPlan.quote).joinedload(Quote.customer_site).joinedload(CustomerSite.company),
-            joinedload(BuyPlan.submitted_by),
         )
         .order_by(BuyPlan.created_at.asc())
         .all()
@@ -889,23 +900,23 @@ def supervise_overview(db: Session) -> dict:
     Action queue
     ------------
     queue : one flat, risk-first-ordered list of uniform row dicts — every item
-            that needs the supervisor, reshaped from the same six source queries
-            (approvals, SO-verify, halted, overdue POs, PO-verify, flagged). Each
-            row has the identical shape::
+            that needs the supervisor, reshaped from the same five source queries
+            (approvals, halted, overdue POs, PO-verify, flagged). Each row has the
+            identical shape::
 
                 kind, label, priority, plan_id, line_id, customer_name, so_number,
                 mpn, vendor_name, owner_name, owner_role, value, margin_pct,
                 waiting_since, issue_reason
 
             ``kind`` is one of ``halted``/``flagged``/``overdue``/``approve``/
-            ``verify_so``/``verify_po``. Plan kinds (approve/verify_so/halted) carry
+            ``verify_po``. Plan kinds (approve/halted) carry
             ``owner_role="AM"`` (the Account Manager = ``submitted_by``) and a NULL
             ``line_id``/``mpn``/``vendor_name``; line kinds (overdue/verify_po/flagged)
             carry ``owner_role="Buyer"`` (``line.buyer``) plus the offer ``mpn`` /
             ``vendor_name``. ``value`` / ``margin_pct`` are always the *parent plan's*
             ``total_cost`` / ``total_margin_pct`` (uniform "deal value/margin"), and
             ``issue_reason`` is populated only on ``flagged`` rows. ``waiting_since``
-            (the age + sort clock) is ``plan.created_at`` for approve/verify_so/halted,
+            (the age + sort clock) is ``plan.created_at`` for approve/halted,
             ``coalesce(line.last_nudge_at, plan.approved_at)`` for overdue, and
             ``line.created_at`` for verify_po/flagged. The list is sorted by
             ``(priority, waiting_since)`` — risk-first, oldest-first within each tier.
@@ -924,7 +935,6 @@ def supervise_overview(db: Session) -> dict:
 
     # ── Source queries (shared single source of truth with my_queue) ──
     approval_plans = _query_approval_plans(db)
-    so_pending_plans = _query_so_pending_plans(db)
     halted_plans = _query_halted_plans(db)
     overdue_lines = _query_overdue_lines(db)
     po_pending_verify_lines = _query_po_pending_verify(db)
@@ -932,7 +942,7 @@ def supervise_overview(db: Session) -> dict:
 
     # ── Uniform row builders ─────────────────────────────────────────
     def _plan_row(plan: BuyPlan, *, kind: str, waiting_since: datetime) -> dict:
-        """Map a plan-source row (approve/verify_so/halted) into the uniform shape.
+        """Map a plan-source row (approve/halted) into the uniform shape.
 
         Owner is the Account Manager (``submitted_by``); ``value`` / ``margin_pct`` are
         the plan's own deal totals. Line-only fields stay NULL.
@@ -985,7 +995,6 @@ def supervise_overview(db: Session) -> dict:
     # ── Assemble the single uniform queue, then sort risk-first / oldest-first ──
     queue = (
         [_plan_row(p, kind="approve", waiting_since=p.created_at) for p in approval_plans]
-        + [_plan_row(p, kind="verify_so", waiting_since=p.created_at) for p in so_pending_plans]
         + [_plan_row(p, kind="halted", waiting_since=p.created_at) for p in halted_plans]
         # overdue uses the exact SLA clock the overdue predicate keys off of.
         + [
@@ -1003,7 +1012,6 @@ def supervise_overview(db: Session) -> dict:
             "open_value": open_value,
             "avg_margin": avg_margin,
             "approval_count": len(approval_plans),
-            "so_pending_count": len(so_pending_plans),
             "halted_count": len(halted_plans),
             "overdue_po_count": len(overdue_lines),
             "po_pending_verify_count": len(po_pending_verify_lines),
@@ -1054,7 +1062,9 @@ class QueueRow:
 #: queue sorts by ``(priority, -age_hours)`` — risk-first, oldest-first within each tier.
 _QUEUE_PRIORITY: dict[str, int] = {
     "halted": 1,
+    "no_approver": 2,
     "plan_returned": 2,
+    "flagged": 2,
     "plan_approve": 3,
     "prepay_approve": 3,
     "po_verify": 4,
@@ -1068,7 +1078,9 @@ _QUEUE_PRIORITY: dict[str, int] = {
 #: Short uppercase microlabel shown in the row's KIND column.
 _QUEUE_LABEL: dict[str, str] = {
     "halted": "Halted",
+    "no_approver": "No approver",
     "plan_returned": "Returned",
+    "flagged": "Flagged",
     "plan_approve": "Approve",
     "prepay_approve": "Prepay",
     "po_verify": "Verify",
@@ -1082,7 +1094,9 @@ _QUEUE_LABEL: dict[str, str] = {
 #: Primary action-button verb per kind (the right-rail CTA).
 _QUEUE_ACTION_LABEL: dict[str, str] = {
     "halted": "Open",
+    "no_approver": "Open",
     "plan_returned": "Resubmit",
+    "flagged": "Open",
     "plan_approve": "Approve",
     "prepay_approve": "Approve",
     "po_verify": "Verify",
@@ -1203,6 +1217,20 @@ def _make_line_row(line: BuyPlanLine, *, kind: str, since: datetime | None, cuto
     Touches only eager-loaded relationships (buy_plan, offer, buyer, requirement).
     """
     plan = line.buy_plan
+    extra: dict = {
+        "margin_pct": plan.total_margin_pct if plan else None,
+        "vendor_name": line.offer.vendor_name if line.offer else None,
+        "owner_name": _user_name(line.buyer),
+        "owner_role": "Buyer",
+    }
+    # flagged rows carry the buyer's issue reason for at-a-glance triage; cut-PO rows expose
+    # whether they were kicked back (manager/ops rejected the PO) + the rejection note so the
+    # My Queue surface can flag + explain the re-cut, mirroring the buyer Orders lens.
+    if kind == "flagged":
+        extra["issue_reason"] = _issue_reason(line)
+    elif kind in ("cut_po", "cut_po_overdue"):
+        extra["kicked_back"] = line.po_rejection_note is not None
+        extra["po_rejection_note"] = line.po_rejection_note
     return QueueRow(
         kind=kind,
         priority=_QUEUE_PRIORITY[kind],
@@ -1218,12 +1246,7 @@ def _make_line_row(line: BuyPlanLine, *, kind: str, since: datetime | None, cuto
         action_url=_action_url(kind, plan_id=line.buy_plan_id, line_id=line.id, request_id=None),
         action_label=_QUEUE_ACTION_LABEL[kind],
         detail_href=f"/v2/partials/buy-plans/{line.buy_plan_id}",
-        extra={
-            "margin_pct": plan.total_margin_pct if plan else None,
-            "vendor_name": line.offer.vendor_name if line.offer else None,
-            "owner_name": _user_name(line.buyer),
-            "owner_role": "Buyer",
-        },
+        extra=extra,
     )
 
 
@@ -1298,10 +1321,53 @@ def _prepay_rows(db: Session, user: object) -> list[QueueRow]:
                     "vendor_name": (pp.vendor_card.display_name if pp and pp.vendor_card else None),
                     "amount": ar.amount,
                     "owner_role": "Approver",
+                    # The engine request id so the My Queue inline action can build the
+                    # decide URL (the QueueRow.action_url stays the JSON decision route).
+                    "request_id": ar.id,
                 },
             )
         )
     return rows
+
+
+def _query_stuck_no_approver_plans(db: Session, *, owner_id: int | None = None) -> list[BuyPlan]:
+    """Plans silently stalled because no approver is configured for their open gate.
+
+    Emitted only in the rare, config-level case that no active user holds the approving
+    right (otherwise the plan is merely awaiting a real approver). ``owner_id`` scopes to a
+    single AM (my_queue); ``None`` returns every stuck plan (admins, so they can fix the
+    config). BUY_PLAN eligibility is global — one check gates every PENDING plan — while
+    PURCHASE_ORDER is amount-sensitive, so each over-threshold ACTIVE plan is checked against
+    its own total.
+    """
+    from ..config import settings
+    from ..constants import ApprovalGateType
+    from .approvals.routing import has_eligible_approver
+
+    loads = (
+        *_PLAN_CUSTOMER_LOADS,
+        joinedload(BuyPlan.submitted_by),
+        selectinload(BuyPlan.lines).selectinload(BuyPlanLine.requirement),
+    )
+    out: list[BuyPlan] = []
+
+    if not has_eligible_approver(db, ApprovalGateType.BUY_PLAN):
+        q = db.query(BuyPlan).filter(BuyPlan.status == BuyPlanStatus.PENDING)
+        if owner_id is not None:
+            q = q.filter(BuyPlan.submitted_by_id == owner_id)
+        out += q.options(*loads).order_by(BuyPlan.created_at.asc()).all()
+
+    q = db.query(BuyPlan).filter(
+        BuyPlan.status == BuyPlanStatus.ACTIVE,
+        BuyPlan.total_cost >= settings.po_auto_approve_threshold,
+    )
+    if owner_id is not None:
+        q = q.filter(BuyPlan.submitted_by_id == owner_id)
+    for plan in q.options(*loads).order_by(BuyPlan.created_at.asc()).all():
+        if not has_eligible_approver(db, ApprovalGateType.PURCHASE_ORDER, plan.total_cost):
+            out.append(plan)
+
+    return out
 
 
 def my_queue(db: Session, user: object) -> list[QueueRow]:
@@ -1315,8 +1381,8 @@ def my_queue(db: Session, user: object) -> list[QueueRow]:
       by :func:`_is_returned`.
     - **plan_approve** (P3): all pending plans — buy-plan approvers (``can_approve_buy_plans``).
     - **prepay_approve** (P3): prepayment requests routed to the user (engine-actionable).
-    - **po_verify** (P4): all pending-verify lines — PO approvers (``can_approve_purchase_orders``)
-      or ops members.
+    - **po_verify** (P4): all pending-verify lines — PO approvers
+      (``can_approve_purchase_orders`` — the same per-user right the verify-PO POST enforces).
     - **claim** (P5): the whole RESOURCING pool — PO-cutters.
     - **cut_po_overdue** (P6) / **cut_po** (P7): the user's own AWAITING_PO lines, split by
       the buyer-nudge SLA.
@@ -1328,7 +1394,9 @@ def my_queue(db: Session, user: object) -> list[QueueRow]:
     is_approver = can_approve_buy_plans(user)
     is_ops = _is_ops_member(db, user)
     is_supervisor = user.role in (UserRole.MANAGER, UserRole.ADMIN) or is_ops
-    is_po_approver = bool(getattr(user, "can_approve_purchase_orders", False)) or is_ops
+    # verify-PO is gated solely on the per-user right (Phase D moved it off ops membership);
+    # `or is_ops` would re-introduce a dead 403 button for ops members lacking the right.
+    is_po_approver = bool(getattr(user, "can_approve_purchase_orders", False))
     is_po_cutter = user.role in _PO_CUTTER_ROLES
 
     rows: list[QueueRow] = []
@@ -1337,11 +1405,29 @@ def my_queue(db: Session, user: object) -> list[QueueRow]:
     halted = _query_halted_plans(db) if is_supervisor else _query_halted_plans(db, owner_id=user.id)
     rows += [_make_plan_row(p, kind="halted", since=p.halted_at or p.created_at) for p in halted]
 
+    # no_approver (P2): plans stalled because no approver is configured for the open gate.
+    # Owner-scoped — a submitted plan leaves the AM's draft queue and no approver exists to
+    # see it, so without this the owner has NO signal at all; admins see every stuck plan so
+    # they can fix the config (grant someone the approving right).
+    stuck_owner = None if user.role == UserRole.ADMIN else user.id
+    rows += [
+        _make_plan_row(p, kind="no_approver", since=p.submitted_at or p.created_at)
+        for p in _query_stuck_no_approver_plans(db, owner_id=stuck_owner)
+    ]
+
     # plan_returned (P2) + plan_draft (P9): the user's own DRAFT plans.
     for plan in _query_owner_draft_plans(db, owner_id=user.id):
         kind = "plan_returned" if _is_returned(plan) else "plan_draft"
         since = plan.approved_at if kind == "plan_returned" else plan.created_at
         rows.append(_make_plan_row(plan, kind=kind, since=since or plan.created_at))
+
+    # flagged (P2): buyer-flagged (ISSUE) lines are a supervisor triage surface — the buyer
+    # who raised them can't self-resolve, so they route to managers/admins/ops only (parity
+    # with the supervise lens). Shares _query_flagged_lines with supervise_overview.
+    if is_supervisor:
+        rows += [
+            _make_line_row(ln, kind="flagged", since=ln.created_at, cutoff=cutoff) for ln in _query_flagged_lines(db)
+        ]
 
     # plan_approve (P3): buy-plan approvers see every pending plan.
     if is_approver:
@@ -1353,7 +1439,8 @@ def my_queue(db: Session, user: object) -> list[QueueRow]:
     # prepay_approve (P3): prepayment requests routed to this user.
     rows += _prepay_rows(db, user)
 
-    # po_verify (P4): PO approvers / ops members verify every pending-verify line.
+    # po_verify (P4): PO approvers (can_approve_purchase_orders) verify every pending-verify
+    # line. Ops membership alone no longer grants this (Phase D) — see is_po_approver above.
     if is_po_approver:
         rows += [
             _make_line_row(ln, kind="po_verify", since=ln.po_confirmed_at or ln.created_at, cutoff=cutoff)

@@ -24,7 +24,7 @@ from sqlalchemy import case, exists, or_, select
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from ...constants import QuoteStatus, RequisitionStatus, SourcingStatus, UserRole
+from ...constants import RESTRICTED_ROLES, QuoteStatus, RequisitionStatus, SourcingStatus
 from ...database import get_db
 from ...dependencies import require_requisition_access, require_user
 from ...models import (
@@ -46,6 +46,18 @@ from .._lookup_helpers import get_requisition_or_404
 from ._shared import _base_ctx, _parse_date_safe
 
 router = APIRouter(tags=["htmx-views"])
+
+# Quote-status significance for the list's aggregate Quotes column — lower wins. Mirrors
+# requisition_list_service._quote_priority (won > lost > sent > revised > everything else).
+_QUOTE_STATUS_PRIORITY = {"won": 1, "lost": 2, "sent": 3, "revised": 4}
+
+
+def _best_quote_status(quotes) -> str | None:
+    """The most significant quote status across a requisition's quotes, or None if it
+    has none — the value shown in the list's Quotes column."""
+    if not quotes:
+        return None
+    return min(quotes, key=lambda qt: _QUOTE_STATUS_PRIORITY.get(qt.status, 5)).status
 
 
 # ── Requisition partials ────────────────────────────────────────────────
@@ -75,6 +87,7 @@ async def requisitions_list_partial(
             joinedload(Requisition.creator),
             joinedload(Requisition.requirements),
             joinedload(Requisition.offers),
+            joinedload(Requisition.quotes),
         )
     )
 
@@ -117,8 +130,8 @@ async def requisitions_list_partial(
         except ValueError:
             pass
 
-    # Sales users only see their own
-    if user.role == UserRole.SALES:
+    # Restricted roles (sales/trader) only see their own
+    if user.role in RESTRICTED_ROLES:
         query = query.filter(Requisition.created_by == user.id)
 
     total = query.count()
@@ -167,6 +180,10 @@ async def requisitions_list_partial(
     for req in reqs:
         req.req_count = len(req.requirements) if req.requirements else 0
         req.offer_count = len(req.offers) if req.offers else 0
+        # Aggregate quote status for the list's Quotes column — the most significant of the
+        # req's quotes (won > lost > sent > revised > other), mirroring
+        # requisition_list_service._quote_priority. None → the column shows a dash.
+        req.quote_status = _best_quote_status(req.quotes)
         req.match_reason = None
         req.matched_mpn = None
         if search_term:
@@ -198,9 +215,9 @@ async def requisitions_list_partial(
             if reason and reason in match_counts:
                 match_counts[reason] += 1
 
-    # Fetch team users for owner dropdown (non-sales only)
+    # Fetch team users for owner dropdown (unrestricted roles only)
     users = []
-    if user.role != UserRole.SALES:
+    if user.role not in RESTRICTED_ROLES:
         users = db.query(User).order_by(User.name).all()
 
     from ...services.activity_service import get_inbox_sync_status
@@ -673,6 +690,7 @@ async def requisition_detail_partial(
     )
     if not req:
         raise HTTPException(404, "Requisition not found")
+    require_requisition_access(db, req_id, user)
 
     requirements = req.requirements or []
     for r in requirements:
@@ -908,6 +926,7 @@ async def requisition_tab(
 ):
     """Return a specific tab partial for requisition detail."""
     req = get_requisition_or_404(db, req_id)
+    require_requisition_access(db, req_id, user)
 
     valid_tabs = {"parts", "offers", "quotes", "buy_plans", "tasks", "activity", "responses"}
     if tab not in valid_tabs:

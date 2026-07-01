@@ -213,3 +213,47 @@ class TestUnclaimRequisition:
 
         changed = unclaim_requisition(test_requisition, db_session, actor=test_user)
         assert changed is False
+
+
+class TestValidatorParity:
+    """Both per-part sourcing validators must agree for every transition.
+
+    ``transition_requirement`` (requirement_status.py) and
+    ``validate_transition("requirement", …)`` (status_machine.py) previously used
+    two divergent tables, so a transition's legality depended on which validator a
+    caller happened to hit. They now share ``status_machine.SOURCING_TRANSITIONS``
+    as the single source of truth; this parametrized matrix guards re-divergence.
+    """
+
+    def test_tables_are_the_same_object(self):
+        from app.services.status_machine import SOURCING_TRANSITIONS
+
+        assert ALLOWED_TRANSITIONS is SOURCING_TRANSITIONS
+
+    @pytest.mark.parametrize("to_status", list(RequirementSourcingStatus))
+    @pytest.mark.parametrize("from_status", list(RequirementSourcingStatus))
+    def test_both_validators_agree(self, db_session, test_requisition, test_user, from_status, to_status):
+        from app.services.status_machine import validate_transition
+
+        if from_status == to_status:
+            # No-op: status_machine treats it as valid, transition_requirement as
+            # a no-change (False). Neither rejects — they agree.
+            assert validate_transition("requirement", from_status.value, to_status.value) is True
+            req_item = _first_requirement(test_requisition, db_session, from_status.value)
+            assert transition_requirement(req_item, to_status.value, db_session, actor=test_user) is False
+            return
+
+        expected_legal = to_status.value in ALLOWED_TRANSITIONS.get(from_status.value, set())
+
+        # status_machine validator
+        sm_legal = validate_transition("requirement", from_status.value, to_status.value, raise_on_invalid=False)
+        assert sm_legal is expected_legal
+
+        # requirement_status validator (raises ValueError on an illegal transition)
+        req_item = _first_requirement(test_requisition, db_session, from_status.value)
+        if expected_legal:
+            assert transition_requirement(req_item, to_status.value, db_session, actor=test_user) is True
+            assert req_item.sourcing_status == to_status.value
+        else:
+            with pytest.raises(ValueError):
+                transition_requirement(req_item, to_status.value, db_session, actor=test_user)

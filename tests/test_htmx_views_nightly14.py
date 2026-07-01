@@ -28,7 +28,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.constants import OfferStatus
+from app.constants import OfferStatus, UserRole
 from app.models import (
     Offer,
     Requirement,
@@ -336,6 +336,8 @@ class TestSaveParsedOffers:
 
 class TestRequisitionsBulkAction:
     def test_bulk_assign(self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User):
+        test_user.role = UserRole.MANAGER
+        db_session.commit()
         resp = client.post(
             "/v2/partials/requisitions/bulk/assign",
             data={"ids": str(test_requisition.id), "owner_id": str(test_user.id)},
@@ -344,7 +346,11 @@ class TestRequisitionsBulkAction:
         db_session.refresh(test_requisition)
         assert test_requisition.created_by == test_user.id
 
-    def test_bulk_assign_invalid_owner_id(self, client: TestClient, test_requisition: Requisition):
+    def test_bulk_assign_invalid_owner_id(
+        self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User
+    ):
+        test_user.role = UserRole.MANAGER
+        db_session.commit()
         resp = client.post(
             "/v2/partials/requisitions/bulk/assign",
             data={"ids": str(test_requisition.id), "owner_id": "notanint"},
@@ -457,6 +463,8 @@ class TestRequisitionInlineSave:
         assert resp.status_code == 200
 
     def test_save_owner(self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User):
+        test_user.role = UserRole.MANAGER
+        db_session.commit()
         resp = client.patch(
             f"/v2/partials/requisitions/{test_requisition.id}/inline",
             data={"field": "owner", "value": str(test_user.id), "context": "row"},

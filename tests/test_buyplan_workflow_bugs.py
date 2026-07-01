@@ -9,11 +9,14 @@ Depends on: conftest fixtures, app/services/buyplan_workflow.py
 """
 
 from datetime import datetime, timezone
+from decimal import Decimal
 
 import pytest
 from sqlalchemy.orm import Session
 
+from app.constants import ApprovalGateType, ApprovalRequestStatus, ApprovalSubjectType
 from app.models import Company, CustomerSite, Quote, Requirement, Requisition, User
+from app.models.approvals import ApprovalRequest
 from app.models.buy_plan import (
     BuyPlan,
     BuyPlanLine,
@@ -167,6 +170,62 @@ class TestCheckCompletionIdempotency:
 
         assert result.status == BuyPlanStatus.ACTIVE.value
         assert result.completed_at is None
+
+    def test_completion_cancels_open_po_gate(self, db_session):
+        """Auto-completing via the line flow cancels an orphaned open PURCHASE_ORDER
+        gate.
+
+        Regression: the line flow can run to terminal before a deal-level PO approver
+        decides. _complete_plan left that PURCHASE_ORDER ApprovalRequest REQUESTED — a
+        later decision hit the plan.status != ACTIVE guard (400) and the SP-3 large-PO
+        sign-off was silently bypassed. Completion must close the gate (like cancel/halt).
+        """
+        plan, user = _make_plan_with_lines(
+            db_session,
+            status=BuyPlanStatus.ACTIVE.value,
+            so_status=SOVerificationStatus.APPROVED.value,
+            line_statuses=[BuyPlanLineStatus.VERIFIED.value],
+            total_cost=25000.0,
+        )
+        # Deal-level PO gate still open when the line flow reaches terminal.
+        po_req = ApprovalRequest(
+            gate_type=ApprovalGateType.PURCHASE_ORDER,
+            status=ApprovalRequestStatus.REQUESTED,
+            subject_type=ApprovalSubjectType.BUY_PLAN,
+            subject_id=plan.id,
+            amount=Decimal("25000"),
+            requested_by_id=user.id,
+            owner_id=user.id,
+        )
+        db_session.add(po_req)
+        db_session.flush()
+
+        result = check_completion(plan.id, db_session)
+
+        assert result.status == BuyPlanStatus.COMPLETED.value
+        db_session.refresh(po_req)
+        # The orphan is closed, not left REQUESTED in the approvals queue.
+        assert po_req.status == ApprovalRequestStatus.CANCELLED
+
+    def test_confirm_po_allowed_when_plan_inbound(self, db_session):
+        """After the deal-level PO gate is approved (ACTIVE→INBOUND), an AWAITING_PO
+        line can still record its PO — else the deal-PO approval strands those lines."""
+        from datetime import datetime, timezone
+
+        from app.services.buyplan_workflow import confirm_po
+
+        plan, user = _make_plan_with_lines(
+            db_session,
+            status=BuyPlanStatus.INBOUND.value,
+            so_status=SOVerificationStatus.APPROVED.value,
+            line_statuses=[BuyPlanLineStatus.AWAITING_PO.value],
+        )
+        line = plan.lines[0]
+
+        result = confirm_po(plan.id, line.id, "PO-INB-1", datetime.now(timezone.utc), user, db_session)
+
+        assert result.status == BuyPlanLineStatus.PENDING_VERIFY.value
+        assert result.po_number == "PO-INB-1"
 
     def test_does_not_complete_without_so_approval(self, db_session):
         """Plan should NOT complete if SO is not yet approved."""

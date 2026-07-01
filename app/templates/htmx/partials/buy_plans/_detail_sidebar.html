@@ -1,0 +1,137 @@
+{#
+  _detail_sidebar.html — Buy-plan collapsible secondary sections (AI Insights, Notes,
+  SO Verification).
+  Included by: htmx/partials/buy_plans/detail.html (in place of the old "COLLAPSIBLE
+  SECONDARY SECTIONS" section).
+  Inherits context (default `with context` include): reads `bp` and `top_flag` (guarded with
+  `top_flag if top_flag is defined else None`). The Alpine toggles (showAi/showNotes/showSo)
+  live on the page-fluid x-data in detail.html.
+  Imports `collapse_chevron` from htmx/partials/buy_plans/_macros.html.
+#}
+{% from "htmx/partials/buy_plans/_macros.html" import collapse_chevron %}
+
+  {# ═══ 5. COLLAPSIBLE SECONDARY SECTIONS ═══ #}
+
+  {# AI Insights #}
+  {% set flag_count = bp.ai_flags|length if bp.ai_flags else 0 %}
+  {% if bp.ai_summary or flag_count > 0 %}
+  <div class="border-t border-gray-100">
+    {% set top_flag = top_flag if top_flag is defined else None %}
+    <button @click="showAi = !showAi" class="w-full px-4 py-2 flex items-center justify-between gap-3 text-left hover:bg-gray-50 transition-colors">
+      <div class="flex items-center gap-2 min-w-0">
+        <svg class="w-4 h-4 flex-shrink-0 text-brand-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+        <span class="text-sm font-semibold text-gray-700 flex-shrink-0">AI Insights</span>
+        {% if flag_count > 0 %}
+        <span class="inline-flex items-center justify-center w-5 h-5 flex-shrink-0 rounded-full bg-amber-100 text-amber-700 text-xs font-bold">{{ flag_count }}</span>
+        {% endif %}
+        {# State the actual top issue at first glance — the verbatim flag reason, not just a count. #}
+        {% if top_flag and top_flag.message %}
+        <span class="text-xs truncate
+                     {% if top_flag.severity == 'critical' %}text-rose-600{% elif top_flag.severity == 'warning' %}text-amber-700{% else %}text-gray-500{% endif %}"
+              title="{{ top_flag.message }}">{{ top_flag.message }}</span>
+        {% endif %}
+      </div>
+      {{ collapse_chevron("showAi") }}
+    </button>
+    <div x-show="showAi" x-cloak x-collapse class="px-4 pb-4 space-y-3">
+      {% if bp.ai_summary %}
+      <div class="bg-brand-50 border border-brand-200 rounded-lg p-3">
+        <p class="text-sm text-brand-700 leading-relaxed">{{ bp.ai_summary }}</p>
+      </div>
+      {% endif %}
+      {% if bp.ai_flags %}
+        {% for flag in bp.ai_flags %}
+        {% set flag_colors = {
+          'critical': 'bg-rose-50 text-rose-700 border-rose-200',
+          'warning': 'bg-amber-50 text-amber-700 border-amber-200',
+          'info': 'bg-brand-50 text-brand-600 border-brand-200'
+        } %}
+        <div class="border rounded-lg p-3 flex items-start gap-2 {{ flag_colors.get(flag.severity, flag_colors.info) }}">
+          {% if flag.severity == 'critical' or flag.severity == 'warning' %}
+          <svg class="w-4 h-4 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>
+          {% else %}
+          <svg class="w-4 h-4 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          {% endif %}
+          <div class="text-sm">
+            <span class="font-semibold uppercase text-xs tracking-wider">{{ flag.severity }}</span>
+            <span class="ml-1">{{ flag.message }}</span>
+          </div>
+        </div>
+        {% endfor %}
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  {# Notes #}
+  {% if bp.salesperson_notes or bp.approval_notes or bp.case_report %}
+  <div class="border-t border-gray-100">
+    <button @click="showNotes = !showNotes" class="w-full px-4 py-2 flex items-center justify-between text-left hover:bg-gray-50 transition-colors">
+      <div class="flex items-center gap-2">
+        <svg class="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+        <span class="text-sm font-semibold text-gray-700">Notes</span>
+      </div>
+      {{ collapse_chevron("showNotes") }}
+    </button>
+    <div x-show="showNotes" x-cloak x-collapse class="px-4 pb-4 space-y-3">
+      {% if bp.salesperson_notes %}
+      <div>
+        <div class="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Salesperson Notes</div>
+        <p class="text-sm text-gray-600 leading-relaxed">{{ bp.salesperson_notes }}</p>
+      </div>
+      {% endif %}
+      {% if bp.approval_notes %}
+      <div>
+        <div class="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Approval Notes</div>
+        <p class="text-sm text-gray-600 leading-relaxed">{{ bp.approval_notes }}</p>
+      </div>
+      {% endif %}
+      {% if bp.case_report %}
+      <div>
+        <div class="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Case Report</div>
+        <pre class="text-xs text-gray-600 whitespace-pre-wrap font-mono bg-gray-50 rounded p-3 leading-relaxed">{{ bp.case_report }}</pre>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  {# SO Verification #}
+  <div class="border-t border-gray-100">
+    <button @click="showSo = !showSo" class="w-full px-4 py-2 flex items-center justify-between text-left hover:bg-gray-50 transition-colors">
+      <div class="flex items-center gap-2">
+        <svg class="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+        <span class="text-sm font-semibold text-gray-700">SO Verification</span>
+        {% if bp.so_status == 'approved' %}
+        <svg class="w-4 h-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+        {% else %}
+        {# Finding #7: bespoke inline pill → .badge primitive #}
+        <span class="badge-warning">pending</span>
+        {% endif %}
+      </div>
+      {{ collapse_chevron("showSo") }}
+    </button>
+    <div x-show="showSo" x-cloak x-collapse class="px-4 pb-4">
+      <div class="flex items-center gap-3 text-sm">
+        {% set so_badge = {
+          'pending': 'badge-warning',
+          'approved': 'badge-success',
+          'rejected': 'badge-danger'
+        } %}
+        <span class="text-gray-600">Status:</span>
+        {# Finding #7: bespoke SO status pill → .badge primitive #}
+        <span class="{{ so_badge.get(bp.so_status, 'badge') }}">
+          {{ bp.so_status|capitalize if bp.so_status else 'Pending' }}
+        </span>
+        {% if bp.so_verified_by %}
+        <span class="text-gray-600">by {{ bp.so_verified_by.name }}</span>
+        {% endif %}
+      </div>
+      {% if bp.so_rejection_note %}
+      <div class="mt-2 text-sm text-rose-600 flex items-center gap-1">
+        <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>
+        {{ bp.so_rejection_note }}
+      </div>
+      {% endif %}
+    </div>
+  </div>

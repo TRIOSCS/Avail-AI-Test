@@ -124,6 +124,76 @@ class TestUnifiedMatcherVendorCard:
         assert result["type"] == "vendor"
         assert result["vendor_card_id"] == card.id
 
+    def test_priority5_skipped_when_higher_priority_matches(self, db_session, monkeypatch):
+        """Priority-5 vendor-card scan must NOT run when a priority 1-4 match exists.
+
+        A company (priority 2) and a vendor card (priority 5) share the same phone. The
+        company must win AND the expensive vendor-card fallback must be short-circuited
+        (never invoked), so the result is unambiguous.
+        """
+        from app.models import Company
+        from app.models.vendors import VendorCard
+        from app.services import activity_service
+
+        co = Company(name="Shared Phone Co", phone="9165550700", is_active=True)
+        db_session.add(co)
+        card = VendorCard(
+            normalized_name="shared-vendor",
+            display_name="Shared Vendor",
+            source="test",
+            phones=["9165550700"],
+            is_blacklisted=False,
+        )
+        db_session.add(card)
+        db_session.flush()
+
+        # Spy on the fallback helper: it must never be called on a 1-4 hit.
+        calls = {"n": 0}
+        real = activity_service._match_vendor_card_by_phone
+
+        def _spy(db, e164):
+            calls["n"] += 1
+            return real(db, e164)
+
+        monkeypatch.setattr(activity_service, "_match_vendor_card_by_phone", _spy)
+
+        result = match_phone_to_entity("916-555-0700", db_session)
+
+        assert result is not None
+        assert result["type"] == "company"
+        assert result["company_id"] == co.id
+        assert result["ambiguous"] is False
+        assert calls["n"] == 0, "priority-5 fallback ran despite a higher-priority match"
+
+    def test_priority5_matches_via_db_containment(self, db_session):
+        """Priority-5 links a phone to a vendor card when 1-4 do not match."""
+        from app.models.vendors import VendorCard
+        from app.services import activity_service
+
+        card = VendorCard(
+            normalized_name="containment-vendor",
+            display_name="Containment Vendor",
+            source="test",
+            phones=["(800) 344-4539"],
+            is_blacklisted=False,
+        )
+        db_session.add(card)
+        db_session.flush()
+
+        # e164 must live in the normalized_phones JSON list for the match.
+        assert "+18003444539" in (card.normalized_phones or [])
+
+        # The helper itself resolves the card via the in-DB membership test.
+        # NOTE: on Postgres this compiles to a JSONB `@>` containment query;
+        # SQLite (this test DB) has no JSONB/@>, so the helper degrades to a
+        # Python membership test — the observable match result is identical.
+        assert activity_service._match_vendor_card_by_phone(db_session, "+18003444539") is card
+
+        result = match_phone_to_entity("8003444539", db_session)
+        assert result is not None
+        assert result["type"] == "vendor"
+        assert result["vendor_card_id"] == card.id
+
     def test_blacklisted_vendor_not_returned(self, db_session):
         from app.models.vendors import VendorCard
 

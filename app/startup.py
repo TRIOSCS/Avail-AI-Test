@@ -105,11 +105,13 @@ def run_startup_migrations() -> None:
         )
         _analyze_hot_tables(conn)
 
+    _verify_encryption_canary()
     _backfill_normalized_mpn()
     if os.environ.get("ENABLE_PASSWORD_LOGIN", "false").lower() == "true":
         _create_default_user_if_env_set()
     _backfill_sighting_offer_normalized_mpn()
     _backfill_sighting_vendor_normalized()
+    _backfill_offer_vendor_normalized()
     _backfill_proactive_offer_qty()
     _backfill_ticket_defaults()
     _backfill_material_cards()
@@ -572,6 +574,24 @@ def _seed_site_contacts(conn) -> None:
 _BACKFILL_BATCH_SIZE = 500
 
 
+def _verify_encryption_canary() -> None:
+    """Fail loudly at boot if the live ENCRYPTION_SALT/SECRET_KEY can't decrypt stored
+    data.
+
+    A wrong salt would otherwise silently empty every encrypted credential app-wide. See
+    app/utils/encrypted_type.py::verify_encryption_canary.
+    """
+    from app.database import SessionLocal
+
+    from .utils.encrypted_type import verify_encryption_canary
+
+    db = SessionLocal()
+    try:
+        verify_encryption_canary(db)
+    finally:
+        db.close()
+
+
 def _backfill_normalized_mpn() -> None:
     """One-time backfill: populate requirements.normalized_mpn and re-normalize material_cards."""
     with engine.connect() as conn:
@@ -743,18 +763,24 @@ def _backfill_sighting_vendor_normalized() -> None:
             return  # Column not yet created
 
         total = 0
+        last_id = 0
         while True:
             try:
                 rows = conn.execute(
                     sqltext(
                         "SELECT id, vendor_name FROM sightings "
                         "WHERE vendor_name_normalized IS NULL AND vendor_name IS NOT NULL "
-                        "LIMIT :lim"
+                        "AND id > :last_id ORDER BY id LIMIT :lim"
                     ),
-                    {"lim": _BACKFILL_BATCH_SIZE},
+                    {"last_id": last_id, "lim": _BACKFILL_BATCH_SIZE},
                 ).fetchall()
                 if not rows:
                     break
+                # Advance the cursor past every row we examined. Rows whose vendor_name
+                # normalizes to '' (e.g. "LLC", "Inc.") never get an UPDATE, so filtering
+                # only on "IS NULL" would re-select them forever and hang startup; the
+                # id cursor skips them instead of looping on them.
+                last_id = rows[-1][0]
                 batch = []
                 for r in rows:
                     nv = normalize_vendor_name(r[1])
@@ -773,6 +799,63 @@ def _backfill_sighting_vendor_normalized() -> None:
                 break
         if total:
             logger.info("Backfilled vendor_name_normalized on {} sightings", total)
+
+
+def _backfill_offer_vendor_normalized() -> None:
+    """Backfill offers.vendor_name_normalized from vendor_name until none remain.
+
+    The vendor detail offers tab filters Offer.vendor_name_normalized == normalized_name
+    (aligned with sightings/leads). Every offer write-path already populates the column,
+    but a legacy row created before that was universal would be NULL and silently hidden
+    by the tab; this idempotent backfill closes that gap.
+    """
+    from .vendor_utils import normalize_vendor_name
+
+    with engine.connect() as conn:
+        # Check column exists first
+        try:
+            conn.execute(sqltext("SELECT vendor_name_normalized FROM offers LIMIT 0"))
+        except (SQLAlchemyError, DBAPIError):
+            conn.rollback()
+            return  # Column not yet created
+
+        total = 0
+        last_id = 0
+        while True:
+            try:
+                rows = conn.execute(
+                    sqltext(
+                        "SELECT id, vendor_name FROM offers "
+                        "WHERE vendor_name_normalized IS NULL AND vendor_name IS NOT NULL "
+                        "AND id > :last_id ORDER BY id LIMIT :lim"
+                    ),
+                    {"last_id": last_id, "lim": _BACKFILL_BATCH_SIZE},
+                ).fetchall()
+                if not rows:
+                    break
+                # Advance the cursor past every row we examined. Rows whose vendor_name
+                # normalizes to '' (e.g. "LLC", "Inc.") never get an UPDATE, so filtering
+                # only on "IS NULL" would re-select them forever and hang startup; the
+                # id cursor skips them instead of looping on them.
+                last_id = rows[-1][0]
+                batch = []
+                for r in rows:
+                    nv = normalize_vendor_name(r[1])
+                    if nv:
+                        batch.append({"nv": nv, "id": r[0]})
+                if batch:
+                    conn.execute(
+                        sqltext("UPDATE offers SET vendor_name_normalized = :nv WHERE id = :id"),
+                        batch,
+                    )
+                    conn.commit()
+                total += len(batch)
+            except Exception as e:
+                logger.warning("Backfill offers.vendor_name_normalized failed: {}", e)
+                conn.rollback()
+                break
+        if total:
+            logger.info("Backfilled vendor_name_normalized on {} offers", total)
 
 
 # ── Denormalized company count triggers ──────────────────────────────
@@ -1201,6 +1284,7 @@ def seed_api_sources() -> None:
     import json
     from pathlib import Path
 
+    from .constants import ApiSourceStatus
     from .models import ApiSource
     from .models.config import ApiUsageLog
 
@@ -1234,13 +1318,13 @@ def seed_api_sources() -> None:
                 existing.env_vars = src["env_vars"]
                 existing.setup_notes = src["setup_notes"]
             else:
-                status = "pending"
+                status = ApiSourceStatus.PENDING.value
                 env_vars = src.get("env_vars", [])
                 if env_vars:
                     all_set = all(os.getenv(v) for v in env_vars)
                     if all_set:
-                        status = "live"
-                is_active = status == "live"
+                        status = ApiSourceStatus.LIVE.value
+                is_active = status == ApiSourceStatus.LIVE.value
                 db.add(ApiSource(status=status, is_active=is_active, **src))
 
         # Remove legacy "newark" source (renamed to "element14")

@@ -280,7 +280,7 @@ async def notify_submitted(plan: BuyPlan, db: Session):
         db.add(
             ActivityLog(
                 user_id=m.id,
-                activity_type="buyplan_pending",
+                activity_type=ActivityType.BUYPLAN_PENDING,
                 channel="system",
                 requisition_id=plan.requisition_id,
                 buy_plan_id=plan.id,
@@ -479,7 +479,7 @@ async def notify_po_confirmed(plan: BuyPlan, db: Session, line_id: int):
         db.add(
             ActivityLog(
                 user_id=m.user_id,
-                activity_type="buyplan_pending",
+                activity_type=ActivityType.BUYPLAN_PENDING,
                 channel="system",
                 requisition_id=plan.requisition_id,
                 buy_plan_id=plan.id,
@@ -550,7 +550,7 @@ async def notify_completed(plan: BuyPlan, db: Session):
     db.add(
         ActivityLog(
             user_id=ctx["submitter"].id,
-            activity_type="buyplan_completed",
+            activity_type=ActivityType.BUYPLAN_COMPLETED,
             channel="system",
             requisition_id=plan.requisition_id,
             buy_plan_id=plan.id,
@@ -618,7 +618,7 @@ async def notify_stock_sale_approved(plan: BuyPlan, db: Session):
         db.add(
             ActivityLog(
                 user_id=ctx["submitter"].id,
-                activity_type="buyplan_completed",
+                activity_type=ActivityType.BUYPLAN_COMPLETED,
                 channel="system",
                 requisition_id=plan.requisition_id,
                 buy_plan_id=plan.id,
@@ -648,7 +648,7 @@ async def notify_cancelled(plan: BuyPlan, db: Session):
         db.add(
             ActivityLog(
                 user_id=ctx["submitter"].id,
-                activity_type="buyplan_cancelled",
+                activity_type=ActivityType.BUYPLAN_CANCELLED,
                 channel="system",
                 requisition_id=plan.requisition_id,
                 buy_plan_id=plan.id,
@@ -691,7 +691,7 @@ async def notify_nudge_buyer(plan: BuyPlan, line: BuyPlanLine, db: Session):
     db.add(
         ActivityLog(
             user_id=buyer.id,
-            activity_type="buyplan_pending",
+            activity_type=ActivityType.BUYPLAN_PENDING,
             channel="system",
             requisition_id=plan.requisition_id,
             buy_plan_id=plan.id,
@@ -733,7 +733,7 @@ async def notify_nudge_ops(plan: BuyPlan, line: BuyPlanLine, db: Session):
         db.add(
             ActivityLog(
                 user_id=m.user_id,
-                activity_type="buyplan_pending",
+                activity_type=ActivityType.BUYPLAN_PENDING,
                 channel="system",
                 requisition_id=plan.requisition_id,
                 buy_plan_id=plan.id,

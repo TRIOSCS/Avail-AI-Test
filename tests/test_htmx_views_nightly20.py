@@ -3,7 +3,6 @@
 Targets:
   - buy_plan_submit_partial (POST)
   - buy_plan_approve_partial (POST, 403 path)
-  - buy_plan_verify_so_partial (POST, error path)
   - buy_plan_confirm_po_partial (POST, missing PO#)
   - buy_plan_verify_po_partial (POST, not-found path)
   - buy_plan_flag_issue_partial (POST)
@@ -127,18 +126,8 @@ class TestBuyPlanApprove:
         assert resp.status_code == 403
 
 
-# ── Buy Plan Verify SO ────────────────────────────────────────────────────
-
-
-class TestBuyPlanVerifySo:
-    def test_verify_so_wrong_status(self, client: TestClient, db_session: Session, test_requisition: Requisition):
-        """Draft plan can't have SO verified — returns 400."""
-        bp = _make_buy_plan(db_session, test_requisition, status=BuyPlanStatus.DRAFT)
-        resp = client.post(
-            f"/v2/partials/buy-plans/{bp.id}/verify-so",
-            data={"action": "approve"},
-        )
-        assert resp.status_code == 400
+# Phase D removed the separate verify-SO route (folded into the single approval); its
+# replacement, the standalone halt route, is covered in test_htmx_views_nightly7.py.
 
 
 # ── Buy Plan Confirm PO ───────────────────────────────────────────────────
@@ -169,12 +158,21 @@ class TestBuyPlanConfirmPo:
 
 
 class TestBuyPlanVerifyPo:
-    def test_verify_po_line_not_found(self, client: TestClient, db_session: Session, test_requisition: Requisition):
+    def test_verify_po_line_not_found(self, client: TestClient, db_session: Session, test_user, test_requisition):
+        from app.dependencies import require_buyplan_po_approver
+        from app.main import app
+
         bp = _make_buy_plan(db_session, test_requisition)
-        resp = client.post(
-            f"/v2/partials/buy-plans/{bp.id}/lines/99999/verify-po",
-            data={"action": "approve"},
-        )
+        # Phase D: the route is gated by require_buyplan_po_approver — override it so the
+        # handler runs and the service raises the line-not-found ValueError (→ 400).
+        app.dependency_overrides[require_buyplan_po_approver] = lambda: test_user
+        try:
+            resp = client.post(
+                f"/v2/partials/buy-plans/{bp.id}/lines/99999/verify-po",
+                data={"action": "approve"},
+            )
+        finally:
+            app.dependency_overrides.pop(require_buyplan_po_approver, None)
         assert resp.status_code == 400
 
 

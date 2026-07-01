@@ -111,8 +111,8 @@ def decode_text(content: bytes, encoding: str | None = None) -> str:
     return content.decode(enc, errors="replace")
 
 
-def file_fingerprint(content: bytes, rows: int = 10) -> str:
-    """Generate a fingerprint from the first N rows of a file.
+def file_fingerprint(content: bytes) -> str:
+    """Generate a fingerprint from the first 4KB of a file.
 
     Used for column mapping cache lookup — same vendor + same layout = cache hit.
     """

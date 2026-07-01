@@ -44,8 +44,11 @@ class MouserConnector(BaseConnector):
         }
 
         # Mouser API requires apiKey as URL query param — no header auth option.
-        # Sentry before_send hook scrubs query strings containing "key" (see main.py).
-        # httpx does not log URL params at INFO level, only at DEBUG/TRACE.
+        # On an unhandled HTTP status this URL ends up inside the raised
+        # httpx.HTTPStatusError's str(); BaseConnector redacts secret query
+        # params (apiKey/api_key/key/token) via _redact_secrets BEFORE logging,
+        # so the key never reaches the loguru sinks. (Sentry's before_send only
+        # scrubs Sentry events, not local logs — redaction is at the log sink.)
         r = await http.post(
             self.SEARCH_URL,
             params={"apiKey": self.api_key},

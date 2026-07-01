@@ -17,7 +17,7 @@ from app.dependencies import (
     require_requisition_access,
 )
 from app.models import BuyPlan
-from app.schemas.requisitions2 import ReqListFilters
+from app.schemas.requisition_list import ReqListFilters
 from app.services.requisition_list_service import (
     get_requisition_detail,
     list_requisitions,

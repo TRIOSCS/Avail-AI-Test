@@ -43,37 +43,16 @@ def _seed_pending_buy_plan_approval(db, user):
 
 
 class TestPinnedApprovalSection:
-    def test_section_hidden_for_non_approver(self, client, test_user, db_session):
-        """A buyer without can_approve_buy_plans sees the Buy Plans tab work surface but
-        NO pinned approvals section."""
-        _seed_pending_buy_plan_approval(db_session, test_user)
-        db_session.commit()
-        resp = client.get("/v2/partials/approvals/buy-plans")
-        assert resp.status_code == 200
-        assert "Pending approvals" not in resp.text
-
-    def test_section_shown_for_approver(self, client, test_user, db_session):
-        """Granting can_approve_buy_plans surfaces the pinned section with its pending
-        row inside the Sales Orders tab (BUY_PLAN gate after SP-2 repoint)."""
-        test_user.can_approve_buy_plans = True
-        _seed_pending_buy_plan_approval(db_session, test_user)
-        db_session.commit()
-        resp = client.get("/v2/partials/approvals/sales-orders")
-        assert resp.status_code == 200
-        assert "Pending approvals" in resp.text
-        # The inline approve/reject refetches the SAME stage-tab body into #bp-hub-body.
-        assert "/v2/partials/approvals/sales-orders" in resp.text
-
     def test_full_page_threads_lens_to_lazy_partial(self, nonadmin_client):
-        """A full-page load of /v2/approvals?lens=buy_plans threads ?lens= into the lazy
-        partial URL, so a deep link / reload lands on the requested stage instead of the
+        """A full-page load of /v2/approvals?lens=pipeline threads ?lens= into the lazy
+        partial URL, so a deep link / reload lands on the requested lens instead of the
         role default.
 
         (v2_page authenticates via the session cookie, so this needs nonadmin_client.)
         """
-        resp = nonadmin_client.get("/v2/approvals?lens=buy_plans")
+        resp = nonadmin_client.get("/v2/approvals?lens=pipeline")
         assert resp.status_code == 200
-        assert "/v2/partials/approvals?lens=buy_plans" in resp.text
+        assert "/v2/partials/approvals?lens=pipeline" in resp.text
 
     def test_full_page_ignores_unknown_lens(self, nonadmin_client):
         """An unknown ?lens= value is dropped (no query string), not echoed verbatim."""
