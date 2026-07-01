@@ -125,6 +125,10 @@ async def main():
         await session.start()
     except Exception as e:
         logger.error("ICS worker: failed to start browser session: {}", e)
+        # start() may have launched Playwright/Chromium before failing, so tear it down or
+        # the browser subprocess leaks — matches the login-failure path below. stop() is
+        # None-safe on partial state.
+        await session.stop()
         with _db_session() as db:
             update_worker_status(db, is_running=False)
         return

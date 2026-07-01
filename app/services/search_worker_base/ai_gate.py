@@ -219,10 +219,15 @@ class AIGate:
 
                 for item in batch_items:
                     classification = result_map.get(normalize_mpn_key(item.mpn))
-                    if not classification:
-                        # Model genuinely omitted this MPN — fail open like the API-failure
-                        # branch so a poison item can't recycle as 'pending' and starve the gate.
-                        logger.warning("AI gate: no classification returned for {} — failing open to search", item.mpn)
+                    if not classification or not all(
+                        k in classification for k in (self.search_field, "commodity", "reason")
+                    ):
+                        # Model omitted this MPN, or returned a malformed classification (missing
+                        # keys). Fail open like the API-failure branch — never leave it pending,
+                        # and never let classification[...] KeyError abort the batch + skip commit.
+                        logger.warning(
+                            "AI gate: missing/malformed classification for {} — failing open to search", item.mpn
+                        )
                         item.commodity_class = "unknown"
                         item.gate_decision = "search"
                         item.gate_reason = "AI gate: no classification returned — defaulting to search"

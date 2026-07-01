@@ -1449,7 +1449,12 @@ class TestWorker:
 
     @pytest.mark.asyncio
     async def test_main_browser_start_failure(self, db_session):
-        """Worker exits gracefully when browser fails to start."""
+        """Worker exits gracefully when browser fails to start AND tears down the
+        session.
+
+        start() can launch Playwright/Chromium before raising; the except handler must
+        stop() the session so the browser subprocess isn't leaked.
+        """
         import app.services.ics_worker.worker as worker_mod
 
         ws = IcsWorkerStatus(id=1, is_running=False)
@@ -1467,6 +1472,9 @@ class TestWorker:
                 with patch(self._SESSION, return_value=mock_session):
                     with patch(self._RECOVER):
                         await worker_mod.main()
+
+            # Leak guard: partial browser state is torn down on start failure.
+            mock_session.stop.assert_awaited()
         finally:
             worker_mod._shutdown_requested = original_shutdown
 

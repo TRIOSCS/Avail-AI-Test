@@ -243,6 +243,32 @@ class TestProcessAIGate:
         assert "no classification" in omitted.gate_reason
 
     @pytest.mark.asyncio
+    async def test_malformed_classification_fails_open_not_keyerror(self):
+        """A classification missing required keys fails open — it must NOT KeyError.
+
+        Regression: classification[self.search_field]/["commodity"]/["reason"] on a malformed
+        model dict raised KeyError, aborting the whole batch loop and skipping the commit
+        (every classification in the batch lost). Malformed => fail open, like omission.
+        """
+        good = self._make_item("STM32F407")
+        malformed = self._make_item("LM358")
+        model = MagicMock()
+        db_mock = self._db_with_items([good, malformed])
+
+        gate = AIGate(model, "ICsource", "search_ics")
+        classifications = [
+            {"mpn": "STM32F407", "search_ics": True, "commodity": "semiconductor", "reason": "mcu"},
+            {"mpn": "LM358"},  # missing search_ics/commodity/reason
+        ]
+        with patch.object(gate, "classify_parts_batch", new_callable=AsyncMock, return_value=classifications):
+            await gate.process_ai_gate(db_mock)  # must not raise
+
+        assert good.gate_decision == "search"
+        assert malformed.status == "queued"  # failed open, batch not aborted
+        assert malformed.gate_decision == "search"
+        db_mock.commit.assert_called_once()  # commit reached (batch not aborted)
+
+    @pytest.mark.asyncio
     async def test_gated_out_when_skip(self):
         item = self._make_item("RC0402")
 
