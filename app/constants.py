@@ -689,6 +689,7 @@ class ActivityType(StrEnum):
     BUYPLAN_REJECTED = "buyplan_rejected"
     BUYPLAN_PENDING = "buyplan_pending"
     BUYPLAN_COMPLETED = "buyplan_completed"
+    BUYPLAN_CANCELLED = "buyplan_cancelled"
     # Offer / quote lifecycle
     OFFER_PENDING_REVIEW = "offer_pending_review"  # exactly 20 chars
     NEW_OFFER = "new_offer"
