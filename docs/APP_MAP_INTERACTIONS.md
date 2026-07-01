@@ -1361,6 +1361,11 @@ buyplan_workflow.py (state machine)
     |
     |  Per-line (active):  awaiting_po --confirm_po--> pending_verify --verify_po(PO approver)--> verified
     |  Re-source (§6e):    pending_verify|verified --resource_line--> resourcing --claim_line--> awaiting_po
+    |  Flag/Resolve issue: flag_line_issue: awaiting_po|pending_verify --> issue (buyer). resolve_line_issue:
+    |                      issue --> awaiting_po (clears issue + PO-confirm fields), POST .../lines/{id}/resolve-issue,
+    |                      _can_halt-gated (supervisor/ops) — the buyer who raised it can't self-resolve, so
+    |                      flagged lines route to the supervisor My Queue "flagged" kind. Without resolve, ISSUE
+    |                      was a dead-end (badge only; resource_line rejects it).
     |  SO fold (Phase D):  the single manager approval IS the SO sign-off — _run_approve_side_effects
     |                      stamps so_status=approved + so_verified_by/at at approval time; there is no
     |                      separate verify-SO step (route/modal/queue-kind retired). sales_order_number
@@ -1374,6 +1379,10 @@ buyplan_workflow.py (state machine)
     |                      can_approve_purchase_orders right — the POST route depends on
     |                      require_buyplan_po_approver (403 otherwise), verify_po re-checks the predicate,
     |                      and detail hides the controls via the can_approve_purchase_orders Jinja global.
+    |  No-approver stall:  a plan whose open gate has NO configured approver (routing.has_eligible_approver
+    |                      False — otherwise NoEligibleApproverError is only logged) is surfaced, not left
+    |                      invisible: buyplan_workflow.plan_needs_approver_reason drives an amber detail banner,
+    |                      and my_queue emits a "no_approver" kind to the owner (+ admins) so the stall is seen.
     |  Ops group:          VerificationGroupMember (Settings > Ops Group; seeded from ADMIN_EMAILS) now
     |                      authorizes Halt + was the grandfather basis for can_approve_purchase_orders
     |                      (migration 173). admin/buy_plan_ops.toggle_ops_member guards the toggle: it

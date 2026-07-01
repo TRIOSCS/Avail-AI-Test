@@ -782,6 +782,70 @@ def flag_line_issue(
     return line
 
 
+def resolve_line_issue(plan_id: int, line_id: int, user: User, db: Session) -> BuyPlanLine:
+    """Clear a flagged issue on a line, returning it to awaiting_po so the buyer can re-
+    cut.
+
+    The counterpart to :func:`flag_line_issue`. Without it an ISSUE line was a dead-end — the
+    UI showed only a badge and re-source rejects the ISSUE status, so the only escape was
+    halting the whole plan. Flagged lines route to supervisors on the My Queue (the buyer who
+    raised the issue can't self-resolve), so this action carries the same supervisor/ops
+    authority as :func:`halt_plan`. The PO-confirmation fields are cleared alongside the issue
+    so ``awaiting_po`` means what it always means (no confirmed PO); the buyer re-confirms.
+    """
+    plan = db.get(BuyPlan, plan_id)
+    if not plan:
+        raise ValueError(f"Buy plan {plan_id} not found")
+    if plan.status != BuyPlanStatus.ACTIVE.value:
+        raise ValueError(f"Plan must be active (current: {plan.status})")
+
+    if not _can_halt(user, db):
+        raise PermissionError("Only a supervisor or ops member can resolve a flagged issue")
+
+    line = db.get(BuyPlanLine, line_id)
+    if not line or line.buy_plan_id != plan_id:
+        raise ValueError(f"Line {line_id} not found in plan {plan_id}")
+    if line.status != BuyPlanLineStatus.ISSUE.value:
+        raise ValueError(f"Line has no issue to resolve (current: {line.status})")
+
+    line.status = BuyPlanLineStatus.AWAITING_PO.value
+    line.issue_type = None
+    line.issue_note = None
+    line.po_number = None
+    line.estimated_ship_date = None
+    line.po_confirmed_at = None
+    line.last_nudge_at = None
+    logger.info("Issue resolved on line {} (plan {}) by {}", line_id, plan_id, user.email)
+
+    db.flush()
+    return line
+
+
+def plan_needs_approver_reason(plan: BuyPlan, db: Session) -> str | None:
+    """Why *plan* is stalled for lack of a configured approver, else ``None``.
+
+    A submitted plan stalls silently when no active user holds the approving right for its
+    open gate: ``create_request`` raises ``NoEligibleApproverError``, which is only logged,
+    and the plan sits invisibly (the owner no longer sees a PENDING plan and no approver
+    exists to see it). This read-only check lets the UI surface it instead. Returns
+    ``"buy_plan"`` (PENDING, no buy-plan approver) or ``"purchase_order"`` (ACTIVE over the
+    PO threshold, no approver within the required limit), else ``None``.
+    """
+    from ..constants import ApprovalGateType
+    from .approvals.routing import has_eligible_approver
+
+    if plan.status == BuyPlanStatus.PENDING.value:
+        if not has_eligible_approver(db, ApprovalGateType.BUY_PLAN):
+            return "buy_plan"
+    elif plan.status == BuyPlanStatus.ACTIVE.value:
+        total = float(plan.total_cost or 0)
+        if total >= settings.po_auto_approve_threshold and not has_eligible_approver(
+            db, ApprovalGateType.PURCHASE_ORDER, plan.total_cost
+        ):
+            return "purchase_order"
+    return None
+
+
 # ── Workflow: Completion ─────────────────────────────────────────────
 
 
