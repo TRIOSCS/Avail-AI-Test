@@ -171,6 +171,30 @@ class TestCompanyCreatePhone:
         assert c.phone.startswith("+")
 
 
+# ── CompanyCreate hq normalization (parity with CompanyUpdate) ──────
+
+
+class TestCompanyCreateHqNormalization:
+    @pytest.mark.parametrize(
+        "field,value,expected",
+        [
+            pytest.param("hq_country", None, None, id="hq_country_none"),
+            pytest.param("hq_country", "United States", "US", id="hq_country_value"),
+            pytest.param("hq_state", None, None, id="hq_state_none"),
+            pytest.param("hq_state", "California", "CA", id="hq_state_value"),
+        ],
+    )
+    def test_normalize(self, field, value, expected) -> None:
+        c = CompanyCreate(name="Acme", **{field: value})
+        assert getattr(c, field) == expected
+
+    def test_create_update_parity(self) -> None:
+        created = CompanyCreate(name="Acme", hq_country="United States", hq_state="California")
+        updated = CompanyUpdate(hq_country="United States", hq_state="California")
+        assert created.hq_country == updated.hq_country == "US"
+        assert created.hq_state == updated.hq_state == "CA"
+
+
 # ── CompanyUpdate validators ────────────────────────────────────────
 
 
