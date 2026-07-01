@@ -44,7 +44,7 @@
   <div class="mb-4 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex items-center justify-between gap-3">
     <div class="flex items-center gap-3">
       <span class="flex-shrink-0 w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center justify-center">!</span>
-      <span class="text-sm text-blue-800">This plan needs your approval. ${{ '{:,.2f}'.format(total_cost) }} total.</span>
+      <span class="text-sm text-blue-800">This plan needs your approval. ${{ '{:,.2f}'.format(total_cost) }} total. <span class="text-blue-600">Approving also signs off the sales order.</span></span>
     </div>
     <div class="flex gap-2 flex-shrink-0">
       <button @click="modalType = 'approve'; showModal = true"

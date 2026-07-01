@@ -455,3 +455,35 @@ def test_resolve_issue_route_non_supervisor_403(
     assert resp.status_code == 403
     db_session.refresh(line)
     assert line.status == BuyPlanLineStatus.ISSUE.value
+
+
+def test_detail_shows_so_signed_chip(
+    client: TestClient, db_session: Session, manager_user, test_quote, test_requisition
+):
+    """An approved (active) plan surfaces a 'SO signed · <approver>' chip so the Phase-D
+    fold (one approval also signs the sales order) is no longer invisible."""
+    plan = _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        req_id=test_requisition.id,
+        status=BuyPlanStatus.ACTIVE,
+        so_status=SOVerificationStatus.APPROVED,
+        approved_by_id=manager_user.id,
+    )
+    resp = client.get(f"/v2/partials/buy-plans/{plan.id}")
+    assert resp.status_code == 200
+    assert "SO signed" in resp.text
+
+
+def test_approval_banner_notes_so_fold(
+    client: TestClient, db_session: Session, manager_user, test_quote, test_requisition
+):
+    """The approval banner tells the approver that approving also signs off the sales
+    order."""
+    manager_user.can_approve_buy_plans = True
+    plan = _make_plan(db_session, quote_id=test_quote.id, req_id=test_requisition.id, status=BuyPlanStatus.PENDING)
+    db_session.commit()
+    with _acting_as(manager_user):
+        resp = client.get(f"/v2/partials/buy-plans/{plan.id}")
+    assert resp.status_code == 200
+    assert "signs off the sales order" in resp.text
