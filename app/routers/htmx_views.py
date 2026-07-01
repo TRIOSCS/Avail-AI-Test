@@ -63,12 +63,12 @@ from .htmx.settings import _run_inbox_scan_now
 router = APIRouter(tags=["htmx-views"])
 
 # Nav-id aliases: routes that were demoted into a parent nav item highlight the parent
-# instead. Empty now: the standalone Quotes list redirects to /v2/requisitions and the
-# Reporting surface was retired, so no view needs to borrow another tab's highlight.
-# Quote detail (/v2/quotes/{id}) falls through to "quotes", which matches no nav item —
-# correct, since it has no parent tab to highlight.
-# The global contact lists live under the CRM nav item (twins of Customers/Vendors),
-# so they borrow the "crm" highlight.
+# instead. The standalone Quotes list redirects to /v2/requisitions and the Reporting
+# surface was retired, so neither needs an alias. Quote detail (/v2/quotes/{id}) falls
+# through to "quotes", which matches no nav item — correct, since it has no parent tab to
+# highlight.
+# Current aliases: the global contact lists live under the CRM nav item (twins of
+# Customers/Vendors) so they borrow "crm", and the Approvals surface borrows "buy-plans".
 _NAV_ID_ALIAS: dict[str, str] = {"contacts": "crm", "vendor-contacts": "crm", "approvals": "buy-plans"}
 
 
