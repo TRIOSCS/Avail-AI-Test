@@ -145,6 +145,21 @@
     </button>
     {% endif %}
 
+    {# Reopen a closed quote back to draft for editing (endpoint accepts sent/won/lost). The
+       'sent' state has its own action set above, so surface Reopen for the won/lost gap. #}
+    {% if quote.status in ('won', 'lost') %}
+    {# .btn btn-lg == px-4 py-2 text-sm — matches the sibling actions while sizing via the
+       canonical .btn family (not inline px-/py-, per the static-analysis ratchet). #}
+    <button hx-post="/v2/partials/quotes/{{ quote.id }}/reopen"
+            hx-target="#main-content"
+            hx-confirm="Reopen this quote back to draft for editing?"
+            data-loading-disable
+            class="btn btn-secondary btn-lg inline-flex items-center gap-1.5">
+      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+      Reopen
+    </button>
+    {% endif %}
+
     <button hx-post="/v2/partials/quotes/{{ quote.id }}/revise"
             hx-target="#main-content"
             hx-confirm="Create a new revision of this quote?"
