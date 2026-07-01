@@ -428,6 +428,21 @@ class TestUpdateLeadStatus:
         assert events[0].status == "contacted"
         assert events[0].note == "test note"
 
+    def test_has_stock_propagates_to_vendor_card(self, db_session: Session):
+        """Parity: db.get PK lookups (lead by id, vendor_card by id) still resolve the
+        right rows — a has_stock outcome must record a win on the linked VendorCard."""
+        lead = self._setup_lead(db_session)
+        assert lead.vendor_card_id is not None
+        card_before = db_session.get(VendorCard, lead.vendor_card_id)
+        wins_before = card_before.total_wins or 0
+
+        result = update_lead_status(db_session, lead.id, "has_stock")
+
+        assert result is not None
+        assert result.id == lead.id
+        db_session.refresh(card_before)
+        assert (card_before.total_wins or 0) == wins_before + 1
+
     def test_resync_preserves_buyer_lowered_confidence(self, db_session: Session):
         """Regression: a buyer 'no_stock' outcome lowers confidence_score; re-syncing the
         same sighting must NOT restore the source-computed band and mask the outcome."""
