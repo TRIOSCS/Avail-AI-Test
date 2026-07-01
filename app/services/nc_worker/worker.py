@@ -351,7 +351,12 @@ def main():
         )
         session.stop()
         if session.has_browser:
-            asyncio.run(session.stop_browser())
+            # Stop the browser on the SAME persistent loop it was created on (search_part
+            # drives the browser via _get_browser_loop). A fresh asyncio.run() loop here
+            # would fail cross-loop against the persistent-loop-bound Patchright objects.
+            from .search_engine import _get_browser_loop
+
+            _get_browser_loop().run_until_complete(session.stop_browser())
         with _db_session() as db:
             update_worker_status(db, is_running=False)
 

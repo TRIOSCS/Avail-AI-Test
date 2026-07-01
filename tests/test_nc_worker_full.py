@@ -3473,7 +3473,8 @@ class TestNcWorkerGaps:
             worker_mod._shutdown_requested = original
 
     def test_main_has_browser_stop(self, db_session):
-        """Main() calls stop_browser when has_browser is True (line 316)."""
+        """Main() stops the browser on the persistent browser loop when has_browser is
+        True."""
         import app.services.nc_worker.worker as worker_mod
 
         ws = NcWorkerStatus(id=1, is_running=False)
@@ -3487,18 +3488,25 @@ class TestNcWorkerGaps:
         mock_session.is_logged_in = True
         mock_session.stop = MagicMock()
         mock_session.has_browser = True
-        mock_session.stop_browser = MagicMock()  # Not AsyncMock — avoids unawaited coroutine
+        mock_session.stop_browser = MagicMock()  # loop.run_until_complete is mocked, so no await
+
+        # The teardown now drives stop_browser on the SAME persistent loop search_part uses
+        # (not a fresh asyncio.run loop), so patch that loop and assert it ran the coroutine.
+        mock_loop = MagicMock()
 
         try:
             worker_mod._shutdown_requested = True
             with patch(self._DB, self._make_mock_db(db_session)):
                 with patch(self._SESSION, return_value=mock_session):
                     with patch(self._QUEUE_RECOVER):
-                        with patch(self._ASYNCIO_RUN) as mock_asyncio_run:
+                        with patch(
+                            "app.services.nc_worker.search_engine._get_browser_loop",
+                            return_value=mock_loop,
+                        ):
                             worker_mod.main()
 
-            # stop_browser called via asyncio.run
-            mock_asyncio_run.assert_called()
+            mock_session.stop_browser.assert_called()
+            mock_loop.run_until_complete.assert_called()
         finally:
             worker_mod._shutdown_requested = original
 
