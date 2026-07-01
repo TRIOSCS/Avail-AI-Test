@@ -122,14 +122,17 @@ class TestEncryptedText:
         assert result is None
 
     @patch("app.utils.encrypted_type._get_fernet")
-    def test_process_result_value_other_error_returns_raw(self, mock_fernet):
+    def test_process_result_value_other_error_reraises(self, mock_fernet):
+        """A non-InvalidToken decrypt error (bad salt/secret_key, corrupt key material)
+        must propagate loudly — NOT be swallowed as None, which would make every
+        encrypted field silently decrypt to empty app-wide."""
         mock_f = MagicMock()
         mock_f.decrypt.side_effect = RuntimeError("unexpected")
         mock_fernet.return_value = mock_f
 
         et = EncryptedText()
-        result = et.process_result_value("raw-value", MagicMock())
-        assert result is None
+        with pytest.raises(RuntimeError, match="unexpected"):
+            et.process_result_value("raw-value", MagicMock())
 
 
 class TestEncryptedTypeSalt:

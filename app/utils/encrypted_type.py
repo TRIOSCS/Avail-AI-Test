@@ -74,11 +74,18 @@ class EncryptedText(TypeDecorator):
             f = _get_fernet()
             return f.decrypt(value.encode()).decode()
         except InvalidToken:
+            # The stored value is simply not a valid Fernet token under the current key
+            # (e.g. pre-migration plaintext). Treat it as "no validly-encrypted value".
             logger.warning(
                 "Fernet decryption failed (possible pre-migration plaintext data) — "
                 "returning None instead of raw ciphertext"
             )
             return None
-        except Exception:
-            logger.warning("Unexpected decryption error — returning None for safety")
-            return None
+        except Exception as e:
+            # Any non-InvalidToken error means the crypto layer itself is misconfigured or
+            # broken (wrong ENCRYPTION_SALT / secret_key, corrupted key material). Silently
+            # returning None here would make EVERY encrypted field decrypt to empty app-wide
+            # (M365 appears disconnected, API keys vanish) — indistinguishable from genuinely
+            # empty data. Fail loudly instead so the misconfiguration surfaces.
+            logger.error(f"Encrypted field decryption failed (likely bad ENCRYPTION_SALT/secret_key): {e}")
+            raise
