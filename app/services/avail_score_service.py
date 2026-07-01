@@ -22,7 +22,15 @@ from sqlalchemy import and_, or_
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
 
-from ..constants import BuyPlanStatus, UserRole
+from ..constants import (
+    ActivityType,
+    BuyPlanStatus,
+    ContactStatus,
+    Direction,
+    ProactiveOfferStatus,
+    QuoteStatus,
+    UserRole,
+)
 from ..models import (
     ActivityLog,
     BuyPlan,
@@ -126,7 +134,9 @@ def compute_buyer_avail_score(db: Session, user_id: int, month: date) -> dict:
     quoted_offer_ids = set()
     # No arbitrary row cap: a global .limit() silently dropped offers past the cap and
     # undercounted O2/O4 (which drive real payouts). Scan all sent/won/lost quotes.
-    for (items,) in db.query(Quote.line_items).filter(Quote.status.in_(["sent", "won", "lost"])).all():
+    for (items,) in (
+        db.query(Quote.line_items).filter(Quote.status.in_([QuoteStatus.SENT, QuoteStatus.WON, QuoteStatus.LOST])).all()
+    ):
         for item in items or []:
             oid = item.get("offer_id")
             if oid:
@@ -211,7 +221,10 @@ def compute_buyer_avail_score(db: Session, user_id: int, month: date) -> dict:
     won = (
         db.query(sqlfunc.count(Quote.id))
         .filter(
-            Quote.created_by_id == user_id, Quote.result == "won", Quote.result_at >= start_dt, Quote.result_at < end_dt
+            Quote.created_by_id == user_id,
+            Quote.result == QuoteStatus.WON,
+            Quote.result_at >= start_dt,
+            Quote.result_at < end_dt,
         )
         .scalar()
     ) or 0
@@ -219,7 +232,7 @@ def compute_buyer_avail_score(db: Session, user_id: int, month: date) -> dict:
         db.query(sqlfunc.count(Quote.id))
         .filter(
             Quote.created_by_id == user_id,
-            Quote.result == "lost",
+            Quote.result == QuoteStatus.LOST,
             Quote.result_at >= start_dt,
             Quote.result_at < end_dt,
         )
@@ -380,7 +393,7 @@ def _buyer_b3_vendor_followup(db, req_ids, user_id, start_dt, end_dt):
         .filter(
             Contact.requisition_id.in_(req_ids),
             Contact.user_id == user_id,
-            Contact.status == "sent",
+            Contact.status == ContactStatus.SENT,
             Contact.created_at >= start_dt,
             Contact.created_at <= cutoff_48h,
         )
@@ -448,7 +461,7 @@ def compute_sales_avail_score(db: Session, user_id: int, month: date) -> dict:
     start_dt, end_dt = month_range(month)
     # Calls + emails, direction-agnostic: the prior tuple held both call
     # directions, so call_logged (canonical, any direction) preserves intent.
-    call_and_email_types = ("email_sent", "call_logged")
+    call_and_email_types = (ActivityType.EMAIL_SENT, ActivityType.CALL_LOGGED)
 
     # ── B1: Account Coverage ──
     # % of owned accounts with outbound activity this month
@@ -572,7 +585,10 @@ def compute_sales_avail_score(db: Session, user_id: int, month: date) -> dict:
     won = (
         db.query(sqlfunc.count(Quote.id))
         .filter(
-            Quote.created_by_id == user_id, Quote.result == "won", Quote.result_at >= start_dt, Quote.result_at < end_dt
+            Quote.created_by_id == user_id,
+            Quote.result == QuoteStatus.WON,
+            Quote.result_at >= start_dt,
+            Quote.result_at < end_dt,
         )
         .scalar()
     ) or 0
@@ -580,7 +596,7 @@ def compute_sales_avail_score(db: Session, user_id: int, month: date) -> dict:
         db.query(sqlfunc.count(Quote.id))
         .filter(
             Quote.created_by_id == user_id,
-            Quote.result == "lost",
+            Quote.result == QuoteStatus.LOST,
             Quote.result_at >= start_dt,
             Quote.result_at < end_dt,
         )
@@ -595,7 +611,10 @@ def compute_sales_avail_score(db: Session, user_id: int, month: date) -> dict:
     revenue = (
         db.query(sqlfunc.coalesce(sqlfunc.sum(Quote.won_revenue), 0))
         .filter(
-            Quote.created_by_id == user_id, Quote.result == "won", Quote.result_at >= start_dt, Quote.result_at < end_dt
+            Quote.created_by_id == user_id,
+            Quote.result == QuoteStatus.WON,
+            Quote.result_at >= start_dt,
+            Quote.result_at < end_dt,
         )
         .scalar()
     ) or 0
@@ -622,7 +641,7 @@ def compute_sales_avail_score(db: Session, user_id: int, month: date) -> dict:
         db.query(sqlfunc.count(ProactiveOffer.id))
         .filter(
             ProactiveOffer.salesperson_id == user_id,
-            ProactiveOffer.status == "converted",
+            ProactiveOffer.status == ProactiveOfferStatus.CONVERTED,
             ProactiveOffer.converted_at >= start_dt,
             ProactiveOffer.converted_at < end_dt,
         )
@@ -642,7 +661,7 @@ def compute_sales_avail_score(db: Session, user_id: int, month: date) -> dict:
             .join(Company, CustomerSite.company_id == Company.id)
             .filter(
                 Quote.created_by_id == user_id,
-                Quote.result == "won",
+                Quote.result == QuoteStatus.WON,
                 Quote.result_at >= start_dt,
                 Quote.result_at < end_dt,
                 Company.is_strategic.is_(True),
@@ -717,7 +736,7 @@ def _sales_b3_quote_followup(db, user_id, start_dt, end_dt):
             Quote.created_by_id == user_id,
             Quote.sent_at >= start_dt,
             Quote.sent_at < end_dt,
-            Quote.status.in_(["sent", "won", "lost"]),
+            Quote.status.in_([QuoteStatus.SENT, QuoteStatus.WON, QuoteStatus.LOST]),
         )
         .all()
     )
@@ -738,10 +757,10 @@ def _sales_b3_quote_followup(db, user_id, start_dt, end_dt):
             .filter(
                 ActivityLog.user_id == user_id,
                 or_(
-                    ActivityLog.activity_type == "email_sent",
+                    ActivityLog.activity_type == ActivityType.EMAIL_SENT,
                     and_(
-                        ActivityLog.activity_type == "call_logged",
-                        ActivityLog.direction == "outbound",
+                        ActivityLog.activity_type == ActivityType.CALL_LOGGED,
+                        ActivityLog.direction == Direction.OUTBOUND,
                     ),
                 ),
                 ActivityLog.created_at > sent_at,
