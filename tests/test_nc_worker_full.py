@@ -2477,11 +2477,61 @@ class TestNcSearchEngineFull:
             "status_code": 200,
         }
 
-        with patch("app.services.nc_worker.search_engine._search_browser"):
-            with patch("app.services.nc_worker.search_engine.asyncio.run", return_value=browser_result):
-                result = search_part(mock_session_mgr, "XYZ123")
+        async def fake_browser(_sm, _pn):
+            return browser_result
+
+        with patch("app.services.nc_worker.search_engine._search_browser", side_effect=fake_browser):
+            result = search_part(mock_session_mgr, "XYZ123")
 
         assert result["mode"] == "browser"
+
+    def test_search_part_browser_uses_persistent_loop(self):
+        """Repeated browser fallbacks reuse ONE live event loop.
+
+        Regression: search_part used asyncio.run() per call, creating and
+        closing a fresh loop each time. The session_manager caches the browser
+        page bound to the first loop, so the second fallback ran against a
+        closed loop ("Event loop is closed"). All browser coroutines must run
+        on a single persistent loop that stays open across calls.
+        """
+        import asyncio
+
+        import app.services.nc_worker.search_engine as se
+
+        # Reset the module-level loop so the assertion is deterministic.
+        se._browser_loop = None
+
+        mock_resp = MagicMock()
+        mock_resp.text = "<html>No results</html>"  # forces browser fallback
+        mock_resp.status_code = 200
+
+        mock_session_mgr = MagicMock()
+        mock_session_mgr.session.get = MagicMock(return_value=mock_resp)
+        mock_session_mgr.has_browser = True
+
+        seen_loop_ids = []
+
+        async def record_loop(_sm, _pn):
+            seen_loop_ids.append(id(asyncio.get_running_loop()))
+            return {
+                "html": "<div class='searchresultstable'>data</div>",
+                "url": "url",
+                "duration_ms": 1,
+                "status_code": 200,
+            }
+
+        with patch("app.services.nc_worker.search_engine._search_browser", side_effect=record_loop):
+            first = search_part(mock_session_mgr, "AAA111")
+            second = search_part(mock_session_mgr, "BBB222")
+
+        assert first["mode"] == "browser"
+        assert second["mode"] == "browser"
+        # Same loop drove BOTH calls (fails on old asyncio.run: two loop ids).
+        assert len(seen_loop_ids) == 2
+        assert seen_loop_ids[0] == seen_loop_ids[1]
+        # And that loop is still alive (old asyncio.run closes it each time).
+        assert se._browser_loop is not None
+        assert not se._browser_loop.is_closed()
 
     def test_has_results_empty(self):
         """_has_results returns False for empty string (line 153)."""
