@@ -1,233 +1,72 @@
 """AI commodity gate for NetComponents search queue.
 
-Uses Claude Haiku to classify electronic parts as worth searching on NC
-(semiconductors, ICs, hard-to-find) vs. skip (standard passives, connectors).
-Includes a classification cache to avoid re-classifying the same part.
+Thin worker-specific shim over the parameterized ``AIGate`` in
+``app/services/search_worker_base/ai_gate.py``. It wires the shared base
+implementation to the NetComponents queue (``NcSearchQueue``), marketplace
+name, ``search_nc`` field, and NC's priority-first ordering, then re-exports
+the public ``process_ai_gate`` / ``classify_parts_batch`` /
+``clear_classification_cache`` surface (plus the module-level
+``_classification_cache`` / ``_cache_lock`` / ``_last_api_failure`` state that
+callers and tests reach into).
 
 Called by: worker loop (process_ai_gate)
-Depends on: claude_client, nc_search_queue model
+Depends on: search_worker_base.ai_gate.AIGate, NcSearchQueue model
 """
 
-import threading
-import time
-from datetime import datetime, timezone
-
-from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.models import NcSearchQueue
-from app.utils.normalization import normalize_mpn_key
+from app.services.search_worker_base.ai_gate import AIGate
 
-# Cooldown after API failure to avoid hammering a broken endpoint
-_GATE_COOLDOWN_SECONDS = 300  # 5 minutes
+# Single shared gate instance carrying the NC-specific config. NC orders pending
+# items priority-first, then newest-first within a priority.
+_gate = AIGate(
+    NcSearchQueue,
+    marketplace_name="NetComponents",
+    search_field="search_nc",
+    log_prefix="NC",
+    order_by=[NcSearchQueue.priority.asc(), NcSearchQueue.created_at.desc()],
+)
+
+# Re-export the base instance's cache state as module-level names so existing
+# callers/tests that mutate ``_classification_cache`` / hold ``_cache_lock``
+# operate on the SAME objects the gate uses.
+_classification_cache = _gate._classification_cache
+_cache_lock = _gate._cache_lock
+
+# Module-level cooldown timestamp. Tests set/read this directly, so it is kept
+# in sync with the gate's own ``_last_api_failure`` inside ``process_ai_gate``.
 _last_api_failure: float = 0.0
-
-_GATE_SYSTEM_PROMPT = """\
-You classify electronic components for sourcing on NetComponents marketplace.
-
-SEARCH on NetComponents (return search_nc=true):
-- Semiconductors, ICs (microcontrollers, op-amps, voltage regulators, ADCs/DACs)
-- FPGAs, CPLDs, ASICs
-- Power management ICs (PMICs, DC-DC converters, LDOs)
-- Memory chips (SRAM, DRAM, Flash, EEPROM)
-- Obsolete/EOL/hard-to-find parts
-- Military/aerospace parts (JAN, MIL-spec, QPL)
-- RF/microwave components
-- Specialty sensors (MEMS, pressure, accelerometer ICs)
-- Any part that is not a commodity item
-
-SKIP NetComponents (return search_nc=false):
-- Standard chip resistors (RC/CR/ERJ/CRCW series)
-- MLCC capacitors (GRM/CL/C0G/X5R/X7R series in standard packages)
-- Standard inductors (commodity wound inductors)
-- Commodity connectors (JST headers, Molex headers, USB-A/B/C standard)
-- Standard LEDs (through-hole, common SMD 0402-1206)
-- Standard diodes (1N4148, 1N5819, BAT54, common Schottky/switching)
-- Standard crystals and oscillators
-- Cable assemblies
-- Mechanical/hardware items (screws, standoffs, enclosures)
-- Fuses, ferrite beads (standard values)
-
-Return a JSON array. Each element: {"mpn": str, "search_nc": bool, "commodity": str, "reason": str}
-The commodity field should be one of: semiconductor, passive, connector, discrete, memory, power, rf, sensor, mechanical, other.
-The reason should be a brief explanation (under 50 words).
-"""
-
-_GATE_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "classifications": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "mpn": {"type": "string"},
-                    "search_nc": {"type": "boolean"},
-                    "commodity": {"type": "string"},
-                    "reason": {"type": "string"},
-                },
-                "required": ["mpn", "search_nc", "commodity", "reason"],
-            },
-        }
-    },
-    "required": ["classifications"],
-}
-
-# In-memory classification cache: (normalized_mpn, manufacturer) -> (commodity, decision, reason)
-_classification_cache: dict[tuple[str, str], tuple[str, str, str]] = {}
-_cache_lock = threading.Lock()
 
 
 async def classify_parts_batch(parts: list[dict]) -> list[dict] | None:
-    """Classify up to 30 parts using Claude Haiku.
+    """Classify up to 30 parts using Claude Haiku (delegates to the base gate)."""
+    return await AIGate.classify_parts_batch(_gate, parts)
 
-    Args:
-        parts: List of {"mpn": str, "manufacturer": str, "description": str}
 
-    Returns:
-        List of {"mpn": str, "search_nc": bool, "commodity": str, "reason": str}
-        or None on API failure.
-    """
-    from app.utils.llm_router import routed_structured
+async def _instance_classify(parts: list[dict]) -> list[dict] | None:
+    """Indirection the base gate calls so tests patching the module-level
+    ``classify_parts_batch`` still take effect."""
+    return await classify_parts_batch(parts)
 
-    if not parts:
-        return []
 
-    prompt_lines = ["Classify these electronic parts:\n"]
-    for p in parts:
-        mfr = p.get("manufacturer") or "unknown"
-        desc = p.get("description") or ""
-        prompt_lines.append(f"- MPN: {p['mpn']}, Manufacturer: {mfr}, Description: {desc}")
-
-    prompt = "\n".join(prompt_lines)
-
-    try:
-        result = await routed_structured(
-            prompt=prompt,
-            schema=_GATE_SCHEMA,
-            system=_GATE_SYSTEM_PROMPT,
-            model_tier="fast",
-            max_tokens=2048,
-            timeout=30,
-        )
-        if result and "classifications" in result:
-            return result["classifications"]
-        logger.warning("AI gate: unexpected response format: {}", result)
-        return None
-    except Exception as e:
-        logger.error("AI gate: Claude API call failed: {}", e)
-        return None
+# Route the gate's classification through the module-level (patchable) function.
+_gate.classify_parts_batch = _instance_classify  # type: ignore[method-assign]
 
 
 async def process_ai_gate(db: Session):
     """Process pending queue items through the AI classification gate.
 
-    Checks classification cache first, then batch-classifies uncached items. Updates
-    queue status to 'queued' (search) or 'gated_out' (skip). Respects a 5-minute
-    cooldown after API failures.
+    Delegates to the shared base gate, syncing the module-level cooldown
+    timestamp in and back out so tests (and callers) that read/write
+    ``_last_api_failure`` observe consistent state.
     """
     global _last_api_failure
-    if _last_api_failure:
-        elapsed = time.monotonic() - _last_api_failure
-        if elapsed < _GATE_COOLDOWN_SECONDS:
-            remaining = int(_GATE_COOLDOWN_SECONDS - elapsed)
-            logger.debug("AI gate: in cooldown after API failure ({}s remaining)", remaining)
-            return
-
-    pending = (
-        db.query(NcSearchQueue)
-        .filter(NcSearchQueue.status == "pending")
-        .order_by(NcSearchQueue.priority.asc(), NcSearchQueue.created_at.desc())
-        .limit(30)
-        .all()
-    )
-
-    if not pending:
-        return
-
-    uncached = []
-    for item in pending:
-        cache_key = (item.normalized_mpn, (item.manufacturer or "").lower())
-        with _cache_lock:
-            cached = _classification_cache.get(cache_key)
-        if cached:
-            commodity, decision, reason = cached
-            item.commodity_class = commodity
-            item.gate_decision = decision
-            item.gate_reason = f"[cached] {reason}"
-            item.status = "queued" if decision == "search" else "gated_out"
-            item.updated_at = datetime.now(timezone.utc)
-            logger.debug("AI gate cache hit: {} -> {}", item.mpn, decision)
-        else:
-            uncached.append(item)
-
-    if uncached:
-        parts = [
-            {"mpn": item.mpn, "manufacturer": item.manufacturer or "", "description": item.description or ""}
-            for item in uncached
-        ]
-
-        # Split into batches of 30
-        for batch_start in range(0, len(parts), 30):
-            batch = parts[batch_start : batch_start + 30]
-            batch_items = uncached[batch_start : batch_start + 30]
-
-            results = await classify_parts_batch(batch)
-            if results is None:
-                # API failure — fail-open: default to search so items aren't stuck
-                _last_api_failure = time.monotonic()
-                logger.warning("AI gate: API failure, defaulting {} items to 'queued' (fail-open)", len(batch_items))
-                for item in batch_items:
-                    item.commodity_class = "unknown"
-                    item.gate_decision = "search"
-                    item.gate_reason = "AI gate unavailable — defaulting to search"
-                    item.status = "queued"
-                    item.updated_at = datetime.now(timezone.utc)
-                break  # Stop processing further batches during this cycle
-
-            # Build a lookup by MPN
-            result_map = {normalize_mpn_key(r["mpn"]): r for r in results}
-
-            for item in batch_items:
-                classification = result_map.get(normalize_mpn_key(item.mpn))
-                if not classification or not all(k in classification for k in ("search_nc", "commodity", "reason")):
-                    # Model omitted this MPN, or returned a malformed classification (missing
-                    # keys). Fail open like the API-failure branch — never leave it pending, and
-                    # never let classification[...] KeyError abort the batch + skip commit.
-                    logger.warning(
-                        "AI gate: missing/malformed classification for {} — failing open to search", item.mpn
-                    )
-                    item.commodity_class = "unknown"
-                    item.gate_decision = "search"
-                    item.gate_reason = "AI gate: no classification returned — defaulting to search"
-                    item.status = "queued"
-                    item.updated_at = datetime.now(timezone.utc)
-                    continue
-
-                decision = "search" if classification["search_nc"] else "skip"
-                commodity = classification["commodity"]
-                reason = classification["reason"]
-
-                item.commodity_class = commodity
-                item.gate_decision = decision
-                item.gate_reason = reason
-                item.status = "queued" if decision == "search" else "gated_out"
-                item.updated_at = datetime.now(timezone.utc)
-
-                # Cache the classification
-                cache_key = (item.normalized_mpn, (item.manufacturer or "").lower())
-                with _cache_lock:
-                    _classification_cache[cache_key] = (commodity, decision, reason)
-
-                logger.info("AI gate: {} ({}) -> {} ({})", item.mpn, commodity, decision, reason)
-
-    db.commit()
-    logger.info(
-        "AI gate processed {} items: {} from cache, {} classified",
-        len(pending),
-        len(pending) - len(uncached),
-        len(uncached),
-    )
+    _gate._last_api_failure = _last_api_failure
+    try:
+        await _gate.process_ai_gate(db)
+    finally:
+        _last_api_failure = _gate._last_api_failure
 
 
 def clear_classification_cache():
