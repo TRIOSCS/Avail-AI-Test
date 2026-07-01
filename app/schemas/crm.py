@@ -52,6 +52,28 @@ def normalize_website(v: str | None) -> str | None:
     return v
 
 
+def normalize_hq_country_value(v: str | None) -> str | None:
+    """Normalize a company HQ country to an ISO code (shared by CompanyCreate and
+    CompanyUpdate so create/edit stay in parity).
+
+    None passes through; an unmappable value is kept verbatim.
+    """
+    if v is None:
+        return v
+    return normalize_country(v) or v
+
+
+def normalize_hq_state_value(v: str | None) -> str | None:
+    """Normalize a company HQ state to a US abbreviation (shared by CompanyCreate and
+    CompanyUpdate so create/edit stay in parity).
+
+    None passes through; an unmappable value is kept verbatim.
+    """
+    if v is None:
+        return v
+    return normalize_us_state(v) or v
+
+
 # ── Companies ────────────────────────────────────────────────────────
 
 
@@ -88,6 +110,16 @@ class CompanyCreate(BaseModel):
     @classmethod
     def validate_website(cls, v: str | None) -> str | None:
         return normalize_website(v)
+
+    @field_validator("hq_country")
+    @classmethod
+    def normalize_hq_country(cls, v: str | None) -> str | None:
+        return normalize_hq_country_value(v)
+
+    @field_validator("hq_state")
+    @classmethod
+    def normalize_hq_state(cls, v: str | None) -> str | None:
+        return normalize_hq_state_value(v)
 
     @field_validator("phone")
     @classmethod
@@ -127,16 +159,12 @@ class CompanyUpdate(BaseModel):
     @field_validator("hq_country")
     @classmethod
     def normalize_hq_country(cls, v: str | None) -> str | None:
-        if v is None:
-            return v
-        return normalize_country(v) or v
+        return normalize_hq_country_value(v)
 
     @field_validator("hq_state")
     @classmethod
     def normalize_hq_state(cls, v: str | None) -> str | None:
-        if v is None:
-            return v
-        return normalize_us_state(v) or v
+        return normalize_hq_state_value(v)
 
     @field_validator("phone")
     @classmethod
