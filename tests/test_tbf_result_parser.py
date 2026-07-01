@@ -1,4 +1,5 @@
-"""tests/test_tbf_result_parser.py — Tests for app/services/tbf_worker/result_parser.py."""
+"""tests/test_tbf_result_parser.py — Tests for
+app/services/tbf_worker/result_parser.py."""
 
 import os
 

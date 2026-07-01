@@ -1,4 +1,5 @@
-"""tests/test_search_worker_monitoring.py — Tests for app/services/search_worker_base/monitoring.py."""
+"""tests/test_search_worker_monitoring.py — Tests for
+app/services/search_worker_base/monitoring.py."""
 
 import os
 

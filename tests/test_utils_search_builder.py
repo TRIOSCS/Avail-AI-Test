@@ -1,4 +1,5 @@
-"""tests/test_utils_search_builder.py — Tests for app/utils/search_builder.py and sql_helpers.py."""
+"""tests/test_utils_search_builder.py — Tests for app/utils/search_builder.py and
+sql_helpers.py."""
 
 import os
 
@@ -36,7 +37,6 @@ class TestEscapeLike:
 class TestSearchBuilder:
     def setup_method(self):
         """Create an in-memory SQLite DB for testing."""
-
         self.engine = create_engine("sqlite:///:memory:")
 
         class Base(DeclarativeBase):
@@ -133,8 +133,8 @@ class TestSearchBuilder:
             assert isinstance(results, list)
 
     def test_fts_or_fallback_handles_programming_error(self):
-        """SQLite raises ProgrammingError for tsquery — SearchBuilder falls back to ILIKE."""
-
+        """SQLite raises ProgrammingError for tsquery — SearchBuilder falls back to
+        ILIKE."""
         sb = SearchBuilder("LM317")
 
         # Add a fake search_vector attribute to trigger the FTS path

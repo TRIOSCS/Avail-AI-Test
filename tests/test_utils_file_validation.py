@@ -97,7 +97,7 @@ class TestDetectEncoding:
 
 class TestValidateFileMagicBytes:
     def test_xlsx_valid_with_magic_bytes(self):
-        """xlsx files have PK magic bytes (zip format)."""
+        """Xlsx files have PK magic bytes (zip format)."""
         # A minimal valid xlsx ZIP header
         xlsx_magic = b"PK\x03\x04" + b"\x00" * 26
         ok, ft = validate_file(xlsx_magic, "data.xlsx")

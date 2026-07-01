@@ -1,4 +1,5 @@
-"""tests/test_utils_normalization_helpers_ext.py — Tests for app/utils/normalization_helpers.py."""
+"""tests/test_utils_normalization_helpers_ext.py — Tests for
+app/utils/normalization_helpers.py."""
 
 import os
 
