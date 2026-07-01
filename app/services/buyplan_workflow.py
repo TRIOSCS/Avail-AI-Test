@@ -461,8 +461,12 @@ def confirm_po(
     plan = db.get(BuyPlan, plan_id)
     if not plan:
         raise ValueError(f"Buy plan {plan_id} not found")
-    if plan.status != BuyPlanStatus.ACTIVE.value:
-        raise ValueError(f"Plan must be active (current: {plan.status})")
+    # ACTIVE or INBOUND: over-threshold plans move ACTIVE→INBOUND when the deal-level PO
+    # gate is approved, but their lines can still be AWAITING_PO — the buyer must be able to
+    # record the individual line PO# in either state (else the deal-PO approval strands the
+    # AWAITING_PO lines with no way to confirm their POs).
+    if plan.status not in (BuyPlanStatus.ACTIVE.value, BuyPlanStatus.INBOUND.value):
+        raise ValueError(f"Plan must be active or inbound (current: {plan.status})")
 
     line = db.get(BuyPlanLine, line_id)
     if not line or line.buy_plan_id != plan_id:
