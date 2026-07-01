@@ -49,8 +49,8 @@ _RECENT_LIMIT = 12
 def _ctx(request: Request, user: User) -> dict:
     """Shared base context.
 
-    Lazy import of htmx_views._base_ctx avoids an import cycle (same pattern as
-    routers/requisitions2.py:67).
+    Lazy import of htmx_views._base_ctx avoids an import cycle (the same lazy-import
+    pattern used across the htmx partial routers).
     """
     from app.routers.htmx_views import _base_ctx
 
