@@ -11,6 +11,7 @@ get_all_pns, while MaterialCard.normalized_mpn stores the canonical KEY form
 False and the trigger never fired. These tests lock in the key-form lookup.
 """
 
+from sqlalchemy import event
 from sqlalchemy.orm import Session
 
 from app.models import MaterialCard
@@ -58,3 +59,30 @@ class TestAnyPnObsolete:
         # normalize_mpn_key strips these to empty, so there are no keys to match.
         assert _any_pn_obsolete(db_session, []) is False
         assert _any_pn_obsolete(db_session, ["--", "  "]) is False
+
+    def test_batch_of_pns_uses_single_query(self, db_session: Session):
+        # N+1 guard: a batch of many PNs must resolve obsolete-status with ONE
+        # indexed .in_() query against material_cards, not one query per PN.
+        pns = [f"PART-{i:03d}-ABC" for i in range(12)]
+        _mk_card(db_session, pns[7], "obsolete")  # one obsolete card in the batch
+        for pn in pns[:5]:
+            _mk_card(db_session, pn, "active")
+        db_session.commit()
+
+        material_card_selects: list[str] = []
+
+        def _count(conn, cursor, statement, parameters, context, executemany):
+            normalized = " ".join(statement.lower().split())
+            if normalized.startswith("select") and "material_cards" in normalized:
+                material_card_selects.append(statement)
+
+        engine = db_session.get_bind()
+        event.listen(engine, "after_cursor_execute", _count)
+        try:
+            result = _any_pn_obsolete(db_session, pns)
+        finally:
+            event.remove(engine, "after_cursor_execute", _count)
+
+        assert result is True
+        # Exactly one material_cards SELECT for the whole batch — no per-PN loop.
+        assert len(material_card_selects) == 1, material_card_selects

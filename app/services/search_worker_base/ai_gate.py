@@ -88,6 +88,11 @@ class AIGate:
         search_field: The boolean field name in the classification result
             (e.g. "search_ics", "search_nc").
         log_prefix: Short prefix for log messages (e.g. "ICS", "NC").
+        order_by: Optional list of SQLAlchemy order-by expressions used to
+            select the next batch of pending items. Defaults to
+            ``[queue_model.created_at.asc()]`` (oldest first). NetComponents
+            passes ``[priority.asc(), created_at.desc()]`` to keep its
+            priority-first ordering.
     """
 
     def __init__(
@@ -96,11 +101,13 @@ class AIGate:
         marketplace_name: str,
         search_field: str,
         log_prefix: str = "WORKER",
+        order_by: list | None = None,
     ):
         self.queue_model = queue_model
         self.marketplace_name = marketplace_name
         self.search_field = search_field
         self.log_prefix = log_prefix
+        self._order_by = order_by
         self._system_prompt = _build_system_prompt(marketplace_name, search_field)
         self._schema = _build_schema(search_field)
         self._last_api_failure: float = 0.0
@@ -169,7 +176,8 @@ class AIGate:
                 return
 
         model = self.queue_model
-        pending = db.query(model).filter(model.status == "pending").order_by(model.created_at.asc()).limit(30).all()
+        order_by = self._order_by if self._order_by is not None else [model.created_at.asc()]
+        pending = db.query(model).filter(model.status == "pending").order_by(*order_by).limit(30).all()
 
         if not pending:
             return

@@ -1437,9 +1437,16 @@ async def review_response_htmx(
         raise HTTPException(404, "Response not found")
 
     form = await request.form()
-    new_status = form.get("status", "")
-    if new_status not in ("reviewed", "rejected"):
-        raise HTTPException(400, "Status must be 'reviewed' or 'rejected'")
+    status_by_action = {
+        VendorResponseStatus.REVIEWED.value: VendorResponseStatus.REVIEWED,
+        VendorResponseStatus.REJECTED.value: VendorResponseStatus.REJECTED,
+    }
+    new_status = status_by_action.get(form.get("status", ""))
+    if new_status is None:
+        raise HTTPException(
+            400,
+            f"Status must be '{VendorResponseStatus.REVIEWED.value}' or '{VendorResponseStatus.REJECTED.value}'",
+        )
 
     vr.status = new_status
     db.commit()

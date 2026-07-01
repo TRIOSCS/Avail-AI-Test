@@ -148,6 +148,42 @@ class TestTier:
         assert _tier(value, tiers) == expected
 
 
+# ── Parity: enum constants used by queries match their DB literals ───
+
+
+class TestConstantParity:
+    """Guard the StrEnum members avail_score_service filters on against their raw DB
+    string values.
+
+    If an enum value drifts, the service's queries would silently match nothing
+    (undercounting real payouts), so pin the exact strings here.
+    """
+
+    def test_quote_status_values(self):
+        from app.constants import QuoteStatus
+
+        assert QuoteStatus.SENT == "sent"
+        assert QuoteStatus.WON == "won"
+        assert QuoteStatus.LOST == "lost"
+
+    def test_contact_status_sent(self):
+        from app.constants import ContactStatus
+
+        assert ContactStatus.SENT == "sent"
+
+    def test_proactive_offer_converted(self):
+        from app.constants import ProactiveOfferStatus
+
+        assert ProactiveOfferStatus.CONVERTED == "converted"
+
+    def test_activity_type_and_direction(self):
+        from app.constants import ActivityType, Direction
+
+        assert ActivityType.EMAIL_SENT == "email_sent"
+        assert ActivityType.CALL_LOGGED == "call_logged"
+        assert Direction.OUTBOUND == "outbound"
+
+
 # ── Unit tests: _rank_and_bonus ─────────────────────────────────────
 
 
