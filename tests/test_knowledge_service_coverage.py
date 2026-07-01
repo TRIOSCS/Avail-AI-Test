@@ -523,6 +523,72 @@ class TestGenerateInsights:
         assert len(all_insights) == 1
         assert all_insights[0].content == "New insight"
 
+    async def test_generate_insights_failure_preserves_cached(
+        self, db_session: Session, test_user: User, requisition: Requisition
+    ):
+        # Regression: a failed AI regen must NOT wipe the previously-cached insights.
+        from app.utils.claude_errors import ClaudeError
+
+        knowledge_service.create_entry(
+            db_session,
+            user_id=test_user.id,
+            entry_type="ai_insight",
+            content="Cached insight worth keeping",
+            requisition_id=requisition.id,
+        )
+        entry = knowledge_service.create_entry(
+            db_session,
+            user_id=test_user.id,
+            entry_type="fact",
+            content="LM317T data",
+            requisition_id=requisition.id,
+        )
+        entry.created_at = datetime.now(timezone.utc)
+        db_session.commit()
+
+        async def _raise(*a, **kw):
+            raise ClaudeError("AI regen blew up")
+
+        with patch("app.utils.claude_client.claude_structured", new=_raise):
+            result = await knowledge_service.generate_insights(db_session, requisition.id)
+        assert result == []
+
+        surviving = knowledge_service.get_cached_insights(db_session, requisition.id)
+        assert len(surviving) == 1
+        assert surviving[0].content == "Cached insight worth keeping"
+
+    async def test_generate_insights_empty_result_preserves_cached(
+        self, db_session: Session, test_user: User, requisition: Requisition
+    ):
+        # Regression: an empty AI result must NOT wipe the previously-cached insights.
+        knowledge_service.create_entry(
+            db_session,
+            user_id=test_user.id,
+            entry_type="ai_insight",
+            content="Cached insight worth keeping",
+            requisition_id=requisition.id,
+        )
+        entry = knowledge_service.create_entry(
+            db_session,
+            user_id=test_user.id,
+            entry_type="fact",
+            content="LM317T data",
+            requisition_id=requisition.id,
+        )
+        entry.created_at = datetime.now(timezone.utc)
+        db_session.commit()
+
+        async def _mock_empty(*a, **kw):
+            return {"insights": []}
+
+        with patch("app.utils.claude_client.claude_structured", new=_mock_empty):
+            result = await knowledge_service.generate_insights(db_session, requisition.id)
+        assert result == []
+
+        surviving = knowledge_service.get_cached_insights(db_session, requisition.id)
+        assert len(surviving) == 1
+        assert surviving[0].content == "Cached insight worth keeping"
+
 
 class TestBuildMpnContext:
     def test_returns_empty_for_unknown_mpn(self, db_session: Session):
