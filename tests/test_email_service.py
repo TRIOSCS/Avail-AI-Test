@@ -274,6 +274,40 @@ class TestProgressContactStatus:
         _progress_contact_status(c, self._make_vr("quote_provided"), MagicMock())
         assert c.status_updated_at is not None
 
+    def test_transitions_assign_strenum_members(self):
+        """Phase-3 cleanup: statuses are set from ContactStatus StrEnum members,
+        not raw string literals (value-identical, type-stronger)."""
+        from app.constants import ContactStatus
+
+        c = self._make_contact("sent")
+        _progress_contact_status(c, self._make_vr("quote_provided"), MagicMock())
+        assert c.status is ContactStatus.QUOTED
+        assert c.status == "quoted"
+
+
+# ── Phase-3 signature / StrEnum cleanup regression ───────────────────
+
+
+class TestEmailServiceCleanup:
+    def test_poll_inbox_optional_annotations(self):
+        import inspect
+
+        from app.email_service import poll_inbox
+
+        hints = inspect.get_annotations(poll_inbox)
+        assert hints["requisition_id"] == (int | None)
+        assert hints["scanned_by_user_id"] == (int | None)
+
+    def test_apply_parsed_result_optional_db_annotation(self):
+        import inspect
+
+        from sqlalchemy.orm import Session
+
+        from app.email_service import _apply_parsed_result
+
+        hints = inspect.get_annotations(_apply_parsed_result)
+        assert hints["db"] == (Session | None)
+
 
 # ── log_phone_contact ────────────────────────────────────────────────
 
