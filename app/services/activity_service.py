@@ -701,7 +701,7 @@ def log_call_activity(
 
     # Auto-generate subject if not explicitly provided
     if not subject:
-        verb = "to" if direction == "outbound" else "from"
+        verb = "to" if direction == Direction.OUTBOUND else "from"
         target = contact_name or phone or "unknown"
         subject = f"Call {verb} {target}"
 
@@ -916,7 +916,7 @@ def get_last_outbound_activity(db: Session, company_id: int) -> ActivityLog | No
         db.query(ActivityLog)
         .filter(
             ActivityLog.company_id == company_id,
-            ActivityLog.direction == "outbound",
+            ActivityLog.direction == Direction.OUTBOUND,
         )
         .order_by(ActivityLog.created_at.desc())
         .first()
@@ -1246,7 +1246,7 @@ def get_site_contact_notes(site_contact_id: int, db: Session, limit: int = 50) -
         db.query(ActivityLog)
         .filter(
             ActivityLog.site_contact_id == site_contact_id,
-            ActivityLog.activity_type == "note",
+            ActivityLog.activity_type == ActivityType.NOTE,
         )
         .order_by(ActivityLog.created_at.desc())
         .limit(limit)
