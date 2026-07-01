@@ -763,18 +763,24 @@ def _backfill_sighting_vendor_normalized() -> None:
             return  # Column not yet created
 
         total = 0
+        last_id = 0
         while True:
             try:
                 rows = conn.execute(
                     sqltext(
                         "SELECT id, vendor_name FROM sightings "
                         "WHERE vendor_name_normalized IS NULL AND vendor_name IS NOT NULL "
-                        "LIMIT :lim"
+                        "AND id > :last_id ORDER BY id LIMIT :lim"
                     ),
-                    {"lim": _BACKFILL_BATCH_SIZE},
+                    {"last_id": last_id, "lim": _BACKFILL_BATCH_SIZE},
                 ).fetchall()
                 if not rows:
                     break
+                # Advance the cursor past every row we examined. Rows whose vendor_name
+                # normalizes to '' (e.g. "LLC", "Inc.") never get an UPDATE, so filtering
+                # only on "IS NULL" would re-select them forever and hang startup; the
+                # id cursor skips them instead of looping on them.
+                last_id = rows[-1][0]
                 batch = []
                 for r in rows:
                     nv = normalize_vendor_name(r[1])
@@ -814,18 +820,24 @@ def _backfill_offer_vendor_normalized() -> None:
             return  # Column not yet created
 
         total = 0
+        last_id = 0
         while True:
             try:
                 rows = conn.execute(
                     sqltext(
                         "SELECT id, vendor_name FROM offers "
                         "WHERE vendor_name_normalized IS NULL AND vendor_name IS NOT NULL "
-                        "LIMIT :lim"
+                        "AND id > :last_id ORDER BY id LIMIT :lim"
                     ),
-                    {"lim": _BACKFILL_BATCH_SIZE},
+                    {"last_id": last_id, "lim": _BACKFILL_BATCH_SIZE},
                 ).fetchall()
                 if not rows:
                     break
+                # Advance the cursor past every row we examined. Rows whose vendor_name
+                # normalizes to '' (e.g. "LLC", "Inc.") never get an UPDATE, so filtering
+                # only on "IS NULL" would re-select them forever and hang startup; the
+                # id cursor skips them instead of looping on them.
+                last_id = rows[-1][0]
                 batch = []
                 for r in rows:
                     nv = normalize_vendor_name(r[1])

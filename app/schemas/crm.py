@@ -126,10 +126,14 @@ class CompanyCreate(BaseModel):
     def normalize_phone(cls, v: str | None) -> str | None:
         if v is None:
             return v
+        # Preserve the raw input when it can't be parsed to E.164 (e.g. a 7-digit local
+        # number) rather than 422-ing the whole company write — mirrors hq_state/hq_country
+        # here and the contact-phone path in routers/htmx/companies.py, which also fall
+        # back to raw. Empty/whitespace collapses to None.
         result = normalize_phone_e164(v)
-        if result is None:
-            raise ValueError(f"Could not parse phone number: {v}")
-        return result
+        if result:
+            return result
+        return v.strip() or None
 
 
 class CompanyUpdate(BaseModel):
@@ -171,10 +175,14 @@ class CompanyUpdate(BaseModel):
     def normalize_phone(cls, v: str | None) -> str | None:
         if v is None:
             return v
+        # Preserve the raw input when it can't be parsed to E.164 (e.g. a 7-digit local
+        # number) rather than 422-ing the whole company write — mirrors hq_state/hq_country
+        # here and the contact-phone path in routers/htmx/companies.py, which also fall
+        # back to raw. Empty/whitespace collapses to None.
         result = normalize_phone_e164(v)
-        if result is None:
-            raise ValueError(f"Could not parse phone number: {v}")
-        return result
+        if result:
+            return result
+        return v.strip() or None
 
 
 # ── Offers ───────────────────────────────────────────────────────────

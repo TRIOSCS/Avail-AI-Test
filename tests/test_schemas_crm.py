@@ -170,6 +170,16 @@ class TestCompanyCreatePhone:
         assert c.phone is not None
         assert c.phone.startswith("+")
 
+    def test_phone_local_number_preserved_not_rejected(self) -> None:
+        """Regression: a 7-digit local number can't be parsed to E.164, but the write must
+        NOT 422 — the raw input is preserved (mirrors hq_state/hq_country fallback)."""
+        c = CompanyCreate(name="Acme", phone="555-1234")
+        assert c.phone == "555-1234"
+
+    def test_phone_blank_collapses_to_none(self) -> None:
+        c = CompanyCreate(name="Acme", phone="   ")
+        assert c.phone is None
+
 
 # ── CompanyCreate hq normalization (parity with CompanyUpdate) ──────
 
@@ -217,6 +227,11 @@ class TestCompanyUpdateValidators:
         u = CompanyUpdate(phone="(555) 123-4567")
         assert u.phone is not None
         assert u.phone.startswith("+")
+
+    def test_phone_local_number_preserved_not_rejected(self) -> None:
+        """Regression: an un-parseable local number is preserved, not 422'd."""
+        u = CompanyUpdate(phone="555-1234")
+        assert u.phone == "555-1234"
 
 
 # ── OfferCreate validators ─────────────────────────────────────────

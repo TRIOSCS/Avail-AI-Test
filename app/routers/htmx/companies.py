@@ -1133,7 +1133,7 @@ async def create_company(
         hq_city=form.get("hq_city", "").strip() or None,
         hq_state=(normalize_us_state(raw_hq_state) or raw_hq_state) if raw_hq_state else None,
         hq_country=(normalize_country(raw_hq_country) or raw_hq_country) if raw_hq_country else None,
-        phone=normalize_phone_e164(raw_phone) if raw_phone else None,
+        phone=(normalize_phone_e164(raw_phone) or raw_phone) if raw_phone else None,
         credit_terms=form.get("credit_terms", "").strip() or None,
         tax_id=form.get("tax_id", "").strip() or None,
         source=form.get("source", "").strip() or "manual",
@@ -1657,7 +1657,7 @@ def apply_company_field(company: Company, field: str, value: str) -> None:
         raise HTTPException(404, f"Unknown editable field: {field!r}")
     v = value.strip()
     if field == "phone":
-        company.phone = normalize_phone_e164(v) if v else None
+        company.phone = (normalize_phone_e164(v) or v) if v else None
     elif field == "hq_state":
         company.hq_state = (normalize_us_state(v) or v) if v else None
     elif field == "hq_country":

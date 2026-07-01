@@ -1011,6 +1011,39 @@ class TestBackfillSightingVendorNormalized:
             r2 = conn.execute(sqltext("SELECT vendor_name_normalized FROM sightings WHERE id = 2")).fetchone()
             assert r2[0] == "beta corp"
 
+    def test_empty_normalizing_row_does_not_hang(self):
+        """Regression: a legacy row whose vendor_name normalizes to '' (e.g. 'LLC') must
+        NOT spin the backfill forever. The id cursor skips it and still processes the
+        rest — no stop-loop exception hack needed (the pre-fix loop re-selected the
+        never-updatable row endlessly and hung startup)."""
+        from app.startup import _backfill_sighting_vendor_normalized
+
+        eng = _make_sqlite_engine()
+        with eng.connect() as conn:
+            conn.execute(sqltext(_CREATE_VENDOR_SIGHTINGS))
+            # id=1 normalizes to '' → never updatable; id=2 is a real vendor at a higher id.
+            conn.execute(
+                sqltext("INSERT INTO sightings (id, vendor_name, vendor_name_normalized) VALUES (1, 'LLC', NULL)")
+            )
+            conn.execute(
+                sqltext("INSERT INTO sightings (id, vendor_name, vendor_name_normalized) VALUES (2, 'Arrow', NULL)")
+            )
+            conn.commit()
+
+        with (
+            patch("app.startup.engine", eng),
+            patch(
+                "app.vendor_utils.normalize_vendor_name", side_effect=lambda n: "" if n == "LLC" else n.lower().strip()
+            ),
+        ):
+            _backfill_sighting_vendor_normalized()  # must TERMINATE (would hang pre-fix)
+
+        with eng.connect() as conn:
+            r1 = conn.execute(sqltext("SELECT vendor_name_normalized FROM sightings WHERE id = 1")).fetchone()
+            assert r1[0] is None  # junk row skipped, stays NULL
+            r2 = conn.execute(sqltext("SELECT vendor_name_normalized FROM sightings WHERE id = 2")).fetchone()
+            assert r2[0] == "arrow"  # loop advanced past the junk and processed the rest
+
 
 class TestBackfillOfferVendorNormalized:
     """_backfill_offer_vendor_normalized logic (offers tab matches on the normalized
@@ -1057,6 +1090,37 @@ class TestBackfillOfferVendorNormalized:
 
         with patch("app.startup.engine", eng):
             _backfill_offer_vendor_normalized()  # no raise
+
+    def test_empty_normalizing_row_does_not_hang(self):
+        """Regression: an offer whose vendor_name normalizes to '' (e.g. 'LLC') must NOT
+        spin the backfill forever. The id cursor skips it and still processes the rest —
+        the pre-fix loop re-selected the never-updatable row endlessly and hung startup."""
+        from app.startup import _backfill_offer_vendor_normalized
+
+        eng = _make_sqlite_engine()
+        with eng.connect() as conn:
+            conn.execute(sqltext(self._CREATE))
+            conn.execute(
+                sqltext("INSERT INTO offers (id, vendor_name, vendor_name_normalized) VALUES (1, 'LLC', NULL)")
+            )
+            conn.execute(
+                sqltext("INSERT INTO offers (id, vendor_name, vendor_name_normalized) VALUES (2, 'Arrow', NULL)")
+            )
+            conn.commit()
+
+        with (
+            patch("app.startup.engine", eng),
+            patch(
+                "app.vendor_utils.normalize_vendor_name", side_effect=lambda n: "" if n == "LLC" else n.lower().strip()
+            ),
+        ):
+            _backfill_offer_vendor_normalized()  # must TERMINATE (would hang pre-fix)
+
+        with eng.connect() as conn:
+            r1 = conn.execute(sqltext("SELECT vendor_name_normalized FROM offers WHERE id = 1")).fetchone()
+            assert r1[0] is None  # junk row skipped, stays NULL
+            r2 = conn.execute(sqltext("SELECT vendor_name_normalized FROM offers WHERE id = 2")).fetchone()
+            assert r2[0] == "arrow"  # loop advanced past the junk and processed the rest
 
 
 class TestBackfillMaterialCards:
