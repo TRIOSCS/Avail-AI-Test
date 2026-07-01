@@ -844,10 +844,6 @@ async def poll_inbox(token: str, db: Session, requisition_id: int = None, scanne
                 )
             )
 
-            # ── Reply classification + AI parsing (batch or inline) ──
-            if get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY"):
-                pending_parse.append(vr)
-
             # ── Contact status progression ──
             # Every matched contact progresses: a cross-requisition reply must
             # advance the (requisition, vendor) row on EVERY involved requisition.
@@ -855,6 +851,15 @@ async def poll_inbox(token: str, db: Session, requisition_id: int = None, scanne
                 _progress_contact_status(mc, vr, db)
 
             nested.commit()
+
+            # ── Reply classification + AI parsing (batch or inline) ──
+            # Only enqueue for AI parsing AFTER the savepoint commits. If the
+            # savepoint above had failed, the except rolls back vr; enqueuing
+            # earlier would let a vanished vendor_response_id reach AI parsing
+            # (billed) and _auto_create_offers_from_parse, poisoning the final
+            # db.commit() and rolling back the entire scan.
+            if get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY"):
+                pending_parse.append(vr)
 
             results.append(
                 {
