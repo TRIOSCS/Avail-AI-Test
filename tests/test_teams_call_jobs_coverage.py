@@ -19,9 +19,11 @@ import os
 os.environ["TESTING"] = "1"
 
 import contextlib
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from sqlalchemy.orm import Session
 
 # ---------------------------------------------------------------------------
 # register_teams_call_jobs
@@ -383,3 +385,105 @@ async def test_job_sync_record_no_datetime_fields():
         await _job_sync_teams_calls()
 
     assert logged_durations == [0]
+
+
+# ---------------------------------------------------------------------------
+# Real-DB watermark regression: a per-user fetch failure must NOT advance the
+# single global watermark (else the failed user's window is lost forever), but a
+# fully-successful run MUST advance it. Uses the in-memory SQLite DB (mocks hid this).
+# ---------------------------------------------------------------------------
+
+_OLD_WM = "2025-01-01T00:00:00+00:00"
+
+
+def _seed_two_buyers_and_watermark(db: Session):
+    """Insert two m365-connected buyers and a stale watermark row; return the users."""
+    from app.models.auth import User
+    from app.models.config import SystemConfig
+
+    users = []
+    for i in (1, 2):
+        u = User(
+            email=f"buyer{i}@trioscs.com",
+            name=f"Buyer {i}",
+            role="buyer",
+            azure_id=f"az-wm-{i}",
+            m365_connected=True,
+            created_at=datetime.now(timezone.utc),
+        )
+        db.add(u)
+        users.append(u)
+    db.add(SystemConfig(key="teams_calls_last_poll", value=_OLD_WM, description="Teams call records last poll"))
+    db.commit()
+    for u in users:
+        db.refresh(u)
+    return users
+
+
+@contextlib.contextmanager
+def _patch_realdb_deps(db_session, *, fetch_by_email):
+    """Run the job against the real test session.
+
+    ``fetch_by_email`` maps a user's email to either a records list or an Exception
+    instance to raise. get_valid_token returns the user's email as the token so the
+    patched GraphClient can dispatch per user.
+    """
+
+    async def _get_token(user, _db):
+        return user.email
+
+    def _graph_ctor(token):
+        gc = AsyncMock()
+        outcome = fetch_by_email[token]
+
+        async def _get_all_pages(*_a, **_kw):
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
+
+        gc.get_all_pages.side_effect = _get_all_pages
+        return gc
+
+    with (
+        patch("app.database.SessionLocal", return_value=db_session),
+        patch("app.utils.token_manager.get_valid_token", _get_token),
+        patch("app.utils.graph_client.GraphClient", side_effect=_graph_ctor),
+        # Prevent the job's finally: db.close() from closing our fixture session so we
+        # can re-read the committed watermark afterwards.
+        patch.object(db_session, "close", lambda: None),
+    ):
+        yield
+
+
+def _read_watermark(db: Session) -> str:
+    from app.models.config import SystemConfig
+
+    db.expire_all()
+    row = db.query(SystemConfig).filter(SystemConfig.key == "teams_calls_last_poll").first()
+    return row.value
+
+
+async def test_watermark_not_advanced_when_a_user_fetch_fails(db_session: Session):
+    """One user's Graph fetch raises while another succeeds so watermark stays put."""
+    from app.jobs.teams_call_jobs import _job_sync_teams_calls
+
+    u1, u2 = _seed_two_buyers_and_watermark(db_session)
+    fetch = {u1.email: RuntimeError("Graph timeout"), u2.email: []}
+
+    with _patch_realdb_deps(db_session, fetch_by_email=fetch):
+        await _job_sync_teams_calls()
+
+    assert _read_watermark(db_session) == _OLD_WM, "failed user's window must be retried next run"
+
+
+async def test_watermark_advanced_when_all_fetches_succeed(db_session: Session):
+    """Fully-successful run advances the watermark past the prior value."""
+    from app.jobs.teams_call_jobs import _job_sync_teams_calls
+
+    u1, u2 = _seed_two_buyers_and_watermark(db_session)
+    fetch = {u1.email: [], u2.email: []}
+
+    with _patch_realdb_deps(db_session, fetch_by_email=fetch):
+        await _job_sync_teams_calls()
+
+    assert _read_watermark(db_session) != _OLD_WM, "clean run must advance the watermark"

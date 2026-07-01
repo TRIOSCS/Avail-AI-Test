@@ -545,10 +545,10 @@ async def _regenerate_insights(
         logger.debug(no_context_log)
         return []
 
+    # Snapshot (but do NOT yet delete) the cached insights. We only replace them
+    # once fresh insights are in hand — a failed/empty AI call must leave the old
+    # rows intact rather than wiping the cache with nothing to show for it.
     old_insights = db.query(KnowledgeEntry).filter(*delete_filters).all()
-    for old in old_insights:
-        db.delete(old)
-    db.flush()
 
     try:
         result = await claude_structured(
@@ -566,9 +566,14 @@ async def _regenerate_insights(
         logger.warning(failed_log, e)
         return []
 
-    if not result or "insights" not in result:
+    if not result or not result.get("insights"):
         logger.warning(no_results_log)
         return []
+
+    # Fresh insights are available — safe to swap out the old cached rows now.
+    for old in old_insights:
+        db.delete(old)
+    db.flush()
 
     entries = []
     now = datetime.now(timezone.utc)

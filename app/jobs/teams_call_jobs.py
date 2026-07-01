@@ -55,6 +55,11 @@ async def _job_sync_teams_calls():
         )
 
         total_logged = 0
+        # A single global watermark covers every user's window. If ANY user's fetch fails,
+        # advancing it past the missed window would permanently lose that user's records
+        # (nothing was logged, so dedup can't recover them). Track failures and only advance
+        # when the whole window was fetched cleanly, so a transient error is retried next run.
+        any_fetch_failed = False
         for user in users:
             token = await get_valid_token(user, db)
             if not token:
@@ -74,6 +79,7 @@ async def _job_sync_teams_calls():
                 )
             except Exception as e:
                 logger.warning("Teams call records fetch failed for {}: {}", user.email, e)
+                any_fetch_failed = True
                 continue
 
             for record in records:
@@ -104,12 +110,17 @@ async def _job_sync_teams_calls():
                 if result:
                     total_logged += 1
 
-        # Update watermark in same transaction as activity records
-        now_str = datetime.now(timezone.utc).isoformat()
-        if wm_row:
-            wm_row.value = now_str
+        # Advance the watermark ONLY when every user's window was fetched cleanly.
+        # If any fetch failed we still commit the successfully-logged records, but leave
+        # the watermark untouched so the missed window is re-fetched on the next run.
+        if any_fetch_failed:
+            logger.warning("Teams call sync: a user fetch failed — leaving watermark unadvanced to retry next run")
         else:
-            db.add(SystemConfig(key=wm_key, value=now_str, description="Teams call records last poll"))
+            now_str = datetime.now(timezone.utc).isoformat()
+            if wm_row:
+                wm_row.value = now_str
+            else:
+                db.add(SystemConfig(key=wm_key, value=now_str, description="Teams call records last poll"))
         db.commit()
 
         if total_logged:

@@ -164,7 +164,11 @@ def merge_companies(keep_id: int, remove_id: int, db: Session) -> dict:
             )
             reassigned += count
         except Exception as e:
-            logger.warning("Company merge: failed to reassign {}.{}: {}", model.__tablename__, col, e)
+            # Fail CLOSED: a reassignment error re-raises so the caller rolls back the whole
+            # merge rather than proceeding to db.delete(remove) and orphaning / cascade-deleting
+            # the un-reassigned rows (mirrors vendor_merge_service / delete_companies).
+            logger.error("Company merge: FK reassignment failed on {}.{}: {}", model.__tablename__, col, e)
+            raise ValueError(f"Company merge aborted — failed to reassign {model.__tablename__}.{col}: {e}") from e
 
     # 9. Delete removed company
     db.delete(remove)
