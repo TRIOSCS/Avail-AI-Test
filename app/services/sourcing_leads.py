@@ -719,7 +719,11 @@ def _refresh_lead_evidence_rollups(db: Session, lead: SourcingLead) -> None:
     categories = {_source_category(row.source_type) for row in evidence_rows}
     lead.evidence_count = evidence_count
     lead.corroborated = len(categories) >= 2
-    if lead.corroborated and lead.confidence_score is not None:
+    # The +5 corroboration bump must NOT touch a buyer-owned score. Once buyer_status
+    # leaves 'new', buyer feedback owns confidence_score (see upsert_lead_from_sighting);
+    # bumping it here on every re-sync would both restore a buyer-lowered 'no_stock' lead to
+    # a high band AND — now that upsert preserves the score — accumulate unbounded to 100.
+    if lead.corroborated and lead.confidence_score is not None and (lead.buyer_status or "new") == "new":
         lead.confidence_score = _clamp(float(lead.confidence_score) + 5.0)
         lead.confidence_band = _confidence_band(float(lead.confidence_score))
         # Promote raw evidence to inferred when corroborated by multiple source categories

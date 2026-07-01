@@ -453,6 +453,73 @@ class TestUpdateLeadStatus:
         assert resynced.confidence_score == lowered
         assert resynced.confidence_band == _confidence_band(lowered)
 
+    def test_corroboration_bump_skips_buyer_touched_lead(self, db_session: Session):
+        """The +5 corroboration bump (production _refresh_lead_evidence_rollups) must
+        not touch a buyer-owned score — else a 'no_stock' lead climbs back to a high
+        band and, since upsert now preserves the score, accumulates unbounded on every
+        re-sync."""
+        from app.models.sourcing_lead import LeadEvidence
+        from app.services.sourcing_leads import _refresh_lead_evidence_rollups
+
+        req = _make_requisition(db_session)
+        requirement = _make_requirement(db_session, req.id)
+        _make_vendor_card(db_session)
+        sighting = _make_sighting(db_session, req.id, requirement.id)
+        lead = upsert_lead_from_sighting(db_session, requirement, sighting)
+        db_session.flush()
+        db_session.commit()
+
+        lead = update_lead_status(db_session, lead.id, "no_stock")
+        lowered = lead.confidence_score
+
+        # Two evidence rows in DISTINCT source categories (api + marketplace) → corroborated.
+        for i, st in enumerate(("nexar", "brokerbin")):
+            db_session.add(
+                LeadEvidence(
+                    evidence_id=f"ev_test_{i}",
+                    lead_id=lead.id,
+                    signal_type="stock_listing",
+                    source_type=st,
+                    source_name=st,
+                )
+            )
+        db_session.flush()
+
+        _refresh_lead_evidence_rollups(db_session, lead)
+
+        assert lead.corroborated is True  # corroboration fired …
+        assert lead.confidence_score == lowered  # … but the buyer-owned score was NOT bumped
+
+    def test_corroboration_bump_still_applies_to_untouched_lead(self, db_session: Session):
+        """A 'new' (untouched) corroborated lead still gets the +5 — the guard is buyer-
+        only."""
+        from app.models.sourcing_lead import LeadEvidence
+        from app.services.sourcing_leads import _refresh_lead_evidence_rollups
+
+        req = _make_requisition(db_session)
+        requirement = _make_requirement(db_session, req.id)
+        _make_vendor_card(db_session)
+        sighting = _make_sighting(db_session, req.id, requirement.id)
+        lead = upsert_lead_from_sighting(db_session, requirement, sighting)
+        db_session.flush()
+        before = float(lead.confidence_score)
+
+        for i, st in enumerate(("nexar", "brokerbin")):
+            db_session.add(
+                LeadEvidence(
+                    evidence_id=f"ev_new_{i}",
+                    lead_id=lead.id,
+                    signal_type="stock_listing",
+                    source_type=st,
+                    source_name=st,
+                )
+            )
+        db_session.flush()
+
+        _refresh_lead_evidence_rollups(db_session, lead)
+        assert lead.corroborated is True
+        assert float(lead.confidence_score) == min(before + 5.0, 100.0)  # +5 applied for 'new'
+
     def test_resync_untouched_lead_still_recomputes_confidence(self, db_session: Session):
         """A lead the buyer has NOT acted on (buyer_status == 'new') must still pick up
         a freshly source-computed confidence on re-sync — preservation is buyer-only."""
