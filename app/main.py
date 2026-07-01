@@ -459,11 +459,14 @@ async def _metrics_auth(x_metrics_token: str = Header(default="")) -> None:
         raise HTTPException(status_code=403, detail="Forbidden")
 
 
-# PrometheusMiddleware must remain registered last. Starlette wraps middleware
-# in reverse add_middleware() order, so being added last places it outermost in
-# the request chain — giving it wall-clock time across all inner middleware and
-# a stable position for the metrics contract. Do not move it inside Session,
-# GZip, or CSRF without updating that assumption.
+# PrometheusMiddleware wraps outside the add_middleware() cluster above (Session, GZip,
+# CSRF): Starlette inserts each add_middleware() at the front of the stack, so registering
+# it after them makes it wrap around them. It is NOT the outermost middleware — the
+# @app.middleware("http") handlers defined below (csp, request_id, api_version) register
+# later and so wrap outside it. Its wall-clock timing therefore covers routing plus the
+# Session/GZip/CSRF cluster, but not those three http handlers. Keep it here — after the
+# add_middleware() cluster, before the http handlers — to preserve that timing scope and
+# the metrics contract.
 app.add_middleware(PrometheusMiddleware)
 
 
