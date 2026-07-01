@@ -927,6 +927,42 @@ class TestOEMSecretsConnector:
         results = c._parse(data, "ABC")
         assert results[0]["is_authorized"] is False
 
+    def test_parse_no_auth_signal_defaults_unauthorized(self):
+        """No authorization signal at all → is_authorized must default to False.
+
+        OEMSecrets aggregates 140+ gray-market distributors; an absent signal must not
+        overstate trust by defaulting to authorized.
+        """
+        c = self._make_connector()
+        data = {
+            "stock": [
+                {
+                    "distributor": {"distributor_name": "Some Broker"},
+                    "source_part_number": "ABC",
+                    "quantity_in_stock": 100,
+                    "prices": {"USD": [{"unit_break": 1, "unit_price": "1.50"}]},
+                }
+            ]
+        }
+        results = c._parse(data, "ABC")
+        assert results[0]["is_authorized"] is False
+
+    def test_parse_authorized_signal_sets_true(self):
+        """A positive authorized signal → is_authorized True."""
+        c = self._make_connector()
+        data = {
+            "stock": [
+                {
+                    "distributor": {"distributor_name": "Arrow"},
+                    "source_part_number": "ABC",
+                    "quantity_in_stock": 100,
+                    "distributor_authorisation_status": "authorised",
+                }
+            ]
+        }
+        results = c._parse(data, "ABC")
+        assert results[0]["is_authorized"] is True
+
     def test_parse_v3_no_usd_prices(self):
         """Falls back to first available currency if USD not in prices."""
         c = self._make_connector()
