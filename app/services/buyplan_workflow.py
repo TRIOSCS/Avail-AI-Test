@@ -194,7 +194,7 @@ def _run_reject_side_effects(plan: BuyPlan, user: User, db: Session, *, reason: 
     _log_approval_activity(plan, "reject", user, reason, db)
 
 
-def _cancel_open_engine_requests_for_plan(plan: BuyPlan, user: User, db: Session) -> int:
+def _cancel_open_engine_requests_for_plan(plan: BuyPlan, user: User | None, db: Session) -> int:
     """Cancel every open (REQUESTED) BUY_PLAN ApprovalRequest for *plan* via the engine.
 
     The single point that closes a plan's engine gate when the plan leaves PENDING — called
@@ -787,6 +787,15 @@ def _complete_plan(plan: BuyPlan, db: Session) -> None:
     Shared by check_completion (normal auto-complete) and the stock-sale auto-complete
     job so both completion paths produce a case report.
     """
+    # Close any open engine gate BEFORE completing so no REQUESTED row is orphaned in the
+    # approvals queue/badge. When the line flow runs to terminal before a deal-level
+    # PURCHASE_ORDER approver decides, that gate is still open; leaving it live orphaned a
+    # REQUESTED row (a later decision then hit the plan.status != ACTIVE guard → 400) AND
+    # silently bypassed the SP-3 large-PO sign-off. Mirrors cancel_buy_plan / halt_plan; the
+    # helper is a no-op when nothing is open. Cancels on behalf of each request's own
+    # requester/owner (submitted_by is only a last-resort fallback actor).
+    _cancel_open_engine_requests_for_plan(plan, plan.submitted_by, db)
+
     plan.status = BuyPlanStatus.COMPLETED.value
     plan.completed_at = datetime.now(timezone.utc)
     plan.case_report = generate_case_report(plan, db)
@@ -1315,10 +1324,15 @@ Generated: {now.strftime("%Y-%m-%d %H:%M UTC")}
 
 
 async def verify_po_sent(plan: "BuyPlan", db: "Session") -> list[dict]:
-    """Scan buyer's Outlook sent folder for PO emails matching each line.
+    """Scan buyer's Outlook sent folder for PO emails matching each line (detection
+    only).
 
     For each line with a po_number, searches Graph API for emails containing that PO
-    number. Returns list of verification results per line.
+    number and reports whether one was found. This is a NON-AUTHORITATIVE signal: it does
+    NOT verify the line or complete the plan — verification is gated behind verify_po's
+    ``can_approve_purchase_orders`` right (Phase D). Each result carries
+    ``awaiting_approver_verification`` so callers can flag PENDING_VERIFY lines whose PO
+    email was detected for an approver to sign off.
     """
     from ..utils.graph_client import GraphClient
     from ..utils.token_manager import get_valid_token
@@ -1371,9 +1385,13 @@ async def verify_po_sent(plan: "BuyPlan", db: "Session") -> list[dict]:
             )
 
             found = len(messages) > 0
-            if found and line.status == BuyPlanLineStatus.PENDING_VERIFY.value:
-                line.status = BuyPlanLineStatus.VERIFIED.value
-                line.po_verified_at = datetime.now(timezone.utc)
+            # DETECTION ONLY — finding the PO email in the buyer's sent folder is a signal,
+            # NOT verification. Flipping the line to VERIFIED here bypassed the Phase-D
+            # purchase-order-approver gate (can_approve_purchase_orders) that the interactive
+            # verify_po enforces, and left po_verified_by_id NULL — letting a buyer who merely
+            # emailed a PO complete the deal with no approver signing off. Line verification
+            # must go through verify_po; here we only flag lines awaiting that approval.
+            awaiting = found and line.status == BuyPlanLineStatus.PENDING_VERIFY.value
 
             results.append(
                 {
@@ -1381,15 +1399,15 @@ async def verify_po_sent(plan: "BuyPlan", db: "Session") -> list[dict]:
                     "po_number": line.po_number,
                     "found": found,
                     "message_count": len(messages),
+                    "awaiting_approver_verification": awaiting,
                 }
             )
         except Exception as e:
             logger.error("PO verification failed for line {}: {}", line.id, e)
             results.append({"line_id": line.id, "po_number": line.po_number, "found": False, "error": str(e)})
 
-    # Use centralized completion check (respects SO verification requirement)
-    check_completion(plan.id, db)
-
+    # No completion side-effect: this scan never verifies a line, so it cannot drive
+    # completion. Verified lines complete through verify_po's gated (approver) path.
     # NOTE: flush (not commit) — the caller (PO-verify job) owns the transaction.
     db.flush()
     return results
