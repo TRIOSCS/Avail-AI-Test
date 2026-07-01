@@ -200,3 +200,26 @@ def test_seed_seeds_all_planned_connectors(db_session):
     names = {s.name for s in db_session.query(ApiSource).all()}
     for planned in _PLANNED_NAMES:
         assert planned in names, f"Planned connector '{planned}' was not seeded into the DB"
+
+
+def test_seed_status_is_in_vocabulary(db_session):
+    """Newly-seeded rows carry an in-vocabulary ApiSourceStatus value; planned
+    connectors (empty env_vars) seed as PENDING, never a raw out-of-vocab string."""
+    from app.constants import ApiSourceStatus
+
+    with (
+        patch("app.startup.SessionLocal", return_value=db_session),
+        patch.object(db_session, "close"),
+    ):
+        from app.startup import seed_api_sources
+
+        seed_api_sources()
+
+    valid = {s.value for s in ApiSourceStatus}
+    rows = db_session.query(ApiSource).all()
+    for row in rows:
+        assert row.status in valid, f"'{row.name}' has out-of-vocab status {row.status!r}"
+    by_name = {r.name: r for r in rows}
+    for planned in _PLANNED_NAMES:
+        assert by_name[planned].status == ApiSourceStatus.PENDING.value
+        assert by_name[planned].is_active is False

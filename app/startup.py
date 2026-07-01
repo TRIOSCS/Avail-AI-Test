@@ -1253,6 +1253,7 @@ def seed_api_sources() -> None:
     import json
     from pathlib import Path
 
+    from .constants import ApiSourceStatus
     from .models import ApiSource
     from .models.config import ApiUsageLog
 
@@ -1286,13 +1287,13 @@ def seed_api_sources() -> None:
                 existing.env_vars = src["env_vars"]
                 existing.setup_notes = src["setup_notes"]
             else:
-                status = "pending"
+                status = ApiSourceStatus.PENDING.value
                 env_vars = src.get("env_vars", [])
                 if env_vars:
                     all_set = all(os.getenv(v) for v in env_vars)
                     if all_set:
-                        status = "live"
-                is_active = status == "live"
+                        status = ApiSourceStatus.LIVE.value
+                is_active = status == ApiSourceStatus.LIVE.value
                 db.add(ApiSource(status=status, is_active=is_active, **src))
 
         # Remove legacy "newark" source (renamed to "element14")
