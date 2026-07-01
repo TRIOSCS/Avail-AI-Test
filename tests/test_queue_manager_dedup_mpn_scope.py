@@ -102,3 +102,58 @@ def test_dedup_clones_only_matching_mpn_sightings(db_session, requisition):
     assert len(cloned) == 1
     assert cloned[0].normalized_mpn == _DEDUP_MPN
     assert {s.normalized_mpn for s in cloned} == {_DEDUP_MPN}
+
+
+def test_dedup_clones_punctuation_variant_of_searched_mpn(db_session, requisition):
+    """A vendor who listed the SAME part with internal punctuation ("ABC-123") for a
+    search of "ABC123" must still clone onto the deduped requirement — matched by the
+    canonical MPN key, not raw equality (sightings store the vendor's typed PN, which
+    keeps the dash).
+
+    A genuinely different MPN stays excluded.
+    """
+    search_mpn = "ABC123"
+    variant_mpn = "ABC-123"  # strip_packaging_suffixes preserves the internal dash
+
+    req_a = Requirement(
+        requisition_id=requisition.id,
+        primary_mpn=search_mpn,
+        target_qty=100,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(req_a)
+    db_session.flush()
+
+    completed = IcsSearchQueue(
+        requirement_id=req_a.id,
+        requisition_id=requisition.id,
+        mpn=search_mpn,
+        normalized_mpn=search_mpn,
+        status="completed",
+        last_searched_at=datetime.now(timezone.utc),
+    )
+    db_session.add(completed)
+
+    # A's sightings: the same part typed with a dash, plus a genuinely unrelated MPN.
+    db_session.add(_make_sighting(req_a.id, variant_mpn, "VendorVariant"))
+    db_session.add(_make_sighting(req_a.id, _OTHER_MPN, "VendorOther"))
+
+    card = MaterialCard(normalized_mpn=search_mpn.lower(), display_mpn=search_mpn)
+    db_session.add(card)
+    db_session.flush()
+    req_b = Requirement(
+        requisition_id=requisition.id,
+        primary_mpn=search_mpn,
+        material_card_id=card.id,
+        target_qty=50,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(req_b)
+    db_session.commit()
+
+    result = enqueue_for_ics_search(req_b.id, db_session)
+    assert result is None  # deduped, no new queue row
+
+    cloned = db_session.query(Sighting).filter(Sighting.requirement_id == req_b.id).all()
+    # The punctuation variant IS the same part → cloned; the unrelated MPN stays out.
+    assert {s.normalized_mpn for s in cloned} == {variant_mpn}

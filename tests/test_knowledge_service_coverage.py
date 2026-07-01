@@ -289,6 +289,24 @@ class TestCaptureQuoteFact:
         result = knowledge_service.capture_quote_fact(db_session, quote=mock_quote, user_id=test_user.id)
         assert result is None
 
+    def test_quote_fact_survives_caller_rollback(self, db_session: Session, test_user: User, requisition: Requisition):
+        """Regression: create_quote/build_quote return WITHOUT committing after this call,
+        so the captured fact must be durably committed here — it must survive the caller
+        rolling back its transaction (pre-fix it was only flushed and vanished)."""
+        from app.models.knowledge import KnowledgeEntry
+
+        mock_quote = MagicMock()
+        mock_quote.quote_number = "Q-DURABLE-1"
+        mock_quote.requisition_id = requisition.id
+        mock_quote.line_items = [{"mpn": "LM317T", "unit_sell": 1.50, "qty": 100, "vendor_name": "Arrow"}]
+        entry = knowledge_service.capture_quote_fact(db_session, quote=mock_quote, user_id=test_user.id)
+        assert entry is not None
+
+        db_session.rollback()  # caller discards its own transaction without committing
+
+        surviving = db_session.query(KnowledgeEntry).filter(KnowledgeEntry.content.like("%Q-DURABLE-1%")).all()
+        assert len(surviving) == 1
+
 
 class TestCaptureOfferFact:
     def test_captures_offer(self, db_session: Session, test_user: User, requisition: Requisition):
@@ -316,6 +334,30 @@ class TestCaptureOfferFact:
         mock_offer.requisition_id = None
         result = knowledge_service.capture_offer_fact(db_session, offer=mock_offer)
         assert result is None
+
+    def test_offer_fact_survives_caller_rollback(self, db_session: Session, test_user: User, requisition: Requisition):
+        """Regression: offer callers don't reliably commit after this call, so the fact
+        must be durably committed here — it must survive a caller rollback."""
+        from types import SimpleNamespace
+
+        from app.models.knowledge import KnowledgeEntry
+
+        offer = SimpleNamespace(
+            mpn="LM317T-DURABLE",
+            unit_price=0.75,
+            quantity=500,
+            vendor_name="Arrow",
+            lead_time=None,
+            vendor_card_id=None,
+            requisition_id=requisition.id,
+        )
+        entry = knowledge_service.capture_offer_fact(db_session, offer=offer, user_id=test_user.id)
+        assert entry is not None
+
+        db_session.rollback()
+
+        surviving = db_session.query(KnowledgeEntry).filter(KnowledgeEntry.mpn == "LM317T-DURABLE").all()
+        assert len(surviving) == 1
 
 
 class TestCaptureRfqResponseFact:

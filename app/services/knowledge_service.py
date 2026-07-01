@@ -236,10 +236,11 @@ def capture_quote_fact(db: Session, *, quote, user_id: int) -> KnowledgeEntry | 
     """Auto-capture price facts when a quote is created.
 
     Uses a savepoint so a create failure doesn't corrupt the caller's transaction (the
-    quote it just created), and does NOT commit the caller's in-flight transaction — mirrors
-    capture_offer_fact (the old path called create_entry with the default commit=True and no
-    savepoint, so it both committed the caller's txn early and poisoned it on any failure).
-    Called from: app/routers/crm/quotes.py after quote creation.
+    quote it just created), then commits its own entry. Callers treat this as fire-and-
+    forget and several (create_quote, build_quote) return without a further commit, so
+    the capture MUST persist the entry itself or it rolls back at session close. Mirrors
+    capture_offer_fact. Called from: app/routers/crm/quotes.py and
+    app/services/quote_builder_service.py after quote creation.
     """
     nested = db.begin_nested()
     try:
@@ -278,18 +279,29 @@ def capture_quote_fact(db: Session, *, quote, user_id: int) -> KnowledgeEntry | 
             commit=False,
         )
         nested.commit()
-        return entry
     except Exception as e:
         nested.rollback()
         logger.warning("Failed to capture quote fact: {}", e)
         return None
+    # Persist the released savepoint. Kept OUTSIDE the savepoint block so a commit error
+    # can't roll back an already-released savepoint; the caller's own (already-committed)
+    # work is unaffected either way.
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.warning("Failed to persist quote fact: {}", e)
+        return None
+    return entry
 
 
 def capture_offer_fact(db: Session, *, offer, user_id: int | None = None) -> KnowledgeEntry | None:
     """Auto-capture facts when an offer is created (manual or parsed).
 
-    Uses a savepoint so FK failures don't corrupt the caller's transaction.
-    Called from: app/routers/crm/offers.py, app/email_service.py
+    Uses a savepoint so FK failures don't corrupt the caller's transaction, then commits
+    its own entry — callers treat this as fire-and-forget and don't reliably commit
+    afterward, so the capture must persist the entry itself or it rolls back at session
+    close. Called from: app/routers/crm/offers.py, app/email_service.py
     """
     nested = db.begin_nested()
     try:
@@ -330,11 +342,19 @@ def capture_offer_fact(db: Session, *, offer, user_id: int | None = None) -> Kno
             commit=False,
         )
         nested.commit()
-        return entry
     except Exception as e:
         nested.rollback()
         logger.warning("Failed to capture offer fact: {}", e)
         return None
+    # Persist the released savepoint (see capture_quote_fact — kept outside the savepoint
+    # block so a commit error can't roll back an already-released savepoint).
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.warning("Failed to persist offer fact: {}", e)
+        return None
+    return entry
 
 
 def capture_rfq_response_fact(
