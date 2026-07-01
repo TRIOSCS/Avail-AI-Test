@@ -20,13 +20,10 @@ class TbfConfig:
         self.TBF_USERNAME = os.environ.get("TBF_USERNAME", "")
         self.TBF_PASSWORD = os.environ.get("TBF_PASSWORD", "")
         self.TBF_MAX_DAILY_SEARCHES = int(os.environ.get("TBF_MAX_DAILY_SEARCHES", "50"))
-        self.TBF_MAX_HOURLY_SEARCHES = int(os.environ.get("TBF_MAX_HOURLY_SEARCHES", "10"))
         self.TBF_MIN_DELAY_SECONDS = int(os.environ.get("TBF_MIN_DELAY_SECONDS", "180"))
         self.TBF_MAX_DELAY_SECONDS = int(os.environ.get("TBF_MAX_DELAY_SECONDS", "600"))
         self.TBF_TYPICAL_DELAY_SECONDS = int(os.environ.get("TBF_TYPICAL_DELAY_SECONDS", "300"))
         self.TBF_DEDUP_WINDOW_DAYS = int(os.environ.get("TBF_DEDUP_WINDOW_DAYS", "7"))
-        self.TBF_BUSINESS_HOURS_START = int(os.environ.get("TBF_BUSINESS_HOURS_START", "8"))
-        self.TBF_BUSINESS_HOURS_END = int(os.environ.get("TBF_BUSINESS_HOURS_END", "18"))
         self.TBF_BROWSER_PROFILE_DIR = os.environ.get("TBF_BROWSER_PROFILE_DIR", "/root/tbf_browser_profile")
         # Hard cap on a single search (incl. human-behavior delays) so a wedged page
         # can't stall the loop/heartbeat.

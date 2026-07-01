@@ -85,13 +85,15 @@ class TestIcsConfig:
     def test_defaults(self):
         cfg = IcsConfig()
         assert cfg.ICS_MAX_DAILY_SEARCHES == 50
-        assert cfg.ICS_MAX_HOURLY_SEARCHES == 10
         assert cfg.ICS_MIN_DELAY_SECONDS == 150
         assert cfg.ICS_MAX_DELAY_SECONDS == 420
         assert cfg.ICS_TYPICAL_DELAY_SECONDS == 270
         assert cfg.ICS_DEDUP_WINDOW_DAYS == 7
-        assert cfg.ICS_BUSINESS_HOURS_START == 8
-        assert cfg.ICS_BUSINESS_HOURS_END == 18
+        # Dead knobs removed: hourly cap was never enforced and business-hours
+        # window is hardcoded in the scheduler, not read from config.
+        assert not hasattr(cfg, "ICS_MAX_HOURLY_SEARCHES")
+        assert not hasattr(cfg, "ICS_BUSINESS_HOURS_START")
+        assert not hasattr(cfg, "ICS_BUSINESS_HOURS_END")
 
     def test_env_override(self):
         with patch.dict(os.environ, {"ICS_MAX_DAILY_SEARCHES": "30", "ICS_USERNAME": "testuser"}):
