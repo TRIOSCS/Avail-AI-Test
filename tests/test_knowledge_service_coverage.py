@@ -212,6 +212,37 @@ class TestDeleteEntry:
         assert result is False
 
 
+class TestUpdateDeleteAuthz:
+    """update_entry/delete_entry enforce the documented creator/manager rule."""
+
+    def test_update_by_creator_succeeds(self, db_session: Session, test_user: User):
+        entry = knowledge_service.create_entry(db_session, user_id=test_user.id, entry_type="note", content="Old")
+        updated = knowledge_service.update_entry(db_session, entry.id, test_user.id, content="New")
+        assert updated is not None
+        assert updated.content == "New"
+
+    def test_update_by_non_creator_raises(self, db_session: Session, test_user: User, sales_user: User):
+        entry = knowledge_service.create_entry(db_session, user_id=test_user.id, entry_type="note", content="Mine")
+        with pytest.raises(PermissionError):
+            knowledge_service.update_entry(db_session, entry.id, sales_user.id, content="Hijacked")
+        db_session.rollback()
+        db_session.refresh(entry)
+        assert entry.content == "Mine"
+
+    def test_delete_by_non_creator_raises(self, db_session: Session, test_user: User, sales_user: User):
+        entry = knowledge_service.create_entry(db_session, user_id=test_user.id, entry_type="note", content="Mine")
+        with pytest.raises(PermissionError):
+            knowledge_service.delete_entry(db_session, entry.id, sales_user.id)
+        db_session.rollback()
+        assert knowledge_service.get_entry(db_session, entry.id) is not None
+
+    def test_manager_can_modify_others_entry(self, db_session: Session, test_user: User, manager_user: User):
+        entry = knowledge_service.create_entry(db_session, user_id=test_user.id, entry_type="note", content="Mine")
+        updated = knowledge_service.update_entry(db_session, entry.id, manager_user.id, content="Moderated")
+        assert updated.content == "Moderated"
+        assert knowledge_service.delete_entry(db_session, entry.id, manager_user.id) is True
+
+
 class TestPostQuestion:
     def test_post_question_creates_entry(self, db_session: Session, test_user: User, requisition: Requisition):
         q = knowledge_service.post_question(
@@ -288,6 +319,33 @@ class TestCaptureQuoteFact:
         mock_quote.line_items = MagicMock(side_effect=RuntimeError("DB error"))
         result = knowledge_service.capture_quote_fact(db_session, quote=mock_quote, user_id=test_user.id)
         assert result is None
+
+    def test_uses_savepoint(self, db_session: Session, test_user: User, requisition: Requisition):
+        """capture_quote_fact runs inside a nested transaction (savepoint)."""
+        mock_quote = MagicMock()
+        mock_quote.quote_number = "Q-SP"
+        mock_quote.requisition_id = requisition.id
+        mock_quote.line_items = [{"mpn": "LM317T", "unit_sell": 1.50, "qty": 100}]
+        with patch.object(db_session, "begin_nested", wraps=db_session.begin_nested) as spy:
+            entry = knowledge_service.capture_quote_fact(db_session, quote=mock_quote, user_id=test_user.id)
+        assert entry is not None
+        spy.assert_called_once()
+
+    def test_failure_does_not_poison_outer_txn(self, db_session: Session, test_user: User):
+        """A failure inside capture_quote_fact must not corrupt the caller's
+        transaction."""
+        mock_quote = MagicMock()
+        mock_quote.quote_number = "Q-BAD"
+        mock_quote.requisition_id = 999999  # non-existent FK → flush/commit error
+        mock_quote.line_items = [{"mpn": "LM317T", "unit_sell": 1.50, "qty": 100}]
+        with patch.object(knowledge_service, "create_entry", side_effect=RuntimeError("FK violation")):
+            result = knowledge_service.capture_quote_fact(db_session, quote=mock_quote, user_id=test_user.id)
+        assert result is None
+        # Outer transaction is still usable — a subsequent write succeeds.
+        entry = knowledge_service.create_entry(
+            db_session, user_id=test_user.id, entry_type="note", content="After failure"
+        )
+        assert entry.id is not None
 
 
 class TestCaptureOfferFact:

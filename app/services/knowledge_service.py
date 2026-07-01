@@ -120,14 +120,38 @@ def get_entry(db: Session, entry_id: int) -> KnowledgeEntry | None:
     )
 
 
+def _assert_can_modify(db: Session, entry: KnowledgeEntry, user_id: int) -> None:
+    """Enforce that ``user_id`` may modify ``entry``.
+
+    The creator may always modify their own entry; otherwise only a
+    manager/admin may (matching how the app gates management actions
+    elsewhere via ``is_manager_or_admin``). Anyone else raises
+    ``PermissionError`` — we never silently allow.
+    """
+    if entry.created_by is not None and entry.created_by == user_id:
+        return
+    from app.dependencies import is_manager_or_admin
+    from app.models.auth import User
+
+    user = db.get(User, user_id) if user_id is not None else None
+    if user is None or not is_manager_or_admin(user):
+        raise PermissionError(
+            "User {} is not permitted to modify knowledge entry {} (created_by={})".format(
+                user_id, entry.id, entry.created_by
+            )
+        )
+
+
 def update_entry(db: Session, entry_id: int, user_id: int, **kwargs) -> KnowledgeEntry | None:
     """Update an entry.
 
-    Only the creator can update.
+    Only the creator (or a manager/admin) can update; others raise
+    ``PermissionError``.
     """
     entry = db.get(KnowledgeEntry, entry_id)
     if not entry:
         return None
+    _assert_can_modify(db, entry, user_id)
     for key, value in kwargs.items():
         if value is not None and hasattr(entry, key):
             setattr(entry, key, value)
@@ -139,11 +163,13 @@ def update_entry(db: Session, entry_id: int, user_id: int, **kwargs) -> Knowledg
 def delete_entry(db: Session, entry_id: int, user_id: int) -> bool:
     """Delete an entry.
 
-    Returns True if deleted.
+    Only the creator (or a manager/admin) can delete; others raise
+    ``PermissionError``. Returns True if deleted.
     """
     entry = db.get(KnowledgeEntry, entry_id)
     if not entry:
         return False
+    _assert_can_modify(db, entry, user_id)
     db.delete(entry)
     db.commit()
     logger.info("Knowledge entry deleted: id={} by user={}", entry_id, user_id)
@@ -228,11 +254,14 @@ def post_answer(
 def capture_quote_fact(db: Session, *, quote, user_id: int) -> KnowledgeEntry | None:
     """Auto-capture price facts when a quote is created.
 
+    Uses a savepoint so FK failures don't corrupt the caller's transaction.
     Called from: app/routers/crm/quotes.py after quote creation.
     """
+    nested = db.begin_nested()
     try:
         line_items = quote.line_items or []
         if not line_items:
+            nested.rollback()
             return None
 
         facts = []
@@ -249,10 +278,11 @@ def capture_quote_fact(db: Session, *, quote, user_id: int) -> KnowledgeEntry | 
                 )
 
         if not facts:
+            nested.rollback()
             return None
 
         content = "Quote #{} — {}".format(quote.quote_number, "; ".join(facts))
-        return create_entry(
+        entry = create_entry(
             db,
             user_id=user_id,
             entry_type="fact",
@@ -261,8 +291,12 @@ def capture_quote_fact(db: Session, *, quote, user_id: int) -> KnowledgeEntry | 
             confidence=1.0,
             expires_at=datetime.now(timezone.utc) + timedelta(days=EXPIRY_PRICE_FACT),
             requisition_id=quote.requisition_id,
+            commit=False,
         )
+        nested.commit()
+        return entry
     except Exception as e:
+        nested.rollback()
         logger.warning("Failed to capture quote fact: {}", e)
         return None
 
