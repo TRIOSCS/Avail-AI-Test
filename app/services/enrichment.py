@@ -732,15 +732,13 @@ async def cross_validate_batch(db: Session, limit: int = 500, concurrency: int =
 
     logger.info(f"Cross-validate: checking {len(low_conf)} low-confidence AI tags")
 
-    sem = asyncio.Semaphore(concurrency)
     confirmed = 0
     changed_mfr = 0
     no_result = 0
     sources: dict[str, int] = {}
 
     for i, row in enumerate(low_conf):
-        async with sem:
-            result = await enrich_material_card(row.normalized_mpn, db)
+        result = await enrich_material_card(row.normalized_mpn, db)
 
         if not result:
             no_result += 1
