@@ -1814,10 +1814,21 @@ async def update_response_status(
         raise HTTPException(404, "Response not found")
 
     form = await request.form()
-    new_status = form.get("status", "").strip()
-    valid = {"reviewed", "rejected", "flagged", "new"}
-    if new_status not in valid:
-        raise HTTPException(400, f"Invalid status. Must be one of: {', '.join(valid)}")
+    action = form.get("status", "").strip()
+    # Map accepted action strings to in-vocabulary VendorResponseStatus members so
+    # the persisted status always matches enum-based filters/reports.
+    status_by_action = {
+        VendorResponseStatus.NEW.value: VendorResponseStatus.NEW,
+        VendorResponseStatus.REVIEWED.value: VendorResponseStatus.REVIEWED,
+        VendorResponseStatus.REJECTED.value: VendorResponseStatus.REJECTED,
+        VendorResponseStatus.FLAGGED.value: VendorResponseStatus.FLAGGED,
+    }
+    new_status = status_by_action.get(action)
+    if new_status is None:
+        raise HTTPException(
+            400,
+            f"Invalid status. Must be one of: {', '.join(status_by_action)}",
+        )
 
     vr.status = new_status
     db.commit()
