@@ -47,6 +47,18 @@ from ._shared import _base_ctx, _parse_date_safe
 
 router = APIRouter(tags=["htmx-views"])
 
+# Quote-status significance for the list's aggregate Quotes column — lower wins. Mirrors
+# requisition_list_service._quote_priority (won > lost > sent > revised > everything else).
+_QUOTE_STATUS_PRIORITY = {"won": 1, "lost": 2, "sent": 3, "revised": 4}
+
+
+def _best_quote_status(quotes) -> str | None:
+    """The most significant quote status across a requisition's quotes, or None if it
+    has none — the value shown in the list's Quotes column."""
+    if not quotes:
+        return None
+    return min(quotes, key=lambda qt: _QUOTE_STATUS_PRIORITY.get(qt.status, 5)).status
+
 
 # ── Requisition partials ────────────────────────────────────────────────
 
@@ -75,6 +87,7 @@ async def requisitions_list_partial(
             joinedload(Requisition.creator),
             joinedload(Requisition.requirements),
             joinedload(Requisition.offers),
+            joinedload(Requisition.quotes),
         )
     )
 
@@ -167,6 +180,10 @@ async def requisitions_list_partial(
     for req in reqs:
         req.req_count = len(req.requirements) if req.requirements else 0
         req.offer_count = len(req.offers) if req.offers else 0
+        # Aggregate quote status for the list's Quotes column — the most significant of the
+        # req's quotes (won > lost > sent > revised > other), mirroring
+        # requisition_list_service._quote_priority. None → the column shows a dash.
+        req.quote_status = _best_quote_status(req.quotes)
         req.match_reason = None
         req.matched_mpn = None
         if search_term:

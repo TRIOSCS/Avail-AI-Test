@@ -1,20 +1,17 @@
 """test_panel_column_alignment.py — guards that detail-panel tables show data under the
-columns their headers promise, and that the requisitions2 detail panel has no dead
-placeholder tabs.
+columns their headers promise.
 
-Covers two reviewed defects:
-  Track 1 (sightings vendors tab): the <thead> declared 7 columns
-  (Vendor|Status|Qty|Best Price|Score|Phone|Actions) while every row was a single
-  <td colspan="7"> flex card, so 5 of 7 headers labelled nothing. After the fix the
-  vendors table is real fitted columns (Vendor|Qty|Best Price|Score|⋯) with the
-  per-vendor summary row carrying exactly one <td> per <th>, phone folded into the
-  vendor cell, and actions in a kebab.
-  Track 2 (requisitions2 detail panel): the Offers and Activity tabs were hard-coded
-  placeholders ("will appear here" / "coming soon"). After the fix both lazy-load real
-  data from dedicated endpoints.
+Track 1 (sightings vendors tab): the <thead> declared 7 columns
+(Vendor|Status|Qty|Best Price|Score|Phone|Actions) while every row was a single
+<td colspan="7"> flex card, so 5 of 7 headers labelled nothing. After the fix the
+vendors table is real fitted columns (Vendor|Qty|Best Price|Score|⋯) with the
+per-vendor summary row carrying exactly one <td> per <th>, phone folded into the
+vendor cell, and actions in a kebab.
+
+(Track 2 covered the retired /requisitions2 detail panel — removed with that surface.)
 
 Called by: pytest
-Depends on: app/routers/sightings.py, app/routers/requisitions2.py, bs4
+Depends on: app/routers/sightings.py, bs4
 """
 
 import os
@@ -28,7 +25,7 @@ from bs4 import BeautifulSoup
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.models import Offer, Requirement, Requisition, User
+from app.models import Requirement, Requisition, User
 from app.models.vendor_sighting_summary import VendorSightingSummary
 
 
@@ -177,107 +174,3 @@ class TestSightingsVendorColumns:
                 break
             node = node.parent
         assert node is not None, "vendors table must be inside an overflow-x-auto wrapper"
-
-
-# ── Track 2: requisitions2 detail panel tabs ────────────────────────────────
-class TestReqsDetailTabs:
-    def test_detail_panel_has_no_dead_placeholder_tabs(self, client: TestClient, test_requisition):
-        """The Offers/Activity tabs must not ship hard-coded placeholders."""
-        resp = client.get(f"/requisitions2/{test_requisition.id}/detail")
-        assert resp.status_code == 200
-        low = resp.text.lower()
-        assert "coming soon" not in low
-        assert "will appear here" not in low
-
-    def test_offers_tab_endpoint_renders_offer(
-        self, client: TestClient, db_session: Session, test_requisition: Requisition
-    ):
-        """GET /requisitions2/{id}/offers lists real offers for the requisition."""
-        item = Requirement(
-            requisition_id=test_requisition.id,
-            primary_mpn="OFFER-MPN",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(item)
-        db_session.flush()
-        db_session.add(
-            Offer(
-                requisition_id=test_requisition.id,
-                requirement_id=item.id,
-                vendor_name="Zenith Supply",
-                mpn="OFFER-MPN",
-                qty_available=250,
-                unit_price=11.90,
-                status="active",
-                created_at=datetime.now(timezone.utc),
-            )
-        )
-        db_session.commit()
-        resp = client.get(f"/requisitions2/{test_requisition.id}/offers")
-        assert resp.status_code == 200
-        assert "Zenith Supply" in resp.text
-
-    def test_activity_tab_endpoint_renders(self, client: TestClient, test_requisition: Requisition):
-        """GET /requisitions2/{id}/activity returns the timeline partial (200)."""
-        resp = client.get(f"/requisitions2/{test_requisition.id}/activity")
-        assert resp.status_code == 200
-
-    def test_detail_offer_count_reflects_real_offers(
-        self, db_session: Session, test_user: User, test_requisition: Requisition
-    ):
-        """The detail panel's metadata 'Offers' count must reflect real offers, not a
-        hardcoded 0 — otherwise it contradicts the now-wired Offers tab."""
-        from app.services.requisition_list_service import get_requisition_detail
-
-        item = Requirement(
-            requisition_id=test_requisition.id,
-            primary_mpn="OC-MPN",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(item)
-        db_session.flush()
-        for vendor in ("V-one", "V-two"):
-            db_session.add(
-                Offer(
-                    requisition_id=test_requisition.id,
-                    requirement_id=item.id,
-                    vendor_name=vendor,
-                    mpn="OC-MPN",
-                    status="active",
-                    created_at=datetime.now(timezone.utc),
-                )
-            )
-        db_session.commit()
-        detail = get_requisition_detail(db_session, test_requisition.id, test_user.id, "buyer")
-        assert detail["req"]["offer_count"] == 2
-
-    def test_urgency_not_duplicated_in_metadata_grid(
-        self, client: TestClient, db_session: Session, test_requisition: Requisition
-    ):
-        """Urgency is surfaced once via the header pill — it must NOT also appear as a
-        redundant metadata-grid field (the grid <dt>Urgency</dt> cell is removed)."""
-        test_requisition.urgency = "critical"
-        db_session.commit()
-        resp = client.get(f"/requisitions2/{test_requisition.id}/detail")
-        assert resp.status_code == 200
-        assert ">Urgency</dt>" not in resp.text  # no redundant grid label
-        assert "critical" in resp.text  # still surfaced via the header pill
-
-    def test_lazy_tabs_enforce_ownership_for_sales(
-        self, client: TestClient, sales_user: User, test_requisition: Requisition
-    ):
-        """The lazy Offers/Activity endpoints must enforce the same role-based access as
-        the detail panel they live in — a SALES user gets 404 for a req they don't own
-        (IDOR guard), not a leaked offers/activity list."""
-        from app.dependencies import require_user
-        from app.main import app
-
-        # test_requisition is owned by test_user (buyer); sales_user does not own it.
-        original = app.dependency_overrides.get(require_user)
-        app.dependency_overrides[require_user] = lambda: sales_user
-        try:
-            assert client.get(f"/requisitions2/{test_requisition.id}/offers").status_code == 404
-            assert client.get(f"/requisitions2/{test_requisition.id}/activity").status_code == 404
-        finally:
-            if original is not None:
-                app.dependency_overrides[require_user] = original

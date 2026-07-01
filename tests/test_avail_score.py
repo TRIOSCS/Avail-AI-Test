@@ -148,6 +148,42 @@ class TestTier:
         assert _tier(value, tiers) == expected
 
 
+# ── Parity: enum constants used by queries match their DB literals ───
+
+
+class TestConstantParity:
+    """Guard the StrEnum members avail_score_service filters on against their raw DB
+    string values.
+
+    If an enum value drifts, the service's queries would silently match nothing
+    (undercounting real payouts), so pin the exact strings here.
+    """
+
+    def test_quote_status_values(self):
+        from app.constants import QuoteStatus
+
+        assert QuoteStatus.SENT == "sent"
+        assert QuoteStatus.WON == "won"
+        assert QuoteStatus.LOST == "lost"
+
+    def test_contact_status_sent(self):
+        from app.constants import ContactStatus
+
+        assert ContactStatus.SENT == "sent"
+
+    def test_proactive_offer_converted(self):
+        from app.constants import ProactiveOfferStatus
+
+        assert ProactiveOfferStatus.CONVERTED == "converted"
+
+    def test_activity_type_and_direction(self):
+        from app.constants import ActivityType, Direction
+
+        assert ActivityType.EMAIL_SENT == "email_sent"
+        assert ActivityType.CALL_LOGGED == "call_logged"
+        assert Direction.OUTBOUND == "outbound"
+
+
 # ── Unit tests: _rank_and_bonus ─────────────────────────────────────
 
 
@@ -368,6 +404,42 @@ class TestSalesAvailScore:
 
         result = compute_sales_avail_score(db_session, sales.id, MONTH)
         assert result["b1_score"] == 8  # 80% coverage
+
+    def test_b6_interaction_quality_excluded_from_total(self, db_session):
+        """B6 (Interaction Quality) is a displayed diagnostic, NOT scored into the
+        total.
+
+        Regression: sales summed b1..b6 → a 0-110 scale vs buyers' 0-100, and b6 was
+        never persisted so the breakdown could not reconcile. The score must stay 0-100
+        (5 behaviors + 5 outcomes) with behavior_total == b1..b5, while b6 remains visible.
+        """
+        sales = _make_user(db_session, "Quality Sales", "sales", "quality-sales")
+        # High-quality, meaningful, quality-assessed activities make b6 fire (> 0).
+        for _ in range(3):
+            db_session.add(
+                ActivityLog(
+                    user_id=sales.id,
+                    activity_type="email_sent",
+                    channel="email",
+                    created_at=NOW,
+                    is_meaningful=True,
+                    quality_assessed_at=NOW,
+                    quality_score=90.0,
+                )
+            )
+        db_session.commit()
+
+        result = compute_sales_avail_score(db_session, sales.id, MONTH)
+
+        # b6 fired and is still surfaced as a diagnostic …
+        assert result["b6"] > 0
+        assert result["b6_label"] == "Interaction Quality"
+        # … but it is NOT part of behavior_total (only b1..b5 are) …
+        assert result["behavior_total"] == sum(result[f"b{i}_score"] for i in range(1, 6))
+        # … so both the behavior subtotal and the grand total stay on the 0-100 scale.
+        assert result["behavior_total"] <= 50
+        assert result["total_score"] == result["behavior_total"] + result["outcome_total"]
+        assert result["total_score"] <= 100
 
     def test_outreach_consistency(self, db_session):
         """Sales active on 15 days gets 8 on B2."""
@@ -808,6 +880,47 @@ class TestAvailScoreCoverageGaps:
         result = compute_buyer_avail_score(db_session, buyer.id, MONTH)
         # Offer should be in quoted + po_confirmed sets
         assert result["total_score"] >= 0
+
+    def test_o2_o4_count_offer_in_quote_and_completed_buyplan(self, db_session):
+        """O2 (offers_in_quotes) + O4 (bp_confirmed) must count a user's offer in a sent
+        quote and a completed buy plan.
+
+        Removing the arbitrary .limit(10000) on those global scans is the fix (the cap
+        silently dropped offers past it, undercounting scores that drive real payouts);
+        a >10000-row truncation can't be unit-tested cheaply, so this guards the
+        underlying O2/O4 computation instead.
+        """
+        from app.models.buy_plan import BuyPlanLine
+
+        buyer = _make_user(db_session, "O2O4 Buyer", "buyer", "o2o4")
+        reqn = _make_req(db_session, buyer.id, created_at=NOW)
+        offer = _make_offer(db_session, reqn.id, buyer.id, created_at=NOW)
+        db_session.flush()
+        quote = Quote(
+            requisition_id=reqn.id,
+            quote_number=f"Q-O2O4-{offer.id}",
+            status="sent",
+            line_items=[{"offer_id": offer.id, "qty": 50}],
+            created_by_id=buyer.id,
+            created_at=NOW,
+        )
+        db_session.add(quote)
+        db_session.flush()
+        bp = BuyPlan(
+            requisition_id=reqn.id,
+            quote_id=quote.id,
+            status="completed",
+            submitted_by_id=buyer.id,
+            created_at=NOW,
+        )
+        db_session.add(bp)
+        db_session.flush()
+        db_session.add(BuyPlanLine(buy_plan_id=bp.id, offer_id=offer.id, quantity=50))
+        db_session.commit()
+
+        result = compute_buyer_avail_score(db_session, buyer.id, MONTH)
+        assert "(1/" in result["o2_raw"]  # offer counted in quotes (O2)
+        assert "(1/" in result["o4_raw"]  # offer counted as PO-confirmed (O4)
 
     def test_req_without_created_at_skipped(self, db_session):
         """Line 385: req with no created_at is skipped in B4 pipeline hygiene."""

@@ -1,7 +1,8 @@
 """Background jobs for the Knowledge Ledger.
 
 - refresh_active_insights: Re-generate AI insights for recently active reqs (every 6h)
-- expire_stale_entries: Mark expired entries (daily 3AM)
+- _job_expire_stale: Log a count of expired entries for monitoring — expiry itself is
+  applied at query time, not by this job (daily 3AM)
 
 Called by: app/jobs/__init__.py via register_knowledge_jobs()
 Depends on: services/knowledge_service.py

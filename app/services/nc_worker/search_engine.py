@@ -14,6 +14,24 @@ from urllib.parse import quote
 
 from loguru import logger
 
+# Persistent event loop for the browser fallback path.
+#
+# session_manager caches the Patchright browser/page (start_browser() is a
+# no-op once has_browser is True), so those objects are bound to whatever
+# event loop first drove them. asyncio.run() creates a fresh loop and closes
+# it on every call, which would orphan the cached browser after the first
+# fallback ("Event loop is closed" on the second). Reuse ONE loop across all
+# browser calls in the process so the cached browser stays bound to a live loop.
+_browser_loop: asyncio.AbstractEventLoop | None = None
+
+
+def _get_browser_loop() -> asyncio.AbstractEventLoop:
+    """Return the shared browser event loop, (re)creating it if needed."""
+    global _browser_loop
+    if _browser_loop is None or _browser_loop.is_closed():
+        _browser_loop = asyncio.new_event_loop()
+    return _browser_loop
+
 
 def build_search_url(mpn: str, search_logic: str = "Begins") -> str:
     """Build the full NC search URL with all required parameters.
@@ -48,7 +66,8 @@ def search_part(session_manager, part_number: str) -> dict:
 
     # HTTP didn't return results — try browser fallback
     logger.info("NC search: HTTP returned no results, trying browser fallback for '{}'", part_number)
-    browser_result = asyncio.run(_search_browser(session_manager, part_number))
+    loop = _get_browser_loop()
+    browser_result = loop.run_until_complete(_search_browser(session_manager, part_number))
     if browser_result:
         browser_result["mode"] = "browser"
         return browser_result

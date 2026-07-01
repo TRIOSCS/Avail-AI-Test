@@ -36,7 +36,9 @@ from app.services.buyplan_workflow import (
     flag_line_issue,
     generate_case_report,
     halt_plan,
+    plan_needs_approver_reason,
     reset_buy_plan_to_draft,
+    resolve_line_issue,
     resubmit_buy_plan,
     submit_buy_plan,
     verify_po,
@@ -1418,3 +1420,104 @@ class TestVerifyPoRejectClearsNudge:
         db_session.refresh(line)
         assert line.status == BuyPlanLineStatus.AWAITING_PO.value
         assert line.last_nudge_at is None
+
+
+class TestResolveLineIssue:
+    """resolve_line_issue() — clears a flagged issue back to awaiting_po (supervisor-
+    gated)."""
+
+    def test_supervisor_resolves_issue_to_awaiting_po(
+        self, db_session: Session, manager_user: User, test_user: User, test_quote: Quote, test_requisition: Requisition
+    ):
+        plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.ACTIVE.value)
+        line = _make_line(
+            db_session, plan, status=BuyPlanLineStatus.ISSUE.value, issue_type="price_changed", issue_note="up 20%"
+        )
+
+        result = resolve_line_issue(plan.id, line.id, manager_user, db_session)
+
+        assert result.status == BuyPlanLineStatus.AWAITING_PO.value
+        assert result.issue_type is None
+        assert result.issue_note is None
+
+    def test_resolve_clears_stale_po_fields(
+        self, db_session: Session, manager_user: User, test_user: User, test_quote: Quote, test_requisition: Requisition
+    ):
+        """A PENDING_VERIFY line flagged then resolved must land in a clean awaiting_po
+        (no confirmed PO), so the buyer re-confirms rather than inheriting a stale
+        PO#."""
+        plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.ACTIVE.value)
+        line = _make_line(
+            db_session,
+            plan,
+            status=BuyPlanLineStatus.ISSUE.value,
+            issue_type="sold_out",
+            po_number="PO-STALE",
+            po_confirmed_at=datetime.now(timezone.utc),
+        )
+
+        result = resolve_line_issue(plan.id, line.id, manager_user, db_session)
+
+        assert result.status == BuyPlanLineStatus.AWAITING_PO.value
+        assert result.po_number is None
+        assert result.po_confirmed_at is None
+
+    def test_non_supervisor_cannot_resolve(
+        self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
+    ):
+        """The buyer who raised the issue can't self-resolve (matches the
+        flagged→supervisor My Queue routing) — a plain buyer is refused."""
+        plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.ACTIVE.value)
+        line = _make_line(db_session, plan, status=BuyPlanLineStatus.ISSUE.value, issue_type="other")
+
+        with pytest.raises(PermissionError):
+            resolve_line_issue(plan.id, line.id, test_user, db_session)
+
+    def test_resolve_non_issue_line_rejected(
+        self, db_session: Session, manager_user: User, test_user: User, test_quote: Quote, test_requisition: Requisition
+    ):
+        plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.ACTIVE.value)
+        line = _make_line(db_session, plan, status=BuyPlanLineStatus.AWAITING_PO.value)
+
+        with pytest.raises(ValueError, match="no issue to resolve"):
+            resolve_line_issue(plan.id, line.id, manager_user, db_session)
+
+
+class TestPlanNeedsApproverReason:
+    """plan_needs_approver_reason() — detects a plan silently stalled for lack of an
+    approver."""
+
+    def test_pending_no_buy_plan_approver(
+        self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
+    ):
+        plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.PENDING.value)
+        assert plan_needs_approver_reason(plan, db_session) == "buy_plan"
+
+    def test_pending_with_approver_returns_none(
+        self, db_session: Session, manager_user: User, test_user: User, test_quote: Quote, test_requisition: Requisition
+    ):
+        _grant_approver(db_session, manager_user)
+        plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.PENDING.value)
+        assert plan_needs_approver_reason(plan, db_session) is None
+
+    def test_active_over_threshold_no_po_approver(
+        self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
+    ):
+        plan = _make_plan(
+            db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.ACTIVE.value, total_cost=10000.00
+        )
+        assert plan_needs_approver_reason(plan, db_session) == "purchase_order"
+
+    def test_active_under_threshold_returns_none(
+        self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
+    ):
+        plan = _make_plan(
+            db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.ACTIVE.value, total_cost=100.00
+        )
+        assert plan_needs_approver_reason(plan, db_session) is None
+
+    def test_draft_returns_none(
+        self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
+    ):
+        plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.DRAFT.value)
+        assert plan_needs_approver_reason(plan, db_session) is None

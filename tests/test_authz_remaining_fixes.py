@@ -125,22 +125,26 @@ def test_batch_notes_blocks_non_owner_sales(client, db_session, test_requisition
 #  action is owner re-assignment, which is manager/admin-only; a restricted TRADER
 #  non-owner must not be able to reassign another user's requisition.)
 def test_bulk_assign_blocks_non_owner_trader(client, db_session, test_requisition, test_user, admin_user):
+    # A trader who OWNS the requisition passes require_requisition_access but still may not
+    # reassign owners — the canonical Sales-Hub bulk route enforces the manager/admin gate
+    # in-handler. (Retargeted from the retired /requisitions2/bulk/assign to the live
+    # /v2/partials/requisitions/bulk/assign — same is_manager_or_admin gate.)
     test_user.role = UserRole.TRADER
-    test_requisition.created_by = admin_user.id
+    test_requisition.created_by = test_user.id
     db_session.commit()
     resp = client.post(
-        "/requisitions2/bulk/assign",
-        data={"ids": str(test_requisition.id), "owner_id": str(test_user.id)},
+        "/v2/partials/requisitions/bulk/assign",
+        data={"ids": str(test_requisition.id), "owner_id": str(admin_user.id)},
     )
     assert resp.status_code == 403  # trader is not manager/admin
     db_session.refresh(test_requisition)
-    assert test_requisition.created_by == admin_user.id  # ownership unchanged
+    assert test_requisition.created_by == test_user.id  # ownership unchanged
 
 
 # (The core PUT /api/requisitions/batch-assign endpoint is require_admin-gated in
 #  production; the test `client` fixture overrides require_admin, so role-based
-#  rejection there is not observable here. The requisitions2 bulk/assign case above
-#  covers the in-handler manager/admin gate, which the fixture does NOT bypass.)
+#  rejection there is not observable here. The bulk/assign case above covers the
+#  in-handler manager/admin gate, which the fixture does NOT bypass.)
 
 
 # ── parts bulk archive/unarchive + sightings batch-refresh (round-2 misses) ──

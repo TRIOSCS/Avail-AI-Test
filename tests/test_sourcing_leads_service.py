@@ -428,6 +428,135 @@ class TestUpdateLeadStatus:
         assert events[0].status == "contacted"
         assert events[0].note == "test note"
 
+    def test_has_stock_propagates_to_vendor_card(self, db_session: Session):
+        """Parity: db.get PK lookups (lead by id, vendor_card by id) still resolve the
+        right rows — a has_stock outcome must record a win on the linked VendorCard."""
+        lead = self._setup_lead(db_session)
+        assert lead.vendor_card_id is not None
+        card_before = db_session.get(VendorCard, lead.vendor_card_id)
+        wins_before = card_before.total_wins or 0
+
+        result = update_lead_status(db_session, lead.id, "has_stock")
+
+        assert result is not None
+        assert result.id == lead.id
+        db_session.refresh(card_before)
+        assert (card_before.total_wins or 0) == wins_before + 1
+
+    def test_resync_preserves_buyer_lowered_confidence(self, db_session: Session):
+        """Regression: a buyer 'no_stock' outcome lowers confidence_score; re-syncing the
+        same sighting must NOT restore the source-computed band and mask the outcome."""
+        req = _make_requisition(db_session)
+        requirement = _make_requirement(db_session, req.id)
+        _make_vendor_card(db_session)
+        sighting = _make_sighting(db_session, req.id, requirement.id)
+
+        lead = upsert_lead_from_sighting(db_session, requirement, sighting)
+        db_session.flush()
+        db_session.commit()
+        source_computed = lead.confidence_score
+
+        # Buyer marks the lead 'no_stock' — update_lead_status applies a -14 delta.
+        lead = update_lead_status(db_session, lead.id, "no_stock")
+        lowered = lead.confidence_score
+        assert lowered < source_computed  # buyer feedback dropped confidence
+
+        # Re-sight the same vendor/part — confidence must stay lowered, not be restored.
+        resynced = upsert_lead_from_sighting(db_session, requirement, sighting)
+        db_session.flush()
+        assert resynced.buyer_status == "no_stock"
+        assert resynced.confidence_score == lowered
+        assert resynced.confidence_band == _confidence_band(lowered)
+
+    def test_corroboration_bump_skips_buyer_touched_lead(self, db_session: Session):
+        """The +5 corroboration bump (production _refresh_lead_evidence_rollups) must
+        not touch a buyer-owned score — else a 'no_stock' lead climbs back to a high
+        band and, since upsert now preserves the score, accumulates unbounded on every
+        re-sync."""
+        from app.models.sourcing_lead import LeadEvidence
+        from app.services.sourcing_leads import _refresh_lead_evidence_rollups
+
+        req = _make_requisition(db_session)
+        requirement = _make_requirement(db_session, req.id)
+        _make_vendor_card(db_session)
+        sighting = _make_sighting(db_session, req.id, requirement.id)
+        lead = upsert_lead_from_sighting(db_session, requirement, sighting)
+        db_session.flush()
+        db_session.commit()
+
+        lead = update_lead_status(db_session, lead.id, "no_stock")
+        lowered = lead.confidence_score
+
+        # Two evidence rows in DISTINCT source categories (api + marketplace) → corroborated.
+        for i, st in enumerate(("nexar", "brokerbin")):
+            db_session.add(
+                LeadEvidence(
+                    evidence_id=f"ev_test_{i}",
+                    lead_id=lead.id,
+                    signal_type="stock_listing",
+                    source_type=st,
+                    source_name=st,
+                )
+            )
+        db_session.flush()
+
+        _refresh_lead_evidence_rollups(db_session, lead)
+
+        assert lead.corroborated is True  # corroboration fired …
+        assert lead.confidence_score == lowered  # … but the buyer-owned score was NOT bumped
+
+    def test_corroboration_bump_still_applies_to_untouched_lead(self, db_session: Session):
+        """A 'new' (untouched) corroborated lead still gets the +5 — the guard is buyer-
+        only."""
+        from app.models.sourcing_lead import LeadEvidence
+        from app.services.sourcing_leads import _refresh_lead_evidence_rollups
+
+        req = _make_requisition(db_session)
+        requirement = _make_requirement(db_session, req.id)
+        _make_vendor_card(db_session)
+        sighting = _make_sighting(db_session, req.id, requirement.id)
+        lead = upsert_lead_from_sighting(db_session, requirement, sighting)
+        db_session.flush()
+        before = float(lead.confidence_score)
+
+        for i, st in enumerate(("nexar", "brokerbin")):
+            db_session.add(
+                LeadEvidence(
+                    evidence_id=f"ev_new_{i}",
+                    lead_id=lead.id,
+                    signal_type="stock_listing",
+                    source_type=st,
+                    source_name=st,
+                )
+            )
+        db_session.flush()
+
+        _refresh_lead_evidence_rollups(db_session, lead)
+        assert lead.corroborated is True
+        assert float(lead.confidence_score) == min(before + 5.0, 100.0)  # +5 applied for 'new'
+
+    def test_resync_untouched_lead_still_recomputes_confidence(self, db_session: Session):
+        """A lead the buyer has NOT acted on (buyer_status == 'new') must still pick up
+        a freshly source-computed confidence on re-sync — preservation is buyer-only."""
+        req = _make_requisition(db_session)
+        requirement = _make_requirement(db_session, req.id)
+        _make_vendor_card(db_session)
+        # Stale sighting → lower freshness contribution.
+        stale = _make_sighting(db_session, req.id, requirement.id)
+        stale.created_at = datetime.now(timezone.utc) - timedelta(days=20)
+        db_session.flush()
+        lead = upsert_lead_from_sighting(db_session, requirement, stale)
+        db_session.flush()
+        stale_score = lead.confidence_score
+
+        # Fresh re-sight of the same vendor/part while still 'new' → recompute upward.
+        fresh = _make_sighting(db_session, req.id, requirement.id)
+        resynced = upsert_lead_from_sighting(db_session, requirement, fresh)
+        db_session.flush()
+        assert resynced.id == lead.id
+        assert resynced.buyer_status == "new"
+        assert resynced.confidence_score >= stale_score
+
 
 class TestAppendLeadFeedback:
     def test_append_feedback(self, db_session: Session):

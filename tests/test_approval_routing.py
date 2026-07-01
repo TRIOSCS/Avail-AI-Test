@@ -16,7 +16,7 @@ import pytest
 from app.constants import ApprovalGateType, ApprovalRecipientStatus, ApprovalStepRule
 from app.models.approvals import ApprovalRequest, ApprovalStep
 from app.models.auth import User
-from app.services.approvals.routing import NoEligibleApproverError, route_request
+from app.services.approvals.routing import NoEligibleApproverError, has_eligible_approver, route_request
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -184,3 +184,38 @@ def test_step_linked_to_request(db_session, prepayment_approvers):
 
     assert step.request_id == req.id
     assert isinstance(step, ApprovalStep)
+
+
+class TestHasEligibleApprover:
+    """has_eligible_approver mirrors route_request's eligibility without creating a step
+    — used to detect (and surface) a plan that would silently stall for lack of an
+    approver."""
+
+    def test_true_when_active_buy_plan_approver_exists(self, db_session):
+        db_session.add(User(email="a@trioscs.com", name="A", is_active=True, can_approve_buy_plans=True))
+        db_session.flush()
+        assert has_eligible_approver(db_session, ApprovalGateType.BUY_PLAN) is True
+
+    def test_false_when_no_buy_plan_approver(self, db_session):
+        db_session.add(User(email="b@trioscs.com", name="B", is_active=True, can_approve_buy_plans=False))
+        db_session.flush()
+        assert has_eligible_approver(db_session, ApprovalGateType.BUY_PLAN) is False
+
+    def test_inactive_approver_excluded(self, db_session):
+        db_session.add(User(email="c@trioscs.com", name="C", is_active=False, can_approve_buy_plans=True))
+        db_session.flush()
+        assert has_eligible_approver(db_session, ApprovalGateType.BUY_PLAN) is False
+
+    def test_po_gate_respects_dollar_limit(self, db_session):
+        db_session.add(
+            User(
+                email="d@trioscs.com",
+                name="D",
+                is_active=True,
+                can_approve_purchase_orders=True,
+                purchase_order_approval_limit=Decimal("1000"),
+            )
+        )
+        db_session.flush()
+        assert has_eligible_approver(db_session, ApprovalGateType.PURCHASE_ORDER, Decimal("500")) is True
+        assert has_eligible_approver(db_session, ApprovalGateType.PURCHASE_ORDER, Decimal("5000")) is False

@@ -134,10 +134,12 @@ class OEMSecretsConnector(BaseConnector):
                 continue
             seen.add(key)
 
-            # Authorization status
+            # Authorization status. OEMSecrets is a 140+-distributor gray-market
+            # meta-aggregator, so an unknown/absent signal must NOT be treated as
+            # authorized — default False and flip to True only on a positive signal.
             auth_status = item.get("distributor_authorisation_status", "")
             is_auth = (
-                auth_status == "authorised" if auth_status else item.get("authorized", item.get("is_authorized", True))
+                auth_status == "authorised" if auth_status else item.get("authorized", item.get("is_authorized", False))
             )
 
             # Core attributes (optional — None when absent)

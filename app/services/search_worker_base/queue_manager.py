@@ -21,6 +21,7 @@ from app.constants import RequisitionStatus
 from app.models import Requirement, Sighting
 from app.models.sourcing import Requisition
 from app.services.vendor_unavailability import apply_to_fresh_sightings
+from app.utils.normalization import normalize_mpn_key
 
 from .mpn_normalizer import strip_packaging_suffixes
 
@@ -154,14 +155,29 @@ class QueueManager:
         if recent:
             # Link existing sightings from the previous search to this requirement's material card
             if req.material_card_id and recent.requirement_id:
-                existing_sightings = (
-                    db.query(Sighting)
+                # Scope to the deduped MPN only. A requirement can have multiple
+                # queue rows (primary + resolved-AVL MPNs), so its sightings span
+                # several normalized MPNs; without scoping we'd clone the source
+                # requirement's OTHER MPNs' sightings onto THIS requirement.
+                # Compare on the canonical MPN KEY (normalize_mpn_key), NOT the raw
+                # column: sightings store strip_packaging_suffixes(the vendor's TYPED
+                # part number), which preserves internal dashes/dots, so a vendor who
+                # listed "ABC-123" for a search of "ABC123" would be dropped by raw
+                # equality. The key form collapses both to "abc123" — cloning
+                # punctuation variants of the SAME part while still excluding the
+                # requirement's other MPNs (whose keys differ). Filtered in Python
+                # because the stored column is the packaging-suffix form, not the key.
+                target_key = normalize_mpn_key(norm_mpn)
+                existing_sightings = [
+                    s
+                    for s in db.query(Sighting)
                     .filter(
                         Sighting.requirement_id == recent.requirement_id,
                         Sighting.source_type == self.source_type,
                     )
                     .all()
-                )
+                    if normalize_mpn_key(s.normalized_mpn) == target_key
+                ]
                 cloned_rows = []
                 for s in existing_sightings:
                     new_s = self._link_sighting(s, requirement_id, req.material_card_id, self.source_type)

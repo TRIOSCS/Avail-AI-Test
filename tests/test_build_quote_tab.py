@@ -106,6 +106,9 @@ class TestBuildQuoteTabRender:
         resp = client.get(f"/v2/partials/requisitions/{req.id}/build-quote")
         assert resp.status_code == 200
         assert "No parts to quote yet" in resp.text
+        # Empty state offers a next step (jump to the Parts tab) rather than dead-ending.
+        assert "Add parts" in resp.text
+        assert f"/v2/partials/requisitions/{req.id}/tab/parts" in resp.text
 
 
 class TestBuildQuoteAssemble:

@@ -92,14 +92,16 @@ class TestTbfConfig:
     def test_defaults(self):
         cfg = TbfConfig()
         assert cfg.TBF_MAX_DAILY_SEARCHES == 50
-        assert cfg.TBF_MAX_HOURLY_SEARCHES == 10
         assert cfg.TBF_MIN_DELAY_SECONDS == 180
         assert cfg.TBF_MAX_DELAY_SECONDS == 600
         assert cfg.TBF_TYPICAL_DELAY_SECONDS == 300
         assert cfg.TBF_DEDUP_WINDOW_DAYS == 7
-        assert cfg.TBF_BUSINESS_HOURS_START == 8
-        assert cfg.TBF_BUSINESS_HOURS_END == 18
         assert cfg.TBF_BROWSER_PROFILE_DIR == "/root/tbf_browser_profile"
+        # Dead knobs removed: hourly cap was never enforced and business-hours
+        # window is hardcoded in the scheduler, not read from config.
+        assert not hasattr(cfg, "TBF_MAX_HOURLY_SEARCHES")
+        assert not hasattr(cfg, "TBF_BUSINESS_HOURS_START")
+        assert not hasattr(cfg, "TBF_BUSINESS_HOURS_END")
         assert cfg.TBF_SEARCH_TIMEOUT_SECONDS == 150
         assert cfg.TBF_BREAKER_COOLDOWN_MINUTES == 30
         # No account number — member login only.

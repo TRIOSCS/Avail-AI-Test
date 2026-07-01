@@ -13,13 +13,10 @@ import os
 # Credential fields are worker-specific and handled by subclasses.
 _COMMON_FIELDS = [
     ("MAX_DAILY_SEARCHES", "50", int),
-    ("MAX_HOURLY_SEARCHES", "10", int),
     ("MIN_DELAY_SECONDS", "150", int),
     ("MAX_DELAY_SECONDS", "420", int),
     ("TYPICAL_DELAY_SECONDS", "270", int),
     ("DEDUP_WINDOW_DAYS", "7", int),
-    ("BUSINESS_HOURS_START", "8", int),
-    ("BUSINESS_HOURS_END", "18", int),
     ("BROWSER_PROFILE_DIR", "/root/worker_browser_profile", str),
 ]
 

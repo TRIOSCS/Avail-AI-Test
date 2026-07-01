@@ -415,6 +415,30 @@ class TestScoreUnified:
         result = score_unified("some_random_source")
         assert result["source_badge"] == "Live Stock"
 
+    def test_no_dead_fallback_shape(self):
+        # Regression: the old unreachable fallback returned
+        # {source_badge == source_type, score 0.0, color "red"}. Every input —
+        # including unknown / empty / the three special types — must route to a
+        # real branch and never produce that dead-fallback shape.
+        for st in (
+            "some_random_source",
+            None,
+            "",
+            "live_api",
+            "historical",
+            "vendor_affinity",
+            "ai_live_web",
+        ):
+            result = score_unified(st, claude_confidence=0.5, age_hours=0.0)
+            assert result["source_badge"] in {
+                "Live Stock",
+                "Historical",
+                "Vendor Match",
+                "AI Found",
+            }
+            # The removed fallback echoed source_type verbatim as the badge.
+            assert result["source_badge"] != st
+
     def test_none_source_type(self):
         result = score_unified(None)
         assert result["source_badge"] == "Live Stock"

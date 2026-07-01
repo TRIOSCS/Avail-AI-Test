@@ -170,6 +170,40 @@ class TestCompanyCreatePhone:
         assert c.phone is not None
         assert c.phone.startswith("+")
 
+    def test_phone_local_number_preserved_not_rejected(self) -> None:
+        """Regression: a 7-digit local number can't be parsed to E.164, but the write must
+        NOT 422 — the raw input is preserved (mirrors hq_state/hq_country fallback)."""
+        c = CompanyCreate(name="Acme", phone="555-1234")
+        assert c.phone == "555-1234"
+
+    def test_phone_blank_collapses_to_none(self) -> None:
+        c = CompanyCreate(name="Acme", phone="   ")
+        assert c.phone is None
+
+
+# ── CompanyCreate hq normalization (parity with CompanyUpdate) ──────
+
+
+class TestCompanyCreateHqNormalization:
+    @pytest.mark.parametrize(
+        "field,value,expected",
+        [
+            pytest.param("hq_country", None, None, id="hq_country_none"),
+            pytest.param("hq_country", "United States", "US", id="hq_country_value"),
+            pytest.param("hq_state", None, None, id="hq_state_none"),
+            pytest.param("hq_state", "California", "CA", id="hq_state_value"),
+        ],
+    )
+    def test_normalize(self, field, value, expected) -> None:
+        c = CompanyCreate(name="Acme", **{field: value})
+        assert getattr(c, field) == expected
+
+    def test_create_update_parity(self) -> None:
+        created = CompanyCreate(name="Acme", hq_country="United States", hq_state="California")
+        updated = CompanyUpdate(hq_country="United States", hq_state="California")
+        assert created.hq_country == updated.hq_country == "US"
+        assert created.hq_state == updated.hq_state == "CA"
+
 
 # ── CompanyUpdate validators ────────────────────────────────────────
 
@@ -193,6 +227,11 @@ class TestCompanyUpdateValidators:
         u = CompanyUpdate(phone="(555) 123-4567")
         assert u.phone is not None
         assert u.phone.startswith("+")
+
+    def test_phone_local_number_preserved_not_rejected(self) -> None:
+        """Regression: an un-parseable local number is preserved, not 422'd."""
+        u = CompanyUpdate(phone="555-1234")
+        assert u.phone == "555-1234"
 
 
 # ── OfferCreate validators ─────────────────────────────────────────

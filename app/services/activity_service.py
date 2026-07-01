@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 from loguru import logger
 from sqlalchemy import func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session, selectinload
 
 from app.config import settings
@@ -200,6 +201,24 @@ def _phone_digits(phone: str | None) -> str:
     return "".join(c for c in (phone or "") if c.isdigit())
 
 
+def _match_vendor_card_by_phone(db: Session, e164: str) -> VendorCard | None:
+    """Find one non-blacklisted VendorCard whose normalized_phones contains e164.
+
+    Pushes the membership test into the database instead of materializing every
+    non-blacklisted vendor card into Python.
+
+    Postgres: uses JSONB containment (``@>``). ``normalized_phones`` is a plain
+    ``JSON`` column (no ``@>``), so it is cast to ``JSONB`` at query time. SQLite
+    (the test DB) has neither ``JSONB`` nor ``@>``, so it falls back to a Python
+    membership test over the (blacklist-filtered) rows — the observable result is
+    identical; only Postgres gets the indexed/in-DB path.
+    """
+    base = db.query(VendorCard).filter(VendorCard.is_blacklisted.is_(False))
+    if bool(db.bind) and db.bind.dialect.name == "postgresql":
+        return base.filter(VendorCard.normalized_phones.cast(JSONB).contains([e164])).first()
+    return next((c for c in base.all() if e164 in (c.normalized_phones or [])), None)
+
+
 def match_phone_to_entity(phone: str, db: Session) -> dict | None:
     """Unified E.164 phone matcher — queries normalized columns in priority order.
 
@@ -212,7 +231,8 @@ def match_phone_to_entity(phone: str, db: Session) -> dict | None:
       2. Company.normalized_phone
       3. CustomerSite.normalized_phone / normalized_phone_2
       4. VendorContact.normalized_phone
-      5. VendorCard.normalized_phones (JSON list, Python filter)
+      5. VendorCard.normalized_phones (JSON containment, fallback only —
+         skipped entirely when priorities 1-4 already matched)
 
     Returns None if the number is unparseable or no match found.
     """
@@ -323,28 +343,31 @@ def match_phone_to_entity(phone: str, db: Session) -> dict | None:
                 }
             )
 
-    # ── Priority 5: VendorCard phones JSON ──────────────────────────────
-    vendor_cards = db.query(VendorCard).filter(VendorCard.is_blacklisted.is_(False)).all()
-    for card in vendor_cards:
-        key = ("vendor", card.id)
-        if key in seen:
-            continue
-        if e164 in (card.normalized_phones or []):
-            seen.add(key)
-            candidates.append(
-                {
-                    "type": "vendor",
-                    "id": card.id,
-                    "name": card.display_name,
-                    "source": "vendor_card",
-                    "company_id": None,
-                    "vendor_card_id": card.id,
-                    "_site_id": None,
-                    "_site_contact_id": None,
-                    "_contact_name": None,
-                    "_vendor_contact_id": None,
-                }
-            )
+    # ── Priority 5: VendorCard normalized_phones (fallback) ──────────────
+    # Only runs when priorities 1-4 produced no match. This is the last-resort
+    # JSON-containment lookup — it must never execute on the hot inbound/outbound
+    # call-logging path when a higher-priority normalized-column match already
+    # exists, and it must NOT materialize every non-blacklisted vendor card.
+    if not candidates:
+        card = _match_vendor_card_by_phone(db, e164)
+        if card is not None:
+            key = ("vendor", card.id)
+            if key not in seen:
+                seen.add(key)
+                candidates.append(
+                    {
+                        "type": "vendor",
+                        "id": card.id,
+                        "name": card.display_name,
+                        "source": "vendor_card",
+                        "company_id": None,
+                        "vendor_card_id": card.id,
+                        "_site_id": None,
+                        "_site_contact_id": None,
+                        "_contact_name": None,
+                        "_vendor_contact_id": None,
+                    }
+                )
 
     if not candidates:
         return None
@@ -435,7 +458,7 @@ def _match_entity_links(match: dict | None) -> dict:
 
 def log_email_activity(
     user_id: int | None,
-    direction: str,  # "sent" or "received"
+    direction: str,  # sent/received/inbound/outbound (normalized via _normalize_direction)
     email_addr: str,
     subject: str | None,
     external_id: str | None,
@@ -460,9 +483,20 @@ def log_email_activity(
         if existing:
             return None
 
+    # Normalize direction the same way log_call_activity does so 'outbound'/'inbound'/
+    # 'sent'/'received' all classify correctly. Email rows must carry a definite direction
+    # (EMAIL_SENT vs EMAIL_RECEIVED), so an unrecognized value is rejected explicitly
+    # rather than silently mis-bucketed as INBOUND / EMAIL_RECEIVED.
+    normalized_direction = _normalize_direction(direction)
+    if normalized_direction is None:
+        raise ValueError(
+            f"log_email_activity: unrecognized direction {direction!r}; expected one of sent/received/inbound/outbound"
+        )
+    is_outbound = normalized_direction == Direction.OUTBOUND
+
     match = match_email_to_entity(email_addr, db)
 
-    activity_type = ActivityType.EMAIL_SENT if direction == "sent" else ActivityType.EMAIL_RECEIVED
+    activity_type = ActivityType.EMAIL_SENT if is_outbound else ActivityType.EMAIL_RECEIVED
 
     record = ActivityLog(
         user_id=user_id,
@@ -473,9 +507,9 @@ def log_email_activity(
         contact_name=contact_name,
         subject=subject,
         external_id=external_id,
-        direction=Direction.OUTBOUND if direction == "sent" else Direction.INBOUND,
+        direction=normalized_direction,
         event_type=EventType.EMAIL,
-        summary=f"Email {'to' if direction == 'sent' else 'from'} {contact_name or email_addr}",
+        summary=f"Email {'to' if is_outbound else 'from'} {contact_name or email_addr}",
         requisition_id=requisition_id,
         requirement_id=requirement_id,
         occurred_at=occurred_at,
@@ -667,7 +701,7 @@ def log_call_activity(
 
     # Auto-generate subject if not explicitly provided
     if not subject:
-        verb = "to" if direction == "outbound" else "from"
+        verb = "to" if direction == Direction.OUTBOUND else "from"
         target = contact_name or phone or "unknown"
         subject = f"Call {verb} {target}"
 
@@ -882,7 +916,7 @@ def get_last_outbound_activity(db: Session, company_id: int) -> ActivityLog | No
         db.query(ActivityLog)
         .filter(
             ActivityLog.company_id == company_id,
-            ActivityLog.direction == "outbound",
+            ActivityLog.direction == Direction.OUTBOUND,
         )
         .order_by(ActivityLog.created_at.desc())
         .first()
@@ -1212,7 +1246,7 @@ def get_site_contact_notes(site_contact_id: int, db: Session, limit: int = 50) -
         db.query(ActivityLog)
         .filter(
             ActivityLog.site_contact_id == site_contact_id,
-            ActivityLog.activity_type == "note",
+            ActivityLog.activity_type == ActivityType.NOTE,
         )
         .order_by(ActivityLog.created_at.desc())
         .limit(limit)

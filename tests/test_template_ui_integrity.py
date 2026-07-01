@@ -178,9 +178,9 @@ class TestHxTriggerEventFilterPlacement:
 
 
 class TestSplitPanelMobileStacking:
-    """Wave 7: the two desktop-first split-panel workspaces (requisitions2 page and
-    the CDM account workspace) must stack vertically on phones and keep the
-    side-by-side split on md:+ .
+    """Wave 7: the desktop-first CDM account split-panel workspace must stack vertically
+    on phones and keep the side-by-side split on md:+ . (The requisitions2 split-panel
+    workspace was retired.)
 
     The mechanism (mirrored from sightings/list.html): the container is
     ``flex flex-col md:flex-row``; the inline ``:style`` width binding is guarded by
@@ -193,8 +193,8 @@ class TestSplitPanelMobileStacking:
     """
 
     # (relative template path, split-container id, splitPanel panel key)
+    # (The requisitions2 split-panel workspace was retired; the CDM workspace remains.)
     _SURFACES = [
-        ("app/templates/requisitions2/page.html", "split-rq2", "rq2"),
         ("app/templates/htmx/partials/customers/list.html", "split-cdm", "cdm"),
     ]
 

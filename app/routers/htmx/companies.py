@@ -19,6 +19,7 @@ Depends on: app.models, app.dependencies, app.database, app.services.crm_service
 
 import html as html_mod
 import json
+from collections.abc import Iterable
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
@@ -235,6 +236,42 @@ _VALID_BULK_COMPANY_ACTIONS = frozenset({"deactivate", "send-to-prospecting", "a
 _BULK_MAX_IDS = 200
 
 
+def _manageable_company_ids(user: User, companies: Iterable[Company], db: Session) -> set[int]:
+    """Return the subset of *companies*' ids that this rep may manage — batched.
+
+    Batched equivalent of calling ``can_manage_account`` once per company for a
+    non-manager: a company is manageable when the user is its ``account_owner``, owns
+    one of its sites, or is a named collaborator. Runs in at most two ownership queries
+    total regardless of how many companies are passed — the per-row alternative issues
+    up to 2*N DB round-trips (one site + one collaborator EXISTS per company). Managers
+    and admins manage everything, so callers must gate on ``is_manager_or_admin`` first
+    and skip this entirely.
+    """
+    company_list = list(companies)
+    ids = {c.id for c in company_list}
+    if not ids:
+        return set()
+    # account-owner: resolved from the already-loaded Company rows (no query).
+    manageable = {c.id for c in company_list if c.account_owner_id == user.id}
+    remaining = ids - manageable
+    if remaining:
+        manageable.update(
+            cid
+            for (cid,) in db.query(CustomerSite.company_id)
+            .filter(CustomerSite.company_id.in_(remaining), CustomerSite.owner_id == user.id)
+            .distinct()
+        )
+        remaining = ids - manageable
+    if remaining:
+        manageable.update(
+            cid
+            for (cid,) in db.query(AccountCollaborator.company_id)
+            .filter(AccountCollaborator.company_id.in_(remaining), AccountCollaborator.user_id == user.id)
+            .distinct()
+        )
+    return manageable
+
+
 @router.post("/v2/partials/customers/bulk/{action}", response_class=HTMLResponse)
 async def customers_bulk_action(
     request: Request,
@@ -254,7 +291,7 @@ async def customers_bulk_action(
     - send-to-prospecting: clear ownership (ownership_cleared_at + account_owner_id=NULL)
     - assign-owner: set account_owner_id to owner_id form param (MANAGER/ADMIN only)
     """
-    from ...dependencies import can_manage_account, is_manager_or_admin
+    from ...dependencies import is_manager_or_admin
 
     if action not in _VALID_BULK_COMPANY_ACTIONS:
         raise HTTPException(400, f"Invalid action '{action}'. Allowed: {sorted(_VALID_BULK_COMPANY_ACTIONS)}")
@@ -302,7 +339,8 @@ async def customers_bulk_action(
         authorised = companies
         skipped = 0
     else:
-        authorised = [c for c in companies if can_manage_account(user, c, db)]
+        manageable_ids = _manageable_company_ids(user, companies, db)
+        authorised = [c for c in companies if c.id in manageable_ids]
         skipped = len(companies) - len(authorised)
 
     applied = 0
@@ -535,8 +573,10 @@ async def contacts_bulk_action(
             .filter(SiteContact.id.in_(ids))
             .all()
         )
+        is_mgr = is_manager_or_admin(user)
+        manageable_ids = set() if is_mgr else _manageable_company_ids(user, [company for _, company in rows], db)
         for contact, company in rows:
-            if is_manager_or_admin(user) or can_manage_account(user, company, db):
+            if is_mgr or company.id in manageable_ids:
                 if action == "archive":
                     contact.is_archived = True
                 elif action == "dnc":
@@ -816,6 +856,10 @@ async def import_contacts_preview(
             if _dom:
                 _domain_to_company[_dom] = _co
 
+    # Precompute the manageable-company set once (batched) instead of per-row round-trips.
+    _is_mgr = is_manager_or_admin(user)
+    _manageable_ids = set() if _is_mgr else _manageable_company_ids(user, all_companies, db)
+
     rows = []
     for raw in raw_rows:
         company_name = (raw.get("company_name") or "").strip()
@@ -836,7 +880,7 @@ async def import_contacts_preview(
             _matched_co = _norm_to_company.get(_norm) if _norm else None
             if _matched_co is None and email and "@" in email:
                 _matched_co = _domain_to_company.get(email.split("@", 1)[1])
-            if _matched_co is not None and not (is_manager_or_admin(user) or can_manage_account(user, _matched_co, db)):
+            if _matched_co is not None and not (_is_mgr or _matched_co.id in _manageable_ids):
                 status = "unauthorized"
                 status_label = "Company not yours"
             else:
@@ -940,6 +984,10 @@ async def import_contacts_confirm(
             if domain:
                 domain_to_company[domain] = co
 
+    # Precompute the manageable-company set once (batched) instead of per-row round-trips.
+    is_mgr = is_manager_or_admin(user)
+    manageable_ids = set() if is_mgr else _manageable_company_ids(user, all_companies, db)
+
     now = datetime.now(timezone.utc)
     created = 0
     skipped_no_company = 0
@@ -969,7 +1017,7 @@ async def import_contacts_confirm(
             continue
 
         # AUTHZ: rep may only attach contacts to companies they manage
-        if not (is_manager_or_admin(user) or can_manage_account(user, co, db)):
+        if not (is_mgr or co.id in manageable_ids):
             skipped_unauthorized += 1
             continue
 
@@ -1085,7 +1133,7 @@ async def create_company(
         hq_city=form.get("hq_city", "").strip() or None,
         hq_state=(normalize_us_state(raw_hq_state) or raw_hq_state) if raw_hq_state else None,
         hq_country=(normalize_country(raw_hq_country) or raw_hq_country) if raw_hq_country else None,
-        phone=normalize_phone_e164(raw_phone) if raw_phone else None,
+        phone=(normalize_phone_e164(raw_phone) or raw_phone) if raw_phone else None,
         credit_terms=form.get("credit_terms", "").strip() or None,
         tax_id=form.get("tax_id", "").strip() or None,
         source=form.get("source", "").strip() or "manual",
@@ -1167,86 +1215,6 @@ async def check_company_duplicate(
             f'<p class="text-sm text-amber-600">A company named "{html_mod.escape(existing.name or "")}" already exists (ID {existing.id}).</p>'
         )
     return HTMLResponse("")
-
-
-def build_account_timeline(contacts, quotes, activities, *, req_map):
-    """Merge RFQ contacts, quotes, and activity logs into a single sorted list.
-
-    Each event dict has the shape:
-        {ts, kind, channel, direction, title, detail, is_meaningful,
-         quality_score, quality_classification, raw}
-
-    ``kind`` is one of "rfq" | "quote" | "activity".
-    Events are sorted descending by ``ts`` (newest first).
-    ``raw`` carries the original ORM object for template use.
-
-    Called by: unit tests (TestUnifiedTimelineHelper) only; no longer called by the activity route.
-    """
-    from datetime import datetime, timezone
-
-    _epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
-    events: list[dict] = []
-
-    for c in contacts or []:
-        ts = c.created_at or _epoch
-        events.append(
-            {
-                "ts": ts,
-                "kind": "rfq",
-                "channel": "email",
-                "direction": "outbound",
-                "title": c.vendor_name or "Unknown Vendor",
-                "detail": c.subject or "",
-                "is_meaningful": True,
-                "quality_score": None,
-                "quality_classification": None,
-                "raw": c,
-                "req": req_map.get(c.requisition_id) if req_map and c.requisition_id else None,
-            }
-        )
-
-    for q in quotes or []:
-        ts = q.created_at or _epoch
-        # Use won_revenue for won quotes; fall back to subtotal then total_cost
-        if q.status == "won" and q.won_revenue:
-            display_value = q.won_revenue
-        else:
-            display_value = q.subtotal or q.total_cost
-        events.append(
-            {
-                "ts": ts,
-                "kind": "quote",
-                "channel": "internal",
-                "direction": None,
-                "title": q.quote_number or "Quote",
-                "detail": "${:,.2f}".format(float(display_value)) if display_value else "",
-                "is_meaningful": True,
-                "quality_score": None,
-                "quality_classification": None,
-                "raw": q,
-                "display_value": display_value,
-            }
-        )
-
-    for a in activities or []:
-        ts = a.occurred_at or a.created_at or _epoch
-        events.append(
-            {
-                "ts": ts,
-                "kind": "activity",
-                "channel": a.channel,
-                "direction": a.direction,
-                "title": (a.activity_type or "").replace("_", " ").title(),
-                "detail": a.summary or a.notes or a.subject or "",
-                "is_meaningful": a.is_meaningful,
-                "quality_score": a.quality_score,
-                "quality_classification": a.quality_classification,
-                "raw": a,
-            }
-        )
-
-    events.sort(key=lambda e: e["ts"], reverse=True)
-    return events
 
 
 def _company_quotes_query(db: Session, company):
@@ -1689,7 +1657,7 @@ def apply_company_field(company: Company, field: str, value: str) -> None:
         raise HTTPException(404, f"Unknown editable field: {field!r}")
     v = value.strip()
     if field == "phone":
-        company.phone = normalize_phone_e164(v) if v else None
+        company.phone = (normalize_phone_e164(v) or v) if v else None
     elif field == "hq_state":
         company.hq_state = (normalize_us_state(v) or v) if v else None
     elif field == "hq_country":
@@ -3821,9 +3789,10 @@ async def edit_company(
     _set_parent_company(db, company, parent_company_id_raw)
 
     # Registry fields — DRY via apply_company_field.
-    # source/notes/tax_id are handled explicitly above with blank-sentinel "preserve
-    # current value" semantics; skip them here so the registry loop's clear-on-blank
-    # behaviour doesn't clobber that (a blank source must keep the existing value).
+    # notes/source use blank-sentinel "preserve current value" semantics above; tax_id is
+    # explicitly clear-on-blank (a submitted blank sets it to NULL). All three are handled
+    # above, so skip them here to keep that behaviour — the registry loop must not re-touch
+    # notes/source (its clear-on-blank would wipe a value the user left untouched).
     _form_handled = {"notes", "source", "tax_id"}
     for f in EDITABLE_ACCOUNT_FIELDS:
         if f in _form_handled:

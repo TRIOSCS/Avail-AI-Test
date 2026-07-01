@@ -412,10 +412,11 @@ class TestAdvanceStatus:
         assert resp.status_code == 400
 
     def test_advance_invalid_transition_returns_409(self, client, db_session):
-        _, r, _ = _seed(db_session, sourcing_status="open")
+        # won only transitions to lost/archived — won → sourcing is illegal.
+        _, r, _ = _seed(db_session, sourcing_status="won")
         resp = client.patch(
             f"/v2/partials/sightings/{r.id}/advance-status",
-            data={"status": "won"},
+            data={"status": "sourcing"},
         )
         assert resp.status_code == 409
 

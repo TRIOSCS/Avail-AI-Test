@@ -597,6 +597,17 @@ class TestRequisitionDetail:
         resp = client.get(f"/v2/partials/requisitions/{req.id}/tab/offers")
         assert resp.status_code == 200
 
+    def test_tab_offers_empty_shows_search_cta(self, client: TestClient, db_session: Session, test_user: User):
+        """Empty offers tab points to sourcing (Search all sources → Parts tab) instead
+        of dead-ending with a message the user can't act on."""
+        req = _make_requisition(db_session, test_user)
+        db_session.commit()
+        resp = client.get(f"/v2/partials/requisitions/{req.id}/tab/offers")
+        assert resp.status_code == 200
+        assert "No offers received yet" in resp.text
+        assert "Search all sources" in resp.text
+        assert f"/v2/partials/requisitions/{req.id}/tab/parts" in resp.text
+
     @pytest.mark.parametrize(
         "tab, expected_status",
         [

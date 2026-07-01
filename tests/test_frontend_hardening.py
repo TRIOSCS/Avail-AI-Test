@@ -97,22 +97,6 @@ def test_no_innerHTML_variable_assignment_in_templates():
     )
 
 
-# ── HIGH-FE-3 — every cross-origin CDN <script> carries SRI + crossorigin ─────────
-
-
-def test_requisitions2_cdn_scripts_have_sri():
-    """requisitions2/page.html loads its HTMX/Alpine stack from unpkg; every external
-    <script src="https://..."> must pin an integrity hash + crossorigin so a CDN
-    compromise cannot execute arbitrary code in the user's session."""
-    txt = Path("app/templates/requisitions2/page.html").read_text()
-    offenders = [
-        ln.strip()
-        for ln in txt.splitlines()
-        if re.search(r"<script[^>]*src=\"https://", ln) and ("integrity=" not in ln or "crossorigin" not in ln)
-    ]
-    assert not offenders, "External CDN <script> missing integrity/crossorigin (SRI):\n" + "\n".join(offenders)
-
-
 # ── HIGH-FE-4 — the global modal labels itself for screen readers ────────────────
 
 

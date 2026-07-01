@@ -274,6 +274,40 @@ class TestProgressContactStatus:
         _progress_contact_status(c, self._make_vr("quote_provided"), MagicMock())
         assert c.status_updated_at is not None
 
+    def test_transitions_assign_strenum_members(self):
+        """Phase-3 cleanup: statuses are set from ContactStatus StrEnum members,
+        not raw string literals (value-identical, type-stronger)."""
+        from app.constants import ContactStatus
+
+        c = self._make_contact("sent")
+        _progress_contact_status(c, self._make_vr("quote_provided"), MagicMock())
+        assert c.status is ContactStatus.QUOTED
+        assert c.status == "quoted"
+
+
+# ── Phase-3 signature / StrEnum cleanup regression ───────────────────
+
+
+class TestEmailServiceCleanup:
+    def test_poll_inbox_optional_annotations(self):
+        import inspect
+
+        from app.email_service import poll_inbox
+
+        hints = inspect.get_annotations(poll_inbox)
+        assert hints["requisition_id"] == (int | None)
+        assert hints["scanned_by_user_id"] == (int | None)
+
+    def test_apply_parsed_result_optional_db_annotation(self):
+        import inspect
+
+        from sqlalchemy.orm import Session
+
+        from app.email_service import _apply_parsed_result
+
+        hints = inspect.get_annotations(_apply_parsed_result)
+        assert hints["db"] == (Session | None)
+
 
 # ── log_phone_contact ────────────────────────────────────────────────
 
@@ -2975,6 +3009,93 @@ class TestScopeThreadContactsToSender:
         # that domain (path 2 is skipped for noise domains); two vendors block path 3 → [].
         out = _scope_thread_contacts_to_sender([a1, b1], f"carol@{noise_domain}")
         assert out == []
+
+
+class TestPollInboxSavepointFailureNotParsed:
+    """Regression: a VendorResponse whose savepoint commit fails must NOT reach
+    AI parsing/billing.
+
+    Bug: ``vr`` was appended to ``pending_parse`` BEFORE ``nested.commit()``. If
+    the savepoint commit failed, the ``except`` rolled the row back but left the
+    rolled-back ``vr`` in ``pending_parse`` — it was then AI-parsed and billed, and
+    could spawn Offers referencing a vanished ``vendor_response_id`` that poisoned
+    the poll's final ``db.commit()`` (rolling back the entire scan). Fix appends to
+    ``pending_parse`` only after ``nested.commit()`` succeeds.
+    """
+
+    def _make_inbox_message(self, msg_id, sender_email):
+        return {
+            "id": msg_id,
+            "subject": "RE: RFQ",
+            "from": {"emailAddress": {"address": sender_email, "name": "Vendor"}},
+            "bodyPreview": "Quote attached",
+            "body": {"content": "<p>Quote attached</p>"},
+            "conversationId": f"conv-{msg_id}",
+            "receivedDateTime": None,
+        }
+
+    @pytest.mark.asyncio
+    async def test_rolled_back_response_excluded_from_parse_and_billing(self, db_session, test_user, test_requisition):
+        """First message commits; second message's savepoint commit fails.
+
+        Only the first is parsed/billed/persisted.
+        """
+        mock_gc = AsyncMock()
+        mock_gc.get_json.return_value = {
+            "value": [
+                self._make_inbox_message("msg-good", "good@parts.com"),
+                self._make_inbox_message("msg-bad", "bad@parts.com"),
+            ]
+        }
+
+        # Force ONLY the second message's savepoint commit to fail, exactly as a
+        # Postgres savepoint-release error would (the observable outcome — row not
+        # persisted, not parsed — holds identically on SQLite).
+        real_begin_nested = db_session.begin_nested
+        state = {"n": 0}
+
+        def flaky_begin_nested():
+            state["n"] += 1
+            nested = real_begin_nested()
+            if state["n"] == 2:
+
+                def boom():
+                    raise RuntimeError("savepoint commit failed")
+
+                nested.commit = boom
+            return nested
+
+        db_session.begin_nested = flaky_begin_nested
+
+        captured = {}
+
+        async def fake_submit(pending, db):
+            captured["parsed"] = list(pending)
+
+        billed = MagicMock()
+
+        with (
+            patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+            patch("app.email_service.get_credential_cached", return_value="fake-key"),
+            patch("app.email_service._submit_parse_batch", side_effect=fake_submit),
+            patch("app.email_service._record_email_mining_calls", billed),
+        ):
+            results = await poll_inbox(
+                token="fake-token",
+                db=db_session,
+                requisition_id=test_requisition.id,
+            )
+
+        # Only the good message produced a result and persisted a row.
+        assert [r["message_id"] for r in results] == ["msg-good"]
+        rows = db_session.query(VendorResponse).all()
+        assert [r.message_id for r in rows] == ["msg-good"]
+
+        # The rolled-back response must NOT have been enqueued for AI parsing…
+        assert "parsed" in captured
+        assert [vr.message_id for vr in captured["parsed"]] == ["msg-good"]
+        # …nor billed against the Claude-call budget.
+        billed.assert_called_once_with(1)
 
 
 class TestPollInboxCrossRequisitionFanout:

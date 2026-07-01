@@ -1,7 +1,9 @@
-"""Pydantic models for the Requisitions 2 HTMX page.
+"""Pydantic models for the requisitions list — query/filter parsing, pagination, and
+action validation for the server-rendered Sales Hub requisitions list.
 
-Handles query/filter parsing, pagination, and action validation
-for the server-rendered requisitions list.
+Formerly ``schemas/requisitions2.py``; renamed when the hidden /requisitions2 surface was
+retired, since ``ReqListFilters``/``PaginationContext`` are shared by the canonical Sales
+Hub list (some action/inline-edit enums here are now unused and are a follow-up cleanup).
 
 Called by: app/services/requisition_list_service.py
 Depends on: pydantic

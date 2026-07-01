@@ -52,6 +52,28 @@ def normalize_website(v: str | None) -> str | None:
     return v
 
 
+def normalize_hq_country_value(v: str | None) -> str | None:
+    """Normalize a company HQ country to an ISO code (shared by CompanyCreate and
+    CompanyUpdate so create/edit stay in parity).
+
+    None passes through; an unmappable value is kept verbatim.
+    """
+    if v is None:
+        return v
+    return normalize_country(v) or v
+
+
+def normalize_hq_state_value(v: str | None) -> str | None:
+    """Normalize a company HQ state to a US abbreviation (shared by CompanyCreate and
+    CompanyUpdate so create/edit stay in parity).
+
+    None passes through; an unmappable value is kept verbatim.
+    """
+    if v is None:
+        return v
+    return normalize_us_state(v) or v
+
+
 # ── Companies ────────────────────────────────────────────────────────
 
 
@@ -89,15 +111,29 @@ class CompanyCreate(BaseModel):
     def validate_website(cls, v: str | None) -> str | None:
         return normalize_website(v)
 
+    @field_validator("hq_country")
+    @classmethod
+    def normalize_hq_country(cls, v: str | None) -> str | None:
+        return normalize_hq_country_value(v)
+
+    @field_validator("hq_state")
+    @classmethod
+    def normalize_hq_state(cls, v: str | None) -> str | None:
+        return normalize_hq_state_value(v)
+
     @field_validator("phone")
     @classmethod
     def normalize_phone(cls, v: str | None) -> str | None:
         if v is None:
             return v
+        # Preserve the raw input when it can't be parsed to E.164 (e.g. a 7-digit local
+        # number) rather than 422-ing the whole company write — mirrors hq_state/hq_country
+        # here and the contact-phone path in routers/htmx/companies.py, which also fall
+        # back to raw. Empty/whitespace collapses to None.
         result = normalize_phone_e164(v)
-        if result is None:
-            raise ValueError(f"Could not parse phone number: {v}")
-        return result
+        if result:
+            return result
+        return v.strip() or None
 
 
 class CompanyUpdate(BaseModel):
@@ -127,26 +163,26 @@ class CompanyUpdate(BaseModel):
     @field_validator("hq_country")
     @classmethod
     def normalize_hq_country(cls, v: str | None) -> str | None:
-        if v is None:
-            return v
-        return normalize_country(v) or v
+        return normalize_hq_country_value(v)
 
     @field_validator("hq_state")
     @classmethod
     def normalize_hq_state(cls, v: str | None) -> str | None:
-        if v is None:
-            return v
-        return normalize_us_state(v) or v
+        return normalize_hq_state_value(v)
 
     @field_validator("phone")
     @classmethod
     def normalize_phone(cls, v: str | None) -> str | None:
         if v is None:
             return v
+        # Preserve the raw input when it can't be parsed to E.164 (e.g. a 7-digit local
+        # number) rather than 422-ing the whole company write — mirrors hq_state/hq_country
+        # here and the contact-phone path in routers/htmx/companies.py, which also fall
+        # back to raw. Empty/whitespace collapses to None.
         result = normalize_phone_e164(v)
-        if result is None:
-            raise ValueError(f"Could not parse phone number: {v}")
-        return result
+        if result:
+            return result
+        return v.strip() or None
 
 
 # ── Offers ───────────────────────────────────────────────────────────
