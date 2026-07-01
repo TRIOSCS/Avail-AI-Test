@@ -1690,6 +1690,75 @@ class TestWorkerMainLoop:
         finally:
             worker_mod._shutdown_requested = original_shutdown
 
+    def test_main_circuit_breaker_clears_on_self_heal(self, db_session):
+        """Regression: breaker open->healthy transition resets circuit_breaker_open.
+
+        The breaker auto-resets after its cooldown, so should_stop() flips True (tripped
+        iteration) then False (self-healed iteration). The healthy iteration MUST write
+        circuit_breaker_open=False / circuit_breaker_reason=None back to the status row,
+        otherwise monitoring/UI shows the breaker permanently OPEN after it recovered.
+        """
+        import app.services.nc_worker.worker as worker_mod
+
+        # Seed the singleton row already OPEN so a passing test proves the CLEAR ran
+        # (not merely that the flag was never set).
+        ws = NcWorkerStatus(
+            id=1,
+            is_running=False,
+            circuit_breaker_open=True,
+            circuit_breaker_reason="captcha",
+        )
+        db_session.add(ws)
+        db_session.commit()
+
+        original_shutdown = worker_mod._shutdown_requested
+
+        sleep_calls = {"n": 0}
+
+        def mock_sleep(seconds):
+            # Iter 1 (breaker open) sleeps 1hr; let the loop continue to iter 2.
+            # Iter 2 (healthy) clears the flag then sleeps on the empty queue — stop there.
+            sleep_calls["n"] += 1
+            if sleep_calls["n"] >= 2:
+                worker_mod._shutdown_requested = True
+
+        mock_session = MagicMock()
+        mock_session.start = MagicMock()
+        mock_session.is_logged_in = True
+        mock_session.stop = MagicMock()
+        mock_session.has_browser = False
+
+        mock_scheduler = MagicMock()
+        mock_scheduler.is_business_hours.return_value = True
+        mock_scheduler.time_for_break.return_value = False
+
+        mock_breaker = MagicMock()
+        # Tripped iteration, then self-healed iteration.
+        mock_breaker.should_stop.side_effect = [True, False]
+        mock_breaker.get_trip_info.return_value = {"trip_reason": "captcha"}
+
+        try:
+            worker_mod._shutdown_requested = False
+
+            with patch(self._DB, self._make_mock_db(db_session)):
+                with patch(self._SESSION, return_value=mock_session):
+                    with patch(self._SCHEDULER, return_value=mock_scheduler):
+                        with patch(self._BREAKER, return_value=mock_breaker):
+                            with patch(self._TIME_SLEEP, side_effect=mock_sleep):
+                                with patch(self._QUEUE_RECOVER):
+                                    with patch(self._RUN_AI_GATE):
+                                        with patch(self._QUEUE_NEXT, return_value=None):
+                                            worker_mod.main()
+        finally:
+            worker_mod._shutdown_requested = original_shutdown
+
+        # Both iterations ran: one tripped, one healed.
+        assert mock_breaker.should_stop.call_count == 2
+        # The self-healed iteration cleared the persisted breaker flag.
+        db_session.refresh(ws)
+        assert ws.circuit_breaker_open is False
+        assert ws.circuit_breaker_reason is None
+
     def test_main_break_time(self, db_session):
         """Main() takes a break when scheduler says it's time."""
         import app.services.nc_worker.worker as worker_mod

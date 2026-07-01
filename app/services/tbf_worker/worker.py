@@ -110,6 +110,7 @@ async def main():
     searches_today = 0
     sightings_today = 0
     last_stats_date = None
+    breaker_was_open = False
 
     logger.info("TBF worker starting...")
 
@@ -199,8 +200,22 @@ async def main():
                             circuit_breaker_open=True,
                             circuit_breaker_reason=info["trip_reason"],
                         )
+                    breaker_was_open = True
                     await asyncio.sleep(60 * 60)
                     continue
+
+                # Breaker healthy: clear a previously-open flag on the open->healthy
+                # transition (the breaker auto-resets after cooldown, so without this
+                # the status row would show circuit_breaker_open=True forever).
+                if breaker_was_open:
+                    logger.info("TBF worker: circuit breaker self-healed, resuming searches")
+                    with _db_session() as db:
+                        update_worker_status(
+                            db,
+                            circuit_breaker_open=False,
+                            circuit_breaker_reason=None,
+                        )
+                    breaker_was_open = False
 
                 # Check if time for a break
                 if scheduler.time_for_break():
