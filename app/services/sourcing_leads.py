@@ -421,7 +421,6 @@ def upsert_lead_from_sighting(db: Session, requirement: Requirement, sighting: S
     contactability = _contactability_score(sighting, vendor_card)
     historical = _historical_success_score(vendor_card)
     confidence_score = _compute_confidence(sighting, source_reliability, freshness, contactability, historical)
-    confidence_band = _confidence_band(confidence_score)
     safety_score, safety_flags, safety_summary = _compute_vendor_safety(vendor_card, contactability)
 
     lead = (
@@ -473,8 +472,15 @@ def upsert_lead_from_sighting(db: Session, requirement: Requirement, sighting: S
     lead.source_reliability_score = source_reliability
     lead.contactability_score = contactability
     lead.historical_success_score = historical
-    lead.confidence_score = confidence_score
-    lead.confidence_band = confidence_band
+    # Once a buyer has acted on a lead, their outcome feedback (applied by
+    # update_lead_status — e.g. no_stock -14, bad_lead -18) OWNS confidence_score.
+    # Overwriting it with the freshly source-computed value on every re-sight would
+    # restore a high band and surface a 'no_stock' lead as high-confidence. Preserve
+    # the stored score for buyer-touched leads; only (re)compute for untouched ones.
+    if (lead.buyer_status or "new") == "new" or lead.confidence_score is None:
+        lead.confidence_score = confidence_score
+    effective_confidence = float(lead.confidence_score or 0.0)
+    lead.confidence_band = _confidence_band(effective_confidence)
     lead.vendor_safety_score = safety_score
     lead.vendor_safety_band = _safety_band(safety_score, has_vendor_data=vendor_card is not None)
     lead.vendor_safety_summary = safety_summary
@@ -491,8 +497,8 @@ def upsert_lead_from_sighting(db: Session, requirement: Requirement, sighting: S
         evidence_tier=sighting.evidence_tier,
         source_type=sighting.source_type,
     )
-    lead.suggested_next_action = _suggested_next_action(confidence_score, safety_score, contactability)
-    lead.risk_flags = _build_lead_risk_flags(confidence_score, source_reliability, freshness, contactability)
+    lead.suggested_next_action = _suggested_next_action(effective_confidence, safety_score, contactability)
+    lead.risk_flags = _build_lead_risk_flags(effective_confidence, source_reliability, freshness, contactability)
     lead.updated_at = _now_utc()
     return lead
 
@@ -713,7 +719,11 @@ def _refresh_lead_evidence_rollups(db: Session, lead: SourcingLead) -> None:
     categories = {_source_category(row.source_type) for row in evidence_rows}
     lead.evidence_count = evidence_count
     lead.corroborated = len(categories) >= 2
-    if lead.corroborated and lead.confidence_score is not None:
+    # The +5 corroboration bump must NOT touch a buyer-owned score. Once buyer_status
+    # leaves 'new', buyer feedback owns confidence_score (see upsert_lead_from_sighting);
+    # bumping it here on every re-sync would both restore a buyer-lowered 'no_stock' lead to
+    # a high band AND — now that upsert preserves the score — accumulate unbounded to 100.
+    if lead.corroborated and lead.confidence_score is not None and (lead.buyer_status or "new") == "new":
         lead.confidence_score = _clamp(float(lead.confidence_score) + 5.0)
         lead.confidence_band = _confidence_band(float(lead.confidence_score))
         # Promote raw evidence to inferred when corroborated by multiple source categories

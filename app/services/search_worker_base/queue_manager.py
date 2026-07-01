@@ -159,6 +159,13 @@ class QueueManager:
                     .filter(
                         Sighting.requirement_id == recent.requirement_id,
                         Sighting.source_type == self.source_type,
+                        # Scope to the deduped MPN only. A requirement can have
+                        # multiple queue rows (primary + resolved-AVL MPNs), so
+                        # its sightings span several normalized MPNs. Without
+                        # this filter we'd clone the source requirement's OTHER
+                        # MPNs' sightings onto THIS requirement, attributing
+                        # vendor offers for an MPN it never requested.
+                        Sighting.normalized_mpn == norm_mpn,
                     )
                     .all()
                 )

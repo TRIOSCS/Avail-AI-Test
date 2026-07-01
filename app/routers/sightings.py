@@ -925,7 +925,12 @@ async def sightings_batch_assign(
     """Batch-assign a buyer to multiple requirements."""
     form = await request.form()
     req_ids_raw = form.get("requirement_ids", "[]")
-    requirement_ids = json.loads(req_ids_raw) if isinstance(req_ids_raw, str) else []
+    try:
+        requirement_ids = json.loads(req_ids_raw) if isinstance(req_ids_raw, str) else []
+        if not isinstance(requirement_ids, list):
+            requirement_ids = []
+    except (json.JSONDecodeError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid requirement_ids format")
     buyer_id_str = form.get("buyer_id", "")
     buyer_id = int(buyer_id_str) if buyer_id_str else None
 
@@ -966,7 +971,12 @@ async def sightings_batch_status(
 
     form = await request.form()
     req_ids_raw = form.get("requirement_ids", "[]")
-    requirement_ids = json.loads(req_ids_raw) if isinstance(req_ids_raw, str) else []
+    try:
+        requirement_ids = json.loads(req_ids_raw) if isinstance(req_ids_raw, str) else []
+        if not isinstance(requirement_ids, list):
+            requirement_ids = []
+    except (json.JSONDecodeError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid requirement_ids format")
     new_status = form.get("status", "")
 
     if len(requirement_ids) > MAX_BATCH_SIZE:
@@ -1025,7 +1035,12 @@ async def sightings_batch_notes(
     """Add a note to multiple requirements."""
     form = await request.form()
     req_ids_raw = form.get("requirement_ids", "[]")
-    requirement_ids = json.loads(req_ids_raw) if isinstance(req_ids_raw, str) else []
+    try:
+        requirement_ids = json.loads(req_ids_raw) if isinstance(req_ids_raw, str) else []
+        if not isinstance(requirement_ids, list):
+            requirement_ids = []
+    except (json.JSONDecodeError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid requirement_ids format")
     notes = form.get("notes", "").strip()
 
     if len(requirement_ids) > MAX_BATCH_SIZE:

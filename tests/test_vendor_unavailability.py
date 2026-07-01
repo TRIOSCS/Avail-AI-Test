@@ -1939,10 +1939,11 @@ class TestQueueDedupReapplication:
     def test_dedup_cloned_sightings_stamped(self, db_session: Session):
         from app.models import IcsSearchQueue
         from app.models.intelligence import MaterialCard
+        from app.services.search_worker_base.mpn_normalizer import strip_packaging_suffixes
         from app.services.search_worker_base.queue_manager import QueueManager
 
         req_old = _make_requirement(db_session, primary_mpn="LM317T")
-        _make_sighting(
+        src = _make_sighting(
             db_session,
             req_old,
             "Arrow Electronics",
@@ -1950,6 +1951,10 @@ class TestQueueDedupReapplication:
             qty_available=100,
             source_type="icsource",
         )
+        # Production sightings carry normalized_mpn (strip_packaging_suffixes); the dedup
+        # clone now scopes on it, so the source sighting must have it set like production.
+        src.normalized_mpn = strip_packaging_suffixes("LM317T")
+        db_session.flush()
 
         card = MaterialCard(normalized_mpn="lm317t", display_mpn="LM317T")
         db_session.add(card)
