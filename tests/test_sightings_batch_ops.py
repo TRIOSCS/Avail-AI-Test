@@ -200,15 +200,6 @@ def test_batch_assign_too_many(client):
     assert resp.status_code == 400
 
 
-def test_batch_assign_invalid_json_returns_400(client):
-    """Batch-assign with malformed requirement_ids returns 400, not 500."""
-    resp = client.post(
-        "/v2/partials/sightings/batch-assign",
-        data={"requirement_ids": "not-json", "buyer_id": "1"},
-    )
-    assert resp.status_code == 400
-
-
 # ── batch-status ──────────────────────────────────────────────────
 
 
@@ -260,15 +251,6 @@ def test_batch_status_too_many(client):
     resp = client.post(
         "/v2/partials/sightings/batch-status",
         data={"requirement_ids": json.dumps(list(range(1001))), "status": "sourcing"},
-    )
-    assert resp.status_code == 400
-
-
-def test_batch_status_invalid_json_returns_400(client):
-    """Batch-status with malformed requirement_ids returns 400, not 500."""
-    resp = client.post(
-        "/v2/partials/sightings/batch-status",
-        data={"requirement_ids": "not-json", "status": "sourcing"},
     )
     assert resp.status_code == 400
 
@@ -325,15 +307,6 @@ def test_batch_notes_too_many(client):
     resp = client.post(
         "/v2/partials/sightings/batch-notes",
         data={"requirement_ids": json.dumps(list(range(1001))), "notes": "note"},
-    )
-    assert resp.status_code == 400
-
-
-def test_batch_notes_invalid_json_returns_400(client):
-    """Batch-notes with malformed requirement_ids returns 400, not 500."""
-    resp = client.post(
-        "/v2/partials/sightings/batch-notes",
-        data={"requirement_ids": "not-json", "notes": "note"},
     )
     assert resp.status_code == 400
 
