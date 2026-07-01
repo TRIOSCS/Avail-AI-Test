@@ -1,7 +1,0 @@
-{# requisitions2/_single_row.html — Single row after inline save.
-   Called by: PATCH /requisitions2/{id}/inline
-   Receives: req (Requisition model), user, customer_display, created_by_name, requirement_count.
-   Depends on: HTMX, Alpine.js
-#}
-{% from "requisitions2/_row_macros.html" import req_row_v2 %}
-{{ req_row_v2(req, user, customer_display) }}
