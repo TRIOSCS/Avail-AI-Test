@@ -2977,6 +2977,93 @@ class TestScopeThreadContactsToSender:
         assert out == []
 
 
+class TestPollInboxSavepointFailureNotParsed:
+    """Regression: a VendorResponse whose savepoint commit fails must NOT reach
+    AI parsing/billing.
+
+    Bug: ``vr`` was appended to ``pending_parse`` BEFORE ``nested.commit()``. If
+    the savepoint commit failed, the ``except`` rolled the row back but left the
+    rolled-back ``vr`` in ``pending_parse`` — it was then AI-parsed and billed, and
+    could spawn Offers referencing a vanished ``vendor_response_id`` that poisoned
+    the poll's final ``db.commit()`` (rolling back the entire scan). Fix appends to
+    ``pending_parse`` only after ``nested.commit()`` succeeds.
+    """
+
+    def _make_inbox_message(self, msg_id, sender_email):
+        return {
+            "id": msg_id,
+            "subject": "RE: RFQ",
+            "from": {"emailAddress": {"address": sender_email, "name": "Vendor"}},
+            "bodyPreview": "Quote attached",
+            "body": {"content": "<p>Quote attached</p>"},
+            "conversationId": f"conv-{msg_id}",
+            "receivedDateTime": None,
+        }
+
+    @pytest.mark.asyncio
+    async def test_rolled_back_response_excluded_from_parse_and_billing(self, db_session, test_user, test_requisition):
+        """First message commits; second message's savepoint commit fails.
+
+        Only the first is parsed/billed/persisted.
+        """
+        mock_gc = AsyncMock()
+        mock_gc.get_json.return_value = {
+            "value": [
+                self._make_inbox_message("msg-good", "good@parts.com"),
+                self._make_inbox_message("msg-bad", "bad@parts.com"),
+            ]
+        }
+
+        # Force ONLY the second message's savepoint commit to fail, exactly as a
+        # Postgres savepoint-release error would (the observable outcome — row not
+        # persisted, not parsed — holds identically on SQLite).
+        real_begin_nested = db_session.begin_nested
+        state = {"n": 0}
+
+        def flaky_begin_nested():
+            state["n"] += 1
+            nested = real_begin_nested()
+            if state["n"] == 2:
+
+                def boom():
+                    raise RuntimeError("savepoint commit failed")
+
+                nested.commit = boom
+            return nested
+
+        db_session.begin_nested = flaky_begin_nested
+
+        captured = {}
+
+        async def fake_submit(pending, db):
+            captured["parsed"] = list(pending)
+
+        billed = MagicMock()
+
+        with (
+            patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+            patch("app.email_service.get_credential_cached", return_value="fake-key"),
+            patch("app.email_service._submit_parse_batch", side_effect=fake_submit),
+            patch("app.email_service._record_email_mining_calls", billed),
+        ):
+            results = await poll_inbox(
+                token="fake-token",
+                db=db_session,
+                requisition_id=test_requisition.id,
+            )
+
+        # Only the good message produced a result and persisted a row.
+        assert [r["message_id"] for r in results] == ["msg-good"]
+        rows = db_session.query(VendorResponse).all()
+        assert [r.message_id for r in rows] == ["msg-good"]
+
+        # The rolled-back response must NOT have been enqueued for AI parsing…
+        assert "parsed" in captured
+        assert [vr.message_id for vr in captured["parsed"]] == ["msg-good"]
+        # …nor billed against the Claude-call budget.
+        billed.assert_called_once_with(1)
+
+
 class TestPollInboxCrossRequisitionFanout:
     """Reply matching against per-(requisition, vendor) Contact rows.
 
