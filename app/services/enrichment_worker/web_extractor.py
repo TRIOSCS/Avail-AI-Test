@@ -36,9 +36,14 @@ _PROMPT = (
 )
 
 
-@dataclass
+@dataclass(frozen=True)
 class WebExtractResult:
-    """Result of a web-search enrichment attempt."""
+    """Result of a web-search enrichment attempt.
+
+    Frozen: producers build the full object in one ``return`` and consumers only read, so
+    immutability is safe and lets the ``_FAILED`` module singleton be shared without an
+    aliasing footgun (mutating a field on the singleton would corrupt every future failure).
+    """
 
     status: str  # "web_sourced" | "failed"
     description: str | None = None

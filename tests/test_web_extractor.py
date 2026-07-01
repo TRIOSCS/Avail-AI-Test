@@ -12,6 +12,7 @@ Gates under test (enforced in Python, NOT trusted from LLM output):
   Plus: description/manufacturer quality check.
 """
 
+import dataclasses
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -78,6 +79,32 @@ async def test_claude_backend_error_propagates(mock_cj):
     mock_cj.side_effect = ClaudeRateLimitError("429")
     with pytest.raises(ClaudeError):
         await extract_part_from_web("LM317T", "lm317t")
+
+
+def test_web_extract_result_is_frozen():
+    """WebExtractResult must be frozen so the shared ``_FAILED`` singleton can't be
+    mutated in place — an aliasing footgun that would corrupt every future failure."""
+    from app.services.enrichment_worker.web_extractor import WebExtractResult
+
+    result = WebExtractResult(status="web_sourced", source_urls=["https://x.com"])
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        result.source_urls = ["https://evil.com"]  # type: ignore[misc]
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        result.status = "failed"  # type: ignore[misc]
+
+
+def test_failed_singleton_cannot_be_mutated():
+    """The module-level ``_FAILED`` singleton is shared across all failure returns;
+    mutating any field on it must raise, not silently poison later results."""
+    from app.services.enrichment_worker.web_extractor import _FAILED
+
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        _FAILED.status = "web_sourced"  # type: ignore[misc]
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        _FAILED.confidence = 0.99  # type: ignore[misc]
+    # dataclasses.replace produces a new object, never touching the singleton.
+    assert dataclasses.replace(_FAILED, status="web_sourced") is not _FAILED
+    assert _FAILED.status == "failed"
 
 
 def test_prompt_constrains_category_to_canonical_vocabulary():
