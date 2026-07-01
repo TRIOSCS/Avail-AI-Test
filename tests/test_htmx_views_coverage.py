@@ -789,6 +789,35 @@ class TestReviewResponse:
         )
         assert resp.status_code == 200
 
+    @pytest.mark.parametrize("action", ["reviewed", "rejected"])
+    def test_review_response_persists_enum_value(
+        self, client: TestClient, db_session: Session, test_user: User, action: str
+    ):
+        """review_response_htmx maps the form action to the in-vocabulary
+        VendorResponseStatus member so the persisted status matches enum-based
+        filters."""
+        from app.constants import VendorResponseStatus
+        from app.models.offers import VendorResponse
+
+        req = _make_requisition(db_session, test_user)
+        db_session.commit()
+        vr = VendorResponse(
+            requisition_id=req.id,
+            vendor_name="Arrow",
+            body="Quote: LM317T $0.50",
+            status="unread",
+            received_at=datetime.now(timezone.utc),
+        )
+        db_session.add(vr)
+        db_session.commit()
+        resp = client.post(
+            f"/v2/partials/requisitions/{req.id}/responses/{vr.id}/review",
+            data={"status": action},
+        )
+        assert resp.status_code == 200
+        db_session.refresh(vr)
+        assert vr.status == VendorResponseStatus(action).value
+
 
 # ══════════════════════════════════════════════════════════════════════════
 # Vendor tab — analytics, emails, reviews, find_contacts
