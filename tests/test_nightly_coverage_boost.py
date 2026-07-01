@@ -209,8 +209,9 @@ class TestActivityDigestEdgeCases:
 
 
 class TestSourcingAutoProgressEdgeCases:
-    def test_invalid_transition_blocked_returns_false(self, db_session):
-        """Lines 51-56: validate_transition returns False for non-allowed forward skip."""
+    def test_no_progress_when_already_ahead(self, db_session):
+        """auto_progress is forward-only: a backward target returns False and leaves
+        status unchanged (the _STATUS_ORDER guard, independent of the transition table)."""
         from app.constants import SourcingStatus
         from app.models.sourcing import Requirement as Req2
         from app.models.sourcing import Requisition as Req
@@ -223,16 +224,39 @@ class TestSourcingAutoProgressEdgeCases:
         r = Req2(
             requisition_id=req.id,
             primary_mpn="TEST123",
+            sourcing_status=SourcingStatus.QUOTED,
+        )
+        db_session.add(r)
+        db_session.commit()
+
+        # QUOTED → OFFERED is backwards in _STATUS_ORDER → no progress.
+        result = auto_progress_status(r, SourcingStatus.OFFERED, db_session)
+        assert result is False
+        assert r.sourcing_status == SourcingStatus.QUOTED
+
+    def test_skip_ahead_progresses(self, db_session):
+        """Reconciled contract: OPEN → OFFERED is a legal skip-ahead, so auto_progress
+        advances (offers can arrive on a part with no prior sourcing step)."""
+        from app.constants import SourcingStatus
+        from app.models.sourcing import Requirement as Req2
+        from app.models.sourcing import Requisition as Req
+        from app.services.sourcing_auto_progress import auto_progress_status
+
+        req = Req(name="REQ-SKIP2", status="active")
+        db_session.add(req)
+        db_session.flush()
+
+        r = Req2(
+            requisition_id=req.id,
+            primary_mpn="TEST456",
             sourcing_status=SourcingStatus.OPEN,
         )
         db_session.add(r)
         db_session.commit()
 
-        # OPEN → OFFERED: forward in order but OFFERED not in OPEN's allowed transitions
         result = auto_progress_status(r, SourcingStatus.OFFERED, db_session)
-        assert result is False
-        # Sourcing status must remain OPEN
-        assert r.sourcing_status == SourcingStatus.OPEN
+        assert result is True
+        assert r.sourcing_status == SourcingStatus.OFFERED
 
 
 # ── ai_email_parser ────────────────────────────────────────────────────

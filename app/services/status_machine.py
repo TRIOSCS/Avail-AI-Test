@@ -102,14 +102,54 @@ REQUISITION_TRANSITIONS: dict[str, set[str]] = {
 }
 
 # ── Sourcing Status Transitions (Requirement-level) ────────────────────
+# SINGLE SOURCE OF TRUTH for per-part sourcing transition legality. Both
+# validators route through this table: validate_transition("requirement", …)
+# (below) and requirement_status.transition_requirement (which imports this as
+# ALLOWED_TRANSITIONS). Do not fork it — keep the two in sync by reference.
+#
+# Reconciliation (2026-07): this table previously diverged from
+# requirement_status.ALLOWED_TRANSITIONS. The permissive (superset) definition
+# won because the authoritative event handlers require skip-ahead legality:
+# on_offer_created advances open/sourcing → offered and on_quote_built advances
+# open/sourcing/offered → quoted (offers/quotes can arrive on a part that never
+# had an RFQ sent — e.g. inbound email mining). Under the old restrictive table
+# those transitions were rejected and silently skipped, leaving a part that is
+# on a confirmed offer or customer quote still displayed as "open" — a data
+# integrity bug. Un-archive (archived → open) is likewise legal because a
+# requirement is re-openable (unlike a terminal offer).
 SOURCING_TRANSITIONS: dict[str, set[str]] = {
-    SourcingStatus.OPEN: {SourcingStatus.SOURCING, SourcingStatus.ARCHIVED},
-    SourcingStatus.SOURCING: {SourcingStatus.OFFERED, SourcingStatus.OPEN, SourcingStatus.ARCHIVED},
-    SourcingStatus.OFFERED: {SourcingStatus.QUOTED, SourcingStatus.SOURCING, SourcingStatus.ARCHIVED},
-    SourcingStatus.QUOTED: {SourcingStatus.WON, SourcingStatus.LOST, SourcingStatus.OFFERED, SourcingStatus.ARCHIVED},
-    SourcingStatus.WON: {SourcingStatus.ARCHIVED},
-    SourcingStatus.LOST: {SourcingStatus.OPEN, SourcingStatus.ARCHIVED},
-    SourcingStatus.ARCHIVED: set(),  # terminal
+    SourcingStatus.OPEN: {
+        SourcingStatus.SOURCING,
+        SourcingStatus.OFFERED,
+        SourcingStatus.QUOTED,
+        SourcingStatus.WON,
+        SourcingStatus.LOST,
+        SourcingStatus.ARCHIVED,
+    },
+    SourcingStatus.SOURCING: {
+        SourcingStatus.OFFERED,
+        SourcingStatus.QUOTED,
+        SourcingStatus.WON,
+        SourcingStatus.LOST,
+        SourcingStatus.OPEN,
+        SourcingStatus.ARCHIVED,
+    },
+    SourcingStatus.OFFERED: {
+        SourcingStatus.QUOTED,
+        SourcingStatus.WON,
+        SourcingStatus.LOST,
+        SourcingStatus.SOURCING,
+        SourcingStatus.ARCHIVED,
+    },
+    SourcingStatus.QUOTED: {
+        SourcingStatus.WON,
+        SourcingStatus.LOST,
+        SourcingStatus.OFFERED,
+        SourcingStatus.ARCHIVED,
+    },
+    SourcingStatus.WON: {SourcingStatus.LOST, SourcingStatus.ARCHIVED},
+    SourcingStatus.LOST: {SourcingStatus.OPEN, SourcingStatus.SOURCING, SourcingStatus.ARCHIVED},
+    SourcingStatus.ARCHIVED: {SourcingStatus.OPEN},  # re-openable (un-archive)
 }
 
 

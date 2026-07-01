@@ -19,17 +19,14 @@ from ..constants import ActivityType
 from ..constants import SourcingStatus as RequirementSourcingStatus
 from ..models import ActivityLog, Requirement, Requisition, User
 from .activity_service import log_activity
+from .status_machine import SOURCING_TRANSITIONS
 
-# Valid per-part status transitions
-ALLOWED_TRANSITIONS: dict[str, set[str]] = {
-    "open": {"sourcing", "offered", "quoted", "won", "lost", "archived"},
-    "sourcing": {"offered", "quoted", "won", "lost", "open", "archived"},
-    "offered": {"quoted", "won", "lost", "sourcing", "archived"},
-    "quoted": {"won", "lost", "offered", "archived"},
-    "won": {"lost", "archived"},
-    "lost": {"open", "sourcing", "archived"},
-    "archived": {"open"},
-}
+# Per-part status transitions. The single source of truth is
+# status_machine.SOURCING_TRANSITIONS — validate_transition("requirement", …)
+# and transition_requirement (below) MUST agree, so both reference the same
+# table. `ALLOWED_TRANSITIONS` is kept as an alias for backwards compatibility
+# with existing importers; it is the same object, not a copy.
+ALLOWED_TRANSITIONS: dict[str, set[str]] = SOURCING_TRANSITIONS
 
 
 def transition_requirement(
