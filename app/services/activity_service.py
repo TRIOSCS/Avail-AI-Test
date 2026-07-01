@@ -458,7 +458,7 @@ def _match_entity_links(match: dict | None) -> dict:
 
 def log_email_activity(
     user_id: int | None,
-    direction: str,  # "sent" or "received"
+    direction: str,  # sent/received/inbound/outbound (normalized via _normalize_direction)
     email_addr: str,
     subject: str | None,
     external_id: str | None,
@@ -483,9 +483,20 @@ def log_email_activity(
         if existing:
             return None
 
+    # Normalize direction the same way log_call_activity does so 'outbound'/'inbound'/
+    # 'sent'/'received' all classify correctly. Email rows must carry a definite direction
+    # (EMAIL_SENT vs EMAIL_RECEIVED), so an unrecognized value is rejected explicitly
+    # rather than silently mis-bucketed as INBOUND / EMAIL_RECEIVED.
+    normalized_direction = _normalize_direction(direction)
+    if normalized_direction is None:
+        raise ValueError(
+            f"log_email_activity: unrecognized direction {direction!r}; expected one of sent/received/inbound/outbound"
+        )
+    is_outbound = normalized_direction == Direction.OUTBOUND
+
     match = match_email_to_entity(email_addr, db)
 
-    activity_type = ActivityType.EMAIL_SENT if direction == "sent" else ActivityType.EMAIL_RECEIVED
+    activity_type = ActivityType.EMAIL_SENT if is_outbound else ActivityType.EMAIL_RECEIVED
 
     record = ActivityLog(
         user_id=user_id,
@@ -496,9 +507,9 @@ def log_email_activity(
         contact_name=contact_name,
         subject=subject,
         external_id=external_id,
-        direction=Direction.OUTBOUND if direction == "sent" else Direction.INBOUND,
+        direction=normalized_direction,
         event_type=EventType.EMAIL,
-        summary=f"Email {'to' if direction == 'sent' else 'from'} {contact_name or email_addr}",
+        summary=f"Email {'to' if is_outbound else 'from'} {contact_name or email_addr}",
         requisition_id=requisition_id,
         requirement_id=requirement_id,
         occurred_at=occurred_at,

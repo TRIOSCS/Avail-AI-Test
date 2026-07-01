@@ -3523,15 +3523,17 @@ class TestBatchStatus:
 
     def test_skips_invalid_transitions(self, client, db_session):
         _, r, _ = _seed_data(db_session)
-        # open -> won is NOT valid (must go open -> sourcing -> offered -> quoted -> won)
+        # won -> sourcing is NOT valid (won only transitions to lost/archived).
+        r.sourcing_status = "won"
+        db_session.commit()
         resp = client.post(
             "/v2/partials/sightings/batch-status",
-            data={"requirement_ids": json.dumps([r.id]), "status": "won"},
+            data={"requirement_ids": json.dumps([r.id]), "status": "sourcing"},
         )
         assert resp.status_code == 200
         assert "skipped" in resp.text.lower()
         db_session.refresh(r)
-        assert r.sourcing_status == "open"
+        assert r.sourcing_status == "won"
 
     def test_mixed_valid_and_invalid(self, client, db_session):
         req = Requisition(name="Mix RFQ", status="open", customer_name="Mix Corp")

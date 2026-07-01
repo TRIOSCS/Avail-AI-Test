@@ -105,6 +105,7 @@ def run_startup_migrations() -> None:
         )
         _analyze_hot_tables(conn)
 
+    _verify_encryption_canary()
     _backfill_normalized_mpn()
     if os.environ.get("ENABLE_PASSWORD_LOGIN", "false").lower() == "true":
         _create_default_user_if_env_set()
@@ -571,6 +572,24 @@ def _seed_site_contacts(conn) -> None:
 
 
 _BACKFILL_BATCH_SIZE = 500
+
+
+def _verify_encryption_canary() -> None:
+    """Fail loudly at boot if the live ENCRYPTION_SALT/SECRET_KEY can't decrypt stored
+    data.
+
+    A wrong salt would otherwise silently empty every encrypted credential app-wide. See
+    app/utils/encrypted_type.py::verify_encryption_canary.
+    """
+    from app.database import SessionLocal
+
+    from .utils.encrypted_type import verify_encryption_canary
+
+    db = SessionLocal()
+    try:
+        verify_encryption_canary(db)
+    finally:
+        db.close()
 
 
 def _backfill_normalized_mpn() -> None:
