@@ -17,6 +17,7 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.models import TbfSearchQueue
+from app.utils.normalization import normalize_mpn_key
 
 # Cooldown after API failure to avoid hammering a broken endpoint
 _GATE_COOLDOWN_SECONDS = 300  # 5 minutes
@@ -185,14 +186,26 @@ async def process_ai_gate(db: Session):
                     item.updated_at = datetime.now(timezone.utc)
                 break  # Stop processing further batches during this cycle
 
-            # Build a lookup by MPN
-            result_map = {r["mpn"]: r for r in results}
+            # Build a lookup keyed on a NORMALIZED mpn so case/whitespace echo
+            # differences from the model still match the DB item. Looking up by
+            # the exact returned string left items 'pending' forever, and the
+            # pending fetch re-selected the same poison rows every cycle.
+            result_map = {normalize_mpn_key(r["mpn"]): r for r in results}
 
             for item in batch_items:
-                classification = result_map.get(item.mpn)
-                if not classification:
-                    # Model didn't return this MPN — leave pending
-                    logger.warning("AI gate: no classification returned for {}", item.mpn)
+                classification = result_map.get(normalize_mpn_key(item.mpn))
+                if not classification or not all(k in classification for k in ("search_broker", "commodity", "reason")):
+                    # Model omitted this MPN, or returned a malformed classification (missing
+                    # keys). Fail open like the API-failure branch — never leave it pending, and
+                    # never let classification[...] KeyError abort the batch + skip commit.
+                    logger.warning(
+                        "AI gate: missing/malformed classification for {} — failing open to search", item.mpn
+                    )
+                    item.commodity_class = "unknown"
+                    item.gate_decision = "search"
+                    item.gate_reason = "AI gate: no classification returned — defaulting to search"
+                    item.status = "queued"
+                    item.updated_at = datetime.now(timezone.utc)
                     continue
 
                 decision = "search" if classification["search_broker"] else "skip"

@@ -117,6 +117,32 @@ class TestTbfWorkerMain:
         sm.stop.assert_awaited()
 
     @pytest.mark.asyncio
+    async def test_browser_start_failure_stops_session(self):
+        """Start() raising tears down the session (leak guard) before exiting.
+
+        start() can launch Playwright/Chromium before failing; without stop() the
+        browser subprocess would leak.
+        """
+        import app.services.tbf_worker.worker as wmod
+
+        sm = _make_sm(start_raises=Exception("No DISPLAY"))
+        ctx = _make_mock_ctx()
+
+        wmod._shutdown_requested = False
+        try:
+            with (
+                patch(_DB_SESSION, return_value=ctx),
+                patch(_UPDATE_STATUS),
+                patch(_QUEUE_RECOVER),
+                patch(_SESSION_MGR, return_value=sm),
+            ):
+                await wmod.main()
+        finally:
+            wmod._shutdown_requested = False
+
+        sm.stop.assert_awaited()
+
+    @pytest.mark.asyncio
     async def test_off_hours_sleeps(self):
         """Off-hours path: loop calls asyncio.sleep(30*60)."""
         import app.services.tbf_worker.worker as wmod

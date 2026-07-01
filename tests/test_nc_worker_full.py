@@ -1120,8 +1120,11 @@ class TestAiGate:
 
     @pytest.mark.asyncio
     async def test_process_ai_gate_missing_classification(self, db_session, test_requisition):
-        """process_ai_gate handles when model doesn't return a classification for an
-        MPN."""
+        """An MPN the model omits is failed-open to search, not left 'pending'.
+
+        Leaving it pending let the pending fetch re-select the same poison row every
+        cycle, starving the gate. Fail-open unblocks the batch slot.
+        """
         from app.services.nc_worker.ai_gate import clear_classification_cache, process_ai_gate
 
         clear_classification_cache()
@@ -1143,7 +1146,8 @@ class TestAiGate:
             await process_ai_gate(db_session)
 
         db_session.refresh(item)
-        assert item.status == "pending"  # Not classified, left pending
+        assert item.status == "queued"  # failed open, not left pending
+        assert item.gate_decision == "search"
 
     def test_clear_classification_cache(self):
         from app.services.nc_worker.ai_gate import _classification_cache, clear_classification_cache
@@ -1689,6 +1693,75 @@ class TestWorkerMainLoop:
                                     worker_mod.main()
         finally:
             worker_mod._shutdown_requested = original_shutdown
+
+    def test_main_circuit_breaker_clears_on_self_heal(self, db_session):
+        """Regression: breaker open->healthy transition resets circuit_breaker_open.
+
+        The breaker auto-resets after its cooldown, so should_stop() flips True (tripped
+        iteration) then False (self-healed iteration). The healthy iteration MUST write
+        circuit_breaker_open=False / circuit_breaker_reason=None back to the status row,
+        otherwise monitoring/UI shows the breaker permanently OPEN after it recovered.
+        """
+        import app.services.nc_worker.worker as worker_mod
+
+        # Seed the singleton row already OPEN so a passing test proves the CLEAR ran
+        # (not merely that the flag was never set).
+        ws = NcWorkerStatus(
+            id=1,
+            is_running=False,
+            circuit_breaker_open=True,
+            circuit_breaker_reason="captcha",
+        )
+        db_session.add(ws)
+        db_session.commit()
+
+        original_shutdown = worker_mod._shutdown_requested
+
+        sleep_calls = {"n": 0}
+
+        def mock_sleep(seconds):
+            # Iter 1 (breaker open) sleeps 1hr; let the loop continue to iter 2.
+            # Iter 2 (healthy) clears the flag then sleeps on the empty queue — stop there.
+            sleep_calls["n"] += 1
+            if sleep_calls["n"] >= 2:
+                worker_mod._shutdown_requested = True
+
+        mock_session = MagicMock()
+        mock_session.start = MagicMock()
+        mock_session.is_logged_in = True
+        mock_session.stop = MagicMock()
+        mock_session.has_browser = False
+
+        mock_scheduler = MagicMock()
+        mock_scheduler.is_business_hours.return_value = True
+        mock_scheduler.time_for_break.return_value = False
+
+        mock_breaker = MagicMock()
+        # Tripped iteration, then self-healed iteration.
+        mock_breaker.should_stop.side_effect = [True, False]
+        mock_breaker.get_trip_info.return_value = {"trip_reason": "captcha"}
+
+        try:
+            worker_mod._shutdown_requested = False
+
+            with patch(self._DB, self._make_mock_db(db_session)):
+                with patch(self._SESSION, return_value=mock_session):
+                    with patch(self._SCHEDULER, return_value=mock_scheduler):
+                        with patch(self._BREAKER, return_value=mock_breaker):
+                            with patch(self._TIME_SLEEP, side_effect=mock_sleep):
+                                with patch(self._QUEUE_RECOVER):
+                                    with patch(self._RUN_AI_GATE):
+                                        with patch(self._QUEUE_NEXT, return_value=None):
+                                            worker_mod.main()
+        finally:
+            worker_mod._shutdown_requested = original_shutdown
+
+        # Both iterations ran: one tripped, one healed.
+        assert mock_breaker.should_stop.call_count == 2
+        # The self-healed iteration cleared the persisted breaker flag.
+        db_session.refresh(ws)
+        assert ws.circuit_breaker_open is False
+        assert ws.circuit_breaker_reason is None
 
     def test_main_break_time(self, db_session):
         """Main() takes a break when scheduler says it's time."""
@@ -2477,11 +2550,61 @@ class TestNcSearchEngineFull:
             "status_code": 200,
         }
 
-        with patch("app.services.nc_worker.search_engine._search_browser"):
-            with patch("app.services.nc_worker.search_engine.asyncio.run", return_value=browser_result):
-                result = search_part(mock_session_mgr, "XYZ123")
+        async def fake_browser(_sm, _pn):
+            return browser_result
+
+        with patch("app.services.nc_worker.search_engine._search_browser", side_effect=fake_browser):
+            result = search_part(mock_session_mgr, "XYZ123")
 
         assert result["mode"] == "browser"
+
+    def test_search_part_browser_uses_persistent_loop(self):
+        """Repeated browser fallbacks reuse ONE live event loop.
+
+        Regression: search_part used asyncio.run() per call, creating and
+        closing a fresh loop each time. The session_manager caches the browser
+        page bound to the first loop, so the second fallback ran against a
+        closed loop ("Event loop is closed"). All browser coroutines must run
+        on a single persistent loop that stays open across calls.
+        """
+        import asyncio
+
+        import app.services.nc_worker.search_engine as se
+
+        # Reset the module-level loop so the assertion is deterministic.
+        se._browser_loop = None
+
+        mock_resp = MagicMock()
+        mock_resp.text = "<html>No results</html>"  # forces browser fallback
+        mock_resp.status_code = 200
+
+        mock_session_mgr = MagicMock()
+        mock_session_mgr.session.get = MagicMock(return_value=mock_resp)
+        mock_session_mgr.has_browser = True
+
+        seen_loop_ids = []
+
+        async def record_loop(_sm, _pn):
+            seen_loop_ids.append(id(asyncio.get_running_loop()))
+            return {
+                "html": "<div class='searchresultstable'>data</div>",
+                "url": "url",
+                "duration_ms": 1,
+                "status_code": 200,
+            }
+
+        with patch("app.services.nc_worker.search_engine._search_browser", side_effect=record_loop):
+            first = search_part(mock_session_mgr, "AAA111")
+            second = search_part(mock_session_mgr, "BBB222")
+
+        assert first["mode"] == "browser"
+        assert second["mode"] == "browser"
+        # Same loop drove BOTH calls (fails on old asyncio.run: two loop ids).
+        assert len(seen_loop_ids) == 2
+        assert seen_loop_ids[0] == seen_loop_ids[1]
+        # And that loop is still alive (old asyncio.run closes it each time).
+        assert se._browser_loop is not None
+        assert not se._browser_loop.is_closed()
 
     def test_has_results_empty(self):
         """_has_results returns False for empty string (line 153)."""
@@ -3354,7 +3477,8 @@ class TestNcWorkerGaps:
             worker_mod._shutdown_requested = original
 
     def test_main_has_browser_stop(self, db_session):
-        """Main() calls stop_browser when has_browser is True (line 316)."""
+        """Main() stops the browser on the persistent browser loop when has_browser is
+        True."""
         import app.services.nc_worker.worker as worker_mod
 
         ws = NcWorkerStatus(id=1, is_running=False)
@@ -3368,18 +3492,25 @@ class TestNcWorkerGaps:
         mock_session.is_logged_in = True
         mock_session.stop = MagicMock()
         mock_session.has_browser = True
-        mock_session.stop_browser = MagicMock()  # Not AsyncMock — avoids unawaited coroutine
+        mock_session.stop_browser = MagicMock()  # loop.run_until_complete is mocked, so no await
+
+        # The teardown now drives stop_browser on the SAME persistent loop search_part uses
+        # (not a fresh asyncio.run loop), so patch that loop and assert it ran the coroutine.
+        mock_loop = MagicMock()
 
         try:
             worker_mod._shutdown_requested = True
             with patch(self._DB, self._make_mock_db(db_session)):
                 with patch(self._SESSION, return_value=mock_session):
                     with patch(self._QUEUE_RECOVER):
-                        with patch(self._ASYNCIO_RUN) as mock_asyncio_run:
+                        with patch(
+                            "app.services.nc_worker.search_engine._get_browser_loop",
+                            return_value=mock_loop,
+                        ):
                             worker_mod.main()
 
-            # stop_browser called via asyncio.run
-            mock_asyncio_run.assert_called()
+            mock_session.stop_browser.assert_called()
+            mock_loop.run_until_complete.assert_called()
         finally:
             worker_mod._shutdown_requested = original
 

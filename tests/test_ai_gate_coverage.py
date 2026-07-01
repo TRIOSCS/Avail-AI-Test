@@ -238,7 +238,7 @@ class TestProcessAIGate:
         assert item.status == "gated_out"
         assert item.gate_decision == "skip"
 
-    async def test_missing_mpn_in_result_leaves_pending(self, db_session: Session):
+    async def test_missing_mpn_in_result_fails_open(self, db_session: Session):
         MockModel = MagicMock()
 
         item = _make_queue_item("MISSING_MPN")
@@ -252,8 +252,9 @@ class TestProcessAIGate:
         with patch.object(gate, "classify_parts_batch", new=AsyncMock(return_value=classification)):
             await gate.process_ai_gate(db_mock)
 
-        # Status should remain "pending" since no classification returned
-        assert item.status == "pending"
+        # Fail open, not left 'pending' — otherwise the item recycles forever as a poison row.
+        assert item.status == "queued"
+        assert item.gate_decision == "search"
 
     async def test_mixed_cache_and_uncached(self, db_session: Session):
         MockModel = MagicMock()
