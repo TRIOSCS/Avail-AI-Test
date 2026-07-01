@@ -56,6 +56,9 @@ def test_vendor_offers_tab_escapes_mpn_and_does_not_500(client, db_session, test
         Offer(
             requisition_id=test_requisition.id,
             vendor_name="XSS Vend",
+            # The offers tab matches on the normalized vendor name (as sightings/leads
+            # do); real write-paths always populate it, so the test must too.
+            vendor_name_normalized="xss vend",
             mpn=_XSS,
             qty_available=10,
             unit_price=1.0,

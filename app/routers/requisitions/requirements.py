@@ -87,11 +87,21 @@ def _dedupe_substitutes(subs: list[str], primary_mpn: str) -> list[dict]:
 
 
 def _substitute_keys(requirement: Requirement) -> list[str]:
-    """Return normalized MPN keys for a requirement's substitutes (string or dict
-    form)."""
+    """Return normalized MPN keys for a requirement's substitutes.
+
+    Handles both the canonical dict form ({"mpn": ..., "manufacturer": ...})
+    and the legacy plain-string form.
+    """
     keys = []
     for sub in requirement.substitutes or []:
-        sub_str = (sub if isinstance(sub, str) else "").strip()
+        # Robust to legacy strings, dict form (incl. {"mpn": None}), and malformed
+        # non-str/non-dict entries — mirrors parse_substitute_mpns.
+        if isinstance(sub, str):
+            sub_str = sub.strip()
+        elif isinstance(sub, dict):
+            sub_str = str(sub.get("mpn") or "").strip()
+        else:
+            continue
         if sub_str:
             sub_key = normalize_mpn_key(sub_str)
             if sub_key:

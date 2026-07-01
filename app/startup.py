@@ -110,6 +110,7 @@ def run_startup_migrations() -> None:
         _create_default_user_if_env_set()
     _backfill_sighting_offer_normalized_mpn()
     _backfill_sighting_vendor_normalized()
+    _backfill_offer_vendor_normalized()
     _backfill_proactive_offer_qty()
     _backfill_ticket_defaults()
     _backfill_material_cards()
@@ -773,6 +774,57 @@ def _backfill_sighting_vendor_normalized() -> None:
                 break
         if total:
             logger.info("Backfilled vendor_name_normalized on {} sightings", total)
+
+
+def _backfill_offer_vendor_normalized() -> None:
+    """Backfill offers.vendor_name_normalized from vendor_name until none remain.
+
+    The vendor detail offers tab filters Offer.vendor_name_normalized == normalized_name
+    (aligned with sightings/leads). Every offer write-path already populates the column,
+    but a legacy row created before that was universal would be NULL and silently hidden
+    by the tab; this idempotent backfill closes that gap.
+    """
+    from .vendor_utils import normalize_vendor_name
+
+    with engine.connect() as conn:
+        # Check column exists first
+        try:
+            conn.execute(sqltext("SELECT vendor_name_normalized FROM offers LIMIT 0"))
+        except (SQLAlchemyError, DBAPIError):
+            conn.rollback()
+            return  # Column not yet created
+
+        total = 0
+        while True:
+            try:
+                rows = conn.execute(
+                    sqltext(
+                        "SELECT id, vendor_name FROM offers "
+                        "WHERE vendor_name_normalized IS NULL AND vendor_name IS NOT NULL "
+                        "LIMIT :lim"
+                    ),
+                    {"lim": _BACKFILL_BATCH_SIZE},
+                ).fetchall()
+                if not rows:
+                    break
+                batch = []
+                for r in rows:
+                    nv = normalize_vendor_name(r[1])
+                    if nv:
+                        batch.append({"nv": nv, "id": r[0]})
+                if batch:
+                    conn.execute(
+                        sqltext("UPDATE offers SET vendor_name_normalized = :nv WHERE id = :id"),
+                        batch,
+                    )
+                    conn.commit()
+                total += len(batch)
+            except Exception as e:
+                logger.warning("Backfill offers.vendor_name_normalized failed: {}", e)
+                conn.rollback()
+                break
+        if total:
+            logger.info("Backfilled vendor_name_normalized on {} offers", total)
 
 
 # ── Denormalized company count triggers ──────────────────────────────

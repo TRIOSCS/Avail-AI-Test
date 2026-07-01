@@ -1332,10 +1332,18 @@ async def add_to_requisition(
     )
 
     if not requirement:
+        # Mirror update_requirement: store the canonical key-form normalized_mpn
+        # (lowercase, separators stripped) so part-history / material-card joins
+        # line up, and resolve the MaterialCard up front.
+        from ..search_service import resolve_material_card
+        from ..utils.normalization import normalize_mpn_key
+
+        card = resolve_material_card(mpn, db)
         requirement = Requirement(
             requisition_id=requisition_id,
             primary_mpn=mpn,
-            normalized_mpn=mpn.strip().upper(),
+            normalized_mpn=normalize_mpn_key(mpn),
+            material_card_id=card.id if card else None,
             target_qty=None,
             sourcing_status=SourcingStatus.OPEN,
         )

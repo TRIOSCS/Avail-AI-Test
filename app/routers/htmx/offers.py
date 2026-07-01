@@ -230,6 +230,8 @@ async def save_parsed_offers(
 
     # Match MPNs to requirements
     reqs = db.query(Requirement).filter(Requirement.requisition_id == req_id).all()
+    from app.services.offer_qualification import apply_qualification
+    from app.utils.normalization import normalize_mpn_key
     from app.vendor_utils import normalize_vendor_name
 
     saved_count = 0
@@ -266,6 +268,9 @@ async def save_parsed_offers(
             vendor_name=card.display_name,
             vendor_name_normalized=card.normalized_name,
             mpn=o["mpn"],
+            # Canonical dedup key (dash-stripped) so the part-centric offers query
+            # matches these AI-parsed offers, mirroring add_offer / create_offer.
+            normalized_mpn=normalize_mpn_key(o["mpn"]),
             manufacturer=o.get("manufacturer"),
             qty_available=o.get("qty_available"),
             unit_price=o.get("unit_price"),
@@ -278,6 +283,7 @@ async def save_parsed_offers(
             entered_by_id=user.id,
             status=OfferStatus.ACTIVE,
         )
+        apply_qualification(offer)  # non-raising: composes note + sets qualification_status
         db.add(offer)
         # Offer hook: the user reviewed and saved this parse ACTIVE — user-initiated
         # proof of availability, release the vendor's matching active records.

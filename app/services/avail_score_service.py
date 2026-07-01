@@ -124,7 +124,9 @@ def compute_buyer_avail_score(db: Session, user_id: int, month: date) -> dict:
 
     # Pre-load offer IDs in quotes and buy plans (same pattern as existing leaderboard)
     quoted_offer_ids = set()
-    for (items,) in db.query(Quote.line_items).filter(Quote.status.in_(["sent", "won", "lost"])).limit(10000).all():
+    # No arbitrary row cap: a global .limit() silently dropped offers past the cap and
+    # undercounted O2/O4 (which drive real payouts). Scan all sent/won/lost quotes.
+    for (items,) in db.query(Quote.line_items).filter(Quote.status.in_(["sent", "won", "lost"])).all():
         for item in items or []:
             oid = item.get("offer_id")
             if oid:
@@ -136,7 +138,6 @@ def compute_buyer_avail_score(db: Session, user_id: int, month: date) -> dict:
         db.query(BuyPlan.status, BuyPlanLine.offer_id)
         .join(BuyPlanLine, BuyPlanLine.buy_plan_id == BuyPlan.id)
         .filter(BuyPlanLine.offer_id.isnot(None))
-        .limit(10000)
         .all()
     ):
         bp_offer_ids.add(offer_id)
@@ -544,8 +545,14 @@ def compute_sales_avail_score(db: Session, user_id: int, month: date) -> dict:
     b5_score = _tier(new_biz, [(8, 10), (6, 8), (4, 6), (2, 4), (1, 2)])
     b5_raw = f"{new_accounts} accts + {new_contacts} contacts + {prospect_companies} prospects"
 
-    # ── B6: Interaction Quality ──
-    # Average quality_score of meaningful activities this month
+    # ── B6: Interaction Quality (displayed diagnostic — NOT scored) ──
+    # Average quality_score of meaningful activities this month. This is a soft,
+    # AI-assessed signal, not real tradable activity, so it is surfaced for context
+    # but deliberately excluded from behavior_total: sales must share the buyers'
+    # documented 0-100 scale (5 behaviors + 5 outcomes). Summing b6 here made sales
+    # 0-110 — easier to clear the absolute QUALIFY gates (60/50/40) that drive real
+    # $500/$250/$100 payouts — and b6 was never persisted, so the breakdown could not
+    # reconcile (b1..b5 ≠ behavior_total).
     avg_quality_raw = (
         db.query(sqlfunc.avg(ActivityLog.quality_score))
         .filter(
@@ -559,7 +566,7 @@ def compute_sales_avail_score(db: Session, user_id: int, month: date) -> dict:
     ) or 0.0
     b6 = _tier(avg_quality_raw, [(80, 10), (60, 8), (40, 6), (20, 4), (1, 2)])
 
-    behavior_total = b1_score + b2_score + b3_score + b4_score + b5_score + b6
+    behavior_total = b1_score + b2_score + b3_score + b4_score + b5_score
 
     # ── O1: Win Rate ──
     won = (
