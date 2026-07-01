@@ -529,8 +529,8 @@ def merge_contact_into_card(
     card: VendorCard,
     emails: list,
     phones: list,
-    website: str = None,
-    source: str = None,
+    website: str | None = None,
+    source: str | None = None,
 ) -> bool:
     """Merge new contact data into vendor card.
 
