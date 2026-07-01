@@ -273,6 +273,7 @@ class VendorResponseStatus(StrEnum):
     PARSED = "parsed"
     REVIEWED = "reviewed"
     REJECTED = "rejected"
+    FLAGGED = "flagged"
 
 
 class UserRole(StrEnum):

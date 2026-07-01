@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 os.environ["TESTING"] = "1"
 
+from app.constants import VendorResponseStatus  # noqa: E402
 from app.models import (  # noqa: E402
     Company,
     CustomerSite,
@@ -758,32 +759,33 @@ class TestUpdateResponseStatus:
     """Covers update_response_status (lines 5515-5550)."""
 
     @pytest.mark.parametrize(
-        ("status", "verify_stored"),
+        "status",
         [
-            ("reviewed", True),
-            ("rejected", True),
-            ("flagged", False),
+            VendorResponseStatus.REVIEWED,
+            VendorResponseStatus.REJECTED,
+            VendorResponseStatus.FLAGGED,
+            VendorResponseStatus.NEW,
         ],
-        ids=["reviewed", "rejected", "flagged"],
+        ids=["reviewed", "rejected", "flagged", "new"],
     )
     def test_update_status_valid(
         self,
         client: TestClient,
         db_session: Session,
         test_user: User,
-        status: str,
-        verify_stored: bool,
+        status: VendorResponseStatus,
     ):
         req = _req(db_session, test_user)
         vr = _vendor_response(db_session, req)
         resp = client.patch(
             f"/v2/partials/requisitions/{req.id}/responses/{vr.id}/status",
-            data={"status": status},
+            data={"status": status.value},
         )
         assert resp.status_code == 200
-        if verify_stored:
-            db_session.refresh(vr)
-            assert vr.status == status
+        db_session.refresh(vr)
+        # Stored value must be in-vocabulary: constructing the enum from it must
+        # not raise (the pre-fix bug stored 'flagged' as an out-of-vocab string).
+        assert VendorResponseStatus(vr.status) == status
 
     def test_update_status_invalid_raises_400(
         self,
