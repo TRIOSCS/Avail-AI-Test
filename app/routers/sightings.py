@@ -32,6 +32,7 @@ from sqlalchemy.orm import Session, joinedload
 from ..config import settings
 from ..constants import (
     CONDITION_SPECIFIC_REASONS,
+    RESTRICTED_ROLES,
     AccessKey,
     ActivityType,
     OfferStatus,
@@ -334,6 +335,12 @@ async def sightings_list(
         .options(joinedload(Requirement.requisition).joinedload(Requisition.creator))
     )
 
+    # Ownership boundary: restricted roles (SALES/TRADER) see only their own requisitions'
+    # parts — mirrors the requisition list (requisitions/core.py). Without this a TRADER
+    # could enumerate every customer's sightings/pricing via this list.
+    if user.role in RESTRICTED_ROLES:
+        query = query.filter(Requisition.created_by == user.id)
+
     if filters.status:
         query = query.filter(Requirement.sourcing_status == filters.status)
     if filters.sales_person:
@@ -555,6 +562,10 @@ async def sightings_detail(
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
         raise HTTPException(status_code=404, detail="Requirement not found")
+
+    # Read-IDOR gate: this panel exposes vendor sightings, pricing, and contacts — restrict
+    # to users who may access the owning requisition (matches the other sightings routes).
+    require_requisition_access(db, requirement.requisition_id, user)
 
     requisition = db.get(Requisition, requirement.requisition_id)
 

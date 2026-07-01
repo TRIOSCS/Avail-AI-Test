@@ -40,7 +40,7 @@ def transition_requirement(
     Returns True if status changed, False if already at target status. Raises ValueError
     for illegal transitions.
     """
-    old_status = requirement.sourcing_status or "open"
+    old_status = requirement.sourcing_status or RequirementSourcingStatus.OPEN
     new_val = new_status.value if isinstance(new_status, RequirementSourcingStatus) else new_status
 
     if old_status == new_val:
@@ -63,7 +63,7 @@ def transition_requirement(
         actor_id = actor.id if actor else None
         log_entry = ActivityLog(
             user_id=actor_id,
-            activity_type="part_status_change",
+            activity_type=ActivityType.PART_STATUS_CHANGE,
             channel="system",
             requisition_id=requirement.requisition_id,
             subject=f"Part {requirement.primary_mpn}: {old_status} → {new_val}",
@@ -90,7 +90,7 @@ def _advance_requirements(
     changed = 0
     requirements = db.query(Requirement).filter(Requirement.id.in_(requirement_ids)).all()
     for req in requirements:
-        if (req.sourcing_status or "open") in from_statuses:
+        if (req.sourcing_status or RequirementSourcingStatus.OPEN) in from_statuses:
             try:
                 if transition_requirement(req, target, db, actor):
                     changed += 1
@@ -104,7 +104,9 @@ def on_rfq_sent(requirement_ids: list[int], db: Session, actor: User | None = No
 
     Returns count of requirements that changed status.
     """
-    return _advance_requirements(requirement_ids, "sourcing", ("open",), db, actor)
+    return _advance_requirements(
+        requirement_ids, RequirementSourcingStatus.SOURCING, (RequirementSourcingStatus.OPEN,), db, actor
+    )
 
 
 def on_offer_created(requirement: Requirement, db: Session, actor: User | None = None) -> bool:
@@ -112,10 +114,10 @@ def on_offer_created(requirement: Requirement, db: Session, actor: User | None =
 
     Only advances if currently in open/sourcing state — doesn't demote from quoted/won.
     """
-    current = requirement.sourcing_status or "open"
-    if current in ("open", "sourcing"):
+    current = requirement.sourcing_status or RequirementSourcingStatus.OPEN
+    if current in (RequirementSourcingStatus.OPEN, RequirementSourcingStatus.SOURCING):
         try:
-            return transition_requirement(requirement, "offered", db, actor)
+            return transition_requirement(requirement, RequirementSourcingStatus.OFFERED, db, actor)
         except ValueError as e:
             logger.debug("Skipping requirement {} transition to offered: {}", requirement.id, e)
             return False
@@ -127,7 +129,13 @@ def on_quote_built(requirement_ids: list[int], db: Session, actor: User | None =
 
     Returns count of requirements that changed status.
     """
-    return _advance_requirements(requirement_ids, "quoted", ("open", "sourcing", "offered"), db, actor)
+    return _advance_requirements(
+        requirement_ids,
+        RequirementSourcingStatus.QUOTED,
+        (RequirementSourcingStatus.OPEN, RequirementSourcingStatus.SOURCING, RequirementSourcingStatus.OFFERED),
+        db,
+        actor,
+    )
 
 
 def claim_requisition(requisition: Requisition, buyer: User, db: Session) -> bool:
