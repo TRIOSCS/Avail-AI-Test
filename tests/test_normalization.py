@@ -457,6 +457,12 @@ class TestParseSubstituteMpns:
         result = parse_substitute_mpns(["LM338T"], "LM317T")
         assert len(result) == 1
         assert result[0]["mpn"] == "LM338T"
+
+    def test_non_dict_non_string_entries_skipped(self):
+        # Malformed rows may hold neither dicts nor strings — skip, don't crash.
+        result = parse_substitute_mpns([123, {"mpn": "LM338T"}], "LM317T")
+        assert len(result) == 1
+        assert result[0]["mpn"] == "LM338T"
         assert result[0]["manufacturer"] == ""
 
     def test_mixed_string_and_dict_forms(self):

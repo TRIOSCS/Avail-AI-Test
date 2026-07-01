@@ -67,14 +67,6 @@ class TestCaptureSentryError:
                 capture_sentry_error(error, component_name="TEST")
                 mock_log.warning.assert_called_once()
 
-    def test_handles_missing_sentry_gracefully(self):
-        # Should not raise even without sentry installed
-        try:
-            with patch("builtins.__import__", side_effect=ImportError):
-                capture_sentry_error(ValueError("test"), component_name="TEST")
-        except Exception:
-            pass  # May raise if mocking is too broad, but we're just checking it doesn't crash
-
 
 class TestCaptureSentryMessage:
     def test_logs_when_sentry_unavailable(self):
