@@ -6,10 +6,9 @@ same underlying data as the canonical /v2/requisitions Sales Hub) was retired af
 maintaining. This module now only 302-redirects the old URLs to the canonical surface so any
 stale bookmark keeps working.
 
-Note: the shared list-filter/pagination schemas it used to own still live in
-``app/schemas/requisitions2.py`` — they are imported by ``requisition_list_service`` (the main
-Sales Hub list), so that module stays (worth renaming out of the requisitions2 namespace in a
-follow-up).
+Note: the shared list-filter/pagination schemas it used to own now live in
+``app/schemas/requisition_list.py`` (renamed out of the requisitions2 namespace) — they are
+imported by ``requisition_list_service`` (the main Sales Hub list).
 
 Called by: app/main.py (router mount).
 """

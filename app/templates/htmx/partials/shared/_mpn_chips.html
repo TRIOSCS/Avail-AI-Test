@@ -70,7 +70,9 @@
                carries NO data-tip-content — x-chip-overflow attaches a
                cloned DocumentFragment to the element's _tipNodes property
                at runtime, which x-truncate-tip consumes on hover.
-  Called-by:   requisitions2/_table_rows.html (via opp_name_cell).
+  Called-by:   NONE — the retired requisitions2 opp_name_cell was its only caller.
+               Now unused (dead); a follow-up should drop this macro together with the
+               mpn_chip_items row data + _build_row_mpn_chips in requisition_list_service.
   Business:    `items` is the list produced by _build_row_mpn_chips in
                requisition_list_service.py. All chips render at equal
                visual weight; primaries-first DOM order guarantees they
