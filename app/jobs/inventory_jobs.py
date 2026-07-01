@@ -302,7 +302,7 @@ async def _download_and_import_stock_list(
         sender_match = match_email_to_entity(vendor_email, db)
         if sender_match and sender_match["type"] == "company":
             is_excess_list = True
-            source_company_id = sender_match["id"]  # noqa: F841
+            source_company_id = sender_match["id"]
             logger.info(f"Excess list detected from company '{sender_match['name']}' ({vendor_email}): {filename}")
 
     # Import into material cards — batch pre-load for performance
