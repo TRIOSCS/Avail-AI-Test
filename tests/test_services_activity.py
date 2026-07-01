@@ -260,6 +260,73 @@ class TestLogEmailActivity:
         assert record.company_id is None
         assert record.vendor_card_id is None
 
+    def test_outbound_synonym_classifies_outbound(self, db_session, test_user):
+        """'outbound' must classify OUTBOUND / email_sent, not be silently mis-bucketed
+        as INBOUND / email_received (regression: direction was matched only against the
+        literal 'sent')."""
+        co = _make_company(db_session)
+        _make_site(db_session, co.id, email="contact@acme.com")
+        db_session.commit()
+
+        record = log_email_activity(
+            test_user.id,
+            "outbound",
+            "contact@acme.com",
+            "RFQ",
+            "msg-out-1",
+            "J",
+            db_session,
+        )
+        assert record is not None
+        assert record.activity_type == "email_sent"
+        assert record.direction == "outbound"
+
+    def test_inbound_synonym_classifies_inbound(self, db_session, test_user):
+        co = _make_company(db_session)
+        _make_site(db_session, co.id, email="vendor@acme.com")
+        db_session.commit()
+
+        record = log_email_activity(
+            test_user.id,
+            "inbound",
+            "vendor@acme.com",
+            "RE: RFQ",
+            "msg-in-1",
+            "V",
+            db_session,
+        )
+        assert record is not None
+        assert record.activity_type == "email_received"
+        assert record.direction == "inbound"
+
+    def test_sent_and_received_still_classify(self, db_session, test_user):
+        co = _make_company(db_session)
+        _make_site(db_session, co.id, email="contact@acme.com")
+        db_session.commit()
+
+        sent = log_email_activity(test_user.id, "sent", "contact@acme.com", "S", "msg-s", "J", db_session)
+        received = log_email_activity(test_user.id, "received", "contact@acme.com", "R", "msg-r", "J", db_session)
+        assert sent is not None and sent.activity_type == "email_sent"
+        assert sent.direction == "outbound"
+        assert received is not None and received.activity_type == "email_received"
+        assert received.direction == "inbound"
+
+    def test_unknown_direction_rejected(self, db_session, test_user):
+        """An unrecognized direction is rejected explicitly, never silently stored as an
+        inbound/received row."""
+        import pytest
+
+        with pytest.raises(ValueError):
+            log_email_activity(
+                test_user.id,
+                "gibberish",
+                "contact@acme.com",
+                "S",
+                "msg-bad",
+                "J",
+                db_session,
+            )
+
 
 # ── Call activity logging ───────────────────────────────────────────
 
