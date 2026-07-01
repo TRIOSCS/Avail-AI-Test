@@ -353,12 +353,6 @@ def score_unified(
             },
         }
 
-    # Fallback (shouldn't happen)
-    logger.warning("score_unified: unknown source_type={}", source_type)
-    return {
-        "score": 0.0,
-        "source_badge": source_type,
-        "confidence_pct": 0,
-        "confidence_color": "red",
-        "components": {},
-    }
+    # Unreachable: the guard above routes every source_type that is not one of
+    # the three special types into the live-API branch, and each special type
+    # returns from its own branch. Kept intentionally empty to make that clear.

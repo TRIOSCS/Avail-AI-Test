@@ -4,6 +4,7 @@ Also seeds tier='key' for accounts already flagged is_strategic (idempotent).
 Run: python -m app.management.backfill_cadence_clocks
 """
 
+from loguru import logger
 from sqlalchemy.orm import Session
 
 from ..models.crm import Company
@@ -33,4 +34,4 @@ def backfill_cadence_clocks() -> int:
 
 
 if __name__ == "__main__":
-    print(f"Backfilled cadence clocks for {backfill_cadence_clocks()} companies")
+    logger.info(f"Backfilled cadence clocks for {backfill_cadence_clocks()} companies")
