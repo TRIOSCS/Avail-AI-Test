@@ -223,6 +223,39 @@ async def list_offers(req_id: int, user: User = Depends(require_user), db: Sessi
     quoted_prices = _preload_last_quoted_prices(db)
 
     # ── Cross-requisition historical offers (via material_card_id FK) ──
+    # First pass: parse each requirement's substitute normalized_mpn keys once and
+    # collect the global key set (avoids re-normalizing in the resolution pass).
+    req_sub_keys: dict[int, list[str]] = {}
+    all_sub_keys: set[str] = set()
+    for r in req.requirements:
+        keys: list[str] = []
+        for sub in r.substitutes or []:
+            sub_str = (sub if isinstance(sub, str) else "").strip()
+            if sub_str:
+                sub_key = normalize_mpn_key(sub_str)
+                if sub_key:
+                    keys.append(sub_key)
+                    all_sub_keys.add(sub_key)
+        req_sub_keys[r.id] = keys
+
+    # Batch-resolve substitute keys → MaterialCard ids in ONE query (PERF-4) instead
+    # of one point lookup per substitute. normalized_mpn is unique+indexed, so this
+    # map reproduces the previous per-substitute
+    # `filter_by(normalized_mpn=key).first()` lookups exactly (at most one id per key).
+    sub_card_ids: dict[str, int] = {}
+    if all_sub_keys:
+        for cid, nmpn in (
+            db.query(MaterialCard.id, MaterialCard.normalized_mpn)
+            .filter(MaterialCard.normalized_mpn.in_(all_sub_keys))
+            # normalized_mpn is only unique among ACTIVE cards (the unique index is
+            # partial: WHERE deleted_at IS NULL). Without this filter a soft-deleted dup
+            # sharing a key could collapse into the dict and shadow the active card —
+            # so resolve only active cards, which also makes "one row per key" true.
+            .filter(MaterialCard.deleted_at.is_(None))
+            .all()
+        ):
+            sub_card_ids[nmpn] = cid
+
     req_card_map: dict[int, set[int]] = {}
     all_card_ids: set[int] = set()
     primary_card_ids: dict[int, int | None] = {}
@@ -233,14 +266,10 @@ async def list_offers(req_id: int, user: User = Depends(require_user), db: Sessi
             primary_card_ids[r.id] = r.material_card_id
         else:
             primary_card_ids[r.id] = None
-        for sub in r.substitutes or []:
-            sub_str = (sub if isinstance(sub, str) else "").strip()
-            if sub_str:
-                sub_key = normalize_mpn_key(sub_str)
-                if sub_key:
-                    sub_card = db.query(MaterialCard.id).filter_by(normalized_mpn=sub_key).first()
-                    if sub_card:  # pragma: no cover
-                        r_card_ids.add(sub_card[0])
+        for sub_key in req_sub_keys.get(r.id, []):
+            sub_card_id = sub_card_ids.get(sub_key)
+            if sub_card_id is not None:
+                r_card_ids.add(sub_card_id)
         req_card_map[r.id] = r_card_ids
         all_card_ids |= r_card_ids
 
