@@ -39,8 +39,10 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
 
 # Install Python deps early — only re-runs when requirements.txt changes
 COPY requirements.txt .
+# NOTE: `|| true` is scoped to the apt cleanup ONLY — a failed pip install must
+# fail the build (it used to cover the whole chain, masking dependency failures).
 RUN pip install --no-cache-dir -r requirements.txt \
-    && apt-get purge -y gcc python3-dev && apt-get autoremove -y || true
+    && { apt-get purge -y gcc python3-dev && apt-get autoremove -y || true; }
 
 # Install Chromium for Playwright/patchright (self-heal site testing)
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
