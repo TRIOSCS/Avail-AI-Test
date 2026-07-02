@@ -31,6 +31,7 @@ Depends on: app.database.SessionLocal, models, excess_service, excess_mirror.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -360,6 +361,18 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Seed the Trading workspace demo data (idempotent).")
     parser.add_argument("--reset", action="store_true", help="Delete the demo data, then exit.")
     args = parser.parse_args(argv)
+
+    # Hard production guard: refuse to seed synthetic demo data unless the operator has
+    # explicitly opted in (same ALLOW_SAMPLE_DATA_SEED flag as the AVSAMPLE seeder). --reset
+    # only deletes tagged demo rows, so it's allowed without the flag. Checked BEFORE opening
+    # a DB session so a refused run never touches whatever database SessionLocal resolves to.
+    if not args.reset and os.getenv("ALLOW_SAMPLE_DATA_SEED", "").strip().lower() not in {"1", "true", "yes", "on"}:
+        print(
+            "REFUSED: resell demo seeding is disabled unless ALLOW_SAMPLE_DATA_SEED=true is set "
+            "(guards against injecting demo data into production). Set it explicitly to seed.",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
 
     from ..database import SessionLocal
 
