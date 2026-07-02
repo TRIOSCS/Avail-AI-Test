@@ -312,6 +312,22 @@ class TestAwardOfferService:
         assert a.status == ExcessLineItemStatus.AWARDED
         assert b.status == ExcessLineItemStatus.AWARDED
 
+    def test_award_with_no_live_lines_rejected_not_fake_won(
+        self, db_session: Session, excess_list: ExcessList, owner: User, broker: User
+    ):
+        """A take_all offer whose only line is withdrawn has NO live lines to award — it
+        must 409 and stay OPEN, not flip to won with zero lines (fake success)."""
+        li = _line(db_session, excess_list, "WITHDRAWN-ONLY")
+        li.status = ExcessLineItemStatus.WITHDRAWN
+        offer = _take_all_offer(db_session, excess_list=excess_list, submitter=broker, buyer=None)
+        db_session.commit()
+
+        with pytest.raises(HTTPException) as exc:
+            excess_service.award_offer(db_session, offer.id, owner)
+        assert exc.value.status_code == 409
+        db_session.refresh(offer)
+        assert offer.status == ExcessOfferStatus.OPEN
+
     def test_award_flips_list_when_all_decided(
         self, db_session: Session, excess_list: ExcessList, owner: User, broker: User
     ):

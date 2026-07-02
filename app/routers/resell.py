@@ -904,7 +904,8 @@ async def resell_submit_offer(
 
 def _toast(resp: Response, message: str) -> Response:
     """Attach the ``showToast`` HX-Trigger so an award/unaward confirms even though the
-    triggering button was swapped out of the DOM (mirrors sightings._toast)."""
+    triggering button was swapped out of the DOM (same pattern as
+    sightings._with_toast)."""
     resp.headers["HX-Trigger"] = json.dumps({"showToast": {"message": message, "type": "success"}})
     return resp
 

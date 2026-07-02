@@ -610,9 +610,9 @@ def _award_scope_items(db: Session, offer: ExcessOffer, excess_list: ExcessList)
     """
     if offer.scope == ExcessOfferScope.TAKE_ALL:
         return [li for li in excess_list.line_items if li.status != ExcessLineItemStatus.WITHDRAWN]
-    ids = {line.excess_line_item_id for line in offer.lines if line.excess_line_item_id is not None}
-    items = (db.get(ExcessLineItem, i) for i in ids)
-    return [it for it in items if it is not None]
+    # per_line: the distinct matched line items its lines point at (via the loaded
+    # relationship — no need to re-fetch each id).
+    return list({line.excess_line_item for line in offer.lines if line.excess_line_item is not None})
 
 
 def _apply_award_list_status(excess_list: ExcessList) -> None:
@@ -658,6 +658,11 @@ def award_offer(db: Session, offer_id: int, owner: User) -> ExcessOffer:
         return offer  # idempotent — a double-award is a no-op, not a second flip
 
     affected = _award_scope_items(db, offer, excess_list)
+    if not affected:
+        # No live lines to award (a take_all on an all-withdrawn/empty list, or a per_line
+        # offer whose lines matched nothing). Flipping the offer to WON here would be a
+        # fake success — the "Offer awarded" toast with zero lines actually awarded.
+        raise HTTPException(409, "This offer has no live lines to award.")
     already = next((it for it in affected if it.status == ExcessLineItemStatus.AWARDED), None)
     if already is not None:
         raise HTTPException(409, f"Line '{already.part_number}' is already awarded — unaward the winner first")
