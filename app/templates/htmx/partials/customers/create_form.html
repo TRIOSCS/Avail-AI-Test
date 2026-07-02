@@ -1,15 +1,22 @@
-{# create_form.html — Create new company form.
-   Receives: users (list[User]).
-   Called by: htmx_views.py company_create_form route.
-   Depends on: HTMX, Tailwind CSS with brand palette, _form_fields.html macros.
+{# create_form.html — Create new company form, loaded into #modal-content via
+   $dispatch('open-modal', {url: '/v2/partials/customers/create-form'}). The base modal
+   renders its own ✕ / backdrop / Escape (base.html).
+   Receives: users (list[User]); crm_industries (Jinja global).
+   Called by: GET /v2/partials/customers/create-form (companies.py), surfaced by the
+     "+ New account" button on the CDM account list (list.html).
+   Success: the new account's detail swaps into #cdm-detail, the modal closes, and the
+     handler's HX-Trigger=cdmListRefresh refreshes the left account list. Errors surface
+     via the global htmx:responseError toast (htmx_app.js) with the modal kept open.
+   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette, _form_fields.html macros.
 #}
-{% from "htmx/partials/customers/_form_fields.html" import owner_select, submit_cancel -%}
-<div class="max-w-2xl mx-auto">
-  <div class="bg-white rounded-lg shadow border border-gray-200 p-6">
-    <h2 class="text-lg font-bold text-gray-900 mb-4">Create Company</h2>
+{% from "htmx/partials/customers/_form_fields.html" import owner_select -%}
+<div class="p-5">
+    <h3 id="modal-title" class="text-lg font-bold text-gray-900 mb-4">Create Company</h3>
 
     <form hx-post="/v2/partials/customers/create"
-          hx-target="#main-content"
+          hx-target="#cdm-detail"
+          hx-swap="innerHTML"
+          hx-on::after-request='if(event.detail.successful) $dispatch("close-modal")'
           data-loading-disable
           class="space-y-4">
 
@@ -155,7 +162,13 @@
                   class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500"></textarea>
       </div>
 
-      {{ submit_cancel("Create Company", "/v2/partials/customers") }}
+      <div class="flex justify-end gap-2 pt-1">
+        <button type="button" @click='$dispatch("close-modal")'
+                class="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800">Cancel</button>
+        <button type="submit"
+                class="px-4 py-1.5 text-sm font-medium text-white bg-brand-500 rounded hover:bg-brand-600">
+          Create account
+        </button>
+      </div>
     </form>
-  </div>
 </div>

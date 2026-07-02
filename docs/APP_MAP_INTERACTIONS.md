@@ -2391,6 +2391,22 @@ CDM left list (`_account_list.html`), regardless of `site_count`, hx-gets the SA
   GET → 405).
 - **Breadcrumb** `Customers › {Account}` (`<nav aria-label="Breadcrumb">`) sits at
   the top of `detail.html` (reused from the retired `site_detail.html`).
+- **Create / edit account (F7 — modal buttons).** The create/edit-account forms are
+  surfaced as modals (they previously had NO UI entry — accounts arrived only via CSV
+  import). The `+ New account` primary button (`list.html`, above the split workspace)
+  `$dispatch('open-modal')` + hx-gets `GET .../create-form` into `#modal-content`;
+  `create_form.html` posts to `POST .../create` targeting `#cdm-detail` (the new account's
+  detail fills the right panel). The `Edit account` kebab item (`detail.html`) hx-gets
+  `GET .../{id}/edit-form`; `edit_form.html` posts to `POST .../{id}/edit` targeting
+  `#company-detail-{id}` with `outerHTML` (the `data-detail-root` div now carries that
+  stable id, so the modal — which lives outside the root and can't use `closest` — re-swaps
+  the detail in place in BOTH the workspace and a deep-linked full page). Both handlers set
+  `HX-Trigger=cdmListRefresh`; a hidden listener in `list.html` reloads `#cdm-list` (honoring
+  live `#cdm-filters`) so a new/renamed account shows immediately (no-ops on deep-link, where
+  no listener exists). Both forms close the modal on success via `hx-on::after-request`; 4xx
+  (missing name 400, duplicate 409, cross-owner 403) surfaces through the global
+  `htmx:responseError` toast with the modal kept open. The shared `submit_cancel` macro
+  (which navigated `#main-content`) was removed; `owner_select` remains.
 - **Contacts is the default + primary right-panel surface.** `contacts_tab.html`
   (the ONLY contact-management surface, full feature set) wraps the
   `contactsView` Alpine.data component (`htmx_app.js`): a people-search + a site
