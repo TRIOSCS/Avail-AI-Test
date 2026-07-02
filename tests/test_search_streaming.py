@@ -584,7 +584,9 @@ def test_add_to_requisition_creates_sightings(client, db_session):
 
     requirement = db_session.query(Requirement).filter_by(requisition_id=req.id, primary_mpn="LM317T").first()
     assert requirement is not None
-    assert requirement.normalized_mpn == "LM317T"
+    # Canonical key form (lowercase, separators stripped) — matches update_requirement
+    # so part-history / material-card joins line up. Was the broken .upper() display form.
+    assert requirement.normalized_mpn == "lm317t"
 
     sighting = db_session.query(Sighting).filter_by(requirement_id=requirement.id).first()
     assert sighting is not None

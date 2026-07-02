@@ -63,12 +63,12 @@ from .htmx.settings import _run_inbox_scan_now
 router = APIRouter(tags=["htmx-views"])
 
 # Nav-id aliases: routes that were demoted into a parent nav item highlight the parent
-# instead. Empty now: the standalone Quotes list redirects to /v2/requisitions and the
-# Reporting surface was retired, so no view needs to borrow another tab's highlight.
-# Quote detail (/v2/quotes/{id}) falls through to "quotes", which matches no nav item —
-# correct, since it has no parent tab to highlight.
-# The global contact lists live under the CRM nav item (twins of Customers/Vendors),
-# so they borrow the "crm" highlight.
+# instead. The standalone Quotes list redirects to /v2/requisitions and the Reporting
+# surface was retired, so neither needs an alias. Quote detail (/v2/quotes/{id}) falls
+# through to "quotes", which matches no nav item — correct, since it has no parent tab to
+# highlight.
+# Current aliases: the global contact lists live under the CRM nav item (twins of
+# Customers/Vendors) so they borrow "crm", and the Approvals surface borrows "buy-plans".
 _NAV_ID_ALIAS: dict[str, str] = {"contacts": "crm", "vendor-contacts": "crm", "approvals": "buy-plans"}
 
 
@@ -1332,10 +1332,18 @@ async def add_to_requisition(
     )
 
     if not requirement:
+        # Mirror update_requirement: store the canonical key-form normalized_mpn
+        # (lowercase, separators stripped) so part-history / material-card joins
+        # line up, and resolve the MaterialCard up front.
+        from ..search_service import resolve_material_card
+        from ..utils.normalization import normalize_mpn_key
+
+        card = resolve_material_card(mpn, db)
         requirement = Requirement(
             requisition_id=requisition_id,
             primary_mpn=mpn,
-            normalized_mpn=mpn.strip().upper(),
+            normalized_mpn=normalize_mpn_key(mpn),
+            material_card_id=card.id if card else None,
             target_qty=None,
             sourcing_status=SourcingStatus.OPEN,
         )

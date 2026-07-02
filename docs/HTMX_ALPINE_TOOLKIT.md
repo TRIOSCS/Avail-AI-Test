@@ -228,7 +228,10 @@ Emits events when order changes so you can save to server.
 **AvailAI uses:**
 ```html
 <!-- Reorder RFQ line items by priority -->
-<div x-data="{ items: {{ rfq_items|tojson }} }"
+<!-- NOTE: single-quoted x-data is load-bearing — tojson output contains double quotes
+     (and tojson escapes ' itself), so a double-quoted attribute would end at the first
+     JSON key and kill the whole component. See CLAUDE.md anti-patterns. -->
+<div x-data='{ items: {{ rfq_items|tojson }} }'
      x-sort="(item, position) => {
        htmx.ajax('PATCH', '/v2/api/rfq/reorder', {
          values: { item_id: item, position: position }

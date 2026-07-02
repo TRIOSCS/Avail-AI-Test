@@ -57,22 +57,46 @@ class TestAdvanceStatusValid:
         db_session.refresh(requirement_open)
         assert requirement_open.sourcing_status == SourcingStatus.OFFERED
 
-
-class TestAdvanceStatusInvalid:
-    """Invalid transitions return 409."""
-
-    def test_open_to_won_rejected(self, client: TestClient, db_session: Session, requirement_open: Requirement):
+    def test_open_to_won_skip_ahead(self, client: TestClient, db_session: Session, requirement_open: Requirement):
+        """Skip-ahead is legal (single source of truth): open → won succeeds."""
         resp = advance_status(client, requirement_open.id, SourcingStatus.WON)
-        assert resp.status_code == 409
-        # Status should remain unchanged
+        assert resp.status_code == 200
         db_session.refresh(requirement_open)
-        assert requirement_open.sourcing_status == SourcingStatus.OPEN
+        assert requirement_open.sourcing_status == SourcingStatus.WON
 
-    def test_archived_is_terminal(self, client: TestClient, db_session: Session, requirement_open: Requirement):
+    def test_archived_reopens_to_open(self, client: TestClient, db_session: Session, requirement_open: Requirement):
+        """A requirement is re-openable: archived → open (un-archive) succeeds."""
         requirement_open.sourcing_status = SourcingStatus.ARCHIVED
         db_session.commit()
 
         resp = advance_status(client, requirement_open.id, SourcingStatus.OPEN)
+        assert resp.status_code == 200
+        db_session.refresh(requirement_open)
+        assert requirement_open.sourcing_status == SourcingStatus.OPEN
+
+
+class TestAdvanceStatusInvalid:
+    """Invalid transitions return 409."""
+
+    def test_won_to_sourcing_rejected(self, client: TestClient, db_session: Session, requirement_open: Requirement):
+        """Won only transitions to lost/archived — won → sourcing is illegal."""
+        requirement_open.sourcing_status = SourcingStatus.WON
+        db_session.commit()
+
+        resp = advance_status(client, requirement_open.id, SourcingStatus.SOURCING)
+        assert resp.status_code == 409
+        # Status should remain unchanged
+        db_session.refresh(requirement_open)
+        assert requirement_open.sourcing_status == SourcingStatus.WON
+
+    def test_archived_only_reopens_to_open(
+        self, client: TestClient, db_session: Session, requirement_open: Requirement
+    ):
+        """Archived only transitions to open — archived → sourcing is illegal."""
+        requirement_open.sourcing_status = SourcingStatus.ARCHIVED
+        db_session.commit()
+
+        resp = advance_status(client, requirement_open.id, SourcingStatus.SOURCING)
         assert resp.status_code == 409
 
 
@@ -98,7 +122,11 @@ class TestAdvanceStatusActivityLog:
     def test_no_activity_log_on_invalid_transition(
         self, client: TestClient, db_session: Session, requirement_open: Requirement
     ):
-        advance_status(client, requirement_open.id, SourcingStatus.WON)
+        # won → sourcing is illegal, so no status-change activity is logged.
+        requirement_open.sourcing_status = SourcingStatus.WON
+        db_session.commit()
+
+        advance_status(client, requirement_open.id, SourcingStatus.SOURCING)
 
         log_count = (
             db_session.query(ActivityLog)

@@ -223,13 +223,14 @@ class TestSourcingStatusTransitions:
     def test_offered_to_quoted_valid(self):
         assert validate_transition("requirement", "offered", "quoted") is True
 
-    def test_open_to_won_invalid(self):
-        """Skipping states should be rejected."""
-        assert validate_transition("requirement", "open", "won", raise_on_invalid=False) is False
+    def test_open_to_won_valid(self):
+        """Skip-ahead is legal: offers/quotes can arrive on a part with no prior
+        sourcing step, so open → won is a valid transition."""
+        assert validate_transition("requirement", "open", "won", raise_on_invalid=False) is True
 
-    def test_archived_is_terminal(self):
-        """No transitions from archived."""
-        assert validate_transition("requirement", "archived", "open", raise_on_invalid=False) is False
+    def test_archived_can_reopen(self):
+        """A requirement is re-openable: archived → open (un-archive) is valid."""
+        assert validate_transition("requirement", "archived", "open", raise_on_invalid=False) is True
 
     def test_noop_same_status_valid(self):
         assert validate_transition("requirement", "open", "open") is True

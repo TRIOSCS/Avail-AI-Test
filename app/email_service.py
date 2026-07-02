@@ -12,7 +12,13 @@ from loguru import logger
 from sqlalchemy import func as sqla_func
 from sqlalchemy.orm import Session
 
-from .constants import ActivityType, PendingBatchStatus, VendorResponseStatus
+from .constants import (
+    ActivityType,
+    ContactStatus,
+    OfferStatus,
+    PendingBatchStatus,
+    VendorResponseStatus,
+)
 from .models import (
     ActivityLog,
     Contact,
@@ -281,7 +287,7 @@ async def send_batch_rfq(
                             parts,
                             tagged_subject,
                             group["body"],
-                            "failed",
+                            ContactStatus.FAILED,
                             err_detail[:500],
                         )
                         for rid, parts in per_req_parts
@@ -318,7 +324,7 @@ async def send_batch_rfq(
                         parts,
                         tagged_subject,
                         group["body"],
-                        "sent",
+                        ContactStatus.SENT,
                         sent_at=send_time,
                     )
                     for rid, parts in per_req_parts
@@ -572,7 +578,9 @@ def log_phone_contact(
     }
 
 
-async def poll_inbox(token: str, db: Session, requisition_id: int = None, scanned_by_user_id: int = None) -> list[dict]:
+async def poll_inbox(
+    token: str, db: Session, requisition_id: int | None = None, scanned_by_user_id: int | None = None
+) -> list[dict]:
     """Check inbox for vendor replies. Smart-matches to outbound RFQs.
 
     Matching priority:
@@ -816,7 +824,7 @@ async def poll_inbox(token: str, db: Session, requisition_id: int = None, scanne
                 graph_conversation_id=conv_id,
                 scanned_by_user_id=scanned_by_user_id,
                 received_at=msg.get("receivedDateTime"),
-                status="matched" if matched_contacts else "new",
+                status="matched" if matched_contacts else VendorResponseStatus.NEW,
                 created_at=datetime.now(timezone.utc),
             )
             db.add(vr)
@@ -844,10 +852,6 @@ async def poll_inbox(token: str, db: Session, requisition_id: int = None, scanne
                 )
             )
 
-            # ── Reply classification + AI parsing (batch or inline) ──
-            if get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY"):
-                pending_parse.append(vr)
-
             # ── Contact status progression ──
             # Every matched contact progresses: a cross-requisition reply must
             # advance the (requisition, vendor) row on EVERY involved requisition.
@@ -855,6 +859,15 @@ async def poll_inbox(token: str, db: Session, requisition_id: int = None, scanne
                 _progress_contact_status(mc, vr, db)
 
             nested.commit()
+
+            # ── Reply classification + AI parsing (batch or inline) ──
+            # Only enqueue for AI parsing AFTER the savepoint commits. If the
+            # savepoint above had failed, the except rolls back vr; enqueuing
+            # earlier would let a vanished vendor_response_id reach AI parsing
+            # (billed) and _auto_create_offers_from_parse, poisoning the final
+            # db.commit() and rolling back the entire scan.
+            if get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY"):
+                pending_parse.append(vr)
 
             results.append(
                 {
@@ -1071,10 +1084,10 @@ def _repair_contact_status_for_ooo_bounce(vr: VendorResponse, db: Session) -> No
             contacts = [anchored]
 
     text = f"{vr.subject or ''} {vr.body or ''}".lower()
-    new_status = "bounced" if any(s in text for s in _BOUNCE_SIGNALS) else "ooo"
+    new_status = ContactStatus.BOUNCED if any(s in text for s in _BOUNCE_SIGNALS) else ContactStatus.OOO
     now = datetime.now(timezone.utc)
     for contact in contacts:
-        if contact.status in ("quoted", "declined"):
+        if contact.status in (ContactStatus.QUOTED, ContactStatus.DECLINED):
             continue  # never regress a terminal state on a late auto-reply
         contact.status = new_status
         contact.status_updated_at = now
@@ -1085,27 +1098,27 @@ def _progress_contact_status(contact: Contact, vr: VendorResponse, db: Session):
     now = datetime.now(timezone.utc)
 
     # Already in a terminal state? Don't regress
-    if contact.status in ("quoted", "declined"):
+    if contact.status in (ContactStatus.QUOTED, ContactStatus.DECLINED):
         return
 
     classification = vr.classification or ""
 
     if classification == "quote_provided":
-        contact.status = "quoted"
+        contact.status = ContactStatus.QUOTED
     elif classification == "no_stock":
-        contact.status = "declined"
+        contact.status = ContactStatus.DECLINED
     elif classification == "ooo_bounce":
-        contact.status = "pending"  # Will need re-follow-up
+        contact.status = ContactStatus.PENDING  # Will need re-follow-up
     elif classification in (
         "clarification_needed",
         "counter_offer",
         "partial_availability",
     ):
-        contact.status = "responded"
+        contact.status = ContactStatus.RESPONDED
     else:
         # Generic response — at least we know they replied
-        if contact.status in ("sent", "opened"):
-            contact.status = "responded"
+        if contact.status in (ContactStatus.SENT, ContactStatus.OPENED):
+            contact.status = ContactStatus.RESPONDED
 
     contact.status_updated_at = now
 
@@ -1276,7 +1289,7 @@ async def _submit_parse_batch(
         batch_id=batch_id,
         batch_type="inbox_parse",
         request_map=request_map,
-        status="processing",
+        status=PendingBatchStatus.PROCESSING,
         submitted_at=datetime.now(timezone.utc),
     )
     db.add(pb)
@@ -1314,7 +1327,7 @@ async def _parse_sequential_fallback(
                 db.rollback()
 
 
-def _apply_parsed_result(vr: VendorResponse, parsed: dict, db: Session = None) -> None:
+def _apply_parsed_result(vr: VendorResponse, parsed: dict, db: Session | None = None) -> None:
     """Apply AI-parsed data to a VendorResponse record.
 
     Pure field assignment \u2014 classifies the response and sets fields on vr.
@@ -1428,7 +1441,7 @@ def _auto_create_offers_from_parse(vr: VendorResponse, parsed: dict, db: Session
                 moq=draft.get("moq"),
                 notes=draft.get("notes"),
                 source="email_parse",
-                status="active" if vr.confidence >= 0.8 else "pending_review",
+                status=OfferStatus.ACTIVE if vr.confidence >= 0.8 else OfferStatus.PENDING_REVIEW,
                 vendor_response_id=vr.id,
                 evidence_tier=tier_for_parsed_offer(vr.confidence),
                 parse_confidence=vr.confidence,

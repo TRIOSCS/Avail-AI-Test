@@ -28,6 +28,7 @@
    po_verify into "verify" (mirrors the spec's Verify-SO+PO collapse). Rows x-show on it. #}
 {% set band_of = {
   'halted': 'risk', 'plan_returned': 'risk', 'flagged': 'risk', 'cut_po_overdue': 'risk',
+  'no_approver': 'risk',
   'plan_approve': 'decide', 'prepay_approve': 'decide',
   'po_verify': 'routine', 'claim': 'routine', 'cut_po': 'routine',
   'receive': 'routine', 'plan_draft': 'routine'
@@ -36,6 +37,7 @@
 {% set label_color_of = {'risk': 'text-rose-600', 'decide': 'text-accent-600', 'routine': 'text-brand-500'} %}
 {% set token_of = {
   'halted': 'halted', 'plan_returned': 'returned', 'flagged': 'flagged', 'cut_po_overdue': 'overdue',
+  'no_approver': 'halted',
   'plan_approve': 'approve', 'prepay_approve': 'approve', 'po_verify': 'verify',
   'claim': 'claim', 'cut_po': 'cut_po', 'receive': 'receive', 'plan_draft': 'draft'
 } %}

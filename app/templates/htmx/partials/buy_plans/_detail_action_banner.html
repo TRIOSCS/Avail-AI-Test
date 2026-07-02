@@ -8,6 +8,25 @@
 #}
   {# ═══ 3. ROLE-AWARE ACTION BANNER ═══ #}
 
+  {# Stalled: no approver is configured for the open gate. Without this the plan sits
+     invisibly (the owner no longer sees a PENDING plan and no approver exists to see it).
+     Informational only — deliberately NOT part of has_action_banner, so the owner can
+     still Cancel/Reset a stuck plan. #}
+  {% if no_approver_reason %}
+  <div class="mb-4 bg-amber-50 border border-amber-300 rounded-lg px-4 py-3 flex items-center gap-3">
+    <svg class="flex-shrink-0 w-5 h-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+    </svg>
+    <span class="text-sm text-amber-800">
+      {% if no_approver_reason == 'purchase_order' %}
+      This deal is over the PO-approval threshold but <strong>no purchase-order approver is configured</strong> (or none can approve this amount), so it can't advance. Ask an admin to grant purchase-order approval rights.
+      {% else %}
+      This plan is awaiting approval but <strong>no buy-plan approver is configured</strong>, so it can't advance. Ask an admin to grant buy-plan approval rights.
+      {% endif %}
+    </span>
+  </div>
+  {% endif %}
+
   {# Buyer: lines awaiting PO assigned to them #}
   {% if show_buyer_banner %}
   <div class="mb-4 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex items-center gap-3">
@@ -25,7 +44,7 @@
   <div class="mb-4 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex items-center justify-between gap-3">
     <div class="flex items-center gap-3">
       <span class="flex-shrink-0 w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center justify-center">!</span>
-      <span class="text-sm text-blue-800">This plan needs your approval. ${{ '{:,.2f}'.format(total_cost) }} total.</span>
+      <span class="text-sm text-blue-800">This plan needs your approval. ${{ '{:,.2f}'.format(total_cost) }} total. <span class="text-blue-600">Approving also signs off the sales order.</span></span>
     </div>
     <div class="flex gap-2 flex-shrink-0">
       <button @click="modalType = 'approve'; showModal = true"

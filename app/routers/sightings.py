@@ -32,6 +32,7 @@ from sqlalchemy.orm import Session, joinedload
 from ..config import settings
 from ..constants import (
     CONDITION_SPECIFIC_REASONS,
+    RESTRICTED_ROLES,
     AccessKey,
     ActivityType,
     OfferStatus,
@@ -334,6 +335,12 @@ async def sightings_list(
         .options(joinedload(Requirement.requisition).joinedload(Requisition.creator))
     )
 
+    # Ownership boundary: restricted roles (SALES/TRADER) see only their own requisitions'
+    # parts — mirrors the requisition list (requisitions/core.py). Without this a TRADER
+    # could enumerate every customer's sightings/pricing via this list.
+    if user.role in RESTRICTED_ROLES:
+        query = query.filter(Requisition.created_by == user.id)
+
     if filters.status:
         query = query.filter(Requirement.sourcing_status == filters.status)
     if filters.sales_person:
@@ -555,6 +562,10 @@ async def sightings_detail(
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
         raise HTTPException(status_code=404, detail="Requirement not found")
+
+    # Read-IDOR gate: this panel exposes vendor sightings, pricing, and contacts — restrict
+    # to users who may access the owning requisition (matches the other sightings routes).
+    require_requisition_access(db, requirement.requisition_id, user)
 
     requisition = db.get(Requisition, requirement.requisition_id)
 
@@ -925,7 +936,12 @@ async def sightings_batch_assign(
     """Batch-assign a buyer to multiple requirements."""
     form = await request.form()
     req_ids_raw = form.get("requirement_ids", "[]")
-    requirement_ids = json.loads(req_ids_raw) if isinstance(req_ids_raw, str) else []
+    try:
+        requirement_ids = json.loads(req_ids_raw) if isinstance(req_ids_raw, str) else []
+        if not isinstance(requirement_ids, list):
+            requirement_ids = []
+    except (json.JSONDecodeError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid requirement_ids format")
     buyer_id_str = form.get("buyer_id", "")
     buyer_id = int(buyer_id_str) if buyer_id_str else None
 
@@ -966,7 +982,12 @@ async def sightings_batch_status(
 
     form = await request.form()
     req_ids_raw = form.get("requirement_ids", "[]")
-    requirement_ids = json.loads(req_ids_raw) if isinstance(req_ids_raw, str) else []
+    try:
+        requirement_ids = json.loads(req_ids_raw) if isinstance(req_ids_raw, str) else []
+        if not isinstance(requirement_ids, list):
+            requirement_ids = []
+    except (json.JSONDecodeError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid requirement_ids format")
     new_status = form.get("status", "")
 
     if len(requirement_ids) > MAX_BATCH_SIZE:
@@ -1025,7 +1046,12 @@ async def sightings_batch_notes(
     """Add a note to multiple requirements."""
     form = await request.form()
     req_ids_raw = form.get("requirement_ids", "[]")
-    requirement_ids = json.loads(req_ids_raw) if isinstance(req_ids_raw, str) else []
+    try:
+        requirement_ids = json.loads(req_ids_raw) if isinstance(req_ids_raw, str) else []
+        if not isinstance(requirement_ids, list):
+            requirement_ids = []
+    except (json.JSONDecodeError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid requirement_ids format")
     notes = form.get("notes", "").strip()
 
     if len(requirement_ids) > MAX_BATCH_SIZE:

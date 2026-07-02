@@ -85,13 +85,15 @@ class TestIcsConfig:
     def test_defaults(self):
         cfg = IcsConfig()
         assert cfg.ICS_MAX_DAILY_SEARCHES == 50
-        assert cfg.ICS_MAX_HOURLY_SEARCHES == 10
         assert cfg.ICS_MIN_DELAY_SECONDS == 150
         assert cfg.ICS_MAX_DELAY_SECONDS == 420
         assert cfg.ICS_TYPICAL_DELAY_SECONDS == 270
         assert cfg.ICS_DEDUP_WINDOW_DAYS == 7
-        assert cfg.ICS_BUSINESS_HOURS_START == 8
-        assert cfg.ICS_BUSINESS_HOURS_END == 18
+        # Dead knobs removed: hourly cap was never enforced and business-hours
+        # window is hardcoded in the scheduler, not read from config.
+        assert not hasattr(cfg, "ICS_MAX_HOURLY_SEARCHES")
+        assert not hasattr(cfg, "ICS_BUSINESS_HOURS_START")
+        assert not hasattr(cfg, "ICS_BUSINESS_HOURS_END")
 
     def test_env_override(self):
         with patch.dict(os.environ, {"ICS_MAX_DAILY_SEARCHES": "30", "ICS_USERNAME": "testuser"}):
@@ -1449,7 +1451,12 @@ class TestWorker:
 
     @pytest.mark.asyncio
     async def test_main_browser_start_failure(self, db_session):
-        """Worker exits gracefully when browser fails to start."""
+        """Worker exits gracefully when browser fails to start AND tears down the
+        session.
+
+        start() can launch Playwright/Chromium before raising; the except handler must
+        stop() the session so the browser subprocess isn't leaked.
+        """
         import app.services.ics_worker.worker as worker_mod
 
         ws = IcsWorkerStatus(id=1, is_running=False)
@@ -1467,6 +1474,9 @@ class TestWorker:
                 with patch(self._SESSION, return_value=mock_session):
                     with patch(self._RECOVER):
                         await worker_mod.main()
+
+            # Leak guard: partial browser state is torn down on start failure.
+            mock_session.stop.assert_awaited()
         finally:
             worker_mod._shutdown_requested = original_shutdown
 
@@ -2501,8 +2511,8 @@ class TestAiGateFull:
 
     @pytest.mark.asyncio
     async def test_process_ai_gate_missing_classification(self, db_session, test_requisition):
-        """process_ai_gate handles when model doesn't return a classification for an
-        MPN."""
+        """An MPN the model omits is failed-open to search, not left 'pending'
+        (poison)."""
         from app.services.ics_worker.ai_gate import clear_classification_cache, process_ai_gate
 
         clear_classification_cache()
@@ -2524,7 +2534,8 @@ class TestAiGateFull:
             await process_ai_gate(db_session)
 
         db_session.refresh(item)
-        assert item.status == "pending"
+        assert item.status == "queued"  # failed open, not left pending
+        assert item.gate_decision == "search"
 
 
 # ═══════════════════════════════════════════════════════════════════════

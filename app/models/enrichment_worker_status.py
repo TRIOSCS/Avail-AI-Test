@@ -17,6 +17,7 @@ Depends on: nothing (standalone table)
 
 from datetime import datetime, timezone
 
+from loguru import logger
 from sqlalchemy import JSON, Boolean, CheckConstraint, Column, Date, Integer, Text
 
 from ..database import UTCDateTime
@@ -59,11 +60,24 @@ def update_enrichment_worker_status(db, **kwargs) -> None:
     Pass any column as a kwarg: is_running=True, enriched_today=5, etc.
     Silently returns if the row does not yet exist (e.g. pre-migration).
     """
+    # Reject unknown kwargs LOUDLY. The old `if hasattr(status, key)` guard silently
+    # dropped any typo'd/non-column kwarg (e.g. a misspelled `enriched_todays=5`), so the
+    # heartbeat committed while the intended write was a no-op — a bug that hides
+    # indefinitely. Validate against the real columns and fail fast.
+    valid_columns = set(EnrichmentWorkerStatus.__table__.columns.keys())
+    unknown = set(kwargs) - valid_columns
+    if unknown:
+        logger.error(
+            "update_enrichment_worker_status: unknown column kwarg(s) {} (valid: {})",
+            sorted(unknown),
+            sorted(valid_columns),
+        )
+        raise AttributeError(f"Unknown EnrichmentWorkerStatus column(s): {sorted(unknown)}")
+
     status = db.get(EnrichmentWorkerStatus, 1)
     if not status:
         return
     for key, value in kwargs.items():
-        if hasattr(status, key):
-            setattr(status, key, value)
+        setattr(status, key, value)
     status.updated_at = datetime.now(timezone.utc)
     db.commit()

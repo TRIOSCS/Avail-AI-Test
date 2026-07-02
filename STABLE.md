@@ -27,15 +27,15 @@ Do not refactor these without explicit approval. Changes here can break startup,
 ## Critical routers (thin entry points; logic in services)
 - `app/routers/auth.py`
 - `app/routers/requisitions/` (core, requirements, attachments)
-- `app/routers/task.py`
-- `app/routers/crm/` (companies, offers, quotes, buy_plans, etc.)
-- `app/routers/rfq.py`
+- `app/routers/crm/` (companies, offers, quotes, enrichment, export, clone)
+- `app/routers/htmx/` + `app/routers/htmx_views.py` (HTMX partial surfaces)
 
-## Frontend (single-page app)
-- `app/templates/index.html`
-- `app/static/app.js`
-- `app/static/crm.js`
-- `app/static/styles.css`
+## Frontend (HTMX + Alpine.js + Jinja2)
+- `app/templates/htmx/base.html` — app shell (script/style includes, toast store, CSRF listener)
+- `app/templates/htmx/` — all server-rendered pages and partials
+- `app/static/htmx_app.js` — HTMX/Alpine bootstrap, stores, global listeners
+- `app/static/styles.css` — design tokens + component classes (Tailwind source)
+- `app/static/dist/` — Vite build output (never edit by hand)
 
 When changing any listed file, run tests and do a quick smoke check before committing.
 
@@ -46,20 +46,4 @@ When changing any listed file, run tests and do a quick smoke check before commi
 
 ## Known tech debt
 
-- **`app/static/htmx_app.js` — `htmx:afterSwap` Alpine.initTree gate uses a hardcoded ID allowlist** (`lead-drawer-content`, `rq2-table`). When future HTMX-swapped regions contain Alpine directives (`x-*`), they must be added manually to this list or their directives won't re-bind after swap. Fragile. Future refactor idea: trigger `initTree` whenever the swap target subtree contains any element with an `x-*` attribute, so new regions get covered automatically. Not urgent — Alpine's own MutationObserver handles most cases, and the allowlist is a belt-and-suspenders fallback. Captured 2026-04-21 during the opportunity-table v2 merge.
-
-## Opportunity Table (/requisitions2)
-
-The `/requisitions2` split-workspace left panel renders the v2 opportunity
-table (status dots, urgency accents, deal-value typography, coverage meter,
-aggregated MPN chip row, truncation tooltips, hover action rail). This is the
-sole rendering — the former opportunity-table-v2 feature flag and the legacy
-5-col fallback have been retired.
-
-**Token set:** `app/static/styles.css` `:root { --opp-* }` variables for
-dot colors, urgency border/text, coverage fill, text primary/secondary/
-tertiary, separator. Component classes: `.opp-status-dot`, `.opp-status-label`,
-`.opp-time--{24h,72h,normal}`, `.opp-deal--tier-{primary-500,primary-400,tertiary}`,
-`.opp-deal--computed`, `.opp-deal--partial`, `.opp-coverage-seg`,
-`.opp-row--urgent-{24h,72h}`, `.opp-col-header`, `.opp-chip-row`,
-`.opp-chip-more`, `.opp-name-cell`, `.opp-action-rail*`, `.truncate-tip`.
+- **`app/static/htmx_app.js` — `htmx:afterSwap` Alpine.initTree gate uses a hardcoded ID allowlist** (`lead-drawer-content`, `rq2-table`). When future HTMX-swapped regions contain Alpine directives (`x-*`), they must be added manually to this list or their directives won't re-bind after swap. Fragile. Future refactor idea: trigger `initTree` whenever the swap target subtree contains any element with an `x-*` attribute, so new regions get covered automatically. Not urgent — Alpine's own MutationObserver handles most cases, and the allowlist is a belt-and-suspenders fallback. Captured 2026-04-21 during the opportunity-table v2 merge. (`rq2-table` is dead since `/requisitions2` was retired in #622 — drop it with the dead-code sweep.)

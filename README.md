@@ -167,9 +167,12 @@ docker compose logs -f app
 ### Updating the code
 ```bash
 cd /root/availai
-git pull
-docker compose up -d --build
+./deploy.sh
 ```
+`deploy.sh` syncs `main`, rebuilds with a fresh `BUILD_COMMIT` build-arg (so templates
+and static assets are never stale), recreates both the app and enrichment-worker
+containers, waits for the health check, and restarts the host worker units.
+Never use bare `docker compose up -d --build` — it ships stale templates.
 
 ### Stopping everything
 ```bash

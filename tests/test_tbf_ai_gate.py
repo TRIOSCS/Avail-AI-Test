@@ -224,7 +224,10 @@ class TestProcessAiGate:
         clear_classification_cache()
 
     @pytest.mark.asyncio
-    async def test_missing_mpn_in_response_leaves_pending(self):
+    async def test_missing_mpn_in_response_fails_open_to_queued(self):
+        # Regression: a genuinely omitted MPN must NOT be left 'pending' — the
+        # pending fetch would re-select the same poison row every cycle and
+        # starve the gate. Fail open to 'queued' instead.
         from app.services.tbf_worker.ai_gate import clear_classification_cache, process_ai_gate
 
         clear_classification_cache()
@@ -238,7 +241,46 @@ class TestProcessAiGate:
         ):
             await process_ai_gate(db)
 
-        assert item.status == "pending"  # left unchanged
+        assert item.status == "queued"
+        assert item.commodity_class == "unknown"
+        assert item.gate_decision == "search"
+        assert "no classification" in item.gate_reason.lower()
+        clear_classification_cache()
+
+    @pytest.mark.asyncio
+    async def test_case_whitespace_shifted_mpn_still_matches(self):
+        # Regression: the model echoes the MPN with different case/whitespace
+        # (or punctuation). Normalized lookup on BOTH sides must still match so
+        # the item is classified, not left 'pending'.
+        from app.services.tbf_worker.ai_gate import clear_classification_cache, process_ai_gate
+
+        clear_classification_cache()
+        shifted = _make_queue_item("LM317T", "lm317t", "TI")
+        shifted.status = "pending"
+        omitted = _make_queue_item("STM32F407", "stm32f407", "ST")
+        omitted.status = "pending"
+        db = _mock_db([shifted, omitted])
+
+        classifications = [
+            # Model echoes the mpn case/whitespace-shifted for the first item…
+            {"mpn": " lm317t ", "search_broker": True, "commodity": "semiconductor", "reason": "LDO"},
+            # …and OMITS the second item entirely.
+        ]
+        with patch(
+            "app.services.tbf_worker.ai_gate.classify_parts_batch",
+            new=AsyncMock(return_value=classifications),
+        ):
+            await process_ai_gate(db)
+
+        # Shifted item matched via normalization → classified, not pending.
+        assert shifted.status == "queued"
+        assert shifted.gate_decision == "search"
+        assert shifted.commodity_class == "semiconductor"
+        # Omitted item failed open → queued, not pending.
+        assert omitted.status == "queued"
+        assert omitted.gate_decision == "search"
+        assert omitted.commodity_class == "unknown"
+        db.commit.assert_called_once()
         clear_classification_cache()
 
 

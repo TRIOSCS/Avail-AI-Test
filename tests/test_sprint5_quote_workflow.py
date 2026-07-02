@@ -59,6 +59,24 @@ class TestQuotePreview:
         assert resp.status_code == 404
 
 
+# ── Reopen button (clarity: closed quotes were un-reopenable from the detail UI) ──────
+
+
+class TestQuoteReopenButton:
+    def test_lost_quote_detail_shows_reopen(self, client: TestClient, db_session: Session, test_quote: Quote):
+        test_quote.status = "lost"
+        db_session.commit()
+        resp = client.get(f"/v2/partials/quotes/{test_quote.id}", headers={"HX-Request": "true"})
+        assert resp.status_code == 200
+        assert "Reopen" in resp.text
+        assert f"/v2/partials/quotes/{test_quote.id}/reopen" in resp.text
+
+    def test_draft_quote_detail_has_no_reopen(self, client: TestClient, draft_quote: Quote):
+        resp = client.get(f"/v2/partials/quotes/{draft_quote.id}", headers={"HX-Request": "true"})
+        assert resp.status_code == 200
+        assert "Reopen" not in resp.text
+
+
 # ── Delete Quote ─────────────────────────────────────────────────────
 
 

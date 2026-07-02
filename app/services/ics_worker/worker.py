@@ -110,6 +110,7 @@ async def main():
     searches_today = 0
     sightings_today = 0
     last_stats_date = None
+    breaker_was_open = False
 
     logger.info("ICS worker starting...")
 
@@ -124,6 +125,10 @@ async def main():
         await session.start()
     except Exception as e:
         logger.error("ICS worker: failed to start browser session: {}", e)
+        # start() may have launched Playwright/Chromium before failing, so tear it down or
+        # the browser subprocess leaks — matches the login-failure path below. stop() is
+        # None-safe on partial state.
+        await session.stop()
         with _db_session() as db:
             update_worker_status(db, is_running=False)
         return
@@ -199,8 +204,22 @@ async def main():
                             circuit_breaker_open=True,
                             circuit_breaker_reason=info["trip_reason"],
                         )
+                    breaker_was_open = True
                     await asyncio.sleep(60 * 60)
                     continue
+
+                # Breaker healthy: clear a previously-open flag on the open->healthy
+                # transition (the breaker auto-resets after cooldown, so without this
+                # the status row would show circuit_breaker_open=True forever).
+                if breaker_was_open:
+                    logger.info("ICS worker: circuit breaker self-healed, resuming searches")
+                    with _db_session() as db:
+                        update_worker_status(
+                            db,
+                            circuit_breaker_open=False,
+                            circuit_breaker_reason=None,
+                        )
+                    breaker_was_open = False
 
                 # Check if time for a break
                 if scheduler.time_for_break():

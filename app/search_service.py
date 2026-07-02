@@ -1394,6 +1394,29 @@ def get_market_source_health(db: Session) -> dict:
     }
 
 
+def _any_pn_obsolete(db: Session, pns: list[str]) -> bool:
+    """True if any of ``pns`` maps to a MaterialCard marked obsolete.
+
+    ``pns`` are display-form MPNs (uppercase, dashes preserved) as produced by
+    ``get_all_pns``, but ``MaterialCard.normalized_mpn`` stores the canonical
+    KEY form (``normalize_mpn_key``: lowercase, non-alphanumerics stripped).
+    Query with the key form — a raw display-form ``filter_by`` never matches.
+    All keys are batched into a single indexed ``.in_()`` query to avoid an N+1.
+    """
+    keys = [k for k in (normalize_mpn_key(pn) for pn in pns) if k]
+    if not keys:
+        return False
+    return (
+        db.query(MaterialCard.id)
+        .filter(
+            MaterialCard.normalized_mpn.in_(keys),
+            MaterialCard.lifecycle_status == "obsolete",
+        )
+        .first()
+        is not None
+    )
+
+
 async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[dict]]:
     """Run all enabled connectors against pns and return (results, source_stats).
 
@@ -1566,12 +1589,7 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
         api_result_count = len(out)
         has_price_below_target = any(r.get("unit_price") is not None and r["unit_price"] > 0 for r in out)
         # Check obsolete status from MaterialCard if available
-        is_obsolete = False
-        for pn in pns:
-            card = db.query(MaterialCard).filter_by(normalized_mpn=pn).first()
-            if card and getattr(card, "lifecycle_status", None) == "obsolete":
-                is_obsolete = True
-                break
+        is_obsolete = _any_pn_obsolete(db, pns)
 
         # Months since last sighting for primary PN.
         # NOTE: Sighting has no `mpn` column — the stored fields are

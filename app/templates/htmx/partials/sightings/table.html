@@ -61,7 +61,7 @@
 
 {# ── Filter Bar ──────────────────────────────────────────────── #}
 <div class="px-3 py-2 border-b border-gray-100 flex items-center gap-2 flex-wrap"
-     x-data="{ sStatus: '{{ status }}', sGroupBy: '{{ group_by }}', sQ: '{{ q }}', sManufacturer: '{{ manufacturer|default("") }}' }">
+     x-data='{ sStatus: {{ status|tojson }}, sGroupBy: {{ group_by|tojson }}, sQ: {{ q|tojson }}, sManufacturer: {{ manufacturer|default("")|tojson }} }'>
   <input aria-label="Search sightings" type="text" name="q" value="{{ q }}"
          placeholder="Search MPN or customer..."
          x-model="sQ"
@@ -222,7 +222,7 @@
               <label class="flex items-center gap-1.5 cursor-pointer select-none">
                 <input type="checkbox" class="rounded border-gray-300"
                        @change="
-                         var ids = [{% for r in group_reqs %}{{ r.id }}{% if not loop.last %},{% endif %}{% endfor %}];
+                         let ids = [{% for r in group_reqs %}{{ r.id }}{% if not loop.last %},{% endif %}{% endfor %}];
                          ids.forEach(function(id){ var has = $store.sightingSelection.has(id); if ($event.target.checked && !has) $store.sightingSelection.toggle(id); else if (!$event.target.checked && has) $store.sightingSelection.toggle(id); });
                        ">
                 <span class="text-xs text-gray-600 font-normal">Select all {{ group_reqs|length }}</span>

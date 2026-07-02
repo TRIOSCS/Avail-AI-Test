@@ -230,6 +230,8 @@ async def save_parsed_offers(
 
     # Match MPNs to requirements
     reqs = db.query(Requirement).filter(Requirement.requisition_id == req_id).all()
+    from app.services.offer_qualification import apply_qualification
+    from app.utils.normalization import normalize_mpn_key
     from app.vendor_utils import normalize_vendor_name
 
     saved_count = 0
@@ -266,6 +268,9 @@ async def save_parsed_offers(
             vendor_name=card.display_name,
             vendor_name_normalized=card.normalized_name,
             mpn=o["mpn"],
+            # Canonical dedup key (dash-stripped) so the part-centric offers query
+            # matches these AI-parsed offers, mirroring add_offer / create_offer.
+            normalized_mpn=normalize_mpn_key(o["mpn"]),
             manufacturer=o.get("manufacturer"),
             qty_available=o.get("qty_available"),
             unit_price=o.get("unit_price"),
@@ -278,6 +283,7 @@ async def save_parsed_offers(
             entered_by_id=user.id,
             status=OfferStatus.ACTIVE,
         )
+        apply_qualification(offer)  # non-raising: composes note + sets qualification_status
         db.add(offer)
         # Offer hook: the user reviewed and saved this parse ACTIVE — user-initiated
         # proof of availability, release the vendor's matching active records.
@@ -1431,9 +1437,16 @@ async def review_response_htmx(
         raise HTTPException(404, "Response not found")
 
     form = await request.form()
-    new_status = form.get("status", "")
-    if new_status not in ("reviewed", "rejected"):
-        raise HTTPException(400, "Status must be 'reviewed' or 'rejected'")
+    status_by_action = {
+        VendorResponseStatus.REVIEWED.value: VendorResponseStatus.REVIEWED,
+        VendorResponseStatus.REJECTED.value: VendorResponseStatus.REJECTED,
+    }
+    new_status = status_by_action.get(form.get("status", ""))
+    if new_status is None:
+        raise HTTPException(
+            400,
+            f"Status must be '{VendorResponseStatus.REVIEWED.value}' or '{VendorResponseStatus.REJECTED.value}'",
+        )
 
     vr.status = new_status
     db.commit()
@@ -1814,10 +1827,21 @@ async def update_response_status(
         raise HTTPException(404, "Response not found")
 
     form = await request.form()
-    new_status = form.get("status", "").strip()
-    valid = {"reviewed", "rejected", "flagged", "new"}
-    if new_status not in valid:
-        raise HTTPException(400, f"Invalid status. Must be one of: {', '.join(valid)}")
+    action = form.get("status", "").strip()
+    # Map accepted action strings to in-vocabulary VendorResponseStatus members so
+    # the persisted status always matches enum-based filters/reports.
+    status_by_action = {
+        VendorResponseStatus.NEW.value: VendorResponseStatus.NEW,
+        VendorResponseStatus.REVIEWED.value: VendorResponseStatus.REVIEWED,
+        VendorResponseStatus.REJECTED.value: VendorResponseStatus.REJECTED,
+        VendorResponseStatus.FLAGGED.value: VendorResponseStatus.FLAGGED,
+    }
+    new_status = status_by_action.get(action)
+    if new_status is None:
+        raise HTTPException(
+            400,
+            f"Invalid status. Must be one of: {', '.join(status_by_action)}",
+        )
 
     vr.status = new_status
     db.commit()

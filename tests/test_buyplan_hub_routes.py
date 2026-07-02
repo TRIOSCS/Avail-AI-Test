@@ -399,3 +399,91 @@ def test_pipeline_archive_next_page_button(client: TestClient, db_session: Sessi
     body = resp.text
     assert "Load older" in body
     assert f"/v2/partials/approvals/pipeline-archive?scope=mine&offset={ARCHIVE_PAGE_SIZE}" in body
+
+
+def test_my_queue_renders_no_approver_row(client: TestClient, db_session, test_user, test_quote, test_requisition):
+    """A stuck PENDING plan (no approver configured) renders as a No-approver row for
+    its owner — verifies the new kind's display maps resolve (no Jinja error)."""
+    _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        req_id=test_requisition.id,
+        status=BuyPlanStatus.PENDING,
+        submitted_by_id=test_user.id,
+    )
+    resp = client.get("/v2/partials/approvals/my-queue")
+    assert resp.status_code == 200
+    assert "No approver" in resp.text
+
+
+def test_detail_renders_no_approver_banner(client: TestClient, db_session, test_user, test_quote, test_requisition):
+    """The plan detail surfaces the no-approver banner when the plan is stalled without
+    an approver — the owner otherwise had no signal."""
+    plan = _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        req_id=test_requisition.id,
+        status=BuyPlanStatus.PENDING,
+        submitted_by_id=test_user.id,
+    )
+    resp = client.get(f"/v2/partials/buy-plans/{plan.id}")
+    assert resp.status_code == 200
+    assert "no buy-plan approver" in resp.text
+
+
+def test_resolve_issue_route_supervisor_ok(
+    client: TestClient, db_session: Session, manager_user, test_quote, test_requisition
+):
+    """A supervisor POSTs resolve-issue → 200 and the line returns to awaiting_po."""
+    plan = _make_plan(db_session, quote_id=test_quote.id, req_id=test_requisition.id, status=BuyPlanStatus.ACTIVE)
+    line = _make_line(db_session, plan_id=plan.id, status=BuyPlanLineStatus.ISSUE, issue_type="price_changed")
+    with _acting_as(manager_user):
+        resp = client.post(f"/v2/partials/buy-plans/{plan.id}/lines/{line.id}/resolve-issue")
+    assert resp.status_code == 200
+    db_session.refresh(line)
+    assert line.status == BuyPlanLineStatus.AWAITING_PO.value
+
+
+def test_resolve_issue_route_non_supervisor_403(
+    client: TestClient, db_session: Session, test_user, test_quote, test_requisition
+):
+    """A plain buyer (the client default) can't resolve a flagged issue → 403; the line
+    is left untouched."""
+    plan = _make_plan(db_session, quote_id=test_quote.id, req_id=test_requisition.id, status=BuyPlanStatus.ACTIVE)
+    line = _make_line(db_session, plan_id=plan.id, status=BuyPlanLineStatus.ISSUE, issue_type="sold_out")
+    resp = client.post(f"/v2/partials/buy-plans/{plan.id}/lines/{line.id}/resolve-issue")
+    assert resp.status_code == 403
+    db_session.refresh(line)
+    assert line.status == BuyPlanLineStatus.ISSUE.value
+
+
+def test_detail_shows_so_signed_chip(
+    client: TestClient, db_session: Session, manager_user, test_quote, test_requisition
+):
+    """An approved (active) plan surfaces a 'SO signed · <approver>' chip so the Phase-D
+    fold (one approval also signs the sales order) is no longer invisible."""
+    plan = _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        req_id=test_requisition.id,
+        status=BuyPlanStatus.ACTIVE,
+        so_status=SOVerificationStatus.APPROVED,
+        approved_by_id=manager_user.id,
+    )
+    resp = client.get(f"/v2/partials/buy-plans/{plan.id}")
+    assert resp.status_code == 200
+    assert "SO signed" in resp.text
+
+
+def test_approval_banner_notes_so_fold(
+    client: TestClient, db_session: Session, manager_user, test_quote, test_requisition
+):
+    """The approval banner tells the approver that approving also signs off the sales
+    order."""
+    manager_user.can_approve_buy_plans = True
+    plan = _make_plan(db_session, quote_id=test_quote.id, req_id=test_requisition.id, status=BuyPlanStatus.PENDING)
+    db_session.commit()
+    with _acting_as(manager_user):
+        resp = client.get(f"/v2/partials/buy-plans/{plan.id}")
+    assert resp.status_code == 200
+    assert "signs off the sales order" in resp.text

@@ -22,7 +22,15 @@ from sqlalchemy import and_, or_
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
 
-from ..constants import BuyPlanStatus, UserRole
+from ..constants import (
+    ActivityType,
+    BuyPlanStatus,
+    ContactStatus,
+    Direction,
+    ProactiveOfferStatus,
+    QuoteStatus,
+    UserRole,
+)
 from ..models import (
     ActivityLog,
     BuyPlan,
@@ -124,7 +132,11 @@ def compute_buyer_avail_score(db: Session, user_id: int, month: date) -> dict:
 
     # Pre-load offer IDs in quotes and buy plans (same pattern as existing leaderboard)
     quoted_offer_ids = set()
-    for (items,) in db.query(Quote.line_items).filter(Quote.status.in_(["sent", "won", "lost"])).limit(10000).all():
+    # No arbitrary row cap: a global .limit() silently dropped offers past the cap and
+    # undercounted O2/O4 (which drive real payouts). Scan all sent/won/lost quotes.
+    for (items,) in (
+        db.query(Quote.line_items).filter(Quote.status.in_([QuoteStatus.SENT, QuoteStatus.WON, QuoteStatus.LOST])).all()
+    ):
         for item in items or []:
             oid = item.get("offer_id")
             if oid:
@@ -136,7 +148,6 @@ def compute_buyer_avail_score(db: Session, user_id: int, month: date) -> dict:
         db.query(BuyPlan.status, BuyPlanLine.offer_id)
         .join(BuyPlanLine, BuyPlanLine.buy_plan_id == BuyPlan.id)
         .filter(BuyPlanLine.offer_id.isnot(None))
-        .limit(10000)
         .all()
     ):
         bp_offer_ids.add(offer_id)
@@ -210,7 +221,10 @@ def compute_buyer_avail_score(db: Session, user_id: int, month: date) -> dict:
     won = (
         db.query(sqlfunc.count(Quote.id))
         .filter(
-            Quote.created_by_id == user_id, Quote.result == "won", Quote.result_at >= start_dt, Quote.result_at < end_dt
+            Quote.created_by_id == user_id,
+            Quote.result == QuoteStatus.WON,
+            Quote.result_at >= start_dt,
+            Quote.result_at < end_dt,
         )
         .scalar()
     ) or 0
@@ -218,7 +232,7 @@ def compute_buyer_avail_score(db: Session, user_id: int, month: date) -> dict:
         db.query(sqlfunc.count(Quote.id))
         .filter(
             Quote.created_by_id == user_id,
-            Quote.result == "lost",
+            Quote.result == QuoteStatus.LOST,
             Quote.result_at >= start_dt,
             Quote.result_at < end_dt,
         )
@@ -379,7 +393,7 @@ def _buyer_b3_vendor_followup(db, req_ids, user_id, start_dt, end_dt):
         .filter(
             Contact.requisition_id.in_(req_ids),
             Contact.user_id == user_id,
-            Contact.status == "sent",
+            Contact.status == ContactStatus.SENT,
             Contact.created_at >= start_dt,
             Contact.created_at <= cutoff_48h,
         )
@@ -447,7 +461,7 @@ def compute_sales_avail_score(db: Session, user_id: int, month: date) -> dict:
     start_dt, end_dt = month_range(month)
     # Calls + emails, direction-agnostic: the prior tuple held both call
     # directions, so call_logged (canonical, any direction) preserves intent.
-    call_and_email_types = ("email_sent", "call_logged")
+    call_and_email_types = (ActivityType.EMAIL_SENT, ActivityType.CALL_LOGGED)
 
     # ── B1: Account Coverage ──
     # % of owned accounts with outbound activity this month
@@ -544,8 +558,14 @@ def compute_sales_avail_score(db: Session, user_id: int, month: date) -> dict:
     b5_score = _tier(new_biz, [(8, 10), (6, 8), (4, 6), (2, 4), (1, 2)])
     b5_raw = f"{new_accounts} accts + {new_contacts} contacts + {prospect_companies} prospects"
 
-    # ── B6: Interaction Quality ──
-    # Average quality_score of meaningful activities this month
+    # ── B6: Interaction Quality (displayed diagnostic — NOT scored) ──
+    # Average quality_score of meaningful activities this month. This is a soft,
+    # AI-assessed signal, not real tradable activity, so it is surfaced for context
+    # but deliberately excluded from behavior_total: sales must share the buyers'
+    # documented 0-100 scale (5 behaviors + 5 outcomes). Summing b6 here made sales
+    # 0-110 — easier to clear the absolute QUALIFY gates (60/50/40) that drive real
+    # $500/$250/$100 payouts — and b6 was never persisted, so the breakdown could not
+    # reconcile (b1..b5 ≠ behavior_total).
     avg_quality_raw = (
         db.query(sqlfunc.avg(ActivityLog.quality_score))
         .filter(
@@ -559,13 +579,16 @@ def compute_sales_avail_score(db: Session, user_id: int, month: date) -> dict:
     ) or 0.0
     b6 = _tier(avg_quality_raw, [(80, 10), (60, 8), (40, 6), (20, 4), (1, 2)])
 
-    behavior_total = b1_score + b2_score + b3_score + b4_score + b5_score + b6
+    behavior_total = b1_score + b2_score + b3_score + b4_score + b5_score
 
     # ── O1: Win Rate ──
     won = (
         db.query(sqlfunc.count(Quote.id))
         .filter(
-            Quote.created_by_id == user_id, Quote.result == "won", Quote.result_at >= start_dt, Quote.result_at < end_dt
+            Quote.created_by_id == user_id,
+            Quote.result == QuoteStatus.WON,
+            Quote.result_at >= start_dt,
+            Quote.result_at < end_dt,
         )
         .scalar()
     ) or 0
@@ -573,7 +596,7 @@ def compute_sales_avail_score(db: Session, user_id: int, month: date) -> dict:
         db.query(sqlfunc.count(Quote.id))
         .filter(
             Quote.created_by_id == user_id,
-            Quote.result == "lost",
+            Quote.result == QuoteStatus.LOST,
             Quote.result_at >= start_dt,
             Quote.result_at < end_dt,
         )
@@ -588,7 +611,10 @@ def compute_sales_avail_score(db: Session, user_id: int, month: date) -> dict:
     revenue = (
         db.query(sqlfunc.coalesce(sqlfunc.sum(Quote.won_revenue), 0))
         .filter(
-            Quote.created_by_id == user_id, Quote.result == "won", Quote.result_at >= start_dt, Quote.result_at < end_dt
+            Quote.created_by_id == user_id,
+            Quote.result == QuoteStatus.WON,
+            Quote.result_at >= start_dt,
+            Quote.result_at < end_dt,
         )
         .scalar()
     ) or 0
@@ -615,7 +641,7 @@ def compute_sales_avail_score(db: Session, user_id: int, month: date) -> dict:
         db.query(sqlfunc.count(ProactiveOffer.id))
         .filter(
             ProactiveOffer.salesperson_id == user_id,
-            ProactiveOffer.status == "converted",
+            ProactiveOffer.status == ProactiveOfferStatus.CONVERTED,
             ProactiveOffer.converted_at >= start_dt,
             ProactiveOffer.converted_at < end_dt,
         )
@@ -635,7 +661,7 @@ def compute_sales_avail_score(db: Session, user_id: int, month: date) -> dict:
             .join(Company, CustomerSite.company_id == Company.id)
             .filter(
                 Quote.created_by_id == user_id,
-                Quote.result == "won",
+                Quote.result == QuoteStatus.WON,
                 Quote.result_at >= start_dt,
                 Quote.result_at < end_dt,
                 Company.is_strategic.is_(True),
@@ -710,7 +736,7 @@ def _sales_b3_quote_followup(db, user_id, start_dt, end_dt):
             Quote.created_by_id == user_id,
             Quote.sent_at >= start_dt,
             Quote.sent_at < end_dt,
-            Quote.status.in_(["sent", "won", "lost"]),
+            Quote.status.in_([QuoteStatus.SENT, QuoteStatus.WON, QuoteStatus.LOST]),
         )
         .all()
     )
@@ -731,10 +757,10 @@ def _sales_b3_quote_followup(db, user_id, start_dt, end_dt):
             .filter(
                 ActivityLog.user_id == user_id,
                 or_(
-                    ActivityLog.activity_type == "email_sent",
+                    ActivityLog.activity_type == ActivityType.EMAIL_SENT,
                     and_(
-                        ActivityLog.activity_type == "call_logged",
-                        ActivityLog.direction == "outbound",
+                        ActivityLog.activity_type == ActivityType.CALL_LOGGED,
+                        ActivityLog.direction == Direction.OUTBOUND,
                     ),
                 ),
                 ActivityLog.created_at > sent_at,

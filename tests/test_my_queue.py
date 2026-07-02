@@ -447,13 +447,16 @@ def test_my_queue_oldest_first_within_tier(db_session, test_user, test_quote, te
 # ── Role gating summary (sales sees only owner-scoped work) ────────────
 
 
-def test_my_queue_sales_sees_only_owned_drafts(db_session, sales_user, test_quote, test_requisition):
+def test_my_queue_sales_sees_only_owned_drafts(db_session, sales_user, manager_user, test_quote, test_requisition):
     """A sales user is not a PO-cutter/approver: they only see their own
     draft/returned/halted.
 
     A PENDING plan they own routes to approvers, not to them; a RESOURCING pool line is
     invisible to non-cutters.
     """
+    # A real buy-plan approver exists, so the owned PENDING plan is normally-pending (routed
+    # to the manager) rather than config-stuck — it must NOT surface to sales as no_approver.
+    _grant(db_session, manager_user, can_approve_buy_plans=True)
     own_draft = _make_plan(
         db_session,
         quote_id=test_quote.id,
@@ -640,3 +643,43 @@ def test_supervise_overview_contract_unchanged(db_session):
         "flagged_count",
     }
     assert result["queue"] == []
+
+
+class TestNoApproverKind:
+    """no_approver — a plan silently stalled because no approver is configured surfaces
+    to its owner (who otherwise has no signal) and to admins (who can fix the
+    config)."""
+
+    def test_surfaces_stuck_pending_plan_to_owner(self, db_session, test_user, test_quote, test_requisition):
+        _make_plan(
+            db_session,
+            quote_id=test_quote.id,
+            requisition_id=test_requisition.id,
+            status=BuyPlanStatus.PENDING,
+            submitted_by_id=test_user.id,
+        )
+        assert "no_approver" in _kinds(my_queue(db_session, test_user))
+
+    def test_absent_when_buy_plan_approver_configured(
+        self, db_session, test_user, manager_user, test_quote, test_requisition
+    ):
+        _grant(db_session, manager_user, can_approve_buy_plans=True)
+        _make_plan(
+            db_session,
+            quote_id=test_quote.id,
+            requisition_id=test_requisition.id,
+            status=BuyPlanStatus.PENDING,
+            submitted_by_id=test_user.id,
+        )
+        assert "no_approver" not in _kinds(my_queue(db_session, test_user))
+
+    def test_over_threshold_active_without_po_approver(self, db_session, test_user, test_quote, test_requisition):
+        _make_plan(
+            db_session,
+            quote_id=test_quote.id,
+            requisition_id=test_requisition.id,
+            status=BuyPlanStatus.ACTIVE,
+            submitted_by_id=test_user.id,
+            total_cost=Decimal("10000"),
+        )
+        assert "no_approver" in _kinds(my_queue(db_session, test_user))

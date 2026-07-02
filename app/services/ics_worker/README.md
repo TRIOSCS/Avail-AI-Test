@@ -45,8 +45,6 @@ ics_worker/
 | `ICS_TYPICAL_DELAY_SECONDS` | 270 | Typical delay (log-normal center) |
 | `ICS_MAX_DELAY_SECONDS` | 420 | Max seconds between searches |
 | `ICS_DEDUP_WINDOW_DAYS` | 7 | Skip re-searching same MPN within N days |
-| `ICS_BUSINESS_HOURS_START` | 8 | Start hour (Eastern time) |
-| `ICS_BUSINESS_HOURS_END` | 18 | End hour (Eastern time) |
 | `ICS_BROWSER_PROFILE_DIR` | `/root/ics_browser_profile` | Persistent cookie storage |
 
 ## Deployment (systemd)

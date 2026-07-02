@@ -51,6 +51,55 @@ def _get_fernet():
     return _fernet_instance
 
 
+_CANARY_KEY = "encryption_canary"
+_CANARY_SENTINEL = "AVAIL-ENC-CANARY-v1"
+
+
+def verify_encryption_canary(db) -> None:
+    """Boot-time self-test: prove the live key can decrypt data encrypted under itself.
+
+    A wrong ENCRYPTION_SALT/SECRET_KEY derives a valid-but-DIFFERENT Fernet key, so every
+    EncryptedText column silently decrypts to None (InvalidToken) — the app's stored
+    credentials (M365 tokens, API keys, password hashes) all read as empty with only a
+    per-field warning, indistinguishable from genuinely-empty data. The per-field decrypt
+    cannot tell "wrong key" from "legit pre-migration plaintext", so detection must live
+    here, once, at startup. First boot under a given key bootstraps the canary; later boots
+    verify it and FAIL LOUD (raise) on mismatch instead of silently emptying every secret.
+
+    Called from app/startup.py after the system_config table exists. No-op-safe if the
+    table is missing (pre-migration) — it just skips.
+    """
+    from sqlalchemy.exc import DatabaseError, SQLAlchemyError
+
+    from ..models.config import SystemConfig
+
+    f = _get_fernet()
+    try:
+        row = db.query(SystemConfig).filter(SystemConfig.key == _CANARY_KEY).first()
+    except (SQLAlchemyError, DatabaseError):
+        db.rollback()
+        return  # table not yet created — nothing to verify against
+    if row is None:
+        token = f.encrypt(_CANARY_SENTINEL.encode()).decode()
+        db.add(SystemConfig(key=_CANARY_KEY, value=token, description="Encryption self-test canary"))
+        db.commit()
+        logger.info("Encryption canary bootstrapped under the current key.")
+        return
+    try:
+        decrypted = f.decrypt(row.value.encode()).decode()
+    except InvalidToken as e:
+        raise RuntimeError(
+            "ENCRYPTION MISCONFIG: the encryption canary failed to decrypt — the live "
+            "ENCRYPTION_SALT/SECRET_KEY does not match the key that encrypted stored data. "
+            "Refusing to boot silently, since every encrypted credential (M365 tokens, API "
+            "keys, password hashes) would otherwise read as empty. Restore the correct "
+            "ENCRYPTION_SALT or run the salt-rotation migration."
+        ) from e
+    if decrypted != _CANARY_SENTINEL:
+        raise RuntimeError(f"ENCRYPTION MISCONFIG: canary decrypted to an unexpected value ({decrypted!r}).")
+    logger.debug("Encryption canary verified.")
+
+
 class EncryptedText(TypeDecorator):
     """Transparently encrypts/decrypts text values stored in the database."""
 

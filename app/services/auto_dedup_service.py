@@ -14,7 +14,8 @@ auto-dedup only merges companies that have NO sites with assigned owners, or
 where both companies share the same owner.
 
 Called by: scheduler.py (job_auto_dedup)
-Depends on: vendor_merge_service, company_merge_service, company_utils, claude_client
+Depends on: vendor_merge_service, company_merge_service, company_utils, claude_client,
+    vendor_utils.fuzzy_score_vendor (shared fuzzy scorer — never inline fuzzy)
 """
 
 import asyncio
@@ -62,10 +63,11 @@ def run_auto_dedup(db: Session) -> dict:
 
 def _dedup_vendors(db: Session) -> int:
     """Find and merge duplicate vendor cards using fuzzy matching."""
+    from ..vendor_utils import fuzzy_score_vendor
     from .vendor_merge_service import merge_vendor_cards
 
     try:
-        from rapidfuzz import fuzz
+        import rapidfuzz  # noqa: F401  # shared helper needs it; skip cleanly if absent
     except ImportError:
         logger.warning("rapidfuzz not installed — skipping vendor auto-dedup")
         return 0
@@ -91,7 +93,7 @@ def _dedup_vendors(db: Session) -> int:
             if b.id in merged_ids:
                 continue
 
-            score = fuzz.token_sort_ratio(a.normalized_name or "", b.normalized_name or "")
+            score = fuzzy_score_vendor(a.normalized_name or "", b.normalized_name or "")
             if score < 92:
                 continue
 
