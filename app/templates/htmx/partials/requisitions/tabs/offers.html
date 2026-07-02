@@ -82,8 +82,11 @@
                 }).then(r => {
                   if (!r.ok) throw new Error('HTTP ' + r.status);
                   return r.text();
-                }).then(html => {
-                  htmx.swap('#main-content', html, {swapStyle: 'innerHTML'});
+                }).then(() => {
+                  // The endpoint returns only a status span; swapping it into
+                  // #main-content wiped the whole requisition page (OQ-03). The
+                  // toast is the confirmation; clear the selection in place.
+                  selectedOffers = [];
                   Alpine.store('toast').message = 'Offers added to quote';
                   Alpine.store('toast').type = 'success';
                   Alpine.store('toast').show = true;
