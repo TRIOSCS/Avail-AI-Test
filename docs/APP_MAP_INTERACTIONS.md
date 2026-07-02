@@ -2470,6 +2470,16 @@ REUSING the helpers above (no new ad-hoc checks):
 Regression coverage: `tests/test_authz_hardening.py` (cross-account 403/404 + legitimate owner/
 manager/admin allowed + per-owner data-isolation asserts for proactive / follow-ups / quote).
 
+**Read-IDOR closure — offers.py GET partials.** Five requisition-scoped GET partial handlers in
+`app/routers/htmx/offers.py` (`parse_email_form`, `paste_offer_form`, `add_offer_form`,
+`rfq_compose`, `rfq_prepare_panel` — the parse-email/paste-offer/add-offer forms and the
+rfq-compose/rfq-prepare panels) resolved the requisition via `get_requisition_or_404` but skipped
+`require_requisition_access`, so a `RESTRICTED_ROLES` (SALES/TRADER) non-owner could read another
+rep's requisition name/customer/MPNs/vendor contacts by crafting a direct GET. Each now calls
+`require_requisition_access(db, req_id, user)` right after the 404 check (404-not-403 so existence
+isn't leaked), matching their mutating siblings in the same file. Regression coverage:
+`tests/test_authz_offers_partials_idor.py`.
+
 **Disposition (Increment 1, migration 118).** Salespeople dispose of accounts +
 contacts via setter routes in `htmx_views.py` (all owner-or-admin where they touch
 ownership/disposition; `is_admin = user.role == UserRole.ADMIN`, mirroring
