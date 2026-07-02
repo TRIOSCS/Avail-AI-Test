@@ -1,0 +1,64 @@
+{# edit_form.html — Edit Terms modal for a Quote, loaded into #modal-content via
+   $dispatch('open-modal', {url: '/v2/partials/quotes/{id}/edit-form'}). The base modal
+   renders ✕ / backdrop / Escape.
+   Receives: quote (Quote), valid_until_date (date).
+   On success: swaps the refreshed quote detail into #main-content and closes the modal.
+   On error the route returns HTTPException(400) → global toast, no swap, modal stays open.
+   "Valid Until" is a date the route converts to validity_days (the Quote model has no
+   valid_until column), counted from the send date if sent, else today.
+   Called by: GET /v2/partials/quotes/{quote_id}/edit-form
+#}
+<div class='p-5'>
+  <h3 id="modal-title" class='text-sm font-semibold text-gray-900 mb-4'>Edit Terms</h3>
+
+  {# Lazy-load recent payment/shipping terms as <datalist> options once the modal opens
+     (fresh DOM each open, so hx-trigger="load" fires exactly once). Explicit
+     hx-target="this" so it swaps ITSELF, never the page. #}
+  <div hx-get="/v2/partials/quotes/recent-terms"
+       hx-trigger="load"
+       hx-target="this"
+       hx-swap="outerHTML"></div>
+
+  <form hx-post='/v2/partials/quotes/{{ quote.id }}/edit'
+        hx-target='#main-content'
+        hx-on::after-request='if(event.detail.successful) $dispatch("close-modal")'
+        data-loading-disable
+        class='space-y-3'>
+
+    <div class='grid grid-cols-2 gap-2'>
+      <div>
+        <label class='block text-xs font-medium text-gray-700 mb-1'>Payment Terms</label>
+        <input type='text' name='payment_terms' list='payment-terms' maxlength='100'
+               value='{{ quote.payment_terms or "" }}' placeholder='e.g. Net 30'
+               class='w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500'>
+      </div>
+      <div>
+        <label class='block text-xs font-medium text-gray-700 mb-1'>Shipping Terms</label>
+        <input type='text' name='shipping_terms' list='shipping-terms' maxlength='100'
+               value='{{ quote.shipping_terms or "" }}' placeholder='e.g. FOB Origin'
+               class='w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500'>
+      </div>
+    </div>
+
+    <div>
+      <label class='block text-xs font-medium text-gray-700 mb-1'>Valid Until <span class="text-rose-500">*</span></label>
+      <input type='date' name='valid_until' required
+             value='{{ valid_until_date.isoformat() }}' min='{{ min_valid_until.isoformat() }}'
+             class='w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500'>
+      <p class='mt-1 text-xs text-gray-400'>
+        How long the quote stays valid. Counted from the send date once sent, or from today while it's a draft.
+      </p>
+    </div>
+
+    <div>
+      <label class='block text-xs font-medium text-gray-700 mb-1'>Internal Notes</label>
+      <textarea name='notes' rows='3'
+                class='w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500'>{{ quote.notes or "" }}</textarea>
+    </div>
+
+    <div class='flex justify-end gap-2 pt-1'>
+      <button type='button' @click='$dispatch("close-modal")' class='btn btn-ghost btn-md'>Cancel</button>
+      <button type='submit' class='btn btn-primary btn-md'>Save Changes</button>
+    </div>
+  </form>
+</div>

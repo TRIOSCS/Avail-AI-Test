@@ -181,6 +181,23 @@ def test_buyer_sees_all_quotes(db_session, test_user, test_customer_site):
     assert resp.status_code == 200, resp.text
 
 
+def test_sales_cannot_reach_other_users_edit_form(db_session, test_customer_site):
+    """SALES user A gets 404 opening the Edit Terms modal for SALES user B's quote; B
+    can open their own (positive control)."""
+    user_a = _make_sales_user(db_session, "idor-ef-a@trioscs.com", "azure-idor-ef-a")
+    user_b = _make_sales_user(db_session, "idor-ef-b@trioscs.com", "azure-idor-ef-b")
+    _req_a, _quote_a = _make_req_with_quote(db_session, user_a, test_customer_site, "EFA")
+    _req_b, quote_b = _make_req_with_quote(db_session, user_b, test_customer_site, "EFB")
+
+    with _client_as(db_session, user_a) as c:
+        resp = c.get(f"/v2/partials/quotes/{quote_b.id}/edit-form")
+        assert resp.status_code == 404, resp.text
+
+    with _client_as(db_session, user_b) as c:
+        resp_own = c.get(f"/v2/partials/quotes/{quote_b.id}/edit-form")
+        assert resp_own.status_code == 200, resp_own.text
+
+
 # ---------------------------------------------------------------------------
 # QuoteLine-level IDOR tests (update, delete, apply-markup)
 # ---------------------------------------------------------------------------

@@ -29,6 +29,12 @@
           <p class="text-gray-900">{{ quote.shipping_terms }}</p>
         </div>
         {% endif %}
+        {% if valid_until_date %}
+        <div>
+          <p class="text-xs text-gray-600">Valid Until</p>
+          <p class="text-gray-900">{{ valid_until_date.strftime('%B %d, %Y') }}</p>
+        </div>
+        {% endif %}
         {% if quote.subtotal %}
         <div>
           <p class="text-xs text-gray-600">Subtotal</p>
