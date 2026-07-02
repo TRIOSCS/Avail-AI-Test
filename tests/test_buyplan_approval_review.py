@@ -338,3 +338,91 @@ def test_rejected_draft_blocker_distinguishes_from_fresh(db_session: Session, te
 
     assert _compute_blocker(fresh) == "ready to submit"
     assert _compute_blocker(rejected) == "rejected — resubmit"
+
+
+# ── BP-1: modal confirm buttons fire via htmx.ajax (not dead static hx-post) ──
+#
+# The five buy-plan action modals (submit / approve / reject / halt / cancel) each render
+# their confirm button INSIDE an Alpine `<template x-if="modalType === '...'">`. htmx never
+# processes template-fragment content (and Alpine's x-if clone is never handed to
+# htmx.process), so a static `hx-post` on those buttons fires ZERO requests — a DRAFT could
+# never be Submitted and a pending plan never Approved/Rejected. The fix issues the request
+# imperatively via `htmx.ajax(...)` in @click (evaluated at click time), mirroring the
+# proven-live Issue modal. These tests pin that the imperative pattern renders with the
+# EXACT endpoint + posted fields for each modal, and that the dead static form is gone.
+
+
+def _promote(db: Session, user: User, role: str) -> None:
+    user.role = role
+    db.add(user)
+    db.flush()
+
+
+def test_submit_modal_confirm_uses_htmx_ajax(
+    client: TestClient, db_session: Session, test_user, sales_user, test_requisition
+):
+    """Submit modal (always rendered): imperative POST to /submit carrying all three
+    fields + the required #main-content indicator; no dead static hx-post."""
+    plan = _make_pending_plan(db_session, test_requisition.id, sales_user, status=BuyPlanStatus.DRAFT.value)
+    db_session.commit()
+
+    body = client.get(f"/v2/partials/buy-plans/{plan.id}").text
+    assert f"htmx.ajax('POST', '/v2/partials/buy-plans/{plan.id}/submit'" in body
+    assert "sales_order_number: so" in body
+    assert "customer_po_number: cpo" in body
+    assert "salesperson_notes: notes" in body
+    assert "indicator: '#main-content'" in body
+    # The dead static form the fix replaced must be gone.
+    assert f'hx-post="/v2/partials/buy-plans/{plan.id}/submit"' not in body
+
+
+def test_cancel_modal_confirm_uses_htmx_ajax(
+    client: TestClient, db_session: Session, test_user, sales_user, test_requisition
+):
+    """Cancel modal (rendered for non-terminal plans): imperative POST to /cancel with
+    the reason field; no dead static hx-post."""
+    plan = _make_pending_plan(db_session, test_requisition.id, sales_user, status=BuyPlanStatus.DRAFT.value)
+    db_session.commit()
+
+    body = client.get(f"/v2/partials/buy-plans/{plan.id}").text
+    assert f"htmx.ajax('POST', '/v2/partials/buy-plans/{plan.id}/cancel'" in body
+    assert "values: {reason: reason}" in body
+    assert f'hx-post="/v2/partials/buy-plans/{plan.id}/cancel"' not in body
+
+
+def test_approve_reject_modals_confirm_use_htmx_ajax(
+    client: TestClient, db_session: Session, test_user, sales_user, test_requisition
+):
+    """Approve + Reject modals (gated to approvers): both fire imperative POSTs to
+    /approve with the correct action discriminator; Reject is the ONLY reject path in
+    the app, so a dead button here would strand every pending plan.
+
+    No static hx-post remains.
+    """
+    plan = _make_pending_plan(db_session, test_requisition.id, sales_user)
+    _grant(db_session, test_user)
+    db_session.commit()
+
+    body = client.get(f"/v2/partials/buy-plans/{plan.id}").text
+    assert f"htmx.ajax('POST', '/v2/partials/buy-plans/{plan.id}/approve'" in body
+    assert "action: 'approve', notes: notes" in body
+    assert "action: 'reject', notes: notes" in body
+    assert "indicator: '#main-content'" in body
+    # No static hx-post to the approve endpoint anywhere (only the imperative call string).
+    assert f'hx-post="/v2/partials/buy-plans/{plan.id}/approve"' not in body
+
+
+def test_halt_modal_confirm_uses_htmx_ajax(
+    client: TestClient, db_session: Session, test_user, sales_user, test_requisition
+):
+    """Halt modal (gated to supervisor/manager/admin on an in-flight plan): imperative
+    POST to /halt with the reason field; no dead static hx-post."""
+    plan = _make_pending_plan(db_session, test_requisition.id, sales_user)
+    _promote(db_session, test_user, "manager")  # can_halt = pending + manager
+    db_session.commit()
+
+    body = client.get(f"/v2/partials/buy-plans/{plan.id}").text
+    assert "Halt Buy Plan" in body  # modal actually rendered
+    assert f"htmx.ajax('POST', '/v2/partials/buy-plans/{plan.id}/halt'" in body
+    assert "values: {reason: reason}" in body
+    assert f'hx-post="/v2/partials/buy-plans/{plan.id}/halt"' not in body

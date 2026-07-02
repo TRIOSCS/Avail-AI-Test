@@ -180,11 +180,13 @@
           </div>
           <div class="mt-5 flex justify-end gap-2">
             {{ modal_cancel_btn() }}
-            <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/submit"
-                    hx-target="#main-content"
-                    :hx-vals="JSON.stringify({sales_order_number: so, customer_po_number: cpo, salesperson_notes: notes})"
+            {# Confirm fires imperatively via htmx.ajax so it works INSIDE this
+               <template x-if> clone (htmx never processes template-fragment content, so a
+               static hx-post here would be dead — see the Issue modal for the same pattern).
+               CSRF is injected by the global htmx:configRequest listener. SO# is required. #}
+            <button type="button"
+                    @click.prevent="so.trim() && (htmx.ajax('POST', '/v2/partials/buy-plans/{{ bp.id }}/submit', {target: '#main-content', swap: 'innerHTML', indicator: '#main-content', values: {sales_order_number: so, customer_po_number: cpo, salesperson_notes: notes}}), showModal = false)"
                     data-loading-disable
-                    @click="showModal = false"
                     class="btn btn-primary">
               Submit
             </button>
@@ -242,12 +244,11 @@
           </div>
           <div class="mt-5 flex justify-end gap-2">
             {{ modal_cancel_btn() }}
-            {# Finding #4: raw bg-emerald-600 → .btn btn-primary #}
-            <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/approve"
-                    hx-target="#main-content"
-                    :hx-vals="JSON.stringify({action: 'approve', notes: notes})"
+            {# Finding #4: raw bg-emerald-600 → .btn btn-primary. Imperative htmx.ajax so the
+               confirm works inside this <template x-if> clone (a static hx-post would be dead). #}
+            <button type="button"
+                    @click.prevent="htmx.ajax('POST', '/v2/partials/buy-plans/{{ bp.id }}/approve', {target: '#main-content', swap: 'innerHTML', indicator: '#main-content', values: {action: 'approve', notes: notes}}); showModal = false"
                     data-loading-disable
-                    @click="showModal = false"
                     class="btn btn-primary">
               Approve
             </button>
@@ -267,12 +268,12 @@
           </div>
           <div class="mt-5 flex justify-end gap-2">
             {{ modal_cancel_btn() }}
-            {# Finding #4: raw bg-rose-600 → .btn btn-danger #}
-            <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/approve"
-                    hx-target="#main-content"
-                    :hx-vals="JSON.stringify({action: 'reject', notes: notes})"
+            {# Finding #4: raw bg-rose-600 → .btn btn-danger. Imperative htmx.ajax so the
+               confirm works inside this <template x-if> clone (a static hx-post would be dead).
+               Reason is required: the short-circuit guard keeps the modal open on empty input. #}
+            <button type="button"
+                    @click.prevent="notes.trim() && (htmx.ajax('POST', '/v2/partials/buy-plans/{{ bp.id }}/approve', {target: '#main-content', swap: 'innerHTML', indicator: '#main-content', values: {action: 'reject', notes: notes}}), showModal = false)"
                     data-loading-disable
-                    @click="showModal = false"
                     class="btn btn-danger">
               Reject
             </button>
@@ -297,11 +298,11 @@
           </div>
           <div class="mt-5 flex justify-end gap-2">
             {{ modal_cancel_btn() }}
-            <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/halt"
-                    hx-target="#main-content"
-                    :hx-vals="JSON.stringify({reason: reason})"
+            {# Imperative htmx.ajax so the confirm works inside this <template x-if> clone
+               (a static hx-post would be dead). Reason is optional (service default). #}
+            <button type="button"
+                    @click.prevent="htmx.ajax('POST', '/v2/partials/buy-plans/{{ bp.id }}/halt', {target: '#main-content', swap: 'innerHTML', indicator: '#main-content', values: {reason: reason}}); showModal = false"
                     data-loading-disable
-                    @click="showModal = false"
                     class="btn btn-danger">
               Halt Plan
             </button>
@@ -322,11 +323,11 @@
           </div>
           <div class="mt-5 flex justify-end gap-2">
             {{ modal_cancel_btn() }}
-            <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/cancel"
-                    hx-target="#main-content"
-                    :hx-vals="JSON.stringify({reason: reason})"
+            {# Imperative htmx.ajax so the confirm works inside this <template x-if> clone
+               (a static hx-post would be dead). Reason is optional (service default). #}
+            <button type="button"
+                    @click.prevent="htmx.ajax('POST', '/v2/partials/buy-plans/{{ bp.id }}/cancel', {target: '#main-content', swap: 'innerHTML', indicator: '#main-content', values: {reason: reason}}); showModal = false"
                     data-loading-disable
-                    @click="showModal = false"
                     class="btn btn-danger">
               Cancel Plan
             </button>

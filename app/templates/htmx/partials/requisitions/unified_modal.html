@@ -345,8 +345,12 @@
           </div>
 
           {# ── Substitute detail rows ── #}
-          <template x-if="part.showSubs">
-            <div class="border-t border-gray-200">
+          {# x-show (not <template x-if>) keeps these rows in the DOM alongside the main
+             part row so the sub-manufacturer hx-get autocomplete shares the main row's
+             clone/processing timing; content inside a <template x-if> is never handed to
+             htmx.process. Submission reads the Alpine `part.substitutes` model (hidden
+             inputs below), not these visible rows, so gating on display-only is safe. #}
+          <div x-show="part.showSubs" x-cloak class="border-t border-gray-200">
               <template x-for="(sub, si) in part.substitutes" :key="si">
                 <div class="flex items-center bg-amber-50/60 border-b border-amber-200/50 border-l-[3px] border-l-amber-400">
                   <div class="flex-none w-[40px] px-2 py-1.5 text-center">
@@ -387,8 +391,7 @@
                   </div>
                 </div>
               </template>
-            </div>
-          </template>
+          </div>
         </div>
       </template>
       </div>{# /min-w-max #}
