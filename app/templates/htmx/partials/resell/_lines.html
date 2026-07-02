@@ -13,8 +13,11 @@
 {% set is_draft = el.status == 'draft' %}
 
 {# Reusable best-offer / offer-count chip → opens the per-line comparison modal. #}
-{% macro _line_offer_badge(el, item) %}
-  {% if (item.offer_count or 0) > 0 %}
+{# is_owner passed explicitly — Jinja macros don't see the template-level set.
+   A non-owner broker must not see the competing-offer COUNT either (the badge
+   also 403s on click), so it shows a dash for them. #}
+{% macro _line_offer_badge(el, item, is_owner) %}
+  {% if is_owner and (item.offer_count or 0) > 0 %}
   <button hx-get="/v2/partials/resell/{{ el.id }}/lines/{{ item.id }}/offers"
           hx-target="#modal-content"
           @click="$dispatch('open-modal', { wide: true })"
@@ -78,7 +81,7 @@
         {% if desc %}<p class="text-sm text-gray-500 mt-0.5">{{ desc }}</p>{% endif %}
         {% if item.manufacturer %}<p class="text-xs text-gray-400 mt-0.5">{{ item.manufacturer }}</p>{% endif %}
       </div>
-      {{ _line_offer_badge(el, item) }}
+      {{ _line_offer_badge(el, item, is_owner) }}
     </div>
     <div class="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
       <div><span class="block text-xs text-gray-400 uppercase tracking-wide">Qty</span><span class="font-medium tabular-nums">{{ "{:,}".format(item.quantity) }}</span></div>
@@ -86,7 +89,9 @@
       <div><span class="block text-xs text-gray-400 uppercase tracking-wide">Date code</span><span class="font-medium">{{ item.date_code or '—' }}</span></div>
       <div>
         <span class="block text-xs text-gray-400 uppercase tracking-wide">Best offer</span>
-        {% if item.best_offer_unit_price is not none %}
+        {# Owner-only: a non-owner broker must never see the current best COMPETING
+           price (matches the Offers-tab / compare 403 boundary). #}
+        {% if is_owner and item.best_offer_unit_price is not none %}
         <span class="font-semibold text-emerald-600 tabular-nums">${{ "{:,.4f}".format(item.best_offer_unit_price|float) }}</span>
         {% else %}<span class="text-gray-400">—</span>{% endif %}
       </div>
@@ -116,11 +121,12 @@
           <td class="text-right tabular-nums">{{ "{:,}".format(item.quantity) }}</td>
           <td>{{ item.condition or '—' }}</td>
           <td class="text-right tabular-nums">
-            {% if item.best_offer_unit_price is not none %}
+            {# Owner-only best competing price (see single-card note above). #}
+            {% if is_owner and item.best_offer_unit_price is not none %}
             <span class="font-semibold text-emerald-600">${{ "{:,.4f}".format(item.best_offer_unit_price|float) }}</span>
             {% else %}<span class="text-gray-400">—</span>{% endif %}
           </td>
-          <td class="text-center">{{ _line_offer_badge(el, item) }}</td>
+          <td class="text-center">{{ _line_offer_badge(el, item, is_owner) }}</td>
         </tr>
         {% endfor %}
       </tbody>
