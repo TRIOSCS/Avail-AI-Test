@@ -2326,7 +2326,10 @@ REUSING the helpers above (no new ad-hoc checks):
 - `htmx_views`: `sourcing_search_trigger` (connector spend) + `ai_rephrase_email` gated on
   `require_requisition_access`; `send_batch_follow_up` and `follow_up_badge` scope the stale-
   `RfqContact` query for `RESTRICTED_ROLES` (join `Requisition`, filter `created_by == user.id`)
-  so the badge matches what the batch acts on.
+  so the badge matches what the batch acts on. `send_batch_follow_up` re-renders the shared
+  `follow_ups/list.html` (via `_build_follow_ups_ctx`, the same builder the list partial uses)
+  so the "Send All" swap into `#main-content` leaves the refreshed queue intact instead of a
+  bare success div, and surfaces the count through an `HX-Trigger: showToast`.
 - `crm.quotes.create_quote` (`POST /api/requisitions/{req_id}/quote`) — `offer_ids` filtered to
   `Offer.requisition_id == req_id` (400 on any mismatch) and the `on_quote_built` requirement-
   advance query filtered the same way, so foreign offers can't enter the quote or advance another

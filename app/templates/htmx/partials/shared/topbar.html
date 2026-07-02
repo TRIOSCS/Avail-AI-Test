@@ -30,6 +30,7 @@
              hx-target="#global-search-results"
              @focus="searchOpen = true"
              @blur="setTimeout(() => searchOpen = false, 200)"
+             @keydown.enter.prevent="searchOpen = true; htmx.ajax('POST', '/v2/partials/search/ai', {target: '#global-search-results', indicator: '#global-search-results', values: {q: $el.value}, source: $el})"
              @keydown.escape="$el.blur(); searchOpen = false">
     </div>
     <div id="global-search-results"

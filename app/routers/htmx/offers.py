@@ -12,6 +12,7 @@ Depends on: app.models, app.dependencies, app.database, app.services, ._shared
     re-renders the requisition offers tab).
 """
 
+import json
 import os
 from datetime import datetime, timedelta, timezone
 
@@ -1240,13 +1241,14 @@ async def rfq_send(
     return template_response("htmx/partials/requisitions/rfq_results.html", ctx)
 
 
-@router.get("/v2/partials/follow-ups", response_class=HTMLResponse)
-async def follow_ups_list_partial(
-    request: Request,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Cross-requisition follow-up queue as HTML partial."""
+def _build_follow_ups_ctx(request: Request, user: User, db: Session) -> dict:
+    """Build the cross-requisition follow-up queue template context.
+
+    Shared by the list partial and the batch-send re-render so both surfaces render the
+    SAME queue (same threshold, same per-owner scope). Extracted so send-batch can
+    return the refreshed list instead of a bare success div that replaced the whole
+    page.
+    """
     from ...config import settings
     from ...models.offers import Contact as RfqContact
 
@@ -1268,9 +1270,7 @@ async def follow_ups_list_partial(
         for r in db.query(Requisition.id, Requisition.name).filter(Requisition.id.in_(req_ids)).all():
             req_names[r.id] = r.name
 
-    from datetime import timezone as tz
-
-    now = datetime.now(tz.utc)
+    now = datetime.now(timezone.utc)
     follow_ups = []
     for c in stale:
         ca = c.created_at if c.created_at else now
@@ -1290,6 +1290,17 @@ async def follow_ups_list_partial(
 
     ctx = _base_ctx(request, user, "follow-ups")
     ctx.update({"follow_ups": follow_ups, "total": len(follow_ups)})
+    return ctx
+
+
+@router.get("/v2/partials/follow-ups", response_class=HTMLResponse)
+async def follow_ups_list_partial(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Cross-requisition follow-up queue as HTML partial."""
+    ctx = _build_follow_ups_ctx(request, user, db)
     return template_response("htmx/partials/follow_ups/list.html", ctx)
 
 
@@ -1800,10 +1811,15 @@ async def send_batch_follow_up(
     db.commit()
     logger.info("Batch follow-up: {} contacts marked by {}", sent_count, user.email)
 
+    # Re-render the (now shorter / empty) queue so the surrounding page survives —
+    # the button targets #main-content, and returning a bare success div here used
+    # to wipe the whole list, stranding the user on a one-line message. The success
+    # count is surfaced via an HX-Trigger toast instead (base.html showToast bridge).
     msg = f"{sent_count} contact{'s' if sent_count != 1 else ''} marked as responded."
-    return HTMLResponse(
-        f'<div class="text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">{msg}</div>'
-    )
+    ctx = _build_follow_ups_ctx(request, user, db)
+    resp = template_response("htmx/partials/follow_ups/list.html", ctx)
+    resp.headers["HX-Trigger"] = json.dumps({"showToast": {"message": msg, "type": "success"}})
+    return resp
 
 
 @router.get("/v2/partials/follow-ups/badge", response_class=HTMLResponse)
