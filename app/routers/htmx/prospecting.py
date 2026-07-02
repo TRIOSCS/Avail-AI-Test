@@ -74,6 +74,20 @@ def _prospect_toast(response, message: str, kind: str = "success") -> None:
     response.headers["HX-Trigger"] = json.dumps({"showToast": {"message": message, "type": kind}})
 
 
+def _prospect_error_toast(message: str) -> HTMLResponse:
+    """Honest error feedback for an HTMX action that has no card to re-render.
+
+    HTMX suppresses non-2xx swaps and the JSON HTTPException handler carries no
+    showToast, so raising a 4xx here would leave the modal open with ZERO feedback (a
+    silent no-op). Instead return a 200 that swaps nothing (HX-Reswap: none) but fires
+    an error showToast — mirroring the reassign handler's ValueError path, which also
+    returns 200 + a toast.
+    """
+    resp = HTMLResponse("", headers={"HX-Reswap": "none"})
+    _prospect_toast(resp, message, "error")
+    return resp
+
+
 def _wants_detail(request: Request) -> bool:
     """True when an action came from the detail view (targets #main-content) rather than
     from an in-grid card (targets #prospect-<id>) — so we return the right partial."""
@@ -720,30 +734,31 @@ async def reassign_prospect_htmx(
     card/detail with a showToast trigger.
     """
     if not is_manager_or_admin(user):
-        raise HTTPException(403, "Only a manager or admin can reassign an account")
+        return _prospect_error_toast("Only a manager or admin can reassign an account")
 
     from ...services.prospect_reclamation import reassign_account
 
     prospect = db.get(ProspectAccount, prospect_id)
     if not prospect:
-        raise HTTPException(404, "Prospect not found")
-    if not prospect.company_id:
-        raise HTTPException(400, "Prospect is not linked to a company; nothing to reassign")
+        return _prospect_error_toast("Prospect not found")
 
     error = None
     result = None
-    try:
-        result = reassign_account(prospect.company_id, to_user_id, user, db)
-    except PermissionError as e:
-        raise HTTPException(403, str(e))
-    except LookupError:
-        raise HTTPException(404, "Company not found")
-    except ValueError as e:
-        error = str(e)
+    if not prospect.company_id:
+        error = "Prospect is not linked to a company; nothing to reassign"
+    else:
+        try:
+            result = reassign_account(prospect.company_id, to_user_id, user, db)
+        except PermissionError as e:
+            error = str(e)
+        except LookupError:
+            error = "Company not found"
+        except ValueError as e:
+            error = str(e)
 
     prospect = db.get(ProspectAccount, prospect_id)
     if not prospect:
-        raise HTTPException(404, "Prospect not found")
+        return _prospect_error_toast("Prospect not found")
 
     form = await request.form()
     flt_status = form.get("flt_status", "")

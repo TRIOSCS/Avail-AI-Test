@@ -19,6 +19,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
+import json
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -184,11 +185,40 @@ class TestReassignAction:
         assert p.status == "dismissed"
         assert p.reclaim_blocked_until is None
 
-    def test_reassign_route_forbidden_for_non_manager(self, client, db_session, test_user):
+    def test_reassign_route_forbidden_for_non_manager_shows_error_toast(self, client, db_session, test_user):
+        """A denied reassign must surface an error toast, not a silent suppressed 4xx.
+
+        HTMX drops non-2xx swaps and the JSON error handler carries no showToast, so the
+        old bare ``HTTPException(403)`` left the reassign modal open with ZERO feedback.
+        The honest response is a 200 + error showToast (HX-Reswap:none so nothing swaps),
+        and the reassign must not have happened.
+        """
         co = make_company(db_session, owner_id=test_user.id)
         p = make_swept(db_session, swept_from_owner_id=test_user.id, company=co)
         resp = client.post(
             f"/v2/partials/prospects/{p.id}/reassign",
             data={"to_user_id": test_user.id, "flt_status": ""},
         )
-        assert resp.status_code == 403
+        assert resp.status_code == 200
+        trigger = json.loads(resp.headers["HX-Trigger"])
+        assert trigger["showToast"]["type"] == "error"
+        assert "manager or admin" in trigger["showToast"]["message"]
+        # Card is left in place (no silent removal): the swap is suppressed.
+        assert resp.headers.get("HX-Reswap") == "none"
+        db_session.refresh(co)
+        assert co.account_owner_id == test_user.id  # ownership unchanged
+
+    def test_reassign_route_no_company_shows_error_toast(self, client, db_session, test_user, manager_user):
+        """A swept prospect with no linked company can't be reassigned; a manager must
+        get an honest error toast rather than a silently-suppressed 400 that no-ops the
+        modal."""
+        _act_as(manager_user)
+        p = make_swept(db_session, swept_from_owner_id=test_user.id, company=None)
+        resp = client.post(
+            f"/v2/partials/prospects/{p.id}/reassign",
+            data={"to_user_id": test_user.id, "flt_status": ""},
+        )
+        assert resp.status_code == 200
+        trigger = json.loads(resp.headers["HX-Trigger"])
+        assert trigger["showToast"]["type"] == "error"
+        assert "not linked to a company" in trigger["showToast"]["message"]
