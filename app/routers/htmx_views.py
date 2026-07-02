@@ -275,6 +275,9 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         "quotes",
         "prospecting",
         "trouble-tickets",
+        # "materials" — /v2/materials/{id} deep-links (row push-url, F5 reload, the
+        # Add-part HX-Redirect) must lazy-load the card detail, not the faceted list.
+        "materials",
     )
     if current_view in _DETAIL_VIEWS and f"/{current_view}/" in path:
         parts = path.split(f"/{current_view}/")
