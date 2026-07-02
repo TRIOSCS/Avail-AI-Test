@@ -12,8 +12,18 @@ on:
     # schedule instead — see the `migration-full-cycle` job below (HIGH-DEVOPS-7).
     - cron: "0 7 * * *"
 
+# Cancel superseded runs of the same PR/branch; pushes to main and the nightly
+# schedule get a unique group per run (run_id) so they are never cancelled.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   test:
+    # The nightly `schedule` trigger exists for migration-full-cycle below. The
+    # full test job already ran for every push/PR (and the host runs the suite
+    # nightly too) — don't burn ~12 runner-minutes re-running it every night.
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     # Suite has grown to ~13.8k tests; locally it runs in ~2.5 min, but the
     # 2-vCPU GitHub runner takes longer. 15-min was being exceeded before the
@@ -197,10 +207,15 @@ jobs:
         env:
           TESTING: "1"
           PYTHONPATH: ${{ github.workspace }}
+        # -q not -v: ~21k tests at -v stream megabytes of log the 2-vCPU runner
+        # has to flush (a measurable slice of the ~9m step); failures still show
+        # full detail via --tb=short. --cov-report=term (not term-missing): the
+        # per-line miss dump belongs in coverage.xml, not thousands of log lines.
+        # fail-under=85: actual coverage sits ~94%; the old 50 could never fire.
         run: |
-          pytest tests/ -v --tb=short \
-            --cov=app --cov-report=term-missing --cov-report=xml:coverage.xml \
-            --cov-fail-under=50 \
+          pytest tests/ -q --tb=short \
+            --cov=app --cov-report=term --cov-report=xml:coverage.xml \
+            --cov-fail-under=85 \
             --junitxml=test-results.xml
 
       - name: Redis integration tests
@@ -221,6 +236,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: test-results
+          # Debugging artifacts go stale in days; the default 90-day retention
+          # just accumulates storage.
+          retention-days: 14
           path: |
             test-results.xml
             coverage.xml

@@ -37,11 +37,20 @@ jobs:
           npm ci
 
       - name: Bandit security linter
-        run: bandit -r app/ -c pyproject.toml -f json -o bandit-report.json || true
-
-      - name: Bandit summary
-        if: always()
-        run: bandit -r app/ -c pyproject.toml -ll
+        # Single scan: the JSON artifact and the gating summary come from ONE
+        # bandit run (it used to scan app/ twice back-to-back). -ll gates on
+        # medium+ severity; the JSON report is uploaded below for triage.
+        run: |
+          bandit -r app/ -c pyproject.toml -f json -o bandit-report.json -ll || rc=$?
+          bandit_exit=${rc:-0}
+          python -c "
+          import json
+          d = json.load(open('bandit-report.json'))
+          for r in d.get('results', []):
+              print(f\"{r['issue_severity']}: {r['filename']}:{r['line_number']} {r['test_id']} {r['issue_text']}\")
+          print(f\"{len(d.get('results', []))} finding(s)\")
+          "
+          exit $bandit_exit
 
       - name: pip-audit vulnerability scan
         # --requirement scopes the audit to declared deps (app + dev) and their

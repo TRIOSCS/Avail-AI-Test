@@ -179,7 +179,9 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile
+      # :ro — the internet-facing container must not be able to rewrite its own
+      # routing/security config if compromised.
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
       - static_files:/srv/static:ro
