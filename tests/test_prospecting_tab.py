@@ -20,6 +20,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
+import json
 import uuid
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
@@ -293,14 +294,25 @@ class TestReassignRoute:
         )
         return co, p
 
-    def test_rep_reassign_returns_403(self, client, db_session, test_user):
-        # The default `client` is authenticated as a buyer (test_user) → must be denied.
+    def test_rep_reassign_denied_shows_error_toast(self, client, db_session, test_user):
+        # The default `client` is authenticated as a buyer (test_user) → reassign is denied.
+        # HTMX suppresses non-2xx swaps, so instead of a silent 403 no-op the handler returns
+        # 200 with HX-Reswap:none + an error showToast (honest feedback) and reassigns nothing.
         co, p = self._swept_prospect(db_session, owner_id=test_user.id)
         resp = client.post(
             f"/v2/partials/prospects/{p.id}/reassign",
             data={"to_user_id": str(test_user.id)},
         )
-        assert resp.status_code == 403
+        assert resp.status_code == 200
+        assert resp.headers.get("HX-Reswap") == "none"
+        trigger = json.loads(resp.headers["HX-Trigger"])
+        assert trigger["showToast"]["type"] == "error"
+        assert "manager or admin" in trigger["showToast"]["message"]
+        # The denied action changed nothing — still a swept suggestion, owner not set.
+        db_session.refresh(p)
+        db_session.refresh(co)
+        assert p.status == "suggested"
+        assert co.account_owner_id is None
 
     def test_manager_reassign_sets_owner_and_dismisses(self, db_session, test_user, manager_user):
         from app.database import get_db
