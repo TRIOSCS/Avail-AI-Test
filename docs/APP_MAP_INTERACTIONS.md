@@ -5792,8 +5792,14 @@ four-sub-tab `approvals/_queue.html` lens was already retired before that).
 per-gate projection) but is no longer wired to a human surface; the only human-facing approvals
 queue is now the engine API (`GET /v2/approvals/requests` + the standalone Approvals page).
 Subjects resolve by `subject_type` (buy_plan→plan detail, quality_plan→`/v2/qp/{id}`,
-prepayment→vendor + payment method). Visibility is **org-wide** (every request of that gate),
-but approve/reject act only for an eligible PENDING recipient (`decide()`). The legacy
+prepayment→vendor + payment method). **Visibility is ownership-scoped** (parity with
+requisition-derived data): unrestricted roles (buyer/manager/admin) see every request, but
+`RESTRICTED_ROLES` (SALES/TRADER) see only requests they submitted (`requested_by_id`), own
+(`owner_id`), or must personally decide (a PENDING `ApprovalStepRecipient` row) — enforced on
+BOTH `list_requests` (`_restricted_visibility_clause`) and `get_request`
+(`_can_view_request`; 404-not-403 so existence isn't leaked, mirroring
+`require_requisition_access`). approve/reject still act only for an eligible PENDING recipient
+(`decide()`). The legacy
 `GET /v2/approvals/queue` still **302-redirects** to `/v2/buy-plans?lens=approvals` (which 302s
 on to the hub, where the unknown lens falls back to the role default).
 `ApprovalRequestActionSource` (`AlertKind.APPROVAL_ACTION`) is registered under the
