@@ -1304,6 +1304,84 @@ async def follow_ups_list_partial(
     return template_response("htmx/partials/follow_ups/list.html", ctx)
 
 
+async def _deliver_follow_up(
+    request: Request, db: Session, contact, *, token: str | None, is_testing: bool, body: str = ""
+) -> str:
+    """Send ONE follow-up email to a stale contact. Returns 'sent' | 'no_email' | 'dnc'
+    | 'failed'.
+
+    Marks contact SENT in-session (the CALLER commits) on success. Shared by the single-send
+    and batch paths so both honor the same DNC hard-block, the same Graph send, and honest
+    success/failure — no drift between them.
+
+    token: a pre-fetched Graph token (batch fetches once and reuses); pass None and the helper
+    fetches lazily via require_fresh_token — only after the no-email/DNC checks pass, so a
+    contact with no address never triggers a token fetch.
+    """
+    if not contact.vendor_contact:
+        return "no_email"
+    dnc = (
+        db.query(SiteContact)
+        .filter(
+            sqlfunc.lower(SiteContact.email) == contact.vendor_contact.lower(),
+            SiteContact.do_not_contact.is_(True),
+        )
+        .first()
+    )
+    if dnc:
+        logger.warning(
+            "Follow-up skipped — do-not-contact flag set for vendor '{}' ({})",
+            contact.vendor_name,
+            contact.vendor_contact,
+        )
+        return "dnc"
+    if is_testing:
+        contact.status = ContactStatus.SENT
+        contact.status_updated_at = datetime.now(timezone.utc)
+        return "sent"
+    # Fetch the token OUTSIDE the try so a genuine session-expiry (require_fresh_token →
+    # HTTPException 401) propagates to the global 401→login handler instead of being
+    # mislabeled as a per-contact send failure.
+    if token is None:
+        from ...dependencies import require_fresh_token
+
+        token = await require_fresh_token(request, db)
+    from ...utils.graph_client import GraphClient
+
+    gc = GraphClient(token)
+    follow_up_body = (
+        body
+        or f"Dear {contact.vendor_name},\n\nI'm following up on our previous inquiry. Please let us know if you have availability.\n\nThank you."
+    )
+    payload = {
+        "message": {
+            "subject": f"Follow-up: {contact.subject or 'RFQ'}",
+            "body": {"contentType": "Text", "content": follow_up_body},
+            "toRecipients": [{"emailAddress": {"address": contact.vendor_contact}}],
+        },
+        "saveToSentItems": "true",
+    }
+    try:
+        result = await gc.post_json("/me/sendMail", payload)
+    except Exception as exc:
+        logger.warning("Follow-up email send failed for contact {}: {}", contact.id, exc)
+        return "failed"
+    # GraphClient returns {"error": ...} on a 4xx / exhausted-retry WITHOUT raising — a
+    # discarded return would silently mark a NON-sent email "sent" (the exact lie this
+    # change removes). Check it, matching services/quote_send.py.
+    if isinstance(result, dict) and result.get("error"):
+        logger.warning(
+            "Follow-up send failed for contact {}: Graph {} — {}",
+            contact.id,
+            result.get("error"),
+            result.get("detail"),
+        )
+        return "failed"
+    contact.status = ContactStatus.SENT
+    contact.status_updated_at = datetime.now(timezone.utc)
+    return "sent"
+
+
 @router.post("/v2/partials/follow-ups/{contact_id}/send", response_class=HTMLResponse)
 async def send_follow_up_htmx(
     request: Request,
@@ -1325,88 +1403,27 @@ async def send_follow_up_htmx(
 
     form = await request.form()
     body = (form.get("body") or "").strip()
-
-    # DNC hard-block — never email a do-not-contact vendor (checked in all modes,
-    # before the TESTING gate), mirroring send_reply_htmx / send_batch_rfq.
-    if contact.vendor_contact:
-        dnc = (
-            db.query(SiteContact)
-            .filter(
-                sqlfunc.lower(SiteContact.email) == contact.vendor_contact.lower(),
-                SiteContact.do_not_contact.is_(True),
-            )
-            .first()
-        )
-        if dnc:
-            logger.warning(
-                "Follow-up skipped — do-not-contact flag set for vendor '{}' ({})",
-                contact.vendor_name,
-                contact.vendor_contact,
-            )
-            return HTMLResponse(
-                '<div class="rounded bg-rose-50 border border-rose-200 text-rose-700 text-xs px-2 py-1.5">'
-                "This vendor is on the do-not-contact list — follow-up not sent.</div>"
-            )
-
     is_testing = os.environ.get("TESTING") == "1"
-    email_sent = False
 
-    if not is_testing and contact.vendor_contact:
-        # Try to send real follow-up via Graph API
-        try:
-            from ...dependencies import require_fresh_token
-
-            token = await require_fresh_token(request, db)
-
-            from ...utils.graph_client import GraphClient
-
-            gc = GraphClient(token)
-            follow_up_subject = f"Follow-up: {contact.subject or 'RFQ'}"
-            follow_up_body = (
-                body
-                or f"Dear {contact.vendor_name},\n\nI'm following up on our previous inquiry. Please let us know if you have availability.\n\nThank you."
-            )
-            payload = {
-                "message": {
-                    "subject": follow_up_subject,
-                    "body": {"contentType": "Text", "content": follow_up_body},
-                    "toRecipients": [{"emailAddress": {"address": contact.vendor_contact}}],
-                },
-                "saveToSentItems": "true",
-            }
-            await gc.post_json("/me/sendMail", payload)
-            email_sent = True
-        except Exception as exc:
-            logger.warning("Follow-up email send failed for contact {}: {}", contact_id, exc)
-
-    from datetime import timezone as tz
-
-    if email_sent or is_testing:
-        contact.status = ContactStatus.SENT
-        contact.status_updated_at = datetime.now(tz.utc)
+    result = await _deliver_follow_up(request, db, contact, token=None, is_testing=is_testing, body=body)
+    if result == "sent":
         db.commit()
+    logger.info("Follow-up {} for contact {} (vendor: {}) by {}", result, contact_id, contact.vendor_name, user.email)
 
-    mode = "via Graph API" if email_sent else ("test mode" if is_testing else "FAILED")
-    logger.info(
-        "Follow-up {} for contact {} (vendor: {}, {}) by {}",
-        "sent" if email_sent or is_testing else "FAILED",
-        contact_id,
-        contact.vendor_name,
-        mode,
-        user.email,
-    )
+    if result == "dnc":
+        return HTMLResponse(
+            '<div class="rounded bg-rose-50 border border-rose-200 text-rose-700 text-xs px-2 py-1.5">'
+            "This vendor is on the do-not-contact list — follow-up not sent.</div>"
+        )
 
     ctx = _base_ctx(request, user, "follow-ups")
     ctx["contact_id"] = contact_id
     ctx["vendor_name"] = contact.vendor_name or "Vendor"
-
-    # Honest result card: only claim "sent" when the email actually went out (or in test
-    # mode). A swallowed Graph failure or a contact with no address leaves email_sent False
-    # — surface that instead of the green success card, which used to lie.
-    if not email_sent and not is_testing:
-        ctx["reason"] = "no_email" if not contact.vendor_contact else "send_failed"
+    # Honest result card — only claim "sent" when the email actually went out (or in test
+    # mode). no_email / failed surface an honest failure card instead of a green lie.
+    if result in ("no_email", "failed"):
+        ctx["reason"] = "no_email" if result == "no_email" else "send_failed"
         return template_response("htmx/partials/follow_ups/send_failed.html", ctx)
-
     return template_response("htmx/partials/follow_ups/sent_success.html", ctx)
 
 
@@ -1803,22 +1820,56 @@ async def send_batch_follow_up(
         q = q.join(Requisition, RfqContact.requisition_id == Requisition.id).filter(Requisition.created_by == user.id)
     stale = q.limit(50).all()
 
-    sent_count = 0
-    for contact in stale:
-        contact.status = ContactStatus.RESPONDED
-        contact.status_updated_at = datetime.now(timezone.utc)
-        sent_count += 1
-    db.commit()
-    logger.info("Batch follow-up: {} contacts marked by {}", sent_count, user.email)
+    # Actually SEND each stale contact's follow-up (via the shared _deliver_follow_up path,
+    # same DNC block + Graph send + SENT-marking as the single send), instead of the old
+    # behavior that silently marked everyone RESPONDED without emailing. Fetch the Graph
+    # token ONCE and reuse it across the batch.
+    is_testing = os.environ.get("TESTING") == "1"
+    token = None
+    if stale and not is_testing:
+        from ...dependencies import require_fresh_token
 
-    # Re-render the (now shorter / empty) queue so the surrounding page survives —
-    # the button targets #main-content, and returning a bare success div here used
-    # to wipe the whole list, stranding the user on a one-line message. The success
-    # count is surfaced via an HX-Trigger toast instead (base.html showToast bridge).
-    msg = f"{sent_count} contact{'s' if sent_count != 1 else ''} marked as responded."
+        token = await require_fresh_token(request, db)
+
+    tally = {"sent": 0, "no_email": 0, "dnc": 0, "failed": 0}
+    for contact in stale:
+        result = await _deliver_follow_up(request, db, contact, token=token, is_testing=is_testing)
+        tally[result] += 1
+        if result == "sent":
+            # Commit each send immediately — a Graph send is irreversible, so a later mid-loop
+            # failure/cancellation must not roll back the SENT record and re-send the same
+            # vendor on the next Send-All run.
+            db.commit()
+    # Escalate to ERROR (Sentry-visible) when a batch sends nothing but had failures — a
+    # systemic outage (expired app creds, Graph down) shouldn't be visible only as one
+    # user's toast.
+    log = logger.error if (tally["failed"] and not tally["sent"]) else logger.info
+    log(
+        "Batch follow-up by {user}: sent={sent} no_email={no_email} dnc={dnc} failed={failed}",
+        user=user.email,
+        **tally,
+    )
+
+    # Honest summary — report what ACTUALLY happened, never a blanket "marked responded".
+    skipped = tally["no_email"] + tally["dnc"]
+    parts = [f"{tally['sent']} sent"]
+    if skipped:
+        parts.append(f"{skipped} skipped (no address / do-not-contact)")
+    if tally["failed"]:
+        parts.append(f"{tally['failed']} failed")
+    msg = "Follow-ups: " + ", ".join(parts) + "."
+    if tally["failed"] and not tally["sent"]:
+        toast_type = "error"
+    elif tally["failed"] or skipped:
+        toast_type = "warning"
+    else:
+        toast_type = "success"
+
+    # Re-render the (now shorter / empty) queue so the surrounding page survives; the honest
+    # count is surfaced via an HX-Trigger toast (base.html showToast bridge).
     ctx = _build_follow_ups_ctx(request, user, db)
     resp = template_response("htmx/partials/follow_ups/list.html", ctx)
-    resp.headers["HX-Trigger"] = json.dumps({"showToast": {"message": msg, "type": "success"}})
+    resp.headers["HX-Trigger"] = json.dumps({"showToast": {"message": msg, "type": toast_type}})
     return resp
 
 
