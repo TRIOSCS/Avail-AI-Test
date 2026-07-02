@@ -34,19 +34,11 @@ def _make_mock_anthropic(text: str):
 def test_estimate_qty_passes_bounded_timeout():
     from app.services.sighting_aggregation import _estimate_qty_with_ai
 
-    module, client = _make_mock_anthropic("350")
-    mock_settings = MagicMock()
-    mock_settings.ANTHROPIC_API_KEY = "sk-test-key"
-    mock_claude_client = MagicMock()
-    mock_claude_client.MODELS = {"fast": "claude-haiku-3"}
+    _module, client = _make_mock_anthropic("350")
 
-    with patch.dict(
-        "sys.modules",
-        {
-            "anthropic": module,
-            "app.config": MagicMock(settings=mock_settings),
-            "app.utils.claude_client": mock_claude_client,
-        },
+    with (
+        patch("app.services.credential_service.get_credential_cached", return_value="sk-test-key"),
+        patch("anthropic.Anthropic", return_value=client),
     ):
         result = _estimate_qty_with_ai([100, 200, 300])
 

@@ -553,18 +553,21 @@ class TestEstimateQtyWithAI:
         result = _estimate_qty_with_ai([None, 100])
         assert result == {"qty": 100, "approximate": False}
 
+    # Regression note (2026-07-02): these three tests previously replaced the whole
+    # app.config module with a MagicMock, on which ANY attribute exists — which is
+    # exactly how the production bug (settings.ANTHROPIC_API_KEY, a nonexistent
+    # uppercase field, swallowed by the broad except) shipped green while the AI
+    # branch was dead. They now patch the REAL seams: the credential store the
+    # function actually reads, and anthropic.Anthropic at its source module.
+
     def test_three_values_no_api_key_returns_max(self):
-        # > 2 non-null values but no API key → max fallback
-        # settings is imported lazily inside the function; mock app.config.settings
-        mock_settings = MagicMock()
-        mock_settings.ANTHROPIC_API_KEY = None
-        with patch.dict("sys.modules", {"app.config": MagicMock(settings=mock_settings)}):
+        # > 2 non-null values but no credential → max fallback, flagged approximate
+        with patch("app.services.credential_service.get_credential_cached", return_value=None):
             result = _estimate_qty_with_ai([100, 200, 300])
-        # Falls into the "no API key" branch → max fallback
         assert result == {"qty": 300, "approximate": True}
 
     def test_three_values_ai_success(self):
-        # > 2 values with API key → Claude returns a number
+        # > 2 values with a credential → Claude's estimate is used
         mock_content = MagicMock()
         mock_content.text = "350"
         mock_resp = MagicMock()
@@ -572,42 +575,20 @@ class TestEstimateQtyWithAI:
         mock_client = MagicMock()
         mock_client.messages.create.return_value = mock_resp
 
-        mock_settings = MagicMock()
-        mock_settings.ANTHROPIC_API_KEY = "sk-test-key"
-        mock_anthropic_module = MagicMock()
-        mock_anthropic_module.Anthropic.return_value = mock_client
-        mock_claude_client = MagicMock()
-        mock_claude_client.MODELS = {"fast": "claude-haiku-3"}
-
-        with patch.dict(
-            "sys.modules",
-            {
-                "anthropic": mock_anthropic_module,
-                "app.config": MagicMock(settings=mock_settings),
-                "app.utils.claude_client": mock_claude_client,
-            },
+        with (
+            patch("app.services.credential_service.get_credential_cached", return_value="sk-test-key"),
+            patch("anthropic.Anthropic", return_value=mock_client) as anthropic_cls,
         ):
             result = _estimate_qty_with_ai([100, 200, 300])
 
         assert result == {"qty": 350, "approximate": False}
+        anthropic_cls.assert_called_once_with(api_key="sk-test-key")
 
     def test_three_values_ai_exception_returns_max(self):
-        # AI call throws → max fallback (exception caught)
-        # Any exception inside the try block → fallback to max
-        mock_settings = MagicMock()
-        mock_settings.ANTHROPIC_API_KEY = "sk-test-key"
-        mock_anthropic_module = MagicMock()
-        mock_anthropic_module.Anthropic.side_effect = Exception("API error")
-        mock_claude_client = MagicMock()
-        mock_claude_client.MODELS = {"fast": "claude-haiku-3"}
-
-        with patch.dict(
-            "sys.modules",
-            {
-                "anthropic": mock_anthropic_module,
-                "app.config": MagicMock(settings=mock_settings),
-                "app.utils.claude_client": mock_claude_client,
-            },
+        # AI call throws → max fallback (exception caught inside the try)
+        with (
+            patch("app.services.credential_service.get_credential_cached", return_value="sk-test-key"),
+            patch("anthropic.Anthropic", side_effect=Exception("API error")),
         ):
             result = _estimate_qty_with_ai([100, 200, 300])
 

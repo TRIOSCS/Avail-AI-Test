@@ -299,3 +299,33 @@ class TestProcessAIGate:
         # Fail open, not left 'pending' — otherwise the item recycles as a poison row.
         assert item.status == "queued"
         assert item.gate_decision == "search"
+
+    @pytest.mark.asyncio
+    async def test_result_element_without_mpn_key_does_not_abort_batch(self):
+        """A results ELEMENT with no 'mpn' key must not KeyError inside the result_map
+        comprehension (which runs BEFORE the per-item malformed guard) — that aborts the
+        whole batch and skips the commit, recycling every item as poison.
+
+        The mpn-less element is discarded; the item it would have described fails open
+        like any omitted item, and valid sibling elements still classify normally.
+        """
+        classified = self._make_item("STM32F407")
+        orphaned = self._make_item("LM358")
+        model = MagicMock()
+        db_mock = self._db_with_items([classified, orphaned])
+
+        gate = AIGate(model, "ICsource", "search_ics")
+        classifications = [
+            {"mpn": "STM32F407", "search_ics": True, "commodity": "semiconductor", "reason": "mcu"},
+            # Malformed element: model dropped the 'mpn' key entirely.
+            {"search_ics": True, "commodity": "semiconductor", "reason": "op-amp"},
+        ]
+        with patch.object(gate, "classify_parts_batch", new_callable=AsyncMock, return_value=classifications):
+            await gate.process_ai_gate(db_mock)
+
+        assert classified.status == "queued"
+        assert classified.gate_decision == "search"
+        # The orphaned item fails open instead of recycling as a poison row.
+        assert orphaned.status == "queued"
+        assert orphaned.gate_decision == "search"
+        assert "no classification" in orphaned.gate_reason

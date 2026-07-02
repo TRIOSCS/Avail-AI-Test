@@ -222,8 +222,10 @@ class AIGate:
                         item.updated_at = datetime.now(timezone.utc)
                     break  # Stop processing further batches during this cycle
 
-                # Build a lookup by MPN
-                result_map = {normalize_mpn_key(r["mpn"]): r for r in results}
+                # Build a lookup by MPN. Skip elements with no usable 'mpn' — indexing
+                # r["mpn"] here would KeyError BEFORE the per-item malformed guard
+                # below, aborting the batch and skipping the commit (poison recycle).
+                result_map = {normalize_mpn_key(r["mpn"]): r for r in results if isinstance(r, dict) and r.get("mpn")}
 
                 for item in batch_items:
                     classification = result_map.get(normalize_mpn_key(item.mpn))
