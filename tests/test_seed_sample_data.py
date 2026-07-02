@@ -16,6 +16,9 @@ Depends on: tests.conftest fixtures, app.management.seed_sample_data, ORM models
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
+import pytest
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -316,6 +319,48 @@ def test_owner_pre_provisions_missing_user_and_survives_wipe(db_session: Session
     # Sample users gone; the pre-provisioned real owner survives.
     assert db_session.query(User).filter(User.email.like("%avsample@avsample.test")).count() == 0
     assert db_session.get(User, owner.id) is not None
+
+
+def test_seed_entrypoint_refuses_without_optin_flag(db_session: Session, monkeypatch) -> None:
+    """The CLI entrypoint REFUSES to seed (and writes NO rows) unless the operator has
+    explicitly opted in via ALLOW_SAMPLE_DATA_SEED.
+
+    Closes the audit hole: a stray ``python -m app.management.seed_sample_data`` against
+    a real production DB can no longer inject synthetic AVSAMPLE demo data. The guard
+    fires before any DB session is opened, so seed() is never reached.
+    """
+    monkeypatch.delenv(sds.SEED_ALLOW_ENV, raising=False)
+
+    with patch.object(sds, "seed") as seed_spy, pytest.raises(SystemExit) as exc:
+        sds.main([])
+
+    assert exc.value.code != 0  # loud, non-zero refusal
+    seed_spy.assert_not_called()  # seed body never entered
+    assert db_session.query(User).count() == 0  # nothing written
+
+
+def test_seed_entrypoint_runs_with_optin_flag(db_session: Session, monkeypatch) -> None:
+    """With ALLOW_SAMPLE_DATA_SEED set, the entrypoint seeds exactly as before."""
+    monkeypatch.setenv(sds.SEED_ALLOW_ENV, "true")
+
+    with patch("app.database.SessionLocal", lambda: db_session):
+        rc = sds.main([])
+
+    assert rc == 0
+    # Full sample cast landed — same result as a direct seed() call.
+    assert db_session.query(User).count() == 6
+    assert db_session.query(Company).count() == 6
+
+
+def test_wipe_entrypoint_exempt_from_optin_guard(db_session: Session, monkeypatch) -> None:
+    """--wipe is exempt from the seed opt-in guard — it only deletes tagged sample rows,
+    so it must run without ALLOW_SAMPLE_DATA_SEED."""
+    monkeypatch.delenv(sds.SEED_ALLOW_ENV, raising=False)
+
+    with patch("app.database.SessionLocal", lambda: db_session):
+        rc = sds.main(["--wipe"])
+
+    assert rc == 0  # no refusal even without the flag
 
 
 def test_wipe_with_owner_succeeds_under_fk_enforcement(db_session: Session) -> None:

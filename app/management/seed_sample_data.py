@@ -35,6 +35,7 @@ Depends on: app.database.SessionLocal, the ORM models, app.constants enums,
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -100,6 +101,14 @@ from app.services.spec_tiers import set_brand, set_category, set_manufacturer
 from app.services.spec_write_service import record_spec
 from app.utils.normalization import normalize_mpn_key
 from app.vendor_utils import normalize_vendor_name
+
+# ── Production guard ─────────────────────────────────────────────────
+# Seeding injects synthetic AVSAMPLE demo rows into whatever DATABASE_URL resolves to.
+# Nothing about the environment is trusted: the operator MUST explicitly opt in via this
+# env var on the exact box/DB they intend to fill, so a stray `python -m
+# app.management.seed_sample_data` can never pollute the real production DB. (--wipe is
+# exempt — it only ever deletes tagged sample rows.)
+SEED_ALLOW_ENV = "ALLOW_SAMPLE_DATA_SEED"
 
 # ── Sample tag & naming convention ───────────────────────────────────
 SAMPLE_TAG = "AVSAMPLE"  # appears in every taggable free-text marker column
@@ -1728,6 +1737,16 @@ def wipe(db: Session) -> dict[str, int]:
     return deleted
 
 
+def _seed_allowed() -> bool:
+    """True only when the operator has explicitly opted in to sample-data seeding.
+
+    Read at call time (not via config.py's import-time Settings) so the flag is scoped
+    to the exact process/DB being seeded — mirrors ``password_login_env_enabled`` in
+    app/routers/auth.py.
+    """
+    return os.getenv(SEED_ALLOW_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point."""
     parser = argparse.ArgumentParser(description="Seed (or wipe) the AvailAI sample dataset (idempotent additive).")
@@ -1743,6 +1762,21 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     args = parser.parse_args(argv)
+
+    # Hard production guard: refuse to seed synthetic demo data unless the operator has
+    # explicitly opted in. Checked BEFORE opening any DB session so a refused run touches
+    # the database not at all. --wipe stays exempt (deletes only tagged sample rows).
+    if not args.wipe and not _seed_allowed():
+        logger.error(
+            "seed-sample: REFUSING to seed — {} is not set. This command injects "
+            "synthetic {} demo rows into whatever DATABASE_URL resolves to and must "
+            "never run against production. Re-run with {}=true ONLY on a database you "
+            "intend to fill with demo data (e.g. staging or a fresh dev box).",
+            SEED_ALLOW_ENV,
+            SAMPLE_TAG,
+            SEED_ALLOW_ENV,
+        )
+        raise SystemExit(2)
 
     from app.database import SessionLocal
 
