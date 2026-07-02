@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import Request
+from loguru import logger
 from sqlalchemy.orm import Session
 
 from ...constants import UserRole
@@ -25,6 +26,15 @@ _MANIFEST_PATH = Path("app/static/dist/.vite/manifest.json")
 _vite_manifest: dict = {}
 if _MANIFEST_PATH.exists():
     _vite_manifest = json.loads(_MANIFEST_PATH.read_text())
+else:
+    logger.critical(
+        "Vite manifest missing ({}) — the frontend will render UNSTYLED with dead JS "
+        "(the un-hashed fallback path never exists in dist/). Run `npm run build`, or "
+        "deploy via ./deploy.sh which builds it.",
+        _MANIFEST_PATH,
+    )
+
+_warned_missing_entry = False
 
 
 def _vite_assets() -> dict:
@@ -33,6 +43,17 @@ def _vite_assets() -> dict:
     Keys: js_file, css_files.
     """
     entry = _vite_manifest.get("htmx_app.js", {})
+    if not entry:
+        # Fail LOUDLY (but keep serving so dev-without-build still shows raw HTML):
+        # the fallback path below points at an asset Vite never emits, so every page
+        # would otherwise be silently blank/unstyled with a 404'd bundle.
+        global _warned_missing_entry
+        if not _warned_missing_entry:
+            _warned_missing_entry = True
+            logger.critical(
+                "Vite manifest has no 'htmx_app.js' entry — pages will be unstyled with "
+                "dead JS until `npm run build` produces app/static/dist/.vite/manifest.json"
+            )
     js_file = entry.get("file", "assets/htmx_app.js")
     css_files = entry.get("css", [])
     # Also add standalone styles entry if not already in css list
