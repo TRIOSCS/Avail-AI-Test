@@ -9,7 +9,7 @@
 #}
 {% import 'htmx/partials/settings/_connector_macros.html' as cm %}
 {% for s in tested_sources %}
-{{ cm.connector_card(s, oob=True, is_admin=is_admin) }}
+{{ cm.connector_card(s, oob=True) }}
 {% endfor %}
 <div id="test-all-summary" hx-swap-oob="true"
      class="text-xs {{ 'text-red-600' if failed_count else 'text-gray-500' }}" aria-live="polite">
