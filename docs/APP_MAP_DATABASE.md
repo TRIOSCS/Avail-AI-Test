@@ -836,11 +836,22 @@ Model: `VendorContactAttachment` (`app/models/vendors.py`).
 > `can_post`/`can_offer` (role-derived capabilities), `submit_offer` (per_line/take_all;
 > part-number-only matching via `normalize_mpn_key`; unmatched/ambiguous rows queued),
 > `recompute_line_rollup`/`withdraw_offer` (min priced active offer -> best_offer_*),
-> `award_offer` (the single chokepoint that flips an offer -> `won`: owner-gated, marks
-> matched lines `awarded`, recomputes rollups, then fires the buyer-score win-hook
-> `buyer_affinity_service.recompute_buyer_score_on_win` BEFORE the commit — no-ops for an
-> offer with no canonical buyer; routed as `POST /api/resell/{id}/offers/{offer_id}/award`),
-> `close_list`, `get_excess_stats` (offer counts), list/line CRUD + import, and
+> `award_offer` (the single chokepoint that flips an offer -> `won`: owner-gated; a
+> `take_all` offer awards EVERY non-withdrawn line (it carries no offer lines), a
+> `per_line` offer awards its matched lines; idempotent for an already-won offer; 409 if a
+> line is already awarded to a different offer; marks lines `awarded`, recomputes rollups,
+> fires the buyer-score win-hook `buyer_affinity_service.recompute_buyer_score_on_win`
+> BEFORE the commit — no-ops for an offer with no canonical buyer; RETIRES the sold lines
+> from the Sighting mirror via `excess_mirror.sync_list_mirror`; and DERIVES the list's own
+> `awarded` status once every line is decided (awarded/withdrawn) with ≥1 awarded — nothing
+> else flips `excess_lists.status`->`awarded`. Routed as `POST /api/resell/{id}/offers/{offer_id}/award`),
+> `unaward_offer` (the explicit inverse — never a silent auto-swap to a new winner: 409 if
+> not won, reverts offer->`open` + lines->`available`, recomputes rollups + buyer score
+> (full-history recompute self-heals `wins` back down), re-mirrors the lines, and steps the
+> list off `awarded` -> `bid_out` (close_at set) else `collecting`; `POST /api/resell/{id}/offers/{offer_id}/unaward`).
+> Award never auto-marks the losing offers `lost` (`ExcessOfferStatus.LOST` stays
+> defined-but-unassigned) — "not selected" is a pure render decision (line awarded + this
+> row's offer != won). `close_list`, `get_excess_stats` (offer counts), list/line CRUD + import, and
 > `material_card_id` resolution on the import path. The thin router is `app/routers/resell.py`
 > (templates under `app/templates/htmx/partials/resell/*`).
 >
