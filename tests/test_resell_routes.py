@@ -670,3 +670,24 @@ def test_import_confirm_to_posted_list_returns_409(client, db_session, trader_us
         assert resp.status_code == 409
     finally:
         app.dependency_overrides.pop(require_user, None)
+
+
+def test_detail_action_buttons_target_self_not_workspace_shell(client, db_session, trader_user, posted_list):
+    """RS-2: on a deep-linked/reloaded /v2/resell/{id}, the detail loads standalone
+    into #main-content — but Post/Close targeted #split-right-resell, which only exists
+    in the workspace shell, so they fired htmx:targetError and did nothing. They must
+    target the detail's own always-present root instead."""
+    from app.dependencies import require_user
+
+    client.app.dependency_overrides[require_user] = lambda: trader_user
+    try:
+        resp = client.get(f"/v2/partials/resell/{posted_list.id}")
+    finally:
+        client.app.dependency_overrides.pop(require_user, None)
+    assert resp.status_code == 200
+    body = resp.text
+    # The owner sees the Close action (collecting list); it targets the detail root,
+    # and no action targets the workspace-shell-only #split-right-resell.
+    assert "data-resell-detail-root" in body
+    assert "#split-right-resell" not in body
+    assert "closest [data-resell-detail-root]" in body
