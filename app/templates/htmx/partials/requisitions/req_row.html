@@ -177,7 +177,7 @@
                   data-loading-disable
                   :disabled="!outcomeReady"
                   class="px-2 py-1 text-xs font-medium rounded bg-brand-500 text-white hover:bg-brand-600 disabled:opacity-40 disabled:cursor-not-allowed"
-                  @click="htmx.ajax('POST', '/v2/partials/requisitions/{{ req.id }}/action/' + outcomePrompt, {target: '#main-content', values: {reason: outcomeReason}}); outcomePrompt = null">Confirm</button>
+                  @click="htmx.ajax('POST', '/v2/partials/requisitions/{{ req.id }}/action/' + outcomePrompt, {target: '#main-content', indicator: '#main-content', values: {reason: outcomeReason}}); outcomePrompt = null">Confirm</button>
         </div>
       </div>
     </div>
