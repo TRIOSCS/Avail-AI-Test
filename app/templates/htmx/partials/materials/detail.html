@@ -52,9 +52,12 @@
         {# Enrichment-status badge — polls itself while the card is queued (HTTP 286
            stops the poll once the worker lands a terminal status). #}
         {% include "htmx/partials/materials/enrich_status.html" %}
+        {# Enrich returns the FULL detail partial, so it must replace the whole detail
+           surface (#main-content) like conflict-accept and the edit form — NOT hx-target
+           "this"/outerHTML, which nested a second detail tree inside this button. #}
         <button hx-post="/v2/partials/materials/{{ card.id }}/enrich"
-                hx-target="this"
-                hx-swap="outerHTML"
+                hx-target="#main-content"
+                hx-swap="innerHTML"
                 data-loading-disable
                 class="mt-1 inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-accent-600 bg-accent-50 border border-accent-200 rounded-lg hover:bg-accent-100 transition-colors">
           <svg class="h-3.5 w-3.5 htmx-indicator animate-spin" fill="none" viewBox="0 0 24 24">
