@@ -1,0 +1,24 @@
+{#
+  follow_ups/send_failed.html — Replaces a follow-up card when the send did NOT happen.
+  Shown when the Graph send raised (swallowed exception) or the contact has no email
+  address on file, so the card never falsely claims "Follow-up sent".
+  Receives: contact_id (int), vendor_name (str), reason (str: 'no_email' | 'send_failed').
+  Called by: htmx/offers.py send_follow_up_htmx endpoint.
+  Depends on: Tailwind CSS with rose palette.
+#}
+<div id="follow-up-{{ contact_id }}" class="bg-rose-50 rounded-lg border border-rose-200 p-4">
+  <div class="flex items-center gap-2">
+    <div class="flex items-center justify-center w-6 h-6 rounded-full bg-rose-100">
+      <svg class="h-4 w-4 text-rose-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+      </svg>
+    </div>
+    <p class="text-sm font-medium text-rose-700">
+      {% if reason == 'no_email' %}
+      No email address on file for <span class="font-semibold">{{ vendor_name }}</span> — follow-up not sent.
+      {% else %}
+      Couldn't send the follow-up to <span class="font-semibold">{{ vendor_name }}</span>. Please try again.
+      {% endif %}
+    </p>
+  </div>
+</div>

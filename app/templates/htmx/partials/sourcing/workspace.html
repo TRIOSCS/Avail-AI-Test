@@ -38,9 +38,15 @@
     </div>
   </div>
 
-  {# Filter bar #}
+  {# Filter bar. Workspace swaps ONLY the left list rows (#lead-list-content) via the
+     rows-only workspace-list endpoint — hitting the full-grid partial here nested the
+     entire card grid inside the list panel. Pushes the real workspace page URL so F5
+     loads the app shell. #}
   <div class="flex-shrink-0 px-3 py-2 bg-gray-50 border-b border-gray-200">
-    {% with filter_target='#lead-list-content', compact=true %}
+    {% with filter_target='#lead-list-content',
+            filter_endpoint='/v2/partials/sourcing/' ~ requirement.id ~ '/workspace-list',
+            filter_push_url='/v2/sourcing/' ~ requirement.id ~ '/workspace',
+            compact=true %}
       {% include "htmx/partials/sourcing/filter_bar.html" %}
     {% endwith %}
   </div>

@@ -211,3 +211,58 @@ class TestEditQuoteMetadata:
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 404
+
+
+class TestReviseClonesLines:
+    def test_revise_clones_quote_lines(self, client: TestClient, db_session: Session, test_quote: Quote, test_user):
+        """P0/P1 (OQ-04): revising a quote must clone the parent's QuoteLine rows —
+        quote_detail_partial, the sent email, the PDF, and Build-Buy-Plan all read
+        QuoteLine, not line_items JSON.
+
+        Without the clone the revision showed an empty line table and couldn't build a
+        buy plan.
+        """
+        from app.models import QuoteLine
+
+        # Give the parent quote a real line.
+        db_session.add(
+            QuoteLine(
+                quote_id=test_quote.id,
+                mpn="LM317T",
+                manufacturer="TI",
+                qty=100,
+                cost_price=0.40,
+                sell_price=0.55,
+                margin_pct=27.3,
+            )
+        )
+        db_session.commit()
+
+        resp = client.post(f"/v2/partials/quotes/{test_quote.id}/revise", headers={"HX-Request": "true"})
+        assert resp.status_code == 200
+
+        # The new revision must have its own cloned QuoteLine row.
+        rev = (
+            db_session.query(Quote)
+            .filter(Quote.requisition_id == test_quote.requisition_id, Quote.id != test_quote.id)
+            .order_by(Quote.id.desc())
+            .first()
+        )
+        assert rev is not None
+        rev_lines = db_session.query(QuoteLine).filter(QuoteLine.quote_id == rev.id).all()
+        assert len(rev_lines) == 1
+        assert rev_lines[0].mpn == "LM317T"
+        assert float(rev_lines[0].sell_price) == 0.55
+        # The revision detail must render the line (not "No line items yet").
+        assert "LM317T" in resp.text
+
+
+class TestPricingHistoryUrl:
+    def test_pricing_history_route_resolves(self, client: TestClient):
+        """OQ-05: the quote-detail pricing-history panel must hit a real route. The
+        template pointed at /v2/partials/quotes/pricing-history/{mpn} (404); the route
+        is /v2/partials/pricing-history/{mpn}."""
+        resp = client.get("/v2/partials/pricing-history/LM317T")
+        assert resp.status_code == 200
+        # The dead URL must 404 (proves the template no longer uses it).
+        assert client.get("/v2/partials/quotes/pricing-history/LM317T").status_code == 404

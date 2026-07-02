@@ -343,6 +343,30 @@ class TestSourcingPartials:
         resp = client.get(f"/v2/partials/sourcing/{item.id}/workspace")
         assert resp.status_code == 200
 
+    def test_sourcing_workspace_filters_target_rows_only_endpoint(self, client, db_session: Session, test_user: User):
+        """SOURCING-WS-FILTER-WRONG-TARGET: in the workspace the filter/sort/source
+        controls must hit the rows-only '/workspace-list' endpoint and swap into
+        #lead-list-content — NOT the full card-grid partial (which nested the whole
+        results page inside the left list panel)."""
+        req = _req(db_session, test_user)
+        item = _requirement(db_session, req)
+        _sourcing_lead(db_session, item)
+        db_session.commit()
+
+        body = client.get(f"/v2/partials/sourcing/{item.id}/workspace").text
+        ws_list = f"/v2/partials/sourcing/{item.id}/workspace-list"
+        # The filter controls (pills, sort select, source checkboxes) target the
+        # rows-only endpoint and the left list container.
+        assert f'hx-get="{ws_list}' in body
+        assert 'hx-target="#lead-list-content"' in body
+        # The full-grid partial URL must NOT be a filter hx-get target inside the
+        # workspace filter bar (that was the nesting bug). It only appears as the
+        # "Grid view" link href.
+        assert f'hx-get="/v2/partials/sourcing/{item.id}?' not in body
+        # push-url points at the real (resolvable) workspace page URL, not the naked
+        # partial fragment (which would 404 on F5).
+        assert f'hx-push-url="/v2/sourcing/{item.id}/workspace"' in body
+
     def test_sourcing_workspace_page(self, client, db_session: Session, test_user: User):
         req = _req(db_session, test_user)
         item = _requirement(db_session, req)
@@ -391,21 +415,20 @@ class TestSourcingPartials:
         assert resp.status_code == 404
 
     def test_sourcing_search_trigger(self, client, db_session: Session, test_user: User):
+        """Re-search delegates to search_requirement() (which persists sightings +
+        leads) and redirects back to the results page."""
         req = _req(db_session, test_user)
         item = _requirement(db_session, req)
         db_session.commit()
 
-        mock_broker = MagicMock()
-        mock_broker.publish = AsyncMock(return_value=None)
-        mock_broker.listen = AsyncMock(return_value=iter([]))
-
-        with (
-            patch("app.services.sse_broker.broker", mock_broker),
-            patch("app.search_service.quick_search_mpn", AsyncMock(return_value=[])),
-        ):
+        mock_search = AsyncMock(return_value={"sightings": [], "source_stats": [], "mpn_results": {}})
+        with patch("app.search_service.search_requirement", mock_search):
             resp = client.post(f"/v2/partials/sourcing/{item.id}/search")
 
         assert resp.status_code in (200, 303)
+        # The persistence path was actually invoked (old code discarded results).
+        mock_search.assert_awaited_once()
+        assert resp.headers.get("HX-Redirect") == f"/v2/sourcing/{item.id}"
 
     def test_lead_detail_page(self, client, db_session: Session, test_user: User):
         req = _req(db_session, test_user)

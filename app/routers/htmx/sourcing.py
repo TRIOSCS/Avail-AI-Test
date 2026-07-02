@@ -11,9 +11,6 @@ Depends on: app.models, app.dependencies, app.database, app.scoring,
     app.search_service, ._shared.
 """
 
-import asyncio
-import json
-import time
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -105,13 +102,18 @@ async def sourcing_search_trigger(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Trigger multi-source search for a requirement.
+    """Re-run the sourcing pipeline for a requirement and PERSIST the results.
 
-    Runs connectors in parallel, publishes SSE events per source completion, syncs leads
-    on completion, returns redirect to sourcing results.
+    Delegates to ``search_requirement()`` — the same orchestrator the sightings refresh
+    button uses. It fans out across the connectors once (the 48h per-MPN cooldown gates
+    the spend), saves the sightings, and write-throughs canonical ``SourcingLead`` rows
+    (``sync_leads_for_sightings``). The old implementation instead called
+    ``quick_search_mpn`` six times (each a full read-only sweep of every connector) and
+    discarded every result, so "Re-search" persisted nothing and redirected to an
+    unchanged list. After persisting, redirect back to the results page, which now reads
+    the freshly-written leads.
     """
-
-    from ...services.sse_broker import broker
+    from ...search_service import search_requirement
 
     req = db.query(Requirement).filter(Requirement.id == requirement_id).first()
     if not req:
@@ -119,47 +121,14 @@ async def sourcing_search_trigger(
     # Search triggers connector SPEND + cross-owner disclosure — scope to the owner.
     require_requisition_access(db, req.requisition_id, user, label="Requirement")
 
-    mpn = req.primary_mpn or ""
-    sources = ["brokerbin", "nexar", "digikey", "mouser", "oemsecrets", "element14"]
-    channel = f"sourcing:{requirement_id}"
-    all_sightings = []
+    try:
+        await search_requirement(req, db)
+    except Exception:
+        logger.warning("Sourcing re-search failed for requirement {}", requirement_id, exc_info=True)
 
-    async def search_source(source_name):
-        start_t = time.time()
-        try:
-            from ...search_service import quick_search_mpn
-
-            raw = await quick_search_mpn(mpn, db)
-            results = raw if isinstance(raw, list) else raw.get("sightings", [])
-            elapsed = int((time.time() - start_t) * 1000)
-            count = len(results) if results else 0
-            await broker.publish(
-                channel,
-                "source-complete",
-                json.dumps({"source": source_name, "count": count, "elapsed_ms": elapsed, "status": "done"}),
-            )
-            return results or []
-        except Exception as exc:
-            elapsed = int((time.time() - start_t) * 1000)
-            logger.error("Sourcing search failed for {} on {}: {}", mpn, source_name, exc)
-            await broker.publish(
-                channel,
-                "source-complete",
-                json.dumps(
-                    {"source": source_name, "count": 0, "elapsed_ms": elapsed, "status": "failed", "error": str(exc)}
-                ),
-            )
-            return []
-
-    results_by_source = await asyncio.gather(*[search_source(s) for s in sources], return_exceptions=True)
-
-    for source_results in results_by_source:
-        if isinstance(source_results, list):
-            all_sightings.extend(source_results)
-
-    await broker.publish(
-        channel, "search-complete", json.dumps({"total": len(all_sightings), "requirement_id": requirement_id})
-    )
+    # search_requirement() commits via a separate write session; expire so the redirect
+    # target re-reads the freshly-persisted leads instead of the caller session's cache.
+    db.expire_all()
 
     return HTMLResponse(status_code=200, headers={"HX-Redirect": f"/v2/sourcing/{requirement_id}"})
 

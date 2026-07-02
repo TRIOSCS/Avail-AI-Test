@@ -288,6 +288,33 @@ class TestSettingsPartials:
         resp = client.get("/v2/partials/settings/connectors")
         assert resp.status_code == 403
 
+    def test_non_admin_settings_index_lands_on_profile_not_403_connectors(self, client: TestClient):
+        """SET-04: the default settings tab is 'connectors' (admin-only, 403). A
+        non-admin (buyer client) must be redirected to the Profile tab, not served an
+        empty 403 page, and the Connectors tab button must not render for them."""
+        resp = client.get("/v2/partials/settings")
+        assert resp.status_code == 200
+        body = resp.text
+        # Profile content is shown; the admin-only Connectors tab button is absent.
+        assert "/v2/partials/settings/connectors" not in body, "Connectors tab button leaked to a non-admin"
+
+    def test_prepayment_approver_form_change_trigger_is_scoped(self, client: TestClient):
+        """SET-02: the per-user approver forms must trigger on their OWN change
+        (bubbling to the form), not 'change from:input' which htmx resolves to EVERY
+        input on the page."""
+        # Admin sees the Users tab; assert no over-broad 'from:input' trigger remains.
+        from app.constants import UserRole
+        from app.dependencies import require_user
+
+        admin = type("A", (), {"id": 1, "role": UserRole.ADMIN, "name": "A", "email": "a@x.com"})()
+        client.app.dependency_overrides[require_user] = lambda: admin
+        try:
+            resp = client.get("/v2/partials/settings/users")
+        finally:
+            client.app.dependency_overrides.pop(require_user, None)
+        if resp.status_code == 200:
+            assert "change from:input" not in resp.text
+
     def test_settings_system_tab_non_admin_returns_403(self, client: TestClient, db_session: Session, test_user: User):
         """Buyer user should get 403 from system tab (admin-only)."""
         resp = client.get("/v2/partials/settings/system")

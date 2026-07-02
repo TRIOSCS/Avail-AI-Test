@@ -11,6 +11,7 @@
 {% set el = list %}
 
 <div class="flex flex-col h-full"
+     data-resell-detail-root
      x-data="{ tab: 'lines' }">
 
   {# ── Slim header ──────────────────────────────────────────────── #}
@@ -59,8 +60,8 @@
       <div class="flex items-center gap-2 flex-shrink-0">
         {% if can_see_customer and el.status == 'draft' and line_count > 0 %}
         <button hx-post="/api/resell/{{ el.id }}/publish"
-                hx-target="#split-right-resell"
-                hx-swap="innerHTML"
+                hx-target="closest [data-resell-detail-root]"
+                hx-swap="outerHTML"
                 hx-confirm="Post this list? Lines lock and become visible to brokers."
                 data-loading-disable
                 class="btn-primary btn-sm">
@@ -81,8 +82,8 @@
         {% endif %}
         {% if can_see_customer and el.status in ['open', 'collecting'] %}
         <button hx-post="/api/resell/{{ el.id }}/close"
-                hx-target="#split-right-resell"
-                hx-swap="innerHTML"
+                hx-target="closest [data-resell-detail-root]"
+                hx-swap="outerHTML"
                 hx-confirm="Close this list? The posting window ends and the bid goes out."
                 data-loading-disable
                 class="btn-secondary btn-sm">

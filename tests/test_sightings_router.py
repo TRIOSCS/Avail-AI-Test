@@ -6,7 +6,7 @@ Depends on: conftest.py fixtures, app models, sighting_status service
 
 import json
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from html.parser import HTMLParser
 
 import pytest
@@ -2967,6 +2967,102 @@ class TestDashboardCounters:
             assert label in text, f"Dashboard counter '{label}' missing from response"
 
 
+class TestUrgentStaleQuickFilters:
+    """SIGHT-URGENT-STALE-NOOP: the dashboard 'N Urgent' / 'N Stale' buttons pass
+    ?urgent=1 / ?stale=1; the endpoint must accept + apply them with the SAME predicate
+    as the counters so the filtered list matches the count (previously the params were
+    silently dropped and the full unfiltered list reloaded)."""
+
+    def _two_reqs(self, db_session):
+        """Return (urgent_req, calm_req): one high-priority urgent, one low/idle."""
+        req = Requisition(name="QF RFQ", status="open", customer_name="QF Corp")
+        db_session.add(req)
+        db_session.flush()
+        urgent = Requirement(
+            requisition_id=req.id,
+            primary_mpn="URGENT-MPN",
+            target_qty=10,
+            sourcing_status="open",
+            priority_score=90.0,
+        )
+        calm = Requirement(
+            requisition_id=req.id,
+            primary_mpn="CALM-MPN",
+            target_qty=10,
+            sourcing_status="open",
+            priority_score=10.0,
+        )
+        db_session.add_all([urgent, calm])
+        db_session.commit()
+        return urgent, calm
+
+    def test_urgent_filter_by_priority(self, client, db_session):
+        """?urgent=1 shows only priority>=70 (or near-deadline) requirements."""
+        self._two_reqs(db_session)
+        resp = client.get("/v2/partials/sightings?urgent=1")
+        assert resp.status_code == 200
+        assert "URGENT-MPN" in resp.text
+        assert "CALM-MPN" not in resp.text
+
+    def test_urgent_filter_by_deadline(self, client, db_session):
+        """A low-priority req with need_by within 48h still passes the urgent filter."""
+        req = Requisition(name="DL RFQ", status="open", customer_name="DL Corp")
+        db_session.add(req)
+        db_session.flush()
+        soon = Requirement(
+            requisition_id=req.id,
+            primary_mpn="SOON-MPN",
+            target_qty=10,
+            sourcing_status="open",
+            priority_score=5.0,
+            need_by_date=date.today() + timedelta(days=1),
+        )
+        later = Requirement(
+            requisition_id=req.id,
+            primary_mpn="LATER-MPN",
+            target_qty=10,
+            sourcing_status="open",
+            priority_score=5.0,
+            need_by_date=date.today() + timedelta(days=30),
+        )
+        db_session.add_all([soon, later])
+        db_session.commit()
+        resp = client.get("/v2/partials/sightings?urgent=1")
+        assert resp.status_code == 200
+        assert "SOON-MPN" in resp.text
+        assert "LATER-MPN" not in resp.text
+
+    def test_stale_filter_excludes_recently_active(self, client, db_session):
+        """?stale=1 shows only requirements with no ActivityLog inside the stale
+        window."""
+        urgent, calm = self._two_reqs(db_session)
+        # Give `calm` a fresh activity so it is NOT stale; `urgent` stays stale (no logs).
+        db_session.add(
+            ActivityLog(
+                activity_type="note",
+                channel="manual",
+                requirement_id=calm.id,
+                requisition_id=calm.requisition_id,
+                notes="touched",
+                created_at=datetime.now(timezone.utc),
+            )
+        )
+        db_session.commit()
+        resp = client.get("/v2/partials/sightings?stale=1")
+        assert resp.status_code == 200
+        assert "URGENT-MPN" in resp.text  # no activity → stale
+        assert "CALM-MPN" not in resp.text  # recent activity → not stale
+
+    def test_no_filter_shows_all(self, client, db_session):
+        """Without the quick-filter params, both requirements appear (regression: the
+        old code dropped the params AND showed everything, masking the bug)."""
+        self._two_reqs(db_session)
+        resp = client.get("/v2/partials/sightings")
+        assert resp.status_code == 200
+        assert "URGENT-MPN" in resp.text
+        assert "CALM-MPN" in resp.text
+
+
 class TestCoverageMap:
     """Phase 2: Fulfillment coverage bar data in sightings_list context."""
 
@@ -3498,7 +3594,8 @@ class TestBatchStatus:
             data={"requirement_ids": json.dumps([r.id]), "status": "sourcing"},
         )
         assert resp.status_code == 200
-        assert "Updated 1 of 1" in resp.text
+        # Toast fires via HX-Trigger:showToast (empty body, form posts hx-swap="none").
+        assert "Updated 1 of 1" in resp.headers.get("HX-Trigger", "")
         db_session.refresh(r)
         assert r.sourcing_status == "sourcing"
 
@@ -3531,7 +3628,7 @@ class TestBatchStatus:
             data={"requirement_ids": json.dumps([r.id]), "status": "sourcing"},
         )
         assert resp.status_code == 200
-        assert "skipped" in resp.text.lower()
+        assert "skipped" in resp.headers.get("HX-Trigger", "").lower()
         db_session.refresh(r)
         assert r.sourcing_status == "won"
 
@@ -3549,8 +3646,9 @@ class TestBatchStatus:
             data={"requirement_ids": json.dumps([r1.id, r2.id]), "status": "sourcing"},
         )
         assert resp.status_code == 200
-        assert "Updated 1 of 2" in resp.text
-        assert "1 skipped" in resp.text
+        trigger = resp.headers.get("HX-Trigger", "")
+        assert "Updated 1 of 2" in trigger
+        assert "1 skipped" in trigger
 
     def test_over_limit_returns_400(self, client, db_session):
         ids = list(range(1, 52))
@@ -3579,7 +3677,7 @@ class TestBatchNotes:
             data={"requirement_ids": json.dumps([r.id]), "notes": "Test batch note"},
         )
         assert resp.status_code == 200
-        assert "Added note to 1 requirement" in resp.text
+        assert "Added note to 1 requirement" in resp.headers.get("HX-Trigger", "")
         logs = (
             db_session.query(ActivityLog)
             .filter(
@@ -3604,7 +3702,7 @@ class TestBatchNotes:
             data={"requirement_ids": json.dumps([r1.id, r2.id]), "notes": "Shared note"},
         )
         assert resp.status_code == 200
-        assert "Added note to 2 requirements" in resp.text
+        assert "Added note to 2 requirements" in resp.headers.get("HX-Trigger", "")
         logs = (
             db_session.query(ActivityLog)
             .filter(
@@ -3622,7 +3720,7 @@ class TestBatchNotes:
             data={"requirement_ids": json.dumps([r.id]), "notes": ""},
         )
         assert resp.status_code == 200
-        assert "Note text is required" in resp.text
+        assert "Note text is required" in resp.headers.get("HX-Trigger", "")
 
     def test_over_limit_returns_400(self, client, db_session):
         ids = list(range(1, 52))
