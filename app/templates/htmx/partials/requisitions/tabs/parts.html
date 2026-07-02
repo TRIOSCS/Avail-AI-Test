@@ -17,7 +17,7 @@
       {% if requirements %}
       <button type="button"
               hx-post="/v2/partials/requisitions/{{ req.id }}/search-all"
-              hx-target="closest div"
+              hx-target="#tab-content"
               hx-swap="innerHTML"
               data-loading-disable
               class="btn-primary btn-sm">
@@ -187,7 +187,7 @@
   <div class="mb-3 px-3 py-2 bg-brand-50 border border-brand-200 rounded-lg text-sm text-brand-700 flex items-center gap-2"
        hx-get="/v2/partials/requisitions/{{ req.id }}/tab/parts"
        hx-trigger="load delay:8s"
-       hx-target="closest div"
+       hx-target="#tab-content"
        hx-swap="innerHTML">
     <svg class="h-4 w-4 animate-spin flex-none" fill="none" viewBox="0 0 24 24">
       <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"></circle>
@@ -197,10 +197,14 @@
   </div>
   {% endif %}
 
-  {# Requirements table #}
+  {# Requirements table — always rendered (including #parts-tbody) so the Add
+     Requirement form's hx-target="#parts-tbody" (above) resolves even when the
+     requisition has zero parts; the empty state lives inside the tbody as a
+     placeholder row, matching the vendors/contacts tab pattern. #}
   <div id="parts-table-wrapper">
   {% if requirements %}
   <p class="text-xs text-gray-400 mb-2">{{ requirements|length }} requirement{{ "s" if requirements|length != 1 }}. Double-click any row to edit inline.</p>
+  {% endif %}
   <div class="overflow-x-auto bg-white rounded-lg border border-brand-200">
     <table class="min-w-full divide-y divide-gray-200">
       <thead class="bg-gray-50 sticky top-0">
@@ -228,15 +232,24 @@
         </tr>
       </thead>
       <tbody id="parts-tbody" class="divide-y divide-gray-200">
+        {% if requirements %}
         {% for r in requirements %}
           {% include "htmx/partials/requisitions/tabs/req_row.html" %}
         {% endfor %}
+        {% else %}
+        <tr id="parts-empty-state">
+          <td colspan="17" class="py-6 sm:py-8 text-center">
+            <svg class="mx-auto h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+              <path stroke-linecap="round" stroke-linejoin="round"
+                    d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/>
+            </svg>
+            <p class="text-sm font-medium text-gray-600 mt-3">No requirements yet.</p>
+            <p class="text-xs text-gray-400 mt-1">Add parts using the form above.</p>
+          </td>
+        </tr>
+        {% endif %}
       </tbody>
     </table>
   </div>
-  {% else %}
-  {% set message = "No requirements yet. Add parts using the form above." %}
-  {% include "htmx/partials/shared/empty_state.html" %}
-  {% endif %}
   </div>{# /parts-table-wrapper #}
 </div>
