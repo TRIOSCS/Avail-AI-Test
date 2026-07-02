@@ -67,7 +67,16 @@ class MaterialCard(Base):
     # Verification provenance (added 2026-06-04 — verified-enrichment feature)
     # enrichment_status: see constants.MaterialEnrichmentStatus (validated on write):
     # unenriched | verified | web_sourced | oem_sourced | ai_inferred | not_found | not_catalogued
-    enrichment_status = Column(String(20), nullable=False, server_default="unenriched", index=True)
+    enrichment_status = Column(
+        String(20),
+        nullable=False,
+        server_default="unenriched",
+        index=True,
+        comment=(
+            "unenriched|verified|web_sourced|oem_sourced|ai_inferred|not_found|not_catalogued "
+            "(see MaterialEnrichmentStatus)"
+        ),
+    )
     # Per-field provenance: {"<field>": {"source": "digikey", "confidence": 1.0,
     #                                    "fetched_at": "2026-06-04T..Z", "matched_mpn": "..."}}
     enrichment_provenance = Column(JSONB)

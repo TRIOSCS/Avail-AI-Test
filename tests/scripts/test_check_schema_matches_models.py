@@ -45,8 +45,10 @@ def test_grandfather_is_name_scoped():
     assert filter_allowlist(novel) == novel
 
 
-def test_grandfathered_add_constraint_keyed_by_table_and_columns():
-    """add_constraint is grandfathered by (table, sorted-columns); a new table fails."""
+def test_reconciled_add_constraints_now_surface():
+    """#464 finish (migration 174) created every formerly-grandfathered unique
+    constraint, so an ``add_constraint`` diff — even for a previously-listed key like
+    (users, email) — must now SURFACE as real drift."""
 
     class _Col:
         def __init__(self, name):
@@ -61,9 +63,9 @@ def test_grandfathered_add_constraint_keyed_by_table_and_columns():
             self.table = _Table(table_name)
             self.columns = [_Col(c) for c in col_names]
 
-    grandfathered = [("add_constraint", _UC("users", ["email"]))]
+    formerly_grandfathered = [("add_constraint", _UC("users", ["email"]))]
     novel = [("add_constraint", _UC("brand_new_table", ["email"]))]
-    assert filter_allowlist(grandfathered) == []
+    assert filter_allowlist(formerly_grandfathered) == formerly_grandfathered
     assert filter_allowlist(novel) == novel
 
 
@@ -78,13 +80,17 @@ def test_reconciled_indexes_surface_but_intentional_ones_stay_grandfathered():
             self.name = name
 
     reconciled = [("remove_index", _Ix("ix_companies_name_trgm"))]
-    danger = [("remove_index", _Ix("ix_buyplans_token"))]
+    # ix_buyplans_token left with its table (dropped by migration 174, #464 finish),
+    # so its remove_index must now surface too.
+    dropped_with_table = [("remove_index", _Ix("ix_buyplans_token"))]
+    orphan_table_index = [("remove_index", _Ix("ix_ecu_provider_month"))]
     pg_expression = [("remove_index", _Ix("ix_vendor_cards_domain_lower"))]
 
     # Reconciled (now model-declared) → no longer filtered → surfaces as drift.
     assert filter_allowlist(reconciled) == reconciled
-    # Still intentional raw-DDL / DANGER → filtered out.
-    assert filter_allowlist(danger) == []
+    assert filter_allowlist(dropped_with_table) == dropped_with_table
+    # Still intentional: enrichment_credit_usage's index + PG-only expression DDL.
+    assert filter_allowlist(orphan_table_index) == []
     assert filter_allowlist(pg_expression) == []
 
 
