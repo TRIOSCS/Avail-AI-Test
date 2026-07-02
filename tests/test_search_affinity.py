@@ -214,3 +214,33 @@ class TestAffinityDedupWithLiveResults:
         arrow_results = [s for s in sightings if s.get("vendor_name", "").lower() == "arrow"]
         assert len(arrow_results) == 1
         assert arrow_results[0].get("source_type") == "nexar"
+
+
+class TestAffinityRunsOffEventLoop:
+    """PERF-1 — find_vendor_affinity has a blocking 30s Anthropic L3 fallback, so it
+    must run OFF the event-loop thread (via asyncio.to_thread) or it freezes every
+    concurrent request.
+
+    This guards against a regression back to a direct on-loop call.
+    """
+
+    @pytest.mark.asyncio
+    async def test_affinity_dispatched_to_worker_thread(self, db_session, requirement):
+        import threading
+
+        main_thread = threading.get_ident()
+        seen: dict = {}
+
+        def _spy(mpn, db):
+            seen["thread"] = threading.get_ident()
+            return list(MOCK_AFFINITY)
+
+        with (
+            patch("app.search_service._fetch_fresh", new_callable=AsyncMock) as mock_fetch,
+            patch("app.search_service.find_vendor_affinity", side_effect=_spy),
+        ):
+            mock_fetch.return_value = (list(MOCK_FRESH), list(MOCK_STATS))
+            await search_requirement(requirement, db_session)
+
+        assert "thread" in seen, "find_vendor_affinity was never called"
+        assert seen["thread"] != main_thread, "affinity ran on the event-loop thread (PERF-1 regression)"
