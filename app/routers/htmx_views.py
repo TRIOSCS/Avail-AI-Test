@@ -136,6 +136,7 @@ _MODULE_ENTRY_URLS: tuple[tuple[AccessKey, str], ...] = (
 @router.get("/v2/requisitions", response_class=HTMLResponse)
 @router.get("/v2/requisitions/{req_id:int}", response_class=HTMLResponse)
 @router.get("/v2/search", response_class=HTMLResponse)
+@router.get("/v2/search/results", response_class=HTMLResponse)
 @router.get("/v2/vendors", response_class=HTMLResponse)
 @router.get("/v2/vendors/{vendor_id:int}", response_class=HTMLResponse)
 @router.get("/v2/customers", response_class=HTMLResponse)
@@ -233,10 +234,17 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
     elif current_view == "my-day":
         partial_url = "/v2/partials/my-day"
     elif current_view == "search":
-        # Deep-link the Part Dossier: ?mpn= rides along to /v2/partials/search so a
-        # bookmarked /v2/search?mpn=<PN> paints the dossier on first load.
-        mpn_qs = request.query_params.get("mpn", "").strip()
-        partial_url = f"/v2/partials/search?mpn={quote(mpn_qs)}" if mpn_qs else "/v2/partials/search"
+        if path.rstrip("/").endswith("/results"):
+            # Full-page global-search results (F5/bookmark/share of "View all
+            # results"): thread ?q= to the results partial (shell-01). Without this
+            # route the pushed /v2/search/results URL 404'd → bare JSON error page.
+            q_qs = request.query_params.get("q", "").strip()
+            partial_url = f"/v2/partials/search/results?q={quote(q_qs)}"
+        else:
+            # Deep-link the Part Dossier: ?mpn= rides along to /v2/partials/search so a
+            # bookmarked /v2/search?mpn=<PN> paints the dossier on first load.
+            mpn_qs = request.query_params.get("mpn", "").strip()
+            partial_url = f"/v2/partials/search?mpn={quote(mpn_qs)}" if mpn_qs else "/v2/partials/search"
     elif current_view == "settings":
         # Thread ?tab= through so a deep-link / redirect (e.g. the legacy
         # /v2/trouble-tickets → /v2/settings?tab=tickets) paints the right tab on
