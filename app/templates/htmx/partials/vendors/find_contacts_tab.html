@@ -16,6 +16,7 @@
       <button hx-post="/v2/partials/vendors/{{ vendor.id }}/ai/find-contacts"
               hx-target="#prospect-results"
               hx-swap="innerHTML"
+              hx-include="#find-contacts-form"
               data-loading-disable
               @htmx:before-request="searching = true"
               @htmx:after-request="searching = false"

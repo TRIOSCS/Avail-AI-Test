@@ -812,19 +812,24 @@ async def contact_timeline(
 # ── Vendor Contact CRUD (HTMX, parity P1) ──────────────────────────────────
 
 
-def _render_vendor_contacts(request: Request, vendor, contacts, user):
-    """Re-render vendor contacts tab partial."""
-    return template_response(
-        "htmx/partials/vendors/tabs/contacts.html",
-        {"request": request, "vendor": vendor, "contacts": contacts, "user": user},
-    )
-
-
 def _render_contact_row(request: Request, c, vendor):
     """Re-render a single vendor contact row partial."""
     return template_response(
         "htmx/partials/vendors/tabs/contact_row.html",
         {"request": request, "c": c, "vendor": vendor},
+    )
+
+
+def _render_contact_rows(request: Request, vendor, contacts):
+    """Re-render the contact table rows only (tbody inner content).
+
+    Used when a re-render must target #contacts-table-body with hx-swap="innerHTML"
+    (e.g. set-primary flips the Primary badge across every row). Returning the full
+    contacts.html shell here would nest a <div>/<form>/<table> inside the <tbody>.
+    """
+    return template_response(
+        "htmx/partials/vendors/tabs/contact_rows.html",
+        {"request": request, "vendor": vendor, "contacts": contacts},
     )
 
 
@@ -977,7 +982,8 @@ async def vendor_contact_set_primary(
         .limit(50)
         .all()
     )
-    return _render_vendor_contacts(request, vendor, contacts, user)
+    # Return rows only — the button swaps innerHTML into <tbody id="contacts-table-body">.
+    return _render_contact_rows(request, vendor, contacts)
 
 
 # ── Vendor Ownership UI (surface existing StrategicVendor) ─────────────────
