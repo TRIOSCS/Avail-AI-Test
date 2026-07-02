@@ -13,7 +13,7 @@ Depends on: app.models, app.dependencies, app.database, app.services, ._shared
 import html as html_mod
 import json
 import os
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
@@ -44,7 +44,7 @@ from ...services.quote_send import (
 )
 from ...services.status_machine import require_valid_transition
 from ...template_env import template_response
-from ._shared import _base_ctx, _is_ops_member
+from ._shared import _base_ctx, _is_ops_member, _parse_date_safe
 
 router = APIRouter(tags=["htmx-views"])
 
@@ -94,6 +94,30 @@ def _recalc_quote_totals(db: Session, quote: Quote) -> None:
     quote.line_items = new_line_items
 
 
+def _quote_valid_until(quote: Quote) -> date:
+    """Return the quote's "valid until" calendar date, derived from validity_days.
+
+    The Quote model has NO valid_until column — validity_days is the single source of
+    truth (also read by quote_send.py, crm/_helpers.py, quote_report.html). The expiry
+    is validity_days out from the SAME anchor quote_send.py uses when it emails the
+    customer: the send date if the quote was sent, else today. Keeping the anchor
+    identical means the editor default, the preview, and the real outbound email all
+    show the same date.
+    """
+    anchor = quote.sent_at.date() if quote.sent_at else date.today()
+    return anchor + timedelta(days=quote.validity_days or 7)
+
+
+def _validity_days_from_valid_until(quote: Quote, target: date) -> int:
+    """Convert a chosen "valid until" date back into validity_days.
+
+    Inverse of _quote_valid_until, anchored the same way (send date if sent, else
+    today), so a round-trip of the prefilled date leaves validity_days unchanged.
+    """
+    anchor = quote.sent_at.date() if quote.sent_at else date.today()
+    return (target - anchor).days
+
+
 # ── Sprint 5: Quote Workflow Completion ────────────────────────────────
 
 
@@ -109,7 +133,7 @@ async def preview_quote(
 
     return template_response(
         "htmx/partials/quotes/preview.html",
-        {"request": request, "quote": quote},
+        {"request": request, "quote": quote, "valid_until_date": _quote_valid_until(quote)},
     )
 
 
@@ -212,6 +236,26 @@ async def pricing_history(
     )
 
 
+@router.get("/v2/partials/quotes/{quote_id}/edit-form", response_class=HTMLResponse)
+async def edit_terms_form(
+    request: Request,
+    quote_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render the Edit Terms modal (payment/shipping terms, valid-until, notes).
+
+    Loaded into #modal-content by $dispatch('open-modal', {url: ...}) from the quote
+    detail action bar. "Valid Until" is prefilled from validity_days via _quote_valid_until
+    so the picker default matches what the customer would see on the sent quote.
+    """
+    quote = get_quote_for_user(db, user, quote_id)
+    return template_response(
+        "htmx/partials/quotes/edit_form.html",
+        {"request": request, "quote": quote, "valid_until_date": _quote_valid_until(quote)},
+    )
+
+
 @router.post("/v2/partials/quotes/{quote_id}/edit", response_class=HTMLResponse)
 async def edit_quote_metadata(
     request: Request,
@@ -219,19 +263,38 @@ async def edit_quote_metadata(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Update quote metadata (payment terms, shipping, notes) and return refreshed
-    detail."""
+    """Update quote terms (payment/shipping), notes, and valid-until; return refreshed
+    detail.
+
+    "Valid until" is a date the user picks; it is stored as validity_days relative to
+    the same anchor quote_send.py uses (send date if sent, else today) — the Quote model
+    has no valid_until column. Blank/omitted fields are left unchanged (edit-in-place).
+    Bad input raises HTTPException(400) → the global htmx:responseError toast (no swap,
+    modal stays open to fix and retry).
+    """
     quote = get_quote_for_user(db, user, quote_id)
 
     form = await request.form()
     if form.get("payment_terms"):
-        quote.payment_terms = form["payment_terms"].strip()
+        payment_terms = form["payment_terms"].strip()
+        if len(payment_terms) > 100:
+            raise HTTPException(400, "Payment Terms must be 100 characters or fewer.")
+        quote.payment_terms = payment_terms
     if form.get("shipping_terms"):
-        quote.shipping_terms = form["shipping_terms"].strip()
+        shipping_terms = form["shipping_terms"].strip()
+        if len(shipping_terms) > 100:
+            raise HTTPException(400, "Shipping Terms must be 100 characters or fewer.")
+        quote.shipping_terms = shipping_terms
     if form.get("notes"):
         quote.notes = form["notes"].strip()
     if form.get("valid_until"):
-        quote.valid_until = form["valid_until"].strip()
+        target = _parse_date_safe(form["valid_until"].strip(), date)
+        if target is None:
+            raise HTTPException(400, "Valid Until must be a valid date (YYYY-MM-DD).")
+        days = _validity_days_from_valid_until(quote, target)
+        if days < 1:
+            raise HTTPException(400, "Valid Until must be a date in the future.")
+        quote.validity_days = days
 
     quote.updated_at = datetime.now(timezone.utc)
     db.commit()

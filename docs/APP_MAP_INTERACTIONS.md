@@ -1334,6 +1334,25 @@ parent so attribution survives a revision: the htmx "Revise" button
 (non-revision) build has no parent so `source` stays NULL — it is set only at origin
 (e.g. `proactive_service.py` sets `'proactive'`).
 
+**Terms editor + Preview (OQ-08).** The quote detail action bar (`quotes/detail.html`)
+carries two always-visible buttons (no status gate, beside Revise / Apply Markup): **Edit
+Terms** opens a modal (`$dispatch('open-modal', {url: '/v2/partials/quotes/{id}/edit-form'})`
+→ `htmx/quotes.py::edit_terms_form` renders `quotes/edit_form.html` into `#modal-content`,
+lazy-loading recent payment/shipping `<datalist>`s from `GET .../recent-terms`), and
+**Preview** (`POST /v2/partials/quotes/{id}/preview` → `quotes/preview.html` swapped into
+`#main-content`). The modal POSTs `.../{id}/edit` (`edit_quote_metadata`), which updates
+`payment_terms`/`shipping_terms` (each ≤100 chars → else `HTTPException(400)`), `notes`
+(uncapped), and **"Valid Until"**. The Quote model has **no `valid_until` column** —
+`validity_days` is the single source of truth (also read by `quote_send.py`,
+`crm/_helpers.py`, `quote_report.html`). The editor shows a **date picker**; the route
+converts it to `validity_days` via `_validity_days_from_valid_until(quote, target)` anchored
+to `quote.sent_at.date()` if sent else today — the **same anchor** `quote_send.py` uses for
+the emailed expiry — so the editor default, the preview cell, and the real outbound email all
+agree. `< 1` day → 400 (must be in the future); unparseable → 400 (invalid date). Blank/omitted
+fields are left unchanged (edit-in-place). Ownership is scoped through `get_quote_for_user`
+(SALES sees only own reqs → 404 otherwise). Errors surface via the global `htmx:responseError`
+toast with no swap, so the modal stays open to fix and retry.
+
 ## 6. Buy Plan Workflow
 
 ```
@@ -4901,7 +4920,7 @@ the current implementation.
 | Vendors | 57 | CRUD, contacts, stock history, reviews, tags; new create: `POST /api/vendors` (201, 409 dup), `GET /v2/partials/vendors/create-form`, `POST /v2/partials/vendors/create`; delete UI: `DELETE /v2/partials/vendors/{id}` (admin, 400 if active offers) — both returning vendor detail/list HTML; stock-list upload UI: `POST /v2/partials/vendors/import-stock` (`import_vendor_stock_list`, require_buyer — thin wrapper over `stock_list_ingest.ingest_stock_list`, result banner into `#vendor-stock-result`); CRM parity: activity tab, add-note, tasks tab + CRUD, attachments; **migration 145 (P1)**: HTMX vendor contact CRUD (`POST /v2/partials/vendors/{id}/contacts` require_user, `PUT .../contacts/{cid}` require_user, `DELETE .../contacts/{cid}` require_admin, `POST .../contacts/{cid}/set-primary` require_user — clears all others atomically); ownership badge (`GET/POST .../claim` require_user, `POST .../release` require_user — wraps `strategic_vendor_service.claim_vendor`/`drop_vendor`); custom fields (`POST/DELETE /v2/partials/vendors/{id}/custom-fields[/{label}]` require_user, mirrors company custom-fields); is_primary column on vendor_contacts; custom_fields JSONB on vendor_cards |
 | Companies/CRM | 47 | CRUD, sites, contacts, enrichment, import; CDM workspace (`/v2/partials/customers`, `/v2/partials/customers/account-list`); outreach logging (`POST /api/activity/outreach-initiated`); CRM task CRUD: `DELETE /v2/partials/tasks/{id}` (delete), `GET /v2/partials/tasks/{id}/edit-form` + `POST /v2/partials/tasks/{id}/edit` (edit); account add-note: `GET /v2/partials/customers/{id}/activity/add-note-form` + `POST /v2/partials/customers/{id}/activity/add-note` (cadence-neutral, direction=None → no last_outbound_at bump); all three gates reuse `_is_crm_task_authorized` (task) or `can_manage_account` (note); contact merge (dedup): `GET /v2/partials/customers/{cid}/contacts/{ctid}/merge-form` + preview + `POST .../merge` (can_manage_account on source company, merge_contacts service); contact move: `GET .../move-form` + `POST .../move` (can_manage_account on BOTH source+target companies, target site must be active); **migration 144**: contact secondary fields (secondary_email, secondary_phone in EDITABLE_CONTACT_FIELDS), reports_to_id self-FK in create+edit; contact tag routes: `POST /v2/partials/customers/{cid}/contacts/{ctid}/tags` (assign segment tag by tag_id or tag_name), `DELETE /v2/partials/customers/{cid}/contacts/{ctid}/tags/{tag_id}` (unassign), `GET /v2/partials/customers/{cid}/contacts/for-select` (JSON list for reports_to picker, exclude_id param); EntityTag entity_type='site_contact' now valid; **bulk actions**: `POST /v2/partials/customers/bulk/{action}` (deactivate, send-to-prospecting, assign-owner) — auth-scoped: deactivate+send-to-prospecting gate per-company via `can_manage_account` (skips non-manageable; summary), assign-owner is MANAGER/ADMIN ONLY (403 for reps); **CSV import**: `POST /v2/partials/customers/import/preview` (parse+flag dupes/invalid, no writes) + `POST /v2/partials/customers/import/confirm` (create Companies, dedup by normalized_name, sets importer as account_owner_id); **contact CSV import**: `POST /v2/partials/customers/import/contacts/preview` (parse+flag duplicate emails) |
 | Offers | 30 | CRUD, line items, accept/reject, changelog |
-| Quotes | 25 | CRUD, send, PDF, e-signature, pricing history; bare `/v2/quotes` 307→`/v2/requisitions`; list partial removed; detail `/v2/quotes/{id}` unchanged; surfaced via Reqs workspace + CRM account Quotes tabs |
+| Quotes | 26 | CRUD, send, PDF, e-signature, pricing history; terms editor modal (`GET .../{id}/edit-form` + `POST .../{id}/edit`) + Preview (`POST .../{id}/preview`) — OQ-08; "Valid Until" date picker persists as `validity_days` (no `valid_until` column); bare `/v2/quotes` 307→`/v2/requisitions`; list partial removed; detail `/v2/quotes/{id}` unchanged; surfaced via Reqs workspace + CRM account Quotes tabs |
 | Buy Plans | 10 | submit/approve, SO+PO verify, confirm-PO, flag-issue, cancel (service + line cascade), reset; ops-group admin tab |
 | Materials | 20 | CRUD, substitutes, stock levels, price history |
 | Sightings | 27 | CRUD, RFQ send, batch RFQ, inquiry (cross-requisition composer: vendor-affinity GET + composer-vendor POST), vendor+part unavailability (mark/clear/reason modal) |

@@ -7,7 +7,7 @@ Called by: pytest
 Depends on: conftest.py fixtures, app.routers.htmx_views
 """
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -57,6 +57,17 @@ class TestQuotePreview:
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 404
+
+    def test_preview_shows_valid_until(self, client: TestClient, draft_quote: Quote):
+        # draft_quote has no sent_at → anchor is today; validity_days defaults to 7.
+        resp = client.post(
+            f"/v2/partials/quotes/{draft_quote.id}/preview",
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        assert "Valid Until" in resp.text
+        expected = (date.today() + timedelta(days=7)).strftime("%B %d, %Y")
+        assert expected in resp.text
 
 
 # ── Reopen button (clarity: closed quotes were un-reopenable from the detail UI) ──────
@@ -242,6 +253,117 @@ class TestEditQuoteMetadata:
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 404
+
+    def test_valid_until_persists_as_validity_days(self, client: TestClient, draft_quote: Quote, db_session: Session):
+        # Draft (no sent_at) → anchor is today, so today+14 → validity_days == 14.
+        target = date.today() + timedelta(days=14)
+        resp = client.post(
+            f"/v2/partials/quotes/{draft_quote.id}/edit",
+            data={"valid_until": target.isoformat()},
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        db_session.refresh(draft_quote)
+        assert draft_quote.validity_days == 14
+
+    def test_valid_until_anchors_to_sent_at(
+        self, client: TestClient, db_session: Session, test_requisition, test_customer_site, test_user
+    ):
+        # A SENT quote: the anchor is sent_at, NOT today, so sent_at+30 → validity_days == 30.
+        sent_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        q = Quote(
+            requisition_id=test_requisition.id,
+            customer_site_id=test_customer_site.id,
+            quote_number="TEST-Q-SENT-ANCHOR",
+            status="sent",
+            line_items=[],
+            sent_at=sent_at,
+            validity_days=7,
+            created_by_id=test_user.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(q)
+        db_session.commit()
+        db_session.refresh(q)
+
+        target = sent_at.date() + timedelta(days=30)
+        resp = client.post(
+            f"/v2/partials/quotes/{q.id}/edit",
+            data={"valid_until": target.isoformat()},
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        db_session.refresh(q)
+        assert q.validity_days == 30
+
+    def test_valid_until_past_rejected(self, client: TestClient, draft_quote: Quote, db_session: Session):
+        before = draft_quote.validity_days
+        past = date.today() - timedelta(days=1)
+        resp = client.post(
+            f"/v2/partials/quotes/{draft_quote.id}/edit",
+            data={"valid_until": past.isoformat()},
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 400
+        db_session.refresh(draft_quote)
+        assert draft_quote.validity_days == before
+
+    def test_valid_until_invalid_format_rejected(self, client: TestClient, draft_quote: Quote):
+        resp = client.post(
+            f"/v2/partials/quotes/{draft_quote.id}/edit",
+            data={"valid_until": "not-a-date"},
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 400
+
+    def test_payment_terms_too_long_rejected(self, client: TestClient, draft_quote: Quote, db_session: Session):
+        resp = client.post(
+            f"/v2/partials/quotes/{draft_quote.id}/edit",
+            data={"payment_terms": "x" * 101},
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 400
+        db_session.refresh(draft_quote)
+        assert draft_quote.payment_terms == "Net 30"
+
+    def test_shipping_terms_too_long_rejected(self, client: TestClient, draft_quote: Quote, db_session: Session):
+        resp = client.post(
+            f"/v2/partials/quotes/{draft_quote.id}/edit",
+            data={"shipping_terms": "y" * 101},
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 400
+        db_session.refresh(draft_quote)
+        assert draft_quote.shipping_terms == "FOB Origin"
+
+
+class TestEditTermsForm:
+    def test_edit_form_renders(self, client: TestClient, draft_quote: Quote):
+        resp = client.get(
+            f"/v2/partials/quotes/{draft_quote.id}/edit-form",
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        assert "Edit Terms" in resp.text
+        assert 'name="valid_until"' in resp.text or "name='valid_until'" in resp.text
+        # Prefilled from validity_days (draft → today+7).
+        expected = (date.today() + timedelta(days=7)).isoformat()
+        assert expected in resp.text
+
+    def test_edit_form_nonexistent(self, client: TestClient):
+        resp = client.get(
+            "/v2/partials/quotes/99999/edit-form",
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 404
+
+    def test_detail_shows_edit_terms_and_preview_buttons(self, client: TestClient, draft_quote: Quote):
+        resp = client.get(f"/v2/partials/quotes/{draft_quote.id}", headers={"HX-Request": "true"})
+        assert resp.status_code == 200
+        assert "Edit Terms" in resp.text
+        assert f"/v2/partials/quotes/{draft_quote.id}/edit-form" in resp.text
+        assert "Preview" in resp.text
+        assert f"/v2/partials/quotes/{draft_quote.id}/preview" in resp.text
 
 
 class TestReviseClonesLines:
