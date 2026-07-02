@@ -1388,6 +1388,14 @@ async def send_follow_up_htmx(
     ctx = _base_ctx(request, user, "follow-ups")
     ctx["contact_id"] = contact_id
     ctx["vendor_name"] = contact.vendor_name or "Vendor"
+
+    # Honest result card: only claim "sent" when the email actually went out (or in test
+    # mode). A swallowed Graph failure or a contact with no address leaves email_sent False
+    # — surface that instead of the green success card, which used to lie.
+    if not email_sent and not is_testing:
+        ctx["reason"] = "no_email" if not contact.vendor_contact else "send_failed"
+        return template_response("htmx/partials/follow_ups/send_failed.html", ctx)
+
     return template_response("htmx/partials/follow_ups/sent_success.html", ctx)
 
 
