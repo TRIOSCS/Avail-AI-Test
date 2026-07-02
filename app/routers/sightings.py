@@ -209,10 +209,15 @@ def _annotated_unavailability(
     the rows-win state selection) so the template stays dumb and never re-derives
     policy. Vendors with no matching record are absent.
     """
-    raw = unavailability_for_requirement(db, requirement, vendor_names)
+    # PERF-8: load the requirement's sightings once and share the single scan between the
+    # unavailability lookup and the has_unstamped_row grouping below — both operate on the
+    # identical set (Sighting.requirement_id == requirement.id). Skip the scan entirely
+    # when there are no vendors to annotate (unavailability_for_requirement returns {}
+    # without touching sightings in that case, so the pre-fix query count is unchanged).
+    rows = db.query(Sighting).filter(Sighting.requirement_id == requirement.id).all() if vendor_names else []
+    raw = unavailability_for_requirement(db, requirement, vendor_names, sightings=rows)
     if not raw:
         return {}
-    rows = db.query(Sighting).filter(Sighting.requirement_id == requirement.id).all()
     # Group sightings by vendor norm for condition-scoped has_unstamped_row computation.
     sightings_by_vendor: dict[str, list[Sighting]] = {}
     for s in rows:
