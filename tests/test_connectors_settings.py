@@ -681,7 +681,16 @@ def _make_user_client(db_session, user):
 
 @pytest.fixture()
 def connector_manager_client(db_session, test_user):
-    """A non-admin buyer — holds MANAGE_CONNECTORS by role default (SET-06)."""
+    """A non-admin buyer explicitly GRANTED MANAGE_CONNECTORS via override (SET-06).
+
+    manage_connectors is not a blanket interactive default — connector credentials are
+    workspace-global shared state — so a trusted non-admin holds it only by deliberate
+    per-user grant.
+    """
+    from app.constants import AccessKey
+
+    test_user.access_overrides = {AccessKey.MANAGE_CONNECTORS.value: True}
+    db_session.commit()
     _seed_sources(db_session)
     yield from _make_user_client(db_session, test_user)
 
@@ -697,6 +706,14 @@ def no_connector_client(db_session, test_user):
     yield from _make_user_client(db_session, test_user)
 
 
+@pytest.fixture()
+def default_buyer_client(db_session, test_user):
+    """A plain non-admin buyer with NO access override — must NOT hold MANAGE_CONNECTORS
+    by default (SET-06 blast-radius guard)."""
+    _seed_sources(db_session)
+    yield from _make_user_client(db_session, test_user)
+
+
 def test_capability_holder_can_open_connectors_tab(connector_manager_client):
     """A non-admin who holds MANAGE_CONNECTORS gets the tab (200), not a 403."""
     r = connector_manager_client.get("/v2/partials/settings/connectors", follow_redirects=False)
@@ -708,6 +725,13 @@ def test_capability_revoked_is_forbidden(no_connector_client):
     """MANAGE_CONNECTORS revoked → the connectors tab endpoint 403s."""
     r = no_connector_client.get("/v2/partials/settings/connectors", follow_redirects=False)
     assert r.status_code == 403, f"expected 403 for revoked capability, got {r.status_code}"
+
+
+def test_default_buyer_cannot_open_connectors_tab(default_buyer_client):
+    """A plain buyer with no explicit grant does NOT get MANAGE_CONNECTORS by default,
+    so the connectors tab endpoint 403s (guards the shared-credential blast radius)."""
+    r = default_buyer_client.get("/v2/partials/settings/connectors", follow_redirects=False)
+    assert r.status_code == 403, f"default buyer must not reach connectors, got {r.status_code}"
 
 
 def test_settings_index_shows_connectors_tab_for_holder(connector_manager_client):

@@ -1995,7 +1995,11 @@ the orphaned **API Keys** tab: both legacy routes (`/v2/partials/settings/source
 `/v2/partials/settings/api-keys`) 302 → `/v2/partials/settings/connectors`.
 
 Gated on the `MANAGE_CONNECTORS` capability (admins always qualify via `user_has_access`),
-not bare `is_admin` — the SET-06 fix that made the capability actually gate something. The
+not bare `is_admin` — the SET-06 fix that made the capability actually gate something.
+`MANAGE_CONNECTORS` is deliberately NOT in the interactive role defaults (unlike
+send_rfq / approve_offers / export_data): connector credentials + `is_active` are
+workspace-global shared state, so it is a per-user grant an admin sets explicitly, never a
+blanket buyer-tier default. The
 tab button (`settings/index.html`, `can_manage_connectors` flag), the `settings_partial`
 default-tab redirect, the tab + card-refresh + test-all endpoints, and the per-source
 mutations (`sources.toggle_api_source` / `toggle_source_active` / `update_source_credentials`)
