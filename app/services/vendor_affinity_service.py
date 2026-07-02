@@ -11,7 +11,6 @@ from loguru import logger
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.config import settings
 from app.models import (
     EntityTag,
     MaterialCard,
@@ -167,9 +166,14 @@ def find_affinity_vendors_l2(mpn: str, db: Session, exclude_vendors: set[str] | 
 def find_affinity_vendors_l3(mpn: str, manufacturer: str | None, db: Session) -> list[dict]:
     """Use Claude to classify MPN into a category, then find vendors supplying that
     category."""
-    api_key = settings.anthropic_api_key
+    # Resolve via the credential store (connectors table, env fallback) — same as
+    # every other Anthropic caller. Reading settings.anthropic_api_key directly left
+    # L3 silently off whenever the key lives only in the DB, not the environment.
+    from app.services.credential_service import get_credential_cached
+
+    api_key = get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY")
     if not api_key:
-        logger.debug("L3: no anthropic_api_key configured, skipping")
+        logger.debug("L3: no Anthropic credential configured, skipping")
         return []
 
     # Classify the MPN into a sourcing category using Claude Haiku.

@@ -226,9 +226,8 @@ def test_l2_no_tags(db_session: Session):
 
 
 def test_l3_skipped_without_api_key(db_session: Session):
-    """L3 returns empty list when no Anthropic API key is configured."""
-    with patch("app.services.vendor_affinity_service.settings") as mock_settings:
-        mock_settings.anthropic_api_key = ""
+    """L3 returns empty list when no Anthropic credential is configured."""
+    with patch("app.services.credential_service.get_credential_cached", return_value=None):
         results = find_affinity_vendors_l3("LM317T", "Texas Instruments", db_session)
     assert results == []
 
@@ -329,7 +328,8 @@ def test_find_vendor_affinity_deduplicates(db_session: Session):
     db_session.add(et)
     db_session.commit()
 
-    results = find_vendor_affinity("LM317T", db_session)
+    with patch("app.services.credential_service.get_credential_cached", return_value=None):
+        results = find_vendor_affinity("LM317T", db_session)
 
     # Arrow should appear only once
     arrow_results = [r for r in results if r["vendor_name"].lower() == "arrow electronics"]
@@ -359,5 +359,6 @@ def test_find_vendor_affinity_limits_to_10(db_session: Session):
 
     db_session.commit()
 
-    results = find_vendor_affinity("LM317T", db_session)
+    with patch("app.services.credential_service.get_credential_cached", return_value=None):
+        results = find_vendor_affinity("LM317T", db_session)
     assert len(results) <= 10
