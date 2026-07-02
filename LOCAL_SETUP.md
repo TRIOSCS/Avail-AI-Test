@@ -131,33 +131,27 @@ pytest -v
 
 ---
 
-## 5. Migrations and one-time fixes
+## 5. Migrations
 
-**Correct migration sequence (single head):**
-`… → 017_proactive_matches_cph → 018_missing_orm_cols → 019_activity_req_channel → 020 → … → 047`
+The chain is a single head (asserted in CI); the entrypoint runs
+`alembic upgrade head` on boot, so a fresh local DB migrates itself. Check the
+current head with:
 
-- **018** already adds `site_contacts.contact_status` (and other ORM columns). There is no separate “019 contact_status” migration in the repo.
-- If you see **“Multiple head revisions”** or **“Can't locate revision 019_site_contacts_contact_status_ensure”**, your DB’s `alembic_version` is pointing at a revision that was removed. Reset it so the next `alembic upgrade head` runs the canonical 019 → 047 chain.
+```bash
+docker compose -f docker-compose.yml -f docker-compose.local.yml exec app alembic heads
+```
 
-**One-time fix (local DB stuck on removed revision):**
+Claiming a number for a NEW migration: see `MIGRATION_NUMBERS_IN_FLIGHT.txt`
+(protocol enforced by `tests/test_migration_numbers_in_flight.py`).
 
-1. Start only the DB (so you can run SQL):
-   ```bash
-   docker compose -f docker-compose.yml -f docker-compose.local.yml up -d db
-   ```
-2. Set the stored revision back to 018:
-   ```bash
-   docker compose -f docker-compose.yml -f docker-compose.local.yml exec db \
-     psql -U availai -d availai -c "UPDATE alembic_version SET version_num = '018_missing_orm_cols' WHERE version_num = '019_site_contacts_contact_status_ensure';"
-   ```
-3. Bring up the full stack (entrypoint will run `alembic upgrade head` → 019 through 047):
-   ```bash
-   docker compose -f docker-compose.yml -f docker-compose.local.yml down
-   docker compose -f docker-compose.yml -f docker-compose.local.yml up --build
-   ```
+If a local DB ever gets stuck on a revision that no longer exists (historic
+renumbering), the simplest fix locally is a clean rebuild — drop the local
+volume and let the entrypoint re-migrate from scratch:
 
-Optional: run the same SQL from the script:
-`docker compose -f docker-compose.yml -f docker-compose.local.yml exec -T db psql -U availai -d availai < scripts/fix_alembic_stuck_019.sql`
+```bash
+docker compose -f docker-compose.yml -f docker-compose.local.yml down -v
+docker compose -f docker-compose.yml -f docker-compose.local.yml up --build
+```
 
 ---
 

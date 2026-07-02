@@ -27,7 +27,7 @@ AvailAI is a production electronic component sourcing platform and CRM. Buyers s
 | Container | Purpose | Resources |
 |-----------|---------|-----------|
 | **app** | FastAPI on port 8000 | 2 GB / 2 CPU |
-| **db** | PostgreSQL 16 | 1.5 GB |
+| **db** | PostgreSQL 16 | 2 GB / 1.5 CPU |
 | **redis** | Cache + coordination | 768 MB |
 | **caddy** | Reverse proxy, HTTPS | 512 MB |
 | **db-backup** | pg_dump every 6 hours | 256 MB |
