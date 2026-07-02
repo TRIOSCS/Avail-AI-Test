@@ -118,7 +118,7 @@
                  Hidden 'false' field ensures an unchecked box still submits a revoke. #}
               <form hx-post="/api/admin/users/{{ row.user.id }}/prepayment-approver"
                     hx-target="#users-content" hx-swap="outerHTML"
-                    hx-trigger="change from:input">
+                    hx-trigger="change">
                 <input type="hidden" name="can_approve" value="false">
                 <div class="space-y-1">
                   <label class="inline-flex items-center cursor-pointer">
@@ -172,7 +172,7 @@
                  hidden 'false' field ensures an unchecked box still submits a revoke. #}
               <form hx-post="/api/admin/users/{{ row.user.id }}/purchase-order-approver"
                     hx-target="#users-content" hx-swap="outerHTML"
-                    hx-trigger="change from:input">
+                    hx-trigger="change">
                 <input type="hidden" name="can_approve" value="false">
                 <div class="space-y-1">
                   <label class="inline-flex items-center cursor-pointer">

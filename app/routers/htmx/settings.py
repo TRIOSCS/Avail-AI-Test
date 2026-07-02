@@ -147,9 +147,15 @@ async def settings_partial(
     db: Session = Depends(get_db),
 ):
     """Settings page — renders index with active tab."""
+    is_admin = user.role == UserRole.ADMIN
+    # Connectors is admin-only (403 for others). A non-admin hitting Settings with
+    # the default 'connectors' tab landed on an empty 403 page — send them to Profile
+    # (available to everyone) instead (SET-04).
+    if tab == "connectors" and not is_admin:
+        tab = "profile"
     ctx = _base_ctx(request, user, "settings")
     ctx["active_tab"] = tab
-    ctx["is_admin"] = user.role == UserRole.ADMIN
+    ctx["is_admin"] = is_admin
     # Supervisor-tier flag — gates the Activity Scorecard tab (manager + admin).
     ctx["is_manager"] = is_manager_or_admin(user)
     return template_response("htmx/partials/settings/index.html", ctx)
