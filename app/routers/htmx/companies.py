@@ -3761,6 +3761,15 @@ async def edit_company(
     form = await request.form()
     name = form.get("name", "").strip()
     if name:
+        # Duplicate-name guard — mirror create_company. Company.name is nullable=False
+        # and NOT unique, so nothing else stops a rename colliding with another account.
+        # Exclude self (Company.id != company_id) so a no-op or case-only save on the
+        # same row doesn't false-positive.
+        existing = (
+            db.query(Company).filter(sqlfunc.lower(Company.name) == name.lower(), Company.id != company_id).first()
+        )
+        if existing:
+            raise HTTPException(409, f"Company '{existing.name}' already exists (ID {existing.id})")
         company.name = name
     notes = form.get("notes", "").strip()
     company.notes = notes or company.notes
