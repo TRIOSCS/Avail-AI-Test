@@ -1226,11 +1226,10 @@ async def follow_ups_list_partial(
     db: Session = Depends(get_db),
 ):
     """Cross-requisition follow-up queue as HTML partial."""
-    from ...config import settings as cfg
+    from ...config import settings
     from ...models.offers import Contact as RfqContact
 
-    threshold_days = getattr(cfg, "follow_up_days", 2)
-    threshold = datetime.now() - __import__("datetime").timedelta(days=threshold_days)
+    threshold = datetime.now(timezone.utc) - timedelta(days=settings.follow_up_days)
 
     stale_q = db.query(RfqContact).filter(
         RfqContact.contact_type == "email",
@@ -1745,11 +1744,12 @@ async def send_batch_follow_up(
     db: Session = Depends(get_db),
 ):
     """Send follow-ups to all stale contacts at once."""
+    from ...config import settings
     from ...models.offers import Contact as RfqContact
 
-    cfg = getattr(request.app, "state", None)
-    threshold_days = getattr(cfg, "follow_up_days", 2) if cfg else 2
-    threshold = datetime.now(timezone.utc) - timedelta(days=threshold_days)
+    # Was request.app.state.follow_up_days — a value nothing ever set, so this
+    # silently used the getattr default (2) and diverged from the queue/badge.
+    threshold = datetime.now(timezone.utc) - timedelta(days=settings.follow_up_days)
 
     q = db.query(RfqContact).filter(
         RfqContact.contact_type == "email",
@@ -1784,9 +1784,10 @@ async def follow_up_badge(
     db: Session = Depends(get_db),
 ):
     """Return follow-up count badge for nav sidebar."""
+    from ...config import settings
     from ...models.offers import Contact as RfqContact
 
-    threshold = datetime.now(timezone.utc) - timedelta(days=2)
+    threshold = datetime.now(timezone.utc) - timedelta(days=settings.follow_up_days)
     q = db.query(sqlfunc.count(RfqContact.id)).filter(
         RfqContact.contact_type == "email",
         RfqContact.status.in_(["sent", "opened"]),
