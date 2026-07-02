@@ -7,6 +7,7 @@ setup_logging()  # Must run before any other module logs
 import hmac
 import logging
 import os
+import re
 import uuid
 from contextlib import asynccontextmanager
 
@@ -382,27 +383,37 @@ app.add_middleware(
 # GZip responses ≥ 500 bytes — big wins on JSON-heavy API payloads
 app.add_middleware(GZipMiddleware, minimum_size=500)
 
+# CSRF double-submit-cookie exemptions. Matched with re.Pattern.match against
+# request.url.path (starlette_csrf ``_url_is_exempt``), so anchor the end with ``$``
+# to stop a prefix from over-matching a sibling route. Only genuinely
+# CSRF-incompatible or unauthenticated endpoints belong here; every state-changing
+# authenticated route must stay under x-csrftoken enforcement. Exposed as a
+# module-level constant so the exempt set is unit-testable (see tests).
+CSRF_EXEMPT_URLS = [
+    re.compile(r"/auth/callback$"),
+    re.compile(r"/auth/login$"),
+    re.compile(r"/health$"),
+    re.compile(r"/metrics$"),
+    # Import PREVIEW only: import-parse is a multipart upload (a plain browser form
+    # post can't add the x-csrftoken header) and import-form is a GET. import-save
+    # (POST that CREATES requisition + requirement rows) is deliberately EXCLUDED so
+    # it stays under standard CSRF enforcement like every other state-changing route.
+    re.compile(r"/v2/partials/requisitions/import-(form|parse)$"),
+    re.compile(r"/v2/partials/customers/lookup"),  # AI company lookup (read-only)
+    re.compile(r"/api/webhooks/graph$"),  # Microsoft Graph mail webhook
+    re.compile(r"/api/webhooks/teams$"),  # Microsoft Graph Teams webhook
+    re.compile(r"/api/webhooks/acs$"),  # Azure Communication Services webhook
+]
+
 # CSRF protection (double-submit cookie) — disabled in test mode
 if not os.environ.get("TESTING"):
-    import re
-
     from starlette_csrf import CSRFMiddleware
 
     app.add_middleware(
         CSRFMiddleware,
         secret=settings.secret_key,
         sensitive_cookies={"session"},  # Only enforce CSRF when session cookie is present
-        exempt_urls=[
-            re.compile(r"/auth/callback$"),
-            re.compile(r"/auth/login$"),
-            re.compile(r"/health$"),
-            re.compile(r"/metrics$"),
-            re.compile(r"/v2/partials/requisitions/import-.*"),  # multipart file upload
-            re.compile(r"/v2/partials/customers/lookup"),  # AI company lookup (read-only)
-            re.compile(r"/api/webhooks/graph$"),  # Microsoft Graph mail webhook
-            re.compile(r"/api/webhooks/teams$"),  # Microsoft Graph Teams webhook
-            re.compile(r"/api/webhooks/acs$"),  # Azure Communication Services webhook
-        ],
+        exempt_urls=CSRF_EXEMPT_URLS,
     )
 
 

@@ -50,7 +50,14 @@ FastAPI Middleware Stack (in order):
     │       (sets current_user_id contextvar) and ModuleAccessMiddleware (per-user MODULE
     │       access chokepoint on module-exclusive HTMX sub-partials — see INTERACTIONS
     │       "Module SUB-partial chokepoint"; reads scope["session"] so Session must run first).
-    ├── 3. CSRFMiddleware (double-submit cookie on mutations)
+    ├── 3. CSRFMiddleware (double-submit cookie on mutations; exempt set is the
+    │       module-level `CSRF_EXEMPT_URLS` in main.py — anchor patterns with `$` since
+    │       starlette_csrf matches `re.match(url.path)`. Only auth/health/webhook/read
+    │       endpoints and the requisition import PREVIEW are exempt: `import-parse`
+    │       (multipart upload, browser form can't add the x-csrftoken header) + the
+    │       `import-form` GET. `import-save` (the DB write) is NOT exempt — it stays under
+    │       token enforcement like every mutation; htmx supplies the header via the global
+    │       `htmx:configRequest` listener in htmx_app.js)
     ├── 4. PrometheusMiddleware (request count + duration histogram, app/prometheus_metrics.py)
     │       Note: fastapi 0.137 (PR #15745) made `app.routes` a tree — `include_router`'d
     │       routes hide behind opaque `_IncludedRouter` wrappers — so `_handler_for` reads
