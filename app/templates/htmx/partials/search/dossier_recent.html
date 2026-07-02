@@ -5,7 +5,7 @@
    Depends on: recent (list[MaterialCard]). #}
 
 {% if recent %}
-<div class="bg-white border border-brand-200 rounded-lg shadow-sm p-3">
+<div class="bg-white border border-brand-200 rounded-lg shadow-card p-3">
   <p class="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">Recent searches</p>
   <div class="divide-y divide-brand-100">
     {% for c in recent %}
@@ -15,7 +15,7 @@
        class="flex items-center justify-between gap-3 py-2.5 px-1 hover:bg-brand-50 rounded-md transition-colors">
       <div class="min-w-0">
         <p class="font-mono text-sm font-semibold text-brand-900 truncate">{{ c.display_mpn }}</p>
-        <p class="text-xs text-gray-400 truncate">{{ c.manufacturer or '—' }}{% if c.category %} · {{ c.category }}{% endif %}</p>
+        <p class="text-secondary truncate">{{ c.manufacturer or '—' }}{% if c.category %} · {{ c.category }}{% endif %}</p>
       </div>
       <div class="shrink-0 text-right">
         <p class="text-[11px] text-gray-400">{{ c.last_searched_at|timeago }}</p>
@@ -26,7 +26,7 @@
   </div>
 </div>
 {% else %}
-<div class="bg-white border border-brand-200 rounded-lg shadow-sm p-8 text-center">
+<div class="bg-white border border-brand-200 rounded-lg shadow-card p-8 text-center">
   <p class="text-sm text-gray-400">No recent searches yet — enter a part number above to begin.</p>
 </div>
 {% endif %}

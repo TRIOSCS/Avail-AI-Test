@@ -12,7 +12,7 @@
 {% if card is none %}
 <div class="rounded-lg bg-brand-50 border border-brand-100 px-4 py-6 text-center">
   <p class="text-sm font-medium text-gray-600">New to us — no enrichment yet</p>
-  <p class="text-xs text-gray-400 mt-1">The first sourcing action queues this part for enrichment.</p>
+  <p class="text-secondary mt-1">The first sourcing action queues this part for enrichment.</p>
 </div>
 {% else %}
 
@@ -78,7 +78,7 @@
 <div class="rounded-lg bg-brand-50 border border-brand-100 px-4 py-6 text-center">
   {% if unenriched %}
   <p class="text-sm font-medium text-gray-600">Unenriched — enriching…</p>
-  <p class="text-xs text-gray-400 mt-1">We know this part, but its specs haven't been filled in yet.</p>
+  <p class="text-secondary mt-1">We know this part, but its specs haven't been filled in yet.</p>
   {% else %}
   <p class="text-sm font-medium text-gray-600">No specs on record.</p>
   {% endif %}

@@ -89,7 +89,7 @@
         <dd class="font-medium {{ 'text-emerald-700' if s.unit_price else 'text-gray-400' }}">
           {% if s.unit_price %}
             ${{ "%.4f"|format(s.unit_price) if s.unit_price < 1 else "%.2f"|format(s.unit_price) }}
-            {% if s.currency and s.currency != "USD" %}<span class="text-gray-400 text-xs ml-1">{{ s.currency }}</span>{% endif %}
+            {% if s.currency and s.currency != "USD" %}<span class="text-secondary ml-1">{{ s.currency }}</span>{% endif %}
           {% else %}RFQ{% endif %}
         </dd>
       </div>

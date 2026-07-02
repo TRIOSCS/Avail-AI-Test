@@ -9,7 +9,7 @@
     <button @click="$el.closest('#parse-area').innerHTML = ''"
             class="text-xs text-gray-400 hover:text-gray-600">Close</button>
   </div>
-  <p class="text-xs text-gray-500 mb-3">Paste a vendor email reply below. AI will extract structured offers with confidence scoring.</p>
+  <p class="text-secondary mb-3">Paste a vendor email reply below. AI will extract structured offers with confidence scoring.</p>
 
   <form hx-post="/v2/partials/requisitions/{{ req.id }}/parse-email"
         hx-target="#parse-area"
@@ -20,19 +20,19 @@
 
     <div class="grid grid-cols-2 gap-3 mb-3">
       <div>
-        <label class="text-xs text-gray-500 block mb-1">Subject (optional)</label>
+        <label class="text-secondary block mb-1">Subject (optional)</label>
         <input type="text" name="email_subject" placeholder="RE: RFQ for LM317T"
                class="input">
       </div>
       <div>
-        <label class="text-xs text-gray-500 block mb-1">Vendor Name (optional)</label>
+        <label class="text-secondary block mb-1">Vendor Name (optional)</label>
         <input type="text" name="vendor_name" placeholder="Arrow Electronics"
                class="input">
       </div>
     </div>
 
     <div class="mb-3">
-      <label class="text-xs text-gray-500 block mb-1">Email Body</label>
+      <label class="text-secondary block mb-1">Email Body</label>
       <textarea name="email_body" rows="6" required
                 placeholder="Paste the full vendor email here..."
                 class="input font-mono"></textarea>
