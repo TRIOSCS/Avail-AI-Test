@@ -57,7 +57,7 @@ from ..utils.sql_helpers import escape_like
 from ._lookup_helpers import get_requisition_or_404
 from .auth import _password_login_enabled
 from .htmx._shared import _base_ctx, _safe_int, _vite_assets
-from .htmx.requisitions import requisition_tab, requisitions_list_partial
+from .htmx.requisitions import _best_quote_status, requisition_tab, requisitions_list_partial
 from .htmx.settings import _run_inbox_scan_now
 
 router = APIRouter(tags=["htmx-views"])
@@ -576,19 +576,23 @@ async def requisition_inline_save(
         ctx.update({"req": req, "requirements": requirements, "users": users})
         response = template_response("htmx/partials/requisitions/detail_header.html", ctx)
     else:
-        # Row context — re-fetch ORM object with relationships
+        # Row context — re-fetch ORM object with relationships. Must attach the SAME
+        # computed attrs the list route does (req_count/offer_count/quote_status) or
+        # the swapped-in row degrades those cells.
         req = (
             db.query(Requisition)
             .options(
                 joinedload(Requisition.creator),
                 joinedload(Requisition.requirements),
                 joinedload(Requisition.offers),
+                joinedload(Requisition.quotes),
             )
             .filter(Requisition.id == req_id)
             .first()
         )
         req.req_count = len(req.requirements) if req.requirements else 0
         req.offer_count = len(req.offers) if req.offers else 0
+        req.quote_status = _best_quote_status(req.quotes)
         ctx = _base_ctx(request, user, "requisitions")
         ctx.update({"req": req, "user_role": getattr(user, "role", UserRole.SALES), "user": user})
         response = template_response("htmx/partials/requisitions/req_row.html", ctx)
