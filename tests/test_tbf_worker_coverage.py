@@ -66,49 +66,41 @@ class TestSearchScheduler:
         with patch.dict(os.environ, {"FORCE_BUSINESS_HOURS": "1"}):
             assert s.is_business_hours() is True
 
-    def test_is_business_hours_saturday(self):
+    def test_is_business_hours_saturday(self, monkeypatch):
         """Saturday is always off."""
         s = self._make()
         # weekday() returns 5 for Saturday
         fake_dt = MagicMock()
         fake_dt.weekday.return_value = 5
         fake_dt.hour = 12
-        with (
-            patch.dict(os.environ, {}, clear=False),
-            patch("app.services.tbf_worker.scheduler.datetime") as mock_dt,
-        ):
-            if "FORCE_BUSINESS_HOURS" in os.environ:
-                del os.environ["FORCE_BUSINESS_HOURS"]
+        monkeypatch.delenv("FORCE_BUSINESS_HOURS", raising=False)
+        with patch("app.services.tbf_worker.scheduler.datetime") as mock_dt:
             mock_dt.now.return_value = fake_dt
             result = s.is_business_hours()
         assert result is False
 
-    def test_is_business_hours_sunday_morning(self):
+    def test_is_business_hours_sunday_morning(self, monkeypatch):
         """Sunday before 6 PM is off."""
         s = self._make()
         fake_dt = MagicMock()
         fake_dt.weekday.return_value = 6
         fake_dt.hour = 10
-        env = {k: v for k, v in os.environ.items() if k != "FORCE_BUSINESS_HOURS"}
-        with (
-            patch.dict(os.environ, env, clear=True),
-            patch("app.services.tbf_worker.scheduler.datetime") as mock_dt,
-        ):
+        # Remove ONLY the override var (auto-restored) — never clear the whole env, which
+        # would also wipe the TESTING / DATABASE_URL / REDIS_URL sandbox guards.
+        monkeypatch.delenv("FORCE_BUSINESS_HOURS", raising=False)
+        with patch("app.services.tbf_worker.scheduler.datetime") as mock_dt:
             mock_dt.now.return_value = fake_dt
             result = s.is_business_hours()
         assert result is False
 
-    def test_is_business_hours_sunday_evening(self):
+    def test_is_business_hours_sunday_evening(self, monkeypatch):
         """Sunday at 6 PM+ is on."""
         s = self._make()
         fake_dt = MagicMock()
         fake_dt.weekday.return_value = 6
         fake_dt.hour = 18
-        env = {k: v for k, v in os.environ.items() if k != "FORCE_BUSINESS_HOURS"}
-        with (
-            patch.dict(os.environ, env, clear=True),
-            patch("app.services.tbf_worker.scheduler.datetime") as mock_dt,
-        ):
+        monkeypatch.delenv("FORCE_BUSINESS_HOURS", raising=False)
+        with patch("app.services.tbf_worker.scheduler.datetime") as mock_dt:
             mock_dt.now.return_value = fake_dt
             result = s.is_business_hours()
         assert result is True

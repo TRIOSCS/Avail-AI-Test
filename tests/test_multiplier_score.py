@@ -689,16 +689,17 @@ class TestMultiplierAPI:
 
         app.dependency_overrides[get_db] = lambda: db_session
         app.dependency_overrides[require_user] = lambda: buyer
-        client = TestClient(app)
+        try:
+            client = TestClient(app)
 
-        resp = client.get("/api/performance/multiplier-scores?role=buyer&month=2026-02")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["role"] == "buyer"
-        assert len(data["entries"]) >= 1
-
-        app.dependency_overrides.pop(get_db, None)
-        app.dependency_overrides.pop(require_user, None)
+            resp = client.get("/api/performance/multiplier-scores?role=buyer&month=2026-02")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["role"] == "buyer"
+            assert len(data["entries"]) >= 1
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+            app.dependency_overrides.pop(require_user, None)
 
     def test_get_bonus_winners(self, db_session):
         """GET /api/performance/bonus-winners returns data."""
@@ -713,15 +714,16 @@ class TestMultiplierAPI:
 
         app.dependency_overrides[get_db] = lambda: db_session
         app.dependency_overrides[require_user] = lambda: buyer
-        client = TestClient(app)
+        try:
+            client = TestClient(app)
 
-        resp = client.get("/api/performance/bonus-winners?role=buyer&month=2026-02")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "winners" in data
-
-        app.dependency_overrides.pop(get_db, None)
-        app.dependency_overrides.pop(require_user, None)
+            resp = client.get("/api/performance/bonus-winners?role=buyer&month=2026-02")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert "winners" in data
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+            app.dependency_overrides.pop(require_user, None)
 
     def test_invalid_role_rejected(self, db_session):
         """Invalid role returns 422."""
@@ -736,13 +738,14 @@ class TestMultiplierAPI:
 
         app.dependency_overrides[get_db] = lambda: db_session
         app.dependency_overrides[require_user] = lambda: user
-        client = TestClient(app)
+        try:
+            client = TestClient(app)
 
-        resp = client.get("/api/performance/multiplier-scores?role=invalid")
-        assert resp.status_code == 422
-
-        app.dependency_overrides.pop(get_db, None)
-        app.dependency_overrides.pop(require_user, None)
+            resp = client.get("/api/performance/multiplier-scores?role=invalid")
+            assert resp.status_code == 422
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+            app.dependency_overrides.pop(require_user, None)
 
     def test_refresh_requires_admin(self, db_session):
         """POST refresh requires admin role."""
@@ -757,13 +760,14 @@ class TestMultiplierAPI:
 
         app.dependency_overrides[get_db] = lambda: db_session
         app.dependency_overrides[require_user] = lambda: buyer
-        client = TestClient(app)
+        try:
+            client = TestClient(app)
 
-        resp = client.post("/api/performance/multiplier-scores/refresh")
-        assert resp.status_code == 403
-
-        app.dependency_overrides.pop(get_db, None)
-        app.dependency_overrides.pop(require_user, None)
+            resp = client.post("/api/performance/multiplier-scores/refresh")
+            assert resp.status_code == 403
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+            app.dependency_overrides.pop(require_user, None)
 
 
 # ══════════════════════════════════════════════════════════════════════

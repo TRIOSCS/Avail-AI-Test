@@ -14,12 +14,18 @@ from app.services.ics_worker.session_manager import IcsSessionManager
 
 
 @pytest.fixture()
-def config():
-    """ICS config with test credentials."""
+def config(tmp_path):
+    """ICS config with test credentials.
+
+    The browser profile dir is a per-test ``tmp_path`` subdir (auto-cleaned, unique per
+    xdist worker) — never a fixed shared path, which would collide across parallel
+    workers / concurrent pytest invocations the moment a real launch_persistent_context
+    path runs.
+    """
     c = IcsConfig()
     c.ICS_USERNAME = "testuser"
     c.ICS_PASSWORD = "testpass"
-    c.ICS_BROWSER_PROFILE_DIR = "/tmp/test_ics_profile"
+    c.ICS_BROWSER_PROFILE_DIR = str(tmp_path / "ics_profile")
     return c
 
 
@@ -79,21 +85,13 @@ class TestInit:
 
 
 class TestStart:
-    def test_start_no_display_raises(self, manager):
+    def test_start_no_display_raises(self, manager, monkeypatch):
         """Start() raises RuntimeError when DISPLAY is not set."""
-        with patch.dict("os.environ", {}, clear=False):
-            # Remove DISPLAY if present
-            with patch.dict("os.environ", {"DISPLAY": ""}, clear=False):
-                # Actually need to remove DISPLAY
-                import os
-
-                old = os.environ.pop("DISPLAY", None)
-                try:
-                    with pytest.raises(RuntimeError, match="DISPLAY environment variable not set"):
-                        asyncio.get_event_loop().run_until_complete(manager.start())
-                finally:
-                    if old is not None:
-                        os.environ["DISPLAY"] = old
+        # Remove ONLY DISPLAY (auto-restored) — never clear the whole environment, which
+        # would also wipe the TESTING / DATABASE_URL / REDIS_URL sandbox guards.
+        monkeypatch.delenv("DISPLAY", raising=False)
+        with pytest.raises(RuntimeError, match="DISPLAY environment variable not set"):
+            asyncio.get_event_loop().run_until_complete(manager.start())
 
     def test_start_success_logged_in(self, manager, mock_playwright, mock_page):
         """Start() launches browser and detects existing login."""
