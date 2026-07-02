@@ -3,6 +3,11 @@
              no agent), active_admin_count (int), error (str|None inline banner).
    Rendered by: htmx_views.settings_users_tab (GET) and the three
                 admin/users POSTs (which swap #users-content via outerHTML).
+   Error render (SET-03): validation failures re-render THIS partial with `error` set at
+                HTTP 400. htmx won't swap a 4xx by default, so every form carries
+                hx-target-4xx="#users-content" (response-targets ext, loaded in base.html)
+                — without it the inline banner below was unreachable and the user only saw
+                a generic toast.
    CSRF: htmx_app.js injects x-csrftoken on every POST automatically. #}
 <div class="space-y-4" id="users-content">
 
@@ -21,7 +26,7 @@
     </div>
     <form class="px-5 py-4 grid grid-cols-1 sm:grid-cols-4 gap-3 items-end"
           hx-post="/api/admin/users/invite"
-          hx-target="#users-content" hx-swap="outerHTML">
+          hx-target="#users-content" hx-target-4xx="#users-content" hx-swap="outerHTML">
       <div class="sm:col-span-2">
         <label class="form-label" for="invite-email">Email</label>
         <input id="invite-email" name="email" type="email" required
@@ -89,7 +94,7 @@
             <td class="table-cell">
               <select name="role"
                       hx-post="/api/admin/users/{{ row.user.id }}/role"
-                      hx-target="#users-content" hx-swap="outerHTML"
+                      hx-target="#users-content" hx-target-4xx="#users-content" hx-swap="outerHTML"
                       hx-trigger="change"
                       class="input input-sm input-focus w-auto">
                 {% for r in roles %}
@@ -107,7 +112,7 @@
                        class="h-4 w-4 rounded border-gray-300 text-accent-600 focus:ring-accent-500"
                        {{ 'checked' if row.can_approve_buy_plans else '' }}
                        hx-post="/api/admin/users/{{ row.user.id }}/buyplan-approver"
-                       hx-target="#users-content" hx-swap="outerHTML"
+                       hx-target="#users-content" hx-target-4xx="#users-content" hx-swap="outerHTML"
                        hx-trigger="change">
                 <span class="ml-2 text-xs text-gray-600">{{ 'Yes' if row.can_approve_buy_plans else 'No' }}</span>
               </label>
@@ -117,7 +122,7 @@
                  Wrapped in a form so both fields submit together on any change.
                  Hidden 'false' field ensures an unchecked box still submits a revoke. #}
               <form hx-post="/api/admin/users/{{ row.user.id }}/prepayment-approver"
-                    hx-target="#users-content" hx-swap="outerHTML"
+                    hx-target="#users-content" hx-target-4xx="#users-content" hx-swap="outerHTML"
                     hx-trigger="change">
                 <input type="hidden" name="can_approve" value="false">
                 <div class="space-y-1">
@@ -146,7 +151,7 @@
                        class="h-4 w-4 rounded border-gray-300 text-accent-600 focus:ring-accent-500"
                        {{ 'checked' if row.can_approve_qp_sales else '' }}
                        hx-post="/api/admin/users/{{ row.user.id }}/sales-order-approver"
-                       hx-target="#users-content" hx-swap="outerHTML"
+                       hx-target="#users-content" hx-target-4xx="#users-content" hx-swap="outerHTML"
                        hx-trigger="change">
                 <span class="ml-2 text-xs text-gray-600">{{ 'Yes' if row.can_approve_qp_sales else 'No' }}</span>
               </label>
@@ -161,7 +166,7 @@
                        class="h-4 w-4 rounded border-gray-300 text-accent-600 focus:ring-accent-500"
                        {{ 'checked' if row.can_approve_qp_purchasing else '' }}
                        hx-post="/api/admin/users/{{ row.user.id }}/po-approver"
-                       hx-target="#users-content" hx-swap="outerHTML"
+                       hx-target="#users-content" hx-target-4xx="#users-content" hx-swap="outerHTML"
                        hx-trigger="change">
                 <span class="ml-2 text-xs text-gray-600">{{ 'Yes' if row.can_approve_qp_purchasing else 'No' }}</span>
               </label>
@@ -171,7 +176,7 @@
                  prepayment gate). Wrapped in a form so both fields submit together; the
                  hidden 'false' field ensures an unchecked box still submits a revoke. #}
               <form hx-post="/api/admin/users/{{ row.user.id }}/purchase-order-approver"
-                    hx-target="#users-content" hx-swap="outerHTML"
+                    hx-target="#users-content" hx-target-4xx="#users-content" hx-swap="outerHTML"
                     hx-trigger="change">
                 <input type="hidden" name="can_approve" value="false">
                 <div class="space-y-1">
@@ -210,13 +215,13 @@
                 <button class="btn-secondary btn-sm text-rose-600"
                         hx-post="/api/admin/users/{{ row.user.id }}/active"
                         hx-vals='{"is_active": "false"}'
-                        hx-target="#users-content" hx-swap="outerHTML"
+                        hx-target="#users-content" hx-target-4xx="#users-content" hx-swap="outerHTML"
                         hx-confirm="Deactivate {{ row.user.name or row.user.email }}? They won't be able to sign in.">Deactivate</button>
                 {% else %}
                 <button class="btn-secondary btn-sm text-emerald-600"
                         hx-post="/api/admin/users/{{ row.user.id }}/active"
                         hx-vals='{"is_active": "true"}'
-                        hx-target="#users-content" hx-swap="outerHTML"
+                        hx-target="#users-content" hx-target-4xx="#users-content" hx-swap="outerHTML"
                         hx-confirm="Reactivate {{ row.user.name or row.user.email }}?">Activate</button>
                 {% endif %}
               </div>
