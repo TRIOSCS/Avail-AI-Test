@@ -201,51 +201,71 @@ class TestCreateDefaultUser:
                 _create_default_user_if_env_set()
 
 
-class TestSeedVinodUser:
-    """Lines 102, 112-114, 117: _seed_admin_user_if_env_set logic."""
+class TestSeedAdminUser:
+    """_seed_admin_user_if_env_set logic — env-driven, no hard-coded default admin."""
+
+    _ENV = {"SEED_ADMIN_EMAIL": "ops@example.com", "SEED_ADMIN_NAME": "Ops"}
 
     @patch("app.startup.SessionLocal")
-    def test_creates_vinod_user(self, mock_sl, db_session):
-        """Creates Vinod admin user when not present."""
+    def test_creates_admin_user_from_env(self, mock_sl, db_session):
+        """Creates the env-named admin user when not present."""
         from app.startup import _seed_admin_user_if_env_set
 
         mock_sl.return_value = db_session
-        _seed_admin_user_if_env_set()
+        with patch.dict("os.environ", self._ENV):
+            _seed_admin_user_if_env_set()
 
         from app.models.auth import User
 
-        u = db_session.query(User).filter_by(email="vinod@trioscs.com").first()
+        u = db_session.query(User).filter_by(email="ops@example.com").first()
         assert u is not None
         assert u.role == "admin"
 
     @patch("app.startup.SessionLocal")
-    def test_skips_existing_vinod(self, mock_sl, db_session):
-        """Does not duplicate Vinod user."""
+    def test_skips_existing_admin(self, mock_sl, db_session):
+        """Does not duplicate the admin user."""
         from app.models.auth import User
         from app.startup import _seed_admin_user_if_env_set
 
         mock_sl.return_value = db_session
-        existing = User(email="vinod@trioscs.com", name="Vinod", role="admin")
+        existing = User(email="ops@example.com", name="Ops", role="admin")
         db_session.add(existing)
         db_session.commit()
 
-        _seed_admin_user_if_env_set()
-        count = db_session.query(User).filter_by(email="vinod@trioscs.com").count()
+        with patch.dict("os.environ", self._ENV):
+            _seed_admin_user_if_env_set()
+        count = db_session.query(User).filter_by(email="ops@example.com").count()
         assert count == 1
 
-    def test_seed_vinod_with_passed_db(self, db_session):
+    def test_seed_with_passed_db(self, db_session):
         """When db is passed directly, does not create/close own session."""
         from app.startup import _seed_admin_user_if_env_set
 
-        _seed_admin_user_if_env_set(db=db_session)
+        with patch.dict("os.environ", self._ENV):
+            _seed_admin_user_if_env_set(db=db_session)
 
         from app.models.auth import User
 
-        u = db_session.query(User).filter_by(email="vinod@trioscs.com").first()
+        u = db_session.query(User).filter_by(email="ops@example.com").first()
         assert u is not None
 
     @patch("app.startup.SessionLocal")
-    def test_seed_vinod_handles_error(self, mock_sl):
+    def test_env_unset_seeds_nothing_and_opens_no_session(self, mock_sl):
+        """No SEED_ADMIN_EMAIL means no seed and no DB session (CFG-8).
+
+        The old hard-coded default seeded an admin into every fresh install.
+        """
+        import os
+
+        from app.startup import _seed_admin_user_if_env_set
+
+        with patch.dict("os.environ", {}, clear=False):
+            os.environ.pop("SEED_ADMIN_EMAIL", None)
+            _seed_admin_user_if_env_set()
+        mock_sl.assert_not_called()
+
+    @patch("app.startup.SessionLocal")
+    def test_seed_handles_error(self, mock_sl):
         """DB error is rolled back and re-raised."""
         from app.startup import _seed_admin_user_if_env_set
 
@@ -256,7 +276,7 @@ class TestSeedVinodUser:
         mock_db.close = MagicMock()
         mock_sl.return_value = mock_db
 
-        with pytest.raises(RuntimeError, match="DB error"):
+        with patch.dict("os.environ", self._ENV), pytest.raises(RuntimeError, match="DB error"):
             _seed_admin_user_if_env_set()
         mock_db.rollback.assert_called_once()
         mock_db.close.assert_called_once()

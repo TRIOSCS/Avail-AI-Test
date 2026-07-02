@@ -212,8 +212,13 @@ def _seed_admin_user_if_env_set(db=None) -> None:
     Called by: run_startup_migrations
     Depends on: User model, SessionLocal
     """
-    email = os.environ.get("SEED_ADMIN_EMAIL", "vinod@trioscs.com")
-    name = os.environ.get("SEED_ADMIN_NAME", "Vinod")
+    email = os.environ.get("SEED_ADMIN_EMAIL")
+    if not email:
+        # No hard-coded default: seeding an admin into every fresh install without
+        # the operator asking for it is an access-control decision the env must make.
+        logger.debug("SEED_ADMIN_EMAIL not set — skipping admin seed")
+        return
+    name = os.environ.get("SEED_ADMIN_NAME", email.split("@")[0])
 
     from .models.auth import User
 
