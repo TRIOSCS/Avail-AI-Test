@@ -2451,6 +2451,16 @@ merges different-`account_owner_id` accounts) are reused AS-IS.
   blank + emitted empty merge ids; dead). Default keep/remove direction follows
   `pair.auto_keep_id`; both buttons POST `/v2/partials/admin/company-merge`. Reached via
   `GET /v2/partials/settings/data-ops` (`require_user` + explicit `is_admin` gate).
+- **OEM Spec-Code Approvals "Open queue" (SET-07):** the Data Ops card links to the pending
+  spec-code approval queue (`GET /admin/spec-codes/pending`, `admin/spec_codes.list_pending`,
+  `require_settings_access`) with `hx-get` + `hx-push-url="true"`. Because that url is pushed
+  into history, a raw browser reload / bookmark arrives WITHOUT the `HX-Request` header — the
+  route content-negotiates (`request.headers.get("HX-Request") != "true"`) and serves the app
+  shell via `full_page_shell(request, user, request.url.path, "settings")` (`routers/htmx/
+  _shared.py`), whose `base_page.html` loader re-fires `hx-get` at this same url WITH the header
+  to paint the queue; HTMX callers still get the bare `spec_codes_pending.html` partial. Coverage:
+  `tests/routers/admin/test_spec_codes_pending.py` (HTMX pass renders the queue, full-page reload
+  serves the shell).
 - **Vendor-Duplicates loop (same template) had the identical flat-field bug** — it read
   `pair.name_a/id_a/sightings_a` while `vendor_utils.find_vendor_dedup_candidates` returns
   NESTED `{vendor_a:{id,name,sightings}, vendor_b:{…}, score}` → vendor rows rendered blank
@@ -5500,9 +5510,14 @@ has at most one QP, so a second open returns the same row (no duplicate). It re-
 with the same eager options `qp_detail` uses and renders via the shared `_qp_detail_response`,
 so the user lands on the native QP detail. The QP detail's header sub-line carries a back-link
 to the buy plan (`hx-get="/v2/partials/buy-plans/{bp.id}"`, `hx-target="#main-content"`) so the
-view is not a dead-end. Coverage: `tests/test_qp_entry.py` (create-on-first-open, idempotent
-second open, restricted-non-owner 404 with no QP created, button renders the for-buy-plan
-hx-get).
+view is not a dead-end. **Full-page reload / bookmark (SET-05):** the button `hx-push-url`s this
+url into history, so a raw browser reload arrives WITHOUT the `HX-Request` header — the route
+content-negotiates (`request.headers.get("HX-Request") != "true"`) and serves the app shell via
+`full_page_shell(request, user, request.url.path, "buy-plans")` (`routers/htmx/_shared.py`), whose
+`base_page.html` loader re-fires `hx-get` at this same url WITH the header to paint the QP; the
+non-HTMX pass is side-effect-free (get-or-create runs only on the HTMX pass). Coverage:
+`tests/test_qp_entry.py` (create-on-first-open, idempotent second open, restricted-non-owner 404
+with no QP created, button renders the for-buy-plan hx-get, full-page reload serves the shell).
 
 **QP section gates — Sales / Purchasing (QP Phase C2a):** the QualityPlan is the engine
 subject (`subject_type='quality_plan'`); the `gate_type` discriminates the section.
