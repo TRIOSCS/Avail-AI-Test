@@ -269,8 +269,9 @@ class TestEditQuoteMetadata:
     def test_valid_until_anchors_to_sent_at(
         self, client: TestClient, db_session: Session, test_requisition, test_customer_site, test_user
     ):
-        # A SENT quote: the anchor is sent_at, NOT today, so sent_at+30 → validity_days == 30.
-        sent_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        # A SENT quote: validity_days is measured from sent_at, NOT today. sent_at is 10
+        # days ago and the (future) target is today+20 → validity_days == 30.
+        sent_at = datetime.now(timezone.utc) - timedelta(days=10)
         q = Quote(
             requisition_id=test_requisition.id,
             customer_site_id=test_customer_site.id,
@@ -286,7 +287,7 @@ class TestEditQuoteMetadata:
         db_session.commit()
         db_session.refresh(q)
 
-        target = sent_at.date() + timedelta(days=30)
+        target = date.today() + timedelta(days=20)
         resp = client.post(
             f"/v2/partials/quotes/{q.id}/edit",
             data={"valid_until": target.isoformat()},
@@ -295,6 +296,51 @@ class TestEditQuoteMetadata:
         assert resp.status_code == 200
         db_session.refresh(q)
         assert q.validity_days == 30
+
+    def test_valid_until_past_on_sent_quote_rejected(
+        self, client: TestClient, db_session: Session, test_requisition, test_customer_site, test_user
+    ):
+        # Regression: a date in the PAST but after an old sent_at used to pass the days>=1
+        # check while the UI promised "a future date". It must be rejected outright.
+        q = Quote(
+            requisition_id=test_requisition.id,
+            customer_site_id=test_customer_site.id,
+            quote_number="TEST-Q-SENT-PAST",
+            status="sent",
+            line_items=[],
+            sent_at=datetime.now(timezone.utc) - timedelta(days=40),
+            validity_days=7,
+            created_by_id=test_user.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(q)
+        db_session.commit()
+        db_session.refresh(q)
+
+        yesterday = date.today() - timedelta(days=1)  # past today, but 39 days after sent_at
+        resp = client.post(
+            f"/v2/partials/quotes/{q.id}/edit",
+            data={"valid_until": yesterday.isoformat()},
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 400
+        db_session.refresh(q)
+        assert q.validity_days == 7  # unchanged
+
+    def test_edit_can_clear_a_term(self, client: TestClient, draft_quote: Quote, db_session: Session):
+        # Regression: a present-but-empty field must CLEAR the value, not be a silent
+        # no-op that reports success while leaving stale terms on a customer-facing quote.
+        draft_quote.payment_terms = "Net 30"
+        db_session.commit()
+        resp = client.post(
+            f"/v2/partials/quotes/{draft_quote.id}/edit",
+            data={"payment_terms": "", "shipping_terms": "FOB Origin"},
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        db_session.refresh(draft_quote)
+        assert not draft_quote.payment_terms  # cleared
+        assert draft_quote.shipping_terms == "FOB Origin"  # the other field still saved
 
     def test_valid_until_past_rejected(self, client: TestClient, draft_quote: Quote, db_session: Session):
         before = draft_quote.validity_days

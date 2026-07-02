@@ -94,28 +94,30 @@ def _recalc_quote_totals(db: Session, quote: Quote) -> None:
     quote.line_items = new_line_items
 
 
+def _quote_expiry_anchor(quote: Quote) -> date:
+    """The date validity_days counts from — the SINGLE place this anchor is defined.
+
+    quote_send.py anchors the emailed expiry to the send date if the quote was sent,
+    else "now" (UTC). Both directions below must use this identical anchor or the editor
+    default, the preview, and the real outbound email would drift apart, so it lives
+    here once. UTC (not date.today()) matches quote_send.py exactly.
+    """
+    return quote.sent_at.date() if quote.sent_at else datetime.now(timezone.utc).date()
+
+
 def _quote_valid_until(quote: Quote) -> date:
     """Return the quote's "valid until" calendar date, derived from validity_days.
 
     The Quote model has NO valid_until column — validity_days is the single source of
-    truth (also read by quote_send.py, crm/_helpers.py, quote_report.html). The expiry
-    is validity_days out from the SAME anchor quote_send.py uses when it emails the
-    customer: the send date if the quote was sent, else today. Keeping the anchor
-    identical means the editor default, the preview, and the real outbound email all
-    show the same date.
+    truth (also read by quote_send.py, crm/_helpers.py, quote_report.html).
     """
-    anchor = quote.sent_at.date() if quote.sent_at else date.today()
-    return anchor + timedelta(days=quote.validity_days or 7)
+    return _quote_expiry_anchor(quote) + timedelta(days=quote.validity_days or 7)
 
 
 def _validity_days_from_valid_until(quote: Quote, target: date) -> int:
-    """Convert a chosen "valid until" date back into validity_days.
-
-    Inverse of _quote_valid_until, anchored the same way (send date if sent, else
-    today), so a round-trip of the prefilled date leaves validity_days unchanged.
-    """
-    anchor = quote.sent_at.date() if quote.sent_at else date.today()
-    return (target - anchor).days
+    """Convert a chosen "valid until" date back into validity_days (inverse of
+    _quote_valid_until, same anchor)."""
+    return (target - _quote_expiry_anchor(quote)).days
 
 
 # ── Sprint 5: Quote Workflow Completion ────────────────────────────────
@@ -250,9 +252,18 @@ async def edit_terms_form(
     so the picker default matches what the customer would see on the sent quote.
     """
     quote = get_quote_for_user(db, user, quote_id)
+    # min = tomorrow: the earliest date the server accepts (must be a future expiry), so
+    # the picker floor matches the rule AND the user can pick a date EARLIER than the
+    # current validity (shorten it) — which a min of the prefilled value would forbid.
+    min_valid_until = datetime.now(timezone.utc).date() + timedelta(days=1)
     return template_response(
         "htmx/partials/quotes/edit_form.html",
-        {"request": request, "quote": quote, "valid_until_date": _quote_valid_until(quote)},
+        {
+            "request": request,
+            "quote": quote,
+            "valid_until_date": _quote_valid_until(quote),
+            "min_valid_until": min_valid_until,
+        },
     )
 
 
@@ -268,33 +279,39 @@ async def edit_quote_metadata(
 
     "Valid until" is a date the user picks; it is stored as validity_days relative to
     the same anchor quote_send.py uses (send date if sent, else today) — the Quote model
-    has no valid_until column. Blank/omitted fields are left unchanged (edit-in-place).
+    has no valid_until column. A field PRESENT in the form is applied even when blank
+    (so the user can clear a term/note); a field absent from the form is left unchanged.
     Bad input raises HTTPException(400) → the global htmx:responseError toast (no swap,
     modal stays open to fix and retry).
     """
     quote = get_quote_for_user(db, user, quote_id)
 
     form = await request.form()
-    if form.get("payment_terms"):
-        payment_terms = form["payment_terms"].strip()
+    # Present-but-empty = intentional clear (the modal always submits all three), so key
+    # on membership, not truthiness — otherwise emptying a field is a silent no-op that
+    # still reports success, leaving stale terms on a customer-facing quote.
+    if "payment_terms" in form:
+        payment_terms = str(form["payment_terms"]).strip()
         if len(payment_terms) > 100:
             raise HTTPException(400, "Payment Terms must be 100 characters or fewer.")
-        quote.payment_terms = payment_terms
-    if form.get("shipping_terms"):
-        shipping_terms = form["shipping_terms"].strip()
+        quote.payment_terms = payment_terms or None
+    if "shipping_terms" in form:
+        shipping_terms = str(form["shipping_terms"]).strip()
         if len(shipping_terms) > 100:
             raise HTTPException(400, "Shipping Terms must be 100 characters or fewer.")
-        quote.shipping_terms = shipping_terms
-    if form.get("notes"):
-        quote.notes = form["notes"].strip()
+        quote.shipping_terms = shipping_terms or None
+    if "notes" in form:
+        quote.notes = str(form["notes"]).strip() or None
     if form.get("valid_until"):
-        target = _parse_date_safe(form["valid_until"].strip(), date)
+        target = _parse_date_safe(str(form["valid_until"]).strip(), date)
         if target is None:
             raise HTTPException(400, "Valid Until must be a valid date (YYYY-MM-DD).")
-        days = _validity_days_from_valid_until(quote, target)
-        if days < 1:
+        # Must be a genuinely future expiry. Checking days<1 alone was a lie: for an
+        # already-sent quote the anchor is the (past) send date, so a date in the past
+        # but after sent_at passed while the message promised "a date in the future".
+        if target <= datetime.now(timezone.utc).date():
             raise HTTPException(400, "Valid Until must be a date in the future.")
-        quote.validity_days = days
+        quote.validity_days = _validity_days_from_valid_until(quote, target)
 
     quote.updated_at = datetime.now(timezone.utc)
     db.commit()
