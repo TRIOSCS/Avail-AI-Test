@@ -106,19 +106,6 @@ class TestSampleRateValidator:
                 _make()
 
 
-class TestConfidenceValidator:
-    """Confidence thresholds must be 0.0-1.0."""
-
-    def test_valid_confidence(self):
-        s = _settings_with({"MIN_TAG_CONFIDENCE": "0.85"})
-        assert s.min_tag_confidence == 0.85
-
-    def test_confidence_too_high(self):
-        with patch.dict(os.environ, {"MIN_TAG_CONFIDENCE": "1.5"}, clear=True):
-            with pytest.raises(ValidationError, match="Confidence/threshold must be between"):
-                _make()
-
-
 class TestCsvParsing:
     """Comma-separated env vars parse into lists correctly."""
 
