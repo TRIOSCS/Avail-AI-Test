@@ -259,6 +259,24 @@ class TestListSortAndBucket:
         assert f"/v2/partials/prospecting/{p.id}/claim" in body
         assert "Claim anyway" in body
 
+    def test_screened_out_row_has_claim_target_id(self, client, db_session, monkeypatch):
+        """F4: the screened-out row must carry id='prospect-<id>' so the Claim-anyway
+        button's hx-target='#prospect-<id>' resolves. Screened-out prospects are filtered
+        out of the grid (where _card.html normally provides that id), so without an id on
+        the row htmx aborts the claim with targetError and the button is dead."""
+        monkeypatch.setattr(settings, "ai_screen_enabled", True)
+        p = _make_prospect(
+            db_session,
+            name="LowFitCo",
+            trio_match_score=10,
+            enrichment_data=_ai_screen(verdict="screened_out", match=10),
+        )
+        resp = client.get("/v2/partials/prospecting?sort=ai_match_desc")
+        assert resp.status_code == 200
+        body = resp.text
+        assert f'id="prospect-{p.id}"' in body  # target the claim button swaps
+        assert f'hx-target="#prospect-{p.id}"' in body  # button points at that id
+
     def test_screened_out_bucket_hidden_when_screening_disabled(self, client, db_session, monkeypatch):
         """No screened-out section when ai_screen_enabled=False."""
         monkeypatch.setattr(settings, "ai_screen_enabled", False)

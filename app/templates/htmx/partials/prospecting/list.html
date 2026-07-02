@@ -172,7 +172,9 @@
     </button>
     <div x-show="open" x-cloak class="border-t border-amber-200 p-4 space-y-3">
       {% for p in screened_out_prospects %}
-      <div class="flex items-start justify-between gap-3 text-sm">
+      {# id must match the Claim-anyway button's hx-target below — the claim endpoint's
+         _action_oob response swaps this row (outerHTML) with the refreshed card. #}
+      <div id="prospect-{{ p.id }}" class="flex items-start justify-between gap-3 text-sm">
         <div class="min-w-0">
           <span class="font-medium text-gray-800">{{ p.name }}</span>
           {% if p.domain %}<span class="text-gray-400 ml-1">{{ p.domain }}</span>{% endif %}
