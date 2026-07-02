@@ -4562,6 +4562,7 @@ async def contact_merge(
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
+    reassigned = int(result.get("reassigned", 0))
     logger.info(
         "Manual contact merge: kept {} ({}), removed {} by {}",
         contact_id,
@@ -4570,14 +4571,12 @@ async def contact_merge(
         user.email,
     )
 
-    safe_name = html_mod.escape(keep.full_name or "")
-    response = HTMLResponse(
-        f'<p class="text-sm text-emerald-600 py-2">Merged into <strong>{safe_name}</strong>. '
-        f"{int(result.get('reassigned', 0))} record(s) reassigned.</p>",
-        status_code=200,
-    )
+    # Return the refreshed contacts grouped-list (targeted at #contacts-tab-list) so the
+    # merged-away contact disappears immediately; the preview form's after-request closes
+    # the modal. Mirrors the sibling Move-contact flow — no in-modal dead-end.
+    response = _render_contacts_list(request, user, company, db)
     response.headers["HX-Trigger"] = json.dumps(
-        {"showToast": {"message": "Contact merged successfully", "type": "success"}}
+        {"showToast": {"message": f"Contact merged — {reassigned} record(s) reassigned", "type": "success"}}
     )
     return response
 

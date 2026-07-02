@@ -12,6 +12,8 @@ Depends on: tests/conftest.py fixtures (db_session, test_user, admin_user, clien
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -170,6 +172,30 @@ class TestPrimaryContactEndpoint:
         """contact_b belongs to company_b, not company_a — IDOR guard → 404."""
         resp = owner_client.post(f"/v2/partials/customers/{company_a.id}/primary-contact/{contact_b.id}")
         assert resp.status_code == 404
+
+    def test_kebab_button_targets_detail_root_not_main_content(
+        self, owner_client: TestClient, company_a: Company, contact_a: SiteContact
+    ):
+        """F8: the 'Set account primary' kebab action must refresh the detail via
+        `closest [data-detail-root]` (outerHTML) like the sibling Reactivate/Archive
+        actions — NOT swap the whole #main-content and destroy the CDM split workspace.
+
+        The account-primary shows in the detail header (not the contacts list), so the
+        handler returns the full detail partial; targeting the detail root re-swaps it
+        both inside the CDM workspace and on a deep-linked full-page detail.
+        """
+        resp = owner_client.get(f"/v2/partials/customers/{company_a.id}/tab/contacts")
+        assert resp.status_code == 200
+        m = re.search(
+            r"<button[^>]*primary-contact/" + str(contact_a.id) + r"\b.*?Set account primary</button>",
+            resp.text,
+            re.S,
+        )
+        assert m, "Set account primary button not found in contacts tab"
+        btn = m.group(0)
+        assert "closest [data-detail-root]" in btn
+        assert "outerHTML" in btn
+        assert "#main-content" not in btn
 
 
 class TestParentCompanyEndpoint:
