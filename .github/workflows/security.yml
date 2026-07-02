@@ -8,6 +8,13 @@ on:
   schedule:
     - cron: "0 8 * * 1"  # Weekly Monday 8am UTC
 
+# Cancel superseded PR runs (a new push to the same PR branch obsoletes the old scan),
+# but keep every push/schedule run — the run_id fallback makes those groups unique so
+# main-branch and weekly history is never cancelled. Mirrors ci.yml (CI-2).
+concurrency:
+  group: security-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   security:
     runs-on: ubuntu-latest
