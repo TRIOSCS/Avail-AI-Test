@@ -211,18 +211,24 @@ class TestAddToRequisition:
         assert resp.status_code == 400
         assert "Missing required fields" in resp.text
 
-    def test_missing_items_returns_400(
+    def test_no_items_still_adds_mpn(
         self,
         client: TestClient,
         test_requisition: Requisition,
     ):
-        """Present requisition_id + mpn but no items → 400."""
+        """requisition_id + mpn with an empty shortlist adds the MPN itself (200).
+
+        DOSSIER-ADDREQ-EMPTY-400 fix: shortlisted market rows (items) are optional
+        supporting evidence, so an empty shortlist must no longer dead-end on 400 —
+        it adds the dossier's MPN as a new requirement.
+        """
         resp = client.post(
             "/v2/partials/search/add-to-requisition",
             content=json.dumps({"requisition_id": test_requisition.id, "mpn": "LM317T", "items": []}),
             headers={"Content-Type": "application/json"},
         )
-        assert resp.status_code == 400
+        assert resp.status_code == 200
+        assert "Added" in resp.text
 
     def test_requisition_not_found_returns_404(self, client: TestClient):
         """Unknown requisition_id → 404 HTML response."""
