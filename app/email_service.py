@@ -22,6 +22,7 @@ from .constants import (
 from .models import (
     ActivityLog,
     Contact,
+    ExcessOutreach,
     Offer,
     PendingBatch,
     ProcessedMessage,
@@ -761,6 +762,9 @@ async def poll_inbox(
         # matched contact's status progresses below.
         matched_contacts: list[Contact] = []
         matched_req_id = requisition_id
+        # Resell outreach rows this reply matches (buyer replying to an offer-out). Stays
+        # empty unless the resell tier below fires; only ever set when no Contact matched.
+        matched_resell_rows: list[ExcessOutreach] = []
 
         # Tier 1: ConversationId (exact thread, global) — all of the REPLYING
         # vendor's contacts on the thread (vendor-scoped: a reply from vendor A
@@ -796,13 +800,25 @@ async def poll_inbox(
                     # the first token's requisition
                     matched_req_id = token_req_ids[0]
 
-        # Tier 3: Exact email match (USER-SCOPED, most-recent contact by design)
-        if not matched_contacts and email_addr in email_map:
+        # Tier 2.5: Resell outreach (exact conversation/message id). A buyer replying to
+        # an offered-OUT excess list — the trader→buyer inverse of the RFQ path. Runs only
+        # when no Contact matched (an RFQ reply always wins), and BEFORE the fuzzy
+        # email/domain fallbacks, mirroring the exact-before-fuzzy tier order. Reuses the
+        # already-built + unit-tested resell matcher; a hit routes to record_response below.
+        if not matched_contacts:
+            from .services.resell_outreach_service import _match_outreach
+
+            matched_resell_rows = _match_outreach(db, conversation_id=conv_id, message_id=msg_id)
+
+        # Tier 3: Exact email match (USER-SCOPED, most-recent contact by design). Yields
+        # to the exact resell match above — an exact conv/msg hit must win over this fuzzy
+        # sender-email fallback (a buyer whose address also appears in email_map).
+        if not matched_contacts and not matched_resell_rows and email_addr in email_map:
             matched_contacts = [email_map[email_addr]]
             matched_req_id = matched_contacts[0].requisition_id
 
         # Tier 4: Domain match (USER-SCOPED, most-recent contact by design)
-        if not matched_contacts and "@" in email_addr:
+        if not matched_contacts and not matched_resell_rows and "@" in email_addr:
             sender_domain = email_addr.split("@", 1)[1]
             if sender_domain in domain_map:
                 matched_contacts = [domain_map[sender_domain]]
@@ -824,7 +840,7 @@ async def poll_inbox(
                 graph_conversation_id=conv_id,
                 scanned_by_user_id=scanned_by_user_id,
                 received_at=msg.get("receivedDateTime"),
-                status="matched" if matched_contacts else VendorResponseStatus.NEW,
+                status="matched" if (matched_contacts or matched_resell_rows) else VendorResponseStatus.NEW,
                 created_at=datetime.now(timezone.utc),
             )
             db.add(vr)
@@ -858,6 +874,31 @@ async def poll_inbox(
             for mc in matched_contacts:
                 _progress_contact_status(mc, vr, db)
 
+            # ── Resell outreach progression (Tier 2.5 hit) ──
+            # A buyer replying to an offered-out list: advance the ExcessOutreach
+            # row(s) sent→responded and log the inbound reply on the resell timeline.
+            # commit=False keeps it inside THIS message's savepoint (one bad resell
+            # reply rolls back with the rest, never poisons the whole scan). Offer
+            # extraction stays MANUAL (the "Convert to offer" quick-add), so has_offer
+            # is False here — status advances to responded, not bid.
+            # An OOO / vacation / bounce auto-reply is NOT genuine engagement: advancing the
+            # outreach to "responded" and logging a "meaningful" inbound reply would stop the
+            # follow-up clock on a buyer who never actually replied. The RFQ path repairs this
+            # after AI parsing, but a purely-resell reply skips AI parsing — so gate it here.
+            # The VendorResponse row above still records the raw inbound message either way.
+            if matched_resell_rows and not _is_auto_reply(subj, vr.body):
+                from .services.resell_outreach_service import _log_inbound_reply_activity, record_response
+
+                updated = record_response(
+                    db,
+                    conversation_id=conv_id,
+                    message_id=msg_id,
+                    has_offer=False,  # offer extraction stays manual (Convert-to-offer)
+                    commit=False,
+                )
+                for outreach_row in updated:
+                    _log_inbound_reply_activity(db, outreach=outreach_row, vr=vr)
+
             nested.commit()
 
             # ── Reply classification + AI parsing (batch or inline) ──
@@ -866,7 +907,11 @@ async def poll_inbox(
             # earlier would let a vanished vendor_response_id reach AI parsing
             # (billed) and _auto_create_offers_from_parse, poisoning the final
             # db.commit() and rolling back the entire scan.
-            if get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY"):
+            # A purely-resell reply (matched the outreach tier, no Contact) carries no RFQ
+            # to parse and no contact status to repair, so it never enters AI parsing —
+            # don't bill Claude for it. A reply that also matched a Contact still parses.
+            purely_resell = bool(matched_resell_rows) and not matched_contacts
+            if get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY") and not purely_resell:
                 pending_parse.append(vr)
 
             results.append(
@@ -925,24 +970,39 @@ async def poll_inbox(
     return results
 
 
+# Out-of-office / vacation / bounce / delivery-failure phrases that mark a message as an
+# automated reply rather than a genuine human response.
+_AUTO_REPLY_SIGNALS = (
+    "out of office",
+    "automatic reply",
+    "autoreply",
+    "i am currently out",
+    "on vacation",
+    "will return",
+    "away from",
+    "undeliverable",
+    "delivery failure",
+)
+
+
+def _is_auto_reply(subject: str, body: str) -> bool:
+    """True if the message looks like an OOO / vacation / bounce auto-reply.
+
+    Shared by the RFQ classifier and the resell reply path so neither treats an
+    automated reply as genuine engagement (advancing status / stopping the follow-up
+    clock).
+    """
+    body_lower = (body or "").lower()[:2000]
+    subject_lower = (subject or "").lower()
+    return any(s in body_lower or s in subject_lower for s in _AUTO_REPLY_SIGNALS)
+
+
 def _classify_response(parsed: dict, body: str, subject: str) -> dict:
     """Classify a vendor response into actionable categories."""
     body_lower = (body or "").lower()[:2000]
-    subject_lower = (subject or "").lower()
 
     # OOO / bounce detection
-    ooo_signals = [
-        "out of office",
-        "automatic reply",
-        "autoreply",
-        "i am currently out",
-        "on vacation",
-        "will return",
-        "away from",
-        "undeliverable",
-        "delivery failure",
-    ]
-    if any(s in body_lower or s in subject_lower for s in ooo_signals):
+    if _is_auto_reply(subject, body):
         return {
             "type": "ooo_bounce",
             "needs_action": False,

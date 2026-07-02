@@ -1118,7 +1118,7 @@ email_service.poll_inbox()
     |       (delta query incremental sync when available; top-50 fallback —
     |        ALL messages fetched, matching happens locally below)
     |
-    +---> 4-tier reply matching (first tier that hits wins):
+    +---> reply matching (first tier that hits wins; exact before fuzzy):
     |       Tier 1: graph_conversation_id (global, exact) — matches ALL
     |               Contacts sharing the thread: a cross-requisition RFQ
     |               writes one Contact per (requisition, vendor) on ONE
@@ -1129,6 +1129,13 @@ email_service.poll_inbox()
     |               pair is resolved via req_email_map (unique keys under the
     |               per-requisition fan-out); tokens with no email match still
     |               assign the first token's requisition
+    |       Tier 2.5 (RS-4): RESELL outreach — a buyer replying to an offered-OUT
+    |               excess list (the trader->buyer inverse of the RFQ). Runs ONLY
+    |               when no Contact matched (Tiers 1-2), and BEFORE the fuzzy
+    |               email/domain tiers (which now also yield to it), reusing the
+    |               already-built resell_outreach_service._match_outreach
+    |               (graph_conversation_id then graph_message_id, both stamped on
+    |               ExcessOutreach at send time via migration 133)
     |       Tier 3: sender email -> most-recent contact (USER-SCOPED,
     |               single-contact fallback BY DESIGN — untokenized replies)
     |       Tier 4: sender domain (USER-SCOPED, same single-contact design)
@@ -1136,11 +1143,21 @@ email_service.poll_inbox()
     +---> DB: INSERT vendor_responses (raw email) — exactly ONE per message
     |     (it is per-message, not per-requisition); contact_id anchors to the
     |     first matched contact; _progress_contact_status then advances EVERY
-    |     matched contact, so all involved requisitions' rows progress
+    |     matched contact, so all involved requisitions' rows progress.
+    |     status='matched' when EITHER a Contact OR a resell row matched.
     |       +---> activity_service.py: log_email_activity() --> DB: INSERT activity_log
-    |             (event_type='email', direction='inbound', activity_type='email_received';
-    |              dedups on external_id=message_id) so inbound vendor replies
-    |              appear on the requisition Activity tab
+    |       |     (event_type='email', direction='inbound', activity_type='email_received';
+    |       |      dedups on external_id=message_id) so inbound vendor replies
+    |       |      appear on the requisition Activity tab
+    |       +---> [RS-4 resell hit] resell_outreach_service.record_response(commit=False)
+    |             INSIDE the per-message savepoint: advances the ExcessOutreach row(s)
+    |             sent->responded (offer extraction stays MANUAL — see the resell
+    |             "Convert to offer" quick-add, so has_offer=False here, never ->bid),
+    |             then _log_inbound_reply_activity writes ONE excess_list_id-scoped
+    |             inbound activity_log (dedup on external_id+excess_list_id, so a
+    |             per-line campaign sharing one conversation logs the reply once and
+    |             never collides with the requisition-side log_email_activity row).
+    |             A PURELY-resell reply (no Contact) skips AI parsing (never billed).
     |
     v
 ai_email_parser.py
@@ -1722,9 +1739,28 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     |     (full-history recompute self-heals wins), re-mirrors the lines, and steps the list
     |     back off awarded → bid_out (close_at set) else collecting. Same _award_response OOB)
     +-- POST /api/resell/{id}/outreach                  (owner-only; channel=email →
-          resell_outreach_service.submit_outreach_email [RFQ send engine], else
-          submit_outreach [manual log]; re-renders the Outreach tracker)
+    |     resell_outreach_service.submit_outreach_email [RFQ send engine], else
+    |     submit_outreach [manual log]; re-renders the Outreach tracker)
+    +-- GET  /v2/partials/resell/{id}/outreach/{oid}/reply   (RS-4, owner-only; the tracker's
+    |     "View reply" button opens _reply_viewer.html in #modal-content — the buyer's reply
+    |     thread (_replies_context joins VendorResponse↔ExcessOutreach on graph_conversation_id,
+    |     newest-first) + a "Convert to offer" quick-add. 404 when the outreach has no thread)
+    +-- POST /api/resell/{id}/outreach/{oid}/offer      (RS-4, owner-only; human-reviewed
+          offer extraction — record_response(has_offer=True) creates the inbound ExcessOffer
+          via the SAME queued-never-dropped line matcher as an emailed bid + advances the
+          outreach →bid; re-renders the tracker into #tab-outreach-<id>)
 ```
+
+**RS-4 reply tracking (inbound half).** The send path already stamps
+`ExcessOutreach.graph_conversation_id`/`graph_message_id` (migration 133); RS-4 wires the
+INBOUND half with NO new migration. `email_service.poll_inbox` gained Tier 2.5 (see §4):
+a buyer's reply matches the outreach via `resell_outreach_service._match_outreach` and
+advances it `sent→responded` through `record_response(commit=False)` inside the existing
+per-message savepoint, logging one excess-scoped inbound `activity_log`. The tracker's
+"View reply" button (shown once a reply lands — `graph_conversation_id` + an engaged status)
+opens the reply viewer, which reuses the `VendorResponse` rows the poll already writes (no
+new reply-content table) and offers a manual "Convert to offer" — offer auto-detection from
+the AI parse is a deliberately deferred Phase-2 decision.
 
 Adaptive-detail rule (spec "density scales to line count, placement follows offer scope"):
 `shape='single'` (1 line → one `.card`, no table chrome) vs `'table'` (≥2 → `compact-table`);
