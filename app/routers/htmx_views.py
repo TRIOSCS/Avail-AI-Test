@@ -221,8 +221,14 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
 
     # Determine the correct partial URL for initial content load
     if current_view == "requisitions":
-        # Split-panel workspace is the new default for requisitions
-        partial_url = "/v2/partials/parts/workspace"
+        # Split-panel workspace is the default Sales Hub; ?view=list serves the flat
+        # requisitions list so the List-view toggle's pushed URL
+        # (/v2/requisitions?view=list) reloads / bookmarks straight to the list.
+        partial_url = (
+            "/v2/partials/requisitions"
+            if request.query_params.get("view") == "list"
+            else "/v2/partials/parts/workspace"
+        )
     elif current_view == "trouble-tickets":
         partial_url = "/v2/partials/trouble-tickets/workspace"
     elif current_view == "crm":

@@ -1,0 +1,31 @@
+{# Sales Hub view toggle — segmented switch between the split-panel Workspace
+   (the canonical "Sales Hub") and the flat Requisitions list. Both links push clean
+   full-page URLs so a reload / bookmark reproduces the chosen view: v2_page honours
+   ?view=list (app/routers/htmx_views.py). hx-target="#main-content" exists in every
+   served page shell (base.html), so the swap lands in both deep-link and workspace DOM.
+   Called by: parts/workspace.html (active='workspace'), requisitions/list.html (active='list').
+   Receives: active — 'workspace' | 'list'.
+#}
+<div role="group" aria-label="Requisitions view"
+     class="inline-flex items-center rounded border border-line-base bg-white p-px text-xs font-medium leading-none">
+  <a href="/v2/requisitions"
+     hx-get="/v2/partials/parts/workspace"
+     hx-target="#main-content"
+     hx-swap="innerHTML"
+     hx-push-url="/v2/requisitions"
+     {% if active == 'workspace' %}aria-current="page"{% endif %}
+     class="px-2 py-1 rounded-sm cursor-pointer transition-colors
+            {{ 'bg-brand-500 text-white' if active == 'workspace' else 'text-gray-600 hover:text-brand-600 hover:bg-brand-50' }}">
+    Workspace
+  </a>
+  <a href="/v2/requisitions?view=list"
+     hx-get="/v2/partials/requisitions"
+     hx-target="#main-content"
+     hx-swap="innerHTML"
+     hx-push-url="/v2/requisitions?view=list"
+     {% if active == 'list' %}aria-current="page"{% endif %}
+     class="px-2 py-1 rounded-sm cursor-pointer transition-colors
+            {{ 'bg-brand-500 text-white' if active == 'list' else 'text-gray-600 hover:text-brand-600 hover:bg-brand-50' }}">
+    List view
+  </a>
+</div>

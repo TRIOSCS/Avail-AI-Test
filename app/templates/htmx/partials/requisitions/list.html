@@ -17,10 +17,15 @@
 
   {% include "htmx/partials/shared/inbox_disconnected_banner.html" %}
 
-  {# Header #}
+  {# Header — distinct identity ("Requisitions list") + toggle back to the Sales Hub
+     workspace (finding REQ-12). The split-panel workspace keeps the "Sales Hub" name. #}
   <div class="flex items-center justify-between mb-4">
-    <div>
-      <p class="text-sm text-gray-600 mt-1">{{ total }} total</p>
+    <div class="flex items-center gap-3">
+      <div>
+        <h1 class="text-base font-semibold text-gray-800 leading-tight">Requisitions list</h1>
+        <p class="text-sm text-gray-600">{{ total }} total</p>
+      </div>
+      {% with active='list' %}{% include "htmx/partials/requisitions/_view_toggle.html" %}{% endwith %}
     </div>
     <button @click="$dispatch('open-modal')"
             hx-get="/v2/partials/requisitions/create-form"
