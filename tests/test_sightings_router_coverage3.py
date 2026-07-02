@@ -105,7 +105,7 @@ class TestBatchRefreshCoverage:
                 headers={"HX-Request": "true"},
             )
         assert resp.status_code == 200
-        assert "1/1" in resp.text
+        assert "1/1" in resp.headers.get("HX-Trigger", "")
 
     def test_batch_refresh_id_not_found_increments_failed(self, client: TestClient):
         """Lines 657-659: req_obj is None → failed += 1."""
@@ -116,7 +116,7 @@ class TestBatchRefreshCoverage:
                 headers={"HX-Request": "true"},
             )
         assert resp.status_code == 200
-        assert "failed" in resp.text.lower()
+        assert "failed" in resp.headers.get("HX-Trigger", "").lower()
 
     def test_batch_refresh_mixed_failed_and_skipped(self, client: TestClient, two_items, db_session: Session):
         """Lines 683-688: failed > 0 → level='warning', skipped text appended."""
@@ -134,8 +134,9 @@ class TestBatchRefreshCoverage:
                 headers={"HX-Request": "true"},
             )
         assert resp.status_code == 200
-        # Either failed or skipped text must appear
-        assert "failed" in resp.text.lower() or "skipped" in resp.text.lower()
+        # Either failed or skipped text must appear in the HX-Trigger toast message.
+        trigger = resp.headers.get("HX-Trigger", "")
+        assert "failed" in trigger.lower() or "skipped" in trigger.lower()
 
     def test_batch_refresh_too_many(self, client: TestClient):
         """Line 642-643: exceeds MAX_BATCH_SIZE."""
@@ -157,7 +158,7 @@ class TestBatchRefreshCoverage:
             )
         # non-list parsed → requirement_ids = [] → 0 searched
         assert resp.status_code == 200
-        assert "0/0" in resp.text
+        assert "0/0" in resp.headers.get("HX-Trigger", "")
 
 
 # ── batch-assign ─────────────────────────────────────────────────────────────
@@ -255,7 +256,7 @@ class TestBatchStatusCoverage:
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
-        assert "No requirements selected" in resp.text
+        assert "No requirements selected" in resp.headers.get("HX-Trigger", "")
 
     def test_batch_status_too_many(self, client: TestClient):
         """Line 747-748: exceeds MAX_BATCH_SIZE."""
@@ -286,7 +287,7 @@ class TestBatchStatusCoverage:
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
-        assert "Updated 1" in resp.text
+        assert "Updated 1" in resp.headers.get("HX-Trigger", "")
 
     def test_batch_status_skipped_invalid_transition(self, client: TestClient, req_item, db_session: Session):
         """Lines 778-787: invalid transition → skipped > 0, level=warning."""
@@ -300,7 +301,7 @@ class TestBatchStatusCoverage:
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
-        assert "skipped" in resp.text.lower()
+        assert "skipped" in resp.headers.get("HX-Trigger", "").lower()
 
     def test_batch_status_two_items_mixed(self, client: TestClient, two_items, db_session: Session):
         """Both items: one valid, one invalid transition → updated=1, skipped=1."""
@@ -313,7 +314,7 @@ class TestBatchStatusCoverage:
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
-        assert "skipped" in resp.text.lower()
+        assert "skipped" in resp.headers.get("HX-Trigger", "").lower()
 
 
 # ── batch-notes ──────────────────────────────────────────────────────────────
@@ -328,7 +329,7 @@ class TestBatchNotesCoverage:
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
-        assert "No requirements selected" in resp.text
+        assert "No requirements selected" in resp.headers.get("HX-Trigger", "")
 
     def test_batch_notes_too_many(self, client: TestClient):
         """Line 804-805: exceeds MAX_BATCH_SIZE."""
@@ -349,7 +350,7 @@ class TestBatchNotesCoverage:
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
-        assert "Note text is required" in resp.text
+        assert "Note text is required" in resp.headers.get("HX-Trigger", "")
 
     def test_batch_notes_success(self, client: TestClient, req_item):
         """Lines 813-831: notes added to all requirements, success toast."""
@@ -360,7 +361,7 @@ class TestBatchNotesCoverage:
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
-        assert "Added note" in resp.text
+        assert "Added note" in resp.headers.get("HX-Trigger", "")
 
     def test_batch_notes_multiple_requirements(self, client: TestClient, two_items):
         """Plural form: 'Added note to 2 requirements'."""
@@ -371,7 +372,7 @@ class TestBatchNotesCoverage:
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
-        assert "2 requirement" in resp.text
+        assert "2 requirement" in resp.headers.get("HX-Trigger", "")
 
 
 # ── mark-unavailable ──────────────────────────────────────────────────────────

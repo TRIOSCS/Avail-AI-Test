@@ -75,7 +75,8 @@ class TestBatchRefresh:
                 headers={"HX-Request": "true"},
             )
         assert resp.status_code == 200
-        assert "Searched" in resp.text or "Refreshed" in resp.text
+        trigger = resp.headers.get("HX-Trigger", "")
+        assert "Searched" in trigger or "Refreshed" in trigger
 
     def test_batch_refresh_nonexistent_ids(self, client: TestClient):
         with patch("app.search_service.search_requirement", new=AsyncMock()):
@@ -85,7 +86,8 @@ class TestBatchRefresh:
                 headers={"HX-Request": "true"},
             )
         assert resp.status_code == 200
-        assert "failed" in resp.text.lower() or "0/" in resp.text
+        trigger = resp.headers.get("HX-Trigger", "")
+        assert "failed" in trigger.lower() or "0/" in trigger
 
 
 class TestBatchAssign:
@@ -136,7 +138,7 @@ class TestBatchStatus:
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
-        assert "No requirements" in resp.text
+        assert "No requirements" in resp.headers.get("HX-Trigger", "")
 
     def test_batch_status_too_many(self, client: TestClient):
         ids = list(range(51))
@@ -164,7 +166,7 @@ class TestBatchStatus:
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
-        assert "Updated" in resp.text
+        assert "Updated" in resp.headers.get("HX-Trigger", "")
 
 
 class TestBatchNotes:
@@ -175,7 +177,7 @@ class TestBatchNotes:
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
-        assert "No requirements" in resp.text
+        assert "No requirements" in resp.headers.get("HX-Trigger", "")
 
     def test_batch_notes_too_many(self, client: TestClient):
         ids = list(range(51))
@@ -194,7 +196,7 @@ class TestBatchNotes:
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
-        assert "required" in resp.text.lower()
+        assert "required" in resp.headers.get("HX-Trigger", "").lower()
 
     def test_batch_notes_success(self, client: TestClient, req_with_item: tuple):
         _, item = req_with_item
@@ -204,7 +206,7 @@ class TestBatchNotes:
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
-        assert "Added note" in resp.text
+        assert "Added note" in resp.headers.get("HX-Trigger", "")
 
 
 class TestAssignBuyer:

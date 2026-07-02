@@ -73,8 +73,11 @@
             hx-post="/v2/partials/search/quick-source/offer"
             hx-vals='{"mpn": "{{ card.mpn_matched|e }}", "vendor_name": "{{ card.vendor_name|e }}"}'
             class="p-1.5 rounded text-gray-400 hover:text-brand-700 hover:bg-brand-50"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M12 4v16m8-8H4"/></svg></button>
+    {# Pass the RAW vendor name (url-encoded so spaces/& survive); the server matches on
+       normalize_vendor_name() of both sides, so a lower|trim key that keeps the ", Inc."
+       suffix the normalizer strips no longer misses. #}
     <button type="button"
-            hx-get="/v2/partials/search/lead-detail?search_id={{ search_id }}&vendor_key={{ card.vendor_name|lower|trim }}"
+            hx-get="/v2/partials/search/lead-detail?search_id={{ search_id }}&vendor_key={{ card.vendor_name|urlencode }}"
             hx-target="#lead-drawer-content" hx-swap="innerHTML"
             class="px-2 py-1 rounded text-[11px] text-gray-600 hover:text-brand-700 hover:bg-brand-50">Details →</button>
   </div>

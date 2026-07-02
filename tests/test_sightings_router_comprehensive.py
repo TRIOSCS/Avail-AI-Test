@@ -377,7 +377,9 @@ class TestSightingsRefreshBranches:
                 data={"requirement_ids": json.dumps([r.id, r2.id])},
             )
             assert resp.status_code == 200
-            assert "1 failed" in resp.text or "failed" in resp.text.lower()
+            # Toast fires via HX-Trigger:showToast (empty body for the non-table caller).
+            trigger = resp.headers.get("HX-Trigger", "")
+            assert "1 failed" in trigger or "failed" in trigger.lower()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -717,7 +719,7 @@ class TestBatchNotesBranches:
             data={"requirement_ids": "[]", "notes": "note"},
         )
         assert resp.status_code == 200
-        assert "No requirements selected" in resp.text
+        assert "No requirements selected" in resp.headers.get("HX-Trigger", "")
 
     def test_whitespace_only_notes(self, client, db_session):
         _, r, _ = _seed(db_session)
@@ -726,7 +728,7 @@ class TestBatchNotesBranches:
             data={"requirement_ids": json.dumps([r.id]), "notes": "   "},
         )
         assert resp.status_code == 200
-        assert "Note text is required" in resp.text
+        assert "Note text is required" in resp.headers.get("HX-Trigger", "")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -741,7 +743,7 @@ class TestBatchStatusBranches:
             data={"requirement_ids": "[]", "status": "sourcing"},
         )
         assert resp.status_code == 200
-        assert "No requirements selected" in resp.text
+        assert "No requirements selected" in resp.headers.get("HX-Trigger", "")
 
     def test_all_valid_transitions(self, client, db_session):
         req = Requisition(name="RFQ", status="open", customer_name="Corp")
@@ -756,7 +758,7 @@ class TestBatchStatusBranches:
             data={"requirement_ids": json.dumps([r1.id, r2.id]), "status": "sourcing"},
         )
         assert resp.status_code == 200
-        assert "Updated 2 of 2" in resp.text
+        assert "Updated 2 of 2" in resp.headers.get("HX-Trigger", "")
 
 
 # ═══════════════════════════════════════════════════════════════════════════

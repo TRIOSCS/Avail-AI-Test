@@ -34,8 +34,12 @@
     </div>
   </div>
 
-  {# Filter bar (shared component) #}
-  {% with filter_target='#main-content', compact=false %}
+  {# Filter bar (shared component). Results view swaps the whole grid into #main-content
+     and pushes the real page URL so F5 loads the app shell. #}
+  {% with filter_target='#main-content',
+          filter_endpoint='/v2/partials/sourcing/' ~ requirement.id,
+          filter_push_url='/v2/sourcing/' ~ requirement.id,
+          compact=false %}
     {% include "htmx/partials/sourcing/filter_bar.html" %}
   {% endwith %}
 

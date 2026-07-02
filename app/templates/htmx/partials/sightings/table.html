@@ -13,7 +13,7 @@
 {% set dc = dashboard_counters|default({}) %}
 <div class="px-3 pt-3 pb-2 border-b border-gray-100 flex items-center gap-2 flex-wrap">
   {# Urgent counter — Sales Hub btn shape; active count tints the chrome. #}
-  <button hx-get="/v2/partials/sightings?priority_min=70&q={{ q }}&manufacturer={{ manufacturer|default('') }}"
+  <button hx-get="/v2/partials/sightings?urgent=1&q={{ q }}&manufacturer={{ manufacturer|default('') }}"
           hx-target="#sightings-table" hx-swap="innerHTML"
           class="btn btn-sm btn-secondary inline-flex items-center gap-1.5
                  {{ 'border-rose-300 text-rose-700 bg-rose-50' if dc.get('urgent', 0) > 0 else '' }}">
@@ -318,13 +318,23 @@
             class="btn-primary btn-sm">
       Build RFQ (<span x-text="$store.sightingSelection.count"></span> parts)
     </button>
-    <button class="btn-secondary btn-sm"
-            hx-post="/v2/partials/sightings/batch-refresh"
-            hx-vals='js:{requirement_ids: JSON.stringify($store.sightingSelection.array)}'
-            hx-target="#sightings-table"
-            data-loading-disable>
-      Refresh Sightings
-    </button>
+    {# Refresh runs a connector sweep for the selected requirements, then the handler
+       re-renders this table (target #sightings-table) so coverage/status update in place.
+       requirement_ids ride an Alpine :value bind (works in Alpine scope, unlike $store in
+       hx-vals js:); the current filters ride hidden inputs so the refreshed list keeps the
+       active view. #}
+    <form hx-post="/v2/partials/sightings/batch-refresh"
+          hx-target="#sightings-table" hx-swap="innerHTML"
+          data-loading-disable>
+      <input type="hidden" name="requirement_ids" :value="JSON.stringify($store.sightingSelection.array)">
+      <input type="hidden" name="status" value="{{ status }}">
+      <input type="hidden" name="q" value="{{ q }}">
+      <input type="hidden" name="group_by" value="{{ group_by }}">
+      <input type="hidden" name="manufacturer" value="{{ manufacturer|default('') }}">
+      <button type="submit" class="btn-secondary btn-sm">
+        Refresh Sightings
+      </button>
+    </form>
 
 
     {# ── Batch Status Dropdown ─────────────────────────────── #}
@@ -336,7 +346,7 @@
       <div x-show="open" @click.outside="open = false" x-cloak
            class="absolute bottom-full mb-1 left-0 bg-white border border-gray-200 rounded-lg shadow-lg p-3 w-48 z-50">
         <form hx-post="/v2/partials/sightings/batch-status"
-              hx-target="#toast-trigger" hx-swap="outerHTML"
+              hx-swap="none"
               @htmx:after-request="open = false"
               x-data="{ status: '' }">
           <input type="hidden" name="requirement_ids" :value="JSON.stringify($store.sightingSelection.array)">
@@ -369,7 +379,7 @@
       <div x-show="open" @click.outside="open = false" x-cloak
            class="absolute bottom-full mb-1 left-0 bg-white border border-gray-200 rounded-lg shadow-lg p-3 w-64 z-50">
         <form hx-post="/v2/partials/sightings/batch-notes"
-              hx-target="#toast-trigger" hx-swap="outerHTML"
+              hx-swap="none"
               @htmx:after-request="open = false"
               x-data="{ noteText: '' }">
           <input type="hidden" name="requirement_ids" :value="JSON.stringify($store.sightingSelection.array)">

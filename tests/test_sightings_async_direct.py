@@ -89,7 +89,8 @@ async def test_batch_refresh_success(db_session: Session, test_user: User, test_
         )
 
     assert resp.status_code == 200
-    assert "Searched" in resp.body.decode()
+    # Toast fires via HX-Trigger:showToast; body is empty for the non-table caller.
+    assert "Searched" in resp.headers.get("HX-Trigger", "")
 
 
 async def test_batch_refresh_empty_ids(db_session: Session, test_user: User):
@@ -132,7 +133,7 @@ async def test_batch_refresh_id_not_found(db_session: Session, test_user: User):
         )
 
     assert resp.status_code == 200
-    assert "failed" in resp.body.decode().lower()
+    assert "failed" in resp.headers.get("HX-Trigger", "").lower()
 
 
 async def test_batch_refresh_search_raises(db_session: Session, test_user: User, test_requisition: Requisition):
@@ -195,7 +196,8 @@ async def test_batch_refresh_skipped_all_fresh(db_session: Session, test_user: U
         )
 
     assert resp.status_code == 200
-    assert "skipped" in resp.body.decode().lower() or "Searched" in resp.body.decode()
+    trigger = resp.headers.get("HX-Trigger", "")
+    assert "skipped" in trigger.lower() or "Searched" in trigger
 
 
 # ── batch-assign (lines 749-782) ─────────────────────────────────────────────
@@ -318,7 +320,7 @@ async def test_batch_status_update_open_to_sourcing(
     )
 
     assert resp.status_code == 200
-    assert "Updated" in resp.body.decode()
+    assert "Updated" in resp.headers.get("HX-Trigger", "")
 
 
 async def test_batch_status_empty_ids_returns_warning(db_session: Session, test_user: User):
@@ -339,7 +341,7 @@ async def test_batch_status_empty_ids_returns_warning(db_session: Session, test_
     )
 
     assert resp.status_code == 200
-    assert "No requirements" in resp.body.decode()
+    assert "No requirements" in resp.headers.get("HX-Trigger", "")
 
 
 async def test_batch_status_invalid_status_raises_400(
@@ -414,7 +416,7 @@ async def test_batch_notes_success(db_session: Session, test_user: User, test_re
     )
 
     assert resp.status_code == 200
-    assert "Added note" in resp.body.decode()
+    assert "Added note" in resp.headers.get("HX-Trigger", "")
 
 
 async def test_batch_notes_empty_ids(db_session: Session, test_user: User):
@@ -435,7 +437,7 @@ async def test_batch_notes_empty_ids(db_session: Session, test_user: User):
     )
 
     assert resp.status_code == 200
-    assert "No requirements" in resp.body.decode()
+    assert "No requirements" in resp.headers.get("HX-Trigger", "")
 
 
 async def test_batch_notes_empty_notes(db_session: Session, test_user: User, test_requisition: Requisition):
@@ -458,7 +460,7 @@ async def test_batch_notes_empty_notes(db_session: Session, test_user: User, tes
     )
 
     assert resp.status_code == 200
-    assert "Note text is required" in resp.body.decode()
+    assert "Note text is required" in resp.headers.get("HX-Trigger", "")
 
 
 # ── mark-unavailable (lines 887-919) ──────────────────────────────────────────

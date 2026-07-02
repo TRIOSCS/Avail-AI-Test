@@ -311,8 +311,8 @@ class TestBatchRefreshLogic:
                 data={"requirement_ids": json.dumps([r.id])},
             )
         assert resp.status_code == 200
-        # "Refreshed 1/1" or similar success message
-        assert "1/1" in resp.text or "1" in resp.text
+        # Toast fires via HX-Trigger:showToast (empty body for the non-table caller).
+        assert "1/1" in resp.headers.get("HX-Trigger", "")
 
     def test_batch_refresh_failure_increments_failed(self, client, db_session):
         """Search failure for a requirement shows failed count."""
@@ -326,7 +326,8 @@ class TestBatchRefreshLogic:
                 data={"requirement_ids": json.dumps([r.id])},
             )
         assert resp.status_code == 200
-        assert "failed" in resp.text.lower() or "0/1" in resp.text
+        trigger = resp.headers.get("HX-Trigger", "")
+        assert "failed" in trigger.lower() or "0/1" in trigger
 
     def test_batch_refresh_nonexistent_id_counts_as_failed(self, client, db_session):
         """Nonexistent requirement ID results in failed count."""
