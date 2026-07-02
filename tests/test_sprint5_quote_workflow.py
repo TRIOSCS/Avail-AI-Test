@@ -106,6 +106,37 @@ class TestDeleteQuote:
         assert resp.status_code == 404
 
 
+# ── Delete-draft button (detail UI wiring for the DELETE endpoint) ────
+
+
+class TestDeleteDraftButton:
+    def test_draft_detail_shows_delete_button(self, client: TestClient, draft_quote: Quote):
+        """Draft detail renders a Delete-draft button wired to the DELETE endpoint."""
+        resp = client.get(f"/v2/partials/quotes/{draft_quote.id}", headers={"HX-Request": "true"})
+        assert resp.status_code == 200
+        assert "Delete draft" in resp.text
+        assert f'hx-delete="/v2/partials/quotes/{draft_quote.id}"' in resp.text
+        # Confirmation dialog guards the destructive action.
+        assert "hx-confirm=" in resp.text
+
+    def test_non_draft_detail_has_no_delete_button(self, client: TestClient, db_session: Session, test_quote: Quote):
+        """Sent/won/lost quotes must NOT expose the Delete-draft button (endpoint
+        400s)."""
+        test_quote.status = "sent"
+        db_session.commit()
+        resp = client.get(f"/v2/partials/quotes/{test_quote.id}", headers={"HX-Request": "true"})
+        assert resp.status_code == 200
+        assert "Delete draft" not in resp.text
+        assert f'hx-delete="/v2/partials/quotes/{test_quote.id}"' not in resp.text
+
+    def test_delete_success_redirects_to_requisitions(self, client: TestClient, draft_quote: Quote):
+        """The button relies on HX-Redirect → /v2/requisitions on a successful
+        delete."""
+        resp = client.delete(f"/v2/partials/quotes/{draft_quote.id}", headers={"HX-Request": "true"})
+        assert resp.status_code == 200
+        assert resp.headers.get("HX-Redirect") == "/v2/requisitions"
+
+
 # ── Reopen Quote ─────────────────────────────────────────────────────
 
 

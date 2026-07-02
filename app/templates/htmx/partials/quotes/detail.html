@@ -198,6 +198,24 @@
       <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
       Download PDF
     </a>
+
+    {# Delete draft — destructive, so it sits last (flex-wraps away from the primary Send
+       action). Only draft quotes are deletable; the endpoint 400s otherwise, so the button
+       is draft-gated. On success the DELETE returns an empty body with HX-Redirect →
+       full navigation to /v2/requisitions (redirect wins, so hx-target is moot). A 400/404
+       surfaces via the global htmx:responseError toast (htmx_app.js reads body.error) — no
+       silent failure. hx-target="#main-content" exists in both the deep-link page and the
+       Build-Quote workspace. Matches the vendors/detail.html delete sibling. #}
+    {% if quote.status == 'draft' %}
+    <button hx-delete="/v2/partials/quotes/{{ quote.id }}"
+            hx-target="#main-content"
+            hx-confirm="Delete this draft quote? This cannot be undone."
+            data-loading-disable
+            class="btn btn-danger btn-lg inline-flex items-center gap-1.5">
+      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+      Delete draft
+    </button>
+    {% endif %}
   </div>
 
   {# Global markup input #}
