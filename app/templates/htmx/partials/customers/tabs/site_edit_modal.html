@@ -1,14 +1,14 @@
 {# site_edit_modal.html — Edit form for a CustomerSite, loaded into #modal-content
    via $dispatch('open-modal', {url: '...'}). The base modal renders ✕/backdrop/Escape.
    Receives: site (CustomerSite), company_id (int), users (list[User]).
-   On success: re-renders #sites-list area and closes the modal.
+   On success: re-renders #company-tab-content (the Sites tab panel) and closes the modal.
    Called by: GET /v2/partials/customers/{company_id}/sites/{site_id}/edit-form
 #}
 <div class='p-5'>
   <h3 id="modal-title" class='text-sm font-semibold text-gray-900 mb-4'>Edit Site</h3>
 
   <form hx-post='/v2/partials/customers/{{ company_id }}/sites/{{ site.id }}/edit'
-        hx-target='#main-content'
+        hx-target='#company-tab-content'
         hx-swap='innerHTML'
         hx-on::after-request='if(event.detail.successful) $dispatch("close-modal")'
         data-loading-disable

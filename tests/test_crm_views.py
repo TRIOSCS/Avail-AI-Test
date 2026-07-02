@@ -164,6 +164,83 @@ class TestCustomerWorkspace:
         assert 'id="cdm-workspace"' not in resp.text
 
 
+class TestArchivedSearchResults:
+    """F3: archived (DNC) rows surfaced in a name search must link to the real detail
+    route (/v2/partials/customers/{id}), not a non-existent /detail suffix that 404s and
+    swaps nothing."""
+
+    def test_archived_row_uses_real_detail_url(self, client: TestClient, db_session: Session, test_user: User):
+        archived = Company(name="ZzArchived DNC Co", is_active=False)
+        db_session.add(archived)
+        db_session.commit()
+
+        resp = client.get("/v2/partials/customers/account-list", params={"search": "ZzArchived"})
+        assert resp.status_code == 200
+        body = resp.text
+        assert "ZzArchived DNC Co" in body
+        # Correct URL present (matches the active-row pattern); broken /detail suffix absent.
+        assert f'hx-get="/v2/partials/customers/{archived.id}"' in body
+        assert f"/v2/partials/customers/{archived.id}/detail" not in body
+
+    def test_detail_suffix_route_does_not_exist(self, client: TestClient, db_session: Session):
+        """The old /detail suffix has no registered route → 404 (the silent failure F3
+        fixed)."""
+        archived = Company(name="ZzArchived404 Co", is_active=False)
+        db_session.add(archived)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{archived.id}/detail", headers={"HX-Request": "true"})
+        assert resp.status_code == 404
+
+
+@pytest.mark.usefixtures("_grant_account_management")
+class TestAccountActionsWorkStandalone:
+    """F6: Reactivate / Archive (DNC) / Send-to-Prospecting must target the detail
+    partial's own root (`closest [data-detail-root]`), not `#cdm-detail`. `#cdm-detail`
+    exists only inside the CDM workspace shell, so on a deep-linked / reloaded full-page
+    company view (detail rendered into #main-content) those actions were dead — htmx fired
+    a targetError and never sent the request."""
+
+    def test_detail_root_carries_data_detail_root_marker(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        c = Company(name="Standalone Marker Co", is_active=True, account_owner_id=test_user.id)
+        db_session.add(c)
+        db_session.commit()
+        resp = client.get(f"/v2/partials/customers/{c.id}")
+        assert resp.status_code == 200
+        assert "data-detail-root" in resp.text
+
+    def test_archive_and_send_to_prospecting_target_detail_root(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        c = Company(name="ActiveActions Co", is_active=True, account_owner_id=test_user.id)
+        db_session.add(c)
+        db_session.commit()
+        resp = client.get(f"/v2/partials/customers/{c.id}")
+        assert resp.status_code == 200
+        body = resp.text
+        assert "/deactivate" in body  # Archive (DNC) kebab action rendered
+        assert "/send-to-prospecting" in body  # disposition control rendered
+        # Both actions resolve to the detail root, and none target the shell-only id.
+        assert body.count("closest [data-detail-root]") >= 2
+        assert 'hx-target="#cdm-detail"' not in body
+        assert "hx-target='#cdm-detail'" not in body
+
+    def test_reactivate_targets_detail_root_on_archived_view(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        c = Company(name="ArchivedActions Co", is_active=False, account_owner_id=None)
+        db_session.add(c)
+        db_session.commit()
+        resp = client.get(f"/v2/partials/customers/{c.id}")
+        assert resp.status_code == 200
+        body = resp.text
+        assert "/reactivate" in body
+        assert "closest [data-detail-root]" in body
+        assert 'hx-target="#cdm-detail"' not in body
+
+
 class TestOverdueChip:
     """Test the overdue 'needs a call' chip on the CDM workspace filter bar.
 

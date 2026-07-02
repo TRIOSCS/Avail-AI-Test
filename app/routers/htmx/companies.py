@@ -4324,14 +4324,18 @@ async def company_merge(
         user.email,
     )
 
-    # Redirect browser to keeper's detail page via HTMX redirect header
+    # Redirect browser to the keeper's FULL-PAGE detail URL via HTMX redirect header.
+    # HX-Redirect triggers a real window.location navigation, so it must point at the
+    # base-page-wrapped route (/v2/customers/{id}) — NOT the bare partial
+    # (/v2/partials/customers/{id}), which would land the user on an unstyled fragment
+    # with no nav shell or CSS entry point.
     safe_name = html_mod.escape(keep.name or "")
     response = HTMLResponse(
         f'<p class="text-sm text-emerald-600 py-2">Merged into <strong>{safe_name}</strong>. '
         f"{int(result.get('sites_moved', 0))} site(s) and {int(result.get('reassigned', 0))} record(s) reassigned.</p>",
         status_code=200,
     )
-    response.headers["HX-Redirect"] = f"/v2/partials/customers/{company_id}"
+    response.headers["HX-Redirect"] = f"/v2/customers/{company_id}"
     return response
 
 
