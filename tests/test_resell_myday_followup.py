@@ -226,3 +226,14 @@ class TestNotYetStripRoute:
         resp = client.get(f"/v2/partials/resell/{owned_list.id}/not-yet-strip")
         assert resp.status_code == 200
         assert _tasks_for(db_session, test_user.id) == []
+
+    def test_chip_carries_preselect_buyer(self, client, db_session, monkeypatch, test_user, owned_list, buyer_card_a):
+        """RS-8: each nudge chip opens the offer panel with its buyer preselected.
+
+        The chip's hx-get must carry preselect_vendor_card_id=<buyer> so the panel lands
+        with that buyer already checked (the one-click promise), not the generic panel.
+        """
+        _stub_strip(monkeypatch, [_ranked(buyer_card_a)])
+        resp = client.get(f"/v2/partials/resell/{owned_list.id}/not-yet-strip")
+        assert resp.status_code == 200
+        assert f"preselect_vendor_card_id={buyer_card_a.id}" in resp.text

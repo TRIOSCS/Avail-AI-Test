@@ -732,7 +732,10 @@ async def resell_add_line(
     excess_service._resolve_line_material_card(db, item)
     el.total_line_items = (el.total_line_items or 0) + 1
     db.commit()
-    return await resell_lines(request, list_id=list_id, user=user, db=db)
+    # Re-render the WHOLE detail (not just the Lines tab): adding the first line to a
+    # draft is what makes the header Post button appear (line_count > 0), so a Lines-only
+    # swap would leave the header stale and the user with no way to publish (RS-5).
+    return template_response("htmx/partials/resell/detail.html", _detail_context(request, db, el, user))
 
 
 @router.post("/api/resell/{list_id}/import-preview", response_class=HTMLResponse)
@@ -790,7 +793,10 @@ async def resell_import_confirm(
     except (json.JSONDecodeError, ValueError) as exc:
         raise HTTPException(400, "Invalid import payload") from exc
     excess_service.confirm_import(db, list_id, rows)
-    return await resell_lines(request, list_id=list_id, user=user, db=db)
+    # Re-render the WHOLE detail so the header Post button appears once the draft has
+    # lines — a Lines-only swap leaves the header stale (RS-5).
+    el = excess_service.get_excess_list(db, list_id)
+    return template_response("htmx/partials/resell/detail.html", _detail_context(request, db, el, user))
 
 
 @router.post("/api/resell/{list_id}/publish", response_class=HTMLResponse)
@@ -977,10 +983,20 @@ def _no_contact_buyers(db: Session, el: ExcessList, suggested_ids: set[int]) -> 
 
 
 def _buyer_panel_context(
-    request: Request, db: Session, el: ExcessList, owner: User, line_ids: list[int] | None
+    request: Request,
+    db: Session,
+    el: ExcessList,
+    owner: User,
+    line_ids: list[int] | None,
+    preselect_ids: list[int] | None = None,
 ) -> dict:
     """Context for the offer-to-buyers panel: ranked suggestions + no-contact buyers +
-    scope."""
+    scope.
+
+    ``preselect_ids`` (buyer ``vendor_card_id``s) seed the panel's checked set so a "not
+    yet offered" nudge chip lands with its buyer already selected (RS-8) — one click from
+    action instead of re-finding the buyer in the ranked list.
+    """
     suggestions = _suggestion_rows(db, el, owner, line_ids)
     suggested_ids = {row["buyer"].vendor_card_id for row in suggestions}
     scope_lines = db.query(ExcessLineItem).filter(ExcessLineItem.id.in_(line_ids)).all() if line_ids else None
@@ -993,6 +1009,7 @@ def _buyer_panel_context(
         "channels": [c.value for c in ExcessOutreachChannel],
         "line_ids": line_ids or [],
         "scope_lines": scope_lines,
+        "preselect_ids": preselect_ids or [],
     }
 
 
@@ -1030,6 +1047,7 @@ async def resell_offer_buyers_form(
     request: Request,
     list_id: int,
     line_ids: str = Query(""),
+    preselect_vendor_card_id: str = Query(""),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -1037,15 +1055,18 @@ async def resell_offer_buyers_form(
     scope + channel.
 
     ``line_ids`` (comma-separated) scopes the campaign to specific lines; omitted = the
-    whole list. The panel reveals the buyer "who" + scorecard facts, so it is the owner's
-    private view (403 for a non-owner).
+    whole list. ``preselect_vendor_card_id`` seeds the checked set so a "not yet offered"
+    nudge chip opens the panel with that buyer already selected (RS-8). The panel reveals
+    the buyer "who" + scorecard facts, so it is the owner's private view (403 for a
+    non-owner).
     """
     el = excess_service.get_excess_list(db, list_id)
     _require_owner(el, user)
     parsed = [lid for lid in (_to_int(x) for x in line_ids.split(",")) if lid is not None] if line_ids else None
+    preselect = _to_int(preselect_vendor_card_id)
     return template_response(
         "htmx/partials/resell/offer_buyers_modal.html",
-        _buyer_panel_context(request, db, el, user, parsed),
+        _buyer_panel_context(request, db, el, user, parsed, [preselect] if preselect is not None else None),
     )
 
 

@@ -7,19 +7,21 @@
   not to need a JS factory.
 
   Receives: list, suggestions [{buyer: RankedBuyer, overlap}], no_contact_buyers
-            [{card}], channels (list), line_ids (list), scope_lines (or None), user.
-  Called by: resell.resell_offer_buyers_form (via the detail "Offer to buyers" action).
+            [{card}], channels (list), line_ids (list), scope_lines (or None),
+            preselect_ids (buyer vendor_card_ids to pre-check — RS-8), user.
+  Called by: resell.resell_offer_buyers_form (via the detail "Offer to buyers" action
+             and the "not yet offered" nudge chips, which pass a preselect buyer).
   Depends on: the global modal (#modal-content), $store.toast, /api/autocomplete/names.
 
-  Alpine landmines (CLAUDE.md): the |tojson seed is in a SINGLE-quoted x-data attr
-  (tojson emits double quotes); the per-row :checked / @change pass the id as a JS
-  number literal so no quoting hazard.
+  Alpine landmines (CLAUDE.md): the |tojson seeds (selected, scope) are in a SINGLE-quoted
+  x-data attr (tojson emits double quotes); the per-row :checked / @change pass the id as
+  a JS number literal so no quoting hazard.
 #}
 {% set el = list %}
 
 <div class="p-5"
      x-data='{
-       selected: [],
+       selected: {{ preselect_ids|default([])|tojson }},
        scope: {{ "per_line" | tojson if line_ids else "whole_list" | tojson }},
        channel: "email",
        query: "",

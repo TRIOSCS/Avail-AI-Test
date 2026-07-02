@@ -25,10 +25,11 @@
       <p class="text-xs font-medium text-amber-800">You usually offer this to these buyers — not yet this round</p>
       <div class="mt-1.5 flex flex-wrap gap-1.5">
         {% for b in buyers %}
-        {# Each chip opens the offer panel — no scope means the whole list. #}
+        {# Each chip opens the offer panel with THIS buyer preselected (RS-8) — no scope
+           means the whole list. #}
         <button type="button"
                 @click="$dispatch('open-modal')"
-                hx-get="/v2/partials/resell/{{ el.id }}/offer-buyers-form"
+                hx-get="/v2/partials/resell/{{ el.id }}/offer-buyers-form?preselect_vendor_card_id={{ b.vendor_card_id }}"
                 hx-target="#modal-content"
                 class="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-white border border-amber-300 text-amber-700 hover:bg-amber-100 transition-colors">
           {{ b.display_name }}
