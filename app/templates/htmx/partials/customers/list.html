@@ -15,6 +15,18 @@
      x-data="{ selectedId: null, autoSelectFirst() { if (this.selectedId !== null) return; const detail = this.$el.querySelector('#cdm-detail'); if (!detail || !detail.querySelector('[data-cdm-empty]')) return; const first = this.$el.querySelector('#cdm-list [role=\'button\'][hx-get]'); if (first) first.click() } }"
      x-init="$nextTick(() => autoSelectFirst())">
 
+  {# List-refresh hook — the create/edit-account modals fire HX-Trigger=cdmListRefresh on
+     success; this hidden element reloads the left account list (honoring the live filters)
+     so a new or renamed account shows immediately. It lives inside the workspace, so a
+     deep-linked full-page edit (no workspace present) simply has no listener and the
+     trigger harmlessly no-ops. #}
+  <div hx-get="/v2/partials/customers/account-list"
+       hx-trigger="cdmListRefresh from:body"
+       hx-target="#cdm-list"
+       hx-swap="innerHTML"
+       hx-include="#cdm-filters"
+       class="hidden"></div>
+
   {# ── Filter / sort bar ─────────────────────────────────────── #}
   {# All filter controls use .input / .input-sm (accent ring, line border) per PR0. #}
   <form id="cdm-filters" class="flex items-center gap-1.5 flex-wrap pb-1 flex-shrink-0"
@@ -113,9 +125,24 @@
     {% include "htmx/partials/customers/_saved_views.html" %}
   </div>
 
-  {# Export + cross-company contacts links + Import — below the filter bar, above the split workspace #}
+  {# New account (primary CTA) + Export/contacts/Import utilities — below the filter bar,
+     above the split workspace. Until now accounts arrived only via CSV import (F7); the
+     "+ New account" button surfaces the existing create-account form as a modal. #}
   {# Import modal uses the shared modal-* primitives to match vendors import and the rest of the app. #}
-  <div class="flex justify-end gap-3 text-xs text-gray-600 mb-0.5" x-data="{ importOpen: false }">
+  <div class="flex items-center justify-between gap-3 mb-0.5" x-data="{ importOpen: false }">
+    {# + New account — loads the create-account form into #modal-content and opens the
+       global modal (base.html). On success the new account's detail fills #cdm-detail and
+       the list refreshes via HX-Trigger=cdmListRefresh. #}
+    <button type="button"
+            @click="$dispatch('open-modal')"
+            hx-get="/v2/partials/customers/create-form"
+            hx-target="#modal-content"
+            hx-swap="innerHTML"
+            data-loading-disable
+            class="btn btn-primary btn-sm whitespace-nowrap">
+      + New account
+    </button>
+    <div class="flex items-center gap-3 text-xs text-gray-600">
     <a hx-get="/v2/partials/contacts" hx-target="#main-content" hx-push-url="/v2/contacts"
        class="hover:text-accent-600 hover:underline cursor-pointer">All contacts</a>
     {# Export honors the CURRENT filtered view: @click.prevent rebuilds the download URL
@@ -126,6 +153,7 @@
     <a href="/v2/customers/contacts/export.csv" class="hover:text-accent-600 hover:underline">Export contacts</a>
     <button type="button" @click="importOpen = true"
             class="hover:text-accent-600 hover:underline cursor-pointer">Import CSV</button>
+    </div>
 
     {# Import modal — built on shared modal-* primitives to match vendors import modal. #}
     <div x-show="importOpen" x-cloak

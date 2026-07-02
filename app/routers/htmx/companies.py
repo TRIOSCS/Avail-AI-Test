@@ -1165,7 +1165,12 @@ async def create_company(
     db.commit()
     logger.info("Company {} created by {}", company.id, user.email)
 
-    return await _render_company_detail(request, company.id, user, db)
+    # Load the new account's detail into the CDM right panel (form hx-target=#cdm-detail);
+    # the HX-Trigger tells the workspace's hidden listener to refresh the left account list
+    # so the freshly created row appears. On deep-link contexts (no listener) it no-ops.
+    resp = await _render_company_detail(request, company.id, user, db)
+    resp.headers["HX-Trigger"] = "cdmListRefresh"
+    return resp
 
 
 @router.get("/v2/partials/customers/typeahead", response_class=HTMLResponse)
@@ -3805,7 +3810,12 @@ async def edit_company(
     db.commit()
     logger.info("Company {} edited by {}", company_id, user.email)
 
-    return await _render_company_detail(request, company_id, user, db)
+    # Refreshed detail replaces the detail root in place (form hx-target=#company-detail-<id>,
+    # outerHTML) so it works in both the workspace and a deep-linked full page. The HX-Trigger
+    # refreshes the left account list too (name/owner/type edits change the row) when present.
+    resp = await _render_company_detail(request, company_id, user, db)
+    resp.headers["HX-Trigger"] = "cdmListRefresh"
+    return resp
 
 
 # ── Inline Field Edit — Account (WS1) ─────────────────────────────────────

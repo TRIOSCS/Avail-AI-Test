@@ -16,8 +16,10 @@
    data-detail-root marks this partial's own root so account actions (Reactivate /
    Archive / Send-to-Prospecting) can target `closest [data-detail-root]` and re-swap
    themselves whether they render inside the CDM workspace right panel (#cdm-detail) or
-   standalone in #main-content on a deep-linked/reloaded page. #}
-<div data-detail-root class="space-y-4 page-fluid">
+   standalone in #main-content on a deep-linked/reloaded page. The stable id lets the
+   Edit-account modal (which lives OUTSIDE this root, in #modal-content, so `closest`
+   can't reach it) re-swap this detail in place via outerHTML in either context. #}
+<div id="company-detail-{{ company.id }}" data-detail-root class="space-y-4 page-fluid">
 
   {# ── Breadcrumb — "Customers › {Account}" (you-are-here for the right panel).
      Reuses the treatment from the retired site_detail.html. "Customers" is the
@@ -206,6 +208,16 @@
           <div x-show="open" x-cloak
                role="menu"
                class="absolute right-0 top-full mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-lg z-20 py-1 text-xs text-left">
+            {# Edit account — opens the full account edit form as a modal. Most fields are
+               also inline-editable in the header/settings grid, so the full form is an
+               overflow action alongside Merge/Archive. #}
+            <button type="button"
+                    hx-get="/v2/partials/customers/{{ company.id }}/edit-form"
+                    hx-target="#modal-content"
+                    hx-swap="innerHTML"
+                    @click.stop="$dispatch('open-modal'); open = false"
+                    role="menuitem"
+                    class="w-full text-left px-3 py-1.5 text-gray-700 hover:bg-gray-50">Edit account</button>
             {# Merge duplicate — opens modal with search + confirm flow #}
             <button type="button"
                     hx-get="/v2/partials/customers/{{ company.id }}/merge-form"
