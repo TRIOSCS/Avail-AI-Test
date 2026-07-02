@@ -17,6 +17,36 @@
   {%- else -%}Broker #{{ offer.id }}{%- endif -%}
 {% endmacro %}
 
+{#
+  Per-line award action — the single 3-way cell (spec §RS-3): the offer that won this
+  line shows Awarded ✓ + Unaward (the explicit inverse); a line awarded to a DIFFERENT
+  offer shows "Not selected" (a pure render decision — award never auto-marks losers
+  ``lost``); an open/late offer on an un-awarded line shows Award. Every button targets
+  #tab-offers (its own tab) so the OOB response never resets the Alpine tab state.
+#}
+{% macro _offer_action(el, item, offer, is_owner) %}
+  {%- if offer.status == 'won' -%}
+  <div class="inline-flex items-center gap-1.5 whitespace-nowrap">
+    <span class="text-xs font-semibold text-emerald-700">Awarded ✓</span>
+    <button hx-post="/api/resell/{{ el.id }}/offers/{{ offer.id }}/unaward"
+            hx-target="#tab-offers-{{ el.id }}" hx-swap="innerHTML"
+            hx-confirm="Reverse this award? The line returns to the pool for offers."
+            data-loading-disable
+            class="btn-ghost btn-sm text-rose-600 hover:text-rose-700">Unaward</button>
+  </div>
+  {%- elif item.status == 'awarded' -%}
+  <span class="text-xs text-gray-400 whitespace-nowrap">Not selected</span>
+  {%- elif offer.status in ['open', 'late'] -%}
+  <button hx-post="/api/resell/{{ el.id }}/offers/{{ offer.id }}/award"
+          hx-target="#tab-offers-{{ el.id }}" hx-swap="innerHTML"
+          hx-confirm="Award {{ _broker_label(offer, is_owner) }} for {{ item.part_number }}? This marks the line sold."
+          data-loading-disable
+          class="btn-primary btn-sm">Award</button>
+  {%- else -%}
+  <span class="text-xs text-gray-400">—</span>
+  {%- endif -%}
+{% endmacro %}
+
 {% if not is_owner %}
 {# Offerer-facing: a non-owner never sees the collected offer stack. #}
 <div class="mx-auto max-w-sm text-center py-10">
@@ -31,8 +61,10 @@
 <div class="space-y-5">
 
   {# ── Pinned take-all banner(s) ──────────────────────────────── #}
+  {% set active_line_count = line_items|rejectattr('status', 'equalto', 'withdrawn')|list|length %}
   {% for offer in take_all_offers %}
-  <div class="rounded-lg border-2 border-violet-200 bg-violet-50 p-4">
+  {% set won = offer.status == 'won' %}
+  <div class="rounded-lg border-2 p-4 {{ 'border-emerald-300 bg-emerald-50' if won else 'border-violet-200 bg-violet-50' }}">
     <div class="flex items-start justify-between gap-3">
       <div>
         <span class="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-semibold rounded-full bg-violet-100 text-violet-700">
@@ -48,6 +80,27 @@
         <span class="text-lg font-bold text-violet-700 tabular-nums">${{ "{:,.2f}".format(offer.take_all_total_price|float) }}</span>
         {% else %}<span class="text-sm text-gray-400 italic">Price TBD</span>{% endif %}
       </div>
+    </div>
+    {# ── 3-way award action: Awarded✓+Unaward / disabled(blocked) / Award all N ── #}
+    <div class="mt-3 pt-3 border-t flex items-center justify-end gap-2 {{ 'border-emerald-200' if won else 'border-violet-200' }}">
+      {% if won %}
+      <span class="text-xs font-semibold text-emerald-700">Awarded ✓ — the whole list</span>
+      <button hx-post="/api/resell/{{ el.id }}/offers/{{ offer.id }}/unaward"
+              hx-target="#tab-offers-{{ el.id }}" hx-swap="innerHTML"
+              hx-confirm="Reverse this take-all award? Every line returns to the pool."
+              data-loading-disable
+              class="btn-ghost btn-sm text-rose-600 hover:text-rose-700">Unaward</button>
+      {% elif take_all_blocked %}
+      <span class="text-xs text-gray-500">Some lines already awarded — unaward them first</span>
+      {% elif offer.status in ['open', 'late'] %}
+      <button hx-post="/api/resell/{{ el.id }}/offers/{{ offer.id }}/award"
+              hx-target="#tab-offers-{{ el.id }}" hx-swap="innerHTML"
+              hx-confirm="Award the whole list to {{ _broker_label(offer, is_owner) }}? All {{ active_line_count }} line{{ 's' if active_line_count != 1 }} are marked sold."
+              data-loading-disable
+              class="btn-primary btn-sm">Award all {{ active_line_count }}</button>
+      {% else %}
+      <span class="text-xs text-gray-400">—</span>
+      {% endif %}
     </div>
   </div>
   {% endfor %}
@@ -75,12 +128,15 @@
             <th class="text-right">Qty</th>
             <th class="text-center">Lead</th>
             <th class="text-left">Terms</th>
+            <th class="text-center">Action</th>
           </tr>
         </thead>
         <tbody>
           {% for e in entries %}
           {% set best = item.best_offer_id is not none and e.offer.id == item.best_offer_id and e.line.unit_price is not none %}
-          <tr class="{{ 'bg-emerald-50/60' if best }}">
+          {% set won = e.offer.status == 'won' %}
+          {% set not_selected = item.status == 'awarded' and not won %}
+          <tr class="{{ 'bg-emerald-50' if won else 'opacity-60' if not_selected else 'bg-emerald-50/60' if best else '' }}">
             <td>{{ _broker_label(e.offer, is_owner) }}{% if best %}<span class="ml-1 text-xs font-semibold text-emerald-600">best</span>{% endif %}</td>
             <td class="text-right tabular-nums {{ 'font-semibold text-emerald-600' if best }}">
               {% if e.line.unit_price is not none %}${{ "{:,.4f}".format(e.line.unit_price|float) }}{% else %}<span class="text-gray-400">TBD</span>{% endif %}
@@ -88,6 +144,7 @@
             <td class="text-right tabular-nums">{{ "{:,}".format(e.line.quantity) }}</td>
             <td class="text-center">{{ (e.line.lead_time_days|string ~ 'd') if e.line.lead_time_days is not none else '—' }}</td>
             <td class="text-gray-500">{{ e.line.terms_text or '—' }}</td>
+            <td class="text-center">{{ _offer_action(el, item, e.offer, is_owner) }}</td>
           </tr>
           {% endfor %}
         </tbody>

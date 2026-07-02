@@ -1652,8 +1652,19 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     +-- POST /api/resell/{id}/offers                    (excess_service.submit_offer; scope
     |     per_line|take_all; service enforces can_offer + the self-offer guard)
     +-- POST /api/resell/{id}/offers/{offer_id}/award   (owner-only; excess_service.award_offer:
-    |     the single offer→won chokepoint; marks matched lines awarded, recomputes rollups,
-    |     then fires buyer_affinity_service.recompute_buyer_score_on_win before commit)
+    |     the single offer→won chokepoint; take_all awards ALL non-withdrawn lines, per_line
+    |     awards its matched lines; 409 if a line is already awarded to another offer;
+    |     idempotent for an already-won offer; recomputes rollups + buyer-score win-hook;
+    |     retires the sold lines from the Sighting mirror (sync_list_mirror); derives the
+    |     list→awarded status once every line is decided. RESPONSE is an OOB compose
+    |     (_award_response.html): PRIMARY = Offers tab (hx-target #tab-offers-<id>), OOB =
+    |     #tab-lines-<id> (Awarded/Withdrawn pills) + #resell-chips-<id> (N/M-awarded chip +
+    |     status badge), so awarding never resets the Alpine tab state; HX-Trigger showToast)
+    +-- POST /api/resell/{id}/offers/{offer_id}/unaward (owner-only; excess_service.unaward_offer:
+    |     the EXPLICIT inverse — never a silent auto-swap to a new winner. 409 if the offer
+    |     is not won; reverts offer→open + lines→available, recomputes rollups + buyer score
+    |     (full-history recompute self-heals wins), re-mirrors the lines, and steps the list
+    |     back off awarded → bid_out (close_at set) else collecting. Same _award_response OOB)
     +-- POST /api/resell/{id}/outreach                  (owner-only; channel=email →
           resell_outreach_service.submit_outreach_email [RFQ send engine], else
           submit_outreach [manual log]; re-renders the Outreach tracker)

@@ -33,6 +33,7 @@ from sqlalchemy.orm import Session
 
 from ..constants import (
     AccessKey,
+    ExcessLineItemStatus,
     ExcessListStatus,
     ExcessOfferScope,
     ExcessOfferStatus,
@@ -240,6 +241,7 @@ def _detail_context(request: Request, db: Session, el: ExcessList, user: User) -
         "list": el,
         "line_items": items,
         "line_count": len(items),
+        "awarded_line_count": sum(1 for it in items if it.status == ExcessLineItemStatus.AWARDED),
         "offer_count": offer_count,
         "take_all_count": take_all_count,
         "can_see_customer": can_see_customer,
@@ -378,40 +380,36 @@ async def resell_lines(
     return template_response("htmx/partials/resell/_lines.html", _detail_context(request, db, el, user))
 
 
-@router.get("/v2/partials/resell/{list_id}/offers", response_class=HTMLResponse)
-async def resell_offers(
-    request: Request,
-    list_id: int,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Lazy Offers tab body — per-line offer stacks + pinned take-all banner.
+def _offers_context(request: Request, db: Session, el: ExcessList, user: User) -> dict:
+    """Build the Offers tab context — per-line offer stacks + pinned take-all banners.
 
-    Offers are the owner's private view — non-owners must not see other brokers' quotes.
-    If the requester is not the owner, render the "offers are private" state without
-    querying or passing any offer data.
+    Offers are the owner's private view: a non-owner gets an empty stack (the template
+    renders the "offers are private" state instead). ``take_all_blocked`` is True once any
+    line is already awarded, which disables a whole-list take-all award (it would collide
+    with the per-line winner). Caller must have already authorized access to *el*.
     """
-    el, can_see_customer = _get_list_for_user(db, list_id, user)
     is_owner = el.owner_id == user.id
     items = db.query(ExcessLineItem).filter_by(excess_list_id=el.id).order_by(ExcessLineItem.id).all()
+    take_all_blocked = any(it.status == ExcessLineItemStatus.AWARDED for it in items)
+    base = {
+        "request": request,
+        "user": user,
+        "list": el,
+        "line_items": items,
+        "shape": "single" if len(items) == 1 else "table",
+        "take_all_blocked": take_all_blocked,
+    }
 
     if not is_owner:
         # Non-owner: render an empty offers view — no offer data in the response.
-        return template_response(
-            "htmx/partials/resell/_offers.html",
-            {
-                "request": request,
-                "user": user,
-                "list": el,
-                "line_items": items,
-                "by_line": {it.id: [] for it in items},
-                "unmatched": [],
-                "take_all_offers": [],
-                "can_see_customer": False,
-                "is_owner": False,
-                "shape": "single" if len(items) == 1 else "table",
-            },
-        )
+        return {
+            **base,
+            "by_line": {it.id: [] for it in items},
+            "unmatched": [],
+            "take_all_offers": [],
+            "can_see_customer": False,
+            "is_owner": False,
+        }
 
     take_all_offers = (
         db.query(ExcessOffer)
@@ -443,21 +441,37 @@ async def resell_offers(
             else:
                 unmatched.append(entry)
 
-    return template_response(
-        "htmx/partials/resell/_offers.html",
-        {
-            "request": request,
-            "user": user,
-            "list": el,
-            "line_items": items,
-            "by_line": by_line,
-            "unmatched": unmatched,
-            "take_all_offers": take_all_offers,
-            "can_see_customer": can_see_customer,
-            "is_owner": True,
-            "shape": "single" if len(items) == 1 else "table",
-        },
-    )
+    return {
+        **base,
+        "by_line": by_line,
+        "unmatched": unmatched,
+        "take_all_offers": take_all_offers,
+        "can_see_customer": True,
+        "is_owner": True,
+    }
+
+
+def _award_response_context(request: Request, db: Session, el: ExcessList, user: User) -> dict:
+    """Combined context for the award/unaward OOB response.
+
+    ``_award_response.html`` swaps the Offers tab (its primary target) and, out-of-band,
+    the Lines tab (awarded/withdrawn pills) and the header chips (the awarded-count chip +
+    list-status badge) — so awarding never resets the Alpine ``tab`` state. Merging the
+    two contexts is safe: the shared keys (request/user/list/line_items/shape) are equal.
+    """
+    return {**_detail_context(request, db, el, user), **_offers_context(request, db, el, user)}
+
+
+@router.get("/v2/partials/resell/{list_id}/offers", response_class=HTMLResponse)
+async def resell_offers(
+    request: Request,
+    list_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Lazy Offers tab body — per-line offer stacks + pinned take-all banner."""
+    el, _ = _get_list_for_user(db, list_id, user)
+    return template_response("htmx/partials/resell/_offers.html", _offers_context(request, db, el, user))
 
 
 @router.get("/v2/partials/resell/{list_id}/lines/{line_id}/offers", response_class=HTMLResponse)
@@ -888,6 +902,13 @@ async def resell_submit_offer(
     return await resell_offers(request, list_id=el.id, user=user, db=db)
 
 
+def _toast(resp: Response, message: str) -> Response:
+    """Attach the ``showToast`` HX-Trigger so an award/unaward confirms even though the
+    triggering button was swapped out of the DOM (mirrors sightings._toast)."""
+    resp.headers["HX-Trigger"] = json.dumps({"showToast": {"message": message, "type": "success"}})
+    return resp
+
+
 @router.post("/api/resell/{list_id}/offers/{offer_id}/award", response_class=HTMLResponse)
 async def resell_award_offer(
     request: Request,
@@ -896,16 +917,44 @@ async def resell_award_offer(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Award an inbound offer (owner-only): flip it to ``won`` and recompute the winning
-    buyer's scorecard, then re-render the detail panel.
+    """Award an inbound offer (owner-only): flip it to ``won``, mark its lines sold,
+    recompute the winning buyer's scorecard, and re-render the Offers tab + OOB
+    lines/chips.
 
-    The award is the single path that marks an ExcessOffer ``won``; the service owns the
-    transaction and fires the buyer-score recompute hook before committing. Owner-gated +
-    404 on a missing offer are enforced in ``excess_service.award_offer``.
+    The service owns the transaction (buyer-score hook, mirror-retire, list-status
+    derivation) and enforces owner-gating, 404 on a missing offer, and 409 when a line is
+    already awarded to a different offer. The response is an OOB compose so awarding from a
+    tab never resets the Alpine ``tab`` state; the toast fires via HX-Trigger.
     """
     offer = excess_service.award_offer(db, offer_id, user)
     el = excess_service.get_excess_list(db, offer.excess_list_id)
-    return template_response("htmx/partials/resell/detail.html", _detail_context(request, db, el, user))
+    resp = template_response(
+        "htmx/partials/resell/_award_response.html", _award_response_context(request, db, el, user)
+    )
+    return _toast(resp, "Offer awarded")
+
+
+@router.post("/api/resell/{list_id}/offers/{offer_id}/unaward", response_class=HTMLResponse)
+async def resell_unaward_offer(
+    request: Request,
+    list_id: int,
+    offer_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Reverse an award (owner-only): flip the offer back to ``open``, return its lines
+    to the pool, and re-render the Offers tab + OOB lines/chips.
+
+    The explicit inverse of award — never a silent auto-swap to a different winner. The
+    service enforces owner-gating, 404 on a missing offer, and 409 when the offer is not
+    awarded (nothing to reverse).
+    """
+    offer = excess_service.unaward_offer(db, offer_id, user)
+    el = excess_service.get_excess_list(db, offer.excess_list_id)
+    resp = template_response(
+        "htmx/partials/resell/_award_response.html", _award_response_context(request, db, el, user)
+    )
+    return _toast(resp, "Award reversed")
 
 
 # ── Outreach: offer-to-buyers panel + tracker + don't-forget strip ───

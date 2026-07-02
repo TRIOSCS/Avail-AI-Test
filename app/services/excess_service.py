@@ -596,17 +596,55 @@ def withdraw_offer(db: Session, offer_id: int) -> ExcessOffer:
     return offer
 
 
+# Line statuses that are decided (no longer collecting offers) for list-status derivation.
+_DECIDED_LINE_STATUSES = (ExcessLineItemStatus.AWARDED, ExcessLineItemStatus.WITHDRAWN)
+
+
+def _award_scope_items(db: Session, offer: ExcessOffer, excess_list: ExcessList) -> list[ExcessLineItem]:
+    """The line items an award/unaward of *offer* acts on.
+
+    A ``take_all`` offer carries NO ``ExcessOfferLine`` rows — it binds the whole list, so
+    its scope is every non-withdrawn line (FIX: take_all used to award zero lines because
+    it derived the scope from the empty ``offer.lines``). A ``per_line`` offer's scope is
+    the distinct matched line items its lines point at.
+    """
+    if offer.scope == ExcessOfferScope.TAKE_ALL:
+        return [li for li in excess_list.line_items if li.status != ExcessLineItemStatus.WITHDRAWN]
+    ids = {line.excess_line_item_id for line in offer.lines if line.excess_line_item_id is not None}
+    items = (db.get(ExcessLineItem, i) for i in ids)
+    return [it for it in items if it is not None]
+
+
+def _apply_award_list_status(excess_list: ExcessList) -> None:
+    """Derive the list's own status once its lines are all decided (FIX #1).
+
+    Nothing else flips an ExcessList to ``awarded``, so the workspace "Awarded" glance
+    stayed empty. When every line is decided (awarded or withdrawn) AND at least one was
+    awarded, the list itself is awarded. A partial award (some lines still open) does NOT
+    flip it — offers are still being collected on the rest.
+    """
+    items = excess_list.line_items
+    if (
+        items
+        and all(it.status in _DECIDED_LINE_STATUSES for it in items)
+        and any(it.status == ExcessLineItemStatus.AWARDED for it in items)
+    ):
+        excess_list.status = ExcessListStatus.AWARDED
+
+
 def award_offer(db: Session, offer_id: int, owner: User) -> ExcessOffer:
     """Award an inbound offer — the single chokepoint where an ExcessOffer becomes
     ``won``.
 
     Owner-only (the list owner is the only one who may pick a winner): raises 404 if the
-    offer does not exist, 403 if *owner* does not own the offer's list. Flips the offer
-    to ``won``, marks each matched line item ``awarded``, recomputes the best-price
-    rollup of every line the offer touched, then recomputes the winning buyer's
-    ``BuyerScore`` via ``recompute_buyer_score_on_win`` BEFORE the commit (this path owns
-    the transaction; the hook no-ops for an offer with no canonical buyer card). Commits,
-    refreshes, returns the offer. Mirrors ``withdraw_offer`` (the inverse terminal flip).
+    offer does not exist, 403 if *owner* does not own the offer's list. Idempotent — an
+    already-won offer is returned unchanged. Otherwise: guards that none of the awarded
+    lines are already sold to a different offer (409, ``unaward first``), flips the offer
+    to ``won`` and its lines to ``awarded``, recomputes each touched line's best-price
+    rollup, recomputes the winning buyer's ``BuyerScore`` (``recompute_buyer_score_on_win``),
+    retires the sold lines from the Sighting mirror (``sync_list_mirror`` — a sold line
+    must stop advertising as live supply), and derives the list's own ``awarded`` status
+    when every line is decided. All in one transaction, committed here.
     """
     offer = db.get(ExcessOffer, offer_id)
     if not offer:
@@ -616,25 +654,84 @@ def award_offer(db: Session, offer_id: int, owner: User) -> ExcessOffer:
     if excess_list.owner_id != owner.id:
         raise HTTPException(403, "Only the list owner can award an offer")
 
-    affected = {line.excess_line_item_id for line in offer.lines if line.excess_line_item_id is not None}
+    if offer.status == ExcessOfferStatus.WON:
+        return offer  # idempotent — a double-award is a no-op, not a second flip
+
+    affected = _award_scope_items(db, offer, excess_list)
+    already = next((it for it in affected if it.status == ExcessLineItemStatus.AWARDED), None)
+    if already is not None:
+        raise HTTPException(409, f"Line '{already.part_number}' is already awarded — unaward the winner first")
+
     offer.status = ExcessOfferStatus.WON
-    for line_item_id in affected:
-        line_item = db.get(ExcessLineItem, line_item_id)
-        if line_item is not None:
-            line_item.status = ExcessLineItemStatus.AWARDED
+    for it in affected:
+        it.status = ExcessLineItemStatus.AWARDED
     db.flush()
 
-    for line_item_id in affected:
-        recompute_line_rollup(db, line_item_id)
+    for it in affected:
+        recompute_line_rollup(db, it.id)
 
     # Recompute the winning buyer's scorecard before the commit — this path owns the
     # transaction (the hook returns None / no-ops for an offer with no canonical buyer).
     recompute_buyer_score_on_win(db, offer)
 
+    # Retire the sold lines from the Sighting live-mirror — a lazy import breaks the
+    # excess_mirror ↔ excess_service cycle (excess_mirror imports get_excess_list).
+    from . import excess_mirror
+
+    excess_mirror.sync_list_mirror(db, excess_list)
+    _apply_award_list_status(excess_list)
+
     _safe_commit(db, entity="excess offer award")
     db.refresh(offer)
     logger.info(
         "Awarded ExcessOffer id={} (status=won, {} lines awarded) by owner={}", offer_id, len(affected), owner.id
+    )
+    return offer
+
+
+def unaward_offer(db: Session, offer_id: int, owner: User) -> ExcessOffer:
+    """Reverse an award — the explicit inverse of :func:`award_offer`.
+
+    Owner-only (404 missing, 403 non-owner, same order as award). Raises 409 if the offer
+    is not ``won`` (there is nothing to reverse — we never silently re-pick a different
+    winner). Flips the offer back to ``open`` and its awarded lines back to ``available``,
+    recomputes each line's rollup, recomputes the buyer's ``BuyerScore`` (a full-history
+    recompute self-heals the win count back down), re-mirrors the now-live lines
+    (``sync_list_mirror``), and steps the list's own status back off ``awarded`` — to
+    ``bid_out`` when the posting window has closed, else ``collecting``. One transaction.
+    """
+    offer = db.get(ExcessOffer, offer_id)
+    if not offer:
+        raise HTTPException(404, f"ExcessOffer {offer_id} not found")
+
+    excess_list = get_excess_list(db, offer.excess_list_id)
+    if excess_list.owner_id != owner.id:
+        raise HTTPException(403, "Only the list owner can reverse an award")
+
+    if offer.status != ExcessOfferStatus.WON:
+        raise HTTPException(409, "This offer is not awarded — nothing to reverse")
+
+    affected = [it for it in _award_scope_items(db, offer, excess_list) if it.status == ExcessLineItemStatus.AWARDED]
+    offer.status = ExcessOfferStatus.OPEN
+    for it in affected:
+        it.status = ExcessLineItemStatus.AVAILABLE
+    db.flush()
+
+    for it in affected:
+        recompute_line_rollup(db, it.id)
+
+    recompute_buyer_score_on_win(db, offer)
+
+    from . import excess_mirror
+
+    excess_mirror.sync_list_mirror(db, excess_list)
+    if excess_list.status == ExcessListStatus.AWARDED:
+        excess_list.status = ExcessListStatus.BID_OUT if excess_list.close_at else ExcessListStatus.COLLECTING
+
+    _safe_commit(db, entity="excess offer unaward")
+    db.refresh(offer)
+    logger.info(
+        "Unawarded ExcessOffer id={} (status=open, {} lines reverted) by owner={}", offer_id, len(affected), owner.id
     )
     return offer
 
