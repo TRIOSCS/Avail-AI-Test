@@ -85,9 +85,12 @@ async def requisitions_list_partial(
         .filter(Requisition.is_scratch.is_(False))
         .options(
             joinedload(Requisition.creator),
-            joinedload(Requisition.requirements),
-            joinedload(Requisition.offers),
-            joinedload(Requisition.quotes),
+            # selectinload (not joinedload) for the three collections: stacking
+            # collection joinedloads multiplies the base query's rows per requisition
+            # (requirements × offers × quotes cartesian before entity dedup).
+            selectinload(Requisition.requirements),
+            selectinload(Requisition.offers),
+            selectinload(Requisition.quotes),
         )
     )
 
@@ -156,6 +159,22 @@ async def requisitions_list_partial(
         (Requisition.deadline == "ASAP", "0000-00-00"),
         else_=Requisition.deadline,
     )
+    # Aggregate quote significance (asc = won first), mirroring _best_quote_status; a
+    # requisition with no quotes yields NULL → nullslast puts it at the bottom either way.
+    quote_status_sub = (
+        select(
+            sqlfunc.min(
+                case(
+                    *[(Quote.status == status, prio) for status, prio in _QUOTE_STATUS_PRIORITY.items()],
+                    else_=5,
+                )
+            )
+        )
+        .where(Quote.requisition_id == Requisition.id)
+        .correlate(Requisition)
+        .scalar_subquery()
+        .label("quote_status_sort")
+    )
     sort_col_map = {
         "name": Requisition.name,
         "customer_name": Requisition.customer_name,
@@ -166,6 +185,7 @@ async def requisitions_list_partial(
         "updated_at": Requisition.updated_at,
         "req_count": req_count_sub,
         "offer_count": offer_count_sub,
+        "quote_status": quote_status_sub,
     }
     sort_col = sort_col_map.get(sort)
     if sort_col is None:
