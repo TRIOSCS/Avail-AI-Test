@@ -19,11 +19,18 @@
   <span><span class="figure-accent">${{ "{:,.0f}".format(pipeline.open_value) }}</span> open value</span>
   <span class="text-gray-300">·</span>
   <span><span class="figure-accent">${{ "{:,.0f}".format(pipeline.weighted_value) }}</span> weighted forecast</span>
+  {# View toggle — discoverable switch to the flat Requisitions list (finding REQ-12) #}
+  <div class="ml-auto">
+    {% with active='workspace' %}{% include "htmx/partials/requisitions/_view_toggle.html" %}{% endwith %}
+  </div>
 </div>
 {% else %}
 {# No pipeline data: still render the page identity eyebrow (finding 9) #}
 <div class="h-[26px] flex items-center gap-2 px-3 text-xs bg-gray-50 border-b border-line-base">
   <span class="font-semibold text-gray-700">Sales Hub</span>
+  <div class="ml-auto">
+    {% with active='workspace' %}{% include "htmx/partials/requisitions/_view_toggle.html" %}{% endwith %}
+  </div>
 </div>
 {% endif %}
 
