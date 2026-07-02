@@ -1257,7 +1257,11 @@ def _build_follow_ups_ctx(request: Request, user: User, db: Session) -> dict:
     stale_q = db.query(RfqContact).filter(
         RfqContact.contact_type == "email",
         RfqContact.status.in_(["sent", "opened"]),
-        RfqContact.created_at < threshold,
+        # "Needs follow-up" = LAST outbound contact was more than follow_up_days ago.
+        # status_updated_at is stamped on the original RFQ send AND on every follow-up, so a
+        # just-sent follow-up drops off the queue (no re-spam) until the window elapses again;
+        # created_at is the fallback for legacy rows with no status_updated_at.
+        sqlfunc.coalesce(RfqContact.status_updated_at, RfqContact.created_at) < threshold,
     )
     if getattr(user, "role", None) in (UserRole.SALES, UserRole.TRADER):
         stale_q = stale_q.join(Requisition).filter(Requisition.created_by == user.id)
@@ -1811,7 +1815,9 @@ async def send_batch_follow_up(
     q = db.query(RfqContact).filter(
         RfqContact.contact_type == "email",
         RfqContact.status.in_(["sent", "opened"]),
-        RfqContact.created_at < threshold,
+        # Last outbound contact older than the window — in lockstep with the queue + badge
+        # (see _build_follow_ups_ctx); keeps a just-sent contact from being re-sent.
+        sqlfunc.coalesce(RfqContact.status_updated_at, RfqContact.created_at) < threshold,
     )
     # Restricted roles act only on contacts under their own requisitions; buyer/manager/admin
     # stay global. Keep this in lockstep with follow_up_badge so the badge counts what the
@@ -1887,7 +1893,8 @@ async def follow_up_badge(
     q = db.query(sqlfunc.count(RfqContact.id)).filter(
         RfqContact.contact_type == "email",
         RfqContact.status.in_(["sent", "opened"]),
-        RfqContact.created_at < threshold,
+        # Last outbound contact older than the window — in lockstep with the queue + batch.
+        sqlfunc.coalesce(RfqContact.status_updated_at, RfqContact.created_at) < threshold,
     )
     # Same per-owner scope as send_batch_follow_up so the badge matches the batch.
     if user.role in RESTRICTED_ROLES:
