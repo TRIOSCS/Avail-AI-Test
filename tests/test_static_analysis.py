@@ -211,6 +211,71 @@ def test_hx_vals_js_is_object_literal():
     )
 
 
+_HX_VERB_ATTR = re.compile(r"\bhx-(?:post|get|put|delete)\s*=", re.IGNORECASE)
+_TEMPLATE_TAG = re.compile(r"<template\b([^>]*)>|</template>", re.IGNORECASE)
+
+
+def _blank_template_comments(text: str) -> str:
+    """Blank Jinja {# #} and HTML <!-- --> comment bodies (newlines preserved) so prose
+    that MENTIONS `<template x-if>` or an hx-verb — e.g. the explanatory comments the
+    BP-1 fix itself adds — is not parsed as live markup."""
+
+    def repl(m: "re.Match[str]") -> str:
+        return re.sub(r"[^\n]", " ", m.group(0))
+
+    text = re.sub(r"\{#.*?#\}", repl, text, flags=re.DOTALL)
+    return re.sub(r"<!--.*?-->", repl, text, flags=re.DOTALL)
+
+
+def _hx_verb_in_xif_offenders(raw: str) -> list[int]:
+    """Return the line numbers of every hx-(post|get|put|delete) attribute that sits
+    INSIDE a ``<template x-if=...>...</template>`` block (nesting-aware)."""
+    text = _blank_template_comments(raw)
+    # Build the character spans covered by an x-if <template> (including nested templates).
+    stack: list[tuple[int, bool]] = []
+    xif_spans: list[tuple[int, int]] = []
+    for m in _TEMPLATE_TAG.finditer(text):
+        if m.group(0).lower().startswith("</template"):
+            if stack:
+                open_end, is_xif = stack.pop()
+                if is_xif:
+                    xif_spans.append((open_end, m.start()))
+        else:
+            is_xif = bool(re.search(r"\bx-if\b", m.group(1)))
+            stack.append((m.end(), is_xif))
+    offenders: list[int] = []
+    for hm in _HX_VERB_ATTR.finditer(text):
+        pos = hm.start()
+        if any(start <= pos < end for start, end in xif_spans):
+            offenders.append(text[:pos].count("\n") + 1)
+    return offenders
+
+
+def test_no_hx_verb_inside_template_x_if():
+    """BP-1 defect class: an ``hx-post/hx-get/hx-put/hx-delete`` on an element INSIDE a
+    ``<template x-if=...>...</template>`` block is DEAD.
+
+    htmx 2.x processes nodes only at load / after-swap; a ``<template>``'s content is an
+    inert DocumentFragment, and Alpine's x-if clone is inserted WITHOUT being handed to
+    ``htmx.process`` — so the hx-* attribute is never wired and the element fires zero
+    requests (a buy-plan confirm button that silently did nothing; an inline-edit form whose
+    Save was dead). The fix is either an imperative ``htmx.ajax(...)`` in ``@click`` (read at
+    click time) or switching ``<template x-if>`` to a plain ``<div x-show>`` (which keeps the
+    element in the server-rendered DOM so htmx processes it at swap time).
+
+    Allowlist NOTHING — a hit is a genuinely dead control. Convert the call site.
+    """
+    offenders: list[str] = []
+    for path in sorted(Path("app/templates").rglob("*.html")):
+        for line in _hx_verb_in_xif_offenders(path.read_text()):
+            offenders.append(f"{path.relative_to(Path('.'))}:{line}")
+    assert not offenders, (
+        "hx-post/get/put/delete found on an element INSIDE a <template x-if> (htmx never "
+        "processes template-fragment content, so the control is DEAD). Use an imperative "
+        "htmx.ajax(...) @click, or switch the wrapper to <div x-show>:\n" + "\n".join(offenders)
+    )
+
+
 def test_dockerfile_cache_bust_precedes_source_copies():
     """deploy.sh dropped --no-cache (PR #211); template freshness now relies entirely on
     a per-deploy BUILD_COMMIT cache-bust placed BEFORE the source COPYs in each

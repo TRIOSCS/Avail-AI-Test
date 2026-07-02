@@ -125,7 +125,8 @@
 
       {# Status pills #}
       <div class="flex flex-wrap gap-2">
-        {% for s_val, s_label in [('', 'All'), ('open', 'Open'), ('awarded', 'Awarded')] %}
+        {# 'won' is the real RequisitionStatus; the old 'awarded' value doesn't exist and always returned empty. #}
+        {% for s_val, s_label in [('', 'All'), ('open', 'Open'), ('won', 'Won')] %}
         <button type="button"
                 @click="rStatus = '{{ s_val }}'"
                 hx-get="/v2/partials/requisitions"

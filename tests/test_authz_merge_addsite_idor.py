@@ -139,6 +139,20 @@ class TestCompanyMergeIDOR:
             cleanup()
         assert resp.status_code == 200
 
+    def test_merge_success_redirects_to_full_page_url(self, client, keep_company, remove_company):
+        """F2: merge success must HX-Redirect to the base-page-wrapped /v2/customers/{id},
+        NOT the bare partial /v2/partials/customers/{id}. HX-Redirect does a real
+        window.location navigation, so the partial URL would land the user on an unstyled,
+        nav-less HTML fragment."""
+        resp = client.post(
+            f"/v2/partials/customers/{keep_company.id}/merge",
+            data={"remove_id": str(remove_company.id), "confirmed": "true"},
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        assert resp.headers.get("HX-Redirect") == f"/v2/customers/{keep_company.id}"
+        assert "/partials/" not in resp.headers.get("HX-Redirect", "")
+
 
 # ── 2. merge preview (GET) ───────────────────────────────────────────────────
 

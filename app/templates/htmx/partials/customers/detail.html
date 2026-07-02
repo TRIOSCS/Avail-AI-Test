@@ -12,8 +12,12 @@
 
 <title hx-swap-oob="true">{{ company.name }} — Companies — AvailAI</title>
 
-{# Full panel width — no max-w cap; the slim header + multi-column contacts use it all. #}
-<div class="space-y-4 page-fluid">
+{# Full panel width — no max-w cap; the slim header + multi-column contacts use it all.
+   data-detail-root marks this partial's own root so account actions (Reactivate /
+   Archive / Send-to-Prospecting) can target `closest [data-detail-root]` and re-swap
+   themselves whether they render inside the CDM workspace right panel (#cdm-detail) or
+   standalone in #main-content on a deep-linked/reloaded page. #}
+<div data-detail-root class="space-y-4 page-fluid">
 
   {# ── Breadcrumb — "Customers › {Account}" (you-are-here for the right panel).
      Reuses the treatment from the retired site_detail.html. "Customers" is the
@@ -37,8 +41,8 @@
     {% if can_reactivate %}
     <button type="button"
             hx-post="/v2/partials/customers/{{ company.id }}/reactivate"
-            hx-target="#cdm-detail"
-            hx-swap="innerHTML"
+            hx-target="closest [data-detail-root]"
+            hx-swap="outerHTML"
             hx-confirm="Restore this account to active status?"
             class="btn btn-secondary btn-sm flex-shrink-0">
       Reactivate
@@ -215,8 +219,8 @@
               {% if company.is_active %}
             <button type="button"
                     hx-post="/v2/partials/customers/{{ company.id }}/deactivate"
-                    hx-target="#cdm-detail"
-                    hx-swap="innerHTML"
+                    hx-target="closest [data-detail-root]"
+                    hx-swap="outerHTML"
                     hx-confirm="Archive (Do Not Call)? This will unassign the account and hide it from all active lists. Are you sure?"
                     @click.stop="open = false"
                     role="menuitem"
