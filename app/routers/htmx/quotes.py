@@ -37,6 +37,11 @@ from ...models import (
     User,
 )
 from ...services.buyplan_naming import summarize_top_flag
+from ...services.quote_requisitions import (
+    link_quote_to_requisitions,
+    requisition_ids_for_quote,
+    requisitions_for_quote,
+)
 from ...services.quote_send import (
     QuoteSendDNCBlocked,
     QuoteSendError,
@@ -342,11 +347,21 @@ async def quote_detail_partial(
         ],
     )
     lines = db.query(QuoteLine).filter(QuoteLine.quote_id == quote_id).all()
+    # Offer gallery spans EVERY contributing requisition of a combined quote (not just the
+    # anchor), so the "add offer" picker offers lines from all of them.
+    contributing_req_ids = requisition_ids_for_quote(db, quote.id)
     offers = (
-        db.query(Offer).filter(Offer.requisition_id == quote.requisition_id).order_by(Offer.created_at.desc()).all()
+        db.query(Offer).filter(Offer.requisition_id.in_(contributing_req_ids)).order_by(Offer.created_at.desc()).all()
     )
     ctx = _base_ctx(request, user, "quotes")
-    ctx.update({"quote": quote, "lines": lines, "offers": offers})
+    ctx.update(
+        {
+            "quote": quote,
+            "lines": lines,
+            "offers": offers,
+            "contributing_reqs": requisitions_for_quote(db, quote.id),
+        }
+    )
     return template_response("htmx/partials/quotes/detail.html", ctx)
 
 
@@ -462,7 +477,7 @@ async def add_offer_to_quote(
     offer = db.get(Offer, offer_id)
     if not offer:
         raise HTTPException(404, "Offer not found")
-    if offer.requisition_id is not None and offer.requisition_id != quote.requisition_id:
+    if offer.requisition_id is not None and offer.requisition_id not in requisition_ids_for_quote(db, quote.id):
         raise HTTPException(
             status_code=403,
             detail={"error": "offer does not belong to this quote's requisition"},
@@ -591,6 +606,11 @@ async def revise_quote_htmx(
     db.add(new_quote)
     db.flush()  # need new_quote.id for the cloned lines
 
+    # Carry the FULL requisition membership onto the revision so a combined quote's
+    # revision stays visible on every contributing requisition (the after_insert listener
+    # only added new_quote's primary self-row).
+    link_quote_to_requisitions(db, new_quote.id, requisition_ids_for_quote(db, quote.id))
+
     # Clone the parent's QuoteLine rows — quote_detail_partial, the send email, the
     # PDF, and Build-Buy-Plan all read QuoteLine (not line_items JSON). Without this
     # the revision showed an empty line table and couldn't build a buy plan (OQ-04,
@@ -668,7 +688,7 @@ async def add_offers_to_draft_quote(
         raise HTTPException(400, "Missing offer_ids or quote_id")
 
     quote = get_quote_for_user(db, user, quote_id)
-    if quote.requisition_id != req_id:
+    if req_id not in requisition_ids_for_quote(db, quote.id):
         raise HTTPException(404, "Quote not found")
     if quote.status != QuoteStatus.DRAFT:
         raise HTTPException(400, "Can only add to draft quotes")

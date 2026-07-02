@@ -1285,6 +1285,43 @@ requisitions/tabs/build_quote.html  (quoteBuilderTab Alpine: live margin + guard
         Download PDF (existing /export/pdf) / Send (existing /quotes/{id}/send)
 ```
 
+**Combined cross-req quote (OQ-02/REQ-04).** Selecting **2+ requisitions** in the
+requisitions list and clicking **Build Quote** opens ONE combined quote spanning every
+selected requisition's lines (not one quote per req). The list bulk-bar's 2+ branch
+`htmx.ajax('GET', '/v2/partials/quote-builder/multi?requisition_ids=...', {target:'#modal-content'})`
+then `$dispatch('open-modal', {wide:true})` — into the always-present global modal. The
+`/multi*` routes are declared BEFORE `/{req_id}` in `routers/quote_builder.py` (FastAPI
+matches in order, so "multi" must win before the int path param captures it).
+
+```
+List (2+ selected) ──GET──> /v2/partials/quote-builder/multi?requisition_ids=a,b
+    |   (loop get_req_for_user per id = ownership; validate_same_customer)
+    |     mismatch/no-site -> quote_builder/multi_error.html (HTTP 200 honest breakdown)
+    v     ok -> quote_builder/modal.html (quoteBuilder Alpine, multiReqIds set)
+Alpine loadData() ──GET──> /multi/data (merges get_builder_data across all reqs)
+    |
+    saveQuote() ──POST──> /multi/save?requisition_ids=a,b
+        |   (looped require_requisition_access + get_req_for_user; then service core)
+        v
+save_quote_from_builder_multi -> _save_quote_from_builder_core(db, req_ids, payload, user):
+    validate_same_customer (400 on mismatch) · primary = req_ids[0] (Quote.requisition_id)
+    · one Quote + QuoteLines from ALL reqs · transition EVERY req -> QUOTED
+    · link_quote_to_requisitions(quote.id, req_ids)  (join rows; primary self-row already
+      created by the Quote after_insert listener)
+```
+
+**Quote ⇄ requisition membership is one arbitration point** — `services/quote_requisitions.py`:
+`validate_same_customer` (all reqs share one non-null `customer_site_id`, honest 400 naming
+each offender), `link_quote_to_requisitions` (idempotent), `requisition_ids_for_quote` /
+`requisitions_for_quote` (primary-first), and `quotes_for_requisition(db, req_id)` — the
+join-based `Query[Quote]` that REPLACES the old `Quote.requisition_id == req_id` read filter
+so a SECONDARY requisition also surfaces the combined quote on its Quotes tab, Build-Quote
+tab, offers-tab draft lookup, and the list Quotes column (batched one-query-per-page). Quote
+**send** loops the transition + one ActivityLog over every contributing req (response still
+reflects the primary). Building a **buy plan** from a combined quote is HARD-BLOCKED
+(`buyplan_builder.build_buy_plan` raises `ValueError` "spans N requisitions" → 400) rather than
+silently dropping the non-primary reqs' lines.
+
 **Quote pre-flight (advisory, never blocks send).** `services/quote_preflight.py`
 `quote_preflight(db, quote)` runs three deterministic read-only checks and returns a list of
 `PreflightWarning`s: **dnc** (recipient `CustomerSite.do_not_contact`, or a `SiteContact` at

@@ -2067,7 +2067,9 @@ Alpine.data('quoteBuilder', (initialLines, reqId, hasCustomerSite, requirementId
     if (hasChanges && !this.saved) {
       if (!confirm('You have unsaved line decisions. Close anyway?')) return;
     }
-    window.dispatchEvent(new CustomEvent('close-quote-builder'));
+    // The builder renders into the global modal (#modal-content); close-modal is the
+    // event that wrapper listens for.
+    window.dispatchEvent(new CustomEvent('close-modal'));
   },
 
   async saveQuote() {
@@ -2098,7 +2100,13 @@ Alpine.data('quoteBuilder', (initialLines, reqId, hasCustomerSite, requirementId
       };
     });
     try {
-      const resp = await fetch(`/v2/partials/quote-builder/${this.reqId}/save`, {
+      // A combined (multi-req) build saves ONE quote spanning all selected reqs via the
+      // /multi/save route; the single-req build keeps its per-req save. Both return the
+      // same {ok, quote_id, quote_number} shape, so the handling below is unchanged.
+      const url = this.multiReqIds
+        ? `/v2/partials/quote-builder/multi/save?requisition_ids=${this.multiReqIds}`
+        : `/v2/partials/quote-builder/${this.reqId}/save`;
+      const resp = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

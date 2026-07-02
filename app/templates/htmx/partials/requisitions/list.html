@@ -208,8 +208,10 @@
         {% endfor %}
       </div>
     </div>
-    {# Build Quote — one requisition opens the in-workspace Build Quote tab (the modal is
-       retired for the per-req path); 2+ keep the cross-req bulk modal (out of scope). #}
+    {# Build Quote — one requisition opens the in-workspace Build Quote tab; 2+ open ONE
+       combined cross-req quote in the global modal (#modal-content is always present, and
+       open-modal is the real listener). The multi route renders the builder or, on a
+       customer mismatch, an honest error fragment — both 200s into #modal-content. #}
     <button @click="
               const ids = Array.from(selectedIds);
               const idStr = ids.join(',');
@@ -217,7 +219,7 @@
                 htmx.ajax('GET', '/v2/partials/requisitions/' + ids[0] + '?tab=build_quote', {target:'#main-content', swap:'innerHTML', indicator:'#quote-builder-skeleton'});
                 window.history.pushState({}, '', '/v2/requisitions/' + ids[0]);
               } else {
-                htmx.ajax('GET', '/v2/partials/quote-builder/multi?requisition_ids=' + idStr, {target:'#quote-builder-content', swap:'innerHTML', indicator:'#quote-builder-skeleton'}).then(() => $dispatch('open-quote-builder'));
+                htmx.ajax('GET', '/v2/partials/quote-builder/multi?requisition_ids=' + idStr, {target:'#modal-content', swap:'innerHTML', indicator:'#modal-loading'}).then(() => $dispatch('open-modal', {wide:true}));
               }
             "
             class="px-3 py-1 text-xs font-medium bg-emerald-600 text-white border border-emerald-700 rounded-lg hover:bg-emerald-700 inline-flex items-center gap-1">

@@ -61,11 +61,15 @@ def _make_payload(quote_id=None, lines=None, payment_terms=None, shipping_terms=
 
 
 @pytest.fixture()
-def req_and_item(db_session: Session, test_user: User):
+def req_and_item(db_session: Session, test_user: User, test_customer_site):
     req = Requisition(
         name="QB-BOOST",
         customer_name="Boost Co",
         status="open",
+        # save_quote_from_builder now runs the customer-consistency gate; the router
+        # already requires a linked customer site before quoting, so the fixture matches
+        # that real precondition.
+        customer_site_id=test_customer_site.id,
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
