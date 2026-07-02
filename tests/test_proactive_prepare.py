@@ -812,3 +812,41 @@ def test_prepare_page_renders_add_contact_affordance(db_session):
     assert 'id="proactive-contact-list"' in resp.text
     assert f"/v2/partials/proactive/prepare/{data['site'].id}/add-contact" in resp.text
     assert "showAddContact" in resp.text
+
+
+def test_afterswap_reinits_alpine_on_proactive_contact_list():
+    """Regression guard for the htmx+Alpine re-init bug.
+
+    The add-contact POST swaps the re-rendered picker into #proactive-contact-list via
+    hx-swap="innerHTML". This codebase only re-runs Alpine.initTree on HTMX-swapped
+    nodes for an explicit allowlist in the htmx:afterSwap handler. If 'proactive-
+    contact-list' is absent, the swapped checkbox rows go inert: the new contact's
+    x-init auto-select never fires (Send stays disabled) and existing checkboxes lose
+    :checked / @change. Assert the swap target id (the one the form's hx-target actually
+    uses) is in that Alpine.initTree allowlist.
+    """
+    import re
+    from pathlib import Path
+
+    js = Path("app/static/htmx_app.js").read_text()
+
+    # Isolate the afterSwap Alpine.initTree gate: the `if (...) { Alpine.initTree(t); }`
+    # block guarded by `typeof Alpine.initTree === 'function'`. Matching just this region
+    # ensures the id is a genuine allowlist entry, not an incidental mention elsewhere.
+    m = re.search(
+        r"typeof Alpine\.initTree === 'function'.*?Alpine\.initTree\(t\)",
+        js,
+        re.DOTALL,
+    )
+    assert m is not None, "afterSwap Alpine.initTree gate not found in htmx_app.js"
+    allowlist = m.group(0)
+
+    # The swap target the add-contact form posts into (hx-target in prepare.html).
+    assert "proactive-contact-list" in allowlist, (
+        "#proactive-contact-list must be in the afterSwap Alpine.initTree allowlist so "
+        "the swapped picker re-inits (x-init auto-select + :checked/@change bindings)"
+    )
+    # Sibling entries must survive alongside it (mirrors rfq-affinity-section exactly).
+    assert "rfq-affinity-section" in allowlist
+    assert "settings-content" in allowlist
+    assert "lead-drawer-content" in allowlist
