@@ -600,3 +600,215 @@ def test_htmx_do_not_offer_match_no_longer_in_list(db_session):
     after = get_matches_for_user(db_session, data["owner"].id, status="new")
     after_mpns = [m["mpn"] for g in after["groups"] for m in g["matches"]]
     assert "LM358N" not in after_mpns, "DNO match must be suppressed from list"
+
+
+# ── PROACTIVE-04: inline add-contact on the Prepare page ─────────────────────
+
+
+def _add_contact_client(db_session, user):
+    """Build a TestClient with get_db + require_user overridden to *user*."""
+    from fastapi.testclient import TestClient
+
+    from app.database import get_db
+    from app.dependencies import require_user
+    from app.main import app
+
+    def _override_db():
+        yield db_session
+
+    def _override_user():
+        return user
+
+    app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[require_user] = _override_user
+    return TestClient(app), app
+
+
+def _cleanup_overrides(app):
+    from app.database import get_db
+    from app.dependencies import require_user
+
+    app.dependency_overrides.pop(get_db, None)
+    app.dependency_overrides.pop(require_user, None)
+
+
+def test_add_contact_creates_and_auto_selects(db_session):
+    """POST add-contact creates a SiteContact and returns a picker that auto-selects
+    it."""
+    data = _setup_send_scenario(db_session)
+    site_id = data["site"].id
+    client, app = _add_contact_client(db_session, data["owner"])
+
+    before = db_session.query(SiteContact).filter(SiteContact.customer_site_id == site_id).count()
+
+    try:
+        resp = client.post(
+            f"/v2/partials/proactive/prepare/{site_id}/add-contact",
+            data={"full_name": "Carol Chen", "email": "carol@acme.com", "title": "Buyer"},
+        )
+    finally:
+        _cleanup_overrides(app)
+
+    assert resp.status_code == 200, resp.text
+    created = (
+        db_session.query(SiteContact)
+        .filter(SiteContact.customer_site_id == site_id, SiteContact.email == "carol@acme.com")
+        .first()
+    )
+    assert created is not None, "contact must be persisted"
+    assert created.full_name == "Carol Chen"
+    assert created.first_name == "Carol" and created.last_name == "Chen"
+    assert db_session.query(SiteContact).filter(SiteContact.customer_site_id == site_id).count() == before + 1
+    # Auto-select wiring: ONLY the new contact's row carries an x-init toggle so Send
+    # unblocks in one step without re-selecting the pre-existing contacts.
+    assert f"toggleContact({created.id})" in resp.text
+    assert resp.text.count("x-init") == 1, "only the freshly-added contact may auto-select"
+    assert f'x-init="if (!selectedContacts[{created.id}])' in resp.text
+    assert "carol@acme.com" in resp.text
+
+
+def test_add_contact_first_contact_unblocks_empty_site(db_session):
+    """A site with zero contacts gets one, and the picker no longer shows the empty
+    state."""
+    data = _setup_send_scenario(db_session)
+    # Fresh site with NO contacts but a match owned by the salesperson.
+    empty_site = CustomerSite(company_id=data["company"].id, site_name="Depot", is_active=True)
+    db_session.add(empty_site)
+    db_session.flush()
+    match = ProactiveMatch(
+        offer_id=data["offer"].id,
+        customer_site_id=empty_site.id,
+        salesperson_id=data["owner"].id,
+        mpn="LM358N",
+        company_id=data["company"].id,
+        match_score=50,
+        status="new",
+    )
+    db_session.add(match)
+    db_session.commit()
+
+    client, app = _add_contact_client(db_session, data["owner"])
+    try:
+        resp = client.post(
+            f"/v2/partials/proactive/prepare/{empty_site.id}/add-contact",
+            data={"full_name": "Dana Lee", "email": "dana@acme.com"},
+        )
+    finally:
+        _cleanup_overrides(app)
+
+    assert resp.status_code == 200, resp.text
+    assert "No contacts on file" not in resp.text
+    assert "dana@acme.com" in resp.text
+
+
+def test_add_contact_requires_name_and_email(db_session):
+    """Empty name, empty email, and malformed email each return 4xx and create
+    nothing."""
+    data = _setup_send_scenario(db_session)
+    site_id = data["site"].id
+    client, app = _add_contact_client(db_session, data["owner"])
+    before = db_session.query(SiteContact).filter(SiteContact.customer_site_id == site_id).count()
+
+    try:
+        r_noname = client.post(
+            f"/v2/partials/proactive/prepare/{site_id}/add-contact",
+            data={"full_name": "  ", "email": "x@acme.com"},
+        )
+        r_noemail = client.post(
+            f"/v2/partials/proactive/prepare/{site_id}/add-contact",
+            data={"full_name": "No Email", "email": ""},
+        )
+        r_bademail = client.post(
+            f"/v2/partials/proactive/prepare/{site_id}/add-contact",
+            data={"full_name": "Bad Email", "email": "not-an-email"},
+        )
+    finally:
+        _cleanup_overrides(app)
+
+    assert r_noname.status_code == 400
+    assert r_noemail.status_code == 400
+    assert r_bademail.status_code == 400
+    assert db_session.query(SiteContact).filter(SiteContact.customer_site_id == site_id).count() == before, (
+        "no contact may be created on validation failure"
+    )
+
+
+def test_add_contact_dedup_rejects_existing_email(db_session):
+    """Adding an email that already exists at the site returns 409 and creates
+    nothing."""
+    data = _setup_send_scenario(db_session)
+    site_id = data["site"].id
+    client, app = _add_contact_client(db_session, data["owner"])
+    before = db_session.query(SiteContact).filter(SiteContact.customer_site_id == site_id).count()
+
+    try:
+        # contact1 already has jane@acme.com — case-insensitive dedup.
+        resp = client.post(
+            f"/v2/partials/proactive/prepare/{site_id}/add-contact",
+            data={"full_name": "Jane Dup", "email": "JANE@acme.com"},
+        )
+    finally:
+        _cleanup_overrides(app)
+
+    assert resp.status_code == 409
+    assert db_session.query(SiteContact).filter(SiteContact.customer_site_id == site_id).count() == before
+
+
+def test_add_contact_authz_requires_owned_match(db_session):
+    """A user with no proactive match at the site cannot add a contact (403)."""
+    data = _setup_send_scenario(db_session)
+    site_id = data["site"].id
+    stranger = User(
+        email="stranger@trioscs.com",
+        name="Stranger",
+        role="sales",
+        azure_id="x-999",
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(stranger)
+    db_session.commit()
+
+    client, app = _add_contact_client(db_session, stranger)
+    before = db_session.query(SiteContact).filter(SiteContact.customer_site_id == site_id).count()
+    try:
+        resp = client.post(
+            f"/v2/partials/proactive/prepare/{site_id}/add-contact",
+            data={"full_name": "Sneaky", "email": "sneaky@acme.com"},
+        )
+    finally:
+        _cleanup_overrides(app)
+
+    assert resp.status_code == 403
+    assert db_session.query(SiteContact).filter(SiteContact.customer_site_id == site_id).count() == before
+
+
+def test_add_contact_missing_site_404(db_session):
+    """Posting to a nonexistent site returns 404."""
+    data = _setup_send_scenario(db_session)
+    client, app = _add_contact_client(db_session, data["owner"])
+    try:
+        resp = client.post(
+            "/v2/partials/proactive/prepare/999999/add-contact",
+            data={"full_name": "Ghost", "email": "ghost@acme.com"},
+        )
+    finally:
+        _cleanup_overrides(app)
+    assert resp.status_code == 404
+
+
+def test_prepare_page_renders_add_contact_affordance(db_session):
+    """The Prepare page exposes the inline add-contact form + picker container."""
+    data = _setup_send_scenario(db_session)
+    client, app = _add_contact_client(db_session, data["owner"])
+    try:
+        resp = client.post(
+            "/v2/proactive/prepare/{}".format(data["site"].id),
+            data={"match_ids": str(data["match"].id)},
+        )
+    finally:
+        _cleanup_overrides(app)
+
+    assert resp.status_code == 200, resp.text
+    assert 'id="proactive-contact-list"' in resp.text
+    assert f"/v2/partials/proactive/prepare/{data['site'].id}/add-contact" in resp.text
+    assert "showAddContact" in resp.text

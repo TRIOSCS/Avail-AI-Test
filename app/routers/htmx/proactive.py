@@ -14,7 +14,7 @@ import asyncio
 import html as html_mod
 import json
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from loguru import logger
 from sqlalchemy import func as sqlfunc
@@ -213,6 +213,117 @@ async def proactive_prepare_page(
         }
     )
     return template_response("htmx/partials/proactive/prepare.html", ctx)
+
+
+def _render_contact_picker(request, db, site_id, added_contact_id=None):
+    """Re-render the Prepare "Send To" contact picker for one site.
+
+    Shared by proactive_add_contact so the swapped-in list mirrors the initial
+    prepare.html render exactly (same fields, same ordering).
+    """
+    contacts = (
+        db.query(SiteContact)
+        .filter(SiteContact.customer_site_id == site_id)
+        .order_by(SiteContact.is_primary.desc(), SiteContact.full_name)
+        .all()
+    )
+    contact_data = [
+        {
+            "id": c.id,
+            "full_name": c.full_name,
+            "email": c.email,
+            "title": c.title,
+            "is_primary": c.is_primary,
+            "has_email": bool(c.email),
+        }
+        for c in contacts
+    ]
+    return template_response(
+        "htmx/partials/proactive/_contact_picker.html",
+        {"request": request, "contacts": contact_data, "added_contact_id": added_contact_id},
+    )
+
+
+@router.post("/v2/partials/proactive/prepare/{site_id}/add-contact", response_class=HTMLResponse)
+async def proactive_add_contact(
+    site_id: int,
+    request: Request,
+    full_name: str = Form(""),
+    email: str = Form(""),
+    title: str = Form(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Add a SiteContact from the Prepare page, then re-render the contact picker.
+
+    Fixes PROACTIVE-04: when a site has no emailable contact, Send was disabled with
+    no way forward. This adds one inline. The refreshed picker auto-selects the new
+    contact (client-side) so Send unblocks in a single step.
+
+    Authorization: the caller must be the assigned salesperson on at least one
+    ProactiveMatch at this site — the same relationship that lets them reach Prepare.
+    Validation failures raise 4xx (surfaced by the global htmx toast handler); the
+    form stays open with the entered values on error.
+    """
+    from ...models import ProactiveMatch
+    from ...models.crm import CustomerSite as _CS
+
+    site = db.get(_CS, site_id)
+    if site is None:
+        raise HTTPException(404, "Site not found")
+
+    owns_match = (
+        db.query(ProactiveMatch.id)
+        .filter(
+            ProactiveMatch.customer_site_id == site_id,
+            ProactiveMatch.salesperson_id == user.id,
+        )
+        .first()
+    )
+    if not owns_match:
+        raise HTTPException(403, "Not authorized to add a contact for this site")
+
+    full_name = full_name.strip()
+    email = email.strip().lower()
+    if not full_name:
+        raise HTTPException(400, "Name is required.")
+    if not email:
+        raise HTTPException(400, "Email is required to send an offer.")
+    if "@" not in email:
+        raise HTTPException(400, "Enter a valid email address.")
+
+    # Per-site email dedup (case-insensitive) — mirrors the canonical add path.
+    dup = (
+        db.query(SiteContact)
+        .filter(
+            SiteContact.customer_site_id == site_id,
+            sqlfunc.lower(SiteContact.email) == email,
+        )
+        .first()
+    )
+    if dup:
+        raise HTTPException(409, f"A contact with email {email} already exists at this site.")
+
+    # Split full_name into first/last so the new contact matches the canonical
+    # contacts_tab_create shape (full_name stays the derived source of truth).
+    parts = full_name.split(" ", 1)
+    contact = SiteContact(
+        customer_site_id=site_id,
+        full_name=full_name,
+        first_name=parts[0] or None,
+        last_name=parts[1].strip() if len(parts) > 1 else None,
+        email=email,
+        title=title.strip() or None,
+    )
+    db.add(contact)
+    db.commit()
+    logger.info(
+        "Proactive add-contact: created contact {} at site {} by {}",
+        contact.id,
+        site_id,
+        user.email,
+    )
+    return _render_contact_picker(request, db, site_id, added_contact_id=contact.id)
 
 
 @router.post("/v2/partials/proactive/draft", response_class=HTMLResponse)

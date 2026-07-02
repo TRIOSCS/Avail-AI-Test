@@ -273,6 +273,9 @@ URL space and the `htmx-views` tag, and `main.py` mounts each one alongside
   parsers (`_parse_filter_json`/`_pop_manufacturers`/`_parse_card_filter_params`).
 - `app/routers/htmx/proactive.py` — **tail split (proactive slice)**: the proactive part-match
   list, refresh/scan, batch-dismiss, the prepare page + draft + send flow (`/v2/proactive/*`),
+  the inline add-contact affordance on Prepare
+  (`POST /v2/partials/proactive/prepare/{site_id}/add-contact` → re-renders `_contact_picker.html`
+  into `#proactive-contact-list`, auto-selecting the new contact so Send unblocks — PROACTIVE-04),
   the legacy send/convert routes, scorecard, badge, and do-not-offer.
 - `app/routers/htmx/parts.py` — **tail split (parts-workspace body slice)**: the parts list, the
   detail tabs (offers/sourcing/req-details/quotes/activity/comms/notes), the header + inline cell +
