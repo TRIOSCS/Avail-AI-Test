@@ -36,6 +36,46 @@ from ._shared import _base_ctx, _vite_assets
 router = APIRouter(tags=["htmx-views"])
 
 
+def _lead_sighting_data(db: Session, requirement_id: int, leads: list) -> dict[int, dict]:
+    """Map each lead → its latest sighting's ``{qty_available, unit_price}``.
+
+    One batched query replaces the former per-lead N+1 (PERF-7): fetch every sighting
+    for this requirement whose ``vendor_name_normalized`` matches a lead on the current
+    page, newest-first (nulls last), and keep the first (latest) row per vendor — the
+    exact row each lead's ``order_by(created_at.desc().nullslast()).first()`` returned.
+    Leads always carry a non-null ``vendor_name_normalized`` (NOT NULL column), so the
+    ``IN`` filter matches the same rows the per-lead equality filter did, and grouping
+    in newest-first order picks the identical "best" sighting the loop selected.
+    """
+    lead_sighting_data: dict[int, dict] = {}
+    if not leads:
+        return lead_sighting_data
+
+    norms = {lead.vendor_name_normalized for lead in leads}
+    sightings = (
+        db.query(Sighting)
+        .filter(
+            Sighting.requirement_id == requirement_id,
+            Sighting.vendor_name_normalized.in_(norms),
+        )
+        .order_by(Sighting.created_at.desc().nullslast())
+        .all()
+    )
+
+    best_by_vendor: dict[str, Sighting] = {}
+    for sighting in sightings:
+        best_by_vendor.setdefault(sighting.vendor_name_normalized, sighting)
+
+    for lead in leads:
+        best = best_by_vendor.get(lead.vendor_name_normalized)
+        if best:
+            lead_sighting_data[lead.id] = {
+                "qty_available": best.qty_available,
+                "unit_price": best.unit_price,
+            }
+    return lead_sighting_data
+
+
 @router.get("/v2/sourcing/{requirement_id}", response_class=HTMLResponse)
 async def v2_sourcing_page(request: Request, requirement_id: int, db: Session = Depends(get_db)):
     """Full page load for sourcing results."""
@@ -203,23 +243,7 @@ async def sourcing_results_partial(
     per_page = 24
     leads = query.offset((page - 1) * per_page).limit(per_page).all()
 
-    lead_sighting_data = {}
-    if leads:
-        for lead in leads:
-            best_sighting = (
-                db.query(Sighting)
-                .filter(
-                    Sighting.requirement_id == requirement_id,
-                    Sighting.vendor_name_normalized == lead.vendor_name_normalized,
-                )
-                .order_by(Sighting.created_at.desc().nullslast())
-                .first()
-            )
-            if best_sighting:
-                lead_sighting_data[lead.id] = {
-                    "qty_available": best_sighting.qty_available,
-                    "unit_price": best_sighting.unit_price,
-                }
+    lead_sighting_data = _lead_sighting_data(db, requirement_id, leads)
 
     ctx = _base_ctx(request, user, "requisitions")
     ctx.update(
@@ -528,23 +552,7 @@ async def sourcing_workspace_partial(
     per_page = 24
     leads = query.offset((page - 1) * per_page).limit(per_page).all()
 
-    lead_sighting_data = {}
-    if leads:
-        for ld in leads:
-            best_sighting = (
-                db.query(Sighting)
-                .filter(
-                    Sighting.requirement_id == requirement_id,
-                    Sighting.vendor_name_normalized == ld.vendor_name_normalized,
-                )
-                .order_by(Sighting.created_at.desc().nullslast())
-                .first()
-            )
-            if best_sighting:
-                lead_sighting_data[ld.id] = {
-                    "qty_available": best_sighting.qty_available,
-                    "unit_price": best_sighting.unit_price,
-                }
+    lead_sighting_data = _lead_sighting_data(db, requirement_id, leads)
 
     ctx = _base_ctx(request, user, "requisitions")
     ctx.update(
@@ -639,23 +647,7 @@ async def sourcing_workspace_list_partial(
     per_page = 24
     leads = query.offset((page - 1) * per_page).limit(per_page).all()
 
-    lead_sighting_data = {}
-    if leads:
-        for ld in leads:
-            best_sighting = (
-                db.query(Sighting)
-                .filter(
-                    Sighting.requirement_id == requirement_id,
-                    Sighting.vendor_name_normalized == ld.vendor_name_normalized,
-                )
-                .order_by(Sighting.created_at.desc().nullslast())
-                .first()
-            )
-            if best_sighting:
-                lead_sighting_data[ld.id] = {
-                    "qty_available": best_sighting.qty_available,
-                    "unit_price": best_sighting.unit_price,
-                }
+    lead_sighting_data = _lead_sighting_data(db, requirement_id, leads)
 
     ctx = _base_ctx(request, user, "requisitions")
     ctx.update(
