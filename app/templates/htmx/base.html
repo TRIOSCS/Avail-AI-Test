@@ -5,6 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="app-build" content="{{ build_commit|default('') }}">
   <title>{% block title %}AvailAI{% endblock %}</title>
+  {# Favicon + touch icon — the PWA icons already shipped in static/public/icons
+     were dead weight until now (nothing linked them). Served from the Vite public dir. #}
+  <link rel="icon" type="image/png" sizes="192x192" href="/static/icons/icon-192.png">
+  <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
   <!-- App UI face: Inter (loaded web font) → Aptos → Segoe UI → system fallbacks -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
