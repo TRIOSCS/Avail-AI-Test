@@ -212,29 +212,10 @@
 .opp-time--72h    { color: var(--opp-urgency-72h-text); }
 .opp-time--normal { color: var(--opp-text-tertiary); }
 
-.opp-mpn {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--opp-text-primary);
-  font-variant-numeric: tabular-nums;
-  display: block;
-}
-.opp-desc { font-size: 11px; font-weight: 400; color: var(--opp-text-tertiary); margin-top: 2px; display: block; }
-.opp-mpn-more { font-size: 10px; color: var(--opp-text-tertiary); margin-left: 6px; }
-
-.opp-qty, .opp-unit-price {
-  font-size: 12px;
-  color: var(--opp-text-secondary);
-  font-variant-numeric: tabular-nums;
-}
-
-.opp-deal { font-size: 13px; font-variant-numeric: tabular-nums; }
-.opp-deal--tier-primary-500 { font-weight: 500; color: var(--opp-text-primary); }
-.opp-deal--tier-primary-400 { font-weight: 400; color: var(--opp-text-primary); }
-.opp-deal--tier-tertiary    { font-weight: 400; color: var(--opp-text-tertiary); }
-.opp-deal--computed         { font-style: italic; }
-
+/* FE-3: .opp-mpn/.opp-desc/.opp-qty/.opp-unit-price/.opp-deal-* removed — they styled the
+   mpn_chips_aggregated + deal_value macros that were deleted with the retired /requisitions2
+   opportunity table. The .opp-time-*, .opp-coverage-*, opp_status_cell tokens stay (live via
+   Sightings + Resell). */
 .opp-coverage { display: inline-flex; gap: 2px; align-items: center; }
 .opp-coverage-seg { width: 6px; height: 14px; background: var(--opp-coverage-empty); border-radius: 1px; }
 .opp-coverage-seg--filled { background: var(--opp-coverage-filled); }

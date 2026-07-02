@@ -218,7 +218,8 @@ Usage:
 {#
   Purpose:     6-segment meter showing offers-covered / total requirements.
   Depends on:  styles.css opp-coverage* tokens.
-  Called-by:   requisitions2/_table_rows.html, _single_row.html
+  Called-by:   sightings/table.html, resell/_lists.html (the retired requisitions2
+               opportunity table was its original caller; these reuse the token).
   Business:    coverage_filled = count of requirements with ≥1 offer (not
                sightings — see spec §Coverage semantic). Segments filled =
                round(6·filled/total). total==0 renders an empty meter with
