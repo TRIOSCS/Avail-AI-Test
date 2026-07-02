@@ -1326,7 +1326,11 @@ async def add_to_requisition(
     mpn = body.get("mpn", "").strip()
     items = body.get("items", [])
 
-    if not requisition_id or not mpn or not items:
+    # The MPN + requisition are the only required inputs: from the part dossier the
+    # meaningful action is "add THIS part to a requisition", which creates the
+    # Requirement row. Shortlisted market rows (items) are optional supporting
+    # sightings, so an empty shortlist must still succeed (it added the part).
+    if not requisition_id or not mpn:
         return HTMLResponse(
             '<div class="text-red-600 text-sm p-2">Missing required fields.</div>',
             status_code=400,
@@ -1384,10 +1388,13 @@ async def add_to_requisition(
     db.commit()
 
     count = len(items)
+    req_label = html_mod.escape(req.name or "")
+    if count:
+        what = f"{count} result{'s' if count != 1 else ''}"
+    else:
+        what = html_mod.escape(mpn)
     return HTMLResponse(
-        f'<div class="text-sm text-emerald-600 p-2">'
-        f"Added {count} result{'s' if count != 1 else ''} to requisition &ldquo;{html_mod.escape(req.name or '')}&rdquo;"
-        f"</div>"
+        f'<div class="text-sm text-emerald-600 p-2">Added {what} to requisition &ldquo;{req_label}&rdquo;</div>'
     )
 
 

@@ -12,7 +12,7 @@
             {% if lead.buyer_status == 'contacted' or lead.buyer_status == 'has_stock' %}border-l-4 border-l-teal-500 border-brand-200{% else %}border-brand-200{% endif %}
             hover:border-brand-400"
      hx-get="/v2/partials/sourcing/leads/{{ lead.id }}"
-     hx-target="#main-content" hx-push-url="/sourcing/leads/{{ lead.id }}">
+     hx-target="#main-content" hx-push-url="/v2/sourcing/leads/{{ lead.id }}">
 
   <div class="p-4 space-y-3">
     {# Row 1: Vendor name + safety badge #}

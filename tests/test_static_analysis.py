@@ -61,7 +61,6 @@ def test_htmx_ajax_calls_have_indicator():
     # the allowlist. Drain the list as those sites get fixed.
     allowlist: set[tuple[str, int]] = {
         ("app/templates/htmx/base.html", 57),
-        ("app/templates/htmx/partials/sourcing/workspace.html", 182),
         ("app/templates/htmx/partials/parts/cell_edit.html", 12),
         ("app/templates/htmx/partials/parts/cell_edit.html", 26),
         ("app/templates/htmx/partials/parts/cell_edit.html", 37),

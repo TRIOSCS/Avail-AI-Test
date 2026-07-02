@@ -8,7 +8,7 @@
                  per_page, f_confidence, f_safety, f_freshness, f_source, f_status,
                  f_contactability, f_corroborated, f_sort, selected_lead_id #}
 
-<div class="flex flex-col h-[calc(100vh-7.5rem)]" x-data="sourcingWorkspace()"
+<div class="flex flex-col h-[calc(100vh-7.5rem)]" x-data="sourcingWorkspace({{ selected_lead_id|default(0)|int }}, [{% for lead in leads %}{{ lead.id }}{% if not loop.last %}, {% endif %}{% endfor %}])"
      @keydown.arrow-down.prevent="selectNext()"
      @keydown.arrow-up.prevent="selectPrev()"
      @keydown.escape="clearSelection()"
@@ -24,9 +24,9 @@
       </span>
     </div>
     <div class="flex items-center gap-2">
-      <a href="/sourcing/{{ requirement.id }}"
+      <a href="/v2/sourcing/{{ requirement.id }}"
          hx-get="/v2/partials/sourcing/{{ requirement.id }}"
-         hx-target="#main-content" hx-push-url="/sourcing/{{ requirement.id }}"
+         hx-target="#main-content" hx-push-url="/v2/sourcing/{{ requirement.id }}"
          class="text-xs text-gray-600 hover:text-brand-500"
          title="Switch to card grid view">Grid view</a>
       <button hx-post="/v2/partials/sourcing/{{ requirement.id }}/search"
@@ -136,56 +136,3 @@
     </div>
   </div>
 </div>
-
-<script>
-  document.addEventListener('alpine:init', () => {
-    if (!Alpine._sourcingWorkspaceRegistered) {
-      Alpine.data('sourcingWorkspace', () => ({
-        selectedLead: {{ selected_lead_id|default(0) }},
-        leadIds: [{% for lead in leads %}{{ lead.id }}{% if not loop.last %}, {% endif %}{% endfor %}],
-
-        selectNext() {
-          const idx = this.leadIds.indexOf(this.selectedLead);
-          if (idx < this.leadIds.length - 1) {
-            this.selectedLead = this.leadIds[idx + 1];
-            this._loadLead(this.selectedLead);
-          }
-        },
-
-        selectPrev() {
-          const idx = this.leadIds.indexOf(this.selectedLead);
-          if (idx > 0) {
-            this.selectedLead = this.leadIds[idx - 1];
-            this._loadLead(this.selectedLead);
-          }
-        },
-
-        clearSelection() {
-          this.selectedLead = 0;
-          const target = document.getElementById('split-right-sourcing');
-          if (target) {
-            target.textContent = '';
-            const wrapper = document.createElement('div');
-            wrapper.className = 'flex items-center justify-center h-full text-gray-400';
-            const inner = document.createElement('div');
-            inner.className = 'text-center';
-            const p = document.createElement('p');
-            p.className = 'text-sm';
-            p.textContent = 'Select a lead to view details';
-            inner.appendChild(p);
-            wrapper.appendChild(inner);
-            target.appendChild(wrapper);
-          }
-        },
-
-        _loadLead(leadId) {
-          htmx.ajax('GET', '/v2/partials/sourcing/leads/' + leadId + '/panel',
-            { target: '#split-right-sourcing', swap: 'innerHTML' });
-          const row = document.getElementById('lead-row-' + leadId);
-          if (row) row.scrollIntoView({ block: 'nearest' });
-        }
-      }));
-      Alpine._sourcingWorkspaceRegistered = true;
-    }
-  });
-</script>

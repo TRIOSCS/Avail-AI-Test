@@ -672,6 +672,70 @@ Alpine.data('splitPanel', (panelId, defaultPct) => ({
 }));
 
 /**
+ * sourcingWorkspace — keyboard navigation for the split-panel sourcing workspace.
+ * Arrow keys walk the selection through leadIds and lazy-load each lead's detail
+ * into #split-right-sourcing; Escape restores the empty-state placeholder.
+ *
+ * Registered statically here (NOT via an in-partial `alpine:init` listener) because
+ * the workspace partial arrives via HTMX long after Alpine.start() has already fired,
+ * so a partial-scoped alpine:init would never run and `x-data="sourcingWorkspace()"`
+ * would throw. Mirrors splitPanel: the initial selection and lead-id list are passed
+ * in from the template's x-data call.
+ *
+ * Called by: app/templates/htmx/partials/sourcing/workspace.html
+ *            (x-data="sourcingWorkspace(<selected_lead_id>, [<lead ids>])").
+ * Depends on: Alpine.js, htmx.
+ */
+Alpine.data('sourcingWorkspace', (selectedLeadId, leadIds) => ({
+    selectedLead: selectedLeadId || 0,
+    leadIds: leadIds || [],
+
+    selectNext() {
+        const idx = this.leadIds.indexOf(this.selectedLead);
+        if (idx < this.leadIds.length - 1) {
+            this.selectedLead = this.leadIds[idx + 1];
+            this._loadLead(this.selectedLead);
+        }
+    },
+
+    selectPrev() {
+        const idx = this.leadIds.indexOf(this.selectedLead);
+        if (idx > 0) {
+            this.selectedLead = this.leadIds[idx - 1];
+            this._loadLead(this.selectedLead);
+        }
+    },
+
+    clearSelection() {
+        this.selectedLead = 0;
+        const target = document.getElementById('split-right-sourcing');
+        if (target) {
+            target.textContent = '';
+            const wrapper = document.createElement('div');
+            wrapper.className = 'flex items-center justify-center h-full text-gray-400';
+            const inner = document.createElement('div');
+            inner.className = 'text-center';
+            const p = document.createElement('p');
+            p.className = 'text-sm';
+            p.textContent = 'Select a lead to view details';
+            inner.appendChild(p);
+            wrapper.appendChild(inner);
+            target.appendChild(wrapper);
+        }
+    },
+
+    _loadLead(leadId) {
+        htmx.ajax('GET', '/v2/partials/sourcing/leads/' + leadId + '/panel', {
+            target: '#split-right-sourcing',
+            swap: 'innerHTML',
+            indicator: '#split-right-sourcing',
+        });
+        const row = document.getElementById('lead-row-' + leadId);
+        if (row) row.scrollIntoView({ block: 'nearest' });
+    },
+}));
+
+/**
  * resizableModal — global modal wrapper behavior: open/close state plus, on
  * desktop, drag-to-move and drag-to-resize (4 edges + 4 corners) with the
  * chosen size/position remembered per size-bucket.
