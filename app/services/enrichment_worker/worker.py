@@ -86,6 +86,50 @@ def _record_heartbeat(db: Session, breaker: "EnrichmentCircuitBreaker") -> bool:
     return breaker_open
 
 
+def _heartbeat_sleep_chunk_seconds() -> int:
+    """Max seconds to sleep between heartbeat refreshes during a long cap/breaker sleep.
+
+    A third of the liveness watchdog's stale window (floored at 60s), so the heartbeat is
+    refreshed several times over before it could ever be judged stale. Derived from
+    ``settings.worker_heartbeat_stale_minutes`` — the SAME threshold the watchdog uses — so
+    lowering that threshold automatically tightens the chunk instead of silently
+    re-introducing the false alarm.
+    """
+    from app.config import settings
+
+    return max(60, (settings.worker_heartbeat_stale_minutes * 60) // 3)
+
+
+async def _sleep_with_heartbeat(total_seconds: int, breaker: "EnrichmentCircuitBreaker") -> None:
+    """Sleep ``total_seconds`` in heartbeat-sized chunks, refreshing the heartbeat
+    between.
+
+    The daily-cap and circuit-breaker branches idle ~1h. A single ``asyncio.sleep(3600)``
+    lets ``last_heartbeat`` go stale mid-sleep, so the liveness watchdog false-alarms
+    "heartbeat stale" on a perfectly healthy, legitimately-capped/paused worker. Chunking
+    the sleep and calling ``_record_heartbeat`` after each chunk keeps the heartbeat fresh.
+
+    Real-hang detection is NOT weakened: the heartbeat is only refreshed AFTER a chunk the
+    worker actually finished sleeping through, so a wedged event loop / stuck heartbeat
+    write still lets the heartbeat go stale and the watchdog fires. Also honors
+    ``_shutdown_requested`` so a SIGTERM during the sleep exits within one chunk instead of
+    blocking the full hour.
+    """
+    from app.database import SessionLocal
+
+    chunk = _heartbeat_sleep_chunk_seconds()
+    slept = 0
+    while slept < total_seconds and not _shutdown_requested:
+        this_chunk = min(chunk, total_seconds - slept)
+        await asyncio.sleep(this_chunk)
+        slept += this_chunk
+        db = SessionLocal()
+        try:
+            _record_heartbeat(db, breaker)
+        finally:
+            db.close()
+
+
 def _load_today_counters(db: Session, today_date: date) -> dict:
     """Hydrate the worker's in-memory daily counters from the persisted status row.
 
@@ -990,25 +1034,29 @@ async def main() -> None:
                     web_state["web_calls"] = 0
                     web_state["oem_resolves"] = 0
 
-                # Daily cap check — long sleep when exhausted
+                # Daily cap check — long sleep when exhausted. Chunked so the heartbeat
+                # keeps refreshing through the hour (a LEGITIMATE cap sleep must not look
+                # like a hang to the liveness watchdog); a genuine hang mid-sleep still
+                # goes silent and is caught.
                 if enriched_today >= config.daily_cap:
                     logger.info(
                         "ENRICH_WORKER: daily cap reached ({}/{}), sleeping 1h",
                         enriched_today,
                         config.daily_cap,
                     )
-                    await asyncio.sleep(3600)
+                    await _sleep_with_heartbeat(3600, breaker)
                     continue
 
                 # Circuit breaker check — long sleep when open. Reuses the breaker_open
                 # value already persisted by _record_heartbeat at the top of this tick, so
-                # the status write is not duplicated here.
+                # the status write is not duplicated here. Chunked (same reason as the cap
+                # sleep) so a paused-on-breaker worker keeps heartbeating.
                 if breaker_open:
                     logger.error(
                         "ENRICH_WORKER: circuit breaker open ({}), sleeping 1h",
                         breaker.get_trip_info()["trip_reason"],
                     )
-                    await asyncio.sleep(3600)
+                    await _sleep_with_heartbeat(3600, breaker)
                     continue
 
                 # Run one batch. The session is closed exactly once (in finally) so the

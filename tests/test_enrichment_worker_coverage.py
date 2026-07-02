@@ -17,6 +17,8 @@ import sys
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 os.environ["TESTING"] = "1"
 
 
@@ -216,17 +218,23 @@ async def test_main_empty_batch_uses_idle_sleep():
 # ---------------------------------------------------------------------------
 
 
-async def test_main_daily_cap_sleeps_one_hour():
-    """When daily_cap is reached, main() sleeps 1h before the next batch."""
+async def test_main_daily_cap_sleeps_in_heartbeat_chunks():
+    """When daily_cap is reached, main() sleeps 1h in watchdog-safe chunks (never a
+    single silent 3600s sleep) so the liveness watchdog does not false-alarm on a capped
+    worker."""
     import app.services.enrichment_worker.worker as w
+    from app.config import settings
 
     original = w._shutdown_requested
     w._shutdown_requested = False
     sleep_calls = []
+    chunk = w._heartbeat_sleep_chunk_seconds()
 
     async def fake_sleep(secs):
         sleep_calls.append(secs)
-        if secs == 3600:
+        # The first cap-sleep chunk is enough to prove the behavior — shut down so the
+        # (otherwise forever-capped) loop terminates.
+        if secs == chunk:
             w._shutdown_requested = True
 
     async def fake_batch(*args, **kwargs):
@@ -243,7 +251,10 @@ async def test_main_daily_cap_sleeps_one_hour():
     finally:
         w._shutdown_requested = original
 
-    assert 3600 in sleep_calls
+    stale_seconds = settings.worker_heartbeat_stale_minutes * 60
+    assert chunk in sleep_calls  # cap path slept in chunks
+    assert 3600 not in sleep_calls  # never one silent hour-long sleep
+    assert all(s <= stale_seconds for s in sleep_calls)  # every chunk stays within the window
 
 
 # ---------------------------------------------------------------------------
@@ -251,8 +262,9 @@ async def test_main_daily_cap_sleeps_one_hour():
 # ---------------------------------------------------------------------------
 
 
-async def test_main_circuit_breaker_open_sleeps_one_hour():
-    """When circuit breaker is open, main() sleeps 1h and updates CB status."""
+async def test_main_circuit_breaker_open_sleeps_in_heartbeat_chunks():
+    """When the circuit breaker is open, main() sleeps 1h in watchdog-safe chunks (never
+    a single silent 3600s sleep) so a paused-on-breaker worker keeps heartbeating."""
     import app.services.enrichment_worker.worker as w
     from app.services.enrichment_worker.circuit_breaker import EnrichmentCircuitBreaker
     from app.services.enrichment_worker.config import EnrichmentWorkerConfig
@@ -260,10 +272,11 @@ async def test_main_circuit_breaker_open_sleeps_one_hour():
     original = w._shutdown_requested
     w._shutdown_requested = False
     sleep_calls = []
+    chunk = w._heartbeat_sleep_chunk_seconds()
 
     async def fake_sleep(secs):
         sleep_calls.append(secs)
-        if secs == 3600:
+        if secs == chunk:
             w._shutdown_requested = True
 
     cfg = EnrichmentWorkerConfig(circuit_breaker_errors=1)
@@ -285,7 +298,121 @@ async def test_main_circuit_breaker_open_sleeps_one_hour():
     finally:
         w._shutdown_requested = original
 
-    assert 3600 in sleep_calls
+    assert chunk in sleep_calls  # breaker path slept in chunks
+    assert 3600 not in sleep_calls  # never one silent hour-long sleep
+
+
+# ---------------------------------------------------------------------------
+# _sleep_with_heartbeat — chunked cap/breaker sleep that keeps the heartbeat fresh
+# (liveness-watchdog false-alarm fix) WITHOUT weakening real-hang detection
+# ---------------------------------------------------------------------------
+
+
+def test_heartbeat_sleep_chunk_stays_within_stale_window():
+    """The chunk is derived from the SAME stale threshold the watchdog uses and stays
+    comfortably inside it, so the coupling can't silently regress."""
+    from app.config import settings
+    from app.services.enrichment_worker.worker import _heartbeat_sleep_chunk_seconds
+
+    chunk = _heartbeat_sleep_chunk_seconds()
+    stale_seconds = settings.worker_heartbeat_stale_minutes * 60
+    assert 0 < chunk < stale_seconds
+
+
+async def test_sleep_with_heartbeat_refreshes_each_chunk():
+    """A capped worker keeps its heartbeat FRESH: the 1h sleep is split into chunks that
+    stay within the watchdog's stale window, and the heartbeat is refreshed after each."""
+    import app.services.enrichment_worker.worker as w
+    from app.config import settings
+
+    sleeps = []
+    hb_calls = []
+
+    async def fake_sleep(secs):
+        sleeps.append(secs)
+
+    def fake_hb(db, breaker):
+        hb_calls.append(True)
+        return False
+
+    original = w._shutdown_requested
+    w._shutdown_requested = False
+    try:
+        with (
+            patch("asyncio.sleep", side_effect=fake_sleep),
+            patch("app.database.SessionLocal", return_value=_mock_db()),
+            patch.object(w, "_record_heartbeat", side_effect=fake_hb),
+        ):
+            await w._sleep_with_heartbeat(3600, breaker=MagicMock())
+    finally:
+        w._shutdown_requested = original
+
+    stale_seconds = settings.worker_heartbeat_stale_minutes * 60
+    assert sum(sleeps) == 3600  # sleeps the full hour, in pieces
+    assert max(sleeps) < stale_seconds  # every gap stays inside the stale window
+    assert len(hb_calls) == len(sleeps)  # heartbeat refreshed after every chunk
+    assert len(hb_calls) >= 3  # several refreshes across the hour
+
+
+async def test_sleep_with_heartbeat_no_refresh_on_wedged_chunk():
+    """Real-hang detection is PRESERVED: if a sleep chunk never completes (wedged event
+    loop), the heartbeat is NOT refreshed for that chunk — it goes stale and the watchdog
+    fires. Refreshes only ever follow chunks the worker actually slept through."""
+    import app.services.enrichment_worker.worker as w
+
+    hb_calls = []
+    sleep_n = [0]
+
+    async def wedge_on_third(secs):
+        sleep_n[0] += 1
+        if sleep_n[0] == 3:
+            raise RuntimeError("event loop wedged")
+
+    def fake_hb(db, breaker):
+        hb_calls.append(True)
+        return False
+
+    original = w._shutdown_requested
+    w._shutdown_requested = False
+    try:
+        with (
+            patch("asyncio.sleep", side_effect=wedge_on_third),
+            patch("app.database.SessionLocal", return_value=_mock_db()),
+            patch.object(w, "_record_heartbeat", side_effect=fake_hb),
+        ):
+            with pytest.raises(RuntimeError):
+                await w._sleep_with_heartbeat(3600, breaker=MagicMock())
+    finally:
+        w._shutdown_requested = original
+
+    # Only the 2 completed chunks refreshed; the wedged 3rd chunk did NOT.
+    assert len(hb_calls) == 2
+
+
+async def test_sleep_with_heartbeat_exits_on_shutdown():
+    """A SIGTERM during the long sleep exits within one chunk instead of blocking the
+    whole hour — the shutdown flag is honored between chunks."""
+    import app.services.enrichment_worker.worker as w
+
+    sleeps = []
+
+    async def fake_sleep(secs):
+        sleeps.append(secs)
+        w._shutdown_requested = True  # SIGTERM arrives during the first chunk
+
+    original = w._shutdown_requested
+    w._shutdown_requested = False
+    try:
+        with (
+            patch("asyncio.sleep", side_effect=fake_sleep),
+            patch("app.database.SessionLocal", return_value=_mock_db()),
+            patch.object(w, "_record_heartbeat", return_value=False),
+        ):
+            await w._sleep_with_heartbeat(3600, breaker=MagicMock())
+    finally:
+        w._shutdown_requested = original
+
+    assert len(sleeps) == 1  # stopped after the first chunk, not all 12
 
 
 # ---------------------------------------------------------------------------
