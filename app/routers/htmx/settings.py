@@ -24,16 +24,13 @@ from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
 
 from ...constants import (
-    AccessKey,
     UserRole,
 )
 from ...database import get_db
 from ...dependencies import (
     is_manager_or_admin,
-    require_access,
     require_admin,
     require_user,
-    user_has_access,
 )
 from ...models import (
     ApiSource,
@@ -151,17 +148,14 @@ async def settings_partial(
 ):
     """Settings page — renders index with active tab."""
     is_admin = user.role == UserRole.ADMIN
-    # Connectors is gated on MANAGE_CONNECTORS (admins always qualify via user_has_access).
-    # A user without that capability hitting Settings with the default 'connectors' tab
-    # landed on an empty 403 page — send them to Profile (available to everyone) instead
-    # (SET-04). Making the tab honor the capability is the SET-06 fix.
-    can_manage_connectors = user_has_access(user, AccessKey.MANAGE_CONNECTORS, db)
-    if tab == "connectors" and not can_manage_connectors:
+    # Connectors is admin-only (403 for others). A non-admin hitting Settings with
+    # the default 'connectors' tab landed on an empty 403 page — send them to Profile
+    # (available to everyone) instead (SET-04).
+    if tab == "connectors" and not is_admin:
         tab = "profile"
     ctx = _base_ctx(request, user, "settings")
     ctx["active_tab"] = tab
     ctx["is_admin"] = is_admin
-    ctx["can_manage_connectors"] = can_manage_connectors
     # Supervisor-tier flag — gates the Activity Scorecard tab (manager + admin).
     ctx["is_manager"] = is_manager_or_admin(user)
     return template_response("htmx/partials/settings/index.html", ctx)
@@ -582,13 +576,16 @@ def _build_connector_groups(db, request) -> list[dict]:
 @router.get("/v2/partials/settings/connectors", response_class=HTMLResponse)
 async def settings_connectors_tab(
     request: Request,
-    user: User = Depends(require_access(AccessKey.MANAGE_CONNECTORS)),
+    user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Unified Connectors tab — admins + MANAGE_CONNECTORS capability holders (SET-06).
+    """Unified Connectors tab — admin only.
 
     Replaces sources + api-keys tabs.
     """
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(403, "Admin only")
+
     ctx = _base_ctx(request, user, "settings")
     ctx["connector_groups"] = _build_connector_groups(db, request)
     return template_response("htmx/partials/settings/connectors.html", ctx)
@@ -598,15 +595,16 @@ async def settings_connectors_tab(
 async def connector_card_partial(
     source_id: int,
     request: Request,
-    user: User = Depends(require_access(AccessKey.MANAGE_CONNECTORS)),
+    user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
     """Single connector card partial — used as the swap unit for toggle/test/save.
 
-    Returns the rendered card macro for one source, or 404 if not found. Gated on
-    MANAGE_CONNECTORS (admins always qualify) — this is re-GET after every card action,
-    so it must honor the same gate as the tab (SET-06).
+    Returns the rendered card macro for one source, or 404 if not found.
     """
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(403, "Admin only")
+
     source = db.query(ApiSource).filter(ApiSource.id == source_id).first()
     if not source:
         raise HTTPException(404, f"Connector {source_id!r} not found")
@@ -620,16 +618,18 @@ async def connector_card_partial(
 @router.post("/v2/partials/settings/connectors/test-all", response_class=HTMLResponse)
 async def connectors_test_all(
     request: Request,
-    user: User = Depends(require_access(AccessKey.MANAGE_CONNECTORS)),
+    user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
     """Run Test for every credentialed + active source, sequentially (don't hammer
     provider APIs), and return an OOB bundle of refreshed cards.
 
-    Gated on MANAGE_CONNECTORS (admins always qualify) — matches the per-source Test
-    endpoint (SET-06). Sources without credentials / inactive are skipped. Per-source
-    failures are tolerated (recorded as Error) and never abort the sweep.
+    Sources without credentials / inactive are skipped. Per-source failures are
+    tolerated (recorded as Error) and never abort the sweep.
     """
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(403, "Admin only")
+
     from ..sources import run_source_test
 
     sources = db.query(ApiSource).order_by(ApiSource.display_name).all()
