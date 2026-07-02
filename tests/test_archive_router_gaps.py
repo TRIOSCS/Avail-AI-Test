@@ -1,0 +1,598 @@
+"""test_archive_router_gaps.py — Coverage gap tests for app/routers/htmx/archive.py.
+
+Targets uncovered lines: 210, 217, 291, 293, 296-300, 339, 391-398, 419-421,
+470-477, 498-499, 526-528, 576, 604-632, 659, 676-704, 739-742, 765-769, 799,
+801, 865-868.
+
+Called by: pytest
+Depends on: conftest fixtures, app.models, app.services.task_service
+"""
+
+from datetime import datetime, timezone
+from unittest.mock import patch
+
+import pytest
+from fastapi.responses import HTMLResponse
+from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
+
+from app.models import Company, CustomerSite, RequisitionTask, SiteContact, User, VendorCard
+from app.models.vendors import VendorContact
+from tests.conftest import engine  # noqa: F401
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _html_ok(_name: str, _ctx: dict, **_kw):
+    """Stub for template_response — returns minimal HTMLResponse."""
+    return HTMLResponse("<html/>")
+
+
+def _make_company(db: Session, owner_id: int | None = None) -> Company:
+    co = Company(
+        name="Test Co Gap",
+        website="https://testcogap.com",
+        is_active=True,
+        created_at=datetime.now(timezone.utc),
+        account_owner_id=owner_id,
+    )
+    db.add(co)
+    db.flush()
+    return co
+
+
+def _make_site(db: Session, company_id: int, owner_id: int | None = None) -> CustomerSite:
+    site = CustomerSite(
+        company_id=company_id,
+        site_name="Main Site",
+        owner_id=owner_id,
+    )
+    db.add(site)
+    db.flush()
+    return site
+
+
+def _make_contact(db: Session, site_id: int) -> SiteContact:
+    contact = SiteContact(
+        customer_site_id=site_id,
+        full_name="Jane Gap",
+        email="jane@gap.com",
+        is_active=True,
+    )
+    db.add(contact)
+    db.flush()
+    return contact
+
+
+def _make_vendor_card(db: Session) -> VendorCard:
+    card = VendorCard(
+        normalized_name="gap vendor",
+        display_name="Gap Vendor",
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(card)
+    db.flush()
+    return card
+
+
+def _make_vendor_contact(db: Session, vendor_card_id: int) -> VendorContact:
+    vc = VendorContact(
+        vendor_card_id=vendor_card_id,
+        full_name="Vendor Guy",
+        email="vendor@gap.com",
+        source="manual",
+    )
+    db.add(vc)
+    db.flush()
+    return vc
+
+
+def _make_task(
+    db: Session,
+    user_id: int,
+    company_id: int | None = None,
+    site_contact_id: int | None = None,
+    vendor_card_id: int | None = None,
+    vendor_contact_id: int | None = None,
+    title: str = "Test Task",
+) -> RequisitionTask:
+    task = RequisitionTask(
+        company_id=company_id,
+        site_contact_id=site_contact_id,
+        vendor_card_id=vendor_card_id,
+        vendor_contact_id=vendor_contact_id,
+        title=title,
+        task_type="general",
+        status="todo",
+        created_by=user_id,
+        assigned_to_id=user_id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(task)
+    db.flush()
+    return task
+
+
+# ---------------------------------------------------------------------------
+# Admin client fixture — required for admin-only routes
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def admin_user(db_session: Session) -> User:
+    user = User(
+        email="admin_gap@trioscs.com",
+        name="Admin Gap",
+        role="admin",
+        azure_id="admin-gap-azure-001",
+        m365_connected=True,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    return user
+
+
+@pytest.fixture
+def admin_client(db_session: Session, admin_user: User) -> TestClient:
+    from app.database import get_db
+    from app.dependencies import require_admin, require_buyer, require_fresh_token, require_user
+    from app.main import app
+
+    overridden = [get_db, require_user, require_admin, require_buyer, require_fresh_token]
+    app.dependency_overrides[get_db] = lambda: db_session
+    app.dependency_overrides[require_user] = lambda: admin_user
+    app.dependency_overrides[require_admin] = lambda: admin_user
+    app.dependency_overrides[require_buyer] = lambda: admin_user
+    app.dependency_overrides[require_fresh_token] = lambda: "token"
+    try:
+        with TestClient(app) as c:
+            yield c
+    finally:
+        for dep in overridden:
+            app.dependency_overrides.pop(dep, None)
+
+
+# ---------------------------------------------------------------------------
+# Line 210 — create_account_task: 403 when user is not account owner/admin
+# ---------------------------------------------------------------------------
+
+
+def test_create_account_task_403_not_owner(client, db_session, test_user):
+    """POST /v2/partials/customers/{id}/tasks returns 403 when user lacks ownership."""
+    # Company with a different owner — test_user is not admin so can't manage
+    co = _make_company(db_session, owner_id=None)
+    db_session.commit()
+    with patch("app.routers.htmx.archive.template_response", side_effect=_html_ok):
+        resp = client.post(
+            f"/v2/partials/customers/{co.id}/tasks",
+            data={"title": "Task X", "due_at": ""},
+        )
+    assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Line 217 — create_account_task: invalid date returns 422 HTML error
+# ---------------------------------------------------------------------------
+
+
+def test_create_account_task_invalid_date(client, db_session, test_user):
+    """POST /v2/partials/customers/{id}/tasks returns date error on bad due_at."""
+    co = _make_company(db_session, owner_id=test_user.id)
+    db_session.commit()
+    with patch("app.routers.htmx.archive.template_response", side_effect=_html_ok):
+        resp = client.post(
+            f"/v2/partials/customers/{co.id}/tasks",
+            data={"title": "Good Title", "due_at": "not-a-date"},
+        )
+    assert resp.status_code == 200
+    assert "Invalid date" in resp.text
+
+
+# ---------------------------------------------------------------------------
+# Line 291, 293, 296-300 — create_contact_task: 403 and invalid date
+# ---------------------------------------------------------------------------
+
+
+def test_create_contact_task_403_not_owner(client, db_session, test_user):
+    """POST contact tasks returns 403 when user can't manage the account."""
+    co = _make_company(db_session, owner_id=None)
+    site = _make_site(db_session, co.id)
+    contact = _make_contact(db_session, site.id)
+    db_session.commit()
+    with patch("app.routers.htmx.archive.template_response", side_effect=_html_ok):
+        resp = client.post(
+            f"/v2/partials/customers/{co.id}/contacts/{contact.id}/tasks",
+            data={"title": "Contact Task", "due_at": ""},
+        )
+    assert resp.status_code == 403
+
+
+def test_create_contact_task_invalid_date(client, db_session, test_user):
+    """POST contact tasks returns date error on bad due_at."""
+    co = _make_company(db_session, owner_id=test_user.id)
+    site = _make_site(db_session, co.id)
+    contact = _make_contact(db_session, site.id)
+    db_session.commit()
+    with patch("app.routers.htmx.archive.template_response", side_effect=_html_ok):
+        resp = client.post(
+            f"/v2/partials/customers/{co.id}/contacts/{contact.id}/tasks",
+            data={"title": "Real Title", "due_at": "bad-date"},
+        )
+    assert resp.status_code == 200
+    assert "Invalid date" in resp.text
+
+
+# ---------------------------------------------------------------------------
+# Line 339 — contact_tasks_partial: contact not found
+# ---------------------------------------------------------------------------
+
+
+def test_contact_tasks_partial_404(client, db_session):
+    """GET contact tasks returns 404 if contact doesn't exist."""
+    co = _make_company(db_session)
+    db_session.commit()
+    resp = client.get(f"/v2/partials/customers/{co.id}/contacts/99999/tasks")
+    assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Lines 391-398 — complete_task: vendor_contact_id path (vc found + deleted)
+# ---------------------------------------------------------------------------
+
+
+def test_complete_task_vendor_contact_found(client, db_session, test_user):
+    """POST complete on a vendor_contact task returns vendor tasks HTML."""
+    card = _make_vendor_card(db_session)
+    vc = _make_vendor_contact(db_session, card.id)
+    task = _make_task(db_session, test_user.id, vendor_contact_id=vc.id)
+    db_session.commit()
+
+    with patch("app.routers.htmx.archive.template_response", side_effect=_html_ok):
+        resp = client.post(f"/v2/partials/tasks/{task.id}/complete")
+    assert resp.status_code == 200
+
+
+def test_complete_task_vendor_contact_deleted(client, db_session, test_user):
+    """POST complete on a vendor_contact task when VendorContact row is gone."""
+    from sqlalchemy import text
+
+    # Disable FK checks to insert a task with dangling vendor_contact_id.
+    db_session.execute(text("PRAGMA foreign_keys=OFF"))
+    task = RequisitionTask(
+        vendor_contact_id=99999,
+        title="Orphan VC Task",
+        task_type="general",
+        status="todo",
+        created_by=test_user.id,
+        assigned_to_id=test_user.id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(task)
+    db_session.flush()
+    db_session.execute(text("PRAGMA foreign_keys=ON"))
+    db_session.commit()
+
+    resp = client.post(f"/v2/partials/tasks/{task.id}/complete")
+    assert resp.status_code == 200
+    assert "Task updated" in resp.text
+
+
+# ---------------------------------------------------------------------------
+# Lines 419-421 — complete_task: from_my_day=true and fallback empty fragment
+# ---------------------------------------------------------------------------
+
+
+def test_complete_task_from_my_day(client, db_session, test_user):
+    """POST complete with from_my_day=true returns empty fragment."""
+    co = _make_company(db_session, owner_id=test_user.id)
+    task = _make_task(db_session, test_user.id, company_id=co.id)
+    db_session.commit()
+
+    resp = client.post(f"/v2/partials/tasks/{task.id}/complete?from_my_day=true")
+    assert resp.status_code == 200
+    assert resp.text == ""
+
+
+def test_complete_task_fallback_empty_fragment(client, db_session, test_user):
+    """POST complete on a requisition-only task returns empty fragment."""
+    # Task with only requisition_id set — no company/contact/vendor
+    from app.models import Requisition
+
+    req = Requisition(
+        name="REQ-FALLBACK",
+        customer_name="Fallback Co",
+        status="open",
+        created_by=test_user.id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(req)
+    db_session.flush()
+    task = RequisitionTask(
+        requisition_id=req.id,
+        title="Req Only Task",
+        task_type="general",
+        status="todo",
+        created_by=test_user.id,
+        assigned_to_id=test_user.id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(task)
+    db_session.commit()
+
+    resp = client.post(f"/v2/partials/tasks/{task.id}/complete")
+    assert resp.status_code == 200
+    assert resp.text == ""
+
+
+# ---------------------------------------------------------------------------
+# Lines 470-477 — delete_task: vendor_card and vendor_contact branches
+# ---------------------------------------------------------------------------
+
+
+def test_delete_task_vendor_card_branch(admin_client, db_session, admin_user):
+    """DELETE vendor_card task by admin returns vendor task list HTML."""
+    card = _make_vendor_card(db_session)
+    task = _make_task(db_session, admin_user.id, vendor_card_id=card.id)
+    db_session.commit()
+
+    with patch("app.routers.htmx.archive.template_response", side_effect=_html_ok):
+        resp = admin_client.delete(f"/v2/partials/tasks/{task.id}")
+    assert resp.status_code == 200
+
+
+def test_delete_task_vendor_contact_branch(admin_client, db_session, admin_user):
+    """DELETE vendor_contact task by admin returns vendor tasks HTML."""
+    card = _make_vendor_card(db_session)
+    vc = _make_vendor_contact(db_session, card.id)
+    task = _make_task(db_session, admin_user.id, vendor_contact_id=vc.id)
+    db_session.commit()
+
+    with patch("app.routers.htmx.archive.template_response", side_effect=_html_ok):
+        resp = admin_client.delete(f"/v2/partials/tasks/{task.id}")
+    assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Lines 498-499 — delete_task: vendor_contact deleted fallback + empty return
+# ---------------------------------------------------------------------------
+
+
+def test_delete_task_vendor_contact_deleted_fallback(admin_client, db_session, admin_user):
+    """DELETE task whose vendor_contact no longer exists returns safe ack."""
+    from sqlalchemy import text
+
+    db_session.execute(text("PRAGMA foreign_keys=OFF"))
+    task = RequisitionTask(
+        vendor_contact_id=99998,
+        title="Orphan Delete Task",
+        task_type="general",
+        status="todo",
+        created_by=admin_user.id,
+        assigned_to_id=admin_user.id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(task)
+    db_session.flush()
+    db_session.execute(text("PRAGMA foreign_keys=ON"))
+    db_session.commit()
+
+    resp = admin_client.delete(f"/v2/partials/tasks/{task.id}")
+    assert resp.status_code == 200
+    assert "Task deleted" in resp.text
+
+
+# ---------------------------------------------------------------------------
+# Lines 526-528 — task_edit_form: vendor_contact path vendor_id resolution
+# ---------------------------------------------------------------------------
+
+
+def test_task_edit_form_vendor_contact(client, db_session, test_user):
+    """GET edit-form for a vendor_contact task resolves vendor_id."""
+    card = _make_vendor_card(db_session)
+    vc = _make_vendor_contact(db_session, card.id)
+    task = _make_task(db_session, test_user.id, vendor_contact_id=vc.id)
+    db_session.commit()
+
+    with patch("app.routers.htmx.archive.template_response", side_effect=_html_ok):
+        resp = client.get(f"/v2/partials/tasks/{task.id}/edit-form")
+    assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Line 576 — edit_task: invalid date format
+# ---------------------------------------------------------------------------
+
+
+def test_edit_task_invalid_date(client, db_session, test_user):
+    """POST /v2/partials/tasks/{id}/edit with bad due_at returns error HTML."""
+    co = _make_company(db_session, owner_id=test_user.id)
+    task = _make_task(db_session, test_user.id, company_id=co.id)
+    db_session.commit()
+
+    resp = client.post(
+        f"/v2/partials/tasks/{task.id}/edit",
+        data={"title": "New Title", "due_at": "not-a-date"},
+    )
+    assert resp.status_code == 200
+    assert "Invalid date" in resp.text
+
+
+# ---------------------------------------------------------------------------
+# Lines 604-632 — edit_task: vendor_card and vendor_contact return branches
+# ---------------------------------------------------------------------------
+
+
+def test_edit_task_vendor_card_branch(client, db_session, test_user):
+    """POST edit returns vendor task list when task is vendor-scoped."""
+    card = _make_vendor_card(db_session)
+    task = _make_task(db_session, test_user.id, vendor_card_id=card.id)
+    db_session.commit()
+
+    with patch("app.routers.htmx.archive.template_response", side_effect=_html_ok):
+        resp = client.post(
+            f"/v2/partials/tasks/{task.id}/edit",
+            data={"title": "Updated Vendor Task", "due_at": ""},
+        )
+    assert resp.status_code == 200
+
+
+def test_edit_task_vendor_contact_branch(client, db_session, test_user):
+    """POST edit returns vendor task list for vendor_contact task."""
+    card = _make_vendor_card(db_session)
+    vc = _make_vendor_contact(db_session, card.id)
+    task = _make_task(db_session, test_user.id, vendor_contact_id=vc.id)
+    db_session.commit()
+
+    with patch("app.routers.htmx.archive.template_response", side_effect=_html_ok):
+        resp = client.post(
+            f"/v2/partials/tasks/{task.id}/edit",
+            data={"title": "Updated VC Task", "due_at": ""},
+        )
+    assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Line 659 — snooze_task: 400 "Not a CRM task"
+# ---------------------------------------------------------------------------
+
+
+def test_snooze_task_not_crm_task(client, db_session, test_user):
+    """POST snooze on a requisition-only task returns 400."""
+    from app.models import Requisition
+
+    req = Requisition(
+        name="REQ-SNOOZE",
+        customer_name="Snooze Co",
+        status="open",
+        created_by=test_user.id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(req)
+    db_session.flush()
+    task = RequisitionTask(
+        requisition_id=req.id,
+        title="Req Snooze Task",
+        task_type="general",
+        status="todo",
+        created_by=test_user.id,
+        assigned_to_id=test_user.id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(task)
+    db_session.commit()
+
+    resp = client.post(f"/v2/partials/tasks/{task.id}/snooze")
+    assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Lines 676-704 — snooze_task: vendor_card and vendor_contact return branches
+# ---------------------------------------------------------------------------
+
+
+def test_snooze_task_vendor_card_branch(client, db_session, test_user):
+    """POST snooze returns vendor task list for vendor_card task."""
+    card = _make_vendor_card(db_session)
+    task = _make_task(db_session, test_user.id, vendor_card_id=card.id)
+    db_session.commit()
+
+    with patch("app.routers.htmx.archive.template_response", side_effect=_html_ok):
+        resp = client.post(f"/v2/partials/tasks/{task.id}/snooze")
+    assert resp.status_code == 200
+
+
+def test_snooze_task_vendor_contact_branch(client, db_session, test_user):
+    """POST snooze returns vendor task list for vendor_contact task."""
+    card = _make_vendor_card(db_session)
+    vc = _make_vendor_contact(db_session, card.id)
+    task = _make_task(db_session, test_user.id, vendor_contact_id=vc.id)
+    db_session.commit()
+
+    with patch("app.routers.htmx.archive.template_response", side_effect=_html_ok):
+        resp = client.post(f"/v2/partials/tasks/{task.id}/snooze")
+    assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Lines 739-742 — create_vendor_task: invalid date
+# ---------------------------------------------------------------------------
+
+
+def test_create_vendor_task_invalid_date(client, db_session):
+    """POST vendor tasks with bad due_at returns date error HTML."""
+    card = _make_vendor_card(db_session)
+    db_session.commit()
+
+    with patch("app.routers.htmx.archive.template_response", side_effect=_html_ok):
+        resp = client.post(
+            f"/v2/partials/vendors/{card.id}/tasks",
+            data={"title": "Vendor Task", "due_at": "bad-date"},
+        )
+    assert resp.status_code == 200
+    assert "Invalid date" in resp.text
+
+
+# ---------------------------------------------------------------------------
+# Lines 765-769 — activity_add_note_form: 403 when user can't manage account
+# ---------------------------------------------------------------------------
+
+
+def test_activity_add_note_form_403(client, db_session, test_user):
+    """GET add-note-form returns 403 when user lacks account management access."""
+    co = _make_company(db_session, owner_id=None)
+    db_session.commit()
+
+    resp = client.get(f"/v2/partials/customers/{co.id}/activity/add-note-form")
+    assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Lines 799, 801 — activity_add_note: 403 and empty note error
+# ---------------------------------------------------------------------------
+
+
+def test_activity_add_note_403(client, db_session, test_user):
+    """POST add-note returns 403 when user can't manage account."""
+    co = _make_company(db_session, owner_id=None)
+    db_session.commit()
+
+    resp = client.post(
+        f"/v2/partials/customers/{co.id}/activity/add-note",
+        data={"notes": "Some note"},
+    )
+    assert resp.status_code == 403
+
+
+def test_activity_add_note_empty_note(client, db_session, test_user):
+    """POST add-note returns error HTML when notes is empty."""
+    co = _make_company(db_session, owner_id=test_user.id)
+    db_session.commit()
+
+    resp = client.post(
+        f"/v2/partials/customers/{co.id}/activity/add-note",
+        data={"notes": "   "},
+    )
+    assert resp.status_code == 200
+    assert "Note text is required" in resp.text
+
+
+# ---------------------------------------------------------------------------
+# Lines 865-868 — vendor_activity_add_note: empty notes returns error HTML
+# ---------------------------------------------------------------------------
+
+
+def test_vendor_activity_add_note_empty(client, db_session):
+    """POST vendor add-note returns error HTML when notes field is blank."""
+    card = _make_vendor_card(db_session)
+    db_session.commit()
+
+    resp = client.post(
+        f"/v2/partials/vendors/{card.id}/activity/add-note",
+        data={"notes": ""},
+    )
+    assert resp.status_code == 200
+    assert "Note text is required" in resp.text
