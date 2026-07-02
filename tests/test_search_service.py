@@ -26,6 +26,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from sqlalchemy import event
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -52,6 +53,7 @@ from app.search_service import (
     search_requirement,
     sighting_to_dict,
 )
+from app.vendor_utils import normalize_vendor_name
 from tests.conftest import engine  # noqa: F401 — ensures SQLite engine is used
 
 # ── Helpers ──────────────────────────────────────────────────────────────
@@ -3032,3 +3034,243 @@ class TestUpsertMaterialCardTagClassification:
         tags = db_session.query(MaterialTag).filter_by(material_card_id=card.id).all()
         tag_types = {db_session.get(Tag, t.tag_id).tag_type for t in tags}
         assert tag_types == {"brand"}
+
+
+# ── PERF-5: batched VendorCard lookups in the search persist path ─────────────
+
+
+class _VendorCardSelectCounter:
+    """Count SELECT statements that hit the vendor_cards table on the bound engine.
+
+    Models the after_cursor_execute counter used in tests/test_proactive_perf2.py, but
+    filtered to vendor_cards so the assertion targets the PERF-5 N+1 specifically and is
+    not perturbed by the (legitimately N-scaling) sighting INSERTs in _save_sightings.
+    """
+
+    def __init__(self, db):
+        self.engine = db.get_bind()
+        self.count = 0
+
+    def _on_exec(self, conn, cursor, statement, parameters, context, executemany):
+        s = statement.lstrip().lower()
+        if s.startswith("select") and "vendor_cards" in s:
+            self.count += 1
+
+    def __enter__(self):
+        event.listen(self.engine, "after_cursor_execute", self._on_exec)
+        return self
+
+    def __exit__(self, *a):
+        event.remove(self.engine, "after_cursor_execute", self._on_exec)
+
+
+class TestSaveSightingsVendorCardBatching:
+    """PERF-5 — the tag-propagation loop and _propagate_vendor_emails must resolve every
+    VendorCard in ONE IN(normalized_names) query, not one .first() per sighting/vendor.
+
+    normalized_name is unique on VendorCard, so the batched dict lookup returns exactly
+    the row .first() returned (or None) — these tests lock in both the query-count
+    reduction and byte-for-byte identical resolution (collisions, misses, nulls).
+    """
+
+    def _seed_card_and_tag(self, db):
+        from app.models.tags import MaterialTag, Tag
+
+        card = MaterialCard(normalized_mpn="lm317t", display_mpn="LM317T", search_count=1)
+        db.add(card)
+        db.flush()
+        tag = Tag(name="Texas Instruments", tag_type="brand", created_at=datetime.now(timezone.utc))
+        db.add(tag)
+        db.flush()
+        db.add(
+            MaterialTag(
+                material_card_id=card.id,
+                tag_id=tag.id,
+                confidence=0.95,
+                source="ai_classified",
+                classified_at=datetime.now(timezone.utc),
+            )
+        )
+        db.commit()
+        return card, tag
+
+    def test_vendor_card_selects_do_not_scale_with_vendor_count(self, db_session):
+        """1 vendor and 5 vendors must cost the SAME number of vendor_cards SELECTs.
+
+        Pre-fix, the tag-propagation loop and _propagate_vendor_emails (both called by
+        _save_sightings) each issued one .first() per vendor, so more vendors meant more
+        vendor_cards SELECTs. sync_leads_for_sightings has its own, unrelated per-vendor
+        card lookup (_find_vendor_card — out of PERF-5 scope), so it is patched out here
+        to keep the guard focused on the two lookups this change batched.
+        """
+        user = _make_user(db_session)
+        reqn = _make_requisition(db_session, user)
+        card, _tag = self._seed_card_and_tag(db_session)
+
+        def _fresh(n):
+            out = []
+            for i in range(n):
+                name = f"Vendor {i} Electronics"
+                norm = normalize_vendor_name(name)
+                if not db_session.query(VendorCard).filter_by(normalized_name=norm).first():
+                    db_session.add(VendorCard(display_name=name, normalized_name=norm))
+                out.append(
+                    {
+                        "vendor_name": name,
+                        "mpn_matched": "LM317T",
+                        "material_card_id": card.id,
+                        "vendor_email": f"sales{i}@v{i}.com",
+                        "qty_available": 100,
+                        "unit_price": 1.0,
+                        "source_type": "nexar",
+                    }
+                )
+            db_session.commit()
+            return out
+
+        # Build the fresh lists (and their VendorCards) OUTSIDE the counted region.
+        fresh_one = _fresh(1)
+        req_one = _make_requirement(db_session, reqn)
+        with patch("app.search_service.sync_leads_for_sightings", return_value=0):
+            with _VendorCardSelectCounter(db_session) as c_one:
+                _save_sightings(fresh_one, req_one, db_session, succeeded_sources={"nexar"})
+
+            fresh_five = _fresh(5)
+            req_five = _make_requirement(db_session, reqn)
+            with _VendorCardSelectCounter(db_session) as c_five:
+                _save_sightings(fresh_five, req_five, db_session, succeeded_sources={"nexar"})
+
+        assert c_one.count > 0, "sanity: the persist path should hit vendor_cards at least once"
+        assert c_five.count == c_one.count, (
+            f"PERF-5 N+1 regressed: 1 vendor={c_one.count} vendor_cards SELECTs, "
+            f"5 vendors={c_five.count} — lookups must be batched into one IN query"
+        )
+
+    def test_batched_tag_propagation_matches_first_semantics(self, db_session):
+        """Collisions, misses and null fields resolve identically to the per-sighting
+        .first() version.
+
+        - Two vendor spellings normalizing to the same card → propagate twice (the dict
+          returns the same identity-mapped card both times, so interaction_count == 2.0).
+        - A vendor with no card → skipped.
+        - A sighting with no material_card_id → not a tag target → skipped.
+        """
+        from app.models.tags import EntityTag
+
+        user = _make_user(db_session)
+        reqn = _make_requisition(db_session, user)
+        req = _make_requirement(db_session, reqn)
+        card, tag = self._seed_card_and_tag(db_session)
+
+        vc = VendorCard(display_name="Arrow Electronics", normalized_name="arrow electronics")
+        db_session.add(vc)
+        db_session.commit()
+
+        fresh = [
+            {  # normalizes to "arrow electronics"
+                "vendor_name": "Arrow Electronics",
+                "mpn_matched": "LM317T",
+                "material_card_id": card.id,
+                "qty_available": 10,
+                "unit_price": 1.0,
+                "source_type": "nexar",
+            },
+            {  # ", Inc." stripped → also "arrow electronics" → SAME card
+                "vendor_name": "Arrow Electronics, Inc.",
+                "mpn_matched": "LM317T",
+                "material_card_id": card.id,
+                "qty_available": 20,
+                "unit_price": 1.1,
+                "source_type": "nexar",
+            },
+            {  # no matching VendorCard → skipped
+                "vendor_name": "Ghost Vendor LLC",
+                "mpn_matched": "LM317T",
+                "material_card_id": card.id,
+                "qty_available": 5,
+                "unit_price": 2.0,
+                "source_type": "nexar",
+            },
+            {  # no material_card_id → not a tag target
+                "vendor_name": "Arrow Electronics",
+                "mpn_matched": "LM317T",
+                "qty_available": 7,
+                "unit_price": 1.2,
+                "source_type": "nexar",
+            },
+        ]
+        _save_sightings(fresh, req, db_session, succeeded_sources={"nexar"})
+
+        ets = db_session.query(EntityTag).filter_by(entity_type="vendor_card", entity_id=vc.id).all()
+        assert len(ets) == 1
+        assert ets[0].tag_id == tag.id
+        # Two same-card sightings → propagate called twice → count accumulates to 2.0.
+        assert ets[0].interaction_count == 2.0
+        # Ghost Vendor had no card, so no other entity ever received a tag.
+        assert db_session.query(EntityTag).count() == 1
+
+
+class TestPropagateVendorEmailsBatching:
+    """PERF-5 — _propagate_vendor_emails resolves every vendor's card in one IN
+    query."""
+
+    def test_vendor_name_spellings_share_one_card(self, db_session):
+        """Two raw vendor-name spellings that normalize to the same card BOTH merge onto
+        that single card (identical to repeated .first() returning the same instance); a
+        vendor with no card is skipped."""
+        vc = VendorCard(normalized_name="arrow electronics", display_name="Arrow Electronics", emails=[])
+        db_session.add(vc)
+        db_session.flush()
+
+        user = _make_user(db_session)
+        reqn = _make_requisition(db_session, user)
+        req = _make_requirement(db_session, reqn)
+
+        s1 = Sighting(
+            requirement_id=req.id, vendor_name="Arrow Electronics", vendor_email="a@arrow.com", mpn_matched="LM317T"
+        )
+        s2 = Sighting(
+            requirement_id=req.id,
+            vendor_name="Arrow Electronics, Inc.",
+            vendor_email="b@arrow.com",
+            mpn_matched="LM317T",
+        )
+        s3 = Sighting(requirement_id=req.id, vendor_name="Ghost LLC", vendor_email="c@ghost.com", mpn_matched="LM317T")
+        db_session.add_all([s1, s2, s3])
+        db_session.commit()
+
+        _propagate_vendor_emails([s1, s2, s3], db_session)
+
+        contacts = {c.email for c in db_session.query(VendorContact).filter_by(vendor_card_id=vc.id).all()}
+        assert contacts == {"a@arrow.com", "b@arrow.com"}
+        # Both emails merged onto the one shared card.
+        assert {e.lower() for e in (vc.emails or [])} >= {"a@arrow.com", "b@arrow.com"}
+        # Ghost vendor had no card → no third contact.
+        assert db_session.query(VendorContact).count() == 2
+
+    def test_vendor_card_select_count_is_constant(self, db_session):
+        """The vendor_cards SELECT count must not grow with the number of vendors."""
+        user = _make_user(db_session)
+        reqn = _make_requisition(db_session, user)
+        req = _make_requirement(db_session, reqn)
+
+        sightings = []
+        for i in range(6):
+            name = f"Vendor {i} Corp"
+            db_session.add(VendorCard(normalized_name=normalize_vendor_name(name), display_name=name, emails=[]))
+            sightings.append(
+                Sighting(
+                    requirement_id=req.id,
+                    vendor_name=name,
+                    vendor_email=f"s{i}@v{i}.com",
+                    mpn_matched="LM317T",
+                )
+            )
+        db_session.add_all(sightings)
+        db_session.commit()
+
+        with _VendorCardSelectCounter(db_session) as counter:
+            _propagate_vendor_emails(sightings, db_session)
+
+        # One batched IN query resolves all 6 vendors; pre-fix this was 6 .first() calls.
+        assert counter.count == 1, f"expected a single batched vendor_cards SELECT, got {counter.count}"
