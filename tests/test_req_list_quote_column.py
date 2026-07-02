@@ -177,3 +177,40 @@ def test_mark_lost_confirm_posts_dynamically_not_static_won(client: TestClient, 
     # so 'Mark Lost' actually hits /action/lost.
     assert "htmx.ajax('POST', '/v2/partials/requisitions/" in html
     assert "/action/' + outcomePrompt" in html
+
+
+def test_claim_button_renders_for_buyer_on_unclaimed_req(client: TestClient, db_session, test_customer_site, test_user):
+    """REQ-07: the req_row kebab gates Claim/Unclaim on `user`, which the list route
+    omitted from its context — so the buttons never rendered. With `user` present, a
+    buyer sees Claim on an unclaimed requisition."""
+    from datetime import datetime, timezone
+
+    from app.models import Requisition
+
+    req = Requisition(
+        name="CLAIMABLE",
+        customer_name="Claim Co",
+        status="open",
+        customer_site_id=test_customer_site.id,
+        created_by=test_user.id,
+        claimed_by_id=None,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(req)
+    db_session.commit()
+
+    soup = _list_soup(client)
+    row = soup.select_one(f'tr[id="req-row-{req.id}"]')
+    assert row is not None
+    assert "Claim" in row.get_text(), "Claim kebab item must render (user now in context)"
+
+
+def test_status_pill_uses_real_won_status_not_phantom_awarded(client: TestClient, test_requisition):
+    """REQ-03: the status filter pill filtered on 'awarded', which is not a
+    RequisitionStatus, so it always returned an empty list. It now uses 'won'."""
+    resp = client.get("/v2/partials/requisitions")
+    assert resp.status_code == 200
+    html = resp.text
+    assert "'awarded'" not in html and '"awarded"' not in html, "phantom 'awarded' status still referenced"
+    # The Won pill posts the real status value.
+    assert "status: 'won'" in html or '"status": "won"' in html or "{status: 'won'" in html

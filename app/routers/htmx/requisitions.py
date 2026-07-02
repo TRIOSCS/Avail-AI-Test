@@ -259,6 +259,7 @@ async def requisitions_list_partial(
             "limit": limit,
             "offset": offset,
             "users": users,
+            "user": user,  # req_row kebab gates Claim/Unclaim on `user` — omitting it hid them
             "user_role": user.role,
             "inbox_status": get_inbox_sync_status(db, user),
         }
