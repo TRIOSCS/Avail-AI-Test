@@ -1048,12 +1048,17 @@ htmx.on('htmx:afterSwap', function(evt) {
     // settings-content — the Settings tab body is lazy-swapped here and re-swapped by
     // every settings mutation (e.g. a dedup merge re-renders Data Ops), so its Alpine
     // directives — the Data Ops multi-select bar — must re-init or the checkboxes go
-    // inert and selection state is lost after the first action).
+    // inert and selection state is lost after the first action;
+    // proactive-contact-list — the Prepare page add-contact POST swaps the re-rendered
+    // picker here, whose :checked/@change checkboxes bind to the surrounding prepare
+    // x-data scope and whose new row carries an x-init auto-select; without re-init the
+    // checkboxes go inert and the new contact never selects (Send stays disabled).
     if (t && typeof Alpine !== 'undefined' && typeof Alpine.initTree === 'function') {
         if (
             t.id === 'lead-drawer-content' ||
             t.id === 'rfq-affinity-section' ||
-            t.id === 'settings-content'
+            t.id === 'settings-content' ||
+            t.id === 'proactive-contact-list'
         ) {
             Alpine.initTree(t);
         }
