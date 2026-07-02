@@ -358,6 +358,47 @@ class TestMergeRoutes:
         db_session.expire_all()
         assert db_session.get(SiteContact, loser_id) is None
 
+    def test_merge_execute_returns_refreshed_contacts_list(
+        self,
+        owner_client_a: TestClient,
+        company_a: Company,
+        keeper: SiteContact,
+        loser: SiteContact,
+    ):
+        """F9: a successful merge returns the refreshed contacts grouped-list (which htmx
+        swaps into #contacts-tab-list behind the modal) — NOT the old dead-end <p> that
+        left the merged-away contact visible until the user manually closed the modal."""
+        resp = owner_client_a.post(
+            f"/v2/partials/customers/{company_a.id}/contacts/{keeper.id}/merge",
+            data={"remove_id": str(loser.id), "confirmed": "true"},
+        )
+        assert resp.status_code == 200
+        # It is the grouped-list partial (has its section marker), not the bare <p>.
+        assert "data-contacts-section" in resp.text
+        assert "Merged into" not in resp.text
+        # Keeper stays; the merged-away loser is gone from the list immediately.
+        assert "Keep Me" in resp.text
+        assert "Lose Me" not in resp.text
+        # Toast confirmation still fires via HX-Trigger.
+        assert "showToast" in resp.headers.get("HX-Trigger", "")
+
+    def test_merge_preview_form_targets_contacts_list_and_closes_modal(
+        self,
+        owner_client_a: TestClient,
+        company_a: Company,
+        keeper: SiteContact,
+        loser: SiteContact,
+    ):
+        """F9: the confirm form swaps into #contacts-tab-list and closes the modal on
+        success — the in-modal #contact-merge-result dead-end target is gone."""
+        resp = owner_client_a.get(
+            f"/v2/partials/customers/{company_a.id}/contacts/{keeper.id}/merge-preview?remove_id={loser.id}"
+        )
+        assert resp.status_code == 200
+        assert 'hx-target="#contacts-tab-list"' in resp.text
+        assert "close-modal" in resp.text
+        assert 'id="contact-merge-result"' not in resp.text
+
     def test_merge_execute_requires_confirmed(
         self,
         owner_client_a: TestClient,

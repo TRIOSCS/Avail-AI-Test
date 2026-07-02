@@ -368,9 +368,13 @@
                     role='menuitem'
                     class='w-full text-left px-3 py-1.5 text-emerald-700 hover:bg-emerald-50'>Set Primary</button>
             {% endif %}
+            {# Refresh the whole detail (the account-primary shows in the detail header,
+               not the contacts list) via `closest [data-detail-root]` — the same target
+               the Reactivate / Archive account actions use, so it works both inside the
+               CDM workspace right panel and on a deep-linked full-page detail. #}
             <button hx-post='/v2/partials/customers/{{ company.id }}/primary-contact/{{ contact.id }}'
-                    hx-target='#main-content'
-                    hx-swap='innerHTML'
+                    hx-target='closest [data-detail-root]'
+                    hx-swap='outerHTML'
                     @click.stop='km=false'
                     data-loading-disable
                     role='menuitem'
