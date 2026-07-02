@@ -179,6 +179,7 @@ Migration 162 also adds the new status value **`resourcing`** to `buy_plan_lines
 | parsed_data | JSON | AI-extracted pricing |
 | confidence | Float | Parse confidence |
 | classification | String 50 | offer\|stock_list\|ooo\|spam |
+| status | String 50, default `new` | new\|parsed\|reviewed\|rejected\|flagged (VendorResponseStatus — the review queue) |
 | message_id | String 255, unique | |
 
 **`requisition_attachments`** — Files attached to a requisition (Migration 126: renamed `onedrive_item_id`→`library_item_id`, `onedrive_url`→`library_web_url`; added `library_drive_id`)
@@ -230,7 +231,7 @@ Migration 162 also adds the new status value **`resourcing`** to `buy_plan_lines
 | source | String 50 | manual\|email_parsed\|proactive |
 | evidence_tier | String 4 | T1-T7 |
 | parse_confidence | Float | 0.0-1.0 |
-| status | String 20 | active\|sold |
+| status | String 20 | pending_review\|active\|approved\|rejected\|sold\|won\|expired (OfferStatus) |
 | selected_for_quote | Boolean | Included in quote? |
 | vendor_response_id | FK -> vendor_responses | |
 | entered_by_id | FK -> users | |
@@ -256,7 +257,7 @@ Migration 162 also adds the new status value **`resourcing`** to `buy_plan_lines
 | line_items | JSON | |
 | subtotal | Numeric 12,2 | |
 | total_margin_pct | Numeric 5,2 | |
-| status | String 20 | draft\|sent\|accepted\|rejected |
+| status | String 20 | draft\|sent\|won\|lost\|revised (QuoteStatus, validated on write) |
 | result | String 20 | won\|lost |
 | won_revenue | Numeric 12,2 | |
 | sent_at | UTCDateTime | Set when the quote is emailed |
