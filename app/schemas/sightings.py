@@ -20,3 +20,7 @@ class SightingsListParams(BaseModel):
     dir: str = "desc"
     page: int = Field(default=1, ge=1)
     limit: int = Field(default=50, ge=1, le=200)
+    # Dashboard-strip quick filters. These mirror the counter predicates computed in
+    # sightings_list so clicking "N Urgent" / "N Stale" shows exactly those N rows.
+    urgent: bool = False  # priority_score >= 70 OR need_by_date within 48h
+    stale: bool = False  # no ActivityLog within sighting_stale_days

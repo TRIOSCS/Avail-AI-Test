@@ -61,7 +61,7 @@ def test_htmx_ajax_calls_have_indicator():
     # the allowlist. Drain the list as those sites get fixed.
     allowlist: set[tuple[str, int]] = {
         ("app/templates/htmx/base.html", 57),
-        ("app/templates/htmx/partials/sourcing/workspace.html", 176),
+        ("app/templates/htmx/partials/sourcing/workspace.html", 182),
         ("app/templates/htmx/partials/parts/cell_edit.html", 12),
         ("app/templates/htmx/partials/parts/cell_edit.html", 26),
         ("app/templates/htmx/partials/parts/cell_edit.html", 37),
@@ -165,11 +165,11 @@ def test_hx_vals_js_has_no_alpine_magics():
     Regression (SET-01): the system-settings toggles used `$el.checked`, so every
     toggle no-op'd. Use `event.target` / `this` instead.
 
-    NOTE: `$store` is deliberately excluded here — the one remaining `$store` use
-    (sightings batch actions) is tracked separately as SIGHT-BATCH in the review
-    and fixed in its own wave; add it back to this ratchet once that lands.
+    `$store` is included: the last remaining `$store` use in `hx-vals="js:..."` (the
+    sightings batch-refresh button, SIGHT-BATCH) was converted to a form with an Alpine
+    `:value` bind, so no `hx-vals js:` may reference `$store` (undefined in htmx eval).
     """
-    magic = re.compile(r"\$(el|refs|data|dispatch|nextTick|watch)\b")
+    magic = re.compile(r"\$(el|store|refs|data|dispatch|nextTick|watch)\b")
     offenders: list[str] = []
     for path in sorted(Path("app/templates").rglob("*.html")):
         text = path.read_text()

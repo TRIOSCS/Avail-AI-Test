@@ -1153,8 +1153,12 @@ async def search_lead_detail(
         if results:
             from ..vendor_utils import normalize_vendor_name
 
+            # Normalize BOTH sides: the template sends the raw vendor name (url-encoded),
+            # so applying the same normalizer here makes the key survive suffix stripping
+            # (", Inc." / "LLC" / "Corp.") that used to make the row's Details → miss.
+            vendor_key_norm = normalize_vendor_name(vendor_key)
             lead = next(
-                (r for r in results if normalize_vendor_name(r.get("vendor_name", "")) == vendor_key),
+                (r for r in results if normalize_vendor_name(r.get("vendor_name", "")) == vendor_key_norm),
                 None,
             )
             if lead:

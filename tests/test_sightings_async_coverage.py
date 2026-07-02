@@ -75,7 +75,7 @@ class TestBatchStatusAsync:
             data={"requirement_ids": "[]", "status": "sourcing"},
         )
         assert resp.status_code == 200
-        assert "No requirements" in resp.text
+        assert "No requirements" in resp.headers.get("HX-Trigger", "")
 
     async def test_batch_status_invalid_status(self, client, db_session, test_user, test_requisition):
         r = _make_requirement(db_session, test_requisition)
@@ -113,7 +113,8 @@ class TestBatchRefreshAsync:
                 data={"requirement_ids": "[]"},
             )
         assert resp.status_code == 200
-        assert "Searched" in resp.text or "0/" in resp.text
+        trigger = resp.headers.get("HX-Trigger", "")
+        assert "Searched" in trigger or "0/" in trigger
 
     async def test_batch_refresh_invalid_format(self, client):
         resp = client.post(
@@ -148,8 +149,9 @@ class TestBatchRefreshAsync:
                 data={"requirement_ids": json.dumps([r.id])},
             )
         assert resp.status_code == 200
-        # Failed count should be in message
-        assert "1/" in resp.text or "failed" in resp.text.lower()
+        # Failed count should be in the toast message (HX-Trigger header).
+        trigger = resp.headers.get("HX-Trigger", "")
+        assert "1/" in trigger or "failed" in trigger.lower()
 
 
 # ── preview-inquiry ───────────────────────────────────────────────────

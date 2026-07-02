@@ -485,6 +485,56 @@ def test_search_filter_reads_from_cache(client, db_session):
     assert "Arrow" in resp.text
 
 
+def test_lead_detail_matches_vendor_with_suffix(client, db_session):
+    """SEARCH-DETAILS-VENDORKEY: the market-row Details → passes the RAW vendor name
+    (url-encoded). The server normalizes BOTH sides, so a name carrying a corporate
+    suffix the normalizer strips (', Inc.') still matches its cached result instead of
+    falling through to 'Lead not found'."""
+    cached_results = [
+        {
+            "vendor_name": "Mouser Electronics, Inc.",
+            "mpn_matched": "LM317T",
+            "unit_price": 0.45,
+            "confidence_color": "green",
+            "confidence_pct": 85,
+            "lead_quality": "strong",
+            "source_type": "nexar",
+            "sub_offers": [],
+            "sources_found": ["nexar"],
+            "score": 80,
+            "is_authorized": True,
+        },
+    ]
+    with patch(
+        "app.routers.htmx_views._get_cached_search_results",
+        return_value=cached_results,
+    ):
+        resp = client.get(
+            "/v2/partials/search/lead-detail",
+            params={"search_id": "sfx-1", "vendor_key": "Mouser Electronics, Inc."},
+            headers={"HX-Request": "true"},
+        )
+    assert resp.status_code == 200
+    assert "Mouser Electronics" in resp.text
+    assert "Lead not found" not in resp.text
+
+
+def test_lead_detail_unknown_vendor_returns_not_found(client, db_session):
+    """A vendor_key with no cached match still returns the 'Lead not found' message."""
+    cached_results = [{"vendor_name": "Arrow Electronics", "mpn_matched": "LM317T"}]
+    with patch(
+        "app.routers.htmx_views._get_cached_search_results",
+        return_value=cached_results,
+    ):
+        resp = client.get(
+            "/v2/partials/search/lead-detail",
+            params={"search_id": "sfx-2", "vendor_key": "Nobody Corp"},
+            headers={"HX-Request": "true"},
+        )
+    assert resp.status_code == 200
+    assert "Lead not found" in resp.text
+
+
 def test_search_filter_expired_returns_message(client, db_session):
     """GET /v2/partials/search/filter with no cached data returns expiry message."""
     with patch(

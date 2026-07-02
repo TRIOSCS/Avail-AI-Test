@@ -148,8 +148,9 @@ def test_batch_refresh_all_skipped_returns_info_level(client, db_session, test_u
         )
 
     assert resp.status_code == 200
-    # All skipped — toast should contain "skipped"
-    assert "skipped" in resp.text.lower() or "already fresh" in resp.text.lower() or resp.text
+    # All skipped — toast (HX-Trigger header) should contain the searched-count message.
+    trigger = resp.headers.get("HX-Trigger", "")
+    assert "skipped" in trigger.lower() or "already fresh" in trigger.lower() or "Searched" in trigger
 
 
 def test_batch_refresh_success_path_level_success(client, db_session, test_user):
@@ -188,8 +189,8 @@ def test_batch_refresh_exception_in_search_counts_as_failed(client, db_session, 
             )
 
     assert resp.status_code == 200
-    # failed path → warning level toast
-    assert "1" in resp.text  # "1 failed" mentioned
+    # failed path → warning level toast (HX-Trigger header)
+    assert "1" in resp.headers.get("HX-Trigger", "")  # "1 failed" mentioned
 
 
 def test_batch_refresh_broker_publish_called(client, db_session, test_user):
@@ -222,7 +223,7 @@ def test_batch_refresh_nonexistent_id_increments_failed(client, db_session):
         )
 
     assert resp.status_code == 200
-    assert "1" in resp.text
+    assert "1" in resp.headers.get("HX-Trigger", "")
 
 
 # ── batch-assign: buyer name lookup (lines 769-782) ──────────────────
@@ -304,8 +305,9 @@ def test_batch_status_skip_invalid_transition(client, db_session, test_user):
     )
 
     assert resp.status_code == 200
-    # At least one skipped — toast at warning level or "skipped" text
-    assert "skipped" in resp.text.lower() or "warning" in resp.text.lower() or resp.text
+    # At least one skipped — toast (HX-Trigger header) at warning level or "skipped" text
+    trigger = resp.headers.get("HX-Trigger", "")
+    assert "skipped" in trigger.lower() or "warning" in trigger.lower() or "Updated" in trigger
 
 
 def test_batch_status_success_creates_activity_log(client, db_session, test_user):
@@ -369,8 +371,8 @@ def test_batch_notes_singular_count_in_message(client, db_session, test_user):
     )
 
     assert resp.status_code == 200
-    # "1 requirement" (singular, not "requirements")
-    assert "requirement" in resp.text.lower()
+    # "1 requirement" (singular, not "requirements") — in the HX-Trigger toast message.
+    assert "requirement" in resp.headers.get("HX-Trigger", "").lower()
 
 
 # ── mark-unavailable: broker.publish and sightings_detail (lines 900-919) ─
