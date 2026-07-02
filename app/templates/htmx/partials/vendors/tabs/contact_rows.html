@@ -1,0 +1,25 @@
+{# contact_rows.html — Vendor contact table rows (tbody inner content).
+   Receives: contacts (list[VendorContact]), vendor (VendorCard).
+   Called by: contacts.html (initial render, included into #contacts-table-body)
+              and the set-primary route (re-render after a primary flip).
+   Depends on: contact_row.html partial.
+
+   Kept as the SOLE source of the tbody inner content so a re-render (set-primary)
+   returns exactly the rows — never the full contacts.html shell, which would nest a
+   <div>/<form>/<table> inside the existing <tbody id="contacts-table-body">.
+#}
+{% if contacts %}
+  {% for c in contacts %}
+    {% include "htmx/partials/vendors/tabs/contact_row.html" %}
+  {% endfor %}
+{% else %}
+<tr id="contacts-empty-state">
+  <td colspan="6" class="py-6 sm:py-8 text-center">
+    <svg class="mx-auto h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/>
+    </svg>
+    <p class="text-sm font-medium text-gray-600 mt-3">No contacts found for this vendor.</p>
+    <p class="text-xs text-gray-400 mt-1">Click "+ Add Contact" above or use "Find Contacts" to discover contacts via AI.</p>
+  </td>
+</tr>
+{% endif %}
