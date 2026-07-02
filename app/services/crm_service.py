@@ -517,18 +517,15 @@ def customer_contacts_list_ctx(
     base = customer_contacts_query(db, user, search=search, company_id=company_id, contact_role=contact_role)
 
     if cadence_state in CONTACT_CADENCE_DOTS:
-        # cadence_state is derived → fetch the filtered set, compute, then slice.
-        rows = base.all()
-        for c in rows:
-            c.cadence_state = cadence_state_of(c, now)
-        rows = [c for c in rows if c.cadence_state == cadence_state]
-        total = len(rows)
-        contacts = rows[offset : offset + limit]
-    else:
-        total = base.count()
-        contacts = base.offset(offset).limit(limit).all()
-        for c in contacts:
-            c.cadence_state = cadence_state_of(c, now)
+        # cadence_state is derived from last_outbound_at, but its integer day-floor
+        # thresholds collapse to exact timestamp cutoffs, so the filter (and therefore
+        # count + paging) runs in SQL rather than loading the whole scoped set into
+        # Python. contact_cadence_predicate mirrors cadence_state_of EXACTLY. (PERF-10)
+        base = base.filter(contact_cadence_predicate(cadence_state, now))
+    total = base.count()
+    contacts = base.offset(offset).limit(limit).all()
+    for c in contacts:
+        c.cadence_state = cadence_state_of(c, now)
 
     # Company filter options: distinct companies within the viewer's scope.
     company_q = (
@@ -556,6 +553,43 @@ def customer_contacts_list_ctx(
 def cadence_state_of(contact: SiteContact, now: datetime) -> str:
     """Contact-level cadence dot — standard 30d outbound clock (tier=None)."""
     return cadence_state(None, contact.last_outbound_at, now)
+
+
+def contact_cadence_predicate(state: str, now: datetime):
+    """SQL predicate selecting SiteContacts whose contact-level cadence_state ==
+    ``state``.
+
+    Mirrors ``cadence_state_of()`` → ``cadence_state(tier=None, last_outbound_at, now)``
+    EXACTLY so the filter (and thus count + LIMIT/OFFSET paging) can run in the database
+    instead of loading the whole scoped contact set into Python (PERF-10). cadence_state
+    derives from the OUTBOUND clock with integer day-floor thresholds:
+
+        new        last_outbound_at IS NULL
+        overdue    floor(days) > CADENCE_RED_DAYS
+        due        target < floor(days) <= CADENCE_RED_DAYS   (empty when target == red)
+        on_target  floor(days) <= target                       (and not NULL)
+
+    where ``days == (now - last_outbound_at).days`` and ``target`` is the "standard" tier
+    target (tier is always None for contacts). The day-FLOOR comparison collapses to an
+    exact timestamp cutoff — ``floor(days) > k  ⇔  (now - ts) >= (k+1) days  ⇔
+    ts <= now - (k+1) days`` — so no SQL date-diff is needed and the comparison is portable
+    across SQLite (tests) and PostgreSQL (prod), matching the existing _needs_call_filter
+    pattern. NULL rows are excluded from the timestamp bands explicitly (they are "new").
+    """
+    col = SiteContact.last_outbound_at
+    if state == "new":
+        return col.is_(None)
+    target = TIER_TARGET_DAYS.get("standard", CADENCE_RED_DAYS)
+    overdue_cutoff = now - timedelta(days=CADENCE_RED_DAYS + 1)  # ts <= this ⇒ overdue
+    due_cutoff = now - timedelta(days=target + 1)  # ts <= this ⇒ due-or-worse
+    if state == "overdue":
+        return and_(col.isnot(None), col <= overdue_cutoff)
+    if state == "due":
+        # Collapses to an empty set when target == CADENCE_RED_DAYS (the current config),
+        # exactly matching cadence_state's unreachable "due" band for tier=None contacts.
+        return and_(col.isnot(None), col <= due_cutoff, col > overdue_cutoff)
+    # on_target — the only remaining CONTACT_CADENCE_DOTS value.
+    return and_(col.isnot(None), col > due_cutoff)
 
 
 def company_contact_rows(
