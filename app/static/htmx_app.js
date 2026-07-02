@@ -13,7 +13,7 @@
 import htmx from 'htmx.org';
 import Alpine from 'alpinejs';
 
-// ── Alpine.js Official Plugins (all 9) ───────────────────────
+// ── Alpine.js Official Plugins ───────────────────────
 // Focus (replaces deprecated @alpinejs/trap) — focus management & trapping for modals/drawers
 import focus from '@alpinejs/focus';
 // Persist — saves Alpine state to localStorage across page loads
@@ -24,14 +24,6 @@ import intersect from '@alpinejs/intersect';
 import collapse from '@alpinejs/collapse';
 // Morph — DOM morphing that preserves Alpine + browser state
 import morph from '@alpinejs/morph';
-// Mask — auto-format text inputs as user types (part numbers, phones)
-import mask from '@alpinejs/mask';
-// Sort — drag-and-drop reordering
-import sort from '@alpinejs/sort';
-// Anchor — position elements relative to other elements (dropdowns, tooltips)
-import anchor from '@alpinejs/anchor';
-// Resize — react to element resize events
-import resize from '@alpinejs/resize';
 
 // ── HTMX Extensions ─────────────────────────────────────────
 // Alpine-morph: uses Alpine's morph plugin as HTMX swap strategy (preserves Alpine state)
@@ -50,18 +42,12 @@ import 'htmx-ext-head-support';
 import 'htmx-ext-multi-swap';
 // SSE: Server-Sent Events for real-time updates (sourcing progress, RFQ status)
 import 'htmx-ext-sse';
-// WS: WebSocket support with auto-reconnect (real-time notifications)
-import 'htmx-ext-ws';
 // JSON-enc: encode request body as JSON instead of form-encoded
 import 'htmx-ext-json-enc';
-// Path-params: use path parameters in hx-get/hx-post URLs from element data
-import 'htmx-ext-path-params';
 // Remove-me: auto-remove elements after a timeout (flash messages, temp alerts)
 import 'htmx-ext-remove-me';
 // Restored: trigger events when back-button restores a page from cache
 import 'htmx-ext-restored';
-// Debug: logs all HTMX events to console (dev only — enabled per-element with hx-ext="debug")
-import 'htmx-ext-debug';
 // Idiomorph: smart DOM morphing algorithm by HTMX team (alternative swap strategy)
 import 'idiomorph';
 import 'idiomorph/dist/idiomorph-ext.esm.js';
@@ -81,10 +67,6 @@ Alpine.plugin(persist);    // $persist
 Alpine.plugin(intersect);  // x-intersect
 Alpine.plugin(collapse);   // x-collapse
 Alpine.plugin(morph);      // Alpine.morph()
-Alpine.plugin(mask);       // x-mask
-Alpine.plugin(sort);       // x-sort
-Alpine.plugin(anchor);     // x-anchor
-Alpine.plugin(resize);     // x-resize
 
 // ── Expose globals ───────────────────────────────────────────
 window.htmx = htmx;
