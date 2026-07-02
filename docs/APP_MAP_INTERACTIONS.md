@@ -541,6 +541,14 @@ tick via `_record_heartbeat()` at the top of the loop — so the heartbeat
 reflects process liveness independent of work, and stays fresh on idle /
 cap-sleep / breaker-open / off-hours paths (a liveness monitor reading
 `last_heartbeat` won't false-alarm "DOWN" while a worker is merely paused).
+The enrichment worker's LONG (~1h) daily-cap and circuit-breaker sleeps would
+otherwise let the heartbeat lapse mid-sleep and false-alarm the watchdog, so
+those two sleeps run through `_sleep_with_heartbeat()` — it splits the hour into
+chunks (a third of `settings.worker_heartbeat_stale_minutes`, floored at 60s)
+and re-touches the heartbeat after each chunk. Real-hang detection is preserved:
+the refresh only follows a chunk the worker actually finished sleeping through,
+so a wedged loop still goes silent and is caught (the chunk loop also honors the
+shutdown flag so SIGTERM exits within one chunk).
 
 **Proactive liveness watchdog.** Beyond the on-demand Connectors-page read, a
 scheduler job (`app/jobs/worker_liveness_jobs.py`, registered by
