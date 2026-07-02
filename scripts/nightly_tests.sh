@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Nightly full test suite + 100% coverage check
-# Runs at 2am via cron — logs to /var/log/avail/nightly_tests/
+# Nightly full test suite + coverage check on the HOST checkout.
+# Called by: root crontab (30 2 * * * — 02:30 UTC) — logs to /var/log/avail/nightly_tests/
+# Note: per-day logs here are pruned by /etc/logrotate.d/avail (host config).
 
 set -euo pipefail
 
