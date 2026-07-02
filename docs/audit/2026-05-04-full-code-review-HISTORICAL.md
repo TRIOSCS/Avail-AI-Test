@@ -1,3 +1,7 @@
+> **HISTORICAL — retired from repo root 2026-07-02.** This May 2026 whole-codebase review is
+> materially superseded: its open criticals were re-verified fixed or moot on main during the
+> 2026-06-30 full audit (see AUDIT_REPORT_2026-06-30.md and REMEDIATION_2026-07.md). Kept for history.
+
 # AvailAI — Full Code Review Notes (Re-verified)
 
 **Original review:** 2026-05-04 (branch `claude/code-review-notes-f6Cg7`, base commit `fbba111`)
