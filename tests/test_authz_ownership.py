@@ -16,17 +16,21 @@ from app.dependencies import (
     get_req_for_user,
     require_requisition_access,
 )
-from app.models import BuyPlan
-from app.schemas.requisition_list import ReqListFilters
-from app.services.requisition_list_service import (
-    get_requisition_detail,
-    list_requisitions,
-)
+from app.models import BuyPlan, Requisition
 
 
 def _own(db, req, owner_id):
     req.created_by = owner_id
     db.commit()
+
+
+def _mk_req(db, owner_id, name):
+    """A non-scratch requisition owned by owner_id, surfaced by the list route."""
+    r = Requisition(name=name, status="open", urgency="normal", customer_name="Cust", created_by=owner_id)
+    db.add(r)
+    db.commit()
+    db.refresh(r)
+    return r
 
 
 def _make_buyplan(db, req, quote) -> BuyPlan:
@@ -157,32 +161,42 @@ def test_get_buyplan_for_user_missing_raises_404(db_session, sales_user):
 
 
 # ── Regression: list/detail scoping now restricts TRADER too (was SALES-only) ──
-def test_list_requisitions_scopes_trader_to_own(db_session, test_requisition, trader_user, admin_user):
+# Re-pointed from the retired requisitions2 list service to the canonical Sales Hub list
+# route (GET /v2/partials/requisitions) and detail route (GET /v2/partials/requisitions/{id})
+# in app/routers/htmx/requisitions.py, which now own the same ownership invariants.
+def test_list_requisitions_scopes_trader_to_own(client, db_session, test_user, admin_user):
     """A TRADER's list is scoped to requisitions they own (mirrors SALES)."""
-    _own(db_session, test_requisition, admin_user.id)  # not the trader's
-    result = list_requisitions(db_session, ReqListFilters(), trader_user.id, trader_user.role)
-    ids = {row["id"] for row in result["requisitions"]}
-    assert test_requisition.id not in ids
+    mine = _mk_req(db_session, test_user.id, "MINE-REQ-TRADER")
+    foreign = _mk_req(db_session, admin_user.id, "FOREIGN-REQ-TRADER")
+    test_user.role = UserRole.TRADER  # client auths as test_user
+    db_session.commit()
 
-    _own(db_session, test_requisition, trader_user.id)  # now owned by the trader
-    result = list_requisitions(db_session, ReqListFilters(), trader_user.id, trader_user.role)
-    ids = {row["id"] for row in result["requisitions"]}
-    assert test_requisition.id in ids
+    resp = client.get("/v2/partials/requisitions")
+    assert resp.status_code == 200
+    assert mine.name in resp.text  # own requisition visible
+    assert foreign.name not in resp.text  # restricted: foreign requisition hidden
 
 
-def test_get_requisition_detail_scopes_trader_to_own(db_session, test_requisition, trader_user, admin_user):
+def test_get_requisition_detail_scopes_trader_to_own(client, db_session, test_user, admin_user):
     """A TRADER's detail fetch is scoped to requisitions they own (mirrors SALES)."""
-    _own(db_session, test_requisition, admin_user.id)
-    assert get_requisition_detail(db_session, test_requisition.id, trader_user.id, trader_user.role) is None
+    req = _mk_req(db_session, admin_user.id, "DETAIL-REQ-TRADER")
+    test_user.role = UserRole.TRADER
+    db_session.commit()
 
-    _own(db_session, test_requisition, trader_user.id)
-    detail = get_requisition_detail(db_session, test_requisition.id, trader_user.id, trader_user.role)
-    assert detail is not None and detail["req"]["id"] == test_requisition.id
+    # Non-owner trader → gated (404, not found), never leaks the foreign detail.
+    assert client.get(f"/v2/partials/requisitions/{req.id}").status_code == 404
+
+    _own(db_session, req, test_user.id)  # now owned by the trader
+    resp = client.get(f"/v2/partials/requisitions/{req.id}")
+    assert resp.status_code == 200
+    assert req.name in resp.text
 
 
-def test_list_requisitions_buyer_sees_non_owned(db_session, test_requisition, test_user, admin_user):
+def test_list_requisitions_buyer_sees_non_owned(client, db_session, test_user, admin_user):
     """A BUYER (unrestricted) sees requisitions they don't own."""
-    _own(db_session, test_requisition, admin_user.id)
-    result = list_requisitions(db_session, ReqListFilters(), test_user.id, test_user.role)
-    ids = {row["id"] for row in result["requisitions"]}
-    assert test_requisition.id in ids
+    assert test_user.role == UserRole.BUYER  # client auths as an unrestricted buyer
+    foreign = _mk_req(db_session, admin_user.id, "FOREIGN-REQ-BUYER")
+
+    resp = client.get("/v2/partials/requisitions")
+    assert resp.status_code == 200
+    assert foreign.name in resp.text  # unrestricted: sees non-owned requisition
