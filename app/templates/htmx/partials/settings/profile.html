@@ -88,7 +88,7 @@
       {# Click-to-call extension. Saving posts the current name + this extension. #}
       <form hx-post="/api/user/profile" hx-swap="none">
         <label class="block text-sm font-medium text-gray-600 mb-1.5">Click-to-call (8x8 phone)</label>
-        <p class="text-xs text-gray-500 mb-2">Your 8x8 desk extension. We use it so you can call a contact in one click.</p>
+        <p class="text-secondary mb-2">Your 8x8 desk extension. We use it so you can call a contact in one click.</p>
         <input type="hidden" name="name" :value="name">
         <div class="flex items-center gap-2">
           <input type="text" name="extension" x-model="extension"

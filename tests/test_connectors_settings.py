@@ -464,7 +464,7 @@ def test_connectors_empty_state_when_no_sources(empty_admin_client):
     html = empty_admin_client.get("/v2/partials/settings/connectors").text
     assert "No connectors" in html, "Expected empty-state heading when no sources exist"
     assert "text-sm text-gray-600" in html, "Expected house-style empty-state heading class"
-    assert "text-xs text-gray-400" in html, "Expected house-style empty-state hint class"
+    assert "text-secondary" in html, "Expected house-style empty-state hint class"
 
 
 def test_connectors_tab_not_empty_state_when_sources_exist(admin_client):

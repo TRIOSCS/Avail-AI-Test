@@ -16,7 +16,7 @@
   {# ── Slim header ──────────────────────────────────────────────── #}
   <div class="px-5 py-3 border-b border-line-base bg-white flex-shrink-0">
     {# Breadcrumb #}
-    <nav class="text-xs text-gray-400 mb-1" aria-label="Breadcrumb">
+    <nav class="text-secondary mb-1" aria-label="Breadcrumb">
       <a hx-get="/v2/partials/resell/workspace?lens=mine"
          hx-target="#main-content" hx-push-url="/v2/resell"
          class="hover:text-brand-500">Resell</a>
@@ -29,7 +29,7 @@
         <h1 class="text-xl font-bold text-gray-900 truncate">{{ el.title }}</h1>
         {# Metadata chips — refreshed in place by the award/unaward OOB response, so the
            id'd flex container is the swap target (chip content lives in _header_chips). #}
-        <div id="resell-chips-{{ el.id }}" class="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500">
+        <div id="resell-chips-{{ el.id }}" class="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-secondary">
           {% include "htmx/partials/resell/_header_chips.html" %}
         </div>
       </div>

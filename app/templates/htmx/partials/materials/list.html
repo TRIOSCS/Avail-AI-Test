@@ -207,13 +207,13 @@
     {# Coverage-aware nudge: parametric facets only exist on spec-enriched cards, so a
        zero here mostly means "not yet spec-enriched", not "no such parts". #}
     <p class="text-sm font-medium text-gray-600">No matches — but most parts here haven't been spec-enriched yet. Try clearing parametric filters.</p>
-    <p class="text-xs text-gray-400 mt-1">
+    <p class="text-secondary mt-1">
       Only {{ "{:,}".format(spec_coverage.with_specs) }} of {{ "{:,}".format(spec_coverage.total) }}
       {% if commodity_display %}{{ commodity_display }} {% endif %}parts have filterable specs so far
     </p>
     {% else %}
     <p class="text-sm font-medium text-gray-600">No results match your filters</p>
-    <p class="text-xs text-gray-400 mt-1">Try removing a filter or broadening your search</p>
+    <p class="text-secondary mt-1">Try removing a filter or broadening your search</p>
     {% endif %}
   </div>
   {% endif %}

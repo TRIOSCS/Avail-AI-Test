@@ -52,9 +52,9 @@
         <div class="min-w-0 flex-1">
           <p class="text-sm font-semibold text-gray-900 truncate">{{ el.title }}</p>
           {% if c.customer_name %}
-          <p class="text-xs text-gray-500 truncate mt-0.5">{{ c.customer_name }}</p>
+          <p class="text-secondary truncate mt-0.5">{{ c.customer_name }}</p>
           {% else %}
-          <p class="text-xs text-gray-400 truncate mt-0.5 italic">Anonymized posting</p>
+          <p class="text-secondary truncate mt-0.5 italic">Anonymized posting</p>
           {% endif %}
         </div>
         {{ status_badge(el.status, status_map={
@@ -67,7 +67,7 @@
           'expired': 'bg-gray-50 text-gray-400 border-gray-200'
         }) }}
       </div>
-      <div class="mt-1.5 flex items-center gap-3 text-xs text-gray-500">
+      <div class="mt-1.5 flex items-center gap-3 text-secondary">
         <span class="inline-flex items-center gap-1.5" title="Offer coverage: {{ c.coverage_filled }} of {{ c.coverage_total }} lines have an offer">
           {{ coverage_meter(c.coverage_filled, c.coverage_total) }}
           <span class="tabular-nums">{{ c.coverage_filled }}/{{ c.coverage_total }}</span>
