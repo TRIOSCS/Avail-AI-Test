@@ -122,6 +122,27 @@ class TestLineMutationsRecalcTotals:
         assert draft_quote.subtotal == pytest.approx(30.0)  # 10 * 3.00
         assert draft_quote.total_cost == pytest.approx(10.0)
 
+    def test_update_line_rebuilds_line_items_so_email_rows_match_total(
+        self, client: TestClient, db_session: Session, draft_quote: Quote
+    ):
+        """OQ-12 (full): editing a line must rebuild quote.line_items (the JSON the sent
+        email/PDF render ROWS from) — not just the header subtotal — so the emailed rows
+        sum to the stated total instead of showing stale prices."""
+        line = _add_line(db_session, draft_quote, qty=5, cost_price=1.0, sell_price=2.0)
+        client.put(
+            f"/v2/partials/quotes/{draft_quote.id}/lines/{line.id}",
+            data={"qty": "10", "cost_price": "1.00", "sell_price": "3.00"},
+            headers={"HX-Request": "true"},
+        )
+        db_session.refresh(draft_quote)
+        items = draft_quote.line_items or []
+        assert len(items) == 1
+        assert items[0]["sell_price"] == pytest.approx(3.00)
+        assert items[0]["qty"] == 10
+        # The email renders rows from line_items and the total from subtotal — they must agree.
+        rows_total = sum((it.get("sell_price") or 0) * (it.get("qty") or 0) for it in items)
+        assert rows_total == pytest.approx(float(draft_quote.subtotal))
+
     def test_delete_line_recalcs(self, client: TestClient, db_session: Session, draft_quote: Quote):
         keep = _add_line(db_session, draft_quote, mpn="KEEP", qty=5, cost_price=1.0, sell_price=2.0)
         drop = _add_line(db_session, draft_quote, mpn="DROP", qty=2, cost_price=1.0, sell_price=4.0)

@@ -59,12 +59,39 @@ def _recalc_quote_totals(db: Session, quote: Quote) -> None:
     Single arbitration point — every mutation handler calls this before commit.
     """
     db.flush()
-    lines = db.query(QuoteLine).filter(QuoteLine.quote_id == quote.id).all()
+    lines = db.query(QuoteLine).filter(QuoteLine.quote_id == quote.id).order_by(QuoteLine.id).all()
     subtotal = sum(float(ln.sell_price or 0) * (ln.qty or 1) for ln in lines)
     total_cost = sum(float(ln.cost_price or 0) * (ln.qty or 1) for ln in lines)
     quote.subtotal = subtotal
     quote.total_cost = total_cost
     quote.total_margin_pct = ((subtotal - total_cost) / subtotal * 100) if subtotal else 0
+
+    # Rebuild quote.line_items (the JSON the sent email + PDF render their ROWS from —
+    # quote_send.py:220, quote_builder_service) from the QuoteLine rows, so an edited /
+    # added / deleted line stays consistent with the recomputed total. Without this the
+    # OQ-12 fix only corrected the header total: the email rows still showed stale prices
+    # and no longer summed to the stated total (edit-then-send self-contradiction). The
+    # display-only fields (condition/date_code/…) live on the linked Offer, not QuoteLine.
+    new_line_items = []
+    for ln in lines:
+        offer = db.get(Offer, ln.offer_id) if ln.offer_id else None
+        new_line_items.append(
+            {
+                "mpn": ln.mpn or "",
+                "manufacturer": ln.manufacturer or "",
+                "qty": ln.qty or 1,
+                "cost_price": float(ln.cost_price or 0),
+                "sell_price": float(ln.sell_price or 0),
+                "margin_pct": float(ln.margin_pct or 0),
+                "lead_time": offer.lead_time if offer else None,
+                "date_code": offer.date_code if offer else None,
+                "condition": offer.condition if offer else None,
+                "packaging": offer.packaging if offer else None,
+                "moq": offer.moq if offer else None,
+                "offer_id": ln.offer_id,
+            }
+        )
+    quote.line_items = new_line_items
 
 
 # ── Sprint 5: Quote Workflow Completion ────────────────────────────────
