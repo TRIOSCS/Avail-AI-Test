@@ -881,15 +881,19 @@ async def poll_inbox(
             # reply rolls back with the rest, never poisons the whole scan). Offer
             # extraction stays MANUAL (the "Convert to offer" quick-add), so has_offer
             # is False here — status advances to responded, not bid.
-            if matched_resell_rows:
+            # An OOO / vacation / bounce auto-reply is NOT genuine engagement: advancing the
+            # outreach to "responded" and logging a "meaningful" inbound reply would stop the
+            # follow-up clock on a buyer who never actually replied. The RFQ path repairs this
+            # after AI parsing, but a purely-resell reply skips AI parsing — so gate it here.
+            # The VendorResponse row above still records the raw inbound message either way.
+            if matched_resell_rows and not _is_auto_reply(subj, vr.body):
                 from .services.resell_outreach_service import _log_inbound_reply_activity, record_response
 
                 updated = record_response(
                     db,
-                    conversation_id=conv_id or None,
+                    conversation_id=conv_id,
                     message_id=msg_id,
-                    has_offer=False,
-                    declined=False,
+                    has_offer=False,  # offer extraction stays manual (Convert-to-offer)
                     commit=False,
                 )
                 for outreach_row in updated:
@@ -966,24 +970,39 @@ async def poll_inbox(
     return results
 
 
+# Out-of-office / vacation / bounce / delivery-failure phrases that mark a message as an
+# automated reply rather than a genuine human response.
+_AUTO_REPLY_SIGNALS = (
+    "out of office",
+    "automatic reply",
+    "autoreply",
+    "i am currently out",
+    "on vacation",
+    "will return",
+    "away from",
+    "undeliverable",
+    "delivery failure",
+)
+
+
+def _is_auto_reply(subject: str, body: str) -> bool:
+    """True if the message looks like an OOO / vacation / bounce auto-reply.
+
+    Shared by the RFQ classifier and the resell reply path so neither treats an
+    automated reply as genuine engagement (advancing status / stopping the follow-up
+    clock).
+    """
+    body_lower = (body or "").lower()[:2000]
+    subject_lower = (subject or "").lower()
+    return any(s in body_lower or s in subject_lower for s in _AUTO_REPLY_SIGNALS)
+
+
 def _classify_response(parsed: dict, body: str, subject: str) -> dict:
     """Classify a vendor response into actionable categories."""
     body_lower = (body or "").lower()[:2000]
-    subject_lower = (subject or "").lower()
 
     # OOO / bounce detection
-    ooo_signals = [
-        "out of office",
-        "automatic reply",
-        "autoreply",
-        "i am currently out",
-        "on vacation",
-        "will return",
-        "away from",
-        "undeliverable",
-        "delivery failure",
-    ]
-    if any(s in body_lower or s in subject_lower for s in ooo_signals):
+    if _is_auto_reply(subject, body):
         return {
             "type": "ooo_bounce",
             "needs_action": False,

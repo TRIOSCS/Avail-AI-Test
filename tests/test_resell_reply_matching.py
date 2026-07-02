@@ -126,6 +126,38 @@ class TestResellReplyMatching:
         assert act[0].external_id == "msg-rs4"
 
     @pytest.mark.asyncio
+    async def test_auto_reply_does_not_advance_or_stop_clock(
+        self, db_session: Session, excess_list: ExcessList, buyer_card: VendorCard, owner: User
+    ):
+        """An OOO/bounce auto-reply matches the outreach thread but must NOT advance it
+        to 'responded' or log a meaningful inbound reply — doing so would stop the
+        follow-up clock on a buyer who never actually replied.
+
+        The VendorResponse still records the raw inbound message.
+        """
+        row = _outreach(db_session, excess_list, buyer_card, owner)
+        msg = _inbox_message()
+        msg["subject"] = "Automatic reply: Out of Office"
+        msg["body"] = {"content": "I am currently out of the office and will return Monday."}
+        msg["bodyPreview"] = "I am currently out of the office"
+
+        await _run_poll(db_session, [msg])
+
+        db_session.refresh(row)
+        assert row.status == "sent"  # NOT advanced by an auto-reply
+
+        # The raw inbound message is still recorded (matched)...
+        vr = db_session.query(VendorResponse).filter(VendorResponse.message_id == "msg-rs4").one()
+        assert vr.status == "matched"
+        # ...but no inbound resell activity log fires (which would stop the follow-up clock).
+        act = (
+            db_session.query(ActivityLog)
+            .filter(ActivityLog.excess_list_id == excess_list.id, ActivityLog.direction == "inbound")
+            .count()
+        )
+        assert act == 0
+
+    @pytest.mark.asyncio
     async def test_match_by_message_id_fallback(
         self, db_session: Session, excess_list: ExcessList, buyer_card: VendorCard, owner: User
     ):
