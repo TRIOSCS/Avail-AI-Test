@@ -70,6 +70,7 @@ async def parse_email_form(
 ):
     """Return the parse-email paste form."""
     req = get_requisition_or_404(db, req_id)
+    require_requisition_access(db, req_id, user)
     ctx = _base_ctx(request, user, "requisitions")
     ctx["req"] = req
     return template_response("htmx/partials/requisitions/tabs/parse_email_form.html", ctx)
@@ -84,6 +85,7 @@ async def paste_offer_form(
 ):
     """Return the paste-offer freeform form."""
     req = get_requisition_or_404(db, req_id)
+    require_requisition_access(db, req_id, user)
     ctx = _base_ctx(request, user, "requisitions")
     ctx["req"] = req
     return template_response("htmx/partials/requisitions/tabs/paste_offer_form.html", ctx)
@@ -468,6 +470,7 @@ async def add_offer_form(
 ):
     """Return the manual offer entry form."""
     req = get_requisition_or_404(db, req_id)
+    require_requisition_access(db, req_id, user)
     requirements = db.query(Requirement).filter(Requirement.requisition_id == req_id).all()
     ctx = _base_ctx(request, user, "requisitions")
     ctx["req"] = req
@@ -607,6 +610,7 @@ async def edit_offer_form(
     db: Session = Depends(get_db),
 ):
     """Return inline edit form for an existing offer."""
+    require_requisition_access(db, req_id, user)
     offer = db.query(Offer).filter(Offer.id == offer_id, Offer.requisition_id == req_id).first()
     if not offer:
         raise HTTPException(404, "Offer not found")
@@ -922,6 +926,7 @@ async def offer_changelog(
     offer = db.get(Offer, offer_id)
     if not offer:
         raise HTTPException(404, "Offer not found")
+    require_requisition_access(db, offer.requisition_id, user, owner_id=offer.entered_by_id, label="Offer")
     rows = (
         db.query(ChangeLog)
         .filter(ChangeLog.entity_type == "offer", ChangeLog.entity_id == offer_id)
@@ -983,6 +988,7 @@ async def rfq_compose(
     from ...models.offers import Contact as RfqContact
 
     req = get_requisition_or_404(db, req_id)
+    require_requisition_access(db, req_id, user)
 
     parts = db.query(Requirement).filter(Requirement.requisition_id == req_id).all()
 
@@ -1684,6 +1690,7 @@ async def rfq_prepare_panel(
     from ...models.offers import Contact as RfqContact
 
     req = get_requisition_or_404(db, req_id)
+    require_requisition_access(db, req_id, user)
 
     # Get requirements for this req
     requirements = db.query(Requirement).filter(Requirement.requisition_id == req_id).all()
