@@ -650,3 +650,117 @@ def test_keyless_direct_api_source_still_shows_needs_or_off(admin_client):
     assert "Worker active" not in html and "Worker down" not in html, (
         "Direct-API keyless source must not render a worker badge"
     )
+
+
+# ── SET-06: MANAGE_CONNECTORS capability gates the tab (not just is_admin) ──
+
+
+def _make_user_client(db_session, user):
+    """TestClient authenticated as *user* with ONLY require_user + get_db overridden.
+
+    Leaves the real require_access(MANAGE_CONNECTORS) gate in place so the capability
+    check actually runs against *user* (unlike _make_admin_client, which stubs the
+    gates).
+    """
+    from app.database import get_db
+    from app.dependencies import require_user
+    from app.main import app
+
+    def _db():
+        yield db_session
+
+    app.dependency_overrides[get_db] = _db
+    app.dependency_overrides[require_user] = lambda: user
+    try:
+        client = TestClient(app)
+        yield client
+    finally:
+        for dep in [get_db, require_user]:
+            app.dependency_overrides.pop(dep, None)
+
+
+@pytest.fixture()
+def connector_manager_client(db_session, test_user):
+    """A non-admin buyer — holds MANAGE_CONNECTORS by role default (SET-06)."""
+    _seed_sources(db_session)
+    yield from _make_user_client(db_session, test_user)
+
+
+@pytest.fixture()
+def no_connector_client(db_session, test_user):
+    """A non-admin buyer with MANAGE_CONNECTORS explicitly revoked via override."""
+    from app.constants import AccessKey
+
+    test_user.access_overrides = {AccessKey.MANAGE_CONNECTORS.value: False}
+    db_session.commit()
+    _seed_sources(db_session)
+    yield from _make_user_client(db_session, test_user)
+
+
+def test_capability_holder_can_open_connectors_tab(connector_manager_client):
+    """A non-admin who holds MANAGE_CONNECTORS gets the tab (200), not a 403."""
+    r = connector_manager_client.get("/v2/partials/settings/connectors", follow_redirects=False)
+    assert r.status_code == 200, f"capability holder should reach connectors, got {r.status_code}"
+    assert "Enrichment" in r.text  # a real group label — the tab actually rendered
+
+
+def test_capability_revoked_is_forbidden(no_connector_client):
+    """MANAGE_CONNECTORS revoked → the connectors tab endpoint 403s."""
+    r = no_connector_client.get("/v2/partials/settings/connectors", follow_redirects=False)
+    assert r.status_code == 403, f"expected 403 for revoked capability, got {r.status_code}"
+
+
+def test_settings_index_shows_connectors_tab_for_holder(connector_manager_client):
+    """The Settings shell renders the Connectors tab button for a capability holder and
+    keeps it as the default active tab."""
+    html = connector_manager_client.get("/v2/partials/settings").text
+    assert "tab = 'connectors'" in html, "Connectors tab button must render for a holder"
+
+
+def test_settings_index_hides_connectors_tab_for_non_holder(no_connector_client):
+    """No capability → no Connectors tab button, and the default tab falls back to
+    Profile (never an empty 403 landing)."""
+    html = no_connector_client.get("/v2/partials/settings").text
+    assert "tab = 'connectors'" not in html, "Connectors tab button must be hidden without the capability"
+    assert "tab = 'profile'" in html, "Profile tab is always available"
+
+
+def test_capability_holder_can_refresh_card_and_test_all(connector_manager_client, db_session):
+    """The card-refresh + test-all endpoints (hit by every card action) honor the
+    capability, so the tab is functional — not just viewable."""
+    from app.models import ApiSource as AS
+
+    src = db_session.query(AS).filter_by(name="lusha_enrichment").first()
+    r_card = connector_manager_client.get(f"/v2/partials/settings/connector-card/{src.id}", follow_redirects=False)
+    assert r_card.status_code == 200, f"card refresh should work for a holder, got {r_card.status_code}"
+
+    r_all = connector_manager_client.post("/v2/partials/settings/connectors/test-all")
+    assert r_all.status_code == 200, f"test-all should work for a holder, got {r_all.status_code}"
+
+
+def test_capability_holder_can_save_credentials_and_toggle(connector_manager_client, db_session):
+    """A holder can actually MANAGE connectors — save credentials and toggle active —
+    not merely view them (previously these were admin-only)."""
+    r_save = connector_manager_client.put(
+        "/api/sources/lusha_enrichment/credentials",
+        json={"credentials": {"LUSHA_API_KEY": "sk-holder-1"}},
+    )
+    assert r_save.status_code == 200, f"credential save should work for a holder, got {r_save.status_code}"
+
+    from app.models import ApiSource as AS
+
+    src = db_session.query(AS).filter_by(name="lusha_enrichment").first()
+    r_toggle = connector_manager_client.put(f"/api/sources/{src.id}/activate")
+    assert r_toggle.status_code == 200, f"activate toggle should work for a holder, got {r_toggle.status_code}"
+
+
+def test_clay_controls_admin_only_for_non_admin_holder(connector_manager_client, monkeypatch):
+    """Clay OAuth is a backend-wide authorization kept admin-only: a non-admin holder
+    sees Clay STATUS but no connect/disconnect control (no dead 403 button)."""
+    import app.routers.htmx.settings as v
+
+    monkeypatch.setattr(v.clay_oauth, "is_connected", lambda: True)
+    html = connector_manager_client.get("/v2/partials/settings/connectors").text
+    assert "An admin manages this connection." in html
+    assert "/auth/clay/disconnect" not in html, "non-admin holder must not get the Clay disconnect control"
+    assert "/auth/clay/connect" not in html, "non-admin holder must not get the Clay connect link"
