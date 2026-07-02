@@ -105,25 +105,6 @@
 {% endmacro %}
 
 
-{# ── Compact last-touch indicator (always-visible row) ─────────────────────────── #}
-{% macro _last_touch_compact(contact, now_utc, cadence) %}
-{# Shows a cadence dot + compact "Xd" text. NULL → "—". #}
-{% set out_ts = contact.last_outbound_at if contact else none %}
-{% set _dot = {'new': 'bg-gray-300', 'on_target': 'bg-emerald-400', 'due': 'bg-amber-400', 'overdue': 'bg-rose-500'} %}
-{% set _dot_cls = _dot.get(cadence, 'bg-gray-300') %}
-<span class="inline-flex items-center gap-1 text-[11px]"
-      title="{% if out_ts and now_utc %}Last outreach {{ (now_utc - out_ts).days }}d ago{% else %}No logged outreach yet{% endif %}">
-  <span class="w-1.5 h-1.5 rounded-full flex-shrink-0 {{ _dot_cls }}"></span>
-  {% if out_ts and now_utc %}
-    {% set out_days = (now_utc - out_ts).days %}
-    <span class="{% if cadence == 'overdue' %}text-rose-600{% elif cadence == 'due' %}text-amber-600{% else %}text-gray-400{% endif %}">{{ out_days }}d</span>
-  {% else %}
-    <span class="text-gray-400">—<span class="sr-only"> no data</span></span>
-  {% endif %}
-</span>
-{% endmacro %}
-
-
 {# NOTE: the old per-card `contact_card` macro was removed as dead code — the active
    CRM customer-tab surface is the compact-table `contact_row` macro below. #}
 

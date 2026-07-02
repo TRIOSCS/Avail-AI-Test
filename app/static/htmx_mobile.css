@@ -1,7 +1,7 @@
 /*
   htmx_mobile.css — Mobile-specific styles for the HTMX + Alpine.js frontend.
   Handles touch-friendly tap targets, mobile bottom nav, and drawer behavior.
-  Called by: base.html (via <link>)
+  Called by: htmx_app.js (import './htmx_mobile.css' — ships inside that Vite bundle)
   Depends on: styles.css (base styles, CSS variables)
 */
 

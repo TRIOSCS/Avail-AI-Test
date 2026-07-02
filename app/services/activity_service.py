@@ -196,11 +196,6 @@ def match_email_to_entity(email_addr: str, db: Session) -> dict | None:
     return None
 
 
-def _phone_digits(phone: str | None) -> str:
-    """Return only the digit characters of a phone string ("" if none)."""
-    return "".join(c for c in (phone or "") if c.isdigit())
-
-
 def _match_vendor_card_by_phone(db: Session, e164: str) -> VendorCard | None:
     """Find one non-blacklisted VendorCard whose normalized_phones contains e164.
 
