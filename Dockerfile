@@ -69,7 +69,6 @@ RUN chmod +x docker-entrypoint.sh
 RUN useradd -r -u 1000 -m appuser \
     && chown -R appuser:appuser /app \
     && mkdir -p /var/log/avail && chown appuser:appuser /var/log/avail \
-    && mkdir -p /app/fix_queue && chown appuser:appuser /app/fix_queue \
     && mkdir -p /app/uploads/tickets /app/uploads/avatars && chown -R appuser:appuser /app/uploads
 # NOTE: /app/uploads is a named volume (see docker-compose.yml). Docker seeds a
 # *fresh* volume from this image dir, so creating it appuser-owned here makes new
