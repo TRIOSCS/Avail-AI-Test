@@ -47,8 +47,8 @@ from ._shared import _base_ctx, _parse_date_safe
 
 router = APIRouter(tags=["htmx-views"])
 
-# Quote-status significance for the list's aggregate Quotes column — lower wins. Mirrors
-# requisition_list_service._quote_priority (won > lost > sent > revised > everything else).
+# Quote-status significance for the list's aggregate Quotes column — lower wins
+# (won > lost > sent > revised > everything else).
 _QUOTE_STATUS_PRIORITY = {"won": 1, "lost": 2, "sent": 3, "revised": 4}
 
 
@@ -201,8 +201,8 @@ async def requisitions_list_partial(
         req.req_count = len(req.requirements) if req.requirements else 0
         req.offer_count = len(req.offers) if req.offers else 0
         # Aggregate quote status for the list's Quotes column — the most significant of the
-        # req's quotes (won > lost > sent > revised > other), mirroring
-        # requisition_list_service._quote_priority. None → the column shows a dash.
+        # req's quotes (won > lost > sent > revised > other), per _best_quote_status /
+        # _QUOTE_STATUS_PRIORITY above. None → the column shows a dash.
         req.quote_status = _best_quote_status(req.quotes)
         req.match_reason = None
         req.matched_mpn = None
