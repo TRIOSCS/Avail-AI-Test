@@ -59,6 +59,21 @@ def _make_outsider(db: Session) -> User:
     return u
 
 
+def _make_restricted(db: Session, role: str = "sales") -> User:
+    """A RESTRICTED_ROLES user (sales/trader) — ownership-scoped visibility."""
+    u = User(
+        email=f"restricted-{uuid.uuid4().hex[:6]}@test.com",
+        name="Restricted",
+        role=role,
+        azure_id=f"azure-restricted-{uuid.uuid4().hex[:8]}",
+        can_approve_buy_plans=False,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(u)
+    db.flush()
+    return u
+
+
 def _make_buy_plan(db: Session, user: User) -> BuyPlan:
     req = Requisition(
         name=f"REQ-TEST-{uuid.uuid4().hex[:6]}",
@@ -302,3 +317,91 @@ class TestPostCancel:
         assert resp.json() == {"cancelled": True}
         db_session.expire(ar)
         assert ar.status == "cancelled"
+
+
+class TestOwnershipScoping:
+    """RESTRICTED_ROLES (SALES/TRADER) may only see requests they submitted, own, or
+    must personally decide — list + detail. Unrestricted roles keep full visibility.
+
+    Security: without scoping, a restricted user could enumerate every company-wide
+    approval's dollar amount / owner via the list and detail endpoints.
+    """
+
+    def _seed_request(self, db_session: Session, owner: User) -> ApprovalRequest:
+        bp = _make_buy_plan(db_session, owner)
+        qp = _make_quality_plan(db_session, bp, owner)
+        ar, _, _ = _make_approval_chain(db_session, qp, owner)
+        return ar
+
+    def test_restricted_user_does_not_see_others_request_in_list(self, db_session: Session) -> None:
+        """A sales user must NOT see another user's request in the list."""
+        owner = _make_approver(db_session)  # admin, owns the request
+        ar = self._seed_request(db_session, owner)
+        stranger = _make_restricted(db_session)  # sales, unrelated
+
+        for client in _build_client(db_session, stranger, override_gatekeeper=False):
+            resp = client.get("/v2/approvals/requests")
+
+        assert resp.status_code == 200
+        ids = [item["id"] for item in resp.json()["items"]]
+        assert ar.id not in ids, "restricted user leaked another user's approval request"
+
+    def test_restricted_user_gets_404_on_others_detail(self, db_session: Session) -> None:
+        """A sales user must get 404 on another user's request detail (existence
+        hidden)."""
+        owner = _make_approver(db_session)  # admin, owns the request
+        ar = self._seed_request(db_session, owner)
+        stranger = _make_restricted(db_session)  # sales, unrelated
+
+        for client in _build_client(db_session, stranger, override_gatekeeper=False):
+            resp = client.get(f"/v2/approvals/requests/{ar.id}")
+
+        assert resp.status_code == 404
+        assert "error" in resp.json()
+
+    def test_restricted_user_sees_own_request(self, db_session: Session) -> None:
+        """A sales user sees the request they submitted/own — list + detail (200)."""
+        me = _make_restricted(db_session)  # sales, owner + requester
+        ar = self._seed_request(db_session, me)
+
+        for client in _build_client(db_session, me, override_gatekeeper=False):
+            list_resp = client.get("/v2/approvals/requests")
+            detail_resp = client.get(f"/v2/approvals/requests/{ar.id}")
+
+        assert list_resp.status_code == 200
+        assert ar.id in [item["id"] for item in list_resp.json()["items"]]
+        assert detail_resp.status_code == 200
+        assert detail_resp.json()["id"] == ar.id
+
+    def test_restricted_recipient_sees_request(self, db_session: Session) -> None:
+        """A sales user who is a PENDING recipient (not owner/requester) sees it."""
+        owner = _make_approver(db_session)  # admin, owns the request
+        ar = self._seed_request(db_session, owner)
+        # Route a fresh pending recipient step to a restricted user (not owner/requester).
+        recip_user = _make_restricted(db_session, role="trader")
+        step = ApprovalStep(request_id=ar.id, seq=2, rule="any", status="pending")
+        db_session.add(step)
+        db_session.flush()
+        db_session.add(ApprovalStepRecipient(step_id=step.id, user_id=recip_user.id, status="pending"))
+        db_session.commit()
+
+        for client in _build_client(db_session, recip_user, override_gatekeeper=False):
+            list_resp = client.get("/v2/approvals/requests")
+            detail_resp = client.get(f"/v2/approvals/requests/{ar.id}")
+
+        assert ar.id in [item["id"] for item in list_resp.json()["items"]]
+        assert detail_resp.status_code == 200
+
+    def test_admin_sees_all_requests(self, db_session: Session) -> None:
+        """An admin (unrestricted) still sees another user's request — list + detail."""
+        owner = _make_outsider(db_session)  # buyer, owns the request
+        ar = self._seed_request(db_session, owner)
+        admin = _make_approver(db_session)  # admin, unrelated
+
+        for client in _build_client(db_session, admin, override_gatekeeper=False):
+            list_resp = client.get("/v2/approvals/requests")
+            detail_resp = client.get(f"/v2/approvals/requests/{ar.id}")
+
+        assert ar.id in [item["id"] for item in list_resp.json()["items"]]
+        assert detail_resp.status_code == 200
+        assert detail_resp.json()["id"] == ar.id
