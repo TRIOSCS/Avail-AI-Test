@@ -65,15 +65,27 @@ def get_matches_for_user(
         joinedload(ProactiveMatch.offer).joinedload(Offer.entered_by),
         joinedload(ProactiveMatch.requisition),
         joinedload(ProactiveMatch.customer_site).joinedload(CustomerSite.company),
+        # PERF-2: requirement is read (m.requirement.target_qty) inside the per-match
+        # loop below — without this joinedload it was one lazy SELECT per match.
+        joinedload(ProactiveMatch.requirement),
     ).order_by(ProactiveMatch.match_score.desc(), ProactiveMatch.created_at.desc())
     matches = query.all()
 
-    # Build do-not-offer set for filtering
-    dno_rows = db.query(
-        ProactiveDoNotOffer.mpn,
-        ProactiveDoNotOffer.company_id,
-    ).all()
-    dno_set = {(r.mpn, r.company_id) for r in dno_rows}
+    # Build the do-not-offer set for filtering. PERF-2: scope the query to the companies
+    # actually present in this match set — the ProactiveDoNotOffer table only grows and a
+    # company absent from the matches can never suppress one, so loading the whole table
+    # every call was wasted work. (customer_site is joinedload-ed above, so resolving the
+    # company_id here adds no query.)
+    match_company_ids = {(m.company_id or (m.customer_site.company_id if m.customer_site else None)) for m in matches}
+    match_company_ids.discard(None)
+    dno_set: set = set()
+    if match_company_ids:
+        dno_rows = (
+            db.query(ProactiveDoNotOffer.mpn, ProactiveDoNotOffer.company_id)
+            .filter(ProactiveDoNotOffer.company_id.in_(match_company_ids))
+            .all()
+        )
+        dno_set = {(r.mpn, r.company_id) for r in dno_rows}
 
     # Group by customer site
     groups: dict[int, dict] = {}
