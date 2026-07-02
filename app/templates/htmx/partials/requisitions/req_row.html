@@ -169,15 +169,15 @@
         <div class="mt-2 flex justify-end gap-2">
           <button type="button" class="px-2 py-1 text-xs text-gray-500 hover:text-gray-700"
                   @click="outcomePrompt = null">Cancel</button>
+          {# Issue the POST imperatively: a STATIC hx-post + reactive :hx-post both
+             present means htmx captures the static /action/won path at init and
+             never re-reads it, so 'Mark Lost' silently posted to /action/won and
+             marked the requisition WON. htmx.ajax reads the path at click time. #}
           <button type="button"
-                  hx-post="/v2/partials/requisitions/{{ req.id }}/action/won"
-                  :hx-post="'/v2/partials/requisitions/{{ req.id }}/action/' + outcomePrompt"
-                  hx-target="#main-content"
-                  :hx-vals="JSON.stringify({reason: outcomeReason})"
                   data-loading-disable
                   :disabled="!outcomeReady"
                   class="px-2 py-1 text-xs font-medium rounded bg-brand-500 text-white hover:bg-brand-600 disabled:opacity-40 disabled:cursor-not-allowed"
-                  @click="if (outcomeReady) outcomePrompt = null">Confirm</button>
+                  @click="htmx.ajax('POST', '/v2/partials/requisitions/{{ req.id }}/action/' + outcomePrompt, {target: '#main-content', indicator: '#main-content', values: {reason: outcomeReason}}); outcomePrompt = null">Confirm</button>
         </div>
       </div>
     </div>

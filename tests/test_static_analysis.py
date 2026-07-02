@@ -157,6 +157,33 @@ def test_no_tojson_in_double_quoted_alpine_attribute():
 _HX_VALS_JS = re.compile(r"""hx-vals\s*=\s*(['"])js:(.*?)\1""", re.DOTALL)
 
 
+def test_hx_vals_js_has_no_alpine_magics():
+    """`hx-vals="js:..."` runs in htmx's eval context (event + `this` = element), NOT
+    Alpine's — so Alpine magics like `$el`, `$store`, `$refs`, `$data` are UNDEFINED
+    there and throw, silently aborting the request.
+
+    Regression (SET-01): the system-settings toggles used `$el.checked`, so every
+    toggle no-op'd. Use `event.target` / `this` instead.
+
+    NOTE: `$store` is deliberately excluded here — the one remaining `$store` use
+    (sightings batch actions) is tracked separately as SIGHT-BATCH in the review
+    and fixed in its own wave; add it back to this ratchet once that lands.
+    """
+    magic = re.compile(r"\$(el|refs|data|dispatch|nextTick|watch)\b")
+    offenders: list[str] = []
+    for path in sorted(Path("app/templates").rglob("*.html")):
+        text = path.read_text()
+        for m in _HX_VALS_JS.finditer(text):
+            hit = magic.search(m.group(2))
+            if hit:
+                line = text[: m.start()].count("\n") + 1
+                offenders.append(f"{path.relative_to(Path('.'))}:{line}: Alpine {hit.group(0)} in hx-vals js:")
+    assert not offenders, (
+        "hx-vals='js:...' must not reference Alpine magics (undefined in htmx eval → "
+        "request silently aborts). Use event.target / this:\n" + "\n".join(offenders)
+    )
+
+
 def test_hx_vals_js_is_object_literal():
     """`hx-vals="js:..."` MUST be a plain object literal (start with `{`).
 

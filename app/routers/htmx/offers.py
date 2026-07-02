@@ -341,6 +341,7 @@ async def create_quote_from_offers(
 
     subtotal = 0.0
     total_cost = 0.0
+    line_items = []  # canonical JSON the email/PDF render from (quote_send.py:220)
     for o in offers:
         sell_price = float(o.unit_price or 0)
         cost_price = sell_price  # Default cost = sell, buyer adjusts
@@ -358,9 +359,29 @@ async def create_quote_from_offers(
             margin_pct=margin_pct,
         )
         db.add(line)
+        # Mirror each line into quote.line_items in the shape quote_builder_service
+        # emits — otherwise the sent email / PDF render an EMPTY line-item table
+        # (they read quote.line_items, not the QuoteLine rows).
+        line_items.append(
+            {
+                "mpn": o.mpn or "",
+                "manufacturer": o.manufacturer or "",
+                "qty": qty,
+                "cost_price": cost_price,
+                "sell_price": sell_price,
+                "margin_pct": margin_pct,
+                "lead_time": o.lead_time,
+                "date_code": o.date_code,
+                "condition": o.condition,
+                "packaging": o.packaging,
+                "moq": o.moq,
+                "offer_id": o.id,
+            }
+        )
         subtotal += sell_price * qty
         total_cost += cost_price * qty
 
+    quote.line_items = line_items
     quote.subtotal = subtotal
     quote.total_cost = total_cost
     quote.total_margin_pct = ((subtotal - total_cost) / subtotal * 100) if subtotal else 0

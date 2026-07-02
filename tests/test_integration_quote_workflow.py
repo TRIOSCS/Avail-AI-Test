@@ -1,69 +1,36 @@
-"""test_integration_quote_workflow.py — Integration tests for the full quote lifecycle.
-
-Tests the complete workflow: create requisition → link to customer site → add
-requirements → log offers → build quote → update quote lines → mark result.
+"""test_integration_quote_workflow.py — Integration tests for the quote lifecycle.
 
 Called by: pytest
-Depends on: conftest.py (client, db_session, test_user, test_company fixtures)
+Depends on: conftest.py (client, db_session, test_requisition, test_offer fixtures)
 """
 
-import pytest
-
-pytestmark = pytest.mark.slow
-
-# ── Helpers ──────────────────────────────────────────────────────────────
+# ── Tests ────────────────────────────────────────────────────────────────
 
 
-def _setup_req_with_offers(client):
-    """Create a requisition linked to a customer site with offers.
+def test_create_quote_from_offers_populates_line_items_json(client, db_session, test_requisition, test_offer):
+    """P0 regression (OQ-01): creating a quote from selected offers must populate
+    quote.line_items (the JSON the emailed quote + PDF render from) — not only the
+    QuoteLine ORM rows the detail UI reads.
 
-    Returns (req_id, offer_ids).
+    Otherwise the customer receives an empty line-item table.
     """
-    # Create company + site
-    co = client.post("/api/companies", json={"name": "QuoteTest Corp"}).json()
-    site = client.post(
-        f"/api/companies/{co['id']}/sites",
-        json={"site_name": "HQ", "contact_name": "Jane", "contact_email": "jane@test.com"},
-    ).json()
+    from app.models import Quote
 
-    # Create requisition and link to site
-    req = client.post(
-        "/api/requisitions",
-        json={
-            "name": "Quote Workflow Test",
-            "customer_site_id": site["id"],
-        },
-    ).json()
-    req_id = req["id"]
+    resp = client.post(
+        f"/v2/partials/requisitions/{test_requisition.id}/create-quote",
+        data={"offer_ids": str(test_offer.id)},
+    )
+    assert resp.status_code == 200
 
-    items = client.post(
-        f"/api/requisitions/{req_id}/requirements",
-        json=[
-            {"primary_mpn": "LM317T", "manufacturer": "TI", "target_qty": 500, "target_price": 0.50},
-            {"primary_mpn": "NE555P", "manufacturer": "TI", "target_qty": 200, "target_price": 0.30},
-        ],
-    ).json()["created"]
-
-    offer1 = client.post(
-        f"/api/requisitions/{req_id}/offers",
-        json={
-            "mpn": "LM317T",
-            "vendor_name": "Arrow Electronics",
-            "unit_price": 0.45,
-            "qty_available": 1000,
-            "requirement_id": items[0]["id"],
-        },
-    ).json()
-
-    offer2 = client.post(
-        f"/api/requisitions/{req_id}/offers",
-        json={
-            "mpn": "NE555P",
-            "vendor_name": "Mouser",
-            "unit_price": 0.25,
-            "qty_available": 500,
-            "requirement_id": items[1]["id"],
-        },
-    ).json()
-
-    return req_id, [offer1["id"], offer2["id"]]
+    quote = (
+        db_session.query(Quote).filter(Quote.requisition_id == test_requisition.id).order_by(Quote.id.desc()).first()
+    )
+    assert quote is not None
+    assert quote.line_items, "quote.line_items must be populated (email/PDF render from it)"
+    assert len(quote.line_items) == 1
+    li = quote.line_items[0]
+    assert li["mpn"] == "LM317T"
+    assert li["sell_price"] == 0.50
+    assert li["qty"] == 1000
+    assert li["offer_id"] == test_offer.id
+    assert "manufacturer" in li
