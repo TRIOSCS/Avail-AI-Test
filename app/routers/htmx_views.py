@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from loguru import logger
 from sqlalchemy import func as sqlfunc
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from ..constants import (
     AccessKey,
@@ -574,8 +574,8 @@ async def requisition_inline_save(
             db.query(Requisition)
             .options(
                 joinedload(Requisition.creator),
-                joinedload(Requisition.requirements),
-                joinedload(Requisition.offers),
+                selectinload(Requisition.requirements),
+                selectinload(Requisition.offers),
             )
             .filter(Requisition.id == req_id)
             .first()
@@ -594,9 +594,9 @@ async def requisition_inline_save(
             db.query(Requisition)
             .options(
                 joinedload(Requisition.creator),
-                joinedload(Requisition.requirements),
-                joinedload(Requisition.offers),
-                joinedload(Requisition.quotes),
+                selectinload(Requisition.requirements),
+                selectinload(Requisition.offers),
+                selectinload(Requisition.quotes),
             )
             .filter(Requisition.id == req_id)
             .first()
