@@ -366,6 +366,26 @@ def _affinity_match_to_result(match: dict, mpn: str) -> dict:
     }
 
 
+def _find_affinity_in_thread(mpn: str) -> list[dict]:
+    """Run the SYNC find_vendor_affinity on a worker thread with its OWN session.
+
+    find_vendor_affinity falls through to an L3 fallback that makes a BLOCKING
+    anthropic.Anthropic().messages.create(timeout=30) call, so running it directly on
+    the event loop froze every concurrent request for up to 30s (PERF-1). We dispatch it
+    via asyncio.to_thread; SQLAlchemy sessions are not thread-safe, so the request session
+    never crosses the boundary — each call opens and closes a fresh SessionLocal (the
+    established pattern, mirroring routers/sightings.py._find_affinity_in_thread).
+
+    NB: find_vendor_affinity is referenced as the module-level name (NOT re-imported
+    lazily) so tests patching app.search_service.find_vendor_affinity still take effect.
+    """
+    thread_db = SessionLocal()
+    try:
+        return find_vendor_affinity(mpn, thread_db)
+    finally:
+        thread_db.close()
+
+
 async def search_requirement(req: Requirement, db: Session) -> dict:
     """Search APIs for stale MPNs only; surface cached sightings for fresh ones.
 
@@ -408,12 +428,13 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
         key = normalize_mpn_key(pn)
         mpn_results[pn] = "searched" if key in searched_keys else "cached"
 
-    # Vendor affinity is a pure-DB lookup (no connector quota) keyed on the
-    # requirement's primary MPN, so we compute it on every path — including
-    # the cached-only short-circuit below.
+    # Vendor affinity is keyed on the requirement's primary MPN (no connector quota), so
+    # we compute it on every path — including the cached-only short-circuit below. It is
+    # NOT a pure-DB lookup: its L3 fallback makes a blocking 30s Anthropic call, so it runs
+    # on a worker thread (asyncio.to_thread) to keep the event loop free (PERF-1).
     primary_mpn = pns[0]
     try:
-        affinity_matches = find_vendor_affinity(primary_mpn, db)
+        affinity_matches = await asyncio.to_thread(_find_affinity_in_thread, primary_mpn)
     except Exception as e:
         logger.warning("Vendor affinity lookup failed for {}: {}", primary_mpn, e)
         affinity_matches = []
