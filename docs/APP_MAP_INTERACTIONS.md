@@ -4669,7 +4669,8 @@ BROWSER (HTMX + Alpine.js)
           with overflow toggle and modal material card click
       status_badge macro (_macros.html): unified badge rendering
           used across all pages (requisitions, parts, etc.)
-      Sales-Hub look (requisitions2 opportunity-table tokens): the
+      Sales-Hub look (opportunity-table tokens, originally built for the
+          retired /requisitions2 and now canonical in shared/_macros.html): the
           Sightings list table + detail panel reuse opp_status_cell
           (status dot+label), coverage_meter (6-seg meter), .opp-col-header
           (th), .h4 / .figure-accent / .input / .btn btn-sm. Sightings-only
@@ -4865,7 +4866,7 @@ the current implementation.
 | Domain | Routes | Key Operations |
 |--------|--------|---------------|
 | Auth | 7 | OAuth login/callback/logout, status |
-| Requisitions | 47 | CRUD, search, bulk archive/assign, claim; requisitions2 split-panel detail with lazy-loaded Offers/Activity tabs (`GET /requisitions2/{id}/offers` + `/activity`, reusing the shared activity timeline) |
+| Requisitions | 47 | CRUD, search, bulk archive/assign, claim. The canonical surface is `/v2/requisitions` (Sales Hub); the legacy `/requisitions2` split-panel was retired in #622 — `app/routers/requisitions2.py` now 302-redirects every `/requisitions2/*` URL to `/v2/requisitions` (no templates, no offers/activity sub-routes) |
 | Requirements | 23 | Add parts, CSV upload, search, leads, tasks |
 | Vendors | 57 | CRUD, contacts, stock history, reviews, tags; new create: `POST /api/vendors` (201, 409 dup), `GET /v2/partials/vendors/create-form`, `POST /v2/partials/vendors/create`; delete UI: `DELETE /v2/partials/vendors/{id}` (admin, 400 if active offers) — both returning vendor detail/list HTML; stock-list upload UI: `POST /v2/partials/vendors/import-stock` (`import_vendor_stock_list`, require_buyer — thin wrapper over `stock_list_ingest.ingest_stock_list`, result banner into `#vendor-stock-result`); CRM parity: activity tab, add-note, tasks tab + CRUD, attachments; **migration 145 (P1)**: HTMX vendor contact CRUD (`POST /v2/partials/vendors/{id}/contacts` require_user, `PUT .../contacts/{cid}` require_user, `DELETE .../contacts/{cid}` require_admin, `POST .../contacts/{cid}/set-primary` require_user — clears all others atomically); ownership badge (`GET/POST .../claim` require_user, `POST .../release` require_user — wraps `strategic_vendor_service.claim_vendor`/`drop_vendor`); custom fields (`POST/DELETE /v2/partials/vendors/{id}/custom-fields[/{label}]` require_user, mirrors company custom-fields); is_primary column on vendor_contacts; custom_fields JSONB on vendor_cards |
 | Companies/CRM | 47 | CRUD, sites, contacts, enrichment, import; CDM workspace (`/v2/partials/customers`, `/v2/partials/customers/account-list`); outreach logging (`POST /api/activity/outreach-initiated`); CRM task CRUD: `DELETE /v2/partials/tasks/{id}` (delete), `GET /v2/partials/tasks/{id}/edit-form` + `POST /v2/partials/tasks/{id}/edit` (edit); account add-note: `GET /v2/partials/customers/{id}/activity/add-note-form` + `POST /v2/partials/customers/{id}/activity/add-note` (cadence-neutral, direction=None → no last_outbound_at bump); all three gates reuse `_is_crm_task_authorized` (task) or `can_manage_account` (note); contact merge (dedup): `GET /v2/partials/customers/{cid}/contacts/{ctid}/merge-form` + preview + `POST .../merge` (can_manage_account on source company, merge_contacts service); contact move: `GET .../move-form` + `POST .../move` (can_manage_account on BOTH source+target companies, target site must be active); **migration 144**: contact secondary fields (secondary_email, secondary_phone in EDITABLE_CONTACT_FIELDS), reports_to_id self-FK in create+edit; contact tag routes: `POST /v2/partials/customers/{cid}/contacts/{ctid}/tags` (assign segment tag by tag_id or tag_name), `DELETE /v2/partials/customers/{cid}/contacts/{ctid}/tags/{tag_id}` (unassign), `GET /v2/partials/customers/{cid}/contacts/for-select` (JSON list for reports_to picker, exclude_id param); EntityTag entity_type='site_contact' now valid; **bulk actions**: `POST /v2/partials/customers/bulk/{action}` (deactivate, send-to-prospecting, assign-owner) — auth-scoped: deactivate+send-to-prospecting gate per-company via `can_manage_account` (skips non-manageable; summary), assign-owner is MANAGER/ADMIN ONLY (403 for reps); **CSV import**: `POST /v2/partials/customers/import/preview` (parse+flag dupes/invalid, no writes) + `POST /v2/partials/customers/import/confirm` (create Companies, dedup by normalized_name, sets importer as account_owner_id); **contact CSV import**: `POST /v2/partials/customers/import/contacts/preview` (parse+flag duplicate emails) |
@@ -4966,13 +4967,6 @@ on hover. Primaries-first DOM order (enforced by `_build_row_mpn_chips`
 service helper) guarantees primary MPNs never hide while subs are
 visible. Cleanup via Alpine's `cleanup()` disconnects the observer on
 element teardown.
-
-### rowActionRail  (htmx_app.js, Alpine.data)
-
-Component bound to `/requisitions2` `<tr>`. CSS handles hover reveal via
-`tr:hover .opp-action-rail`; this component exposes `show` state so
-`@focusin`/`@focusout`/`@keydown.enter` toggle visibility for keyboard
-users. `Escape` dismisses.
 
 ### rfqVendorModal  (htmx_app.js, Alpine.data)
 
