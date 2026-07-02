@@ -17,6 +17,7 @@ from pathlib import Path
 from fastapi import Request
 from loguru import logger
 from sqlalchemy.orm import Session
+from starlette.responses import Response
 
 from ...constants import UserRole
 from ...models import User, VerificationGroupMember
@@ -82,6 +83,22 @@ def _base_ctx(request: Request, user: User, current_view: str = "") -> dict:
         "now_utc": datetime.now(timezone.utc),
         "build_commit": os.environ.get("BUILD_COMMIT", "dev"),
     }
+
+
+def full_page_shell(request: Request, user: User, partial_url: str, nav_active: str = "") -> Response:
+    """Serve the base app shell that HTMX-loads ``partial_url`` into #main-content.
+
+    Content-negotiation companion for routes whose OWN url is pushed into history (hx-
+    push-url): a full-page reload / bookmark / share of that url arrives WITHOUT the HX-
+    Request header and must receive the app shell (nav + chrome), not a bare fragment.
+    The shell's loader then re-requests the same url WITH the HX-Request header and the
+    route returns its partial. Mirrors how htmx_views.v2_page builds every /v2/* shell.
+    """
+    from ...template_env import page_response
+
+    ctx = _base_ctx(request, user, nav_active)
+    ctx["partial_url"] = partial_url
+    return page_response(ctx)
 
 
 def _parse_date_safe(val, date_cls):

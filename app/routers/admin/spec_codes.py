@@ -34,6 +34,7 @@ from ...models.sourcing import (
 )
 from ...schemas.spec_codes import ApproveActionBody, RejectActionBody
 from ...template_env import template_response
+from ..htmx._shared import full_page_shell
 
 router = APIRouter(tags=["admin"])
 
@@ -66,7 +67,15 @@ async def list_pending(
     user: User = Depends(require_settings_access),
     db: Session = Depends(get_db),
 ):
-    """Render the pending spec-code approval queue (HTMX partial)."""
+    """Render the pending spec-code approval queue (HTMX partial).
+
+    Settings → Data Ops "Open queue" hx-push-urls this url into history, so a full-page
+    reload / bookmark / share arrives WITHOUT the HX-Request header: serve the app shell
+    (which then HTMX-loads this same url) instead of a shell-less fragment.
+    """
+    if request.headers.get("HX-Request") != "true":
+        return full_page_shell(request, user, request.url.path, "settings")
+
     rows = db.query(OemSpecCodePending).order_by(OemSpecCodePending.discovered_at.desc()).all()
     return template_response(
         "htmx/partials/admin/spec_codes_pending.html",
