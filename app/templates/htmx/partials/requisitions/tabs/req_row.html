@@ -156,8 +156,10 @@
                class="px-2 py-1.5 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500"
                placeholder="HW Codes">
       </div>
-      {# Structured substitute rows — initialised from data-subs JSON attribute #}
-      <div x-data="{ subs: JSON.parse($el.dataset.subs || '[]') }"
+      {# Structured substitute rows — initialised from data-subs JSON attribute.
+         Legacy rows may hold plain MPN strings (["ABC123"]); coerce them to
+         {mpn, manufacturer} dicts so sub.mpn binds instead of showing blank inputs. #}
+      <div x-data="{ subs: JSON.parse($el.dataset.subs || '[]').map(s => typeof s === 'string' ? {mpn: s, manufacturer: ''} : s) }"
            data-subs='{{ r.substitutes | tojson if r.substitutes else "[]" }}'>
         <div class="text-xs text-gray-600 mb-1">Substitutes</div>
         <template x-for="(sub, idx) in subs" :key="idx">

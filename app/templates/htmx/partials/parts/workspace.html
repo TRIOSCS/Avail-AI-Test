@@ -74,7 +74,7 @@
   <div class="flex flex-col min-w-0 border-r border-line-base" :style="'width: ' + (splitRatio * 100) + '%'">
     <div id="parts-list" class="flex-1 flex flex-col min-h-0"
          hx-get="/v2/partials/parts"
-         hx-trigger="load"
+         hx-trigger="load, reqListRefresh from:body"
          hx-target="#parts-list"
          hx-swap="innerHTML"
          hx-indicator="#parts-load-spinner">
