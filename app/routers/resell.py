@@ -43,7 +43,7 @@ from ..constants import (
 from ..database import get_db
 from ..dependencies import require_access, require_fresh_token, require_user
 from ..file_utils import parse_tabular_file
-from ..models import Company, User, VendorCard
+from ..models import Company, User, VendorCard, VendorResponse
 from ..models.excess import CustomerBid, ExcessLineItem, ExcessList, ExcessOffer, ExcessOfferLine, ExcessOutreach
 from ..services import (
     bid_back_service,
@@ -1092,6 +1092,43 @@ def _outreach_tracker_context(request: Request, db: Session, el: ExcessList, use
     }
 
 
+def _replies_context(db: Session, el: ExcessList) -> dict[str, dict]:
+    """Map each of the list's outreach conversations to its buyer replies.
+
+    Joins the buyer's inbound emails (``VendorResponse``, one per received message, written
+    by the inbox poll and carrying the reply body) back to the ``ExcessOutreach`` they
+    answered — on the shared ``graph_conversation_id`` the send path stamped. Returns
+    ``{conversation_id: {"outreach": ExcessOutreach, "replies": [VendorResponse, …]}}`` with
+    replies newest-first, so the reply viewer can render one conversation's thread. Only
+    outreach rows with a conversation id participate (an unstamped row has no thread to show).
+    """
+    outreach_rows = (
+        db.query(ExcessOutreach)
+        .filter(
+            ExcessOutreach.excess_list_id == el.id,
+            ExcessOutreach.graph_conversation_id.isnot(None),
+        )
+        .all()
+    )
+    owning: dict[str, ExcessOutreach] = {}
+    for row in outreach_rows:
+        # Per-line campaigns write several rows on one conversation; keep the first as the
+        # display anchor (they share buyer + list, which is all the viewer reads).
+        owning.setdefault(row.graph_conversation_id, row)
+
+    replies: dict[str, list[VendorResponse]] = {}
+    if owning:
+        for vr in (
+            db.query(VendorResponse)
+            .filter(VendorResponse.graph_conversation_id.in_(list(owning.keys())))
+            .order_by(VendorResponse.received_at.desc())
+            .all()
+        ):
+            replies.setdefault(vr.graph_conversation_id, []).append(vr)
+
+    return {conv: {"outreach": owning[conv], "replies": replies.get(conv, [])} for conv in owning}
+
+
 @router.get("/v2/partials/resell/{list_id}/offer-buyers-form", response_class=HTMLResponse)
 async def resell_offer_buyers_form(
     request: Request,
@@ -1240,6 +1277,104 @@ async def resell_submit_outreach(
             line_item_ids=parsed_lines,
             notes=notes or None,
         )
+
+    el = excess_service.get_excess_list(db, list_id)
+    return template_response("htmx/partials/resell/_outreach.html", _outreach_tracker_context(request, db, el, user))
+
+
+def _load_outreach_for_owner(
+    db: Session, list_id: int, outreach_id: int, user: User
+) -> tuple[ExcessList, ExcessOutreach]:
+    """Owner-gated load of one outreach row on a list, requiring an email thread.
+
+    404 (not 403) when the row is missing or belongs to another list — existence is not
+    revealed. 404 when the row has no ``graph_conversation_id`` (a manual-log or degraded
+    send has no thread to view or convert). Shared by the reply-viewer + convert-to-offer
+    routes so both enforce the same guard.
+    """
+    el = excess_service.get_excess_list(db, list_id)
+    _require_owner(el, user)
+    outreach = db.get(ExcessOutreach, outreach_id)
+    if outreach is None or outreach.excess_list_id != el.id:
+        raise HTTPException(404, "Outreach not found")
+    if not outreach.graph_conversation_id:
+        raise HTTPException(404, "No email thread on this outreach")
+    return el, outreach
+
+
+@router.get("/v2/partials/resell/{list_id}/outreach/{outreach_id}/reply", response_class=HTMLResponse)
+async def resell_outreach_reply(
+    request: Request,
+    list_id: int,
+    outreach_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Reply viewer for one buyer×list outreach (owner-only): the reply thread + a
+    convert-to-offer quick-add.
+
+    Loads the buyer's inbound emails on this outreach's conversation and renders them
+    with a "Convert to offer" form, so the trader can turn a free-text reply into a
+    tracked inbound ExcessOffer. Owner's private view (403 non-owner); 404 when the
+    outreach has no email thread.
+    """
+    el, outreach = _load_outreach_for_owner(db, list_id, outreach_id, user)
+    ctx = _replies_context(db, el).get(outreach.graph_conversation_id, {})
+    return template_response(
+        "htmx/partials/resell/_reply_viewer.html",
+        {
+            "request": request,
+            "user": user,
+            "list": el,
+            "outreach": outreach,
+            "replies": ctx.get("replies", []),
+        },
+    )
+
+
+@router.post("/api/resell/{list_id}/outreach/{outreach_id}/offer", response_class=HTMLResponse)
+async def resell_outreach_convert_offer(
+    request: Request,
+    list_id: int,
+    outreach_id: int,
+    mpn_raw: str = Form(""),
+    quantity: str = Form(""),
+    unit_price: str = Form(""),
+    lead_time_days: str = Form(""),
+    terms_text: str = Form(""),
+    notes: str = Form(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Convert a buyer's reply into a tracked inbound offer (owner-only), then re-render
+    the tracker.
+
+    Human-reviewed offer extraction: the trader reads the reply and types the line. Reuses
+    :func:`resell_outreach_service.record_response` (``has_offer=True``) so the offer is
+    created via the SAME queued-never-dropped line matcher as an emailed bid and the
+    outreach advances sent/responded → ``bid``. Owner-gated; 404 when there is no thread.
+    """
+    el, outreach = _load_outreach_for_owner(db, list_id, outreach_id, user)
+
+    qty = _to_int(quantity)
+    if not mpn_raw.strip() or qty is None:
+        raise HTTPException(400, "A converted offer needs a part number and quantity")
+
+    resell_outreach_service.record_response(
+        db,
+        conversation_id=outreach.graph_conversation_id,
+        has_offer=True,
+        offer_lines=[
+            {
+                "mpn_raw": mpn_raw.strip(),
+                "quantity": qty,
+                "unit_price": _to_decimal(unit_price),
+                "lead_time_days": _to_int(lead_time_days),
+                "terms_text": terms_text or None,
+            }
+        ],
+        offer_notes=notes or None,
+    )
 
     el = excess_service.get_excess_list(db, list_id)
     return template_response("htmx/partials/resell/_outreach.html", _outreach_tracker_context(request, db, el, user))

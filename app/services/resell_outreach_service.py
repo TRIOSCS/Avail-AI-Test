@@ -51,7 +51,7 @@ from ..constants import (
     ExcessOutreachStatus,
     OfferLineMatchStatus,
 )
-from ..models import ActivityLog, Company, User, VendorCard
+from ..models import ActivityLog, Company, User, VendorCard, VendorResponse
 from ..models.excess import ExcessLineItem, ExcessList, ExcessOffer, ExcessOfferLine, ExcessOutreach
 from ..utils.normalization import normalize_mpn_key
 from ..vendor_utils import normalize_vendor_name
@@ -480,6 +480,7 @@ def record_response(
     declined: bool = False,
     offer_lines: list[dict] | None = None,
     offer_notes: str | None = None,
+    commit: bool = True,
 ) -> list[ExcessOutreach]:
     """Advance the matched ExcessOutreach row(s) on a buyer's reply; link an offer.
 
@@ -495,7 +496,12 @@ def record_response(
     scoped to the canonical buyer (``offerer_vendor_card_id`` from the outreach's
     ``target_vendor_card_id``), with one ExcessOfferLine per row matched to the list's
     lines by part number only (the same matching ``submit_offer`` uses) — unmatched rows
-    are queued, never dropped. Commits. Returns the advanced rows ([] if no match).
+    are queued, never dropped. Returns the advanced rows ([] if no match).
+
+    ``commit`` (default True) commits + refreshes. Pass ``commit=False`` when the caller
+    owns the transaction (the inbox poll runs this inside a per-message savepoint): the
+    status changes + any linked ExcessOffer/Line are still ``flush``ed so they get PKs and
+    are visible in the session, but the enclosing txn stays open for the caller to commit.
 
     Raises ValueError if neither conversation_id nor message_id is supplied.
     """
@@ -523,11 +529,63 @@ def record_response(
     if has_offer:
         _link_inbound_offer(db, rows[0], offer_lines or [], offer_notes)
 
-    db.commit()
-    for row in rows:
-        db.refresh(row)
+    if commit:
+        db.commit()
+        for row in rows:
+            db.refresh(row)
+    else:
+        # Caller owns the txn (inbox-poll savepoint): flush so status changes + the
+        # linked ExcessOffer/Line get PKs and are visible before the caller commits.
+        db.flush()
     logger.info("record_response advanced {} outreach row(s) → {} (offer={})", len(rows), new_status, has_offer)
     return rows
+
+
+def _log_inbound_reply_activity(db: Session, *, outreach: ExcessOutreach, vr: VendorResponse) -> None:
+    """Write one inbound ActivityLog for a buyer's reply on a resell outreach.
+
+    Sibling of :func:`_log_outreach_activity` for the INBOUND leg: the buyer's reply lands
+    on the same immutable timeline + cadence clocks, scoped to the outreach's
+    ``excess_list_id`` and its canonical buyer ``vendor_card_id``. Idempotent per reply —
+    dedups on ``external_id`` (the Graph message id) within the list scope, so a per-line
+    campaign whose rows share one conversation logs the reply ONCE (never once-per-line),
+    and it never collides with the requisition-side ``log_email_activity`` row (that row
+    carries no ``excess_list_id``). Advances the reply clock via ``bump_clocks_from_activity``.
+    """
+    if vr.message_id:
+        existing = (
+            db.query(ActivityLog)
+            .filter(
+                ActivityLog.external_id == vr.message_id,
+                ActivityLog.excess_list_id == outreach.excess_list_id,
+            )
+            .first()
+        )
+        if existing:
+            return
+
+    card = db.get(VendorCard, outreach.target_vendor_card_id) if outreach.target_vendor_card_id else None
+    record = ActivityLog(
+        user_id=outreach.submitted_by,
+        activity_type=ActivityType.EMAIL_RECEIVED,
+        channel=Channel.EMAIL,
+        direction=Direction.INBOUND,
+        event_type=EventType.EMAIL,
+        excess_list_id=outreach.excess_list_id,
+        vendor_card_id=outreach.target_vendor_card_id,
+        contact_name=card.display_name if card else vr.vendor_name,
+        contact_email=vr.vendor_email,
+        subject=vr.subject,
+        external_id=vr.message_id,
+        is_meaningful=True,
+        auto_logged=True,
+    )
+    db.add(record)
+    db.flush()
+
+    from .cadence_service import bump_clocks_from_activity
+
+    bump_clocks_from_activity(db, record)
 
 
 def _match_outreach(
