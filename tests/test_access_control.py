@@ -66,15 +66,43 @@ def test_interactive_roles_have_all_modules_by_default(role_fixture, request):
 
 @pytest.mark.parametrize("role_fixture", _INTERACTIVE_ROLE_FIXTURES)
 def test_interactive_roles_have_buyer_capabilities_by_default(role_fixture, request):
-    """send_rfq / approve_offers / export_data / manage_connectors True by default."""
+    """send_rfq / approve_offers / export_data True by default (buyer-tier baseline)."""
     user = request.getfixturevalue(role_fixture)
     for key in (
         AccessKey.SEND_RFQ,
         AccessKey.APPROVE_OFFERS,
         AccessKey.EXPORT_DATA,
-        AccessKey.MANAGE_CONNECTORS,
     ):
         assert user_has_access(user, key) is True, f"{user.role} denied capability {key}"
+
+
+@pytest.mark.parametrize("role_fixture", _INTERACTIVE_ROLE_FIXTURES)
+def test_manage_connectors_not_default_for_interactive_roles(role_fixture, request):
+    """manage_connectors is NOT a blanket interactive default (connector credentials +
+    is_active are workspace-global shared state — a default would let any buyer
+    overwrite shared API keys / disable data sources).
+
+    It must be granted deliberately per user.
+    """
+    user = request.getfixturevalue(role_fixture)
+    assert user_has_access(user, AccessKey.MANAGE_CONNECTORS) is False, (
+        f"{user.role} must NOT hold manage_connectors by default"
+    )
+
+
+def test_manage_connectors_granted_via_explicit_override(test_user, db_session):
+    """An admin can deliberately grant manage_connectors to a trusted non-admin via an
+    explicit access override, and only then does the capability resolve True."""
+    assert user_has_access(test_user, AccessKey.MANAGE_CONNECTORS) is False
+    test_user.access_overrides = {AccessKey.MANAGE_CONNECTORS.value: True}
+    db_session.commit()
+    assert user_has_access(test_user, AccessKey.MANAGE_CONNECTORS) is True
+
+
+def test_manage_connectors_always_true_for_admin(admin_user):
+    """Admin always qualifies for manage_connectors (short-circuit), independent of any
+    role default — removing it from the interactive defaults never locks admins out."""
+    assert user_has_access(admin_user, AccessKey.MANAGE_CONNECTORS) is True
 
 
 def test_capability_keys_constant_matches_expected_set():

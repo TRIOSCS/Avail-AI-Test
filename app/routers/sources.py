@@ -30,7 +30,6 @@ from ..dependencies import (
     require_access,
     require_fresh_token,
     require_requisition_access,
-    require_settings_access,
     require_user,
 )
 from ..models import (
@@ -567,10 +566,10 @@ async def test_api_source(
 async def toggle_api_source(
     source_id: int,
     payload: SourceStatusToggle,
-    user: User = Depends(require_settings_access),
+    user: User = Depends(require_access(AccessKey.MANAGE_CONNECTORS)),
     db: Session = Depends(get_db),
 ):
-    """Enable or disable a source (admin only)."""
+    """Enable or disable a source (admins + MANAGE_CONNECTORS holders)."""
     from ..services.credential_service import credential_is_set
 
     src = db.get(ApiSource, source_id)
@@ -593,10 +592,10 @@ async def toggle_api_source(
 async def toggle_source_active(
     source_id: int,
     response: Response,
-    user: User = Depends(require_settings_access),
+    user: User = Depends(require_access(AccessKey.MANAGE_CONNECTORS)),
     db: Session = Depends(get_db),
 ):
-    """Toggle is_active flag on a source (settings access required)."""
+    """Toggle is_active flag on a source (admins + MANAGE_CONNECTORS holders)."""
     from ..routers.htmx.settings import settings_toast
 
     src = db.get(ApiSource, source_id)
@@ -682,10 +681,11 @@ async def update_source_credentials(
     source_name: str,
     request: Request,
     response: Response,
-    user: User = Depends(require_settings_access),
+    user: User = Depends(require_access(AccessKey.MANAGE_CONNECTORS)),
     db: Session = Depends(get_db),
 ):
-    """Save encrypted credentials for an API source.
+    """Save encrypted credentials for an API source (admins + MANAGE_CONNECTORS
+    holders).
 
     Skips blank values (preserves existing).
     """

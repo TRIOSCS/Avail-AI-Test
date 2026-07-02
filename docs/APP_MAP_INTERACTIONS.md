@@ -1996,17 +1996,30 @@ their toast through `settings_toast()`.
 
 ---
 
-## 9a. Settings → Connectors Tab (admin only)
+## 9a. Settings → Connectors Tab (admins + MANAGE_CONNECTORS holders)
 
 Unified credential + health management surface. Replaces the old **Sources** tab and
 the orphaned **API Keys** tab: both legacy routes (`/v2/partials/settings/sources` and
 `/v2/partials/settings/api-keys`) 302 → `/v2/partials/settings/connectors`.
 
+Gated on the `MANAGE_CONNECTORS` capability (admins always qualify via `user_has_access`),
+not bare `is_admin` — the SET-06 fix that made the capability actually gate something.
+`MANAGE_CONNECTORS` is deliberately NOT in the interactive role defaults (unlike
+send_rfq / approve_offers / export_data): connector credentials + `is_active` are
+workspace-global shared state, so it is a per-user grant an admin sets explicitly, never a
+blanket buyer-tier default. The
+tab button (`settings/index.html`, `can_manage_connectors` flag), the `settings_partial`
+default-tab redirect, the tab + card-refresh + test-all endpoints, and the per-source
+mutations (`sources.toggle_api_source` / `toggle_source_active` / `update_source_credentials`)
+all honor the same gate, so a holder gets a fully functional tab with no dead 403 controls.
+Clay OAuth connect/disconnect stays admin-only (a backend-wide authorization); non-admin
+holders see Clay status read-only.
+
 ```
 GET /v2/partials/settings/connectors
     |
     v
-htmx_views.settings_connectors_tab  (admin-only; 403 for non-admin)
+htmx_views.settings_connectors_tab  (require_access(MANAGE_CONNECTORS); 403 without it)
     |
     +---> _build_connector_groups(db, request)
     |       |
@@ -2157,7 +2170,7 @@ membership is curated, never "follow role"). Enforced at four points:
 | **Module full-page route** | `v2_page` maps the resolved `current_view` to its module `AccessKey` (`_VIEW_ACCESS`; CRM sub-views all gate on CRM); a denied view 302-redirects to the user's FIRST allowed module (`_MODULE_ENTRY_URLS` order) — target is always allowed, so no loop. No-access-at-all → 403 with logout link. Un-gated views: settings/quotes/follow-ups/tickets. |
 | **Module partial entry route** | `require_access(<module>)` dependency on each of the 10 nav-module partial routes (parts/sightings/materials/search/buy-plans/resell/crm/proactive/prospecting/my-day workspaces). |
 | **Module SUB-partial chokepoint** | `ModuleAccessMiddleware` (`app/main.py`, inner of `SessionMiddleware`) closes the gap where a revoked user could still READ a module's *sub*-partials by direct URL (those carry only `require_user`). It resolves the request path through the pure `app.access_paths.module_key_for_path` and, if a guarded prefix matches and the session user lacks the key, returns a plain 403. **Only EMPIRICALLY module-exclusive prefixes are guarded: `crm`, `resell`, `proactive`, `prospecting`, `my-day`.** The other five entry-prefixes (`parts`, `sightings`, `materials`, `search`, `buy-plans`) are SHARED cross-module (embedded by other modules' templates) and DELIBERATELY un-gated, as are all CRM *data* partials (customers/contacts/vendors/vendor-contacts) and capability/global/global-search partials — gating them would over-block. Admins and logged-out requests pass through; a DB session opens only when a guarded prefix matches. |
-| **Capability action** | `require_access(<capability>)` on: RFQ-send (`htmx_views.rfq_send`, `sightings.sightings_send_inquiry`); offer approve/reject/reconfirm (`crm/offers.py` + the Sightings `review_offer`/`reconfirm_offer` wrappers); CSV + quote exports (`crm/export.py`, `quote_builder.py`); source-test (`sources.test_api_source`). |
+| **Capability action** | `require_access(<capability>)` on: RFQ-send (`htmx_views.rfq_send`, `sightings.sightings_send_inquiry`); offer approve/reject/reconfirm (`crm/offers.py` + the Sightings `review_offer`/`reconfirm_offer` wrappers); CSV + quote exports (`crm/export.py`, `quote_builder.py`); the whole Connectors surface — `MANAGE_CONNECTORS` on `sources.test_api_source` / `toggle_api_source` / `toggle_source_active` / `update_source_credentials` and the `settings.py` connectors tab + `connector_card_partial` + `connectors_test_all` (SET-06). |
 
 `require_access(key)` is a factory returning a dependency that depends on `require_user`
 and raises 403 unless `user_has_access` passes (admins always pass). The

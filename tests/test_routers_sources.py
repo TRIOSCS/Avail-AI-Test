@@ -240,6 +240,16 @@ def sources_client(db_session: Session, test_user: User) -> TestClient:
     app.dependency_overrides[require_buyer] = _override_user
     app.dependency_overrides[require_settings_access] = _override_user
 
+    # Source test/toggle/credential endpoints are gated on MANAGE_CONNECTORS
+    # (SET-06) — which is no longer an interactive-role default — so grant it to
+    # the buyer test_user here to exercise the capability-holder path.
+    from app.constants import AccessKey
+
+    test_user.access_overrides = {
+        **(test_user.access_overrides or {}),
+        AccessKey.MANAGE_CONNECTORS.value: True,
+    }
+
     limiter.reset()
     try:
         with TestClient(app) as c:

@@ -209,19 +209,22 @@ def test_toggle_enable_without_creds_goes_pending(admin_source_client, db_sessio
 # ── POST /api/sources/{id}/test ──────────────────────────────────────
 
 
-def test_source_test_no_connector(client, db_session, seed_sources):
+# The /test + /toggle source endpoints are gated on MANAGE_CONNECTORS (SET-06),
+# which is no longer an interactive-role default — so these use the admin client
+# (admins qualify for every capability) rather than the plain buyer client.
+def test_source_test_no_connector(admin_source_client, db_session, seed_sources):
     """Testing a source with no connector returns error."""
     arrow = db_session.query(ApiSource).filter_by(name="arrow").first()
-    resp = client.post(f"/api/sources/{arrow.id}/test")
+    resp = admin_source_client.post(f"/api/sources/{arrow.id}/test")
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "error"
     assert "No connector" in (data["error"] or "")
 
 
-def test_source_test_not_found(client):
+def test_source_test_not_found(admin_source_client):
     """Testing a nonexistent source returns 404."""
-    resp = client.post("/api/sources/99999/test")
+    resp = admin_source_client.post("/api/sources/99999/test")
     assert resp.status_code == 404
 
 

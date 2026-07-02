@@ -80,7 +80,7 @@
     </button>
     <div x-show="open" x-collapse class="space-y-2 mt-2">
       {% for s in group.sources %}
-        {{ cm.connector_card(s) }}
+        {{ cm.connector_card(s, is_admin=is_admin) }}
       {% endfor %}
     </div>
   </section>
