@@ -33,12 +33,14 @@ from ...models import (
     CustomerSite,
     Offer,
     Quote,
+    QuoteRequisition,
     Requirement,
     Requisition,
     RequisitionTask,
     User,
 )
 from ...services.freeform_parser_service import parse_freeform_rfq
+from ...services.quote_requisitions import quotes_for_requisition
 from ...template_env import template_response
 from ...utils.search_builder import SearchBuilder
 from ...utils.sql_helpers import escape_like
@@ -170,7 +172,11 @@ async def requisitions_list_partial(
                 )
             )
         )
-        .where(Quote.requisition_id == Requisition.id)
+        # Correlate through the join table (not Quote.requisition_id) so a combined quote
+        # counts for every contributing requisition's Quotes-column sort, not just its anchor.
+        .select_from(QuoteRequisition)
+        .join(Quote, Quote.id == QuoteRequisition.quote_id)
+        .where(QuoteRequisition.requisition_id == Requisition.id)
         .correlate(Requisition)
         .scalar_subquery()
         .label("quote_status_sort")
@@ -196,14 +202,28 @@ async def requisitions_list_partial(
     order = sort_col.desc().nullslast() if sort_dir == "desc" else sort_col.asc().nullslast()
     reqs = query.order_by(order).offset(offset).limit(limit).all()
 
+    # Quotes contributing to each requisition on THIS page, via the join table — ONE extra
+    # query for the whole page (not per row) so a combined quote's status shows on every
+    # contributing requisition, not just the one it anchors (which req.quotes would miss).
+    page_req_ids = [r.id for r in reqs]
+    quotes_by_req: dict[int, list] = {}
+    if page_req_ids:
+        for rid, qt in (
+            db.query(QuoteRequisition.requisition_id, Quote)
+            .join(Quote, Quote.id == QuoteRequisition.quote_id)
+            .filter(QuoteRequisition.requisition_id.in_(page_req_ids))
+            .all()
+        ):
+            quotes_by_req.setdefault(rid, []).append(qt)
+
     # Attach counts + match reason when searching
     for req in reqs:
         req.req_count = len(req.requirements) if req.requirements else 0
         req.offer_count = len(req.offers) if req.offers else 0
         # Aggregate quote status for the list's Quotes column — the most significant of the
-        # req's quotes (won > lost > sent > revised > other), per _best_quote_status /
-        # _QUOTE_STATUS_PRIORITY above. None → the column shows a dash.
-        req.quote_status = _best_quote_status(req.quotes)
+        # req's contributing quotes (won > lost > sent > revised > other), per
+        # _best_quote_status / _QUOTE_STATUS_PRIORITY above. None → the column shows a dash.
+        req.quote_status = _best_quote_status(quotes_by_req.get(req.id, []))
         req.match_reason = None
         req.matched_mpn = None
         if search_term:
@@ -990,10 +1010,11 @@ async def requisition_tab(
         if qual in ("unset", "incomplete", "essentials", "complete"):
             q = q.filter(Offer.qualification_status == qual)
         offers = q.order_by(Offer.created_at.desc().nullslast()).all()
-        # Check for existing draft quote to show "Add to Quote" button
+        # Check for existing draft quote to show "Add to Quote" button — join-table scoped
+        # so a combined draft quote is offered on every contributing requisition.
         draft_quote = (
-            db.query(Quote)
-            .filter(Quote.requisition_id == req_id, Quote.status == QuoteStatus.DRAFT)
+            quotes_for_requisition(db, req_id)
+            .filter(Quote.status == QuoteStatus.DRAFT)
             .order_by(Quote.created_at.desc())
             .first()
         )
@@ -1003,9 +1024,9 @@ async def requisition_tab(
         return template_response("htmx/partials/requisitions/tabs/offers.html", ctx)
 
     elif tab == "quotes":
-        quotes = (
-            db.query(Quote).filter(Quote.requisition_id == req_id).order_by(Quote.created_at.desc().nullslast()).all()
-        )
+        # Join-table scoped so a combined quote appears on the Quotes tab of EVERY
+        # contributing requisition, not just the one it anchors.
+        quotes = quotes_for_requisition(db, req_id).order_by(Quote.created_at.desc().nullslast()).all()
         ctx["quotes"] = quotes
         return template_response("htmx/partials/requisitions/tabs/quotes.html", ctx)
 

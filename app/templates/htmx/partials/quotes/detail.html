@@ -43,7 +43,18 @@
                class="text-brand-500 hover:text-brand-400 cursor-pointer font-medium">{{ quote.customer_site.company.name }}</a>
           </p>
           {% endif %}
-          {% if quote.requisition %}
+          {% if contributing_reqs is defined and contributing_reqs|length > 1 %}
+          {# Combined quote (OQ-02): one link per contributing requisition, primary first. #}
+          <p>
+            <span class="text-gray-400">Requisitions:</span>
+            {% for r in contributing_reqs %}
+            <a hx-get="/v2/partials/requisitions/{{ r.id }}"
+               hx-target="#main-content" hx-push-url="/v2/requisitions/{{ r.id }}"
+               preload="mouseover"
+               class="text-brand-500 hover:text-brand-400 cursor-pointer font-medium">{{ r.name }}</a>{% if not loop.last %}<span class="text-gray-300">, </span>{% endif %}
+            {% endfor %}
+          </p>
+          {% elif quote.requisition %}
           <p>
             <span class="text-gray-400">Requisition:</span>
             <a hx-get="/v2/partials/requisitions/{{ quote.requisition.id }}"

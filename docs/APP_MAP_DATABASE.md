@@ -278,6 +278,15 @@ Migration 162 also adds the new status value **`resourcing`** to `buy_plan_lines
 | sell_price | Numeric 12,4 | |
 | margin_pct | Numeric 5,2 | |
 
+**`quote_requisitions`** — Join table linking a quote to EVERY requisition it draws lines from (Migration 175, OQ-02). A combined quote spans 2+ requisitions selected together in the list "Build Quote" flow; `Quote.requisition_id` stays the PRIMARY/anchor while one row here per contributing requisition (primary included) makes the full membership queryable. Invariant: every quote has ≥1 join row (its primary self-row) — existing quotes were backfilled by 175, and every NEW quote gets its self-row via the `Quote` `after_insert` listener (`app/models/quotes.py`), so ANY creation path (builder, revise, proactive, offers, CRM) is visible on its requisition. The single arbitration point for reads/writes is `app/services/quote_requisitions.py` (`quotes_for_requisition` replaces the old `Quote.requisition_id == req_id` filter so secondary reqs also surface the combined quote).
+| Column | Type | Notes |
+|--------|------|-------|
+| id | Integer PK | |
+| quote_id | FK -> quotes (CASCADE), indexed (`ix_quote_requisitions_quote`) | |
+| requisition_id | FK -> requisitions (CASCADE), indexed (`ix_quote_requisitions_req`) | |
+| created_at | UTCDateTime | |
+| | | `uq_quote_requisition` unique on (quote_id, requisition_id) |
+
 **`offer_attachments`** — Files attached to a vendor offer (Migration 126: renamed `onedrive_item_id`→`library_item_id`, `onedrive_url`→`library_web_url`; added `library_drive_id`)
 | Column | Type | Notes |
 |--------|------|-------|

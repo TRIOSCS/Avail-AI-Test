@@ -460,6 +460,13 @@
         <svg x-show="!saving" x-cloak class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
         <span x-text="saved ? 'Update Quote' : 'Save Quote'"></span>
       </button>
+      {# Once saved, jump straight to the (possibly combined) quote detail. Full-page nav
+         to the real /v2/quotes/{id} route; close the modal first. #}
+      <a x-show="saved" x-cloak :href="'/v2/quotes/' + quoteId" @click="$dispatch('close-modal')"
+         class="px-4 py-2 text-sm font-medium text-brand-600 border border-brand-200 rounded-lg hover:bg-brand-50 flex items-center gap-1.5 transition-colors">
+        View Quote
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+      </a>
     </div>
   </div>
 </div>

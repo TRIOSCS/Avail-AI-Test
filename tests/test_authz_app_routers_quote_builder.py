@@ -90,3 +90,35 @@ def test_quote_save_allows_buyer_non_owner(
         json=_save_payload(),
     )
     assert resp.status_code != 404
+
+
+def test_multi_save_blocks_sales_combining_unowned_req(
+    client, db_session, test_requisition, test_user, admin_user, test_customer_site
+):
+    """SALES cannot smuggle an UNOWNED requisition into a combined quote — 404 (OQ-02).
+
+    Both reqs share one customer site (so a customer mismatch isn't what blocks it); the
+    second req is owned by someone else, so the looped ownership guard must 404.
+    """
+    from datetime import datetime, timezone
+
+    from app.models import Requisition
+
+    test_user.role = UserRole.SALES
+    test_requisition.created_by = test_user.id  # owned
+    test_requisition.customer_site_id = test_customer_site.id
+    unowned = Requisition(
+        name="UNOWNED-COMBO",
+        status="open",
+        customer_site_id=test_customer_site.id,
+        created_by=admin_user.id,  # someone else's req
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(unowned)
+    db_session.commit()
+
+    resp = client.post(
+        f"/v2/partials/quote-builder/multi/save?requisition_ids={test_requisition.id},{unowned.id}",
+        json=_save_payload(),
+    )
+    assert resp.status_code == 404

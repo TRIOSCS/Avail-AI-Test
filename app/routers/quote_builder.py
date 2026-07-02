@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from ..constants import AccessKey
 from ..database import get_db
 from ..dependencies import get_quote_for_user, require_access, require_user
-from ..models import User
+from ..models import Requisition, User
 from ..schemas.quote_builder import QuoteBuilderSaveRequest
 
 router = APIRouter(tags=["quote-builder"])
@@ -46,6 +46,127 @@ def _customer_name_for_site(db: Session, customer_site_id: int | None) -> str:
     if site and site.company:
         return site.company.name or ""
     return ""
+
+
+# ── Combined cross-req quote (OQ-02) — MUST be declared before the /{req_id} routes ──
+# FastAPI matches in declaration order; "multi" would otherwise be captured by the
+# {req_id} path param (and fail int coercion → 422), so every /multi* route lives here,
+# above the single-req routes.
+
+
+@router.get("/v2/partials/quote-builder/multi")
+async def quote_builder_modal_multi(
+    request: Request,
+    requisition_ids: str = "",
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Open the COMBINED quote builder for 2+ requisitions selected on the list page.
+
+    Every selected requisition is ownership-checked (SALES/TRADER may only combine reqs
+    they own — 404 otherwise, so unowned existence isn't leaked), then the selection must
+    share ONE customer (``validate_same_customer``). On a customer mismatch we render a
+    plain static error fragment (HTTP 200) into #modal-content — NOT an exception — so the
+    modal shows an honest per-requisition breakdown of the clash instead of a bare toast.
+    ``requisition_ids[0]`` is the primary/anchor (its customer site + the quote record).
+    """
+    from ..dependencies import get_req_for_user
+    from ..services.quote_requisitions import CustomerMismatchError, validate_same_customer
+    from ..template_env import template_response
+
+    req_id_list = _parse_req_ids(requisition_ids)
+
+    for rid in req_id_list:
+        if not get_req_for_user(db, user, rid):
+            raise HTTPException(404, "Requisition not found")
+
+    primary_req = db.get(Requisition, req_id_list[0])
+    if not primary_req:
+        raise HTTPException(404, "Requisition not found")
+
+    try:
+        validate_same_customer(db, req_id_list)
+    except CustomerMismatchError as exc:
+        return template_response(
+            "htmx/partials/quote_builder/multi_error.html",
+            {"request": request, "message": exc.detail},
+        )
+
+    return template_response(
+        "htmx/partials/quote_builder/modal.html",
+        {
+            "request": request,
+            "req": primary_req,
+            "customer_name": _customer_name_for_site(db, primary_req.customer_site_id),
+            "has_customer_site": bool(primary_req.customer_site_id),
+            "requirement_ids": "",
+            "multi_req_ids": requisition_ids,
+        },
+    )
+
+
+@router.get("/v2/partials/quote-builder/multi/data")
+async def quote_builder_data_multi(
+    requisition_ids: str = "",
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return merged line data from every selected requisition for the combined
+    builder."""
+    from ..dependencies import get_req_for_user
+    from ..services.quote_builder_service import apply_smart_defaults, get_builder_data
+
+    req_id_list = _parse_req_ids(requisition_ids)
+
+    all_lines = []
+    for rid in req_id_list:
+        req = get_req_for_user(db, user, rid)
+        if req:
+            lines = get_builder_data(rid, db)
+            all_lines.extend(lines)
+
+    apply_smart_defaults(all_lines)
+    return {"lines": all_lines}
+
+
+@router.post("/v2/partials/quote-builder/multi/save")
+async def quote_builder_save_multi(
+    payload: QuoteBuilderSaveRequest,
+    requisition_ids: str = "",
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Save ONE combined quote spanning every selected requisition's chosen lines.
+
+    Ownership-checks each requisition (looped ``require_requisition_access`` +
+    ``get_req_for_user`` — an unowned req can't be smuggled into the combine), then
+    delegates to ``save_quote_from_builder_multi``. A customer mismatch surfaces as an
+    honest 400 (the builder's save banner), a missing/unknown req as 404 — never a silent
+    partial write. Returns the SAME dict shape as the single-req save.
+    """
+    from ..dependencies import get_req_for_user, require_requisition_access
+    from ..services.quote_builder_service import save_quote_from_builder_multi
+    from ..services.quote_requisitions import CustomerMismatchError
+
+    req_ids = _parse_req_ids(requisition_ids)
+
+    for rid in req_ids:
+        require_requisition_access(db, rid, user)
+        if not get_req_for_user(db, user, rid):
+            raise HTTPException(404, "Requisition not found")
+
+    try:
+        result = save_quote_from_builder_multi(db, req_ids=req_ids, payload=payload, user=user)
+    except CustomerMismatchError as e:
+        # Subclass of ValueError — MUST be caught before the ValueError arm below.
+        raise HTTPException(400, e.detail)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    except Exception as e:
+        logger.error("Combined quote save failed for reqs {}: {}", req_ids, e)
+        raise HTTPException(500, "Failed to save quote. Please try again.")
+
+    return result
 
 
 @router.get("/v2/partials/quote-builder/{req_id}")
@@ -80,65 +201,6 @@ async def quote_builder_modal(
             "requirement_ids": requirement_ids or "",
         },
     )
-
-
-@router.get("/v2/partials/quote-builder/multi")
-async def quote_builder_modal_multi(
-    request: Request,
-    requisition_ids: str = "",
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Open quote builder for multiple requisitions selected from the list page.
-
-    Picks the first requisition as the primary (for customer site/quote record), loads
-    requirements from all selected requisitions.
-    """
-    from ..dependencies import get_req_for_user
-
-    req_id_list = _parse_req_ids(requisition_ids)
-
-    # Use the first requisition as primary
-    primary_req = get_req_for_user(db, user, req_id_list[0])
-    if not primary_req:
-        raise HTTPException(404, "Requisition not found")
-
-    from ..template_env import template_response
-
-    return template_response(
-        "htmx/partials/quote_builder/modal.html",
-        {
-            "request": request,
-            "req": primary_req,
-            "customer_name": _customer_name_for_site(db, primary_req.customer_site_id),
-            "has_customer_site": bool(primary_req.customer_site_id),
-            "requirement_ids": "",
-            "multi_req_ids": requisition_ids,
-        },
-    )
-
-
-@router.get("/v2/partials/quote-builder/multi/data")
-async def quote_builder_data_multi(
-    requisition_ids: str = "",
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Return line data from multiple requisitions for the quote builder."""
-    from ..dependencies import get_req_for_user
-    from ..services.quote_builder_service import apply_smart_defaults, get_builder_data
-
-    req_id_list = _parse_req_ids(requisition_ids)
-
-    all_lines = []
-    for rid in req_id_list:
-        req = get_req_for_user(db, user, rid)
-        if req:
-            lines = get_builder_data(rid, db)
-            all_lines.extend(lines)
-
-    apply_smart_defaults(all_lines)
-    return {"lines": all_lines}
 
 
 @router.get("/v2/partials/quote-builder/{req_id}/data")
@@ -296,14 +358,12 @@ def _build_quote_tab_context(request: Request, db: Session, req, quote=None) -> 
         quote_export_context,
     )
     from ..services.quote_preflight import quote_preflight
+    from ..services.quote_requisitions import quotes_for_requisition
 
     if quote is None:
-        quote = (
-            db.query(Quote)
-            .filter(Quote.requisition_id == req.id)
-            .order_by(Quote.revision.desc().nullslast(), Quote.id.desc())
-            .first()
-        )
+        # quotes_for_requisition (join-based) so a SECONDARY requisition of a combined
+        # quote surfaces that quote here too — not just the ones it anchors.
+        quote = quotes_for_requisition(db, req.id).order_by(Quote.revision.desc().nullslast(), Quote.id.desc()).first()
 
     lines = build_quote_tab_data(db, req.id)
     # Compact reactive seed keyed by requirement id — passed to the Alpine component as a

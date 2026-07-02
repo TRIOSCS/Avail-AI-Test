@@ -64,10 +64,9 @@ class TestQuoteBuilderModal:
 
 
 # ── quote_builder_modal_multi (covered via direct function calls) ───────────
-# Note: GET /v2/partials/quote-builder/multi is shadowed by the /{req_id} route
-# because FastAPI registers routes in declaration order and `multi` isn't a valid
-# int, producing 422. The multi/data endpoint works because it has a longer path.
-# We test the modal_multi function directly to cover those branches.
+# The /multi route is now declared BEFORE /{req_id} (OQ-02), so it is reachable over
+# HTTP; these keep exercising the multi/data merge branches directly. The full combined-
+# quote HTTP flow is covered in tests/test_build_quote_multi_req.py.
 
 
 class TestQuoteBuilderModalMulti:

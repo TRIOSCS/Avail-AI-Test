@@ -143,7 +143,7 @@ from .purchase_history import CustomerPartHistory  # noqa: F401
 from .quality_plan import Prepayment, QpFruLookup, QpSerialEntry, QualityPlan  # noqa: F401
 
 # Quotes (V1 BuyPlan model removed — use BuyPlan from buy_plan module)
-from .quotes import Quote, QuoteLine  # noqa: F401
+from .quotes import Quote, QuoteLine, QuoteRequisition  # noqa: F401
 from .root_cause_group import RootCauseGroup  # noqa: F401
 
 # Core: Requisitions, Requirements & Attachments
