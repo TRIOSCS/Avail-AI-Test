@@ -11,6 +11,7 @@ Depends on: app.models, app.dependencies, app.database, app.services, ._shared
 """
 
 import html as html_mod
+import json
 import os
 from datetime import datetime, timezone
 
@@ -46,6 +47,24 @@ from ...template_env import template_response
 from ._shared import _base_ctx, _is_ops_member
 
 router = APIRouter(tags=["htmx-views"])
+
+
+def _recalc_quote_totals(db: Session, quote: Quote) -> None:
+    """Recompute quote header totals (subtotal/cost/margin) from its QuoteLine rows.
+
+    The detail header (quotes/detail.html) and the sent-email/PDF total (quote_send.py)
+    all read quote.subtotal / total_cost / total_margin_pct, so every line mutation (add
+    / edit / delete / add-offer / apply-markup) must refresh them or the stored totals
+    drift from the visible lines and the customer is emailed a stale subtotal (OQ-12).
+    Single arbitration point — every mutation handler calls this before commit.
+    """
+    db.flush()
+    lines = db.query(QuoteLine).filter(QuoteLine.quote_id == quote.id).all()
+    subtotal = sum(float(ln.sell_price or 0) * (ln.qty or 1) for ln in lines)
+    total_cost = sum(float(ln.cost_price or 0) * (ln.qty or 1) for ln in lines)
+    quote.subtotal = subtotal
+    quote.total_cost = total_cost
+    quote.total_margin_pct = ((subtotal - total_cost) / subtotal * 100) if subtotal else 0
 
 
 # ── Sprint 5: Quote Workflow Completion ────────────────────────────────
@@ -237,7 +256,7 @@ async def update_quote_line(
     if not line or line.quote_id != quote_id:
         raise HTTPException(404, "Line not found")
     # Scope the parent quote through ownership (raises 404 for SALES accessing other users' quotes).
-    get_quote_for_user(db, user, line.quote_id)
+    quote = get_quote_for_user(db, user, line.quote_id)
     form = await request.form()
     if "mpn" in form:
         line.mpn = form["mpn"]
@@ -260,6 +279,7 @@ async def update_quote_line(
             raise HTTPException(400, "sell_price must be a number")
     if line.sell_price and float(line.sell_price) > 0 and line.cost_price is not None:
         line.margin_pct = round((float(line.sell_price) - float(line.cost_price)) / float(line.sell_price) * 100, 2)
+    _recalc_quote_totals(db, quote)
     db.commit()
     ctx = _base_ctx(request, user, "quotes")
     ctx["line"] = line
@@ -279,8 +299,9 @@ async def delete_quote_line(
     if not line or line.quote_id != quote_id:
         raise HTTPException(404, "Line not found")
     # Scope the parent quote through ownership (raises 404 for SALES accessing other users' quotes).
-    get_quote_for_user(db, user, line.quote_id)
+    quote = get_quote_for_user(db, user, line.quote_id)
     db.delete(line)
+    _recalc_quote_totals(db, quote)
     db.commit()
     return HTMLResponse("")
 
@@ -299,7 +320,7 @@ async def add_quote_line(
 ):
     """Add a new line item to a quote, return the new row HTML."""
     # Ownership/existence check (raises 404 if the quote isn't visible to the user).
-    get_quote_for_user(db, user, quote_id)
+    quote = get_quote_for_user(db, user, quote_id)
     margin_pct = 0.0
     if sell_price > 0:
         margin_pct = round((sell_price - cost_price) / sell_price * 100, 2)
@@ -313,6 +334,7 @@ async def add_quote_line(
         margin_pct=margin_pct,
     )
     db.add(line)
+    _recalc_quote_totals(db, quote)
     db.commit()
     db.refresh(line)
     ctx = _base_ctx(request, user, "quotes")
@@ -349,6 +371,7 @@ async def add_offer_to_quote(
         margin_pct=0,
     )
     db.add(line)
+    _recalc_quote_totals(db, quote)
     db.commit()
     db.refresh(line)
     ctx = _base_ctx(request, user, "quotes")
@@ -381,16 +404,28 @@ async def send_quote_htmx(
     try:
         await send_quote_email(db, quote, user, token=token, testing=testing)
     except QuoteSendDNCBlocked:
-        return HTMLResponse(
-            '<div class="rounded bg-rose-50 border border-rose-200 text-rose-700 text-xs px-2 py-1.5">'
-            "This recipient is do-not-contact — quote not sent.</div>"
-        )
+        # Surface the failure as a toast WITHOUT swapping — the Send button targets
+        # #main-content, so swapping any error body would replace the whole quote
+        # detail / Build-Quote workspace (OQ-07). HX-Reswap=none keeps the workspace
+        # intact; the showToast HX-Trigger bridges to $store.toast (htmx_app.js).
+        return _send_error_toast("This recipient is do-not-contact — quote not sent.")
     except QuoteSendError as exc:
-        return HTMLResponse(
-            '<div class="rounded bg-rose-50 border border-rose-200 text-rose-700 text-xs px-2 py-1.5">'
-            f"{html_mod.escape(exc.detail)}</div>"
-        )
+        return _send_error_toast(exc.detail)
     return await quote_detail_partial(request, quote_id, user, db)
+
+
+def _send_error_toast(message: str) -> HTMLResponse:
+    """Return a no-swap response that surfaces a send failure as a toast.
+
+    The quote Send buttons (quotes/detail.html, requisitions/tabs/build_quote.html)
+    target #main-content, so any swapped error body wipes the whole workspace (OQ-07).
+    HX-Reswap=none suppresses the swap; the showToast HX-Trigger (htmx_app.js) shows the
+    error and the user stays where they are to retry.
+    """
+    resp = HTMLResponse("")
+    resp.headers["HX-Reswap"] = "none"
+    resp.headers["HX-Trigger"] = json.dumps({"showToast": {"message": message, "type": "error"}})
+    return resp
 
 
 @router.post("/v2/partials/quotes/{quote_id}/result", response_class=HTMLResponse)
@@ -485,13 +520,14 @@ async def apply_markup_htmx(
 ):
     """Apply a markup percentage to all lines in the quote."""
     # Scope ownership check before mutating any lines (raises 404 for SALES on other users' quotes).
-    get_quote_for_user(db, user, quote_id)
+    quote = get_quote_for_user(db, user, quote_id)
     lines = db.query(QuoteLine).filter(QuoteLine.quote_id == quote_id).all()
     for line in lines:
         if line.cost_price and float(line.cost_price) > 0:
             multiplier = 1 + (markup_pct / 100)
             line.sell_price = round(float(line.cost_price) * multiplier, 4)
             line.margin_pct = round(markup_pct / multiplier, 2)
+    _recalc_quote_totals(db, quote)
     db.commit()
     return await quote_detail_partial(request, quote_id, user, db)
 
@@ -549,14 +585,7 @@ async def add_offers_to_draft_quote(
         )
         db.add(line)
 
-    # Recalculate totals
-    db.flush()
-    all_lines = db.query(QuoteLine).filter(QuoteLine.quote_id == quote.id).all()
-    subtotal = sum(float(ln.sell_price or 0) * (ln.qty or 1) for ln in all_lines)
-    total_cost = sum(float(ln.cost_price or 0) * (ln.qty or 1) for ln in all_lines)
-    quote.subtotal = subtotal
-    quote.total_cost = total_cost
-    quote.total_margin_pct = ((subtotal - total_cost) / subtotal * 100) if subtotal else 0
+    _recalc_quote_totals(db, quote)
     db.commit()
 
     logger.info("Added {} offers to quote {} by {}", len(offers), quote.quote_number, user.email)

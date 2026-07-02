@@ -120,7 +120,7 @@
         <tr>
           <th class="px-3 py-2.5 text-center w-8">
             <input aria-label="Select all offers" type="checkbox"
-                   @change="selectedOffers = $el.checked ? [{% for o in offers %}{{ o.id }}{{ ',' if not loop.last }}{% endfor %}] : []"
+                   @change="document.querySelectorAll('#offers-form input[name=offer_ids]').forEach(c => c.checked = $el.checked); selectedOffers = $el.checked ? [{% for o in offers %}{{ o.id }}{{ ',' if not loop.last }}{% endfor %}] : []"
                    class="rounded border-gray-300 text-brand-500 focus:ring-brand-500">
           </th>
           <th data-col-key="vendor" class="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vendor</th>
