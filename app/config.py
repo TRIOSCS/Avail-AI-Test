@@ -192,15 +192,11 @@ class Settings(BaseSettings):
     # Env: ENRICHMENT_SKIP_WEB_FOR_OEM_MPNS.
     enrichment_skip_web_for_oem_mpns: bool = True
 
-    # --- Tagging ---
-    min_tag_confidence: float = 0.90
-
     # --- AI Features ---
     ai_features_enabled: str = "mike_only"  # "all", "mike_only", "off"
 
     # --- Email Intelligence ---
     email_mining_enabled: bool = False
-    email_mining_lookback_days: int = 180
     # Cap on how many mined domains (top N by inbox volume) get an eager Explorium
     # match per batch. The long tail is created unenriched and enriched on demand later.
     # This is the only metered-spend lever for the email-mining path.
@@ -237,11 +233,7 @@ class Settings(BaseSettings):
     customer_inactivity_days: int = 30
     strategic_inactivity_days: int = 90
     customer_warning_days: int = 23
-    offer_attribution_days: int = 14
     vendor_protection_warn_days: int = 60
-    vendor_protection_drop_days: int = 90
-    routing_window_hours: int = 48
-    collision_lookback_days: int = 7
 
     # --- Proactive offers ---
     proactive_matching_enabled: bool = True
@@ -262,7 +254,6 @@ class Settings(BaseSettings):
     sighting_stale_days: int = 3  # Days before a requirement is flagged stale
     buyplan_min_margin_pct: float = 10
     buyplan_nudge_buyer_hours: int = 4
-    buyplan_escalate_manager_hours: int = 8
     buyplan_nudge_ops_hours: int = 2
     buyplan_favoritism_threshold_pct: float = 60
     buyplan_better_offer_pct: float = 5
@@ -316,7 +307,6 @@ class Settings(BaseSettings):
     # On by default; degrades cleanly when HUNTER_API_KEY is absent (no key → contact
     # fetch returns [] without an outbound call — never raises).
     hunter_enrichment_enabled: bool = True  # feature gate; off → Hunter not triggered
-    hunter_cooldown_minutes: int = 15  # quota/rate-limit (402/429) circuit cooldown
 
     # --- SAM.gov Enrichment ---
     # On by default; free public API. When SAM_GOV_API_KEY is absent the connector uses
@@ -349,9 +339,6 @@ class Settings(BaseSettings):
     # Set MVP_MODE=true in .env only to suppress the Teams integration.
     mvp_mode: bool = False
 
-    # --- On-demand enrichment orchestrator ---
-    on_demand_enrichment_enabled: bool = True
-
     # --- Metrics ---
     metrics_token: str = ""  # Required token for /metrics endpoint (X-Metrics-Token header)
 
@@ -362,7 +349,6 @@ class Settings(BaseSettings):
     prospecting_enabled: bool = True
     prospecting_min_fit_for_contacts: int = 60
     prospecting_expire_days: int = 90
-    prospecting_resurface_days: int = 180
 
     # --- SP4: Account Reclamation ---
     # Nightly sweep: reassigns accounts inactive beyond the threshold from their owner
@@ -403,13 +389,6 @@ class Settings(BaseSettings):
     def validate_sample_rate(cls, v: float) -> float:
         if not 0.0 <= v <= 1.0:
             raise ValueError("Sample rate must be between 0.0 and 1.0")
-        return v
-
-    @field_validator("min_tag_confidence")
-    @classmethod
-    def validate_confidence(cls, v: float) -> float:
-        if not 0.0 <= v <= 1.0:
-            raise ValueError("Confidence/threshold must be between 0.0 and 1.0")
         return v
 
     @model_validator(mode="after")
