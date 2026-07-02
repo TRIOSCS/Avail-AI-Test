@@ -39,14 +39,40 @@
       </div>
 
       {# Action buttons #}
+      {% set rc = reclaim_ui or {} %}
       <div class="flex flex-wrap gap-2">
         {% if prospect.status == 'suggested' %}
+        {% if rc.is_swept and rc.can_reclaim %}
+        {# Swept account — reclaim ownership (Phase-4 flow) instead of a fresh claim #}
+        {% if rc.in_cooldown %}
+        <button type="button" disabled
+                title="In cooldown until {{ rc.cooldown_until }} — ask a manager to reassign"
+                class="btn-secondary btn-sm opacity-50 cursor-not-allowed">
+          Reclaim
+        </button>
+        {% else %}
+        <button hx-post="/v2/partials/prospects/{{ prospect.id }}/reclaim"
+                hx-target="#main-content"
+                data-loading-disable
+                class="btn-primary btn-sm">
+          Reclaim
+        </button>
+        {% endif %}
+        {% if rc.can_reassign %}
+        <button type="button" x-data
+                @click="$dispatch('open-modal', {url: '/v2/partials/prospects/{{ prospect.id }}/reassign-form?ctx=detail'})"
+                class="btn-secondary btn-sm">
+          Reassign
+        </button>
+        {% endif %}
+        {% else %}
         <button hx-post="/v2/partials/prospecting/{{ prospect.id }}/claim"
                 hx-target="#main-content"
                 data-loading-disable
                 class="btn-primary btn-sm">
           Claim
         </button>
+        {% endif %}
         <button hx-post="/v2/partials/prospecting/{{ prospect.id }}/dismiss"
                 hx-target="#main-content"
                 data-loading-disable
