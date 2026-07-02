@@ -247,6 +247,11 @@ async def list_offers(req_id: int, user: User = Depends(require_user), db: Sessi
         for cid, nmpn in (
             db.query(MaterialCard.id, MaterialCard.normalized_mpn)
             .filter(MaterialCard.normalized_mpn.in_(all_sub_keys))
+            # normalized_mpn is only unique among ACTIVE cards (the unique index is
+            # partial: WHERE deleted_at IS NULL). Without this filter a soft-deleted dup
+            # sharing a key could collapse into the dict and shadow the active card —
+            # so resolve only active cards, which also makes "one row per key" true.
+            .filter(MaterialCard.deleted_at.is_(None))
             .all()
         ):
             sub_card_ids[nmpn] = cid
