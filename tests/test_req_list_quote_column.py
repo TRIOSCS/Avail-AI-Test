@@ -153,3 +153,27 @@ def test_multi_quote_req_renders_once(client: TestClient, db_session, test_custo
     soup = _list_soup(client)
     rows = soup.select(f'tr[id="req-row-{req.id}"]')
     assert len(rows) == 1
+
+
+def test_mark_lost_confirm_posts_dynamically_not_static_won(client: TestClient, test_requisition):
+    """P0 regression (REQ-01): the Won/Lost kebab Confirm button must NOT carry a STATIC
+    hx-post to /action/won alongside a reactive one — htmx captures the static verb path
+    at init and ignores the Alpine rebinding, so 'Mark Lost' silently posted to
+    /action/won and marked the requisition WON.
+
+    The button now issues the POST imperatively via htmx.ajax with the reactive
+    outcomePrompt path.
+    """
+    import re
+
+    resp = client.get("/v2/partials/requisitions")
+    assert resp.status_code == 200
+    html = resp.text
+    # No STATIC hx-post attribute hard-codes the 'won' action (the bug: htmx would
+    # capture this path at init and ignore the reactive :hx-post rebinding).
+    static_won = re.findall(r'hx-post="[^"]*?/action/won"', html)
+    assert static_won == [], f"static /action/won hx-post still present: {static_won}"
+    # The Confirm button posts via htmx.ajax using the reactive outcomePrompt path,
+    # so 'Mark Lost' actually hits /action/lost.
+    assert "htmx.ajax('POST', '/v2/partials/requisitions/" in html
+    assert "/action/' + outcomePrompt" in html
