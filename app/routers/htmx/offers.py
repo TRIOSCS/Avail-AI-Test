@@ -610,6 +610,7 @@ async def edit_offer_form(
     db: Session = Depends(get_db),
 ):
     """Return inline edit form for an existing offer."""
+    require_requisition_access(db, req_id, user)
     offer = db.query(Offer).filter(Offer.id == offer_id, Offer.requisition_id == req_id).first()
     if not offer:
         raise HTTPException(404, "Offer not found")
@@ -925,6 +926,7 @@ async def offer_changelog(
     offer = db.get(Offer, offer_id)
     if not offer:
         raise HTTPException(404, "Offer not found")
+    require_requisition_access(db, offer.requisition_id, user, owner_id=offer.entered_by_id, label="Offer")
     rows = (
         db.query(ChangeLog)
         .filter(ChangeLog.entity_type == "offer", ChangeLog.entity_id == offer_id)
