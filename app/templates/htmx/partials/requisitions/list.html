@@ -7,6 +7,14 @@
 
 <div class="page-fluid" x-data="{ selectedIds: new Set(), rStatus: '{{ status }}', rSort: '{{ sort }}', rDir: '{{ dir }}' }">
 
+  {# Refresh hook — the create-requisition modal fires `reqListRefresh` on success; on this
+     surface (no #parts-list) reload the list into #main-content so the new req appears. #}
+  <div hx-get="/v2/partials/requisitions"
+       hx-trigger="reqListRefresh from:body"
+       hx-target="#main-content"
+       hx-swap="innerHTML"
+       class="hidden"></div>
+
   {% include "htmx/partials/shared/inbox_disconnected_banner.html" %}
 
   {# Header #}

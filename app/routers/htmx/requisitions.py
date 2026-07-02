@@ -385,7 +385,7 @@ async def requisition_import_save(
     db: Session = Depends(get_db),
 ):
     """Save AI-parsed requirements as a new requisition."""
-    from app.utils.normalization import normalize_mpn_key
+    from app.utils.normalization import normalize_mpn_key, parse_substitute_mpns
 
     form = await request.form()
 
@@ -395,6 +395,21 @@ async def requisition_import_save(
     while f"reqs[{idx}].primary_mpn" in form:
         mpn = form.get(f"reqs[{idx}].primary_mpn", "").strip()
         if mpn:
+            # Prefer the structured substitutes_json (mpn + manufacturer per sub) the modal
+            # posts; fall back to the legacy comma-joined MPN string. parse_substitute_mpns()
+            # normalizes either into the canonical [{"mpn", "manufacturer"}] list format
+            # (CLAUDE.md "Substitutes Format") — the raw string list was the legacy bug.
+            subs_input: list = []
+            subs_json_raw = form.get(f"reqs[{idx}].substitutes_json", "").strip()
+            if subs_json_raw:
+                try:
+                    parsed = json.loads(subs_json_raw)
+                    if isinstance(parsed, list):
+                        subs_input = parsed
+                except (ValueError, TypeError):
+                    subs_input = []
+            if not subs_input:
+                subs_input = [s.strip() for s in form.get(f"reqs[{idx}].substitutes", "").split(",") if s.strip()]
             requirements.append(
                 {
                     "primary_mpn": mpn,
@@ -406,9 +421,7 @@ async def requisition_import_save(
                     "date_codes": form.get(f"reqs[{idx}].date_codes", "").strip() or None,
                     "packaging": form.get(f"reqs[{idx}].packaging", "").strip() or None,
                     "manufacturer": form.get(f"reqs[{idx}].manufacturer", "").strip(),
-                    "substitutes": [
-                        s.strip() for s in form.get(f"reqs[{idx}].substitutes", "").split(",") if s.strip()
-                    ],
+                    "substitutes": parse_substitute_mpns(subs_input, mpn),
                     "firmware": form.get(f"reqs[{idx}].firmware", "").strip() or None,
                     "hardware_codes": form.get(f"reqs[{idx}].hardware_codes", "").strip() or None,
                     "description": form.get(f"reqs[{idx}].description", "").strip() or None,
@@ -481,11 +494,13 @@ async def requisition_import_save(
 
     db.commit()
 
-    # Return success — close modal + refresh parts list + toast
+    # Return success — close modal + toast, and fire reqListRefresh so whichever surface
+    # opened this modal refreshes itself. The old snippet hard-targeted #parts-list, which
+    # exists only in the parts workspace — opened from the requisitions list it hit
+    # htmx:targetError and nothing refreshed. Both surfaces now listen for
+    # `reqListRefresh from:body` (parts/workspace.html #parts-list, list.html hidden hook).
     safe_added = int(added)  # safe: server-computed int
-    return HTMLResponse(
-        "<div hx-trigger='load' hx-get='/v2/partials/parts' hx-target='#parts-list' hx-swap='innerHTML'>"
-        "</div>"
+    resp = HTMLResponse(
         "<script>"
         "window.dispatchEvent(new CustomEvent('close-modal'));"
         f"Alpine.store('toast').message = 'Requisition created with {safe_added} parts';"
@@ -493,6 +508,8 @@ async def requisition_import_save(
         "Alpine.store('toast').show = true;"
         "</script>"
     )
+    resp.headers["HX-Trigger"] = "reqListRefresh"
+    return resp
 
 
 @router.post("/v2/partials/customers/lookup", response_class=HTMLResponse)
