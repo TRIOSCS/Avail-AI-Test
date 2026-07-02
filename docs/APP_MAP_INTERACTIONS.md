@@ -5174,6 +5174,13 @@ Three inflows that feed idle CRM accounts into the prospecting pool.
 - HTMX endpoint: `POST /v2/partials/prospects/{prospect_id}/reassign` with `to_user_id` form param (require_user + in-route `is_manager_or_admin` gate)
 - Returns: {company_id, company_name, to_user_id, prospect_id|None, status: "reassigned"}
 
+### Prospecting tab UI wiring (DC-02)
+The sweep notification tells the rep to reclaim "from the Prospecting tab"; these buttons make that reachable. `_reclaim_ui_flags(user, prospect)` (in `app/routers/htmx/prospecting.py`) computes per-(user, prospect) visibility — added to the card context (`reclaim_ui_map` keyed by id, so it renders identically in the grid loop and OOB card swaps) and the detail context (`reclaim_ui`).
+- A prospect is "swept" when `swept_from_owner_id` is set. On a swept SUGGESTED card/detail the generic **Claim** button is replaced by **Reclaim** (posts the existing `/prospects/{id}/reclaim`) for anyone who can reclaim (former owner / manager / admin / `account_sweep_manager_email`); everyone else still sees plain **Claim**.
+- A former owner inside the 30-day cooldown (supervisors bypass) sees Reclaim rendered *disabled* with a `title` of the unlock date — honest state, not a dead click; the POST wiring is omitted.
+- Managers/admins additionally get a **Reassign** button that opens `reassign_modal.html` (loaded into `#modal-content` via `$dispatch('open-modal', {url: .../reassign-form?ctx=grid|detail&flt_status=...})`). The modal is a `to_user_id` picker of active users that posts `/prospects/{id}/reassign`; `ctx` sets the form's `hx-target` (`#prospect-{id}` outerHTML for grid, `#main-content` innerHTML for detail) so the swap matches the surface the action came from.
+- Route `GET /v2/partials/prospects/{prospect_id}/reassign-form` (`reassign_prospect_form`, require_user + `is_manager_or_admin` gate → 403) returns that modal body.
+
 ---
 
 ## CRM Rubric Batch A — 2026-06-24
