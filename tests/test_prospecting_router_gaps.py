@@ -1,4 +1,5 @@
-"""tests/test_prospecting_router_gaps.py — Coverage gap tests for app/routers/htmx/prospecting.py.
+"""tests/test_prospecting_router_gaps.py — Coverage gap tests for
+app/routers/htmx/prospecting.py.
 
 Targets uncovered lines:
   65-66  : _enrich_is_stale with invalid ISO string (ValueError / TypeError paths)

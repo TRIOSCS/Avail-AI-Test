@@ -1,4 +1,5 @@
-"""tests/test_vendors_router_gaps.py — Targeted coverage for missing lines in vendors router.
+"""tests/test_vendors_router_gaps.py — Targeted coverage for missing lines in vendors
+router.
 
 Covers lines: 231-264, 577, 595-602, 682-696, 701-706, 709-713, 846-874,
               897-918, 999, 1076-1092, 1116, 1149, 1197-1213
@@ -22,7 +23,8 @@ from app.models import User, VendorCard, VendorContact
 
 @pytest.fixture()
 def admin_user(db_session: Session) -> User:
-    """Admin-role user (may already exist from conftest — redefined locally to avoid dep)."""
+    """Admin-role user (may already exist from conftest — redefined locally to avoid
+    dep)."""
     user = User(
         email="vendor_gaps_admin@trioscs.com",
         name="Gaps Admin",

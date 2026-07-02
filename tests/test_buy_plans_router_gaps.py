@@ -286,7 +286,7 @@ def test_approve_risk3_fallback_no_open_request(approver_client, buy_plan):
 
 
 def test_approve_reject_notify(approver_client, buy_plan):
-    """action=reject → notify_rejected is called (lines 607-613)."""
+    """Action=reject → notify_rejected is called (lines 607-613)."""
     with patch("app.services.buyplan_workflow.approve_buy_plan"):
         with patch("app.services.buyplan_notifications.run_notify_bg", new=AsyncMock()) as mock_notify:
             with patch(
@@ -473,7 +473,8 @@ def test_resource_missing_reason_code(client, buy_plan):
 
 
 def test_verify_po_completion_triggers_notify(po_approver_client, buy_plan):
-    """check_completion returns COMPLETED plan → commit + notify_completed (lines 881-884)."""
+    """check_completion returns COMPLETED plan → commit + notify_completed (lines
+    881-884)."""
     from app.constants import BuyPlanStatus
 
     completed_plan = MagicMock()
