@@ -813,6 +813,47 @@ class TestAddRequirement:
         )
         assert resp.status_code == 404
 
+    def test_zero_parts_tab_renders_stable_tbody_target(self, client: TestClient, db_session: Session, test_user: User):
+        """REQ-02 regression: the Add Requirement form targets hx-target="#parts-tbody"
+        (unchanged). On a zero-parts requisition the tbody must still be present in
+        the served DOM or htmx aborts with targetError and the form is dead — verify
+        the tab always renders a real #parts-tbody, even with no requirements."""
+        req = _make_requisition(db_session, test_user)
+        db_session.commit()
+        resp = client.get(f"/v2/partials/requisitions/{req.id}/tab/parts")
+        assert resp.status_code == 200
+        assert 'id="parts-tbody"' in resp.text
+        assert 'hx-target="#parts-tbody"' in resp.text
+
+    def test_zero_parts_tab_add_requirement_end_to_end(self, client: TestClient, db_session: Session, test_user: User):
+        """REQ-02: Add Requirement must actually work starting from a zero-parts
+        requisition (the form's hx-target now resolves, so the POST completes and
+        returns a swappable <tr> fragment for #parts-tbody)."""
+        req = _make_requisition(db_session, test_user)
+        db_session.commit()
+        tab_resp = client.get(f"/v2/partials/requisitions/{req.id}/tab/parts")
+        assert 'id="parts-tbody"' in tab_resp.text
+
+        add_resp = client.post(
+            f"/v2/partials/requisitions/{req.id}/requirements",
+            data={"primary_mpn": "NE555P", "manufacturer": "Texas Instruments", "target_qty": "100"},
+        )
+        assert add_resp.status_code == 200
+        assert "<tr" in add_resp.text
+        assert "NE555P" in add_resp.text
+
+    def test_has_parts_tab_still_renders_tbody(self, client: TestClient, db_session: Session, test_user: User):
+        """Regression: the has-parts case must keep rendering #parts-tbody with its
+        rows (not just the zero-parts placeholder)."""
+        req = _make_requisition(db_session, test_user)
+        _make_requirement(db_session, req, primary_mpn="LM317T")
+        db_session.commit()
+        resp = client.get(f"/v2/partials/requisitions/{req.id}/tab/parts")
+        assert resp.status_code == 200
+        assert 'id="parts-tbody"' in resp.text
+        assert "LM317T" in resp.text
+        assert 'id="parts-empty-state"' not in resp.text
+
 
 class TestSearchAll:
     """Test search-all requirements in a requisition."""
@@ -830,6 +871,36 @@ class TestSearchAll:
         resp = client.post(f"/v2/partials/requisitions/{req.id}/search-all")
         assert resp.status_code == 200
         assert "No requirements to search" in resp.text
+
+    def test_search_all_button_targets_tab_content(self, client: TestClient, db_session: Session, test_user: User):
+        """REQ-05 regression: the toolbar 'Search All Sources' button used to target
+        hx-target="closest div" (the toolbar row), so the full-tab response it gets
+        back nested a duplicate table inside the toolbar. It must target the stable
+        #tab-content ancestor, matching detail_header.html's working wiring."""
+        req = _make_requisition(db_session, test_user)
+        _make_requirement(db_session, req)
+        db_session.commit()
+        resp = client.get(f"/v2/partials/requisitions/{req.id}/tab/parts")
+        assert resp.status_code == 200
+        assert 'hx-target="closest div"' not in resp.text
+        assert 'hx-post="/v2/partials/requisitions/{}/search-all"'.format(req.id) in resp.text
+        assert 'hx-target="#tab-content"' in resp.text
+
+    def test_search_all_refresh_banner_targets_tab_content(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """REQ-05 regression: the 8s auto-refresh banner shown after triggering a
+        search used to target hx-target="closest div" (the banner itself), nesting
+        a duplicate table inside the banner. It must target #tab-content."""
+        req = _make_requisition(db_session, test_user)
+        _make_requirement(db_session, req)
+        db_session.commit()
+        resp = client.post(f"/v2/partials/requisitions/{req.id}/search-all")
+        assert resp.status_code == 200
+        assert "Searching all sources" in resp.text
+        assert 'hx-target="closest div"' not in resp.text
+        # Both the toolbar button and the refresh banner must now target #tab-content.
+        assert resp.text.count('hx-target="#tab-content"') == 2
 
 
 class TestRequisitionImport:
