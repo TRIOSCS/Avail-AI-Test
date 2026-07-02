@@ -318,7 +318,7 @@
           <div class="px-4 py-2 bg-gray-50 text-xs font-medium text-gray-500 uppercase">
             {{ line.mpn }}
           </div>
-          <div hx-get="/v2/partials/quotes/pricing-history/{{ line.mpn }}"
+          <div hx-get="/v2/partials/pricing-history/{{ line.mpn }}"
                hx-trigger="revealed"
                hx-swap="innerHTML"
                class="px-4 py-3 text-sm text-gray-600">

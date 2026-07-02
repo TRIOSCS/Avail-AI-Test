@@ -447,6 +447,28 @@ async def revise_quote_htmx(
         source=quote.source,
     )
     db.add(new_quote)
+    db.flush()  # need new_quote.id for the cloned lines
+
+    # Clone the parent's QuoteLine rows — quote_detail_partial, the send email, the
+    # PDF, and Build-Buy-Plan all read QuoteLine (not line_items JSON). Without this
+    # the revision showed an empty line table and couldn't build a buy plan (OQ-04,
+    # the inverse of the create-from-offers OQ-01 gap).
+    for src in db.query(QuoteLine).filter(QuoteLine.quote_id == quote.id).all():
+        db.add(
+            QuoteLine(
+                quote_id=new_quote.id,
+                material_card_id=src.material_card_id,
+                offer_id=src.offer_id,
+                mpn=src.mpn,
+                description=src.description,
+                manufacturer=src.manufacturer,
+                qty=src.qty,
+                cost_price=src.cost_price,
+                sell_price=src.sell_price,
+                margin_pct=src.margin_pct,
+                currency=src.currency,
+            )
+        )
     db.commit()
     db.refresh(new_quote)
     logger.info("Quote {} revised to rev {} as {}", quote.quote_number, new_rev, new_quote.quote_number)
