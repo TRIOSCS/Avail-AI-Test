@@ -723,6 +723,56 @@ class TestUnavailabilityForRequirement:
         requirement = _make_requirement(db_session, primary_mpn="AAA-111")
         assert unavailability_for_requirement(db_session, requirement, []) == {}
 
+    def test_preloaded_sightings_match_queried(self, db_session: Session):
+        """PERF-8: passing a pre-loaded sighting set must produce byte-identical intel to
+        the self-querying path — same keys, same chosen record per vendor. Covers
+        duplicate, cross-vendor and primary-key-only rows so the candidate-key set build
+        is exercised."""
+        requirement = _make_requirement(db_session, primary_mpn="AAA-111")
+        # Duplicate rows for one vendor, a distinct-mpn row for another, and a row whose
+        # mpn matches only the requirement's primary key.
+        _make_sighting(db_session, requirement, "Acme Components", mpn_matched="BBB-222")
+        _make_sighting(db_session, requirement, "Acme Components", mpn_matched="BBB-222")
+        _make_sighting(db_session, requirement, "Acme Components", mpn_matched="AAA-111")
+        _make_sighting(db_session, requirement, "Globex Parts", mpn_matched=None)
+        db_session.add_all(
+            [
+                VendorPartUnavailability(
+                    vendor_name_normalized="acme components",
+                    normalized_mpn=normalize_mpn_key("BBB-222"),
+                    reason=UnavailabilityReason.BROKEN,
+                    created_at=datetime.now(timezone.utc) - timedelta(days=1),
+                ),
+                VendorPartUnavailability(
+                    vendor_name_normalized="acme components",
+                    normalized_mpn=normalize_mpn_key("AAA-111"),
+                    reason=UnavailabilityReason.SOLD_ELSEWHERE,
+                    created_at=datetime.now(timezone.utc),
+                ),
+                VendorPartUnavailability(
+                    vendor_name_normalized="globex parts",
+                    normalized_mpn=normalize_mpn_key("AAA-111"),
+                    reason=UnavailabilityReason.BOUGHT_BY_US,
+                    created_at=datetime.now(timezone.utc),
+                ),
+            ]
+        )
+        db_session.commit()
+
+        vendors = ["Acme Components", "Globex Parts"]
+        queried = unavailability_for_requirement(db_session, requirement, vendors)
+
+        preloaded = list(db_session.query(Sighting).filter(Sighting.requirement_id == requirement.id).all())
+        passed = unavailability_for_requirement(db_session, requirement, vendors, sightings=preloaded)
+
+        assert set(queried) == set(passed)
+        assert {v: i.record.id for v, i in queried.items()} == {v: i.record.id for v, i in passed.items()}
+        # A shuffled / reversed set must not change the outcome (candidate keys are a set).
+        reversed_pass = unavailability_for_requirement(
+            db_session, requirement, vendors, sightings=list(reversed(preloaded))
+        )
+        assert {v: i.record.id for v, i in reversed_pass.items()} == {v: i.record.id for v, i in queried.items()}
+
 
 # ── Temporal policy: model columns, predicate, source classes ─────────────────
 

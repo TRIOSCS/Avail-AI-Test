@@ -4522,6 +4522,206 @@ class TestAnnotatedUnavailabilityConditionScoped:
         assert result["Good Vendor"]["has_unstamped_row"] is True
 
 
+class _SightingScanCounter:
+    """Count SELECTs that scan the ``sightings`` table for the enclosing block.
+
+    PERF-8: _annotated_unavailability used to scan the requirement's sightings twice per
+    render (once inside unavailability_for_requirement, once in the wrapper). This asserts
+    the merged single scan and guards against the double-scan regressing.
+    """
+
+    def __init__(self, db):
+        from sqlalchemy import event as _event
+
+        self._event = _event
+        self.engine = db.get_bind()
+        self.count = 0
+
+    def _on_exec(self, conn, cursor, statement, parameters, context, executemany):
+        if "from sightings" in statement.lower():
+            self.count += 1
+
+    def __enter__(self):
+        self._event.listen(self.engine, "after_cursor_execute", self._on_exec)
+        return self
+
+    def __exit__(self, *a):
+        self._event.remove(self.engine, "after_cursor_execute", self._on_exec)
+
+
+class TestAnnotatedUnavailabilitySingleScan:
+    """PERF-8: the requirement's sightings are scanned once, not twice, per render."""
+
+    def _seed_record(self, db_session, r, *, condition=None):
+        db_session.add(
+            VendorPartUnavailability(
+                vendor_name_normalized="good vendor",
+                normalized_mpn="testmpn001",
+                reason="sold_elsewhere",
+                condition=condition,
+                requirement_id=r.id,
+            )
+        )
+        db_session.commit()
+
+    def test_sightings_scanned_once_when_record_present(self, client, db_session):
+        """With a matching unavailability record the wrapper must scan sightings exactly
+        once (was twice: helper scan + wrapper scan)."""
+        from app.routers.sightings import _annotated_unavailability
+
+        _, r, _ = _seed_data(db_session)
+        db_session.add(
+            Sighting(
+                requirement_id=r.id,
+                vendor_name="Good Vendor",
+                mpn_matched="TEST-MPN-001",
+                is_unavailable=True,
+                condition="New",
+            )
+        )
+        db_session.commit()
+        self._seed_record(db_session, r, condition="new")
+
+        with _SightingScanCounter(db_session) as counter:
+            result = _annotated_unavailability(db_session, r, ["Good Vendor"])
+
+        assert "Good Vendor" in result  # record present → wrapper ran its full body
+        assert counter.count == 1, f"expected a single sightings scan, got {counter.count}"
+
+    def test_scan_count_independent_of_sighting_count(self, client, db_session):
+        """The sightings scan count must stay 1 regardless of how many sightings exist —
+        the old double-scan was constant-2 but each scan is unbounded in rows."""
+        from app.routers.sightings import _annotated_unavailability
+
+        _, r, _ = _seed_data(db_session)
+        self._seed_record(db_session, r, condition=None)
+        for i in range(2):
+            db_session.add(
+                Sighting(
+                    requirement_id=r.id,
+                    vendor_name="Good Vendor",
+                    mpn_matched="TEST-MPN-001",
+                    is_unavailable=False,
+                    condition="New",
+                )
+            )
+        db_session.commit()
+        with _SightingScanCounter(db_session) as c_small:
+            _annotated_unavailability(db_session, r, ["Good Vendor"])
+
+        for i in range(25):
+            db_session.add(
+                Sighting(
+                    requirement_id=r.id,
+                    vendor_name="Good Vendor",
+                    mpn_matched="TEST-MPN-001",
+                    is_unavailable=False,
+                    condition="New",
+                )
+            )
+        db_session.commit()
+        with _SightingScanCounter(db_session) as c_big:
+            _annotated_unavailability(db_session, r, ["Good Vendor"])
+
+        assert c_small.count == 1
+        assert c_big.count == c_small.count, "sightings scan count grew with sighting count"
+
+    def test_no_scan_when_no_vendors(self, client, db_session):
+        """Empty vendor list short-circuits before any sightings scan (unchanged from
+        pre-fix: unavailability_for_requirement returns {} without touching sightings)."""
+        from app.routers.sightings import _annotated_unavailability
+
+        _, r, _ = _seed_data(db_session)
+        db_session.add(Sighting(requirement_id=r.id, vendor_name="Good Vendor", mpn_matched="TEST-MPN-001"))
+        db_session.commit()
+        with _SightingScanCounter(db_session) as counter:
+            result = _annotated_unavailability(db_session, r, [])
+        assert result == {}
+        assert counter.count == 0
+
+
+class TestAnnotatedUnavailabilityEquivalence:
+    """PERF-8: sharing the loaded sighting set must produce byte-identical output — same
+    rows, same has_unstamped_row derivation — across duplicate/null/multi-vendor cases."""
+
+    def _rec(self, db_session, r, vendor_norm, mpn_norm, *, condition=None):
+        db_session.add(
+            VendorPartUnavailability(
+                vendor_name_normalized=vendor_norm,
+                normalized_mpn=mpn_norm,
+                reason="sold_elsewhere",
+                condition=condition,
+                requirement_id=r.id,
+            )
+        )
+
+    def test_duplicate_and_null_condition_sightings(self, client, db_session):
+        """Duplicate sightings (same vendor+mpn) and NULL-condition rows must yield the
+        same has_unstamped_row the single merged scan derives: an unstamped row matching
+        the record's condition (or any row for a NULL record) sets it True."""
+        from app.routers.sightings import _annotated_unavailability
+
+        _, r, _ = _seed_data(db_session)
+        # Two identical unstamped NEW sightings for the same vendor (duplicates) ...
+        for _ in range(2):
+            db_session.add(
+                Sighting(
+                    requirement_id=r.id,
+                    vendor_name="Good Vendor",
+                    mpn_matched="TEST-MPN-001",
+                    is_unavailable=False,
+                    condition="New",
+                )
+            )
+        # ... plus a stamped row with NULL condition (should not flip the NEW record).
+        db_session.add(
+            Sighting(
+                requirement_id=r.id,
+                vendor_name="Good Vendor",
+                mpn_matched="TEST-MPN-001",
+                is_unavailable=True,
+                condition=None,
+            )
+        )
+        self._rec(db_session, r, "good vendor", "testmpn001", condition="new")
+        db_session.commit()
+
+        result = _annotated_unavailability(db_session, r, ["Good Vendor"])
+        assert set(result.keys()) == {"Good Vendor"}
+        assert result["Good Vendor"]["condition"] == "new"
+        assert result["Good Vendor"]["has_unstamped_row"] is True
+
+    def test_multi_vendor_only_matched_vendor_present(self, client, db_session):
+        """A vendor with no matching record is absent; the matched vendor is annotated —
+        identical to the pre-fix per-vendor filtering over the shared scan."""
+        from app.routers.sightings import _annotated_unavailability
+
+        _, r, _ = _seed_data(db_session)
+        db_session.add(
+            Sighting(
+                requirement_id=r.id,
+                vendor_name="Good Vendor",
+                mpn_matched="TEST-MPN-001",
+                is_unavailable=True,
+                condition="New",
+            )
+        )
+        db_session.add(
+            Sighting(
+                requirement_id=r.id,
+                vendor_name="Other Vendor",
+                mpn_matched="TEST-MPN-001",
+                is_unavailable=False,
+                condition="New",
+            )
+        )
+        self._rec(db_session, r, "good vendor", "testmpn001", condition="new")
+        db_session.commit()
+
+        result = _annotated_unavailability(db_session, r, ["Good Vendor", "Other Vendor"])
+        assert set(result.keys()) == {"Good Vendor"}
+
+
 class TestUnavailableFormConditionSelector:
     """Task 8: unavailable_form renders condition selector and corrected copy."""
 
