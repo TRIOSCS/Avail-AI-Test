@@ -244,6 +244,60 @@ class TestCSRFExemptions:
         assert r"/auth/.*" not in content, "Broad /auth/.* CSRF exemption should be removed"
         assert "/auth/callback" in content
 
+    def test_import_save_not_csrf_exempt(self):
+        """The requisition import-save POST creates Requisition + Requirement rows, so
+        it must stay under CSRF-token enforcement.
+
+        Only the multipart preview (import-parse) and the import-form GET are exempt — a
+        prefix pattern that also covered import-save would let a cross-site POST forge
+        requisitions.
+        """
+        from starlette.datastructures import URL
+        from starlette_csrf import CSRFMiddleware
+
+        from app.main import CSRF_EXEMPT_URLS
+
+        mw = CSRFMiddleware(app=lambda scope, receive, send: None, secret="x", exempt_urls=CSRF_EXEMPT_URLS)
+        assert mw._url_is_exempt(URL(path="/v2/partials/requisitions/import-save")) is False
+        assert mw._url_is_exempt(URL(path="/v2/partials/requisitions/import-parse")) is True
+        assert mw._url_is_exempt(URL(path="/v2/partials/requisitions/import-form")) is True
+
+    def test_import_save_rejected_without_csrf_token(self):
+        """End-to-end: with the real exempt set, an authenticated (session-cookie) POST to
+        import-save carrying no x-csrftoken is rejected 403, while import-parse (multipart
+        preview) still passes through exempt. Fails against the old broad ``import-.*``
+        exemption, which let import-save through unprotected."""
+        from starlette.applications import Starlette
+        from starlette.responses import PlainTextResponse
+        from starlette.routing import Route
+        from starlette.testclient import TestClient
+        from starlette_csrf import CSRFMiddleware
+
+        from app.main import CSRF_EXEMPT_URLS
+
+        async def ok(request):
+            return PlainTextResponse("ok")
+
+        app = Starlette(
+            routes=[
+                Route("/v2/partials/requisitions/import-save", ok, methods=["POST"]),
+                Route("/v2/partials/requisitions/import-parse", ok, methods=["POST"]),
+            ]
+        )
+        app.add_middleware(
+            CSRFMiddleware,
+            secret="test-secret",
+            sensitive_cookies={"session"},
+            exempt_urls=CSRF_EXEMPT_URLS,
+        )
+        client = TestClient(app)
+        client.cookies.set("session", "authenticated")
+
+        # No x-csrftoken header → the write path must be rejected.
+        assert client.post("/v2/partials/requisitions/import-save").status_code == 403
+        # The multipart preview stays exempt and passes through.
+        assert client.post("/v2/partials/requisitions/import-parse").status_code == 200
+
 
 # ── Fix 6: Style Attribute XSS ────────────────────────────────────
 
