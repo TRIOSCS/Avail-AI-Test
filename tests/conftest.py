@@ -13,12 +13,20 @@ Called by: all test files via pytest autodiscovery
 Depends on: app.models (Base), app.database (get_db), app.dependencies
 """
 
-import asyncio
 import os
 
 import nest_asyncio
 
-nest_asyncio.apply()  # Allow nested event loops (prevents cross-test contamination)
+# Many synchronous unit tests drive coroutines via
+# ``asyncio.get_event_loop().run_until_complete(...)``. Under pytest-asyncio's auto mode
+# an async test that ran earlier in the same (xdist) worker can leave the policy with no
+# current event loop, so a later SYNC test's ``get_event_loop()`` raises "There is no
+# current event loop" and the whole worker's remaining get_event_loop() tests fail by
+# ordering. ``nest_asyncio.apply()`` keeps a usable loop available process-wide, which
+# neutralizes that ordering hazard. Verified empirically: removing it turns ~60 such
+# tests red under xdist. Kept deliberately (F13 reviewed — remove only after migrating
+# every ``get_event_loop().run_until_complete`` call site to an async test / asyncio.run).
+nest_asyncio.apply()
 
 os.environ["TESTING"] = "1"  # Must be set before importing app modules
 os.environ["RATE_LIMIT_ENABLED"] = "false"  # Disable rate limiting in tests
@@ -31,6 +39,7 @@ from datetime import datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
+from loguru import logger
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -50,19 +59,6 @@ from app.models import (
     VendorCard,
     VendorContact,
 )
-
-# ── Event loop isolation ─────────────────────────────────────────────
-# Provide a fresh event loop per test to prevent cross-test pollution
-# (e.g. Playwright e2e tests leaving a running loop).
-
-
-@pytest.fixture()
-def event_loop():
-    """Create a fresh event loop for each test function."""
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
-
 
 # ── In-memory SQLite engine ──────────────────────────────────────────
 # SQLite can't handle PostgreSQL ARRAY columns — remap them to JSON.
@@ -107,8 +103,50 @@ _sqlite_safe = [t for name, t in Base.metadata.tables.items() if name not in _PG
 Base.metadata.create_all(bind=engine, tables=_sqlite_safe)
 
 # Pre-compute delete order (respects FK dependencies via reversed create order).
-_delete_order = list(reversed(Base.metadata.sorted_tables))
-_delete_stmts = [t.delete() for t in _delete_order if t.name not in _PG_ONLY_TABLES]
+#
+# The companies <-> customer_sites <-> site_contacts trio is an FK cycle that
+# ``sorted_tables`` cannot topologically order (it emits SAWarning 'unresolvable
+# cycles' and drops those FK edges from the sort). Delete the cycle explicitly in
+# child -> parent order FIRST, then everything else in reverse-create order. The
+# per-table resilient cleanup below is what actually guarantees isolation, but a
+# correct base order means the happy path never needs the retry.
+_CYCLE_DELETE_FIRST = ("site_contacts", "customer_sites", "companies")
+_tables_by_name = {t.name: t for t in Base.metadata.sorted_tables}
+_delete_order_names = [n for n in _CYCLE_DELETE_FIRST if n in _tables_by_name] + [
+    t.name for t in reversed(Base.metadata.sorted_tables) if t.name not in _CYCLE_DELETE_FIRST
+]
+_delete_stmts = [_tables_by_name[n].delete() for n in _delete_order_names if n not in _PG_ONLY_TABLES]
+
+
+def _cleanup_all_rows() -> None:
+    """Delete every row FK-safely, resilient to a single table's DELETE failing.
+
+    Each DELETE runs inside its own SAVEPOINT so one failure — e.g. a future FK edge
+    into the companies/customer_sites/site_contacts cycle that lacks a cascade — is
+    isolated and rolled back on its own, instead of aborting the whole transaction and
+    leaking EVERY table's rows into the next test (the multi-test cascade signature of
+    the xdist flake clusters). Tables that fail the first pass are retried once after
+    the rest are cleared (their FK parents/children are gone by then). A row that still
+    won't delete is logged loudly rather than silently swallowed.
+    """
+    with engine.begin() as conn:
+        failed = []
+        for stmt in _delete_stmts:
+            sp = conn.begin_nested()
+            try:
+                conn.execute(stmt)
+                sp.commit()
+            except Exception:
+                sp.rollback()
+                failed.append(stmt)
+        for stmt in failed:
+            sp = conn.begin_nested()
+            try:
+                conn.execute(stmt)
+                sp.commit()
+            except Exception:
+                sp.rollback()
+                logger.warning("Test cleanup could not delete {} — rows may leak", stmt.table.name)
 
 
 @pytest.fixture(autouse=True)
@@ -122,6 +160,80 @@ def _clear_8x8_token_cache():
 
 
 @pytest.fixture(autouse=True)
+def _reset_ai_gate_state():
+    """Reset every search-worker AI-gate's cooldown + classification cache per test.
+
+    Each worker gate (nc/ics/tbf) is a thin shim over one shared ``AIGate`` instance
+    that carries a module-level ``_last_api_failure`` cooldown timestamp and an
+    in-memory classification cache. A fail-open test drives the real API-failure path,
+    which sets the cooldown to ``time.monotonic()``; the base gate then silently
+    no-ops ``process_ai_gate`` for 300s. Under xdist that poisons every later gate
+    test in the same worker (items stay 'pending', ``status == 'queued'`` asserts
+    fail) — passes in isolation, flakes in the full suite. Reset both the module-level
+    name and the underlying gate instance, on all three workers, before AND after each
+    test so no test inherits a poisoned cooldown or a stale cache.
+    """
+    from app.services.ics_worker import ai_gate as ics_gate
+    from app.services.nc_worker import ai_gate as nc_gate
+    from app.services.tbf_worker import ai_gate as tbf_gate
+
+    gate_modules = (nc_gate, ics_gate, tbf_gate)
+
+    def _reset() -> None:
+        for mod in gate_modules:
+            mod._last_api_failure = 0.0
+            mod._gate._last_api_failure = 0.0
+            with mod._gate._cache_lock:
+                mod._gate._classification_cache.clear()
+
+    _reset()
+    yield
+    _reset()
+
+
+@pytest.fixture(autouse=True)
+def _clear_known_html_hashes():
+    """Clear the shared HTML-structure-hash registry before and after each test.
+
+    ``search_worker_base.monitoring._known_html_hashes`` is one process-wide dict keyed
+    by component ("NC"/"ICS"/"TBF"). The 'first hash never warns / changed structure
+    warns' tests across three files depend on every consumer clearing it first; a test
+    that seeds hashes without clearing (or asserts warning behavior after another file
+    populated the same component set in the worker) flakes by ordering. Centralize the
+    clear here so no per-file setup_method discipline is load-bearing.
+    """
+    from app.services.search_worker_base.monitoring import _known_html_hashes
+
+    _known_html_hashes.clear()
+    yield
+    _known_html_hashes.clear()
+
+
+@pytest.fixture(autouse=True)
+def _restore_dependency_overrides():
+    """Snapshot and restore ``app.main.app.dependency_overrides`` around every test.
+
+    ``app.main.app`` is a process-wide singleton. Many tests install auth/db overrides
+    inline (``app.dependency_overrides[dep] = ...``) and pop them AFTER their asserts,
+    with no try/finally — so a failing assert (or a 30s timeout) leaks the override onto
+    the shared app for the rest of that xdist worker, and every later test using
+    ``unauthenticated_client`` (expects 401) or a real-authz client then fails for
+    unrelated reasons. This is the amplification mechanism behind the multi-test
+    user_mgmt/vendor/activities flake clusters. Snapshotting before and restoring the
+    exact mapping after each test makes any leak impossible, worker-wide and for future
+    tests, regardless of assertion outcome.
+    """
+    from app.main import app
+
+    snapshot = dict(app.dependency_overrides)
+    try:
+        yield
+    finally:
+        app.dependency_overrides.clear()
+        app.dependency_overrides.update(snapshot)
+
+
+@pytest.fixture(autouse=True)
 def db_session():
     """Yield a session, then DELETE all rows (fast) instead of drop/create tables."""
     session = TestSessionLocal()
@@ -129,10 +241,9 @@ def db_session():
         yield session
     finally:
         session.rollback()
-        # Delete all rows in FK-safe order — much faster than drop_all/create_all
-        with engine.begin() as conn:
-            for stmt in _delete_stmts:
-                conn.execute(stmt)
+        # Delete all rows in FK-safe order — much faster than drop_all/create_all.
+        # Per-table savepoints keep one failure from cascading (see _cleanup_all_rows).
+        _cleanup_all_rows()
         session.close()
 
 

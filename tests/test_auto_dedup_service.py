@@ -242,18 +242,38 @@ class TestDedupVendors:
             _dedup_vendors(db_session)
 
     def test_ai_confirm_mid_score_accepted(self, db_session):
-        """Score 92-97 with AI approval should merge."""
-        from app.services.auto_dedup_service import _dedup_vendors
+        """Score 92-97 with AI approval performs a REAL merge (only the AI call mocked).
 
-        _make_vendor(
+        End-to-end: nothing but ``_ai_confirm_vendor_merge`` is stubbed, so the real
+        ``merge_vendor_cards`` runs. Asserts the AI was consulted for the mid-score band,
+        the merge actually happened, the lower-sighting card was deleted, and its
+        sightings were folded into the survivor — a real scoring/merge regression now
+        fails this test instead of passing green.
+        """
+        from app.services.auto_dedup_service import _dedup_vendors
+        from app.vendor_utils import fuzzy_score_vendor
+
+        keep = _make_vendor(
             db_session, "Arrow Electronics Group", normalized_name="arrow electronics group", sighting_count=20
         )
-        _make_vendor(db_session, "Arrow Electronics Grp", normalized_name="arrow electronics grp", sighting_count=5)
+        remove = _make_vendor(
+            db_session, "Arrow Electronics Grp", normalized_name="arrow electronics grp", sighting_count=5
+        )
         db_session.commit()
 
-        with patch("app.services.auto_dedup_service._ai_confirm_vendor_merge", return_value=True):
-            # Whether AI is called depends on the fuzzy score
-            _dedup_vendors(db_session)
+        # Pin the branch under test: this pair must score in the AI-confirm band
+        # (92-97), NOT the >=98 auto-merge band — otherwise the AI is never consulted.
+        assert 92 <= fuzzy_score_vendor("arrow electronics group", "arrow electronics grp") < 98
+
+        with patch("app.services.auto_dedup_service._ai_confirm_vendor_merge", return_value=True) as mock_ai:
+            merged = _dedup_vendors(db_session)
+
+        mock_ai.assert_called_once()  # AI was consulted for the mid-score pair
+        assert merged == 1  # and its approval drove exactly one real merge
+        assert db_session.get(VendorCard, remove.id) is None  # lower-sighting card deleted
+        survivor = db_session.get(VendorCard, keep.id)
+        assert survivor is not None
+        assert survivor.sighting_count == 25  # 20 + 5 folded in
 
 
 # ══════════════════════════════════════════════════════════════════════

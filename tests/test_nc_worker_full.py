@@ -1502,7 +1502,7 @@ class TestWorkerMainLoop:
     _SEARCH = "app.services.nc_worker.search_engine.search_part"
     _PARSE = "app.services.nc_worker.result_parser.parse_results_html"
     _SAVE = "app.services.nc_worker.sighting_writer.save_nc_sightings"
-    _TIME_SLEEP = "app.services.nc_worker.worker.time.sleep"
+    _TIME_SLEEP = "app.services.nc_worker.worker._sleep"
     _ASYNCIO_RUN = "app.services.nc_worker.worker.asyncio.run"
     _RUN_AI_GATE = "app.services.nc_worker.worker.run_ai_gate"
 
@@ -2573,7 +2573,11 @@ class TestNcSearchEngineFull:
 
         import app.services.nc_worker.search_engine as se
 
-        # Reset the module-level loop so the assertion is deterministic.
+        # Isolate the module-level browser loop. Save the original and force a fresh
+        # one for a deterministic assertion; the finally closes whatever loop THIS test
+        # creates and restores the original, so we never orphan an open loop (leaking
+        # its fds) into later tests in this xdist worker.
+        original_loop = se._browser_loop
         se._browser_loop = None
 
         mock_resp = MagicMock()
@@ -2595,18 +2599,24 @@ class TestNcSearchEngineFull:
                 "status_code": 200,
             }
 
-        with patch("app.services.nc_worker.search_engine._search_browser", side_effect=record_loop):
-            first = search_part(mock_session_mgr, "AAA111")
-            second = search_part(mock_session_mgr, "BBB222")
+        try:
+            with patch("app.services.nc_worker.search_engine._search_browser", side_effect=record_loop):
+                first = search_part(mock_session_mgr, "AAA111")
+                second = search_part(mock_session_mgr, "BBB222")
 
-        assert first["mode"] == "browser"
-        assert second["mode"] == "browser"
-        # Same loop drove BOTH calls (fails on old asyncio.run: two loop ids).
-        assert len(seen_loop_ids) == 2
-        assert seen_loop_ids[0] == seen_loop_ids[1]
-        # And that loop is still alive (old asyncio.run closes it each time).
-        assert se._browser_loop is not None
-        assert not se._browser_loop.is_closed()
+            assert first["mode"] == "browser"
+            assert second["mode"] == "browser"
+            # Same loop drove BOTH calls (fails on old asyncio.run: two loop ids).
+            assert len(seen_loop_ids) == 2
+            assert seen_loop_ids[0] == seen_loop_ids[1]
+            # And that loop is still alive (old asyncio.run closes it each time).
+            assert se._browser_loop is not None
+            assert not se._browser_loop.is_closed()
+        finally:
+            created = se._browser_loop
+            if created is not None and not created.is_closed():
+                created.close()
+            se._browser_loop = original_loop
 
     def test_has_results_empty(self):
         """_has_results returns False for empty string (line 153)."""
@@ -3273,7 +3283,7 @@ class TestNcWorkerGaps:
     _SEARCH = "app.services.nc_worker.search_engine.search_part"
     _PARSE = "app.services.nc_worker.result_parser.parse_results_html"
     _SAVE = "app.services.nc_worker.sighting_writer.save_nc_sightings"
-    _TIME_SLEEP = "app.services.nc_worker.worker.time.sleep"
+    _TIME_SLEEP = "app.services.nc_worker.worker._sleep"
     _ASYNCIO_RUN = "app.services.nc_worker.worker.asyncio.run"
     _RUN_AI_GATE = "app.services.nc_worker.worker.run_ai_gate"
 

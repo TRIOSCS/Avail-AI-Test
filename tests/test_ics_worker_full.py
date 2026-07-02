@@ -274,6 +274,18 @@ class TestResultParser:
 
 
 class TestSearchEngine:
+    @pytest.fixture(autouse=True)
+    def _no_pace(self, monkeypatch):
+        """Zero the page-settle pacing so search_part tests don't pay ~2s of real sleep.
+
+        The ASP.NET page is fully mocked here, so the production 1s waits are pure dead
+        wall-clock (and feed the 30s-timeout risk). Patching the module constant leaves
+        production pacing untouched and auto-restores after the test.
+        """
+        import app.services.ics_worker.search_engine as se
+
+        monkeypatch.setattr(se, "_PACE_SECONDS", 0)
+
     def test_search_url_constant(self):
         assert "icsource.com" in SEARCH_URL
         assert "NewSearch" in SEARCH_URL
@@ -1290,15 +1302,16 @@ class TestAiGate:
 
 class TestSessionManager:
     @pytest.mark.asyncio
-    async def test_start_no_display(self):
+    async def test_start_no_display(self, monkeypatch):
         from app.services.ics_worker.session_manager import IcsSessionManager
 
         cfg = IcsConfig()
         sm = IcsSessionManager(cfg)
-        with patch.dict(os.environ, {}, clear=True):
-            os.environ.pop("DISPLAY", None)
-            with pytest.raises(RuntimeError, match="DISPLAY"):
-                await sm.start()
+        # Remove ONLY DISPLAY (auto-restored). clear=True would wipe the whole env —
+        # including the TESTING / DATABASE_URL / REDIS_URL guards the app reads.
+        monkeypatch.delenv("DISPLAY", raising=False)
+        with pytest.raises(RuntimeError, match="DISPLAY"):
+            await sm.start()
 
     @pytest.mark.asyncio
     async def test_login_no_credentials(self):
@@ -1561,7 +1574,7 @@ class TestIcsWorkerMainLoop:
     _PARSE = "app.services.ics_worker.result_parser.parse_results_html"
     _SAVE = "app.services.ics_worker.sighting_writer.save_ics_sightings"
     _AI_GATE = "app.services.ics_worker.ai_gate.process_ai_gate"
-    _ASYNC_SLEEP = "app.services.ics_worker.worker.asyncio.sleep"
+    _ASYNC_SLEEP = "app.services.ics_worker.worker._async_sleep"
 
     def _make_mock_db(self, db_session):
         mock_session = MagicMock(wraps=db_session)
@@ -2581,6 +2594,14 @@ class TestSchedulerBranches:
 
 
 class TestSearchEngineFull:
+    @pytest.fixture(autouse=True)
+    def _no_pace(self, monkeypatch):
+        """Zero the page-settle pacing so search_part tests don't pay ~2s of real
+        sleep."""
+        import app.services.ics_worker.search_engine as se
+
+        monkeypatch.setattr(se, "_PACE_SECONDS", 0)
+
     @pytest.mark.asyncio
     async def test_search_part_all_selectors_fail_fallback(self):
         """When all 4 selectors fail, falls back to first text input (lines 52-55)."""

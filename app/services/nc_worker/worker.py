@@ -29,6 +29,14 @@ except ImportError:  # pragma: no cover
 
 EASTERN = ZoneInfo("America/New_York")
 
+# Private module-level alias for the pacing primitive. The main loop calls ``_sleep``
+# (never ``time.sleep`` directly) so tests patch ``worker._sleep`` in isolation.
+# Patching the shared ``time`` module's ``sleep`` would intercept sleeps from EVERY
+# other thread in the process (TestClient portals, lingering timers), skewing the
+# circuit-breaker call-count assertions and causing xdist-order flakes. Production
+# behavior is identical: ``_sleep is time.sleep``.
+_sleep = time.sleep
+
 _shutdown_requested = False
 
 
@@ -185,13 +193,13 @@ def main():
                 # Check business hours
                 if not scheduler.is_business_hours():
                     logger.debug("NC worker: outside business hours, sleeping 30 min")
-                    time.sleep(30 * 60)
+                    _sleep(30 * 60)
                     continue
 
                 # Check daily limit
                 if searches_today >= config.NC_MAX_DAILY_SEARCHES:
                     logger.info("NC worker: daily limit reached ({})", searches_today)
-                    time.sleep(60 * 60)
+                    _sleep(60 * 60)
                     continue
 
                 # Check circuit breaker
@@ -205,7 +213,7 @@ def main():
                             circuit_breaker_reason=info["trip_reason"],
                         )
                     breaker_was_open = True
-                    time.sleep(60 * 60)
+                    _sleep(60 * 60)
                     continue
 
                 # Breaker healthy: clear a previously-open flag on the open->healthy
@@ -226,7 +234,7 @@ def main():
                     duration = scheduler.get_break_duration()
                     logger.info("NC worker: taking a break ({:.0f} min)", duration / 60)
                     scheduler.reset_break_counter()
-                    time.sleep(duration)
+                    _sleep(duration)
                     continue
 
                 # Run AI gate for any pending items
@@ -246,7 +254,7 @@ def main():
                     if not item:
                         logger.debug("NC worker: queue empty, sleeping 60s")
                         db.close()
-                        time.sleep(60)
+                        _sleep(60)
                         continue
 
                     # Ensure session is valid
@@ -254,7 +262,7 @@ def main():
                         logger.error("NC worker: session re-auth failed")
                         mark_status(db, item, "failed", error="Session authentication failed")
                         db.close()
-                        time.sleep(5 * 60)
+                        _sleep(5 * 60)
                         continue
 
                     # Execute search (already marked 'searching' by the claim)
@@ -337,11 +345,11 @@ def main():
                 # Delay before next search
                 delay = scheduler.next_delay()
                 logger.debug("NC worker: sleeping {:.0f}s before next search", delay)
-                time.sleep(delay)
+                _sleep(delay)
 
             except Exception as e:
                 logger.error("NC worker: unexpected error: {}", e)
-                time.sleep(5 * 60)
+                _sleep(5 * 60)
 
     finally:
         logger.info(

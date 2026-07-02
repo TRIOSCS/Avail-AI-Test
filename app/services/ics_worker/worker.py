@@ -28,6 +28,14 @@ except ImportError:  # pragma: no cover
 
 EASTERN = ZoneInfo("America/New_York")
 
+# Private module-level alias for the pacing primitive. The main loop awaits
+# ``_async_sleep`` (never ``asyncio.sleep`` directly) so tests patch
+# ``worker._async_sleep`` in isolation. Patching the shared ``asyncio.sleep`` would
+# intercept sleeps from every other coroutine in the process, skewing circuit-breaker
+# call-count assertions and causing xdist-order flakes. Production behavior is
+# identical: ``_async_sleep is asyncio.sleep``.
+_async_sleep = asyncio.sleep
+
 _shutdown_requested = False
 
 
@@ -185,13 +193,13 @@ async def main():
                 # Check business hours
                 if not scheduler.is_business_hours():
                     logger.debug("ICS worker: outside business hours, sleeping 30 min")
-                    await asyncio.sleep(30 * 60)
+                    await _async_sleep(30 * 60)
                     continue
 
                 # Check daily limit
                 if searches_today >= config.ICS_MAX_DAILY_SEARCHES:
                     logger.info("ICS worker: daily limit reached ({}), sleeping until tomorrow", searches_today)
-                    await asyncio.sleep(60 * 60)
+                    await _async_sleep(60 * 60)
                     continue
 
                 # Check circuit breaker
@@ -205,7 +213,7 @@ async def main():
                             circuit_breaker_reason=info["trip_reason"],
                         )
                     breaker_was_open = True
-                    await asyncio.sleep(60 * 60)
+                    await _async_sleep(60 * 60)
                     continue
 
                 # Breaker healthy: clear a previously-open flag on the open->healthy
@@ -226,7 +234,7 @@ async def main():
                     duration = scheduler.get_break_duration()
                     logger.info("ICS worker: taking a break ({:.0f} min)", duration / 60)
                     scheduler.reset_break_counter()
-                    await asyncio.sleep(duration)
+                    await _async_sleep(duration)
                     continue
 
                 # Run AI gate for any pending items
@@ -246,7 +254,7 @@ async def main():
                     if not item:
                         logger.debug("ICS worker: queue empty, sleeping 60s")
                         db.close()
-                        await asyncio.sleep(60)
+                        await _async_sleep(60)
                         continue
 
                     # Ensure session is valid
@@ -254,7 +262,7 @@ async def main():
                         logger.error("ICS worker: session re-auth failed, sleeping 5 min")
                         mark_status(db, item, "failed", error="Session authentication failed")
                         db.close()
-                        await asyncio.sleep(5 * 60)
+                        await _async_sleep(5 * 60)
                         continue
 
                     # Execute search (already marked 'searching' by the claim).
@@ -347,11 +355,11 @@ async def main():
                 # Delay before next search
                 delay = scheduler.next_delay()
                 logger.debug("ICS worker: sleeping {:.0f}s before next search", delay)
-                await asyncio.sleep(delay)
+                await _async_sleep(delay)
 
             except Exception as e:
                 logger.error("ICS worker: unexpected error in main loop: {}", e)
-                await asyncio.sleep(5 * 60)
+                await _async_sleep(5 * 60)
 
     finally:
         # Shutdown cleanup
