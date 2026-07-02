@@ -1904,15 +1904,29 @@ def _save_sightings(
         from .models import VendorCard
         from .services.tagging import propagate_tags_to_entity
 
+        # PERF-5: resolve every sighting's VendorCard in ONE IN(normalized_names)
+        # query instead of one .first() per sighting. normalized_name is unique on
+        # VendorCard, so the dict lookup returns exactly the row .first() would have
+        # (or None). The (material_card_id, vn_norm) list preserves the original
+        # sighting order, so propagate_tags_to_entity is called identically.
+        tag_targets: list[tuple[int, str]] = []
         for s in sightings:
             if not s.material_card_id or not s.vendor_name:
                 continue
             vn_norm = normalize_vendor_name(s.vendor_name)
             if not vn_norm:
                 continue
-            vc = db.query(VendorCard).filter_by(normalized_name=vn_norm).first()
-            if vc:
-                propagate_tags_to_entity("vendor_card", vc.id, s.material_card_id, 1.0, db)
+            tag_targets.append((s.material_card_id, vn_norm))
+        if tag_targets:
+            norms = {vn for _, vn in tag_targets}
+            card_by_norm = {
+                vc.normalized_name: vc
+                for vc in db.query(VendorCard).filter(VendorCard.normalized_name.in_(norms)).all()
+            }
+            for material_card_id, vn_norm in tag_targets:
+                vc = card_by_norm.get(vn_norm)
+                if vc:
+                    propagate_tags_to_entity("vendor_card", vc.id, material_card_id, 1.0, db)
         db.commit()
     except Exception:
         logger.warning("Tag propagation failed for sightings", exc_info=True)
@@ -1946,12 +1960,28 @@ def _propagate_vendor_emails(sightings: list[Sighting], db: Session):
     if not email_map:
         return
 
+    # PERF-5: resolve every vendor's VendorCard in ONE IN(normalized_names) query
+    # instead of one .first() per vendor. normalized_name is unique on VendorCard,
+    # so the dict lookup returns exactly the row .first() would have (or None).
+    # Vendor names that normalize to the same key share the one card object, just as
+    # repeated .first() calls returned the same identity-mapped instance.
+    name_norms = {name: normalize_vendor_name(name) for name in email_map}
+    wanted_norms = {n for n in name_norms.values() if n}
+    card_by_norm = (
+        {
+            card.normalized_name: card
+            for card in db.query(VendorCard).filter(VendorCard.normalized_name.in_(wanted_norms)).all()
+        }
+        if wanted_norms
+        else {}
+    )
+
     for vendor_name, emails in email_map.items():
-        norm = normalize_vendor_name(vendor_name)
+        norm = name_norms.get(vendor_name)
         if not norm:
             continue
 
-        card = db.query(VendorCard).filter_by(normalized_name=norm).first()
+        card = card_by_norm.get(norm)
         if not card:
             continue
 
