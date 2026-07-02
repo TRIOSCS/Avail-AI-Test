@@ -2564,8 +2564,11 @@ UI for uploading a vendor's stock list. All three are thin routes in
   MANAGER/ADMIN see all (the predicate is skipped for `is_manager_or_admin`).
   `customer_contacts_query` joins `SiteContact → CustomerSite → Company` (all
   `is_active`), filters search (name OR email) / company / role; `cadence_state` is a
-  DERIVED dot (not a column) so it is computed via `cadence_state_of` and filtered in
-  Python by `customer_contacts_list_ctx`. The company-filter dropdown is built from the
+  DERIVED dot (not a column) but its day-floor thresholds collapse to exact timestamp
+  cutoffs, so `customer_contacts_list_ctx` filters it in SQL via
+  `contact_cadence_predicate` (which mirrors `cadence_state_of` EXACTLY) and pages with
+  count()/offset()/limit() — no full-set load before paging (PERF-10). The company-filter
+  dropdown is built from the
   same visibility scope. `require_user`. Reached via the "All contacts" link in
   `customers/list.html`.
 - **`GET /v2/vendor-contacts`** (`vendor_contacts_partial` → `vendors/contacts_list.html`)
@@ -5204,8 +5207,10 @@ minimal and mirrors the accounts pattern; no rearrangement of existing controls.
   visible set (`effective_my_only = my_only OR not is_manager_or_admin`); managers can add
   the My-accounts filter. Unfiltered call = all visible (unchanged default).
 - `GET /v2/customers/contacts/export.csv` now accepts `search/company_id/contact_role/
-  cadence_state` and streams via the role-scoped `customer_contacts_query` (cadence_state is
-  derived → filtered in Python, mirroring `customer_contacts_list_ctx`). Headers unchanged.
+  cadence_state` and streams via the role-scoped `customer_contacts_query`; the derived
+  `cadence_state` facet is applied in SQL via `contact_cadence_predicate` (mirroring
+  `customer_contacts_list_ctx`) so the whole set streams through `yield_per(200)` instead
+  of being materialized (PERF-10). Headers unchanged.
 - Both export links are progressive-enhancement anchors: `@click.prevent` rebuilds the
   download URL from the live filter form (`#cdm-filters` / `#contacts-filters`) via
   `URLSearchParams(new FormData(...))`; the bare `href` is the no-JS fallback (full export).
