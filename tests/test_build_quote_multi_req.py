@@ -22,6 +22,7 @@ import os
 os.environ["TESTING"] = "1"
 
 from datetime import datetime, timezone
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -336,7 +337,19 @@ class TestSendAllReqs:
         db_session.commit()
         send_subject = f"Quote {quote.quote_number} sent"
 
-        await send_quote_email(db_session, quote, test_user, token="", testing=True)
+        # Use the REAL-send path (testing=False) with a patched Graph so graph_message_id is
+        # NON-null — testing=True leaves it None, which disables log_email_activity's
+        # external_id dedup and masks the bug. With a real id, a SHARED external_id would
+        # silently drop every contributing req's send log after the primary; this asserts
+        # each contributing req still records exactly one.
+        with (
+            patch("app.utils.graph_client.GraphClient.post_json", new=AsyncMock(return_value={})),
+            patch(
+                "app.email_service._find_sent_message",
+                new=AsyncMock(return_value={"id": "MSG-QSEND-1", "conversationId": "CONV-QSEND-1"}),
+            ),
+        ):
+            await send_quote_email(db_session, quote, test_user, token="t", testing=False)
 
         db_session.expire_all()
         assert db_session.get(Requisition, r1.id).status == RequisitionStatus.QUOTED

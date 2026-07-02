@@ -41,6 +41,22 @@ class CustomerMismatchError(ValueError):
         super().__init__(detail)
 
 
+def _customer_name_for_site(db: Session, customer_site_id: int | None) -> str:
+    """Resolve the customer company name for a requisition's customer site ("" if none).
+
+    Lives in this service (not the router) so the layering runs router → service; the
+    quote_builder router imports it from here.
+    """
+    if not customer_site_id:
+        return ""
+    from app.models import CustomerSite
+
+    site = db.get(CustomerSite, customer_site_id)
+    if site and site.company:
+        return site.company.name or ""
+    return ""
+
+
 def validate_same_customer(db: Session, req_ids: list[int]) -> int:
     """Ensure every requisition in *req_ids* shares one non-null ``customer_site_id``.
 
@@ -51,7 +67,6 @@ def validate_same_customer(db: Session, req_ids: list[int]) -> int:
     requisition and its resolved customer so the salesperson can fix the selection.
     """
     from app.models import Requisition
-    from app.routers.quote_builder import _customer_name_for_site
 
     if not req_ids:
         raise CustomerMismatchError("No requisitions selected.")

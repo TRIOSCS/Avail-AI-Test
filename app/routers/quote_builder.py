@@ -18,6 +18,10 @@ from ..dependencies import get_quote_for_user, require_access, require_user
 from ..models import Requisition, User
 from ..schemas.quote_builder import QuoteBuilderSaveRequest
 
+# Defined in the service layer so the dependency runs router → service (not the reverse);
+# re-exported through this router for its two call sites.
+from ..services.quote_requisitions import _customer_name_for_site
+
 router = APIRouter(tags=["quote-builder"])
 
 
@@ -33,19 +37,6 @@ def _parse_req_ids(requisition_ids: str) -> list[int]:
     if not ids:
         raise HTTPException(400, "No requisitions selected")
     return ids
-
-
-def _customer_name_for_site(db: Session, customer_site_id: int | None) -> str:
-    """Resolve the customer company name for a requisition's customer site ("" if
-    none)."""
-    if not customer_site_id:
-        return ""
-    from ..models import CustomerSite
-
-    site = db.get(CustomerSite, customer_site_id)
-    if site and site.company:
-        return site.company.name or ""
-    return ""
 
 
 # ── Combined cross-req quote (OQ-02) — MUST be declared before the /{req_id} routes ──

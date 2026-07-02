@@ -162,12 +162,22 @@ async def send_quote_email(
         r = db.get(Requisition, rid)
         if r and r.status not in (RequisitionStatus.WON, RequisitionStatus.LOST):
             r.status = RequisitionStatus.QUOTED
+        # log_email_activity dedupes by external_id, so passing the SAME graph_message_id
+        # for every contributing req would silently drop all but the first (a combined
+        # quote's send would log activity on the primary req only). Keep the PRIMARY on the
+        # raw graph id — the sent-folder reconcile (email_jobs) matches the ActivityLog by
+        # that exact id and would create a duplicate otherwise — and give each SECONDARY req
+        # a per-req-suffixed id so every contributing req records its own send.
+        if graph_message_id and rid != quote.requisition_id:
+            activity_external_id: str | None = f"{graph_message_id}:req{rid}"
+        else:
+            activity_external_id = graph_message_id
         log_email_activity(
             user_id=user.id,
             direction="sent",
             email_addr=to_email,
             subject=f"Quote {quote.quote_number} sent",
-            external_id=graph_message_id,
+            external_id=activity_external_id,
             contact_name=to_name or None,
             db=db,
             requisition_id=rid,
