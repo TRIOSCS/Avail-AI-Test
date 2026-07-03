@@ -126,7 +126,12 @@
   <div class="flex flex-col min-w-0 border-r border-gray-200 w-full lg:w-auto"
        :class="mobileDetailOpen ? 'hidden lg:flex' : 'flex'"
        :style="window.innerWidth >= 1024 ? 'width: ' + (splitRatio * 100) + '%' : ''">
+    {# `collapsed` is a per-user $persist map (group key -> collapsed bool) owned by this
+       stable container, NOT by the swapped table.html — so a group stays collapsed across
+       filter swaps and reloads. table.html (filter bar + group rows) reads it by inheritance.
+       Keyed per-surface ('sightings-group-collapse') so it never collides with the Sales Hub. #}
     <div id="sightings-table" class="flex-1 flex flex-col min-h-0"
+         x-data="{ collapsed: $persist({}).as('sightings-group-collapse') }"
          hx-get="/v2/partials/sightings"
          hx-trigger="load"
          hx-target="#sightings-table"

@@ -249,6 +249,57 @@ class TestSightingsWorkspace:
         assert "sightings-table" in resp.text
         assert "sightings-detail" in resp.text
 
+    def test_group_collapse_state_persisted_on_stable_container(self, client, db_session):
+        """The per-user group-collapse map lives on the stable #sightings-table
+        container (not the swapped table partial) so a collapsed group survives HTMX
+        swaps and reloads, keyed per-surface."""
+        resp = client.get("/v2/partials/sightings/workspace")
+        assert "$persist({}).as('sightings-group-collapse')" in resp.text
+
+
+class TestSightingsGroupCollapse:
+    """Collapsible brand/manufacturer group sections + the Clean & reset control."""
+
+    def test_group_header_is_collapsible(self, client, db_session):
+        """Each group header carries a chevron toggle bound to the inherited `collapsed`
+        map, keyed by a data-attribute so any group name is quote-safe."""
+        _seed_data(db_session)
+        resp = client.get("/v2/partials/sightings?group_by=manufacturer")
+        assert resp.status_code == 200
+        body = resp.text
+        assert 'data-gkey="manufacturer:TestMfr"' in body
+        assert "collapsed[gkey] = !collapsed[gkey]" in body
+        # Chevron rotates when collapsed (starts expanded → no rotation class applied).
+        assert "collapsed[gkey] ? '-rotate-90' : ''" in body
+
+    def test_group_rows_toggle_on_collapsed_map(self, client, db_session):
+        """Group data rows hide via x-show against the same persisted map + their own
+        key."""
+        _seed_data(db_session)
+        resp = client.get("/v2/partials/sightings?group_by=manufacturer")
+        assert 'x-show="!collapsed[$el.dataset.gkey]"' in resp.text
+
+    def test_flat_view_has_no_group_keys(self, client, db_session):
+        """Ungrouped view renders no collapse keys (nothing to collapse)."""
+        _seed_data(db_session)
+        resp = client.get("/v2/partials/sightings")
+        assert "data-gkey" not in resp.text
+
+    def test_clean_reset_control_present_when_flat(self, client, db_session):
+        """The Clean & reset button is always in the toolbar: full server reset (no
+        params) plus clearing the selection basket."""
+        _seed_data(db_session)
+        resp = client.get("/v2/partials/sightings")
+        body = resp.text
+        assert "Clean &amp; reset" in body
+        assert "$store.sightingSelection.clear()" in body
+        assert 'hx-get="/v2/partials/sightings"' in body
+
+    def test_clean_reset_control_present_when_grouped(self, client, db_session):
+        _seed_data(db_session)
+        resp = client.get("/v2/partials/sightings?group_by=brand")
+        assert "Clean &amp; reset" in resp.text
+
 
 class TestSightingsEmptyState:
     def test_list_empty_db(self, client, db_session):
