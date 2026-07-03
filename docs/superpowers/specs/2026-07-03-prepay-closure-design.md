@@ -163,7 +163,11 @@ fan-out alerts + Paid badge; teardown an approved prepayment → assert void + s
 
 ## Out of Scope (YAGNI)
 
-- `reconciled` state / QuickBooks / bank-statement matching (own program).
+- `reconciled` state / QuickBooks / bank-statement matching (own program). NOTE: Trio's
+  QuickBooks is the **Desktop edition, hosted in Azure** — a reconciliation integration
+  would go through the QuickBooks **Web Connector / QBXML SDK** (or a hosted-desktop file
+  bridge), NOT the QuickBooks Online REST API (so the session's Intuit *QBO* connector does
+  not apply). Factor this into the reconciliation program's design.
 - Refund / claw-back tracking after a `paid` wire.
 - Emailing (vs in-app alerting) the buyer/salesperson/managers on paid — they're Avail users;
   in-app alerts suffice (email can be a later toggle).
