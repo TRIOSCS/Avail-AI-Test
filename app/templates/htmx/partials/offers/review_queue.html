@@ -43,28 +43,28 @@
           {# Details grid #}
           <div class="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-2 text-sm mb-2">
             <div>
-              <span class="text-xs text-gray-400 font-medium">Qty</span>
+              <span class="text-secondary font-medium">Qty</span>
               <p class="text-gray-900 font-mono">{{ "{:,}".format(o.qty_available) if o.qty_available else '--' }}</p>
             </div>
             <div>
-              <span class="text-xs text-gray-400 font-medium">Price</span>
+              <span class="text-secondary font-medium">Price</span>
               <p class="{{ 'text-emerald-700 font-medium font-mono' if o.unit_price else 'text-gray-400' }}">
                 {{ "${:,.4f}".format(o.unit_price) if o.unit_price else 'RFQ' }}
               </p>
             </div>
             <div>
-              <span class="text-xs text-gray-400 font-medium">Lead Time</span>
+              <span class="text-secondary font-medium">Lead Time</span>
               <p class="text-gray-900">{{ o.lead_time or '--' }}</p>
             </div>
             <div>
-              <span class="text-xs text-gray-400 font-medium">Source</span>
+              <span class="text-secondary font-medium">Source</span>
               <p class="text-gray-900">{{ o.source or '--' }}</p>
             </div>
           </div>
 
           {# Requisition + date #}
           {% if o.requisition_id %}
-          <div class="flex items-center gap-2 text-xs text-gray-400">
+          <div class="flex items-center gap-2 text-secondary">
             <a hx-get="/v2/partials/requisitions/{{ o.requisition_id }}"
                hx-target="#main-content"
                hx-push-url="/v2/requisitions/{{ o.requisition_id }}"
@@ -120,7 +120,7 @@
       <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
     </svg>
     <p class="mt-3 text-sm font-medium text-gray-600">No offers pending review</p>
-    <p class="text-xs text-gray-400 mt-1">AI-parsed offers with medium confidence appear here for human verification.</p>
+    <p class="text-secondary mt-1">AI-parsed offers with medium confidence appear here for human verification.</p>
   </div>
   {% endif %}
 </div>

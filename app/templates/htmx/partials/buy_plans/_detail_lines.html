@@ -30,7 +30,7 @@
   {# Finding #1: convert to data-table, drop per-cell px-4 py-3 and per-th font-medium text-gray-500 uppercase #}
   <div class="bg-white rounded-lg shadow-sm overflow-hidden border border-line-base mb-6">
     <div class="px-4 py-3 bg-gray-50 border-b border-line-base">
-      <h2 class="text-lg font-semibold text-gray-900">Line Items
+      <h2 class="h2">Line Items
         <span class="ml-1 text-sm font-normal text-gray-600">({{ lines|length }})</span>
       </h2>
     </div>
@@ -65,7 +65,7 @@
               {% if line.buyer %}
               <div class="flex items-center gap-1.5 mt-0.5">
                 {{ user_avatar(line.buyer) }}
-                <span class="text-xs text-gray-400">{{ line.buyer.name }}</span>
+                <span class="text-secondary">{{ line.buyer.name }}</span>
               </div>
               {% endif %}
             </td>
@@ -177,7 +177,7 @@
                     </label>
                     <div x-show="escalate" x-cloak class="pl-4 space-y-0.5">
                       {% for o in other_cut %}
-                      <label class="flex items-center gap-1.5 text-xs text-gray-500">
+                      <label class="flex items-center gap-1.5 text-secondary">
                         <input type="checkbox" name="also_line_ids" value="{{ o.id }}" checked>
                         <span class="font-mono">{{ o.requirement.primary_mpn if o.requirement else ('line ' ~ o.id) }}</span>
                       </label>
@@ -220,7 +220,7 @@
                     </label>
                     <div x-show="escalate" x-cloak class="pl-4 space-y-0.5">
                       {% for o in other_recv %}
-                      <label class="flex items-center gap-1.5 text-xs text-gray-500">
+                      <label class="flex items-center gap-1.5 text-secondary">
                         <input type="checkbox" name="also_line_ids" value="{{ o.id }}" checked>
                         <span class="font-mono">{{ o.requirement.primary_mpn if o.requirement else ('line ' ~ o.id) }}</span>
                       </label>

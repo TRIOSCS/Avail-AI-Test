@@ -20,14 +20,14 @@
     <button @click="showAi = !showAi" class="w-full px-4 py-2 flex items-center justify-between gap-3 text-left hover:bg-gray-50 transition-colors">
       <div class="flex items-center gap-2 min-w-0">
         <svg class="w-4 h-4 flex-shrink-0 text-brand-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
-        <span class="text-sm font-semibold text-gray-700 flex-shrink-0">AI Insights</span>
+        <span class="h3 flex-shrink-0">AI Insights</span>
         {% if flag_count > 0 %}
         <span class="inline-flex items-center justify-center w-5 h-5 flex-shrink-0 rounded-full bg-amber-100 text-amber-700 text-xs font-bold">{{ flag_count }}</span>
         {% endif %}
         {# State the actual top issue at first glance — the verbatim flag reason, not just a count. #}
         {% if top_flag and top_flag.message %}
         <span class="text-xs truncate
-                     {% if top_flag.severity == 'critical' %}text-rose-600{% elif top_flag.severity == 'warning' %}text-amber-700{% else %}text-gray-500{% endif %}"
+                     {% if top_flag.severity == 'critical' %}text-rose-600{% elif top_flag.severity == 'warning' %}text-amber-700{% else %}text-gray-600{% endif %}"
               title="{{ top_flag.message }}">{{ top_flag.message }}</span>
         {% endif %}
       </div>
@@ -69,26 +69,26 @@
     <button @click="showNotes = !showNotes" class="w-full px-4 py-2 flex items-center justify-between text-left hover:bg-gray-50 transition-colors">
       <div class="flex items-center gap-2">
         <svg class="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
-        <span class="text-sm font-semibold text-gray-700">Notes</span>
+        <span class="h3">Notes</span>
       </div>
       {{ collapse_chevron("showNotes") }}
     </button>
     <div x-show="showNotes" x-cloak x-collapse class="px-4 pb-4 space-y-3">
       {% if bp.salesperson_notes %}
       <div>
-        <div class="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Salesperson Notes</div>
+        <div class="text-secondary font-medium uppercase tracking-wider mb-1">Salesperson Notes</div>
         <p class="text-sm text-gray-600 leading-relaxed">{{ bp.salesperson_notes }}</p>
       </div>
       {% endif %}
       {% if bp.approval_notes %}
       <div>
-        <div class="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Approval Notes</div>
+        <div class="text-secondary font-medium uppercase tracking-wider mb-1">Approval Notes</div>
         <p class="text-sm text-gray-600 leading-relaxed">{{ bp.approval_notes }}</p>
       </div>
       {% endif %}
       {% if bp.case_report %}
       <div>
-        <div class="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Case Report</div>
+        <div class="text-secondary font-medium uppercase tracking-wider mb-1">Case Report</div>
         <pre class="text-xs text-gray-600 whitespace-pre-wrap font-mono bg-gray-50 rounded p-3 leading-relaxed">{{ bp.case_report }}</pre>
       </div>
       {% endif %}
@@ -101,7 +101,7 @@
     <button @click="showSo = !showSo" class="w-full px-4 py-2 flex items-center justify-between text-left hover:bg-gray-50 transition-colors">
       <div class="flex items-center gap-2">
         <svg class="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
-        <span class="text-sm font-semibold text-gray-700">SO Verification</span>
+        <span class="h3">SO Verification</span>
         {% if bp.so_status == 'approved' %}
         <svg class="w-4 h-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
         {% else %}
