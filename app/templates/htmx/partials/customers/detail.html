@@ -207,7 +207,7 @@
           </button>
           <div x-show="open" x-cloak
                role="menu"
-               class="absolute right-0 top-full mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-lg z-20 py-1 text-xs text-left">
+               class="absolute right-0 top-full mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-float z-20 py-1 text-xs text-left">
             {# Edit account — opens the full account edit form as a modal. Most fields are
                also inline-editable in the header/settings grid, so the full form is an
                overflow action alongside Merge/Archive. #}
@@ -293,13 +293,13 @@
       </div>
 
       {# ── Segment Tags — inside account-settings collapsible (less weight on other tabs) #}
-      <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-4">
+      <div class="bg-white rounded-xl shadow-card border border-brand-200 p-4">
         <h2 class="text-sm font-semibold text-gray-900 mb-2">Segments</h2>
         {% include "htmx/partials/customers/_segment_tags.html" %}
       </div>
 
       {# ── Additional Details — custom key:value fields (WS3) #}
-      <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-4">
+      <div class="bg-white rounded-xl shadow-card border border-brand-200 p-4">
         <h2 class="text-sm font-semibold text-gray-900 mb-2">Additional details</h2>
         {% with entity='company', obj=company, company_id=company.id %}
           {% include "htmx/partials/customers/_custom_fields.html" %}
@@ -307,7 +307,7 @@
       </div>
 
       {# ── Audit trail — created / modified by ─────────────────────── #}
-      <p class="text-xs text-gray-400 mt-1">
+      <p class="text-secondary mt-1">
         Created by <span class="text-gray-600 font-medium">{{ company.created_by.name if company.created_by else '—' }}</span>
         &middot;
         Updated by <span class="text-gray-600 font-medium">{{ company.modified_by.name if company.modified_by else '—' }}</span>

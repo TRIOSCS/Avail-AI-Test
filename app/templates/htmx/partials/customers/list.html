@@ -168,7 +168,7 @@
         <div class="modal-body space-y-4">
           <div>
             <p class="text-sm font-medium text-gray-700 mb-1">Import Companies</p>
-            <p class="text-xs text-gray-500 mb-2">CSV columns: <code>name</code> (required), <code>website</code>, <code>account_type</code></p>
+            <p class="text-secondary mb-2">CSV columns: <code>name</code> (required), <code>website</code>, <code>account_type</code></p>
             <form hx-post="/v2/partials/customers/import/preview"
                   hx-target="#import-result"
                   hx-swap="innerHTML"
@@ -184,7 +184,7 @@
           </div>
           <div>
             <p class="text-sm font-medium text-gray-700 mb-1">Import Contacts</p>
-            <p class="text-xs text-gray-500 mb-2">CSV columns: <code>company_name</code>, <code>contact_name</code> (required), <code>email</code>, <code>phone</code>, <code>role</code></p>
+            <p class="text-secondary mb-2">CSV columns: <code>company_name</code>, <code>contact_name</code> (required), <code>email</code>, <code>phone</code>, <code>role</code></p>
             <form hx-post="/v2/partials/customers/import/contacts/preview"
                   hx-target="#import-result"
                   hx-swap="innerHTML"

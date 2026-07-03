@@ -37,7 +37,7 @@
     + Save view
   </button>
   <div x-show="saveOpen" x-cloak
-       class="absolute left-0 top-full mt-1 z-30 bg-white border border-line-base rounded-lg shadow-lg p-2 w-56">
+       class="absolute left-0 top-full mt-1 z-30 bg-white border border-line-base rounded-lg shadow-float p-2 w-56">
     <form hx-post="/v2/partials/customers/saved-views"
           hx-target="#saved-views-{{ list_key }}" hx-swap="innerHTML"
           hx-include="#{{ target_form }}"

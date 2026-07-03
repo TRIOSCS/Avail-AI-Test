@@ -51,7 +51,7 @@
       <path stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z'/>
     </svg>
     <p class='text-sm text-gray-600'>No activity recorded for this company yet.</p>
-    <p class='text-xs text-gray-400 mt-1'>Activity will appear here as you log calls, emails, notes, and meetings.</p>
+    <p class='text-secondary mt-1'>Activity will appear here as you log calls, emails, notes, and meetings.</p>
   </div>
   {% endif %}
 
@@ -71,7 +71,7 @@
            @click='hideOther = !hideOther'>
         <div class='flex items-center gap-2'>
           {{ activity_icon(icon_type) }}
-          <h3 class='text-sm font-semibold text-gray-700'>{{ section_label }}</h3>
+          <h3 class='h3'>{{ section_label }}</h3>
           <span class='inline-flex items-center px-1.5 py-0.5 text-xs font-medium rounded-full bg-gray-100 text-gray-600'>{{ section_items|length }}</span>
         </div>
         <div class='flex items-center gap-2'>
@@ -109,7 +109,7 @@
       {# ── Section header ───────────────────────────────── #}
       <div class='px-4 py-2.5 bg-gray-50 border-b flex items-center gap-2'>
         {{ activity_icon(icon_type) }}
-        <h3 class='text-sm font-semibold text-gray-700'>{{ section_label }}</h3>
+        <h3 class='h3'>{{ section_label }}</h3>
         <span class='inline-flex items-center px-1.5 py-0.5 text-xs font-medium rounded-full bg-gray-100 text-gray-600'>{{ section_items|length }}</span>
       </div>
       {# ── Section body (date-grouped, mixed for Emails) ── #}
@@ -152,7 +152,7 @@
                     Out
                   </span>
                 </div>
-                {% if c.subject %}<p class='text-xs text-gray-400 truncate mt-0.5'>{{ c.subject }}</p>{% endif %}
+                {% if c.subject %}<p class='text-secondary truncate mt-0.5'>{{ c.subject }}</p>{% endif %}
               </div>
               <div class='text-right flex-shrink-0 flex flex-col items-end gap-1'>
                 {% if rfq_req %}
@@ -180,7 +180,7 @@
     {# ── Truncation footer ─────────────────────────────── #}
     {% if activities_truncated %}
     <div class='px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg mt-3'>
-      <p class='text-xs text-gray-400'>Showing most recent 50 activities — older history may not appear.</p>
+      <p class='text-secondary'>Showing most recent 50 activities — older history may not appear.</p>
     </div>
     {% endif %}
 

@@ -27,20 +27,20 @@
                hx-get="/v2/partials/customers/check-duplicate"
                hx-trigger="keyup changed delay:500ms"
                hx-target="#dup-warning"
-               class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+               class="input">
         <div id="dup-warning" class="mt-1"></div>
       </div>
 
       <div>
         <label class="block text-sm font-medium text-gray-700 mb-1">Website</label>
         <input type="url" name="website" placeholder="https://..."
-               class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+               class="input">
       </div>
 
       <div>
         <label class="block text-sm font-medium text-gray-700 mb-1">Industry</label>
         <select name="industry"
-                class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+                class="input">
           <option value="">— Select industry —</option>
           {% for val in crm_industries %}
           <option value="{{ val }}">{{ val }}</option>
@@ -54,13 +54,13 @@
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Legal / Registered Name</label>
           <input type="text" name="legal_name" placeholder="Full legal entity name"
-                 class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+                 class="input">
         </div>
         <div class="grid grid-cols-2 gap-3">
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">Employee Size</label>
             <select name="employee_size"
-                    class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+                    class="input">
               <option value="">— Select —</option>
               <option value="1-10">1–10</option>
               <option value="11-50">11–50</option>
@@ -75,7 +75,7 @@
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">Revenue Range</label>
             <select name="revenue_range"
-                    class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+                    class="input">
               <option value="">— Select —</option>
               <option value="&lt;$1M">&lt;$1M</option>
               <option value="$1M-$10M">$1M–$10M</option>
@@ -94,7 +94,7 @@
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Main Phone</label>
           <input type="tel" name="phone" placeholder="+1 555 000 0000"
-                 class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+                 class="input">
         </div>
       </fieldset>
 
@@ -105,18 +105,18 @@
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">City</label>
             <input type="text" name="hq_city" placeholder="e.g. Austin"
-                   class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+                   class="input">
           </div>
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">State / Region</label>
             <input type="text" name="hq_state" placeholder="e.g. TX"
-                   class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+                   class="input">
           </div>
         </div>
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Country</label>
           <input type="text" name="hq_country" placeholder="e.g. United States"
-                 class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+                 class="input">
         </div>
       </fieldset>
 
@@ -127,12 +127,12 @@
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">Credit Terms</label>
             <input type="text" name="credit_terms" placeholder="e.g. Net 30"
-                   class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+                   class="input">
           </div>
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">Tax ID (EIN / VAT)</label>
             <input type="text" name="tax_id" placeholder="e.g. 12-3456789"
-                   class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+                   class="input">
           </div>
         </div>
       </fieldset>
@@ -143,7 +143,7 @@
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">How was this account acquired?</label>
           <select name="source"
-                  class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+                  class="input">
             <option value="manual" selected>Manual entry</option>
             <option value="sfdc">Salesforce import</option>
             <option value="referral">Referral</option>
@@ -159,14 +159,14 @@
       <div>
         <label class="block text-sm font-medium text-gray-700 mb-1">Notes</label>
         <textarea name="notes" rows="3"
-                  class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500"></textarea>
+                  class="input"></textarea>
       </div>
 
       <div class="flex justify-end gap-2 pt-1">
         <button type="button" @click='$dispatch("close-modal")'
                 class="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800">Cancel</button>
         <button type="submit"
-                class="px-4 py-1.5 text-sm font-medium text-white bg-brand-500 rounded hover:bg-brand-600">
+                class="btn-primary">
           Create account
         </button>
       </div>
