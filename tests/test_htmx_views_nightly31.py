@@ -100,7 +100,8 @@ class TestV2PageTroubleTickets:
         assert resp.status_code == 403
 
     def test_admin_trouble_tickets_gets_200(self, client: TestClient, admin_user: User):
-        """Line 233: admin passes line 201 check; partial_url set to trouble-tickets/workspace."""
+        """Line 233: admin passes line 201 check; partial_url set to trouble-
+        tickets/workspace."""
         with patch("app.routers.htmx_views.get_user", return_value=admin_user):
             resp = client.get("/v2/trouble-tickets")
         assert resp.status_code == 200
@@ -113,7 +114,8 @@ class TestV2PageModuleGate:
     """Lines 211-216: access gate redirects to first allowed module or returns 403."""
 
     def test_denied_module_redirects_to_first_allowed(self, client: TestClient, db_session: Session):
-        """Lines 211-215: buyer with requisitions denied redirects (302) to next module."""
+        """Lines 211-215: buyer with requisitions denied redirects (302) to next
+        module."""
         user = User(
             email="limited31@trioscs.com",
             name="Limited31",
@@ -275,20 +277,22 @@ class TestRequisitionsBulkAction:
 
     def test_assign_by_manager_returns_200(
         self,
-        _manager_client: TestClient,
+        client: TestClient,
         db_session: Session,
         test_user: User,
-        manager_user: User,
     ):
-        """Lines 452-466: manager assigns owner; requisitions_list_partial mocked."""
-        req = _req(db_session, manager_user)
+        """Lines 436-466: buyer+is_manager_or_admin patch covers full assign path."""
+        req = _req(db_session, test_user)
         db_session.commit()
 
-        with patch(
-            "app.routers.htmx_views.requisitions_list_partial",
-            new=AsyncMock(return_value=HTMLResponse("<div>ok</div>")),
+        with (
+            patch("app.routers.htmx_views.is_manager_or_admin", return_value=True),
+            patch(
+                "app.routers.htmx_views.requisitions_list_partial",
+                new=AsyncMock(return_value=HTMLResponse("<div>ok</div>")),
+            ),
         ):
-            resp = _manager_client.post(
+            resp = client.post(
                 "/v2/partials/requisitions/bulk/assign",
                 data={"ids": str(req.id), "owner_id": str(test_user.id)},
             )
@@ -335,7 +339,8 @@ class TestRequisitionInlineSave:
         assert resp.status_code == 404
 
     def test_status_value_error_is_caught(self, client: TestClient, db_session: Session, test_user: User):
-        """Lines 545-546: invalid status transition raises ValueError → caught, msg set."""
+        """Lines 545-546: invalid status transition raises ValueError → caught, msg
+        set."""
         req = _req(db_session, test_user)
         db_session.commit()
 
