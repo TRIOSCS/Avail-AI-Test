@@ -529,6 +529,36 @@ uniformly. The Mouser HTTP-403/429 silent-empty path that existed prior
 to round-2 was the silent-failure mode the contract is designed to
 eliminate; it has been removed.
 
+**Core-search hardening (2026-07-03, Phase 1).** Four call-volume /
+robustness invariants layered on top of the contract above, none of which
+change the retry/breaker/health semantics:
+
+- **Process-wide OAuth token cache.** DigiKey / eBay / Nexar authenticate
+  with a client_credentials bearer. `_build_connectors` rebuilds connector
+  instances every search, so the old per-instance token cache died each
+  search (~3 serial token POSTs on the critical path + an intra-search mint
+  herd). The cache is now module-level in `connectors/sources.py`
+  (`_token_cache`, keyed by `(connector class, client_id)` with expiry) and
+  minting is serialized by a per-key `asyncio.Lock` (`_get_cached_token` /
+  `_invalidate_token`), mirroring the `_breakers` / `_connector_semaphores`
+  pooling. A 401 invalidates the shared entry before re-minting. Tests clear
+  `_token_cache` + `_token_locks` per-test (a Lock is loop-bound).
+- **element14 keyword fallback dropped.** `_do_search` no longer fires a
+  second keyword-search call on a 0-result exact-MPN miss. element14 returns
+  HTTP 403 for BOTH auth rejection and its per-second QPS cap, so doubling
+  call volume accelerated the 403s that ERROR-exclude the source — and the
+  keyword rows were catalog noise the relevance guard discards anyway. The
+  exact `manuPartNum:` lookup is the authoritative path.
+- **Price-break null-quantity coalesce.** DigiKey / Mouser / Nexar (GraphQL
+  + REST v4) select the lowest-quantity price break via `min(..., key=...)`.
+  A present-but-null quantity key made the key return `None` → `None < int`
+  TypeError → the whole PN errored. The key now coalesces
+  Quantity/BreakQuantity/breakQuantity/quantity to a large sentinel.
+- **Search-cache Redis off the event loop.** `_fetch_fresh` wraps the sync
+  `_get_search_cache` / `_set_search_cache` (sync `redis.get`/`setex`) in
+  `asyncio.to_thread` so a slow/unreachable Redis can't block the single
+  loop and stall every in-flight request. The helpers stay best-effort.
+
 **Test enforcement** lives in `tests/test_connectors.py`,
 `tests/test_connector_rate_limits.py`,
 `tests/test_sourcengine_connector.py`, `tests/test_connector_errors.py`,
