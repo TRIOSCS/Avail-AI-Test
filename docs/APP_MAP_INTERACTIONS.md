@@ -447,9 +447,22 @@ htmx_views.py: search_run()
         |     vendor_score_map = db.query(VendorCard...) # one-shot setup query
         |
         +---> for each connector: asyncio.create_task(connector.search(mpn))
-        |     loop with asyncio.wait(FIRST_COMPLETED):
+        |     loop via _await_next_within_budget(pending, remaining):
         |       publish "source-status" / "results" / "card-update" per connector
         |     publish terminal "done" once all settle
+        |
+        +---> Bounded aggregate deadline (shares _fetch_fresh's
+        |     settings.search_total_timeout_s). Each round passes the REMAINING
+        |     budget to asyncio.wait; when it is spent with tasks still pending,
+        |     _await_next_within_budget cancels + drains the stragglers and the
+        |     loop publishes an error chip ("search budget exceeded") for each,
+        |     then breaks to "done". One hung/rate-limited connector can no longer
+        |     hold the browser spinner for minutes.
+        |
+        +---> Per-source telemetry (searches/results/latency + errors) is
+        |     accumulated and flushed to ApiSource in one guarded pass after the
+        |     loop (mirrors _fetch_fresh) — the interactive path recorded ZERO
+        |     telemetry before, so streaming failures were invisible in admin health.
         |
         +---> Always publishes a terminal "done" — including on uncaught
               exceptions (pool exhaustion, broker outage, render errors). The

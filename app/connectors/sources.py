@@ -218,7 +218,11 @@ def _parse_retry_after(response: httpx.Response) -> float:
     header = response.headers.get("Retry-After", "")
     if header:
         try:
-            return min(max(float(header), 1.0), 300.0)
+            # Cap at 30s: the retry loop sleeps this inline while holding the
+            # connector's semaphore + concurrency slot, so an upstream advertising a
+            # multi-minute Retry-After must not pin those resources (and the search's
+            # aggregate deadline would cancel the task long before a 300s sleep anyway).
+            return min(max(float(header), 1.0), 30.0)
         except ValueError:
             pass
     # No header or unparseable — default to 5s + jitter

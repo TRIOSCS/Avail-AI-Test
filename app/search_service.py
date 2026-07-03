@@ -2638,6 +2638,43 @@ def _score_raw_hit(r: dict, vendor_score_map: dict) -> dict:
     }
 
 
+async def _await_next_within_budget(
+    pending: set[asyncio.Task],
+    remaining: float,
+) -> tuple[set[asyncio.Task], set[asyncio.Task], set[asyncio.Task]]:
+    """Await the next connector completion(s), bounded by ``remaining`` seconds.
+
+    Isolates the streaming search's aggregate-deadline arithmetic + straggler
+    cancellation (mirrors the reference requisition path ``_fetch_fresh``) so the
+    interactive SSE search inherits the same bounded budget — one hung/rate-limited
+    connector can no longer delay the terminal ``done`` event for minutes. Extracted
+    as a small pure-ish helper so the deadline logic is unit-testable without driving
+    the full SSE generator.
+
+    Returns ``(done, still_pending, timed_out)``:
+      - ``done``          — tasks that completed this round (caller renders results)
+      - ``still_pending`` — tasks to await next round (empty once the budget is spent)
+      - ``timed_out``     — tasks cancelled because the budget expired with work still
+        running; they are already cancelled + drained here, so the caller only needs
+        to publish an error/timeout chip + telemetry for each and then stop.
+    """
+    if remaining <= 0:
+        # Budget already spent before this round — treat all remaining work as timed out.
+        done: set[asyncio.Task] = set()
+        still_pending = set(pending)
+    else:
+        done, still_pending = await asyncio.wait(pending, timeout=remaining, return_when=asyncio.FIRST_COMPLETED)
+    if not done and still_pending:
+        # asyncio.wait returned with nothing completed → the timeout fired with tasks
+        # still running. Cancel the stragglers and drain their CancelledError so they
+        # don't leak, then hand them back for chip + telemetry publication.
+        for t in still_pending:
+            t.cancel()
+        await asyncio.gather(*still_pending, return_exceptions=True)
+        return set(), set(), set(still_pending)
+    return done, still_pending, set()
+
+
 async def stream_search_mpn(search_id: str, mpn: str) -> None:
     """Stream search results via SSE as each connector completes.
 
@@ -2661,6 +2698,7 @@ async def stream_search_mpn(search_id: str, mpn: str) -> None:
     # Allow test mocks to override the broker via module-level patching
     import app.search_service as _self_mod
 
+    from .config import settings
     from .services.sse_broker import broker as _broker
 
     active_broker = getattr(_self_mod, "broker", _broker)
@@ -2732,8 +2770,49 @@ async def stream_search_mpn(search_id: str, mpn: str) -> None:
 
             pending = set(task_map.keys())
 
+            # Per-source telemetry accumulated across the run, flushed to ApiSource in
+            # one guarded pass after the loop (mirrors _fetch_fresh) so streaming
+            # failures/latency show up in admin health — the interactive path recorded
+            # zero telemetry before. Tuples: (source, hit_count, elapsed_ms, error).
+            stats_updates: list[tuple[str, int, int, str | None]] = []
+
+            # Aggregate deadline: the interactive SSE search shares the requisition
+            # path's budget. Track the remaining budget each round; when it is spent,
+            # cancel the stragglers, publish a timeout chip for each, and stop — so one
+            # hung/rate-limited connector cannot hold the browser spinner for minutes.
+            budget_s = settings.search_total_timeout_s
             while pending:
-                done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+                remaining = budget_s - (time.time() - t_start)
+                done, pending, timed_out = await _await_next_within_budget(pending, remaining)
+
+                if timed_out:
+                    budget_ms = int(budget_s * 1000)
+                    logger.warning(
+                        "Streaming search budget {:.1f}s exceeded; cancelling {} pending source(s) search_id={} mpn={}",
+                        budget_s,
+                        len(timed_out),
+                        search_id,
+                        mpn,
+                    )
+                    for task in timed_out:
+                        source_name = task_map[task]
+                        sources_completed += 1
+                        stats_updates.append((source_name, 0, budget_ms, "search budget exceeded"))
+                        await active_broker.publish(
+                            channel,
+                            "source-status",
+                            json.dumps(
+                                {
+                                    "source": source_name,
+                                    "status": SourceRunStatus.ERROR.value,
+                                    "error": "search budget exceeded",
+                                    "results": 0,
+                                    "ms": budget_ms,
+                                },
+                                default=str,
+                            ),
+                        )
+                    break
 
                 for task in done:
                     source_name = task_map[task]
@@ -2805,8 +2884,10 @@ async def stream_search_mpn(search_id: str, mpn: str) -> None:
                             await active_broker.publish(channel, "card-update", update_html)
 
                         total_results += hit_count
+                        stats_updates.append((source_name, hit_count, elapsed_ms, None))
 
                     except Exception as e:
+                        stats_updates.append((source_name, 0, 0, _redact_secrets(str(e))[:500]))
                         logger.exception(
                             "Streaming connector failed: source={} search_id={} mpn={}",
                             source_name,
@@ -2827,6 +2908,38 @@ async def stream_search_mpn(search_id: str, mpn: str) -> None:
                                 default=str,
                             ),
                         )
+
+            # Flush per-source telemetry to ApiSource in one guarded pass (mirrors
+            # _fetch_fresh) — records searches/results/latency + errors (including
+            # budget-exceeded timeouts) so the interactive path is visible in admin
+            # health. Best-effort: a telemetry failure must never abort the search.
+            try:
+                source_names = {s[0] for s in stats_updates if s[0]}
+                src_map = (
+                    {s.name: s for s in db.query(ApiSource).filter(ApiSource.name.in_(source_names)).all()}
+                    if source_names
+                    else {}
+                )
+                for source_name, hit_count, elapsed_ms, error in stats_updates:
+                    src = src_map.get(source_name)
+                    if not src:
+                        continue
+                    src.total_searches = (src.total_searches or 0) + 1
+                    src.total_results = (src.total_results or 0) + hit_count
+                    if not error:
+                        src.last_success = datetime.now(timezone.utc)
+                        prev = src.avg_response_ms or elapsed_ms
+                        src.avg_response_ms = (prev * 3 + elapsed_ms) // 4
+                        src.status = ApiSourceStatus.LIVE.value
+                        src.last_error = None
+                    else:
+                        src.last_error = error
+                        src.last_error_at = datetime.now(timezone.utc)
+                        src.error_count_24h = (src.error_count_24h or 0) + 1
+                db.commit()
+            except Exception as e:
+                logger.warning("API source stats update failed (streaming): {}", e)
+                db.rollback()
 
             # Cache results for filter endpoint (15-min TTL). Also write a per-MPN
             # pointer key (search:{key}:latest → this search_id, same TTL) so the Part
