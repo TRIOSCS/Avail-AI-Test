@@ -255,10 +255,12 @@ def mark_prepayment_paid(
             prepayment can be marked paid — a requested one is not yet authorized, and a
             paid/void one is already terminal).
     """
-    import asyncio
-
     from ..constants import PrepaymentStatus
-    from .prepayment_notifications import notify_prepayment_paid, run_prepayment_notify_bg
+    from .prepayment_notifications import (
+        notify_prepayment_paid,
+        run_prepayment_notify_bg,
+        schedule_prepayment_notify,
+    )
 
     if prepayment.status != PrepaymentStatus.APPROVED.value:
         raise ValueError("Only an approved prepayment can be marked paid.")
@@ -273,15 +275,7 @@ def mark_prepayment_paid(
     prepayment.pay_token = None
     db.commit()
 
-    # Fan out the paid notice best-effort. This is a sync service called from async request
-    # handlers (the confirm route + the in-app fallback): if an event loop is running,
-    # schedule the fire-and-forget runner onto it; if not (a sync/CLI/test caller), close the
-    # coroutine cleanly so nothing dangles and no dispatch is attempted.
-    coro = run_prepayment_notify_bg(notify_prepayment_paid, prepayment.id)
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        coro.close()
-    else:
-        loop.create_task(coro)
+    # Fan out the paid notice best-effort — loop-aware so a sync/CLI/test caller never dangles
+    # a coroutine (this sync service is driven by the async confirm route + in-app fallback).
+    schedule_prepayment_notify(run_prepayment_notify_bg(notify_prepayment_paid, prepayment.id))
     return prepayment

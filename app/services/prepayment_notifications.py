@@ -103,6 +103,24 @@ async def run_prepayment_notify_bg(coro_fn, prepayment_id: int) -> None:
     await safe_background_task(_run(), task_name="prepayment_notification", suppress_in_testing=True)
 
 
+def schedule_prepayment_notify(coro) -> None:
+    """Loop-aware fire-and-forget for a prepayment-notify coroutine from a SYNC caller.
+
+    ``run_prepayment_notify_bg(...)`` returns a coroutine; a sync service (mark-paid,
+    teardown void) cannot ``await`` it. If an event loop is running (the async request that
+    drove the transition) schedule it as a fire-and-forget task; otherwise (a sync/CLI/test
+    caller) close the coroutine cleanly so nothing dangles and no dispatch is attempted.
+    """
+    import asyncio
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        coro.close()
+    else:
+        loop.create_task(coro)
+
+
 # ── Public notify functions ──────────────────────────────────────────
 
 

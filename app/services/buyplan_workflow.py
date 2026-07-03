@@ -264,23 +264,35 @@ def _cancel_open_prepayment_requests_for_plan(
         re-sourced line ids: re-sourcing line A must NOT void a sibling line B's legitimate
         REQUESTED prepayment (only A's PO/vendor changed underneath).
 
-    Idempotent: filters ``status == REQUESTED`` only, so an already-APPROVED (about-to-be-
-    wired), CANCELLED or REJECTED request is untouched — a claw-back of an APPROVED wire
-    needs the follow-up VOID lifecycle state (spec §STRONG FOLLOW-UPS #3) and is deliberately
-    out of scope here. Cancelling an already-terminal request would otherwise flip a live
-    authorisation silently.
+    Two-part sweep on the SAME scope:
+      1. REQUESTED requests → CANCELLED (the never-approved wires; idempotent — a second call
+         finds nothing REQUESTED).
+      2. APPROVED-but-unwired ``Prepayment``s → ``void`` (``voided_at``/``void_reason``,
+         ``pay_token`` cleared) + a fire-and-forget ``notify_prepayment_voided`` DO-NOT-WIRE
+         stand-down to accounting/AP. This closes the QA review's biggest residual money risk:
+         an authorised (about-to-be-wired) prepayment otherwise survives its dead plan. A
+         ``paid`` prepayment is NEVER touched — the wire already went out (no auto claw-back).
 
     Sets each swept request CANCELLED + ``resolved_at`` = now + ``resolution_note`` = *reason*
     (mirroring ``_cancel_open_engine_requests_for_plan``'s cancel mechanics) and returns the
-    count. No engine ``cancel`` event is used: this is a system-driven consequence of the plan
-    dying (the plan-level audit records who cancelled / halted / completed it), not a
-    user-initiated cancel, and the sweep carries no actor. Lazy imports avoid the circular
-    import with the approvals service.
+    REQUESTED-request count (the void of approved prepayments is a side effect, not counted).
+    No engine ``cancel`` event is used: this is a system-driven consequence of the plan dying
+    (the plan-level audit records who cancelled / halted / completed it), not a user-initiated
+    cancel, and the sweep carries no actor. Lazy imports avoid the circular import with the
+    approvals + notification services.
     """
-    from ..constants import ApprovalRequestStatus, ApprovalSubjectType
+    from ..constants import ApprovalRequestStatus, ApprovalSubjectType, PrepaymentStatus
     from ..models.approvals import ApprovalRequest
     from ..models.quality_plan import Prepayment
+    from .prepayment_notifications import (
+        notify_prepayment_voided,
+        run_prepayment_notify_bg,
+        schedule_prepayment_notify,
+    )
 
+    now = datetime.now(timezone.utc)
+
+    # (1) Cancel every open (REQUESTED) prepayment approval request.
     stmt = (
         select(ApprovalRequest)
         .join(Prepayment, Prepayment.id == ApprovalRequest.subject_id)
@@ -293,17 +305,44 @@ def _cancel_open_prepayment_requests_for_plan(
     if line_ids is not None:
         stmt = stmt.where(Prepayment.buy_plan_line_id.in_(line_ids))
     open_requests = db.execute(stmt).scalars().all()
-    now = datetime.now(timezone.utc)
     for ar in open_requests:
         ar.status = ApprovalRequestStatus.CANCELLED
         ar.resolved_at = now
         ar.resolution_note = reason
-    if open_requests:
+
+    # (2) Void every APPROVED-but-unwired prepayment on the same scope + stand down AP.
+    pp_stmt = select(Prepayment).where(
+        Prepayment.status == PrepaymentStatus.APPROVED.value,
+        Prepayment.buy_plan_id == plan_id,
+    )
+    if line_ids is not None:
+        pp_stmt = pp_stmt.where(Prepayment.buy_plan_line_id.in_(line_ids))
+    approved_prepayments = db.execute(pp_stmt).scalars().all()
+    for pp in approved_prepayments:
+        pp.status = PrepaymentStatus.VOID.value
+        pp.voided_at = now
+        pp.void_reason = reason
+        pp.pay_token = None  # a dead link/token can no longer authorise a wire
+
+    if open_requests or approved_prepayments:
         # Flush the sweep so it is durable and immediately visible to any subsequent read —
         # idempotent even under a no-autoflush session (a second sweep then correctly finds
-        # nothing REQUESTED). All call sites flush afterward regardless, so this is free.
+        # nothing REQUESTED/APPROVED). All call sites flush afterward regardless, so this is free.
         db.flush()
-        logger.info("Voided {} pending prepayment request(s) for plan {}: {}", len(open_requests), plan_id, reason)
+
+    # Dispatch the stand-down AFTER the flush so the persisted void_reason is what AP reads.
+    # Loop-aware fire-and-forget: never blocks the teardown transaction (best-effort notice).
+    for pp in approved_prepayments:
+        schedule_prepayment_notify(run_prepayment_notify_bg(notify_prepayment_voided, pp.id))
+
+    if open_requests or approved_prepayments:
+        logger.info(
+            "Teardown of plan {}: cancelled {} pending + voided {} approved prepayment(s): {}",
+            plan_id,
+            len(open_requests),
+            len(approved_prepayments),
+            reason,
+        )
     return len(open_requests)
 
 
