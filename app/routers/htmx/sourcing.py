@@ -11,9 +11,6 @@ Depends on: app.models, app.dependencies, app.database, app.scoring,
     app.search_service, ._shared.
 """
 
-import asyncio
-import json
-import time
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -37,6 +34,46 @@ from ..auth import _password_login_enabled
 from ._shared import _base_ctx, _vite_assets
 
 router = APIRouter(tags=["htmx-views"])
+
+
+def _lead_sighting_data(db: Session, requirement_id: int, leads: list) -> dict[int, dict]:
+    """Map each lead → its latest sighting's ``{qty_available, unit_price}``.
+
+    One batched query replaces the former per-lead N+1 (PERF-7): fetch every sighting
+    for this requirement whose ``vendor_name_normalized`` matches a lead on the current
+    page, newest-first (nulls last), and keep the first (latest) row per vendor — the
+    exact row each lead's ``order_by(created_at.desc().nullslast()).first()`` returned.
+    Leads always carry a non-null ``vendor_name_normalized`` (NOT NULL column), so the
+    ``IN`` filter matches the same rows the per-lead equality filter did, and grouping
+    in newest-first order picks the identical "best" sighting the loop selected.
+    """
+    lead_sighting_data: dict[int, dict] = {}
+    if not leads:
+        return lead_sighting_data
+
+    norms = {lead.vendor_name_normalized for lead in leads}
+    sightings = (
+        db.query(Sighting)
+        .filter(
+            Sighting.requirement_id == requirement_id,
+            Sighting.vendor_name_normalized.in_(norms),
+        )
+        .order_by(Sighting.created_at.desc().nullslast())
+        .all()
+    )
+
+    best_by_vendor: dict[str, Sighting] = {}
+    for sighting in sightings:
+        best_by_vendor.setdefault(sighting.vendor_name_normalized, sighting)
+
+    for lead in leads:
+        best = best_by_vendor.get(lead.vendor_name_normalized)
+        if best:
+            lead_sighting_data[lead.id] = {
+                "qty_available": best.qty_available,
+                "unit_price": best.unit_price,
+            }
+    return lead_sighting_data
 
 
 @router.get("/v2/sourcing/{requirement_id}", response_class=HTMLResponse)
@@ -105,13 +142,18 @@ async def sourcing_search_trigger(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Trigger multi-source search for a requirement.
+    """Re-run the sourcing pipeline for a requirement and PERSIST the results.
 
-    Runs connectors in parallel, publishes SSE events per source completion, syncs leads
-    on completion, returns redirect to sourcing results.
+    Delegates to ``search_requirement()`` — the same orchestrator the sightings refresh
+    button uses. It fans out across the connectors once (the 48h per-MPN cooldown gates
+    the spend), saves the sightings, and write-throughs canonical ``SourcingLead`` rows
+    (``sync_leads_for_sightings``). The old implementation instead called
+    ``quick_search_mpn`` six times (each a full read-only sweep of every connector) and
+    discarded every result, so "Re-search" persisted nothing and redirected to an
+    unchanged list. After persisting, redirect back to the results page, which now reads
+    the freshly-written leads.
     """
-
-    from ...services.sse_broker import broker
+    from ...search_service import search_requirement
 
     req = db.query(Requirement).filter(Requirement.id == requirement_id).first()
     if not req:
@@ -119,47 +161,14 @@ async def sourcing_search_trigger(
     # Search triggers connector SPEND + cross-owner disclosure — scope to the owner.
     require_requisition_access(db, req.requisition_id, user, label="Requirement")
 
-    mpn = req.primary_mpn or ""
-    sources = ["brokerbin", "nexar", "digikey", "mouser", "oemsecrets", "element14"]
-    channel = f"sourcing:{requirement_id}"
-    all_sightings = []
+    try:
+        await search_requirement(req, db)
+    except Exception:
+        logger.warning("Sourcing re-search failed for requirement {}", requirement_id, exc_info=True)
 
-    async def search_source(source_name):
-        start_t = time.time()
-        try:
-            from ...search_service import quick_search_mpn
-
-            raw = await quick_search_mpn(mpn, db)
-            results = raw if isinstance(raw, list) else raw.get("sightings", [])
-            elapsed = int((time.time() - start_t) * 1000)
-            count = len(results) if results else 0
-            await broker.publish(
-                channel,
-                "source-complete",
-                json.dumps({"source": source_name, "count": count, "elapsed_ms": elapsed, "status": "done"}),
-            )
-            return results or []
-        except Exception as exc:
-            elapsed = int((time.time() - start_t) * 1000)
-            logger.error("Sourcing search failed for {} on {}: {}", mpn, source_name, exc)
-            await broker.publish(
-                channel,
-                "source-complete",
-                json.dumps(
-                    {"source": source_name, "count": 0, "elapsed_ms": elapsed, "status": "failed", "error": str(exc)}
-                ),
-            )
-            return []
-
-    results_by_source = await asyncio.gather(*[search_source(s) for s in sources], return_exceptions=True)
-
-    for source_results in results_by_source:
-        if isinstance(source_results, list):
-            all_sightings.extend(source_results)
-
-    await broker.publish(
-        channel, "search-complete", json.dumps({"total": len(all_sightings), "requirement_id": requirement_id})
-    )
+    # search_requirement() commits via a separate write session; expire so the redirect
+    # target re-reads the freshly-persisted leads instead of the caller session's cache.
+    db.expire_all()
 
     return HTMLResponse(status_code=200, headers={"HX-Redirect": f"/v2/sourcing/{requirement_id}"})
 
@@ -234,23 +243,7 @@ async def sourcing_results_partial(
     per_page = 24
     leads = query.offset((page - 1) * per_page).limit(per_page).all()
 
-    lead_sighting_data = {}
-    if leads:
-        for lead in leads:
-            best_sighting = (
-                db.query(Sighting)
-                .filter(
-                    Sighting.requirement_id == requirement_id,
-                    Sighting.vendor_name_normalized == lead.vendor_name_normalized,
-                )
-                .order_by(Sighting.created_at.desc().nullslast())
-                .first()
-            )
-            if best_sighting:
-                lead_sighting_data[lead.id] = {
-                    "qty_available": best_sighting.qty_available,
-                    "unit_price": best_sighting.unit_price,
-                }
+    lead_sighting_data = _lead_sighting_data(db, requirement_id, leads)
 
     ctx = _base_ctx(request, user, "requisitions")
     ctx.update(
@@ -559,23 +552,7 @@ async def sourcing_workspace_partial(
     per_page = 24
     leads = query.offset((page - 1) * per_page).limit(per_page).all()
 
-    lead_sighting_data = {}
-    if leads:
-        for ld in leads:
-            best_sighting = (
-                db.query(Sighting)
-                .filter(
-                    Sighting.requirement_id == requirement_id,
-                    Sighting.vendor_name_normalized == ld.vendor_name_normalized,
-                )
-                .order_by(Sighting.created_at.desc().nullslast())
-                .first()
-            )
-            if best_sighting:
-                lead_sighting_data[ld.id] = {
-                    "qty_available": best_sighting.qty_available,
-                    "unit_price": best_sighting.unit_price,
-                }
+    lead_sighting_data = _lead_sighting_data(db, requirement_id, leads)
 
     ctx = _base_ctx(request, user, "requisitions")
     ctx.update(
@@ -670,23 +647,7 @@ async def sourcing_workspace_list_partial(
     per_page = 24
     leads = query.offset((page - 1) * per_page).limit(per_page).all()
 
-    lead_sighting_data = {}
-    if leads:
-        for ld in leads:
-            best_sighting = (
-                db.query(Sighting)
-                .filter(
-                    Sighting.requirement_id == requirement_id,
-                    Sighting.vendor_name_normalized == ld.vendor_name_normalized,
-                )
-                .order_by(Sighting.created_at.desc().nullslast())
-                .first()
-            )
-            if best_sighting:
-                lead_sighting_data[ld.id] = {
-                    "qty_available": best_sighting.qty_available,
-                    "unit_price": best_sighting.unit_price,
-                }
+    lead_sighting_data = _lead_sighting_data(db, requirement_id, leads)
 
     ctx = _base_ctx(request, user, "requisitions")
     ctx.update(

@@ -44,7 +44,7 @@
           {{ requirement.brand or 'No brand' }}
         </span>
       </div>
-      <p class="text-xs text-gray-400 truncate mt-0.5">
+      <p class="text-secondary truncate mt-0.5">
         {{ requirement.requisition.name if requirement.requisition else '—' }}
         {% if requirement.requisition and requirement.requisition.customer_name %}
           · {{ requirement.requisition.customer_name }}
@@ -89,7 +89,7 @@
               title="Click to edit qty">
           {{ '{:,}'.format(requirement.target_qty) if requirement.target_qty else '—' }}
         </span>
-        <span class="text-xs text-gray-400 block">qty</span>
+        <span class="text-secondary block">qty</span>
       </div>
 
       {# Target Price — inline editable #}
@@ -101,7 +101,7 @@
               title="Click to edit target price">
           {{ '${:,.4f}'.format(requirement.target_price) if requirement.target_price else '—' }}
         </span>
-        <span class="text-xs text-gray-400 block">target</span>
+        <span class="text-secondary block">target</span>
       </div>
 
     </div>

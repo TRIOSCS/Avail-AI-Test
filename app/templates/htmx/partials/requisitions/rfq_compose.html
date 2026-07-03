@@ -64,7 +64,7 @@
               </span>
               {% endif %}
               {% if v.domain %}
-              <span class="text-xs text-gray-400">{{ v.domain }}</span>
+              <span class="text-secondary">{{ v.domain }}</span>
               {% endif %}
             </div>
             {% if v.emails %}
@@ -92,7 +92,7 @@
       {% else %}
       <div class="p-6 sm:p-8 text-center">
         <p class="text-sm text-gray-600">No vendors found with sightings for this requisition.</p>
-        <p class="text-xs text-gray-400 mt-1">Search for parts first to find vendors.</p>
+        <p class="text-secondary mt-1">Search for parts first to find vendors.</p>
       </div>
       {% endif %}
     </div>
@@ -168,7 +168,7 @@
               class="btn-primary">
         <span x-text="'Send RFQ to ' + selectedVendors.length + ' vendor(s)'">Send RFQ</span>
       </button>
-      <p class="text-xs text-gray-400" x-show="selectedVendors.length === 0" x-cloak>
+      <p class="text-secondary" x-show="selectedVendors.length === 0" x-cloak>
         Select at least one vendor to send.
       </p>
     </div>

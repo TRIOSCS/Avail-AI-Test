@@ -209,10 +209,15 @@ def _annotated_unavailability(
     the rows-win state selection) so the template stays dumb and never re-derives
     policy. Vendors with no matching record are absent.
     """
-    raw = unavailability_for_requirement(db, requirement, vendor_names)
+    # PERF-8: load the requirement's sightings once and share the single scan between the
+    # unavailability lookup and the has_unstamped_row grouping below — both operate on the
+    # identical set (Sighting.requirement_id == requirement.id). Skip the scan entirely
+    # when there are no vendors to annotate (unavailability_for_requirement returns {}
+    # without touching sightings in that case, so the pre-fix query count is unchanged).
+    rows = db.query(Sighting).filter(Sighting.requirement_id == requirement.id).all() if vendor_names else []
+    raw = unavailability_for_requirement(db, requirement, vendor_names, sightings=rows)
     if not raw:
         return {}
-    rows = db.query(Sighting).filter(Sighting.requirement_id == requirement.id).all()
     # Group sightings by vendor norm for condition-scoped has_unstamped_row computation.
     sightings_by_vendor: dict[str, list[Sighting]] = {}
     for s in rows:
@@ -341,8 +346,28 @@ async def sightings_list(
     if user.role in RESTRICTED_ROLES:
         query = query.filter(Requisition.created_by == user.id)
 
+    # Thresholds shared by the dashboard-strip quick filters below AND the counter/
+    # heatmap computations further down — compute once so a filtered list matches its
+    # counter exactly. UTC-aware to line up with UTCDateTime columns.
+    stale_threshold = datetime.now(timezone.utc) - timedelta(days=settings.sighting_stale_days)
+    deadline_48h = date.today() + timedelta(days=2)
+
     if filters.status:
         query = query.filter(Requirement.sourcing_status == filters.status)
+    # Urgent quick filter — same predicate as the "urgent" counter (priority >= 70 OR
+    # need_by within 48h).
+    if filters.urgent:
+        query = query.filter((Requirement.priority_score >= 70) | (Requirement.need_by_date <= deadline_48h))
+    # Stale quick filter — active requirements with no ActivityLog inside the stale
+    # window (mirrors the "stale" counter's NOT-IN-recent-activity set).
+    if filters.stale:
+        recent_activity = (
+            db.query(ActivityLog.requirement_id)
+            .filter(ActivityLog.requirement_id.isnot(None))
+            .group_by(ActivityLog.requirement_id)
+            .having(sqlfunc.max(ActivityLog.created_at) >= stale_threshold)
+        )
+        query = query.filter(~Requirement.id.in_(recent_activity.subquery().select()))
     if filters.sales_person:
         safe = escape_like(filters.sales_person)
         query = query.join(User, Requisition.created_by == User.id).filter(User.name.ilike(f"%{safe}%", escape="\\"))
@@ -383,8 +408,6 @@ async def sightings_list(
 
     top_vendors = {}
     coverage_map = {}
-    # Stale threshold is UTC-aware; UTCDateTime columns read back aware too
-    stale_threshold = datetime.now(timezone.utc) - timedelta(days=settings.sighting_stale_days)
     stale_req_ids: set[int] = set()
 
     if requirements:
@@ -433,8 +456,6 @@ async def sightings_list(
         coverage_map = {c.requirement_id: c.total_qty or 0 for c in coverage_rows}
 
     # ── Dashboard Strip Counters (Phase 2) ──────────────────────────
-    deadline_48h = date.today() + timedelta(days=2)
-
     # Active requirement IDs for dashboard (not just current page)
     active_req_select = (
         db.query(Requirement.id)
@@ -520,7 +541,16 @@ async def sightings_list(
     if filters.group_by in ("brand", "manufacturer"):
         groups: dict[str, list] = {}
         for r in requirements:
-            key = getattr(r, filters.group_by, "") or "Unknown"
+            # Group by the ENRICHED value from the linked material card (the manufacturer/
+            # brand derived from the MPN) first; fall back to the requirement's own field.
+            # The requirement's raw brand/manufacturer is blank on most rows (customer input),
+            # so keying off it alone collapsed nearly every part into "Unknown" — making the
+            # By-Brand / By-Manufacturer grouping look broken. material_card is lazy="joined"
+            # (already loaded), so this adds no query.
+            mc = r.material_card
+            key = (
+                (getattr(mc, filters.group_by, None) if mc else None) or getattr(r, filters.group_by, None) or "Unknown"
+            )
             groups.setdefault(key, []).append(r)
 
     ctx = {
@@ -924,7 +954,32 @@ async def sightings_batch_refresh(
     level = "warning" if failed else "success"
     if _toast_suppressed_for_sse(source):
         return HTMLResponse("")
-    return _oob_toast(msg, level)
+
+    # Re-render the sightings table for the split-panel caller so refreshed coverage /
+    # status is visible immediately (the old code returned only an OOB toast whose
+    # #toast-trigger anchor does not exist, which both dropped the toast AND emptied the
+    # table). The requisition parts-tab caller posts hx-swap="none" and only needs the
+    # toast, which fires via the HX-Trigger bridge (htmx_app.js) regardless of swap mode.
+    hx_target = request.headers.get("HX-Target", "")
+    if hx_target == "sightings-table":
+
+        def _fs(key: str) -> str:
+            val = form.get(key, "")
+            return val if isinstance(val, str) else ""
+
+        # search_requirement() commits via a separate write session, so drop the caller
+        # session's identity-map cache before re-querying for fresh coverage/status.
+        db.expire_all()
+        filters = SightingsListParams(
+            status=_fs("status"),
+            q=_fs("q"),
+            group_by=_fs("group_by"),
+            manufacturer=_fs("manufacturer"),
+        )
+        resp: HTMLResponse = await sightings_list(request, db=db, user=user, filters=filters)
+    else:
+        resp = HTMLResponse("")
+    return _with_toast(resp, msg, level)
 
 
 @router.post("/v2/partials/sightings/batch-assign", response_class=HTMLResponse)
@@ -994,7 +1049,7 @@ async def sightings_batch_status(
         raise HTTPException(status_code=400, detail=f"Maximum {MAX_BATCH_SIZE} requirements per batch")
 
     if not requirement_ids:
-        return _oob_toast("No requirements selected", "warning")
+        return _with_toast(HTMLResponse(""), "No requirements selected", "warning")
 
     try:
         SourcingStatus(new_status)
@@ -1034,7 +1089,9 @@ async def sightings_batch_status(
     if skipped:
         msg += f" {skipped} skipped (invalid transition)."
     level = "success" if skipped == 0 else "warning"
-    return _oob_toast(msg, level)
+    # Empty body + HX-Trigger:showToast — the working toast bridge (htmx_app.js). The
+    # form posts hx-swap="none", so there is no body to swap and nothing is wiped.
+    return _with_toast(HTMLResponse(""), msg, level)
 
 
 @router.post("/v2/partials/sightings/batch-notes", response_class=HTMLResponse)
@@ -1058,10 +1115,10 @@ async def sightings_batch_notes(
         raise HTTPException(status_code=400, detail=f"Maximum {MAX_BATCH_SIZE} requirements per batch")
 
     if not requirement_ids:
-        return _oob_toast("No requirements selected", "warning")
+        return _with_toast(HTMLResponse(""), "No requirements selected", "warning")
 
     if not notes:
-        return _oob_toast("Note text is required", "warning")
+        return _with_toast(HTMLResponse(""), "Note text is required", "warning")
 
     int_ids = [int(rid) for rid in requirement_ids]
     reqs = db.query(Requirement).filter(Requirement.id.in_(int_ids)).all()
@@ -1083,7 +1140,8 @@ async def sightings_batch_notes(
 
     count = len(reqs)
     msg = f"Added note to {count} requirement{'s' if count != 1 else ''}"
-    return _oob_toast(msg)
+    # Empty body + HX-Trigger:showToast (form posts hx-swap="none").
+    return _with_toast(HTMLResponse(""), msg)
 
 
 @router.get("/v2/partials/sightings/{requirement_id}/unavailable-form", response_class=HTMLResponse)

@@ -6,7 +6,7 @@ Depends on: conftest.py fixtures, app models, sighting_status service
 
 import json
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from html.parser import HTMLParser
 
 import pytest
@@ -235,6 +235,36 @@ class TestSightingsFilters:
         resp = client.get("/v2/partials/sightings?group_by=manufacturer")
         assert resp.status_code == 200
         assert "TestMfr" in resp.text
+
+    def test_group_by_manufacturer_uses_material_card(self, client, db_session):
+        """Regression: By-Manufacturer grouping keys off the ENRICHED material-card
+        manufacturer, not the requirement's own (usually blank) field.
+
+        The requirement's raw manufacturer is customer input and is empty on most rows, so
+        keying off it alone collapsed nearly every part into 'Unknown' — which read as 'the
+        filter doesn't work'. The linked material card carries the real (MPN-derived)
+        manufacturer.
+        """
+        req = Requisition(name="MC-Group RFQ", status="open", customer_name="Acme Corp")
+        db_session.add(req)
+        db_session.flush()
+        mc = MaterialCard(normalized_mpn="grpmc001", display_mpn="GRP-MC-001", manufacturer="EnrichedMfr")
+        db_session.add(mc)
+        db_session.flush()
+        r = Requirement(
+            requisition_id=req.id,
+            primary_mpn="GRP-MC-001",
+            manufacturer="",  # blank raw field — the common real case
+            target_qty=100,
+            sourcing_status="open",
+            material_card_id=mc.id,
+        )
+        db_session.add(r)
+        db_session.commit()
+
+        resp = client.get("/v2/partials/sightings?group_by=manufacturer")
+        assert resp.status_code == 200
+        assert "EnrichedMfr" in resp.text  # grouped under the card's manufacturer, not "Unknown"
 
     def test_group_by_brand(self, client, db_session):
         _seed_data(db_session)
@@ -2967,6 +2997,102 @@ class TestDashboardCounters:
             assert label in text, f"Dashboard counter '{label}' missing from response"
 
 
+class TestUrgentStaleQuickFilters:
+    """SIGHT-URGENT-STALE-NOOP: the dashboard 'N Urgent' / 'N Stale' buttons pass
+    ?urgent=1 / ?stale=1; the endpoint must accept + apply them with the SAME predicate
+    as the counters so the filtered list matches the count (previously the params were
+    silently dropped and the full unfiltered list reloaded)."""
+
+    def _two_reqs(self, db_session):
+        """Return (urgent_req, calm_req): one high-priority urgent, one low/idle."""
+        req = Requisition(name="QF RFQ", status="open", customer_name="QF Corp")
+        db_session.add(req)
+        db_session.flush()
+        urgent = Requirement(
+            requisition_id=req.id,
+            primary_mpn="URGENT-MPN",
+            target_qty=10,
+            sourcing_status="open",
+            priority_score=90.0,
+        )
+        calm = Requirement(
+            requisition_id=req.id,
+            primary_mpn="CALM-MPN",
+            target_qty=10,
+            sourcing_status="open",
+            priority_score=10.0,
+        )
+        db_session.add_all([urgent, calm])
+        db_session.commit()
+        return urgent, calm
+
+    def test_urgent_filter_by_priority(self, client, db_session):
+        """?urgent=1 shows only priority>=70 (or near-deadline) requirements."""
+        self._two_reqs(db_session)
+        resp = client.get("/v2/partials/sightings?urgent=1")
+        assert resp.status_code == 200
+        assert "URGENT-MPN" in resp.text
+        assert "CALM-MPN" not in resp.text
+
+    def test_urgent_filter_by_deadline(self, client, db_session):
+        """A low-priority req with need_by within 48h still passes the urgent filter."""
+        req = Requisition(name="DL RFQ", status="open", customer_name="DL Corp")
+        db_session.add(req)
+        db_session.flush()
+        soon = Requirement(
+            requisition_id=req.id,
+            primary_mpn="SOON-MPN",
+            target_qty=10,
+            sourcing_status="open",
+            priority_score=5.0,
+            need_by_date=date.today() + timedelta(days=1),
+        )
+        later = Requirement(
+            requisition_id=req.id,
+            primary_mpn="LATER-MPN",
+            target_qty=10,
+            sourcing_status="open",
+            priority_score=5.0,
+            need_by_date=date.today() + timedelta(days=30),
+        )
+        db_session.add_all([soon, later])
+        db_session.commit()
+        resp = client.get("/v2/partials/sightings?urgent=1")
+        assert resp.status_code == 200
+        assert "SOON-MPN" in resp.text
+        assert "LATER-MPN" not in resp.text
+
+    def test_stale_filter_excludes_recently_active(self, client, db_session):
+        """?stale=1 shows only requirements with no ActivityLog inside the stale
+        window."""
+        urgent, calm = self._two_reqs(db_session)
+        # Give `calm` a fresh activity so it is NOT stale; `urgent` stays stale (no logs).
+        db_session.add(
+            ActivityLog(
+                activity_type="note",
+                channel="manual",
+                requirement_id=calm.id,
+                requisition_id=calm.requisition_id,
+                notes="touched",
+                created_at=datetime.now(timezone.utc),
+            )
+        )
+        db_session.commit()
+        resp = client.get("/v2/partials/sightings?stale=1")
+        assert resp.status_code == 200
+        assert "URGENT-MPN" in resp.text  # no activity → stale
+        assert "CALM-MPN" not in resp.text  # recent activity → not stale
+
+    def test_no_filter_shows_all(self, client, db_session):
+        """Without the quick-filter params, both requirements appear (regression: the
+        old code dropped the params AND showed everything, masking the bug)."""
+        self._two_reqs(db_session)
+        resp = client.get("/v2/partials/sightings")
+        assert resp.status_code == 200
+        assert "URGENT-MPN" in resp.text
+        assert "CALM-MPN" in resp.text
+
+
 class TestCoverageMap:
     """Phase 2: Fulfillment coverage bar data in sightings_list context."""
 
@@ -3498,7 +3624,8 @@ class TestBatchStatus:
             data={"requirement_ids": json.dumps([r.id]), "status": "sourcing"},
         )
         assert resp.status_code == 200
-        assert "Updated 1 of 1" in resp.text
+        # Toast fires via HX-Trigger:showToast (empty body, form posts hx-swap="none").
+        assert "Updated 1 of 1" in resp.headers.get("HX-Trigger", "")
         db_session.refresh(r)
         assert r.sourcing_status == "sourcing"
 
@@ -3531,7 +3658,7 @@ class TestBatchStatus:
             data={"requirement_ids": json.dumps([r.id]), "status": "sourcing"},
         )
         assert resp.status_code == 200
-        assert "skipped" in resp.text.lower()
+        assert "skipped" in resp.headers.get("HX-Trigger", "").lower()
         db_session.refresh(r)
         assert r.sourcing_status == "won"
 
@@ -3549,8 +3676,9 @@ class TestBatchStatus:
             data={"requirement_ids": json.dumps([r1.id, r2.id]), "status": "sourcing"},
         )
         assert resp.status_code == 200
-        assert "Updated 1 of 2" in resp.text
-        assert "1 skipped" in resp.text
+        trigger = resp.headers.get("HX-Trigger", "")
+        assert "Updated 1 of 2" in trigger
+        assert "1 skipped" in trigger
 
     def test_over_limit_returns_400(self, client, db_session):
         ids = list(range(1, 52))
@@ -3579,7 +3707,7 @@ class TestBatchNotes:
             data={"requirement_ids": json.dumps([r.id]), "notes": "Test batch note"},
         )
         assert resp.status_code == 200
-        assert "Added note to 1 requirement" in resp.text
+        assert "Added note to 1 requirement" in resp.headers.get("HX-Trigger", "")
         logs = (
             db_session.query(ActivityLog)
             .filter(
@@ -3604,7 +3732,7 @@ class TestBatchNotes:
             data={"requirement_ids": json.dumps([r1.id, r2.id]), "notes": "Shared note"},
         )
         assert resp.status_code == 200
-        assert "Added note to 2 requirements" in resp.text
+        assert "Added note to 2 requirements" in resp.headers.get("HX-Trigger", "")
         logs = (
             db_session.query(ActivityLog)
             .filter(
@@ -3622,7 +3750,7 @@ class TestBatchNotes:
             data={"requirement_ids": json.dumps([r.id]), "notes": ""},
         )
         assert resp.status_code == 200
-        assert "Note text is required" in resp.text
+        assert "Note text is required" in resp.headers.get("HX-Trigger", "")
 
     def test_over_limit_returns_400(self, client, db_session):
         ids = list(range(1, 52))
@@ -4422,6 +4550,206 @@ class TestAnnotatedUnavailabilityConditionScoped:
         self._make_rec(db_session, r, condition=None, reason="not_really_there")
         result = _annotated_unavailability(db_session, r, ["Good Vendor"])
         assert result["Good Vendor"]["has_unstamped_row"] is True
+
+
+class _SightingScanCounter:
+    """Count SELECTs that scan the ``sightings`` table for the enclosing block.
+
+    PERF-8: _annotated_unavailability used to scan the requirement's sightings twice per
+    render (once inside unavailability_for_requirement, once in the wrapper). This asserts
+    the merged single scan and guards against the double-scan regressing.
+    """
+
+    def __init__(self, db):
+        from sqlalchemy import event as _event
+
+        self._event = _event
+        self.engine = db.get_bind()
+        self.count = 0
+
+    def _on_exec(self, conn, cursor, statement, parameters, context, executemany):
+        if "from sightings" in statement.lower():
+            self.count += 1
+
+    def __enter__(self):
+        self._event.listen(self.engine, "after_cursor_execute", self._on_exec)
+        return self
+
+    def __exit__(self, *a):
+        self._event.remove(self.engine, "after_cursor_execute", self._on_exec)
+
+
+class TestAnnotatedUnavailabilitySingleScan:
+    """PERF-8: the requirement's sightings are scanned once, not twice, per render."""
+
+    def _seed_record(self, db_session, r, *, condition=None):
+        db_session.add(
+            VendorPartUnavailability(
+                vendor_name_normalized="good vendor",
+                normalized_mpn="testmpn001",
+                reason="sold_elsewhere",
+                condition=condition,
+                requirement_id=r.id,
+            )
+        )
+        db_session.commit()
+
+    def test_sightings_scanned_once_when_record_present(self, client, db_session):
+        """With a matching unavailability record the wrapper must scan sightings exactly
+        once (was twice: helper scan + wrapper scan)."""
+        from app.routers.sightings import _annotated_unavailability
+
+        _, r, _ = _seed_data(db_session)
+        db_session.add(
+            Sighting(
+                requirement_id=r.id,
+                vendor_name="Good Vendor",
+                mpn_matched="TEST-MPN-001",
+                is_unavailable=True,
+                condition="New",
+            )
+        )
+        db_session.commit()
+        self._seed_record(db_session, r, condition="new")
+
+        with _SightingScanCounter(db_session) as counter:
+            result = _annotated_unavailability(db_session, r, ["Good Vendor"])
+
+        assert "Good Vendor" in result  # record present → wrapper ran its full body
+        assert counter.count == 1, f"expected a single sightings scan, got {counter.count}"
+
+    def test_scan_count_independent_of_sighting_count(self, client, db_session):
+        """The sightings scan count must stay 1 regardless of how many sightings exist —
+        the old double-scan was constant-2 but each scan is unbounded in rows."""
+        from app.routers.sightings import _annotated_unavailability
+
+        _, r, _ = _seed_data(db_session)
+        self._seed_record(db_session, r, condition=None)
+        for i in range(2):
+            db_session.add(
+                Sighting(
+                    requirement_id=r.id,
+                    vendor_name="Good Vendor",
+                    mpn_matched="TEST-MPN-001",
+                    is_unavailable=False,
+                    condition="New",
+                )
+            )
+        db_session.commit()
+        with _SightingScanCounter(db_session) as c_small:
+            _annotated_unavailability(db_session, r, ["Good Vendor"])
+
+        for i in range(25):
+            db_session.add(
+                Sighting(
+                    requirement_id=r.id,
+                    vendor_name="Good Vendor",
+                    mpn_matched="TEST-MPN-001",
+                    is_unavailable=False,
+                    condition="New",
+                )
+            )
+        db_session.commit()
+        with _SightingScanCounter(db_session) as c_big:
+            _annotated_unavailability(db_session, r, ["Good Vendor"])
+
+        assert c_small.count == 1
+        assert c_big.count == c_small.count, "sightings scan count grew with sighting count"
+
+    def test_no_scan_when_no_vendors(self, client, db_session):
+        """Empty vendor list short-circuits before any sightings scan (unchanged from
+        pre-fix: unavailability_for_requirement returns {} without touching sightings)."""
+        from app.routers.sightings import _annotated_unavailability
+
+        _, r, _ = _seed_data(db_session)
+        db_session.add(Sighting(requirement_id=r.id, vendor_name="Good Vendor", mpn_matched="TEST-MPN-001"))
+        db_session.commit()
+        with _SightingScanCounter(db_session) as counter:
+            result = _annotated_unavailability(db_session, r, [])
+        assert result == {}
+        assert counter.count == 0
+
+
+class TestAnnotatedUnavailabilityEquivalence:
+    """PERF-8: sharing the loaded sighting set must produce byte-identical output — same
+    rows, same has_unstamped_row derivation — across duplicate/null/multi-vendor cases."""
+
+    def _rec(self, db_session, r, vendor_norm, mpn_norm, *, condition=None):
+        db_session.add(
+            VendorPartUnavailability(
+                vendor_name_normalized=vendor_norm,
+                normalized_mpn=mpn_norm,
+                reason="sold_elsewhere",
+                condition=condition,
+                requirement_id=r.id,
+            )
+        )
+
+    def test_duplicate_and_null_condition_sightings(self, client, db_session):
+        """Duplicate sightings (same vendor+mpn) and NULL-condition rows must yield the
+        same has_unstamped_row the single merged scan derives: an unstamped row matching
+        the record's condition (or any row for a NULL record) sets it True."""
+        from app.routers.sightings import _annotated_unavailability
+
+        _, r, _ = _seed_data(db_session)
+        # Two identical unstamped NEW sightings for the same vendor (duplicates) ...
+        for _ in range(2):
+            db_session.add(
+                Sighting(
+                    requirement_id=r.id,
+                    vendor_name="Good Vendor",
+                    mpn_matched="TEST-MPN-001",
+                    is_unavailable=False,
+                    condition="New",
+                )
+            )
+        # ... plus a stamped row with NULL condition (should not flip the NEW record).
+        db_session.add(
+            Sighting(
+                requirement_id=r.id,
+                vendor_name="Good Vendor",
+                mpn_matched="TEST-MPN-001",
+                is_unavailable=True,
+                condition=None,
+            )
+        )
+        self._rec(db_session, r, "good vendor", "testmpn001", condition="new")
+        db_session.commit()
+
+        result = _annotated_unavailability(db_session, r, ["Good Vendor"])
+        assert set(result.keys()) == {"Good Vendor"}
+        assert result["Good Vendor"]["condition"] == "new"
+        assert result["Good Vendor"]["has_unstamped_row"] is True
+
+    def test_multi_vendor_only_matched_vendor_present(self, client, db_session):
+        """A vendor with no matching record is absent; the matched vendor is annotated —
+        identical to the pre-fix per-vendor filtering over the shared scan."""
+        from app.routers.sightings import _annotated_unavailability
+
+        _, r, _ = _seed_data(db_session)
+        db_session.add(
+            Sighting(
+                requirement_id=r.id,
+                vendor_name="Good Vendor",
+                mpn_matched="TEST-MPN-001",
+                is_unavailable=True,
+                condition="New",
+            )
+        )
+        db_session.add(
+            Sighting(
+                requirement_id=r.id,
+                vendor_name="Other Vendor",
+                mpn_matched="TEST-MPN-001",
+                is_unavailable=False,
+                condition="New",
+            )
+        )
+        self._rec(db_session, r, "good vendor", "testmpn001", condition="new")
+        db_session.commit()
+
+        result = _annotated_unavailability(db_session, r, ["Good Vendor", "Other Vendor"])
+        assert set(result.keys()) == {"Good Vendor"}
 
 
 class TestUnavailableFormConditionSelector:

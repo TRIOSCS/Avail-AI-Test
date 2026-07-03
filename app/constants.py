@@ -369,15 +369,21 @@ class UserAuditAction(StrEnum):
 
 # Default access granted to every interactive (non-admin) role. This deliberately
 # preserves TODAY'S behavior: the nav is fully visible to all interactive roles, and
-# RFQ / approve-offers / export / manage-connectors are allowed for every buyer-tier
-# role. ops_verification is INTENTIONALLY excluded — it is curated through the
-# verification group (VerificationGroupMember), never via a blanket role default, so
-# turning the access model on grants nobody new ops-verification rights.
+# RFQ / approve-offers / export are allowed for every buyer-tier role.
+#
+# manage_connectors is INTENTIONALLY excluded — connector credentials and is_active are
+# workspace-global shared state, so a blanket role default would let every buyer overwrite
+# shared API keys or disable data sources. It is a deliberate, per-user grant: an admin
+# always qualifies (user_has_access short-circuits on admin), and an admin may grant it to
+# a specific trusted non-admin via an explicit access override.
+#
+# ops_verification is likewise excluded — it is curated through the verification group
+# (VerificationGroupMember), never via a blanket role default, so turning the access model
+# on grants nobody new ops-verification rights.
 _INTERACTIVE_DEFAULTS = frozenset(MODULE_ACCESS_KEYS) | {
     AccessKey.SEND_RFQ,
     AccessKey.APPROVE_OFFERS,
     AccessKey.EXPORT_DATA,
-    AccessKey.MANAGE_CONNECTORS,
 }
 
 # Role → default access set. Defaults exactly preserve current behavior so that

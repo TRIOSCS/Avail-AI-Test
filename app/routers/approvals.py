@@ -23,12 +23,13 @@ Depends on: app.services.approvals.service, app.services.approvals.events,
 
 from fastapi import APIRouter, Depends, Form, HTTPException
 from fastapi.responses import JSONResponse, RedirectResponse
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from ..constants import RESTRICTED_ROLES, ApprovalRecipientStatus
 from ..database import get_db
 from ..dependencies import require_approval_gatekeeper, require_user
-from ..models.approvals import ApprovalRequest
+from ..models.approvals import ApprovalRequest, ApprovalStep, ApprovalStepRecipient
 from ..models.auth import User
 from ..services.approvals.events import cancel as svc_cancel
 from ..services.approvals.events import reassign as svc_reassign
@@ -59,6 +60,59 @@ def _serialize_request(r: ApprovalRequest) -> dict:
         "resolution_note": r.resolution_note,
         "created_at": r.created_at.isoformat() if r.created_at else None,
     }
+
+
+def _pending_recipient_exists(user: User):
+    """Correlated EXISTS: *user* holds a PENDING recipient row on the outer request.
+
+    Shared by the list scope and the detail guard so both mirror the exact set
+    require_approval_gatekeeper acts on.
+    """
+    return (
+        select(ApprovalStepRecipient.id)
+        .join(ApprovalStep, ApprovalStepRecipient.step_id == ApprovalStep.id)
+        .where(
+            ApprovalStep.request_id == ApprovalRequest.id,
+            ApprovalStepRecipient.user_id == user.id,
+            ApprovalStepRecipient.status == ApprovalRecipientStatus.PENDING,
+        )
+        .exists()
+    )
+
+
+def _restricted_visibility_clause(user: User):
+    """WHERE clause limiting ApprovalRequest rows a RESTRICTED_ROLES user may see.
+
+    Mirrors how the app scopes requisition-derived data (require_requisition_access /
+    RESTRICTED_ROLES): SALES/TRADER see only requests they submitted (requested_by_id),
+    own (owner_id), or must personally decide (a PENDING recipient row). Unrestricted
+    roles (buyer/manager/admin) are never passed here and keep full visibility.
+    """
+    return or_(
+        ApprovalRequest.requested_by_id == user.id,
+        ApprovalRequest.owner_id == user.id,
+        _pending_recipient_exists(user),
+    )
+
+
+def _can_view_request(db: Session, request: ApprovalRequest, user: User) -> bool:
+    """True if *user* may view *request* — full for unrestricted roles, scoped for
+    RESTRICTED_ROLES to their own/owned/pending-recipient requests (mirrors
+    _restricted_visibility_clause)."""
+    if getattr(user, "role", None) not in RESTRICTED_ROLES:
+        return True
+    if user.id in (request.requested_by_id, request.owner_id):
+        return True
+    recipient = db.execute(
+        select(ApprovalStepRecipient.id)
+        .join(ApprovalStep, ApprovalStepRecipient.step_id == ApprovalStep.id)
+        .where(
+            ApprovalStep.request_id == request.id,
+            ApprovalStepRecipient.user_id == user.id,
+            ApprovalStepRecipient.status == ApprovalRecipientStatus.PENDING,
+        )
+    ).first()
+    return recipient is not None
 
 
 @router.post("/v2/approvals/requests/{id}/decision")
@@ -150,6 +204,10 @@ def list_requests(
     (gate_type=buy_plan, subject_type=buy_plan), so the old read-only buy-plan bridge is
     gone — filter on gate_type='buy_plan' to get exactly the buy-plan requests.
 
+    Ownership scope: RESTRICTED_ROLES (SALES/TRADER) see only requests they submitted,
+    own, or must personally decide (see _restricted_visibility_clause); unrestricted
+    roles (buyer/manager/admin) see all — mirrors requisition-derived data scoping.
+
     Returns: {"items": [...], "total": N}.
     """
     q = select(ApprovalRequest)
@@ -157,6 +215,8 @@ def list_requests(
         q = q.where(ApprovalRequest.gate_type == gate_type)
     if status:
         q = q.where(ApprovalRequest.status == status)
+    if getattr(current_user, "role", None) in RESTRICTED_ROLES:
+        q = q.where(_restricted_visibility_clause(current_user))
 
     rows = db.execute(q).scalars().all()
     items = [_serialize_request(r) for r in rows]
@@ -183,11 +243,16 @@ def get_request(
 ):
     """Get a single ApprovalRequest by id.
 
+    Ownership scope: RESTRICTED_ROLES (SALES/TRADER) may only read a request they
+    submitted, own, or must personally decide (see _can_view_request); otherwise 404
+    (existence not leaked, mirroring require_requisition_access). Unrestricted roles
+    (buyer/manager/admin) may read any request.
+
     Returns: the request object as a dict.
-    Raises: 404 if not found.
+    Raises: 404 if not found or not visible to the current user.
     """
     request = db.get(ApprovalRequest, id)
-    if request is None:
+    if request is None or not _can_view_request(db, request, current_user):
         return JSONResponse(status_code=404, content={"error": f"ApprovalRequest {id} not found"})
 
     return _serialize_request(request)

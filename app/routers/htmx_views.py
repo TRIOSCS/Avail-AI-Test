@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from loguru import logger
 from sqlalchemy import func as sqlfunc
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from ..constants import (
     AccessKey,
@@ -57,7 +57,7 @@ from ..utils.sql_helpers import escape_like
 from ._lookup_helpers import get_requisition_or_404
 from .auth import _password_login_enabled
 from .htmx._shared import _base_ctx, _safe_int, _vite_assets
-from .htmx.requisitions import requisition_tab, requisitions_list_partial
+from .htmx.requisitions import _best_quote_status, requisition_tab, requisitions_list_partial
 from .htmx.settings import _run_inbox_scan_now
 
 router = APIRouter(tags=["htmx-views"])
@@ -136,6 +136,7 @@ _MODULE_ENTRY_URLS: tuple[tuple[AccessKey, str], ...] = (
 @router.get("/v2/requisitions", response_class=HTMLResponse)
 @router.get("/v2/requisitions/{req_id:int}", response_class=HTMLResponse)
 @router.get("/v2/search", response_class=HTMLResponse)
+@router.get("/v2/search/results", response_class=HTMLResponse)
 @router.get("/v2/vendors", response_class=HTMLResponse)
 @router.get("/v2/vendors/{vendor_id:int}", response_class=HTMLResponse)
 @router.get("/v2/customers", response_class=HTMLResponse)
@@ -220,8 +221,14 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
 
     # Determine the correct partial URL for initial content load
     if current_view == "requisitions":
-        # Split-panel workspace is the new default for requisitions
-        partial_url = "/v2/partials/parts/workspace"
+        # Split-panel workspace is the default Sales Hub; ?view=list serves the flat
+        # requisitions list so the List-view toggle's pushed URL
+        # (/v2/requisitions?view=list) reloads / bookmarks straight to the list.
+        partial_url = (
+            "/v2/partials/requisitions"
+            if request.query_params.get("view") == "list"
+            else "/v2/partials/parts/workspace"
+        )
     elif current_view == "trouble-tickets":
         partial_url = "/v2/partials/trouble-tickets/workspace"
     elif current_view == "crm":
@@ -233,10 +240,17 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
     elif current_view == "my-day":
         partial_url = "/v2/partials/my-day"
     elif current_view == "search":
-        # Deep-link the Part Dossier: ?mpn= rides along to /v2/partials/search so a
-        # bookmarked /v2/search?mpn=<PN> paints the dossier on first load.
-        mpn_qs = request.query_params.get("mpn", "").strip()
-        partial_url = f"/v2/partials/search?mpn={quote(mpn_qs)}" if mpn_qs else "/v2/partials/search"
+        if path.rstrip("/").endswith("/results"):
+            # Full-page global-search results (F5/bookmark/share of "View all
+            # results"): thread ?q= to the results partial (shell-01). Without this
+            # route the pushed /v2/search/results URL 404'd → bare JSON error page.
+            q_qs = request.query_params.get("q", "").strip()
+            partial_url = f"/v2/partials/search/results?q={quote(q_qs)}"
+        else:
+            # Deep-link the Part Dossier: ?mpn= rides along to /v2/partials/search so a
+            # bookmarked /v2/search?mpn=<PN> paints the dossier on first load.
+            mpn_qs = request.query_params.get("mpn", "").strip()
+            partial_url = f"/v2/partials/search?mpn={quote(mpn_qs)}" if mpn_qs else "/v2/partials/search"
     elif current_view == "settings":
         # Thread ?tab= through so a deep-link / redirect (e.g. the legacy
         # /v2/trouble-tickets → /v2/settings?tab=tickets) paints the right tab on
@@ -267,6 +281,9 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         "quotes",
         "prospecting",
         "trouble-tickets",
+        # "materials" — /v2/materials/{id} deep-links (row push-url, F5 reload, the
+        # Add-part HX-Redirect) must lazy-load the card detail, not the faceted list.
+        "materials",
     )
     if current_view in _DETAIL_VIEWS and f"/{current_view}/" in path:
         parts = path.split(f"/{current_view}/")
@@ -563,8 +580,8 @@ async def requisition_inline_save(
             db.query(Requisition)
             .options(
                 joinedload(Requisition.creator),
-                joinedload(Requisition.requirements),
-                joinedload(Requisition.offers),
+                selectinload(Requisition.requirements),
+                selectinload(Requisition.offers),
             )
             .filter(Requisition.id == req_id)
             .first()
@@ -576,19 +593,23 @@ async def requisition_inline_save(
         ctx.update({"req": req, "requirements": requirements, "users": users})
         response = template_response("htmx/partials/requisitions/detail_header.html", ctx)
     else:
-        # Row context — re-fetch ORM object with relationships
+        # Row context — re-fetch ORM object with relationships. Must attach the SAME
+        # computed attrs the list route does (req_count/offer_count/quote_status) or
+        # the swapped-in row degrades those cells.
         req = (
             db.query(Requisition)
             .options(
                 joinedload(Requisition.creator),
-                joinedload(Requisition.requirements),
-                joinedload(Requisition.offers),
+                selectinload(Requisition.requirements),
+                selectinload(Requisition.offers),
+                selectinload(Requisition.quotes),
             )
             .filter(Requisition.id == req_id)
             .first()
         )
         req.req_count = len(req.requirements) if req.requirements else 0
         req.offer_count = len(req.offers) if req.offers else 0
+        req.quote_status = _best_quote_status(req.quotes)
         ctx = _base_ctx(request, user, "requisitions")
         ctx.update({"req": req, "user_role": getattr(user, "role", UserRole.SALES), "user": user})
         response = template_response("htmx/partials/requisitions/req_row.html", ctx)
@@ -1141,8 +1162,12 @@ async def search_lead_detail(
         if results:
             from ..vendor_utils import normalize_vendor_name
 
+            # Normalize BOTH sides: the template sends the raw vendor name (url-encoded),
+            # so applying the same normalizer here makes the key survive suffix stripping
+            # (", Inc." / "LLC" / "Corp.") that used to make the row's Details → miss.
+            vendor_key_norm = normalize_vendor_name(vendor_key)
             lead = next(
-                (r for r in results if normalize_vendor_name(r.get("vendor_name", "")) == vendor_key),
+                (r for r in results if normalize_vendor_name(r.get("vendor_name", "")) == vendor_key_norm),
                 None,
             )
             if lead:
@@ -1307,7 +1332,11 @@ async def add_to_requisition(
     mpn = body.get("mpn", "").strip()
     items = body.get("items", [])
 
-    if not requisition_id or not mpn or not items:
+    # The MPN + requisition are the only required inputs: from the part dossier the
+    # meaningful action is "add THIS part to a requisition", which creates the
+    # Requirement row. Shortlisted market rows (items) are optional supporting
+    # sightings, so an empty shortlist must still succeed (it added the part).
+    if not requisition_id or not mpn:
         return HTMLResponse(
             '<div class="text-red-600 text-sm p-2">Missing required fields.</div>',
             status_code=400,
@@ -1365,10 +1394,13 @@ async def add_to_requisition(
     db.commit()
 
     count = len(items)
+    req_label = html_mod.escape(req.name or "")
+    if count:
+        what = f"{count} result{'s' if count != 1 else ''}"
+    else:
+        what = html_mod.escape(mpn)
     return HTMLResponse(
-        f'<div class="text-sm text-emerald-600 p-2">'
-        f"Added {count} result{'s' if count != 1 else ''} to requisition &ldquo;{html_mod.escape(req.name or '')}&rdquo;"
-        f"</div>"
+        f'<div class="text-sm text-emerald-600 p-2">Added {what} to requisition &ldquo;{req_label}&rdquo;</div>'
     )
 
 

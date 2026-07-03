@@ -3,7 +3,7 @@
    Called by: detail.html (inside acct-settings collapsible)
    Depends on: task_service.get_open_tasks_for_company
 #}
-<div class="bg-white rounded-xl shadow-sm border border-brand-200 p-4" id="account-tasks-{{ company_id }}">
+<div class="bg-white rounded-xl shadow-card border border-brand-200 p-4" id="account-tasks-{{ company_id }}">
   <div class="flex items-center justify-between mb-2">
     <h2 class="text-sm font-semibold text-gray-900">Tasks</h2>
     <button type="button"
@@ -71,6 +71,6 @@
       {% endfor %}
     </ul>
   {% else %}
-    <p class="text-xs text-gray-400 italic">No open tasks.</p>
+    <p class="text-secondary italic">No open tasks.</p>
   {% endif %}
 </div>

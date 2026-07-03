@@ -13,7 +13,7 @@ Called by: pytest
 Depends on: app.services.resell_outreach_service, tests.conftest
 """
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
@@ -513,3 +513,30 @@ class TestRecordResponse:
     def test_requires_a_match_key(self, db_session: Session):
         with pytest.raises(ValueError):
             svc.record_response(db_session, has_offer=False)
+
+    def test_commit_false_flushes_without_committing(
+        self,
+        db_session: Session,
+        excess_list: ExcessList,
+        line_item: ExcessLineItem,
+        buyer_card: VendorCard,
+        trader: User,
+    ):
+        """Commit=False (the inbox-poll savepoint path) must NOT commit, but the linked
+        ExcessOffer is flush-visible in the same session so the caller can finish the
+        txn."""
+        o = self._make_outreach(db_session, excess_list, buyer_card, trader)
+        with patch.object(db_session, "commit", MagicMock()) as mock_commit:
+            updated = svc.record_response(
+                db_session,
+                conversation_id="conv-1",
+                has_offer=True,
+                offer_lines=[{"mpn_raw": "LM358N", "quantity": 500, "unit_price": "1.25"}],
+                commit=False,
+            )
+        mock_commit.assert_not_called()
+        assert updated[0].status == "bid"
+        # Flushed, so the inbound offer is visible in THIS session before any commit.
+        offers = db_session.query(ExcessOffer).filter(ExcessOffer.excess_list_id == excess_list.id).all()
+        assert len(offers) == 1
+        assert offers[0].id is not None

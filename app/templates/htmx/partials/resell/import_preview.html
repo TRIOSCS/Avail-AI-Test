@@ -1,6 +1,9 @@
 {#
   resell/import_preview.html — Preview of a parsed import (reuses the excess grid).
-  Confirm → /api/resell/{id}/import-confirm (re-renders the Lines tab).
+  Confirm → /api/resell/{id}/import-confirm (re-renders the WHOLE detail so the header
+  Post button appears once the draft has lines — RS-5). A Cancel / "Try another file"
+  affordance ALWAYS renders (even for an all-errors file) so the user is never stranded
+  with no way back to the dropzone (RS-6).
   Receives: list_id, filename, valid_count, error_count, errors, preview_rows,
             all_valid_rows_json.
   Called by: resell.resell_import_preview.
@@ -48,20 +51,28 @@
     </table>
   </div>
   {% if valid_count > preview_rows|length %}
-  <p class="text-xs text-gray-400">Showing {{ preview_rows|length }} of {{ valid_count }} valid rows</p>
+  <p class="text-secondary">Showing {{ preview_rows|length }} of {{ valid_count }} valid rows</p>
   {% endif %}
   {% endif %}
 
-  {% if valid_count %}
-  <form hx-post="/api/resell/{{ list_id }}/import-confirm"
-        hx-target="#tab-lines-{{ list_id }}"
-        hx-swap="innerHTML"
-        data-loading-disable
-        @htmx:after-request.camel="$store.toast.message='Imported {{ valid_count }} lines'; $store.toast.type='success'; $store.toast.show=true;">
-    <input type="hidden" name="rows_json" value="{{ all_valid_rows_json }}">
-    <div class="flex gap-2">
+  {# Actions — the Cancel / re-upload affordance ALWAYS renders so an all-errors file
+     never dead-ends inside #import-area (RS-6). Confirm re-renders the whole detail so
+     the header Post button appears (RS-5). #}
+  <div class="flex gap-2">
+    {% if valid_count %}
+    <form hx-post="/api/resell/{{ list_id }}/import-confirm"
+          hx-target="closest [data-resell-detail-root]"
+          hx-swap="outerHTML"
+          data-loading-disable
+          @htmx:after-request.camel="$store.toast.message='Imported {{ valid_count }} lines'; $store.toast.type='success'; $store.toast.show=true;">
+      <input type="hidden" name="rows_json" value="{{ all_valid_rows_json }}">
       <button type="submit" class="btn btn-primary btn-sm">Confirm import ({{ valid_count }})</button>
-    </div>
-  </form>
-  {% endif %}
+    </form>
+    {% endif %}
+    <button type="button"
+            hx-get="/v2/partials/resell/{{ list_id }}/lines"
+            hx-target="#tab-lines-{{ list_id }}"
+            hx-swap="innerHTML"
+            class="btn btn-secondary btn-sm">{{ 'Cancel' if valid_count else 'Try another file' }}</button>
+  </div>
 </div>

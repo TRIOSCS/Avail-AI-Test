@@ -74,10 +74,74 @@ def _prospect_toast(response, message: str, kind: str = "success") -> None:
     response.headers["HX-Trigger"] = json.dumps({"showToast": {"message": message, "type": kind}})
 
 
+def _prospect_error_toast(message: str) -> HTMLResponse:
+    """Honest error feedback for an HTMX action that has no card to re-render.
+
+    HTMX suppresses non-2xx swaps and the JSON HTTPException handler carries no
+    showToast, so raising a 4xx here would leave the modal open with ZERO feedback (a
+    silent no-op). Instead return a 200 that swaps nothing (HX-Reswap: none) but fires
+    an error showToast — mirroring the reassign handler's ValueError path, which also
+    returns 200 + a toast.
+    """
+    resp = HTMLResponse("", headers={"HX-Reswap": "none"})
+    _prospect_toast(resp, message, "error")
+    return resp
+
+
 def _wants_detail(request: Request) -> bool:
     """True when an action came from the detail view (targets #main-content) rather than
     from an in-grid card (targets #prospect-<id>) — so we return the right partial."""
     return request.headers.get("HX-Target") == "main-content"
+
+
+def _reclaim_ui_flags(user: User, prospect) -> dict:
+    """Reclaim/reassign button visibility for one (user, prospect) pair.
+
+    A prospect is "swept" when ``swept_from_owner_id`` is set — an auto-swept dormant
+    account parked back in the pool. The sweep email tells the former owner to reclaim it
+    "from the Prospecting tab", so these flags drive that UI:
+
+    - can_reclaim: former owner, a manager/admin, or the configured sweep-manager email
+      (mirrors ``reclaim_prospect_account``'s permission gate).
+    - in_cooldown: the plain former owner is inside the 30-day post-sweep cooldown
+      (supervisors bypass it) — the reclaim button is shown disabled with the unlock date.
+    - can_reassign: a manager/admin (mirrors ``reassign_account``'s gate); requires a
+      linked company since reassign acts on the company.
+    """
+    if prospect.swept_from_owner_id is None:
+        return {
+            "is_swept": False,
+            "can_reclaim": False,
+            "can_reassign": False,
+            "in_cooldown": False,
+            "cooldown_until": None,
+        }
+
+    from ...config import settings
+
+    supervisor = is_manager_or_admin(user)
+    manager_email = settings.account_sweep_manager_email
+    is_email_manager = bool(manager_email and user.email == manager_email)
+    is_former_owner = prospect.swept_from_owner_id == user.id
+    is_supervisor = supervisor or is_email_manager
+
+    in_cooldown = False
+    cooldown_until = None
+    blocked = prospect.reclaim_blocked_until
+    if is_former_owner and not is_supervisor and blocked is not None:
+        if blocked.tzinfo is None:
+            blocked = blocked.replace(tzinfo=timezone.utc)
+        if blocked > datetime.now(timezone.utc):
+            in_cooldown = True
+            cooldown_until = blocked.strftime("%b %d, %Y")
+
+    return {
+        "is_swept": True,
+        "can_reclaim": is_former_owner or is_supervisor,
+        "can_reassign": supervisor and prospect.company_id is not None,
+        "in_cooldown": in_cooldown,
+        "cooldown_until": cooldown_until,
+    }
 
 
 def _prospect_card_ctx(request: Request, user: User, prospect) -> dict:
@@ -87,6 +151,7 @@ def _prospect_card_ctx(request: Request, user: User, prospect) -> dict:
     ctx["prospect"] = prospect
     ctx["snapshots"] = {prospect.id: build_priority_snapshot(prospect)}
     ctx["contact_stats_map"] = {prospect.id: contacts_summary(prospect.contacts_preview)}
+    ctx["reclaim_ui_map"] = {prospect.id: _reclaim_ui_flags(user, prospect)}
     return ctx
 
 
@@ -102,6 +167,7 @@ def _prospect_detail_ctx(request: Request, user: User, prospect) -> dict:
     ctx["contacts"] = prospect.contacts_preview or []
     ctx["contact_stats"] = contacts_summary(prospect.contacts_preview)
     ctx["similar_customers"] = prospect.similar_customers or []
+    ctx["reclaim_ui"] = _reclaim_ui_flags(user, prospect)
     # Resume the enrich poller if a background enrichment is in flight.
     ctx["enrich_state"] = "running" if (prospect.enrichment_data or {}).get("enrich_status") == "running" else None
     return ctx
@@ -254,6 +320,7 @@ async def prospecting_list_partial(
 
     snapshots = {p.id: build_priority_snapshot(p) for p in prospects}
     contact_stats_map = {p.id: contacts_summary(p.contacts_preview) for p in prospects}
+    reclaim_ui_map = {p.id: _reclaim_ui_flags(user, p) for p in prospects}
 
     # Per-status counts for the filter pills (respect the active search, not the active
     # status filter, so each pill shows its own stable total).
@@ -272,6 +339,7 @@ async def prospecting_list_partial(
             "prospects": prospects,
             "snapshots": snapshots,
             "contact_stats_map": contact_stats_map,
+            "reclaim_ui_map": reclaim_ui_map,
             "q": q,
             "status": status,
             "sort": sort,
@@ -616,6 +684,41 @@ async def reclaim_prospect_htmx(
     )
 
 
+@router.get("/v2/partials/prospects/{prospect_id}/reassign-form", response_class=HTMLResponse)
+async def reassign_prospect_form(
+    request: Request,
+    prospect_id: int,
+    ctx: str = "grid",
+    flt_status: str = "",
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Modal body for reassigning a swept prospect's company to another owner.
+
+    Manager/admin only. Loaded into #modal-content by the Reassign button. ``ctx`` is
+    "grid" (posts back to the in-grid card) or "detail" (posts back to #main-content) so
+    the reassign response swaps the surface the action came from.
+    """
+    if not is_manager_or_admin(user):
+        raise HTTPException(403, "Only a manager or admin can reassign an account")
+
+    prospect = db.get(ProspectAccount, prospect_id)
+    if not prospect:
+        raise HTTPException(404, "Prospect not found")
+
+    users = db.query(User).filter(User.is_active.is_(True)).order_by(User.name).all()
+    return template_response(
+        "htmx/partials/prospecting/reassign_modal.html",
+        {
+            "request": request,
+            "prospect": prospect,
+            "users": users,
+            "ctx": "detail" if ctx == "detail" else "grid",
+            "flt_status": flt_status,
+        },
+    )
+
+
 @router.post("/v2/partials/prospects/{prospect_id}/reassign", response_class=HTMLResponse)
 async def reassign_prospect_htmx(
     request: Request,
@@ -631,30 +734,31 @@ async def reassign_prospect_htmx(
     card/detail with a showToast trigger.
     """
     if not is_manager_or_admin(user):
-        raise HTTPException(403, "Only a manager or admin can reassign an account")
+        return _prospect_error_toast("Only a manager or admin can reassign an account")
 
     from ...services.prospect_reclamation import reassign_account
 
     prospect = db.get(ProspectAccount, prospect_id)
     if not prospect:
-        raise HTTPException(404, "Prospect not found")
-    if not prospect.company_id:
-        raise HTTPException(400, "Prospect is not linked to a company; nothing to reassign")
+        return _prospect_error_toast("Prospect not found")
 
     error = None
     result = None
-    try:
-        result = reassign_account(prospect.company_id, to_user_id, user, db)
-    except PermissionError as e:
-        raise HTTPException(403, str(e))
-    except LookupError:
-        raise HTTPException(404, "Company not found")
-    except ValueError as e:
-        error = str(e)
+    if not prospect.company_id:
+        error = "Prospect is not linked to a company; nothing to reassign"
+    else:
+        try:
+            result = reassign_account(prospect.company_id, to_user_id, user, db)
+        except PermissionError as e:
+            error = str(e)
+        except LookupError:
+            error = "Company not found"
+        except ValueError as e:
+            error = str(e)
 
     prospect = db.get(ProspectAccount, prospect_id)
     if not prospect:
-        raise HTTPException(404, "Prospect not found")
+        return _prospect_error_toast("Prospect not found")
 
     form = await request.form()
     flt_status = form.get("flt_status", "")

@@ -56,7 +56,7 @@
           {{ site_cadence_dot(grp_site, now_utc) }}
           <span class="text-xs font-semibold text-gray-700 truncate">{{ grp_site.site_name if grp_site else "Unknown site" }}</span>
           {% if grp_site and grp_site.city %}
-          <span class="text-xs text-gray-400 truncate">· {{ grp_site.city }}</span>
+          <span class="text-secondary truncate">· {{ grp_site.city }}</span>
           {% endif %}
           {%- set grp_active_count = grp_rows | rejectattr('contact.is_archived', 'equalto', True) | list | length -%}
           <span class="text-gray-300 text-[11px]">·</span>

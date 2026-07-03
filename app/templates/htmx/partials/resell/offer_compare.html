@@ -14,6 +14,38 @@
   {%- else -%}Broker #{{ offer.id }}{%- endif -%}
 {% endmacro %}
 
+{#
+  Award action for a compare row (owner-only modal). Same 3-way as the Offers tab, but
+  every button ALSO closes this modal on success — the underlying Offers/Lines tabs and
+  header chips are refreshed out-of-band by the response, so once the pick lands the modal
+  has served its purpose. Targets #tab-offers-<id> (which lives outside the modal, so the
+  @htmx:after-request handler on the button survives the swap and fires reliably).
+#}
+{% macro _compare_action(el, item, offer) %}
+  {%- if offer.status == 'won' -%}
+  <div class="inline-flex items-center gap-1.5 whitespace-nowrap">
+    <span class="text-xs font-semibold text-emerald-700">Awarded ✓</span>
+    <button hx-post="/api/resell/{{ el.id }}/offers/{{ offer.id }}/unaward"
+            hx-target="#tab-offers-{{ el.id }}" hx-swap="innerHTML"
+            hx-confirm="Reverse this award? The line returns to the pool for offers."
+            @htmx:after-request.camel="if(event.detail.successful) $dispatch('close-modal')"
+            data-loading-disable
+            class="btn-ghost btn-sm text-rose-600 hover:text-rose-700">Unaward</button>
+  </div>
+  {%- elif item.status == 'awarded' -%}
+  <span class="text-secondary whitespace-nowrap">Not selected</span>
+  {%- elif offer.status in ['open', 'late'] -%}
+  <button hx-post="/api/resell/{{ el.id }}/offers/{{ offer.id }}/award"
+          hx-target="#tab-offers-{{ el.id }}" hx-swap="innerHTML"
+          hx-confirm="Award {{ _broker_label(offer) }} for {{ item.part_number }}? This marks the line sold."
+          @htmx:after-request.camel="if(event.detail.successful) $dispatch('close-modal')"
+          data-loading-disable
+          class="btn-primary btn-sm">Award</button>
+  {%- else -%}
+  <span class="text-xs text-gray-400">—</span>
+  {%- endif -%}
+{% endmacro %}
+
 <div class="p-5 max-w-3xl">
   <div class="flex items-center justify-between mb-4">
     <div>
@@ -35,12 +67,15 @@
           <th class="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Qty</th>
           <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Lead</th>
           <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Terms</th>
+          <th class="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
         </tr>
       </thead>
       <tbody class="divide-y divide-gray-200">
         {% for r in rows %}
         {% set is_best = item.best_offer_id is not none and r.offer.id == item.best_offer_id and r.line.unit_price is not none %}
-        <tr class="{{ 'bg-emerald-50/60' if is_best else 'hover:bg-gray-50' }}">
+        {% set won = r.offer.status == 'won' %}
+        {% set not_selected = item.status == 'awarded' and not won %}
+        <tr class="{{ 'bg-emerald-50' if won else 'opacity-60' if not_selected else 'bg-emerald-50/60' if is_best else 'hover:bg-gray-50' }}">
           <td class="px-3 py-2 text-sm font-medium text-gray-900">
             {{ _broker_label(r.offer) }}
             {% if is_best %}<span class="ml-1.5 inline-flex px-1.5 py-0.5 text-xs font-semibold rounded-full bg-emerald-100 text-emerald-700">Best</span>{% endif %}
@@ -51,6 +86,7 @@
           <td class="px-3 py-2 text-sm text-right tabular-nums">{{ "{:,}".format(r.line.quantity) }}</td>
           <td class="px-3 py-2 text-sm text-gray-600">{{ (r.line.lead_time_days|string ~ 'd') if r.line.lead_time_days is not none else '—' }}</td>
           <td class="px-3 py-2 text-sm text-gray-600">{{ r.line.terms_text or '—' }}</td>
+          <td class="px-3 py-2 text-center">{{ _compare_action(el, item, r.offer) }}</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -60,7 +96,7 @@
   {# Price-spread bar — one dot per priced offer, best in emerald. #}
   {% if priced|length > 1 and max_price and max_price > min_price %}
   <div class="mt-3 px-1">
-    <div class="flex items-center gap-2 text-xs text-gray-400">
+    <div class="flex items-center gap-2 text-secondary">
       <span class="font-mono tabular-nums">${{ "{:,.4f}".format(min_price) }}</span>
       <div class="flex-1 relative h-4 flex items-center">
         <div class="absolute inset-x-0 h-1 bg-gradient-to-r from-emerald-200 via-amber-200 to-rose-200 rounded-full"></div>
@@ -77,7 +113,7 @@
   </div>
   {% endif %}
 
-  <p class="mt-3 text-xs text-gray-400">Best price is highlighted for planning — pick on terms, lead, and reputation, not price alone.</p>
+  <p class="mt-3 text-secondary">Best price is highlighted for planning — pick on terms, lead, and reputation, not price alone.</p>
   {% else %}
   <div class="text-center py-8 text-sm text-gray-500">No offers on this line yet.</div>
   {% endif %}

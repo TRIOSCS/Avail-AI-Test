@@ -30,6 +30,10 @@ from app.models.quality_plan import QualityPlan
 from app.models.quotes import Quote
 from app.models.sourcing import Requisition
 
+# HTMX navigations send this header; the for-buy-plan route content-negotiates on it
+# (bare partial for HTMX callers, full app shell for a raw browser reload/bookmark).
+_HX = {"HX-Request": "true"}
+
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 
@@ -131,7 +135,7 @@ def test_for_buy_plan_creates_qp_on_first_open(client, db_session: Session, test
     bp = _seed_buy_plan(db_session, test_user.id, test_customer_site.id)
     assert _qp_count(db_session, bp.id) == 0
 
-    resp = client.get(f"/v2/qp/for-buy-plan/{bp.id}")
+    resp = client.get(f"/v2/qp/for-buy-plan/{bp.id}", headers=_HX)
     assert resp.status_code == 200
 
     qps = _qps_for(db_session, bp.id)
@@ -147,11 +151,11 @@ def test_for_buy_plan_is_idempotent(client, db_session: Session, test_user, test
     """A second open returns the SAME qp.id and creates no duplicate row."""
     bp = _seed_buy_plan(db_session, test_user.id, test_customer_site.id)
 
-    resp1 = client.get(f"/v2/qp/for-buy-plan/{bp.id}")
+    resp1 = client.get(f"/v2/qp/for-buy-plan/{bp.id}", headers=_HX)
     assert resp1.status_code == 200
     qp_id_1 = _qps_for(db_session, bp.id)[0].id
 
-    resp2 = client.get(f"/v2/qp/for-buy-plan/{bp.id}")
+    resp2 = client.get(f"/v2/qp/for-buy-plan/{bp.id}", headers=_HX)
     assert resp2.status_code == 200
 
     qps = _qps_for(db_session, bp.id)
@@ -162,7 +166,7 @@ def test_for_buy_plan_is_idempotent(client, db_session: Session, test_user, test
 
 def test_for_buy_plan_missing_buy_plan_404(client):
     """A non-existent buy plan returns 404 (no QP to create)."""
-    resp = client.get("/v2/qp/for-buy-plan/999999")
+    resp = client.get("/v2/qp/for-buy-plan/999999", headers=_HX)
     assert resp.status_code == 404
 
 
@@ -176,7 +180,7 @@ def test_for_buy_plan_ownership_404_for_restricted_non_owner(
     """
     bp = _seed_buy_plan(db_session, test_user.id, test_customer_site.id)
 
-    resp = restricted_client.get(f"/v2/qp/for-buy-plan/{bp.id}")
+    resp = restricted_client.get(f"/v2/qp/for-buy-plan/{bp.id}", headers=_HX)
     assert resp.status_code == 404
     # Ownership is enforced before create — no QP row leaks into existence.
     assert _qp_count(db_session, bp.id) == 0
@@ -191,3 +195,27 @@ def test_buy_plan_detail_renders_quality_plan_button(client, db_session: Session
     body = resp.text
     assert "Quality Plan" in body
     assert f"/v2/qp/for-buy-plan/{bp.id}" in body
+
+
+def test_for_buy_plan_full_page_reload_serves_shell(client, db_session: Session, test_user, test_customer_site):
+    """SET-05: the 'Quality Plan' button hx-push-urls /v2/qp/for-buy-plan/{id}, so a raw
+    browser reload / bookmark of that url (no HX-Request header) must render the full app
+    shell that HTMX-loads the QP — not a shell-less fragment.
+
+    The shell pass must also be side-effect-free: get-or-create runs only when the shell's
+    loader re-requests WITH the HX-Request header.
+    """
+    bp = _seed_buy_plan(db_session, test_user.id, test_customer_site.id)
+    assert _qp_count(db_session, bp.id) == 0
+
+    resp = client.get(f"/v2/qp/for-buy-plan/{bp.id}")  # no HX-Request → full page
+    assert resp.status_code == 200
+    body = resp.text
+    # App shell: the #main-content mount + a loader that points back at this same url.
+    assert 'id="main-content"' in body
+    assert f'hx-get="/v2/qp/for-buy-plan/{bp.id}"' in body
+    assert 'hx-trigger="load"' in body
+    # The QP partial has NOT been rendered inline (it loads via the HTMX pass)...
+    assert "Quality Plan #" not in body
+    # ...and no QP row was created by the side-effect-free full-page load.
+    assert _qp_count(db_session, bp.id) == 0

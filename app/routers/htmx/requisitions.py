@@ -33,12 +33,14 @@ from ...models import (
     CustomerSite,
     Offer,
     Quote,
+    QuoteRequisition,
     Requirement,
     Requisition,
     RequisitionTask,
     User,
 )
 from ...services.freeform_parser_service import parse_freeform_rfq
+from ...services.quote_requisitions import quotes_for_requisition
 from ...template_env import template_response
 from ...utils.search_builder import SearchBuilder
 from ...utils.sql_helpers import escape_like
@@ -47,8 +49,8 @@ from ._shared import _base_ctx, _parse_date_safe
 
 router = APIRouter(tags=["htmx-views"])
 
-# Quote-status significance for the list's aggregate Quotes column — lower wins. Mirrors
-# requisition_list_service._quote_priority (won > lost > sent > revised > everything else).
+# Quote-status significance for the list's aggregate Quotes column — lower wins
+# (won > lost > sent > revised > everything else).
 _QUOTE_STATUS_PRIORITY = {"won": 1, "lost": 2, "sent": 3, "revised": 4}
 
 
@@ -85,9 +87,12 @@ async def requisitions_list_partial(
         .filter(Requisition.is_scratch.is_(False))
         .options(
             joinedload(Requisition.creator),
-            joinedload(Requisition.requirements),
-            joinedload(Requisition.offers),
-            joinedload(Requisition.quotes),
+            # selectinload (not joinedload) for the three collections: stacking
+            # collection joinedloads multiplies the base query's rows per requisition
+            # (requirements × offers × quotes cartesian before entity dedup).
+            selectinload(Requisition.requirements),
+            selectinload(Requisition.offers),
+            selectinload(Requisition.quotes),
         )
     )
 
@@ -156,6 +161,26 @@ async def requisitions_list_partial(
         (Requisition.deadline == "ASAP", "0000-00-00"),
         else_=Requisition.deadline,
     )
+    # Aggregate quote significance (asc = won first), mirroring _best_quote_status; a
+    # requisition with no quotes yields NULL → nullslast puts it at the bottom either way.
+    quote_status_sub = (
+        select(
+            sqlfunc.min(
+                case(
+                    *[(Quote.status == status, prio) for status, prio in _QUOTE_STATUS_PRIORITY.items()],
+                    else_=5,
+                )
+            )
+        )
+        # Correlate through the join table (not Quote.requisition_id) so a combined quote
+        # counts for every contributing requisition's Quotes-column sort, not just its anchor.
+        .select_from(QuoteRequisition)
+        .join(Quote, Quote.id == QuoteRequisition.quote_id)
+        .where(QuoteRequisition.requisition_id == Requisition.id)
+        .correlate(Requisition)
+        .scalar_subquery()
+        .label("quote_status_sort")
+    )
     sort_col_map = {
         "name": Requisition.name,
         "customer_name": Requisition.customer_name,
@@ -166,6 +191,7 @@ async def requisitions_list_partial(
         "updated_at": Requisition.updated_at,
         "req_count": req_count_sub,
         "offer_count": offer_count_sub,
+        "quote_status": quote_status_sub,
     }
     sort_col = sort_col_map.get(sort)
     if sort_col is None:
@@ -176,14 +202,28 @@ async def requisitions_list_partial(
     order = sort_col.desc().nullslast() if sort_dir == "desc" else sort_col.asc().nullslast()
     reqs = query.order_by(order).offset(offset).limit(limit).all()
 
+    # Quotes contributing to each requisition on THIS page, via the join table — ONE extra
+    # query for the whole page (not per row) so a combined quote's status shows on every
+    # contributing requisition, not just the one it anchors (which req.quotes would miss).
+    page_req_ids = [r.id for r in reqs]
+    quotes_by_req: dict[int, list] = {}
+    if page_req_ids:
+        for rid, qt in (
+            db.query(QuoteRequisition.requisition_id, Quote)
+            .join(Quote, Quote.id == QuoteRequisition.quote_id)
+            .filter(QuoteRequisition.requisition_id.in_(page_req_ids))
+            .all()
+        ):
+            quotes_by_req.setdefault(rid, []).append(qt)
+
     # Attach counts + match reason when searching
     for req in reqs:
         req.req_count = len(req.requirements) if req.requirements else 0
         req.offer_count = len(req.offers) if req.offers else 0
         # Aggregate quote status for the list's Quotes column — the most significant of the
-        # req's quotes (won > lost > sent > revised > other), mirroring
-        # requisition_list_service._quote_priority. None → the column shows a dash.
-        req.quote_status = _best_quote_status(req.quotes)
+        # req's contributing quotes (won > lost > sent > revised > other), per
+        # _best_quote_status / _QUOTE_STATUS_PRIORITY above. None → the column shows a dash.
+        req.quote_status = _best_quote_status(quotes_by_req.get(req.id, []))
         req.match_reason = None
         req.matched_mpn = None
         if search_term:
@@ -239,6 +279,7 @@ async def requisitions_list_partial(
             "limit": limit,
             "offset": offset,
             "users": users,
+            "user": user,  # req_row kebab gates Claim/Unclaim on `user` — omitting it hid them
             "user_role": user.role,
             "inbox_status": get_inbox_sync_status(db, user),
         }
@@ -364,7 +405,7 @@ async def requisition_import_save(
     db: Session = Depends(get_db),
 ):
     """Save AI-parsed requirements as a new requisition."""
-    from app.utils.normalization import normalize_mpn_key
+    from app.utils.normalization import normalize_mpn_key, parse_substitute_mpns
 
     form = await request.form()
 
@@ -374,6 +415,21 @@ async def requisition_import_save(
     while f"reqs[{idx}].primary_mpn" in form:
         mpn = form.get(f"reqs[{idx}].primary_mpn", "").strip()
         if mpn:
+            # Prefer the structured substitutes_json (mpn + manufacturer per sub) the modal
+            # posts; fall back to the legacy comma-joined MPN string. parse_substitute_mpns()
+            # normalizes either into the canonical [{"mpn", "manufacturer"}] list format
+            # (CLAUDE.md "Substitutes Format") — the raw string list was the legacy bug.
+            subs_input: list = []
+            subs_json_raw = form.get(f"reqs[{idx}].substitutes_json", "").strip()
+            if subs_json_raw:
+                try:
+                    parsed = json.loads(subs_json_raw)
+                    if isinstance(parsed, list):
+                        subs_input = parsed
+                except (ValueError, TypeError):
+                    subs_input = []
+            if not subs_input:
+                subs_input = [s.strip() for s in form.get(f"reqs[{idx}].substitutes", "").split(",") if s.strip()]
             requirements.append(
                 {
                     "primary_mpn": mpn,
@@ -385,9 +441,7 @@ async def requisition_import_save(
                     "date_codes": form.get(f"reqs[{idx}].date_codes", "").strip() or None,
                     "packaging": form.get(f"reqs[{idx}].packaging", "").strip() or None,
                     "manufacturer": form.get(f"reqs[{idx}].manufacturer", "").strip(),
-                    "substitutes": [
-                        s.strip() for s in form.get(f"reqs[{idx}].substitutes", "").split(",") if s.strip()
-                    ],
+                    "substitutes": parse_substitute_mpns(subs_input, mpn),
                     "firmware": form.get(f"reqs[{idx}].firmware", "").strip() or None,
                     "hardware_codes": form.get(f"reqs[{idx}].hardware_codes", "").strip() or None,
                     "description": form.get(f"reqs[{idx}].description", "").strip() or None,
@@ -460,11 +514,13 @@ async def requisition_import_save(
 
     db.commit()
 
-    # Return success — close modal + refresh parts list + toast
+    # Return success — close modal + toast, and fire reqListRefresh so whichever surface
+    # opened this modal refreshes itself. The old snippet hard-targeted #parts-list, which
+    # exists only in the parts workspace — opened from the requisitions list it hit
+    # htmx:targetError and nothing refreshed. Both surfaces now listen for
+    # `reqListRefresh from:body` (parts/workspace.html #parts-list, list.html hidden hook).
     safe_added = int(added)  # safe: server-computed int
-    return HTMLResponse(
-        "<div hx-trigger='load' hx-get='/v2/partials/parts' hx-target='#parts-list' hx-swap='innerHTML'>"
-        "</div>"
+    resp = HTMLResponse(
         "<script>"
         "window.dispatchEvent(new CustomEvent('close-modal'));"
         f"Alpine.store('toast').message = 'Requisition created with {safe_added} parts';"
@@ -472,6 +528,8 @@ async def requisition_import_save(
         "Alpine.store('toast').show = true;"
         "</script>"
     )
+    resp.headers["HX-Trigger"] = "reqListRefresh"
+    return resp
 
 
 @router.post("/v2/partials/customers/lookup", response_class=HTMLResponse)
@@ -952,10 +1010,11 @@ async def requisition_tab(
         if qual in ("unset", "incomplete", "essentials", "complete"):
             q = q.filter(Offer.qualification_status == qual)
         offers = q.order_by(Offer.created_at.desc().nullslast()).all()
-        # Check for existing draft quote to show "Add to Quote" button
+        # Check for existing draft quote to show "Add to Quote" button — join-table scoped
+        # so a combined draft quote is offered on every contributing requisition.
         draft_quote = (
-            db.query(Quote)
-            .filter(Quote.requisition_id == req_id, Quote.status == QuoteStatus.DRAFT)
+            quotes_for_requisition(db, req_id)
+            .filter(Quote.status == QuoteStatus.DRAFT)
             .order_by(Quote.created_at.desc())
             .first()
         )
@@ -965,9 +1024,9 @@ async def requisition_tab(
         return template_response("htmx/partials/requisitions/tabs/offers.html", ctx)
 
     elif tab == "quotes":
-        quotes = (
-            db.query(Quote).filter(Quote.requisition_id == req_id).order_by(Quote.created_at.desc().nullslast()).all()
-        )
+        # Join-table scoped so a combined quote appears on the Quotes tab of EVERY
+        # contributing requisition, not just the one it anchors.
+        quotes = quotes_for_requisition(db, req_id).order_by(Quote.created_at.desc().nullslast()).all()
         ctx["quotes"] = quotes
         return template_response("htmx/partials/requisitions/tabs/quotes.html", ctx)
 

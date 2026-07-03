@@ -180,7 +180,7 @@
 
         {# Contact info card #}
         {% if vendor.emails or vendor.phones or vendor.website %}
-        <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-5">
+        <div class="bg-white rounded-xl shadow-card border border-brand-200 p-5">
           <h2 class="text-sm font-semibold text-gray-900 mb-3">Contact Information</h2>
           <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
             {% if vendor.website %}
@@ -226,7 +226,7 @@
 
         {# Contacts table (overview summary) #}
         {% if contacts %}
-        <div class="bg-white rounded-xl shadow-sm border border-brand-200 overflow-hidden">
+        <div class="bg-white rounded-xl shadow-card border border-brand-200 overflow-hidden">
           <div class="px-5 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
             <h2 class="text-sm font-semibold text-gray-900">Contacts ({{ contacts|length }})</h2>
             <button @click="activeTab = 'contacts'"
@@ -288,7 +288,7 @@
 
         {# Recent sightings #}
         {% if recent_sightings %}
-        <div class="bg-white rounded-xl shadow-sm border border-brand-200 overflow-hidden">
+        <div class="bg-white rounded-xl shadow-card border border-brand-200 overflow-hidden">
           <div class="px-5 py-3 bg-gray-50 border-b border-gray-200">
             <h2 class="text-sm font-semibold text-gray-900">
               {% if mpn_filter %}

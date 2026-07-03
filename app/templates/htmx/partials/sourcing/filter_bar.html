@@ -5,12 +5,24 @@
    Context vars: requirement, f_confidence, f_safety, f_freshness, f_source, f_status,
                  f_contactability, f_corroborated, f_sort,
                  filter_target (str, default '#main-content') — HTMX swap target for filter changes
+                 filter_endpoint (str, default '/v2/partials/sourcing/{id}') — hx-get URL each
+                   control hits. Results view uses the full-grid partial; the workspace view
+                   MUST pass the rows-only '.../workspace-list' endpoint so filters swap just
+                   the left list rows into #lead-list-content instead of nesting the whole
+                   card grid inside it.
+                 filter_push_url (str, default '/v2/sourcing/{id}') — real (resolvable) page
+                   URL pushed to history so F5 loads the app shell, not the naked partial
+                   fragment. Must be a registered page route ('/v2/sourcing/...'), not the
+                   pretty '/sourcing/...' alias (which 404s on reload).
                  compact (bool, default false) — show single-row compact mode #}
 {% from "htmx/partials/sourcing/_filter_macros.html" import filter_pill_group -%}
 {% set target = filter_target|default('#main-content') %}
+{% set endpoint = filter_endpoint|default('/v2/partials/sourcing/' ~ requirement.id) %}
+{% set push_url = filter_push_url|default('/v2/sourcing/' ~ requirement.id) %}
 {% set is_compact = compact|default(false) %}
 {# Bind the current filter state once so each pill group only varies by its own param. #}
 {% set _state = {'requirement_id': requirement.id, 'target': target,
+                 'endpoint': endpoint, 'push_url': push_url,
                  'f_confidence': f_confidence, 'f_safety': f_safety,
                  'f_freshness': f_freshness, 'f_source': f_source, 'f_status': f_status,
                  'f_contactability': f_contactability, 'f_corroborated': f_corroborated,
@@ -25,8 +37,8 @@
 
     <div class="flex items-center gap-1.5">
       <span class="text-[11px] text-gray-600 font-medium">Sort:</span>
-      <select hx-get="/v2/partials/sourcing/{{ requirement.id }}"
-              hx-target="{{ target }}" hx-push-url="true"
+      <select hx-get="{{ endpoint }}"
+              hx-target="{{ target }}" hx-push-url="{{ push_url }}"
               hx-include="#sourcing-filters"
               name="sort"
               class="text-[11px] border border-gray-300 rounded px-1.5 py-0.5 focus:ring-brand-500 focus:border-brand-500">
@@ -55,8 +67,8 @@
         <label class="flex items-center gap-0.5 text-[11px] cursor-pointer">
           <input type="checkbox" name="source" value="{{ src }}"
                  {{ 'checked' if src in f_source }}
-                 hx-get="/v2/partials/sourcing/{{ requirement.id }}"
-                 hx-target="{{ target }}" hx-push-url="true"
+                 hx-get="{{ endpoint }}"
+                 hx-target="{{ target }}" hx-push-url="{{ push_url }}"
                  hx-include="#sourcing-filters"
                  class="rounded border-gray-300 text-brand-500 focus:ring-brand-500 w-3 h-3">
           {% with source_type=src %}{% include "htmx/partials/shared/source_badge.html" %}{% endwith %}

@@ -510,6 +510,7 @@ def unavailability_for_requirement(
     db: Session,
     requirement: Requirement,
     vendor_names: Sequence[str],
+    sightings: Sequence[Sighting] | None = None,
 ) -> dict[str, UnavailabilityIntel]:
     """Vendor display name -> annotated most-recent matching record, for rendering.
 
@@ -517,6 +518,11 @@ def unavailability_for_requirement(
     key. One batched query — no N+1. Vendors with no matching record are absent from the
     result. Each entry carries the computed policy state (is_active, age_days) plus the
     record itself so templates render the three row states without re-deriving policy.
+
+    ``sightings`` lets a caller that has already loaded this requirement's sightings pass
+    them through instead of forcing a second identical scan (PERF-8). When None the set is
+    queried here as before. The candidate keys are set-built, so iteration order does not
+    matter; any full ``Sighting.requirement_id == requirement.id`` result is equivalent.
     """
     norm_by_display = {vn: normalize_vendor_name(vn) for vn in vendor_names}
     norms = {n for n in norm_by_display.values() if n}
@@ -525,7 +531,9 @@ def unavailability_for_requirement(
 
     primary_key = normalize_mpn_key(requirement.primary_mpn)
     keys_by_norm: dict[str, set[str]] = {n: ({primary_key} if primary_key else set()) for n in norms}
-    for s in db.query(Sighting).filter(Sighting.requirement_id == requirement.id).all():
+    if sightings is None:
+        sightings = db.query(Sighting).filter(Sighting.requirement_id == requirement.id).all()
+    for s in sightings:
         norm = sighting_vendor_norm(s)
         if norm not in keys_by_norm:
             continue

@@ -11,7 +11,7 @@ Routes:
 
 Called by: app/routers/crm/__init__.py (included into crm_router)
 Depends on: app/services/crm_service (cdm_company_query, customer_contacts_query,
-            cadence_state_of, CONTACT_CADENCE_DOTS),
+            contact_cadence_predicate, CONTACT_CADENCE_DOTS),
             app/dependencies.is_manager_or_admin,
             app/models/crm.py (Company, CustomerSite, SiteContact)
 """
@@ -30,8 +30,8 @@ from app.dependencies import is_manager_or_admin, require_access
 from app.models import User
 from app.services.crm_service import (
     CONTACT_CADENCE_DOTS,
-    cadence_state_of,
     cdm_company_query,
+    contact_cadence_predicate,
     customer_contacts_query,
 )
 
@@ -119,14 +119,15 @@ def _contacts_generator(
     yield buf.getvalue()
 
     # customer_contacts_query is role-scoped (reps see only manageable accounts)
-    # and applies search/company_id/contact_role. cadence_state is derived, so it
-    # is filtered in Python (mirrors customer_contacts_list_ctx).
+    # and applies search/company_id/contact_role. cadence_state is derived, but
+    # contact_cadence_predicate expresses it as a SQL cutoff (mirrors
+    # customer_contacts_list_ctx / cadence_state_of EXACTLY) so the filter runs in the
+    # database and the whole set streams via yield_per instead of materializing. (PERF-10)
     base = customer_contacts_query(db, user, search=search, company_id=company_id, contact_role=contact_role)
     if cadence_state in CONTACT_CADENCE_DOTS:
         now = datetime.now(timezone.utc)
-        rows = [c for c in base.all() if cadence_state_of(c, now) == cadence_state]
-    else:
-        rows = base.yield_per(200)
+        base = base.filter(contact_cadence_predicate(cadence_state, now))
+    rows = base.yield_per(200)
 
     for contact in rows:
         site = contact.customer_site

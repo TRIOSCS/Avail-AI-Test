@@ -183,6 +183,16 @@ class TestV2PageRouting:
         resp = client.get(url)
         assert resp.status_code == 200
 
+    def test_search_results_full_page_route_exists(self, client: TestClient):
+        """shell-01: 'View all results' pushes /v2/search/results into the URL. A
+        F5/bookmark of that URL must serve the app shell (200), not the 404→bare-JSON
+        page it produced before the route was registered."""
+        resp = client.get("/v2/search/results?q=LM317T")
+        assert resp.status_code == 200
+        # It's the full HTML shell, not a JSON error.
+        assert "application/json" not in resp.headers.get("content-type", "")
+        assert "<!DOCTYPE html>" in resp.text or "<html" in resp.text
+
     def test_v2_buy_plans_detail(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user)
         quote = _make_quote(db_session, req, test_user)

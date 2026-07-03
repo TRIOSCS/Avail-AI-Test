@@ -12,8 +12,14 @@
 
 <title hx-swap-oob="true">{{ company.name }} — Companies — AvailAI</title>
 
-{# Full panel width — no max-w cap; the slim header + multi-column contacts use it all. #}
-<div class="space-y-4 page-fluid">
+{# Full panel width — no max-w cap; the slim header + multi-column contacts use it all.
+   data-detail-root marks this partial's own root so account actions (Reactivate /
+   Archive / Send-to-Prospecting) can target `closest [data-detail-root]` and re-swap
+   themselves whether they render inside the CDM workspace right panel (#cdm-detail) or
+   standalone in #main-content on a deep-linked/reloaded page. The stable id lets the
+   Edit-account modal (which lives OUTSIDE this root, in #modal-content, so `closest`
+   can't reach it) re-swap this detail in place via outerHTML in either context. #}
+<div id="company-detail-{{ company.id }}" data-detail-root class="space-y-4 page-fluid">
 
   {# ── Breadcrumb — "Customers › {Account}" (you-are-here for the right panel).
      Reuses the treatment from the retired site_detail.html. "Customers" is the
@@ -37,8 +43,8 @@
     {% if can_reactivate %}
     <button type="button"
             hx-post="/v2/partials/customers/{{ company.id }}/reactivate"
-            hx-target="#cdm-detail"
-            hx-swap="innerHTML"
+            hx-target="closest [data-detail-root]"
+            hx-swap="outerHTML"
             hx-confirm="Restore this account to active status?"
             class="btn btn-secondary btn-sm flex-shrink-0">
       Reactivate
@@ -201,7 +207,17 @@
           </button>
           <div x-show="open" x-cloak
                role="menu"
-               class="absolute right-0 top-full mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-lg z-20 py-1 text-xs text-left">
+               class="absolute right-0 top-full mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-float z-20 py-1 text-xs text-left">
+            {# Edit account — opens the full account edit form as a modal. Most fields are
+               also inline-editable in the header/settings grid, so the full form is an
+               overflow action alongside Merge/Archive. #}
+            <button type="button"
+                    hx-get="/v2/partials/customers/{{ company.id }}/edit-form"
+                    hx-target="#modal-content"
+                    hx-swap="innerHTML"
+                    @click.stop="$dispatch('open-modal'); open = false"
+                    role="menuitem"
+                    class="w-full text-left px-3 py-1.5 text-gray-700 hover:bg-gray-50">Edit account</button>
             {# Merge duplicate — opens modal with search + confirm flow #}
             <button type="button"
                     hx-get="/v2/partials/customers/{{ company.id }}/merge-form"
@@ -215,8 +231,8 @@
               {% if company.is_active %}
             <button type="button"
                     hx-post="/v2/partials/customers/{{ company.id }}/deactivate"
-                    hx-target="#cdm-detail"
-                    hx-swap="innerHTML"
+                    hx-target="closest [data-detail-root]"
+                    hx-swap="outerHTML"
                     hx-confirm="Archive (Do Not Call)? This will unassign the account and hide it from all active lists. Are you sure?"
                     @click.stop="open = false"
                     role="menuitem"
@@ -277,13 +293,13 @@
       </div>
 
       {# ── Segment Tags — inside account-settings collapsible (less weight on other tabs) #}
-      <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-4">
+      <div class="bg-white rounded-xl shadow-card border border-brand-200 p-4">
         <h2 class="text-sm font-semibold text-gray-900 mb-2">Segments</h2>
         {% include "htmx/partials/customers/_segment_tags.html" %}
       </div>
 
       {# ── Additional Details — custom key:value fields (WS3) #}
-      <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-4">
+      <div class="bg-white rounded-xl shadow-card border border-brand-200 p-4">
         <h2 class="text-sm font-semibold text-gray-900 mb-2">Additional details</h2>
         {% with entity='company', obj=company, company_id=company.id %}
           {% include "htmx/partials/customers/_custom_fields.html" %}
@@ -291,7 +307,7 @@
       </div>
 
       {# ── Audit trail — created / modified by ─────────────────────── #}
-      <p class="text-xs text-gray-400 mt-1">
+      <p class="text-secondary mt-1">
         Created by <span class="text-gray-600 font-medium">{{ company.created_by.name if company.created_by else '—' }}</span>
         &middot;
         Updated by <span class="text-gray-600 font-medium">{{ company.modified_by.name if company.modified_by else '—' }}</span>

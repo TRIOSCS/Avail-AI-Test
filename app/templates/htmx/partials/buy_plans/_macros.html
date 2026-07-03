@@ -23,5 +23,5 @@ Usage:
    The dismiss button shared by every buy-plan modal footer. Closes the
    modal without submitting. #}
 {% macro modal_cancel_btn() -%}
-<button @click="showModal = false" class="px-4 py-2 text-sm text-gray-700 border border-brand-200 rounded-md hover:bg-gray-50 transition-colors">Cancel</button>
+<button @click="showModal = false" class="btn btn-secondary">Cancel</button>
 {%- endmacro %}

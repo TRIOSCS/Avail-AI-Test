@@ -47,14 +47,17 @@
       <div class="text-right space-y-1.5 ml-6 flex-shrink-0">
         <p class="text-sm text-gray-600">Searches: <span class="figure-accent">{{ card.search_count or 0 }}</span></p>
         {% if card.last_searched_at %}
-        <p class="text-xs text-gray-400">Last: {{ card.last_searched_at.strftime('%b %d, %Y') }}</p>
+        <p class="text-secondary">Last: {{ card.last_searched_at.strftime('%b %d, %Y') }}</p>
         {% endif %}
         {# Enrichment-status badge — polls itself while the card is queued (HTTP 286
            stops the poll once the worker lands a terminal status). #}
         {% include "htmx/partials/materials/enrich_status.html" %}
+        {# Enrich returns the FULL detail partial, so it must replace the whole detail
+           surface (#main-content) like conflict-accept and the edit form — NOT hx-target
+           "this"/outerHTML, which nested a second detail tree inside this button. #}
         <button hx-post="/v2/partials/materials/{{ card.id }}/enrich"
-                hx-target="this"
-                hx-swap="outerHTML"
+                hx-target="#main-content"
+                hx-swap="innerHTML"
                 data-loading-disable
                 class="mt-1 inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-accent-600 bg-accent-50 border border-accent-200 rounded-lg hover:bg-accent-100 transition-colors">
           <svg class="h-3.5 w-3.5 htmx-indicator animate-spin" fill="none" viewBox="0 0 24 24">
@@ -126,16 +129,16 @@
 
       {# Display mode #}
       <div x-show="!editing" x-cloak class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-        <div><span class="text-gray-400 text-xs font-medium block mb-0.5">Category</span> <span class="font-medium text-gray-900">{{ card.category or "--" }}</span></div>
-        <div><span class="text-gray-400 text-xs font-medium block mb-0.5">Package</span> <span class="font-medium text-gray-900">{{ card.package_type or "--" }}</span></div>
-        <div><span class="text-gray-400 text-xs font-medium block mb-0.5">Pin Count</span> <span class="font-medium text-gray-900">{{ card.pin_count or "--" }}</span></div>
-        <div><span class="text-gray-400 text-xs font-medium block mb-0.5">Lifecycle</span> <span class="font-medium text-gray-900">{{ card.lifecycle_status or "--" }}</span></div>
+        <div><span class="text-secondary font-medium block mb-0.5">Category</span> <span class="font-medium text-gray-900">{{ card.category or "--" }}</span></div>
+        <div><span class="text-secondary font-medium block mb-0.5">Package</span> <span class="font-medium text-gray-900">{{ card.package_type or "--" }}</span></div>
+        <div><span class="text-secondary font-medium block mb-0.5">Pin Count</span> <span class="font-medium text-gray-900">{{ card.pin_count or "--" }}</span></div>
+        <div><span class="text-secondary font-medium block mb-0.5">Lifecycle</span> <span class="font-medium text-gray-900">{{ card.lifecycle_status or "--" }}</span></div>
         {% if card.specs_summary %}
-        <div class="col-span-full"><span class="text-gray-400 text-xs font-medium block mb-0.5">Specs</span> <span class="font-medium text-gray-900">{{ card.specs_summary }}</span></div>
+        <div class="col-span-full"><span class="text-secondary font-medium block mb-0.5">Specs</span> <span class="font-medium text-gray-900">{{ card.specs_summary }}</span></div>
         {% endif %}
         {% if card.datasheet_url %}
         <div class="col-span-full">
-          <span class="text-gray-400 text-xs font-medium block mb-0.5">Datasheet</span>
+          <span class="text-secondary font-medium block mb-0.5">Datasheet</span>
           <a href="{{ card.datasheet_url }}" target="_blank" rel="noopener"
              class="inline-flex items-center gap-1 text-accent-600 hover:text-accent-700 font-medium">
             <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -228,7 +231,7 @@
               class="px-4 py-2.5 text-sm font-medium transition-colors -mb-px"
               hx-get="/v2/partials/materials/{{ card.id }}/tab/{{ tab_id }}"
               hx-target="#material-tab-content"
-              hx-trigger="{{ 'load, click once' if tab_id == 'vendors' else 'click once' }}">
+              hx-trigger="{{ 'load, click' if tab_id == 'vendors' else 'click' }}">
         {{ tab_label }}
       </button>
       {% endfor %}

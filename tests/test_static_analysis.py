@@ -61,13 +61,11 @@ def test_htmx_ajax_calls_have_indicator():
     # the allowlist. Drain the list as those sites get fixed.
     allowlist: set[tuple[str, int]] = {
         ("app/templates/htmx/base.html", 57),
-        ("app/templates/requisitions2/_inline_cell.html", 16),
-        ("app/templates/htmx/partials/sourcing/workspace.html", 176),
         ("app/templates/htmx/partials/parts/cell_edit.html", 12),
         ("app/templates/htmx/partials/parts/cell_edit.html", 26),
         ("app/templates/htmx/partials/parts/cell_edit.html", 37),
-        ("app/templates/htmx/partials/parts/workspace.html", 107),
-        ("app/templates/htmx/partials/parts/workspace.html", 113),
+        ("app/templates/htmx/partials/parts/workspace.html", 114),
+        ("app/templates/htmx/partials/parts/workspace.html", 120),
         ("app/templates/htmx/partials/parts/list.html", 11),
         ("app/templates/htmx/partials/parts/list.html", 12),
         ("app/templates/htmx/partials/parts/list.html", 142),
@@ -119,7 +117,6 @@ _REQ_ID_HEADERED_SIGHTINGS_PARTIALS = (
 _TOJSON_IN_DOUBLE_QUOTED_ALPINE_ALLOWLIST: set[tuple[str, int]] = {
     ("app/templates/htmx/partials/quote_builder/modal.html", 10),  # has_customer_site|tojson -> true/false
     ("app/templates/htmx/partials/requisitions/rfq_compose.html", 44),  # vendors|map(id)|list|tojson -> [1,2,3]
-    ("app/templates/requisitions2/_table.html", 66),  # requisitions|map(id)|list|tojson -> [1,2,3]
 }
 
 # Alpine directive attributes: x-data, x-init, x-bind:x / :x, x-on:x / @x.
@@ -159,6 +156,33 @@ def test_no_tojson_in_double_quoted_alpine_attribute():
 _HX_VALS_JS = re.compile(r"""hx-vals\s*=\s*(['"])js:(.*?)\1""", re.DOTALL)
 
 
+def test_hx_vals_js_has_no_alpine_magics():
+    """`hx-vals="js:..."` runs in htmx's eval context (event + `this` = element), NOT
+    Alpine's — so Alpine magics like `$el`, `$store`, `$refs`, `$data` are UNDEFINED
+    there and throw, silently aborting the request.
+
+    Regression (SET-01): the system-settings toggles used `$el.checked`, so every
+    toggle no-op'd. Use `event.target` / `this` instead.
+
+    `$store` is included: the last remaining `$store` use in `hx-vals="js:..."` (the
+    sightings batch-refresh button, SIGHT-BATCH) was converted to a form with an Alpine
+    `:value` bind, so no `hx-vals js:` may reference `$store` (undefined in htmx eval).
+    """
+    magic = re.compile(r"\$(el|store|refs|data|dispatch|nextTick|watch)\b")
+    offenders: list[str] = []
+    for path in sorted(Path("app/templates").rglob("*.html")):
+        text = path.read_text()
+        for m in _HX_VALS_JS.finditer(text):
+            hit = magic.search(m.group(2))
+            if hit:
+                line = text[: m.start()].count("\n") + 1
+                offenders.append(f"{path.relative_to(Path('.'))}:{line}: Alpine {hit.group(0)} in hx-vals js:")
+    assert not offenders, (
+        "hx-vals='js:...' must not reference Alpine magics (undefined in htmx eval → "
+        "request silently aborts). Use event.target / this:\n" + "\n".join(offenders)
+    )
+
+
 def test_hx_vals_js_is_object_literal():
     """`hx-vals="js:..."` MUST be a plain object literal (start with `{`).
 
@@ -183,6 +207,71 @@ def test_hx_vals_js_is_object_literal():
         "hx-vals='js:...' must be an OBJECT LITERAL (start with '{'). htmx wraps a non-'{' "
         "expression in {...}, turning an IIFE/function-call into invalid JS, so the request "
         "silently never fires:\n" + "\n".join(offenders)
+    )
+
+
+_HX_VERB_ATTR = re.compile(r"\bhx-(?:post|get|put|delete)\s*=", re.IGNORECASE)
+_TEMPLATE_TAG = re.compile(r"<template\b([^>]*)>|</template>", re.IGNORECASE)
+
+
+def _blank_template_comments(text: str) -> str:
+    """Blank Jinja {# #} and HTML <!-- --> comment bodies (newlines preserved) so prose
+    that MENTIONS `<template x-if>` or an hx-verb — e.g. the explanatory comments the
+    BP-1 fix itself adds — is not parsed as live markup."""
+
+    def repl(m: "re.Match[str]") -> str:
+        return re.sub(r"[^\n]", " ", m.group(0))
+
+    text = re.sub(r"\{#.*?#\}", repl, text, flags=re.DOTALL)
+    return re.sub(r"<!--.*?-->", repl, text, flags=re.DOTALL)
+
+
+def _hx_verb_in_xif_offenders(raw: str) -> list[int]:
+    """Return the line numbers of every hx-(post|get|put|delete) attribute that sits
+    INSIDE a ``<template x-if=...>...</template>`` block (nesting-aware)."""
+    text = _blank_template_comments(raw)
+    # Build the character spans covered by an x-if <template> (including nested templates).
+    stack: list[tuple[int, bool]] = []
+    xif_spans: list[tuple[int, int]] = []
+    for m in _TEMPLATE_TAG.finditer(text):
+        if m.group(0).lower().startswith("</template"):
+            if stack:
+                open_end, is_xif = stack.pop()
+                if is_xif:
+                    xif_spans.append((open_end, m.start()))
+        else:
+            is_xif = bool(re.search(r"\bx-if\b", m.group(1)))
+            stack.append((m.end(), is_xif))
+    offenders: list[int] = []
+    for hm in _HX_VERB_ATTR.finditer(text):
+        pos = hm.start()
+        if any(start <= pos < end for start, end in xif_spans):
+            offenders.append(text[:pos].count("\n") + 1)
+    return offenders
+
+
+def test_no_hx_verb_inside_template_x_if():
+    """BP-1 defect class: an ``hx-post/hx-get/hx-put/hx-delete`` on an element INSIDE a
+    ``<template x-if=...>...</template>`` block is DEAD.
+
+    htmx 2.x processes nodes only at load / after-swap; a ``<template>``'s content is an
+    inert DocumentFragment, and Alpine's x-if clone is inserted WITHOUT being handed to
+    ``htmx.process`` — so the hx-* attribute is never wired and the element fires zero
+    requests (a buy-plan confirm button that silently did nothing; an inline-edit form whose
+    Save was dead). The fix is either an imperative ``htmx.ajax(...)`` in ``@click`` (read at
+    click time) or switching ``<template x-if>`` to a plain ``<div x-show>`` (which keeps the
+    element in the server-rendered DOM so htmx processes it at swap time).
+
+    Allowlist NOTHING — a hit is a genuinely dead control. Convert the call site.
+    """
+    offenders: list[str] = []
+    for path in sorted(Path("app/templates").rglob("*.html")):
+        for line in _hx_verb_in_xif_offenders(path.read_text()):
+            offenders.append(f"{path.relative_to(Path('.'))}:{line}")
+    assert not offenders, (
+        "hx-post/get/put/delete found on an element INSIDE a <template x-if> (htmx never "
+        "processes template-fragment content, so the control is DEAD). Use an imperative "
+        "htmx.ajax(...) @click, or switch the wrapper to <div x-show>:\n" + "\n".join(offenders)
     )
 
 
@@ -322,49 +411,6 @@ def test_templates_never_reference_static_public_prefix():
     assert not offenders, (
         "Templates must reference Vite-flattened static URLs (/static/<name>), not the "
         "source-only /static/public/<name> path, which 404s through Caddy in production:\n" + "\n".join(offenders)
-    )
-
-
-def test_standalone_pages_register_csrf_listener():
-    """Standalone page templates that issue mutating HTMX requests but do not
-    unconditionally load htmx_app.js must register their own htmx:configRequest CSRF
-    listener — otherwise starlette_csrf rejects every hx-post/patch/delete (CRIT-FE-1).
-
-    requisitions2/page.html loads requisitions2.js for exactly this reason.
-    """
-    js = Path("app/static/public/js/requisitions2.js").read_text()
-    assert "htmx:configRequest" in js, (
-        "requisitions2.js must register an htmx:configRequest listener that "
-        "attaches the x-csrftoken header — page.html does not always load "
-        "htmx_app.js, which carries the shared listener."
-    )
-    assert "x-csrftoken" in js, "requisitions2.js CSRF listener must set the x-csrftoken header"
-
-
-def test_requisitions2_js_is_published_under_public():
-    """requisitions2/page.html unconditionally loads /static/js/requisitions2.js, which
-    carries the page-only Alpine components rq2Page and resizableTable (and the CSRF
-    listener) — components NOT present in the htmx_app bundle.
-
-    Production serves /static/* from Vite's build output, and Vite copies ONLY its
-    publicDir (app/static/public/) into that tree verbatim, preserving subdirs (e.g.
-    public/icons/ -> /static/icons/). The script therefore must live under
-    app/static/public/js/ or it 404s through Caddy in production despite existing in the
-    source tree — which is exactly what happened while it sat at app/static/js/.
-
-    The page.html URL (/static/js/requisitions2.js) is unchanged by this location: Vite
-    flattens publicDir into the served root, so public/js/requisitions2.js is served at
-    /static/js/requisitions2.js.
-    """
-    served = Path("app/static/public/js/requisitions2.js")
-    assert served.exists(), (
-        "requisitions2.js must live under app/static/public/js/ so Vite publishes it to "
-        "/static/js/requisitions2.js; only files under publicDir reach the served tree."
-    )
-    # It must NOT linger at the old, unpublished top-level location.
-    assert not Path("app/static/js/requisitions2.js").exists(), (
-        "Stale copy at app/static/js/requisitions2.js — that path is never published to "
-        "the served static tree. Keep a single copy under app/static/public/js/."
     )
 
 

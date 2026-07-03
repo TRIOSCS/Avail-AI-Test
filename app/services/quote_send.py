@@ -142,29 +142,47 @@ async def send_quote_email(
             quote.graph_message_id = graph_message_id
             quote.graph_conversation_id = graph_conversation_id
 
-    # 5. Advance quote + requisition status.
+    # 5. Advance quote + EVERY contributing requisition's status.
     require_valid_transition("quote", quote.status, QuoteStatus.SENT)
     quote.status = QuoteStatus.SENT
     quote.sent_at = datetime.now(timezone.utc)
-    req = db.get(Requisition, quote.requisition_id)
-    old_status = req.status if req else None
-    if req and req.status not in (RequisitionStatus.WON, RequisitionStatus.LOST):
-        req.status = RequisitionStatus.QUOTED
 
-    # 6. Write an OUTBOUND email ActivityLog for the customer recipient.
     from .activity_service import log_email_activity
+    from .quote_requisitions import requisition_ids_for_quote
 
-    log_email_activity(
-        user_id=user.id,
-        direction="sent",
-        email_addr=to_email,
-        subject=f"Quote {quote.quote_number} sent",
-        external_id=graph_message_id,
-        contact_name=to_name or None,
-        db=db,
-        requisition_id=quote.requisition_id,
-        occurred_at=quote.sent_at,
-    )
+    primary_req = db.get(Requisition, quote.requisition_id)
+    primary_old_status = primary_req.status if primary_req else None
+
+    # A combined quote spans multiple requisitions — advance each to QUOTED (unless already
+    # WON/LOST) and write one OUTBOUND ActivityLog per requisition, so none is left behind
+    # and each requisition's timeline records the send. `or [quote.requisition_id]` keeps
+    # the primary covered even for a (pathological) quote with no join row. The response's
+    # req_status/status_changed still reflect the PRIMARY only (unchanged shape).
+    for rid in requisition_ids_for_quote(db, quote.id) or [quote.requisition_id]:
+        r = db.get(Requisition, rid)
+        if r and r.status not in (RequisitionStatus.WON, RequisitionStatus.LOST):
+            r.status = RequisitionStatus.QUOTED
+        # log_email_activity dedupes by external_id, so passing the SAME graph_message_id
+        # for every contributing req would silently drop all but the first (a combined
+        # quote's send would log activity on the primary req only). Keep the PRIMARY on the
+        # raw graph id — the sent-folder reconcile (email_jobs) matches the ActivityLog by
+        # that exact id and would create a duplicate otherwise — and give each SECONDARY req
+        # a per-req-suffixed id so every contributing req records its own send.
+        if graph_message_id and rid != quote.requisition_id:
+            activity_external_id: str | None = f"{graph_message_id}:req{rid}"
+        else:
+            activity_external_id = graph_message_id
+        log_email_activity(
+            user_id=user.id,
+            direction="sent",
+            email_addr=to_email,
+            subject=f"Quote {quote.quote_number} sent",
+            external_id=activity_external_id,
+            contact_name=to_name or None,
+            db=db,
+            requisition_id=rid,
+            occurred_at=quote.sent_at,
+        )
 
     # 7. Commit and return.
     db.commit()
@@ -172,8 +190,8 @@ async def send_quote_email(
     return SendQuoteResult(
         sent_to=to_email,
         status="sent",
-        req_status=req.status if req else None,
-        status_changed=bool(req and req.status != old_status),
+        req_status=primary_req.status if primary_req else None,
+        status_changed=bool(primary_req and primary_req.status != primary_old_status),
         graph_message_id=graph_message_id,
     )
 

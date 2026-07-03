@@ -1165,7 +1165,12 @@ async def create_company(
     db.commit()
     logger.info("Company {} created by {}", company.id, user.email)
 
-    return await _render_company_detail(request, company.id, user, db)
+    # Load the new account's detail into the CDM right panel (form hx-target=#cdm-detail);
+    # the HX-Trigger tells the workspace's hidden listener to refresh the left account list
+    # so the freshly created row appears. On deep-link contexts (no listener) it no-ops.
+    resp = await _render_company_detail(request, company.id, user, db)
+    resp.headers["HX-Trigger"] = "cdmListRefresh"
+    return resp
 
 
 @router.get("/v2/partials/customers/typeahead", response_class=HTMLResponse)
@@ -3756,6 +3761,15 @@ async def edit_company(
     form = await request.form()
     name = form.get("name", "").strip()
     if name:
+        # Duplicate-name guard — mirror create_company. Company.name is nullable=False
+        # and NOT unique, so nothing else stops a rename colliding with another account.
+        # Exclude self (Company.id != company_id) so a no-op or case-only save on the
+        # same row doesn't false-positive.
+        existing = (
+            db.query(Company).filter(sqlfunc.lower(Company.name) == name.lower(), Company.id != company_id).first()
+        )
+        if existing:
+            raise HTTPException(409, f"Company '{existing.name}' already exists (ID {existing.id})")
         company.name = name
     notes = form.get("notes", "").strip()
     company.notes = notes or company.notes
@@ -3805,7 +3819,12 @@ async def edit_company(
     db.commit()
     logger.info("Company {} edited by {}", company_id, user.email)
 
-    return await _render_company_detail(request, company_id, user, db)
+    # Refreshed detail replaces the detail root in place (form hx-target=#company-detail-<id>,
+    # outerHTML) so it works in both the workspace and a deep-linked full page. The HX-Trigger
+    # refreshes the left account list too (name/owner/type edits change the row) when present.
+    resp = await _render_company_detail(request, company_id, user, db)
+    resp.headers["HX-Trigger"] = "cdmListRefresh"
+    return resp
 
 
 # ── Inline Field Edit — Account (WS1) ─────────────────────────────────────
@@ -4324,14 +4343,18 @@ async def company_merge(
         user.email,
     )
 
-    # Redirect browser to keeper's detail page via HTMX redirect header
+    # Redirect browser to the keeper's FULL-PAGE detail URL via HTMX redirect header.
+    # HX-Redirect triggers a real window.location navigation, so it must point at the
+    # base-page-wrapped route (/v2/customers/{id}) — NOT the bare partial
+    # (/v2/partials/customers/{id}), which would land the user on an unstyled fragment
+    # with no nav shell or CSS entry point.
     safe_name = html_mod.escape(keep.name or "")
     response = HTMLResponse(
         f'<p class="text-sm text-emerald-600 py-2">Merged into <strong>{safe_name}</strong>. '
         f"{int(result.get('sites_moved', 0))} site(s) and {int(result.get('reassigned', 0))} record(s) reassigned.</p>",
         status_code=200,
     )
-    response.headers["HX-Redirect"] = f"/v2/partials/customers/{company_id}"
+    response.headers["HX-Redirect"] = f"/v2/customers/{company_id}"
     return response
 
 
@@ -4558,6 +4581,7 @@ async def contact_merge(
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
+    reassigned = int(result.get("reassigned", 0))
     logger.info(
         "Manual contact merge: kept {} ({}), removed {} by {}",
         contact_id,
@@ -4566,14 +4590,12 @@ async def contact_merge(
         user.email,
     )
 
-    safe_name = html_mod.escape(keep.full_name or "")
-    response = HTMLResponse(
-        f'<p class="text-sm text-emerald-600 py-2">Merged into <strong>{safe_name}</strong>. '
-        f"{int(result.get('reassigned', 0))} record(s) reassigned.</p>",
-        status_code=200,
-    )
+    # Return the refreshed contacts grouped-list (targeted at #contacts-tab-list) so the
+    # merged-away contact disappears immediately; the preview form's after-request closes
+    # the modal. Mirrors the sibling Move-contact flow — no in-modal dead-end.
+    response = _render_contacts_list(request, user, company, db)
     response.headers["HX-Trigger"] = json.dumps(
-        {"showToast": {"message": "Contact merged successfully", "type": "success"}}
+        {"showToast": {"message": f"Contact merged — {reassigned} record(s) reassigned", "type": "success"}}
     )
     return response
 

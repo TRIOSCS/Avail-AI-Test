@@ -1,0 +1,18 @@
+{#
+  resell/_award_response.html — response for an award / unaward action.
+  OOB compose (like prospecting/_action_oob.html): the PRIMARY body is the Offers tab
+  (the action button's hx-target is #tab-offers-<id>), so awarding never resets the
+  Alpine `tab` state. Out-of-band it also refreshes the Lines tab (awarded/withdrawn
+  pills) and the header chips (the N/M-awarded chip + the list-status badge that flips
+  to `awarded` when the last line is decided).
+  Receives: the merged _detail_context + _offers_context (see resell._award_response_context).
+  Called by: resell.resell_award_offer, resell.resell_unaward_offer.
+#}
+{% set el = list %}
+{% include "htmx/partials/resell/_offers.html" %}
+<div id="tab-lines-{{ el.id }}" hx-swap-oob="innerHTML">
+  {% include "htmx/partials/resell/_lines.html" %}
+</div>
+<div id="resell-chips-{{ el.id }}" hx-swap-oob="innerHTML">
+  {% include "htmx/partials/resell/_header_chips.html" %}
+</div>

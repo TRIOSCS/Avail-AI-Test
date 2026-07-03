@@ -112,3 +112,51 @@ def test_non_owner_submit_offer_on_posted_200(client, db_session, posted_list, o
     assert resp.status_code == 200
     offers = db_session.query(ExcessOffer).filter_by(excess_list_id=posted_list.id).all()
     assert len(offers) == 1
+
+
+def _posted_list_with_best_offer(db_session, owner, company):
+    """A posted list whose single line carries a best competing offer price + count."""
+    el = _list_with_line(db_session, owner, company, ExcessListStatus.COLLECTING)
+    line = db_session.query(ExcessLineItem).filter_by(excess_list_id=el.id).first()
+    line.best_offer_unit_price = 12.3456
+    line.offer_count = 3
+    db_session.commit()
+    return el
+
+
+def test_non_owner_lines_tab_hides_best_offer_price_and_count(client, db_session, owner_user, test_company, test_user):
+    """RS-1 (data leak): the Lines tab must NOT show a non-owner broker the current best
+    COMPETING offer price or the offer count — that's the same data the Offers tab and
+    compare endpoint 403-guard.
+
+    client (test_user, a buyer) is NOT the owner.
+    """
+    assert test_user.id != owner_user.id
+    el = _posted_list_with_best_offer(db_session, owner_user, test_company)
+
+    resp = client.get(f"/v2/partials/resell/{el.id}/lines")
+    assert resp.status_code == 200
+    body = resp.text
+    assert "12.3456" not in body, "best competing offer price leaked to a non-owner broker"
+    assert "12.35" not in body
+    assert "3 offer" not in body, "competing offer count leaked to a non-owner broker"
+    # The line itself (MPN/qty) is still shown — only the offer data is hidden.
+    assert "XCVU9P-2FLGA2104I" in body
+
+
+def test_owner_lines_tab_shows_best_offer_price_and_count(monkeypatch, client, db_session, owner_user, test_company):
+    """Control: the OWNER does see the best offer price + count (the gate is
+    owner-scoped, not a blanket hide)."""
+    el = _posted_list_with_best_offer(db_session, owner_user, test_company)
+
+    # Authenticate the client as the owner for this request.
+    from app.dependencies import require_user
+
+    client.app.dependency_overrides[require_user] = lambda: owner_user
+    try:
+        resp = client.get(f"/v2/partials/resell/{el.id}/lines")
+    finally:
+        client.app.dependency_overrides.pop(require_user, None)
+    assert resp.status_code == 200
+    assert "12.3456" in resp.text, "owner must still see the best offer price"
+    assert "3 offer" in resp.text, "owner must still see the offer count"

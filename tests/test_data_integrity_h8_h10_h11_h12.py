@@ -152,36 +152,29 @@ class TestH11QtyEstimation:
         assert _estimate_qty_with_ai(qtys) == expected
 
     def test_three_values_no_api_key_returns_max_approximate(self):
-        """Without ANTHROPIC_API_KEY, fallback uses max and marks approximate."""
+        """Without an Anthropic credential, fallback uses max and marks approximate."""
         from app.services.sighting_aggregation import _estimate_qty_with_ai
 
-        with patch("app.config.settings") as mock_settings:
-            mock_settings.ANTHROPIC_API_KEY = ""
+        with patch("app.services.credential_service.get_credential_cached", return_value=None):
             result = _estimate_qty_with_ai([100, 200, 300])
 
         assert result == {"qty": 300, "approximate": True}
 
     def test_ai_exception_returns_max_approximate(self):
         """When Claude API call fails, returns max with approximate=True."""
-        from unittest.mock import patch as _patch
-
         from app.services.sighting_aggregation import _estimate_qty_with_ai
 
-        mock_anthropic_mod = MagicMock()
-        mock_anthropic_mod.Anthropic.side_effect = RuntimeError("API error")
-
-        with _patch.dict("sys.modules", {"anthropic": mock_anthropic_mod}):
-            with _patch("app.config.settings") as mock_settings:
-                mock_settings.ANTHROPIC_API_KEY = "sk-test"
-                result = _estimate_qty_with_ai([50, 100, 150])
+        with (
+            patch("app.services.credential_service.get_credential_cached", return_value="sk-test"),
+            patch("anthropic.Anthropic", side_effect=RuntimeError("API error")),
+        ):
+            result = _estimate_qty_with_ai([50, 100, 150])
 
         assert result["qty"] == 150  # max, not sum (350)
         assert result["approximate"] is True
 
     def test_ai_success_returns_exact(self):
         """When Claude responds with a number, returns exact result."""
-        from unittest.mock import patch as _patch
-
         from app.services.sighting_aggregation import _estimate_qty_with_ai
 
         mock_resp = MagicMock()
@@ -190,15 +183,10 @@ class TestH11QtyEstimation:
         mock_client = MagicMock()
         mock_client.messages.create.return_value = mock_resp
 
-        mock_anthropic_mod = MagicMock()
-        mock_anthropic_mod.Anthropic.return_value = mock_client
-
         with (
-            _patch.dict("sys.modules", {"anthropic": mock_anthropic_mod}),
-            _patch("app.config.settings") as mock_settings,
-            _patch("app.utils.claude_client.MODELS", {"fast": "claude-3-haiku"}),
+            patch("app.services.credential_service.get_credential_cached", return_value="sk-test"),
+            patch("anthropic.Anthropic", return_value=mock_client),
         ):
-            mock_settings.ANTHROPIC_API_KEY = "sk-test"
             result = _estimate_qty_with_ai([100, 200, 300])
 
         assert result == {"qty": 250, "approximate": False}

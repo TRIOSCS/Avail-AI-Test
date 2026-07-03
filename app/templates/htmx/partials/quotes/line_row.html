@@ -9,47 +9,47 @@
     @dblclick="editing = true">
   {# MPN cell — in edit mode, expands to show full inline form #}
   <td class="px-4 py-3 text-sm font-mono font-medium text-gray-900" :colspan="editing ? 8 : 1">
-    <template x-if="!editing" x-cloak>
-      <span>{{ line.mpn }}</span>
-    </template>
-    <template x-if="editing" x-cloak>
-      <form hx-put="/v2/partials/quotes/{{ line.quote_id }}/lines/{{ line.id }}"
-            hx-target="#line-{{ line.id }}" hx-swap="outerHTML"
-            data-loading-disable
-            class="flex flex-wrap gap-2 items-end">
+    {# x-show (not <template x-if>) keeps the edit form in the server-rendered DOM so htmx
+       processes its hx-put at swap time; a form inside a <template x-if> clone is never
+       handed to htmx.process, so Save would be dead. Matches this row's x-show convention. #}
+    <span x-show="!editing" x-cloak>{{ line.mpn }}</span>
+    <form x-show="editing" x-cloak
+          hx-put="/v2/partials/quotes/{{ line.quote_id }}/lines/{{ line.id }}"
+          hx-target="#line-{{ line.id }}" hx-swap="outerHTML"
+          data-loading-disable
+          class="flex flex-wrap gap-2 items-end">
         <div>
-          <label class="block text-xs text-gray-400 mb-0.5">MPN</label>
+          <label class="block text-secondary mb-0.5">MPN</label>
           <input type="text" name="mpn" value="{{ line.mpn }}"
                  class="w-28 px-2 py-1 text-sm border border-brand-200 rounded font-mono focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
         </div>
         <div>
-          <label class="block text-xs text-gray-400 mb-0.5">Mfr</label>
+          <label class="block text-secondary mb-0.5">Mfr</label>
           <input type="text" name="manufacturer" value="{{ line.manufacturer or '' }}"
                  class="w-24 px-2 py-1 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
         </div>
         <div>
-          <label class="block text-xs text-gray-400 mb-0.5">Qty</label>
+          <label class="block text-secondary mb-0.5">Qty</label>
           <input type="number" name="qty" value="{{ line.qty or 0 }}"
                  class="w-20 px-2 py-1 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
         </div>
         <div>
-          <label class="block text-xs text-gray-400 mb-0.5">Cost</label>
+          <label class="block text-secondary mb-0.5">Cost</label>
           <input type="number" name="cost_price" value="{{ '{:.4f}'.format(line.cost_price|float) if line.cost_price else '' }}"
                  step="0.0001"
                  class="w-24 px-2 py-1 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
         </div>
         <div>
-          <label class="block text-xs text-gray-400 mb-0.5">Sell</label>
+          <label class="block text-secondary mb-0.5">Sell</label>
           <input type="number" name="sell_price" value="{{ '{:.4f}'.format(line.sell_price|float) if line.sell_price else '' }}"
                  step="0.0001"
                  class="w-24 px-2 py-1 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
         </div>
         <div class="flex gap-1">
-          <button type="submit" class="px-3 py-1 text-xs bg-brand-500 text-white rounded-md hover:bg-brand-600 font-medium transition-colors">Save</button>
-          <button type="button" @click="editing = false" class="px-3 py-1 text-xs text-gray-600 border border-gray-300 rounded-md hover:bg-gray-100 transition-colors">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm">Save</button>
+          <button type="button" @click="editing = false" class="btn btn-secondary btn-sm">Cancel</button>
         </div>
       </form>
-    </template>
   </td>
   {% set desc = line|part_description %}
   <td class="px-4 py-3 text-sm text-gray-600 truncate max-w-[200px]" x-show="!editing" x-cloak title="{{ desc }}">{{ desc or '-' }}</td>

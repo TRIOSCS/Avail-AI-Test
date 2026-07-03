@@ -120,7 +120,7 @@ hx-on::after-request='if(event.detail.successful){htmx.ajax("GET","/v2/partials/
     {% endfor %}
     <div class="flex items-center gap-2 pt-1">
       {{ save_button(s, label) }}
-      <span class="text-xs text-gray-400">Saved keys are encrypted; we never show the full key again</span>
+      <span class="text-secondary">Saved keys are encrypted; we never show the full key again</span>
     </div>
   </div>
 {% endmacro %}
@@ -128,13 +128,16 @@ hx-on::after-request='if(event.detail.successful){htmx.ajax("GET","/v2/partials/
 {# ── Consented Graph scopes / keyless note ───────────────────────────── #}
 {% macro scopes_block(s) %}
   {% if s.keyless_note %}
-  <p class="text-xs text-gray-500">{{ s.keyless_note }}</p>
+  <p class="text-secondary">{{ s.keyless_note }}</p>
   {% endif %}
 {% endmacro %}
 
 {# ── The card ────────────────────────────────────────────────────────── #}
-{# `oob=True` marks the root for an out-of-band swap (used by the Test-all bundle). #}
-{% macro connector_card(s, oob=False) %}
+{# `oob=True` marks the root for an out-of-band swap (used by the Test-all bundle).
+   `is_admin` gates the Clay OAuth connect/disconnect controls: that flow is a
+   backend-wide authorization kept admin-only, so MANAGE_CONNECTORS holders who are
+   not admins see Clay status read-only rather than a dead 403 control (SET-06). #}
+{% macro connector_card(s, oob=False, is_admin=False) %}
 <div id="connector-card-{{ s.id }}" class="card p-4 flex flex-col gap-3"{% if oob %} hx-swap-oob="true"{% endif %}>
 
   {# ── Planned card: read-only, no controls ─────────────────────────── #}
@@ -144,7 +147,7 @@ hx-on::after-request='if(event.detail.successful){htmx.ajax("GET","/v2/partials/
     <div class="min-w-0">
       <p class="text-sm font-medium text-gray-700 truncate">{{ s.display_name }}</p>
       {% if s.description %}
-      <p class="text-xs text-gray-400 truncate">{{ s.description }}</p>
+      <p class="text-secondary truncate">{{ s.description }}</p>
       {% endif %}
     </div>
   </div>
@@ -158,7 +161,7 @@ hx-on::after-request='if(event.detail.successful){htmx.ajax("GET","/v2/partials/
       <div class="min-w-0">
         <p class="text-sm font-medium text-gray-900 truncate">{{ s.display_name }}</p>
         {% if s.description %}
-        <p class="text-xs text-gray-500 truncate">{{ s.description }}</p>
+        <p class="text-secondary truncate">{{ s.description }}</p>
         {% endif %}
       </div>
     </div>
@@ -197,6 +200,7 @@ hx-on::after-request='if(event.detail.successful){htmx.ajax("GET","/v2/partials/
 
   {# Credential / connect controls #}
   {% if s.control_type == 'oauth_clay' %}
+    {% if is_admin %}
     <div class="flex items-center gap-3">
       {% if s.oauth_connected %}
         <span class="text-sm text-green-700 font-medium">Connected</span>
@@ -211,17 +215,31 @@ hx-on::after-request='if(event.detail.successful){htmx.ajax("GET","/v2/partials/
         <span class="text-sm text-amber-700">Connection expired — reconnect.</span>
         <a href="/auth/clay/connect" class="btn-md">Reconnect</a>
       {% else %}
-        <p class="text-xs text-gray-500 flex-1">Connect your Clay workspace to turn on enrichment</p>
+        <p class="text-secondary flex-1">Connect your Clay workspace to turn on enrichment</p>
         <a href="/auth/clay/connect" class="btn-md">Connect Clay</a>
       {% endif %}
     </div>
+    {% else %}
+    {# Non-admin connector managers: Clay's OAuth link is a backend-wide authorization
+       only an admin can grant/revoke — surface status, not a dead control. #}
+    <div class="flex items-center gap-3">
+      {% if s.oauth_connected %}
+        <span class="text-sm text-green-700 font-medium">Connected</span>
+      {% elif s.needs_reconnect %}
+        <span class="text-sm text-amber-700">Connection expired.</span>
+      {% else %}
+        <span class="text-sm text-gray-500">Not connected.</span>
+      {% endif %}
+      <span class="text-secondary">An admin manages this connection.</span>
+    </div>
+    {% endif %}
 
   {% elif s.control_type == 'keyless' or s.control_type == 'scopes' %}
     {{ scopes_block(s) }}
 
   {% elif s.control_type == 'key' %}
     {% if s.state == 'needs_setup' %}
-    <p class="text-xs text-gray-500">Add your {{ s.display_name }} API key to turn this on</p>
+    <p class="text-secondary">Add your {{ s.display_name }} API key to turn this on</p>
     {% endif %}
     <div class="space-y-2">
       {% for ev, field in s.creds.items() %}
@@ -229,7 +247,7 @@ hx-on::after-request='if(event.detail.successful){htmx.ajax("GET","/v2/partials/
       {% endfor %}
       <div class="flex items-center gap-2 pt-1">
         {{ save_button(s, 'Save key') }}
-        <span class="text-xs text-gray-400">Saved keys are encrypted; we never show the full key again</span>
+        <span class="text-secondary">Saved keys are encrypted; we never show the full key again</span>
       </div>
     </div>
 
@@ -238,7 +256,7 @@ hx-on::after-request='if(event.detail.successful){htmx.ajax("GET","/v2/partials/
        worker verdict when the source is switched on (worker_active / worker_down); an
        operator-disabled source reads 'Off' and shows no worker note. #}
     {% if s.state in ('worker_active', 'worker_down') %}{{ worker_detail(s) }}{% endif %}
-    <p class="text-xs text-gray-500">A background worker signs in to {{ s.display_name }} and searches for you. Update the login it uses below.</p>
+    <p class="text-secondary">A background worker signs in to {{ s.display_name }} and searches for you. Update the login it uses below.</p>
     <div class="space-y-2">
       {% for ev, field in s.creds.items() %}
         {{ key_field(s, ev, field) }}

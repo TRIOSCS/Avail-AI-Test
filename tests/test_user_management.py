@@ -521,3 +521,30 @@ def test_users_audit_template_renders():
     assert "target@trioscs.com" in html
     assert "system" in html  # actor None
     assert "Showing latest 200 of 999" in html
+
+
+# ── SET-03: validation errors (400) are swappable + rendered ──────────────────
+
+
+class TestUsersTabErrorRender:
+    """SET-03 — a 400 validation re-render carries the inline error banner AND the forms
+    carry hx-target-4xx so htmx (which won't swap a 4xx by default) actually shows it
+    instead of falling back to a generic toast."""
+
+    def test_users_tab_forms_carry_4xx_error_target(self, admin_client):
+        """Every user-mgmt form routes 4xx responses back into #users-content so the re-
+        rendered error banner is swapped in rather than dropped."""
+        html = admin_client.get("/v2/partials/settings/users").text
+        assert 'hx-target-4xx="#users-content"' in html
+        # The invite form (always present) must carry it, not just per-row forms.
+        invite_idx = html.index("/api/admin/users/invite")
+        # Look at the invite form's attribute block around its hx-post.
+        assert 'hx-target-4xx="#users-content"' in html[invite_idx - 200 : invite_idx + 200]
+
+    def test_invite_400_body_contains_error_banner(self, admin_client, db_session):
+        """The 400 re-render body carries the inline banner text (the swappable content
+        hx-target-4xx delivers) — not an empty/JSON body."""
+        r = admin_client.post("/api/admin/users/invite", data={"email": "notanemail", "role": "buyer"})
+        assert r.status_code == 400
+        assert "Enter a valid email address." in r.text
+        assert 'id="users-content"' in r.text  # full partial re-rendered, swap-ready

@@ -71,7 +71,7 @@
             </td>
             <td>
               <span class="font-mono font-medium text-gray-900">{{ item.part_number }}</span>
-              {% if item.manufacturer %}<span class="block text-xs text-gray-400">{{ item.manufacturer }}</span>{% endif %}
+              {% if item.manufacturer %}<span class="block text-secondary">{{ item.manufacturer }}</span>{% endif %}
             </td>
             <td class="text-right tabular-nums">{{ "{:,}".format(item.quantity) }}</td>
             <td>{{ item.condition or '—' }}</td>
@@ -108,7 +108,7 @@
     <div class="flex items-start justify-between gap-3">
       <div>
         <p class="text-base font-semibold text-gray-900">{{ summary.bid_number }}</p>
-        <p class="text-xs text-gray-400 mt-0.5">{{ summary.line_count }} line{{ 's' if summary.line_count != 1 }} · rev {{ summary.revision }} · {{ summary.status }}</p>
+        <p class="text-secondary mt-0.5">{{ summary.line_count }} line{{ 's' if summary.line_count != 1 }} · rev {{ summary.revision }} · {{ summary.status }}</p>
       </div>
       <a href="/api/resell/{{ el.id }}/bid/{{ bid.id }}/pdf"
          class="btn-secondary btn-sm">
@@ -133,7 +133,7 @@
           <tr>
             <td>
               <span class="font-mono font-medium text-gray-900">{{ li.part_number or '—' }}</span>
-              {% if li.manufacturer %}<span class="block text-xs text-gray-400">{{ li.manufacturer }}</span>{% endif %}
+              {% if li.manufacturer %}<span class="block text-secondary">{{ li.manufacturer }}</span>{% endif %}
             </td>
             <td>{{ li.condition or '—' }}</td>
             <td class="text-right tabular-nums">{{ "{:,}".format(li.quantity) }}</td>
@@ -150,7 +150,7 @@
     </div>
 
     <div class="mt-3 text-right text-sm">
-      <span class="text-gray-400 uppercase tracking-wide text-xs mr-2">Total bid</span>
+      <span class="uppercase tracking-wide text-secondary mr-2">Total bid</span>
       <span class="font-semibold text-gray-900 tabular-nums">${{ "{:,.2f}".format(summary.subtotal) }}</span>
     </div>
   </div>

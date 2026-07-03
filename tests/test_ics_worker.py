@@ -248,7 +248,7 @@ class TestMainLoop:
                 patch("app.services.ics_worker.circuit_breaker.CircuitBreaker"),
                 patch("app.services.ics_worker.ai_gate.process_ai_gate"),
                 patch("app.services.ics_worker.queue_manager.claim_next_queued_item"),
-                patch("asyncio.sleep", side_effect=mock_sleep),
+                patch("app.services.ics_worker.worker._async_sleep", side_effect=mock_sleep),
             ):
                 from app.services.ics_worker.worker import main
 
@@ -298,7 +298,7 @@ class TestMainLoop:
                 patch("app.services.ics_worker.circuit_breaker.CircuitBreaker"),
                 patch("app.services.ics_worker.ai_gate.process_ai_gate"),
                 patch("app.services.ics_worker.queue_manager.claim_next_queued_item"),
-                patch("asyncio.sleep", side_effect=mock_sleep),
+                patch("app.services.ics_worker.worker._async_sleep", side_effect=mock_sleep),
             ):
                 from app.services.ics_worker.worker import main
 
@@ -351,7 +351,7 @@ class TestMainLoop:
                 patch("app.services.ics_worker.circuit_breaker.CircuitBreaker", return_value=mock_breaker),
                 patch("app.services.ics_worker.ai_gate.process_ai_gate"),
                 patch("app.services.ics_worker.queue_manager.claim_next_queued_item"),
-                patch("asyncio.sleep", side_effect=mock_sleep),
+                patch("app.services.ics_worker.worker._async_sleep", side_effect=mock_sleep),
             ):
                 from app.services.ics_worker.worker import main
 
@@ -404,7 +404,7 @@ class TestMainLoop:
                 patch("app.services.ics_worker.circuit_breaker.CircuitBreaker", return_value=mock_breaker),
                 patch("app.services.ics_worker.ai_gate.process_ai_gate", new_callable=AsyncMock),
                 patch("app.services.ics_worker.queue_manager.claim_next_queued_item", return_value=None),
-                patch("asyncio.sleep", side_effect=mock_sleep),
+                patch("app.services.ics_worker.worker._async_sleep", side_effect=mock_sleep),
             ):
                 from app.services.ics_worker.worker import main
 
@@ -485,7 +485,7 @@ class TestMainLoop:
                 ),
                 patch("app.services.ics_worker.result_parser.parse_results_html", return_value=parsed_sightings),
                 patch("app.services.ics_worker.sighting_writer.save_ics_sightings", return_value=1),
-                patch("asyncio.sleep", side_effect=mock_sleep),
+                patch("app.services.ics_worker.worker._async_sleep", side_effect=mock_sleep),
             ):
                 from app.services.ics_worker.worker import main
 
@@ -553,7 +553,7 @@ class TestMainLoop:
                 patch("app.services.ics_worker.ai_gate.process_ai_gate", new_callable=AsyncMock),
                 patch("app.services.ics_worker.queue_manager.claim_next_queued_item", side_effect=get_next),
                 patch("app.services.ics_worker.queue_manager.mark_status") as mock_mark,
-                patch("asyncio.sleep", side_effect=mock_sleep),
+                patch("app.services.ics_worker.worker._async_sleep", side_effect=mock_sleep),
             ):
                 from app.services.ics_worker.worker import main
 
@@ -630,7 +630,7 @@ class TestMainLoop:
                     new_callable=AsyncMock,
                     side_effect=asyncio.TimeoutError,
                 ),
-                patch("asyncio.sleep", side_effect=mock_sleep),
+                patch("app.services.ics_worker.worker._async_sleep", side_effect=mock_sleep),
             ):
                 from app.services.ics_worker.worker import main
 
@@ -685,7 +685,7 @@ class TestMainLoop:
                 patch("app.services.ics_worker.circuit_breaker.CircuitBreaker", return_value=mock_breaker),
                 patch("app.services.ics_worker.ai_gate.process_ai_gate", new_callable=AsyncMock),
                 patch("app.services.ics_worker.queue_manager.claim_next_queued_item"),
-                patch("asyncio.sleep", side_effect=mock_sleep),
+                patch("app.services.ics_worker.worker._async_sleep", side_effect=mock_sleep),
             ):
                 from app.services.ics_worker.worker import main
 
@@ -761,7 +761,7 @@ class TestMainLoop:
                     return_value={"html": "", "duration_ms": 100},
                     create=True,
                 ),
-                patch("asyncio.sleep", side_effect=mock_sleep),
+                patch("app.services.ics_worker.worker._async_sleep", side_effect=mock_sleep),
             ):
                 from app.services.ics_worker.worker import main
 
@@ -837,7 +837,7 @@ class TestMainLoop:
                     side_effect=Exception("Network timeout"),
                     create=True,
                 ),
-                patch("asyncio.sleep", side_effect=mock_sleep),
+                patch("app.services.ics_worker.worker._async_sleep", side_effect=mock_sleep),
             ):
                 from app.services.ics_worker.worker import main
 
@@ -918,7 +918,7 @@ class TestMainLoop:
                 ),
                 patch("app.services.ics_worker.result_parser.parse_results_html", return_value=[]),
                 patch("app.services.ics_worker.sighting_writer.save_ics_sightings", return_value=0),
-                patch("asyncio.sleep", side_effect=mock_sleep),
+                patch("app.services.ics_worker.worker._async_sleep", side_effect=mock_sleep),
             ):
                 from app.services.ics_worker.worker import main
 

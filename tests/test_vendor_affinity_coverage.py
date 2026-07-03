@@ -262,16 +262,14 @@ class TestFindAffinityVendorsL3:
     def test_no_api_key_returns_empty(self, db_session: Session):
         from app.services.vendor_affinity_service import find_affinity_vendors_l3
 
-        with patch("app.services.vendor_affinity_service.settings") as mock_settings:
-            mock_settings.anthropic_api_key = None
+        with patch("app.services.credential_service.get_credential_cached", return_value=None):
             result = find_affinity_vendors_l3("LM317T", "TI", db_session)
         assert result == []
 
     def test_classify_returns_none_returns_empty(self, db_session: Session):
         from app.services.vendor_affinity_service import find_affinity_vendors_l3
 
-        with patch("app.services.vendor_affinity_service.settings") as mock_settings:
-            mock_settings.anthropic_api_key = "sk-fake"
+        with patch("app.services.credential_service.get_credential_cached", return_value="sk-fake"):
             with patch("app.services.vendor_affinity_service._classify_mpn", return_value=None):
                 result = find_affinity_vendors_l3("LM317T", "TI", db_session)
         assert result == []
@@ -294,8 +292,7 @@ class TestFindAffinityVendorsL3:
         db_session.add(s)
         db_session.commit()
 
-        with patch("app.services.vendor_affinity_service.settings") as mock_settings:
-            mock_settings.anthropic_api_key = "sk-fake"
+        with patch("app.services.credential_service.get_credential_cached", return_value="sk-fake"):
             with patch("app.services.vendor_affinity_service._classify_mpn", return_value="Voltage Regulator"):
                 result = find_affinity_vendors_l3("LM317T", "TI", db_session)
 
@@ -394,8 +391,7 @@ class TestFindVendorAffinity:
     def test_empty_db_returns_empty_list(self, db_session: Session):
         from app.services.vendor_affinity_service import find_vendor_affinity
 
-        with patch("app.services.vendor_affinity_service.settings") as mock_settings:
-            mock_settings.anthropic_api_key = None
+        with patch("app.services.credential_service.get_credential_cached", return_value=None):
             result = find_vendor_affinity("UNKNOWN_MPN", db_session)
         assert isinstance(result, list)
         assert len(result) == 0
@@ -405,8 +401,7 @@ class TestFindVendorAffinity:
 
         with patch("app.services.vendor_affinity_service.find_affinity_vendors_l1") as mock_l1:
             with patch("app.services.vendor_affinity_service.find_affinity_vendors_l2") as mock_l2:
-                with patch("app.services.vendor_affinity_service.settings") as mock_settings:
-                    mock_settings.anthropic_api_key = None
+                with patch("app.services.credential_service.get_credential_cached", return_value=None):
                     mock_l1.return_value = [{"vendor_name": "Arrow", "level": 1, "mpn_count": 5, "manufacturer": "TI"}]
                     mock_l2.return_value = [{"vendor_name": "Arrow", "level": 2, "mpn_count": 3, "manufacturer": "TI"}]
                     result = find_vendor_affinity("LM317T", db_session)
@@ -423,8 +418,7 @@ class TestFindVendorAffinity:
         ]
         with patch("app.services.vendor_affinity_service.find_affinity_vendors_l1", return_value=many_vendors):
             with patch("app.services.vendor_affinity_service.find_affinity_vendors_l2", return_value=[]):
-                with patch("app.services.vendor_affinity_service.settings") as mock_settings:
-                    mock_settings.anthropic_api_key = None
+                with patch("app.services.credential_service.get_credential_cached", return_value=None):
                     result = find_vendor_affinity("LM317T", db_session)
 
         assert len(result) <= 10
@@ -435,8 +429,7 @@ class TestFindVendorAffinity:
         with patch("app.services.vendor_affinity_service.find_affinity_vendors_l1", return_value=[]):
             with patch("app.services.vendor_affinity_service.find_affinity_vendors_l2", return_value=[]):
                 with patch("app.services.vendor_affinity_service.find_affinity_vendors_l3", return_value=[]) as mock_l3:
-                    with patch("app.services.vendor_affinity_service.settings") as mock_settings:
-                        mock_settings.anthropic_api_key = "sk-fake"
+                    with patch("app.services.credential_service.get_credential_cached", return_value="sk-fake"):
                         find_vendor_affinity("LM317T", db_session)
 
         mock_l3.assert_called_once()
@@ -448,8 +441,7 @@ class TestFindVendorAffinity:
         with patch("app.services.vendor_affinity_service.find_affinity_vendors_l1", return_value=five_vendors):
             with patch("app.services.vendor_affinity_service.find_affinity_vendors_l2", return_value=[]):
                 with patch("app.services.vendor_affinity_service.find_affinity_vendors_l3") as mock_l3:
-                    with patch("app.services.vendor_affinity_service.settings") as mock_settings:
-                        mock_settings.anthropic_api_key = "sk-fake"
+                    with patch("app.services.credential_service.get_credential_cached", return_value="sk-fake"):
                         find_vendor_affinity("LM317T", db_session)
 
         mock_l3.assert_not_called()

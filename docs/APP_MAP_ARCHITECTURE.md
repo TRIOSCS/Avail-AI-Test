@@ -27,7 +27,7 @@ AvailAI is a production electronic component sourcing platform and CRM. Buyers s
 | Container | Purpose | Resources |
 |-----------|---------|-----------|
 | **app** | FastAPI on port 8000 | 2 GB / 2 CPU |
-| **db** | PostgreSQL 16 | 1.5 GB |
+| **db** | PostgreSQL 16 | 2 GB / 1.5 CPU |
 | **redis** | Cache + coordination | 768 MB |
 | **caddy** | Reverse proxy, HTTPS | 512 MB |
 | **db-backup** | pg_dump every 6 hours | 256 MB |
@@ -50,7 +50,14 @@ FastAPI Middleware Stack (in order):
     │       (sets current_user_id contextvar) and ModuleAccessMiddleware (per-user MODULE
     │       access chokepoint on module-exclusive HTMX sub-partials — see INTERACTIONS
     │       "Module SUB-partial chokepoint"; reads scope["session"] so Session must run first).
-    ├── 3. CSRFMiddleware (double-submit cookie on mutations)
+    ├── 3. CSRFMiddleware (double-submit cookie on mutations; exempt set is the
+    │       module-level `CSRF_EXEMPT_URLS` in main.py — anchor patterns with `$` since
+    │       starlette_csrf matches `re.match(url.path)`. Only auth/health/webhook/read
+    │       endpoints and the requisition import PREVIEW are exempt: `import-parse`
+    │       (multipart upload, browser form can't add the x-csrftoken header) + the
+    │       `import-form` GET. `import-save` (the DB write) is NOT exempt — it stays under
+    │       token enforcement like every mutation; htmx supplies the header via the global
+    │       `htmx:configRequest` listener in htmx_app.js)
     ├── 4. PrometheusMiddleware (request count + duration histogram, app/prometheus_metrics.py)
     │       Note: fastapi 0.137 (PR #15745) made `app.routes` a tree — `include_router`'d
     │       routes hide behind opaque `_IncludedRouter` wrappers — so `_handler_for` reads
@@ -273,6 +280,9 @@ URL space and the `htmx-views` tag, and `main.py` mounts each one alongside
   parsers (`_parse_filter_json`/`_pop_manufacturers`/`_parse_card_filter_params`).
 - `app/routers/htmx/proactive.py` — **tail split (proactive slice)**: the proactive part-match
   list, refresh/scan, batch-dismiss, the prepare page + draft + send flow (`/v2/proactive/*`),
+  the inline add-contact affordance on Prepare
+  (`POST /v2/partials/proactive/prepare/{site_id}/add-contact` → re-renders `_contact_picker.html`
+  into `#proactive-contact-list`, auto-selecting the new contact so Send unblocks — PROACTIVE-04),
   the legacy send/convert routes, scorecard, badge, and do-not-offer.
 - `app/routers/htmx/parts.py` — **tail split (parts-workspace body slice)**: the parts list, the
   detail tabs (offers/sourcing/req-details/quotes/activity/comms/notes), the header + inline cell +
@@ -407,7 +417,7 @@ authoritative reference. Static-analysis tests in
 | `ingest_source_data.py` | `python -m app.management.ingest_source_data [--files GLOB] [--ai-correct] [--apply] [--limit N]` | SP-Ingest CLI: parse → clean → consolidate → (ai_correct) → ingest TRIO source files (SFDC part master + inventory sheets) into `material_cards` via the SP2 tier ladder. DRY RUN by default; `--apply` writes. |
 | `reconcile_decoded_facets.py` | `python -m app.management.reconcile_decoded_facets [--apply] [--limit N]` | Facet-accuracy reconcile: re-run the fixed MPN decoder + desc extractor over cards with mpn_decode/desc_parse facet rows for capacity_gb/gpu_family/memory_gb; corrects changed values (same source, newer ladder timestamp) and DELETES keys the fixed extractor no longer yields. DRY RUN by default with per-failure-class tallies; `--apply` writes. |
 | `backfill_vendor_specs.py` | `python -m app.management.backfill_vendor_specs [--apply] [--limit N] [--daily-cap N] [--source mouser\|element14]` | Vendor-API parametric enrichment: select uncategorized cards demand-first (`sourced_qty_90d DESC NULLS LAST`), search the source for each within a date-keyed per-day call cap (`vendor_api:{source}:calls:{date}`), then the per-source writer enriches through the F1 ladder. `--source mouser` (default, cap 800) → `vendor_spec_enrich.enrich_card_from_mouser` (Mouser's rich DESCRIPTION → desc grammar at connector_desc/84; Mouser carries no structured parametrics). `--source element14` (cap 100 — Element14 rate-limits hard) → `enrich_card_from_element14` (Element14's structured `attributes` ARE parametrics; the connector maps them to seeded keys via `_vendor_spec_map`, written at element14_api/90). DRY RUN by default (counts/searches/writes nothing); `--apply` writes. |
-| `seed_sample_data.py` | `python -m app.management.seed_sample_data [--owner EMAIL] [--wipe]` | Populate staging with a realistic, interconnected sample dataset (companies/contacts/vendors, requisitions+requirements, offers across statuses, quotes incl. revised/won + chosen offers, buy plans, resell/excess lists with competing per-line + take-all broker offers and a customer bid-back, sightings, dated activities, account/contact tasks, outreach + buyer scores, material cards via the F1 ladder) so every workflow can be exercised end-to-end. Idempotent-additive (re-run creates 0 rows; get-or-create on natural keys), every sample row carries the `AVSAMPLE`/`avsample` marker, and `--wipe` deletes ONLY tagged sample rows (FK-safe) — never real data. `--owner EMAIL` assigns the deals to that user (redirecting the seeder/sales/buyer/trader roles) so they show in that user's own-work lenses (buy-plans "orders"/"deals", resell "Open to Me") not just admin "supervise"; re-owning needs `--wipe` first (rows are never UPDATEd), and an unknown email pre-provisions a real, never-wiped account. ORM-only, zero outbound effects. |
+| `seed_sample_data.py` | `ALLOW_SAMPLE_DATA_SEED=true python -m app.management.seed_sample_data [--owner EMAIL]` / `python -m app.management.seed_sample_data --wipe` | Populate staging with a realistic, interconnected sample dataset (companies/contacts/vendors, requisitions+requirements, offers across statuses, quotes incl. revised/won + chosen offers, buy plans, resell/excess lists with competing per-line + take-all broker offers and a customer bid-back, sightings, dated activities, account/contact tasks, outreach + buyer scores, material cards via the F1 ladder) so every workflow can be exercised end-to-end. **Production guard:** seeding REFUSES to run (loud non-zero exit, zero rows written, no DB session opened) unless `ALLOW_SAMPLE_DATA_SEED=true` is explicitly set — so a stray invocation can never inject demo data into the real production DB; `--wipe` is exempt (it only deletes tagged sample rows). Idempotent-additive (re-run creates 0 rows; get-or-create on natural keys), every sample row carries the `AVSAMPLE`/`avsample` marker, and `--wipe` deletes ONLY tagged sample rows (FK-safe) — never real data. `--owner EMAIL` assigns the deals to that user (redirecting the seeder/sales/buyer/trader roles) so they show in that user's own-work lenses (buy-plans "orders"/"deals", resell "Open to Me") not just admin "supervise"; re-owning needs `--wipe` first (rows are never UPDATEd), and an unknown email pre-provisions a real, never-wiped account. ORM-only, zero outbound effects. |
 
 ## TRIO Source Ingest (`app/services/source_ingest/`)
 

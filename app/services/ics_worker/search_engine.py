@@ -18,6 +18,12 @@ from .human_behavior import HumanBehavior
 # ICsource member search URL
 SEARCH_URL = "https://www.icsource.com/members/Search/NewSearch.aspx"
 
+# Page-settle pacing between navigation/submit and reading the DOM. Kept as a module
+# constant (not a literal) so unit tests can zero it out — the ASP.NET WebForms page
+# is fully mocked in tests, so the real 1s waits only add dead wall-clock (~2s/test)
+# and feed the 30s-timeout risk. Production default is unchanged (1.0s).
+_PACE_SECONDS = 1.0
+
 
 async def search_part(page, part_number: str) -> dict:
     """Search for a part on ICsource using form-based search.
@@ -30,7 +36,7 @@ async def search_part(page, part_number: str) -> dict:
 
     logger.info("ICS search: navigating to search for '{}'", part_number)
     await page.goto(SEARCH_URL, wait_until="load", timeout=30000)
-    await asyncio.sleep(1)
+    await asyncio.sleep(_PACE_SECONDS)
 
     # Fill part number field — try multiple selectors in priority order
     pn_input = None
@@ -199,7 +205,7 @@ async def search_part(page, part_number: str) -> dict:
     except Exception:
         logger.warning("ICS search: results selector not found within 20s — page may have changed structure")
 
-    await asyncio.sleep(1)
+    await asyncio.sleep(_PACE_SECONDS)
 
     # Get results HTML
     html = await page.evaluate("""

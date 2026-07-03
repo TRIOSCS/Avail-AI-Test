@@ -63,7 +63,7 @@
       <span class="text-gray-400 tabular-nums">0</span>
     {% endif %}
     {% if r.last_searched_at %}
-    <div class="text-xs text-gray-400">{{ r.last_searched_at|timeago }}</div>
+    <div class="text-secondary">{{ r.last_searched_at|timeago }}</div>
     {% endif %}
   </td>
   <td class="px-4 py-2.5 text-center" x-show="!editing" x-cloak>
@@ -114,7 +114,7 @@
                  hx-vals="js:{q: event.target.value}"
                  hx-swap="innerHTML"
                  class="w-full px-2 py-1.5 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500 placeholder:text-gray-400">
-          <div class="mfr-dropdown absolute z-50 w-full mt-0.5 bg-white border border-gray-200 rounded shadow-lg max-h-40 overflow-y-auto"
+          <div class="mfr-dropdown absolute z-50 w-full mt-0.5 bg-white border border-gray-200 rounded shadow-float max-h-40 overflow-y-auto"
                x-show="mfrOpen" x-cloak></div>
         </div>
         <input aria-label="Target Qty" type="number" name="target_qty" value="{{ r.target_qty or 1 }}" min="1"
@@ -156,8 +156,10 @@
                class="px-2 py-1.5 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500"
                placeholder="HW Codes">
       </div>
-      {# Structured substitute rows — initialised from data-subs JSON attribute #}
-      <div x-data="{ subs: JSON.parse($el.dataset.subs || '[]') }"
+      {# Structured substitute rows — initialised from data-subs JSON attribute.
+         Legacy rows may hold plain MPN strings (["ABC123"]); coerce them to
+         {mpn, manufacturer} dicts so sub.mpn binds instead of showing blank inputs. #}
+      <div x-data="{ subs: JSON.parse($el.dataset.subs || '[]').map(s => typeof s === 'string' ? {mpn: s, manufacturer: ''} : s) }"
            data-subs='{{ r.substitutes | tojson if r.substitutes else "[]" }}'>
         <div class="text-xs text-gray-600 mb-1">Substitutes</div>
         <template x-for="(sub, idx) in subs" :key="idx">
@@ -174,7 +176,7 @@
                      hx-vals="js:{q: event.target.value}"
                      hx-swap="innerHTML"
                      class="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-brand-500 placeholder:text-gray-400">
-              <div class="sub-mfr-dropdown absolute z-50 w-full mt-0.5 bg-white border border-gray-200 rounded shadow-lg max-h-32 overflow-y-auto"
+              <div class="sub-mfr-dropdown absolute z-50 w-full mt-0.5 bg-white border border-gray-200 rounded shadow-float max-h-32 overflow-y-auto"
                    x-show="subMfrOpen" x-cloak></div>
             </div>
             <button type="button" @click="subs.splice(idx, 1)"

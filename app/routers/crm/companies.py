@@ -438,7 +438,10 @@ async def create_company(
     if domain and (
         get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY")
         or get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY")
-        or getattr(settings, "hunter_api_key", "")
+        # Was settings.hunter_api_key — a nonexistent field that getattr defaulted to
+        # "", so a Hunter-only setup never auto-enriched. Resolve it the same way the
+        # enrichment path does (connectors-table credential, env fallback).
+        or get_credential_cached("hunter_enrichment", "HUNTER_API_KEY")
     ):
         from ...enrichment_service import apply_enrichment_to_company, enrich_entity
 

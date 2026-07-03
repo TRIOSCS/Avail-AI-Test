@@ -58,11 +58,6 @@ _COMMS_CATEGORIES = {"email", "auth", "platform", "notifications", "voip", "comm
 _PLANNED = {"findchips", "future", "heilind", "lcsc", "rochester", "verical"}
 
 
-def is_planned(source) -> bool:
-    """Return True when the source is a roadmap connector (not yet built)."""
-    return source.name in _PLANNED
-
-
 def control_type(source) -> str:
     name = source.name
     # Planned check first — must take priority over key/keyless logic.

@@ -68,12 +68,12 @@
                 hx-target='#suggested-contacts-panel'
                 hx-swap='innerHTML'
                 hx-indicator='#suggested-contacts-spinner'
-                class='px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-brand-500'>
+                class='btn-secondary btn-sm'>
           Find contacts
         </button>
         {% endif %}
         <button @click="$dispatch('open-modal', {url: '/v2/partials/customers/{{ company.id }}/contacts/add-form'})"
-                class="px-3 py-1.5 text-xs font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500">
+                class="btn-primary btn-sm">
           + Add Contact
         </button>
       </div>
@@ -85,7 +85,7 @@
   </div>
 
   {# ── Suggested contacts panel (hidden until "Find contacts" clicked) ─────── #}
-  <div id="suggested-contacts-spinner" class="htmx-indicator mt-2 text-xs text-gray-400 py-2">Finding contacts…</div>
+  <div id="suggested-contacts-spinner" class="htmx-indicator mt-2 text-secondary py-2">Finding contacts…</div>
   <div id="suggested-contacts-panel" class="mt-2"></div>
 
   {# ── Grouped list wrapped in stable swap target ──────────────────────────── #}

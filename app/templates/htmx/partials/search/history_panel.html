@@ -14,10 +14,10 @@
   {% if fru_hit %}
   {# A crosswalk-known part isn't "new to us" — only its trading history is empty. #}
   <p class="text-sm font-medium text-gray-600">No trading history yet</p>
-  <p class="text-xs text-gray-400 mt-1">We know this part from the FRU crosswalk below.</p>
+  <p class="text-secondary mt-1">We know this part from the FRU crosswalk below.</p>
   {% else %}
   <p class="text-sm font-medium text-gray-600">No prior history</p>
-  <p class="text-xs text-gray-400 mt-1">This part looks new to us.</p>
+  <p class="text-secondary mt-1">This part looks new to us.</p>
   {% endif %}
 </div>
 {% else %}
@@ -129,7 +129,7 @@
      Full matrix lives on the materials surface — the deep link lands on the
      faceted results, which render the fru_section for the same q. #}
 {% if fru_hit %}
-<div class="mt-3 rounded-xl bg-white border border-line-subtle shadow-sm p-4">
+<div class="mt-3 rounded-xl bg-white border border-line-subtle shadow-card p-4">
   <div class="flex items-center justify-between gap-2">
     <p class="text-sm font-semibold text-gray-900">FRU crosswalk</p>
     <a href="/v2/materials?q={{ fru_query | urlencode }}"

@@ -366,6 +366,26 @@ def _affinity_match_to_result(match: dict, mpn: str) -> dict:
     }
 
 
+def _find_affinity_in_thread(mpn: str) -> list[dict]:
+    """Run the SYNC find_vendor_affinity on a worker thread with its OWN session.
+
+    find_vendor_affinity falls through to an L3 fallback that makes a BLOCKING
+    anthropic.Anthropic().messages.create(timeout=30) call, so running it directly on
+    the event loop froze every concurrent request for up to 30s (PERF-1). We dispatch it
+    via asyncio.to_thread; SQLAlchemy sessions are not thread-safe, so the request session
+    never crosses the boundary — each call opens and closes a fresh SessionLocal (the
+    established pattern, mirroring routers/sightings.py._find_affinity_in_thread).
+
+    NB: find_vendor_affinity is referenced as the module-level name (NOT re-imported
+    lazily) so tests patching app.search_service.find_vendor_affinity still take effect.
+    """
+    thread_db = SessionLocal()
+    try:
+        return find_vendor_affinity(mpn, thread_db)
+    finally:
+        thread_db.close()
+
+
 async def search_requirement(req: Requirement, db: Session) -> dict:
     """Search APIs for stale MPNs only; surface cached sightings for fresh ones.
 
@@ -408,12 +428,13 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
         key = normalize_mpn_key(pn)
         mpn_results[pn] = "searched" if key in searched_keys else "cached"
 
-    # Vendor affinity is a pure-DB lookup (no connector quota) keyed on the
-    # requirement's primary MPN, so we compute it on every path — including
-    # the cached-only short-circuit below.
+    # Vendor affinity is keyed on the requirement's primary MPN (no connector quota), so
+    # we compute it on every path — including the cached-only short-circuit below. It is
+    # NOT a pure-DB lookup: its L3 fallback makes a blocking 30s Anthropic call, so it runs
+    # on a worker thread (asyncio.to_thread) to keep the event loop free (PERF-1).
     primary_mpn = pns[0]
     try:
-        affinity_matches = find_vendor_affinity(primary_mpn, db)
+        affinity_matches = await asyncio.to_thread(_find_affinity_in_thread, primary_mpn)
     except Exception as e:
         logger.warning("Vendor affinity lookup failed for {}: {}", primary_mpn, e)
         affinity_matches = []
@@ -1883,15 +1904,29 @@ def _save_sightings(
         from .models import VendorCard
         from .services.tagging import propagate_tags_to_entity
 
+        # PERF-5: resolve every sighting's VendorCard in ONE IN(normalized_names)
+        # query instead of one .first() per sighting. normalized_name is unique on
+        # VendorCard, so the dict lookup returns exactly the row .first() would have
+        # (or None). The (material_card_id, vn_norm) list preserves the original
+        # sighting order, so propagate_tags_to_entity is called identically.
+        tag_targets: list[tuple[int, str]] = []
         for s in sightings:
             if not s.material_card_id or not s.vendor_name:
                 continue
             vn_norm = normalize_vendor_name(s.vendor_name)
             if not vn_norm:
                 continue
-            vc = db.query(VendorCard).filter_by(normalized_name=vn_norm).first()
-            if vc:
-                propagate_tags_to_entity("vendor_card", vc.id, s.material_card_id, 1.0, db)
+            tag_targets.append((s.material_card_id, vn_norm))
+        if tag_targets:
+            norms = {vn for _, vn in tag_targets}
+            card_by_norm = {
+                vc.normalized_name: vc
+                for vc in db.query(VendorCard).filter(VendorCard.normalized_name.in_(norms)).all()
+            }
+            for material_card_id, vn_norm in tag_targets:
+                vc = card_by_norm.get(vn_norm)
+                if vc:
+                    propagate_tags_to_entity("vendor_card", vc.id, material_card_id, 1.0, db)
         db.commit()
     except Exception:
         logger.warning("Tag propagation failed for sightings", exc_info=True)
@@ -1925,12 +1960,28 @@ def _propagate_vendor_emails(sightings: list[Sighting], db: Session):
     if not email_map:
         return
 
+    # PERF-5: resolve every vendor's VendorCard in ONE IN(normalized_names) query
+    # instead of one .first() per vendor. normalized_name is unique on VendorCard,
+    # so the dict lookup returns exactly the row .first() would have (or None).
+    # Vendor names that normalize to the same key share the one card object, just as
+    # repeated .first() calls returned the same identity-mapped instance.
+    name_norms = {name: normalize_vendor_name(name) for name in email_map}
+    wanted_norms = {n for n in name_norms.values() if n}
+    card_by_norm = (
+        {
+            card.normalized_name: card
+            for card in db.query(VendorCard).filter(VendorCard.normalized_name.in_(wanted_norms)).all()
+        }
+        if wanted_norms
+        else {}
+    )
+
     for vendor_name, emails in email_map.items():
-        norm = normalize_vendor_name(vendor_name)
+        norm = name_norms.get(vendor_name)
         if not norm:
             continue
 
-        card = db.query(VendorCard).filter_by(normalized_name=norm).first()
+        card = card_by_norm.get(norm)
         if not card:
             continue
 

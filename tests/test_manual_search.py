@@ -147,7 +147,8 @@ class TestBatchEdgeCases:
             data={"requirement_ids": "[]"},
         )
         assert resp.status_code == 200
-        assert "0/0" in resp.text
+        # Toast fires via HX-Trigger:showToast (empty body for the non-table caller).
+        assert "0/0" in resp.headers.get("HX-Trigger", "")
 
     def test_malformed_json_returns_400(self, client, db_session):
         """Invalid JSON in requirement_ids should return 400."""

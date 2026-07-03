@@ -1,0 +1,45 @@
+{#
+  proactive/_contact_picker.html — "Send To" contact rows for the Prepare page.
+
+  Rendered inside #proactive-contact-list, which sits inside the prepare.html root
+  Alpine component that owns selectedContacts / toggleContact. Checkbox bindings
+  resolve those up the scope chain.
+
+  Receives:
+    contacts          — list of dicts (id, full_name, email, title, is_primary, has_email)
+    added_contact_id  — optional int; a freshly-added contact to auto-select (via
+                        x-init → toggleContact) so the Send button unblocks.
+  Called by:
+    prepare.html ({% include %} — initial render, no added_contact_id)
+    proactive_add_contact (POST /v2/partials/proactive/prepare/{site_id}/add-contact)
+  Depends on: HTMX, Alpine.js, Tailwind CSS.
+#}
+{% if contacts %}
+  {% for c in contacts %}
+  <label class="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 cursor-pointer {{ 'opacity-50' if not c.has_email }}"
+         {% if not c.has_email %}title="No email address"{% endif %}>
+    {# Checkbox — accent via accent-color + input-focus (not brand-500) #}
+    <input type="checkbox"
+           {% if not c.has_email %}disabled{% endif %}
+           :checked="selectedContacts[{{ c.id }}]"
+           @change="toggleContact({{ c.id }})"
+           {% if added_contact_id is defined and added_contact_id and c.id == added_contact_id %}x-init="if (!selectedContacts[{{ c.id }}]) toggleContact({{ c.id }})"{% endif %}
+           class="rounded border-gray-300 input-focus disabled:opacity-40"
+           style="accent-color:var(--accent)">
+    <div class="flex-1 min-w-0">
+      <p class="text-sm font-medium text-gray-900">{{ c.full_name or '(unnamed)' }}</p>
+      <p class="text-xs text-gray-600">
+        {{ c.email or '(no email)' }}
+        {% if c.title %} &middot; {{ c.title }}{% endif %}
+        {% if c.is_primary %}
+        <span class="badge-mini bg-gray-100 text-gray-600 ml-1">Primary</span>
+        {% endif %}
+      </p>
+    </div>
+  </label>
+  {% endfor %}
+{% else %}
+  <div class="text-center py-6">
+    <p class="text-sm text-gray-600">No contacts on file. Add one below to send this offer.</p>
+  </div>
+{% endif %}

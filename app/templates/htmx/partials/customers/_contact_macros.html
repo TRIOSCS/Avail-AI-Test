@@ -105,25 +105,6 @@
 {% endmacro %}
 
 
-{# ── Compact last-touch indicator (always-visible row) ─────────────────────────── #}
-{% macro _last_touch_compact(contact, now_utc, cadence) %}
-{# Shows a cadence dot + compact "Xd" text. NULL → "—". #}
-{% set out_ts = contact.last_outbound_at if contact else none %}
-{% set _dot = {'new': 'bg-gray-300', 'on_target': 'bg-emerald-400', 'due': 'bg-amber-400', 'overdue': 'bg-rose-500'} %}
-{% set _dot_cls = _dot.get(cadence, 'bg-gray-300') %}
-<span class="inline-flex items-center gap-1 text-[11px]"
-      title="{% if out_ts and now_utc %}Last outreach {{ (now_utc - out_ts).days }}d ago{% else %}No logged outreach yet{% endif %}">
-  <span class="w-1.5 h-1.5 rounded-full flex-shrink-0 {{ _dot_cls }}"></span>
-  {% if out_ts and now_utc %}
-    {% set out_days = (now_utc - out_ts).days %}
-    <span class="{% if cadence == 'overdue' %}text-rose-600{% elif cadence == 'due' %}text-amber-600{% else %}text-gray-400{% endif %}">{{ out_days }}d</span>
-  {% else %}
-    <span class="text-gray-400">—<span class="sr-only"> no data</span></span>
-  {% endif %}
-</span>
-{% endmacro %}
-
-
 {# NOTE: the old per-card `contact_card` macro was removed as dead code — the active
    CRM customer-tab surface is the compact-table `contact_row` macro below. #}
 
@@ -358,7 +339,7 @@
           </button>
           <div x-show='km' x-cloak
                role='menu'
-               class='absolute right-0 top-full mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-lg z-20 py-1 text-xs text-left'>
+               class='absolute right-0 top-full mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-float z-20 py-1 text-xs text-left'>
             <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/customers/{{ company.id }}/contacts/{{ contact.id }}/edit-form'}); km=false"
                     role='menuitem'
                     class='w-full text-left px-3 py-1.5 text-brand-600 hover:bg-brand-50'>Edit</button>
@@ -387,9 +368,13 @@
                     role='menuitem'
                     class='w-full text-left px-3 py-1.5 text-emerald-700 hover:bg-emerald-50'>Set Primary</button>
             {% endif %}
+            {# Refresh the whole detail (the account-primary shows in the detail header,
+               not the contacts list) via `closest [data-detail-root]` — the same target
+               the Reactivate / Archive account actions use, so it works both inside the
+               CDM workspace right panel and on a deep-linked full-page detail. #}
             <button hx-post='/v2/partials/customers/{{ company.id }}/primary-contact/{{ contact.id }}'
-                    hx-target='#main-content'
-                    hx-swap='innerHTML'
+                    hx-target='closest [data-detail-root]'
+                    hx-swap='outerHTML'
                     @click.stop='km=false'
                     data-loading-disable
                     role='menuitem'

@@ -95,7 +95,7 @@ def test_batch_refresh_nonexistent_requirement(client, db_session):
             data={"requirement_ids": "[99999]"},
         )
     assert resp.status_code == 200
-    assert "1" in resp.text  # "1 failed" or similar
+    assert "1" in resp.headers.get("HX-Trigger", "")  # "1 failed" in the showToast message
 
 
 def test_batch_refresh_valid_requirement(client, db_session, test_user):
@@ -159,6 +159,46 @@ def test_batch_refresh_runs_searches_in_parallel(client, db_session, test_user):
     assert peak_inflight == 3, f"batch-refresh still serial: peak {peak_inflight} concurrent search(es), expected 3"
 
 
+def test_batch_refresh_rerenders_table_for_split_panel(client, db_session, test_user):
+    """SIGHT-BATCH-REFRESH-WIPE: the split-panel caller (HX-Target: sightings-table)
+    must get the freshly-rendered table back — NOT an empty body that wipes the list —
+    plus the toast via the HX-Trigger:showToast bridge."""
+    _, requirement = _make_req_and_requirement(db_session, test_user.id, mpn="RERENDER-MPN")
+    db_session.commit()
+
+    with patch("app.search_service.search_requirement", new_callable=AsyncMock, return_value=None):
+        resp = client.post(
+            "/v2/partials/sightings/batch-refresh",
+            data={"requirement_ids": json.dumps([requirement.id])},
+            headers={"HX-Target": "sightings-table"},
+        )
+
+    assert resp.status_code == 200
+    # Re-rendered table body (not empty) — contains the requirement + table chrome.
+    assert "RERENDER-MPN" in resp.text
+    assert "sightingSelection" in resp.text  # the table partial re-rendered
+    # Toast still fires via the header bridge.
+    assert "Searched" in resp.headers.get("HX-Trigger", "")
+
+
+def test_batch_refresh_non_table_caller_gets_empty_body(client, db_session, test_user):
+    """The requisition parts-tab caller posts hx-swap='none' (no HX-Target: sightings-
+    table) and only needs the toast — the body stays empty so nothing is
+    swapped/wiped."""
+    _, requirement = _make_req_and_requirement(db_session, test_user.id)
+    db_session.commit()
+
+    with patch("app.search_service.search_requirement", new_callable=AsyncMock, return_value=None):
+        resp = client.post(
+            "/v2/partials/sightings/batch-refresh",
+            data={"requirement_ids": json.dumps([requirement.id])},
+        )
+
+    assert resp.status_code == 200
+    assert resp.text == ""  # empty body — nothing to swap
+    assert "Searched" in resp.headers.get("HX-Trigger", "")
+
+
 # ── batch-assign ──────────────────────────────────────────────────
 
 
@@ -219,7 +259,9 @@ def test_batch_status_empty_list(client):
         data={"requirement_ids": "[]", "status": "sourcing"},
     )
     assert resp.status_code == 200
-    assert "no requirements" in resp.text.lower() or "warning" in resp.text.lower()
+    # Toast now fires via the HX-Trigger:showToast bridge (empty body, hx-swap="none").
+    trigger = resp.headers.get("HX-Trigger", "").lower()
+    assert "no requirements" in trigger or "warning" in trigger
 
 
 def test_batch_status_invalid_status(client, db_session, test_user):
@@ -283,7 +325,8 @@ def test_batch_notes_empty_list(client):
         data={"requirement_ids": "[]", "notes": "Test note"},
     )
     assert resp.status_code == 200
-    assert "no requirements" in resp.text.lower() or "warning" in resp.text.lower()
+    trigger = resp.headers.get("HX-Trigger", "").lower()
+    assert "no requirements" in trigger or "warning" in trigger
 
 
 def test_batch_notes_empty_notes(client, db_session, test_user):
@@ -296,7 +339,8 @@ def test_batch_notes_empty_notes(client, db_session, test_user):
         data={"requirement_ids": json.dumps([requirement.id]), "notes": ""},
     )
     assert resp.status_code == 200
-    assert "required" in resp.text.lower() or "warning" in resp.text.lower()
+    trigger = resp.headers.get("HX-Trigger", "").lower()
+    assert "required" in trigger or "warning" in trigger
 
 
 def test_batch_notes_creates_activity(client, db_session, test_user):

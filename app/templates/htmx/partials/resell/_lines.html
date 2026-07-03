@@ -13,8 +13,11 @@
 {% set is_draft = el.status == 'draft' %}
 
 {# Reusable best-offer / offer-count chip → opens the per-line comparison modal. #}
-{% macro _line_offer_badge(el, item) %}
-  {% if (item.offer_count or 0) > 0 %}
+{# is_owner passed explicitly — Jinja macros don't see the template-level set.
+   A non-owner broker must not see the competing-offer COUNT either (the badge
+   also 403s on click), so it shows a dash for them. #}
+{% macro _line_offer_badge(el, item, is_owner) %}
+  {% if is_owner and (item.offer_count or 0) > 0 %}
   <button hx-get="/v2/partials/resell/{{ el.id }}/lines/{{ item.id }}/offers"
           hx-target="#modal-content"
           @click="$dispatch('open-modal', { wide: true })"
@@ -26,6 +29,17 @@
   {% endif %}
 {% endmacro %}
 
+{# Awarded / Withdrawn state pill — surfaces a line's terminal status next to its offer
+   badge so the sold/pulled lines read at a glance (RS-3). Shown to everyone: "this line
+   is sold" is a fact, not the owner's private planning data. #}
+{% macro _status_pill(item) %}
+  {%- if item.status == 'awarded' -%}
+  <span class="inline-flex items-center px-1.5 py-0.5 text-xs font-semibold rounded-full bg-emerald-100 text-emerald-700 whitespace-nowrap">Awarded</span>
+  {%- elif item.status == 'withdrawn' -%}
+  <span class="inline-flex items-center px-1.5 py-0.5 text-xs font-medium rounded-full bg-gray-100 text-gray-500 whitespace-nowrap">Withdrawn</span>
+  {%- endif -%}
+{% endmacro %}
+
 <div class="space-y-4">
 
   {# ── Easy entry (owner, draft only — lines lock on post) ──────── #}
@@ -33,7 +47,7 @@
   <div id="import-area" class="rounded-lg border border-dashed border-line-base bg-gray-50 p-3"
        x-data="{ uploading: false }">
     <div class="flex items-center justify-between gap-2">
-      <p class="text-xs text-gray-500">Add parts — drop a file, or add one line.</p>
+      <p class="text-secondary">Add parts — drop a file, or add one line.</p>
       <button @click="$dispatch('open-modal')"
               hx-get="/v2/partials/resell/{{ el.id }}/add-line-form"
               hx-target="#modal-content"
@@ -76,17 +90,22 @@
         <p class="text-base font-semibold text-gray-900 font-mono">{{ item.part_number }}</p>
         {% set desc = item|part_description %}
         {% if desc %}<p class="text-sm text-gray-500 mt-0.5">{{ desc }}</p>{% endif %}
-        {% if item.manufacturer %}<p class="text-xs text-gray-400 mt-0.5">{{ item.manufacturer }}</p>{% endif %}
+        {% if item.manufacturer %}<p class="text-secondary mt-0.5">{{ item.manufacturer }}</p>{% endif %}
       </div>
-      {{ _line_offer_badge(el, item) }}
+      <div class="inline-flex items-center gap-1.5 flex-shrink-0">
+        {{ _status_pill(item) }}
+        {{ _line_offer_badge(el, item, is_owner) }}
+      </div>
     </div>
     <div class="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-      <div><span class="block text-xs text-gray-400 uppercase tracking-wide">Qty</span><span class="font-medium tabular-nums">{{ "{:,}".format(item.quantity) }}</span></div>
-      <div><span class="block text-xs text-gray-400 uppercase tracking-wide">Condition</span><span class="font-medium">{{ item.condition or '—' }}</span></div>
-      <div><span class="block text-xs text-gray-400 uppercase tracking-wide">Date code</span><span class="font-medium">{{ item.date_code or '—' }}</span></div>
+      <div><span class="block text-secondary uppercase tracking-wide">Qty</span><span class="font-medium tabular-nums">{{ "{:,}".format(item.quantity) }}</span></div>
+      <div><span class="block text-secondary uppercase tracking-wide">Condition</span><span class="font-medium">{{ item.condition or '—' }}</span></div>
+      <div><span class="block text-secondary uppercase tracking-wide">Date code</span><span class="font-medium">{{ item.date_code or '—' }}</span></div>
       <div>
-        <span class="block text-xs text-gray-400 uppercase tracking-wide">Best offer</span>
-        {% if item.best_offer_unit_price is not none %}
+        <span class="block text-secondary uppercase tracking-wide">Best offer</span>
+        {# Owner-only: a non-owner broker must never see the current best COMPETING
+           price (matches the Offers-tab / compare 403 boundary). #}
+        {% if is_owner and item.best_offer_unit_price is not none %}
         <span class="font-semibold text-emerald-600 tabular-nums">${{ "{:,.4f}".format(item.best_offer_unit_price|float) }}</span>
         {% else %}<span class="text-gray-400">—</span>{% endif %}
       </div>
@@ -111,16 +130,22 @@
         <tr>
           <td>
             <span class="font-mono font-medium text-gray-900">{{ item.part_number }}</span>
-            {% if item.manufacturer %}<span class="block text-xs text-gray-400">{{ item.manufacturer }}</span>{% endif %}
+            {% if item.manufacturer %}<span class="block text-secondary">{{ item.manufacturer }}</span>{% endif %}
           </td>
           <td class="text-right tabular-nums">{{ "{:,}".format(item.quantity) }}</td>
           <td>{{ item.condition or '—' }}</td>
           <td class="text-right tabular-nums">
-            {% if item.best_offer_unit_price is not none %}
+            {# Owner-only best competing price (see single-card note above). #}
+            {% if is_owner and item.best_offer_unit_price is not none %}
             <span class="font-semibold text-emerald-600">${{ "{:,.4f}".format(item.best_offer_unit_price|float) }}</span>
             {% else %}<span class="text-gray-400">—</span>{% endif %}
           </td>
-          <td class="text-center">{{ _line_offer_badge(el, item) }}</td>
+          <td class="text-center">
+            <div class="inline-flex items-center gap-1.5">
+              {{ _status_pill(item) }}
+              {{ _line_offer_badge(el, item, is_owner) }}
+            </div>
+          </td>
         </tr>
         {% endfor %}
       </tbody>

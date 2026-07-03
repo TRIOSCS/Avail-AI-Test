@@ -13,7 +13,7 @@
 import htmx from 'htmx.org';
 import Alpine from 'alpinejs';
 
-// ── Alpine.js Official Plugins (all 9) ───────────────────────
+// ── Alpine.js Official Plugins ───────────────────────
 // Focus (replaces deprecated @alpinejs/trap) — focus management & trapping for modals/drawers
 import focus from '@alpinejs/focus';
 // Persist — saves Alpine state to localStorage across page loads
@@ -24,14 +24,6 @@ import intersect from '@alpinejs/intersect';
 import collapse from '@alpinejs/collapse';
 // Morph — DOM morphing that preserves Alpine + browser state
 import morph from '@alpinejs/morph';
-// Mask — auto-format text inputs as user types (part numbers, phones)
-import mask from '@alpinejs/mask';
-// Sort — drag-and-drop reordering
-import sort from '@alpinejs/sort';
-// Anchor — position elements relative to other elements (dropdowns, tooltips)
-import anchor from '@alpinejs/anchor';
-// Resize — react to element resize events
-import resize from '@alpinejs/resize';
 
 // ── HTMX Extensions ─────────────────────────────────────────
 // Alpine-morph: uses Alpine's morph plugin as HTMX swap strategy (preserves Alpine state)
@@ -50,18 +42,12 @@ import 'htmx-ext-head-support';
 import 'htmx-ext-multi-swap';
 // SSE: Server-Sent Events for real-time updates (sourcing progress, RFQ status)
 import 'htmx-ext-sse';
-// WS: WebSocket support with auto-reconnect (real-time notifications)
-import 'htmx-ext-ws';
 // JSON-enc: encode request body as JSON instead of form-encoded
 import 'htmx-ext-json-enc';
-// Path-params: use path parameters in hx-get/hx-post URLs from element data
-import 'htmx-ext-path-params';
 // Remove-me: auto-remove elements after a timeout (flash messages, temp alerts)
 import 'htmx-ext-remove-me';
 // Restored: trigger events when back-button restores a page from cache
 import 'htmx-ext-restored';
-// Debug: logs all HTMX events to console (dev only — enabled per-element with hx-ext="debug")
-import 'htmx-ext-debug';
 // Idiomorph: smart DOM morphing algorithm by HTMX team (alternative swap strategy)
 import 'idiomorph';
 import 'idiomorph/dist/idiomorph-ext.esm.js';
@@ -81,10 +67,6 @@ Alpine.plugin(persist);    // $persist
 Alpine.plugin(intersect);  // x-intersect
 Alpine.plugin(collapse);   // x-collapse
 Alpine.plugin(morph);      // Alpine.morph()
-Alpine.plugin(mask);       // x-mask
-Alpine.plugin(sort);       // x-sort
-Alpine.plugin(anchor);     // x-anchor
-Alpine.plugin(resize);     // x-resize
 
 // ── Expose globals ───────────────────────────────────────────
 window.htmx = htmx;
@@ -611,12 +593,7 @@ document.body.addEventListener('htmx:beforeSwap', (evt) => {
  *
  * Called by: partials/shared/split_panel.html
  * Depends on: Alpine.js
- *
- * Sets window.__availSplitPanelRegistered so the standalone
- * requisitions2.js fallback skips its duplicate registration when this
- * bundle is loaded (CRIT-FE-2).
  */
-window.__availSplitPanelRegistered = true;
 Alpine.data('splitPanel', (panelId, defaultPct) => ({
     leftWidth: parseInt(localStorage.getItem('avail_split_' + panelId) || defaultPct),
     _resizing: false,
@@ -674,6 +651,70 @@ Alpine.data('splitPanel', (panelId, defaultPct) => ({
         document.addEventListener('touchmove', onTouchMove);
         document.addEventListener('touchend', onTouchEnd);
     }
+}));
+
+/**
+ * sourcingWorkspace — keyboard navigation for the split-panel sourcing workspace.
+ * Arrow keys walk the selection through leadIds and lazy-load each lead's detail
+ * into #split-right-sourcing; Escape restores the empty-state placeholder.
+ *
+ * Registered statically here (NOT via an in-partial `alpine:init` listener) because
+ * the workspace partial arrives via HTMX long after Alpine.start() has already fired,
+ * so a partial-scoped alpine:init would never run and `x-data="sourcingWorkspace()"`
+ * would throw. Mirrors splitPanel: the initial selection and lead-id list are passed
+ * in from the template's x-data call.
+ *
+ * Called by: app/templates/htmx/partials/sourcing/workspace.html
+ *            (x-data="sourcingWorkspace(<selected_lead_id>, [<lead ids>])").
+ * Depends on: Alpine.js, htmx.
+ */
+Alpine.data('sourcingWorkspace', (selectedLeadId, leadIds) => ({
+    selectedLead: selectedLeadId || 0,
+    leadIds: leadIds || [],
+
+    selectNext() {
+        const idx = this.leadIds.indexOf(this.selectedLead);
+        if (idx < this.leadIds.length - 1) {
+            this.selectedLead = this.leadIds[idx + 1];
+            this._loadLead(this.selectedLead);
+        }
+    },
+
+    selectPrev() {
+        const idx = this.leadIds.indexOf(this.selectedLead);
+        if (idx > 0) {
+            this.selectedLead = this.leadIds[idx - 1];
+            this._loadLead(this.selectedLead);
+        }
+    },
+
+    clearSelection() {
+        this.selectedLead = 0;
+        const target = document.getElementById('split-right-sourcing');
+        if (target) {
+            target.textContent = '';
+            const wrapper = document.createElement('div');
+            wrapper.className = 'flex items-center justify-center h-full text-gray-400';
+            const inner = document.createElement('div');
+            inner.className = 'text-center';
+            const p = document.createElement('p');
+            p.className = 'text-sm';
+            p.textContent = 'Select a lead to view details';
+            inner.appendChild(p);
+            wrapper.appendChild(inner);
+            target.appendChild(wrapper);
+        }
+    },
+
+    _loadLead(leadId) {
+        htmx.ajax('GET', '/v2/partials/sourcing/leads/' + leadId + '/panel', {
+            target: '#split-right-sourcing',
+            swap: 'innerHTML',
+            indicator: '#split-right-sourcing',
+        });
+        const row = document.getElementById('lead-row-' + leadId);
+        if (row) row.scrollIntoView({ block: 'nearest' });
+    },
 }));
 
 /**
@@ -891,159 +932,6 @@ Alpine.data('resizableModal', () => ({
 }));
 
 /**
- * x-truncate-tip — Hover tooltip that fires when an element overflows
- * its box (scrollWidth > clientWidth), OR when the element has a
- * `_tipNodes` property (a DocumentFragment the directive appends as-is).
- *
- * The `_tipNodes` path is used by x-chip-overflow to show hidden chips
- * without ever touching innerHTML — we clone DOM subtrees directly.
- */
-Alpine.directive('truncate-tip', (el, _directive, { cleanup }) => {
-  let tip = null;
-
-  const hasTipNodes = () => el._tipNodes && el._tipNodes.hasChildNodes && el._tipNodes.hasChildNodes();
-
-  const show = () => {
-    // Re-entrant guard: if a tooltip is already shown, skip. Without this,
-    // rapid mouseenter events (e.g. synthetic events during HTMX swap or
-    // mouse re-enter across nested elements) would overwrite `tip` and
-    // orphan the prior DOM node on document.body with no cleanup path.
-    if (tip) return;
-    const viaNodes = hasTipNodes();
-    if (!viaNodes && el.scrollWidth <= el.clientWidth) return;
-    const text = viaNodes ? null : el.textContent.trim();
-    if (!viaNodes && !text) return;
-
-    tip = document.createElement('div');
-    tip.className = 'truncate-tip';
-    if (viaNodes) {
-      // Clone the fragment so the original reference stays reusable.
-      tip.appendChild(el._tipNodes.cloneNode(true));
-    } else {
-      tip.textContent = text;
-    }
-    document.body.appendChild(tip);
-
-    const r = el.getBoundingClientRect();
-    const tr = tip.getBoundingClientRect();
-    let top = r.top - tr.height - 6;
-    if (top < 4) top = r.bottom + 6;
-    let left = r.left + (r.width - tr.width) / 2;
-    left = Math.max(4, Math.min(left, window.innerWidth - tr.width - 4));
-    tip.style.top = top + 'px';
-    tip.style.left = left + 'px';
-    requestAnimationFrame(() => tip && tip.classList.add('visible'));
-  };
-
-  const hide = () => { if (tip) { tip.remove(); tip = null; } };
-
-  el.addEventListener('mouseenter', show);
-  el.addEventListener('mouseleave', hide);
-  el.addEventListener('focusout', hide);
-
-  // Remove any visible tooltip when Alpine tears down the element
-  // (HTMX swap-out, component unmount). Without this, the orphaned tip
-  // would stay on document.body with no removal path since its source
-  // listeners have already been disconnected.
-  cleanup(() => hide());
-});
-
-/**
- * x-chip-overflow — Measures chip row width and hides chips that don't
- * fit. Exposes a trailing +N button (must be last child, .opp-chip-more)
- * whose `_tipNodes` property holds a cloned DocumentFragment of the
- * hidden chips — x-truncate-tip reads that on hover.
- *
- * Primaries-first DOM order (enforced by _build_row_mpn_chips) ensures
- * the left-to-right overflow walk never hides a primary while a sub is
- * still visible.
- */
-Alpine.directive('chip-overflow', (el, _directive, { cleanup }) => {
-  const more = el.querySelector('.opp-chip-more');
-  if (!more) return;
-  const chips = Array.from(el.children).filter((c) => c !== more);
-
-  let rafId = 0;
-
-  const measure = () => {
-    rafId = 0;
-    chips.forEach((c) => (c.style.display = ''));
-    more.style.display = 'none';
-    more.textContent = '';
-    more._tipNodes = null;
-
-    const containerWidth = el.clientWidth;
-    if (containerWidth === 0) return;
-
-    const style = window.getComputedStyle(el);
-    const gap = parseFloat(style.columnGap || style.gap || '0') || 4;
-
-    // Measure +N width at worst-case placeholder, then clear.
-    more.style.display = '';
-    more.textContent = '+9';
-    const moreWidth = more.getBoundingClientRect().width + gap;
-    more.textContent = '';
-
-    let used = 0;
-    let fitCount = 0;
-    for (const chip of chips) {
-      const w = chip.getBoundingClientRect().width;
-      const projected = used + w + (fitCount > 0 ? gap : 0);
-      const reserve = fitCount < chips.length - 1 ? moreWidth : 0;
-      if (projected + reserve <= containerWidth) {
-        used = projected;
-        fitCount++;
-      } else {
-        break;
-      }
-    }
-
-    if (fitCount === chips.length) {
-      more.style.display = 'none';
-      return;
-    }
-
-    const hidden = chips.slice(fitCount);
-    chips.slice(0, fitCount).forEach((c) => (c.style.display = ''));
-    hidden.forEach((c) => (c.style.display = 'none'));
-
-    more.textContent = '+' + hidden.length;
-
-    // Build a DocumentFragment of cloned hidden chips, inside a chip-row wrapper.
-    // x-truncate-tip will clone this fragment into the tooltip when hovered.
-    const frag = document.createDocumentFragment();
-    const wrap = document.createElement('span');
-    wrap.className = 'opp-chip-row';
-    hidden.forEach((c) => {
-      const clone = c.cloneNode(true);
-      clone.style.display = '';
-      wrap.appendChild(clone);
-    });
-    frag.appendChild(wrap);
-    more._tipNodes = frag;
-  };
-
-  const schedule = () => {
-    if (rafId) return;
-    rafId = requestAnimationFrame(measure);
-  };
-
-  schedule();
-
-  const ro = new ResizeObserver(schedule);
-  ro.observe(el);
-
-  // Cleanup when Alpine tears down the element. Using Alpine's cleanup()
-  // callback (third-arg of the directive signature) ensures the
-  // ResizeObserver and any pending RAF are disconnected on HTMX swap-out,
-  // preventing an observer leak per chip row.
-  cleanup(() => {
-    ro.disconnect();
-    if (rafId) cancelAnimationFrame(rafId);
-  });
-});
-
-/**
  * contactsView — Alpine component for the CRM account Contacts surface
  * (contacts_tab.html). Owns the people-search (`q`) + site filter (`siteFilter`)
  * and filters the rendered contact rows CLIENT-SIDE by toggling a `hidden` class
@@ -1092,39 +980,10 @@ Alpine.data('contactsView', () => ({
   },
 }));
 
-/**
- * rowActionRail — Alpine component for requisitions2 <tr>.
- * CSS handles hover visibility via tr:hover; this component exposes
- * `show` state so keyboard users (Tab, Enter, Escape) have a path.
- */
-Alpine.data('rowActionRail', () => ({
-  show: false,
-  // Won/Lost require a close reason. `outcomePrompt` names the pending terminal
-  // action ('won' | 'lost' | null); `outcomeReason` holds the typed reason. The
-  // confirm button is gated on a non-empty trimmed reason, mirroring the
-  // buy-plan cancel modal's required-textarea pattern.
-  outcomePrompt: null,
-  outcomeReason: '',
-  openOutcome(action) {
-    this.outcomeReason = '';
-    this.outcomePrompt = action;
-  },
-  closeOutcome() {
-    this.outcomePrompt = null;
-    this.outcomeReason = '';
-  },
-  get outcomeReady() { return this.outcomeReason.trim().length > 0; },
-  init() {
-    this.$el.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') { this.show = false; this.closeOutcome(); }
-    });
-  },
-}));
-
 // Data Ops dedup multi-select — one instance per dedup section (vendor / company).
 // Selection unit is a PAIR token "<keeperId>-<loserId>" (keeper-first so bulk-merge
-// keeps the suggested side). Mirrors rq2Page's Set-based pattern (reassign the Set to
-// trigger Alpine reactivity). Lives inside #settings-content, which the htmx:afterSwap
+// keeps the suggested side). Uses the reassign-the-Set idiom to trigger Alpine
+// reactivity. Lives inside #settings-content, which the htmx:afterSwap
 // handler re-initTrees, so it rebinds cleanly after each merge/delete re-render.
 Alpine.data('dedupSelect', () => ({
   selected: new Set(),
@@ -1182,21 +1041,24 @@ htmx.on('htmx:afterSwap', function(evt) {
     }
     // HTMX innerHTML swaps do not always auto-run Alpine on new nodes.
     // Explicit initTree for targets known to contain Alpine components/directives
-    // (lead drawer close button; rq2-table rows with rowActionRail, x-truncate-tip,
-    // x-chip-overflow — directives that must re-bind after filter/sort/action swaps;
+    // (lead drawer close button;
     // rfq-affinity-section — affinity rows whose :checked/@change checkboxes bind to
     // the surrounding rfqVendorModal x-data scope, otherwise the checkboxes are inert
     // and ticked affinity vendors never enter selectedVendors / never get sent;
     // settings-content — the Settings tab body is lazy-swapped here and re-swapped by
     // every settings mutation (e.g. a dedup merge re-renders Data Ops), so its Alpine
     // directives — the Data Ops multi-select bar — must re-init or the checkboxes go
-    // inert and selection state is lost after the first action).
+    // inert and selection state is lost after the first action;
+    // proactive-contact-list — the Prepare page add-contact POST swaps the re-rendered
+    // picker here, whose :checked/@change checkboxes bind to the surrounding prepare
+    // x-data scope and whose new row carries an x-init auto-select; without re-init the
+    // checkboxes go inert and the new contact never selects (Send stays disabled).
     if (t && typeof Alpine !== 'undefined' && typeof Alpine.initTree === 'function') {
         if (
             t.id === 'lead-drawer-content' ||
-            t.id === 'rq2-table' ||
             t.id === 'rfq-affinity-section' ||
-            t.id === 'settings-content'
+            t.id === 'settings-content' ||
+            t.id === 'proactive-contact-list'
         ) {
             Alpine.initTree(t);
         }
@@ -2205,7 +2067,9 @@ Alpine.data('quoteBuilder', (initialLines, reqId, hasCustomerSite, requirementId
     if (hasChanges && !this.saved) {
       if (!confirm('You have unsaved line decisions. Close anyway?')) return;
     }
-    window.dispatchEvent(new CustomEvent('close-quote-builder'));
+    // The builder renders into the global modal (#modal-content); close-modal is the
+    // event that wrapper listens for.
+    window.dispatchEvent(new CustomEvent('close-modal'));
   },
 
   async saveQuote() {
@@ -2236,7 +2100,13 @@ Alpine.data('quoteBuilder', (initialLines, reqId, hasCustomerSite, requirementId
       };
     });
     try {
-      const resp = await fetch(`/v2/partials/quote-builder/${this.reqId}/save`, {
+      // A combined (multi-req) build saves ONE quote spanning all selected reqs via the
+      // /multi/save route; the single-req build keeps its per-req save. Both return the
+      // same {ok, quote_id, quote_number} shape, so the handling below is unchanged.
+      const url = this.multiReqIds
+        ? `/v2/partials/quote-builder/multi/save?requisition_ids=${this.multiReqIds}`
+        : `/v2/partials/quote-builder/${this.reqId}/save`;
+      const resp = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -2649,7 +2519,7 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
       // only wires htmx attributes, not Alpine's, and relying on Alpine 3's
       // MutationObserver is exactly the unreliable path the afterSwap handler warns
       // about — explicitly initTree the new node so the row arrives CHECKED and its
-      // checkbox is live (matches the lead-drawer / rq2-table workaround).
+      // checkbox is live (matches the lead-drawer workaround).
       const addedRow = container.lastElementChild;
       if (addedRow && typeof Alpine !== 'undefined' && typeof Alpine.initTree === 'function') {
         Alpine.initTree(addedRow);
@@ -2699,7 +2569,7 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
       // preview_inquiry.html contains Alpine x-data / x-model / @rfq-email-fixed.window
       // directives for the inline fix-email mini-form. htmx.ajax swaps innerHTML but does
       // not run Alpine on new nodes — the afterSwap handler only covers its hardcoded id
-      // allowlist (lead-drawer-content, rq2-table, rfq-affinity-section). previewContent
+      // allowlist (lead-drawer-content, rfq-affinity-section, settings-content). previewContent
       // has no id, so we must explicitly initTree here to bind the fix-email component.
       if (this.$refs.previewContent && typeof Alpine !== 'undefined' && typeof Alpine.initTree === 'function') {
         Alpine.initTree(this.$refs.previewContent);
@@ -3292,17 +3162,20 @@ Alpine.data('avatarCropper', (postUrl, maxBytes) => ({
     }
     const form = new FormData();
     form.append('file', new File([blob], 'avatar.' + ext, { type }));
+    // Raw fetch (not htmx), so the CSRF double-submit header must be added by hand —
+    // starlette_csrf 403s any session POST without it, before the route ever runs.
     fetch(this.postUrl, {
       method: 'POST',
       body: form,
-      headers: { 'HX-Request': 'true' },
+      headers: { 'HX-Request': 'true', 'x-csrftoken': csrfToken() },
       credentials: 'same-origin',
     })
       .then((resp) => {
         if (!resp.ok) {
+          const fallback = 'Upload failed (HTTP ' + resp.status + '). Try again.';
           return resp.json().then(
-            (b) => { throw new Error((b && b.error) || 'Upload failed. Try again.'); },
-            () => { throw new Error('Upload failed. Try again.'); },
+            (b) => { throw new Error((b && b.error) || fallback); },
+            () => { throw new Error(fallback); },
           );
         }
         // The route returns HX-Trigger {avatarUpdated:{filename}, showToast:{...}}.

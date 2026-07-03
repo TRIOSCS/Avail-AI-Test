@@ -19,22 +19,22 @@
     {# Row 1: Vendor Name, Qty Available, Unit Price, Lead Time #}
     <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
       <div>
-        <label class="block text-xs text-gray-500 mb-1">Vendor Name *</label>
+        <label class="block text-secondary mb-1">Vendor Name *</label>
         <input type="text" name="vendor_name" required value="{{ offer.vendor_name or '' }}"
                class="input input-sm">
       </div>
       <div>
-        <label class="block text-xs text-gray-500 mb-1">Qty Available</label>
+        <label class="block text-secondary mb-1">Qty Available</label>
         <input type="number" name="qty_available" min="1" value="{{ offer.qty_available or '' }}"
                class="input input-sm">
       </div>
       <div>
-        <label class="block text-xs text-gray-500 mb-1">Unit Price (USD)</label>
+        <label class="block text-secondary mb-1">Unit Price (USD)</label>
         <input type="number" name="unit_price" step="0.0001" min="0" value="{{ offer.unit_price or '' }}"
                class="input input-sm">
       </div>
       <div>
-        <label class="block text-xs text-gray-500 mb-1">Lead Time</label>
+        <label class="block text-secondary mb-1">Lead Time</label>
         <input type="text" name="lead_time" value="{{ offer.lead_time or '' }}"
                class="input input-sm">
       </div>
@@ -43,17 +43,17 @@
     {# Row 2: Manufacturer, Date Code, Condition, MOQ #}
     <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
       <div>
-        <label class="block text-xs text-gray-500 mb-1">Manufacturer</label>
+        <label class="block text-secondary mb-1">Manufacturer</label>
         <input type="text" name="manufacturer" value="{{ offer.manufacturer or '' }}"
                class="input input-sm">
       </div>
       <div>
-        <label class="block text-xs text-gray-500 mb-1">Date Code</label>
+        <label class="block text-secondary mb-1">Date Code</label>
         <input type="text" name="date_code" value="{{ offer.date_code or '' }}"
                class="input input-sm">
       </div>
       <div>
-        <label class="block text-xs text-gray-500 mb-1">Condition</label>
+        <label class="block text-secondary mb-1">Condition</label>
         <select name="condition" class="input input-sm">
           <option value="">--</option>
           <option value="new" {{ 'selected' if offer.condition == 'new' }}>New</option>
@@ -62,7 +62,7 @@
         </select>
       </div>
       <div>
-        <label class="block text-xs text-gray-500 mb-1">MOQ</label>
+        <label class="block text-secondary mb-1">MOQ</label>
         <input type="number" name="moq" min="1" value="{{ offer.moq or '' }}"
                class="input input-sm">
       </div>
@@ -71,22 +71,22 @@
     {# Row 3: SPQ, Packaging, Firmware, Hardware Code #}
     <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
       <div>
-        <label class="block text-xs text-gray-500 mb-1">SPQ</label>
+        <label class="block text-secondary mb-1">SPQ</label>
         <input type="number" name="spq" min="1" value="{{ offer.spq or '' }}"
                class="input input-sm">
       </div>
       <div>
-        <label class="block text-xs text-gray-500 mb-1">Packaging</label>
+        <label class="block text-secondary mb-1">Packaging</label>
         <input type="text" name="packaging" value="{{ offer.packaging or '' }}"
                class="input input-sm">
       </div>
       <div>
-        <label class="block text-xs text-gray-500 mb-1">Firmware</label>
+        <label class="block text-secondary mb-1">Firmware</label>
         <input type="text" name="firmware" value="{{ offer.firmware or '' }}"
                class="input input-sm">
       </div>
       <div>
-        <label class="block text-xs text-gray-500 mb-1">Hardware Code</label>
+        <label class="block text-secondary mb-1">Hardware Code</label>
         <input type="text" name="hardware_code" value="{{ offer.hardware_code or '' }}"
                class="input input-sm">
       </div>
@@ -95,23 +95,23 @@
     {# Row 4: Warranty, Country of Origin, Valid Until, Linked Requirement #}
     <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
       <div>
-        <label class="block text-xs text-gray-500 mb-1">Warranty</label>
+        <label class="block text-secondary mb-1">Warranty</label>
         <input type="text" name="warranty" value="{{ offer.warranty or '' }}"
                class="input input-sm">
       </div>
       <div>
-        <label class="block text-xs text-gray-500 mb-1">Country of Origin</label>
+        <label class="block text-secondary mb-1">Country of Origin</label>
         <input type="text" name="country_of_origin" value="{{ offer.country_of_origin or '' }}"
                class="input input-sm">
       </div>
       <div>
-        <label class="block text-xs text-gray-500 mb-1">Valid Until</label>
+        <label class="block text-secondary mb-1">Valid Until</label>
         <input type="date" name="valid_until" value="{{ offer.valid_until.isoformat() if offer.valid_until else '' }}"
                class="input input-sm">
       </div>
       {% if requirements %}
       <div>
-        <label class="block text-xs text-gray-500 mb-1">Linked Requirement</label>
+        <label class="block text-secondary mb-1">Linked Requirement</label>
         <select name="requirement_id" class="input input-sm">
           <option value="">— None —</option>
           {% for r in requirements %}
@@ -124,7 +124,7 @@
 
     {# Notes #}
     <div>
-      <label class="block text-xs text-gray-500 mb-1">Notes</label>
+      <label class="block text-secondary mb-1">Notes</label>
       <textarea name="notes" rows="2"
                 class="input input-sm">{{ offer.notes or '' }}</textarea>
     </div>

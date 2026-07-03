@@ -375,7 +375,7 @@ class TestBatchRefreshAdditional:
                 headers={"HX-Request": "true"},
             )
         assert resp.status_code == 200
-        assert "failed" in resp.text.lower()
+        assert "failed" in resp.headers.get("HX-Trigger", "").lower()
 
     def test_batch_refresh_invalid_json(self, client: TestClient):
         resp = client.post(

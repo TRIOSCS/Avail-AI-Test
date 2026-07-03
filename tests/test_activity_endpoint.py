@@ -4,6 +4,8 @@ Covers: valid calls, invalid phone, rate limiting, vendor resolution,
 requirement-to-requisition resolution, unknown entity IDs.
 """
 
+from unittest.mock import patch
+
 import pytest
 
 from app.models import ActivityLog
@@ -98,24 +100,30 @@ class TestCallInitiated:
         assert resp.status_code == 201
 
     def test_rate_limit(self, client):
-        # First 10 should succeed
-        for _ in range(10):
+        # Freeze the rate limiter's window clock so all 11 calls fall in ONE fixed window.
+        # check_rate_limit keys its counter on int(_now() // window_seconds); without this,
+        # 11 sequential calls that straddle a 60s boundary (common under parallel xdist load)
+        # split across two windows and the 11th lands in a fresh window under the limit — a
+        # flaky 201 instead of 429. _now() exists as this exact test seam.
+        with patch("app.rate_limit._now", return_value=1_000_000.0):
+            # First 10 should succeed
+            for _ in range(10):
+                resp = client.post(
+                    "/api/activity/call-initiated",
+                    json={
+                        "phone_number": "4155551234",
+                    },
+                )
+                assert resp.status_code == 201
+
+            # 11th should be rate limited
             resp = client.post(
                 "/api/activity/call-initiated",
                 json={
                     "phone_number": "4155551234",
                 },
             )
-            assert resp.status_code == 201
-
-        # 11th should be rate limited
-        resp = client.post(
-            "/api/activity/call-initiated",
-            json={
-                "phone_number": "4155551234",
-            },
-        )
-        assert resp.status_code == 429
+            assert resp.status_code == 429
 
     def test_origin_recorded(self, client, db_session):
         resp = client.post(

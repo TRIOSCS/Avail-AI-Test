@@ -18,14 +18,6 @@ from sqlalchemy.orm import Session
 # used by buyplan_notifications and avoid import-time side effects.
 
 
-# Re-exported here so tests can patch at the source module.
-def _import_graph():
-    from app.utils.graph_client import GraphClient
-    from app.utils.token_manager import get_valid_token
-
-    return GraphClient, get_valid_token
-
-
 # Make them patchable at this module level (mirrors buyplan_notifications pattern).
 try:
     from app.utils.graph_client import GraphClient  # noqa: F401

@@ -13,8 +13,7 @@ ENV = templates.env
 
 def render_macro(call_expr: str, **ctx) -> str:
     tpl = ENV.from_string(
-        '{% from "htmx/partials/shared/_macros.html" import '
-        "status_dot, deal_value, coverage_meter, urgency_accent_class, time_text %}" + call_expr,
+        '{% from "htmx/partials/shared/_macros.html" import status_dot, coverage_meter, time_text %}' + call_expr,
     )
     return tpl.render(**ctx).strip()
 
@@ -37,55 +36,6 @@ def test_status_dot_buckets(value, bucket, label):
     html = render_macro(f'{{{{ status_dot("{value}") }}}}')
     assert f"opp-status-dot--{bucket}" in html
     assert f">{label}<" in html
-
-
-# ── deal_value ────────────────────────────────────────────────────────
-
-
-@pytest.mark.parametrize(
-    "amount,source,expect_class,expect_text",
-    [
-        (150000, "entered", "opp-deal--tier-primary-500", "$150,000"),
-        (5000, "entered", "opp-deal--tier-primary-400", "$5,000"),
-        (500, "entered", "opp-deal--tier-tertiary", "$500"),
-        (25000, "computed", "opp-deal--computed", "$25,000"),
-        (None, "none", "opp-deal--tier-tertiary", "—"),
-        (0, "none", "opp-deal--tier-tertiary", "—"),
-    ],
-)
-def test_deal_value_tiers(amount, source, expect_class, expect_text):
-    html = render_macro(f"{{{{ deal_value({amount!r}, {source!r}) }}}}")
-    assert expect_class in html
-    assert expect_text in html
-
-
-def test_deal_value_partial_has_tilde_and_italic_and_tooltip():
-    html = render_macro('{{ deal_value(30000, "partial", priced_count=3, requirement_count=5) }}')
-    assert "~$30,000" in html
-    assert "opp-deal--computed" in html
-    assert "opp-deal--partial" in html
-    assert "3 of 5 parts priced" in html
-
-
-def test_deal_value_title_attr_is_escaped_not_safe():
-    """HIGH-SEC-1: the title tooltip must be rendered through Jinja2
-    autoescaping in the attribute context. A value containing HTML/quote
-    metacharacters (priced_count/requirement_count are normally ints, but
-    the macro must not trust them) must come out escaped — never raw.
-    """
-    html = render_macro(
-        '{{ deal_value(30000, "partial", priced_count=\'"><script>x</script>\', requirement_count=5) }}'
-    )
-    # The raw payload must not appear; the escaped form must.
-    assert "<script>x</script>" not in html
-    assert "&lt;script&gt;" in html
-    # The title attribute must still be present and well-formed.
-    assert 'title="Floor estimate' in html
-
-
-def test_deal_value_no_title_attr_for_unknown_source():
-    html = render_macro('{{ deal_value(500, "mystery") }}')
-    assert "title=" not in html
 
 
 # ── coverage_meter ────────────────────────────────────────────────────
@@ -111,25 +61,6 @@ def test_coverage_meter_full():
 def test_coverage_meter_aria_label():
     html = render_macro("{{ coverage_meter(2, 5) }}")
     assert 'aria-label="Coverage: 2 of 5 parts sourced"' in html
-
-
-# ── urgency_accent_class ──────────────────────────────────────────────
-
-
-@pytest.mark.parametrize(
-    "hours,urgency,expected",
-    [
-        (6, "normal", "opp-row--urgent-24h"),
-        (48, "normal", "opp-row--urgent-72h"),
-        (120, "normal", ""),
-        (None, "normal", ""),
-        (None, "critical", "opp-row--urgent-24h"),
-        (120, "critical", "opp-row--urgent-24h"),
-    ],
-)
-def test_urgency_accent_class(hours, urgency, expected):
-    html = render_macro(f"{{{{ urgency_accent_class({hours!r}, {urgency!r}) }}}}")
-    assert html == expected
 
 
 # ── time_text ─────────────────────────────────────────────────────────
@@ -161,52 +92,6 @@ def test_time_text_days():
     html = render_macro("{{ time_text(120) }}")
     assert "5d" in html
     assert "opp-time--normal" in html
-
-
-# ── mpn_chips_aggregated ──────────────────────────────────────────────
-
-
-def render_aggregated(items_expr: str) -> str:
-    tpl = ENV.from_string(
-        '{% from "htmx/partials/shared/_mpn_chips.html" import mpn_chips_aggregated %}'
-        + f"{{{{ mpn_chips_aggregated({items_expr}) }}}}"
-    )
-    return tpl.render().strip()
-
-
-def test_mpn_chips_aggregated_renders_primaries_before_subs():
-    items = [
-        {"mpn": "LM317", "role": "primary"},
-        {"mpn": "NE555", "role": "primary"},
-        {"mpn": "LM337", "role": "sub"},
-    ]
-    html = render_aggregated(repr(items))
-    pos_lm317 = html.index("LM317")
-    pos_ne555 = html.index("NE555")
-    pos_lm337 = html.index("LM337")
-    assert pos_lm317 < pos_ne555 < pos_lm337
-
-
-def test_mpn_chips_aggregated_includes_overflow_bucket_and_directive():
-    items = [{"mpn": f"M{i}", "role": "primary"} for i in range(4)]
-    html = render_aggregated(repr(items))
-    assert "x-chip-overflow" in html
-    assert "opp-chip-more" in html
-
-
-def test_mpn_chips_aggregated_plus_n_button_carries_no_data_tip_content():
-    # Security invariant (spec §Name cell / MPN chip row): the +N button
-    # MUST NOT have a data-tip-content attribute. Hidden-chip content flows
-    # at runtime via _tipNodes on the element, not as an HTML-string attr.
-    # A regression here would re-open the innerHTML XSS class.
-    items = [{"mpn": f"M{i}", "role": "primary"} for i in range(4)]
-    html = render_aggregated(repr(items))
-    assert "data-tip-content" not in html
-
-
-def test_mpn_chips_aggregated_empty_renders_placeholder():
-    html = render_aggregated("[]")
-    assert "—" in html
 
 
 # ── opp_status_cell ───────────────────────────────────────────────────

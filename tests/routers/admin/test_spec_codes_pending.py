@@ -79,10 +79,30 @@ def pending_row(db_session: Session) -> OemSpecCodePending:
 # ── Tests ─────────────────────────────────────────────────────────────
 
 
+# HTMX navigations send this header; list_pending content-negotiates on it (bare partial
+# for HTMX callers, full app shell for a raw browser reload/bookmark of the pushed url).
+_HX = {"HX-Request": "true"}
+
+
 def test_list_pending_returns_200(client_with_settings_user, pending_row):
-    resp = client_with_settings_user.get("/admin/spec-codes/pending")
+    resp = client_with_settings_user.get("/admin/spec-codes/pending", headers=_HX)
     assert resp.status_code == 200
     assert b"SPREJ" in resp.content
+
+
+def test_list_pending_full_page_reload_serves_shell(client_with_settings_user, pending_row):
+    """SET-07: Settings → Data Ops 'Open queue' hx-push-urls /admin/spec-codes/pending, so
+    a raw browser reload / bookmark of that url (no HX-Request header) must render the full
+    app shell that HTMX-loads the queue — not a shell-less fragment."""
+    resp = client_with_settings_user.get("/admin/spec-codes/pending")  # no HX-Request
+    assert resp.status_code == 200
+    body = resp.content.decode()
+    # App shell: the #main-content mount + a loader that points back at this same url.
+    assert 'id="main-content"' in body
+    assert 'hx-get="/admin/spec-codes/pending"' in body
+    assert 'hx-trigger="load"' in body
+    # The queue partial itself has NOT been rendered inline (it loads via the HTMX pass).
+    assert "SPREJ" not in body
 
 
 def test_approve_promotes_to_oem_spec_codes(client_with_settings_user, pending_row, db_session, admin_user):
@@ -455,7 +475,7 @@ def test_pending_list_strips_javascript_url_from_citations(client_with_settings_
     )
     db_session.commit()
 
-    resp = client_with_settings_user.get("/admin/spec-codes/pending")
+    resp = client_with_settings_user.get("/admin/spec-codes/pending", headers=_HX)
     assert resp.status_code == 200
     body = resp.content.decode()
 

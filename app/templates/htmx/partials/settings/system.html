@@ -33,7 +33,7 @@
             <p class="text-sm font-medium text-gray-900">{{ item.label }}</p>
             <p class="text-xs text-gray-600 mt-0.5">{{ item.help }}</p>
             {% if item.restart %}
-            <p class="text-xs text-gray-400 mt-1">Applies after the next restart.</p>
+            <p class="text-secondary mt-1">Applies after the next restart.</p>
             {% endif %}
           </div>
           <label class="relative inline-flex items-center cursor-pointer ml-4 shrink-0">
@@ -41,7 +41,10 @@
                    class="sr-only peer"
                    hx-put="/api/admin/config/{{ item.key }}"
                    hx-swap="none"
-                   hx-vals='js:{value: $el.checked ? "true" : "false"}'
+                   {# $el is an Alpine magic — undefined in htmx's js: eval, so the
+                      value was never computed and every toggle silently no-op'd.
+                      htmx exposes the change event; event.target is the checkbox. #}
+                   hx-vals='js:{value: event.target.checked ? "true" : "false"}'
                    hx-ext="json-enc"
                    data-loading-disable
                    aria-label="{{ item.label }}">
@@ -60,7 +63,7 @@
               <p class="text-sm font-medium text-gray-900">{{ item.label }}</p>
               <p class="text-xs text-gray-600 mt-0.5">{{ item.help }}</p>
               {% if item.restart %}
-              <p class="text-xs text-gray-400 mt-1">Applies after the next restart.</p>
+              <p class="text-secondary mt-1">Applies after the next restart.</p>
               {% endif %}
             </div>
             <form class="flex items-center gap-2 shrink-0"

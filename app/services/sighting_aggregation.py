@@ -46,16 +46,22 @@ def _estimate_qty_with_ai(qty_values: list[int | None]) -> dict:
     if len(non_null) <= 2:
         return {"qty": sum(non_null), "approximate": False}
 
+    # Resolve the key OUTSIDE the try: a config/credential problem must surface as
+    # the no-key fallback, not be swallowed as "AI failed". (This branch was dead
+    # since it shipped — it read settings.ANTHROPIC_API_KEY, which doesn't exist
+    # [the field is lowercase], and the AttributeError was eaten by the except.)
+    from app.services.credential_service import get_credential_cached
+
+    api_key = get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY")
+    if not api_key:
+        return {"qty": max(non_null), "approximate": True}
+
     try:
         import anthropic
 
-        from app.config import settings
         from app.utils.claude_client import MODELS
 
-        if not settings.ANTHROPIC_API_KEY:
-            return {"qty": max(non_null), "approximate": True}
-
-        client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+        client = anthropic.Anthropic(api_key=api_key)
         prompt = (
             f"Given these quantity listings from the same vendor for the same part: {non_null}. "
             f"Some may be duplicate stock listed on different platforms. "

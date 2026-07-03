@@ -1,9 +1,10 @@
 """tests/test_quote_builder_nightly.py — Coverage tests for quote_builder_modal_multi
 (lines 78-103).
 
-The /v2/partials/quote-builder/multi route is shadowed by /{req_id} because FastAPI
-registers routes in declaration order and "multi" is not a valid int (yields 422).
-We call the async function directly to exercise all branches in lines 78-103.
+These exercise quote_builder_modal_multi by calling the async function directly (fine
+for the ownership/customer-gate branches). The /multi route is now declared BEFORE the
+/{req_id} route (OQ-02), so it is reachable over HTTP too; the combined-quote HTTP flow
+is covered end-to-end in tests/test_build_quote_multi_req.py.
 
 Called by: pytest
 Depends on: conftest fixtures (db_session, test_user, test_requisition, test_customer_site, test_company)
@@ -14,6 +15,7 @@ import os
 os.environ["TESTING"] = "1"
 
 import asyncio
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -173,13 +175,32 @@ class TestQuoteBuilderModalMultiWithCustomerSite:
         self,
         db_session: Session,
         test_user: User,
-        test_requisition: Requisition,
+        test_customer_site: CustomerSite,
     ):
-        """multi_req_ids in the template context must equal the raw requisition_ids
-        param."""
-        test_requisition.customer_site_id = None
-        raw_ids = f"{test_requisition.id},{test_requisition.id + 1}"
+        """On the success path, multi_req_ids in the context equals the raw param.
 
-        _, _, captured_ctx = _call_modal_multi_capturing(raw_ids, test_user, db_session, test_requisition)
+        The combine now runs a customer-consistency gate, so the pass-through only
+        happens when the selected requisitions share one customer — two reqs on the same
+        customer site render the builder (not the mismatch fragment).
+        """
+        r1 = Requisition(
+            name="MR-1",
+            status="open",
+            customer_site_id=test_customer_site.id,
+            created_by=test_user.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        r2 = Requisition(
+            name="MR-2",
+            status="open",
+            customer_site_id=test_customer_site.id,
+            created_by=test_user.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add_all([r1, r2])
+        db_session.commit()
+        raw_ids = f"{r1.id},{r2.id}"
+
+        _, _, captured_ctx = _call_modal_multi_capturing(raw_ids, test_user, db_session, r1)
 
         assert captured_ctx.get("multi_req_ids") == raw_ids

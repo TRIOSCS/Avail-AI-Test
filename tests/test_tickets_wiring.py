@@ -135,11 +135,29 @@ class TestSettingsTicketsTab:
         assert 'hx-get="/v2/partials/trouble-tickets/workspace"' in html
         assert "/v2/partials/settings/tickets" not in html
 
-    def test_settings_partial_default_tab_unchanged(self, client):
-        """The default (Connectors) tab still first-paints its own content URL."""
+    def test_settings_partial_default_tab_by_role(self, client, db_session):
+        """Default tab is role-aware (SET-04): an admin first-paints Connectors (the
+        admin-only tab); a non-admin gets Profile instead of an empty 403 Connectors
+        page.
+
+        The `client` fixture is a buyer → Profile.
+        """
         html = client.get("/v2/partials/settings").text
-        assert "{ tab: 'connectors' }" in html
-        assert 'hx-get="/v2/partials/settings/connectors"' in html
+        assert "{ tab: 'profile' }" in html
+        assert 'hx-get="/v2/partials/settings/profile"' in html
+
+        # An admin still defaults to Connectors.
+        from app.constants import UserRole
+        from app.dependencies import require_user
+
+        admin = type("A", (), {"id": 99, "role": UserRole.ADMIN, "name": "Ad", "email": "ad@x.com"})()
+        client.app.dependency_overrides[require_user] = lambda: admin
+        try:
+            admin_html = client.get("/v2/partials/settings").text
+        finally:
+            client.app.dependency_overrides.pop(require_user, None)
+        assert "{ tab: 'connectors' }" in admin_html
+        assert 'hx-get="/v2/partials/settings/connectors"' in admin_html
 
 
 # ── Fix 4: honest status toast (gate on r.ok) ────────────────────────

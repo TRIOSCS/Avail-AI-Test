@@ -14,7 +14,7 @@
   <div class="flex items-center justify-between mb-3">
     <div>
       <h1 class="text-xl font-bold text-gray-900">Prospecting</h1>
-      <p class="text-xs text-gray-500 mt-0.5">Suggested accounts ranked by fit + buying signals</p>
+      <p class="text-secondary mt-0.5">Suggested accounts ranked by fit + buying signals</p>
     </div>
     {# Add-prospect control #}
     <div x-data="{ open: false }" class="relative">
@@ -24,7 +24,7 @@
         Add prospect
       </button>
       <div x-show="open" x-cloak @click.outside="open = false" x-transition
-           class="absolute right-0 mt-2 w-72 bg-white border border-line-base rounded-lg shadow-lg p-3 z-20">
+           class="absolute right-0 mt-2 w-72 bg-white border border-line-base rounded-lg shadow-float p-3 z-20">
         <form hx-post="/v2/partials/prospecting/add-domain"
               hx-target="#add-prospect-result"
               hx-swap="innerHTML"
@@ -119,9 +119,9 @@
     </svg>
     <p class="mt-2 text-sm text-gray-600">No prospects found</p>
     {% if q or status %}
-    <p class="text-xs text-gray-400 mt-1">Try clearing the filter or searching for something else.</p>
+    <p class="text-secondary mt-1">Try clearing the filter or searching for something else.</p>
     {% else %}
-    <p class="text-xs text-gray-400 mt-1">Add a company domain to start prospecting.</p>
+    <p class="text-secondary mt-1">Add a company domain to start prospecting.</p>
     {% endif %}
   </div>
   {% endif %}
@@ -172,7 +172,9 @@
     </button>
     <div x-show="open" x-cloak class="border-t border-amber-200 p-4 space-y-3">
       {% for p in screened_out_prospects %}
-      <div class="flex items-start justify-between gap-3 text-sm">
+      {# id must match the Claim-anyway button's hx-target below — the claim endpoint's
+         _action_oob response swaps this row (outerHTML) with the refreshed card. #}
+      <div id="prospect-{{ p.id }}" class="flex items-start justify-between gap-3 text-sm">
         <div class="min-w-0">
           <span class="font-medium text-gray-800">{{ p.name }}</span>
           {% if p.domain %}<span class="text-gray-400 ml-1">{{ p.domain }}</span>{% endif %}
@@ -186,7 +188,7 @@
           hx-target="#prospect-{{ p.id }}"
           hx-swap="outerHTML"
           data-loading-disable
-          class="shrink-0 px-2 py-1 text-xs font-medium text-amber-700 border border-amber-300 rounded hover:bg-amber-100 transition-colors">
+          class="shrink-0 px-2 py-1 text-xs font-medium text-amber-700 border border-amber-300 rounded-lg hover:bg-amber-100 transition-colors">
           Claim anyway
         </button>
       </div>

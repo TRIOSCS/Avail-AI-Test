@@ -171,3 +171,50 @@ class TestV2PageRequisitionsPath:
         db_session.commit()
         db_session.refresh(req)
         assert self._get(client, f"/v2/requisitions/{req.id}", test_user) == 200
+
+
+class TestViteManifestLoudness:
+    """FE-9 (production-polish): a missing manifest entry must be LOUD, not a silently
+    blank/unstyled app (the un-hashed fallback never exists in dist/)."""
+
+    def test_missing_entry_logs_critical_once(self):
+        from unittest.mock import patch
+
+        from app.routers.htmx import _shared
+
+        records = []
+        handler_id = None
+        from loguru import logger as _loguru
+
+        handler_id = _loguru.add(lambda m: records.append(m), level="CRITICAL")
+        try:
+            with (
+                patch.object(_shared, "_vite_manifest", {}),
+                patch.object(_shared, "_warned_missing_entry", False),
+            ):
+                out1 = _shared._vite_assets()
+                out2 = _shared._vite_assets()
+        finally:
+            _loguru.remove(handler_id)
+
+        assert out1["js_file"] == "assets/htmx_app.js"  # fallback still served
+        crits = [r for r in records if "htmx_app.js" in str(r)]
+        assert len(crits) == 1, "critical must fire exactly once, not per-request"
+
+    def test_present_entry_logs_nothing(self):
+        from unittest.mock import patch
+
+        from app.routers.htmx import _shared
+
+        records = []
+        from loguru import logger as _loguru
+
+        handler_id = _loguru.add(lambda m: records.append(m), level="CRITICAL")
+        try:
+            with patch.object(_shared, "_vite_manifest", {"htmx_app.js": {"file": "assets/htmx_app-abc.js"}}):
+                out = _shared._vite_assets()
+        finally:
+            _loguru.remove(handler_id)
+
+        assert out["js_file"] == "assets/htmx_app-abc.js"
+        assert not records

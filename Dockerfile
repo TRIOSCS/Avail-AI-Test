@@ -39,8 +39,10 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
 
 # Install Python deps early — only re-runs when requirements.txt changes
 COPY requirements.txt .
+# NOTE: `|| true` is scoped to the apt cleanup ONLY — a failed pip install must
+# fail the build (it used to cover the whole chain, masking dependency failures).
 RUN pip install --no-cache-dir -r requirements.txt \
-    && apt-get purge -y gcc python3-dev && apt-get autoremove -y || true
+    && { apt-get purge -y gcc python3-dev && apt-get autoremove -y || true; }
 
 # Install Chromium for Playwright/patchright (self-heal site testing)
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
@@ -67,7 +69,6 @@ RUN chmod +x docker-entrypoint.sh
 RUN useradd -r -u 1000 -m appuser \
     && chown -R appuser:appuser /app \
     && mkdir -p /var/log/avail && chown appuser:appuser /var/log/avail \
-    && mkdir -p /app/fix_queue && chown appuser:appuser /app/fix_queue \
     && mkdir -p /app/uploads/tickets /app/uploads/avatars && chown -R appuser:appuser /app/uploads
 # NOTE: /app/uploads is a named volume (see docker-compose.yml). Docker seeds a
 # *fresh* volume from this image dir, so creating it appuser-owned here makes new

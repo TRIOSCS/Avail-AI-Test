@@ -12,6 +12,7 @@ Depends on: app.models, app.dependencies, app.database, app.services, ._shared
     re-renders the requisition offers tab).
 """
 
+import json
 import os
 from datetime import datetime, timedelta, timezone
 
@@ -69,6 +70,7 @@ async def parse_email_form(
 ):
     """Return the parse-email paste form."""
     req = get_requisition_or_404(db, req_id)
+    require_requisition_access(db, req_id, user)
     ctx = _base_ctx(request, user, "requisitions")
     ctx["req"] = req
     return template_response("htmx/partials/requisitions/tabs/parse_email_form.html", ctx)
@@ -83,6 +85,7 @@ async def paste_offer_form(
 ):
     """Return the paste-offer freeform form."""
     req = get_requisition_or_404(db, req_id)
+    require_requisition_access(db, req_id, user)
     ctx = _base_ctx(request, user, "requisitions")
     ctx["req"] = req
     return template_response("htmx/partials/requisitions/tabs/paste_offer_form.html", ctx)
@@ -341,6 +344,7 @@ async def create_quote_from_offers(
 
     subtotal = 0.0
     total_cost = 0.0
+    line_items = []  # canonical JSON the email/PDF render from (quote_send.py:220)
     for o in offers:
         sell_price = float(o.unit_price or 0)
         cost_price = sell_price  # Default cost = sell, buyer adjusts
@@ -358,9 +362,29 @@ async def create_quote_from_offers(
             margin_pct=margin_pct,
         )
         db.add(line)
+        # Mirror each line into quote.line_items in the shape quote_builder_service
+        # emits — otherwise the sent email / PDF render an EMPTY line-item table
+        # (they read quote.line_items, not the QuoteLine rows).
+        line_items.append(
+            {
+                "mpn": o.mpn or "",
+                "manufacturer": o.manufacturer or "",
+                "qty": qty,
+                "cost_price": cost_price,
+                "sell_price": sell_price,
+                "margin_pct": margin_pct,
+                "lead_time": o.lead_time,
+                "date_code": o.date_code,
+                "condition": o.condition,
+                "packaging": o.packaging,
+                "moq": o.moq,
+                "offer_id": o.id,
+            }
+        )
         subtotal += sell_price * qty
         total_cost += cost_price * qty
 
+    quote.line_items = line_items
     quote.subtotal = subtotal
     quote.total_cost = total_cost
     quote.total_margin_pct = ((subtotal - total_cost) / subtotal * 100) if subtotal else 0
@@ -446,6 +470,7 @@ async def add_offer_form(
 ):
     """Return the manual offer entry form."""
     req = get_requisition_or_404(db, req_id)
+    require_requisition_access(db, req_id, user)
     requirements = db.query(Requirement).filter(Requirement.requisition_id == req_id).all()
     ctx = _base_ctx(request, user, "requisitions")
     ctx["req"] = req
@@ -585,6 +610,7 @@ async def edit_offer_form(
     db: Session = Depends(get_db),
 ):
     """Return inline edit form for an existing offer."""
+    require_requisition_access(db, req_id, user)
     offer = db.query(Offer).filter(Offer.id == offer_id, Offer.requisition_id == req_id).first()
     if not offer:
         raise HTTPException(404, "Offer not found")
@@ -900,6 +926,7 @@ async def offer_changelog(
     offer = db.get(Offer, offer_id)
     if not offer:
         raise HTTPException(404, "Offer not found")
+    require_requisition_access(db, offer.requisition_id, user, owner_id=offer.entered_by_id, label="Offer")
     rows = (
         db.query(ChangeLog)
         .filter(ChangeLog.entity_type == "offer", ChangeLog.entity_id == offer_id)
@@ -961,6 +988,7 @@ async def rfq_compose(
     from ...models.offers import Contact as RfqContact
 
     req = get_requisition_or_404(db, req_id)
+    require_requisition_access(db, req_id, user)
 
     parts = db.query(Requirement).filter(Requirement.requisition_id == req_id).all()
 
@@ -1219,23 +1247,27 @@ async def rfq_send(
     return template_response("htmx/partials/requisitions/rfq_results.html", ctx)
 
 
-@router.get("/v2/partials/follow-ups", response_class=HTMLResponse)
-async def follow_ups_list_partial(
-    request: Request,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Cross-requisition follow-up queue as HTML partial."""
-    from ...config import settings as cfg
+def _build_follow_ups_ctx(request: Request, user: User, db: Session) -> dict:
+    """Build the cross-requisition follow-up queue template context.
+
+    Shared by the list partial and the batch-send re-render so both surfaces render the
+    SAME queue (same threshold, same per-owner scope). Extracted so send-batch can
+    return the refreshed list instead of a bare success div that replaced the whole
+    page.
+    """
+    from ...config import settings
     from ...models.offers import Contact as RfqContact
 
-    threshold_days = getattr(cfg, "follow_up_days", 2)
-    threshold = datetime.now() - __import__("datetime").timedelta(days=threshold_days)
+    threshold = datetime.now(timezone.utc) - timedelta(days=settings.follow_up_days)
 
     stale_q = db.query(RfqContact).filter(
         RfqContact.contact_type == "email",
         RfqContact.status.in_(["sent", "opened"]),
-        RfqContact.created_at < threshold,
+        # "Needs follow-up" = LAST outbound contact was more than follow_up_days ago.
+        # status_updated_at is stamped on the original RFQ send AND on every follow-up, so a
+        # just-sent follow-up drops off the queue (no re-spam) until the window elapses again;
+        # created_at is the fallback for legacy rows with no status_updated_at.
+        sqlfunc.coalesce(RfqContact.status_updated_at, RfqContact.created_at) < threshold,
     )
     if getattr(user, "role", None) in (UserRole.SALES, UserRole.TRADER):
         stale_q = stale_q.join(Requisition).filter(Requisition.created_by == user.id)
@@ -1248,9 +1280,7 @@ async def follow_ups_list_partial(
         for r in db.query(Requisition.id, Requisition.name).filter(Requisition.id.in_(req_ids)).all():
             req_names[r.id] = r.name
 
-    from datetime import timezone as tz
-
-    now = datetime.now(tz.utc)
+    now = datetime.now(timezone.utc)
     follow_ups = []
     for c in stale:
         ca = c.created_at if c.created_at else now
@@ -1270,7 +1300,96 @@ async def follow_ups_list_partial(
 
     ctx = _base_ctx(request, user, "follow-ups")
     ctx.update({"follow_ups": follow_ups, "total": len(follow_ups)})
+    return ctx
+
+
+@router.get("/v2/partials/follow-ups", response_class=HTMLResponse)
+async def follow_ups_list_partial(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Cross-requisition follow-up queue as HTML partial."""
+    ctx = _build_follow_ups_ctx(request, user, db)
     return template_response("htmx/partials/follow_ups/list.html", ctx)
+
+
+async def _deliver_follow_up(
+    request: Request, db: Session, contact, *, token: str | None, is_testing: bool, body: str = ""
+) -> str:
+    """Send ONE follow-up email to a stale contact. Returns 'sent' | 'no_email' | 'dnc'
+    | 'failed'.
+
+    Marks contact SENT in-session (the CALLER commits) on success. Shared by the single-send
+    and batch paths so both honor the same DNC hard-block, the same Graph send, and honest
+    success/failure — no drift between them.
+
+    token: a pre-fetched Graph token (batch fetches once and reuses); pass None and the helper
+    fetches lazily via require_fresh_token — only after the no-email/DNC checks pass, so a
+    contact with no address never triggers a token fetch.
+    """
+    if not contact.vendor_contact:
+        return "no_email"
+    dnc = (
+        db.query(SiteContact)
+        .filter(
+            sqlfunc.lower(SiteContact.email) == contact.vendor_contact.lower(),
+            SiteContact.do_not_contact.is_(True),
+        )
+        .first()
+    )
+    if dnc:
+        logger.warning(
+            "Follow-up skipped — do-not-contact flag set for vendor '{}' ({})",
+            contact.vendor_name,
+            contact.vendor_contact,
+        )
+        return "dnc"
+    if is_testing:
+        contact.status = ContactStatus.SENT
+        contact.status_updated_at = datetime.now(timezone.utc)
+        return "sent"
+    # Fetch the token OUTSIDE the try so a genuine session-expiry (require_fresh_token →
+    # HTTPException 401) propagates to the global 401→login handler instead of being
+    # mislabeled as a per-contact send failure.
+    if token is None:
+        from ...dependencies import require_fresh_token
+
+        token = await require_fresh_token(request, db)
+    from ...utils.graph_client import GraphClient
+
+    gc = GraphClient(token)
+    follow_up_body = (
+        body
+        or f"Dear {contact.vendor_name},\n\nI'm following up on our previous inquiry. Please let us know if you have availability.\n\nThank you."
+    )
+    payload = {
+        "message": {
+            "subject": f"Follow-up: {contact.subject or 'RFQ'}",
+            "body": {"contentType": "Text", "content": follow_up_body},
+            "toRecipients": [{"emailAddress": {"address": contact.vendor_contact}}],
+        },
+        "saveToSentItems": "true",
+    }
+    try:
+        result = await gc.post_json("/me/sendMail", payload)
+    except Exception as exc:
+        logger.warning("Follow-up email send failed for contact {}: {}", contact.id, exc)
+        return "failed"
+    # GraphClient returns {"error": ...} on a 4xx / exhausted-retry WITHOUT raising — a
+    # discarded return would silently mark a NON-sent email "sent" (the exact lie this
+    # change removes). Check it, matching services/quote_send.py.
+    if isinstance(result, dict) and result.get("error"):
+        logger.warning(
+            "Follow-up send failed for contact {}: Graph {} — {}",
+            contact.id,
+            result.get("error"),
+            result.get("detail"),
+        )
+        return "failed"
+    contact.status = ContactStatus.SENT
+    contact.status_updated_at = datetime.now(timezone.utc)
+    return "sent"
 
 
 @router.post("/v2/partials/follow-ups/{contact_id}/send", response_class=HTMLResponse)
@@ -1294,80 +1413,27 @@ async def send_follow_up_htmx(
 
     form = await request.form()
     body = (form.get("body") or "").strip()
-
-    # DNC hard-block — never email a do-not-contact vendor (checked in all modes,
-    # before the TESTING gate), mirroring send_reply_htmx / send_batch_rfq.
-    if contact.vendor_contact:
-        dnc = (
-            db.query(SiteContact)
-            .filter(
-                sqlfunc.lower(SiteContact.email) == contact.vendor_contact.lower(),
-                SiteContact.do_not_contact.is_(True),
-            )
-            .first()
-        )
-        if dnc:
-            logger.warning(
-                "Follow-up skipped — do-not-contact flag set for vendor '{}' ({})",
-                contact.vendor_name,
-                contact.vendor_contact,
-            )
-            return HTMLResponse(
-                '<div class="rounded bg-rose-50 border border-rose-200 text-rose-700 text-xs px-2 py-1.5">'
-                "This vendor is on the do-not-contact list — follow-up not sent.</div>"
-            )
-
     is_testing = os.environ.get("TESTING") == "1"
-    email_sent = False
 
-    if not is_testing and contact.vendor_contact:
-        # Try to send real follow-up via Graph API
-        try:
-            from ...dependencies import require_fresh_token
-
-            token = await require_fresh_token(request, db)
-
-            from ...utils.graph_client import GraphClient
-
-            gc = GraphClient(token)
-            follow_up_subject = f"Follow-up: {contact.subject or 'RFQ'}"
-            follow_up_body = (
-                body
-                or f"Dear {contact.vendor_name},\n\nI'm following up on our previous inquiry. Please let us know if you have availability.\n\nThank you."
-            )
-            payload = {
-                "message": {
-                    "subject": follow_up_subject,
-                    "body": {"contentType": "Text", "content": follow_up_body},
-                    "toRecipients": [{"emailAddress": {"address": contact.vendor_contact}}],
-                },
-                "saveToSentItems": "true",
-            }
-            await gc.post_json("/me/sendMail", payload)
-            email_sent = True
-        except Exception as exc:
-            logger.warning("Follow-up email send failed for contact {}: {}", contact_id, exc)
-
-    from datetime import timezone as tz
-
-    if email_sent or is_testing:
-        contact.status = ContactStatus.SENT
-        contact.status_updated_at = datetime.now(tz.utc)
+    result = await _deliver_follow_up(request, db, contact, token=None, is_testing=is_testing, body=body)
+    if result == "sent":
         db.commit()
+    logger.info("Follow-up {} for contact {} (vendor: {}) by {}", result, contact_id, contact.vendor_name, user.email)
 
-    mode = "via Graph API" if email_sent else ("test mode" if is_testing else "FAILED")
-    logger.info(
-        "Follow-up {} for contact {} (vendor: {}, {}) by {}",
-        "sent" if email_sent or is_testing else "FAILED",
-        contact_id,
-        contact.vendor_name,
-        mode,
-        user.email,
-    )
+    if result == "dnc":
+        return HTMLResponse(
+            '<div class="rounded bg-rose-50 border border-rose-200 text-rose-700 text-xs px-2 py-1.5">'
+            "This vendor is on the do-not-contact list — follow-up not sent.</div>"
+        )
 
     ctx = _base_ctx(request, user, "follow-ups")
     ctx["contact_id"] = contact_id
     ctx["vendor_name"] = contact.vendor_name or "Vendor"
+    # Honest result card — only claim "sent" when the email actually went out (or in test
+    # mode). no_email / failed surface an honest failure card instead of a green lie.
+    if result in ("no_email", "failed"):
+        ctx["reason"] = "no_email" if result == "no_email" else "send_failed"
+        return template_response("htmx/partials/follow_ups/send_failed.html", ctx)
     return template_response("htmx/partials/follow_ups/sent_success.html", ctx)
 
 
@@ -1624,6 +1690,7 @@ async def rfq_prepare_panel(
     from ...models.offers import Contact as RfqContact
 
     req = get_requisition_or_404(db, req_id)
+    require_requisition_access(db, req_id, user)
 
     # Get requirements for this req
     requirements = db.query(Requirement).filter(Requirement.requisition_id == req_id).all()
@@ -1745,16 +1812,19 @@ async def send_batch_follow_up(
     db: Session = Depends(get_db),
 ):
     """Send follow-ups to all stale contacts at once."""
+    from ...config import settings
     from ...models.offers import Contact as RfqContact
 
-    cfg = getattr(request.app, "state", None)
-    threshold_days = getattr(cfg, "follow_up_days", 2) if cfg else 2
-    threshold = datetime.now(timezone.utc) - timedelta(days=threshold_days)
+    # Was request.app.state.follow_up_days — a value nothing ever set, so this
+    # silently used the getattr default (2) and diverged from the queue/badge.
+    threshold = datetime.now(timezone.utc) - timedelta(days=settings.follow_up_days)
 
     q = db.query(RfqContact).filter(
         RfqContact.contact_type == "email",
         RfqContact.status.in_(["sent", "opened"]),
-        RfqContact.created_at < threshold,
+        # Last outbound contact older than the window — in lockstep with the queue + badge
+        # (see _build_follow_ups_ctx); keeps a just-sent contact from being re-sent.
+        sqlfunc.coalesce(RfqContact.status_updated_at, RfqContact.created_at) < threshold,
     )
     # Restricted roles act only on contacts under their own requisitions; buyer/manager/admin
     # stay global. Keep this in lockstep with follow_up_badge so the badge counts what the
@@ -1763,18 +1833,57 @@ async def send_batch_follow_up(
         q = q.join(Requisition, RfqContact.requisition_id == Requisition.id).filter(Requisition.created_by == user.id)
     stale = q.limit(50).all()
 
-    sent_count = 0
-    for contact in stale:
-        contact.status = ContactStatus.RESPONDED
-        contact.status_updated_at = datetime.now(timezone.utc)
-        sent_count += 1
-    db.commit()
-    logger.info("Batch follow-up: {} contacts marked by {}", sent_count, user.email)
+    # Actually SEND each stale contact's follow-up (via the shared _deliver_follow_up path,
+    # same DNC block + Graph send + SENT-marking as the single send), instead of the old
+    # behavior that silently marked everyone RESPONDED without emailing. Fetch the Graph
+    # token ONCE and reuse it across the batch.
+    is_testing = os.environ.get("TESTING") == "1"
+    token = None
+    if stale and not is_testing:
+        from ...dependencies import require_fresh_token
 
-    msg = f"{sent_count} contact{'s' if sent_count != 1 else ''} marked as responded."
-    return HTMLResponse(
-        f'<div class="text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">{msg}</div>'
+        token = await require_fresh_token(request, db)
+
+    tally = {"sent": 0, "no_email": 0, "dnc": 0, "failed": 0}
+    for contact in stale:
+        result = await _deliver_follow_up(request, db, contact, token=token, is_testing=is_testing)
+        tally[result] += 1
+        if result == "sent":
+            # Commit each send immediately — a Graph send is irreversible, so a later mid-loop
+            # failure/cancellation must not roll back the SENT record and re-send the same
+            # vendor on the next Send-All run.
+            db.commit()
+    # Escalate to ERROR (Sentry-visible) when a batch sends nothing but had failures — a
+    # systemic outage (expired app creds, Graph down) shouldn't be visible only as one
+    # user's toast.
+    log = logger.error if (tally["failed"] and not tally["sent"]) else logger.info
+    log(
+        "Batch follow-up by {user}: sent={sent} no_email={no_email} dnc={dnc} failed={failed}",
+        user=user.email,
+        **tally,
     )
+
+    # Honest summary — report what ACTUALLY happened, never a blanket "marked responded".
+    skipped = tally["no_email"] + tally["dnc"]
+    parts = [f"{tally['sent']} sent"]
+    if skipped:
+        parts.append(f"{skipped} skipped (no address / do-not-contact)")
+    if tally["failed"]:
+        parts.append(f"{tally['failed']} failed")
+    msg = "Follow-ups: " + ", ".join(parts) + "."
+    if tally["failed"] and not tally["sent"]:
+        toast_type = "error"
+    elif tally["failed"] or skipped:
+        toast_type = "warning"
+    else:
+        toast_type = "success"
+
+    # Re-render the (now shorter / empty) queue so the surrounding page survives; the honest
+    # count is surfaced via an HX-Trigger toast (base.html showToast bridge).
+    ctx = _build_follow_ups_ctx(request, user, db)
+    resp = template_response("htmx/partials/follow_ups/list.html", ctx)
+    resp.headers["HX-Trigger"] = json.dumps({"showToast": {"message": msg, "type": toast_type}})
+    return resp
 
 
 @router.get("/v2/partials/follow-ups/badge", response_class=HTMLResponse)
@@ -1784,13 +1893,15 @@ async def follow_up_badge(
     db: Session = Depends(get_db),
 ):
     """Return follow-up count badge for nav sidebar."""
+    from ...config import settings
     from ...models.offers import Contact as RfqContact
 
-    threshold = datetime.now(timezone.utc) - timedelta(days=2)
+    threshold = datetime.now(timezone.utc) - timedelta(days=settings.follow_up_days)
     q = db.query(sqlfunc.count(RfqContact.id)).filter(
         RfqContact.contact_type == "email",
         RfqContact.status.in_(["sent", "opened"]),
-        RfqContact.created_at < threshold,
+        # Last outbound contact older than the window — in lockstep with the queue + batch.
+        sqlfunc.coalesce(RfqContact.status_updated_at, RfqContact.created_at) < threshold,
     )
     # Same per-owner scope as send_batch_follow_up so the badge matches the batch.
     if user.role in RESTRICTED_ROLES:

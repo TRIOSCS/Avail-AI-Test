@@ -12,6 +12,7 @@ Depends on: tests/conftest.py fixtures (client, db_session, test_user, test_comp
 test_requisition, test_customer_site), SQLite test engine.
 """
 
+import json
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
@@ -95,14 +96,23 @@ def test_htmx_send_marks_sent_via_real_service(client, db_session, test_requisit
 
 
 def test_htmx_send_blocked_when_site_dnc(client, db_session, test_requisition, test_customer_site, test_user):
-    """Site-level do_not_contact blocks the send: status unchanged, rose partial back."""
+    """Site-level do_not_contact blocks the send: status unchanged, no-swap toast back.
+
+    OQ-07: the Send button targets #main-content, so the failure must NOT swap a body
+    (it would wipe the workspace). The route replies HX-Reswap=none + a showToast
+    HX-Trigger carrying the DNC message.
+    """
     test_customer_site.do_not_contact = True
     db_session.commit()
     quote = _draft_quote(db_session, test_requisition, test_customer_site, test_user, number="Q-2026-DNCS")
 
     resp = client.post(f"/v2/partials/quotes/{quote.id}/send")
     assert resp.status_code == 200
-    assert "do-not-contact" in resp.text
+    assert resp.headers.get("HX-Reswap") == "none"
+    assert resp.text == ""
+    trigger = json.loads(resp.headers["HX-Trigger"])
+    assert "do-not-contact" in trigger["showToast"]["message"]
+    assert trigger["showToast"]["type"] == "error"
     db_session.refresh(quote)
     assert quote.status == "draft"
 
@@ -123,7 +133,37 @@ def test_htmx_send_blocked_when_contact_dnc(client, db_session, test_requisition
 
     resp = client.post(f"/v2/partials/quotes/{quote.id}/send")
     assert resp.status_code == 200
-    assert "do-not-contact" in resp.text
+    assert resp.headers.get("HX-Reswap") == "none"
+    trigger = json.loads(resp.headers["HX-Trigger"])
+    assert "do-not-contact" in trigger["showToast"]["message"]
+    db_session.refresh(quote)
+    assert quote.status == "draft"
+
+
+def test_htmx_send_graph_error_is_no_swap_toast(client, db_session, test_requisition, test_customer_site, test_user):
+    """OQ-07: a Graph send failure must NOT swap a body into #main-content (which would
+    wipe the quote detail / Build-Quote workspace).
+
+    The route replies HX-Reswap=none + a showToast HX-Trigger carrying the error detail,
+    so the user stays on the page to retry.
+    """
+    from app.routers.htmx import quotes
+    from app.services.quote_send import QuoteSendError
+
+    quote = _draft_quote(db_session, test_requisition, test_customer_site, test_user, number="Q-2026-GERR")
+
+    async def _boom(db, q, user, **kwargs):
+        raise QuoteSendError("Graph send failed: mailbox unavailable")
+
+    with patch.object(quotes, "send_quote_email", new=AsyncMock(side_effect=_boom)):
+        resp = client.post(f"/v2/partials/quotes/{quote.id}/send")
+
+    assert resp.status_code == 200
+    assert resp.headers.get("HX-Reswap") == "none"
+    assert resp.text == ""
+    trigger = json.loads(resp.headers["HX-Trigger"])
+    assert "mailbox unavailable" in trigger["showToast"]["message"]
+    assert trigger["showToast"]["type"] == "error"
     db_session.refresh(quote)
     assert quote.status == "draft"
 

@@ -26,7 +26,7 @@ Depends on: app.services.quality_plan_service (validate_complete, validate_secti
 from datetime import date
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
@@ -50,6 +50,7 @@ from ..services.quality_plan_service import (
 )
 from ..template_env import template_response
 from ..utils.normalization import normalize_mpn_key
+from .htmx._shared import full_page_shell
 
 router = APIRouter(tags=["quality_plans"])
 
@@ -267,7 +268,7 @@ def qp_for_buy_plan(
     bp_id: int,
     db: Session = Depends(get_db),
     user=Depends(require_user),
-) -> HTMLResponse:
+) -> Response:
     """Get-or-create the Quality Plan for a buy plan and render its native detail.
 
     The front door to the QP view: the buy-plan owner clicks "Quality Plan" and lands
@@ -275,7 +276,16 @@ def qp_for_buy_plan(
     later open returns the same one (a buy plan has at most one QP). Ownership is scoped
     through the buy plan's parent requisition via get_buyplan_for_user, so a restricted-
     role non-owner gets a 404 (existence not leaked) before any QP is created.
+
+    This url is pushed into history (the buy-plan "Quality Plan" button hx-push-urls it),
+    so a full-page reload / bookmark / share arrives WITHOUT the HX-Request header: serve
+    the app shell (which then HTMX-loads this same url and get-or-creates the QP) instead
+    of a shell-less fragment. get-or-create runs only on the HTMX pass, keeping the
+    full-page load side-effect-free.
     """
+    if request.headers.get("HX-Request") != "true":
+        return full_page_shell(request, user, request.url.path, "buy-plans")
+
     # Ownership-scoped load (404 for missing buy plan or restricted non-owner).
     bp = get_buyplan_for_user(db, user, bp_id)
 

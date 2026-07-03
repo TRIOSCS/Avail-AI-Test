@@ -1,0 +1,31 @@
+{# quote_builder/multi_error.html — Static "can't combine" fragment for the combined
+   quote builder (OQ-02). Rendered (HTTP 200, NOT an exception) into #modal-content by
+   quote_builder_modal_multi when the selected requisitions don't share one customer, so
+   the salesperson sees an honest per-requisition breakdown instead of a bare toast.
+   Deliberately carries NO x-data — the quoteBuilder Alpine component must never init
+   against this fragment. The base modal supplies the ✕ / backdrop / Escape.
+   Receives: message (str, the CustomerMismatchError.detail naming each req + customer).
+   Called by: GET /v2/partials/quote-builder/multi (mismatch branch).
+#}
+<div class="p-6">
+  <div class="flex items-start gap-3">
+    <div class="flex-shrink-0 mt-0.5 flex h-9 w-9 items-center justify-center rounded-full bg-amber-100">
+      <svg class="h-5 w-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+      </svg>
+    </div>
+    <div class="min-w-0">
+      <h3 id="modal-title" class="text-base font-semibold text-gray-900">Can’t combine these requisitions</h3>
+      <p class="mt-2 text-sm text-gray-600 leading-relaxed">{{ message }}</p>
+      <p class="mt-3 text-xs text-gray-400">
+        A combined quote must be for a single customer. Deselect the requisitions that don’t
+        match, or build their quotes separately.
+      </p>
+    </div>
+  </div>
+
+  <div class="mt-6 flex justify-end">
+    <button type="button" @click="$dispatch('close-modal')" class="btn-secondary">Close</button>
+  </div>
+</div>

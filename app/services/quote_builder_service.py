@@ -429,23 +429,71 @@ def save_quote_from_builder(
     payload,
     user,
 ) -> dict:
-    """Create or revise a Quote from the builder's save payload.
+    """Create or revise a Quote from the builder's save payload (single requisition).
+
+    Thin wrapper over ``_save_quote_from_builder_core`` — the single-requisition path is
+    just the one-element case, so it stays 100% behaviour-preserved.
+    """
+    return _save_quote_from_builder_core(db, [req_id], payload, user)
+
+
+def save_quote_from_builder_multi(
+    db: Session,
+    req_ids: list[int],
+    payload,
+    user,
+) -> dict:
+    """Create ONE combined Quote spanning the line items of every requisition in
+    *req_ids*.
+
+    The requisitions must share a single customer (enforced by
+    ``validate_same_customer`` inside the core). ``req_ids[0]`` is the primary/anchor
+    (``Quote.requisition_id``); every contributing requisition is linked via
+    ``quote_requisitions`` so all of them surface the combined quote.
+    """
+    return _save_quote_from_builder_core(db, req_ids, payload, user)
+
+
+def _save_quote_from_builder_core(
+    db: Session,
+    req_ids: list[int],
+    payload,
+    user,
+) -> dict:
+    """Create or revise a Quote from the builder's save payload across *req_ids*.
 
     If payload.quote_id is set, marks the old quote as 'revised' and creates a new
     revision with the updated line items. Otherwise creates a fresh quote.
 
-    Fires the same hooks as create_quote: requisition state transition,
-    per-requirement sourcing status update, and knowledge ledger capture.
+    Every contributing requisition must share one customer (``validate_same_customer``,
+    which raises ``CustomerMismatchError`` → HTTP 400 upstream). ``req_ids[0]`` is the
+    primary/anchor; after the quote is written, ``link_quote_to_requisitions`` records the
+    full membership so a combined quote is visible on all of its requisitions.
+
+    Fires the same hooks as create_quote: requisition state transition (for EVERY
+    contributing requisition), per-requirement sourcing status update, and knowledge
+    ledger capture.
     """
     from loguru import logger
 
-    from app.constants import QuoteStatus
+    from app.constants import QuoteStatus, RequisitionStatus
     from app.models import Quote, QuoteLine, Requisition
     from app.services.crm_service import next_quote_number
+    from app.services.quote_requisitions import link_quote_to_requisitions, validate_same_customer
+    from app.services.requisition_state import transition as req_transition
 
-    req = db.get(Requisition, req_id)
+    if not req_ids:
+        raise ValueError("No requisitions selected")
+
+    primary_req_id = req_ids[0]
+    req = db.get(Requisition, primary_req_id)
     if not req:
         raise ValueError("Requisition not found")
+
+    # Customer-consistency gate — runs unconditionally; the single-req case (len 1) passes
+    # whenever that req has a customer site (the router already guarantees this), so the
+    # single-req path is unchanged. A multi-req mismatch raises before anything is written.
+    validate_same_customer(db, req_ids)
 
     line_items = [
         {
@@ -483,16 +531,16 @@ def save_quote_from_builder(
     else:
         quote_number = next_quote_number(db)
 
-    # Advance requisition status to "quoted" if appropriate
-    from app.constants import RequisitionStatus
-
-    if req.status in (RequisitionStatus.OPEN, RequisitionStatus.OFFERS):
-        try:
-            from app.services.requisition_state import transition as req_transition
-
-            req_transition(req, RequisitionStatus.QUOTED, user, db)
-        except ValueError:
-            pass  # already in quoted or later state
+    # Advance EVERY contributing requisition to "quoted" if appropriate (for a single-req
+    # save this is just the primary; for a combined quote each selected req is advanced so
+    # none is left OPEN/OFFERS after its lines are on the quote).
+    for rid in req_ids:
+        r = db.get(Requisition, rid)
+        if r and r.status in (RequisitionStatus.OPEN, RequisitionStatus.OFFERS):
+            try:
+                req_transition(r, RequisitionStatus.QUOTED, user, db)
+            except ValueError:
+                pass  # already in quoted or later state
 
     # Load customer site for default payment/shipping terms
     from app.models import CustomerSite
@@ -500,7 +548,7 @@ def save_quote_from_builder(
     site = db.get(CustomerSite, req.customer_site_id) if req.customer_site_id else None
 
     quote = Quote(
-        requisition_id=req_id,
+        requisition_id=primary_req_id,
         customer_site_id=req.customer_site_id,
         quote_number=quote_number,
         revision=revision,
@@ -536,6 +584,12 @@ def save_quote_from_builder(
                 currency="USD",
             )
         )
+
+    # Record full requisition membership so the combined quote is visible on every
+    # contributing requisition (the primary self-row already exists via the Quote
+    # after_insert listener; this adds the non-primary reqs). Same transaction as the
+    # quote + lines so it commits atomically — never a quote saved with dropped reqs.
+    link_quote_to_requisitions(db, quote.id, req_ids)
 
     db.commit()
 

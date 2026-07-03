@@ -83,7 +83,7 @@ _SEARCH_PART = "app.services.tbf_worker.search_engine.search_part"
 _PARSE_HTML = "app.services.tbf_worker.result_parser.parse_results_html"
 _SAVE_SIGHTINGS = "app.services.tbf_worker.sighting_writer.save_tbf_sightings"
 _SESSION_LOCAL = "app.database.SessionLocal"
-_SLEEP = "app.services.tbf_worker.worker.asyncio.sleep"
+_SLEEP = "app.services.tbf_worker.worker._async_sleep"
 _UPDATE_STATUS = "app.services.tbf_worker.worker.update_worker_status"
 _DB_SESSION = "app.services.tbf_worker.worker._db_session"
 

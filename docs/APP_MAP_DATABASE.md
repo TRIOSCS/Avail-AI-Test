@@ -13,7 +13,9 @@
 
 ## Table Overview by Domain
 
-> **Raw-DDL index reconciliation (#464 / migration 172).** ~35 indexes that lived in the DB as raw DDL but were never declared on the ORM are now declared directly on their models, so `compare_metadata` (the `scripts/check_schema_matches_models.py` drift gate) sees them instead of flagging them as phantom `remove_index` drift. They span `companies`, `site_contacts`, `material_cards`, `activity_log`, `offers`, `requisitions`, `requirements`, `sightings`, `vendor_cards`, `vendor_contacts` and cover pg_trgm GIN (fuzzy ILIKE search), GIN on JSONB tag arrays, the FTS tsvector GIN, plain btree FK, and simple partial indexes. The DDL still lives in its original owning migration — the model declaration only makes autogenerate / the drift gate aware of the index, it does **not** create a new one. The same migration also **drops** the redundant duplicate `ix_requisitions_company_id` (the model-declared `ix_requisitions_company` from baseline `001` stays), and replaces `site_contacts.reports_to_id`'s column-level `index=True` with the explicit `ix_sc_reports_to` (migration 144's real index name). Indexes that deliberately **stay** grandfathered raw-DDL: (1) DANGER / orphan-table indexes on `buy_plans` / `enrichment_credit_usage` / `notification_engagement` / `self_heal_log` (can't be reconciled without reconciling their tables first), and (2) PostgreSQL-only expression / complex-partial indexes (`ix_mc_order_live`, `ix_mc_cat_order_live`, `ix_mc_has_datasheet`, `ix_mc_has_crosses`, `ix_mc_demand_queue`, and the `lower()` / `TRIM()` / `DESC NULLS LAST` ones) whose definitions can't be expressed on the model in a way that stays valid for the SQLite test engine.
+> **Raw-DDL index reconciliation (#464 / migration 172).** ~35 indexes that lived in the DB as raw DDL but were never declared on the ORM are now declared directly on their models, so `compare_metadata` (the `scripts/check_schema_matches_models.py` drift gate) sees them instead of flagging them as phantom `remove_index` drift. They span `companies`, `site_contacts`, `material_cards`, `activity_log`, `offers`, `requisitions`, `requirements`, `sightings`, `vendor_cards`, `vendor_contacts` and cover pg_trgm GIN (fuzzy ILIKE search), GIN on JSONB tag arrays, the FTS tsvector GIN, plain btree FK, and simple partial indexes. The DDL still lives in its original owning migration — the model declaration only makes autogenerate / the drift gate aware of the index, it does **not** create a new one. The same migration also **drops** the redundant duplicate `ix_requisitions_company_id` (the model-declared `ix_requisitions_company` from baseline `001` stays), and replaces `site_contacts.reports_to_id`'s column-level `index=True` with the explicit `ix_sc_reports_to` (migration 144's real index name). Indexes that deliberately **stay** grandfathered raw-DDL: (1) `ix_ecu_provider_month` on the orphan `enrichment_credit_usage` table (can't be reconciled without reconciling its table first), and (2) PostgreSQL-only expression / complex-partial indexes (`ix_mc_order_live`, `ix_mc_cat_order_live`, `ix_mc_has_datasheet`, `ix_mc_has_crosses`, `ix_mc_demand_queue`, and the `lower()` / `TRIM()` / `DESC NULLS LAST` ones) whose definitions can't be expressed on the model in a way that stays valid for the SQLite test engine.
+>
+> **#464 finish (migration 174, 2026-07-02).** The 21 unique constraints the models declared but the migration-built baseline never created now exist for real (all targets duplicate-checked clean on the live PG first), the three model-less legacy tables the old chain created — `buy_plans` (V1, superseded by `buy_plans_v3` via migration 076), `notification_engagement`, `self_heal_log` — are dropped (`IF EXISTS`; live staging already lacked them), and `material_cards.enrichment_status` carries its vocabulary comment on both model and DB. The drift gate's `_GRANDFATHERED_ADD_CONSTRAINTS` / `_GRANDFATHERED_MODIFY_COMMENT` sets are now empty and `_GRANDFATHERED_REMOVE_TABLES` holds only `_sp1_desc_backup` (migration 091 downgrade path) and `enrichment_credit_usage` (empty + unreferenced; kept pending an explicit product decision).
 
 ### Auth & Users
 
@@ -177,6 +179,7 @@ Migration 162 also adds the new status value **`resourcing`** to `buy_plan_lines
 | parsed_data | JSON | AI-extracted pricing |
 | confidence | Float | Parse confidence |
 | classification | String 50 | offer\|stock_list\|ooo\|spam |
+| status | String 50, default `new` | new\|parsed\|reviewed\|rejected\|flagged (VendorResponseStatus — the review queue) |
 | message_id | String 255, unique | |
 
 **`requisition_attachments`** — Files attached to a requisition (Migration 126: renamed `onedrive_item_id`→`library_item_id`, `onedrive_url`→`library_web_url`; added `library_drive_id`)
@@ -228,7 +231,7 @@ Migration 162 also adds the new status value **`resourcing`** to `buy_plan_lines
 | source | String 50 | manual\|email_parsed\|proactive |
 | evidence_tier | String 4 | T1-T7 |
 | parse_confidence | Float | 0.0-1.0 |
-| status | String 20 | active\|sold |
+| status | String 20 | pending_review\|active\|approved\|rejected\|sold\|won\|expired (OfferStatus) |
 | selected_for_quote | Boolean | Included in quote? |
 | vendor_response_id | FK -> vendor_responses | |
 | entered_by_id | FK -> users | |
@@ -254,7 +257,7 @@ Migration 162 also adds the new status value **`resourcing`** to `buy_plan_lines
 | line_items | JSON | |
 | subtotal | Numeric 12,2 | |
 | total_margin_pct | Numeric 5,2 | |
-| status | String 20 | draft\|sent\|accepted\|rejected |
+| status | String 20 | draft\|sent\|won\|lost\|revised (QuoteStatus, validated on write) |
 | result | String 20 | won\|lost |
 | won_revenue | Numeric 12,2 | |
 | sent_at | UTCDateTime | Set when the quote is emailed |
@@ -274,6 +277,15 @@ Migration 162 also adds the new status value **`resourcing`** to `buy_plan_lines
 | cost_price | Numeric 12,4 | |
 | sell_price | Numeric 12,4 | |
 | margin_pct | Numeric 5,2 | |
+
+**`quote_requisitions`** — Join table linking a quote to EVERY requisition it draws lines from (Migration 175, OQ-02). A combined quote spans 2+ requisitions selected together in the list "Build Quote" flow; `Quote.requisition_id` stays the PRIMARY/anchor while one row here per contributing requisition (primary included) makes the full membership queryable. Invariant: every quote has ≥1 join row (its primary self-row) — existing quotes were backfilled by 175, and every NEW quote gets its self-row via the `Quote` `after_insert` listener (`app/models/quotes.py`), so ANY creation path (builder, revise, proactive, offers, CRM) is visible on its requisition. The single arbitration point for reads/writes is `app/services/quote_requisitions.py` (`quotes_for_requisition` replaces the old `Quote.requisition_id == req_id` filter so secondary reqs also surface the combined quote).
+| Column | Type | Notes |
+|--------|------|-------|
+| id | Integer PK | |
+| quote_id | FK -> quotes (CASCADE), indexed (`ix_quote_requisitions_quote`) | |
+| requisition_id | FK -> requisitions (CASCADE), indexed (`ix_quote_requisitions_req`) | |
+| created_at | UTCDateTime | |
+| | | `uq_quote_requisition` unique on (quote_id, requisition_id) |
 
 **`offer_attachments`** — Files attached to a vendor offer (Migration 126: renamed `onedrive_item_id`→`library_item_id`, `onedrive_url`→`library_web_url`; added `library_drive_id`)
 | Column | Type | Notes |
@@ -833,11 +845,22 @@ Model: `VendorContactAttachment` (`app/models/vendors.py`).
 > `can_post`/`can_offer` (role-derived capabilities), `submit_offer` (per_line/take_all;
 > part-number-only matching via `normalize_mpn_key`; unmatched/ambiguous rows queued),
 > `recompute_line_rollup`/`withdraw_offer` (min priced active offer -> best_offer_*),
-> `award_offer` (the single chokepoint that flips an offer -> `won`: owner-gated, marks
-> matched lines `awarded`, recomputes rollups, then fires the buyer-score win-hook
-> `buyer_affinity_service.recompute_buyer_score_on_win` BEFORE the commit — no-ops for an
-> offer with no canonical buyer; routed as `POST /api/resell/{id}/offers/{offer_id}/award`),
-> `close_list`, `get_excess_stats` (offer counts), list/line CRUD + import, and
+> `award_offer` (the single chokepoint that flips an offer -> `won`: owner-gated; a
+> `take_all` offer awards EVERY non-withdrawn line (it carries no offer lines), a
+> `per_line` offer awards its matched lines; idempotent for an already-won offer; 409 if a
+> line is already awarded to a different offer; marks lines `awarded`, recomputes rollups,
+> fires the buyer-score win-hook `buyer_affinity_service.recompute_buyer_score_on_win`
+> BEFORE the commit — no-ops for an offer with no canonical buyer; RETIRES the sold lines
+> from the Sighting mirror via `excess_mirror.sync_list_mirror`; and DERIVES the list's own
+> `awarded` status once every line is decided (awarded/withdrawn) with ≥1 awarded — nothing
+> else flips `excess_lists.status`->`awarded`. Routed as `POST /api/resell/{id}/offers/{offer_id}/award`),
+> `unaward_offer` (the explicit inverse — never a silent auto-swap to a new winner: 409 if
+> not won, reverts offer->`open` + lines->`available`, recomputes rollups + buyer score
+> (full-history recompute self-heals `wins` back down), re-mirrors the lines, and steps the
+> list off `awarded` -> `bid_out` (close_at set) else `collecting`; `POST /api/resell/{id}/offers/{offer_id}/unaward`).
+> Award never auto-marks the losing offers `lost` (`ExcessOfferStatus.LOST` stays
+> defined-but-unassigned) — "not selected" is a pure render decision (line awarded + this
+> row's offer != won). `close_list`, `get_excess_stats` (offer counts), list/line CRUD + import, and
 > `material_card_id` resolution on the import path. The thin router is `app/routers/resell.py`
 > (templates under `app/templates/htmx/partials/resell/*`).
 >

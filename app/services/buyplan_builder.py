@@ -61,6 +61,19 @@ def build_buy_plan(quote_id: int, db: Session) -> BuyPlan:
     if not quote:
         raise ValueError(f"Quote {quote_id} not found")
 
+    # Hard-guard: a combined quote (OQ-02) spans 2+ requisitions, but this builder assembles
+    # a plan from ONE requisition (quote.requisition). Building from a combined quote would
+    # silently drop every non-primary requisition's lines, so refuse it outright (the router
+    # maps ValueError → 400) rather than emit a partial plan that looks complete.
+    from .quote_requisitions import requisition_ids_for_quote
+
+    contributing = requisition_ids_for_quote(db, quote_id)
+    if len(contributing) > 1:
+        raise ValueError(
+            f"Quote {quote.quote_number} spans {len(contributing)} requisitions — building a "
+            f"buy plan from a combined quote isn't supported yet."
+        )
+
     # Guard: quote must be in actionable state
     if quote.status not in (QuoteStatus.WON.value, QuoteStatus.SENT.value):
         raise ValueError(f"Quote must be won or sent to build a buy plan (current: {quote.status})")

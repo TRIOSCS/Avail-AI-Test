@@ -20,10 +20,10 @@
   <td>
     <p class="text-sm font-medium text-gray-900 font-mono">{{ match.mpn | default('--') }}</p>
     {% if match.manufacturer %}
-    <p class="text-xs text-gray-400 mt-0.5">{{ match.manufacturer }}</p>
+    <p class="text-secondary mt-0.5">{{ match.manufacturer }}</p>
     {% endif %}
     {% if match.customer_purchase_count %}
-    <span class="inline-flex items-center gap-0.5 text-xs text-gray-400 mt-0.5"
+    <span class="inline-flex items-center gap-0.5 text-secondary mt-0.5"
           title="Customer bought {{ match.customer_purchase_count }}x{% if match.customer_last_purchased_at %}, last {{ match.customer_last_purchased_at }}{% endif %}">
       <svg class="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
       {{ match.customer_purchase_count }}&times;

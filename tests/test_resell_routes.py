@@ -371,6 +371,121 @@ def draft_list(db_session: Session, trader_user: User, test_company: Company) ->
     return el
 
 
+@pytest.fixture()
+def empty_draft_list(db_session: Session, trader_user: User, test_company: Company) -> ExcessList:
+    """A freshly-created DRAFT list with ZERO lines (the create-modal starting state).
+
+    RS-5 fixture: adding the FIRST line to this list is what should make the header Post
+    button appear.
+    """
+    el = ExcessList(
+        title="Fresh empty draft",
+        company_id=test_company.id,
+        owner_id=trader_user.id,
+        status="draft",
+        total_line_items=0,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(el)
+    db_session.commit()
+    db_session.refresh(el)
+    return el
+
+
+def test_add_line_returns_full_detail_so_post_appears(client, db_session, trader_user, empty_draft_list):
+    """RS-5: adding the first line to a draft re-renders the WHOLE detail (not just the
+    Lines tab), so the header Post button appears.
+
+    A Lines-only swap (the old behaviour) left the header stale: a freshly-created empty
+    list that just got its first lines showed no way to publish. The response must be the
+    full detail (its root marker is only in detail.html) AND carry the publish action.
+    """
+    from app.dependencies import require_user
+    from app.main import app
+
+    app.dependency_overrides[require_user] = lambda: trader_user
+    try:
+        resp = client.post(
+            f"/api/resell/{empty_draft_list.id}/lines",
+            data={"part_number": "LM358N", "quantity": "500", "condition": "New"},
+        )
+        assert resp.status_code == 200
+        body = resp.text
+        # Only detail.html renders the root marker — a Lines-only swap would omit it.
+        assert "data-resell-detail-root" in body
+        # The header Post (publish) action now shows because the draft has a line.
+        assert f"/api/resell/{empty_draft_list.id}/publish" in body
+    finally:
+        app.dependency_overrides.pop(require_user, None)
+
+
+def test_import_confirm_returns_full_detail_so_post_appears(client, db_session, trader_user, empty_draft_list):
+    """RS-5: confirming an import re-renders the whole detail so the Post button appears."""
+    from app.dependencies import require_user
+    from app.main import app
+
+    app.dependency_overrides[require_user] = lambda: trader_user
+    try:
+        resp = client.post(
+            f"/api/resell/{empty_draft_list.id}/import-confirm",
+            data={"rows_json": json.dumps([{"part_number": "LM358N", "quantity": 100, "condition": "New"}])},
+        )
+        assert resp.status_code == 200
+        body = resp.text
+        assert "data-resell-detail-root" in body
+        assert f"/api/resell/{empty_draft_list.id}/publish" in body
+    finally:
+        app.dependency_overrides.pop(require_user, None)
+
+
+def test_import_preview_zero_valid_rows_offers_retry(client, db_session, trader_user, empty_draft_list):
+    """RS-6: an all-errors import preview still renders a re-upload/back affordance.
+
+    The old preview only rendered the Confirm form when valid_count > 0, so an all-errors
+    file left the user stranded inside #import-area (error list only, no re-upload, no
+    cancel). The preview must always render a way back to the dropzone.
+    """
+    from app.dependencies import require_user
+    from app.main import app
+
+    csv_bytes = b"part_number,quantity\n,100\n,50\n"  # both rows blank part_number → all invalid
+    app.dependency_overrides[require_user] = lambda: trader_user
+    try:
+        resp = client.post(
+            f"/api/resell/{empty_draft_list.id}/import-preview",
+            files={"file": ("bad.csv", csv_bytes, "text/csv")},
+        )
+        assert resp.status_code == 200
+        body = resp.text
+        assert "0 valid rows" in body
+        assert "Confirm import" not in body  # nothing to confirm
+        # A re-upload/back affordance is present and returns to the lines dropzone.
+        assert "Try another file" in body
+        assert f"/v2/partials/resell/{empty_draft_list.id}/lines" in body
+    finally:
+        app.dependency_overrides.pop(require_user, None)
+
+
+def test_offer_buyers_form_preselects_buyer(client, db_session, trader_user, posted_list):
+    """RS-8: the offer-to-buyers panel seeds its checked set from preselect_vendor_card_id.
+
+    The "not yet offered" nudge chips promise to pre-fill the buyer; the panel now honours
+    a preselect param so the buyer lands already selected (one click from action) instead
+    of the generic panel with nothing checked.
+    """
+    from app.dependencies import require_user
+    from app.main import app
+
+    app.dependency_overrides[require_user] = lambda: trader_user
+    try:
+        resp = client.get(f"/v2/partials/resell/{posted_list.id}/offer-buyers-form?preselect_vendor_card_id=777")
+        assert resp.status_code == 200
+        # The Alpine state seeds selected with the preselected card id.
+        assert "selected: [777]" in resp.text
+    finally:
+        app.dependency_overrides.pop(require_user, None)
+
+
 def test_non_owner_draft_detail_404(client, draft_list, test_user):
     """Non-owner GET on a DRAFT list → 404 (existence not revealed)."""
     # The default client user (test_user, a buyer) is NOT the owner.
@@ -670,3 +785,24 @@ def test_import_confirm_to_posted_list_returns_409(client, db_session, trader_us
         assert resp.status_code == 409
     finally:
         app.dependency_overrides.pop(require_user, None)
+
+
+def test_detail_action_buttons_target_self_not_workspace_shell(client, db_session, trader_user, posted_list):
+    """RS-2: on a deep-linked/reloaded /v2/resell/{id}, the detail loads standalone
+    into #main-content — but Post/Close targeted #split-right-resell, which only exists
+    in the workspace shell, so they fired htmx:targetError and did nothing. They must
+    target the detail's own always-present root instead."""
+    from app.dependencies import require_user
+
+    client.app.dependency_overrides[require_user] = lambda: trader_user
+    try:
+        resp = client.get(f"/v2/partials/resell/{posted_list.id}")
+    finally:
+        client.app.dependency_overrides.pop(require_user, None)
+    assert resp.status_code == 200
+    body = resp.text
+    # The owner sees the Close action (collecting list); it targets the detail root,
+    # and no action targets the workspace-shell-only #split-right-resell.
+    assert "data-resell-detail-root" in body
+    assert "#split-right-resell" not in body
+    assert "closest [data-resell-detail-root]" in body

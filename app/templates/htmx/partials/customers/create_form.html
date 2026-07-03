@@ -1,15 +1,22 @@
-{# create_form.html — Create new company form.
-   Receives: users (list[User]).
-   Called by: htmx_views.py company_create_form route.
-   Depends on: HTMX, Tailwind CSS with brand palette, _form_fields.html macros.
+{# create_form.html — Create new company form, loaded into #modal-content via
+   $dispatch('open-modal', {url: '/v2/partials/customers/create-form'}). The base modal
+   renders its own ✕ / backdrop / Escape (base.html).
+   Receives: users (list[User]); crm_industries (Jinja global).
+   Called by: GET /v2/partials/customers/create-form (companies.py), surfaced by the
+     "+ New account" button on the CDM account list (list.html).
+   Success: the new account's detail swaps into #cdm-detail, the modal closes, and the
+     handler's HX-Trigger=cdmListRefresh refreshes the left account list. Errors surface
+     via the global htmx:responseError toast (htmx_app.js) with the modal kept open.
+   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette, _form_fields.html macros.
 #}
-{% from "htmx/partials/customers/_form_fields.html" import owner_select, submit_cancel -%}
-<div class="max-w-2xl mx-auto">
-  <div class="bg-white rounded-lg shadow border border-gray-200 p-6">
-    <h2 class="text-lg font-bold text-gray-900 mb-4">Create Company</h2>
+{% from "htmx/partials/customers/_form_fields.html" import owner_select -%}
+<div class="p-5">
+    <h3 id="modal-title" class="text-lg font-bold text-gray-900 mb-4">Create Company</h3>
 
     <form hx-post="/v2/partials/customers/create"
-          hx-target="#main-content"
+          hx-target="#cdm-detail"
+          hx-swap="innerHTML"
+          hx-on::after-request='if(event.detail.successful) $dispatch("close-modal")'
           data-loading-disable
           class="space-y-4">
 
@@ -20,20 +27,20 @@
                hx-get="/v2/partials/customers/check-duplicate"
                hx-trigger="keyup changed delay:500ms"
                hx-target="#dup-warning"
-               class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+               class="input">
         <div id="dup-warning" class="mt-1"></div>
       </div>
 
       <div>
         <label class="block text-sm font-medium text-gray-700 mb-1">Website</label>
         <input type="url" name="website" placeholder="https://..."
-               class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+               class="input">
       </div>
 
       <div>
         <label class="block text-sm font-medium text-gray-700 mb-1">Industry</label>
         <select name="industry"
-                class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+                class="input">
           <option value="">— Select industry —</option>
           {% for val in crm_industries %}
           <option value="{{ val }}">{{ val }}</option>
@@ -47,13 +54,13 @@
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Legal / Registered Name</label>
           <input type="text" name="legal_name" placeholder="Full legal entity name"
-                 class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+                 class="input">
         </div>
         <div class="grid grid-cols-2 gap-3">
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">Employee Size</label>
             <select name="employee_size"
-                    class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+                    class="input">
               <option value="">— Select —</option>
               <option value="1-10">1–10</option>
               <option value="11-50">11–50</option>
@@ -68,7 +75,7 @@
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">Revenue Range</label>
             <select name="revenue_range"
-                    class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+                    class="input">
               <option value="">— Select —</option>
               <option value="&lt;$1M">&lt;$1M</option>
               <option value="$1M-$10M">$1M–$10M</option>
@@ -87,7 +94,7 @@
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Main Phone</label>
           <input type="tel" name="phone" placeholder="+1 555 000 0000"
-                 class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+                 class="input">
         </div>
       </fieldset>
 
@@ -98,18 +105,18 @@
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">City</label>
             <input type="text" name="hq_city" placeholder="e.g. Austin"
-                   class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+                   class="input">
           </div>
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">State / Region</label>
             <input type="text" name="hq_state" placeholder="e.g. TX"
-                   class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+                   class="input">
           </div>
         </div>
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Country</label>
           <input type="text" name="hq_country" placeholder="e.g. United States"
-                 class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+                 class="input">
         </div>
       </fieldset>
 
@@ -120,12 +127,12 @@
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">Credit Terms</label>
             <input type="text" name="credit_terms" placeholder="e.g. Net 30"
-                   class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+                   class="input">
           </div>
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">Tax ID (EIN / VAT)</label>
             <input type="text" name="tax_id" placeholder="e.g. 12-3456789"
-                   class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+                   class="input">
           </div>
         </div>
       </fieldset>
@@ -136,7 +143,7 @@
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">How was this account acquired?</label>
           <select name="source"
-                  class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+                  class="input">
             <option value="manual" selected>Manual entry</option>
             <option value="sfdc">Salesforce import</option>
             <option value="referral">Referral</option>
@@ -152,10 +159,16 @@
       <div>
         <label class="block text-sm font-medium text-gray-700 mb-1">Notes</label>
         <textarea name="notes" rows="3"
-                  class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500"></textarea>
+                  class="input"></textarea>
       </div>
 
-      {{ submit_cancel("Create Company", "/v2/partials/customers") }}
+      <div class="flex justify-end gap-2 pt-1">
+        <button type="button" @click='$dispatch("close-modal")'
+                class="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800">Cancel</button>
+        <button type="submit"
+                class="btn-primary">
+          Create account
+        </button>
+      </div>
     </form>
-  </div>
 </div>

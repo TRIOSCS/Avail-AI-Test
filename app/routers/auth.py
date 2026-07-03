@@ -232,6 +232,18 @@ async def logout(request: Request):
     return RedirectResponse("/v2/requisitions", status_code=302)
 
 
+def password_login_env_enabled() -> bool:
+    """True iff ENABLE_PASSWORD_LOGIN is set truthy in the environment.
+
+    Single canonical parse of this auth-critical flag — startup.py and the auth
+    router all call this instead of re-implementing the ``.lower() == "true"``
+    check (which previously lived, subtly copy-pasted, in three places). Read at
+    call time (not via config.py's import-time Settings) so the flag can be
+    toggled per-process — the behavior the tests and operator rely on.
+    """
+    return os.getenv("ENABLE_PASSWORD_LOGIN", "false").lower() == "true"
+
+
 def _password_login_enabled() -> bool:
     """Return True when local/test password login should be allowed.
 
@@ -239,7 +251,7 @@ def _password_login_enabled() -> bool:
     """
     if os.getenv("TESTING") == "1":
         return True
-    return os.getenv("ENABLE_PASSWORD_LOGIN", "false").lower() == "true"
+    return password_login_env_enabled()
 
 
 def _verify_password(stored: str, password: str) -> bool:

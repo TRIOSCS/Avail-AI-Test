@@ -5,13 +5,12 @@ object). Forecast = sum(deal_value * stage win-probability) over open
 requisitions. Account- and owner-level rollups plus an
 interactions -> RFQs -> quotes -> orders conversion funnel.
 
-Forecast dollars reuse the canonical _resolve_deal_value so they reconcile with
-what the requisition list shows per row.
+Forecast dollars reuse _resolve_deal_value so they reconcile with what the
+requisition list shows per row.
 
 Called by: app/routers/htmx_views.py parts_workspace_partial (the Sales Hub /
            parts workspace) — pipeline_summary feeds the pipeline chip there.
-Depends on: app.models (Requisition, Requirement, Quote, Company, User),
-            app.services.requisition_list_service._resolve_deal_value
+Depends on: app.models (Requisition, Requirement, Quote, Company, User)
 """
 
 from __future__ import annotations
@@ -24,7 +23,33 @@ from sqlalchemy.orm import Session
 
 from app.constants import RequisitionStatus
 from app.models import Company, Quote, Requirement, Requisition, User
-from app.services.requisition_list_service import _resolve_deal_value
+
+
+def _resolve_deal_value(
+    opportunity_value: float | None,
+    priced_sum: float,
+    priced_count: int,
+    requirement_count: int,
+) -> tuple[float | None, str]:
+    """Pick displayed deal value; tag provenance (entered / computed / partial / none).
+
+    Priority (per 2026-04-21 merged spec §Backend contract additions):
+      1. opportunity_value > 0            → 'entered'   (broker-entered wins)
+      2. priced_sum > 0 and all priced    → 'computed'  (target prices complete)
+      3. priced_sum > 0 and some unpriced → 'partial'   (floor estimate)
+      4. otherwise                         → 'none'     (no useful signal)
+
+    Zero-priced requirements count as priced (target_price explicitly 0 means
+    "free/sample," not "unknown"). priced_count reflects NOT-NULL target_price.
+    """
+    if opportunity_value and opportunity_value > 0:
+        return opportunity_value, "entered"
+    if priced_sum and priced_sum > 0:
+        if priced_count >= requirement_count:
+            return priced_sum, "computed"
+        return priced_sum, "partial"
+    return None, "none"
+
 
 # Stage -> win-probability, keyed on the canonical RequisitionStatus pipeline
 # (Sales Hub: DRAFT -> OPEN -> RFQS_SENT -> OFFERS -> QUOTED -> WON/LOST).

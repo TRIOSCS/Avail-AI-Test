@@ -8,6 +8,13 @@ on:
   schedule:
     - cron: "0 8 * * 1"  # Weekly Monday 8am UTC
 
+# Cancel superseded PR runs (a new push to the same PR branch obsoletes the old scan),
+# but keep every push/schedule run — the run_id fallback makes those groups unique so
+# main-branch and weekly history is never cancelled. Mirrors ci.yml (CI-2).
+concurrency:
+  group: security-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   security:
     runs-on: ubuntu-latest
@@ -37,11 +44,20 @@ jobs:
           npm ci
 
       - name: Bandit security linter
-        run: bandit -r app/ -c pyproject.toml -f json -o bandit-report.json || true
-
-      - name: Bandit summary
-        if: always()
-        run: bandit -r app/ -c pyproject.toml -ll
+        # Single scan: the JSON artifact and the gating summary come from ONE
+        # bandit run (it used to scan app/ twice back-to-back). -ll gates on
+        # medium+ severity; the JSON report is uploaded below for triage.
+        run: |
+          bandit -r app/ -c pyproject.toml -f json -o bandit-report.json -ll || rc=$?
+          bandit_exit=${rc:-0}
+          python -c "
+          import json
+          d = json.load(open('bandit-report.json'))
+          for r in d.get('results', []):
+              print(f\"{r['issue_severity']}: {r['filename']}:{r['line_number']} {r['test_id']} {r['issue_text']}\")
+          print(f\"{len(d.get('results', []))} finding(s)\")
+          "
+          exit $bandit_exit
 
       - name: pip-audit vulnerability scan
         # --requirement scopes the audit to declared deps (app + dev) and their

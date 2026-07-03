@@ -19,7 +19,7 @@
         <svg class="h-3 w-3 ml-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
       </button>
       <div x-show="addOpen" role="menu" aria-label="Add offer options" @click.outside="addOpen = false" x-cloak x-transition
-           class="absolute left-0 top-full mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-lg z-10 py-1">
+           class="absolute left-0 top-full mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-float z-10 py-1">
         <button hx-get="/v2/partials/requisitions/{{ req.id }}/add-offer-form"
                 hx-target="#parse-area" hx-swap="innerHTML"
                 @click="addOpen = false"
@@ -82,8 +82,11 @@
                 }).then(r => {
                   if (!r.ok) throw new Error('HTTP ' + r.status);
                   return r.text();
-                }).then(html => {
-                  htmx.swap('#main-content', html, {swapStyle: 'innerHTML'});
+                }).then(() => {
+                  // The endpoint returns only a status span; swapping it into
+                  // #main-content wiped the whole requisition page (OQ-03). The
+                  // toast is the confirmation; clear the selection in place.
+                  selectedOffers = [];
                   Alpine.store('toast').message = 'Offers added to quote';
                   Alpine.store('toast').type = 'success';
                   Alpine.store('toast').show = true;
@@ -117,7 +120,7 @@
         <tr>
           <th class="px-3 py-2.5 text-center w-8">
             <input aria-label="Select all offers" type="checkbox"
-                   @change="selectedOffers = $el.checked ? [{% for o in offers %}{{ o.id }}{{ ',' if not loop.last }}{% endfor %}] : []"
+                   @change="document.querySelectorAll('#offers-form input[name=offer_ids]').forEach(c => c.checked = $el.checked); selectedOffers = $el.checked ? [{% for o in offers %}{{ o.id }}{{ ',' if not loop.last }}{% endfor %}] : []"
                    class="rounded border-gray-300 text-brand-500 focus:ring-brand-500">
           </th>
           <th data-col-key="vendor" class="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vendor</th>
@@ -196,7 +199,7 @@
                    x-transition:enter-start="opacity-0 scale-95" x-transition:enter-end="opacity-100 scale-100"
                    x-transition:leave="transition ease-in duration-75"
                    x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
-                   class="absolute right-0 top-full mt-1 w-40 bg-white border border-gray-200 rounded-lg shadow-lg z-10 py-1">
+                   class="absolute right-0 top-full mt-1 w-40 bg-white border border-gray-200 rounded-lg shadow-float z-10 py-1">
                 <button hx-get="/v2/partials/requisitions/{{ req.id }}/offers/{{ o.id }}/edit-form"
                         hx-target="#parse-area" hx-swap="innerHTML"
                         @click.stop="open = false"
@@ -261,10 +264,10 @@
     </svg>
     {% if qual %}
     <p class="text-sm font-medium text-gray-600 mt-3">No offers match this filter.</p>
-    <p class="text-xs text-gray-400 mt-1">Try selecting a different filter above or clear the filter to see all offers.</p>
+    <p class="text-secondary mt-1">Try selecting a different filter above or clear the filter to see all offers.</p>
     {% else %}
     <p class="text-sm font-medium text-gray-600 mt-3">No offers received yet.</p>
-    <p class="text-xs text-gray-400 mt-1">Offers appear when vendors respond to RFQs, when leads are promoted, or from searching all supplier sources.</p>
+    <p class="text-secondary mt-1">Offers appear when vendors respond to RFQs, when leads are promoted, or from searching all supplier sources.</p>
     {# Next step: the sourcing engine (Search All Sources) lives on the Parts tab. #}
     <button @click="activeTab = 'parts'"
             hx-get="/v2/partials/requisitions/{{ req.id }}/tab/parts"

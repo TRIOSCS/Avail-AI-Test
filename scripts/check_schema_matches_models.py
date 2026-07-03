@@ -46,12 +46,17 @@ from app.models import Base
 # ---------------------------------------------------------------------------
 
 # Orphan legacy tables present in the DB with no corresponding model.
+# 2026-07-02 (#464 finish): buy_plans (V1), notification_engagement and self_heal_log
+# are dropped by migration 174 (IF EXISTS — live staging already lacked them), so their
+# entries were removed; if a future DB somehow resurrects them, the gate SHOULD flag it.
+# Still grandfathered:
+#   - _sp1_desc_backup — 700 live rows; migration 091's downgrade restore path needs it.
+#   - enrichment_credit_usage — exists but EMPTY and referenced only by migration 030;
+#     the old "billing telemetry, never drop" rationale looks moot, but dropping needs
+#     an explicit product decision — keep grandfathered until the user approves.
 _GRANDFATHERED_REMOVE_TABLES = {
     "_sp1_desc_backup",
-    "buy_plans",
     "enrichment_credit_usage",
-    "notification_engagement",
-    "self_heal_log",
 }
 
 # Indexes that live in the DB (raw-DDL) but the model's metadata never declares, so
@@ -71,14 +76,10 @@ _GRANDFATHERED_REMOVE_TABLES = {
 #      ``<> ALL (ARRAY[...])`` predicates) that can't be expressed on the model in a way
 #      that stays valid for the SQLite test engine, so they remain intentional raw-DDL.
 _GRANDFATHERED_REMOVE_INDEXES = {
-    # 1. DANGER / orphan-table indexes (see _GRANDFATHERED_REMOVE_TABLES).
-    "ix_buyplans_token",
+    # 1. Orphan-table index (see _GRANDFATHERED_REMOVE_TABLES). The buy_plans /
+    #    notification_engagement / self_heal_log index entries left with their
+    #    tables (2026-07-02, #464 finish — tables no longer exist on the rebuilt DB).
     "ix_ecu_provider_month",
-    "ix_notif_engage_created",
-    "ix_notif_engage_user_action",
-    "ix_notif_engage_user_event",
-    "ix_self_heal_log_created_at",
-    "ix_self_heal_log_ticket_id",
     # 2. PostgreSQL-only expression / complex-partial indexes (intentional raw-DDL).
     "ix_mc_cat_order_live",
     "ix_mc_category_lower",
@@ -105,33 +106,11 @@ _GRANDFATHERED_REMOVE_COLUMNS: set[tuple[str, str]] = set()
 # gate enforces it for real now.
 _GRANDFATHERED_REMOVE_FKS: set[str] = set()
 
-# Unique constraints the model declares but the baseline DB never created, so
-# autogenerate wants to add them. Many are single-column ``unique=True`` columns
-# whose UniqueConstraint has ``name=None``, so we key on (table, sorted columns)
-# rather than the constraint name.
-_GRANDFATHERED_ADD_CONSTRAINTS = {
-    ("api_sources", ("name",)),
-    ("commodity_spec_schemas", ("commodity", "spec_key")),
-    ("customer_part_history", ("company_id", "material_card_id", "source")),
-    ("discovery_batches", ("batch_id",)),
-    ("email_signature_extracts", ("sender_email",)),
-    ("enrichment_runs", ("run_id",)),
-    ("entity_tags", ("entity_id", "entity_type", "tag_id")),
-    ("graph_subscriptions", ("subscription_id",)),
-    ("knowledge_config", ("key",)),
-    ("material_spec_facets", ("material_card_id", "spec_key")),
-    ("material_tags", ("material_card_id", "tag_id")),
-    ("prospect_accounts", ("domain",)),
-    ("quotes", ("quote_number",)),
-    ("sourcing_leads", ("part_number_matched", "requirement_id", "vendor_name_normalized")),
-    ("tag_threshold_config", ("entity_type", "tag_type")),
-    ("tags", ("name", "tag_type")),
-    ("trouble_tickets", ("ticket_number",)),
-    ("users", ("azure_id",)),
-    ("users", ("email",)),
-    ("vendor_sighting_summary", ("requirement_id", "vendor_name")),
-    ("verification_group_members", ("user_id",)),
-}
+# Unique constraints the model declares but the baseline DB never created.
+# Reconciled by migration 174 (#464 finish): all 21 were duplicate-checked clean on
+# the live PG and created with model-matching names/column order, so the gate
+# enforces them for real now.
+_GRANDFATHERED_ADD_CONSTRAINTS: set[tuple[str, tuple[str, ...]]] = set()
 
 # (table, column) pairs where a TypeDecorator (``UTCDateTime`` over
 # ``TIMESTAMP WITH TIME ZONE``) reflects as plain ``TIMESTAMP``, so autogenerate
@@ -149,11 +128,10 @@ _GRANDFATHERED_MODIFY_TYPE = {
     ("partsurfer_desc_negative", "updated_at"),
 }
 
-# (table, column) pairs with a column-COMMENT-only diff (model sets a comment the
-# baseline DB column lacks). Cosmetic; reconcile via migration later.
-_GRANDFATHERED_MODIFY_COMMENT = {
-    ("material_cards", "enrichment_status"),
-}
+# (table, column) pairs with a column-COMMENT-only diff. Reconciled by migration 174
+# (#464 finish): the comment now lives on BOTH the model (intelligence.py) and the
+# migration-built DB, so the gate enforces comment parity for real now.
+_GRANDFATHERED_MODIFY_COMMENT: set[tuple[str, str]] = set()
 
 
 def _add_constraint_key(diff: tuple) -> tuple[str | None, tuple[str, ...]]:

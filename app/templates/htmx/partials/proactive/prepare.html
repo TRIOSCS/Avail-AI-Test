@@ -68,7 +68,7 @@
             <td>
               <span class="text-sm font-medium text-gray-900 font-mono">{{ m.mpn }}</span>
               {% if m.manufacturer %}
-              <span class="text-xs text-gray-400 ml-1">{{ m.manufacturer }}</span>
+              <span class="text-secondary ml-1">{{ m.manufacturer }}</span>
               {% endif %}
             </td>
             <td class="text-sm text-gray-700">{{ m.vendor_name }}</td>
@@ -100,40 +100,58 @@
     </div>
   </div>
 
-  {# Send To — Contact Picker #}
-  <div class="bg-white rounded-lg border border-line-base mb-6">
-    <div class="px-4 py-3 bg-gray-50 border-b border-line-base">
+  {# Send To — Contact Picker (+ inline add-contact so Send is never a dead end) #}
+  <div class="bg-white rounded-lg border border-line-base mb-6" x-data="{ showAddContact: false }">
+    <div class="px-4 py-3 bg-gray-50 border-b border-line-base flex items-center justify-between">
       <h2 class="text-sm font-semibold text-gray-900">Send To</h2>
+      {# Toggle the inline add-contact form — .btn-ghost matches page chrome #}
+      <button type="button" @click="showAddContact = !showAddContact"
+              :aria-expanded="showAddContact"
+              class="btn-ghost btn-sm inline-flex items-center gap-1">
+        <svg class="h-3.5 w-3.5 transition-transform" :class="{ 'rotate-45': showAddContact }"
+             fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/>
+        </svg>
+        <span x-text="showAddContact ? 'Cancel' : 'Add contact'">Add contact</span>
+      </button>
     </div>
-    <div class="p-4 space-y-2">
-      {% if contacts %}
-        {% for c in contacts %}
-        <label class="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 cursor-pointer {{ 'opacity-50' if not c.has_email }}"
-               {% if not c.has_email %}title="No email address"{% endif %}>
-          {# Checkbox — accent via accent-color + input-focus (not brand-500) #}
-          <input type="checkbox"
-                 {% if not c.has_email %}disabled{% endif %}
-                 :checked="selectedContacts[{{ c.id }}]"
-                 @change="toggleContact({{ c.id }})"
-                 class="rounded border-gray-300 input-focus disabled:opacity-40"
-                 style="accent-color:var(--accent)">
-          <div class="flex-1 min-w-0">
-            <p class="text-sm font-medium text-gray-900">{{ c.full_name or '(unnamed)' }}</p>
-            <p class="text-xs text-gray-600">
-              {{ c.email or '(no email)' }}
-              {% if c.title %} &middot; {{ c.title }}{% endif %}
-              {% if c.is_primary %}
-              <span class="badge-mini bg-gray-100 text-gray-600 ml-1">Primary</span>
-              {% endif %}
-            </p>
+    <div class="p-4 space-y-3">
+      {# Contact rows — refreshed in place by the add-contact endpoint #}
+      <div id="proactive-contact-list" class="space-y-2">
+        {% include "htmx/partials/proactive/_contact_picker.html" %}
+      </div>
+
+      {# Inline add-contact — hx-posts, swaps the refreshed picker back in, and the
+         new contact auto-selects (x-init) so the Send button unblocks. Validation
+         errors return 4xx → global toast (no swap); the form stays open. #}
+      <div x-show="showAddContact" x-cloak x-transition class="pt-3 border-t border-line-base">
+        <form hx-post="/v2/partials/proactive/prepare/{{ site_id }}/add-contact"
+              hx-target="#proactive-contact-list"
+              hx-swap="innerHTML"
+              data-loading-disable
+              @htmx:after-request.camel="if (event.detail.successful) { $el.reset(); showAddContact = false }"
+              class="space-y-2">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div>
+              <label for="pac-name" class="block text-xs font-medium text-gray-600 mb-1">Name</label>
+              <input type="text" name="full_name" id="pac-name" required
+                     placeholder="Full name" class="input input-sm">
+            </div>
+            <div>
+              <label for="pac-email" class="block text-xs font-medium text-gray-600 mb-1">Email</label>
+              <input type="email" name="email" id="pac-email" required
+                     placeholder="name@company.com" class="input input-sm">
+            </div>
           </div>
-        </label>
-        {% endfor %}
-      {% else %}
-        <div class="text-center py-6">
-          <p class="text-sm text-gray-600">No contacts on file.</p>
-        </div>
-      {% endif %}
+          <div class="flex items-end gap-2">
+            <div class="flex-1">
+              <label for="pac-title" class="block text-xs font-medium text-gray-600 mb-1">Title <span class="text-gray-400 font-normal">(optional)</span></label>
+              <input type="text" name="title" id="pac-title" placeholder="e.g. Buyer" class="input input-sm">
+            </div>
+            <button type="submit" class="btn-primary btn-sm whitespace-nowrap">Add &amp; select</button>
+          </div>
+        </form>
+      </div>
     </div>
   </div>
 

@@ -250,27 +250,35 @@ class TestReclaimEndpoint:
 
 
 class TestReassignEndpointErrors:
-    def test_404_when_prospect_not_found(self, db_session, admin_user):
-        """Line 640: HTTPException 404 when prospect_id doesn't exist."""
+    def test_missing_prospect_returns_error_toast(self, db_session, admin_user):
+        """Unknown prospect_id → 200 + error showToast (DC-02 toast pattern; a 4xx would
+        leave the HTMX modal with zero feedback)."""
         with _client_as(db_session, admin_user) as c:
             resp = c.post(
                 "/v2/partials/prospects/999996/reassign",
                 data={"to_user_id": str(admin_user.id)},
             )
-        assert resp.status_code == 404
+        assert resp.status_code == 200
+        trigger = resp.headers.get("HX-Trigger", "")
+        assert "error" in trigger
+        assert "Prospect not found" in trigger
 
-    def test_400_when_prospect_has_no_company(self, db_session, admin_user):
-        """Line 642: HTTPException 400 when prospect.company_id is None."""
+    def test_no_company_returns_error_toast(self, db_session, admin_user):
+        """prospect.company_id is None → 200 + 'not linked to a company' error toast."""
         p = make_prospect(db_session, company_id=None)
         with _client_as(db_session, admin_user) as c:
             resp = c.post(
                 f"/v2/partials/prospects/{p.id}/reassign",
                 data={"to_user_id": str(admin_user.id)},
             )
-        assert resp.status_code == 400
+        assert resp.status_code == 200
+        trigger = resp.headers.get("HX-Trigger", "")
+        assert "error" in trigger
+        assert "not linked to a company" in trigger
 
-    def test_permission_error_returns_403(self, db_session, admin_user):
-        """Line 649: PermissionError from reassign_account → 403."""
+    def test_permission_error_returns_error_toast(self, db_session, admin_user):
+        """PermissionError from reassign_account → 200 + its message as an error
+        toast."""
         co = Company(
             name="PermCo",
             domain=f"permco-{uuid.uuid4().hex[:6]}.com",
@@ -290,10 +298,13 @@ class TestReassignEndpointErrors:
                     f"/v2/partials/prospects/{p.id}/reassign",
                     data={"to_user_id": str(admin_user.id)},
                 )
-        assert resp.status_code == 403
+        assert resp.status_code == 200
+        trigger = resp.headers.get("HX-Trigger", "")
+        assert "error" in trigger
+        assert "not your territory" in trigger
 
-    def test_lookup_error_returns_404(self, db_session, admin_user):
-        """Line 651: LookupError from reassign_account → 404."""
+    def test_lookup_error_returns_error_toast(self, db_session, admin_user):
+        """LookupError from reassign_account → 200 + 'Company not found' error toast."""
         co = Company(
             name="LookupCo",
             domain=f"lookupco-{uuid.uuid4().hex[:6]}.com",
@@ -313,7 +324,10 @@ class TestReassignEndpointErrors:
                     f"/v2/partials/prospects/{p.id}/reassign",
                     data={"to_user_id": str(admin_user.id)},
                 )
-        assert resp.status_code == 404
+        assert resp.status_code == 200
+        trigger = resp.headers.get("HX-Trigger", "")
+        assert "error" in trigger
+        assert "Company not found" in trigger
 
     def test_value_error_surfaces_as_error_toast(self, db_session, admin_user):
         """Line 653: ValueError from reassign_account → error captured, 200 response."""

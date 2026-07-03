@@ -541,6 +541,14 @@ tick via `_record_heartbeat()` at the top of the loop — so the heartbeat
 reflects process liveness independent of work, and stays fresh on idle /
 cap-sleep / breaker-open / off-hours paths (a liveness monitor reading
 `last_heartbeat` won't false-alarm "DOWN" while a worker is merely paused).
+The enrichment worker's LONG (~1h) daily-cap and circuit-breaker sleeps would
+otherwise let the heartbeat lapse mid-sleep and false-alarm the watchdog, so
+those two sleeps run through `_sleep_with_heartbeat()` — it splits the hour into
+chunks (a third of `settings.worker_heartbeat_stale_minutes`, floored at 60s)
+and re-touches the heartbeat after each chunk. Real-hang detection is preserved:
+the refresh only follows a chunk the worker actually finished sleeping through,
+so a wedged loop still goes silent and is caught (the chunk loop also honors the
+shutdown flag so SIGTERM exits within one chunk).
 
 **Proactive liveness watchdog.** Beyond the on-demand Connectors-page read, a
 scheduler job (`app/jobs/worker_liveness_jobs.py`, registered by
@@ -1110,7 +1118,7 @@ email_service.poll_inbox()
     |       (delta query incremental sync when available; top-50 fallback —
     |        ALL messages fetched, matching happens locally below)
     |
-    +---> 4-tier reply matching (first tier that hits wins):
+    +---> reply matching (first tier that hits wins; exact before fuzzy):
     |       Tier 1: graph_conversation_id (global, exact) — matches ALL
     |               Contacts sharing the thread: a cross-requisition RFQ
     |               writes one Contact per (requisition, vendor) on ONE
@@ -1121,6 +1129,13 @@ email_service.poll_inbox()
     |               pair is resolved via req_email_map (unique keys under the
     |               per-requisition fan-out); tokens with no email match still
     |               assign the first token's requisition
+    |       Tier 2.5 (RS-4): RESELL outreach — a buyer replying to an offered-OUT
+    |               excess list (the trader->buyer inverse of the RFQ). Runs ONLY
+    |               when no Contact matched (Tiers 1-2), and BEFORE the fuzzy
+    |               email/domain tiers (which now also yield to it), reusing the
+    |               already-built resell_outreach_service._match_outreach
+    |               (graph_conversation_id then graph_message_id, both stamped on
+    |               ExcessOutreach at send time via migration 133)
     |       Tier 3: sender email -> most-recent contact (USER-SCOPED,
     |               single-contact fallback BY DESIGN — untokenized replies)
     |       Tier 4: sender domain (USER-SCOPED, same single-contact design)
@@ -1128,11 +1143,21 @@ email_service.poll_inbox()
     +---> DB: INSERT vendor_responses (raw email) — exactly ONE per message
     |     (it is per-message, not per-requisition); contact_id anchors to the
     |     first matched contact; _progress_contact_status then advances EVERY
-    |     matched contact, so all involved requisitions' rows progress
+    |     matched contact, so all involved requisitions' rows progress.
+    |     status='matched' when EITHER a Contact OR a resell row matched.
     |       +---> activity_service.py: log_email_activity() --> DB: INSERT activity_log
-    |             (event_type='email', direction='inbound', activity_type='email_received';
-    |              dedups on external_id=message_id) so inbound vendor replies
-    |              appear on the requisition Activity tab
+    |       |     (event_type='email', direction='inbound', activity_type='email_received';
+    |       |      dedups on external_id=message_id) so inbound vendor replies
+    |       |      appear on the requisition Activity tab
+    |       +---> [RS-4 resell hit] resell_outreach_service.record_response(commit=False)
+    |             INSIDE the per-message savepoint: advances the ExcessOutreach row(s)
+    |             sent->responded (offer extraction stays MANUAL — see the resell
+    |             "Convert to offer" quick-add, so has_offer=False here, never ->bid),
+    |             then _log_inbound_reply_activity writes ONE excess_list_id-scoped
+    |             inbound activity_log (dedup on external_id+excess_list_id, so a
+    |             per-line campaign sharing one conversation logs the reply once and
+    |             never collides with the requisition-side log_email_activity row).
+    |             A PURELY-resell reply (no Contact) skips AI parsing (never billed).
     |
     v
 ai_email_parser.py
@@ -1277,6 +1302,43 @@ requisitions/tabs/build_quote.html  (quoteBuilderTab Alpine: live margin + guard
         Download PDF (existing /export/pdf) / Send (existing /quotes/{id}/send)
 ```
 
+**Combined cross-req quote (OQ-02/REQ-04).** Selecting **2+ requisitions** in the
+requisitions list and clicking **Build Quote** opens ONE combined quote spanning every
+selected requisition's lines (not one quote per req). The list bulk-bar's 2+ branch
+`htmx.ajax('GET', '/v2/partials/quote-builder/multi?requisition_ids=...', {target:'#modal-content'})`
+then `$dispatch('open-modal', {wide:true})` — into the always-present global modal. The
+`/multi*` routes are declared BEFORE `/{req_id}` in `routers/quote_builder.py` (FastAPI
+matches in order, so "multi" must win before the int path param captures it).
+
+```
+List (2+ selected) ──GET──> /v2/partials/quote-builder/multi?requisition_ids=a,b
+    |   (loop get_req_for_user per id = ownership; validate_same_customer)
+    |     mismatch/no-site -> quote_builder/multi_error.html (HTTP 200 honest breakdown)
+    v     ok -> quote_builder/modal.html (quoteBuilder Alpine, multiReqIds set)
+Alpine loadData() ──GET──> /multi/data (merges get_builder_data across all reqs)
+    |
+    saveQuote() ──POST──> /multi/save?requisition_ids=a,b
+        |   (looped require_requisition_access + get_req_for_user; then service core)
+        v
+save_quote_from_builder_multi -> _save_quote_from_builder_core(db, req_ids, payload, user):
+    validate_same_customer (400 on mismatch) · primary = req_ids[0] (Quote.requisition_id)
+    · one Quote + QuoteLines from ALL reqs · transition EVERY req -> QUOTED
+    · link_quote_to_requisitions(quote.id, req_ids)  (join rows; primary self-row already
+      created by the Quote after_insert listener)
+```
+
+**Quote ⇄ requisition membership is one arbitration point** — `services/quote_requisitions.py`:
+`validate_same_customer` (all reqs share one non-null `customer_site_id`, honest 400 naming
+each offender), `link_quote_to_requisitions` (idempotent), `requisition_ids_for_quote` /
+`requisitions_for_quote` (primary-first), and `quotes_for_requisition(db, req_id)` — the
+join-based `Query[Quote]` that REPLACES the old `Quote.requisition_id == req_id` read filter
+so a SECONDARY requisition also surfaces the combined quote on its Quotes tab, Build-Quote
+tab, offers-tab draft lookup, and the list Quotes column (batched one-query-per-page). Quote
+**send** loops the transition + one ActivityLog over every contributing req (response still
+reflects the primary). Building a **buy plan** from a combined quote is HARD-BLOCKED
+(`buyplan_builder.build_buy_plan` raises `ValueError` "spans N requisitions" → 400) rather than
+silently dropping the non-primary reqs' lines.
+
 **Quote pre-flight (advisory, never blocks send).** `services/quote_preflight.py`
 `quote_preflight(db, quote)` runs three deterministic read-only checks and returns a list of
 `PreflightWarning`s: **dnc** (recipient `CustomerSite.do_not_contact`, or a `SiteContact` at
@@ -1325,6 +1387,25 @@ parent so attribution survives a revision: the htmx "Revise" button
 (`save_quote_from_builder`, `source=old_quote.source if old_quote else None`). A fresh
 (non-revision) build has no parent so `source` stays NULL — it is set only at origin
 (e.g. `proactive_service.py` sets `'proactive'`).
+
+**Terms editor + Preview (OQ-08).** The quote detail action bar (`quotes/detail.html`)
+carries two always-visible buttons (no status gate, beside Revise / Apply Markup): **Edit
+Terms** opens a modal (`$dispatch('open-modal', {url: '/v2/partials/quotes/{id}/edit-form'})`
+→ `htmx/quotes.py::edit_terms_form` renders `quotes/edit_form.html` into `#modal-content`,
+lazy-loading recent payment/shipping `<datalist>`s from `GET .../recent-terms`), and
+**Preview** (`POST /v2/partials/quotes/{id}/preview` → `quotes/preview.html` swapped into
+`#main-content`). The modal POSTs `.../{id}/edit` (`edit_quote_metadata`), which updates
+`payment_terms`/`shipping_terms` (each ≤100 chars → else `HTTPException(400)`), `notes`
+(uncapped), and **"Valid Until"**. The Quote model has **no `valid_until` column** —
+`validity_days` is the single source of truth (also read by `quote_send.py`,
+`crm/_helpers.py`, `quote_report.html`). The editor shows a **date picker**; the route
+converts it to `validity_days` via `_validity_days_from_valid_until(quote, target)` anchored
+to `quote.sent_at.date()` if sent else today — the **same anchor** `quote_send.py` uses for
+the emailed expiry — so the editor default, the preview cell, and the real outbound email all
+agree. `< 1` day → 400 (must be in the future); unparseable → 400 (invalid date). Blank/omitted
+fields are left unchanged (edit-in-place). Ownership is scoped through `get_quote_for_user`
+(SALES sees only own reqs → 404 otherwise). Errors surface via the global `htmx:responseError`
+toast with no swap, so the modal stays open to fix and retry.
 
 ## 6. Buy Plan Workflow
 
@@ -1625,25 +1706,61 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     |        |     price-spread bar, cloned from quote_builder/modal.html, NO auto-select)
     |        +-- GET .../{id}/offer-buyers-form  (owner-only buyer panel: ranked suggestions
     |        |     [buyer_affinity_service.rank_buyers_for] + advisory overlap flag
-    |        |     [overlap_warning] + no-contact history rows + scope + channel)
+    |        |     [overlap_warning] + no-contact history rows + scope + channel;
+    |        |     ?preselect_vendor_card_id= seeds the checked set so a not-yet chip lands
+    |        |     with its buyer already selected — RS-8)
     |        +-- GET .../{id}/outreach           (owner-only Outreach tab: tracker rows +
     |        |     'offered N · M responded · K bid' summary; lazy, explicit hx-target)
     |        +-- GET .../{id}/not-yet-strip      (owner-only nudge: not_yet_offered_strip;
     |              also persists each surfaced buyer as an owner-assigned My-Day follow-up via
     |              task_service.auto_create_resell_followup_task — idempotent per list+buyer+owner)
     +-- POST /api/resell/lists                          (create → excess_service.create_excess_list)
-    +-- POST /api/resell/{id}/lines                     (add line; resolves MaterialCard)
-    +-- POST /api/resell/{id}/import-preview|import-confirm  (reuse excess parsers + preview grid)
+    +-- POST /api/resell/{id}/lines                     (add line; resolves MaterialCard;
+    |     re-renders the WHOLE detail via [data-resell-detail-root], not just Lines, so the
+    |     header Post button appears once a fresh draft has lines — RS-5)
+    +-- POST /api/resell/{id}/import-preview|import-confirm  (reuse excess parsers + preview grid;
+    |     preview ALWAYS renders a re-upload/back affordance even for an all-errors file — RS-6;
+    |     confirm re-renders the whole detail like add-line — RS-5)
     +-- POST /api/resell/{id}/publish                   (excess_mirror.publish_list → Sighting mirror)
     +-- POST /api/resell/{id}/offers                    (excess_service.submit_offer; scope
     |     per_line|take_all; service enforces can_offer + the self-offer guard)
     +-- POST /api/resell/{id}/offers/{offer_id}/award   (owner-only; excess_service.award_offer:
-    |     the single offer→won chokepoint; marks matched lines awarded, recomputes rollups,
-    |     then fires buyer_affinity_service.recompute_buyer_score_on_win before commit)
+    |     the single offer→won chokepoint; take_all awards ALL non-withdrawn lines, per_line
+    |     awards its matched lines; 409 if a line is already awarded to another offer;
+    |     idempotent for an already-won offer; recomputes rollups + buyer-score win-hook;
+    |     retires the sold lines from the Sighting mirror (sync_list_mirror); derives the
+    |     list→awarded status once every line is decided. RESPONSE is an OOB compose
+    |     (_award_response.html): PRIMARY = Offers tab (hx-target #tab-offers-<id>), OOB =
+    |     #tab-lines-<id> (Awarded/Withdrawn pills) + #resell-chips-<id> (N/M-awarded chip +
+    |     status badge), so awarding never resets the Alpine tab state; HX-Trigger showToast)
+    +-- POST /api/resell/{id}/offers/{offer_id}/unaward (owner-only; excess_service.unaward_offer:
+    |     the EXPLICIT inverse — never a silent auto-swap to a new winner. 409 if the offer
+    |     is not won; reverts offer→open + lines→available, recomputes rollups + buyer score
+    |     (full-history recompute self-heals wins), re-mirrors the lines, and steps the list
+    |     back off awarded → bid_out (close_at set) else collecting. Same _award_response OOB)
     +-- POST /api/resell/{id}/outreach                  (owner-only; channel=email →
-          resell_outreach_service.submit_outreach_email [RFQ send engine], else
-          submit_outreach [manual log]; re-renders the Outreach tracker)
+    |     resell_outreach_service.submit_outreach_email [RFQ send engine], else
+    |     submit_outreach [manual log]; re-renders the Outreach tracker)
+    +-- GET  /v2/partials/resell/{id}/outreach/{oid}/reply   (RS-4, owner-only; the tracker's
+    |     "View reply" button opens _reply_viewer.html in #modal-content — the buyer's reply
+    |     thread (_replies_context joins VendorResponse↔ExcessOutreach on graph_conversation_id,
+    |     newest-first) + a "Convert to offer" quick-add. 404 when the outreach has no thread)
+    +-- POST /api/resell/{id}/outreach/{oid}/offer      (RS-4, owner-only; human-reviewed
+          offer extraction — record_response(has_offer=True) creates the inbound ExcessOffer
+          via the SAME queued-never-dropped line matcher as an emailed bid + advances the
+          outreach →bid; re-renders the tracker into #tab-outreach-<id>)
 ```
+
+**RS-4 reply tracking (inbound half).** The send path already stamps
+`ExcessOutreach.graph_conversation_id`/`graph_message_id` (migration 133); RS-4 wires the
+INBOUND half with NO new migration. `email_service.poll_inbox` gained Tier 2.5 (see §4):
+a buyer's reply matches the outreach via `resell_outreach_service._match_outreach` and
+advances it `sent→responded` through `record_response(commit=False)` inside the existing
+per-message savepoint, logging one excess-scoped inbound `activity_log`. The tracker's
+"View reply" button (shown once a reply lands — `graph_conversation_id` + an engaged status)
+opens the reply viewer, which reuses the `VendorResponse` rows the poll already writes (no
+new reply-content table) and offers a manual "Convert to offer" — offer auto-detection from
+the AI parse is a deliberately deferred Phase-2 decision.
 
 Adaptive-detail rule (spec "density scales to line count, placement follows offer scope"):
 `shape='single'` (1 line → one `.card`, no table chrome) vs `'table'` (≥2 → `compact-table`);
@@ -1982,17 +2099,30 @@ their toast through `settings_toast()`.
 
 ---
 
-## 9a. Settings → Connectors Tab (admin only)
+## 9a. Settings → Connectors Tab (admins + MANAGE_CONNECTORS holders)
 
 Unified credential + health management surface. Replaces the old **Sources** tab and
 the orphaned **API Keys** tab: both legacy routes (`/v2/partials/settings/sources` and
 `/v2/partials/settings/api-keys`) 302 → `/v2/partials/settings/connectors`.
 
+Gated on the `MANAGE_CONNECTORS` capability (admins always qualify via `user_has_access`),
+not bare `is_admin` — the SET-06 fix that made the capability actually gate something.
+`MANAGE_CONNECTORS` is deliberately NOT in the interactive role defaults (unlike
+send_rfq / approve_offers / export_data): connector credentials + `is_active` are
+workspace-global shared state, so it is a per-user grant an admin sets explicitly, never a
+blanket buyer-tier default. The
+tab button (`settings/index.html`, `can_manage_connectors` flag), the `settings_partial`
+default-tab redirect, the tab + card-refresh + test-all endpoints, and the per-source
+mutations (`sources.toggle_api_source` / `toggle_source_active` / `update_source_credentials`)
+all honor the same gate, so a holder gets a fully functional tab with no dead 403 controls.
+Clay OAuth connect/disconnect stays admin-only (a backend-wide authorization); non-admin
+holders see Clay status read-only.
+
 ```
 GET /v2/partials/settings/connectors
     |
     v
-htmx_views.settings_connectors_tab  (admin-only; 403 for non-admin)
+htmx_views.settings_connectors_tab  (require_access(MANAGE_CONNECTORS); 403 without it)
     |
     +---> _build_connector_groups(db, request)
     |       |
@@ -2143,7 +2273,7 @@ membership is curated, never "follow role"). Enforced at four points:
 | **Module full-page route** | `v2_page` maps the resolved `current_view` to its module `AccessKey` (`_VIEW_ACCESS`; CRM sub-views all gate on CRM); a denied view 302-redirects to the user's FIRST allowed module (`_MODULE_ENTRY_URLS` order) — target is always allowed, so no loop. No-access-at-all → 403 with logout link. Un-gated views: settings/quotes/follow-ups/tickets. |
 | **Module partial entry route** | `require_access(<module>)` dependency on each of the 10 nav-module partial routes (parts/sightings/materials/search/buy-plans/resell/crm/proactive/prospecting/my-day workspaces). |
 | **Module SUB-partial chokepoint** | `ModuleAccessMiddleware` (`app/main.py`, inner of `SessionMiddleware`) closes the gap where a revoked user could still READ a module's *sub*-partials by direct URL (those carry only `require_user`). It resolves the request path through the pure `app.access_paths.module_key_for_path` and, if a guarded prefix matches and the session user lacks the key, returns a plain 403. **Only EMPIRICALLY module-exclusive prefixes are guarded: `crm`, `resell`, `proactive`, `prospecting`, `my-day`.** The other five entry-prefixes (`parts`, `sightings`, `materials`, `search`, `buy-plans`) are SHARED cross-module (embedded by other modules' templates) and DELIBERATELY un-gated, as are all CRM *data* partials (customers/contacts/vendors/vendor-contacts) and capability/global/global-search partials — gating them would over-block. Admins and logged-out requests pass through; a DB session opens only when a guarded prefix matches. |
-| **Capability action** | `require_access(<capability>)` on: RFQ-send (`htmx_views.rfq_send`, `sightings.sightings_send_inquiry`); offer approve/reject/reconfirm (`crm/offers.py` + the Sightings `review_offer`/`reconfirm_offer` wrappers); CSV + quote exports (`crm/export.py`, `quote_builder.py`); source-test (`sources.test_api_source`). |
+| **Capability action** | `require_access(<capability>)` on: RFQ-send (`htmx_views.rfq_send`, `sightings.sightings_send_inquiry`); offer approve/reject/reconfirm (`crm/offers.py` + the Sightings `review_offer`/`reconfirm_offer` wrappers); CSV + quote exports (`crm/export.py`, `quote_builder.py`); the whole Connectors surface — `MANAGE_CONNECTORS` on `sources.test_api_source` / `toggle_api_source` / `toggle_source_active` / `update_source_credentials` and the `settings.py` connectors tab + `connector_card_partial` + `connectors_test_all` (SET-06). |
 
 `require_access(key)` is a factory returning a dependency that depends on `require_user`
 and raises 403 unless `user_has_access` passes (admins always pass). The
@@ -2326,7 +2456,10 @@ REUSING the helpers above (no new ad-hoc checks):
 - `htmx_views`: `sourcing_search_trigger` (connector spend) + `ai_rephrase_email` gated on
   `require_requisition_access`; `send_batch_follow_up` and `follow_up_badge` scope the stale-
   `RfqContact` query for `RESTRICTED_ROLES` (join `Requisition`, filter `created_by == user.id`)
-  so the badge matches what the batch acts on.
+  so the badge matches what the batch acts on. `send_batch_follow_up` re-renders the shared
+  `follow_ups/list.html` (via `_build_follow_ups_ctx`, the same builder the list partial uses)
+  so the "Send All" swap into `#main-content` leaves the refreshed queue intact instead of a
+  bare success div, and surfaces the count through an `HX-Trigger: showToast`.
 - `crm.quotes.create_quote` (`POST /api/requisitions/{req_id}/quote`) — `offer_ids` filtered to
   `Offer.requisition_id == req_id` (400 on any mismatch) and the `on_quote_built` requirement-
   advance query filtered the same way, so foreign offers can't enter the quote or advance another
@@ -2336,6 +2469,16 @@ REUSING the helpers above (no new ad-hoc checks):
   a QP's existence isn't leaked).
 Regression coverage: `tests/test_authz_hardening.py` (cross-account 403/404 + legitimate owner/
 manager/admin allowed + per-owner data-isolation asserts for proactive / follow-ups / quote).
+
+**Read-IDOR closure — offers.py GET partials.** Five requisition-scoped GET partial handlers in
+`app/routers/htmx/offers.py` (`parse_email_form`, `paste_offer_form`, `add_offer_form`,
+`rfq_compose`, `rfq_prepare_panel` — the parse-email/paste-offer/add-offer forms and the
+rfq-compose/rfq-prepare panels) resolved the requisition via `get_requisition_or_404` but skipped
+`require_requisition_access`, so a `RESTRICTED_ROLES` (SALES/TRADER) non-owner could read another
+rep's requisition name/customer/MPNs/vendor contacts by crafting a direct GET. Each now calls
+`require_requisition_access(db, req_id, user)` right after the 404 check (404-not-403 so existence
+isn't leaked), matching their mutating siblings in the same file. Regression coverage:
+`tests/test_authz_offers_partials_idor.py`.
 
 **Disposition (Increment 1, migration 118).** Salespeople dispose of accounts +
 contacts via setter routes in `htmx_views.py` (all owner-or-admin where they touch
@@ -2374,6 +2517,22 @@ CDM left list (`_account_list.html`), regardless of `site_count`, hx-gets the SA
   GET → 405).
 - **Breadcrumb** `Customers › {Account}` (`<nav aria-label="Breadcrumb">`) sits at
   the top of `detail.html` (reused from the retired `site_detail.html`).
+- **Create / edit account (F7 — modal buttons).** The create/edit-account forms are
+  surfaced as modals (they previously had NO UI entry — accounts arrived only via CSV
+  import). The `+ New account` primary button (`list.html`, above the split workspace)
+  `$dispatch('open-modal')` + hx-gets `GET .../create-form` into `#modal-content`;
+  `create_form.html` posts to `POST .../create` targeting `#cdm-detail` (the new account's
+  detail fills the right panel). The `Edit account` kebab item (`detail.html`) hx-gets
+  `GET .../{id}/edit-form`; `edit_form.html` posts to `POST .../{id}/edit` targeting
+  `#company-detail-{id}` with `outerHTML` (the `data-detail-root` div now carries that
+  stable id, so the modal — which lives outside the root and can't use `closest` — re-swaps
+  the detail in place in BOTH the workspace and a deep-linked full page). Both handlers set
+  `HX-Trigger=cdmListRefresh`; a hidden listener in `list.html` reloads `#cdm-list` (honoring
+  live `#cdm-filters`) so a new/renamed account shows immediately (no-ops on deep-link, where
+  no listener exists). Both forms close the modal on success via `hx-on::after-request`; 4xx
+  (missing name 400, duplicate 409, cross-owner 403) surfaces through the global
+  `htmx:responseError` toast with the modal kept open. The shared `submit_cancel` macro
+  (which navigated `#main-content`) was removed; `owner_select` remains.
 - **Contacts is the default + primary right-panel surface.** `contacts_tab.html`
   (the ONLY contact-management surface, full feature set) wraps the
   `contactsView` Alpine.data component (`htmx_app.js`): a people-search + a site
@@ -2451,6 +2610,16 @@ merges different-`account_owner_id` accounts) are reused AS-IS.
   blank + emitted empty merge ids; dead). Default keep/remove direction follows
   `pair.auto_keep_id`; both buttons POST `/v2/partials/admin/company-merge`. Reached via
   `GET /v2/partials/settings/data-ops` (`require_user` + explicit `is_admin` gate).
+- **OEM Spec-Code Approvals "Open queue" (SET-07):** the Data Ops card links to the pending
+  spec-code approval queue (`GET /admin/spec-codes/pending`, `admin/spec_codes.list_pending`,
+  `require_settings_access`) with `hx-get` + `hx-push-url="true"`. Because that url is pushed
+  into history, a raw browser reload / bookmark arrives WITHOUT the `HX-Request` header — the
+  route content-negotiates (`request.headers.get("HX-Request") != "true"`) and serves the app
+  shell via `full_page_shell(request, user, request.url.path, "settings")` (`routers/htmx/
+  _shared.py`), whose `base_page.html` loader re-fires `hx-get` at this same url WITH the header
+  to paint the queue; HTMX callers still get the bare `spec_codes_pending.html` partial. Coverage:
+  `tests/routers/admin/test_spec_codes_pending.py` (HTMX pass renders the queue, full-page reload
+  serves the shell).
 - **Vendor-Duplicates loop (same template) had the identical flat-field bug** — it read
   `pair.name_a/id_a/sightings_a` while `vendor_utils.find_vendor_dedup_candidates` returns
   NESTED `{vendor_a:{id,name,sightings}, vendor_b:{…}, score}` → vendor rows rendered blank
@@ -2545,8 +2714,11 @@ UI for uploading a vendor's stock list. All three are thin routes in
   MANAGER/ADMIN see all (the predicate is skipped for `is_manager_or_admin`).
   `customer_contacts_query` joins `SiteContact → CustomerSite → Company` (all
   `is_active`), filters search (name OR email) / company / role; `cadence_state` is a
-  DERIVED dot (not a column) so it is computed via `cadence_state_of` and filtered in
-  Python by `customer_contacts_list_ctx`. The company-filter dropdown is built from the
+  DERIVED dot (not a column) but its day-floor thresholds collapse to exact timestamp
+  cutoffs, so `customer_contacts_list_ctx` filters it in SQL via
+  `contact_cadence_predicate` (which mirrors `cadence_state_of` EXACTLY) and pages with
+  count()/offset()/limit() — no full-set load before paging (PERF-10). The company-filter
+  dropdown is built from the
   same visibility scope. `require_user`. Reached via the "All contacts" link in
   `customers/list.html`.
 - **`GET /v2/vendor-contacts`** (`vendor_contacts_partial` → `vendors/contacts_list.html`)
@@ -4669,7 +4841,8 @@ BROWSER (HTMX + Alpine.js)
           with overflow toggle and modal material card click
       status_badge macro (_macros.html): unified badge rendering
           used across all pages (requisitions, parts, etc.)
-      Sales-Hub look (requisitions2 opportunity-table tokens): the
+      Sales-Hub look (opportunity-table tokens, originally built for the
+          retired /requisitions2 and now canonical in shared/_macros.html): the
           Sightings list table + detail panel reuse opp_status_cell
           (status dot+label), coverage_meter (6-seg meter), .opp-col-header
           (th), .h4 / .figure-accent / .input / .btn btn-sm. Sightings-only
@@ -4865,12 +5038,12 @@ the current implementation.
 | Domain | Routes | Key Operations |
 |--------|--------|---------------|
 | Auth | 7 | OAuth login/callback/logout, status |
-| Requisitions | 47 | CRUD, search, bulk archive/assign, claim; requisitions2 split-panel detail with lazy-loaded Offers/Activity tabs (`GET /requisitions2/{id}/offers` + `/activity`, reusing the shared activity timeline) |
+| Requisitions | 47 | CRUD, search, bulk archive/assign, claim. The canonical surface is `/v2/requisitions` (**Sales Hub** = the split-panel parts workspace, `partials/parts/workspace.html`); the legacy `/requisitions2` split-panel was retired in #622 — `app/routers/requisitions2.py` now 302-redirects every `/requisitions2/*` URL to `/v2/requisitions` (no templates, no offers/activity sub-routes). **View toggle (finding REQ-12)**: a segmented switch (`partials/requisitions/_view_toggle.html`, in the workspace eyebrow + the list header) flips between the Sales Hub workspace and the flat **"Requisitions list"** (`partials/requisitions/list.html`). Clean full-page push URLs: `/v2/requisitions` → workspace (default); `/v2/requisitions?view=list` → list (`v2_page` honours `?view=list`). Every link that loads the flat list partial (detail back-link, dashboard "Open Requisitions" card, proactive convert-success) pushes `?view=list` so a reload/bookmark reproduces the list. **Create/import flow (unified_modal)**: `POST /v2/partials/requisitions/import-save` parses the modal's `reqs[i].substitutes_json` (per-sub mpn+manufacturer) via `parse_substitute_mpns()` into the canonical `[{mpn, manufacturer}]` list (falls back to the legacy comma-joined `reqs[i].substitutes` MPN string) — never stores raw strings. On success it fires `HX-Trigger: reqListRefresh` (no longer hard-targets the workspace-only `#parts-list`); **both** launch surfaces listen for `reqListRefresh from:body` — the parts workspace `#parts-list` and a hidden hook in `requisitions/list.html` (reloads the list into `#main-content`) — so the create modal refreshes whichever surface opened it. The parts-tab edit row (`tabs/req_row.html`) coerces legacy string subs → `{mpn, manufacturer}` dicts before Alpine binds `sub.mpn` |
 | Requirements | 23 | Add parts, CSV upload, search, leads, tasks |
 | Vendors | 57 | CRUD, contacts, stock history, reviews, tags; new create: `POST /api/vendors` (201, 409 dup), `GET /v2/partials/vendors/create-form`, `POST /v2/partials/vendors/create`; delete UI: `DELETE /v2/partials/vendors/{id}` (admin, 400 if active offers) — both returning vendor detail/list HTML; stock-list upload UI: `POST /v2/partials/vendors/import-stock` (`import_vendor_stock_list`, require_buyer — thin wrapper over `stock_list_ingest.ingest_stock_list`, result banner into `#vendor-stock-result`); CRM parity: activity tab, add-note, tasks tab + CRUD, attachments; **migration 145 (P1)**: HTMX vendor contact CRUD (`POST /v2/partials/vendors/{id}/contacts` require_user, `PUT .../contacts/{cid}` require_user, `DELETE .../contacts/{cid}` require_admin, `POST .../contacts/{cid}/set-primary` require_user — clears all others atomically); ownership badge (`GET/POST .../claim` require_user, `POST .../release` require_user — wraps `strategic_vendor_service.claim_vendor`/`drop_vendor`); custom fields (`POST/DELETE /v2/partials/vendors/{id}/custom-fields[/{label}]` require_user, mirrors company custom-fields); is_primary column on vendor_contacts; custom_fields JSONB on vendor_cards |
 | Companies/CRM | 47 | CRUD, sites, contacts, enrichment, import; CDM workspace (`/v2/partials/customers`, `/v2/partials/customers/account-list`); outreach logging (`POST /api/activity/outreach-initiated`); CRM task CRUD: `DELETE /v2/partials/tasks/{id}` (delete), `GET /v2/partials/tasks/{id}/edit-form` + `POST /v2/partials/tasks/{id}/edit` (edit); account add-note: `GET /v2/partials/customers/{id}/activity/add-note-form` + `POST /v2/partials/customers/{id}/activity/add-note` (cadence-neutral, direction=None → no last_outbound_at bump); all three gates reuse `_is_crm_task_authorized` (task) or `can_manage_account` (note); contact merge (dedup): `GET /v2/partials/customers/{cid}/contacts/{ctid}/merge-form` + preview + `POST .../merge` (can_manage_account on source company, merge_contacts service); contact move: `GET .../move-form` + `POST .../move` (can_manage_account on BOTH source+target companies, target site must be active); **migration 144**: contact secondary fields (secondary_email, secondary_phone in EDITABLE_CONTACT_FIELDS), reports_to_id self-FK in create+edit; contact tag routes: `POST /v2/partials/customers/{cid}/contacts/{ctid}/tags` (assign segment tag by tag_id or tag_name), `DELETE /v2/partials/customers/{cid}/contacts/{ctid}/tags/{tag_id}` (unassign), `GET /v2/partials/customers/{cid}/contacts/for-select` (JSON list for reports_to picker, exclude_id param); EntityTag entity_type='site_contact' now valid; **bulk actions**: `POST /v2/partials/customers/bulk/{action}` (deactivate, send-to-prospecting, assign-owner) — auth-scoped: deactivate+send-to-prospecting gate per-company via `can_manage_account` (skips non-manageable; summary), assign-owner is MANAGER/ADMIN ONLY (403 for reps); **CSV import**: `POST /v2/partials/customers/import/preview` (parse+flag dupes/invalid, no writes) + `POST /v2/partials/customers/import/confirm` (create Companies, dedup by normalized_name, sets importer as account_owner_id); **contact CSV import**: `POST /v2/partials/customers/import/contacts/preview` (parse+flag duplicate emails) |
 | Offers | 30 | CRUD, line items, accept/reject, changelog |
-| Quotes | 25 | CRUD, send, PDF, e-signature, pricing history; bare `/v2/quotes` 307→`/v2/requisitions`; list partial removed; detail `/v2/quotes/{id}` unchanged; surfaced via Reqs workspace + CRM account Quotes tabs |
+| Quotes | 26 | CRUD, send, PDF, e-signature, pricing history; terms editor modal (`GET .../{id}/edit-form` + `POST .../{id}/edit`) + Preview (`POST .../{id}/preview`) — OQ-08; "Valid Until" date picker persists as `validity_days` (no `valid_until` column); bare `/v2/quotes` 307→`/v2/requisitions`; list partial removed; detail `/v2/quotes/{id}` unchanged; surfaced via Reqs workspace + CRM account Quotes tabs |
 | Buy Plans | 10 | submit/approve, SO+PO verify, confirm-PO, flag-issue, cancel (service + line cascade), reset; ops-group admin tab |
 | Materials | 20 | CRUD, substitutes, stock levels, price history |
 | Sightings | 27 | CRUD, RFQ send, batch RFQ, inquiry (cross-requisition composer: vendor-affinity GET + composer-vendor POST), vendor+part unavailability (mark/clear/reason modal) |
@@ -4966,13 +5139,6 @@ on hover. Primaries-first DOM order (enforced by `_build_row_mpn_chips`
 service helper) guarantees primary MPNs never hide while subs are
 visible. Cleanup via Alpine's `cleanup()` disconnects the observer on
 element teardown.
-
-### rowActionRail  (htmx_app.js, Alpine.data)
-
-Component bound to `/requisitions2` `<tr>`. CSS handles hover reveal via
-`tr:hover .opp-action-rail`; this component exposes `show` state so
-`@focusin`/`@focusout`/`@keydown.enter` toggle visibility for keyboard
-users. `Escape` dismisses.
 
 ### rfqVendorModal  (htmx_app.js, Alpine.data)
 
@@ -5158,6 +5324,13 @@ Three inflows that feed idle CRM accounts into the prospecting pool.
 - HTMX endpoint: `POST /v2/partials/prospects/{prospect_id}/reassign` with `to_user_id` form param (require_user + in-route `is_manager_or_admin` gate)
 - Returns: {company_id, company_name, to_user_id, prospect_id|None, status: "reassigned"}
 
+### Prospecting tab UI wiring (DC-02)
+The sweep notification tells the rep to reclaim "from the Prospecting tab"; these buttons make that reachable. `_reclaim_ui_flags(user, prospect)` (in `app/routers/htmx/prospecting.py`) computes per-(user, prospect) visibility — added to the card context (`reclaim_ui_map` keyed by id, so it renders identically in the grid loop and OOB card swaps) and the detail context (`reclaim_ui`).
+- A prospect is "swept" when `swept_from_owner_id` is set. On a swept SUGGESTED card/detail the generic **Claim** button is replaced by **Reclaim** (posts the existing `/prospects/{id}/reclaim`) for anyone who can reclaim (former owner / manager / admin / `account_sweep_manager_email`); everyone else still sees plain **Claim**.
+- A former owner inside the 30-day cooldown (supervisors bypass) sees Reclaim rendered *disabled* with a `title` of the unlock date — honest state, not a dead click; the POST wiring is omitted.
+- Managers/admins additionally get a **Reassign** button that opens `reassign_modal.html` (loaded into `#modal-content` via `$dispatch('open-modal', {url: .../reassign-form?ctx=grid|detail&flt_status=...})`). The modal is a `to_user_id` picker of active users that posts `/prospects/{id}/reassign`; `ctx` sets the form's `hx-target` (`#prospect-{id}` outerHTML for grid, `#main-content` innerHTML for detail) so the swap matches the surface the action came from.
+- Route `GET /v2/partials/prospects/{prospect_id}/reassign-form` (`reassign_prospect_form`, require_user + `is_manager_or_admin` gate → 403) returns that modal body.
+
 ---
 
 ## CRM Rubric Batch A — 2026-06-24
@@ -5191,8 +5364,10 @@ minimal and mirrors the accounts pattern; no rearrangement of existing controls.
   visible set (`effective_my_only = my_only OR not is_manager_or_admin`); managers can add
   the My-accounts filter. Unfiltered call = all visible (unchanged default).
 - `GET /v2/customers/contacts/export.csv` now accepts `search/company_id/contact_role/
-  cadence_state` and streams via the role-scoped `customer_contacts_query` (cadence_state is
-  derived → filtered in Python, mirroring `customer_contacts_list_ctx`). Headers unchanged.
+  cadence_state` and streams via the role-scoped `customer_contacts_query`; the derived
+  `cadence_state` facet is applied in SQL via `contact_cadence_predicate` (mirroring
+  `customer_contacts_list_ctx`) so the whole set streams through `yield_per(200)` instead
+  of being materialized (PERF-10). Headers unchanged.
 - Both export links are progressive-enhancement anchors: `@click.prevent` rebuilds the
   download URL from the live filter form (`#cdm-filters` / `#contacts-filters`) via
   `URLSearchParams(new FormData(...))`; the bare `href` is the no-JS fallback (full export).
@@ -5506,9 +5681,14 @@ has at most one QP, so a second open returns the same row (no duplicate). It re-
 with the same eager options `qp_detail` uses and renders via the shared `_qp_detail_response`,
 so the user lands on the native QP detail. The QP detail's header sub-line carries a back-link
 to the buy plan (`hx-get="/v2/partials/buy-plans/{bp.id}"`, `hx-target="#main-content"`) so the
-view is not a dead-end. Coverage: `tests/test_qp_entry.py` (create-on-first-open, idempotent
-second open, restricted-non-owner 404 with no QP created, button renders the for-buy-plan
-hx-get).
+view is not a dead-end. **Full-page reload / bookmark (SET-05):** the button `hx-push-url`s this
+url into history, so a raw browser reload arrives WITHOUT the `HX-Request` header — the route
+content-negotiates (`request.headers.get("HX-Request") != "true"`) and serves the app shell via
+`full_page_shell(request, user, request.url.path, "buy-plans")` (`routers/htmx/_shared.py`), whose
+`base_page.html` loader re-fires `hx-get` at this same url WITH the header to paint the QP; the
+non-HTMX pass is side-effect-free (get-or-create runs only on the HTMX pass). Coverage:
+`tests/test_qp_entry.py` (create-on-first-open, idempotent second open, restricted-non-owner 404
+with no QP created, button renders the for-buy-plan hx-get, full-page reload serves the shell).
 
 **QP section gates — Sales / Purchasing (QP Phase C2a):** the QualityPlan is the engine
 subject (`subject_type='quality_plan'`); the `gate_type` discriminates the section.
@@ -5612,8 +5792,14 @@ four-sub-tab `approvals/_queue.html` lens was already retired before that).
 per-gate projection) but is no longer wired to a human surface; the only human-facing approvals
 queue is now the engine API (`GET /v2/approvals/requests` + the standalone Approvals page).
 Subjects resolve by `subject_type` (buy_plan→plan detail, quality_plan→`/v2/qp/{id}`,
-prepayment→vendor + payment method). Visibility is **org-wide** (every request of that gate),
-but approve/reject act only for an eligible PENDING recipient (`decide()`). The legacy
+prepayment→vendor + payment method). **Visibility is ownership-scoped** (parity with
+requisition-derived data): unrestricted roles (buyer/manager/admin) see every request, but
+`RESTRICTED_ROLES` (SALES/TRADER) see only requests they submitted (`requested_by_id`), own
+(`owner_id`), or must personally decide (a PENDING `ApprovalStepRecipient` row) — enforced on
+BOTH `list_requests` (`_restricted_visibility_clause`) and `get_request`
+(`_can_view_request`; 404-not-403 so existence isn't leaked, mirroring
+`require_requisition_access`). approve/reject still act only for an eligible PENDING recipient
+(`decide()`). The legacy
 `GET /v2/approvals/queue` still **302-redirects** to `/v2/buy-plans?lens=approvals` (which 302s
 on to the hub, where the unknown lens falls back to the role default).
 `ApprovalRequestActionSource` (`AlertKind.APPROVAL_ACTION`) is registered under the

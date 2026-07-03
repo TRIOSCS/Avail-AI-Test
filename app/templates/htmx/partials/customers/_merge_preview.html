@@ -58,15 +58,13 @@
     <input type="hidden" name="confirmed" value="true">
 
     <button type="submit"
-            class="flex-1 rounded-md bg-rose-600 px-4 py-2 text-sm font-semibold text-white
-                   hover:bg-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-500">
+            class="btn-danger flex-1">
       Merge and delete {{ remove.name }}
     </button>
 
     <button type="button"
             @click="$dispatch('close-modal')"
-            class="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium
-                   text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-brand-500">
+            class="btn-secondary">
       Cancel
     </button>
   </form>

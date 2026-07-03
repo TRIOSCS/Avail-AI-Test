@@ -78,7 +78,7 @@
       <button @click="selectCommodity(null)" x-show="!categorySearch"
               :class="!commodity ? 'bg-accent-100 text-accent-800 font-semibold border-l-[3px] border-accent-500' : 'text-gray-600 hover:bg-gray-50 border-l-[3px] border-transparent'"
               class="w-full text-left px-3 py-1.5 text-sm rounded-r transition-colors mb-1">
-        All Materials <span class="text-xs text-gray-400">({{ total_materials }})</span>
+        All Materials <span class="text-secondary">({{ total_materials }})</span>
       </button>
       <span id="mfr-filter-spinner" class="htmx-indicator text-xs text-gray-400">Loading...</span>
       <div hx-get="/v2/partials/materials/filters/tree"

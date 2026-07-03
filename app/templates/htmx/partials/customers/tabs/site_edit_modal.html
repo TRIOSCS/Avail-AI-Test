@@ -1,29 +1,29 @@
 {# site_edit_modal.html — Edit form for a CustomerSite, loaded into #modal-content
    via $dispatch('open-modal', {url: '...'}). The base modal renders ✕/backdrop/Escape.
    Receives: site (CustomerSite), company_id (int), users (list[User]).
-   On success: re-renders #sites-list area and closes the modal.
+   On success: re-renders #company-tab-content (the Sites tab panel) and closes the modal.
    Called by: GET /v2/partials/customers/{company_id}/sites/{site_id}/edit-form
 #}
 <div class='p-5'>
   <h3 id="modal-title" class='text-sm font-semibold text-gray-900 mb-4'>Edit Site</h3>
 
   <form hx-post='/v2/partials/customers/{{ company_id }}/sites/{{ site.id }}/edit'
-        hx-target='#main-content'
+        hx-target='#company-tab-content'
         hx-swap='innerHTML'
         hx-on::after-request='if(event.detail.successful) $dispatch("close-modal")'
         data-loading-disable
         class='space-y-3'>
 
     <div>
-      <label class='block text-xs font-medium text-gray-700 mb-1'>Site Name <span class="text-rose-500">*</span></label>
+      <label class='form-label'>Site Name <span class="text-rose-500">*</span></label>
       <input type='text' name='site_name' required value='{{ site.site_name or "" }}'
-             class='w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500'>
+             class='input'>
     </div>
 
     <div>
-      <label class='block text-xs font-medium text-gray-700 mb-1'>Site Type</label>
+      <label class='form-label'>Site Type</label>
       <select name='site_type'
-              class='w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500'>
+              class='input'>
         <option value=''>—</option>
         <option value='hq' {% if site.site_type == 'hq' %}selected{% endif %}>HQ</option>
         <option value='branch' {% if site.site_type == 'branch' %}selected{% endif %}>Branch</option>
@@ -35,62 +35,62 @@
 
     <div class='grid grid-cols-2 gap-2'>
       <div>
-        <label class='block text-xs font-medium text-gray-700 mb-1'>Address Line 1</label>
+        <label class='form-label'>Address Line 1</label>
         <input type='text' name='address_line1' value='{{ site.address_line1 or "" }}'
-               class='w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500'>
+               class='input'>
       </div>
       <div>
-        <label class='block text-xs font-medium text-gray-700 mb-1'>Address Line 2</label>
+        <label class='form-label'>Address Line 2</label>
         <input type='text' name='address_line2' value='{{ site.address_line2 or "" }}'
-               class='w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500'>
+               class='input'>
       </div>
     </div>
 
     <div class='grid grid-cols-2 gap-2'>
       <div>
-        <label class='block text-xs font-medium text-gray-700 mb-1'>City</label>
+        <label class='form-label'>City</label>
         <input type='text' name='city' value='{{ site.city or "" }}'
-               class='w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500'>
+               class='input'>
       </div>
       <div>
-        <label class='block text-xs font-medium text-gray-700 mb-1'>State</label>
+        <label class='form-label'>State</label>
         <input type='text' name='state' value='{{ site.state or "" }}'
-               class='w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500'>
+               class='input'>
       </div>
     </div>
 
     <div class='grid grid-cols-2 gap-2'>
       <div>
-        <label class='block text-xs font-medium text-gray-700 mb-1'>ZIP</label>
+        <label class='form-label'>ZIP</label>
         <input type='text' name='zip' value='{{ site.zip or "" }}'
-               class='w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500'>
+               class='input'>
       </div>
       <div>
-        <label class='block text-xs font-medium text-gray-700 mb-1'>Country</label>
+        <label class='form-label'>Country</label>
         <input type='text' name='country' value='{{ site.country or "" }}'
-               class='w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500'>
+               class='input'>
       </div>
     </div>
 
     <div class='grid grid-cols-2 gap-2'>
       <div>
-        <label class='block text-xs font-medium text-gray-700 mb-1'>Payment Terms</label>
+        <label class='form-label'>Payment Terms</label>
         <input type='text' name='payment_terms' value='{{ site.payment_terms or "" }}'
                placeholder='e.g. Net30'
-               class='w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500'>
+               class='input'>
       </div>
       <div>
-        <label class='block text-xs font-medium text-gray-700 mb-1'>Shipping Terms</label>
+        <label class='form-label'>Shipping Terms</label>
         <input type='text' name='shipping_terms' value='{{ site.shipping_terms or "" }}'
                placeholder='e.g. FCA'
-               class='w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500'>
+               class='input'>
       </div>
     </div>
 
     <div>
-      <label class='block text-xs font-medium text-gray-700 mb-1'>Site Owner</label>
+      <label class='form-label'>Site Owner</label>
       <select name='owner_id'
-              class='w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500'>
+              class='input'>
         <option value=''>— None —</option>
         {% for u in users %}
         <option value='{{ u.id }}'{% if site.owner_id == u.id %} selected{% endif %}>{{ u.name }} ({{ u.role }})</option>
@@ -99,16 +99,16 @@
     </div>
 
     <div>
-      <label class='block text-xs font-medium text-gray-700 mb-1'>Notes</label>
+      <label class='form-label'>Notes</label>
       <textarea name='notes' rows='2'
-                class='w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500'>{{ site.notes or "" }}</textarea>
+                class='input'>{{ site.notes or "" }}</textarea>
     </div>
 
     <div class='flex justify-end gap-2 pt-1'>
       <button type='button' @click='$dispatch("close-modal")'
               class='px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800'>Cancel</button>
       <button type='submit'
-              class='px-4 py-1.5 text-sm font-medium text-white bg-brand-500 rounded hover:bg-brand-600'>
+              class='btn-primary'>
         Save Changes
       </button>
     </div>

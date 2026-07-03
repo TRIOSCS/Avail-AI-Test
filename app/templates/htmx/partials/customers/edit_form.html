@@ -1,48 +1,57 @@
-{# edit_form.html — Inline edit form for company fields.
-   Receives: company (Company), users (list[User]).
-   Called by: htmx_views.py company_edit_form route.
-   Depends on: HTMX, Tailwind CSS with brand palette, _form_fields.html macros.
+{# edit_form.html — Edit form for company fields, loaded into #modal-content via
+   $dispatch('open-modal', {url: '/v2/partials/customers/{id}/edit-form'}). The base modal
+   renders its own ✕ / backdrop / Escape (base.html).
+   Receives: company (Company), users (list[User]), all_companies (list[Company]);
+     crm_industries (Jinja global).
+   Called by: GET /v2/partials/customers/{id}/edit-form (companies.py), surfaced by the
+     "Edit account" item in the company-detail kebab menu (detail.html).
+   Success: the refreshed detail replaces #company-detail-{id} (outerHTML — works in the
+     workspace right panel AND a deep-linked full page), the modal closes, and the handler's
+     HX-Trigger=cdmListRefresh refreshes the left account list. Errors surface via the
+     global htmx:responseError toast (htmx_app.js) with the modal kept open.
+   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette, _form_fields.html macros.
 #}
-{% from "htmx/partials/customers/_form_fields.html" import owner_select, submit_cancel -%}
-<div class="max-w-2xl mx-auto">
-  <div class="bg-white rounded-lg shadow border border-gray-200 p-6">
-    <h2 class="text-lg font-bold text-gray-900 mb-4">Edit Company</h2>
+{% from "htmx/partials/customers/_form_fields.html" import owner_select -%}
+<div class="p-5">
+    <h3 id="modal-title" class="text-lg font-bold text-gray-900 mb-4">Edit Company</h3>
 
     <form hx-post="/v2/partials/customers/{{ company.id }}/edit"
-          hx-target="#main-content"
+          hx-target="#company-detail-{{ company.id }}"
+          hx-swap="outerHTML"
+          hx-on::after-request='if(event.detail.successful) $dispatch("close-modal")'
           data-loading-disable
           class="space-y-4">
 
       <div>
-        <label class="block text-sm font-medium text-gray-700 mb-1">Company Name</label>
-        <input type="text" name="name" value="{{ company.name or '' }}"
-               class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+        <label class="block text-sm font-medium text-gray-700 mb-1">Company Name *</label>
+        <input type="text" name="name" value="{{ company.name or '' }}" required
+               class="input">
       </div>
 
       <div>
         <label class="block text-sm font-medium text-gray-700 mb-1">Website</label>
         <input type="url" name="website" value="{{ company.website or '' }}"
-               class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+               class="input">
       </div>
 
       <div>
         <label class="block text-sm font-medium text-gray-700 mb-1">Domain</label>
         <input type="text" name="domain" value="{{ company.domain or '' }}"
                placeholder="e.g. acme.com"
-               class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+               class="input">
       </div>
 
       <div>
         <label class="block text-sm font-medium text-gray-700 mb-1">LinkedIn URL</label>
         <input type="url" name="linkedin_url" value="{{ company.linkedin_url or '' }}"
                placeholder="https://linkedin.com/company/acme"
-               class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+               class="input">
       </div>
 
       <div>
         <label class="block text-sm font-medium text-gray-700 mb-1">Account Type</label>
         <select name="account_type"
-                class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+                class="input">
           <option value="">— None —</option>
           {% for val in ["Customer", "Prospect", "Partner", "Competitor"] %}
           <option value="{{ val }}"{% if company.account_type == val %} selected{% endif %}>{{ val }}</option>
@@ -53,7 +62,7 @@
       <div>
         <label class="block text-sm font-medium text-gray-700 mb-1">Industry</label>
         <select name="industry"
-                class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+                class="input">
           <option value="">— None —</option>
           {# Preserve a legacy / out-of-list current value so saving doesn't drop it. #}
           {% if company.industry and company.industry not in crm_industries %}
@@ -72,13 +81,13 @@
           <label class="block text-sm font-medium text-gray-700 mb-1">Legal / Registered Name</label>
           <input type="text" name="legal_name" value="{{ company.legal_name or '' }}"
                  placeholder="Full legal entity name"
-                 class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+                 class="input">
         </div>
         <div class="grid grid-cols-2 gap-3">
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">Employee Size</label>
             <select name="employee_size"
-                    class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+                    class="input">
               <option value="">— Select —</option>
               {% for opt in ["1-10", "11-50", "51-200", "201-500", "501-1000", "1001-5000", "5001-10000", "10001+"] %}
               <option value="{{ opt }}"{% if company.employee_size == opt %} selected{% endif %}>{{ opt }}</option>
@@ -88,7 +97,7 @@
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">Revenue Range</label>
             <select name="revenue_range"
-                    class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+                    class="input">
               <option value="">— Select —</option>
               {% for opt in ["<$1M", "$1M-$10M", "$10M-$50M", "$50M-$200M", "$200M-$1B", ">$1B"] %}
               <option value="{{ opt }}"{% if company.revenue_range == opt %} selected{% endif %}>{{ opt }}</option>
@@ -105,7 +114,7 @@
           <label class="block text-sm font-medium text-gray-700 mb-1">Main Phone</label>
           <input type="tel" name="phone" value="{{ company.phone or '' }}"
                  placeholder="+1 555 000 0000"
-                 class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+                 class="input">
         </div>
       </fieldset>
 
@@ -117,20 +126,20 @@
             <label class="block text-sm font-medium text-gray-700 mb-1">City</label>
             <input type="text" name="hq_city" value="{{ company.hq_city or '' }}"
                    placeholder="e.g. Austin"
-                   class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+                   class="input">
           </div>
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">State / Region</label>
             <input type="text" name="hq_state" value="{{ company.hq_state or '' }}"
                    placeholder="e.g. TX"
-                   class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+                   class="input">
           </div>
         </div>
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Country</label>
           <input type="text" name="hq_country" value="{{ company.hq_country or '' }}"
                  placeholder="e.g. United States"
-                 class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+                 class="input">
         </div>
       </fieldset>
 
@@ -142,13 +151,13 @@
             <label class="block text-sm font-medium text-gray-700 mb-1">Credit Terms</label>
             <input type="text" name="credit_terms" value="{{ company.credit_terms or '' }}"
                    placeholder="e.g. Net 30"
-                   class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+                   class="input">
           </div>
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">Tax ID (EIN / VAT)</label>
             <input type="text" name="tax_id" value="{{ company.tax_id or '' }}"
                    placeholder="e.g. 12-3456789"
-                   class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+                   class="input">
           </div>
         </div>
       </fieldset>
@@ -160,7 +169,7 @@
           <label class="block text-sm font-medium text-gray-700 mb-1">How was this account acquired?</label>
           {%- set _source_opts = ["manual", "sfdc", "referral", "inbound", "outbound", "enrichment"] -%}
           <select name="source"
-                  class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+                  class="input">
             <option value=""{% if company.source not in _source_opts %} selected{% endif %}>— Keep current ({{ company.source or 'none' }}) —</option>
             {% for val, label in [("manual", "Manual entry"), ("sfdc", "Salesforce import"), ("referral", "Referral"), ("inbound", "Inbound inquiry"), ("outbound", "Outbound prospecting"), ("enrichment", "Enrichment")] %}
             <option value="{{ val }}"{% if company.source == val %} selected{% endif %}>{{ label }}</option>
@@ -177,23 +186,29 @@
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Parent Company</label>
           <select name="parent_company_id"
-                  class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+                  class="input">
             <option value="">— None (top-level account) —</option>
             {% for co in all_companies %}
             <option value="{{ co.id }}"{% if company.parent_company_id == co.id %} selected{% endif %}>{{ co.name }}</option>
             {% endfor %}
           </select>
-          <p class="text-xs text-gray-500 mt-1">Select a parent company to create a hierarchy. Cannot set this company as its own parent.</p>
+          <p class="text-secondary mt-1">Select a parent company to create a hierarchy. Cannot set this company as its own parent.</p>
         </div>
       </fieldset>
 
       <div>
         <label class="block text-sm font-medium text-gray-700 mb-1">Notes</label>
         <textarea name="notes" rows="3"
-                  class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">{{ company.notes or '' }}</textarea>
+                  class="input">{{ company.notes or '' }}</textarea>
       </div>
 
-      {{ submit_cancel("Save Changes", "/v2/partials/customers/" ~ company.id) }}
+      <div class="flex justify-end gap-2 pt-1">
+        <button type="button" @click='$dispatch("close-modal")'
+                class="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800">Cancel</button>
+        <button type="submit"
+                class="btn-primary">
+          Save Changes
+        </button>
+      </div>
     </form>
-  </div>
 </div>

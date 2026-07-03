@@ -35,7 +35,7 @@
   <div class="mx-auto max-w-sm text-center text-sm text-gray-500 py-10">
     <svg class="mx-auto mb-3 h-10 w-10 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
     <p class="font-medium text-gray-600">This list hasn't been offered to anyone yet.</p>
-    <p class="text-xs text-gray-400 mt-1">Use "Offer to buyers" to send or log your first touch.</p>
+    <p class="text-secondary mt-1">Use "Offer to buyers" to send or log your first touch.</p>
   </div>
 
   {% else %}
@@ -66,14 +66,27 @@
           <td class="text-gray-500">{{ row.submitted_by_user.name if row.submitted_by_user else '—' }}</td>
           <td class="text-gray-500 text-xs">{{ (row.sent_at or row.created_at).strftime('%b %d, %H:%M') if (row.sent_at or row.created_at) else '—' }}</td>
           <td>
-            {{ status_badge(row.status, status_map={
-              'sent': 'bg-sky-50 text-sky-600 border-sky-200',
-              'opened': 'bg-indigo-50 text-indigo-600 border-indigo-200',
-              'responded': 'bg-amber-50 text-amber-600 border-amber-200',
-              'bid': 'bg-emerald-50 text-emerald-700 border-emerald-300',
-              'declined': 'bg-rose-50 text-rose-500 border-rose-200',
-              'no_response': 'bg-gray-50 text-gray-400 border-gray-200'
-            }) }}
+            <div class="flex items-center gap-2">
+              {{ status_badge(row.status, status_map={
+                'sent': 'bg-sky-50 text-sky-600 border-sky-200',
+                'opened': 'bg-indigo-50 text-indigo-600 border-indigo-200',
+                'responded': 'bg-amber-50 text-amber-600 border-amber-200',
+                'bid': 'bg-emerald-50 text-emerald-700 border-emerald-300',
+                'declined': 'bg-rose-50 text-rose-500 border-rose-200',
+                'no_response': 'bg-gray-50 text-gray-400 border-gray-200'
+              }) }}
+              {# View reply — only once a reply landed on the thread (needs a conversation
+                 id + an engaged status). Opens the reply viewer in the global modal, same
+                 dispatch+target pattern as "Offer to buyers" above. #}
+              {% if row.graph_conversation_id and row.status in ('opened', 'responded', 'bid', 'declined') %}
+              <button @click="$dispatch('open-modal')"
+                      hx-get="/v2/partials/resell/{{ el.id }}/outreach/{{ row.id }}/reply"
+                      hx-target="#modal-content"
+                      class="text-xs font-medium text-accent-600 hover:text-accent-700 hover:underline">
+                View reply
+              </button>
+              {% endif %}
+            </div>
           </td>
         </tr>
         {% endfor %}

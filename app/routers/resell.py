@@ -33,6 +33,7 @@ from sqlalchemy.orm import Session
 
 from ..constants import (
     AccessKey,
+    ExcessLineItemStatus,
     ExcessListStatus,
     ExcessOfferScope,
     ExcessOfferStatus,
@@ -42,7 +43,7 @@ from ..constants import (
 from ..database import get_db
 from ..dependencies import require_access, require_fresh_token, require_user
 from ..file_utils import parse_tabular_file
-from ..models import Company, User, VendorCard
+from ..models import Company, User, VendorCard, VendorResponse
 from ..models.excess import CustomerBid, ExcessLineItem, ExcessList, ExcessOffer, ExcessOfferLine, ExcessOutreach
 from ..services import (
     bid_back_service,
@@ -240,6 +241,7 @@ def _detail_context(request: Request, db: Session, el: ExcessList, user: User) -
         "list": el,
         "line_items": items,
         "line_count": len(items),
+        "awarded_line_count": sum(1 for it in items if it.status == ExcessLineItemStatus.AWARDED),
         "offer_count": offer_count,
         "take_all_count": take_all_count,
         "can_see_customer": can_see_customer,
@@ -378,40 +380,36 @@ async def resell_lines(
     return template_response("htmx/partials/resell/_lines.html", _detail_context(request, db, el, user))
 
 
-@router.get("/v2/partials/resell/{list_id}/offers", response_class=HTMLResponse)
-async def resell_offers(
-    request: Request,
-    list_id: int,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Lazy Offers tab body — per-line offer stacks + pinned take-all banner.
+def _offers_context(request: Request, db: Session, el: ExcessList, user: User) -> dict:
+    """Build the Offers tab context — per-line offer stacks + pinned take-all banners.
 
-    Offers are the owner's private view — non-owners must not see other brokers' quotes.
-    If the requester is not the owner, render the "offers are private" state without
-    querying or passing any offer data.
+    Offers are the owner's private view: a non-owner gets an empty stack (the template
+    renders the "offers are private" state instead). ``take_all_blocked`` is True once any
+    line is already awarded, which disables a whole-list take-all award (it would collide
+    with the per-line winner). Caller must have already authorized access to *el*.
     """
-    el, can_see_customer = _get_list_for_user(db, list_id, user)
     is_owner = el.owner_id == user.id
     items = db.query(ExcessLineItem).filter_by(excess_list_id=el.id).order_by(ExcessLineItem.id).all()
+    take_all_blocked = any(it.status == ExcessLineItemStatus.AWARDED for it in items)
+    base = {
+        "request": request,
+        "user": user,
+        "list": el,
+        "line_items": items,
+        "shape": "single" if len(items) == 1 else "table",
+        "take_all_blocked": take_all_blocked,
+    }
 
     if not is_owner:
         # Non-owner: render an empty offers view — no offer data in the response.
-        return template_response(
-            "htmx/partials/resell/_offers.html",
-            {
-                "request": request,
-                "user": user,
-                "list": el,
-                "line_items": items,
-                "by_line": {it.id: [] for it in items},
-                "unmatched": [],
-                "take_all_offers": [],
-                "can_see_customer": False,
-                "is_owner": False,
-                "shape": "single" if len(items) == 1 else "table",
-            },
-        )
+        return {
+            **base,
+            "by_line": {it.id: [] for it in items},
+            "unmatched": [],
+            "take_all_offers": [],
+            "can_see_customer": False,
+            "is_owner": False,
+        }
 
     take_all_offers = (
         db.query(ExcessOffer)
@@ -443,21 +441,37 @@ async def resell_offers(
             else:
                 unmatched.append(entry)
 
-    return template_response(
-        "htmx/partials/resell/_offers.html",
-        {
-            "request": request,
-            "user": user,
-            "list": el,
-            "line_items": items,
-            "by_line": by_line,
-            "unmatched": unmatched,
-            "take_all_offers": take_all_offers,
-            "can_see_customer": can_see_customer,
-            "is_owner": True,
-            "shape": "single" if len(items) == 1 else "table",
-        },
-    )
+    return {
+        **base,
+        "by_line": by_line,
+        "unmatched": unmatched,
+        "take_all_offers": take_all_offers,
+        "can_see_customer": True,
+        "is_owner": True,
+    }
+
+
+def _award_response_context(request: Request, db: Session, el: ExcessList, user: User) -> dict:
+    """Combined context for the award/unaward OOB response.
+
+    ``_award_response.html`` swaps the Offers tab (its primary target) and, out-of-band,
+    the Lines tab (awarded/withdrawn pills) and the header chips (the awarded-count chip +
+    list-status badge) — so awarding never resets the Alpine ``tab`` state. Merging the
+    two contexts is safe: the shared keys (request/user/list/line_items/shape) are equal.
+    """
+    return {**_detail_context(request, db, el, user), **_offers_context(request, db, el, user)}
+
+
+@router.get("/v2/partials/resell/{list_id}/offers", response_class=HTMLResponse)
+async def resell_offers(
+    request: Request,
+    list_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Lazy Offers tab body — per-line offer stacks + pinned take-all banner."""
+    el, _ = _get_list_for_user(db, list_id, user)
+    return template_response("htmx/partials/resell/_offers.html", _offers_context(request, db, el, user))
 
 
 @router.get("/v2/partials/resell/{list_id}/lines/{line_id}/offers", response_class=HTMLResponse)
@@ -732,7 +746,10 @@ async def resell_add_line(
     excess_service._resolve_line_material_card(db, item)
     el.total_line_items = (el.total_line_items or 0) + 1
     db.commit()
-    return await resell_lines(request, list_id=list_id, user=user, db=db)
+    # Re-render the WHOLE detail (not just the Lines tab): adding the first line to a
+    # draft is what makes the header Post button appear (line_count > 0), so a Lines-only
+    # swap would leave the header stale and the user with no way to publish (RS-5).
+    return template_response("htmx/partials/resell/detail.html", _detail_context(request, db, el, user))
 
 
 @router.post("/api/resell/{list_id}/import-preview", response_class=HTMLResponse)
@@ -790,7 +807,10 @@ async def resell_import_confirm(
     except (json.JSONDecodeError, ValueError) as exc:
         raise HTTPException(400, "Invalid import payload") from exc
     excess_service.confirm_import(db, list_id, rows)
-    return await resell_lines(request, list_id=list_id, user=user, db=db)
+    # Re-render the WHOLE detail so the header Post button appears once the draft has
+    # lines — a Lines-only swap leaves the header stale (RS-5).
+    el = excess_service.get_excess_list(db, list_id)
+    return template_response("htmx/partials/resell/detail.html", _detail_context(request, db, el, user))
 
 
 @router.post("/api/resell/{list_id}/publish", response_class=HTMLResponse)
@@ -882,6 +902,14 @@ async def resell_submit_offer(
     return await resell_offers(request, list_id=el.id, user=user, db=db)
 
 
+def _toast(resp: Response, message: str) -> Response:
+    """Attach the ``showToast`` HX-Trigger so an award/unaward confirms even though the
+    triggering button was swapped out of the DOM (same pattern as
+    sightings._with_toast)."""
+    resp.headers["HX-Trigger"] = json.dumps({"showToast": {"message": message, "type": "success"}})
+    return resp
+
+
 @router.post("/api/resell/{list_id}/offers/{offer_id}/award", response_class=HTMLResponse)
 async def resell_award_offer(
     request: Request,
@@ -890,16 +918,44 @@ async def resell_award_offer(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Award an inbound offer (owner-only): flip it to ``won`` and recompute the winning
-    buyer's scorecard, then re-render the detail panel.
+    """Award an inbound offer (owner-only): flip it to ``won``, mark its lines sold,
+    recompute the winning buyer's scorecard, and re-render the Offers tab + OOB
+    lines/chips.
 
-    The award is the single path that marks an ExcessOffer ``won``; the service owns the
-    transaction and fires the buyer-score recompute hook before committing. Owner-gated +
-    404 on a missing offer are enforced in ``excess_service.award_offer``.
+    The service owns the transaction (buyer-score hook, mirror-retire, list-status
+    derivation) and enforces owner-gating, 404 on a missing offer, and 409 when a line is
+    already awarded to a different offer. The response is an OOB compose so awarding from a
+    tab never resets the Alpine ``tab`` state; the toast fires via HX-Trigger.
     """
     offer = excess_service.award_offer(db, offer_id, user)
     el = excess_service.get_excess_list(db, offer.excess_list_id)
-    return template_response("htmx/partials/resell/detail.html", _detail_context(request, db, el, user))
+    resp = template_response(
+        "htmx/partials/resell/_award_response.html", _award_response_context(request, db, el, user)
+    )
+    return _toast(resp, "Offer awarded")
+
+
+@router.post("/api/resell/{list_id}/offers/{offer_id}/unaward", response_class=HTMLResponse)
+async def resell_unaward_offer(
+    request: Request,
+    list_id: int,
+    offer_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Reverse an award (owner-only): flip the offer back to ``open``, return its lines
+    to the pool, and re-render the Offers tab + OOB lines/chips.
+
+    The explicit inverse of award — never a silent auto-swap to a different winner. The
+    service enforces owner-gating, 404 on a missing offer, and 409 when the offer is not
+    awarded (nothing to reverse).
+    """
+    offer = excess_service.unaward_offer(db, offer_id, user)
+    el = excess_service.get_excess_list(db, offer.excess_list_id)
+    resp = template_response(
+        "htmx/partials/resell/_award_response.html", _award_response_context(request, db, el, user)
+    )
+    return _toast(resp, "Award reversed")
 
 
 # ── Outreach: offer-to-buyers panel + tracker + don't-forget strip ───
@@ -977,10 +1033,20 @@ def _no_contact_buyers(db: Session, el: ExcessList, suggested_ids: set[int]) -> 
 
 
 def _buyer_panel_context(
-    request: Request, db: Session, el: ExcessList, owner: User, line_ids: list[int] | None
+    request: Request,
+    db: Session,
+    el: ExcessList,
+    owner: User,
+    line_ids: list[int] | None,
+    preselect_ids: list[int] | None = None,
 ) -> dict:
     """Context for the offer-to-buyers panel: ranked suggestions + no-contact buyers +
-    scope."""
+    scope.
+
+    ``preselect_ids`` (buyer ``vendor_card_id``s) seed the panel's checked set so a "not
+    yet offered" nudge chip lands with its buyer already selected (RS-8) — one click from
+    action instead of re-finding the buyer in the ranked list.
+    """
     suggestions = _suggestion_rows(db, el, owner, line_ids)
     suggested_ids = {row["buyer"].vendor_card_id for row in suggestions}
     scope_lines = db.query(ExcessLineItem).filter(ExcessLineItem.id.in_(line_ids)).all() if line_ids else None
@@ -993,6 +1059,7 @@ def _buyer_panel_context(
         "channels": [c.value for c in ExcessOutreachChannel],
         "line_ids": line_ids or [],
         "scope_lines": scope_lines,
+        "preselect_ids": preselect_ids or [],
     }
 
 
@@ -1025,11 +1092,49 @@ def _outreach_tracker_context(request: Request, db: Session, el: ExcessList, use
     }
 
 
+def _replies_context(db: Session, el: ExcessList) -> dict[str, dict]:
+    """Map each of the list's outreach conversations to its buyer replies.
+
+    Joins the buyer's inbound emails (``VendorResponse``, one per received message, written
+    by the inbox poll and carrying the reply body) back to the ``ExcessOutreach`` they
+    answered — on the shared ``graph_conversation_id`` the send path stamped. Returns
+    ``{conversation_id: {"outreach": ExcessOutreach, "replies": [VendorResponse, …]}}`` with
+    replies newest-first, so the reply viewer can render one conversation's thread. Only
+    outreach rows with a conversation id participate (an unstamped row has no thread to show).
+    """
+    outreach_rows = (
+        db.query(ExcessOutreach)
+        .filter(
+            ExcessOutreach.excess_list_id == el.id,
+            ExcessOutreach.graph_conversation_id.isnot(None),
+        )
+        .all()
+    )
+    owning: dict[str, ExcessOutreach] = {}
+    for row in outreach_rows:
+        # Per-line campaigns write several rows on one conversation; keep the first as the
+        # display anchor (they share buyer + list, which is all the viewer reads).
+        owning.setdefault(row.graph_conversation_id, row)
+
+    replies: dict[str, list[VendorResponse]] = {}
+    if owning:
+        for vr in (
+            db.query(VendorResponse)
+            .filter(VendorResponse.graph_conversation_id.in_(list(owning.keys())))
+            .order_by(VendorResponse.received_at.desc())
+            .all()
+        ):
+            replies.setdefault(vr.graph_conversation_id, []).append(vr)
+
+    return {conv: {"outreach": owning[conv], "replies": replies.get(conv, [])} for conv in owning}
+
+
 @router.get("/v2/partials/resell/{list_id}/offer-buyers-form", response_class=HTMLResponse)
 async def resell_offer_buyers_form(
     request: Request,
     list_id: int,
     line_ids: str = Query(""),
+    preselect_vendor_card_id: str = Query(""),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -1037,15 +1142,18 @@ async def resell_offer_buyers_form(
     scope + channel.
 
     ``line_ids`` (comma-separated) scopes the campaign to specific lines; omitted = the
-    whole list. The panel reveals the buyer "who" + scorecard facts, so it is the owner's
-    private view (403 for a non-owner).
+    whole list. ``preselect_vendor_card_id`` seeds the checked set so a "not yet offered"
+    nudge chip opens the panel with that buyer already selected (RS-8). The panel reveals
+    the buyer "who" + scorecard facts, so it is the owner's private view (403 for a
+    non-owner).
     """
     el = excess_service.get_excess_list(db, list_id)
     _require_owner(el, user)
     parsed = [lid for lid in (_to_int(x) for x in line_ids.split(",")) if lid is not None] if line_ids else None
+    preselect = _to_int(preselect_vendor_card_id)
     return template_response(
         "htmx/partials/resell/offer_buyers_modal.html",
-        _buyer_panel_context(request, db, el, user, parsed),
+        _buyer_panel_context(request, db, el, user, parsed, [preselect] if preselect is not None else None),
     )
 
 
@@ -1169,6 +1277,104 @@ async def resell_submit_outreach(
             line_item_ids=parsed_lines,
             notes=notes or None,
         )
+
+    el = excess_service.get_excess_list(db, list_id)
+    return template_response("htmx/partials/resell/_outreach.html", _outreach_tracker_context(request, db, el, user))
+
+
+def _load_outreach_for_owner(
+    db: Session, list_id: int, outreach_id: int, user: User
+) -> tuple[ExcessList, ExcessOutreach]:
+    """Owner-gated load of one outreach row on a list, requiring an email thread.
+
+    404 (not 403) when the row is missing or belongs to another list — existence is not
+    revealed. 404 when the row has no ``graph_conversation_id`` (a manual-log or degraded
+    send has no thread to view or convert). Shared by the reply-viewer + convert-to-offer
+    routes so both enforce the same guard.
+    """
+    el = excess_service.get_excess_list(db, list_id)
+    _require_owner(el, user)
+    outreach = db.get(ExcessOutreach, outreach_id)
+    if outreach is None or outreach.excess_list_id != el.id:
+        raise HTTPException(404, "Outreach not found")
+    if not outreach.graph_conversation_id:
+        raise HTTPException(404, "No email thread on this outreach")
+    return el, outreach
+
+
+@router.get("/v2/partials/resell/{list_id}/outreach/{outreach_id}/reply", response_class=HTMLResponse)
+async def resell_outreach_reply(
+    request: Request,
+    list_id: int,
+    outreach_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Reply viewer for one buyer×list outreach (owner-only): the reply thread + a
+    convert-to-offer quick-add.
+
+    Loads the buyer's inbound emails on this outreach's conversation and renders them
+    with a "Convert to offer" form, so the trader can turn a free-text reply into a
+    tracked inbound ExcessOffer. Owner's private view (403 non-owner); 404 when the
+    outreach has no email thread.
+    """
+    el, outreach = _load_outreach_for_owner(db, list_id, outreach_id, user)
+    ctx = _replies_context(db, el).get(outreach.graph_conversation_id, {})
+    return template_response(
+        "htmx/partials/resell/_reply_viewer.html",
+        {
+            "request": request,
+            "user": user,
+            "list": el,
+            "outreach": outreach,
+            "replies": ctx.get("replies", []),
+        },
+    )
+
+
+@router.post("/api/resell/{list_id}/outreach/{outreach_id}/offer", response_class=HTMLResponse)
+async def resell_outreach_convert_offer(
+    request: Request,
+    list_id: int,
+    outreach_id: int,
+    mpn_raw: str = Form(""),
+    quantity: str = Form(""),
+    unit_price: str = Form(""),
+    lead_time_days: str = Form(""),
+    terms_text: str = Form(""),
+    notes: str = Form(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Convert a buyer's reply into a tracked inbound offer (owner-only), then re-render
+    the tracker.
+
+    Human-reviewed offer extraction: the trader reads the reply and types the line. Reuses
+    :func:`resell_outreach_service.record_response` (``has_offer=True``) so the offer is
+    created via the SAME queued-never-dropped line matcher as an emailed bid and the
+    outreach advances sent/responded → ``bid``. Owner-gated; 404 when there is no thread.
+    """
+    el, outreach = _load_outreach_for_owner(db, list_id, outreach_id, user)
+
+    qty = _to_int(quantity)
+    if not mpn_raw.strip() or qty is None:
+        raise HTTPException(400, "A converted offer needs a part number and quantity")
+
+    resell_outreach_service.record_response(
+        db,
+        conversation_id=outreach.graph_conversation_id,
+        has_offer=True,
+        offer_lines=[
+            {
+                "mpn_raw": mpn_raw.strip(),
+                "quantity": qty,
+                "unit_price": _to_decimal(unit_price),
+                "lead_time_days": _to_int(lead_time_days),
+                "terms_text": terms_text or None,
+            }
+        ],
+        offer_notes=notes or None,
+    )
 
     el = excess_service.get_excess_list(db, list_id)
     return template_response("htmx/partials/resell/_outreach.html", _outreach_tracker_context(request, db, el, user))

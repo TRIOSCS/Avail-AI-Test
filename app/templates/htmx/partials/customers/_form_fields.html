@@ -1,7 +1,6 @@
 {# _form_fields.html — Shared field macros for the company create/edit forms.
    Extracted from create_form.html and edit_form.html to remove copy-paste of the
-   account-owner <select> and the submit/cancel button row. Each macro emits markup
-   byte-identical to the inline version it replaced.
+   account-owner <select>.
 
    Call convention: the macro body's first line carries no leading indentation, so
    the call site supplies the opening indent, e.g. `      {{ owner_select(users) }}`.
@@ -17,28 +16,11 @@
 <div>
         <label class="block text-sm font-medium text-gray-700 mb-1">Account Owner</label>
         <select name="owner_id"
-                class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+                class="input">
           <option value="">— None —</option>
           {% for u in users %}
           <option value="{{ u.id }}"{% if with_selection %} {{ 'selected' if selected_id == u.id else '' }}{% endif %}>{{ u.name }} ({{ u.role }})</option>
           {% endfor %}
         </select>
-      </div>
-{%- endmacro -%}
-
-{# Submit + Cancel row. `submit_label` is the primary button text; `cancel_url`
-   is the hx-get the Cancel button navigates back to (swapped into #main-content). #}
-{%- macro submit_cancel(submit_label, cancel_url) -%}
-<div class="flex items-center gap-3 pt-2">
-        <button type="submit"
-                class="px-4 py-2 text-sm font-medium text-white bg-brand-500 rounded-md hover:bg-brand-600">
-          {{ submit_label }}
-        </button>
-        <button type="button"
-                hx-get="{{ cancel_url }}"
-                hx-target="#main-content"
-                class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200">
-          Cancel
-        </button>
       </div>
 {%- endmacro -%}

@@ -144,6 +144,118 @@ def test_company_lookup_form_accessible(client):
         assert resp.status_code == 200
 
 
+def test_import_save_persists_canonical_substitutes(client, db_session):
+    """REQ-09: substitutes_json (mpn + manufacturer) → canonical [{mpn, manufacturer}] rows.
+
+    The old path read only the comma-joined MPN string and stored raw strings, dropping the
+    per-sub manufacturer and violating the canonical substitutes format.
+    """
+    from app.models import Requirement
+
+    resp = client.post(
+        "/v2/partials/requisitions/import-save",
+        data={
+            "name": "Subs Canonical",
+            "urgency": "normal",
+            "reqs[0].primary_mpn": "LM358DR",
+            "reqs[0].target_qty": "10",
+            "reqs[0].manufacturer": "TI",
+            "reqs[0].substitutes": "LM358N, LM358P",
+            "reqs[0].substitutes_json": (
+                '[{"mpn": "LM358N", "manufacturer": "ON Semi"}, {"mpn": "LM358P", "manufacturer": "STMicro"}]'
+            ),
+        },
+    )
+    assert resp.status_code == 200
+    req = db_session.query(Requirement).filter_by(primary_mpn="LM358DR").one()
+    assert isinstance(req.substitutes, list)
+    assert len(req.substitutes) == 2
+    assert all(isinstance(s, dict) and s["mpn"] for s in req.substitutes)
+    # manufacturer carried through from substitutes_json (the old comma path dropped it)
+    assert {s["manufacturer"] for s in req.substitutes} == {"ON Semi", "STMicro"}
+
+
+def test_import_save_substitutes_json_fallback_to_comma(client, db_session):
+    """REQ-09: with no substitutes_json, the legacy comma field still yields canonical dicts."""
+    from app.models import Requirement
+
+    resp = client.post(
+        "/v2/partials/requisitions/import-save",
+        data={
+            "name": "Subs Fallback",
+            "urgency": "normal",
+            "reqs[0].primary_mpn": "STM32F407",
+            "reqs[0].target_qty": "5",
+            "reqs[0].manufacturer": "ST",
+            "reqs[0].substitutes": "STM32F405, STM32F415",
+        },
+    )
+    assert resp.status_code == 200
+    req = db_session.query(Requirement).filter_by(primary_mpn="STM32F407").one()
+    assert isinstance(req.substitutes, list)
+    assert len(req.substitutes) == 2
+    assert all(isinstance(s, dict) and s["mpn"] for s in req.substitutes)
+
+
+def test_import_save_fires_req_list_refresh(client):
+    """REQ-10: import-save fires HX-Trigger reqListRefresh and no longer hard-targets #parts-list.
+
+    The old success snippet loaded /v2/partials/parts into #parts-list, which exists only in
+    the parts workspace — opened from the requisitions list it hit htmx:targetError.
+    """
+    resp = client.post(
+        "/v2/partials/requisitions/import-save",
+        data={
+            "name": "Trigger Test",
+            "urgency": "normal",
+            "reqs[0].primary_mpn": "LM358DR",
+            "reqs[0].target_qty": "1",
+            "reqs[0].manufacturer": "TI",
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.headers.get("HX-Trigger") == "reqListRefresh"
+    assert "parts-list" not in resp.text
+
+
+def test_requisitions_list_has_refresh_hook(client):
+    """REQ-10: the requisitions list carries a reqListRefresh listener so create refreshes it."""
+    resp = client.get("/v2/partials/requisitions")
+    assert resp.status_code == 200
+    assert "reqListRefresh from:body" in resp.text
+
+
+def test_parts_workspace_listens_for_req_list_refresh(client):
+    """REQ-10: the parts workspace #parts-list also listens for reqListRefresh."""
+    resp = client.get("/v2/partials/parts/workspace")
+    assert resp.status_code == 200
+    assert "reqListRefresh from:body" in resp.text
+
+
+def test_edit_form_tolerates_legacy_string_subs(client, db_session, test_user):
+    """REQ-09: the parts-tab edit form coerces legacy string subs so sub.mpn binds (not blank)."""
+    from app.models import Requirement, Requisition
+
+    reqn = Requisition(name="Legacy Subs", status="open", created_by=test_user.id)
+    db_session.add(reqn)
+    db_session.commit()
+    part = Requirement(
+        requisition_id=reqn.id,
+        primary_mpn="LM358DR",
+        manufacturer="TI",
+        target_qty=1,
+        substitutes=["LM358N"],  # legacy plain-string form
+    )
+    db_session.add(part)
+    db_session.commit()
+
+    resp = client.get(f"/v2/partials/requisitions/{reqn.id}/tab/parts")
+    assert resp.status_code == 200
+    # coercion maps plain strings → {mpn, manufacturer} dicts before Alpine binds sub.mpn
+    assert "typeof s === 'string'" in resp.text
+    assert "LM358N" in resp.text
+
+
 def test_company_quick_create(client, db_session):
     """Quick-create should create a company and site."""
     resp = client.post(

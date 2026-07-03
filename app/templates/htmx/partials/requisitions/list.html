@@ -7,12 +7,25 @@
 
 <div class="page-fluid" x-data="{ selectedIds: new Set(), rStatus: '{{ status }}', rSort: '{{ sort }}', rDir: '{{ dir }}' }">
 
+  {# Refresh hook — the create-requisition modal fires `reqListRefresh` on success; on this
+     surface (no #parts-list) reload the list into #main-content so the new req appears. #}
+  <div hx-get="/v2/partials/requisitions"
+       hx-trigger="reqListRefresh from:body"
+       hx-target="#main-content"
+       hx-swap="innerHTML"
+       class="hidden"></div>
+
   {% include "htmx/partials/shared/inbox_disconnected_banner.html" %}
 
-  {# Header #}
+  {# Header — distinct identity ("Requisitions list") + toggle back to the Sales Hub
+     workspace (finding REQ-12). The split-panel workspace keeps the "Sales Hub" name. #}
   <div class="flex items-center justify-between mb-4">
-    <div>
-      <p class="text-sm text-gray-600 mt-1">{{ total }} total</p>
+    <div class="flex items-center gap-3">
+      <div>
+        <h1 class="text-base font-semibold text-gray-800 leading-tight">Requisitions list</h1>
+        <p class="text-sm text-gray-600">{{ total }} total</p>
+      </div>
+      {% with active='list' %}{% include "htmx/partials/requisitions/_view_toggle.html" %}{% endwith %}
     </div>
     <button @click="$dispatch('open-modal')"
             hx-get="/v2/partials/requisitions/create-form"
@@ -51,7 +64,7 @@
           {# Search scope indicators — show what matched when actively searching #}
           {% if match_counts %}
           <div class="flex items-center gap-1.5 mt-1.5 animate-fade-in">
-            <span class="text-xs text-gray-400 uppercase tracking-wide mr-0.5">Matched:</span>
+            <span class="text-secondary uppercase tracking-wide mr-0.5">Matched:</span>
             {% set scopes = [
               ("name", "Names", "bg-brand-50 text-brand-600 border-brand-200", match_counts.name),
               ("customer", "Customers", "bg-sky-50 text-sky-600 border-sky-200", match_counts.customer),
@@ -125,7 +138,8 @@
 
       {# Status pills #}
       <div class="flex flex-wrap gap-2">
-        {% for s_val, s_label in [('', 'All'), ('open', 'Open'), ('awarded', 'Awarded')] %}
+        {# 'won' is the real RequisitionStatus; the old 'awarded' value doesn't exist and always returned empty. #}
+        {% for s_val, s_label in [('', 'All'), ('open', 'Open'), ('won', 'Won')] %}
         <button type="button"
                 @click="rStatus = '{{ s_val }}'"
                 hx-get="/v2/partials/requisitions"
@@ -182,7 +196,7 @@
         <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
       </button>
       <div x-show="showAssign" role="menu" @click.away="showAssign = false" x-cloak
-           class="absolute left-0 mt-1 w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-10 py-1">
+           class="absolute left-0 mt-1 w-48 bg-white border border-gray-200 rounded-lg shadow-float z-10 py-1">
         {% for u in users %}
         <button hx-post="/v2/partials/requisitions/bulk/assign"
                 hx-target="#main-content"
@@ -194,8 +208,10 @@
         {% endfor %}
       </div>
     </div>
-    {# Build Quote — one requisition opens the in-workspace Build Quote tab (the modal is
-       retired for the per-req path); 2+ keep the cross-req bulk modal (out of scope). #}
+    {# Build Quote — one requisition opens the in-workspace Build Quote tab; 2+ open ONE
+       combined cross-req quote in the global modal (#modal-content is always present, and
+       open-modal is the real listener). The multi route renders the builder or, on a
+       customer mismatch, an honest error fragment — both 200s into #modal-content. #}
     <button @click="
               const ids = Array.from(selectedIds);
               const idStr = ids.join(',');
@@ -203,7 +219,7 @@
                 htmx.ajax('GET', '/v2/partials/requisitions/' + ids[0] + '?tab=build_quote', {target:'#main-content', swap:'innerHTML', indicator:'#quote-builder-skeleton'});
                 window.history.pushState({}, '', '/v2/requisitions/' + ids[0]);
               } else {
-                htmx.ajax('GET', '/v2/partials/quote-builder/multi?requisition_ids=' + idStr, {target:'#quote-builder-content', swap:'innerHTML', indicator:'#quote-builder-skeleton'}).then(() => $dispatch('open-quote-builder'));
+                htmx.ajax('GET', '/v2/partials/quote-builder/multi?requisition_ids=' + idStr, {target:'#modal-content', swap:'innerHTML', indicator:'#modal-loading'}).then(() => $dispatch('open-modal', {wide:true}));
               }
             "
             class="px-3 py-1 text-xs font-medium bg-emerald-600 text-white border border-emerald-700 rounded-lg hover:bg-emerald-700 inline-flex items-center gap-1">

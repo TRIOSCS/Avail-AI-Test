@@ -7,7 +7,7 @@
   <div class="card">
     <div class="flex items-center justify-between mb-3">
       <h3 class="text-sm font-semibold text-gray-900">Sales Notes</h3>
-      <span class="text-xs text-gray-400">{{ requirement.primary_mpn }}</span>
+      <span class="text-secondary">{{ requirement.primary_mpn }}</span>
     </div>
     <form hx-patch="/v2/partials/parts/{{ requirement.id }}/notes"
           hx-target="#notes-tab-content"

@@ -21,7 +21,6 @@ from app.services.enrichment_credit_guard import ProviderQuotaError
 def test_new_provider_settings_exist():
     for attr in (
         "hunter_enrichment_enabled",
-        "hunter_cooldown_minutes",
         "sam_gov_enrichment_enabled",
     ):
         assert hasattr(settings, attr), f"settings missing attribute: {attr}"

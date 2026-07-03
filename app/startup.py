@@ -76,7 +76,9 @@ def run_startup_migrations() -> None:
     Safe to call on every app boot.
     """
     # Warn if password login backdoor is active outside test mode
-    if os.getenv("ENABLE_PASSWORD_LOGIN", "false").lower() == "true" and not os.getenv("TESTING"):
+    from .routers.auth import password_login_env_enabled
+
+    if password_login_env_enabled() and not os.getenv("TESTING"):
         logger.critical(
             "ENABLE_PASSWORD_LOGIN is active in non-test mode. "
             "This creates an authentication bypass. Disable before production use."
@@ -107,7 +109,7 @@ def run_startup_migrations() -> None:
 
     _verify_encryption_canary()
     _backfill_normalized_mpn()
-    if os.environ.get("ENABLE_PASSWORD_LOGIN", "false").lower() == "true":
+    if password_login_env_enabled():
         _create_default_user_if_env_set()
     _backfill_sighting_offer_normalized_mpn()
     _backfill_sighting_vendor_normalized()
@@ -212,8 +214,13 @@ def _seed_admin_user_if_env_set(db=None) -> None:
     Called by: run_startup_migrations
     Depends on: User model, SessionLocal
     """
-    email = os.environ.get("SEED_ADMIN_EMAIL", "vinod@trioscs.com")
-    name = os.environ.get("SEED_ADMIN_NAME", "Vinod")
+    email = os.environ.get("SEED_ADMIN_EMAIL")
+    if not email:
+        # No hard-coded default: seeding an admin into every fresh install without
+        # the operator asking for it is an access-control decision the env must make.
+        logger.debug("SEED_ADMIN_EMAIL not set — skipping admin seed")
+        return
+    name = os.environ.get("SEED_ADMIN_NAME", email.split("@")[0])
 
     from .models.auth import User
 
