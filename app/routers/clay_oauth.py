@@ -1,7 +1,7 @@
 """Clay OAuth connect/callback/disconnect routes (admin-only).
 
 One-time interactive flow to authorize the AvailAI backend against Clay's MCP.
-Called by: the Settings → API Keys "Connect Clay" card. Depends on:
+Called by: the Settings → Connectors "Connect Clay" card. Depends on:
 app/services/clay_oauth, app/cache/intel_cache (state store), app/dependencies (admin gate).
 
 State lifecycle: /connect stores state→{verifier, client_id} with a 10-minute TTL in

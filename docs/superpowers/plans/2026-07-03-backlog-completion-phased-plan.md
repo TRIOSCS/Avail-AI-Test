@@ -18,22 +18,26 @@ per `docs/superpowers/plans/2026-07-03-prepay-closure.md`: approve/reject transi
 email link, in-app mark-paid + undo, void-on-teardown of an approved prepayment, Paid/Void
 badges, docs+deploy. *Rec: resume immediately — it's live-code half-done.*
 
-## Phase 3 — Activate dormant features ✅ (approved set)
-Flip on + live-verify (no new key needed):
-- **Lusha enrichment** — key present in `.env`; set `lusha_enrichment_enabled=true`.
-- **Email-mining** — `email_mining_enabled=true` (Graph mailbox access).
-- **Ownership + account sweeps** — `ownership_sweep_enabled=true`, `account_sweep_enabled=true`.
-- **Spec-resolver** — `spec_resolver_enabled=true`.
-Each: flip in `.env`, deploy, verify the feature runs, watch for errors.
-- **Already ON** (no action): Clay enrichment, AI-screen.
-- **Await your key** (OPEN): **Explorium** (no key), **eBay** (empty client id) — supply
-  keys to activate, or defer.
+## Phase 3 — Activate dormant features ✅ DONE
+All four now live on staging (container recreated, health 200): Lusha, email-mining,
+account-sweep were already `=true` in `.env`; added `OWNERSHIP_SWEEP_ENABLED=true` +
+`SPEC_RESOLVER_ENABLED=true`. Clay + AI-screen already on. **Explorium + eBay DEFERRED**
+(await keys, user's call). ✅
 
-## Phase 4 — Loose ends *(rec: accept unless you object)*
-- **API Keys tab** — dead/orphaned: the route `GET /v2/partials/settings/api-keys`
-  (`settings.py:433`) is superseded by the Connectors tab ("replaces sources + api-keys
-  tabs"), and its nav button was never wired. *Rec: REMOVE the dead route + its template +
-  fix the stale `clay_oauth.py` "Settings → API Keys" doc comment. Not a rebuild.*
+## Phase 2.5 — ⭐ API-SEARCH CORE DEEP-DIVE (user-raised, HIGH priority)
+The parallel supplier-API search is the product's core — user mandate: highly functional,
+optimized, stable. Fable deep-dive audit running (4 reviewers: connectors / orchestration /
+infra-pooling-ratelimit-cache / Settings API-management tool → prioritized synthesis). On
+completion: bring the fix-now/optimize/UX action plan to the user, then execute the
+critical/high items. Findings drive a follow-up build.
+
+## Phase 4 — Loose ends ✅ (mostly no-op — corrected after read-only prep)
+- **API Keys tab** — NOT dead: `GET /v2/partials/settings/api-keys` (`settings.py:433`) is a
+  live **302 redirect to the unified Connectors tab** — a backward-compat alias that old
+  links AND several tests rely on. The "tab button never wired" note is RESOLVED by design
+  (API-key management folded into Connectors; no separate tab intended). *KEEP the redirect.*
+  Only real remnant: a stale doc comment in `clay_oauth.py` ("Settings → API Keys" →
+  "Connectors") — ✅ FIXED.
 - **Code TODOs**: email calendar-delta (`email_jobs.py:82`, incremental-sync optimization)
   and startup category-alias backfill (`startup.py:1128`). *Rec: defer — minor optimizations,
   not incomplete features.*
