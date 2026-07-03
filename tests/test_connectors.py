@@ -1360,41 +1360,28 @@ class TestElement14Connector:
         assert results == []
 
     @pytest.mark.asyncio
-    async def test_fallback_keyword_search(self):
-        """When exact MPN match returns 0, falls back to keyword search."""
+    async def test_exact_miss_returns_empty_no_keyword_fallback(self):
+        """A 0-result exact-MPN miss returns [] with NO second keyword-search call.
+
+        The keyword fallback was dropped (Optim #4): it doubled call volume against an
+        API that 403s for its per-second QPS cap and returned catalog noise the
+        relevance guard discards anyway. Only the exact `manuPartNum:` call runs.
+        """
         c = self._make_connector()
         exact_resp = _mock_response(200, json_data={"manufacturerPartNumberSearchReturn": {"products": []}})
-        keyword_resp = _mock_response(
-            200,
-            json_data={
-                "manufacturerPartNumberSearchReturn": {
-                    "products": [
-                        {
-                            "translatedManufacturerPartNumber": "LM317T/NOPB",
-                            "brandName": "TI",
-                            "displayName": "VReg",
-                            "sku": "123",
-                            "stock": {"level": "100"},
-                            "prices": [{"cost": "0.50"}],
-                        }
-                    ]
-                }
-            },
-        )
         call_count = 0
 
         async def _mock_get(*args, **kwargs):
             nonlocal call_count
             call_count += 1
-            return exact_resp if call_count == 1 else keyword_resp
+            return exact_resp
 
         with patch("app.connectors.element14.http") as mock_http:
             mock_http.get = _mock_get
             results = await c._do_search("LM317T")
 
-        assert len(results) == 1
-        assert results[0]["mpn_matched"] == "LM317T/NOPB"
-        assert call_count == 2  # exact + fallback
+        assert results == []
+        assert call_count == 1  # exact only — no keyword fallback
 
     @pytest.mark.asyncio
     async def test_no_fallback_when_exact_matches(self):
@@ -1429,9 +1416,9 @@ class TestElement14Connector:
         ("status", "text", "exc", "match"),
         [
             # 401 (auth), 403 (key rejected for region/store), and 429 (rate limit) must
-            # each raise so health_monitor.ping_source flips status to 'error'. The first
-            # raise also short-circuits the keyword-fallback in _do_search so we don't burn
-            # a second quota call against the same broken creds (call_count == 1).
+            # each raise so health_monitor.ping_source flips status to 'error'. Only the
+            # single exact-MPN call runs (the keyword fallback was dropped — Optim #4),
+            # so a broken-creds search burns exactly one quota call (call_count == 1).
             pytest.param(401, "Unauthorized", ConnectorAuthError, "element14 auth error", id="401_auth"),
             pytest.param(403, "Forbidden", ConnectorAuthError, "element14 auth error", id="403_auth"),
             pytest.param(429, "Too Many Requests", ConnectorRateLimitError, "element14 rate limited", id="429_rate"),
@@ -1446,7 +1433,7 @@ class TestElement14Connector:
             mock_http.get = AsyncMock(return_value=resp)
             with pytest.raises(exc, match=match):
                 await c._do_search("LM317T")
-            # Only the exact-MPN call ran — fallback was short-circuited
+            # Only the exact-MPN call ran — there is no keyword fallback
             assert mock_http.get.call_count == 1
 
 

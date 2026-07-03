@@ -70,14 +70,15 @@ class Element14Connector(BaseConnector):
         if not self.api_key:
             return []
 
-        # Try exact MPN search first
-        results = await self._api_search(f"manuPartNum:{part_number}", part_number)
-        if results:
-            return results
-
-        # Fallback: keyword search (catches partial matches and alternate formats)
-        logger.debug(f"element14: exact MPN match returned 0 for {part_number}, trying keyword search")
-        return await self._api_search(part_number, part_number)
+        # Exact MPN search ONLY. The former keyword-search fallback (fired on a
+        # 0-result exact miss) doubled call volume against an API that returns HTTP
+        # 403 for BOTH auth failure AND its per-second QPS cap — so the extra call
+        # accelerated the 403s that ERROR-exclude element14 from every search —
+        # while returning catalog noise the search_service relevance guard
+        # (fuzzy_mpn_match) discards anyway. Dropped: exact match is the
+        # authoritative path. Optim #4; see
+        # docs/APP_MAP_INTERACTIONS.md § Connector Failure Contract.
+        return await self._api_search(f"manuPartNum:{part_number}", part_number)
 
     async def _api_search(self, term: str, part_number: str) -> list[dict]:
         """Run a single search against the element14 API."""

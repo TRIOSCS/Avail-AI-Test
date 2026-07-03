@@ -199,26 +199,29 @@ async def test_api_search_400_returns_empty(connector, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_keyword_fallback_survives_400(connector, monkeypatch):
-    """If exact MPN returns 0 and keyword fallback gets 400, return [] gracefully."""
+async def test_exact_miss_returns_empty_single_call(connector, monkeypatch):
+    """A 0-result exact-MPN miss returns [] after exactly one call.
+
+    The keyword-search fallback was dropped (Optim #4) — it doubled call volume against
+    an API that 403s for its per-second QPS cap and returned catalog noise the relevance
+    guard discards anyway, so only the exact `manuPartNum:` call runs.
+    """
     call_count = 0
     fake_request = httpx.Request("GET", ELEMENT14_URL)
 
     async def mock_get(*args, **kwargs):
         nonlocal call_count
         call_count += 1
-        if call_count == 1:
-            return httpx.Response(
-                200,
-                request=fake_request,
-                json={"manufacturerPartNumberSearchReturn": {"products": []}},
-            )
-        return httpx.Response(400, request=fake_request, json={"error": {"code": 400, "message": "Bad Request"}})
+        return httpx.Response(
+            200,
+            request=fake_request,
+            json={"manufacturerPartNumberSearchReturn": {"products": []}},
+        )
 
     install_mock_get(monkeypatch, mock_get)
     results = await connector._do_search("TPS65217CRSLR")
     assert results == []
-    assert call_count == 2
+    assert call_count == 1
 
 
 @pytest.mark.asyncio
