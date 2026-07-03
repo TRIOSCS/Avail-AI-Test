@@ -93,24 +93,23 @@ test.describe('Settings & Admin', () => {
     }
   });
 
-  test('/sources redirects to /connectors', async ({ request }) => {
+  // Auth runs BEFORE the legacy-route redirect (2026-07 security hardening), so an
+  // anonymous request gets 401 — the authenticated 302 → /connectors mapping is
+  // covered by tests/test_connectors_settings.py::test_old_routes_redirect.
+  test('/sources requires auth before redirecting', async ({ request }) => {
     const res = await request.get('/v2/partials/settings/sources', {
       maxRedirects: 0,
       headers: { 'HX-Request': 'true' },
     });
-    expect(res.status()).toBe(302);
-    const location = res.headers()['location'] ?? '';
-    expect(location).toContain('/connectors');
+    expect(res.status()).toBe(401);
   });
 
-  test('/api-keys redirects to /connectors', async ({ request }) => {
+  test('/api-keys requires auth before redirecting', async ({ request }) => {
     const res = await request.get('/v2/partials/settings/api-keys', {
       maxRedirects: 0,
       headers: { 'HX-Request': 'true' },
     });
-    expect(res.status()).toBe(302);
-    const location = res.headers()['location'] ?? '';
-    expect(location).toContain('/connectors');
+    expect(res.status()).toBe(401);
   });
 
   test('/connectors renders the 6 group headings', async ({ request }) => {
