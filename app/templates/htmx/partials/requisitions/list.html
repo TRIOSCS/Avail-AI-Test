@@ -19,23 +19,25 @@
 
   {# Header — distinct identity ("Requisitions list") + toggle back to the Sales Hub
      workspace (finding REQ-12). The split-panel workspace keeps the "Sales Hub" name. #}
+  {# New Requisition on the LEFT; the view toggle pinned RIGHT so it stays in the same
+     corner as the Workspace view's toggle (no horizontal jump when switching views). #}
   <div class="flex items-center justify-between mb-4">
     <div class="flex items-center gap-3">
+      <button @click="$dispatch('open-modal')"
+              hx-get="/v2/partials/requisitions/create-form"
+              hx-target="#modal-content"
+              data-loading-disable
+              class="btn-primary btn-md">
+        <svg data-loading class="h-4 w-4 mr-1.5 spinner" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/></svg>
+        <svg data-loading-remove class="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+        New Requisition
+      </button>
       <div>
         <h1 class="h2">Requisitions list</h1>
         <p class="text-sm text-gray-600">{{ total }} total</p>
       </div>
-      {% with active='list' %}{% include "htmx/partials/requisitions/_view_toggle.html" %}{% endwith %}
     </div>
-    <button @click="$dispatch('open-modal')"
-            hx-get="/v2/partials/requisitions/create-form"
-            hx-target="#modal-content"
-            data-loading-disable
-            class="btn-primary btn-md">
-      <svg data-loading class="h-4 w-4 mr-1.5 spinner" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/></svg>
-      <svg data-loading-remove class="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-      New Requisition
-    </button>
+    {% with active='list' %}{% include "htmx/partials/requisitions/_view_toggle.html" %}{% endwith %}
   </div>
 
   {# Filter bar #}
