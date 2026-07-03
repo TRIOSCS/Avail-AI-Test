@@ -16,7 +16,7 @@ Called by: services/quality_plan_service.py, routers/quality_plans.py
            (subject_type, subject_id) pair — subject_type=ApprovalSubjectType.QUALITY_PLAN
            or .PREPAYMENT, subject_id holding the QualityPlan/Prepayment PK.
 Depends on: models.base, app.constants (QualityPlanStatus, QPOrderType, PaymentMethod),
-            models.buy_plan (BuyPlan), models.vendors (VendorCard)
+            models.buy_plan (BuyPlan, BuyPlanLine), models.vendors (VendorCard)
 """
 
 from datetime import datetime, timezone
@@ -156,6 +156,9 @@ class Prepayment(Base):
 
     vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id", ondelete="SET NULL"), nullable=True)
     buy_plan_id = Column(Integer, ForeignKey("buy_plans_v3.id", ondelete="CASCADE"), nullable=False)
+    # The specific PO line this prepayment is against (migration 178). Nullable +
+    # ondelete=SET NULL: a prepayment record outlives the line it prepaid (audit trail).
+    buy_plan_line_id = Column(Integer, ForeignKey("buy_plan_lines.id", ondelete="SET NULL"), nullable=True)
 
     total_incl_fees = Column(Numeric(12, 2), nullable=False)
     currency = Column(String(10), nullable=False, default="USD")
@@ -173,11 +176,13 @@ class Prepayment(Base):
     # ── Relationships
     vendor_card = relationship("VendorCard", foreign_keys=[vendor_card_id])
     buy_plan = relationship("BuyPlan", foreign_keys=[buy_plan_id])
+    buy_plan_line = relationship("BuyPlanLine", foreign_keys=[buy_plan_line_id])
     created_by = relationship("User", foreign_keys=[created_by_id])
 
     __table_args__ = (
         Index("ix_prepayment_vendor_card", "vendor_card_id"),
         Index("ix_prepayment_buy_plan", "buy_plan_id"),
+        Index("ix_prepayment_buy_plan_line", "buy_plan_line_id"),
         Index("ix_prepayment_created_by", "created_by_id"),
     )
 
