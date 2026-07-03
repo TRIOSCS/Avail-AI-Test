@@ -49,15 +49,19 @@ async def post_teams_channel(message: str) -> None:
         logger.error("Teams channel post failed: {}", e)
 
 
-async def post_teams_channel_card(card: dict) -> None:
+async def post_teams_channel_card(card: dict, webhook_url: str | None = None) -> None:
     """Post a FULL Adaptive Card to the configured Teams channel via webhook.
 
     Sibling of :func:`post_teams_channel`, but the caller supplies the entire Adaptive
     Card ``content`` dict (so it can carry a FactSet, an ``Action.OpenUrl`` button, colored
     TextBlocks, etc.) rather than a single markdown string. The card is wrapped verbatim in
     the same message envelope. Silently skips if no webhook URL is configured.
+
+    ``webhook_url`` lets a caller target a specific channel webhook (e.g. the prepayment
+    accounting/AP channel) instead of the shared ``TEAMS_WEBHOOK_URL`` credential. When
+    omitted it falls back to that global credential, so every existing caller is unaffected.
     """
-    webhook_url = get_credential_cached("teams_notifications", "TEAMS_WEBHOOK_URL")
+    webhook_url = webhook_url or get_credential_cached("teams_notifications", "TEAMS_WEBHOOK_URL")
     if not webhook_url:
         logger.debug("Teams webhook not configured — skipping channel card post")
         return
