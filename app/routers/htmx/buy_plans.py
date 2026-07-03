@@ -322,6 +322,20 @@ async def prepay_request_decide(
     except ValueError as e:
         raise HTTPException(400, str(e))
 
+    # Notify accounting/AP that the wire is authorized — OK TO WIRE. ONLY on approve (never
+    # on reject). Fire-and-forget: the runner isolates every error so a failed notice never
+    # breaks the approval that just committed.
+    if action == "approve":
+        from ...models.approvals import ApprovalRequest
+        from ...services.prepayment_notifications import (
+            notify_prepayment_approved,
+            run_prepayment_notify_bg,
+        )
+
+        ar = db.get(ApprovalRequest, request_id)
+        if ar is not None and ar.subject_id is not None:
+            await run_prepayment_notify_bg(notify_prepayment_approved, ar.subject_id)
+
     if origin == "approvals_hub":
         from .approvals_hub import render_tab_body
 

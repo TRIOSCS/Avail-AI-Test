@@ -160,7 +160,7 @@ def prepayment_request_modal(
 
 
 @router.post("/v2/partials/prepayments", response_class=HTMLResponse)
-def prepayment_request_create(
+async def prepayment_request_create(
     request: Request,
     buy_plan_id: int = Form(...),
     buy_plan_line_id: int = Form(...),
@@ -187,7 +187,7 @@ def prepayment_request_create(
     report_sent = str(test_report_sent or "").strip().lower() in _TRUTHY
 
     try:
-        create_prepayment(
+        prepayment, _req = create_prepayment(
             db,
             buy_plan_id=buy_plan_id,
             buy_plan_line_id=buy_plan_line_id,
@@ -208,8 +208,12 @@ def prepayment_request_create(
         db.rollback()
         return _prepayment_error_toast(str(exc))
 
-    # NOTE: notification wired in Task 6 — fire run_prepayment_notify_bg(
-    #       notify_prepayment_requested, prepayment.id) here after the successful commit.
+    # Notify accounting/AP (email + Teams) that a prepayment was requested — DO NOT PAY YET.
+    # Fire-and-forget: the runner isolates every error so a failed notice never breaks the
+    # request that just succeeded.
+    from ..services.prepayment_notifications import notify_prepayment_requested, run_prepayment_notify_bg
+
+    await run_prepayment_notify_bg(notify_prepayment_requested, prepayment.id)
 
     resp = HTMLResponse("", headers={"HX-Reswap": "none"})
     _prepayment_toast(resp, "Prepayment request submitted for approval.", "success")
