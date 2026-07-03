@@ -432,6 +432,11 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 | test_report_sent | Boolean NOT NULL | server_default false |
 | buyer_remarks | Text, nullable | |
 | created_by_id | FK -> users (SET NULL) | |
+| status | String 20 NOT NULL, indexed | Migration 179 — `PrepaymentStatus` lifecycle: `requested → approved → paid`, or `void`. Source of truth for the closure loop; synced at each transition (create/approve/reject/mark-paid/teardown). server_default `requested`; 179 backfills from the linked PREPAYMENT ApprovalRequest |
+| approved_by_id / approved_at | FK -> users (SET NULL) / UTCDateTime, nullable | Migration 179 — stamped when the manager approves (in `prepay_request_decide`) |
+| pay_token | String 64, nullable, UNIQUE | Migration 179 — single-use `secrets.token_urlsafe(32)` minted at approval; the public `/p/confirm/{token}` link in the "OK TO WIRE" email lets non-Avail accounting mark it paid. Cleared on paid/void; re-minted on manager undo |
+| paid_at / paid_by_id / paid_by_label / paid_via / wire_reference / paid_amount | UTCDateTime / FK users SET NULL / String 120 / String 20 / String 120 / Numeric 12,2, all nullable | Migration 179 — set by `mark_prepayment_paid`. `paid_via` ∈ {`accounting_email`,`in_app`}; `paid_by_label` carries the accounting confirmer's initials (no User row) or the in-app user's name |
+| voided_at / voided_by_id / void_reason | UTCDateTime / FK users SET NULL / String 255, nullable | Migration 179 — set on reject or teardown-void (an approved-but-unwired prepayment whose plan is cancelled/halted/completed/re-sourced → `void` + a "DO NOT WIRE" stand-down notice to accounting/AP) |
 
 **`approval_requests`** — Root record for one approval workflow instance.
 | Column | Type | Notes |
