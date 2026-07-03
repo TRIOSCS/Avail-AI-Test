@@ -1,7 +1,9 @@
 {#
   approvals/approvals_hub.html — Approvals hub shell (3-tab decide surface).
-  Tabs: Buy Plan (BUY_PLAN engine gate) · PO Approval (per-line PENDING_VERIFY, not
-  engine-backed) · Prepayment (PREPAYMENT engine gate). One tab per surviving gate type;
+  Tabs: Buy Plans / Sales Orders (BUY_PLAN engine gate — approving the plan IS the SO
+  sign-off after the Phase-D SO fold, so the plan carries its SO number) · PO Approval
+  (per-line PENDING_VERIFY, not engine-backed) · Prepayment (PREPAYMENT engine gate).
+  One tab per surviving gate type;
   the body lazy-loads the active tab partial into #ap-hub-body. This is the "browse +
   decide + history, per gate type, org-wide" console — distinct from the Buy Plans hub's
   personal My Queue / Pipeline surfaces (which live at /v2/buy-plans). No origination
@@ -23,7 +25,7 @@
      re-rendered hub re-inits x-data with the server tab. Mirrors the Buy Plans hub /
      settings tab_button pattern. Active state uses accent-600 (single-accent rule). #}
   <div class="flex flex-wrap items-center gap-2 mb-5">
-    {% for key, label in [('buy-plan', 'Buy Plan'), ('po-approval', 'PO Approval'), ('prepayment', 'Prepayment')] %}
+    {% for key, label in [('buy-plan', 'Buy Plans / Sales Orders'), ('po-approval', 'PO Approval'), ('prepayment', 'Prepayment')] %}
     {% set c = counts.get(key, 0) %}
     <button hx-get="/v2/partials/approvals?tab={{ key }}"
             hx-target="#main-content"
