@@ -1,0 +1,144 @@
+{#-
+  confirm_page.html — STANDALONE public "confirm wire sent" page (prepay closure Task 5).
+
+  Rendered by app/routers/prepayment_confirm.py for the auth-less, CSRF-exempt, rate-limited
+  tokenized route GET/POST /p/confirm/{token}. This is NOT the app base: it carries its own
+  minimal <html>/<head>/<body> shell (no nav, no JS, no Alpine, no auth) because the audience
+  is the (non-Avail) accounting/AP team clicking the link from the approval email.
+
+  Context: `mode` selects the panel (form | recorded | paid | voided | inactive | not_found);
+  `pp` is the Prepayment (None only for not_found); `beneficiary`, `amount_display`,
+  `po_number`, `so_number` are pre-formatted display strings.
+-#}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>AVAIL — Confirm Prepayment</title>
+  <style>
+    :root { color-scheme: light; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; padding: 24px;
+      display: flex; align-items: center; justify-content: center;
+      background: #f3f4f6; color: #111827;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      line-height: 1.5;
+    }
+    .card {
+      width: 100%; max-width: 520px; background: #ffffff;
+      border: 1px solid #e5e7eb; border-radius: 12px;
+      box-shadow: 0 1px 3px rgba(0,0,0,.08); overflow: hidden;
+    }
+    .brand {
+      padding: 16px 24px; border-bottom: 1px solid #e5e7eb;
+      font-weight: 700; letter-spacing: .04em; color: #111827; font-size: 14px;
+    }
+    .body { padding: 24px; }
+    .banner { border-radius: 8px; padding: 12px 16px; margin: 0 0 18px; font-weight: 700; }
+    .banner-ok { background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
+    .banner-warn { background: #fffbeb; color: #92400e; border: 1px solid #fde68a; }
+    .banner-danger { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+    h1 { font-size: 20px; margin: 0 0 8px; }
+    p { margin: 0 0 12px; }
+    .muted { color: #6b7280; font-size: 13px; }
+    table.facts { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    table.facts td { padding: 8px 10px; border: 1px solid #e5e7eb; vertical-align: top; }
+    table.facts td.k { font-weight: 600; width: 42%; background: #f9fafb; }
+    label { display: block; font-weight: 600; font-size: 13px; margin: 14px 0 4px; }
+    input[type=text] {
+      width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px;
+      font-size: 15px; color: #111827; background: #fff;
+    }
+    button {
+      margin-top: 20px; width: 100%; padding: 12px 16px; border: 0; border-radius: 8px;
+      background: #16a34a; color: #fff; font-size: 15px; font-weight: 700; cursor: pointer;
+    }
+    button:hover { background: #15803d; }
+    .footer { padding: 14px 24px; border-top: 1px solid #e5e7eb; color: #9ca3af; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="brand">AVAIL — PREPAYMENT</div>
+    <div class="body">
+      {% if mode == "not_found" %}
+        <div class="banner banner-warn">Link not found or expired</div>
+        <h1>This confirmation link is no longer valid</h1>
+        <p class="muted">The prepayment may have already been recorded, cancelled, or the
+          link may be incorrect. No action was taken. If you believe this is an error,
+          contact your AVAIL buyer.</p>
+
+      {% elif mode == "recorded" %}
+        <div class="banner banner-ok">Recorded — thank you</div>
+        <h1>Payment confirmed</h1>
+        <p>Thank you. This prepayment has been marked <strong>PAID</strong> in AVAIL and the
+          team has been notified. You can close this window.</p>
+        <table class="facts">
+          <tr><td class="k">Beneficiary</td><td>{{ beneficiary }}</td></tr>
+          <tr><td class="k">Amount</td><td>{{ amount_display }}</td></tr>
+          <tr><td class="k">PO #</td><td>{{ po_number }}</td></tr>
+          {% if pp.wire_reference %}<tr><td class="k">Wire reference</td><td>{{ pp.wire_reference }}</td></tr>{% endif %}
+          {% if pp.paid_by_label %}<tr><td class="k">Confirmed by</td><td>{{ pp.paid_by_label }}</td></tr>{% endif %}
+        </table>
+
+      {% elif mode == "paid" %}
+        <div class="banner banner-ok">Already recorded as paid</div>
+        <h1>This prepayment is already marked paid</h1>
+        <p>Already marked paid on <strong>{{ pp.paid_at|fmtdate }}</strong>
+          by <strong>{{ pp.paid_by_label or "Accounting" }}</strong>. No further action is
+          needed — nothing was changed.</p>
+        <table class="facts">
+          <tr><td class="k">Beneficiary</td><td>{{ beneficiary }}</td></tr>
+          <tr><td class="k">Amount</td><td>{{ amount_display }}</td></tr>
+          <tr><td class="k">PO #</td><td>{{ po_number }}</td></tr>
+          {% if pp.wire_reference %}<tr><td class="k">Wire reference</td><td>{{ pp.wire_reference }}</td></tr>{% endif %}
+        </table>
+
+      {% elif mode == "voided" %}
+        <div class="banner banner-danger">DO NOT WIRE</div>
+        <h1>This prepayment was voided</h1>
+        <p>This prepayment was <strong>voided</strong>{% if pp.void_reason %}
+          ({{ pp.void_reason }}){% endif %} and must <strong>NOT</strong> be wired. If the
+          wire has already been sent, please claw it back and notify your AVAIL buyer.</p>
+        <table class="facts">
+          <tr><td class="k">Beneficiary</td><td>{{ beneficiary }}</td></tr>
+          <tr><td class="k">Amount</td><td>{{ amount_display }}</td></tr>
+          <tr><td class="k">PO #</td><td>{{ po_number }}</td></tr>
+        </table>
+
+      {% elif mode == "inactive" %}
+        <div class="banner banner-warn">Not available</div>
+        <h1>This prepayment cannot be confirmed</h1>
+        <p class="muted">This link is not currently active for confirmation. No action was
+          taken.</p>
+
+      {% else %}{# mode == "form" #}
+        <div class="banner banner-warn">Action required — confirm the wire</div>
+        <h1>Confirm wire sent</h1>
+        <p>You are recording that the wire below has been sent. Please review the details,
+          then confirm.</p>
+        <table class="facts">
+          <tr><td class="k">Beneficiary</td><td>{{ beneficiary }}</td></tr>
+          <tr><td class="k">Amount (incl. fees)</td><td>{{ amount_display }}</td></tr>
+          <tr><td class="k">PO #</td><td>{{ po_number }}</td></tr>
+          <tr><td class="k">Buy Plan #</td><td>{{ pp.buy_plan_id or "—" }}</td></tr>
+          <tr><td class="k">SO #</td><td>{{ so_number }}</td></tr>
+        </table>
+        <form method="post" action="{{ request.url.path }}">
+          <label for="wire_reference">Wire reference (optional)</label>
+          <input type="text" id="wire_reference" name="wire_reference" maxlength="120"
+                 placeholder="e.g. bank confirmation / IMAD">
+          <label for="confirmer">Your initials (optional)</label>
+          <input type="text" id="confirmer" name="confirmer" maxlength="120"
+                 placeholder="e.g. KM">
+          <button type="submit">Confirm wire sent</button>
+        </form>
+      {% endif %}
+    </div>
+    <div class="footer">Automated prepayment confirmation from AVAIL.</div>
+  </div>
+</body>
+</html>

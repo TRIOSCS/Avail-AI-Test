@@ -285,6 +285,19 @@ def _fmt_dt(dt) -> str:
         return str(dt)
 
 
+def _confirm_url(prepayment: Prepayment) -> str | None:
+    """The public tokenized "confirm wire sent" URL, or None when no live pay_token.
+
+    Only an approved prepayment carries a ``pay_token`` (minted on approve, cleared on
+    paid/void), so this resolves to a link only while a wire is genuinely pending. Base is
+    ``settings.app_url`` (must point at the reachable deployment for the link to work).
+    """
+    if not prepayment.pay_token:
+        return None
+    base = (settings.app_url or "").rstrip("/")
+    return f"{base}/p/confirm/{prepayment.pay_token}"
+
+
 def _facts(prepayment: Prepayment, event: str, approver=None, decided_at=None) -> list[tuple[str, str]]:
     """Ordered (label, value) pairs shared by the Teams card FactSet + the email
     table."""
@@ -340,9 +353,13 @@ _SUBTITLE = {
 
 
 def _card(prepayment: Prepayment, event: str, *, approver=None, decided_at=None, reason=None) -> dict:
-    """Adaptive Card: colored heading + subtitle + a FactSet of the wire facts."""
+    """Adaptive Card: colored heading + subtitle + a FactSet of the wire facts.
+
+    On the APPROVED notice, appends an ``Action.OpenUrl`` "Confirm wire sent" button linking
+    to the public tokenized confirm page so accounting can mark it paid straight from Teams.
+    """
     facts = [{"title": label, "value": str(value)} for label, value in _facts(prepayment, event, approver, decided_at)]
-    return {
+    card: dict = {
         "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
         "type": "AdaptiveCard",
         "version": "1.4",
@@ -359,6 +376,11 @@ def _card(prepayment: Prepayment, event: str, *, approver=None, decided_at=None,
             {"type": "FactSet", "facts": facts},
         ],
     }
+    if event == "approved":
+        confirm_url = _confirm_url(prepayment)
+        if confirm_url:
+            card["actions"] = [{"type": "Action.OpenUrl", "title": "Confirm wire sent", "url": confirm_url}]
+    return card
 
 
 def _email_html(prepayment: Prepayment, event: str, approver=None, decided_at=None, reason=None) -> str:
@@ -376,11 +398,25 @@ def _email_html(prepayment: Prepayment, event: str, approver=None, decided_at=No
         "requested": "This prepayment is <strong>PENDING APPROVAL — DO NOT PAY YET</strong>.",
     }
     note = _NOTES.get(event, _NOTES["requested"])
+    # On the APPROVED notice, embed the public tokenized "confirm wire sent" button so the
+    # (non-Avail) accounting team can mark the prepayment paid straight from the email.
+    button = ""
+    if event == "approved":
+        confirm_url = _confirm_url(prepayment)
+        if confirm_url:
+            button = (
+                f'<p style="margin:20px 0"><a href="{html_mod.escape(confirm_url)}" '
+                f'style="display:inline-block;background:#16a34a;color:#ffffff;padding:12px 20px;'
+                f'border-radius:6px;text-decoration:none;font-weight:bold">Confirm wire sent</a></p>'
+                f'<p style="color:#6b7280;font-size:12px">Once the wire has gone out, click the '
+                f"button above to confirm payment. This link is single-use.</p>"
+            )
     return (
         f'<div style="font-family:Arial,sans-serif;max-width:640px">'
         f'<h2 style="color:{banner}">{html_mod.escape(_heading(event, reason))}</h2>'
         f"<p>{note}</p>"
         f'<table style="border-collapse:collapse;margin:16px 0">{rows}</table>'
+        f"{button}"
         f'<p style="color:#6b7280;font-size:12px;margin-top:20px">'
         f"Automated prepayment notice from AVAIL.</p></div>"
     )

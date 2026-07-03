@@ -403,6 +403,9 @@ CSRF_EXEMPT_URLS = [
     re.compile(r"/api/webhooks/graph$"),  # Microsoft Graph mail webhook
     re.compile(r"/api/webhooks/teams$"),  # Microsoft Graph Teams webhook
     re.compile(r"/api/webhooks/acs$"),  # Azure Communication Services webhook
+    # Public tokenized "confirm wire sent" page — no session/CSRF (the non-Avail
+    # accounting team posts a plain form); the single-use pay_token IS the authorization.
+    re.compile(r"/p/confirm/"),
 ]
 
 # CSRF protection (double-submit cookie) — disabled in test mode
@@ -719,6 +722,7 @@ from .routers.htmx.vendors import router as htmx_vendors_router
 from .routers.htmx_views import router as htmx_views_router
 from .routers.materials import router as materials_router
 from .routers.part_dossier import router as part_dossier_router
+from .routers.prepayment_confirm import router as prepayment_confirm_router
 from .routers.prepayments import router as prepayments_router
 from .routers.proactive import router as proactive_router
 from .routers.quality_plans import router as quality_plans_router
@@ -758,6 +762,7 @@ app.include_router(resell_router)
 app.include_router(v13_router)
 app.include_router(approvals_router)
 app.include_router(prepayments_router)
+app.include_router(prepayment_confirm_router)
 app.include_router(quality_plans_router)
 app.include_router(vendor_contacts_router)
 app.include_router(vendors_crud_router)
