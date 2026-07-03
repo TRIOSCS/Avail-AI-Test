@@ -1482,6 +1482,17 @@ buyplan_workflow.py (state machine)
     |                      queue.pending/resolved_rows_for_gate). Every tab has a See-all vs See-mine scope
     |                      toggle (mine = submitted_by/requested_by == user; default all). queue.build_queue_view
     |                      /TAB_GATE and the stale approvals.get_queue redirect are removed.
+    |  Prepay cash ctx:     The Prepayment RowVM (queue._row_vm) is enriched as the cash-authorising surface:
+    |                      beneficiary (queue._beneficiary chain legal_name→vendor_name→display_name→—), the
+    |                      authoritative amount/currency from the Prepayment itself (2-decimal, honours currency),
+    |                      PO#/SO#/plan_id, po_line_total (_line_amount) for the PO→requested delta, buyer_remarks,
+    |                      test_report_sent, + decided_by (queue._decider_names, resolved rows). _load_subjects
+    |                      eager-loads vendor_card + buy_plan→requisition + buy_plan_line→offer (no N+1). The tab
+    |                      renders a LOUD amber warning above Approve when test_report_sent is False, wires the
+    |                      beneficiary/Review→ to subject_href, and a self-documenting resolved row (approved-by +
+    |                      amount + PO#). My Queue prepay parity: buyplan_hub._prepay_rows carries the same fields
+    |                      (extra.*), value = the AUTHORISED total_incl_fees (not plan cost), same warning + a
+    |                      Review drill-through.
     |  Backorder (Ph3):    resource_line already reopens a COMPLETED plan (RESOURCEABLE_LINE_STATUSES includes
     |                      verified); when a cancel fires on a plan that WAS completed, resource_line returns
     |                      was_completed=True (computed pre-reopen) which is threaded to

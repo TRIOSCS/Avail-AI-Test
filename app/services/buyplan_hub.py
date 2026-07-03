@@ -34,7 +34,7 @@ from ..models.crm import CustomerSite
 from ..models.quality_plan import Prepayment
 from ..models.quotes import Quote
 from ..models.sourcing import Requisition
-from .approvals.queue import _actionable_request_ids
+from .approvals.queue import _actionable_request_ids, _beneficiary
 from .buyplan_naming import (
     CARD_KIND_BUY_PLAN,
     build_card_title,
@@ -1014,7 +1014,9 @@ class QueueRow:
     wait clock used both for display and the oldest-first sort; ``is_overdue`` is True only
     for an AWAITING_PO line past its buyer-nudge SLA. ``extra`` carries kind-specific
     secondary-line fields (``margin_pct``, ``vendor_name``, ``owner_name``, ``owner_role``,
-    and ``amount`` on prepay rows) the template renders below the identity line.
+    and — on prepay rows — the cash-approval context ``amount``/``currency``/
+    ``payment_method``/``po_number``/``test_report_sent``/``buyer_remarks``/``request_id``)
+    the template renders below the identity line.
     """
 
     kind: str
@@ -1250,6 +1252,9 @@ def _prepay_rows(db: Session, user: object) -> list[QueueRow]:
                 select(Prepayment)
                 .options(
                     joinedload(Prepayment.vendor_card),
+                    # The PO# + line total the enriched row shows (finding #10) — eager-loaded
+                    # so parity with the tab adds no per-row query.
+                    joinedload(Prepayment.buy_plan_line).joinedload(BuyPlanLine.offer),
                     joinedload(Prepayment.buy_plan)
                     .joinedload(BuyPlan.quote)
                     .joinedload(Quote.customer_site)
@@ -1271,6 +1276,7 @@ def _prepay_rows(db: Session, user: object) -> list[QueueRow]:
         pp = prepayments.get(ar.subject_id) if ar.subject_id else None
         plan = pp.buy_plan if pp else None
         plan_id = pp.buy_plan_id if pp else None
+        line = pp.buy_plan_line if pp else None
         rows.append(
             QueueRow(
                 kind="prepay_approve",
@@ -1281,7 +1287,9 @@ def _prepay_rows(db: Session, user: object) -> list[QueueRow]:
                 customer_name=_customer_name(plan) if plan else None,
                 primary_mpn=None,
                 tso=plan.sales_order_number if plan else None,
-                value=plan.total_cost if plan else None,
+                # The prominent value is the AUTHORISED prepayment amount (what actually gets
+                # wired), never the whole plan cost — this is a cash-approval row (finding #10).
+                value=pp.total_incl_fees if pp else None,
                 age_hours=_age_hours(ar.created_at),
                 is_overdue=False,
                 action_url=f"/v2/approvals/requests/{ar.id}/decision",
@@ -1289,8 +1297,15 @@ def _prepay_rows(db: Session, user: object) -> list[QueueRow]:
                 detail_href=f"/v2/partials/buy-plans/{plan_id}" if plan_id else None,
                 extra={
                     "margin_pct": plan.total_margin_pct if plan else None,
-                    "vendor_name": (pp.vendor_card.display_name if pp and pp.vendor_card else None),
-                    "amount": ar.amount,
+                    # vendor_name carries the legal beneficiary (who is actually paid), same
+                    # chain as the tab; renders in the row's muted identity line.
+                    "vendor_name": (_beneficiary(pp) if pp else None),
+                    "amount": (pp.total_incl_fees if pp else None),
+                    "currency": (pp.currency if pp else None),
+                    "payment_method": (pp.payment_method if pp else None),
+                    "po_number": (line.po_number if line else None),
+                    "test_report_sent": (pp.test_report_sent if pp else None),
+                    "buyer_remarks": (pp.buyer_remarks if pp else None),
                     "owner_role": "Approver",
                     # The engine request id so the My Queue inline action can build the
                     # decide URL (the QueueRow.action_url stays the JSON decision route).

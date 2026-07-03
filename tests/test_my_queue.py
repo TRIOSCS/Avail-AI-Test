@@ -240,6 +240,11 @@ def test_my_queue_prepay_approve_for_recipient(db_session, test_user, manager_us
     assert row.action_url == f"/v2/approvals/requests/{ar.id}/decision"
     assert row.customer_name == "Acme Electronics"
     assert row.extra["amount"] == Decimal("2500.00")
+    # The prominent value is the AUTHORISED prepayment amount, never the plan cost (finding #10).
+    assert row.value == Decimal("2500.00")
+    assert row.value != plan.total_cost
+    assert row.extra["currency"] == "USD"
+    assert row.extra["test_report_sent"] is False  # decision-critical field carried to My Queue
 
     # test_user is not a recipient → no prepay row.
     assert "prepay_approve" not in _kinds(my_queue(db_session, test_user))

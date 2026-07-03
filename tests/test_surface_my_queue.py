@@ -286,7 +286,56 @@ def test_my_queue_surface_prepay_inline_action(
     assert 'hx-target="#bp-hub-body"' in body
     assert 'hx-push-url="false"' in body
     assert "rejectOpen" in body  # the reject reveal toggle
-    assert "$2,500 prepay" in body  # the amount surfaced on the muted line
+    # The authorised amount is currency-aware with cents (parity with the tab, finding #10).
+    assert "USD 2,500.00 prepay" in body
+    # A Review affordance drills to the plan detail — never a lower-fidelity one-click cash OK.
+    assert f'hx-get="/v2/partials/buy-plans/{plan.id}"' in body
+    assert ">Review<" in body
+
+
+def test_my_queue_surface_prepay_shows_test_report_warning_and_fields(
+    client: TestClient, db_session: Session, manager_user: User, test_quote, test_requisition, test_vendor_card
+):
+    """A My-Queue prepay row surfaces the decision-critical fields — the LOUD test-
+    report warning when it was NOT sent to management, the payment method, PO#,
+    beneficiary (legal name), remarks — reaching parity with the Prepayment tab (finding
+    #10)."""
+    from app.constants import PaymentMethod
+    from app.models.buy_plan import BuyPlanLine
+    from tests.test_my_queue import _grant, _make_prepay_request
+
+    plan = _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.ACTIVE,
+        total_cost="5000.00",
+    )
+    line = BuyPlanLine(buy_plan_id=plan.id, quantity=10, unit_cost="200.00", po_number="PO-4471")
+    db_session.add(line)
+    db_session.flush()
+    test_vendor_card.legal_name = "Northwind Components LLC"
+    _grant(db_session, manager_user, can_approve_prepayments=True)
+    ar, pp = _make_prepay_request(
+        db_session,
+        recipient=manager_user,
+        buy_plan_id=plan.id,
+        amount="2500.00",
+        vendor_card_id=test_vendor_card.id,
+    )
+    pp.buy_plan_line_id = line.id
+    pp.payment_method = PaymentMethod.WIRE
+    pp.test_report_sent = False
+    pp.buyer_remarks = "Vendor requires 50% upfront before build slot"
+    db_session.commit()
+
+    with _acting_as(manager_user):
+        body = client.get(MY_QUEUE_URL).text
+    assert "Test report NOT sent to management" in body  # the loud amber warning
+    assert "Northwind Components LLC" in body  # legal beneficiary
+    assert "PO-4471" in body
+    assert "wire" in body  # payment method (uppercased in-view)
+    assert "Vendor requires 50% upfront" in body  # buyer remarks
 
 
 # ── Header avg-margin + kicked-back surfacing (Phase F-1 gap-fill) ─────────
