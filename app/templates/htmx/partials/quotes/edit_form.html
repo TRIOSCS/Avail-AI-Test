@@ -27,33 +27,33 @@
 
     <div class='grid grid-cols-2 gap-2'>
       <div>
-        <label class='block text-xs font-medium text-gray-700 mb-1'>Payment Terms</label>
+        <label class='form-label'>Payment Terms</label>
         <input type='text' name='payment_terms' list='payment-terms' maxlength='100'
                value='{{ quote.payment_terms or "" }}' placeholder='e.g. Net 30'
-               class='w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500'>
+               class='input'>
       </div>
       <div>
-        <label class='block text-xs font-medium text-gray-700 mb-1'>Shipping Terms</label>
+        <label class='form-label'>Shipping Terms</label>
         <input type='text' name='shipping_terms' list='shipping-terms' maxlength='100'
                value='{{ quote.shipping_terms or "" }}' placeholder='e.g. FOB Origin'
-               class='w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500'>
+               class='input'>
       </div>
     </div>
 
     <div>
-      <label class='block text-xs font-medium text-gray-700 mb-1'>Valid Until <span class="text-rose-500">*</span></label>
+      <label class='form-label'>Valid Until <span class="text-rose-500">*</span></label>
       <input type='date' name='valid_until' required
              value='{{ valid_until_date.isoformat() }}' min='{{ min_valid_until.isoformat() }}'
-             class='w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500'>
-      <p class='mt-1 text-xs text-gray-400'>
+             class='input'>
+      <p class='mt-1 text-secondary'>
         How long the quote stays valid. Counted from the send date once sent, or from today while it's a draft.
       </p>
     </div>
 
     <div>
-      <label class='block text-xs font-medium text-gray-700 mb-1'>Internal Notes</label>
+      <label class='form-label'>Internal Notes</label>
       <textarea name='notes' rows='3'
-                class='w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500'>{{ quote.notes or "" }}</textarea>
+                class='input'>{{ quote.notes or "" }}</textarea>
     </div>
 
     <div class='flex justify-end gap-2 pt-1'>

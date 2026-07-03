@@ -24,10 +24,10 @@
         </svg>
         <span class="text-gray-700">{{ c.new_value or '(empty)' }}</span>
         {% if c.old_value %}
-        <span class="text-xs text-gray-400 ml-1">(was: {{ c.old_value }})</span>
+        <span class="text-secondary ml-1">(was: {{ c.old_value }})</span>
         {% endif %}
       </div>
-      <div class="text-xs text-gray-400 whitespace-nowrap flex-shrink-0">
+      <div class="text-secondary whitespace-nowrap flex-shrink-0">
         {{ c.user.name if c.user else 'System' }}
         {% if c.created_at %} &middot; {{ c.created_at.strftime('%b %d %H:%M') }}{% endif %}
       </div>

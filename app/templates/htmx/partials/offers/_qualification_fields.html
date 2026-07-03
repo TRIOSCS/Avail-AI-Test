@@ -63,7 +63,7 @@
 
   {# Standardized note preview (read-only, auto-composed by JS) + meter #}
   <div x-show="condition" x-cloak class="text-xs">
-    <div class="text-gray-400 mb-0.5">Standardized note (auto)</div>
+    <div class="text-secondary mb-0.5">Standardized note (auto)</div>
     <div class="rounded bg-white border border-gray-200 px-2 py-1 text-gray-700" x-text="noteText() || '—'"></div>
     <div class="mt-1 text-gray-600" x-show="meterTotal() > 0">
       Qualified <span x-text="meterFilled()"></span>/<span x-text="meterTotal()"></span>
