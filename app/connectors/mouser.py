@@ -121,7 +121,18 @@ class MouserConnector(BaseConnector):
             price = None
             price_breaks = part.get("PriceBreaks", [])
             if price_breaks:
-                best = min(price_breaks, key=lambda p: p.get("Quantity", 999999))
+                # Coalesce a present-but-null break quantity (None < int → TypeError,
+                # erroring the whole PN) to a large sentinel so a null row sorts last.
+                best = min(
+                    price_breaks,
+                    key=lambda p: (
+                        p.get("Quantity")
+                        or p.get("BreakQuantity")
+                        or p.get("breakQuantity")
+                        or p.get("quantity")
+                        or 999999
+                    ),
+                )
                 price_str = best.get("Price", "")
                 if price_str:
                     price = safe_float(price_str.replace("$", "").replace(",", ""))

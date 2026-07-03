@@ -132,10 +132,18 @@ class DigiKeyConnector(BaseConnector):
             # Price — use unit price or first price break
             price_breaks = prod.get("StandardPricing") or prod.get("standardPricing") or []
             if isinstance(price_breaks, list) and price_breaks:
-                # Find the smallest qty price break
+                # Find the smallest qty price break. Coalesce the break quantity
+                # (a PRESENT-but-null key yields None → None < int TypeError) to a
+                # large sentinel so a null row sorts last instead of crashing the PN.
                 best = min(
                     price_breaks,
-                    key=lambda p: p.get("BreakQuantity", p.get("breakQuantity", 999999)),
+                    key=lambda p: (
+                        p.get("Quantity")
+                        or p.get("BreakQuantity")
+                        or p.get("breakQuantity")
+                        or p.get("quantity")
+                        or 999999
+                    ),
                 )
                 price = best.get("UnitPrice", best.get("unitPrice"))
             else:

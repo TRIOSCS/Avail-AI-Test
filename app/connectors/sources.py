@@ -472,7 +472,18 @@ class NexarConnector(BaseConnector):
                     price, currency = None, "USD"
                     prices = offer.get("prices") or []
                     if isinstance(prices, list) and prices:
-                        best = min(prices, key=lambda p: p.get("quantity", 999999))
+                        # Coalesce a present-but-null break quantity (None < int →
+                        # TypeError, erroring the whole PN) to a large sentinel.
+                        best = min(
+                            prices,
+                            key=lambda p: (
+                                p.get("Quantity")
+                                or p.get("BreakQuantity")
+                                or p.get("breakQuantity")
+                                or p.get("quantity")
+                                or 999999
+                            ),
+                        )
                         price = best.get("price")
                         currency = best.get("currency", "USD")
                     elif isinstance(prices, dict):
@@ -617,7 +628,18 @@ class NexarConnector(BaseConnector):
                     price, currency = None, "USD"
                     prices = offer.get("prices") or []
                     if prices:
-                        best = min(prices, key=lambda p: p.get("quantity", 999999))
+                        # Coalesce a present-but-null break quantity (None < int →
+                        # TypeError, erroring the whole PN) to a large sentinel.
+                        best = min(
+                            prices,
+                            key=lambda p: (
+                                p.get("Quantity")
+                                or p.get("BreakQuantity")
+                                or p.get("breakQuantity")
+                                or p.get("quantity")
+                                or 999999
+                            ),
+                        )
                         price = best.get("price")
                         currency = best.get("currency", "USD")
 
