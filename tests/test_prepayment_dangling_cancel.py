@@ -81,6 +81,29 @@ def test_resource_line_voids_pending_prepayment(db_session: Session) -> None:
     assert req.resolution_note == "buy plan line re-sourced — prepayment voided"
 
 
+def test_resource_line_leaves_sibling_line_prepayment(db_session: Session) -> None:
+    """Re-sourcing line A must NOT cancel a legitimate REQUESTED prepayment on sibling
+    line B of the SAME plan.
+
+    resource_line is line-scoped: only the resourced line's wire
+    is stale (its PO/vendor changed); B's authorised-in-flight wire stays intact.
+    """
+    u = _prepay_approver(db_session)
+    plan = _make_plan(db_session, u, status=BuyPlanStatus.ACTIVE.value)
+    line_a = _make_line(db_session, plan, po_number="PO-A")
+    line_b = _make_line(db_session, plan, po_number="PO-B")
+    db_session.commit()
+    _pp_a, req_a = _prepay(db_session, u, plan, line_a)
+    _pp_b, req_b = _prepay(db_session, u, plan, line_b)
+
+    resource_line(plan.id, line_a.id, LineResourceReason.DEFECTIVE.value, "bad", u, db_session)
+
+    db_session.refresh(req_a)
+    db_session.refresh(req_b)
+    assert req_a.status == ApprovalRequestStatus.CANCELLED  # line A's wire voided
+    assert req_b.status == ApprovalRequestStatus.REQUESTED  # sibling B untouched
+
+
 def test_resource_line_covers_all_resourced_lines(db_session: Session) -> None:
     """A multi-line re-source (also_line_ids) voids EVERY line's pending prepayment."""
     u = _prepay_approver(db_session)

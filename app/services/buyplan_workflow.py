@@ -242,7 +242,9 @@ def _cancel_open_engine_requests_for_plan(plan: BuyPlan, user: User | None, db: 
     return cancelled
 
 
-def _cancel_open_prepayment_requests_for_plan(plan_id: int, db: Session, reason: str) -> int:
+def _cancel_open_prepayment_requests_for_plan(
+    plan_id: int, db: Session, reason: str, *, line_ids: list[int] | None = None
+) -> int:
     """Void every open (REQUESTED) PREPAYMENT ApprovalRequest for *plan_id* — the money-
     safety teardown sweep (simulation finding #2, Task 9 extended).
 
@@ -253,11 +255,14 @@ def _cancel_open_prepayment_requests_for_plan(plan_id: int, db: Session, reason:
     ``halt_plan``, ``_complete_plan`` (all completion paths) and ``resource_line`` — so no
     dangling wire authorisation survives the plan.
 
-    Plan-scoped (join ApprovalRequest → Prepayment on subject_id, filter by
-    ``Prepayment.buy_plan_id``): cancelling / halting / completing a plan voids ALL its
-    pending prepayments regardless of line; a re-sourced line means that PO's vendor changed,
-    so the plan's pending prepayment is stale either way — plan scope covers every re-sourced
-    line in one sweep and is simpler than a line filter.
+    Scope (join ApprovalRequest → Prepayment on subject_id):
+      - ``line_ids is None`` (default) → PLAN scope (``Prepayment.buy_plan_id == plan_id``):
+        cancelling / halting / completing a plan voids ALL its pending prepayments
+        regardless of line — the whole deal is dead.
+      - ``line_ids`` given → additionally narrow to ``Prepayment.buy_plan_line_id.in_(...)``
+        so ONLY those lines' pending wires are voided. ``resource_line`` passes the actually
+        re-sourced line ids: re-sourcing line A must NOT void a sibling line B's legitimate
+        REQUESTED prepayment (only A's PO/vendor changed underneath).
 
     Idempotent: filters ``status == REQUESTED`` only, so an already-APPROVED (about-to-be-
     wired), CANCELLED or REJECTED request is untouched — a claw-back of an APPROVED wire
@@ -276,19 +281,18 @@ def _cancel_open_prepayment_requests_for_plan(plan_id: int, db: Session, reason:
     from ..models.approvals import ApprovalRequest
     from ..models.quality_plan import Prepayment
 
-    open_requests = (
-        db.execute(
-            select(ApprovalRequest)
-            .join(Prepayment, Prepayment.id == ApprovalRequest.subject_id)
-            .where(
-                ApprovalRequest.subject_type == ApprovalSubjectType.PREPAYMENT,
-                ApprovalRequest.status == ApprovalRequestStatus.REQUESTED,
-                Prepayment.buy_plan_id == plan_id,
-            )
+    stmt = (
+        select(ApprovalRequest)
+        .join(Prepayment, Prepayment.id == ApprovalRequest.subject_id)
+        .where(
+            ApprovalRequest.subject_type == ApprovalSubjectType.PREPAYMENT,
+            ApprovalRequest.status == ApprovalRequestStatus.REQUESTED,
+            Prepayment.buy_plan_id == plan_id,
         )
-        .scalars()
-        .all()
     )
+    if line_ids is not None:
+        stmt = stmt.where(Prepayment.buy_plan_line_id.in_(line_ids))
+    open_requests = db.execute(stmt).scalars().all()
     now = datetime.now(timezone.utc)
     for ar in open_requests:
         ar.status = ApprovalRequestStatus.CANCELLED
@@ -707,11 +711,14 @@ def resource_line(
         line.last_nudge_at = None
         line.status = BuyPlanLineStatus.RESOURCING.value
 
-    # A re-sourced line means its PO/vendor changed underneath, so any pending prepayment
-    # (wire) for this plan's PO is now stale — void it so a manager can't authorise a wire
-    # to a vendor no longer on the deal (finding #2, Task 9 extended). Plan-scoped, so ALL
-    # re-sourced lines (line_id + also_line_ids) are covered in one sweep.
-    _cancel_open_prepayment_requests_for_plan(plan_id, db, "buy plan line re-sourced — prepayment voided")
+    # A re-sourced line means its PO/vendor changed underneath, so that line's pending
+    # prepayment (wire) is now stale — void it so a manager can't authorise a wire to a
+    # vendor no longer on the deal (finding #2, Task 9 extended). LINE-scoped to exactly the
+    # re-sourced lines (line_id + also_line_ids) so a sibling line's legitimate REQUESTED
+    # prepayment on the same plan is NOT collateral-cancelled.
+    _cancel_open_prepayment_requests_for_plan(
+        plan_id, db, "buy plan line re-sourced — prepayment voided", line_ids=sorted(target_ids)
+    )
 
     # A COMPLETED (auto-completed/closed) plan must reopen to ACTIVE so the re-claimed
     # line's PO flow (confirm_po requires an ACTIVE plan) works again. ``was_completed``
