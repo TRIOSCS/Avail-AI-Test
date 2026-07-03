@@ -6,6 +6,7 @@ import re
 import threading
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
 from urllib.parse import quote_plus
 
 import httpx
@@ -114,6 +115,66 @@ def _get_connector_semaphore(name: str) -> asyncio.Semaphore:
         limit = _CONNECTOR_CONCURRENCY.get(name, 3)
         _connector_semaphores[name] = asyncio.Semaphore(limit)
     return _connector_semaphores[name]
+
+
+# ── Cross-search OAuth token cache ───────────────────────────────────
+# DigiKey / eBay / Nexar authenticate with a client_credentials bearer valid for
+# minutes-to-hours, but `search_service._build_connectors` constructs FRESH
+# connector instances on every search, so a token cached on the instance dies
+# with it — each search paid ~3 serial token POSTs on the critical path and a
+# burst of concurrent PNs could herd the auth endpoint. Hoist the cache to the
+# process (keyed by connector class name + client_id, matching `_breakers` /
+# `_connector_semaphores` above) so a token minted by one search is reused by the
+# next until it expires. A per-key `asyncio.Lock` collapses a cold-cache mint
+# burst into a SINGLE POST (double-checked after acquire).
+#
+# These are asyncio primitives: token minting only ever runs on the app's single
+# event loop, so — unlike `_breakers` — no `threading.Lock` guards dict creation.
+# (Tests clear both dicts per-test via a conftest fixture so a Lock never straddles
+# two event loops; production has one long-lived loop and never clears them.)
+_token_cache: dict[tuple[str, str], tuple[str, float]] = {}  # key -> (bearer, expires_at monotonic)
+_token_locks: dict[tuple[str, str], asyncio.Lock] = {}
+
+
+def _get_token_lock(cache_key: tuple[str, str]) -> asyncio.Lock:
+    """Get or create the asyncio.Lock that serializes minting for *cache_key*."""
+    lock = _token_locks.get(cache_key)
+    if lock is None:
+        lock = _token_locks[cache_key] = asyncio.Lock()
+    return lock
+
+
+async def _get_cached_token(
+    cache_key: tuple[str, str],
+    mint: Callable[[], Awaitable[tuple[str, int]]],
+    *,
+    safety_margin: float = 60.0,
+) -> str:
+    """Return a process-cached OAuth bearer for *cache_key*, minting only on a cold or
+    near-expiry cache.
+
+    *mint* is an async callable returning ``(bearer, expires_in_seconds)``. The
+    per-key lock collapses a concurrent cold-cache mint burst into one POST; the
+    re-check after acquiring the lock means only the first waiter mints.
+    """
+    cached = _token_cache.get(cache_key)
+    if cached and time.monotonic() < cached[1] - safety_margin:
+        return cached[0]
+
+    async with _get_token_lock(cache_key):
+        # Re-check under the lock — a peer coroutine may have just minted.
+        cached = _token_cache.get(cache_key)
+        if cached and time.monotonic() < cached[1] - safety_margin:
+            return cached[0]
+        bearer, expires_in = await mint()
+        _token_cache[cache_key] = (bearer, time.monotonic() + expires_in)
+        return bearer
+
+
+def _invalidate_token(cache_key: tuple[str, str]) -> None:
+    """Drop a cached bearer so the next `_get_cached_token` re-mints (used after a
+    401)."""
+    _token_cache.pop(cache_key, None)
 
 
 class BaseConnector(ABC):
@@ -296,34 +357,32 @@ class NexarConnector(BaseConnector):
         self.client_id = client_id
         self.client_secret = client_secret
         self.octopart_api_key = octopart_api_key
-        self._token: str | None = None
-        self._token_expires_at: float = 0  # monotonic time when token expires
+
+    def _token_cache_key(self) -> tuple[str, str]:
+        # Process-wide OAuth cache key (see `_get_cached_token`). A blank client_id
+        # never reaches token minting — `_do_search` guards it before `_run_query`.
+        return (type(self).__name__, self.client_id)
 
     async def _get_token(self) -> str:
-        # Return cached token if still valid (with 60s safety margin)
-        if self._token and time.monotonic() < self._token_expires_at - 60:
-            return self._token
-        self._token = None
+        async def _mint() -> tuple[str, int]:
+            from ..http_client import http
 
-        from ..http_client import http
+            r = await http.post(
+                self.TOKEN_URL,
+                data={
+                    "grant_type": "client_credentials",
+                    "client_id": self.client_id,
+                    "client_secret": self.client_secret,
+                },
+                timeout=15,
+            )
+            r.raise_for_status()
+            body = r.json()
+            expires_in = int(body.get("expires_in", 300))  # Nexar tokens typically ~300s
+            logger.debug(f"Nexar: new token acquired, expires in {expires_in}s")
+            return body["access_token"], expires_in
 
-        r = await http.post(
-            self.TOKEN_URL,
-            data={
-                "grant_type": "client_credentials",
-                "client_id": self.client_id,
-                "client_secret": self.client_secret,
-            },
-            timeout=15,
-        )
-        r.raise_for_status()
-        body = r.json()
-        self._token = body["access_token"]
-        # Nexar tokens typically expire in ~300s; track it
-        expires_in = int(body.get("expires_in", 300))
-        self._token_expires_at = time.monotonic() + expires_in
-        logger.debug(f"Nexar: new token acquired, expires in {expires_in}s")
-        return self._token
+        return await _get_cached_token(self._token_cache_key(), _mint)
 
     async def _run_query(self, query: str, part_number: str) -> dict:
         from ..http_client import http
@@ -342,7 +401,7 @@ class NexarConnector(BaseConnector):
 
         r = await post()
         if r.status_code == 401:
-            self._token = None  # force a fresh token, then retry once
+            _invalidate_token(self._token_cache_key())  # drop cached bearer, re-mint, retry once
             r = await post()
         r.raise_for_status()
         return r.json()

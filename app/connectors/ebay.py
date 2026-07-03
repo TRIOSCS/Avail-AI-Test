@@ -1,13 +1,12 @@
 """EBay Browse API connector — searches electronic components on eBay."""
 
 import base64
-import time
 
 from loguru import logger
 
 from ..http_client import http
 from ..utils import safe_float, safe_int
-from .sources import BaseConnector
+from .sources import BaseConnector, _get_cached_token, _invalidate_token
 
 
 class EbayConnector(BaseConnector):
@@ -22,35 +21,34 @@ class EbayConnector(BaseConnector):
         super().__init__(timeout=15.0)
         self.client_id = client_id
         self.client_secret = client_secret
-        self._token: str | None = None
-        self._token_expires_at: float = 0  # monotonic time when token expires
+
+    def _token_cache_key(self) -> tuple[str, str]:
+        # Process-wide OAuth cache key (see sources._get_cached_token). A blank
+        # client_id never reaches minting — `_do_search` returns early on it.
+        return (type(self).__name__, self.client_id)
 
     async def _get_token(self) -> str:
-        # Return cached token if still valid (with 60s safety margin)
-        if self._token and time.monotonic() < self._token_expires_at - 60:
-            return self._token
-        self._token = None
+        async def _mint() -> tuple[str, int]:
+            creds = base64.b64encode(f"{self.client_id}:{self.client_secret}".encode()).decode()
+            r = await http.post(
+                self.TOKEN_URL,
+                headers={
+                    "Authorization": f"Basic {creds}",
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+                data={
+                    "grant_type": "client_credentials",
+                    "scope": "https://api.ebay.com/oauth/api_scope",
+                },
+                timeout=15,
+            )
+            r.raise_for_status()
+            body = r.json()
+            expires_in = int(body.get("expires_in", 7200))
+            logger.debug("eBay: new token acquired, expires in {}s", expires_in)
+            return body["access_token"], expires_in
 
-        creds = base64.b64encode(f"{self.client_id}:{self.client_secret}".encode()).decode()
-        r = await http.post(
-            self.TOKEN_URL,
-            headers={
-                "Authorization": f"Basic {creds}",
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-            data={
-                "grant_type": "client_credentials",
-                "scope": "https://api.ebay.com/oauth/api_scope",
-            },
-            timeout=15,
-        )
-        r.raise_for_status()
-        body = r.json()
-        self._token = body["access_token"]
-        expires_in = int(body.get("expires_in", 7200))
-        self._token_expires_at = time.monotonic() + expires_in
-        logger.debug("eBay: new token acquired, expires in {}s", expires_in)
-        return self._token
+        return await _get_cached_token(self._token_cache_key(), _mint)
 
     async def _do_search(self, part_number: str) -> list[dict]:
         if not self.client_id:
@@ -75,7 +73,7 @@ class EbayConnector(BaseConnector):
         r = await http.get(self.SEARCH_URL, headers=headers(token), params=params, timeout=self.timeout)
 
         if r.status_code == 401:
-            self._token = None
+            _invalidate_token(self._token_cache_key())
             token = await self._get_token()
             r = await http.get(self.SEARCH_URL, headers=headers(token), params=params, timeout=self.timeout)
 

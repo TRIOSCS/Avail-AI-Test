@@ -8,7 +8,6 @@ Depends on: http_client, utils, sources.BaseConnector
 """
 
 import asyncio
-import time
 
 from loguru import logger
 
@@ -16,7 +15,7 @@ from ..http_client import http
 from ..utils import safe_float, safe_int
 from ._core_attrs import clean_str, digikey_parameter, map_lifecycle, map_rohs, safe_pin_count
 from .errors import ConnectorRateLimitError
-from .sources import BaseConnector, _parse_retry_after
+from .sources import BaseConnector, _get_cached_token, _invalidate_token, _parse_retry_after
 
 
 class DigiKeyConnector(BaseConnector):
@@ -32,32 +31,30 @@ class DigiKeyConnector(BaseConnector):
         super().__init__(timeout=15.0)
         self.client_id = client_id
         self.client_secret = client_secret
-        self._token: str | None = None
-        self._token_expires_at: float = 0  # monotonic time when token expires
+
+    def _token_cache_key(self) -> tuple[str, str]:
+        # Process-wide OAuth cache key (see sources._get_cached_token). A blank
+        # client_id never reaches minting — `_do_search` returns early on it.
+        return (type(self).__name__, self.client_id)
 
     async def _get_token(self) -> str:
-        # Return cached token if still valid (with 60s safety margin)
-        if self._token and time.monotonic() < self._token_expires_at - 60:
-            return self._token
-        self._token = None
+        async def _mint() -> tuple[str, int]:
+            r = await http.post(
+                self.TOKEN_URL,
+                data={
+                    "client_id": self.client_id,
+                    "client_secret": self.client_secret,
+                    "grant_type": "client_credentials",
+                },
+                timeout=15,
+            )
+            r.raise_for_status()
+            body = r.json()
+            expires_in = int(body.get("expires_in", 590))  # DigiKey tokens typically ~599s
+            logger.debug(f"DigiKey: new token acquired, expires in {expires_in}s")
+            return body["access_token"], expires_in
 
-        r = await http.post(
-            self.TOKEN_URL,
-            data={
-                "client_id": self.client_id,
-                "client_secret": self.client_secret,
-                "grant_type": "client_credentials",
-            },
-            timeout=15,
-        )
-        r.raise_for_status()
-        body = r.json()
-        self._token = body["access_token"]
-        # DigiKey tokens typically expire in 599s; track it
-        expires_in = int(body.get("expires_in", 590))
-        self._token_expires_at = time.monotonic() + expires_in
-        logger.debug(f"DigiKey: new token acquired, expires in {expires_in}s")
-        return self._token
+        return await _get_cached_token(self._token_cache_key(), _mint)
 
     def _headers(self, token: str) -> dict:
         return {
@@ -90,7 +87,7 @@ class DigiKeyConnector(BaseConnector):
 
         # 401 — token expired, refresh once and retry
         if r.status_code == 401:
-            self._token = None
+            _invalidate_token(self._token_cache_key())
             token = await self._get_token()
             r = await http.post(
                 self.SEARCH_URL,

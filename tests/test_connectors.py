@@ -215,10 +215,11 @@ class TestBaseConnector:
 class TestDigiKeyConnector:
     def _make_connector(self):
         from app.connectors.digikey import DigiKeyConnector
+        from app.connectors.sources import _token_cache
 
         c = DigiKeyConnector(client_id="test-id", client_secret="test-secret")
-        c._token = "cached-token"
-        c._token_expires_at = 9999999999  # far future — skip refresh
+        # Seed the process-wide OAuth cache so `_get_token` skips the mint POST.
+        _token_cache[c._token_cache_key()] = ("cached-token", 9999999999.0)
         return c
 
     def test_parse_products(self):
@@ -372,9 +373,7 @@ class TestDigiKeyConnector:
         raise RuntimeError so health_monitor.ping_source flips status to
         'error'; search_service excludes the source from user searches;
         auto-recovers on next successful ping."""
-        c = self._make_connector()
-        c._token = "cached-token"
-        c._token_expires_at = time.monotonic() + 600  # avoid token refresh
+        c = self._make_connector()  # _make_connector already seeds a valid cached token
         resp_429 = _mock_response(429, text="Too Many Requests")
         resp_429.raise_for_status = MagicMock()
         # Mock asyncio.sleep so the test doesn't actually wait for Retry-After
@@ -396,10 +395,11 @@ class TestDigiKeyConnector:
 class TestEbayConnector:
     def _make_connector(self):
         from app.connectors.ebay import EbayConnector
+        from app.connectors.sources import _token_cache
 
         c = EbayConnector(client_id="ebay-id", client_secret="ebay-secret")
-        c._token = "cached-token"
-        c._token_expires_at = time.monotonic() + 3600  # valid for 1 hour
+        # Seed the process-wide OAuth cache so `_get_token` skips the mint POST.
+        _token_cache[c._token_cache_key()] = ("cached-token", time.monotonic() + 3600)
         return c
 
     def test_parse_items(self):
@@ -1656,9 +1656,9 @@ class TestNexarConnector:
     def _make_connector(self):
         from app.connectors.sources import NexarConnector
 
-        c = NexarConnector(client_id="nexar-id", client_secret="nexar-secret")
-        c._token = "cached"
-        return c
+        # Parse-only tests need no token; the token-path tests seed the module
+        # cache explicitly (see test_run_query_401_retry).
+        return NexarConnector(client_id="nexar-id", client_secret="nexar-secret")
 
     def test_parse_full_with_sellers(self):
         c = self._make_connector()
@@ -2101,16 +2101,16 @@ class TestNexarConnector:
 
     @pytest.mark.asyncio
     async def test_get_token(self):
-        from app.connectors.sources import NexarConnector
+        from app.connectors.sources import NexarConnector, _token_cache
 
         c = NexarConnector(client_id="id", client_secret="secret")
-        assert c._token is None
+        assert c._token_cache_key() not in _token_cache  # cold process-wide cache
         token_resp = _mock_response(200, {"access_token": "tok123"})
         with patch("app.http_client.http") as mock_http:
             mock_http.post = AsyncMock(return_value=token_resp)
             token = await c._get_token()
             assert token == "tok123"
-            # Second call should use cache
+            # Second call should hit the process-wide cache — no extra mint POST.
             token2 = await c._get_token()
             assert token2 == "tok123"
             assert mock_http.post.call_count == 1
@@ -2119,9 +2119,11 @@ class TestNexarConnector:
     async def test_run_query_401_retry(self):
         import time
 
+        from app.connectors.sources import _token_cache
+
         c = self._make_connector()
-        c._token = "old-token"
-        c._token_expires_at = time.monotonic() + 600  # ensure cached token is considered valid
+        # Seed a valid cached bearer; the 401 handler must invalidate it and re-mint.
+        _token_cache[c._token_cache_key()] = ("old-token", time.monotonic() + 600)
         resp_401 = _mock_response(401, text="Unauthorized")
         resp_401.raise_for_status = MagicMock()
         token_resp = _mock_response(200, {"access_token": "new-token"})

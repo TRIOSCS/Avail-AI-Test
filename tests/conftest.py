@@ -160,6 +160,26 @@ def _clear_8x8_token_cache():
 
 
 @pytest.fixture(autouse=True)
+def _clear_connector_token_cache():
+    """Clear the cross-search OAuth token cache + per-key locks before and after each
+    test.
+
+    The DigiKey/eBay/Nexar bearer cache (`app.connectors.sources._token_cache`) is
+    process-wide, so without this a token minted by one test would leak into the
+    next. The paired `_token_locks` hold `asyncio.Lock`s bound to the event loop
+    that first used them; under pytest-asyncio's per-test loops a reused lock would
+    raise "bound to a different event loop", so both dicts are cleared each test.
+    """
+    from app.connectors.sources import _token_cache, _token_locks
+
+    _token_cache.clear()
+    _token_locks.clear()
+    yield
+    _token_cache.clear()
+    _token_locks.clear()
+
+
+@pytest.fixture(autouse=True)
 def _reset_ai_gate_state():
     """Reset every search-worker AI-gate's cooldown + classification cache per test.
 

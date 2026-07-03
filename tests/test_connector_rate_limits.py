@@ -91,10 +91,11 @@ class TestConnectorSemaphore:
 class TestDigiKey429:
     def _make_connector(self):
         from app.connectors.digikey import DigiKeyConnector
+        from app.connectors.sources import _token_cache
 
         c = DigiKeyConnector(client_id="test-id", client_secret="test-secret")
-        c._token = "cached-token"
-        c._token_expires_at = 9999999999  # far future
+        # Seed the process-wide OAuth cache so `_get_token` skips the mint POST.
+        _token_cache[c._token_cache_key()] = ("cached-token", 9999999999.0)
         return c
 
     @pytest.mark.asyncio
@@ -129,12 +130,12 @@ class TestDigiKey429:
 
     @pytest.mark.asyncio
     async def test_token_expiry_refresh(self):
-        """DigiKey refreshes expired token before search."""
+        """DigiKey refreshes an expired cached token before search."""
         from app.connectors.digikey import DigiKeyConnector
+        from app.connectors.sources import _token_cache
 
         c = DigiKeyConnector(client_id="test-id", client_secret="test-secret")
-        c._token = "old-token"
-        c._token_expires_at = 0  # expired
+        _token_cache[c._token_cache_key()] = ("old-token", 0.0)  # expired
 
         token_resp = _mock_response(200, json_data={"access_token": "new-token", "expires_in": 600})
         search_resp = _mock_response(200, json_data={"Products": []})
@@ -143,7 +144,7 @@ class TestDigiKey429:
             mock_http.post = AsyncMock(side_effect=[token_resp, search_resp])
             results = await c._do_search("LM317T")
             assert results == []
-            assert c._token == "new-token"
+            assert _token_cache[c._token_cache_key()][0] == "new-token"
 
 
 # ═══════════════════════════════════════════════════════════════════════

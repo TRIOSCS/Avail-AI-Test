@@ -66,10 +66,10 @@ def _mock_response(status_code=200, json_data=None, text=""):
 async def test_ebay_token_expiry_caches_within_window():
     """Token should be reused when within expiry window."""
     from app.connectors.ebay import EbayConnector
+    from app.connectors.sources import _token_cache
 
     c = EbayConnector(client_id="id", client_secret="secret")
-    c._token = "cached-token"
-    c._token_expires_at = time.monotonic() + 3600  # 1 hour from now
+    _token_cache[c._token_cache_key()] = ("cached-token", time.monotonic() + 3600)  # 1 hour
 
     token = await c._get_token()
     assert token == "cached-token"
@@ -79,17 +79,17 @@ async def test_ebay_token_expiry_caches_within_window():
 async def test_ebay_token_expiry_refreshes_when_expired():
     """Token should be refreshed when past expiry window."""
     from app.connectors.ebay import EbayConnector
+    from app.connectors.sources import _token_cache
 
     c = EbayConnector(client_id="id", client_secret="secret")
-    c._token = "old-token"
-    c._token_expires_at = time.monotonic() - 10  # expired
+    _token_cache[c._token_cache_key()] = ("old-token", time.monotonic() - 10)  # expired
 
     token_resp = _mock_response(200, {"access_token": "new-token", "expires_in": 7200})
     with patch("app.connectors.ebay.http") as mock_http:
         mock_http.post = AsyncMock(return_value=token_resp)
         token = await c._get_token()
         assert token == "new-token"
-        assert c._token_expires_at > time.monotonic()
+        assert _token_cache[c._token_cache_key()][1] > time.monotonic()
         mock_http.post.assert_called_once()
 
 
@@ -97,10 +97,10 @@ async def test_ebay_token_expiry_refreshes_when_expired():
 async def test_ebay_token_expiry_refreshes_near_margin():
     """Token should be refreshed when within 60s of expiry."""
     from app.connectors.ebay import EbayConnector
+    from app.connectors.sources import _token_cache
 
     c = EbayConnector(client_id="id", client_secret="secret")
-    c._token = "almost-expired"
-    c._token_expires_at = time.monotonic() + 30  # within 60s margin
+    _token_cache[c._token_cache_key()] = ("almost-expired", time.monotonic() + 30)  # within margin
 
     token_resp = _mock_response(200, {"access_token": "refreshed-token", "expires_in": 7200})
     with patch("app.connectors.ebay.http") as mock_http:

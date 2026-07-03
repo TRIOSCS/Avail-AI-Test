@@ -118,9 +118,10 @@ class TestEbayConnector:
     async def test_get_token_uses_cache(self, mock_http):
         import time
 
+        from app.connectors.sources import _token_cache
+
         connector = _make_ebay()
-        connector._token = "cached-tok"
-        connector._token_expires_at = time.monotonic() + 3600  # far future
+        _token_cache[connector._token_cache_key()] = ("cached-tok", time.monotonic() + 3600)
 
         token = await connector._get_token()
         assert token == "cached-tok"
