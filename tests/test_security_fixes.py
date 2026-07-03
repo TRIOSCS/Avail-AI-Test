@@ -35,7 +35,9 @@ class TestAgentKeyTimingAttack:
 
 
 class TestRetryAfterCap:
-    """Verify Retry-After header value is capped at 300 seconds."""
+    """Verify Retry-After header value is capped at 30 seconds (budget-aware — API-
+    search core Phase 0 tightened the cap from 300s so one rate-limited upstream can't
+    hold a search-concurrency slot for minutes)."""
 
     def _make_response(self, retry_after: str) -> httpx.Response:
         resp = MagicMock(spec=httpx.Response)
@@ -47,9 +49,11 @@ class TestRetryAfterCap:
         [
             ("10", 10.0),  # normal value passes through
             ("0.1", 1.0),  # minimum floor of 1 second
-            ("999999", 300.0),  # extreme value capped at 300
-            ("600", 300.0),  # moderate value capped at 300
-            ("300", 300.0),  # 300 exactly passes
+            ("30", 30.0),  # 30 exactly passes
+            ("31", 30.0),  # just over the cap
+            ("999999", 30.0),  # extreme value capped at 30
+            ("600", 30.0),  # moderate value capped at 30
+            ("300", 30.0),  # old cap now itself capped at 30
         ],
     )
     def test_value_clamped(self, retry_after: str, expected: float):

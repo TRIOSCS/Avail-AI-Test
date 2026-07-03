@@ -204,27 +204,40 @@ def test_create_so_success(client, test_requisition):
 # ── prepay_request_decide error branches (lines 389-390) ─────────────
 
 
-def test_prepay_decide_permission_error(client):
+def _seed_prepay_request(db_session, test_user):
+    """Seed a real PREPAYMENT ApprovalRequest so the decide route passes its AR-exists +
+    gate_type guards and reaches svc_decide (which the tests mock)."""
+    from tests.test_approvals_hub_tabs import _pending_prepay_request, _plan, _req_quote
+
+    req, q, _ = _req_quote(db_session, test_user)
+    bp = _plan(db_session, req, q, status="active")
+    ar, _pp = _pending_prepay_request(db_session, bp, test_user)
+    return ar
+
+
+def test_prepay_decide_permission_error(db_session, approver_client, test_user):
     """svc_decide raises PermissionError → 403 (line 388-389)."""
+    ar = _seed_prepay_request(db_session, test_user)
     with patch(
         "app.services.approvals.service.decide",
         side_effect=PermissionError("not a recipient"),
     ):
-        resp = client.post(
-            "/v2/partials/approvals/prepay-requests/1/decide",
+        resp = approver_client.post(
+            f"/v2/partials/approvals/prepay-requests/{ar.id}/decide",
             data={"action": "approve"},
         )
     assert resp.status_code == 403
 
 
-def test_prepay_decide_value_error(client):
+def test_prepay_decide_value_error(db_session, approver_client, test_user):
     """svc_decide raises ValueError → 400 (lines 389-390)."""
+    ar = _seed_prepay_request(db_session, test_user)
     with patch(
         "app.services.approvals.service.decide",
         side_effect=ValueError("already decided"),
     ):
-        resp = client.post(
-            "/v2/partials/approvals/prepay-requests/1/decide",
+        resp = approver_client.post(
+            f"/v2/partials/approvals/prepay-requests/{ar.id}/decide",
             data={"action": "approve"},
         )
     assert resp.status_code == 400
