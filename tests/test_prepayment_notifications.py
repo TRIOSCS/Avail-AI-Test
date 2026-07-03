@@ -27,10 +27,11 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from sqlalchemy.orm import Session
 
-from app.constants import PaymentMethod
+from app.constants import PaymentMethod, PrepaymentStatus
 from app.models import ActivityLog, Offer, Requirement, SystemConfig, User
 from app.models.approvals import ApprovalRequest
 from app.models.buy_plan import BuyPlan, BuyPlanLine
+from app.models.quality_plan import Prepayment
 from app.models.quotes import Quote
 from app.models.sourcing import Requisition
 from app.models.vendors import VendorCard
@@ -346,3 +347,176 @@ def test_distinct_headings(db_session: Session):
     assert "PENDING APPROVAL" in req_card and "DO NOT PAY YET" in req_card
     assert "OK TO WIRE" in app_card and "APPROVED" in app_card
     assert "DO NOT PAY" not in app_card
+
+
+# ── Paid fan-out + Voided stand-down (prepay closure, Tasks 3/4) ──────────
+
+
+def _seed_person(db: Session, *, role: str, name: str) -> User:
+    """A plain active user in *role* (buyer / salesperson / manager fan-out targets)."""
+    u = User(
+        email=f"{name.lower()}-{uuid.uuid4().hex[:6]}@trioscs.com",
+        name=name,
+        role=role,
+        azure_id=f"az-{uuid.uuid4().hex[:8]}",
+        is_active=True,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(u)
+    db.flush()
+    return u
+
+
+def _make_paid_prepay(db: Session, buyer: User, salesperson: User) -> Prepayment:
+    """A PAID Prepayment whose buyer (created_by) and salesperson (plan submitter)
+    differ.
+
+    Built directly (no approval routing) so the fan-out recipients are unambiguous.
+    """
+    req = Requisition(
+        name=f"REQ-{uuid.uuid4().hex[:6]}",
+        customer_name="AcmeCo",
+        status="active",
+        created_by=salesperson.id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(req)
+    db.flush()
+    q = Quote(
+        requisition_id=req.id,
+        quote_number=f"Q-{uuid.uuid4().hex[:8]}",
+        line_items=[],
+        status="sent",
+        created_by_id=salesperson.id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(q)
+    db.flush()
+    bp = BuyPlan(
+        requisition_id=req.id,
+        quote_id=q.id,
+        status="active",
+        so_status="approved",
+        sales_order_number="SO-PAID",
+        submitted_by_id=salesperson.id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(bp)
+    db.flush()
+    vc = VendorCard(
+        normalized_name=f"vc-{uuid.uuid4().hex[:8]}",
+        display_name="AcmeVendor Display",
+        legal_name="Acme Components LLC",
+    )
+    db.add(vc)
+    db.flush()
+    line = BuyPlanLine(
+        buy_plan_id=bp.id,
+        quantity=2,
+        unit_cost=10.0,
+        status="pending_verify",
+        po_number="PO-2024",
+        po_confirmed_at=datetime.now(timezone.utc),
+    )
+    db.add(line)
+    db.flush()
+    pp = Prepayment(
+        buy_plan_id=bp.id,
+        buy_plan_line_id=line.id,
+        vendor_card_id=vc.id,
+        vendor_name="Acme Components LLC",
+        total_incl_fees=Decimal("20002.38"),
+        currency="USD",
+        created_by_id=buyer.id,
+        status=PrepaymentStatus.PAID.value,
+        paid_amount=Decimal("20002.38"),
+        paid_via="in_app",
+        paid_by_label="MK",
+        wire_reference="WIRE-1",
+        paid_at=datetime.now(timezone.utc),
+    )
+    db.add(pp)
+    db.commit()
+    return pp
+
+
+@pytest.fixture()
+def users(db_session: Session) -> dict:
+    """A buyer, a distinct salesperson, and two managers — the paid-notice fan-out
+    set."""
+    m1 = _seed_person(db_session, role="manager", name="Mgr1")
+    m2 = _seed_person(db_session, role="manager", name="Mgr2")
+    buyer = _seed_person(db_session, role="buyer", name="Buyer")
+    salesperson = _seed_person(db_session, role="sales", name="Sales")
+    db_session.commit()
+    return {"managers": [m1, m2], "buyer": buyer, "salesperson": salesperson}
+
+
+@pytest.fixture()
+def paid_prepay(db_session: Session, users: dict) -> Prepayment:
+    return _make_paid_prepay(db_session, users["buyer"], users["salesperson"])
+
+
+@pytest.fixture()
+def approved_prepay(db_session: Session) -> Prepayment:
+    """An APPROVED prepayment with a live pay_token (the voided stand-down subject)."""
+    appr = _seed_approver(db_session)
+    pp, _ar = _make_prepayment(db_session, requester=appr)
+    pp.status = PrepaymentStatus.APPROVED.value
+    pp.pay_token = f"tok-{uuid.uuid4().hex}"
+    db_session.commit()
+    return pp
+
+
+@pytest.fixture()
+def set_group_config(db_session: Session) -> None:
+    _set_config(db_session, accounting_group_email=ACC, ap_group_email=AP)
+
+
+@pytest.mark.asyncio
+async def test_paid_alerts_buyer_salesperson_managers(db_session: Session, paid_prepay: Prepayment, users: dict):
+    await pn.notify_prepayment_paid(paid_prepay.id, db=db_session)
+    alerts = db_session.query(ActivityLog).filter_by(channel="system").all()
+    recips = {a.user_id for a in alerts}
+    assert paid_prepay.created_by_id in recips  # buyer
+    assert paid_prepay.buy_plan.submitted_by_id in recips  # salesperson
+    assert all(m.id in recips for m in users["managers"])  # every manager
+    # Deduped: one alert per recipient, not one per (recipient × role membership).
+    assert len(alerts) == len(recips)
+    note = alerts[0].notes
+    assert "Acme Components LLC" in note and "USD 20,002.38" in note and "PO-2024" in note
+
+
+@pytest.mark.asyncio
+async def test_paid_salesperson_falls_back_to_requisition_creator(db_session: Session):
+    """When the plan has no submitter, the requisition creator gets the salesperson
+    alert."""
+    buyer = _seed_person(db_session, role="buyer", name="Buyer2")
+    creator = _seed_person(db_session, role="sales", name="ReqOwner")
+    pp = _make_paid_prepay(db_session, buyer, creator)
+    pp.buy_plan.submitted_by_id = None  # force the fallback
+    db_session.commit()
+    await pn.notify_prepayment_paid(pp.id, db=db_session)
+    recips = {a.user_id for a in db_session.query(ActivityLog).filter_by(channel="system").all()}
+    assert creator.id in recips  # requisition.created_by fallback
+
+
+@pytest.mark.asyncio
+async def test_voided_emails_stand_down(db_session: Session, approved_prepay: Prepayment, set_group_config):
+    with (
+        patch.object(pn, "_send_group_email", new=AsyncMock()) as email,
+        patch("app.services.prepayment_notifications.post_teams_channel_card", new=AsyncMock()),
+    ):
+        await pn.notify_prepayment_voided(approved_prepay.id, db=db_session, reason="plan cancelled")
+    body = email.call_args.kwargs.get("html") or email.call_args.args[-1]
+    assert "DO NOT WIRE" in body
+    assert "plan cancelled" in body
+
+
+@pytest.mark.asyncio
+async def test_voided_card_says_do_not_wire(db_session: Session, approved_prepay: Prepayment):
+    """The Teams card heading is the DO-NOT-WIRE stand-down with the reason."""
+    approved_prepay.void_reason = "rejected by approver"
+    db_session.commit()
+    text = json.dumps(pn._card(approved_prepay, "voided", reason="rejected by approver"))
+    assert "DO NOT WIRE" in text and "rejected by approver" in text

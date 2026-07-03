@@ -21,8 +21,15 @@ out) — a durable in-app ActivityLog alert is written to the requester + admins
 assumes AP was told. The notify functions never raise — a failed notice must not break the
 request/approval.
 
-Called by: app.routers.prepayments (request create), app.routers.htmx.buy_plans (approve),
-           via run_prepayment_notify_bg.
+The prepay-closure lifecycle adds two more notices: ``notify_prepayment_paid`` fans an
+IN-APP alert (durable ActivityLog rows) out to the buyer, the salesperson, and every
+manager once the wire is confirmed; ``notify_prepayment_voided`` sends a "DO NOT WIRE"
+stand-down to accounting/AP when an approved-but-unwired prepayment is rejected or torn
+down. Both are best-effort and never raise.
+
+Called by: app.routers.prepayments (request create), app.routers.htmx.buy_plans (approve
+           → approved, reject → voided), app.services.buyplan_workflow (teardown → voided),
+           app.services.prepayment_service (mark paid → paid), via run_prepayment_notify_bg.
 Depends on: app.database (SessionLocal), app.config (settings.admin_emails),
             app.services.admin_service (get_config_values),
             app.services.teams_notifications (post_teams_channel_card),
@@ -58,6 +65,7 @@ _CONFIG_KEYS = ["accounting_group_email", "ap_group_email", "prepayment_teams_we
 _HEADINGS = {
     "requested": "PENDING APPROVAL — DO NOT PAY YET",
     "approved": "APPROVED — OK TO WIRE",
+    "paid": "PAID — WIRE CONFIRMED",
 }
 
 
@@ -108,7 +116,37 @@ async def notify_prepayment_approved(prepayment_id: int, db: Session | None = No
     return await _notify(prepayment_id, "approved", db)
 
 
-async def _notify(prepayment_id: int, event: str, db: Session | None) -> dict:
+async def notify_prepayment_voided(prepayment_id: int, db: Session | None = None, reason: str | None = None) -> dict:
+    """Stand-down: tell accounting/AP a previously-authorized prepayment is VOID — DO NOT WIRE.
+
+    Reuses the accounting/AP email DLs + Teams channel card. *reason* overrides the
+    prepayment's persisted ``void_reason`` (the background runner passes none, so the
+    persisted reason wins there). Best-effort, never raises.
+    """
+    return await _notify(prepayment_id, "voided", db, reason=reason)
+
+
+async def notify_prepayment_paid(prepayment_id: int, db: Session | None = None) -> dict:
+    """In-app fan-out: alert the buyer, the salesperson, and all managers the wire went out.
+
+    Unlike the accounting/AP notices this is an IN-APP alert (durable ``channel="system"``
+    ActivityLog rows) — the recipients are Avail users, so no email/Teams is used. Recipients
+    are deduped: the buyer (``created_by_id``), the salesperson (``buy_plan.submitted_by_id``,
+    falling back to the requisition creator), and every active Manager-role user. Best-effort.
+    """
+    own_session = db is None
+    if own_session:
+        from ..database import SessionLocal
+
+        db = SessionLocal()
+    try:
+        return _notify_paid_inner(db, prepayment_id)
+    finally:
+        if own_session:
+            db.close()
+
+
+async def _notify(prepayment_id: int, event: str, db: Session | None, reason: str | None = None) -> dict:
     """Run both channels for *event*; open + close an own session only if none was
     passed."""
     own_session = db is None
@@ -117,13 +155,13 @@ async def _notify(prepayment_id: int, event: str, db: Session | None) -> dict:
 
         db = SessionLocal()
     try:
-        return await _notify_inner(db, prepayment_id, event)
+        return await _notify_inner(db, prepayment_id, event, reason=reason)
     finally:
         if own_session:
             db.close()
 
 
-async def _notify_inner(db: Session, prepayment_id: int, event: str) -> dict:
+async def _notify_inner(db: Session, prepayment_id: int, event: str, reason: str | None = None) -> dict:
     result = {"email_sent": False, "teams_sent": False, "recipients": []}
     prepayment = db.get(Prepayment, prepayment_id)
     if prepayment is None:
@@ -135,14 +173,16 @@ async def _notify_inner(db: Session, prepayment_id: int, event: str) -> dict:
     webhook = (cfg.get("prepayment_teams_webhook") or "").strip() or None
     result["recipients"] = recipients
 
+    # The void reason: an explicit argument wins, else the persisted column.
+    effective_reason = reason or prepayment.void_reason
     approver_name, decided_at = (None, None)
     if event == "approved":
         approver_name, decided_at = _resolve_approval(db, prepayment_id)
 
     # ── Email channel (best-effort, isolated) ──
     if recipients:
-        subject = _subject(prepayment, event)
-        html_body = _email_html(prepayment, event, approver_name, decided_at)
+        subject = _subject(prepayment, event, reason=effective_reason)
+        html_body = _email_html(prepayment, event, approver_name, decided_at, reason=effective_reason)
         try:
             result["email_sent"] = bool(await _send_group_email(db, recipients, subject, html_body))
         except Exception as e:
@@ -150,7 +190,7 @@ async def _notify_inner(db: Session, prepayment_id: int, event: str) -> dict:
 
     # ── Teams channel (best-effort, isolated) ──
     if webhook:
-        card = _card(prepayment, event, approver=approver_name, decided_at=decided_at)
+        card = _card(prepayment, event, approver=approver_name, decided_at=decided_at, reason=effective_reason)
         try:
             await post_teams_channel_card(card, webhook)
             result["teams_sent"] = True
@@ -265,26 +305,43 @@ def _facts(prepayment: Prepayment, event: str, approver=None, decided_at=None) -
             facts.append(("Approved by", approver))
         if decided_at:
             facts.append(("Approved at", _fmt_dt(decided_at)))
+    if event == "voided" and prepayment.void_reason:
+        facts.append(("Void reason", prepayment.void_reason))
+    if event == "paid":
+        if prepayment.wire_reference:
+            facts.append(("Wire reference", prepayment.wire_reference))
+        if prepayment.paid_by_label:
+            facts.append(("Paid by", prepayment.paid_by_label))
     return facts
 
 
-def _heading(event: str) -> str:
+def _heading(event: str, reason: str | None = None) -> str:
+    if event == "voided":
+        return f"DO NOT WIRE — prepayment voided: {reason or '—'}"
     return _HEADINGS.get(event, _HEADINGS["requested"])
 
 
-def _subject(prepayment: Prepayment, event: str) -> str:
-    return f"[AVAIL] Prepayment {_heading(event)} — Plan #{prepayment.buy_plan_id} ({_format_amount(prepayment)})"
-
-
-def _card(prepayment: Prepayment, event: str, *, approver=None, decided_at=None) -> dict:
-    """Adaptive Card: colored heading + subtitle + a FactSet of the wire facts."""
-    approved = event == "approved"
-    facts = [{"title": label, "value": str(value)} for label, value in _facts(prepayment, event, approver, decided_at)]
-    subtitle = (
-        "This prepayment is APPROVED — OK to wire the beneficiary below."
-        if approved
-        else "A prepayment has been requested and is awaiting manager approval. Do NOT pay yet."
+def _subject(prepayment: Prepayment, event: str, reason: str | None = None) -> str:
+    return (
+        f"[AVAIL] Prepayment {_heading(event, reason)} — Plan #{prepayment.buy_plan_id} ({_format_amount(prepayment)})"
     )
+
+
+# Adaptive-Card / email banner treatment per event: green = money OK, red = stand-down,
+# amber = still pending.
+_CARD_COLOR = {"approved": "Good", "paid": "Good", "voided": "Attention"}
+_BANNER = {"approved": "#16a34a", "paid": "#16a34a", "voided": "#dc2626"}
+_SUBTITLE = {
+    "approved": "This prepayment is APPROVED — OK to wire the beneficiary below.",
+    "paid": "This prepayment has been marked PAID — the wire is confirmed.",
+    "voided": "This prepayment was VOIDED — do NOT wire it. Claw back if already sent.",
+    "requested": "A prepayment has been requested and is awaiting manager approval. Do NOT pay yet.",
+}
+
+
+def _card(prepayment: Prepayment, event: str, *, approver=None, decided_at=None, reason=None) -> dict:
+    """Adaptive Card: colored heading + subtitle + a FactSet of the wire facts."""
+    facts = [{"title": label, "value": str(value)} for label, value in _facts(prepayment, event, approver, decided_at)]
     return {
         "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
         "type": "AdaptiveCard",
@@ -292,35 +349,36 @@ def _card(prepayment: Prepayment, event: str, *, approver=None, decided_at=None)
         "body": [
             {
                 "type": "TextBlock",
-                "text": _heading(event),
+                "text": _heading(event, reason),
                 "weight": "Bolder",
                 "size": "Large",
-                "color": "Good" if approved else "Warning",
+                "color": _CARD_COLOR.get(event, "Warning"),
                 "wrap": True,
             },
-            {"type": "TextBlock", "text": subtitle, "isSubtle": True, "wrap": True},
+            {"type": "TextBlock", "text": _SUBTITLE.get(event, _SUBTITLE["requested"]), "isSubtle": True, "wrap": True},
             {"type": "FactSet", "facts": facts},
         ],
     }
 
 
-def _email_html(prepayment: Prepayment, event: str, approver=None, decided_at=None) -> str:
+def _email_html(prepayment: Prepayment, event: str, approver=None, decided_at=None, reason=None) -> str:
     """Standard AVAIL email wrapper around the prepayment facts table."""
-    approved = event == "approved"
-    banner = "#16a34a" if approved else "#d97706"
+    banner = _BANNER.get(event, "#d97706")
     rows = "".join(
         f'<tr><td style="padding:6px 10px;border:1px solid #e5e7eb;font-weight:bold">{html_mod.escape(str(label))}</td>'
         f'<td style="padding:6px 10px;border:1px solid #e5e7eb">{html_mod.escape(str(value))}</td></tr>'
         for label, value in _facts(prepayment, event, approver, decided_at)
     )
-    note = (
-        "This prepayment is <strong>APPROVED — OK TO WIRE</strong> the beneficiary below."
-        if approved
-        else "This prepayment is <strong>PENDING APPROVAL — DO NOT PAY YET</strong>."
-    )
+    _NOTES = {
+        "approved": "This prepayment is <strong>APPROVED — OK TO WIRE</strong> the beneficiary below.",
+        "paid": "This prepayment has been marked <strong>PAID — WIRE CONFIRMED</strong>.",
+        "voided": "This prepayment was <strong>VOIDED — DO NOT WIRE</strong>. Claw back if already sent.",
+        "requested": "This prepayment is <strong>PENDING APPROVAL — DO NOT PAY YET</strong>.",
+    }
+    note = _NOTES.get(event, _NOTES["requested"])
     return (
         f'<div style="font-family:Arial,sans-serif;max-width:640px">'
-        f'<h2 style="color:{banner}">{html_mod.escape(_heading(event))}</h2>'
+        f'<h2 style="color:{banner}">{html_mod.escape(_heading(event, reason))}</h2>'
         f"<p>{note}</p>"
         f'<table style="border-collapse:collapse;margin:16px 0">{rows}</table>'
         f'<p style="color:#6b7280;font-size:12px;margin-top:20px">'
@@ -418,3 +476,63 @@ def _write_failure_alert(db: Session, prepayment: Prepayment) -> None:
     except Exception:
         db.rollback()
         logger.exception("Failed to write prepayment notification-failure alert for #{}", prepayment.id)
+
+
+# ── Paid fan-out (in-app alerts to the buyer, salesperson, and all managers) ──
+
+
+def _notify_paid_inner(db: Session, prepayment_id: int) -> dict:
+    """Write a durable in-app ``channel="system"`` ActivityLog alert per fan-out
+    recipient.
+
+    Recipients (deduped): the buyer (``created_by_id``), the salesperson
+    (``buy_plan.submitted_by_id``, falling back to the requisition creator), and every active
+    Manager-role user. Best-effort: a failure here is logged, never raised.
+    """
+    result: dict = {"alerted": []}
+    prepayment = db.get(Prepayment, prepayment_id)
+    if prepayment is None:
+        logger.warning("notify_prepayment_paid: prepayment {} not found", prepayment_id)
+        return result
+
+    plan = prepayment.buy_plan
+    user_ids: set[int] = set()
+    if prepayment.created_by_id:
+        user_ids.add(prepayment.created_by_id)
+    if plan is not None:
+        if plan.submitted_by_id:
+            user_ids.add(plan.submitted_by_id)
+        elif plan.requisition is not None and plan.requisition.created_by:
+            user_ids.add(plan.requisition.created_by)
+    managers = db.query(User.id).filter(User.role == UserRole.MANAGER, User.is_active.is_(True)).all()
+    user_ids.update(row.id for row in managers)
+    if not user_ids:
+        logger.warning("Prepayment #{} paid but no buyer/salesperson/manager to alert", prepayment_id)
+        return result
+
+    amount = prepayment.paid_amount if prepayment.paid_amount is not None else prepayment.total_incl_fees
+    notes = (
+        f"{_beneficiary(prepayment)} {prepayment.currency or 'USD'} {(amount or Decimal('0')):,.2f} "
+        f"wired for PO {_po_number(prepayment)} (plan #{prepayment.buy_plan_id})"
+    )
+    requisition_id = plan.requisition_id if plan is not None else None
+    try:
+        for uid in user_ids:
+            db.add(
+                ActivityLog(
+                    user_id=uid,
+                    activity_type=ActivityType.NOTE,
+                    channel="system",
+                    requisition_id=requisition_id,
+                    buy_plan_id=prepayment.buy_plan_id,
+                    subject="Prepayment paid",
+                    notes=notes,
+                )
+            )
+        db.commit()
+        result["alerted"] = sorted(user_ids)
+        logger.info("Prepayment #{} paid — wrote {} in-app alert(s)", prepayment_id, len(user_ids))
+    except Exception:
+        db.rollback()
+        logger.exception("Failed to write prepayment-paid in-app alerts for #{}", prepayment_id)
+    return result
