@@ -1493,6 +1493,22 @@ buyplan_workflow.py (state machine)
     |                      amount + PO#). My Queue prepay parity: buyplan_hub._prepay_rows carries the same fields
     |                      (extra.*), value = the AUTHORISED total_incl_fees (not plan cost), same warning + a
     |                      Review drill-through.
+    |  Prepay on PO:        prepayment_service.prepayment_state_for_lines(db, line_ids) → {line_id:
+    |                      'requested'|'approved'} in ONE query (ApprovalRequest⨝Prepayment, status in
+    |                      REQUESTED/APPROVED, buy_plan_line_id in ids; approved wins). Fed into the plan-detail ctx
+    |                      (buy_plan_detail_partial) AND the PO-Approval tab ctx (render_tab_body po-approval) as
+    |                      prepay_state. Drives (a) an amber "Prepayment pending"/emerald "Prepaid" badge on the
+    |                      _detail_lines status cell + the PO-Approval row (#11), and (b) a non-interactive
+    |                      "Prepay requested"/"Prepaid" pill that REPLACES the live request button when a line is
+    |                      already in prepay_state — gated on can_request_prepayment(user,line) AND line.id not in
+    |                      prepay_state (#10, kills the duplicate-400 dead-end). PO-Approval rows also link the
+    |                      identity cell to the plan (hx-get /v2/partials/buy-plans/{id} + push /v2/buy-plans/{id})
+    |                      and show · SO {plan.sales_order_number} (Task 8). The request_prepayment_button macro +
+    |                      request_modal thread origin/hub_scope (like resource_form): modal shows PO#/MPN/plan#·SO#
+    |                      read-only (#3) + an Alpine :data-deviates / hx-on::confirm warn-only client confirm when
+    |                      the entered amount swings >5% from the PO line total (#2); prepayment_request_create reads
+    |                      origin and re-renders the RIGHT surface (approvals_hub → po-approval tab body into
+    |                      #ap-hub-body @hub_scope; else → plan detail into #main-content) instead of a blank toast (#12).
     |  Backorder (Ph3):    resource_line already reopens a COMPLETED plan (RESOURCEABLE_LINE_STATUSES includes
     |                      verified); when a cancel fires on a plan that WAS completed, resource_line returns
     |                      was_completed=True (computed pre-reopen) which is threaded to

@@ -9,7 +9,7 @@
   `line_status_pill(line)` macro for the Status cell.
 #}
 {% from "htmx/partials/shared/_macros.html" import status_badge, user_avatar %}
-{% from "htmx/partials/buy_plans/_macros.html" import resource_form, request_prepayment_button %}
+{% from "htmx/partials/buy_plans/_macros.html" import resource_form, request_prepayment_button, prepay_state_badge, prepay_requested_pill %}
 
 {# ── Status cell: status badge + optional PO# (extracted verbatim from the inline block) ── #}
 {% macro line_status_pill(line) %}
@@ -74,9 +74,11 @@
             <td class="text-right text-gray-600">{{ '{:,}'.format(line.quantity) }}</td>
             {# Unit Cost #}
             <td class="text-right text-gray-600">${{ '{:,.4f}'.format(line.unit_cost|float) if line.unit_cost else '-' }}</td>
-            {# Status + PO# #}
+            {# Status + PO# + prepayment badge (#11) #}
             <td>
               {{ line_status_pill(line) }}
+              {% set _pp_state = (prepay_state or {}).get(line.id) %}
+              {% if _pp_state %}<div class="mt-0.5">{{ prepay_state_badge(_pp_state) }}</div>{% endif %}
             </td>
             {# Action — Finding #4: bespoke bg-emerald/rose buttons → .btn family #}
             <td>
@@ -164,9 +166,14 @@
 
               {# ── Request prepayment: a cut PO (pending_verify/verified) the owner wants paid
                    up-front. Gated at the call site by can_request_prepayment (ownership + cut-PO
-                   state — the SAME rule create_prepayment enforces on submit). ── #}
+                   state — the SAME rule create_prepayment enforces on submit). When a live
+                   prepayment already exists (prepay_state), render a non-interactive pill
+                   instead of the live button so a duplicate request can't dead-end (#10). ── #}
               {% if can_request_prepayment(user, line) %}
-              <div class="mt-1.5">{{ request_prepayment_button(line, bp) }}</div>
+              {% set _req_state = (prepay_state or {}).get(line.id) %}
+              <div class="mt-1.5">
+                {% if _req_state %}{{ prepay_requested_pill(_req_state) }}{% else %}{{ request_prepayment_button(line, bp) }}{% endif %}
+              </div>
               {% endif %}
 
               {# ── Open pool: a re-sourced line awaiting a claim. Any PO-cutter can grab it. ── #}

@@ -93,16 +93,46 @@ Usage:
 {# ── Request-prepayment trigger button ────────────────────────────────
    Opens the prepayment request modal (prefilled from the line) into the global
    #modal-content via the open-modal event. Gate the CALL SITE with
-   can_request_prepayment(user, line) — the macro renders the button unconditionally (same
-   convention as resource_form, which is gated at its call site by can_resource). Args:
-   line — the cut BuyPlanLine (needs .id); plan — its BuyPlan (unused in the URL but kept
-   for a stable, self-documenting (line, plan) signature and parity with resource_form). #}
-{% macro request_prepayment_button(line, plan) -%}
+   can_request_prepayment(user, line) AND line.id not in prepay_state — the macro renders
+   the button unconditionally (same convention as resource_form, which is gated at its call
+   site by can_resource). ``origin``/``hub_scope`` thread the caller's surface into the modal
+   GET (mirroring resource_form) so the create route re-renders the RIGHT surface: origin=''
+   → plan detail into #main-content; origin='approvals_hub' → the PO Approval tab body into
+   #ap-hub-body (preserving hub_scope). Args: line — the cut BuyPlanLine (needs .id);
+   plan — its BuyPlan (kept for a stable (line, plan) signature and parity with
+   resource_form). #}
+{% macro request_prepayment_button(line, plan, origin='', hub_scope='') -%}
 <button type="button"
-        @click="$dispatch('open-modal', {url: '/v2/partials/prepayments/new?line_id={{ line.id }}'})"
+        @click="$dispatch('open-modal', {url: '/v2/partials/prepayments/new?line_id={{ line.id }}{% if origin %}&origin={{ origin }}{% endif %}{% if hub_scope %}&hub_scope={{ hub_scope }}{% endif %}'})"
         class="btn btn-secondary btn-sm">
   Request prepayment
 </button>
+{%- endmacro %}
+
+
+{# ── Prepayment state badge (#11) ──────────────────────────────────────
+   The amber "Prepayment pending" / emerald "Prepaid" pill surfaced on the plan-detail line
+   status cell AND the PO Approval row so anyone verifying/paying a PO can see a wire is in
+   flight on that line. Driven by prepayment_state_for_lines (state = 'requested'|'approved');
+   renders nothing for any other/absent state. Colours match the line_colors status map. #}
+{% macro prepay_state_badge(state) -%}
+{%- if state == 'approved' -%}
+<span class="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">Prepaid</span>
+{%- elif state == 'requested' -%}
+<span class="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">Prepayment pending</span>
+{%- endif -%}
+{%- endmacro %}
+
+
+{# ── Prepayment "already requested" pill (#10) ─────────────────────────
+   Non-interactive replacement for the live request button once a line already has a live
+   prepayment (state = 'requested'|'approved'), so a buyer/approver can't fire a duplicate
+   request that dead-ends on the service's duplicate-pending 400. Button-shaped (.btn) but
+   disabled — a clear "this is done" affordance, not a click target. #}
+{% macro prepay_requested_pill(state) -%}
+<span class="btn btn-secondary btn-sm opacity-60 cursor-default" aria-disabled="true">
+  {%- if state == 'approved' -%}Prepaid{%- else -%}Prepay requested{%- endif -%}
+</span>
 {%- endmacro %}
 
 

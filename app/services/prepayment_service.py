@@ -17,6 +17,7 @@ Depends on: app.models.quality_plan (Prepayment), app.models.buy_plan (BuyPlanLi
             BuyPlanLineStatus, PaymentMethod).
 """
 
+from collections.abc import Sequence
 from decimal import Decimal
 
 from sqlalchemy.orm import Session
@@ -33,6 +34,52 @@ from ..models.buy_plan import BuyPlanLine
 from ..models.quality_plan import Prepayment
 from ..models.vendors import VendorCard
 from ..services.approvals.service import create_request
+
+
+def prepayment_state_for_lines(db: Session, line_ids: Sequence[int]) -> dict[int, str]:
+    """Return each PO line's *live* prepayment state in a single query (no per-line
+    N+1).
+
+    A line maps to ``'approved'`` when its prepayment's ApprovalRequest is APPROVED (a wire
+    is imminent / already authorised), else ``'requested'`` when the request is still
+    REQUESTED (awaiting approval). Lines with no live prepayment — none at all, or only a
+    rejected/cancelled/expired one — are absent from the map (callers treat "not in map" as
+    "no prepayment"). Approved wins over requested if a line somehow has both.
+
+    Shared by the plan-detail line table and the Approvals-hub PO Approval tab so both can
+    (a) show a "Prepayment pending / Prepaid" badge and (b) swap the live request button for
+    a non-interactive pill without any extra DB round-trips.
+
+    Args:
+        db: SQLAlchemy session (sync, 2.0 style).
+        line_ids: The ``BuyPlanLine.id`` values to resolve (empty → ``{}``).
+
+    Returns:
+        ``{line_id: 'requested' | 'approved'}`` for lines with a live prepayment.
+    """
+    ids = [i for i in line_ids if i is not None]
+    if not ids:
+        return {}
+
+    rows = (
+        db.query(Prepayment.buy_plan_line_id, ApprovalRequest.status)
+        .join(ApprovalRequest, ApprovalRequest.subject_id == Prepayment.id)
+        .filter(
+            ApprovalRequest.subject_type == ApprovalSubjectType.PREPAYMENT,
+            ApprovalRequest.gate_type == ApprovalGateType.PREPAYMENT,
+            ApprovalRequest.status.in_([ApprovalRequestStatus.REQUESTED, ApprovalRequestStatus.APPROVED]),
+            Prepayment.buy_plan_line_id.in_(ids),
+        )
+        .all()
+    )
+
+    state: dict[int, str] = {}
+    for line_id, status in rows:
+        if status == ApprovalRequestStatus.APPROVED:
+            state[line_id] = "approved"
+        elif line_id not in state:
+            state[line_id] = "requested"
+    return state
 
 
 def create_prepayment(

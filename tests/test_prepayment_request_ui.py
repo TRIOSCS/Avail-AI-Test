@@ -21,9 +21,16 @@ from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
-from app.constants import BuyPlanLineStatus, UserRole
+from app.constants import (
+    ApprovalGateType,
+    ApprovalRequestStatus,
+    ApprovalSubjectType,
+    BuyPlanLineStatus,
+    UserRole,
+)
 from app.dependencies import can_request_prepayment
 from app.models import Offer, Requirement, User
+from app.models.approvals import ApprovalRequest
 from app.models.buy_plan import BuyPlan, BuyPlanLine
 from app.models.quality_plan import Prepayment
 from app.models.quotes import Quote
@@ -96,6 +103,31 @@ def _plan_with_line(db: Session, owner: User) -> tuple[BuyPlan, BuyPlanLine]:
     return bp, line
 
 
+def _seed_prepayment_on_line(db: Session, line: BuyPlanLine, owner: User, *, status: ApprovalRequestStatus) -> None:
+    """Seed a live prepayment (REQUESTED/APPROVED) on *line* so prepay_state reflects
+    it."""
+    pp = Prepayment(
+        buy_plan_id=line.buy_plan_id,
+        buy_plan_line_id=line.id,
+        total_incl_fees=Decimal("20.00"),
+        currency="USD",
+        created_by_id=owner.id,
+    )
+    db.add(pp)
+    db.flush()
+    db.add(
+        ApprovalRequest(
+            gate_type=ApprovalGateType.PREPAYMENT,
+            status=status,
+            subject_type=ApprovalSubjectType.PREPAYMENT,
+            subject_id=pp.id,
+            requested_by_id=owner.id,
+            owner_id=owner.id,
+        )
+    )
+    db.flush()
+
+
 def _seed_approver(db: Session) -> User:
     """An unlimited prepayment approver so create routing succeeds."""
     u = User(
@@ -130,6 +162,37 @@ def test_request_modal_prefills_amount_from_line(client, db_session: Session, te
     assert "name='vendor_name'" in r.text  # hidden payee-snapshot fallback (finding #3)
 
 
+def test_request_modal_shows_po_mpn_so_readonly(client, db_session: Session, test_user: User):
+    """#3: the modal confirms the exact PO before authorising cash — PO#, MPN, and the
+    plan#·SO# render read-only at the top."""
+    bp, line = _plan_with_line(db_session, test_user)
+    bp.sales_order_number = "SO-8899"
+    db_session.commit()
+
+    r = client.get(f"/v2/partials/prepayments/new?line_id={line.id}", headers={"HX-Request": "true"})
+    assert r.status_code == 200, r.text
+    assert "PO-2024" in r.text  # PO#
+    assert "LM317" in r.text  # MPN from the line's requirement
+    assert f"Plan #{bp.id}" in r.text
+    assert "SO-8899" in r.text  # sales-order number
+
+
+def test_request_modal_threads_origin_and_deviation_confirm(client, db_session: Session, test_user: User):
+    """#12/#2: an approvals_hub-origin modal carries the origin hidden field + targets
+    the hub body, and the >5% deviation client-confirm markup is present."""
+    _bp, line = _plan_with_line(db_session, test_user)
+    db_session.commit()
+
+    r = client.get(
+        f"/v2/partials/prepayments/new?line_id={line.id}&origin=approvals_hub&hub_scope=mine",
+        headers={"HX-Request": "true"},
+    )
+    assert r.status_code == 200, r.text
+    assert "name='origin'" in r.text and "approvals_hub" in r.text  # threaded origin (#12)
+    assert "#ap-hub-body" in r.text  # posts back to the hub body, not #main-content
+    assert "data-deviates" in r.text and "0.05" in r.text  # >5% deviation confirm (#2)
+
+
 # ── HTMX create ──────────────────────────────────────────────────────────
 
 
@@ -157,6 +220,64 @@ def test_htmx_create_makes_prepayment_linked_to_line(client, db_session: Session
     pp = db_session.query(Prepayment).filter_by(buy_plan_line_id=line.id).one()
     assert pp.total_incl_fees == Decimal("20002.38")
     assert pp.test_report_sent is True
+
+
+def test_htmx_create_from_approvals_hub_rerenders_po_tab(client, db_session: Session, test_user: User):
+    """#12: submitting the modal with origin=approvals_hub re-renders the PO Approval
+    tab body (not the plan detail), and that body now shows the pill/badge for the new
+    prepayment."""
+    _seed_approver(db_session)
+    _bp, line = _plan_with_line(db_session, test_user)
+    db_session.commit()
+
+    r = client.post(
+        "/v2/partials/prepayments",
+        data={
+            "buy_plan_id": line.buy_plan_id,
+            "buy_plan_line_id": line.id,
+            "payment_method": "wire",
+            "total_incl_fees": "20.00",
+            "origin": "approvals_hub",
+            "hub_scope": "all",
+        },
+        headers={"HX-Request": "true"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.text
+    assert "Pending POs" in body  # the PO Approval tab body
+    assert "Line Items" not in body  # NOT the full plan detail
+    assert "Prepay requested" in body  # the just-created prepayment renders its pill
+    assert "showToast" in r.headers.get("HX-Trigger", "")
+
+
+# ── Plan-detail line pill + badge (#10/#11) ───────────────────────────────
+
+
+def test_detail_line_without_prepayment_shows_live_button(client, db_session: Session, test_user: User):
+    """Control: a cut PO line with no prepayment renders the live request button."""
+    bp, _line = _plan_with_line(db_session, test_user)
+    db_session.commit()
+
+    r = client.get(f"/v2/partials/buy-plans/{bp.id}", headers={"HX-Request": "true"})
+    assert r.status_code == 200, r.text
+    assert "prepayments/new" in r.text  # live request button present
+    assert "Prepay requested" not in r.text
+
+
+def test_detail_line_with_pending_prepayment_shows_pill_and_badge(client, db_session: Session, test_user: User):
+    """#10/#11: a cut PO line with a live prepayment shows the amber 'Prepayment
+    pending' badge in the status cell AND replaces the live button with a non-
+    interactive pill."""
+    bp, line = _plan_with_line(db_session, test_user)
+    _seed_prepayment_on_line(db_session, line, test_user, status=ApprovalRequestStatus.REQUESTED)
+    db_session.commit()
+
+    r = client.get(f"/v2/partials/buy-plans/{bp.id}", headers={"HX-Request": "true"})
+    assert r.status_code == 200, r.text
+    body = r.text
+    assert "Prepayment pending" in body  # status-cell badge (#11)
+    assert "Prepay requested" in body  # pill replacing the live button (#10)
+    assert "prepayments/new" not in body  # live button suppressed
 
 
 def test_htmx_create_duplicate_pending_returns_error_toast(client, db_session: Session, test_user: User):

@@ -439,12 +439,14 @@ async def buy_plan_detail_partial(
     )
 
     from ...services.buyplan_workflow import plan_needs_approver_reason
+    from ...services.prepayment_service import prepayment_state_for_lines
 
+    lines = bp.lines or []
     ctx = _base_ctx(request, user, "buy-plans")
     ctx.update(
         {
             "bp": bp,
-            "lines": bp.lines or [],
+            "lines": lines,
             "is_ops_member": _is_ops_member(user, db),
             "can_resource": _can_resource(user),
             # Supervisors/ops resolve flagged-issue lines (the buyer who raised them can't).
@@ -454,6 +456,8 @@ async def buy_plan_detail_partial(
             "top_flag": summarize_top_flag(bp.ai_flags),
             # Why the plan is silently stalled for lack of a configured approver (or None).
             "no_approver_reason": plan_needs_approver_reason(bp, db),
+            # Live prepayment state per line (badge #11 + button→pill #10), one batch query.
+            "prepay_state": prepayment_state_for_lines(db, [ln.id for ln in lines]),
         }
     )
     return template_response("htmx/partials/buy_plans/detail.html", ctx)

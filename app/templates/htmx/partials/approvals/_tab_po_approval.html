@@ -13,7 +13,7 @@
              resource handlers (origin=approvals_hub).
   Depends on: HTMX, Alpine.js, Tailwind; resource_form macro; can_verify_po_line Jinja global.
 #}
-{% from "htmx/partials/buy_plans/_macros.html" import resource_form, scope_toggle, request_prepayment_button %}
+{% from "htmx/partials/buy_plans/_macros.html" import resource_form, scope_toggle, request_prepayment_button, prepay_state_badge, prepay_requested_pill %}
 
 <div class="space-y-6">
   <div>
@@ -25,14 +25,20 @@
     <div class="bg-white rounded-lg border border-line-base shadow-card divide-y divide-line-subtle overflow-hidden">
       {% for row in view.pending %}
       <div class="grid grid-cols-[minmax(0,1fr)_auto_auto] items-start gap-3 px-4 py-2.5">
-        {# identity: customer + MPN/vendor #}
+        {# identity: customer (drill-through to the plan, Task 8) + MPN/vendor/PO/SO + prepay badge #}
         <div class="min-w-0 pt-0.5">
-          <div class="text-sm font-semibold text-gray-900 truncate">{{ row.customer_name or '—' }}</div>
+          <a hx-get="/v2/partials/buy-plans/{{ row.plan.id }}" hx-target="#main-content"
+             hx-push-url="/v2/buy-plans/{{ row.plan.id }}" class="block cursor-pointer group">
+            <div class="text-sm font-semibold text-gray-900 truncate group-hover:text-accent-600">{{ row.customer_name or '—' }}</div>
+          </a>
           <div class="text-tertiary truncate">
             {%- if row.primary_mpn %}<span class="font-mono">{{ row.primary_mpn }}</span>{% endif -%}
             {%- if row.vendor_name %} · {{ row.vendor_name }}{% endif -%}
             {%- if row.po_number %} · <span class="font-mono">{{ row.po_number }}</span>{% endif -%}
+            {%- if row.plan.sales_order_number %} · SO {{ row.plan.sales_order_number }}{% endif -%}
           </div>
+          {% set _pp_state = (prepay_state or {}).get(row.line.id) %}
+          {% if _pp_state %}<div class="mt-1">{{ prepay_state_badge(_pp_state) }}</div>{% endif %}
         </div>
         {# value #}
         <span class="text-sm font-semibold tabular-nums text-gray-900 text-right pt-0.5">${{ '{:,.0f}'.format(row.amount) }}</span>
@@ -54,9 +60,11 @@
           {% if can_resource %}
           {{ resource_form(row.line, row.plan, [], 'approvals_hub', '#ap-hub-body', scope) }}
           {% endif %}
-          {# Request-prepayment: same ownership + cut-PO gate create_prepayment enforces. #}
+          {# Request-prepayment: same ownership + cut-PO gate create_prepayment enforces. A
+             live prepayment (prepay_state) swaps the live button for a non-interactive pill
+             (#10); origin=approvals_hub threads the re-render back to THIS body (#12). #}
           {% if can_request_prepayment(user, row.line) %}
-          {{ request_prepayment_button(row.line, row.plan) }}
+          {% if _pp_state %}{{ prepay_requested_pill(_pp_state) }}{% else %}{{ request_prepayment_button(row.line, row.plan, 'approvals_hub', scope) }}{% endif %}
           {% endif %}
         </div>
       </div>

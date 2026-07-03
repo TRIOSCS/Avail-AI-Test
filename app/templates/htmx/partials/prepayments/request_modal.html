@@ -19,13 +19,29 @@
     Accounting and AP are notified once you submit.
   </p>
 
+  {# #3: confirm the EXACT PO before authorising cash — PO#, MPN, and plan#·SO# read-only. #}
+  <div class='rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 mb-4 text-xs text-gray-600 space-y-0.5'>
+    <div>PO <span class='font-mono text-gray-900'>{{ line.po_number or "—" }}</span>{% if line.requirement and line.requirement.primary_mpn %} · MPN <span class='font-mono text-gray-900'>{{ line.requirement.primary_mpn }}</span>{% endif %}</div>
+    <div>Plan #{{ plan.id }}{% if plan.sales_order_number %} · SO <span class='font-mono text-gray-900'>{{ plan.sales_order_number }}</span>{% endif %}</div>
+  </div>
+
+  {# #12: origin/hub_scope thread the caller's surface so the create route re-renders it.
+     #2: x-data tracks the PO total (po) vs the entered amount (amt); :data-deviates flags a
+     >5% swing that the hx-on::confirm hook turns into a warn-only client confirm. #}
   <form hx-post='/v2/partials/prepayments'
-        hx-target='#main-content'
+        hx-target='{% if origin == "approvals_hub" %}#ap-hub-body{% else %}#main-content{% endif %}'
+        hx-swap='innerHTML'
+        hx-push-url='false'
+        x-data='{ po: {{ "%.2f"|format(amount) }}, amt: {{ "%.2f"|format(amount) }} }'
+        :data-deviates='po > 0 && isFinite(amt) && Math.abs(amt - po) / po > 0.05 ? "1" : ""'
+        hx-on::confirm='if (this.dataset.deviates) { event.preventDefault(); if (window.confirm("The amount differs from the PO line total by more than 5%. Submit anyway?")) event.detail.issueRequest(true); }'
         hx-on::after-request='if(event.detail.successful) $dispatch("close-modal")'
         data-loading-disable
         class='space-y-3'>
     <input type='hidden' name='buy_plan_id' value='{{ plan.id }}'>
     <input type='hidden' name='buy_plan_line_id' value='{{ line.id }}'>
+    <input type='hidden' name='origin' value='{{ origin }}'>
+    <input type='hidden' name='hub_scope' value='{{ hub_scope }}'>
 
     <div>
       <label class='form-label'>Vendor</label>
@@ -41,6 +57,7 @@
         <label class='form-label'>Amount (incl. fees) <span class="text-rose-500">*</span></label>
         <input type='number' name='total_incl_fees' required min='0' step='0.01'
                value='{{ "%.2f"|format(amount) }}'
+               @input='amt = parseFloat($event.target.value)'
                class='w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-brand-500 focus:border-brand-500'>
       </div>
       <div class='w-28'>

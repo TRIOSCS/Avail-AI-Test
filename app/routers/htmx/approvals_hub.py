@@ -123,7 +123,17 @@ def render_tab_body(request: Request, user: User, db: Session, tab: str, scope: 
         return template_response("htmx/partials/approvals/_tab_prepayment.html", ctx)
 
     # po-approval — the per-line PENDING_VERIFY trio (not engine-backed).
+    from ...services.prepayment_service import prepayment_state_for_lines
     from .buy_plans import _can_resource
 
-    ctx.update({"view": build_po_queue_view(db, user, scope=scope), "user": user, "can_resource": _can_resource(user)})
+    view = build_po_queue_view(db, user, scope=scope)
+    ctx.update(
+        {
+            "view": view,
+            "user": user,
+            "can_resource": _can_resource(user),
+            # Live prepayment state per line (badge #11 + button→pill #10), one batch query.
+            "prepay_state": prepayment_state_for_lines(db, [row.line.id for row in view.pending]),
+        }
+    )
     return template_response("htmx/partials/approvals/_tab_po_approval.html", ctx)

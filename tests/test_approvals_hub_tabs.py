@@ -245,6 +245,71 @@ def test_po_approval_tab_has_three_action_row(hub_client: TestClient, db_session
     assert "Re-source" in r.text
 
 
+def _prepay_on_line(
+    db: Session, bp: BuyPlan, line: BuyPlanLine, user: User, *, status: ApprovalRequestStatus
+) -> Prepayment:
+    """Seed a live prepayment (REQUESTED/APPROVED) on *line* so the PO tab reflects
+    it."""
+    pp = Prepayment(
+        buy_plan_id=bp.id,
+        buy_plan_line_id=line.id,
+        total_incl_fees=Decimal("500.00"),
+        currency="USD",
+        created_by_id=user.id,
+    )
+    db.add(pp)
+    db.flush()
+    db.add(
+        ApprovalRequest(
+            gate_type=ApprovalGateType.PREPAYMENT,
+            status=status,
+            subject_type=ApprovalSubjectType.PREPAYMENT,
+            subject_id=pp.id,
+            requested_by_id=user.id,
+            owner_id=user.id,
+        )
+    )
+    db.commit()
+    return pp
+
+
+def test_po_approval_row_links_to_plan_and_shows_so(hub_client: TestClient, db_session: Session, test_user: User):
+    """Task 8: the PO Approval row drills through to its plan (hx-get + push-url) and shows
+    the sales-order number in the sub-line so an approver can jump to the deal."""
+    req, q, rq = _req_quote(db_session, test_user)
+    bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)
+    bp.sales_order_number = "SO-4455"
+    line = _pending_verify_line(db_session, bp, rq, test_user)
+    db_session.commit()
+
+    r = hub_client.get("/v2/partials/approvals/po-approval")
+    assert r.status_code == 200
+    body = r.text
+    assert f'hx-get="/v2/partials/buy-plans/{bp.id}"' in body  # drill-through to the plan
+    assert f'hx-push-url="/v2/buy-plans/{bp.id}"' in body
+    assert "SO-4455" in body  # sales-order number in the sub-line
+    assert f"/lines/{line.id}/verify-po" in body  # the verify action still renders
+
+
+def test_po_approval_row_with_pending_prepayment_shows_badge_and_pill(
+    hub_client: TestClient, db_session: Session, test_user: User
+):
+    """#10/#11: a PENDING_VERIFY line with a live prepayment shows the amber 'Prepayment
+    pending' badge AND swaps the live request button for a non-interactive pill (no
+    duplicate-request dead-end for the approver)."""
+    req, q, rq = _req_quote(db_session, test_user)
+    bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)
+    line = _pending_verify_line(db_session, bp, rq, test_user)
+    _prepay_on_line(db_session, bp, line, test_user, status=ApprovalRequestStatus.REQUESTED)
+
+    r = hub_client.get("/v2/partials/approvals/po-approval")
+    assert r.status_code == 200
+    body = r.text
+    assert "Prepayment pending" in body  # status badge (#11)
+    assert "Prepay requested" in body  # non-interactive pill replacing the live button (#10)
+    assert "prepayments/new" not in body  # the live request button is gone for this line
+
+
 def test_prepayment_tab_lists_pending(hub_client: TestClient, db_session: Session, test_user: User):
     req, q, _ = _req_quote(db_session, test_user)
     bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)

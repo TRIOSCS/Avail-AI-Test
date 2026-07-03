@@ -130,6 +130,8 @@ def _prepayment_error_toast(message: str) -> HTMLResponse:
 def prepayment_request_modal(
     request: Request,
     line_id: int,
+    origin: str = "",
+    hub_scope: str = "all",
     db: Session = Depends(get_db),
     current_user=Depends(require_user),
 ):
@@ -137,6 +139,11 @@ def prepayment_request_modal(
 
     The ownership gate (get_buyplan_for_user → 404 for a restricted non-owner) is
     applied here too so the modal can't be opened against a plan the actor can't access.
+
+    ``origin``/``hub_scope`` (mirroring resource_form) thread the caller's surface through to
+    the create POST so it re-renders the RIGHT surface: ``''`` → plan detail into
+    #main-content; ``approvals_hub`` → the PO Approval tab body into #ap-hub-body (at the
+    preserved SEE-ALL/MINE ``hub_scope``).
     """
     line = db.get(BuyPlanLine, line_id)
     if line is None:
@@ -155,6 +162,8 @@ def prepayment_request_modal(
         "vendor_name": vendor_name,
         "amount": _line_amount(line),
         "payment_methods": _PAYMENT_METHOD_CHOICES,
+        "origin": "approvals_hub" if origin == "approvals_hub" else "",
+        "hub_scope": "mine" if hub_scope == "mine" else "all",
     }
     return template_response("htmx/partials/prepayments/request_modal.html", ctx)
 
@@ -170,6 +179,8 @@ async def prepayment_request_create(
     buyer_remarks: str | None = Form(None),
     vendor_name: str | None = Form(None),
     currency: str = Form("USD"),
+    origin: str = Form(""),
+    hub_scope: str = Form("all"),
     db: Session = Depends(get_db),
     current_user=Depends(require_user),
 ):
@@ -178,6 +189,12 @@ async def prepayment_request_create(
     On a service ValueError (line not on plan / no cut PO / duplicate pending) or
     NoEligibleApproverError, roll back and return an error toast so the modal surfaces the
     reason instead of a silent no-op.
+
+    On success, re-render the caller's surface (threaded via ``origin``, mirroring the
+    verify-po / resource routes): ``approvals_hub`` → the PO Approval tab body into
+    #ap-hub-body (at ``hub_scope``); anything else → the refreshed plan detail into
+    #main-content — so the new "Prepay requested" pill / "Prepayment pending" badge appears
+    at once instead of leaving the buyer on a stale surface.
     """
     try:
         amount = Decimal(total_incl_fees)
@@ -215,6 +232,15 @@ async def prepayment_request_create(
 
     await run_prepayment_notify_bg(notify_prepayment_requested, prepayment.id)
 
-    resp = HTMLResponse("", headers={"HX-Reswap": "none"})
+    # Re-render the surface the request was raised from so the pill/badge update in place.
+    if origin == "approvals_hub":
+        from .htmx.approvals_hub import render_tab_body
+
+        resp = render_tab_body(request, current_user, db, "po-approval", hub_scope)
+    else:
+        from .htmx.buy_plans import buy_plan_detail_partial
+
+        resp = await buy_plan_detail_partial(request, buy_plan_id, current_user, db)
+
     _prepayment_toast(resp, "Prepayment request submitted for approval.", "success")
     return resp
