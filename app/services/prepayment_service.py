@@ -18,6 +18,7 @@ Depends on: app.models.quality_plan (Prepayment), app.models.buy_plan (BuyPlanLi
 """
 
 from collections.abc import Sequence
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy.orm import Session
@@ -215,3 +216,72 @@ def create_prepayment(
     )
 
     return prepayment, request
+
+
+def mark_prepayment_paid(
+    db: Session,
+    prepayment: Prepayment,
+    *,
+    wire_reference: str,
+    paid_amount: Decimal,
+    paid_via: str,
+    paid_by_id: int | None = None,
+    paid_by_label: str | None = None,
+) -> Prepayment:
+    """Transition an APPROVED prepayment to PAID and fan out the paid notice.
+
+    The wire actually went out (confirmed via the tokenized accounting-email link or the
+    in-app manager fallback): stamp the paid fields, clear the single-use ``pay_token`` (so a
+    replayed link is inert), commit, and fire the best-effort in-app fan-out to the buyer,
+    salesperson, and managers.
+
+    Args:
+        db: SQLAlchemy session (sync, 2.0 style).
+        prepayment: The Prepayment to mark paid — must be in status ``approved``.
+        wire_reference: The bank/wire reference recorded by the confirmer.
+        paid_amount: The amount actually wired (defaults to ``total_incl_fees`` at the call
+            site; captured here as a Decimal — never a float).
+        paid_via: ``accounting_email`` (tokenized link) or ``in_app`` (manager fallback).
+        paid_by_id: The Avail User who recorded the payment (in-app path); None for the
+            accounting-email path (accounting has no User row).
+        paid_by_label: The name/initials shown on the record (the confirmer's initials on the
+            email path, the Avail user's name on the in-app path).
+
+    Returns:
+        The same Prepayment, now committed in status ``paid``.
+
+    Raises:
+        ValueError: If *prepayment* is not in status ``approved`` (only an approved
+            prepayment can be marked paid — a requested one is not yet authorized, and a
+            paid/void one is already terminal).
+    """
+    import asyncio
+
+    from ..constants import PrepaymentStatus
+    from .prepayment_notifications import notify_prepayment_paid, run_prepayment_notify_bg
+
+    if prepayment.status != PrepaymentStatus.APPROVED.value:
+        raise ValueError("Only an approved prepayment can be marked paid.")
+
+    prepayment.status = PrepaymentStatus.PAID.value
+    prepayment.paid_at = datetime.now(timezone.utc)
+    prepayment.wire_reference = wire_reference
+    prepayment.paid_amount = paid_amount
+    prepayment.paid_via = paid_via
+    prepayment.paid_by_id = paid_by_id
+    prepayment.paid_by_label = paid_by_label
+    prepayment.pay_token = None
+    db.commit()
+
+    # Fan out the paid notice best-effort. This is a sync service called from async request
+    # handlers (the confirm route + the in-app fallback): if an event loop is running,
+    # schedule the fire-and-forget runner onto it; if not (a sync/CLI/test caller), close the
+    # coroutine cleanly so nothing dangles and no dispatch is attempted.
+    coro = run_prepayment_notify_bg(notify_prepayment_paid, prepayment.id)
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        coro.close()
+    else:
+        loop.create_task(coro)
+    return prepayment
