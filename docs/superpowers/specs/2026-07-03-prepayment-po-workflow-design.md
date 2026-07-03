@@ -36,10 +36,12 @@ sales-order/buy-plan**.
    covers the amount; the first to act decides). Accounting + AP are **notify-only, never
    approvers.**
 4. **Notification source:** admin configures the two **Outlook group email addresses**
-   (accounting, AP). Notify on **request** and on **approval** (not on reject). Delivery:
-   (a) **email** the group addresses directly (the distribution list auto-updates
-   natively); (b) **Teams DM** each *current* member, resolved live via Microsoft Graph so
-   membership auto-updates. Best-effort, failure-isolated per channel.
+   (accounting, AP) + one **Teams channel webhook**. Notify on **request** and on
+   **approval** (not on reject). Delivery: (a) **email** the group addresses directly, sent
+   from a logged-in admin's mailbox (the distribution list auto-updates natively);
+   (b) a **Teams channel card** to the configured webhook. (Teams *DMs* to the non-Avail
+   accounting/AP staff are impossible via Graph — replaced by the channel card.)
+   Best-effort, failure-isolated per channel.
 5. **Amount:** pre-filled from the PO line total, **editable** ("Total incl. fees" can
    differ from the line total via wire fees / currency).
 6. **PO Approval tab:** each PO row is clickable to its parent buy plan and shows the SO#.
@@ -64,15 +66,30 @@ Single head verified.
   `GET /v2/partials/prepayments/new?line_id={id}` that renders a modal pre-filled from the
   PO line: vendor (from `line.offer.vendor_card`), `total_incl_fees` (default =
   `unit_cost * quantity`, editable), `payment_method` (select: wire / cc / paypal),
-  `test_report_sent` (Y/N), `buyer_remarks` (textarea). Fields mirror the Teams card.
+  `test_report_sent` (Y/N), `buyer_remarks` (textarea). Fields mirror the Teams card. The
+  amount default reuses **`buyplan_workflow._line_amount(line)`** (already consumed by
+  `po_queue.py:104`) and stays **`Decimal`** end-to-end (no float rounding on
+  `total_incl_fees`, a `Numeric(12,2)`).
 - **Service:** `create_prepayment` (`app/services/prepayment_service.py`) gains
   `buy_plan_line_id: int`; validates the line belongs to `buy_plan_id` (400 otherwise) and
-  that the line has a cut PO. **Duplicate guard:** refuse a second *pending* prepayment on
-  the same line (one in-flight prepayment per PO) — return a 400 error toast.
+  that the line has a cut PO (`po_number` set; status `pending_verify` or `verified`).
+  **Duplicate guard (race-safe):** `Prepayment` has no status column and no FK to its
+  `ApprovalRequest` (only the reverse polymorphic pair `subject_type='prepayment' /
+  subject_id`), so "pending" is derived by querying `approval_requests` (gate
+  `PREPAYMENT`, status `REQUESTED`) whose `subject_id` is a `Prepayment` on this line.
+  To avoid a two-request race, take `SELECT … FOR UPDATE` on the `buy_plan_line` row at
+  the top of the create transaction, then re-check for an open prepayment before inserting;
+  a second concurrent request loses the lock and gets the 400 error toast.
+- **Permission:** any user who may act on the plan may request — reuse the existing
+  ownership gate already inside `create_prepayment` (`get_buyplan_for_user`, 404 on a
+  restricted role not owning the parent requisition). The button visibility mirrors it via
+  a thin `can_request_prepayment(user, line)` Jinja global (wraps the same ownership check).
 - **Trigger UI:** a "Request prepayment" button on each eligible PO line via a shared
-  Jinja macro, rendered in `_detail_lines.html` and `_tab_po_approval.html`. Gated to users
-  who may act on the plan (reuse the existing ownership/`can_resource`-style predicate; a
-  new `can_request_prepayment(user, line)` Jinja global if needed).
+  Jinja macro. On the **plan detail** (`_detail_lines.html`) it shows on both
+  `pending_verify` and `verified` lines. On the **PO Approval tab** only `pending_verify`
+  lines are actionable rows (`build_po_queue_view` sources `_query_po_pending_verify`;
+  `verified` lines are history-only `POHistoryRow`s with plain fields), so the button
+  appears there only on pending rows — verified-line requests go through the plan detail.
 - On success: existing HX-Trigger toast + re-render; fire the request-time notification
   (§4).
 
@@ -89,37 +106,59 @@ Single head verified.
 
 ### 4. Accounting/AP notification (new module)
 
-- **Config:** two runtime-editable settings — `accounting_group_email`, `ap_group_email` —
-  stored in `system_config` (admin-editable in Settings, no redeploy), surfaced in the
-  Approvals/Ops settings section (admin-only). Empty ⇒ that channel is skipped (graceful).
+Delivery = **email to the two Outlook group addresses + a Teams *channel* card** (per user
+decision). Teams *DMs to non-Avail staff are impossible* — the app's `send_teams_dm`
+(`teams_notifications.py:84`) needs a recipient `User` ORM object + that user's own
+delegated token, and Graph forbids app-only 1:1 chat posting; accounting/AP are not Avail
+users. So the Teams half is a channel card via the existing `post_teams_channel_card`
+(webhook, no per-user permission). Email is sent from a **logged-in admin's mailbox** using
+the delegated-admin-token pattern already in `buyplan_notifications.py:589-614`
+(`notify_stock_sale_approved`) — the app has **no** app-token `sendMail` path (all mail is
+delegated `/me/sendMail`), so app-only email is out of scope.
+
+- **Config:** three runtime-editable keys in `system_config` (real pattern: `SystemConfig`
+  @ `models/config.py:46`, `admin_service.get_config_value/set_config_value`,
+  `PUT /api/admin/config/{key}` @ `admin/system.py:134`) — `accounting_group_email`,
+  `ap_group_email`, `prepayment_teams_webhook`. **Registered** in `SYSTEM_SETTINGS_META` +
+  rendered in `templates/htmx/partials/settings/system.html` with seeded empty defaults so
+  they appear in the admin Settings section (admin-only). Any empty key ⇒ that channel is
+  skipped (logged once, graceful).
 - **New module** `app/services/prepayment_notifications.py`, mirroring
-  `buyplan_notifications.py`'s best-effort, failure-isolated, `run_notify_bg`
-  fire-and-forget pattern (re-derives from `prepayment_id`):
+  `buyplan_notifications.py`'s best-effort, failure-isolated pattern — but with its **own
+  `prepayment_id`-keyed background runner** (`run_notify_bg` hardcodes
+  `bg_db.get(BuyPlan, plan_id)` @ `buyplan_notifications.py:37-53` and cannot re-derive a
+  `Prepayment`; copy the pattern, don't reuse the function):
   - `notify_prepayment_requested(prepayment_id)` and
     `notify_prepayment_approved(prepayment_id)`.
-  - **Email:** send to `accounting_group_email` + `ap_group_email` via the existing Graph
-    app-token mail path (`email_service` / `graph_app_auth`). Body: vendor, PO#/plan/SO#,
-    amount incl. fees, payment method, test-report flag, buyer remarks, requester, and
-    (for the approved variant) approver + timestamp. The DL delivers to current members —
-    auto-updates natively.
-  - **Teams DM:** resolve each group's *current* members via Graph
-    (`GET /groups?$filter=mail eq '{addr}'` → id → `GET /groups/{id}/members`), then DM
-    each via `teams_notifications.py`. Auto-updates because membership is re-resolved each
-    call. **Prerequisite:** the app registration needs the Graph `GroupMember.Read.All`
-    (application) permission with admin consent — a one-time ops step (documented like the
-    datasheet `Sites.Selected` grant). Until granted, the Teams-DM half fails soft (logged)
-    and email still fires.
+  - **Email:** send to `accounting_group_email` + `ap_group_email` via the delegated-admin
+    token (find an admin with a valid Graph token, as `notify_stock_sale_approved` does;
+    if none, log + skip email). Body: vendor, PO#/plan/SO#, amount incl. fees, payment
+    method, test-report flag, buyer remarks, requester, and (approved variant) approver +
+    timestamp. The DL delivers to current members — auto-updates natively.
+  - **Teams:** `post_teams_channel_card(prepayment_teams_webhook, card)` with the same
+    details. No per-user permission, no membership resolution.
 - **Wiring:** `notify_prepayment_requested` fires from the create path; `..._approved`
   fires from the approve branch of `prepay_request_decide`. Both dispatched fire-and-forget
-  so a Graph outage never blocks the request/approval.
+  via the new runner so a Graph/webhook outage never blocks the request/approval. Fires on
+  request + approval only (NOT reject).
 
 ### 5. PO Approval tab → SO/plan connection
 
-- `services/approvals/po_queue.py::build_po_queue_view` — add `so_number` to each PO row
-  (from `plan.sales_order_number`).
+- **No view-model change** — `POPendingRow` already carries the full ORM `plan`
+  (`po_queue.py:47,100`), so the template reads `row.plan.sales_order_number` and links
+  `row.plan.id` directly.
 - `_tab_po_approval.html` — wrap the identity cell in a link to the parent buy plan
   (`/v2/partials/buy-plans/{plan_id}`, push `/v2/buy-plans/{plan_id}`) and render the SO#
   in the sub-line. The tab already tracks pending + recently-resolved.
+
+### 6. Cancel/re-source cancels a dangling prepayment approval
+
+A pending PREPAYMENT `ApprovalRequest` whose PO line is later cancelled or re-sourced would
+otherwise keep routing/showing "approve this prepay" for a PO that no longer exists — a real
+money risk (`ondelete SET NULL` rarely fires because lines are status-changed, not deleted).
+So `resource_line` (`buyplan_workflow.py`), on the cancel/re-source path, must **cancel any
+open PREPAYMENT `ApprovalRequest`** tied to a `Prepayment` on that line (look up via
+`buy_plan_line_id` → the polymorphic prepayment subject), stamping a resolution note. Tested.
 
 ## Data Flow
 
@@ -128,10 +167,10 @@ Buyer on a PO line → "Request prepayment" → modal (prefill from PO)
   → POST /v2/prepayments (line_id, vendor, amount, method, test_report, remarks)
   → create_prepayment: persist Prepayment(buy_plan_line_id, buy_plan_id, …)
         + spawn routed PREPAYMENT ApprovalRequest (→ eligible managers)
-        + run_notify_bg(notify_prepayment_requested)  → email DLs + Teams-DM members
+        + notify_prepayment_requested  → email DLs (admin mailbox) + Teams channel card
   → Prepayment tab (manager): enriched pending row (vendor/PO/SO/amount/test-report/remarks)
   → manager Approve → prepay_request_decide(approve)
-        + run_notify_bg(notify_prepayment_approved)   → email DLs + Teams-DM members
+        + notify_prepayment_approved   → email DLs (admin mailbox) + Teams channel card
         (AP executes the wire from the email/Teams notice)
 ```
 
@@ -155,10 +194,13 @@ Buyer on a PO line → "Request prepayment" → modal (prefill from PO)
 - **Entry point:** the request modal renders pre-filled from a PO; the "Request prepayment"
   button shows only on eligible lines for permitted users.
 - **Notifications:** `notify_prepayment_requested`/`_approved` email the configured group
-  addresses AND Teams-DM the resolved members (Graph mocked); fire on request + approval,
-  NOT on reject; unset address skips that channel; a Graph failure is isolated and does not
-  raise.
-- **PO tab:** rows link to the parent plan and show SO#.
+  addresses (delegated-admin token, mocked) AND post the Teams channel card
+  (`post_teams_channel_card`, mocked); fire on request + approval, NOT on reject; an unset
+  key skips that channel; a Graph/webhook failure is isolated and does not raise; the new
+  `prepayment_id`-keyed runner re-derives the `Prepayment` correctly.
+- **Dangling approval:** cancelling/re-sourcing a line with a pending prepayment cancels its
+  PREPAYMENT `ApprovalRequest`.
+- **PO tab:** rows link to the parent plan and show SO# (no view-model change).
 - **Enriched prepay tab:** row shows vendor/method/amount/test-report/PO/SO.
 - Full suite green (run with `SENTRY_DSN=""` — its shutdown flush corrupts xdist teardown);
   `pre-commit run --all-files`.
@@ -168,13 +210,24 @@ Buyer on a PO line → "Request prepayment" → modal (prefill from PO)
 Migration 178 + code ship in the **same batch** (`./deploy.sh --no-commit`; the entrypoint
 runs `alembic upgrade head`). Go/no-go on staging data first. Then live-verify: request a
 prepayment on a PO, confirm the enriched manager row, approve, confirm the connection
-renders. The Graph `GroupMember.Read.All` consent is an ops prerequisite for the Teams-DM
-channel; email works without it.
+renders. No new Graph consent is required (email = admin delegated token, Teams = channel
+webhook); see the ops-prerequisite note below for the config keys the admin must set.
+
+## Deploy prerequisite (ops, not code)
+
+None blocking. Email uses an admin's existing delegated token (no new consent); the Teams
+channel card uses a webhook the admin pastes into Settings. A dedicated app-token sender
+mailbox (`Mail.Send` application grant) was explicitly deferred (user chose the admin-mailbox
+sender). Admin must set the three config keys in Settings for notifications to fire; unset
+keys skip that channel silently.
 
 ## Out of Scope (YAGNI)
 
 - Requester-chosen approvers / multi-approver "no response" tracking (engine routes to any
   eligible manager; first decides).
+- Teams **DMs** to accounting/AP (impossible — non-Avail users; replaced by a channel card).
+- App-token / dedicated-mailbox email sender (`Mail.Send` grant) — using the admin-mailbox
+  delegated pattern instead.
 - A standalone prepayment detail page (the enriched row carries the Teams-card fields).
 - Notifying accounting/AP on reject (user chose request + approval only).
 - Plan-level prepayment entry (PO-level only).
