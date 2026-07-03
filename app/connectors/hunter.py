@@ -54,7 +54,11 @@ class HunterConnector:
             logger.warning("Hunter domain-search HTTP {} for {}", r.status_code, domain)
             return []
 
-        data = r.json()
+        try:
+            data = r.json()
+        except ValueError:
+            logger.warning("Hunter domain-search non-JSON body for {}", domain)
+            return []
         emails = (data.get("data") or {}).get("emails") or []
         results = []
         for e in emails:
@@ -107,7 +111,11 @@ class HunterConnector:
         if r.status_code != 200:
             return None
 
-        data = r.json()
+        try:
+            data = r.json()
+        except ValueError:
+            logger.warning("Hunter email-finder non-JSON body for {}", domain)
+            return None
         email = (data.get("data") or {}).get("email") or ""
         score = (data.get("data") or {}).get("score") or 0
         return {"email": email, "score": score} if email else None
@@ -138,6 +146,10 @@ class HunterConnector:
         if r.status_code != 200:
             return {"result": "unknown", "score": 0}
 
-        data = r.json()
+        try:
+            data = r.json()
+        except ValueError:
+            logger.warning("Hunter verify non-JSON body for {}", email)
+            return {"result": "unknown", "score": 0}
         d = data.get("data") or {}
         return {"result": d.get("result", "unknown"), "score": d.get("score", 0)}

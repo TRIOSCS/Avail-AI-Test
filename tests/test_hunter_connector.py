@@ -113,6 +113,19 @@ class TestHunterDomainSearch:
         assert result == []
 
     @pytest.mark.asyncio
+    async def test_200_non_json_body_returns_empty(self):
+        """A 200 with a non-JSON body (r.json() raises ValueError) must not escape into
+        the enrichment caller — return the empty shape like the siblings."""
+        from app.connectors.hunter import HunterConnector
+
+        mock_resp = _mock_response(200, {})
+        mock_resp.json.side_effect = ValueError("No JSON object could be decoded")
+        with patch("app.connectors.hunter.http") as mock_http:
+            mock_http.get = AsyncMock(return_value=mock_resp)
+            result = await HunterConnector("key").domain_search("example.com")
+        assert result == []
+
+    @pytest.mark.asyncio
     async def test_skips_entries_without_email(self):
         from app.connectors.hunter import HunterConnector
 
@@ -294,6 +307,17 @@ class TestHunterEmailFinderEdgeCases:
             result = await HunterConnector("key").email_finder("ex.com", "Alice", "Smith")
         assert result is None
 
+    @pytest.mark.asyncio
+    async def test_200_non_json_body_returns_none(self):
+        from app.connectors.hunter import HunterConnector
+
+        mock_resp = _mock_response(200, {})
+        mock_resp.json.side_effect = ValueError("No JSON object could be decoded")
+        with patch("app.connectors.hunter.http") as mock_http:
+            mock_http.get = AsyncMock(return_value=mock_resp)
+            result = await HunterConnector("key").email_finder("ex.com", "Alice", "Smith")
+        assert result is None
+
 
 class TestHunterVerifyEdgeCases:
     @pytest.mark.asyncio
@@ -349,3 +373,14 @@ class TestHunterVerifyEdgeCases:
             mock_http.get = AsyncMock(return_value=mock_resp)
             result = await HunterConnector("key").verify("alice@ex.com")
         assert result == {"result": "deliverable", "score": 95}
+
+    @pytest.mark.asyncio
+    async def test_200_non_json_body_returns_unknown(self):
+        from app.connectors.hunter import HunterConnector
+
+        mock_resp = _mock_response(200, {})
+        mock_resp.json.side_effect = ValueError("No JSON object could be decoded")
+        with patch("app.connectors.hunter.http") as mock_http:
+            mock_http.get = AsyncMock(return_value=mock_resp)
+            result = await HunterConnector("key").verify("alice@ex.com")
+        assert result == {"result": "unknown", "score": 0}
