@@ -2248,18 +2248,32 @@ settings/connectors.html  (grouped card grid)
 | `planned` | Read-only label, no controls |
 
 Every non-planned card has an **enable toggle** (`POST /api/sources/{id}/activate`) and a
-**Test** button (disabled if untestable). Both return JSON; the swap unit is a refreshed
-card partial:
+**Test** button (hidden when no real test path exists). Both return JSON; the swap unit is
+a refreshed card partial:
 
 ```
 PUT  /api/sources/{id}/activate          → JSON {ok, is_active} + showToast HX-Trigger
-POST /api/sources/{id}/test              → JSON {ok, error}
+POST /api/sources/{id}/test              → JSON {ok, error} + showToast HX-Trigger
+     (status + results_count + elapsed — the button uses hx-swap=none, so the toast
+      is the only feedback; single source of truth for a source's ok/error status)
 PUT  /api/sources/{name}/credentials     → JSON {saved} + showToast HX-Trigger
 GET  /v2/partials/settings/connector-card/{id}  → single card HTML (swap target)
 POST /v2/partials/settings/connectors/test-all  → OOB bundle of refreshed cards
      + an OOB summary line ("Tested N · M failed") into #test-all-summary
      (skips inactive / untestable; per-source failures tolerated, never abort)
 ```
+
+**Testability & Test-all concurrency.** A source is "testable" iff a real test path
+exists — `routers/sources.source_has_test_path` (= `_get_connector_for_source` can build
+a probe: credential present, or a keyless test hook such as `AIWebSearchConnector` for
+`ai_live_web`). Keyless sources with no hook (`sam_gov_enrichment`, `stock_list_import`)
+are NOT testable and hide their Test button (previously they falsely reported OK). A
+keyless probe's ok/error result IS persisted (the old `has_env_vars` gate was dropped).
+`run_source_test` = `_probe_source` (network only, never raises) + `_persist_test_result`
+(sequential DB write). `connectors_test_all` fans the probes out CONCURRENTLY with a
+per-probe timeout + an overall budget (< the button's raised `hx-request timeout:120000`)
+and polls `request.is_disconnected()` to cancel an abandoned sweep — the old sequential
+loop blew the 15s htmx client timeout with >4 live connectors and discarded every result.
 
 Credential save uses `hx-ext="json-enc"` to PUT a nested JSON body
 (`{credentials:{ENV:val}}`) to `PUT /api/sources/{name}/credentials` (HTMX json-enc

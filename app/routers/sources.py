@@ -14,6 +14,7 @@ Depends on: models, config, dependencies, connectors/, services/
 """
 
 import base64
+import json
 import os
 import time
 from datetime import datetime, timezone
@@ -127,6 +128,18 @@ def _get_connector_for_source(name: str, db: Session = None):
     if name == "email_mining" and get_effective_flag(db, "email_mining_enabled", settings.email_mining_enabled):
         return _EmailMiningTestConnector()
 
+    # AI live web search — keyless from the operator's view, but it runs on the
+    # Anthropic key (stored under the anthropic_ai source). Wire it so its Test
+    # actually exercises the connector instead of silently resolving to None
+    # (which the old code swallowed → a keyless card that falsely reported OK).
+    if name == "ai_live_web":
+        from ..connectors.ai_live_web import AIWebSearchConnector
+
+        ai_key = get_credential(db, "anthropic_ai", "ANTHROPIC_API_KEY") if db else os.getenv("ANTHROPIC_API_KEY")
+        if ai_key:
+            return AIWebSearchConnector(ai_key)
+        return None
+
     test_connector = {
         "anthropic_ai": _AnthropicTestConnector,
         "teams_notifications": _TeamsTestConnector,
@@ -140,6 +153,20 @@ def _get_connector_for_source(name: str, db: Session = None):
         return test_connector()
 
     return None
+
+
+def source_has_test_path(name: str, db: Session = None) -> bool:
+    """True when a live Test probe can actually run for this source.
+
+    Single source of truth for testability: a test path exists iff
+    ``_get_connector_for_source`` can build a connector (credential present, keyless
+    test hook available, etc.). The connectors UI uses this to decide whether to show
+    the Test button — previously any keyless source claimed testable, so ai_live_web /
+    sam_gov_enrichment / stock_list_import rendered a Test button that silently no-op'd
+    and falsely reported OK. Instantiation is cheap (no network) — it only reads
+    credentials/flags — so this is safe to call per-source on render.
+    """
+    return _get_connector_for_source(name, db) is not None
 
 
 class _EmailMiningTestConnector:
@@ -493,39 +520,47 @@ async def list_api_sources(user: User = Depends(require_user), db: Session = Dep
     return {"sources": result}
 
 
-async def run_source_test(src: ApiSource, db: Session) -> dict:
-    """Run a live part-search probe against one source, persisting its health.
+_TEST_MPN = "LM358N"
 
-    Shared by the per-source Test endpoint and the Connectors "Test all" sweep.
-    Tolerates connector failures (records them as `error`) and never raises.
+
+async def _probe_source(src: ApiSource, db: Session) -> dict:
+    """Run the live connector search for one source WITHOUT persisting anything.
+
+    Returns ``{"results": [...], "elapsed_ms": int, "error": str | None}`` and never
+    raises. Split from persistence so the "Test all" sweep can fan these out
+    concurrently (network I/O overlaps) and then write status sequentially on one
+    session — running ``db.commit()`` from concurrent coroutines on a shared session
+    would race. The connector is built here synchronously (credential reads only, no
+    await) before the first ``await``, so concurrent probes never interleave DB reads.
     """
-    test_mpn = "LM358N"
     start = time.time()
-    results = []
-    error = None
-
-    has_env_vars = bool(src.env_vars)
-
     try:
         connector = _get_connector_for_source(src.name, db)
         if not connector:
             raise ValueError(f"No connector available for {src.name}")
-        results = await connector.search(test_mpn)
-        elapsed_ms = int((time.time() - start) * 1000)
-
-        if has_env_vars:
-            src.status = ApiSourceStatus.LIVE
-            src.last_success = datetime.now(timezone.utc)
-            src.last_error = None
-            src.avg_response_ms = elapsed_ms
+        results = await connector.search(_TEST_MPN)
+        return {"results": results, "elapsed_ms": int((time.time() - start) * 1000), "error": None}
     except Exception as e:
-        elapsed_ms = int((time.time() - start) * 1000)
-        error = str(e)[:500]
-        # Only mark as error if source is configurable (has env_vars)
-        if has_env_vars:
-            src.status = ApiSourceStatus.ERROR
-            src.last_error = error
+        return {"results": [], "elapsed_ms": int((time.time() - start) * 1000), "error": str(e)[:500]}
 
+
+def _persist_test_result(src: ApiSource, db: Session, *, results: list, elapsed_ms: int, error: str | None) -> dict:
+    """Persist one probe outcome to the ApiSource row and return the result dict.
+
+    Records the real ok/error status for every testable source — including keyless
+    ones (ai_live_web, Clay, Teams). The old ``has_env_vars`` gate skipped persistence
+    for keyless sources, so a keyless Test's result was silently discarded and the card
+    stayed "all OK". A source only reaches here when a real test path exists, so
+    recording its status is always meaningful.
+    """
+    if error is None:
+        src.status = ApiSourceStatus.LIVE
+        src.last_success = datetime.now(timezone.utc)
+        src.last_error = None
+        src.avg_response_ms = elapsed_ms
+    else:
+        src.status = ApiSourceStatus.ERROR
+        src.last_error = error
     db.commit()
 
     if results:
@@ -537,7 +572,7 @@ async def run_source_test(src: ApiSource, db: Session) -> dict:
 
     return {
         "source": src.display_name,
-        "test_mpn": test_mpn,
+        "test_mpn": _TEST_MPN,
         "status": status,
         "results_count": len(results),
         "elapsed_ms": elapsed_ms,
@@ -546,11 +581,44 @@ async def run_source_test(src: ApiSource, db: Session) -> dict:
     }
 
 
+async def run_source_test(src: ApiSource, db: Session) -> dict:
+    """Run a live part-search probe against one source, persisting its health.
+
+    Shared by the per-source Test endpoint and the Connectors "Test all" sweep.
+    Tolerates connector failures (records them as `error`) and never raises.
+    """
+    outcome = await _probe_source(src, db)
+    return _persist_test_result(
+        src, db, results=outcome["results"], elapsed_ms=outcome["elapsed_ms"], error=outcome["error"]
+    )
+
+
+def _test_toast_header(result: dict) -> str:
+    """Build the ``HX-Trigger`` payload (a ``showToast`` event) for a single Test.
+
+    Gives the per-source Test button real pass/fail feedback — the JSON body is
+    discarded by ``hx-swap="none"``, so without this a re-test on a Live source was
+    zero-feedback. Bridged client-side by the ``showToast`` listener in htmx_app.js.
+    """
+    name = result["source"]
+    if result["status"] == "ok":
+        message = f"{name}: Live — {result['results_count']} result(s) in {result['elapsed_ms']}ms"
+        kind = "success"
+    elif result["status"] == "no_results":
+        message = f"{name}: connected but returned no results ({result['elapsed_ms']}ms)"
+        kind = "info"
+    else:
+        message = f"{name}: error — {result.get('error') or 'test failed'}"
+        kind = "error"
+    return json.dumps({"showToast": {"message": message, "type": kind}})
+
+
 @router.post("/api/sources/{source_id}/test", response_model=ApiTestResponse)
 @limiter.limit("5/minute")
 async def test_api_source(
     source_id: int,
     request: Request,
+    response: Response,
     user: User = Depends(require_access(AccessKey.MANAGE_CONNECTORS)),
     db: Session = Depends(get_db),
 ):
@@ -559,7 +627,9 @@ async def test_api_source(
     if not src:
         raise HTTPException(404, "API source not found")
 
-    return await run_source_test(src, db)
+    result = await run_source_test(src, db)
+    response.headers["HX-Trigger"] = _test_toast_header(result)
+    return result
 
 
 @router.put("/api/sources/{source_id}/toggle", response_model=ToggleResponse)

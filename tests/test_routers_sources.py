@@ -307,6 +307,24 @@ def test_test_source_success(sources_client: TestClient, _api_source: ApiSource)
     assert data["error"] is None
 
 
+def test_test_source_emits_showtoast_trigger(sources_client: TestClient, _api_source: ApiSource):
+    """Phase-0 FIX C (UX half): a single Test sets HX-Trigger showToast so the button —
+    which uses hx-swap=none and discards the JSON body — gives real pass/fail
+    feedback."""
+    import json
+
+    mock_connector = MagicMock()
+    mock_connector.search = AsyncMock(return_value=[{"vendor_name": "Test", "status": "ok"}])
+
+    with patch("app.routers.sources._get_connector_for_source", return_value=mock_connector):
+        resp = sources_client.post(f"/api/sources/{_api_source.id}/test")
+
+    assert resp.status_code == 200
+    trigger = json.loads(resp.headers["HX-Trigger"])
+    assert trigger["showToast"]["type"] == "success"
+    assert "Test Source" in trigger["showToast"]["message"]
+
+
 # ── 4. test_test_source_failure ──────────────────────────────────────
 
 
@@ -1356,8 +1374,9 @@ def test_test_source_no_results(sources_client: TestClient, _api_source: ApiSour
 
 
 def test_test_source_no_env_vars(sources_client: TestClient, db_session: Session):
-    """POST /api/sources/{id}/test for source with no env_vars does not change status on
-    error."""
+    """Phase-0 FIX C: a keyless source (no env_vars) that FAILS its probe now records
+    status=error. The old has_env_vars gate discarded keyless results, so the card
+    falsely stayed OK — this test now asserts the corrected persistence."""
     src = ApiSource(
         name="no_env_src",
         display_name="No Env",
@@ -1379,14 +1398,15 @@ def test_test_source_no_env_vars(sources_client: TestClient, db_session: Session
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "error"
-    # Source status should NOT be updated because no env_vars
+    # Status IS now persisted for keyless sources (has_env_vars gate dropped).
     db_session.refresh(src)
-    assert src.status == "live"
+    assert src.status == "error"
+    assert "Test error" in (src.last_error or "")
 
 
 def test_test_source_success_no_env_vars(sources_client: TestClient, db_session: Session):
-    """POST /api/sources/{id}/test for source with no env_vars does not change status on
-    success."""
+    """Phase-0 FIX C: a keyless source (no env_vars) that PASSES its probe now records
+    status=live (was: not persisted, so a keyless Test was zero-feedback)."""
     src = ApiSource(
         name="no_env_success",
         display_name="No Env Success",
@@ -1408,9 +1428,10 @@ def test_test_source_success_no_env_vars(sources_client: TestClient, db_session:
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "ok"
-    # Source status should NOT be updated because no env_vars
+    # Status IS now persisted for keyless sources (has_env_vars gate dropped).
     db_session.refresh(src)
-    assert src.status == "pending"
+    assert src.status == "live"
+    assert src.last_success is not None
 
 
 def test_toggle_source_not_found(sources_client: TestClient):

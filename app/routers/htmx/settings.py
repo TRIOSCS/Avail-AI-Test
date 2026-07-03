@@ -524,11 +524,19 @@ def _enrich_source(source, db) -> dict:
     #  - planned: never (no implementation yet)
     #  - worker-backed: never via the API-probe Test button — health is the heartbeat,
     #    not a synchronous search (the worker runs out-of-process on a schedule)
-    #  - else: has some form of access
+    #  - keyless: only when a real test path exists — some keyless sources
+    #    (sam_gov_enrichment, stock_list_import) have no connector/test hook, so their
+    #    Test button was a cosmetic no-op that falsely reported OK. Derive it from
+    #    whether _get_connector_for_source can actually build a probe.
+    #  - else (credentialed / oauth): has some form of access
     if ct == "planned" or worker is not None:
         testable = False
+    elif keyless:
+        from ..sources import source_has_test_path
+
+        testable = source_has_test_path(name, db)
     else:
-        testable = bool(credential_set or oauth_connected or keyless)
+        testable = bool(credential_set or oauth_connected)
 
     return {
         "id": source.id,

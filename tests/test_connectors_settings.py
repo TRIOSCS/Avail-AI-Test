@@ -366,14 +366,16 @@ def test_dead_providers_absent(admin_client):
 
 
 def test_test_all_endpoint_returns_oob_bundle(admin_client, db_session):
-    """POST test-all returns 200 with an OOB card bundle for credentialed+active
-    sources, tolerating per-source connector failures (no real connectors in tests)."""
+    """POST test-all returns 200 with an OOB card bundle for testable+active sources,
+    tolerating per-source connector failures (no real connectors in tests)."""
     from app.models import ApiSource as AS
 
-    # A keyless source is "testable"; make it active so the sweep includes it.
-    sam = db_session.query(AS).filter_by(name="sam_gov_enrichment").first()
-    assert sam is not None
-    sam.is_active = True
+    # teams_notifications has a real keyless test hook (testable); it fails fast without
+    # a webhook (recorded as error) but still produces an OOB card. sam_gov_enrichment is
+    # deliberately NOT testable post-FIX-C (no test path), so it can't stand in here.
+    teams = db_session.query(AS).filter_by(name="teams_notifications").first()
+    assert teams is not None
+    teams.is_active = True
     db_session.commit()
 
     r = admin_client.post("/v2/partials/settings/connectors/test-all")
@@ -535,8 +537,9 @@ def test_test_all_returns_summary_fragment(admin_client, db_session):
     """Test-all returns an aggregate summary line targeting a dedicated container."""
     from app.models import ApiSource as AS
 
-    sam = db_session.query(AS).filter_by(name="sam_gov_enrichment").first()
-    sam.is_active = True
+    # teams_notifications is testable (real keyless hook); sam_gov is not post-FIX-C.
+    teams = db_session.query(AS).filter_by(name="teams_notifications").first()
+    teams.is_active = True
     db_session.commit()
 
     r = admin_client.post("/v2/partials/settings/connectors/test-all")

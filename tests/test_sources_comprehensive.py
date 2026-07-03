@@ -347,7 +347,9 @@ class TestTestApiSourceNoConnector:
         assert data["status"] == "ok"
 
     def test_source_error_without_env_vars(self, sources_client: TestClient, db_session: Session):
-        """Source without env_vars that errors does not update status."""
+        """Phase-0 FIX C: a keyless source (no env_vars) that errors now persists
+        status=error (the has_env_vars gate was dropped so keyless Test results are
+        recorded instead of silently discarded)."""
         src = ApiSource(
             name="no_env_err",
             display_name="No Env Err",
@@ -371,7 +373,7 @@ class TestTestApiSourceNoConnector:
         assert data["status"] == "error"
 
         db_session.refresh(src)
-        assert src.status == "pending"  # Not changed to "error"
+        assert src.status == "error"  # FIX C: keyless result now persisted
 
 
 # ---------------------------------------------------------------------------
