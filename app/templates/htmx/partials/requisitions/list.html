@@ -64,7 +64,7 @@
           {# Search scope indicators — show what matched when actively searching #}
           {% if match_counts %}
           <div class="flex items-center gap-1.5 mt-1.5 animate-fade-in">
-            <span class="text-xs text-gray-400 uppercase tracking-wide mr-0.5">Matched:</span>
+            <span class="text-secondary uppercase tracking-wide mr-0.5">Matched:</span>
             {% set scopes = [
               ("name", "Names", "bg-brand-50 text-brand-600 border-brand-200", match_counts.name),
               ("customer", "Customers", "bg-sky-50 text-sky-600 border-sky-200", match_counts.customer),
@@ -196,7 +196,7 @@
         <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
       </button>
       <div x-show="showAssign" role="menu" @click.away="showAssign = false" x-cloak
-           class="absolute left-0 mt-1 w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-10 py-1">
+           class="absolute left-0 mt-1 w-48 bg-white border border-gray-200 rounded-lg shadow-float z-10 py-1">
         {% for u in users %}
         <button hx-post="/v2/partials/requisitions/bulk/assign"
                 hx-target="#main-content"

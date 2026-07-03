@@ -18,7 +18,7 @@
          @dossier-add-to-req.window="addToReq()">
 
   {# ── Identity hero card ── #}
-  <div class="rounded-xl bg-white border border-brand-200 shadow-sm p-5">
+  <div class="rounded-xl bg-white border border-brand-200 shadow-card p-5">
     <div class="flex flex-col lg:flex-row gap-6">
 
       {# Zone A — identity #}
@@ -67,7 +67,7 @@
         {% if known and card.description %}
         <p class="mt-3 text-xs text-gray-600 max-w-xl leading-relaxed">{{ card.description }}</p>
         {% elif not known %}
-        <p class="mt-3 text-xs text-gray-400 max-w-xl leading-relaxed">We don't have history on this part — the live market below will tell us who has it.</p>
+        <p class="mt-3 text-secondary max-w-xl leading-relaxed">We don't have history on this part — the live market below will tell us who has it.</p>
         {% endif %}
       </div>
 
@@ -78,7 +78,7 @@
         <div class="mt-1 flex items-baseline gap-1.5">
           {# figure-accent: tabular-nums + accent color for the decision-driving numeral #}
           <span class="font-mono text-2xl font-bold figure-accent">${{ (pt.last_price if pt.last_price is not none else pt.min_price)|pricefmt }}</span>
-          <span class="text-xs text-gray-400">last</span>
+          <span class="text-secondary">last</span>
         </div>
         <p class="font-mono text-xs text-gray-600 mt-0.5">${{ pt.min_price|pricefmt }} – ${{ pt.max_price|pricefmt }}</p>
         {# Sparkline from min/last/max — a 3-point glanceable trend (no axes). currentColor via text-brand-400 wrapper. #}
@@ -93,11 +93,11 @@
           <polyline fill="none" stroke="currentColor" stroke-width="1.5" points="0,{{ '%.1f'|format(y_lo) }} 60,{{ '%.1f'|format(y_hi) }} 120,{{ '%.1f'|format(y_last) }}"/>
           <circle cx="120" cy="{{ '%.1f'|format(y_last) }}" r="2" fill="currentColor"/>
         </svg>
-        <p class="text-xs text-gray-400 mt-1">{{ pt.currency }} · min–max–last</p>
+        <p class="text-secondary mt-1">{{ pt.currency }} · min–max–last</p>
         {% else %}
         <div class="mt-1 rounded-lg border border-dashed border-brand-200 px-3 py-4 text-center">
           <p class="font-mono text-sm text-gray-300">$ — — —</p>
-          <p class="text-xs text-gray-400 mt-1">No price history yet — run the market</p>
+          <p class="text-secondary mt-1">No price history yet — run the market</p>
         </div>
         {% endif %}
       </div>
@@ -117,7 +117,7 @@
           {% for b in history.buyers[:3] %}
           <span class="h-5 w-5 rounded-full bg-accent-100 text-accent-700 grid place-items-center text-[11px] font-semibold ring-2 ring-white" title="{{ b.name or b.email }}">{{ (b.name or b.email)[:2]|upper }}</span>
           {% endfor %}
-          <span class="text-xs text-gray-400 pl-2.5">{{ history.buyers|length }} buyer{{ '' if history.buyers|length == 1 else 's' }}</span>
+          <span class="text-secondary pl-2.5">{{ history.buyers|length }} buyer{{ '' if history.buyers|length == 1 else 's' }}</span>
         </div>
         {% endif %}
       </div>
@@ -149,7 +149,7 @@
           <svg class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>
         </button>
         <div x-show="overflow" x-cloak @click.outside="overflow=false" x-transition
-             class="absolute right-0 mt-1 w-52 rounded-lg bg-white border border-brand-200 shadow-lg z-20 py-1 text-sm">
+             class="absolute right-0 mt-1 w-52 rounded-lg bg-white border border-brand-200 shadow-float z-20 py-1 text-sm">
           <button type="button" @click="refreshMarket();overflow=false" class="w-full text-left px-3 py-2 hover:bg-brand-50 text-gray-700">↻ Refresh market</button>
           <button type="button" @click="copyMpn();overflow=false" class="w-full text-left px-3 py-2 hover:bg-brand-50 text-gray-700">Copy MPN</button>
           {% if known %}

@@ -253,7 +253,7 @@
   {# ── Undo toast for archive actions ──────────────────────── #}
   <div x-data="undoToast()" @part-archived.window="showUndo($event.detail)"
        x-show="visible" x-cloak
-       class="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-gray-800 text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-3 text-xs">
+       class="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-gray-800 text-white px-4 py-2 rounded-lg shadow-float flex items-center gap-3 text-xs">
     <span x-text="message"></span>
     <button @click="undo()" class="font-semibold text-accent-300 hover:text-accent-100 underline">Undo</button>
     <span class="text-gray-400 text-[11px]" x-text="countdown + 's'"></span>

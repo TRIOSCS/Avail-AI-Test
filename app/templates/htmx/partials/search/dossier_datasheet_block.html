@@ -13,9 +13,9 @@
     Datasheet (saved {{ saved.captured_at.strftime('%b %d, %Y') if saved.captured_at else '' }})
   </a>
   {% elif card.datasheet_searched_at and not card.datasheet_captured_at %}
-  <span class="inline-flex items-center gap-1.5 text-xs text-gray-400">No datasheet found (will retry)</span>
+  <span class="inline-flex items-center gap-1.5 text-secondary">No datasheet found (will retry)</span>
   {% else %}
-  <span class="inline-flex items-center gap-1.5 text-xs text-gray-400"
+  <span class="inline-flex items-center gap-1.5 text-secondary"
         hx-get="/v2/partials/search/dossier/datasheet-status?mpn={{ mpn|urlencode }}"
         hx-trigger="every 15s" hx-target="this" hx-swap="outerHTML">
     <svg class="h-3.5 w-3.5 animate-spin text-brand-400" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
