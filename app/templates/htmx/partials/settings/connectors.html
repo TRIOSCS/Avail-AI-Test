@@ -46,7 +46,7 @@
       </button>
       {# Test-all aggregate result — OOB-swapped here after the sweep so it's visible
          even when the cards that changed are far down a long page. #}
-      <div id="test-all-summary" class="text-xs text-gray-500" aria-live="polite"></div>
+      <div id="test-all-summary" class="text-secondary" aria-live="polite"></div>
     </div>
   </div>
 
@@ -57,7 +57,7 @@
             d="M13 10V3L4 14h7v7l9-11h-7z"/>
     </svg>
     <p class="text-sm text-gray-600 mt-3">No connectors yet.</p>
-    <p class="text-xs text-gray-400 mt-1">Data providers appear here once they're configured for your workspace.</p>
+    <p class="text-secondary mt-1">Data providers appear here once they're configured for your workspace.</p>
   </div>
   {% endif %}
 
@@ -74,7 +74,7 @@
         </svg>
         <span class="text-sm font-semibold text-gray-700 uppercase tracking-wide">{{ group.label }}</span>
       </span>
-      <span class="text-xs text-gray-500">
+      <span class="text-secondary">
         {{ g_live }} live{% if g_needs %} · {{ g_needs }} need setup{% endif %}
       </span>
     </button>

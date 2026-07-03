@@ -51,14 +51,14 @@
           </div>
         </template>
         <template x-if="activeFilterCount === 0">
-          <span class="text-xs font-semibold text-gray-400 uppercase tracking-widest">Filters</span>
+          <span class="font-semibold text-secondary uppercase tracking-widest">Filters</span>
         </template>
       </div>
 
       {# ── Recents (re-entry accelerator) ─────────────────────────────#}
       <template x-if="recentCommodities.length > 0">
         <div class="mb-3">
-          <h4 class="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1.5">Recent</h4>
+          <h4 class="font-semibold text-secondary uppercase tracking-widest mb-1.5">Recent</h4>
           <div class="flex flex-wrap gap-1">
             <template x-for="rc in recentCommodities" :key="rc">
               <button @click="selectCommodity(rc)"
@@ -71,14 +71,14 @@
       </template>
 
       {# ── Category (the entry point) ─────────────────────────────────#}
-      <h4 class="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1.5">Category</h4>
+      <h4 class="font-semibold text-secondary uppercase tracking-widest mb-1.5">Category</h4>
       <input type="text" x-model="categorySearch" placeholder="Jump to category…"
              aria-label="Filter categories"
              class="w-full mb-1 px-2 py-1 text-[13px] border border-gray-200 rounded focus:ring-1 focus:ring-accent-500 focus:border-accent-500">
       <button @click="selectCommodity(null)" x-show="!categorySearch"
               :class="!commodity ? 'bg-accent-100 text-accent-800 font-semibold border-l-[3px] border-accent-500' : 'text-gray-600 hover:bg-gray-50 border-l-[3px] border-transparent'"
               class="w-full text-left px-3 py-1.5 text-sm rounded-r transition-colors mb-1">
-        All Materials <span class="text-xs text-gray-400">({{ total_materials }})</span>
+        All Materials <span class="text-secondary">({{ total_materials }})</span>
       </button>
       <span id="mfr-filter-spinner" class="htmx-indicator text-xs text-gray-400">Loading...</span>
       <div hx-get="/v2/partials/materials/filters/tree"
@@ -172,7 +172,7 @@
             </label>
           </div>
           <div class="mb-3">
-            <h4 class="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1.5">Part type</h4>
+            <h4 class="font-semibold text-secondary uppercase tracking-widest mb-1.5">Part type</h4>
             <div class="flex flex-wrap gap-1">
               {# Vocabulary lives on the component (INTERNAL_MODES) — single front-end source of truth. #}
               <template x-for="opt in INTERNAL_MODES" :key="'int-' + opt[0]">
@@ -185,7 +185,7 @@
             </div>
           </div>
           <div class="mb-3">
-            <h4 class="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1.5">Searched within</h4>
+            <h4 class="font-semibold text-secondary uppercase tracking-widest mb-1.5">Searched within</h4>
             <div class="flex flex-wrap gap-1">
               {# Vocabulary lives on the component (SEARCH_BUCKETS) — single front-end source of truth. #}
               <template x-for="opt in SEARCH_BUCKETS" :key="'sw-' + opt[0]">
@@ -198,7 +198,7 @@
             </div>
           </div>
           <div class="mb-3">
-            <h4 class="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1.5">Min searches</h4>
+            <h4 class="font-semibold text-secondary uppercase tracking-widest mb-1.5">Min searches</h4>
             <input type="number" min="0" step="1" placeholder="0"
                    :value="minSearches || ''"
                    @input.debounce.600ms="setMinSearches($event.target.value)"

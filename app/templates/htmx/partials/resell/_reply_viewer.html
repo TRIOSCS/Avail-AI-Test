@@ -37,10 +37,10 @@
           </div>
           <div>
             <span class="text-sm font-medium text-gray-900">{{ vr.vendor_name or 'Unknown sender' }}</span>
-            {% if vr.vendor_email %}<span class="text-xs text-gray-400 ml-1">&lt;{{ vr.vendor_email }}&gt;</span>{% endif %}
+            {% if vr.vendor_email %}<span class="text-secondary ml-1">&lt;{{ vr.vendor_email }}&gt;</span>{% endif %}
           </div>
         </div>
-        <span class="text-xs text-gray-400">{{ vr.received_at | fmtdate }}</span>
+        <span class="text-secondary">{{ vr.received_at | fmtdate }}</span>
       </div>
       {% if vr.subject %}<p class="text-xs font-medium text-gray-600 mb-1.5">{{ vr.subject }}</p>{% endif %}
       <div class="text-sm text-gray-700 prose prose-sm max-w-none">
@@ -54,7 +54,7 @@
      Honest note, not a silent blank — the convert form below still works off the thread. #}
   <div class="rounded-lg border border-dashed border-brand-200 p-5 text-center text-sm text-gray-500">
     <p class="font-medium text-gray-600">This buyer replied, but no message body was captured.</p>
-    <p class="text-xs text-gray-400 mt-1">You can still record their offer below.</p>
+    <p class="text-secondary mt-1">You can still record their offer below.</p>
   </div>
   {% endif %}
 
@@ -68,7 +68,7 @@
               class="text-xs font-medium text-accent-600 hover:text-accent-700"
               x-text="showConvert ? 'Hide' : 'Add offer'"></button>
     </div>
-    <p class="text-xs text-gray-400 mt-0.5">Read the reply, then record the buyer's price and quantity as a tracked offer.</p>
+    <p class="text-secondary mt-0.5">Read the reply, then record the buyer's price and quantity as a tracked offer.</p>
 
     <form x-show="showConvert" x-cloak
           hx-post="/api/resell/{{ el.id }}/outreach/{{ outreach.id }}/offer"

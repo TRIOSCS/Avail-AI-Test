@@ -24,7 +24,7 @@
               :aria-current="commodity === '{{ sub }}' ? 'true' : undefined"
               class="w-full text-left px-3 py-1.5 text-sm rounded-r flex items-center justify-between transition-colors">
         <span>{{ display_names.get(sub, sub) }}</span>
-        <span class="text-xs text-gray-400">({{ count }})</span>
+        <span class="text-secondary">({{ count }})</span>
       </button>
       {% endif %}
       {% endfor %}
@@ -32,7 +32,7 @@
   </div>
   {% endfor %}
   {# Type-to-find found nothing — don't leave a blank tree with no signal. #}
-  <p x-show="categorySearch && !anyCategoryMatches" x-cloak class="px-3 py-2 text-xs text-gray-400 italic">
+  <p x-show="categorySearch && !anyCategoryMatches" x-cloak class="px-3 py-2 text-secondary italic">
     No categories match “<span x-text="categorySearch"></span>”.
   </p>
 </div>
