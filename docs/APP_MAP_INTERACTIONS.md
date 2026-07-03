@@ -5812,6 +5812,19 @@ second line of defense, `_run_approve_side_effects`/`_run_reject_side_effects` r
 raises `ValueError` → the router returns a clean 400 (via `get_db`'s rollback) instead of
 silently reactivating a cancelled/halted plan.
 
+**Prepayment teardown sweep (money-safety, finding #2):** a plan that dies must not leave a
+pending wire an approver could still authorise. `_cancel_open_prepayment_requests_for_plan(plan_id,
+db, reason)` joins `ApprovalRequest → Prepayment` on `subject_id` and voids every
+`REQUESTED` `PREPAYMENT` request whose `Prepayment.buy_plan_id == plan_id` (sets
+`status=CANCELLED` + `resolved_at` + `resolution_note=reason`, flushes, returns the count).
+It fires from `cancel_buy_plan`, `halt_plan`, `_complete_plan` (so BOTH completion paths —
+`check_completion` and the stock-sale job — sweep) and `resource_line`. **Plan-scoped**, so a
+multi-line re-source (`line_id` + `also_line_ids`) voids every affected line's pending
+prepayment in one sweep — a re-sourced line means its PO/vendor changed, so the plan's pending
+wire is stale regardless. **Idempotent** (`REQUESTED`-only): an already-`APPROVED`
+prepayment (about to be wired) is deliberately left alone — clawing back an approved wire needs
+the follow-up VOID lifecycle state.
+
 The buy-plans ACTION badge (`alerts/sources/buyplan.py`, branch 2 — manager approval) counts
 ONLY pending plans with **no open `BUY_PLAN` `ApprovalRequest`**, so a post-C1 plan surfaces
 on the **Approvals** badge alone (no double-count) while a pre-C1 transition-window plan (no
