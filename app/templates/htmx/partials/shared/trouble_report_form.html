@@ -1,34 +1,70 @@
-{# Trouble report form — loaded into the global modal via HTMX #}
-<div x-data="{ submitting: false }" class="p-6">
-  <div class="flex items-center gap-3 mb-4">
-    <div class="flex-shrink-0 w-10 h-10 bg-rose-100 rounded-full flex items-center justify-center">
+{# Report form — shared by "Report a Problem" (bug) and "Request a Feature"
+   (feature). Rendered into the global modal via HTMX; `ticket_type` (a TicketType)
+   selects the copy + accent. Both kinds reuse the SAME client-side capture
+   (window._ttScreenshot / window._ttContext) and submit through
+   window.submitTroubleReport, which sends window._ttKind as ticket_type.
+
+   Layout is deliberately tight: the auto-captured screenshot is a compact,
+   collapsed chip (no large empty box) and the technical context is summarised in
+   one line, so the form stays focused on the one thing we ask the user to type. #}
+{% set is_feature = ticket_type == 'feature' %}
+<div x-data="{ submitting: false, shotOpen: false }" class="p-5">
+  <div class="flex items-center gap-3 mb-3">
+    {% if is_feature %}
+    <div class="flex-shrink-0 w-9 h-9 bg-violet-100 rounded-full flex items-center justify-center">
+      <svg class="w-5 h-5 text-violet-600" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round"
+          d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+      </svg>
+    </div>
+    <div>
+      <h3 id="modal-title" class="h2">Request a Feature</h3>
+      <p class="text-sm text-gray-600">Tell us what you'd like to add or change on this page.</p>
+    </div>
+    {% else %}
+    <div class="flex-shrink-0 w-9 h-9 bg-rose-100 rounded-full flex items-center justify-center">
       <svg class="w-5 h-5 text-rose-600" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
         <path stroke-linecap="round" stroke-linejoin="round"
           d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
       </svg>
     </div>
     <div>
-      <h3 class="h2">Report a Problem</h3>
-      <p class="text-sm text-gray-600">Describe the issue — a screenshot has been captured automatically.</p>
+      <h3 id="modal-title" class="h2">Report a Problem</h3>
+      <p class="text-sm text-gray-600">Describe what went wrong on this page.</p>
     </div>
+    {% endif %}
   </div>
 
-  {# Screenshot preview #}
-  <div x-show="window._ttScreenshot" x-cloak class="mb-4 border border-gray-200 rounded-lg overflow-hidden">
-    <img x-bind:src="window._ttScreenshot || ''" class="w-full max-h-40 object-cover object-top" alt="Screenshot">
-  </div>
-
-  <div class="mb-4">
+  <div class="mb-3">
     <label for="tr-description" class="block text-sm font-medium text-gray-700 mb-1">
-      What went wrong?
+      {{ 'What would you like, and why?' if is_feature else 'What went wrong?' }}
     </label>
     <textarea
       id="tr-description"
       rows="4"
       required
       minlength="1"
-      placeholder="Describe the problem you encountered..."
+      placeholder="{{ 'Describe the feature you want and why it would help...' if is_feature else 'Describe the problem you encountered...' }}"
       class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 placeholder-gray-400"></textarea>
+  </div>
+
+  {# Compact captured-context line + collapsible screenshot chip (no large empty box).
+     Both kinds capture the page URL, view, browser and a screenshot to help us act. #}
+  <div class="mb-4 text-xs text-gray-500 flex items-center gap-2 flex-wrap">
+    <svg class="w-3.5 h-3.5 text-gray-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
+    </svg>
+    <span>This page and technical context are attached automatically.</span>
+    <template x-if="window._ttScreenshot">
+      <button type="button" @click="shotOpen = !shotOpen"
+              class="underline decoration-dotted hover:text-gray-700">
+        <span x-show="!shotOpen">View screenshot</span>
+        <span x-show="shotOpen" x-cloak>Hide screenshot</span>
+      </button>
+    </template>
+  </div>
+  <div x-show="shotOpen" x-cloak x-collapse class="mb-4 border border-gray-200 rounded-lg overflow-hidden">
+    <img x-bind:src="window._ttScreenshot || ''" class="w-full max-h-48 object-cover object-top" alt="Captured screenshot">
   </div>
 
   <div class="flex items-center justify-between pt-2 border-t border-gray-100">
@@ -40,8 +76,8 @@
     <button type="button"
             :disabled="submitting"
             @click="window.submitTroubleReport($data)"
-            class="px-4 py-2 bg-rose-500 text-white text-sm font-medium rounded-lg hover:bg-rose-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
-      <span x-show="!submitting" x-cloak>Submit Report</span>
+            class="px-4 py-2 {{ 'bg-violet-500 hover:bg-violet-600' if is_feature else 'bg-rose-500 hover:bg-rose-600' }} text-white text-sm font-medium rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+      <span x-show="!submitting" x-cloak>{{ 'Submit Request' if is_feature else 'Submit Report' }}</span>
       <span x-show="submitting" x-cloak class="flex items-center gap-2">
         <svg class="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
           <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>

@@ -210,14 +210,19 @@ window.collectTroubleContext = function collectTroubleContext() {
 
 // More-menu entry point: capture the page first (so neither menu nor modal is in
 // the shot), then open the report modal. Double-rAF guarantees the menu has
-// painted out before capture.
-window.openTroubleReport = async function openTroubleReport() {
+// painted out before capture. `kind` is 'bug' (default, Report a Problem) or
+// 'feature' (Request a Feature) — it drives the form copy and the ticket_type sent
+// on submit. Both kinds capture the same screenshot + context.
+window.openTroubleReport = async function openTroubleReport(kind) {
+    kind = (kind === 'feature') ? 'feature' : 'bug';
+    window._ttKind = kind;
     await new Promise(function(r) {
         requestAnimationFrame(function() { requestAnimationFrame(r); });
     });
     window._ttScreenshot = await window.captureTroubleScreenshot();
     window._ttContext = window.collectTroubleContext();
-    window.dispatchEvent(new CustomEvent('open-modal', { detail: { url: '/api/trouble-tickets/form' } }));
+    const url = '/api/trouble-tickets/form' + (kind === 'feature' ? '?type=feature' : '');
+    window.dispatchEvent(new CustomEvent('open-modal', { detail: { url: url } }));
 };
 
 // Submit the trouble report. Called from the form's @click as a single
@@ -235,6 +240,7 @@ window.submitTroubleReport = function submitTroubleReport(data) {
         headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
         body: JSON.stringify({
             description: desc,
+            ticket_type: window._ttKind || 'bug',
             screenshot: window._ttScreenshot || null,
             page_url: window.location.href,
             user_agent: navigator.userAgent,
