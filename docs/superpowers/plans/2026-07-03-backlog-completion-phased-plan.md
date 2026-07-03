@@ -42,6 +42,20 @@ critical/high items. Findings drive a follow-up build.
   and startup category-alias backfill (`startup.py:1128`). *Rec: defer — minor optimizations,
   not incomplete features.*
 
+## ⭐ USER-ADDED review/rework PROGRAMS (2026-07-03, queue after the API-core sprint)
+Same treatment as the API-search core: deep review → prioritized findings → build. Each is
+its own brainstorm→spec→plan→build (or an audit-workflow → action plan → build).
+- **RESELL module — workflow / function / process review + optimization + improvement +
+  rework.** The resell module (/v2/resell, models 127-133). Audit the end-to-end resell flow
+  (offer→buyers→award→...) like the prepayment/API-search reviews: correctness, gaps,
+  efficiency, UX; then rework. → Fable multi-lens audit workflow first.
+- **CRM aesthetics / readability pass** — make the CRM (Customers/Contacts/Companies +
+  detail panels) **easier to read, more pleasing to the eye, with the important info standing
+  out WITHOUT being noise — clean + effective.** A taste/readability pass (like the app-wide
+  taste-layer we shipped, focused on CRM): visual hierarchy, scannability, signal-vs-noise,
+  the key facts (deal value, status, next action) prominent; muted chrome recedes. → invoke
+  frontend-design; likely a targeted taste sweep, not a rebuild.
+
 ## Phase 5 — Future programs *(rec: schedule as their own projects, NOT this sprint)*
 Written specs/plans that are multi-week roadmap efforts, not quick completions:
 - Vendor-API parametric enrichment (the ~6-month filters program).
