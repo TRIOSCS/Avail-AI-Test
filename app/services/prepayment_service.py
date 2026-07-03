@@ -41,45 +41,57 @@ def prepayment_state_for_lines(db: Session, line_ids: Sequence[int]) -> dict[int
     """Return each PO line's *live* prepayment state in a single query (no per-line
     N+1).
 
-    A line maps to ``'approved'`` when its prepayment's ApprovalRequest is APPROVED (a wire
-    is imminent / already authorised), else ``'requested'`` when the request is still
-    REQUESTED (awaiting approval). Lines with no live prepayment — none at all, or only a
-    rejected/cancelled/expired one — are absent from the map (callers treat "not in map" as
-    "no prepayment"). Approved wins over requested if a line somehow has both.
+    Read straight off the ``Prepayment.status`` lifecycle (the source of truth since the
+    closure work): a line maps to ``'requested'`` (awaiting approval), ``'approved'`` (a wire
+    is authorised / imminent), or ``'paid'`` (the wire went out). A ``void`` prepayment is
+    deliberately OMITTED — a voided (stood-down) wire is no longer active, so the line is
+    treated as having no prepayment and the Request-prepayment button returns, letting a fresh
+    request be raised. Lines with no prepayment at all are likewise absent (callers treat "not
+    in map" as "no prepayment"). Precedence paid > approved > requested if a line somehow has
+    several (the duplicate-guard makes that rare).
 
     Shared by the plan-detail line table and the Approvals-hub PO Approval tab so both can
-    (a) show a "Prepayment pending / Prepaid" badge and (b) swap the live request button for
-    a non-interactive pill without any extra DB round-trips.
+    (a) show a "Prepayment pending / Prepaid / Paid" badge and (b) swap the live request
+    button for a non-interactive pill without any extra DB round-trips.
 
     Args:
         db: SQLAlchemy session (sync, 2.0 style).
         line_ids: The ``BuyPlanLine.id`` values to resolve (empty → ``{}``).
 
     Returns:
-        ``{line_id: 'requested' | 'approved'}`` for lines with a live prepayment.
+        ``{line_id: 'requested' | 'approved' | 'paid'}`` for lines with an active prepayment
+        (``void`` omitted so the line re-opens for a fresh request).
     """
+    from ..constants import PrepaymentStatus
+
     ids = [i for i in line_ids if i is not None]
     if not ids:
         return {}
 
+    # Precedence for the badge/pill when a line carries more than one prepayment over time
+    # (e.g. an old void + a fresh request): the most-progressed active state wins. ``void`` is
+    # excluded from the query entirely so it can never mask a live request.
+    precedence = {
+        PrepaymentStatus.PAID.value: 3,
+        PrepaymentStatus.APPROVED.value: 2,
+        PrepaymentStatus.REQUESTED.value: 1,
+    }
+
     rows = (
-        db.query(Prepayment.buy_plan_line_id, ApprovalRequest.status)
-        .join(ApprovalRequest, ApprovalRequest.subject_id == Prepayment.id)
+        db.query(Prepayment.buy_plan_line_id, Prepayment.status)
         .filter(
-            ApprovalRequest.subject_type == ApprovalSubjectType.PREPAYMENT,
-            ApprovalRequest.gate_type == ApprovalGateType.PREPAYMENT,
-            ApprovalRequest.status.in_([ApprovalRequestStatus.REQUESTED, ApprovalRequestStatus.APPROVED]),
             Prepayment.buy_plan_line_id.in_(ids),
+            Prepayment.status.in_(list(precedence.keys())),
         )
         .all()
     )
 
     state: dict[int, str] = {}
     for line_id, status in rows:
-        if status == ApprovalRequestStatus.APPROVED:
-            state[line_id] = "approved"
-        elif line_id not in state:
-            state[line_id] = "requested"
+        if line_id is None or status not in precedence:
+            continue
+        if line_id not in state or precedence[status] > precedence[state[line_id]]:
+            state[line_id] = status
     return state
 
 

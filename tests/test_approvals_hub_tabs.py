@@ -34,6 +34,7 @@ from app.constants import (
     BuyPlanLineStatus,
     BuyPlanStatus,
     OfferStatus,
+    PrepaymentStatus,
     SOVerificationStatus,
 )
 from app.database import get_db
@@ -246,16 +247,31 @@ def test_po_approval_tab_has_three_action_row(hub_client: TestClient, db_session
 
 
 def _prepay_on_line(
-    db: Session, bp: BuyPlan, line: BuyPlanLine, user: User, *, status: ApprovalRequestStatus
+    db: Session,
+    bp: BuyPlan,
+    line: BuyPlanLine,
+    user: User,
+    *,
+    status: ApprovalRequestStatus,
+    pp_status: str | None = None,
+    wire_reference: str | None = None,
+    void_reason: str | None = None,
 ) -> Prepayment:
-    """Seed a live prepayment (REQUESTED/APPROVED) on *line* so the PO tab reflects
-    it."""
+    """Seed a prepayment on *line* so the PO tab reflects it.
+
+    ``pp_status`` sets the
+    Prepayment lifecycle (the badge/pill source of truth); ``status`` sets its
+    ApprovalRequest.
+    """
     pp = Prepayment(
         buy_plan_id=bp.id,
         buy_plan_line_id=line.id,
         total_incl_fees=Decimal("500.00"),
         currency="USD",
         created_by_id=user.id,
+        status=pp_status or PrepaymentStatus.REQUESTED.value,
+        wire_reference=wire_reference,
+        void_reason=void_reason,
     )
     db.add(pp)
     db.flush()
@@ -308,6 +324,136 @@ def test_po_approval_row_with_pending_prepayment_shows_badge_and_pill(
     assert "Prepayment pending" in body  # status badge (#11)
     assert "Prepay requested" in body  # non-interactive pill replacing the live button (#10)
     assert "prepayments/new" not in body  # the live request button is gone for this line
+
+
+def test_po_approval_paid_line_shows_paid_and_blocks_request(
+    hub_client: TestClient, db_session: Session, test_user: User
+):
+    """Task 8: a line whose prepayment is PAID shows the Paid pill and offers NO new-request
+    button (a wire already went out)."""
+    req, q, rq = _req_quote(db_session, test_user)
+    bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)
+    line = _pending_verify_line(db_session, bp, rq, test_user)
+    _prepay_on_line(
+        db_session,
+        bp,
+        line,
+        test_user,
+        status=ApprovalRequestStatus.APPROVED,
+        pp_status=PrepaymentStatus.PAID.value,
+        wire_reference="WIRE-PAID",
+    )
+
+    r = hub_client.get("/v2/partials/approvals/po-approval")
+    assert r.status_code == 200
+    body = r.text
+    assert "Paid" in body  # the Paid lifecycle badge/pill
+    assert "prepayments/new" not in body  # no duplicate request on an already-paid line
+
+
+def test_po_approval_void_line_reopens_request_button(hub_client: TestClient, db_session: Session, test_user: User):
+    """Task 8: a VOID prepayment is treated as no active prepayment — the line re-opens for a
+    fresh Request-prepayment button (no pill), so a stood-down wire can be re-requested."""
+    req, q, rq = _req_quote(db_session, test_user)
+    bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)
+    line = _pending_verify_line(db_session, bp, rq, test_user)
+    _prepay_on_line(
+        db_session,
+        bp,
+        line,
+        test_user,
+        status=ApprovalRequestStatus.APPROVED,
+        pp_status=PrepaymentStatus.VOID.value,
+        void_reason="plan cancelled",
+    )
+
+    r = hub_client.get("/v2/partials/approvals/po-approval")
+    assert r.status_code == 200
+    body = r.text
+    assert f"prepayments/new?line_id={line.id}" in body  # the live request button is back
+    assert "Prepay requested" not in body  # no non-interactive pill
+    assert "Prepayment pending" not in body  # and no active-state badge
+
+
+def _resolved_prepay_request(
+    db: Session,
+    bp: BuyPlan,
+    rq: Requirement,
+    user: User,
+    *,
+    pp_status: str,
+    wire_reference: str | None = None,
+    paid_by_label: str | None = None,
+    void_reason: str | None = None,
+) -> Prepayment:
+    """A prepayment with a RESOLVED (approved) request whose Prepayment lifecycle is set
+    to *pp_status* (paid/void) so the Prepayment tab's Recently-resolved section
+    reflects the closure state."""
+    ar, pp, _line = _rich_prepay_request(db, bp, rq, user)
+    now = datetime.now(timezone.utc)
+    ar.status = ApprovalRequestStatus.APPROVED.value
+    ar.resolved_at = now
+    recip = db.query(ApprovalStepRecipient).join(ApprovalStep).filter(ApprovalStep.request_id == ar.id).one()
+    recip.status = ApprovalRecipientStatus.APPROVED.value
+    recip.decided_at = now
+    pp.status = pp_status
+    pp.wire_reference = wire_reference
+    pp.paid_by_label = paid_by_label
+    pp.void_reason = void_reason
+    if pp_status == PrepaymentStatus.PAID.value:
+        pp.paid_at = now
+    elif pp_status == PrepaymentStatus.VOID.value:
+        pp.voided_at = now
+        pp.pay_token = None
+    db.commit()
+    return pp
+
+
+def test_prepayment_tab_paid_row_shows_paid_badge_and_wire(
+    hub_client: TestClient, db_session: Session, test_user: User
+):
+    """Task 8: a PAID prepayment's resolved row shows the Paid badge + the wire reference and
+    who recorded it."""
+    req, q, rq = _req_quote(db_session, test_user)
+    bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)
+    _resolved_prepay_request(
+        db_session,
+        bp,
+        rq,
+        test_user,
+        pp_status=PrepaymentStatus.PAID.value,
+        wire_reference="FT-5566",
+        paid_by_label="MK",
+    )
+
+    r = hub_client.get("/v2/partials/approvals/prepayment")
+    assert r.status_code == 200
+    body = r.text
+    assert "Recently resolved" in body
+    assert "Paid" in body  # the Paid lifecycle badge
+    assert "FT-5566" in body  # the wire reference on the row
+    assert "MK" in body  # who recorded the payment
+
+
+def test_prepayment_tab_void_row_shows_void_and_reason(hub_client: TestClient, db_session: Session, test_user: User):
+    """Task 8: a VOID prepayment's resolved row shows the Void badge + the stand-down
+    reason."""
+    req, q, rq = _req_quote(db_session, test_user)
+    bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)
+    _resolved_prepay_request(
+        db_session,
+        bp,
+        rq,
+        test_user,
+        pp_status=PrepaymentStatus.VOID.value,
+        void_reason="buy plan cancelled — prepayment voided",
+    )
+
+    r = hub_client.get("/v2/partials/approvals/prepayment")
+    assert r.status_code == 200
+    body = r.text
+    assert "Void" in body  # the Void lifecycle badge
+    assert "buy plan cancelled" in body  # the stand-down reason on the row
 
 
 def test_prepayment_tab_lists_pending(hub_client: TestClient, db_session: Session, test_user: User):

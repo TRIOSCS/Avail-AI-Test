@@ -298,49 +298,42 @@ def test_post_prepayments_returns_200_with_request_id(db_session: Session, clien
 
 
 def test_prepayment_state_for_lines_returns_batch_states(db_session: Session, test_user: User):
-    """prepayment_state_for_lines maps each line to its live prepayment state in ONE query:
-    a REQUESTED prepayment → 'requested', an APPROVED one → 'approved'; lines with no live
-    (or a rejected) prepayment are absent, and an empty input short-circuits to {}."""
-    from app.models.approvals import ApprovalRequest
+    """prepayment_state_for_lines maps each line to its Prepayment.status lifecycle in ONE
+    query: requested → 'requested', approved → 'approved', paid → 'paid'; a VOID prepayment is
+    OMITTED (the line re-opens for a fresh request), lines with none are absent, and an empty
+    input short-circuits to {}."""
+    from app.constants import PrepaymentStatus
     from app.models.quality_plan import Prepayment
     from app.services.prepayment_service import prepayment_state_for_lines
 
     buy_plan = _make_buy_plan(db_session, test_user)
     line_req = _make_po_line(db_session, buy_plan)
     line_app = _make_po_line(db_session, buy_plan)
-    line_rej = _make_po_line(db_session, buy_plan)
+    line_paid = _make_po_line(db_session, buy_plan)
+    line_void = _make_po_line(db_session, buy_plan)
     line_none = _make_po_line(db_session, buy_plan)
     db_session.commit()
 
-    def _seed(line, status: ApprovalRequestStatus) -> None:
+    def _seed(line, status: str) -> None:
         pp = Prepayment(
             buy_plan_id=buy_plan.id,
             buy_plan_line_id=line.id,
             total_incl_fees=Decimal("100.00"),
             currency="USD",
             created_by_id=test_user.id,
+            status=status,
         )
         db_session.add(pp)
         db_session.flush()
-        db_session.add(
-            ApprovalRequest(
-                gate_type=ApprovalGateType.PREPAYMENT,
-                status=status,
-                subject_type=ApprovalSubjectType.PREPAYMENT,
-                subject_id=pp.id,
-                requested_by_id=test_user.id,
-                owner_id=test_user.id,
-            )
-        )
-        db_session.flush()
 
-    _seed(line_req, ApprovalRequestStatus.REQUESTED)
-    _seed(line_app, ApprovalRequestStatus.APPROVED)
-    _seed(line_rej, ApprovalRequestStatus.REJECTED)  # not live → excluded
+    _seed(line_req, PrepaymentStatus.REQUESTED.value)
+    _seed(line_app, PrepaymentStatus.APPROVED.value)
+    _seed(line_paid, PrepaymentStatus.PAID.value)
+    _seed(line_void, PrepaymentStatus.VOID.value)  # stood down → omitted (re-opens the line)
     db_session.commit()
 
-    state = prepayment_state_for_lines(db_session, [line_req.id, line_app.id, line_rej.id, line_none.id])
-    assert state == {line_req.id: "requested", line_app.id: "approved"}
+    state = prepayment_state_for_lines(db_session, [line_req.id, line_app.id, line_paid.id, line_void.id, line_none.id])
+    assert state == {line_req.id: "requested", line_app.id: "approved", line_paid.id: "paid"}
     assert prepayment_state_for_lines(db_session, []) == {}
 
 
