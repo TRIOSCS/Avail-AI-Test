@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
+from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -253,6 +254,117 @@ def test_prepayment_tab_lists_pending(hub_client: TestClient, db_session: Sessio
     assert r.status_code == 200
     assert "WireVendor" in r.text
     assert "Approve" in r.text
+
+
+def _rich_prepay_request(
+    db: Session,
+    bp: BuyPlan,
+    rq: Requirement,
+    user: User,
+    *,
+    amount: str = "20002.38",
+    line_cost: str = "2000.00",
+    line_qty: int = 10,
+    test_report_sent: bool = False,
+) -> tuple[ApprovalRequest, Prepayment, BuyPlanLine]:
+    """A fully-populated pending prepayment (legal beneficiary, PO line, SO#, remarks)
+    so the tab can be exercised as the real cash-approval surface it is."""
+    bp.sales_order_number = "SO-3321"
+    vc = VendorCard(
+        normalized_name=f"vc-{uuid.uuid4().hex[:8]}",
+        display_name="WireVendor Display",
+        legal_name="Northwind Components LLC",
+    )
+    db.add(vc)
+    db.flush()
+    line = BuyPlanLine(
+        buy_plan_id=bp.id,
+        requirement_id=rq.id,
+        quantity=line_qty,
+        unit_cost=Decimal(line_cost),
+        status=BuyPlanLineStatus.PENDING_VERIFY.value,
+        po_number="PO-7788",
+    )
+    db.add(line)
+    db.flush()
+    pp = Prepayment(
+        buy_plan_id=bp.id,
+        buy_plan_line_id=line.id,
+        vendor_card_id=vc.id,
+        total_incl_fees=Decimal(amount),
+        currency="USD",
+        payment_method="wire",
+        test_report_sent=test_report_sent,
+        buyer_remarks="Vendor requires 50% upfront before build slot",
+        created_by_id=user.id,
+    )
+    db.add(pp)
+    db.flush()
+    ar = ApprovalRequest(
+        gate_type=ApprovalGateType.PREPAYMENT,
+        status=ApprovalRequestStatus.REQUESTED,
+        subject_type=ApprovalSubjectType.PREPAYMENT,
+        subject_id=pp.id,
+        amount=Decimal(amount),
+        currency="USD",
+        requested_by_id=user.id,
+        owner_id=user.id,
+    )
+    db.add(ar)
+    db.flush()
+    step = ApprovalStep(request_id=ar.id, seq=1, rule="any", status="pending")
+    db.add(step)
+    db.flush()
+    db.add(ApprovalStepRecipient(step_id=step.id, user_id=user.id, status=ApprovalRecipientStatus.PENDING))
+    db.commit()
+    return ar, pp, line
+
+
+def test_prepayment_pending_row_shows_full_decision_context(
+    hub_client: TestClient, db_session: Session, test_user: User
+):
+    """The pending prepayment row surfaces everything a manager needs to authorise cash:
+    legal beneficiary, a 2-decimal currency amount + PO delta, the drill-through link, the
+    PO#/SO#, the requester, remarks, and the LOUD test-report warning (findings #1/#5/#6/#9)."""
+    req, q, rq = _req_quote(db_session, test_user)
+    bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)
+    _rich_prepay_request(db_session, bp, rq, test_user)
+
+    r = hub_client.get("/v2/partials/approvals/prepayment")
+    assert r.status_code == 200
+    body = r.text
+    assert "Northwind Components LLC" in body  # beneficiary (legal name wins the chain)
+    assert "USD 20,002.38" in body  # 2-decimal amount honouring currency (finding #9)
+    assert "20,000.00" in body and "+2.38" in body  # PO total + signed delta (finding #1)
+    assert "PO-7788" in body and "SO-3321" in body
+    assert f'hx-get="/v2/partials/buy-plans/{bp.id}"' in body  # wired drill-through (finding #9)
+    assert "Test report NOT sent to management" in body  # loud warning (finding #5)
+    assert "Vendor requires 50% upfront" in body  # buyer remarks (finding #6)
+    assert "Test Buyer" in body  # requester name
+
+
+def test_prepayment_resolved_row_is_self_documenting(hub_client: TestClient, db_session: Session, test_user: User):
+    """A resolved prepayment row documents who approved it, for how much, on which PO
+    (finding #7)."""
+    req, q, rq = _req_quote(db_session, test_user)
+    bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)
+    ar, _pp, _line = _rich_prepay_request(db_session, bp, rq, test_user)
+    # Approve it directly (flip request + recipient decision) so it lands in Recently-resolved.
+    now = datetime.now(timezone.utc)
+    ar.status = ApprovalRequestStatus.APPROVED.value
+    ar.resolved_at = now
+    recip = db_session.query(ApprovalStepRecipient).join(ApprovalStep).filter(ApprovalStep.request_id == ar.id).one()
+    recip.status = ApprovalRecipientStatus.APPROVED.value
+    recip.decided_at = now
+    db_session.commit()
+
+    r = hub_client.get("/v2/partials/approvals/prepayment")
+    assert r.status_code == 200
+    body = r.text
+    assert "Recently resolved" in body
+    assert "Approved by Test Buyer" in body  # approved-by (decider name)
+    assert "USD 20,002.38" in body  # amount
+    assert "PO-7788" in body  # the PO it prepaid
 
 
 # ── origin=approvals_hub re-render for all three decide actions ───────────

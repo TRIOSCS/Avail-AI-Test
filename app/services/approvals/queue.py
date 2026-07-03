@@ -20,9 +20,10 @@ Purpose: ``pending_rows_for_gate`` / ``resolved_rows_for_gate`` build the rows o
 
 Called by: routers/htmx/approvals_hub.py (Buy Plan + Prepayment tabs).
 Depends on: models.approvals (ApprovalRequest/Step/StepRecipient), models.auth (User),
-            models.buy_plan (BuyPlan), models.quality_plan (QualityPlan, Prepayment),
-            models.sourcing (Requisition, via BuyPlan), app.constants enums. Reuses the
-            exact awaiting-me join from services/alerts/sources/approvals.py.
+            models.buy_plan (BuyPlan, BuyPlanLine), models.quality_plan (QualityPlan,
+            Prepayment), models.sourcing (Requisition, via BuyPlan), app.constants enums,
+            services.buyplan_workflow._line_amount (lazy — the PO line-total delta). Reuses
+            the exact awaiting-me join from services/alerts/sources/approvals.py.
 """
 
 from __future__ import annotations
@@ -43,7 +44,7 @@ from ...constants import (
 )
 from ...models.approvals import ApprovalRequest, ApprovalStep, ApprovalStepRecipient
 from ...models.auth import User
-from ...models.buy_plan import BuyPlan
+from ...models.buy_plan import BuyPlan, BuyPlanLine
 from ...models.quality_plan import Prepayment, QualityPlan
 
 RESOLVED_STATUSES = (
@@ -80,6 +81,18 @@ class RowVM:
     parent_label: str | None
     payment_method: str | None
     can_act: bool
+    # ── Prepayment-only decision context (None for other gate types). The Prepayment tab is
+    # the surface where cash is authorised, so a row carries the full payee / PO / amount
+    # picture the approver needs. ``amount``/``currency`` above are overridden to the
+    # Prepayment's own ``total_incl_fees``/``currency`` (the authoritative authorised figure).
+    beneficiary: str | None = None
+    test_report_sent: bool | None = None
+    po_number: str | None = None
+    so_number: str | None = None
+    plan_id: int | None = None
+    buyer_remarks: str | None = None
+    po_line_total: float | None = None
+    decided_by: str | None = None
 
 
 def _mine_clause(user: User):
@@ -127,6 +140,7 @@ def resolved_rows_for_gate(db: Session, gate_type, *, scope: str = "all", user: 
         return []
     requester_names = _requester_names(db, resolved)
     subjects = _load_subjects(db, resolved)
+    decider_names = _decider_names(db, [ar.id for ar in resolved])
     return [
         _row_vm(
             ar,
@@ -135,6 +149,7 @@ def resolved_rows_for_gate(db: Session, gate_type, *, scope: str = "all", user: 
             approver_names={},
             requester_names=requester_names,
             subjects=subjects,
+            decider_names=decider_names,
         )
         for ar in resolved
     ]
@@ -355,8 +370,20 @@ def _load_subjects(db: Session, rows: list[ApprovalRequest]) -> dict[tuple[str, 
 
     pp_ids = by_type.get(ApprovalSubjectType.PREPAYMENT)
     if pp_ids:
+        # Eager-load every relationship the Prepayment RowVM reads (beneficiary needs the
+        # vendor_card; the SO#/customer needs buy_plan→requisition; the PO#/line-total delta
+        # needs buy_plan_line→offer) so the enriched fields add NO per-row query — the
+        # module's constant-query / no-N+1 contract holds regardless of row count (finding #8).
         pps = (
-            db.execute(select(Prepayment).options(joinedload(Prepayment.vendor_card)).where(Prepayment.id.in_(pp_ids)))
+            db.execute(
+                select(Prepayment)
+                .options(
+                    joinedload(Prepayment.vendor_card),
+                    joinedload(Prepayment.buy_plan).joinedload(BuyPlan.requisition),
+                    joinedload(Prepayment.buy_plan_line).joinedload(BuyPlanLine.offer),
+                )
+                .where(Prepayment.id.in_(pp_ids))
+            )
             .unique()
             .scalars()
         )
@@ -364,6 +391,31 @@ def _load_subjects(db: Session, rows: list[ApprovalRequest]) -> dict[tuple[str, 
             subjects[(ApprovalSubjectType.PREPAYMENT, pp.id)] = pp
 
     return subjects
+
+
+def _decider_names(db: Session, request_ids: list[int]) -> dict[int, str]:
+    """For each resolved request id, the name of the recipient who decided it (approved
+    / rejected) — the "approved-by" a self-documenting resolved row shows (finding #7).
+
+    One query for the whole page (keyed on a non-null ``decided_at``), most-recent decision
+    wins — no per-row lookup.
+    """
+    if not request_ids:
+        return {}
+    rows = db.execute(
+        select(ApprovalStep.request_id, User.name, ApprovalStepRecipient.decided_at)
+        .join(ApprovalStepRecipient, ApprovalStepRecipient.step_id == ApprovalStep.id)
+        .join(User, User.id == ApprovalStepRecipient.user_id)
+        .where(
+            ApprovalStep.request_id.in_(request_ids),
+            ApprovalStepRecipient.decided_at.isnot(None),
+        )
+        .order_by(ApprovalStepRecipient.decided_at.desc())
+    ).all()
+    out: dict[int, str] = {}
+    for req_id, name, _decided_at in rows:
+        out.setdefault(req_id, name or "—")  # first row per request = most-recent decider
+    return out
 
 
 # ── Assembly ─────────────────────────────────────────────────────────────
@@ -393,6 +445,22 @@ def _resolve_subject(ar: ApprovalRequest, subjects: dict) -> tuple[str, str | No
     return f"Request #{ar.id}", None, None, None
 
 
+def _beneficiary(pp: Prepayment) -> str:
+    """Who is actually being paid — the legal payee, most-authoritative first.
+
+    Chain (finding #3): vendor_card.legal_name → the request-time vendor_name snapshot →
+    vendor_card.display_name → "—". The approver/AP must never see a blank payee.
+    """
+    vc = pp.vendor_card
+    if vc is not None and vc.legal_name:
+        return vc.legal_name
+    if pp.vendor_name:
+        return pp.vendor_name
+    if vc is not None and vc.display_name:
+        return vc.display_name
+    return "—"
+
+
 def _row_vm(
     ar: ApprovalRequest,
     *,
@@ -401,16 +469,45 @@ def _row_vm(
     approver_names: dict[int, list[str]],
     requester_names: dict[int, str],
     subjects: dict,
+    decider_names: dict[int, str] | None = None,
 ) -> RowVM:
     subject_label, subject_href, parent_label, payment_method = _resolve_subject(ar, subjects)
+
+    amount = ar.amount
+    currency = ar.currency or "USD"
+    beneficiary = po_number = so_number = buyer_remarks = None
+    plan_id = po_line_total = test_report_sent = None
+
+    if ar.subject_type == ApprovalSubjectType.PREPAYMENT:
+        pp = subjects.get((ar.subject_type, ar.subject_id)) if ar.subject_id else None
+        if pp is not None:
+            # Authoritative authorised figure comes from the Prepayment itself, not the
+            # (possibly-drifted) request amount — this is the surface where cash is signed off.
+            from ..buyplan_workflow import _line_amount  # lazy: avoid an import cycle
+
+            beneficiary = _beneficiary(pp)
+            test_report_sent = pp.test_report_sent
+            buyer_remarks = pp.buyer_remarks
+            plan_id = pp.buy_plan_id
+            if pp.total_incl_fees is not None:
+                amount = pp.total_incl_fees
+            currency = pp.currency or currency
+            line = pp.buy_plan_line
+            if line is not None:
+                po_number = line.po_number
+                po_line_total = _line_amount(line)
+            bp = pp.buy_plan
+            if bp is not None:
+                so_number = bp.sales_order_number
+
     return RowVM(
         id=ar.id,
         gate_type=ar.gate_type,
         status=ar.status,
         subject_type=ar.subject_type,
         subject_id=ar.subject_id,
-        amount=ar.amount,
-        currency=ar.currency or "USD",
+        amount=amount,
+        currency=currency,
         created_at=ar.created_at,
         resolved_at=ar.resolved_at,
         resolution_note=ar.resolution_note,
@@ -421,4 +518,12 @@ def _row_vm(
         parent_label=parent_label,
         payment_method=payment_method,
         can_act=pending and ar.id in actionable,
+        beneficiary=beneficiary,
+        test_report_sent=test_report_sent,
+        po_number=po_number,
+        so_number=so_number,
+        plan_id=plan_id,
+        buyer_remarks=buyer_remarks,
+        po_line_total=po_line_total,
+        decided_by=(decider_names.get(ar.id) if decider_names else None),
     )

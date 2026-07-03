@@ -28,7 +28,7 @@ from app.constants import (
 )
 from app.models.approvals import ApprovalRequest, ApprovalStep, ApprovalStepRecipient
 from app.models.auth import User
-from app.models.buy_plan import BuyPlan
+from app.models.buy_plan import BuyPlan, BuyPlanLine
 from app.models.quality_plan import Prepayment, QualityPlan
 from app.models.quotes import Quote
 from app.models.sourcing import Requisition
@@ -380,6 +380,112 @@ def test_amount_source_per_gate(db_session: Session) -> None:
 
     assert pending_rows_for_gate(db_session, me, ApprovalGateType.BUY_PLAN)[0].amount == Decimal("4200.00")
     assert pending_rows_for_gate(db_session, me, ApprovalGateType.PREPAYMENT)[0].amount == Decimal("2500.00")
+
+
+def _rich_prepay(db: Session, bp: BuyPlan, me: User) -> Prepayment:
+    """A prepayment with a legal beneficiary + a PO line, for the enriched-RowVM
+    assertions."""
+    bp.sales_order_number = "SO-9001"
+    vc = VendorCard(
+        normalized_name=f"vc-{uuid.uuid4().hex[:8]}",
+        display_name="Acme Display",
+        legal_name="Acme Components GmbH",
+    )
+    db.add(vc)
+    db.flush()
+    line = BuyPlanLine(
+        buy_plan_id=bp.id, quantity=10, unit_cost=Decimal("2000.00"), po_number="PO-5501", status="pending_verify"
+    )
+    db.add(line)
+    db.flush()
+    pp = Prepayment(
+        buy_plan_id=bp.id,
+        buy_plan_line_id=line.id,
+        vendor_card_id=vc.id,
+        total_incl_fees=Decimal("20002.38"),
+        currency="USD",
+        payment_method=PaymentMethod.WIRE,
+        test_report_sent=False,
+        buyer_remarks="50% upfront required",
+        created_by_id=me.id,
+    )
+    db.add(pp)
+    db.flush()
+    return pp
+
+
+def test_prepayment_rowvm_enriched_decision_fields(db_session: Session) -> None:
+    """The prepayment RowVM carries the full cash-decision context: legal beneficiary, the
+    authoritative authorised amount/currency (from the Prepayment, not the request), PO#/SO#,
+    the PO line total for the delta, remarks, and the test-report flag."""
+    me = _user(db_session, name="Deciderella")
+    bp = _bp(db_session, me)
+    pp = _rich_prepay(db_session, bp, me)
+    _seed(
+        db_session,
+        ApprovalGateType.PREPAYMENT,
+        subject_type=ApprovalSubjectType.PREPAYMENT,
+        subject_id=pp.id,
+        pending_recipients=(me,),
+    )
+
+    row = pending_rows_for_gate(db_session, me, ApprovalGateType.PREPAYMENT)[0]
+    assert row.beneficiary == "Acme Components GmbH"  # legal_name wins the chain
+    assert row.amount == Decimal("20002.38") and row.currency == "USD"
+    assert row.po_number == "PO-5501"
+    assert row.so_number == "SO-9001"
+    assert row.plan_id == bp.id
+    assert row.po_line_total == 20000.0  # unit_cost * qty → drives the delta
+    assert row.buyer_remarks == "50% upfront required"
+    assert row.test_report_sent is False
+
+
+def test_prepayment_rows_have_no_n_plus_one(db_session: Session) -> None:
+    """Adding the beneficiary / PO / SO enrichment must not reintroduce per-row queries:
+
+    the SELECT count for the pending list is constant regardless of how many rows it
+    holds.
+    """
+    from sqlalchemy import event
+
+    me = _user(db_session)
+
+    def _seed_one() -> None:
+        bp = _bp(db_session, me)
+        pp = _rich_prepay(db_session, bp, me)
+        _seed(
+            db_session,
+            ApprovalGateType.PREPAYMENT,
+            subject_type=ApprovalSubjectType.PREPAYMENT,
+            subject_id=pp.id,
+            pending_recipients=(me,),
+        )
+
+    def _count_selects() -> tuple[int, int]:
+        engine = db_session.get_bind()
+        db_session.expire_all()  # force a real reload, not identity-map hits
+        counter = {"n": 0}
+
+        def _on_exec(conn, cursor, statement, params, context, executemany):
+            if statement.lstrip().upper().startswith("SELECT"):
+                counter["n"] += 1
+
+        event.listen(engine, "before_cursor_execute", _on_exec)
+        try:
+            rows = pending_rows_for_gate(db_session, me, ApprovalGateType.PREPAYMENT)
+        finally:
+            event.remove(engine, "before_cursor_execute", _on_exec)
+        return counter["n"], len(rows)
+
+    _seed_one()
+    _seed_one()
+    q2, n2 = _count_selects()
+    _seed_one()
+    _seed_one()
+    q4, n4 = _count_selects()
+
+    assert n2 == 2 and n4 == 4
+    assert q4 == q2  # constant query budget — no N+1 from the new eager-loaded fields
 
 
 def test_pending_capped_oldest_first(db_session, monkeypatch) -> None:

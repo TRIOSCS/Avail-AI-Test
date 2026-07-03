@@ -14,19 +14,51 @@
 {% from "htmx/partials/buy_plans/_macros.html" import scope_toggle %}
 {% macro prepay_pending_row(row, scope) %}
 {% set decide_url = '/v2/partials/approvals/prepay-requests/' ~ row.id ~ '/decide' %}
+{% set link = row.subject_href %}
 <div class="grid grid-cols-[minmax(0,1fr)_auto_auto] items-start gap-3 px-4 py-2.5">
+  {# identity: beneficiary (linked to the plan) + method · SO# · PO# · requester, then remarks #}
   <div class="min-w-0 pt-1">
-    <div class="text-sm font-semibold text-gray-900 truncate">{{ row.subject_label }}</div>
+    {% if link %}
+    <a hx-get="{{ link }}" hx-target="#main-content" hx-push-url="{{ link | replace('/partials', '') }}"
+       class="block cursor-pointer group">
+      <div class="text-sm font-semibold text-gray-900 truncate group-hover:text-accent-600">{{ row.beneficiary or row.subject_label }}</div>
+    </a>
+    {% else %}
+    <div class="text-sm font-semibold text-gray-900 truncate">{{ row.beneficiary or row.subject_label }}</div>
+    {% endif %}
     <div class="text-tertiary truncate">
       {%- if row.payment_method %}<span class="uppercase">{{ row.payment_method }}</span>{% endif -%}
-      {%- if row.parent_label %} · {{ row.parent_label }}{% endif -%}
+      {%- if row.so_number %} · <span class="font-mono">SO {{ row.so_number }}</span>{% endif -%}
+      {%- if row.po_number %} · <span class="font-mono">{{ row.po_number }}</span>{% endif -%}
+      {%- if row.requester_name and row.requester_name != '—' %} · req. {{ row.requester_name }}{% endif -%}
       {%- if not row.can_act %} · <span class="text-brand-500">awaiting {{ row.approver_names }}</span>{% endif -%}
     </div>
+    {% if row.buyer_remarks %}
+    <div class="text-tertiary truncate italic" title="{{ row.buyer_remarks }}">&ldquo;{{ row.buyer_remarks | truncate(90) }}&rdquo;</div>
+    {% endif %}
   </div>
-  <span class="text-sm font-semibold tabular-nums text-gray-900 text-right pt-1">
-    {%- if row.amount is not none -%}${{ '{:,.0f}'.format(row.amount | float) }}{%- else -%}<span class="text-gray-400">—</span>{%- endif -%}
-  </span>
-  <div class="justify-self-end">
+  {# amount: the AUTHORISED figure (currency + 2 decimals, finding #9) + PO total & delta (#1) #}
+  <div class="text-right pt-1">
+    <div class="text-sm font-semibold tabular-nums text-gray-900">
+      {%- if row.amount is not none -%}{{ row.currency }} {{ '{:,.2f}'.format(row.amount | float) }}{%- else -%}<span class="text-gray-400">—</span>{%- endif -%}
+    </div>
+    {% if row.amount is not none and row.po_line_total is not none %}
+    {% set delta = (row.amount | float) - (row.po_line_total | float) %}
+    <div class="text-[11px] tabular-nums text-gray-500 whitespace-nowrap">
+      PO {{ row.currency }} {{ '{:,.2f}'.format(row.po_line_total | float) }}
+      <span class="{% if delta > 0 %}text-amber-600 font-medium{% elif delta < 0 %}text-emerald-600{% endif %}">({{ '+' if delta >= 0 else '' }}{{ '{:,.2f}'.format(delta) }})</span>
+    </div>
+    {% endif %}
+  </div>
+  {# action rail: the test-report warning sits ABOVE the decide buttons (finding #5) #}
+  <div class="justify-self-end flex flex-col items-end gap-1.5">
+    {% if row.test_report_sent is false %}
+    <div class="flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-800 whitespace-nowrap">
+      <span aria-hidden="true">&#9888;</span> Test report NOT sent to management
+    </div>
+    {% elif row.test_report_sent is true %}
+    <div class="text-[11px] text-gray-400 whitespace-nowrap">&#10003; Test report sent</div>
+    {% endif %}
     {% if row.can_act %}
     <div x-data="{ rejectOpen: false }" class="flex flex-col items-end gap-1.5">
       <div class="flex items-center gap-1.5">
@@ -49,8 +81,11 @@
         <button type="submit" data-loading-disable class="btn-danger btn-sm">Confirm reject</button>
       </form>
     </div>
+    {% elif link %}
+    <a hx-get="{{ link }}" hx-target="#main-content" hx-push-url="{{ link | replace('/partials', '') }}"
+       class="text-xs font-medium text-accent-600 whitespace-nowrap cursor-pointer">Review &rarr;</a>
     {% else %}
-    <span class="text-xs font-medium text-accent-600 whitespace-nowrap pt-1">Review &rarr;</span>
+    <span class="text-xs font-medium text-accent-600 whitespace-nowrap">Review &rarr;</span>
     {% endif %}
   </div>
 </div>
@@ -58,12 +93,28 @@
 
 {% macro prepay_resolved_row(row) %}
 {% set pill = {'approved': 'badge-success', 'rejected': 'badge-danger', 'cancelled': 'badge-neutral', 'expired': 'badge-neutral'} %}
+{% set link = row.subject_href %}
+{# self-documenting (finding #7): beneficiary + who decided + PO# + amount + when #}
 <div class="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 px-4 py-2">
   <div class="min-w-0">
-    <div class="text-sm text-gray-800 truncate">{{ row.subject_label }}</div>
-    {% if row.resolution_note %}<div class="text-tertiary truncate">{{ row.resolution_note }}</div>{% endif %}
+    {% if link %}
+    <a hx-get="{{ link }}" hx-target="#main-content" hx-push-url="{{ link | replace('/partials', '') }}"
+       class="block cursor-pointer group">
+      <div class="text-sm text-gray-800 truncate group-hover:text-accent-600">{{ row.beneficiary or row.subject_label }}</div>
+    </a>
+    {% else %}
+    <div class="text-sm text-gray-800 truncate">{{ row.beneficiary or row.subject_label }}</div>
+    {% endif %}
+    <div class="text-tertiary truncate">
+      {%- if row.po_number -%}<span class="font-mono">{{ row.po_number }}</span>{%- endif -%}
+      {%- if row.decided_by -%}{% if row.po_number %} · {% endif %}{{ row.status | capitalize }} by {{ row.decided_by }}{%- endif -%}
+      {%- if row.resolution_note %} · {{ row.resolution_note }}{% endif -%}
+    </div>
   </div>
-  <span class="{{ pill.get(row.status, 'badge-neutral') }}">{{ row.status | capitalize }}</span>
+  <div class="text-right">
+    <span class="{{ pill.get(row.status, 'badge-neutral') }}">{{ row.status | capitalize }}</span>
+    {% if row.amount is not none %}<div class="text-[11px] tabular-nums text-gray-500 mt-0.5 whitespace-nowrap">{{ row.currency }} {{ '{:,.2f}'.format(row.amount | float) }}</div>{% endif %}
+  </div>
   <span class="text-xs text-gray-400 tabular-nums justify-self-end">{{ row.resolved_at.strftime('%b %d') if row.resolved_at else '' }}</span>
 </div>
 {% endmacro %}
