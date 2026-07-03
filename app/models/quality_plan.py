@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 from sqlalchemy import Boolean, Column, Date, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 
-from ..constants import QPOrderType, QualityPlanStatus
+from ..constants import PrepaymentStatus, QPOrderType, QualityPlanStatus
 from ..database import UTCDateTime
 from .base import Base
 
@@ -172,6 +172,30 @@ class Prepayment(Base):
     test_report_sent = Column(Boolean, nullable=False, default=False)
     buyer_remarks = Column(Text, nullable=True)
 
+    # ── Payment lifecycle (migration 179): requested → approved → paid, or void.
+    # status is the source of truth; the paid/approved/void field groups are stamped at
+    # each transition. pay_token is a single-use secrets.token_urlsafe(32) minted on
+    # approve (the "OK TO WIRE" email link) and cleared on paid/void so a spent/dead link
+    # can't act again.
+    status = Column(
+        String(20),
+        nullable=False,
+        default=PrepaymentStatus.REQUESTED.value,
+        server_default=PrepaymentStatus.REQUESTED.value,
+    )
+    approved_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at = Column(UTCDateTime, nullable=True)
+    pay_token = Column(String(64), nullable=True)
+    paid_at = Column(UTCDateTime, nullable=True)
+    paid_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    paid_by_label = Column(String(120), nullable=True)
+    paid_via = Column(String(20), nullable=True)  # accounting_email | in_app
+    wire_reference = Column(String(120), nullable=True)
+    paid_amount = Column(Numeric(12, 2), nullable=True)
+    voided_at = Column(UTCDateTime, nullable=True)
+    voided_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    void_reason = Column(String(255), nullable=True)
+
     # Audit
     created_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
@@ -189,6 +213,8 @@ class Prepayment(Base):
         Index("ix_prepayment_buy_plan", "buy_plan_id"),
         Index("ix_prepayment_buy_plan_line", "buy_plan_line_id"),
         Index("ix_prepayment_created_by", "created_by_id"),
+        Index("ix_prepayment_status", "status"),
+        Index("ix_prepayment_pay_token", "pay_token", unique=True),
     )
 
 

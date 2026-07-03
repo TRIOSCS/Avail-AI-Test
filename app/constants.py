@@ -1155,6 +1155,22 @@ class PaymentMethod(StrEnum):
     WIRE = "wire"
 
 
+class PrepaymentStatus(StrEnum):
+    """Lifecycle state of a Prepayment (migration 179).
+
+    requested — created, awaiting approval (default). approved — signed off; a single-
+    use pay_token is minted and the "OK TO WIRE" email carries the confirm link. paid —
+    the wire went out (email token or in-app fallback), pay_token cleared. void — killed
+    before payment (rejected by approver, or the plan was torn down while approved-but-
+    unwired); a paid prepayment is never auto-voided.
+    """
+
+    REQUESTED = "requested"
+    APPROVED = "approved"
+    PAID = "paid"
+    VOID = "void"
+
+
 class SourcingType(StrEnum):
     """Sourcing strategy classification for a buy plan or line item.
 
