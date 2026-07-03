@@ -696,6 +696,11 @@ class ActivityType(StrEnum):
     BUYPLAN_PENDING = "buyplan_pending"
     BUYPLAN_COMPLETED = "buyplan_completed"
     BUYPLAN_CANCELLED = "buyplan_cancelled"
+    # Per-PO (buy-plan line) sign-off decisions — written by verify_po (Phase 3).
+    PO_LINE_VERIFIED = "po_line_verified"  # 16 chars — fits String(20)
+    PO_LINE_REJECTED = "po_line_rejected"  # 16 chars — fits String(20)
+    # QP section review mark/unmark — written by toggle_section_reviewed (Phase 3 QP fold).
+    QP_SECTION_REVIEWED = "qp_section_reviewed"  # 19 chars — fits String(20)
     # Offer / quote lifecycle
     OFFER_PENDING_REVIEW = "offer_pending_review"  # exactly 20 chars
     NEW_OFFER = "new_offer"
@@ -1076,8 +1081,10 @@ class ApprovalGateType(StrEnum):
     QP_SALES = "qp_sales"
     # QP Purchasing-section gate (SP-3 de-collision). Was squatting on PURCHASE_ORDER.
     QP_PURCHASING = "qp_purchasing"
-    # Deal-level Purchase Order gate (SP-3): a buy plan's PO spend that clears the
-    # po_auto_approve_threshold routes here to can_approve_purchase_orders holders.
+    # Purchase-order approver eligibility (can_approve_purchase_orders holders within
+    # their dollar limit). The deal-level engine gate was retired (Phase 3) — no new
+    # PURCHASE_ORDER ApprovalRequest is ever created — but the value stays for historical
+    # rows and for has_eligible_approver's per-line PENDING_VERIFY stall detector.
     PURCHASE_ORDER = "purchase_order"
 
 

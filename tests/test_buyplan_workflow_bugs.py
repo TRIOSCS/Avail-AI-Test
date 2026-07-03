@@ -207,26 +207,6 @@ class TestCheckCompletionIdempotency:
         # The orphan is closed, not left REQUESTED in the approvals queue.
         assert po_req.status == ApprovalRequestStatus.CANCELLED
 
-    def test_confirm_po_allowed_when_plan_inbound(self, db_session):
-        """After the deal-level PO gate is approved (ACTIVE→INBOUND), an AWAITING_PO
-        line can still record its PO — else the deal-PO approval strands those lines."""
-        from datetime import datetime, timezone
-
-        from app.services.buyplan_workflow import confirm_po
-
-        plan, user = _make_plan_with_lines(
-            db_session,
-            status=BuyPlanStatus.INBOUND.value,
-            so_status=SOVerificationStatus.APPROVED.value,
-            line_statuses=[BuyPlanLineStatus.AWAITING_PO.value],
-        )
-        line = plan.lines[0]
-
-        result = confirm_po(plan.id, line.id, "PO-INB-1", datetime.now(timezone.utc), user, db_session)
-
-        assert result.status == BuyPlanLineStatus.PENDING_VERIFY.value
-        assert result.po_number == "PO-INB-1"
-
     def test_does_not_complete_without_so_approval(self, db_session):
         """Plan should NOT complete if SO is not yet approved."""
         plan, _ = _make_plan_with_lines(

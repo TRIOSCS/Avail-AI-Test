@@ -412,7 +412,7 @@ def _render_pipeline_body(request: Request, user: User, db: Session, scope: str 
     """Build + render the Pipeline surface body for ``user`` into ``#bp-hub-body``.
 
     The Pipeline is the deal flow as cards in the four canonical stages: three visible
-    columns Build (DRAFT) · Approve (PENDING) · Purchase (ACTIVE|INBOUND), plus a collapsed
+    columns Build (DRAFT) · Approve (PENDING) · Purchase (ACTIVE), plus a collapsed
     Done (COMPLETED) summary below. Each column is one ``deals_board`` call with an explicit
     status filter so the read model stays the single source of truth (see Phase B / the
     rework design's "Two surfaces via lens values"). Done comes from ``completed_archive``.
@@ -428,9 +428,7 @@ def _render_pipeline_body(request: Request, user: User, db: Session, scope: str 
 
     build = deals_board(db, user, scope=board_scope, statuses=[BuyPlanStatus.DRAFT.value])
     approve = deals_board(db, user, scope=board_scope, statuses=[BuyPlanStatus.PENDING.value])
-    purchase = deals_board(
-        db, user, scope=board_scope, statuses=[BuyPlanStatus.ACTIVE.value, BuyPlanStatus.INBOUND.value]
-    )
+    purchase = deals_board(db, user, scope=board_scope, statuses=[BuyPlanStatus.ACTIVE.value])
     # HALTED is the off-ramp — buyers regain its visibility via a dedicated Halted column
     # (rework parity). HALTED maps to the "active" bucket in _STATUS_TO_COLUMN. The column
     # only renders for can_see_all_deals viewers (see the surface template).
@@ -652,33 +650,6 @@ async def buy_plan_halt_partial(
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
 
-@router.post("/v2/partials/buy-plans/{plan_id}/receive", response_class=HTMLResponse)
-async def buy_plan_receive_partial(
-    request: Request,
-    plan_id: int,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Buyer marks an inbound buy plan received — completes the deal (SP-3).
-
-    The deal-level PO gate moved the plan to INBOUND; this terminal action moves it to
-    COMPLETED and generates its case report. Per-record ownership is enforced exactly
-    like confirm-po (non-owner SALES/TRADER → 404). The workflow guards status==INBOUND.
-    """
-    from ...services.buyplan_workflow import receive_buy_plan
-
-    # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation.
-    get_buyplan_for_user(db, user, plan_id)
-
-    try:
-        receive_buy_plan(plan_id, user, db)
-        db.commit()
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-
-    return await buy_plan_detail_partial(request, plan_id, user, db)
-
-
 @router.post("/v2/partials/buy-plans/{plan_id}/lines/{line_id}/confirm-po", response_class=HTMLResponse)
 async def buy_plan_confirm_po_partial(
     request: Request,
@@ -802,7 +773,7 @@ async def buy_plan_reject_received_line_partial(
 
     The vendor delivered, but the parts failed receiving. This drops the line into the SAME
     open re-source pool the vendor-cancel Re-source uses (reusing ``resource_line``), reopens
-    the INBOUND plan to ACTIVE so the line can be re-claimed/re-cut from another vendor, and
+    the COMPLETED plan to ACTIVE so the line can be re-claimed/re-cut from another vendor, and
     fires the URGENT backfill alert. Owner- + buyer-gated exactly like the re-source route.
     ``scope=plan`` rejects the plan's other received lines too.
     """

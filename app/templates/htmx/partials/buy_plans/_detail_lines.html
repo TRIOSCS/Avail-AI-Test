@@ -110,7 +110,9 @@
                       </div>
                     </div>
                   </div>
-                {% elif line.status == 'pending_verify' and can_approve_purchase_orders(user) %}
+                {# Per-line predicate (Phase 3): right + dollar limit vs THIS line's amount —
+                   an over-limit line hides the buttons instead of 403ing on submit. #}
+                {% elif line.status == 'pending_verify' and can_verify_po_line(user, line) %}
                   <div class="flex gap-1">
                     <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/lines/{{ line.id }}/verify-po"
                             hx-target="#main-content"

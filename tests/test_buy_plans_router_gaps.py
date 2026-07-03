@@ -389,21 +389,6 @@ def test_halt_origin_my_queue(client, buy_plan):
     assert resp.status_code == 200
 
 
-# ── buy_plan_receive_partial (lines 676-677) ─────────────────────────
-
-
-def test_receive_value_error(client, buy_plan):
-    """receive_buy_plan raises ValueError → 400 (lines 676-677)."""
-    with patch(
-        "app.services.buyplan_workflow.receive_buy_plan",
-        side_effect=ValueError("not inbound"),
-    ):
-        resp = client.post(
-            f"/v2/partials/buy-plans/{buy_plan.id}/receive",
-        )
-    assert resp.status_code == 400
-
-
 # ── buy_plan_confirm_po_partial (lines 708-711, 717-718) ─────────────
 
 

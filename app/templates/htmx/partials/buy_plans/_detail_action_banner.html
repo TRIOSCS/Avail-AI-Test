@@ -19,7 +19,7 @@
     </svg>
     <span class="text-sm text-amber-800">
       {% if no_approver_reason == 'purchase_order' %}
-      This deal is over the PO-approval threshold but <strong>no purchase-order approver is configured</strong> (or none can approve this amount), so it can't advance. Ask an admin to grant purchase-order approval rights.
+      This deal has one or more cut POs awaiting a purchase-order approver, but <strong>none is configured</strong> (or none can approve the amount), so it can't advance. Ask an admin to grant purchase-order approval rights.
       {% else %}
       This plan is awaiting approval but <strong>no buy-plan approver is configured</strong>, so it can't advance. Ask an admin to grant buy-plan approval rights.
       {% endif %}
@@ -93,22 +93,6 @@
     <button @click="modalType = 'submit'; showModal = true"
             class="flex-shrink-0 btn btn-primary btn-sm">
       Submit
-    </button>
-  </div>
-  {% endif %}
-
-  {# Buyer: PO approved, goods inbound — mark received to complete (SP-3) #}
-  {% if show_inbound_banner %}
-  <div class="mb-4 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3 flex items-center justify-between gap-3">
-    <div class="flex items-center gap-3">
-      <span class="flex-shrink-0 w-6 h-6 rounded-full bg-emerald-600 text-white text-xs font-bold flex items-center justify-center">!</span>
-      <span class="text-sm text-emerald-800">Purchase Order approved — goods are inbound. Mark received to complete the deal.</span>
-    </div>
-    <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/receive"
-            hx-target="#main-content" hx-swap="innerHTML"
-            hx-confirm="Mark this buy plan received and complete it?"
-            class="flex-shrink-0 btn btn-primary btn-sm">
-      Mark Received
     </button>
   </div>
   {% endif %}

@@ -1500,20 +1500,26 @@ class TestPlanNeedsApproverReason:
         plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.PENDING.value)
         assert plan_needs_approver_reason(plan, db_session) is None
 
-    def test_active_over_threshold_no_po_approver(
+    def test_active_pending_verify_line_no_po_approver(
         self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
     ):
-        plan = _make_plan(
-            db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.ACTIVE.value, total_cost=10000.00
-        )
-        assert plan_needs_approver_reason(plan, db_session) == "purchase_order"
-
-    def test_active_under_threshold_returns_none(
-        self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
-    ):
+        """Phase 3: the PO stall is per PENDING_VERIFY line — a cut PO awaiting sign-off
+        with no purchase-order approver stalls the plan, whatever the plan total."""
         plan = _make_plan(
             db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.ACTIVE.value, total_cost=100.00
         )
+        _make_line(db_session, plan, status=BuyPlanLineStatus.PENDING_VERIFY.value)
+        assert plan_needs_approver_reason(plan, db_session) == "purchase_order"
+
+    def test_active_without_pending_verify_line_returns_none(
+        self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
+    ):
+        """No PENDING_VERIFY line → no PO stall, even with no approver and a big
+        total."""
+        plan = _make_plan(
+            db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.ACTIVE.value, total_cost=10000.00
+        )
+        _make_line(db_session, plan, status=BuyPlanLineStatus.AWAITING_PO.value)
         assert plan_needs_approver_reason(plan, db_session) is None
 
     def test_draft_returns_none(

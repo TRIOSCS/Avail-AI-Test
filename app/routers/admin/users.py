@@ -475,14 +475,15 @@ async def set_purchase_order_approver(
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Grant or revoke a user's deal-level PO approval right + optional dollar limit.
+    """Grant or revoke a user's purchase-order approval right + optional dollar limit.
 
-    Sets User.can_approve_purchase_orders and User.purchase_order_approval_limit. A buy
-    plan whose total clears the po_auto_approve_threshold opens a PURCHASE_ORDER gate
-    that routes to holders whose limit is NULL (unlimited) or ≥ the amount — mirrors the
-    prepayment grant exactly. limit="" or "unlimited" → NULL (no cap); a positive
-    decimal sets the cap. Admin-only; each change writes an APPROVAL_GRANT /
-    APPROVAL_REVOKE audit row. A no-op (state unchanged) re-renders without auditing.
+    Sets User.can_approve_purchase_orders and User.purchase_order_approval_limit. The
+    right gates the per-line PO sign-off (``verify_po`` — Verify/Reject on a cut PO
+    awaiting verification); the limit caps the dollar amount of an individual PO the
+    holder may verify — NULL (unlimited) or ≥ the line amount, mirroring the prepayment
+    grant. limit="" or "unlimited" → NULL (no cap); a positive decimal sets the cap.
+    Admin-only; each change writes an APPROVAL_GRANT / APPROVAL_REVOKE audit row. A
+    no-op (state unchanged) re-renders without auditing.
     """
     target = _editable_target(db, user_id)
     grant = str(can_approve).strip().lower() in {"true", "1", "on", "yes"}

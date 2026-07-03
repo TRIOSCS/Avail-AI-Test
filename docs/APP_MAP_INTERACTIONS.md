@@ -1489,13 +1489,15 @@ buyplan_workflow.py (state machine)
   Shown on `pending_verify`/`verified` lines of an `active`/`completed` plan (the button
   survives even when the plan auto-completed — the late-fall-down case).
 - **Receiving-reject (SP-4):** the vendor delivered, but the parts were rejected at
-  receiving (**defective / wrong / short**). On an **INBOUND** plan the buyer clicks
-  **Reject** on the line (`POST /v2/partials/buy-plans/{plan}/lines/{line}/reject-received`,
-  the per-line counterpart to the plan-level "Mark Received") instead of completing the
-  deal. The reject reasons (`defective`/`wrong_part`/`short_ship`) are receiving-specific
-  `LineResourceReason`/`POCancellationReason` values (free strings on the `String` reason
-  columns — **no migration**); each maps to a durable vendor-unavailability reason
-  (`broken`/`different_part`/`not_really_there`). The plan reopens **INBOUND → active**.
+  receiving (**defective / wrong / short**). On a delivered — i.e. auto-**COMPLETED** —
+  plan the buyer rejects the line
+  (`POST /v2/partials/buy-plans/{plan}/lines/{line}/reject-received`) instead of letting
+  the deal stand. The reject reasons (`defective`/`wrong_part`/`short_ship`) are
+  receiving-specific `LineResourceReason`/`POCancellationReason` values (free strings on
+  the `String` reason columns — **no migration**); each maps to a durable
+  vendor-unavailability reason (`broken`/`different_part`/`not_really_there`). The plan
+  reopens **completed → active**. (Phase 3 retired the INBOUND state along with the
+  deal-level PO gate.)
 
 Both triggers are gated by `get_buyplan_for_user` ownership + `_require_po_cutter` role and
 both funnel through the router helper `_resource_lines_and_alert` (pool + commit + alert
@@ -1508,8 +1510,8 @@ plan's other cut/received lines) for each target, in one transaction:
 3. `mark_vendor_unavailable` — `record_unavailability(SOLD_ELSEWHERE-mapped)` so the vendor
    shows **unavailable** for that part on the Sightings tab (§2d).
 4. Reset the line into the pool: clear buyer/offer/PO fields, `status = resourcing`; reopen
-   the plan to `active` if it had auto-completed (`completed`) or was awaiting receipt
-   (`inbound`), so `claim_line` → `confirm_po` (needs an active plan) works again.
+   the plan to `active` if it had auto-completed (`completed`), so `claim_line` →
+   `confirm_po` (needs an active plan) works again.
 5. `refresh_vendor_cancellation_metrics` — recompute the vendor's `cancellation_rate` /
    `avg_days_to_cancel` / `slow_cancel_count` (a slow cancel, >7d, dampens `vendor_score`
    harder — `vendor_score._cancel_dampener`).
@@ -1568,7 +1570,7 @@ GET /v2/partials/approvals?lens=          (shell: My Queue + Pipeline switcher +
     |                   prepay decide route re-render THIS body into #bp-hub-body.
     +-- pipeline   --> GET /partials/approvals/pipeline?scope=  (_render_pipeline_body)
                         buyplan_hub.deals_board called ONCE PER COLUMN with an explicit status
-                        filter — Build=[DRAFT], Approve=[PENDING], Purchase=[ACTIVE,INBOUND],
+                        filter — Build=[DRAFT], Approve=[PENDING], Purchase=[ACTIVE],
                         Halted=[HALTED] — + completed_archive for the collapsed Done column
                         (lazy "Load older" via GET /partials/approvals/pipeline-archive). Same
                         _resolve_deal_scope + All/Mine toggle (reloads #bp-hub-body,
@@ -1600,7 +1602,7 @@ inline button posts `origin=my_queue` so the action re-renders the refreshed que
 up` + money subline + Alpine `qf` filter chips with live counts) over ONE hero card of
 uniform rows. Each row is a CSS grid (`16px 84px 1fr auto auto auto auto`): a **3-band risk
 dot** (At-risk `bg-rose-500` = halted/returned/overdue; Decide `bg-accent-500` =
-approve/prepay; Routine `bg-brand-400` = verify/claim/cut-po/receive/draft) + uppercase
+approve/prepay; Routine `bg-brand-400` = verify/claim/cut-po/draft) + uppercase
 microlabel · customer · muted secondary line · age (>72h amber) · value · margin badge
 (`badge-success ≥30 / badge-warning ≥15 / badge-danger`) · action rail. Two kinds carry
 **inline one-click actions** (`plan_approve` → Approve/Review, `po_verify` → Verify/Reject)
@@ -1622,12 +1624,12 @@ canonical stages **Build → Approve → Purchase → Done** (retiring the Draft
 vocabulary). Three columns are visible (Build / Approve / Purchase) with a **collapsed Done
 summary bar** below (Alpine `x-show`, default closed). Each column is ONE
 `buyplan_hub.deals_board` call with an explicit status filter (`[DRAFT]`, `[PENDING]`,
-`[ACTIVE, INBOUND]` — `INBOUND` now buckets to the `active` column via `_STATUS_TO_COLUMN`);
+`[ACTIVE]`);
 Done is `completed_archive`. Cards render through the shared `deal_card` macro
 (`approvals/_pipeline_macros.html`): the signature **4-pip "who-has-the-ball" stepper**
 (`●●○○` — done pips `bg-brand-500`, the single live ball `bg-accent-500`, upcoming hollow
 `border-brand-200`) computed from the card's `status`→stage index (DRAFT 0 / PENDING 1 /
-ACTIVE|INBOUND 2 / COMPLETED 3) now sits ALONGSIDE the **restored blocker line +
+ACTIVE 2 / COMPLETED 3) now sits ALONGSIDE the **restored blocker line +
 verified/total PO-progress bar + headline MPN + cut-PO#(s) + a rose `Returned` badge**
 (distinguishing a kicked-back DRAFT from a fresh one — Phase F-1 parity restoration), plus
 Customer + tabular value + a muted `SO · owner` line + ONE margin-health badge + the `stock`
@@ -1646,7 +1648,7 @@ read model. The six source queries supervise composes are extracted into module-
 `_query_*` helpers (`_query_approval_plans`, `_query_so_pending_plans`,
 `_query_halted_plans`, `_query_overdue_lines`, `_query_po_pending_verify`,
 `_query_flagged_lines`) and `supervise_overview` now CALLS them (return shape unchanged);
-`my_queue` reuses those plus `_query_inbound_plans`, `_query_resourcing_pool`,
+`my_queue` reuses those plus `_query_resourcing_pool`,
 `_query_owner_draft_plans`, `_query_buyer_awaiting_po_lines` — single source of truth, so a
 workflow change just stops a builder emitting a kind. `QueueRow` is a frozen dataclass
 (`kind, priority, label, plan_id, line_id, customer_name, primary_mpn, tso, value,
@@ -1654,12 +1656,12 @@ age_hours, is_overdue, action_url, action_label, detail_href, extra`); Jinja (Ph
 consume ONLY `QueueRow` — all ORM access stays in the service. Kinds + risk-first priorities
 (`_QUEUE_PRIORITY`/`_QUEUE_LABEL`, distinct from supervise's `_SUPERVISE_QUEUE_*`): halted 1,
 plan_returned 2, plan_approve/prepay_approve 3, po_verify 4, claim 5, cut_po_overdue 6,
-cut_po 7, receive 8, plan_draft 9; sorted `(priority, -age_hours)` (risk-first, oldest-first
+cut_po 7, plan_draft 9; sorted `(priority, -age_hours)` (risk-first, oldest-first
 within a tier). Role gating: halted = own plans (supervisor=manager/admin/ops sees all);
 plan_draft/plan_returned = own DRAFTs (split by `_is_returned`); plan_approve =
 `can_approve_buy_plans`; prepay_approve = the engine's `_actionable_request_ids` filtered to
 the PREPAYMENT gate (NOT re-queried); po_verify = `can_approve_purchase_orders` or ops
-member; claim/cut_po/cut_po_overdue/receive = PO-cutters (buyer/manager/admin), buyer-scoped
+member; claim/cut_po/cut_po_overdue = PO-cutters (buyer/manager/admin), buyer-scoped
 by `buyer_id`. The overdue-PO SLA is single-sourced in `_nudge_cutoff()`/`_line_overdue()`
 (the same rule `_query_overdue_lines` encodes in SQL); cut_po vs cut_po_overdue is the
 Python split on that rule, computed in the row builder.
@@ -5711,25 +5713,32 @@ gate-status chip from `_get_gate(db, qp_id, gate_type)` (latest `ApprovalRequest
 Purchasing (`purchasing_gate_can_act`, added in SP-3) section headers for eligible PENDING
 recipients, and the "Submit … for Approval" button is hidden once a non-rejected request exists.
 
-**Deal-level PO gate + receiving (SP-3):** distinct from the QP Purchasing **section** gate
-above, the deal-level `PURCHASE_ORDER` gate approves a buy plan's PO **spend** (subject =
-BuyPlan). When the `BUY_PLAN` gate is approved, `_run_approve_side_effects` calls
-`_maybe_open_po_gate(plan, user, db)`: a plan whose `total_cost` is below
-`settings.po_auto_approve_threshold` (default $5,000) auto-skips (stays ACTIVE, no gate); at or
-above it a `PURCHASE_ORDER` `ApprovalRequest` opens (amount = plan total), routed to
-`can_approve_purchase_orders` holders within their `purchase_order_approval_limit` (mirrors the
-prepayment amount-filter). `decide()` discriminates it from the `BUY_PLAN` gate by **gate_type**
-(both carry a BuyPlan subject): on approve it runs `_run_po_approve_side_effects`, moving the
-plan **ACTIVE → INBOUND** (goods inbound). On an INBOUND plan the buyer either completes the
-deal via `receive_buy_plan` (`POST /v2/partials/buy-plans/{id}/receive`, the "Mark Received"
-banner), which moves **INBOUND → COMPLETED** through the shared `_complete_plan` (same case
-report as auto-completion); **or (SP-4 fall-down)** rejects line(s) at receiving
-(`POST .../lines/{line}/reject-received`, the per-line "Reject" affordance) when the parts
-arrive defective/wrong/short — those lines fall into the **same re-source pool** as a
-vendor-cancel fall-down (§6e: `resource_line` reopens the plan INBOUND → ACTIVE so the line
-can be re-claimed/re-cut). The deal-level gate surfaces under the **Purchase Orders** stage tab
-(`_TAB_APPROVE_ATTR['purchase_orders'] = can_approve_purchase_orders`); the QP Purchasing
-section gate is now QP-view inline only (no tab).
+**Per-PO sign-off (Phase 3 — replaces the SP-3 deal-level PO gate):** distinct from the QP
+Purchasing **section** gate above, a "PO" is one `BuyPlanLine` (its own `po_number` via
+`confirm_po`), and its approval is the **per-line trio** — `verify_po(action="approve")`
+(line → VERIFIED), `verify_po(action="reject")` (send-back: line → AWAITING_PO, plan
+untouched), and `resource_line` (cancel → fall-down/re-source). The old deal-level
+`PURCHASE_ORDER` `ApprovalRequest` (opened on buy-plan approval when the plan total cleared
+`po_auto_approve_threshold`, approve → ACTIVE→INBOUND, completed via
+`receive_buy_plan`/"Mark Received") is **retired**: `_maybe_open_po_gate`,
+`_run_po_approve_side_effects`, `receive_buy_plan`, the `/receive` route, the INBOUND
+lifecycle step, and the `po_auto_approve_threshold` setting are gone (the
+`BuyPlanStatus.INBOUND` enum member remains for historical rows). `verify_po` now enforces
+the approver's `purchase_order_approval_limit` against **this line's** amount
+(`_line_amount = unit_cost × quantity`; NULL = unlimited) and writes a durable
+`PO_LINE_VERIFIED`/`PO_LINE_REJECTED` `ActivityLog` row via `_log_po_line_activity`.
+Templates hide Verify/Reject per line with the Jinja global `can_verify_po_line(user, line)`
+(`app/dependencies.py` — the same right + limit check the POST enforces). `_complete_plan`
+refuses (warn + no-op) while `_has_open_po_gate(plan)` — any line PENDING_VERIFY — so
+neither `check_completion` nor the stock-sale auto-complete job
+(`inventory_jobs._job_stock_autocomplete`, which skips-and-continues on a refused plan) can
+complete past an undecided PO. The stall detectors are per-line too:
+`plan_needs_approver_reason` returns `"purchase_order"` when any PENDING_VERIFY line's
+amount has no eligible approver (`has_eligible_approver(PURCHASE_ORDER, _line_amount)`),
+and `buyplan_hub._query_stuck_no_approver_plans` flags ACTIVE plans the same way.
+`routing._eligible_approvers`'s `PURCHASE_ORDER` branch stays (it powers those per-line
+checks); the Approvals-hub Purchase Orders tab is history-only (no new gate rows are ever
+created).
 
 **QP native sections (QP Phase C2b):** the QP detail (`qp/detail.html`) `{% include %}`s four
 section partials — `qp/_section_sales.html`, `_section_purchasing.html`, `_section_serial.html`,
@@ -5761,9 +5770,9 @@ an approver pull the stale request and resurrect the plan. `cancel_buy_plan` and
 `verify_so` **HALT** branch therefore call
 `_cancel_open_engine_requests_for_plan(plan, user, db)` (the stale-cancel loop factored out
 of `_open_engine_request_for_plan`) at/before the transition. `cancel_buy_plan` calls it
-**unconditionally** (SP-3) so it also closes a live deal-level `PURCHASE_ORDER` gate on an
-ACTIVE/INBOUND plan (the helper matches by `subject_type=buy_plan` + `REQUESTED`, so it covers
-both the `BUY_PLAN` and `PURCHASE_ORDER` gates, and is a no-op when none are open); the
+**unconditionally** (the helper matches by `subject_type=buy_plan` + `REQUESTED` and is a
+no-op when none are open — it would also sweep any historical pre-Phase-3 deal-level
+`PURCHASE_ORDER` row); the
 `verify_so` HALT branch still guards on PENDING. That helper cancels each open request on behalf of the request's OWN
 `requested_by`/`owner` (the original submitter), so the `events.cancel` authz
 (requester/owner OR manager/admin) is satisfied for EVERY caller — including a `verify_so`

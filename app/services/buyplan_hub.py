@@ -307,10 +307,6 @@ _STATUS_TO_COLUMN: dict[str, str] = {
     BuyPlanStatus.PENDING: "pending",
     BuyPlanStatus.ACTIVE: "active",
     BuyPlanStatus.HALTED: "active",
-    # INBOUND is a sub-status of the Purchase stage (goods inbound, awaiting receipt) —
-    # it buckets with ACTIVE so the Pipeline's Purchase column (statuses=[ACTIVE, INBOUND])
-    # surfaces it. Previously dropped by the safety net, which silently hid inbound deals.
-    BuyPlanStatus.INBOUND: "active",
     # COMPLETED → archive section (see completed_archive), not an active column
     # CANCELLED → omitted (no entry)
 }
@@ -457,7 +453,7 @@ def _deal_card(plan: BuyPlan, user: object) -> dict:
         "margin_pct": plan.total_margin_pct,
         # Raw lifecycle status — the Pipeline card maps it to a 4-stage index for the
         # "who-has-the-ball" pip stepper (DRAFT→Build, PENDING→Approve,
-        # ACTIVE|INBOUND→Purchase, COMPLETED→Done). stage_label keeps the legacy vocabulary.
+        # ACTIVE→Purchase, COMPLETED→Done). stage_label keeps the legacy vocabulary.
         "status": plan.status,
         "stage_label": _STAGE_LABELS.get(plan.status, plan.status),
         "blocker": _compute_blocker(plan),
@@ -800,26 +796,6 @@ def _query_flagged_lines(db: Session) -> list[BuyPlanLine]:
     )
 
 
-def _query_inbound_plans(db: Session, *, buyer_id: int | None = None) -> list[BuyPlan]:
-    """INBOUND plans awaiting receipt, oldest first.
-
-    ``buyer_id`` scopes to plans where that buyer holds a line (the receiver), via an
-    EXISTS subquery (no row multiplication).
-    """
-    q = db.query(BuyPlan).filter(BuyPlan.status == BuyPlanStatus.INBOUND)
-    if buyer_id is not None:
-        q = q.filter(BuyPlan.lines.any(BuyPlanLine.buyer_id == buyer_id))
-    return (
-        q.options(
-            *_PLAN_CUSTOMER_LOADS,
-            joinedload(BuyPlan.submitted_by),
-            selectinload(BuyPlan.lines).selectinload(BuyPlanLine.requirement),
-        )
-        .order_by(BuyPlan.created_at.asc())
-        .all()
-    )
-
-
 def _query_resourcing_pool(db: Session) -> list[BuyPlanLine]:
     """Unclaimed RESOURCING-pool lines on ACTIVE plans (pool-wide), oldest first."""
     return (
@@ -1071,7 +1047,6 @@ _QUEUE_PRIORITY: dict[str, int] = {
     "claim": 5,
     "cut_po_overdue": 6,
     "cut_po": 7,
-    "receive": 8,
     "plan_draft": 9,
 }
 
@@ -1087,7 +1062,6 @@ _QUEUE_LABEL: dict[str, str] = {
     "claim": "Claim",
     "cut_po_overdue": "Overdue",
     "cut_po": "Cut PO",
-    "receive": "Receive",
     "plan_draft": "Draft",
 }
 
@@ -1103,11 +1077,10 @@ _QUEUE_ACTION_LABEL: dict[str, str] = {
     "claim": "Claim",
     "cut_po_overdue": "Cut PO",
     "cut_po": "Cut PO",
-    "receive": "Receive",
     "plan_draft": "Submit",
 }
 
-#: Roles that may cut/claim POs and receive goods (line-execution kinds).
+#: Roles that may cut/claim POs (line-execution kinds).
 _PO_CUTTER_ROLES: frozenset[str] = frozenset({UserRole.BUYER, UserRole.MANAGER, UserRole.ADMIN})
 
 
@@ -1176,8 +1149,6 @@ def _action_url(kind: str, *, plan_id: int | None, line_id: int | None, request_
         return f"{base}/lines/{line_id}/claim"
     if kind in ("cut_po", "cut_po_overdue"):
         return f"{base}/lines/{line_id}/confirm-po"
-    if kind == "receive":
-        return f"{base}/receive"
     # halted → whole row links to detail; no distinct action endpoint.
     return None
 
@@ -1337,12 +1308,12 @@ def _query_stuck_no_approver_plans(db: Session, *, owner_id: int | None = None) 
     right (otherwise the plan is merely awaiting a real approver). ``owner_id`` scopes to a
     single AM (my_queue); ``None`` returns every stuck plan (admins, so they can fix the
     config). BUY_PLAN eligibility is global — one check gates every PENDING plan — while
-    PURCHASE_ORDER is amount-sensitive, so each over-threshold ACTIVE plan is checked against
-    its own total.
+    PURCHASE_ORDER is amount-sensitive PER LINE (Phase 3): an ACTIVE plan is stuck when any
+    of its PENDING_VERIFY lines has no approver eligible for that line's dollar amount.
     """
-    from ..config import settings
     from ..constants import ApprovalGateType
     from .approvals.routing import has_eligible_approver
+    from .buyplan_workflow import _line_amount
 
     loads = (
         *_PLAN_CUSTOMER_LOADS,
@@ -1357,14 +1328,20 @@ def _query_stuck_no_approver_plans(db: Session, *, owner_id: int | None = None) 
             q = q.filter(BuyPlan.submitted_by_id == owner_id)
         out += q.options(*loads).order_by(BuyPlan.created_at.asc()).all()
 
+    # ACTIVE plans with a cut PO awaiting verification (EXISTS subquery — no row
+    # multiplication), then the per-line amount-eligibility check in Python.
     q = db.query(BuyPlan).filter(
         BuyPlan.status == BuyPlanStatus.ACTIVE,
-        BuyPlan.total_cost >= settings.po_auto_approve_threshold,
+        BuyPlan.lines.any(BuyPlanLine.status == BuyPlanLineStatus.PENDING_VERIFY),
     )
     if owner_id is not None:
         q = q.filter(BuyPlan.submitted_by_id == owner_id)
     for plan in q.options(*loads).order_by(BuyPlan.created_at.asc()).all():
-        if not has_eligible_approver(db, ApprovalGateType.PURCHASE_ORDER, plan.total_cost):
+        if any(
+            line.status == BuyPlanLineStatus.PENDING_VERIFY
+            and not has_eligible_approver(db, ApprovalGateType.PURCHASE_ORDER, _line_amount(line))
+            for line in plan.lines
+        ):
             out.append(plan)
 
     return out
@@ -1386,7 +1363,6 @@ def my_queue(db: Session, user: object) -> list[QueueRow]:
     - **claim** (P5): the whole RESOURCING pool — PO-cutters.
     - **cut_po_overdue** (P6) / **cut_po** (P7): the user's own AWAITING_PO lines, split by
       the buyer-nudge SLA.
-    - **receive** (P8): INBOUND plans where the user holds a line — PO-cutters.
 
     Sorted by ``(priority, -age_hours)``: highest-risk tier first, oldest-first within it.
     """
@@ -1461,13 +1437,6 @@ def my_queue(db: Session, user: object) -> list[QueueRow]:
             kind = "cut_po_overdue" if overdue else "cut_po"
             since = (ln.last_nudge_at or ln.buy_plan.approved_at or ln.created_at) if ln.buy_plan else ln.created_at
             rows.append(_make_line_row(ln, kind=kind, since=since, cutoff=cutoff))
-
-    # receive (P8): INBOUND plans where the user holds a line.
-    if is_po_cutter:
-        rows += [
-            _make_plan_row(p, kind="receive", since=p.updated_at or p.created_at)
-            for p in _query_inbound_plans(db, buyer_id=user.id)
-        ]
 
     # Risk-first, then oldest-first (largest age) within each priority tier.
     rows.sort(key=lambda r: (r.priority, -r.age_hours))

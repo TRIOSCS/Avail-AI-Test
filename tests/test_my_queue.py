@@ -364,30 +364,6 @@ def test_my_queue_cut_po_overdue(db_session, test_user, test_quote, test_requisi
     assert row.is_overdue is True
 
 
-# ── receive (P8) ──────────────────────────────────────────────────────
-
-
-def test_my_queue_receive(db_session, test_user, sales_user, test_quote, test_requisition):
-    """An INBOUND plan where the user holds a line surfaces as receive (PO-cutters)."""
-    plan = _make_plan(
-        db_session,
-        quote_id=test_quote.id,
-        requisition_id=test_requisition.id,
-        status=BuyPlanStatus.INBOUND,
-    )
-    _make_line(db_session, buy_plan_id=plan.id, buyer_id=test_user.id, status=BuyPlanLineStatus.VERIFIED)
-
-    rows = my_queue(db_session, test_user)
-    assert "receive" in _kinds(rows)
-    row = _row(rows, "receive")
-    assert row.plan_id == plan.id
-    assert row.priority == 8
-    assert row.action_url == f"/v2/partials/buy-plans/{plan.id}/receive"
-
-    # sales holds no line on the plan → no receive.
-    assert "receive" not in _kinds(my_queue(db_session, sales_user))
-
-
 # ── Ordering: risk-first, oldest-first within a tier ──────────────────
 
 
@@ -673,8 +649,12 @@ class TestNoApproverKind:
         )
         assert "no_approver" not in _kinds(my_queue(db_session, test_user))
 
-    def test_over_threshold_active_without_po_approver(self, db_session, test_user, test_quote, test_requisition):
-        _make_plan(
+    def test_active_with_unverifiable_po_line_without_po_approver(
+        self, db_session, test_user, test_quote, test_requisition
+    ):
+        """Phase 3: the PO stall is per PENDING_VERIFY line, not the plan total — a cut
+        PO awaiting sign-off with no purchase-order approver configured surfaces."""
+        plan = _make_plan(
             db_session,
             quote_id=test_quote.id,
             requisition_id=test_requisition.id,
@@ -682,4 +662,5 @@ class TestNoApproverKind:
             submitted_by_id=test_user.id,
             total_cost=Decimal("10000"),
         )
+        _make_line(db_session, buy_plan_id=plan.id, status=BuyPlanLineStatus.PENDING_VERIFY)
         assert "no_approver" in _kinds(my_queue(db_session, test_user))

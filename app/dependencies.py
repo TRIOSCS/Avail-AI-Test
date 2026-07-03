@@ -277,9 +277,28 @@ def can_approve_purchase_orders(user: User | None) -> bool:
     the grant is admin-toggled in Users settings, not role-derived). Parallel to
     :func:`can_approve_buy_plans`: it is the shared gate so any surface that hides the
     verify-PO UI checks the SAME flag the POST enforces via require_buyplan_po_approver.
-    The deal-level PURCHASE_ORDER approval engine routes on the same column.
     """
     return bool(user is not None and getattr(user, "can_approve_purchase_orders", False))
+
+
+def can_verify_po_line(user: User | None, line) -> bool:
+    """True if *user* may verify/reject THIS line's PO (right + per-line dollar limit).
+
+    Wraps :func:`can_approve_purchase_orders` with the same admin-configured
+    ``purchase_order_approval_limit`` check ``verify_po`` enforces against the line's
+    dollar amount (NULL = unlimited) — the per-line UI predicate, so a line above the
+    viewer's limit hides the Verify/Reject buttons instead of 403ing on submit. Lazy
+    import: buyplan_workflow lazily imports this module, so a top-level import back
+    would be circular.
+    """
+    if not can_approve_purchase_orders(user):
+        return False
+    limit = getattr(user, "purchase_order_approval_limit", None)
+    if limit is None:
+        return True
+    from .services.buyplan_workflow import _line_amount
+
+    return _line_amount(line) <= limit
 
 
 def require_buyplan_po_approver(request: Request, db: Session = Depends(get_db)) -> User:

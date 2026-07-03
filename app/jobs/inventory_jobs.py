@@ -101,7 +101,11 @@ async def _job_stock_autocomplete():
         for plan in stuck:
             # Route through the shared completion helper so a case report is generated
             # (matches the normal auto-complete path; no silent direct status flip).
+            # _complete_plan REFUSES (warn + no-op) while a line's PO is still
+            # PENDING_VERIFY — never auto-complete past an undecided PO sign-off.
             _complete_plan(plan, db)
+            if plan.status != BuyPlanStatus.COMPLETED.value:
+                continue
             logger.info(f"Auto-completed stuck stock sale plan #{plan.id}")
             completed_ids.append(plan.id)
 

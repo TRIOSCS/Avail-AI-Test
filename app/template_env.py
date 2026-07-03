@@ -350,13 +350,17 @@ templates.env.globals["roles"] = _CANONICAL_ROLES
 # Buy-plan approval right exposed as a Jinja2 global so templates hide the approve/reject
 # UI using the SAME predicate the require_buyplan_approver dependency enforces on the POST
 # (single source of truth — the per-user User.can_approve_buy_plans column).
-from .dependencies import can_approve_buy_plans, can_approve_purchase_orders  # noqa: E402
+from .dependencies import can_approve_buy_plans, can_approve_purchase_orders, can_verify_po_line  # noqa: E402
 
 templates.env.globals["can_approve_buy_plans"] = can_approve_buy_plans
 # Purchase-order approval right exposed the same way: templates hide the verify-PO UI using
 # the SAME predicate require_buyplan_po_approver enforces on the POST (Phase D —
 # verify-PO moved off ops membership onto User.can_approve_purchase_orders).
 templates.env.globals["can_approve_purchase_orders"] = can_approve_purchase_orders
+# Per-line variant (Phase 3): same right PLUS the per-user purchase_order_approval_limit
+# checked against THIS line's dollar amount — the SAME check verify_po enforces on the
+# POST, so an over-limit line hides the Verify/Reject buttons instead of 403ing.
+templates.env.globals["can_verify_po_line"] = can_verify_po_line
 
 # CRM P5 trust — canonical industry pick-list exposed to the create/edit account
 # forms (single source of truth in app/constants.py; the SAME tuple the inline

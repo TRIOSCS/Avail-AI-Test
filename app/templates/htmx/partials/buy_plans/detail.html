@@ -28,8 +28,7 @@
 {% set show_verify_banner = bp.status == 'active' and can_approve_purchase_orders(user) and pending_verify_lines|length > 0 %}
 {% set show_rejected_banner = bp.status == 'draft' and (bp.cancellation_reason or (bp.approved_at and bp.approval_notes)) %}
 {% set show_draft_banner = bp.status == 'draft' and not show_rejected_banner %}
-{% set show_inbound_banner = bp.status == 'inbound' %}
-{% set has_action_banner = show_buyer_banner or show_approval_banner or show_verify_banner or show_rejected_banner or show_draft_banner or show_inbound_banner %}
+{% set has_action_banner = show_buyer_banner or show_approval_banner or show_verify_banner or show_rejected_banner or show_draft_banner %}
 {# Halt is the single off-ramp (Phase D): a supervisor/ops member may halt an in-flight
    (pending/active) plan. Mirrors the service-side _can_halt + HALTABLE_STATUSES guard. #}
 {% set can_halt = bp.status in ('pending', 'active') and (is_ops_member or user.role in ('manager', 'admin')) %}

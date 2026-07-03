@@ -1,17 +1,18 @@
 """test_approvals_sp4_fall_down.py — Approvals SP-4: receiving-reject → re-source.
 
-The SP-3 receiving step lets a buyer mark an INBOUND plan received (→ COMPLETED). SP-4
-adds the fall-down path: at receiving the buyer can REJECT line(s) (wrong / defective /
-short parts) instead. A rejected line "falls down" into the SAME open re-source pool the
-vendor-cancel Re-source uses (status RESOURCING) so it can be backfilled from another
-vendor — it REUSES ``resource_line`` (and therefore the POCancellation vendor-performance
-fact + the urgent buyer alert); it does NOT build a parallel queue.
+SP-4 is the fall-down path at receiving: the buyer can REJECT line(s) (wrong / defective /
+short parts) after the goods arrive. A rejected line "falls down" into the SAME open
+re-source pool the vendor-cancel Re-source uses (status RESOURCING) so it can be
+backfilled from another vendor — it REUSES ``resource_line`` (and therefore the
+POCancellation vendor-performance fact + the urgent buyer alert); it does NOT build a
+parallel queue. Phase 3 retired the deal-level PO gate's INBOUND state, so a delivered
+deal is a COMPLETED (auto-completed) plan — rejecting reopens it to ACTIVE (the kept
+reopen-on-completed branch).
 
 Covers:
-  - rejecting a received line on an INBOUND plan pools it (RESOURCING) and reopens the
+  - rejecting a received line on a COMPLETED plan pools it (RESOURCING) and reopens the
     plan to ACTIVE so the line can be re-claimed/re-cut;
   - the rejection records a POCancellation with the receiving-specific reason;
-  - a fully-received PO still completes (the happy path is untouched);
   - the reject route fires one urgent backfill alert per pooled line;
   - the reject route is owner- + buyer-gated (non-owner sales → 404; owner-but-not-a-
     PO-cutter → 403).
@@ -39,7 +40,7 @@ from app.constants import (
 from app.models import Offer, POCancellation, User  # noqa: F401 (User kept for parity/typing)
 from app.models.buy_plan import BuyPlan, BuyPlanLine
 from app.models.sourcing import Requisition
-from app.services.buyplan_workflow import receive_buy_plan, resource_line
+from app.services.buyplan_workflow import resource_line
 
 # ── Helpers (mirror tests/test_buyplan_resource.py) ──────────────────────
 
@@ -48,7 +49,7 @@ def _make_plan(db, quote, requisition, **overrides) -> BuyPlan:
     defaults = dict(
         quote_id=quote.id,
         requisition_id=requisition.id,
-        status=BuyPlanStatus.INBOUND.value,
+        status=BuyPlanStatus.COMPLETED.value,
         so_status=SOVerificationStatus.APPROVED.value,
         total_cost=10_000.0,
         total_revenue=20_000.0,
@@ -82,7 +83,7 @@ def _make_offer(db, requirement, vendor_card, **overrides) -> Offer:
 
 
 def _make_received_line(db, plan, requirement, offer, buyer, **overrides) -> BuyPlanLine:
-    """A VERIFIED line on an INBOUND plan — goods arrived (a live, received PO)."""
+    """A VERIFIED line on a COMPLETED plan — goods arrived (a live, received PO)."""
     defaults = dict(
         buy_plan_id=plan.id,
         requirement_id=requirement.id,
@@ -124,7 +125,7 @@ class _FakeRequest:
 
 
 class TestReceivingRejectService:
-    def test_reject_pools_line_and_reopens_inbound_plan(
+    def test_reject_pools_line_and_reopens_completed_plan(
         self, db_session: Session, test_user, test_quote, test_requisition, test_vendor_card
     ):
         plan = _make_plan(db_session, test_quote, test_requisition)
@@ -141,7 +142,7 @@ class TestReceivingRejectService:
         assert line.status == BuyPlanLineStatus.RESOURCING.value
         assert line.buyer_id is None
         assert line.offer_id is None
-        # The INBOUND plan reopens to ACTIVE so the line can be re-claimed/re-cut.
+        # The COMPLETED plan reopens to ACTIVE so the line can be re-claimed/re-cut.
         assert plan.status == BuyPlanStatus.ACTIVE.value
         assert len(payload["resourced_lines"]) == 1
 
@@ -184,26 +185,6 @@ class TestReceivingRejectService:
         # Every receiving reason maps to a real vendor-unavailability reason.
         mapped = RESOURCE_TO_UNAVAILABILITY_REASON[reason]
         assert mapped in {r.value for r in UnavailabilityReason}
-
-
-# ── Service: the happy path (fully received → COMPLETED) is untouched ─────
-
-
-def test_fully_received_plan_still_completes(
-    db_session: Session, test_user, test_quote, test_requisition, test_vendor_card
-):
-    """With no rejected lines, mark-received still drives an INBOUND plan to
-    COMPLETED."""
-    plan = _make_plan(db_session, test_quote, test_requisition)
-    requirement = test_requisition.requirements[0]
-    offer = _make_offer(db_session, requirement, test_vendor_card)
-    _make_received_line(db_session, plan, requirement, offer, test_user)
-
-    received = receive_buy_plan(plan.id, test_user, db_session)
-
-    assert received.status == BuyPlanStatus.COMPLETED.value
-    assert received.completed_at is not None
-    assert received.case_report
 
 
 # ── Route: reject-received pools + alerts, owner/buyer gated ──────────────
@@ -278,7 +259,7 @@ class TestRejectReceivedRoute:
         plan = BuyPlan(
             requisition_id=req_obj.id,
             quote_id=test_quote.id,
-            status=BuyPlanStatus.INBOUND.value,
+            status=BuyPlanStatus.COMPLETED.value,
             so_status=SOVerificationStatus.APPROVED.value,
             total_cost=10_000.0,
         )
@@ -306,14 +287,15 @@ class TestRejectReceivedRoute:
         assert exc.value.status_code == 404
 
 
-# ── Render: the INBOUND detail partial shows the per-line Reject affordance ──
+# ── Render: the COMPLETED detail partial shows the per-line Re-source affordance ──
 
 
-def test_inbound_detail_renders_reject_affordance(
+def test_completed_detail_renders_resource_affordance(
     client, db_session: Session, test_user, test_quote, test_requisition, test_vendor_card
 ):
-    """The real detail template renders the SP-4 Reject affordance on an INBOUND plan's
-    cut line (catches Jinja errors + confirms the button posts to /reject-received)."""
+    """The real detail template renders the fall-down affordance on a COMPLETED plan's
+    cut line (catches Jinja errors + confirms the form posts to /resource — the late-
+    fall-down / receiving-reject entry point now that INBOUND is retired)."""
     plan = _make_plan(db_session, test_quote, test_requisition)
     requirement = test_requisition.requirements[0]
     offer = _make_offer(db_session, requirement, test_vendor_card)
@@ -323,5 +305,6 @@ def test_inbound_detail_renders_reject_affordance(
     resp = client.get(f"/v2/partials/buy-plans/{plan.id}")
 
     assert resp.status_code == 200
-    assert "reject-received" in resp.text
-    assert "Reject &amp; re-source" in resp.text
+    assert f"/v2/partials/buy-plans/{plan.id}/lines/" in resp.text
+    assert "/resource" in resp.text
+    assert "Re-source" in resp.text

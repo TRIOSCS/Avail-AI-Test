@@ -173,6 +173,38 @@ def test_stock_autocomplete_completes_stuck_plans(
     assert plan.status == "completed"
 
 
+def test_stock_autocomplete_blocked_by_pending_verify_line(
+    scheduler_db, test_user, test_requisition, test_company, test_customer_site, test_quote
+):
+    """The job must NOT complete past an undecided PO: a stuck stock-sale plan with a
+    PENDING_VERIFY line stays ACTIVE (_complete_plan's _has_open_po_gate guard) and no
+    completion notification fires."""
+    from app.models.buy_plan import BuyPlanLine, BuyPlanLineStatus
+
+    plan = BuyPlan(
+        requisition_id=test_requisition.id,
+        quote_id=test_quote.id,
+        status="active",
+        is_stock_sale=True,
+        submitted_by_id=test_user.id,
+        approved_at=datetime.now(timezone.utc) - timedelta(hours=2),
+    )
+    scheduler_db.add(plan)
+    scheduler_db.flush()
+    scheduler_db.add(BuyPlanLine(buy_plan_id=plan.id, quantity=10, status=BuyPlanLineStatus.PENDING_VERIFY.value))
+    scheduler_db.commit()
+
+    with patch("app.services.buyplan_notifications.run_notify_bg", new_callable=AsyncMock) as mock_bg:
+        from app.jobs.inventory_jobs import _job_stock_autocomplete
+
+        asyncio.run(_job_stock_autocomplete())
+
+    scheduler_db.refresh(plan)
+    assert plan.status == "active"
+    assert plan.completed_at is None
+    mock_bg.assert_not_called()
+
+
 def test_stock_autocomplete_handles_zero(scheduler_db):
     """Job runs cleanly when no plans to complete."""
     from app.jobs.inventory_jobs import _job_stock_autocomplete

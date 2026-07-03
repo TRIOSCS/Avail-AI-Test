@@ -382,6 +382,18 @@ def test_can_act_only_for_eligible_pending_recipient(db_session: Session) -> Non
     assert by_id[b.id].can_act is False
 
 
+def test_purchase_orders_tab_pending_empty_post_cutover(db_session: Session) -> None:
+    """Phase 3 retired the deal-level PURCHASE_ORDER gate: no code path creates new
+    requests for it, so the tab's pending section is empty absent historical rows
+    (history-only tab — the seeded-row tests above cover rendering those)."""
+    me = _user(db_session)
+
+    view = build_queue_view(db_session, me, "purchase_orders")
+
+    assert view.active_tab == "purchase_orders"
+    assert view.pending_rows == []
+
+
 def test_org_wide_shows_unactionable_row_with_approver_names(db_session: Session) -> None:
     me = _user(db_session)
     other = _user(db_session, name="Bob Approver")

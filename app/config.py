@@ -257,9 +257,6 @@ class Settings(BaseSettings):
     buyplan_nudge_ops_hours: int = 2
     buyplan_favoritism_threshold_pct: float = 60
     buyplan_better_offer_pct: float = 5
-    # Deal-level PO gate (SP-3): a buy plan whose total cost is below this threshold skips
-    # the PURCHASE_ORDER approval gate (auto-approved PO); at or above it, the gate opens.
-    po_auto_approve_threshold: float = 5000
 
     # --- Vendor-part unavailability ("Two Windows, Real Proof" temporal policy) ---
     # Read-time suppression windows (stateless predicate, sighting_stale_days
