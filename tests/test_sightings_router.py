@@ -236,6 +236,36 @@ class TestSightingsFilters:
         assert resp.status_code == 200
         assert "TestMfr" in resp.text
 
+    def test_group_by_manufacturer_uses_material_card(self, client, db_session):
+        """Regression: By-Manufacturer grouping keys off the ENRICHED material-card
+        manufacturer, not the requirement's own (usually blank) field.
+
+        The requirement's raw manufacturer is customer input and is empty on most rows, so
+        keying off it alone collapsed nearly every part into 'Unknown' — which read as 'the
+        filter doesn't work'. The linked material card carries the real (MPN-derived)
+        manufacturer.
+        """
+        req = Requisition(name="MC-Group RFQ", status="open", customer_name="Acme Corp")
+        db_session.add(req)
+        db_session.flush()
+        mc = MaterialCard(normalized_mpn="grpmc001", display_mpn="GRP-MC-001", manufacturer="EnrichedMfr")
+        db_session.add(mc)
+        db_session.flush()
+        r = Requirement(
+            requisition_id=req.id,
+            primary_mpn="GRP-MC-001",
+            manufacturer="",  # blank raw field — the common real case
+            target_qty=100,
+            sourcing_status="open",
+            material_card_id=mc.id,
+        )
+        db_session.add(r)
+        db_session.commit()
+
+        resp = client.get("/v2/partials/sightings?group_by=manufacturer")
+        assert resp.status_code == 200
+        assert "EnrichedMfr" in resp.text  # grouped under the card's manufacturer, not "Unknown"
+
     def test_group_by_brand(self, client, db_session):
         _seed_data(db_session)
         resp = client.get("/v2/partials/sightings?group_by=brand")

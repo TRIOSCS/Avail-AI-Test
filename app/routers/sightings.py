@@ -541,7 +541,16 @@ async def sightings_list(
     if filters.group_by in ("brand", "manufacturer"):
         groups: dict[str, list] = {}
         for r in requirements:
-            key = getattr(r, filters.group_by, "") or "Unknown"
+            # Group by the ENRICHED value from the linked material card (the manufacturer/
+            # brand derived from the MPN) first; fall back to the requirement's own field.
+            # The requirement's raw brand/manufacturer is blank on most rows (customer input),
+            # so keying off it alone collapsed nearly every part into "Unknown" — making the
+            # By-Brand / By-Manufacturer grouping look broken. material_card is lazy="joined"
+            # (already loaded), so this adds no query.
+            mc = r.material_card
+            key = (
+                (getattr(mc, filters.group_by, None) if mc else None) or getattr(r, filters.group_by, None) or "Unknown"
+            )
             groups.setdefault(key, []).append(r)
 
     ctx = {
