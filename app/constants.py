@@ -423,6 +423,21 @@ class TicketSource(StrEnum):
     TICKET_FORM = "ticket_form"
 
 
+class TicketType(StrEnum):
+    """Kind discriminator for a TroubleTicket.
+
+    One ticket system, two kinds: a BUG report ("something is broken") and a FEATURE
+    request ("please add / change this"). Both share the same capture, inbox, and review
+    flow; the kind only changes the copy shown to the reporter and how the AI Create-
+    Prompt frames the resulting Claude Code prompt (fix task vs build task). Stored in
+    trouble_tickets.ticket_type (server_default 'bug', so every pre-existing row reads
+    as a bug).
+    """
+
+    BUG = "bug"
+    FEATURE = "feature"
+
+
 class BuyPlanStatus(StrEnum):
     """Buy plan header statuses."""
 

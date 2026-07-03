@@ -36,12 +36,16 @@ class TroubleTicket(Base):
         Index("ix_trouble_tickets_created_at", "created_at"),
         Index("ix_trouble_tickets_source", "source"),
         Index("ix_trouble_tickets_source_status_created", "source", "status", "created_at"),
+        Index("ix_trouble_tickets_ticket_type", "ticket_type"),
     )
 
     id = Column(Integer, primary_key=True)
     ticket_number = Column(String(20), unique=True, nullable=False)
     submitted_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
     status = Column(String(30), default="submitted", nullable=False)
+    # Kind discriminator (bug | feature). server_default 'bug' → existing rows read
+    # as bugs; the app always writes a TicketType value, never a raw string.
+    ticket_type = Column(String(20), nullable=False, server_default="bug")
     risk_tier = Column(String(10))
     category = Column(String(20))
     title = Column(String(200), nullable=False)
@@ -98,6 +102,15 @@ class TroubleTicket(Base):
         valid = {e.value for e in TicketStatus}
         if value and value not in valid:
             raise ValueError(f"Invalid ticket status: {value!r}. Valid: {valid}")
+        return value
+
+    @validates("ticket_type")
+    def _validate_ticket_type(self, _key, value):
+        from ..constants import TicketType
+
+        valid = {e.value for e in TicketType}
+        if value and value not in valid:
+            raise ValueError(f"Invalid ticket type: {value!r}. Valid: {valid}")
         return value
 
     submitter = relationship("User", foreign_keys=[submitted_by])
