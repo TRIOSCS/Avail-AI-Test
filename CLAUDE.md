@@ -68,6 +68,14 @@ change, update the relevant APP_MAP doc(s) in the same PR.**
 - Inner htmx container that should swap into **itself** but omits `hx-target` → under `<main id="main-content" hx-target="this">` it inherits `hx-target="this"` (resolving to `#main-content`) and **replaces the whole page** on its `load`/trigger. Always set an explicit `hx-target` (e.g. `hx-target="this"`) on faceted/lazy-load sub-containers.
 - htmx event filter `[condition]` **not** hugging the event name → `keyup[cond]` is valid, but `keyup changed delay:800ms[cond]` (filter trailing a modifier) throws `htmx:syntax:error` and silently disables the trigger. The `[filter]` must immediately follow the event.
 
+### Asking Questions / Clarifications
+- Ask clarifying questions **ONE AT A TIME** — never batch multiple questions into a single
+  message. Wait for the answer before asking the next.
+- Always present **suggested answers** as concrete options (each with a one-line rationale),
+  and mark exactly **one "(Recommended)"** with why.
+- Prefer the structured multiple-choice question tool (with the Recommended option) over
+  open-ended prose questions.
+
 ### Linear Development
 - Memory references specific code (line numbers, function names)? Verify against current files before acting
 - Plans or specs with line numbers? Verify those lines are still correct before editing
