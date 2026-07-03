@@ -32,7 +32,7 @@
 {# Awarded coverage — emerald once every line is decided, amber while partial. Visible to
    non-owners too (like the line/offer counts): "this deal is done" is not private. #}
 {% if awarded_line_count %}
-<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-medium border
+<span class="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full font-medium border
     {{ 'bg-emerald-50 text-emerald-700 border-emerald-200' if awarded_line_count == line_count
        else 'bg-amber-50 text-amber-700 border-amber-200' }}">
   {{ awarded_line_count }}/{{ line_count }} awarded

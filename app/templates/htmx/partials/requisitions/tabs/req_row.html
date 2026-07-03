@@ -114,7 +114,7 @@
                  hx-vals="js:{q: event.target.value}"
                  hx-swap="innerHTML"
                  class="w-full px-2 py-1.5 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500 placeholder:text-gray-400">
-          <div class="mfr-dropdown absolute z-50 w-full mt-0.5 bg-white border border-gray-200 rounded shadow-float max-h-40 overflow-y-auto"
+          <div class="mfr-dropdown absolute z-50 w-full mt-0.5 bg-white border border-line-base rounded shadow-float max-h-40 overflow-y-auto"
                x-show="mfrOpen" x-cloak></div>
         </div>
         <input aria-label="Target Qty" type="number" name="target_qty" value="{{ r.target_qty or 1 }}" min="1"
@@ -176,7 +176,7 @@
                      hx-vals="js:{q: event.target.value}"
                      hx-swap="innerHTML"
                      class="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-brand-500 placeholder:text-gray-400">
-              <div class="sub-mfr-dropdown absolute z-50 w-full mt-0.5 bg-white border border-gray-200 rounded shadow-float max-h-32 overflow-y-auto"
+              <div class="sub-mfr-dropdown absolute z-50 w-full mt-0.5 bg-white border border-line-base rounded shadow-float max-h-32 overflow-y-auto"
                    x-show="subMfrOpen" x-cloak></div>
             </div>
             <button type="button" @click="subs.splice(idx, 1)"

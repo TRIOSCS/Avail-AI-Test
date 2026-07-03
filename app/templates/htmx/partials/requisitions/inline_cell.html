@@ -31,12 +31,12 @@
   {% endset %}
 {% elif field == 'urgency' %}
   {% set urgency_colors = {
-    'normal': 'bg-gray-100 text-gray-600',
-    'hot': 'bg-orange-100 text-orange-700',
-    'critical': 'bg-red-100 text-red-700'
+    'normal': 'bg-gray-50 text-gray-600 border-gray-200',
+    'hot': 'bg-amber-50 text-amber-700 border-amber-200',
+    'critical': 'bg-rose-50 text-rose-700 border-rose-200'
   } %}
   {% set orig_display %}
-    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium {{ urgency_colors.get(req.urgency or 'normal', 'bg-gray-100 text-gray-600') }}">{{ (req.urgency or 'normal')|capitalize }}</span>
+    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border {{ urgency_colors.get(req.urgency or 'normal', 'bg-gray-50 text-gray-600 border-gray-200') }}">{{ (req.urgency or 'normal')|capitalize }}</span>
   {% endset %}
 {% elif field == 'deadline' %}
   {% set orig_display %}

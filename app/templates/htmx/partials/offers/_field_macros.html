@@ -12,7 +12,7 @@
     <label class="cursor-pointer">
       <input type="radio" name="{{ name }}" value="{{ value }}" x-model="{{ model }}" class="peer sr-only">
       <span class="inline-flex px-2 py-1 text-xs rounded-full border border-gray-300 text-gray-600
-                   peer-checked:bg-brand-500 peer-checked:text-white peer-checked:border-brand-500">{{ text }}</span>
+                   peer-checked:bg-accent-500 peer-checked:text-white peer-checked:border-accent-500">{{ text }}</span>
     </label>
     {% endfor %}
   </div>
@@ -32,8 +32,8 @@
 {# Qualification status badge — colored pill with filled/total count or "Unqualified". #}
 {%- macro qual_badge(offer) -%}
 {% set s = offer.qualification_summary %}
-{% set cmap = {'complete':'bg-emerald-50 text-emerald-700','essentials':'bg-amber-50 text-amber-700','incomplete':'bg-rose-50 text-rose-700','unset':'bg-gray-100 text-gray-600'} %}
-<span class="inline-flex px-1.5 py-0.5 text-xs font-medium rounded-full {{ cmap.get(s.status, 'bg-gray-100 text-gray-600') }}"
+{% set cmap = {'complete':'bg-emerald-50 text-emerald-700 border-emerald-200','essentials':'bg-amber-50 text-amber-700 border-amber-200','incomplete':'bg-rose-50 text-rose-700 border-rose-200','unset':'bg-gray-50 text-gray-600 border-gray-200'} %}
+<span class="badge {{ cmap.get(s.status, 'bg-gray-50 text-gray-600 border-gray-200') }}"
       title="{{ s.note or 'Not qualified' }}">
   {% if s.status == 'unset' %}Unqualified{% elif s.total %}{{ s.filled }}/{{ s.total }}{% else %}{{ s.status|capitalize }}{% endif %}
 </span>

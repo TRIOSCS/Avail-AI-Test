@@ -6,7 +6,7 @@
 #}
 <div class="space-y-5 p-1">
   <div>
-    <h2 class="text-lg font-bold text-gray-900">Merge Contact: {{ keep.full_name }}</h2>
+    <h2 class="h2">Merge Contact: {{ keep.full_name }}</h2>
     <p class="mt-1 text-sm text-gray-600">
       Search for the duplicate contact to merge away. The duplicate will be
       <strong>deleted</strong> and its data merged into
@@ -34,7 +34,7 @@
              hx-swap="innerHTML"
              hx-include="[name='exclude_id']">
       <div id="contact-merge-results"
-           class="absolute z-30 w-full bg-white border border-gray-200 rounded-lg shadow-float mt-1 hidden">
+           class="absolute z-30 w-full bg-white border border-line-base rounded-lg shadow-float mt-1 hidden">
       </div>
     </div>
 

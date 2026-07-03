@@ -35,7 +35,7 @@
      @dossier-rail.window="railShown = $event.detail">
   <div x-show="railShown" x-cloak
        x-transition:enter="transition ease-out duration-150" x-transition:enter-start="opacity-0 -translate-y-1" x-transition:enter-end="opacity-100 translate-y-0"
-       class="sticky tier-rail z-10 -mx-4 bg-white border-b border-brand-200 shadow-sm">
+       class="sticky tier-rail z-10 -mx-4 bg-white border-b border-brand-200 shadow-card">
     <div class="page-readable px-4 py-2 flex items-center gap-3">
       <span class="font-mono text-sm font-bold text-brand-900 truncate">{{ mpn }}</span>
       <div class="ml-auto flex items-center gap-2">
@@ -168,7 +168,7 @@
        x-transition:enter-start="translate-x-full" x-transition:enter-end="translate-x-0"
        x-transition:leave="transition ease-in duration-150 transform"
        x-transition:leave-start="translate-x-0" x-transition:leave-end="translate-x-full"
-       class="fixed inset-y-0 right-0 w-full max-w-lg bg-white shadow-2xl border-l border-line-subtle z-50"
+       class="fixed inset-y-0 right-0 w-full max-w-lg bg-white shadow-float border-l border-line-subtle z-50"
        x-cloak>
     <div id="lead-drawer-content" class="h-full" @htmx:after-swap="drawerOpen = true"></div>
   </div>

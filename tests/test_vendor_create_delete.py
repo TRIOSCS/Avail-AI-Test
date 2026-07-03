@@ -220,7 +220,7 @@ def test_vendor_detail_has_delete_button(client: TestClient, vendor: VendorCard)
 
 
 def test_vendor_detail_header_matches_account_header(client: TestClient, db_session: Session):
-    """The vendor detail h1 uses text-lg (matching the account detail header) and the
+    """The vendor detail h1 uses the design-system record-hero recipe (.h1) and the
     header metadata uses middot `·` separators (not pipe `|`), mirroring the account
     header."""
     v = VendorCard(
@@ -239,8 +239,9 @@ def test_vendor_detail_header_matches_account_header(client: TestClient, db_sess
     assert resp.status_code == 200
     body = resp.text
 
-    # h1 must use the smaller text-lg size (account-header parity), not text-2xl.
-    assert '<h1 class="text-lg font-bold text-gray-900">Header Consistency Co</h1>' in body
+    # h1 must use the shared record-hero recipe (account-header parity via .h1),
+    # not a hand-rolled utility stack.
+    assert '<h1 class="h1">Header Consistency Co</h1>' in body
     assert '<h1 class="text-2xl font-bold text-gray-900">' not in body
     # Header metadata separators must be the middot, not the pipe.
     assert '<span class="text-gray-300">·</span>' in body

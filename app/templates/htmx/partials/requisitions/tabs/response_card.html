@@ -11,13 +11,13 @@
     </div>
     <div class="flex items-center gap-2">
       {% set class_colors = {
-        "quote": "bg-emerald-50 text-emerald-700",
-        "decline": "bg-rose-50 text-rose-700",
-        "ooo": "bg-amber-50 text-amber-700",
-        "bounce": "bg-gray-100 text-gray-500",
+        "quote": "bg-emerald-50 text-emerald-700 border-emerald-200",
+        "decline": "bg-rose-50 text-rose-700 border-rose-200",
+        "ooo": "bg-amber-50 text-amber-700 border-amber-200",
+        "bounce": "bg-gray-50 text-gray-500 border-gray-200",
       } %}
       {% if r.classification %}
-      <span class="px-2 py-0.5 text-xs font-medium rounded-full {{ class_colors.get(r.classification, 'bg-gray-100 text-gray-600') }}">
+      <span class="badge {{ class_colors.get(r.classification, 'bg-gray-50 text-gray-600 border-gray-200') }}">
         {{ r.classification|capitalize }}
       </span>
       {% endif %}
@@ -27,12 +27,12 @@
       </span>
       {% endif %}
       {% set status_colors = {
-        "new": "bg-brand-100 text-brand-700",
-        "reviewed": "bg-emerald-50 text-emerald-700",
-        "rejected": "bg-rose-50 text-rose-700",
-        "matched": "bg-emerald-50 text-emerald-700",
+        "new": "bg-brand-50 text-brand-700 border-brand-200",
+        "reviewed": "bg-emerald-50 text-emerald-700 border-emerald-200",
+        "rejected": "bg-rose-50 text-rose-700 border-rose-200",
+        "matched": "bg-emerald-50 text-emerald-700 border-emerald-200",
       } %}
-      <span class="px-2 py-0.5 text-xs font-medium rounded-full {{ status_colors.get(r.status, 'bg-gray-100 text-gray-600') }}">
+      <span class="badge {{ status_colors.get(r.status, 'bg-gray-50 text-gray-600 border-gray-200') }}">
         {{ (r.status or "new")|capitalize }}
       </span>
     </div>

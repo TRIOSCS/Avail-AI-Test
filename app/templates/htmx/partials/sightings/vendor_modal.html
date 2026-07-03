@@ -21,7 +21,7 @@
 
   {# ── Step 1: Compose ─────────────────────────────────────────── #}
   <div x-show="step === 'compose'" x-cloak>
-    <h3 class="text-lg font-semibold text-gray-900 mb-3">Send Inquiry</h3>
+    <h3 class="h2 mb-3">Send Inquiry</h3>
 
     {# Vendor panel — stable container id; every swap below targets a stable-id
        SUB-container inside the x-data wrapper, never the wrapper itself
@@ -175,7 +175,7 @@
                aria-label="Find any vendor"
                class="input">
         <div x-show="searchOpen" x-cloak
-             class="absolute z-50 left-0 right-0 mt-1 max-h-40 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-lg">
+             class="absolute z-50 left-0 right-0 mt-1 max-h-40 overflow-y-auto bg-white border border-line-base rounded-lg shadow-float">
           <template x-for="v in vendorResults" :key="v.id">
             <button type="button" @click="pickVendor(v.name)"
                     class="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-accent-50 hover:text-accent-700 truncate"
@@ -303,7 +303,7 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
         </svg>
       </button>
-      <h3 class="text-lg font-semibold text-gray-900">Review Emails Before Sending</h3>
+      <h3 class="h2">Review Emails Before Sending</h3>
     </div>
 
     {# Preview content injected via loadPreview() — server-sanitized via sanitize_html filter #}

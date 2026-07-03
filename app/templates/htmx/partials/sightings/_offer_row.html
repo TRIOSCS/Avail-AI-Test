@@ -42,7 +42,7 @@
         </svg>
       </button>
       <div x-show="open" x-cloak
-           class="absolute right-0 top-full mt-1 w-36 bg-white border border-gray-200 rounded-lg shadow-lg z-10 py-1 text-xs">
+           class="absolute right-0 top-full mt-1 w-36 bg-white border border-line-base rounded-lg shadow-float z-10 py-1 text-xs">
         <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/sightings/{{ requirement.id }}/offers/{{ o.id }}/edit-form'}); open = false"
                 class="w-full text-left px-3 py-1.5 text-gray-700 hover:bg-gray-50">Edit</button>
         {% if o.vendor_response_id %}

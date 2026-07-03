@@ -166,7 +166,7 @@ def test_direction_pill_outbound_shows_out():
     )
     html = _render_row(a)
     assert "Out" in html
-    assert "bg-slate-100" in html
+    assert "bg-slate-50" in html
     assert "text-slate-600" in html
 
 
@@ -182,7 +182,7 @@ def test_direction_pill_outbound_with_connected_outcome():
     html = _render_row(a)
     assert "Out" in html
     assert "Connected" in html
-    assert "bg-emerald-100" in html
+    assert "bg-emerald-50" in html
 
 
 def test_direction_pill_inbound_shows_in():
@@ -196,7 +196,7 @@ def test_direction_pill_inbound_shows_in():
     html = _render_row(a)
     assert "In" in html
     # inbound direction uses emerald
-    assert "bg-emerald-100" in html
+    assert "bg-emerald-50" in html
 
 
 def test_call_outcome_left_message():
@@ -208,7 +208,7 @@ def test_call_outcome_left_message():
     )
     html = _render_row(a)
     assert "Left msg" in html
-    assert "bg-sky-100" in html
+    assert "bg-sky-50" in html
 
 
 def test_call_outcome_voicemail():
@@ -220,7 +220,7 @@ def test_call_outcome_voicemail():
     )
     html = _render_row(a)
     assert "Voicemail" in html
-    assert "bg-amber-100" in html
+    assert "bg-amber-50" in html
 
 
 def test_call_outcome_no_answer():
@@ -232,7 +232,7 @@ def test_call_outcome_no_answer():
     )
     html = _render_row(a)
     assert "No answer" in html
-    assert "bg-gray-100" in html
+    assert "bg-gray-50" in html
 
 
 def test_no_direction_no_details_renders_cleanly():
@@ -241,7 +241,7 @@ def test_no_direction_no_details_renders_cleanly():
     a = _vendor_activity(direction=None, details=None)
     html = _render_row(a)
     # Must not crash and must not emit direction/outcome markup
-    assert "bg-slate-100" not in html
+    assert "bg-slate-50" not in html
     assert "Connected" not in html
     assert "Left msg" not in html
     assert "Voicemail" not in html
@@ -260,6 +260,6 @@ def test_meeting_row_outbound_shows_out_pill():
     )
     html = _render_row(a)
     assert "Out" in html
-    assert "bg-slate-100" in html
+    assert "bg-slate-50" in html
     # No outcome badge when details is None
     assert "Connected" not in html

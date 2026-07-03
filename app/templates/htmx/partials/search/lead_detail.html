@@ -9,7 +9,7 @@
 {# Drawer header with close button #}
 <div class="flex items-center justify-between px-5 py-4 border-b border-line-subtle bg-brand-700">
   <div class="min-w-0">
-    <h2 class="text-lg font-bold text-white truncate">{{ s.vendor_name }}</h2>
+    <h2 class="h2 text-white truncate">{{ s.vendor_name }}</h2>
     <p class="text-xs text-brand-300 mt-0.5">{{ s.mpn_matched or s.mpn or mpn }}</p>
   </div>
   <button type="button" @click="drawerOpen = false"

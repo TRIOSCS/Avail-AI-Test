@@ -26,7 +26,7 @@
   <a hx-get="{{ endpoint }}?confidence={{ val if param == 'confidence' else f_confidence }}&safety={{ val if param == 'safety' else f_safety }}&freshness={{ val if param == 'freshness' else f_freshness }}&source={{ f_source }}&status={{ val if param == 'status' else f_status }}&contactability={{ val if param == 'contactability' else f_contactability }}&corroborated={{ val if param == 'corroborated' else f_corroborated }}&sort={{ f_sort }}"
      hx-target="{{ target }}" hx-push-url="{{ push_url }}"
      class="px-2 py-0.5 text-[11px] rounded-full border cursor-pointer
-       {{ 'bg-brand-500 text-white border-brand-500' if val == selected else 'bg-white text-gray-600 border-gray-300 hover:border-brand-300' }}">
+       {{ 'bg-accent-500 text-white border-accent-500' if val == selected else 'bg-white text-gray-600 border-gray-300 hover:border-accent-300' }}">
     {{ opt_label }}
   </a>
   {% endfor %}

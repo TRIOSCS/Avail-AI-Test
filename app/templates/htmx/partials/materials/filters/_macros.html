@@ -75,7 +75,7 @@
      would close early and break Alpine init. spec_key is [a-z0-9_]. #}
   <button type="button" @click='toggleNumericChip({{ spec_key|tojson }}, {{ chip.value|tojson }})'
           :class='(subFilters[{{ (spec_key ~ "__vals")|tojson }}] || []).includes({{ chip.value|tojson }}) ? "bg-accent-50 text-accent-700 border-accent-300" : "bg-white text-gray-500 border-gray-200 hover:border-gray-300"'
-          class="px-2 py-0.5 text-[12px] border rounded-md transition-colors tabular-nums">
+          class="px-2 py-0.5 text-[12px] border rounded-lg transition-colors tabular-nums">
     {{ '%g'|format(chip.value) }} <span class="opacity-60">({{ counts.get(chip.value|string, 0) }})</span>
   </button>
   {% endfor %}
@@ -116,12 +116,12 @@
   <div class="flex gap-1.5">
     <button @click="toggleFilter('{{ spec_key }}', 'true')"
             :class="(subFilters['{{ spec_key }}'] || []).includes('true') ? 'bg-accent-50 text-accent-700 border-accent-300' : 'bg-white text-gray-500 border-gray-200 hover:border-gray-300'"
-            class="px-3 py-1 text-sm border rounded-md transition-colors">
+            class="px-3 py-1 text-sm border rounded-lg transition-colors">
       Yes <span class="text-[11px] opacity-60 tabular-nums">({{ counts['true'] if (counts and 'true' in counts) else 0 }})</span>
     </button>
     <button @click="toggleFilter('{{ spec_key }}', 'false')"
             :class="(subFilters['{{ spec_key }}'] || []).includes('false') ? 'bg-accent-50 text-accent-700 border-accent-300' : 'bg-white text-gray-500 border-gray-200 hover:border-gray-300'"
-            class="px-3 py-1 text-sm border rounded-md transition-colors">
+            class="px-3 py-1 text-sm border rounded-lg transition-colors">
       No <span class="text-[11px] opacity-60 tabular-nums">({{ counts['false'] if (counts and 'false' in counts) else 0 }})</span>
     </button>
   </div>

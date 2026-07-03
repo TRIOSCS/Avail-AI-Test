@@ -64,7 +64,7 @@
         <div class="flex items-center gap-2">
           {{ activity_icon(icon_type) }}
           <h3 class="text-sm font-semibold text-gray-700">{{ section_label }}</h3>
-          <span class="inline-flex items-center px-1.5 py-0.5 text-xs font-medium rounded-full bg-gray-100 text-gray-600">{{ section_items|length }}</span>
+          <span class="badge bg-gray-100 text-gray-600 border-gray-200">{{ section_items|length }}</span>
         </div>
         <div class="flex items-center gap-2">
           <span class="text-xs text-gray-600" x-text='hideOther ? "Show" : "Hide"'>Show</span>
@@ -102,7 +102,7 @@
       <div class="px-4 py-2.5 bg-gray-50 border-b flex items-center gap-2">
         {{ activity_icon(icon_type) }}
         <h3 class="text-sm font-semibold text-gray-700">{{ section_label }}</h3>
-        <span class="inline-flex items-center px-1.5 py-0.5 text-xs font-medium rounded-full bg-gray-100 text-gray-600">{{ section_items|length }}</span>
+        <span class="badge bg-gray-100 text-gray-600 border-gray-200">{{ section_items|length }}</span>
       </div>
       {# ── Section body (date-grouped) ───────────────────── #}
       <div class="px-4 py-2">

@@ -8,7 +8,7 @@
 #}
 {% set el = list %}
 <div class="p-5" x-data="{ scope: 'per_line' }">
-  <h2 class="text-lg font-semibold text-gray-900 mb-1">Submit offer</h2>
+  <h2 class="h2 mb-1">Submit offer</h2>
   <p class="text-sm text-gray-500 mb-4">On <span class="font-medium text-gray-700">{{ el.title }}</span></p>
 
   <form hx-post="/api/resell/{{ el.id }}/offers"

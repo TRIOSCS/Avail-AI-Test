@@ -15,7 +15,7 @@
      hx-push-url="/v2/requisitions"
      {% if active == 'workspace' %}aria-current="page"{% endif %}
      class="px-2 py-1 rounded-sm cursor-pointer transition-colors
-            {{ 'bg-brand-500 text-white' if active == 'workspace' else 'text-gray-600 hover:text-brand-600 hover:bg-brand-50' }}">
+            {{ 'bg-accent-500 text-white' if active == 'workspace' else 'text-gray-600 hover:text-accent-600 hover:bg-accent-50' }}">
     Workspace
   </a>
   <a href="/v2/requisitions?view=list"
@@ -25,7 +25,7 @@
      hx-push-url="/v2/requisitions?view=list"
      {% if active == 'list' %}aria-current="page"{% endif %}
      class="px-2 py-1 rounded-sm cursor-pointer transition-colors
-            {{ 'bg-brand-500 text-white' if active == 'list' else 'text-gray-600 hover:text-brand-600 hover:bg-brand-50' }}">
+            {{ 'bg-accent-500 text-white' if active == 'list' else 'text-gray-600 hover:text-accent-600 hover:bg-accent-50' }}">
     List view
   </a>
 </div>

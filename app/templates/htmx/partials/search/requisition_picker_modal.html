@@ -3,8 +3,8 @@
    Depends on: htmx_views requisition_picker + add_to_requisition routes
 #}
 <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" role="dialog" aria-label="Add to requisition" @click.self="$el.remove()" @keydown.escape="$el.remove()">
-  <div class="bg-white rounded-lg border border-brand-200 shadow-2xl w-full max-w-md mx-4 p-6">
-    <h3 class="text-lg font-semibold text-brand-900 mb-4">Add to Requisition</h3>
+  <div class="bg-white rounded-lg border border-brand-200 shadow-float w-full max-w-md mx-4 p-6">
+    <h3 class="h2 mb-4">Add to Requisition</h3>
 
     {% if requisitions %}
     <div class="space-y-2 max-h-64 overflow-y-auto">

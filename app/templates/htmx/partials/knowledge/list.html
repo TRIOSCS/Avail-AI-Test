@@ -5,7 +5,7 @@
 #}
 <div class="page-readable">
   <div class="flex items-center justify-between mb-4">
-    <h2 class="text-lg font-bold text-gray-900">Knowledge Base</h2>
+    <h1 class="h2">Knowledge Base</h1>
   </div>
 
   {# Search #}
@@ -43,7 +43,7 @@
       {% for e in entries %}
       <div class="bg-white rounded-lg border border-gray-200 p-3">
         <div class="flex items-center gap-2 mb-1">
-          <span class="px-1.5 py-0.5 text-xs font-medium rounded-full bg-gray-100 text-gray-600">{{ e.entry_type }}</span>
+          <span class="badge bg-gray-100 text-gray-600 border-gray-200">{{ e.entry_type }}</span>
         </div>
         <p class="text-sm text-gray-600">{{ e.content[:200] }}{{ '...' if e.content|length > 200 }}</p>
         {% if e.created_at %}

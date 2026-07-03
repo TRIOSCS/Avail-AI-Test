@@ -165,7 +165,7 @@
            role="dialog" aria-modal="true" aria-label="Position your profile photo"
            x-trap.noscroll="open"
            @keydown.escape="close()" @click.self="close()">
-          <div class="bg-white rounded-xl border border-brand-200 shadow-2xl w-full max-w-sm">
+          <div class="bg-white rounded-xl border border-brand-200 shadow-float w-full max-w-sm">
             <div class="modal-header">
               <h3 class="text-base font-semibold text-brand-900">Position your photo</h3>
               <button type="button" class="modal-close" @click="close()" aria-label="Cancel">
@@ -228,7 +228,7 @@
                     after:h-5 after:w-5 after:transition-all peer-checked:bg-accent-500"></div>
       </label>
     </div>
-    <div x-show="enabled" x-cloak class="mt-3 p-3 bg-accent-50 rounded-md">
+    <div x-show="enabled" x-cloak class="mt-3 p-3 bg-accent-50 rounded-lg">
       <p class="text-xs text-accent-600">Click-to-call is active. Phone numbers across the app will dial through 8x8.</p>
     </div>
   </div>

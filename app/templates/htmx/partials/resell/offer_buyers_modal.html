@@ -48,7 +48,7 @@
        get addedCompanyIds() { return this.addedCompanies.filter(c => c.type === "customer").map(c => c.id); }
      }'>
 
-  <h2 class="text-lg font-semibold text-gray-900 mb-1">Offer to buyers</h2>
+  <h2 class="h2 mb-1">Offer to buyers</h2>
   <p class="text-sm text-gray-500 mb-4">
     {% if scope_lines %}{{ scope_lines|length }} selected line{{ 's' if scope_lines|length != 1 }} on
     {% else %}The whole list

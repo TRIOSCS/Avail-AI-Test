@@ -167,7 +167,7 @@
             </svg>
           </button>
           <div x-show="open" x-cloak
-               class="absolute right-0 top-full mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-lg z-20 py-1 text-xs text-left">
+               class="absolute right-0 top-full mt-1 w-44 bg-white border border-line-base rounded-lg shadow-float z-20 py-1 text-xs text-left">
             {# ── State 1 (suppressed): Mark available is the only action ── #}
             {% if is_unavailable %}
             <button hx-post="/v2/partials/sightings/{{ requirement.id }}/mark-available"

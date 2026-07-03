@@ -192,9 +192,9 @@ Usage:
 #}
 {% macro task_priority_badge(priority) -%}
 {%- if priority == 3 -%}
-<span class="inline-flex px-2 py-0.5 text-xs font-semibold uppercase tracking-wider rounded-full bg-rose-100 text-rose-700">High</span>
+{{ badge('High', tone='danger') }}
 {%- elif priority == 1 -%}
-<span class="inline-flex px-2 py-0.5 text-xs font-semibold uppercase tracking-wider rounded-full bg-gray-100 text-gray-600">Low</span>
+{{ badge('Low', tone='muted') }}
 {%- endif -%}
 {%- endmacro %}
 
@@ -328,7 +328,7 @@ Usage:
 
 {% macro filter_pill(label, value, current, attrs={}) %}
 <button class="px-3 py-1.5 text-sm font-medium rounded-full transition-colors
-  {% if current == value %}bg-brand-500 text-white shadow-sm{% else %}bg-brand-100 text-brand-600 hover:bg-brand-200{% endif %}"
+  {% if current == value %}bg-accent-500 text-white shadow-sm{% else %}bg-accent-100 text-accent-600 hover:bg-accent-200{% endif %}"
   data-loading-disable
   {% for key, val in attrs.items() %}{{ key }}="{{ val }}" {% endfor %}>
   {{ label }}
@@ -474,18 +474,18 @@ Usage:
       <span class="text-xs text-gray-600 truncate">{{ who }}</span>
       {% endif %}
       {% if a.channel and a.channel not in ('system', 'manual') %}
-      <span class="inline-flex px-1.5 py-0.5 text-xs font-medium rounded-full bg-gray-100 text-gray-600">{{ a.channel|capitalize }}</span>
+      <span class="badge bg-gray-50 text-gray-600 border-gray-200">{{ a.channel|capitalize }}</span>
       {% endif %}
       {% if a.direction %}
-      {%- set _dir_colors = {"outbound": "bg-slate-100 text-slate-600", "inbound": "bg-emerald-100 text-emerald-700"} -%}
+      {%- set _dir_colors = {"outbound": "bg-slate-50 text-slate-600 border-slate-200", "inbound": "bg-emerald-50 text-emerald-700 border-emerald-200"} -%}
       {%- set _dir_labels = {"outbound": "Out", "inbound": "In"} -%}
-      <span class="inline-flex px-1.5 py-0.5 text-xs font-medium rounded-full {{ _dir_colors.get(a.direction, 'bg-gray-100 text-gray-600') }}">{{ _dir_labels.get(a.direction, a.direction|capitalize) }}</span>
+      <span class="badge {{ _dir_colors.get(a.direction, 'bg-gray-50 text-gray-600 border-gray-200') }}">{{ _dir_labels.get(a.direction, a.direction|capitalize) }}</span>
       {% endif %}
       {% if a.details and a.details.get('call_outcome') %}
-      {%- set _outcome_colors = {"connected": "bg-emerald-100 text-emerald-700", "left_message": "bg-sky-100 text-sky-700", "voicemail": "bg-amber-100 text-amber-700", "no_answer": "bg-gray-100 text-gray-600"} -%}
+      {%- set _outcome_colors = {"connected": "bg-emerald-50 text-emerald-700 border-emerald-200", "left_message": "bg-sky-50 text-sky-700 border-sky-200", "voicemail": "bg-amber-50 text-amber-700 border-amber-200", "no_answer": "bg-gray-50 text-gray-600 border-gray-200"} -%}
       {%- set _outcome_labels = {"connected": "Connected", "left_message": "Left msg", "voicemail": "Voicemail", "no_answer": "No answer"} -%}
       {%- set _co = a.details.get('call_outcome') -%}
-      <span class="inline-flex px-1.5 py-0.5 text-xs font-medium rounded-full {{ _outcome_colors.get(_co, 'bg-gray-100 text-gray-600') }}">{{ _outcome_labels.get(_co, _co|replace('_', ' ')|capitalize) }}</span>
+      <span class="badge {{ _outcome_colors.get(_co, 'bg-gray-50 text-gray-600 border-gray-200') }}">{{ _outcome_labels.get(_co, _co|replace('_', ' ')|capitalize) }}</span>
       {% endif %}
     </div>
     {% if a.summary or a.notes %}
@@ -517,10 +517,10 @@ Usage:
 #}
 {% macro cadence_hero(entity, cadence_state, next_best_touch, now_utc) %}
 {%- set badge_colors = {
-  "new":       "bg-gray-100 text-gray-600",
-  "on_target": "bg-emerald-100 text-emerald-700",
-  "due":       "bg-amber-100 text-amber-700",
-  "overdue":   "bg-rose-100 text-rose-700"
+  "new":       "bg-gray-50 text-gray-600 border-gray-200",
+  "on_target": "bg-emerald-50 text-emerald-700 border-emerald-200",
+  "due":       "bg-amber-50 text-amber-700 border-amber-200",
+  "overdue":   "bg-rose-50 text-rose-700 border-rose-200"
 } -%}
 {%- set badge_labels = {
   "new":       "New",
@@ -532,7 +532,7 @@ Usage:
   {# Hero row: cadence badge + next-best-touch #}
   <div class="flex items-center justify-between flex-wrap gap-2 mb-3">
     <div class="flex items-center gap-2">
-      <span class="px-2.5 py-1 text-xs font-semibold rounded-full {{ badge_colors.get(cadence_state, 'bg-gray-100 text-gray-600') }}">
+      <span class="badge {{ badge_colors.get(cadence_state, 'bg-gray-50 text-gray-600 border-gray-200') }}">
         {{ badge_labels.get(cadence_state, cadence_state|title) }}
       </span>
     </div>

@@ -22,7 +22,7 @@
   <div class="flex items-center justify-between mb-4">
     <div class="flex items-center gap-3">
       <div>
-        <h1 class="text-base font-semibold text-gray-800 leading-tight">Requisitions list</h1>
+        <h1 class="h2">Requisitions list</h1>
         <p class="text-sm text-gray-600">{{ total }} total</p>
       </div>
       {% with active='list' %}{% include "htmx/partials/requisitions/_view_toggle.html" %}{% endwith %}
@@ -148,7 +148,7 @@
                 hx-include="#req-filters"
                 :hx-vals="JSON.stringify({status: '{{ s_val }}', sort: rSort, dir: rDir})"
                 class="px-3 py-1 text-xs font-medium rounded-full transition-colors
-                       {{ 'bg-brand-500 text-white' if status == s_val else 'bg-white text-gray-700 border border-gray-200 hover:bg-brand-50' }}">
+                       {{ 'bg-accent-500 text-white' if status == s_val else 'bg-white text-gray-700 border border-gray-200 hover:bg-accent-50' }}">
           {{ s_label }}
         </button>
         {% endfor %}
@@ -159,7 +159,7 @@
         {% for u_val, u_label in [('hot', 'Hot'), ('critical', 'Critical')] %}
         <button type="button" x-data="{ active: '{{ urgency }}' === '{{ u_val }}' }"
                 @click="let inp=$el.closest('form').querySelector('[name=urgency]'); inp.value = inp.value==='{{ u_val }}' ? '' : '{{ u_val }}'; active=inp.value==='{{ u_val }}'; htmx.trigger($el.closest('form').querySelector('[name=q]'), 'changed')"
-                :class="active ? '{{ 'bg-amber-100 text-amber-700' if u_val == 'hot' else 'bg-rose-100 text-rose-700' }}' : 'bg-white text-gray-700 border border-gray-200 hover:bg-brand-50'"
+                :class="active ? '{{ 'bg-amber-100 text-amber-700' if u_val == 'hot' else 'bg-rose-100 text-rose-700' }}' : 'bg-white text-gray-700 border border-gray-200 hover:bg-accent-50'"
                 class="px-3 py-1 text-xs font-medium rounded-full transition-colors">
           {{ u_label }}
         </button>
@@ -196,7 +196,7 @@
         <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
       </button>
       <div x-show="showAssign" role="menu" @click.away="showAssign = false" x-cloak
-           class="absolute left-0 mt-1 w-48 bg-white border border-gray-200 rounded-lg shadow-float z-10 py-1">
+           class="absolute left-0 mt-1 w-48 bg-white border border-line-base rounded-lg shadow-float z-10 py-1">
         {% for u in users %}
         <button hx-post="/v2/partials/requisitions/bulk/assign"
                 hx-target="#main-content"

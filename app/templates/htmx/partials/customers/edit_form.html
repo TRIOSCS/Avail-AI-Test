@@ -13,7 +13,7 @@
 #}
 {% from "htmx/partials/customers/_form_fields.html" import owner_select -%}
 <div class="p-5">
-    <h3 id="modal-title" class="text-lg font-bold text-gray-900 mb-4">Edit Company</h3>
+    <h3 id="modal-title" class="h2 mb-4">Edit Company</h3>
 
     <form hx-post="/v2/partials/customers/{{ company.id }}/edit"
           hx-target="#company-detail-{{ company.id }}"
@@ -75,7 +75,7 @@
       </div>
 
       <!-- Company Details -->
-      <fieldset class="border border-gray-200 rounded-md p-4 space-y-3">
+      <fieldset class="border border-gray-200 rounded-lg p-4 space-y-3">
         <legend class="text-xs font-semibold text-gray-600 uppercase tracking-wide px-1">Company Details</legend>
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Legal / Registered Name</label>
@@ -108,7 +108,7 @@
       </fieldset>
 
       <!-- Contact Info -->
-      <fieldset class="border border-gray-200 rounded-md p-4 space-y-3">
+      <fieldset class="border border-gray-200 rounded-lg p-4 space-y-3">
         <legend class="text-xs font-semibold text-gray-600 uppercase tracking-wide px-1">Contact Info</legend>
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Main Phone</label>
@@ -119,7 +119,7 @@
       </fieldset>
 
       <!-- Address (HQ) -->
-      <fieldset class="border border-gray-200 rounded-md p-4 space-y-3">
+      <fieldset class="border border-gray-200 rounded-lg p-4 space-y-3">
         <legend class="text-xs font-semibold text-gray-600 uppercase tracking-wide px-1">Address (HQ)</legend>
         <div class="grid grid-cols-2 gap-3">
           <div>
@@ -144,7 +144,7 @@
       </fieldset>
 
       <!-- Commercial -->
-      <fieldset class="border border-gray-200 rounded-md p-4 space-y-3">
+      <fieldset class="border border-gray-200 rounded-lg p-4 space-y-3">
         <legend class="text-xs font-semibold text-gray-600 uppercase tracking-wide px-1">Commercial</legend>
         <div class="grid grid-cols-2 gap-3">
           <div>
@@ -163,7 +163,7 @@
       </fieldset>
 
       <!-- Source -->
-      <fieldset class="border border-gray-200 rounded-md p-4 space-y-3">
+      <fieldset class="border border-gray-200 rounded-lg p-4 space-y-3">
         <legend class="text-xs font-semibold text-gray-600 uppercase tracking-wide px-1">Source</legend>
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">How was this account acquired?</label>
@@ -181,7 +181,7 @@
       {{ owner_select(users, selected_id=company.account_owner_id, with_selection=True) }}
 
       <!-- Account Hierarchy -->
-      <fieldset class="border border-gray-200 rounded-md p-4 space-y-3">
+      <fieldset class="border border-gray-200 rounded-lg p-4 space-y-3">
         <legend class="text-xs font-semibold text-gray-600 uppercase tracking-wide px-1">Account Hierarchy</legend>
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Parent Company</label>

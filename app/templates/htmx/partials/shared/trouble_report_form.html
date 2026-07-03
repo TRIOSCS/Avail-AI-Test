@@ -8,7 +8,7 @@
       </svg>
     </div>
     <div>
-      <h3 class="text-lg font-semibold text-gray-900">Report a Problem</h3>
+      <h3 class="h2">Report a Problem</h3>
       <p class="text-sm text-gray-600">Describe the issue — a screenshot has been captured automatically.</p>
     </div>
   </div>
@@ -28,7 +28,7 @@
       required
       minlength="1"
       placeholder="Describe the problem you encountered..."
-      class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 placeholder-gray-400"></textarea>
+      class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 placeholder-gray-400"></textarea>
   </div>
 
   <div class="flex items-center justify-between pt-2 border-t border-gray-100">
@@ -40,7 +40,7 @@
     <button type="button"
             :disabled="submitting"
             @click="window.submitTroubleReport($data)"
-            class="px-4 py-2 bg-rose-500 text-white text-sm font-medium rounded-md hover:bg-rose-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+            class="px-4 py-2 bg-rose-500 text-white text-sm font-medium rounded-lg hover:bg-rose-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
       <span x-show="!submitting" x-cloak>Submit Report</span>
       <span x-show="submitting" x-cloak class="flex items-center gap-2">
         <svg class="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">

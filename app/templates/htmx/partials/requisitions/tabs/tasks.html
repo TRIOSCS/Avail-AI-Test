@@ -9,7 +9,7 @@
     <div class="flex gap-2">
       {% for f, label in [('all', 'All'), ('todo', 'To Do'), ('in_progress', 'In Progress'), ('done', 'Done')] %}
       <button @click="taskFilter = '{{ f }}'"
-              :class="taskFilter === '{{ f }}' ? 'bg-brand-500 text-white shadow-sm' : 'bg-white text-gray-700 border border-gray-200 hover:bg-brand-50 hover:border-brand-200'"
+              :class="taskFilter === '{{ f }}' ? 'bg-accent-500 text-white shadow-sm' : 'bg-white text-gray-700 border border-gray-200 hover:bg-accent-50 hover:border-accent-200'"
               class="px-3 py-1.5 text-xs font-medium rounded-full transition-colors">
         {{ label }}
       </button>

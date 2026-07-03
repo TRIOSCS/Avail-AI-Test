@@ -149,7 +149,7 @@
           <svg class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>
         </button>
         <div x-show="overflow" x-cloak @click.outside="overflow=false" x-transition
-             class="absolute right-0 mt-1 w-52 rounded-lg bg-white border border-brand-200 shadow-float z-20 py-1 text-sm">
+             class="absolute right-0 mt-1 w-52 rounded-lg bg-white border border-line-base shadow-float z-20 py-1 text-sm">
           <button type="button" @click="refreshMarket();overflow=false" class="w-full text-left px-3 py-2 hover:bg-brand-50 text-gray-700">↻ Refresh market</button>
           <button type="button" @click="copyMpn();overflow=false" class="w-full text-left px-3 py-2 hover:bg-brand-50 text-gray-700">Copy MPN</button>
           {% if known %}

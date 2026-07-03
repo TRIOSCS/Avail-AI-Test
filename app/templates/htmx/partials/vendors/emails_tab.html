@@ -42,15 +42,15 @@
             <span class="text-sm font-medium text-gray-900">{{ c.subject or "RFQ" }}</span>
           </div>
           {% set st_colors = {
-            'sent': 'bg-brand-50 text-brand-700',
-            'opened': 'bg-amber-50 text-amber-700',
-            'responded': 'bg-emerald-50 text-emerald-700',
-            'quoted': 'bg-emerald-50 text-emerald-700',
-            'declined': 'bg-rose-50 text-rose-700',
-            'bounced': 'bg-rose-50 text-rose-600',
-            'failed': 'bg-rose-50 text-rose-700',
+            'sent': 'bg-brand-50 text-brand-700 border-brand-200',
+            'opened': 'bg-amber-50 text-amber-700 border-amber-200',
+            'responded': 'bg-emerald-50 text-emerald-700 border-emerald-200',
+            'quoted': 'bg-emerald-50 text-emerald-700 border-emerald-200',
+            'declined': 'bg-rose-50 text-rose-700 border-rose-200',
+            'bounced': 'bg-rose-50 text-rose-600 border-rose-200',
+            'failed': 'bg-rose-50 text-rose-700 border-rose-200',
           } %}
-          <span class="px-1.5 py-0.5 text-xs font-medium rounded-full {{ st_colors.get(c.status, 'bg-gray-100 text-gray-600') }}">
+          <span class="badge {{ st_colors.get(c.status, 'bg-gray-100 text-gray-600 border-gray-200') }}">
             {{ (c.status or 'sent')|capitalize }}
           </span>
         </div>
@@ -91,13 +91,13 @@
           </div>
           <div class="flex items-center gap-2">
             {% set class_colors = {
-              "quote": "bg-emerald-50 text-emerald-700",
-              "decline": "bg-rose-50 text-rose-700",
-              "ooo": "bg-amber-50 text-amber-700",
-              "bounce": "bg-gray-100 text-gray-600",
+              "quote": "bg-emerald-50 text-emerald-700 border-emerald-200",
+              "decline": "bg-rose-50 text-rose-700 border-rose-200",
+              "ooo": "bg-amber-50 text-amber-700 border-amber-200",
+              "bounce": "bg-gray-100 text-gray-600 border-gray-200",
             } %}
             {% if r.classification %}
-            <span class="px-1.5 py-0.5 text-xs font-medium rounded-full {{ class_colors.get(r.classification, 'bg-gray-100 text-gray-600') }}">
+            <span class="badge {{ class_colors.get(r.classification, 'bg-gray-100 text-gray-600 border-gray-200') }}">
               {{ r.classification|capitalize }}
             </span>
             {% endif %}

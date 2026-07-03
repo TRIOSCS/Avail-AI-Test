@@ -57,11 +57,11 @@
           <td class="compact-cell whitespace-nowrap">
             {% set status = vendor_statuses.get(s.vendor_name, 'sighting') %}
             {% set status_styles = {
-              'sighting': 'bg-gray-100 text-gray-600',
-              'contacted': 'bg-blue-50 text-blue-700',
-              'offer-in': 'bg-emerald-50 text-emerald-700',
-              'unavailable': 'bg-gray-100 text-gray-500',
-              'blacklisted': 'bg-red-50 text-red-700',
+              'sighting': 'bg-gray-100 text-gray-600 border-gray-200',
+              'contacted': 'bg-blue-50 text-blue-700 border-blue-200',
+              'offer-in': 'bg-emerald-50 text-emerald-700 border-emerald-200',
+              'unavailable': 'bg-gray-100 text-gray-500 border-gray-200',
+              'blacklisted': 'bg-red-50 text-red-700 border-red-200',
             } %}
             {% set status_labels = {
               'sighting': 'Sighting',
@@ -70,7 +70,7 @@
               'unavailable': 'Unavailable',
               'blacklisted': 'Blacklisted',
             } %}
-            <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ status_styles.get(status, 'bg-gray-100 text-gray-600') }}">
+            <span class="badge {{ status_styles.get(status, 'bg-gray-100 text-gray-600 border-gray-200') }}">
               {{ status_labels.get(status, status|capitalize) }}
             </span>
           </td>

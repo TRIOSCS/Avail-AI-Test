@@ -11,7 +11,7 @@
 {# Customer avatar + company name + optional site name, used in both the
    Matches and Sent group headers. default_name is the |default fallback for a
    missing company_name ('Unknown Customer' on Matches, 'Unknown' on Sent). #}
-{% macro company_header(group, default_name) %}        <div class="flex items-center justify-center w-7 h-7 rounded-full bg-gray-200 text-gray-600 text-xs font-bold">
+{% macro company_header(group, default_name) %}        <div class="flex items-center justify-center w-7 h-7 rounded-full bg-brand-100 text-brand-600 text-xs font-bold">
           {{ (group.company_name or 'U')[0]|upper }}
         </div>
         <div class="flex-1 min-w-0">

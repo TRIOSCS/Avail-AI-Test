@@ -146,7 +146,7 @@
              hx-target="#main-content"
              hx-push-url="/v2/requisitions/{{ item.id }}"
              @click="searchOpen = false"
-             class="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-gray-700 hover:bg-brand-50 transition-colors">
+             class="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-gray-700 hover:bg-brand-50 transition-colors">
             {{ entity_icon("requisitions") }}
             <span>
               <span class="font-medium">{{ item.name }}</span>
@@ -163,7 +163,7 @@
              hx-target="#main-content"
              hx-push-url="/v2/companies/{{ item.id }}"
              @click="searchOpen = false"
-             class="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-gray-700 hover:bg-brand-50 transition-colors">
+             class="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-gray-700 hover:bg-brand-50 transition-colors">
             {{ entity_icon("companies") }}
             <span class="font-medium">{{ item.name }}</span>
           </a>
@@ -175,7 +175,7 @@
              hx-target="#main-content"
              hx-push-url="/v2/vendors/{{ item.id }}"
              @click="searchOpen = false"
-             class="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-gray-700 hover:bg-brand-50 transition-colors">
+             class="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-gray-700 hover:bg-brand-50 transition-colors">
             {{ entity_icon("vendors") }}
             <span class="font-medium">{{ item.display_name }}</span>
           </a>
@@ -187,7 +187,7 @@
              hx-target="#main-content"
              hx-push-url="/v2/vendors/{{ item.vendor_card_id|default(item.id) }}"
              @click="searchOpen = false"
-             class="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-gray-700 hover:bg-brand-50 transition-colors">
+             class="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-gray-700 hover:bg-brand-50 transition-colors">
             {{ entity_icon("vendor_contacts") }}
             <span>
               <span class="font-medium">{{ item.full_name }}</span>
@@ -199,7 +199,7 @@
 
           {# ── Site Contacts ── #}
           {% elif group_key == "site_contacts" %}
-          <div class="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-gray-700">
+          <div class="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-gray-700">
             {{ entity_icon("site_contacts") }}
             <span>
               <span class="font-medium">{{ item.full_name }}</span>
@@ -216,7 +216,7 @@
              hx-target="#main-content"
              hx-push-url="/v2/requisitions/{{ item.requisition_id|default('') }}"
              @click="searchOpen = false"
-             class="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-gray-700 hover:bg-brand-50 transition-colors">
+             class="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-gray-700 hover:bg-brand-50 transition-colors">
             {{ entity_icon("parts") }}
             <span>
               <span class="font-medium font-mono">{{ item.primary_mpn }}</span>
@@ -233,7 +233,7 @@
              hx-target="#main-content"
              hx-push-url="/v2/requisitions/{{ item.requisition_id|default('') }}"
              @click="searchOpen = false"
-             class="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-gray-700 hover:bg-brand-50 transition-colors">
+             class="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-gray-700 hover:bg-brand-50 transition-colors">
             {{ entity_icon("offers") }}
             <span>
               <span class="font-medium font-mono">{{ item.mpn }}</span>
@@ -253,7 +253,7 @@
              hx-target="#main-content"
              hx-push-url="/v2/search?mpn={{ item.display_mpn|default(item.normalized_mpn|default(''))|urlencode }}"
              @click="searchOpen = false"
-             class="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-gray-700 hover:bg-brand-50 transition-colors">
+             class="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-gray-700 hover:bg-brand-50 transition-colors">
             {{ entity_icon("material_cards") }}
             <span>
               <span class="font-medium font-mono">{{ item.display_mpn }}</span>
@@ -270,7 +270,7 @@
              hx-target="#main-content"
              hx-push-url="/v2/requisitions/{{ item.requisition_id|default('') }}"
              @click="searchOpen = false"
-             class="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-gray-700 hover:bg-brand-50 transition-colors">
+             class="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-gray-700 hover:bg-brand-50 transition-colors">
             {{ entity_icon("sightings") }}
             <span>
               <span class="font-medium font-mono">{{ item.mpn_matched }}</span>

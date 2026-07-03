@@ -14,20 +14,20 @@
         <span class="font-medium text-gray-900 truncate">{{ offer.vendor_name }}</span>
         {% if offer.evidence_tier %}
         {% set tier_num = offer.evidence_tier|replace('T', '')|int if offer.evidence_tier else 5 %}
-        <span class="inline-flex px-1.5 py-0.5 text-xs font-medium rounded-full
-                     {% if tier_num <= 3 %}bg-emerald-50 text-emerald-700
-                     {% elif tier_num == 4 %}bg-amber-50 text-amber-700
-                     {% else %}bg-brand-100 text-brand-600{% endif %}">
+        <span class="badge
+                     {% if tier_num <= 3 %}bg-emerald-50 text-emerald-700 border-emerald-200
+                     {% elif tier_num == 4 %}bg-amber-50 text-amber-700 border-amber-200
+                     {% else %}bg-brand-100 text-brand-600 border-brand-200{% endif %}">
           {{ offer.evidence_tier }}
         </span>
         {% endif %}
         {% set offer_status_colors = {
-          'active': 'bg-emerald-50 text-emerald-700',
-          'pending_review': 'bg-amber-50 text-amber-700',
-          'rejected': 'bg-rose-50 text-rose-700',
-          'sold': 'bg-gray-100 text-gray-600'
+          'active': 'bg-emerald-50 text-emerald-700 border-emerald-200',
+          'pending_review': 'bg-amber-50 text-amber-700 border-amber-200',
+          'rejected': 'bg-rose-50 text-rose-700 border-rose-200',
+          'sold': 'bg-gray-50 text-gray-600 border-gray-200'
         } %}
-        <span class="inline-flex px-1.5 py-0.5 text-xs font-medium rounded-full {{ offer_status_colors.get(offer.status, 'bg-gray-100 text-gray-600') }}">
+        <span class="badge {{ offer_status_colors.get(offer.status, 'bg-gray-50 text-gray-600 border-gray-200') }}">
           {{ offer.status|replace('_', ' ')|capitalize }}
         </span>
       </div>

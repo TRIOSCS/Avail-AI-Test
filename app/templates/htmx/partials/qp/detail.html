@@ -59,7 +59,7 @@
   <div class="mb-4">
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div class="flex items-center gap-3">
-        <h1 class="text-2xl font-bold text-gray-900">Quality Plan #{{ qp.id }}</h1>
+        <h1 class="h1">Quality Plan #{{ qp.id }}</h1>
         {{ status_badge(qp.status, status_map=QP_STATUS) }}
         <span class="chip bg-gray-50 text-gray-600 border-gray-200">{{ qp.order_type|replace('_', ' ')|title }}</span>
       </div>

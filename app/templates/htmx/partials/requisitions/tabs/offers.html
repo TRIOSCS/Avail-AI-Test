@@ -19,7 +19,7 @@
         <svg class="h-3 w-3 ml-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
       </button>
       <div x-show="addOpen" role="menu" aria-label="Add offer options" @click.outside="addOpen = false" x-cloak x-transition
-           class="absolute left-0 top-full mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-float z-10 py-1">
+           class="absolute left-0 top-full mt-1 w-44 bg-white border border-line-base rounded-lg shadow-float z-10 py-1">
         <button hx-get="/v2/partials/requisitions/{{ req.id }}/add-offer-form"
                 hx-target="#parse-area" hx-swap="innerHTML"
                 @click="addOpen = false"
@@ -52,7 +52,7 @@
   <div class="flex flex-wrap items-center gap-2 mb-4">
     {% for s, label in [('', 'All'), ('unset', 'Unset'), ('incomplete', 'Incomplete'), ('essentials', 'Essentials'), ('complete', 'Complete')] %}
     <button class="px-3 py-1.5 text-sm font-medium rounded-full transition-colors
-                   {% if (qual or '') == s %}bg-brand-500 text-white shadow-sm{% else %}bg-brand-100 text-brand-600 hover:bg-brand-200{% endif %}"
+                   {% if (qual or '') == s %}bg-accent-500 text-white shadow-sm{% else %}bg-accent-100 text-accent-600 hover:bg-accent-200{% endif %}"
             hx-get="/v2/partials/requisitions/{{ req.id }}/tab/offers?qual={{ s }}"
             hx-target="#tab-content"
             hx-swap="innerHTML">
@@ -173,15 +173,15 @@
           <td data-col-key="notes" class="px-4 py-2.5 text-sm text-gray-600 max-w-[200px] truncate" title="{{ o.notes or '' }}">{{ o.notes or "—" }}</td>
           <td data-col-key="status" class="px-4 py-2.5">
             {% set offer_colors = {
-              "active": "bg-emerald-50 text-emerald-700",
-              "pending_review": "bg-amber-50 text-amber-700",
-              "approved": "bg-emerald-50 text-emerald-700",
-              "rejected": "bg-rose-50 text-rose-700",
-              "draft": "bg-brand-100 text-brand-600",
-              "sold": "bg-gray-100 text-gray-600"
+              "active": "bg-emerald-50 text-emerald-700 border-emerald-200",
+              "pending_review": "bg-amber-50 text-amber-700 border-amber-200",
+              "approved": "bg-emerald-50 text-emerald-700 border-emerald-200",
+              "rejected": "bg-rose-50 text-rose-700 border-rose-200",
+              "draft": "bg-brand-50 text-brand-700 border-brand-200",
+              "sold": "bg-gray-50 text-gray-600 border-gray-200"
             } %}
             <div class="flex items-center gap-1 flex-wrap">
-              <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ offer_colors.get(o.status, 'bg-gray-100 text-gray-600') }}">
+              <span class="badge {{ offer_colors.get(o.status, 'bg-gray-50 text-gray-600 border-gray-200') }}">
                 {{ (o.status or 'unknown')|replace('_', ' ')|capitalize }}
               </span>
               {{ qual_badge(o) }}
@@ -199,7 +199,7 @@
                    x-transition:enter-start="opacity-0 scale-95" x-transition:enter-end="opacity-100 scale-100"
                    x-transition:leave="transition ease-in duration-75"
                    x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
-                   class="absolute right-0 top-full mt-1 w-40 bg-white border border-gray-200 rounded-lg shadow-float z-10 py-1">
+                   class="absolute right-0 top-full mt-1 w-40 bg-white border border-line-base rounded-lg shadow-float z-10 py-1">
                 <button hx-get="/v2/partials/requisitions/{{ req.id }}/offers/{{ o.id }}/edit-form"
                         hx-target="#parse-area" hx-swap="innerHTML"
                         @click.stop="open = false"

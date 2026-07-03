@@ -61,8 +61,8 @@ class TestProactiveBadge:
         html = self._render(jinja_env, source=None)
         # The word "Proactive" should not appear (except possibly in the title)
         # Check the badge span itself is absent
-        assert "bg-violet-100" not in html
+        assert "text-violet-700" not in html
 
     def test_badge_absent_for_manual_source(self, jinja_env):
         html = self._render(jinja_env, source="manual")
-        assert "bg-violet-100" not in html
+        assert "text-violet-700" not in html

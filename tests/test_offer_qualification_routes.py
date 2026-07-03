@@ -515,7 +515,7 @@ def test_offers_tab_qual_filter_server_side(client, db_session, test_requisition
     assert b"FilterVendorComplete" in body_all
 
     # FIX 1: "All" pill must carry the active class when no qual param is sent.
-    assert b"bg-brand-500" in body_all, "All pill should be active (bg-brand-500) when no qual filter"
+    assert b"bg-accent-500" in body_all, "All pill should be active (bg-accent-500) when no qual filter"
 
     # FIX 2: filter-aware empty state — ?qual=essentials on a req with only incomplete/complete offers.
     resp_empty = client.get(f"/v2/partials/requisitions/{req_id}/tab/offers?qual=essentials")

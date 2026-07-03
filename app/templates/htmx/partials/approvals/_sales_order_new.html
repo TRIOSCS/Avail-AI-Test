@@ -17,7 +17,7 @@
 {# ── Mode 1: requisition picker ── #}
 <div>
   <div class="flex items-center justify-between mb-4">
-    <h2 class="text-lg font-semibold text-gray-900">New Buy Plan</h2>
+    <h2 class="h2">New Buy Plan</h2>
     <button hx-get="/v2/partials/approvals/my-queue"
             hx-target="#bp-hub-body"
             hx-swap="innerHTML"
@@ -56,7 +56,7 @@
 <div>
   <div class="flex items-center justify-between mb-4">
     <div class="min-w-0">
-      <h2 class="text-lg font-semibold text-gray-900 truncate">
+      <h2 class="h2 truncate">
         New Buy Plan — {{ selected_req.name or 'REQ #' ~ selected_req.id }}
       </h2>
       <p class="text-xs text-gray-600">REQ #{{ selected_req.id }}</p>

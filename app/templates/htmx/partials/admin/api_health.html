@@ -11,8 +11,8 @@
     {% for c in health.connectors %}
     <div class="flex items-center justify-between px-3 py-2 rounded border border-gray-100">
       <span class="text-sm font-medium text-gray-900">{{ c.get('name', 'Unknown') }}</span>
-      {% set status_colors = {'healthy': 'bg-emerald-100 text-emerald-700', 'degraded': 'bg-amber-100 text-amber-700', 'down': 'bg-rose-100 text-rose-700'} %}
-      <span class="px-2 py-0.5 text-xs font-medium rounded-full {{ status_colors.get(c.get('status', ''), 'bg-gray-100 text-gray-600') }}">
+      {% set status_colors = {'healthy': 'bg-emerald-50 text-emerald-600 border-emerald-200', 'degraded': 'bg-amber-50 text-amber-600 border-amber-200', 'down': 'bg-rose-50 text-rose-500 border-rose-200'} %}
+      <span class="badge {{ status_colors.get(c.get('status', ''), 'bg-gray-50 text-gray-600 border-gray-200') }}">
         {{ c.get('status', 'unknown')|title }}
       </span>
     </div>

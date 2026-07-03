@@ -12,7 +12,7 @@
   {# ── Page header: title + primary CTA ────────────────────────────────────── #}
   <div class="flex items-center justify-between mb-4">
     <div>
-      <h2 class="text-base font-semibold text-gray-900">Vendors</h2>
+      <h1 class="h2">Vendors</h1>
       <p class="text-secondary mt-0.5">{{ total }} vendor{{ "s" if total != 1 }}</p>
     </div>
     <div class="flex items-center gap-2">
@@ -42,7 +42,7 @@
   <div x-show="importOpen" x-cloak
        class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
        @keydown.escape.window="importOpen = false">
-    <div class="bg-white rounded-xl shadow-xl w-full max-w-md relative" @click.outside="importOpen = false">
+    <div class="bg-white rounded-xl shadow-float w-full max-w-md relative" @click.outside="importOpen = false">
       <div class="modal-header">
         <h3 class="h4">Upload stock list</h3>
         <button type="button" class="modal-close" @click="importOpen = false" aria-label="Close">&times;</button>

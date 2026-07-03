@@ -32,7 +32,7 @@
     <button hx-get="/v2/partials/email-intelligence?classification={{ cls }}"
             hx-target="#main-content"
             class="inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-lg transition-colors
-                   {% if classification == cls %}bg-brand-500 text-white shadow-sm{% else %}bg-white text-gray-600 border border-brand-200 hover:bg-brand-50{% endif %}">
+                   {% if classification == cls %}bg-accent-500 text-white shadow-sm{% else %}bg-white text-gray-600 border border-brand-200 hover:bg-accent-50{% endif %}">
       {{ label }}
     </button>
     {% endfor %}
@@ -54,7 +54,7 @@
             'stock_list': 'bg-violet-50 text-violet-700 border-violet-200',
             'inquiry': 'bg-amber-50 text-amber-700 border-amber-200',
           } %}
-          <span class="inline-flex px-2 py-0.5 text-xs font-semibold rounded-full border {{ cls_colors.get(item.get('classification', ''), 'bg-gray-100 text-gray-600 border-gray-200') }}">
+          <span class="inline-flex px-2 py-0.5 text-xs font-semibold rounded-full border {{ cls_colors.get(item.get('classification', ''), 'bg-gray-50 text-gray-700 border-gray-200') }}">
             {{ (item.get('classification', '') or 'unknown')|replace('_', ' ')|title }}
           </span>
           {% if item.get('confidence') %}

@@ -13,8 +13,8 @@
   {# ── Top Bar ──────────────────────────────────────────────── #}
   <div class="flex items-center justify-between px-6 py-3 bg-brand-50 border-b-2 border-brand-200 flex-shrink-0">
     <div class="flex items-center gap-3">
-      <h2 class="text-lg font-bold text-brand-800 tracking-tight">Quote Builder</h2>
-      <span x-show="saved" class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-emerald-100 text-emerald-700" x-text="quoteNumber" x-cloak></span>
+      <h2 class="h2">Quote Builder</h2>
+      <span x-show="saved" class="badge bg-emerald-50 text-emerald-700 border-emerald-200" x-text="quoteNumber" x-cloak></span>
       <span class="text-sm text-gray-600">
         for <span class="font-medium text-gray-700">{{ customer_name or req.name }}</span>
       </span>
@@ -65,7 +65,7 @@
       <div class="px-4 py-2.5 flex flex-wrap gap-1.5 border-b border-brand-100 flex-shrink-0">
         <template x-for="f in filterOptions" :key="f.key">
           <button @click="setFilter(f.key)"
-                  :class="activeFilter === f.key ? 'bg-brand-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'"
+                  :class="activeFilter === f.key ? 'bg-accent-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'"
                   class="text-xs px-2.5 py-1 rounded-full font-medium transition-colors tabular-nums">
             <span x-text="f.label"></span>
             <span x-show="f.count > 0" x-cloak class="ml-0.5" x-text="'(' + f.count + ')'"></span>
@@ -288,8 +288,8 @@
                           :class="h.margin >= 25 ? 'text-emerald-600' : h.margin >= 15 ? 'text-amber-600' : 'text-rose-600'"
                           x-text="(h.margin || 0).toFixed(1) + '%'"></td>
                       <td class="px-3 py-1.5">
-                        <span class="inline-flex px-1.5 py-0.5 text-xs font-semibold rounded-full"
-                              :class="h.result === 'won' ? 'bg-emerald-50 text-emerald-700' : h.result === 'lost' ? 'bg-rose-50 text-rose-700' : 'bg-gray-100 text-gray-600'"
+                        <span class="inline-flex px-1.5 py-0.5 text-xs font-semibold rounded-full border"
+                              :class="h.result === 'won' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : h.result === 'lost' ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-slate-50 text-slate-500 border-slate-200'"
                               x-text="h.result || 'draft'"></span>
                       </td>
                     </tr>
@@ -386,7 +386,7 @@
             <button @click="confirmDecision()"
                     :disabled="!activeLine.selected_offer_id || !activeLine.sell_price"
                     class="px-4 py-1.5 text-sm font-medium text-white rounded-lg transition-colors flex items-center gap-1.5 disabled:opacity-50"
-                    :class="activeLine.status === 'decided' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-brand-500 hover:bg-brand-600'">
+                    :class="activeLine.status === 'decided' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-accent-500 hover:bg-accent-600'">
               <span x-text="activeLine.status === 'decided' ? 'Update & Next' : 'Confirm & Next'"></span>
               <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/>
@@ -443,13 +443,13 @@
     <div class="flex items-center gap-2">
       <button @click="exportExcel()"
               :disabled="!saved"
-              class="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 flex items-center gap-1.5 transition-colors disabled:opacity-50">
+              class="btn-secondary btn-lg">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
         Excel
       </button>
       <button @click="exportPdf()"
               :disabled="!saved"
-              class="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 flex items-center gap-1.5 transition-colors disabled:opacity-50">
+              class="btn-secondary btn-lg">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
         TRIO PDF
       </button>

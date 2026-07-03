@@ -6,7 +6,7 @@
 <div class="max-w-3xl mx-auto">
   <div class="bg-white rounded-lg shadow border border-gray-200 p-6">
     <div class="flex items-center justify-between mb-4">
-      <h2 class="text-lg font-bold text-gray-900">Quote Preview</h2>
+      <h2 class="h2">Quote Preview</h2>
       <span class="text-sm text-gray-600">{{ quote.quote_number }}</span>
     </div>
 
@@ -86,7 +86,7 @@
     <div class="flex items-center gap-3 pt-2 border-t border-gray-200">
       <button hx-get="/v2/partials/quotes/{{ quote.id }}"
               hx-target="#main-content"
-              class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200">
+              class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">
         Back to Quote
       </button>
     </div>

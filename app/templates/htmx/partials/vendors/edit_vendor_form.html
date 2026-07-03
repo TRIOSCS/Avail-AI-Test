@@ -3,7 +3,7 @@
    Called by: htmx_views.py vendor_edit_form route.
    Depends on: HTMX, Tailwind CSS with brand palette.
 #}
-<div class="bg-white rounded-lg shadow border border-gray-200 p-6 mb-6">
+<div class="bg-white rounded-lg shadow-card border border-gray-200 p-6 mb-6">
   <div class="flex items-center justify-between mb-4">
     <h2 class="text-sm font-semibold text-gray-900">Edit Vendor</h2>
     <button hx-get="/v2/partials/vendors/{{ vendor.id }}"
