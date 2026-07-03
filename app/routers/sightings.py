@@ -84,7 +84,20 @@ router = APIRouter(tags=["sightings"])
 
 MAX_BATCH_SIZE: Final[int] = 50
 # Requisitions in these statuses are excluded from sightings (no active sourcing).
-_EXCLUDED_REQ_STATUSES: Final = (RequisitionStatus.CANCELLED,)
+# WON/LOST/CANCELLED are terminal deals — the sightings board is for buyers to ACTIVELY
+# source OPEN work, so closed deals never appear.
+_EXCLUDED_REQ_STATUSES: Final = (
+    RequisitionStatus.CANCELLED,
+    RequisitionStatus.WON,
+    RequisitionStatus.LOST,
+)
+# Per-part terminal states — a closed requirement (won/lost/archived) drops off the active
+# sourcing board even when its parent requisition is still open (multi-part deals).
+_EXCLUDED_SOURCING_STATUSES: Final = (
+    SourcingStatus.WON,
+    SourcingStatus.LOST,
+    SourcingStatus.ARCHIVED,
+)
 
 _cache: dict[str, tuple[float, Any]] = {}
 
@@ -337,6 +350,7 @@ async def sightings_list(
         db.query(Requirement)
         .join(Requisition, Requirement.requisition_id == Requisition.id)
         .filter(Requisition.status.notin_(_EXCLUDED_REQ_STATUSES))
+        .filter(Requirement.sourcing_status.notin_(_EXCLUDED_SOURCING_STATUSES))
         .options(joinedload(Requirement.requisition).joinedload(Requisition.creator))
     )
 
@@ -401,6 +415,7 @@ async def sightings_list(
             db.query(Requirement.sourcing_status, sqlfunc.count())
             .join(Requisition, Requirement.requisition_id == Requisition.id)
             .filter(Requisition.status.notin_(_EXCLUDED_REQ_STATUSES))
+            .filter(Requirement.sourcing_status.notin_(_EXCLUDED_SOURCING_STATUSES))
             .group_by(Requirement.sourcing_status)
             .all()
         ),
@@ -461,6 +476,7 @@ async def sightings_list(
         db.query(Requirement.id)
         .join(Requisition, Requirement.requisition_id == Requisition.id)
         .filter(Requisition.status.notin_(_EXCLUDED_REQ_STATUSES))
+        .filter(Requirement.sourcing_status.notin_(_EXCLUDED_SOURCING_STATUSES))
     )
 
     # Urgent: priority >= 70 OR need_by_date within 48h
@@ -752,6 +768,7 @@ async def sightings_detail(
         .join(Requirement, VendorSightingSummary.requirement_id == Requirement.id)
         .join(Requisition, Requirement.requisition_id == Requisition.id)
         .filter(Requisition.status.notin_(_EXCLUDED_REQ_STATUSES))
+        .filter(Requirement.sourcing_status.notin_(_EXCLUDED_SOURCING_STATUSES))
         .group_by(VendorSightingSummary.vendor_name)
         .having(sqlfunc.count(sqlfunc.distinct(VendorSightingSummary.requirement_id)) > 1)
         .all()

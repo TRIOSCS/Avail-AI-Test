@@ -127,6 +127,53 @@ class TestSightingsListPartial:
         resp = client.get("/v2/partials/sightings?page=1")
         assert resp.status_code == 200
 
+    def test_hides_won_lost_archived_requirements(self, client, db_session):
+        """Closed parts (won/lost/archived sourcing_status) never appear on the
+        sightings board — it is for actively sourcing OPEN work.
+
+        The open part still shows.
+        """
+        req = Requisition(name="Mixed RFQ", status="open", customer_name="Acme Corp")
+        db_session.add(req)
+        db_session.flush()
+        for mpn, ss in [
+            ("OPEN-PART-1", "open"),
+            ("WON-PART-1", "won"),
+            ("LOST-PART-1", "lost"),
+            ("ARCH-PART-1", "archived"),
+        ]:
+            db_session.add(Requirement(requisition_id=req.id, primary_mpn=mpn, target_qty=10, sourcing_status=ss))
+        db_session.commit()
+
+        resp = client.get("/v2/partials/sightings")
+        assert resp.status_code == 200
+        assert "OPEN-PART-1" in resp.text
+        assert "WON-PART-1" not in resp.text
+        assert "LOST-PART-1" not in resp.text
+        assert "ARCH-PART-1" not in resp.text
+
+    def test_hides_parts_of_closed_deals(self, client, db_session):
+        """A won/lost/cancelled requisition is a closed deal — none of its parts appear,
+        even a part still marked 'open' (multi-part-deal / data-drift safety)."""
+        for deal_status in ("won", "lost", "cancelled"):
+            req = Requisition(name=f"{deal_status} RFQ", status=deal_status, customer_name="Acme Corp")
+            db_session.add(req)
+            db_session.flush()
+            db_session.add(
+                Requirement(
+                    requisition_id=req.id,
+                    primary_mpn=f"DEAL-{deal_status.upper()}",
+                    target_qty=10,
+                    sourcing_status="open",
+                )
+            )
+        db_session.commit()
+
+        resp = client.get("/v2/partials/sightings")
+        assert "DEAL-WON" not in resp.text
+        assert "DEAL-LOST" not in resp.text
+        assert "DEAL-CANCELLED" not in resp.text
+
 
 class TestSightingsDetailPartial:
     def test_returns_200(self, client, db_session):
@@ -4211,12 +4258,15 @@ class TestMPNClickableLinks:
 
 
 class TestRequisitionStatusFilter:
-    """Sightings list excludes requirements from cancelled requisitions."""
+    """Sightings list excludes requirements from closed deals — cancelled/won/lost
+    requisitions (the board is for actively sourcing OPEN work)."""
 
     @pytest.mark.parametrize(
         ("status", "mpn"),
         [
             ("cancelled", "CANCELLED-MPN"),
+            ("won", "WON-DEAL-MPN"),
+            ("lost", "LOST-DEAL-MPN"),
         ],
     )
     def test_inactive_requisition_excluded(self, client, db_session, status, mpn):
@@ -4230,9 +4280,10 @@ class TestRequisitionStatusFilter:
         assert resp.status_code == 200
         assert mpn not in resp.text
 
-    def test_non_active_requisition_included(self, client, db_session):
-        """WON/SOURCING/QUOTED requisitions should appear in sightings."""
-        for status in ("sourcing", "won", "quoted"):
+    def test_active_pipeline_requisition_included(self, client, db_session):
+        """Active-pipeline requisitions (sourcing/offers/quoted) still appear — only the
+        terminal won/lost/cancelled deals are hidden."""
+        for status in ("sourcing", "offers", "quoted"):
             req = Requisition(name=f"{status} RFQ", status=status, customer_name="Acme")
             db_session.add(req)
             db_session.flush()
@@ -4243,7 +4294,7 @@ class TestRequisitionStatusFilter:
         db_session.commit()
         resp = client.get("/v2/partials/sightings")
         assert resp.status_code == 200
-        for status in ("sourcing", "won", "quoted"):
+        for status in ("sourcing", "offers", "quoted"):
             assert f"MPN-{status.upper()}" in resp.text
 
 
