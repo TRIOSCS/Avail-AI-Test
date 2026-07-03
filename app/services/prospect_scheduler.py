@@ -26,6 +26,7 @@ from app.config import settings
 from app.constants import ProspectAccountStatus
 from app.models.discovery_batch import DiscoveryBatch
 from app.models.prospect_account import ProspectAccount
+from app.services.prospect_free_enrichment import run_contact_enrichment_batch
 from app.services.prospect_scoring import calculate_fit_score, calculate_readiness_score
 
 
@@ -268,8 +269,6 @@ async def job_find_contacts() -> dict:
         return {"skipped": True, "reason": "disabled"}
 
     try:
-        from app.services.prospect_contacts import run_contact_enrichment_batch
-
         result = await run_contact_enrichment_batch(
             min_fit_score=settings.prospecting_min_fit_for_contacts,
         )

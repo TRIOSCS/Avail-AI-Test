@@ -519,11 +519,16 @@ class TestJobErrorHandling:
 
     @pytest.mark.asyncio
     async def test_contacts_handles_service_error(self):
-        """When run_contact_enrichment_batch is missing/fails, job returns error."""
+        """When run_contact_enrichment_batch raises at runtime, job returns error."""
         with patch("app.services.prospect_scheduler.settings") as mock_s:
             mock_s.prospecting_enabled = True
             mock_s.prospecting_min_fit_for_contacts = 60
-            result = await job_find_contacts()
+            with patch(
+                "app.services.prospect_scheduler.run_contact_enrichment_batch",
+                new_callable=AsyncMock,
+                side_effect=Exception("Service crash"),
+            ):
+                result = await job_find_contacts()
         assert "error" in result
 
     @pytest.mark.asyncio
@@ -722,16 +727,38 @@ class TestEnrichPoolJob:
 
 
 class TestFindContactsJob:
-    """Tests for job_find_contacts after enrichment removal."""
+    """job_find_contacts is wired to the real contact-enrichment batch (C1 fix)."""
+
+    def test_batch_symbol_resolves_at_module_top(self):
+        """Regression for C1: the batch is imported at scheduler module top, so a
+        missing symbol fails loudly at import instead of being swallowed by the job's
+        blanket except."""
+        import app.services.prospect_scheduler as sched
+
+        assert callable(sched.run_contact_enrichment_batch)
 
     @pytest.mark.asyncio
-    async def test_contacts_returns_error_when_batch_missing(self):
-        """run_contact_enrichment_batch was removed; job should return error."""
+    async def test_contacts_happy_path_invokes_batch(self):
+        """The job resolves and awaits run_contact_enrichment_batch, forwarding the
+        configured min-fit gate and returning its summary."""
+        mock_summary = {
+            "prospects_processed": 4,
+            "total_verified": 7,
+            "total_contacts": 12,
+            "errors": 0,
+        }
         with patch("app.services.prospect_scheduler.settings") as mock_s:
             mock_s.prospecting_enabled = True
             mock_s.prospecting_min_fit_for_contacts = 60
-            result = await job_find_contacts()
-        assert "error" in result
+            with patch(
+                "app.services.prospect_scheduler.run_contact_enrichment_batch",
+                new_callable=AsyncMock,
+                return_value=mock_summary,
+            ) as mock_batch:
+                result = await job_find_contacts()
+
+        assert result == mock_summary
+        mock_batch.assert_awaited_once_with(min_fit_score=60)
 
 
 # ── Coverage Gap Tests ──────────────────────────────────────────────

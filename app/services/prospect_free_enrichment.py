@@ -15,6 +15,7 @@ from loguru import logger
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
+from app.constants import ProspectAccountStatus
 from app.models.prospect_account import ProspectAccount
 
 # ── Seniority Inference + Prospect Helpers ──────────────────────────────────
@@ -359,6 +360,55 @@ async def run_free_enrichment(prospect_id: int, db: Session | None = None) -> di
             db.close()
 
 
+async def enrich_contacts_for_prospect(prospect: ProspectAccount, db: Session, *, force: bool = False) -> dict:
+    """Find + persist procurement contacts for one prospect (paid Lusha chain).
+
+    Runs the company + suggested-contacts providers, maps them into
+    ``contacts_preview``, and refreshes ``readiness_signals['contacts_verified_count']`` /
+    ``['contacts_unverified_count']`` so the buyer-ready score reflects verified
+    decision-makers. Honors a 24h re-enrichment skip gate keyed on
+    ``enrichment_data['contacts_enriched_at']`` unless ``force`` is set.
+
+    Does NOT commit — the caller owns the transaction. Returns
+    ``{"enriched": bool, "verified": int, "unverified": int}``.
+
+    Called by: run_enrichment_job (per-prospect UI enrich), run_contact_enrichment_batch
+    (monthly Job 3).
+    """
+    from app.config import settings as _settings
+    from app.enrichment_service import enrich_entity, find_suggested_contacts
+
+    ed = dict(prospect.enrichment_data or {})
+    last = ed.get("contacts_enriched_at")
+    if not force and last:
+        try:
+            if (datetime.now(timezone.utc) - datetime.fromisoformat(last)).total_seconds() < 86400:
+                return {"enriched": False, "verified": 0, "unverified": 0}
+        except (TypeError, ValueError):
+            pass
+
+    limit = _settings.prospect_enrich_contacts_per_account
+    company = await enrich_entity(prospect.domain, prospect.name or "")
+    contacts = await find_suggested_contacts(prospect.domain, prospect.name or "", limit=limit)
+    _apply_company_to_prospect(prospect, company)
+    mapped = _apply_contacts_to_prospect(prospect, contacts, limit)
+
+    verified = sum(1 for c in mapped if c["verified"])
+    unverified = sum(1 for c in mapped if not c["verified"])
+    signals = dict(prospect.readiness_signals or {})
+    signals["contacts_verified_count"] = verified
+    signals["contacts_unverified_count"] = unverified
+    prospect.readiness_signals = signals
+
+    ed["contact_provider"] = (company or {}).get("source") or "lusha"
+    ed["contacts_enriched_at"] = datetime.now(timezone.utc).isoformat()
+    prospect.enrichment_data = ed
+    flag_modified(prospect, "contacts_preview")
+    flag_modified(prospect, "readiness_signals")
+    flag_modified(prospect, "enrichment_data")
+    return {"enriched": True, "verified": verified, "unverified": unverified}
+
+
 async def run_enrichment_job(prospect_id: int, db: Session | None = None) -> None:
     """Full background enrichment pass for one prospect, recording enrich_status.
 
@@ -383,43 +433,11 @@ async def run_enrichment_job(prospect_id: int, db: Session | None = None) -> Non
         if prospect is None:
             return
 
-        # ── Paid enrichment (Lusha chain) — 24h skip gate ──
-        from app.config import settings as _settings
-        from app.enrichment_service import enrich_entity, find_suggested_contacts
-
-        ed = dict(prospect.enrichment_data or {})
-        last = ed.get("contacts_enriched_at")
-        recently = False
-        if last:
-            try:
-                recently = (datetime.now(timezone.utc) - datetime.fromisoformat(last)).total_seconds() < 86400
-            except (TypeError, ValueError):
-                recently = False
-
-        if not recently:
-            try:
-                company = await enrich_entity(prospect.domain, prospect.name or "")
-                contacts = await find_suggested_contacts(
-                    prospect.domain,
-                    prospect.name or "",
-                    limit=_settings.prospect_enrich_contacts_per_account,
-                )
-                _apply_company_to_prospect(prospect, company)
-                mapped = _apply_contacts_to_prospect(prospect, contacts, _settings.prospect_enrich_contacts_per_account)
-
-                signals = dict(prospect.readiness_signals or {})
-                signals["contacts_verified_count"] = sum(1 for c in mapped if c["verified"])
-                signals["contacts_unverified_count"] = sum(1 for c in mapped if not c["verified"])
-                prospect.readiness_signals = signals
-
-                ed["contact_provider"] = (company or {}).get("source") or "lusha"
-                ed["contacts_enriched_at"] = datetime.now(timezone.utc).isoformat()
-                prospect.enrichment_data = ed
-                flag_modified(prospect, "contacts_preview")
-                flag_modified(prospect, "readiness_signals")
-                flag_modified(prospect, "enrichment_data")
-            except Exception as exc:  # noqa: BLE001 — paid step is best-effort; free data already saved
-                logger.warning("Paid enrichment step failed for prospect {}: {}", prospect_id, exc)
+        # ── Paid enrichment (Lusha chain) — 24h skip gate lives in the helper ──
+        try:
+            await enrich_contacts_for_prospect(prospect, db)
+        except Exception as exc:  # noqa: BLE001 — paid step is best-effort; free data already saved
+            logger.warning("Paid enrichment step failed for prospect {}: {}", prospect_id, exc)
 
         try:
             warm = detect_warm_intros(prospect, db)
@@ -517,6 +535,62 @@ async def run_free_enrichment_batch(min_fit_score: int = 40) -> dict:
                 summary["errors"] += 1
 
         logger.info("Free enrichment batch complete: {}", summary)
+        return summary
+
+    finally:
+        db.close()
+
+
+async def run_contact_enrichment_batch(min_fit_score: int | None = None) -> dict:
+    """Monthly Job 3 — find procurement contacts for high-fit suggested prospects.
+
+    For each SUGGESTED prospect with ``fit_score >= min_fit_score`` (defaults to
+    ``settings.prospecting_min_fit_for_contacts``), runs the paid contact-finder
+    (``enrich_contacts_for_prospect``) and persists ``contacts_preview`` +
+    ``readiness_signals['contacts_verified_count']`` so the buyer-ready score can credit
+    verified decision-makers. Commits per prospect so one failure never aborts the batch.
+
+    Called by: prospect_scheduler.job_find_contacts.
+    Returns ``{"prospects_processed", "total_verified", "total_contacts", "errors"}``.
+    """
+    from app.config import settings as _settings
+    from app.database import SessionLocal
+
+    if min_fit_score is None:
+        min_fit_score = _settings.prospecting_min_fit_for_contacts
+
+    db = SessionLocal()
+    try:
+        rows = (
+            db.query(ProspectAccount.id)
+            .filter(
+                ProspectAccount.status == ProspectAccountStatus.SUGGESTED,
+                ProspectAccount.fit_score >= min_fit_score,
+            )
+            .order_by(ProspectAccount.fit_score.desc())
+            .limit(50)  # batch limit — mirrors run_free_enrichment_batch
+            .all()
+        )
+
+        summary = {"prospects_processed": 0, "total_verified": 0, "total_contacts": 0, "errors": 0}
+
+        for (prospect_id,) in rows:
+            prospect = db.get(ProspectAccount, prospect_id)
+            if prospect is None:
+                continue
+            try:
+                result = await enrich_contacts_for_prospect(prospect, db)
+                db.commit()
+                if result["enriched"]:
+                    summary["prospects_processed"] += 1
+                    summary["total_verified"] += result["verified"]
+                    summary["total_contacts"] += result["verified"] + result["unverified"]
+            except Exception as e:  # noqa: BLE001 — one prospect must not abort the batch
+                logger.error("Contact enrichment error for prospect {}: {}", prospect_id, e)
+                db.rollback()
+                summary["errors"] += 1
+
+        logger.info("Contact enrichment batch complete: {}", summary)
         return summary
 
     finally:
