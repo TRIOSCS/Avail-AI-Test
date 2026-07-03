@@ -3162,17 +3162,20 @@ Alpine.data('avatarCropper', (postUrl, maxBytes) => ({
     }
     const form = new FormData();
     form.append('file', new File([blob], 'avatar.' + ext, { type }));
+    // Raw fetch (not htmx), so the CSRF double-submit header must be added by hand —
+    // starlette_csrf 403s any session POST without it, before the route ever runs.
     fetch(this.postUrl, {
       method: 'POST',
       body: form,
-      headers: { 'HX-Request': 'true' },
+      headers: { 'HX-Request': 'true', 'x-csrftoken': csrfToken() },
       credentials: 'same-origin',
     })
       .then((resp) => {
         if (!resp.ok) {
+          const fallback = 'Upload failed (HTTP ' + resp.status + '). Try again.';
           return resp.json().then(
-            (b) => { throw new Error((b && b.error) || 'Upload failed. Try again.'); },
-            () => { throw new Error('Upload failed. Try again.'); },
+            (b) => { throw new Error((b && b.error) || fallback); },
+            () => { throw new Error(fallback); },
           );
         }
         // The route returns HX-Trigger {avatarUpdated:{filename}, showToast:{...}}.
