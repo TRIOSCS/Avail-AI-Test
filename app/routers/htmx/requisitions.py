@@ -76,12 +76,18 @@ async def requisitions_list_partial(
     date_to: str = "",
     sort: str = "created_at",
     sort_dir: Literal["asc", "desc"] = Query("desc", alias="dir"),
+    group_by: str = "",
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Return requisitions list as HTML partial with filters and sorting."""
+    """Return requisitions list as HTML partial with filters and sorting.
+
+    ``group_by='customer'`` renders a 2-level nested tree (Customer → Requisition →
+    requirement lines) built server-side over the current page's rows; any other value
+    is the default flat list.
+    """
     query = (
         db.query(Requisition)
         .filter(Requisition.is_scratch.is_(False))
@@ -260,6 +266,25 @@ async def requisitions_list_partial(
     if user.role not in RESTRICTED_ROLES:
         users = db.query(User).order_by(User.name).all()
 
+    # Nested Customer → Requisition → requirement-line tree for the "By Customer" view.
+    # Grouping is scoped to the CURRENT PAGE's requisitions (same page-scoped behaviour as
+    # the sightings board): pagination limits the rows, then we group what's on the page.
+    # Ownership/authz is inherited — `reqs` is already filtered by the RESTRICTED_ROLES
+    # clause above, so restricted users only ever group their own requisitions.
+    customer_groups = None
+    if group_by == "customer":
+        grouped: dict[str, list[Requisition]] = {}
+        for req in reqs:
+            customer = (req.customer_name or "").strip() or "Unknown customer"
+            grouped.setdefault(customer, []).append(req)
+        customer_groups = [
+            {
+                "customer": customer,
+                "requisitions": [{"req": r, "requirements": list(r.requirements or [])} for r in group_reqs],
+            }
+            for customer, group_reqs in grouped.items()
+        ]
+
     from ...services.activity_service import get_inbox_sync_status
 
     ctx = _base_ctx(request, user, "requisitions")
@@ -275,6 +300,8 @@ async def requisitions_list_partial(
             "date_to": date_to,
             "sort": sort,
             "dir": sort_dir,
+            "group_by": group_by,
+            "customer_groups": customer_groups,
             "total": total,
             "limit": limit,
             "offset": offset,

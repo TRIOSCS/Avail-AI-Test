@@ -447,6 +447,83 @@ class TestRequisitionsListPartial:
         assert resp.status_code == 200
         assert resp.text.index("MANY-PARTS") < resp.text.index("FEW-PARTS")
 
+
+class TestRequisitionsGroupByCustomer:
+    """The By-Customer nested grouping (Customer → Requisition → requirement lines),
+    both-level collapse, and the Clean & reset control on the Sales Hub list."""
+
+    def test_group_by_customer_renders_nested_tree(self, client: TestClient, db_session: Session, test_user: User):
+        req = _make_requisition(db_session, test_user, name="ACME-REQ-1", customer_name="Acme Corp")
+        _make_requirement(db_session, req, primary_mpn="GRP-LINE-001")
+        db_session.commit()
+        resp = client.get("/v2/partials/requisitions?group_by=customer")
+        assert resp.status_code == 200
+        body = resp.text
+        # Customer (level 1) + requisition (level 2) + requirement-line leaf all render.
+        assert "Acme Corp" in body
+        assert "ACME-REQ-1" in body
+        assert "GRP-LINE-001" in body
+        # Both levels are collapsible against the inherited persisted map, keyed cust:/req:.
+        assert 'data-gkey="cust:Acme Corp"' in body
+        assert f'data-gkey="req:{req.id}"' in body
+        assert "collapsed[gkey] = !collapsed[gkey]" in body
+
+    def test_group_by_customer_splits_customers_into_separate_groups(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        r1 = _make_requisition(db_session, test_user, name="REQ-A", customer_name="Alpha Inc")
+        r2 = _make_requisition(db_session, test_user, name="REQ-B", customer_name="Beta LLC")
+        _make_requirement(db_session, r1)
+        _make_requirement(db_session, r2, primary_mpn="BETA-1")
+        db_session.commit()
+        resp = client.get("/v2/partials/requisitions?group_by=customer")
+        body = resp.text
+        assert 'data-gkey="cust:Alpha Inc"' in body
+        assert 'data-gkey="cust:Beta LLC"' in body
+
+    def test_group_by_customer_missing_name_bucketed_as_unknown(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        req = _make_requisition(db_session, test_user, name="NOCUST-REQ", customer_name=None)
+        _make_requirement(db_session, req)
+        db_session.commit()
+        resp = client.get("/v2/partials/requisitions?group_by=customer")
+        assert 'data-gkey="cust:Unknown customer"' in resp.text
+
+    def test_persist_and_reset_wired_on_root_scope(self, client: TestClient, db_session: Session, test_user: User):
+        _make_requisition(db_session, test_user)
+        db_session.commit()
+        body = client.get("/v2/partials/requisitions").text
+        # Per-user, per-surface persisted collapse map on the list root.
+        assert "$persist({}).as('saleshub-group-collapse')" in body
+        # Clean & reset: full server reset + expand-all + clear selection.
+        assert "Clean &amp; reset" in body
+        assert "Object.keys(collapsed).forEach(k => collapsed[k] = false)" in body
+        # Group-by control present.
+        assert 'name="group_by"' in body
+        assert ">By Customer</option>" in body
+
+    def test_flat_view_has_no_group_keys(self, client: TestClient, db_session: Session, test_user: User):
+        _make_requisition(db_session, test_user)
+        db_session.commit()
+        resp = client.get("/v2/partials/requisitions")
+        assert "data-gkey" not in resp.text
+
+    def test_grouped_view_respects_ownership_scoping(
+        self, client: TestClient, db_session: Session, test_user: User, admin_user: User
+    ):
+        """Restricted roles group only their OWN requisitions — grouping reuses the same
+        ownership-filtered query, so a foreign req never leaks into the tree."""
+        _make_requisition(db_session, test_user, name="MINE-GRP", customer_name="MyCo")
+        _make_requisition(db_session, admin_user, name="FOREIGN-GRP", customer_name="TheirCo")
+        test_user.role = UserRole.TRADER
+        db_session.commit()
+        resp = client.get("/v2/partials/requisitions?group_by=customer")
+        assert resp.status_code == 200
+        assert "MINE-GRP" in resp.text
+        assert "FOREIGN-GRP" not in resp.text
+        assert 'data-gkey="cust:TheirCo"' not in resp.text
+
     def test_list_sort_by_offer_count(self, client: TestClient, db_session: Session, test_user: User):
         """Sort by offers count (correlated subquery)."""
         r1 = _make_requisition(db_session, test_user, name="NO-OFFERS")

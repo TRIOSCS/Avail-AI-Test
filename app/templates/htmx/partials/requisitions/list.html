@@ -5,7 +5,7 @@
    Depends on: partials/requisitions/req_row.html, brand palette.
 #}
 
-<div class="page-fluid" x-data="{ selectedIds: new Set(), rStatus: '{{ status }}', rSort: '{{ sort }}', rDir: '{{ dir }}' }">
+<div class="page-fluid" x-data="{ selectedIds: new Set(), rStatus: '{{ status }}', rSort: '{{ sort }}', rDir: '{{ dir }}', collapsed: $persist({}).as('saleshub-group-collapse') }">
 
   {# Refresh hook — the create-requisition modal fires `reqListRefresh` on success; on this
      surface (no #parts-list) reload the list into #main-content so the new req appears. #}
@@ -167,6 +167,37 @@
         </button>
         {% endfor %}
 
+        {# Group-by — lives INSIDE #req-filters so its value rides every filter/sort/page
+           request via hx-include (grouping stays sticky). Server-rendered `selected`
+           mirrors the owner dropdown pattern (no extra Alpine state needed). #}
+        <span class="text-gray-300 mx-1 self-center">|</span>
+        <span class="text-xs text-gray-600 self-center mr-1">Group:</span>
+        <select name="group_by" aria-label="Group requisitions"
+                hx-get="/v2/partials/requisitions"
+                hx-target="#main-content"
+                hx-swap="innerHTML"
+                hx-push-url="true"
+                hx-include="#req-filters"
+                :hx-vals="JSON.stringify({status: rStatus, sort: rSort, dir: rDir})"
+                class="px-3 py-1 border border-gray-200 rounded-full text-xs font-medium focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+          <option value="" {% if not group_by %}selected{% endif %}>Flat</option>
+          <option value="customer" {% if group_by == 'customer' %}selected{% endif %}>By Customer</option>
+        </select>
+
+        {# Clean & reset — FULL reset: server GET with no params clears search + every filter
+           + grouping; @click re-expands all groups (mutate in place, never reassign) and
+           clears the selection. Always visible (distinct from the filters-only Clear link). #}
+        <button type="button"
+                hx-get="/v2/partials/requisitions"
+                hx-target="#main-content"
+                hx-swap="innerHTML"
+                hx-push-url="true"
+                @click="selectedIds = new Set(); Object.keys(collapsed).forEach(k => collapsed[k] = false)"
+                class="btn btn-sm btn-secondary self-center"
+                title="Clear search, filters &amp; grouping, expand all groups, and clear selection">
+          Clean &amp; reset
+        </button>
+
         {# Clear all filters #}
         {% if q or status or urgency or date_from or date_to or (owner and owner != 0) %}
         <span class="text-gray-300 mx-1 self-center">|</span>
@@ -236,7 +267,10 @@
     </div>
   </div>
 
-  {# Table #}
+  {# Table (flat) OR nested Customer → Requisition → lines tree (By Customer) #}
+  {% if requisitions and group_by == 'customer' %}
+    {% include "htmx/partials/requisitions/grouped.html" %}
+  {% else %}
   <div class="bg-white rounded-lg shadow border border-gray-200">
     {% if requisitions %}
     <div class="avail-scroll">
@@ -295,8 +329,9 @@
     </div>
     {% endif %}
   </div>
+  {% endif %}
 
-  {# Pagination #}
+  {# Pagination — page of requisitions; grouping regroups only that page's rows. #}
   {% if total > limit %}
   <div class="mt-4 flex justify-center">
     <nav class="flex gap-1 items-center">
