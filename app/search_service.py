@@ -1465,7 +1465,10 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
     # Check search cache (keyed by PNs + active connector set)
     active_names = sorted(_CONNECTOR_SOURCE_MAP.get(c.__class__.__name__, "") for c in connectors)
     cache_key = _search_cache_key(pns, active_names)
-    cached = _get_search_cache(cache_key)
+    # Sync Redis GET off the event loop — a slow/unreachable Redis must not block
+    # every other in-flight request on the single loop (PERF-2). The helper stays
+    # best-effort (swallows RedisError internally), so no new exception escapes here.
+    cached = await asyncio.to_thread(_get_search_cache, cache_key)
     if cached is not None:
         cached_results, cached_stats = cached
         # Merge cached stats with disabled/skipped entries
@@ -1703,9 +1706,10 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
     # Merge with skipped/disabled entries
     source_stats_map.update(agg)
 
-    # Cache results for subsequent searches of the same PNs
+    # Cache results for subsequent searches of the same PNs — sync Redis SETEX
+    # off the event loop so a slow Redis doesn't stall the loop (PERF-2).
     connector_stats = list(agg.values())
-    _set_search_cache(cache_key, out, connector_stats)
+    await asyncio.to_thread(_set_search_cache, cache_key, out, connector_stats)
 
     return out, list(source_stats_map.values())
 
