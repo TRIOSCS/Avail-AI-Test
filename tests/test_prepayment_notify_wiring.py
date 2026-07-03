@@ -26,7 +26,12 @@ from app.dependencies import require_user
 from app.models import User
 
 # Reuse the proven prepay-approval + plan/line builders.
-from tests.test_approvals_hub_tabs import _pending_prepay_request, _plan, _req_quote
+from tests.test_approvals_hub_tabs import (
+    _pending_buy_plan_request,
+    _pending_prepay_request,
+    _plan,
+    _req_quote,
+)
 from tests.test_prepayment_request_ui import _plan_with_line, _seed_approver
 
 _RUNNER = "app.services.prepayment_notifications.run_prepayment_notify_bg"
@@ -105,4 +110,35 @@ def test_reject_dispatches_nothing(approver_client: TestClient, db_session: Sess
         )
 
     assert r.status_code == 200, r.text
+    assert not bg.called
+
+
+# ── Gate guard: a non-PREPAYMENT request is rejected, never mis-fires ──────
+
+
+def test_non_prepayment_request_rejected(approver_client: TestClient, db_session: Session, test_user: User):
+    """The prepayment-specific decide route must refuse a non-PREPAYMENT ApprovalRequest
+    (400) BEFORE deciding it — so it can't decide a buy-plan gate here nor fire the OK-
+    TO-WIRE notice against a wrong subject_id.
+
+    svc_decide is stubbed to a no-op so the guard is isolated from the buy-plan approval
+    bridge (which would 400 on its own for other reasons): a route without the gate
+    guard would sail through the stub and dispatch notify_prepayment_approved against
+    the buy plan id.
+    """
+    req, q, _ = _req_quote(db_session, test_user)
+    bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)
+    ar = _pending_buy_plan_request(db_session, bp, test_user)  # BUY_PLAN gate, not PREPAYMENT
+    db_session.commit()
+
+    with (
+        patch("app.services.approvals.service.decide", new=lambda *a, **k: None),
+        patch(_RUNNER, new_callable=AsyncMock) as bg,
+    ):
+        r = approver_client.post(
+            f"/v2/partials/approvals/prepay-requests/{ar.id}/decide",
+            data={"action": "approve", "origin": "approvals_hub"},
+        )
+
+    assert r.status_code == 400, r.text
     assert not bg.called

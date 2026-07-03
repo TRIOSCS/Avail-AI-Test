@@ -309,10 +309,21 @@ async def prepay_request_decide(
     holds no PENDING recipient slot is 403 (engine PermissionError); a stale/decided request
     is 400 (engine ValueError).
     """
+    from ...constants import ApprovalGateType
+    from ...models.approvals import ApprovalRequest
     from ...services.approvals.service import decide as svc_decide
 
     if action == "reject" and not (comment or "").strip():
         raise HTTPException(400, "A reason is required to reject a prepayment.")
+
+    # This route is prepayment-specific: refuse a non-PREPAYMENT request outright so it can
+    # neither decide a foreign gate here nor mis-fire the OK-TO-WIRE notice against a wrong
+    # subject_id (a buy-plan/quote subject_id is NOT a Prepayment id).
+    ar = db.get(ApprovalRequest, request_id)
+    if ar is None:
+        raise HTTPException(404, "Prepayment request not found.")
+    if ar.gate_type != ApprovalGateType.PREPAYMENT:
+        raise HTTPException(400, "Not a prepayment approval request.")
 
     try:
         svc_decide(db, request_id, user, action, comment=comment or None)
@@ -325,16 +336,13 @@ async def prepay_request_decide(
     # Notify accounting/AP that the wire is authorized — OK TO WIRE. ONLY on approve (never
     # on reject). Fire-and-forget: the runner isolates every error so a failed notice never
     # breaks the approval that just committed.
-    if action == "approve":
-        from ...models.approvals import ApprovalRequest
+    if action == "approve" and ar.subject_id is not None:
         from ...services.prepayment_notifications import (
             notify_prepayment_approved,
             run_prepayment_notify_bg,
         )
 
-        ar = db.get(ApprovalRequest, request_id)
-        if ar is not None and ar.subject_id is not None:
-            await run_prepayment_notify_bg(notify_prepayment_approved, ar.subject_id)
+        await run_prepayment_notify_bg(notify_prepayment_approved, ar.subject_id)
 
     if origin == "approvals_hub":
         from .approvals_hub import render_tab_body
