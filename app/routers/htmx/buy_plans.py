@@ -11,7 +11,8 @@ Depends on: app.models, app.dependencies, app.database, app.services.approvals,
 """
 
 import json
-from datetime import datetime
+import secrets
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
@@ -333,16 +334,35 @@ async def prepay_request_decide(
     except ValueError as e:
         raise HTTPException(400, str(e))
 
-    # Notify accounting/AP that the wire is authorized — OK TO WIRE. ONLY on approve (never
-    # on reject). Fire-and-forget: the runner isolates every error so a failed notice never
-    # breaks the approval that just committed.
-    if action == "approve" and ar.subject_id is not None:
+    # Stamp the prepayment lifecycle + fan the accounting/AP notice. Fire-and-forget: the
+    # runner isolates every error so a failed notice never breaks the decision that just
+    # committed. APPROVE → approved + mint the single-use pay_token (the "OK TO WIRE" email
+    # link); REJECT → void + the "DO NOT WIRE" stand-down.
+    if ar.subject_id is not None and action in ("approve", "reject"):
+        from ...constants import PrepaymentStatus
+        from ...models.quality_plan import Prepayment
         from ...services.prepayment_notifications import (
             notify_prepayment_approved,
+            notify_prepayment_voided,
             run_prepayment_notify_bg,
         )
 
-        await run_prepayment_notify_bg(notify_prepayment_approved, ar.subject_id)
+        pp = db.get(Prepayment, ar.subject_id)
+        if action == "approve":
+            if pp is not None:
+                pp.status = PrepaymentStatus.APPROVED.value
+                pp.approved_by_id = user.id
+                pp.approved_at = datetime.now(timezone.utc)
+                pp.pay_token = secrets.token_urlsafe(32)
+                db.commit()
+            await run_prepayment_notify_bg(notify_prepayment_approved, ar.subject_id)
+        elif pp is not None:  # reject
+            pp.status = PrepaymentStatus.VOID.value
+            pp.void_reason = "rejected by approver"
+            pp.voided_at = datetime.now(timezone.utc)
+            pp.voided_by_id = user.id
+            db.commit()
+            await run_prepayment_notify_bg(notify_prepayment_voided, pp.id)
 
     if origin == "approvals_hub":
         from .approvals_hub import render_tab_body

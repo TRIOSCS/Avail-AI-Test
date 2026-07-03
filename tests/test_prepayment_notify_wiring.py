@@ -3,7 +3,7 @@
 Verifies the two call sites dispatch the accounting/AP notice via run_prepayment_notify_bg:
   - the HTMX create route dispatches notify_prepayment_requested;
   - the prepay decide route dispatches notify_prepayment_approved on approve;
-  - the prepay decide route dispatches NOTHING on reject.
+  - the prepay decide route dispatches notify_prepayment_voided on reject (the stand-down).
 The background runner itself is patched (AsyncMock) so no email/Teams/session work runs.
 
 Called by: pytest
@@ -98,7 +98,12 @@ def test_approve_dispatches_approved(approver_client: TestClient, db_session: Se
     assert any(c.args and c.args[0].__name__ == "notify_prepayment_approved" for c in bg.call_args_list)
 
 
-def test_reject_dispatches_nothing(approver_client: TestClient, db_session: Session, test_user: User):
+def test_reject_dispatches_voided(approver_client: TestClient, db_session: Session, test_user: User):
+    """Reject now voids the prepayment and fires the DO-NOT-WIRE stand-down (prepay
+    closure).
+
+    It must NOT fire notify_prepayment_approved (the wire was never authorized).
+    """
     req, q, _ = _req_quote(db_session, test_user)
     bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)
     ar, _pp = _pending_prepay_request(db_session, bp, test_user)
@@ -110,7 +115,9 @@ def test_reject_dispatches_nothing(approver_client: TestClient, db_session: Sess
         )
 
     assert r.status_code == 200, r.text
-    assert not bg.called
+    dispatched = [c.args[0].__name__ for c in bg.call_args_list if c.args]
+    assert "notify_prepayment_voided" in dispatched
+    assert "notify_prepayment_approved" not in dispatched
 
 
 # ── Gate guard: a non-PREPAYMENT request is rejected, never mis-fires ──────
