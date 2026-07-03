@@ -16,6 +16,7 @@ Depends on: app.services.prepayment_service, app.services.buyplan_workflow (_lin
 """
 
 import json
+import secrets
 from decimal import Decimal, InvalidOperation
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
@@ -23,13 +24,15 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 from starlette.responses import HTMLResponse
 
-from ..constants import PaymentMethod
+from ..constants import ActivityType, PaymentMethod, PrepaymentStatus
 from ..database import get_db
-from ..dependencies import get_buyplan_for_user, require_user
+from ..dependencies import get_buyplan_for_user, is_manager_or_admin, require_user
+from ..models import ActivityLog
 from ..models.buy_plan import BuyPlanLine
+from ..models.quality_plan import Prepayment
 from ..services.approvals.routing import NoEligibleApproverError
 from ..services.buyplan_workflow import _line_amount
-from ..services.prepayment_service import create_prepayment
+from ..services.prepayment_service import create_prepayment, mark_prepayment_paid
 from ..template_env import template_response
 
 router = APIRouter(tags=["prepayments"])
@@ -243,4 +246,152 @@ async def prepayment_request_create(
         resp = await buy_plan_detail_partial(request, buy_plan_id, current_user, db)
 
     _prepayment_toast(resp, "Prepayment request submitted for approval.", "success")
+    return resp
+
+
+# ── In-app mark-paid fallback + manager undo ────────────────────────────────
+#
+# The tokenized accounting-email link (routers/prepayment_confirm.py) is the primary
+# confirm-paid path. These two routes are the in-app fallback + correction: a manager/admin
+# (or the plan owner) records the wire from the Prepayment tab if the email is lost, and a
+# manager/admin can reverse a mis-click. Both re-render the Prepayment tab body into
+# #ap-hub-body so the row's badge/actions update in place.
+
+
+def _require_mark_paid_access(db: Session, user, prepayment: Prepayment) -> None:
+    """Gate the in-app mark-paid: a manager/admin may mark any; anyone else must own the
+    plan (get_buyplan_for_user 404s a restricted role that doesn't own the requisition —
+    the same ownership model create_prepayment enforces)."""
+    if is_manager_or_admin(user):
+        return
+    get_buyplan_for_user(db, user, prepayment.buy_plan_id)
+
+
+def _render_prepayment_tab(request: Request, user, db: Session, scope: str) -> HTMLResponse:
+    """Re-render the Approvals-hub Prepayment tab body (the surface these actions live
+    on)."""
+    from .htmx.approvals_hub import render_tab_body
+
+    return render_tab_body(request, user, db, "prepayment", scope)
+
+
+@router.get("/v2/partials/prepayments/{prepayment_id}/mark-paid", response_class=HTMLResponse)
+def prepayment_mark_paid_modal(
+    request: Request,
+    prepayment_id: int,
+    scope: str = "all",
+    db: Session = Depends(get_db),
+    current_user=Depends(require_user),
+):
+    """Render the in-app "Mark paid" modal for an approved prepayment (house modal
+    pattern).
+
+    Same access gate as the POST so the modal can't be opened against a prepayment the actor
+    may not settle. Only an ``approved`` prepayment can be marked paid.
+    """
+    pp = db.get(Prepayment, prepayment_id)
+    if pp is None:
+        raise HTTPException(status_code=404, detail="Prepayment not found")
+    _require_mark_paid_access(db, current_user, pp)
+    if pp.status != PrepaymentStatus.APPROVED.value:
+        raise HTTPException(status_code=400, detail="Only an approved prepayment can be marked paid.")
+
+    ctx = {
+        "request": request,
+        "user": current_user,
+        "pp": pp,
+        "amount": pp.total_incl_fees,
+        "scope": "mine" if scope == "mine" else "all",
+    }
+    return template_response("htmx/partials/prepayments/mark_paid_modal.html", ctx)
+
+
+@router.post("/v2/partials/prepayments/{prepayment_id}/mark-paid", response_class=HTMLResponse)
+async def prepayment_mark_paid(
+    request: Request,
+    prepayment_id: int,
+    wire_reference: str | None = Form(None),
+    paid_amount: str | None = Form(None),
+    scope: str = Form("all"),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_user),
+):
+    """Record that the wire went out in-app (fallback for the tokenized email link).
+
+    Gated to a manager/admin or the plan owner. ``paid_amount`` defaults to the prepayment's
+    ``total_incl_fees``. On the service guard (non-approved) → an error toast (no swap).
+    """
+    pp = db.get(Prepayment, prepayment_id)
+    if pp is None:
+        raise HTTPException(status_code=404, detail="Prepayment not found")
+    _require_mark_paid_access(db, current_user, pp)
+
+    try:
+        amount = Decimal(paid_amount) if paid_amount else pp.total_incl_fees
+    except (InvalidOperation, TypeError):
+        return _prepayment_error_toast("Enter a valid paid amount.")
+
+    try:
+        mark_prepayment_paid(
+            db,
+            pp,
+            wire_reference=(wire_reference or "").strip(),
+            paid_amount=amount,
+            paid_via="in_app",
+            paid_by_id=current_user.id,
+            paid_by_label=current_user.name,
+        )
+    except ValueError as exc:
+        return _prepayment_error_toast(str(exc))
+
+    resp = _render_prepayment_tab(request, current_user, db, scope)
+    _prepayment_toast(resp, "Prepayment marked paid.", "success")
+    return resp
+
+
+@router.post("/v2/partials/prepayments/{prepayment_id}/unmark-paid", response_class=HTMLResponse)
+async def prepayment_unmark_paid(
+    request: Request,
+    prepayment_id: int,
+    scope: str = Form("all"),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_user),
+):
+    """Reverse a mis-clicked payment: revert ``paid`` → ``approved``, clear the paid fields,
+    re-mint a fresh single-use ``pay_token``, and log the correction. Manager/admin only —
+    reversing a recorded wire is an oversight action, not a plan-owner one.
+    """
+    if not is_manager_or_admin(current_user):
+        raise HTTPException(status_code=403, detail="Manager or admin role required to reverse a payment.")
+    pp = db.get(Prepayment, prepayment_id)
+    if pp is None:
+        raise HTTPException(status_code=404, detail="Prepayment not found")
+    if pp.status != PrepaymentStatus.PAID.value:
+        return _prepayment_error_toast("Only a paid prepayment can be reversed.")
+
+    pp.status = PrepaymentStatus.APPROVED.value
+    pp.paid_at = None
+    pp.paid_by_id = None
+    pp.paid_by_label = None
+    pp.paid_via = None
+    pp.wire_reference = None
+    pp.paid_amount = None
+    pp.pay_token = secrets.token_urlsafe(32)
+
+    requisition_id = pp.buy_plan.requisition_id if pp.buy_plan is not None else None
+    db.add(
+        ActivityLog(
+            user_id=current_user.id,
+            activity_type=ActivityType.NOTE,
+            channel="system",
+            requisition_id=requisition_id,
+            buy_plan_id=pp.buy_plan_id,
+            subject="Prepayment payment reversed",
+            notes=f"Prepayment #{pp.id} reverted paid → approved by {current_user.name or current_user.email}",
+        )
+    )
+    db.commit()
+
+    resp = _render_prepayment_tab(request, current_user, db, scope)
+    _prepayment_toast(resp, "Payment reversed — prepayment returned to approved.", "success")
     return resp

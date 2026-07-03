@@ -93,6 +93,13 @@ class RowVM:
     buyer_remarks: str | None = None
     po_line_total: float | None = None
     decided_by: str | None = None
+    # ── Prepayment payment-lifecycle (the Prepayment's OWN status, not the request's). The
+    # Prepayment tab surfaces the closure state so an approved row offers "Mark paid", a paid
+    # row shows the wire + a manager "Undo paid", and a void row shows the stand-down reason.
+    prepay_status: str | None = None
+    wire_reference: str | None = None
+    paid_by_label: str | None = None
+    void_reason: str | None = None
 
 
 def _mine_clause(user: User):
@@ -477,6 +484,7 @@ def _row_vm(
     currency = ar.currency or "USD"
     beneficiary = po_number = so_number = buyer_remarks = None
     plan_id = po_line_total = test_report_sent = None
+    prepay_status = wire_reference = paid_by_label = void_reason = None
 
     if ar.subject_type == ApprovalSubjectType.PREPAYMENT:
         pp = subjects.get((ar.subject_type, ar.subject_id)) if ar.subject_id else None
@@ -499,6 +507,11 @@ def _row_vm(
             bp = pp.buy_plan
             if bp is not None:
                 so_number = bp.sales_order_number
+            # Payment-lifecycle closure fields (the Mark-paid / Undo / badge affordances).
+            prepay_status = pp.status
+            wire_reference = pp.wire_reference
+            paid_by_label = pp.paid_by_label
+            void_reason = pp.void_reason
 
     return RowVM(
         id=ar.id,
@@ -526,4 +539,8 @@ def _row_vm(
         buyer_remarks=buyer_remarks,
         po_line_total=po_line_total,
         decided_by=(decider_names.get(ar.id) if decider_names else None),
+        prepay_status=prepay_status,
+        wire_reference=wire_reference,
+        paid_by_label=paid_by_label,
+        void_reason=void_reason,
     )

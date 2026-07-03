@@ -114,10 +114,16 @@ def render_tab_body(request: Request, user: User, db: Session, tab: str, scope: 
         return template_response("htmx/partials/approvals/_tab_buy_plan.html", ctx)
 
     if tab == "prepayment":
+        from ...dependencies import is_manager_or_admin
+
         ctx.update(
             {
                 "pending_rows": pending_rows_for_gate(db, user, ApprovalGateType.PREPAYMENT, scope=scope),
                 "resolved_rows": resolved_rows_for_gate(db, ApprovalGateType.PREPAYMENT, scope=scope, user=user),
+                "user": user,
+                # Gate the payment-closure affordances: the "Undo paid" correction is
+                # manager/admin only; "Mark paid" is also offered to the requester (owner).
+                "is_manager_admin": is_manager_or_admin(user),
             }
         )
         return template_response("htmx/partials/approvals/_tab_prepayment.html", ctx)
