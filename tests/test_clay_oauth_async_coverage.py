@@ -1,9 +1,10 @@
-"""tests/test_clay_oauth_async_coverage.py — Async-function coverage for clay_oauth service.
+"""tests/test_clay_oauth_async_coverage.py — Async-function coverage for clay_oauth
+service.
 
 Covers: register_client, _persist_tokens, exchange_code, refresh, get_access_token.
 
-Called by: pytest (asyncio_mode=auto — no @pytest.mark.asyncio needed)
-Depends on: conftest.py, app.services.clay_oauth
+Called by: pytest (asyncio_mode=auto — no @pytest.mark.asyncio needed) Depends on:
+conftest.py, app.services.clay_oauth
 """
 
 import os
@@ -27,7 +28,8 @@ class TestRegisterClient:
         mock_load.assert_called_once_with("CLAY_OAUTH_CLIENT_ID")
 
     async def test_registers_new_client_via_http(self):
-        """register_client() POSTs to CLAY_REGISTER_URL and stores returned client_id."""
+        """register_client() POSTs to CLAY_REGISTER_URL and stores returned
+        client_id."""
         from app.services.clay_oauth import register_client
 
         mock_resp = MagicMock()
@@ -104,7 +106,8 @@ class TestPersistTokens:
         assert "CLAY_OAUTH_EXPIRES_AT" in updates
 
     def test_stores_tokens_without_refresh_token(self):
-        """_persist_tokens() omits CLAY_OAUTH_REFRESH_TOKEN when not in response (rotation-aware)."""
+        """_persist_tokens() omits CLAY_OAUTH_REFRESH_TOKEN when not in response
+        (rotation-aware)."""
         from app.services.clay_oauth import _persist_tokens
 
         tok = {"access_token": "at-abc", "expires_in": 3600}
@@ -154,7 +157,8 @@ class TestExchangeCode:
 
 class TestRefresh:
     async def test_returns_none_when_no_refresh_token(self):
-        """refresh() returns None immediately when CLAY_OAUTH_REFRESH_TOKEN is absent."""
+        """Refresh() returns None immediately when CLAY_OAUTH_REFRESH_TOKEN is
+        absent."""
         from app.services.clay_oauth import refresh
 
         with patch("app.services.clay_oauth._load", return_value=None):
@@ -163,7 +167,7 @@ class TestRefresh:
         assert result is None
 
     async def test_returns_none_and_sets_needs_reconnect_on_http_failure(self):
-        """refresh() marks needs_reconnect and returns None on HTTP failure."""
+        """Refresh() marks needs_reconnect and returns None on HTTP failure."""
         from app.services.clay_oauth import refresh
 
         def _load_side(key):
@@ -188,7 +192,7 @@ class TestRefresh:
         assert updates["CLAY_OAUTH_ACCESS_TOKEN"] is None
 
     async def test_returns_access_token_on_success(self):
-        """refresh() persists new tokens and returns the new access token."""
+        """Refresh() persists new tokens and returns the new access token."""
         from app.services.clay_oauth import refresh
 
         def _load_side(key):
@@ -215,7 +219,8 @@ class TestRefresh:
 
 class TestGetAccessToken:
     async def test_returns_none_when_no_token_and_no_refresh_token(self):
-        """get_access_token() returns None when both access token and refresh token are absent."""
+        """get_access_token() returns None when both access token and refresh token are
+        absent."""
         from app.services.clay_oauth import get_access_token
 
         with patch("app.services.clay_oauth._load", return_value=None):
@@ -224,7 +229,8 @@ class TestGetAccessToken:
         assert result is None
 
     async def test_refreshes_when_token_is_expired(self):
-        """get_access_token() calls refresh() when stored token is past expiry buffer."""
+        """get_access_token() calls refresh() when stored token is past expiry
+        buffer."""
         from app.services.clay_oauth import get_access_token
 
         past = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
@@ -242,7 +248,8 @@ class TestGetAccessToken:
         mock_refresh.assert_called_once()
 
     async def test_returns_token_when_still_valid(self):
-        """get_access_token() returns stored token directly when expiry is in the future."""
+        """get_access_token() returns stored token directly when expiry is in the
+        future."""
         from app.services.clay_oauth import get_access_token
 
         future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()

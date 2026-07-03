@@ -1,10 +1,9 @@
 """test_credential_service.py — Round-trip tests for credential encrypt/decrypt.
 
-Covers encrypt_value, decrypt_value, mask_value, get_credential, and
-credential_is_set from the credential service.
+Covers encrypt_value, decrypt_value, mask_value, get_credential, and credential_is_set
+from the credential service.
 
-Called by: pytest
-Depends on: app.services.credential_service, app.models.ApiSource
+Called by: pytest Depends on: app.services.credential_service, app.models.ApiSource
 """
 
 import os
@@ -209,7 +208,8 @@ class TestTryDecrypt:
 
 
 class TestGetCredentialDecryptFailure:
-    """Exercises lines 107-114 (decrypt error path) and line 117 (env fallback warning)."""
+    """Exercises lines 107-114 (decrypt error path) and line 117 (env fallback
+    warning)."""
 
     def _add_corrupted_source(self, db_session, name: str, key: str) -> None:
         src = ApiSource(

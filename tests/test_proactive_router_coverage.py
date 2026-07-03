@@ -1,4 +1,5 @@
-"""tests/test_proactive_router_coverage.py — Targeted coverage for app/routers/htmx/proactive.py.
+"""tests/test_proactive_router_coverage.py — Targeted coverage for
+app/routers/htmx/proactive.py.
 
 Covers the uncovered HTMX endpoint lines:
   110-117  proactive_batch_dismiss with non-empty match_ids
@@ -410,7 +411,8 @@ class TestSendLegacy:
 
 
 class TestConvertValueError403:
-    """POST /v2/partials/proactive/{offer_id}/convert — ValueError without 'already converted'."""
+    """POST /v2/partials/proactive/{offer_id}/convert — ValueError without 'already
+    converted'."""
 
     def test_value_error_not_already_converted_returns_403(self, client, test_proactive_offer):
         with patch(
@@ -439,7 +441,8 @@ class TestConvertValueError403:
 
 
 class TestDoNotOffer:
-    """POST /v2/partials/proactive/do-not-offer — creates record, dedup, returns HTML."""
+    """POST /v2/partials/proactive/do-not-offer — creates record, dedup, returns
+    HTML."""
 
     def test_creates_record_and_returns_hidden_row(self, client, db_session, test_user, test_company):
         test_company.account_owner_id = test_user.id
@@ -468,7 +471,8 @@ class TestDoNotOffer:
         assert b"<tr" in resp.content
 
     def test_accepts_customer_site_id_as_company_id_fallback(self, client, db_session, test_user, test_company):
-        """customer_site_id form field is accepted when company_id is absent (line 662)."""
+        """customer_site_id form field is accepted when company_id is absent (line
+        662)."""
         test_company.account_owner_id = test_user.id
         db_session.commit()
 
