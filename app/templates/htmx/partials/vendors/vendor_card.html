@@ -16,7 +16,7 @@
     <div class="min-w-0">
       <h3 class="font-semibold text-gray-900 truncate">{{ v.display_name }}</h3>
       {% if v.domain %}
-      <p class="text-xs text-gray-400 truncate">{{ v.domain }}</p>
+      <p class="text-secondary truncate">{{ v.domain }}</p>
       {% endif %}
     </div>
     {% set claim = claim_map.get(v.id) if claim_map else None %}
@@ -57,7 +57,7 @@
     </div>
   </div>
   {% else %}
-  <p class="text-xs text-gray-400 italic">New — no score yet</p>
+  <p class="text-secondary italic">New — no score yet</p>
   {% endif %}
 
   {# Row 3: Brand + commodity tags #}
@@ -101,7 +101,7 @@
 
   {# Row 6: Location + industry #}
   {% if v.hq_country or v.industry %}
-  <div class="text-xs text-gray-400 truncate">
+  <div class="text-secondary truncate">
     {{ v.hq_country or '' }}{% if v.hq_country and v.industry %} · {% endif %}{{ v.industry or '' }}
   </div>
   {% endif %}
