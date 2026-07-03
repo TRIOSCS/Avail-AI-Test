@@ -516,9 +516,7 @@ class TestDoNotOffer:
         assert resp.status_code == 200
         assert b"<tr" in resp.content
 
-    async def test_dedup_when_already_suppressed_still_returns_html(
-        self, ac, db_session, test_user, test_company
-    ):
+    async def test_dedup_when_already_suppressed_still_returns_html(self, ac, db_session, test_user, test_company):
         test_company.account_owner_id = test_user.id
         db_session.commit()
 
@@ -531,9 +529,7 @@ class TestDoNotOffer:
         assert resp.status_code == 200
         assert b"<tr" in resp.content
 
-    async def test_accepts_customer_site_id_as_company_id_fallback(
-        self, ac, db_session, test_user, test_company
-    ):
+    async def test_accepts_customer_site_id_as_company_id_fallback(self, ac, db_session, test_user, test_company):
         """customer_site_id form field is accepted when company_id is absent."""
         test_company.account_owner_id = test_user.id
         db_session.commit()
@@ -662,9 +658,7 @@ class TestDirectListPartial:
 
         with (
             patch("app.services.proactive_service.get_matches_for_user", return_value=_EMPTY_MATCHES),
-            patch(
-                "app.services.proactive_service.get_sent_offers", return_value=[{"id": 1}]
-            ) as mock_sent,
+            patch("app.services.proactive_service.get_sent_offers", return_value=[{"id": 1}]) as mock_sent,
             patch("app.routers.htmx.proactive.template_response", return_value=_html_ok()),
         ):
             await proactive_list_partial(_get_req(), tab="sent", user=test_user, db=db_session)
@@ -759,9 +753,7 @@ class TestDirectPreparePage:
         req = _post_req({"match_ids": str(match.id)})
 
         with patch("app.routers.htmx.proactive.template_response", return_value=_html_ok()) as mock_tpl:
-            resp = await proactive_prepare_page(
-                test_customer_site.id, req, user=test_user, db=db_session
-            )
+            resp = await proactive_prepare_page(test_customer_site.id, req, user=test_user, db=db_session)
 
         assert resp.status_code == 200
         _, ctx = mock_tpl.call_args[0]
@@ -772,9 +764,7 @@ class TestDirectPreparePage:
     async def test_redirects_on_empty_match_ids(self, db_session, test_user, test_customer_site):
         from app.routers.htmx.proactive import proactive_prepare_page
 
-        resp = await proactive_prepare_page(
-            test_customer_site.id, _post_req({}), user=test_user, db=db_session
-        )
+        resp = await proactive_prepare_page(test_customer_site.id, _post_req({}), user=test_user, db=db_session)
         assert resp.status_code == 303
 
     async def test_redirects_when_match_not_owned(self, db_session, test_user, test_customer_site):
@@ -802,8 +792,10 @@ class TestDirectPreparePage:
 
         with patch("app.routers.htmx.proactive.template_response", return_value=_html_ok()) as mock_tpl:
             await proactive_prepare_page(
-                test_customer_site.id, _post_req({"match_ids": str(match.id)}),
-                user=test_user, db=db_session,
+                test_customer_site.id,
+                _post_req({"match_ids": str(match.id)}),
+                user=test_user,
+                db=db_session,
             )
 
         _, ctx = mock_tpl.call_args[0]
@@ -957,9 +949,7 @@ class TestDirectDraftForPrepare:
     async def test_match_not_owned_returns_error_html(self, db_session, test_user):
         from app.routers.htmx.proactive import proactive_draft_for_prepare
 
-        resp = await proactive_draft_for_prepare(
-            _post_req({"match_ids": "99999"}), user=test_user, db=db_session
-        )
+        resp = await proactive_draft_for_prepare(_post_req({"match_ids": "99999"}), user=test_user, db=db_session)
         assert b"No valid matches" in resp.body
 
 
@@ -975,11 +965,13 @@ class TestDirectSendOffer:
         from app.routers.htmx.proactive import proactive_send_offer
 
         match = _make_match(db_session, test_user, test_requisition, test_offer, test_customer_site)
-        req = _post_req({
-            "match_ids": str(match.id),
-            "contact_ids": "1",
-            f"sell_price_{match.id}": "3.50",
-        })
+        req = _post_req(
+            {
+                "match_ids": str(match.id),
+                "contact_ids": "1",
+                f"sell_price_{match.id}": "3.50",
+            }
+        )
 
         with (
             patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="tok"),
@@ -1060,6 +1052,7 @@ class TestDirectSendOffer:
 
     async def test_value_error_raises_http_400(self, db_session, test_user):
         from fastapi import HTTPException
+
         from app.routers.htmx.proactive import proactive_send_offer
 
         req = _post_req({"match_ids": "1", "contact_ids": "1"})
@@ -1079,6 +1072,7 @@ class TestDirectSendOffer:
 
     async def test_runtime_error_raises_http_500(self, db_session, test_user):
         from fastapi import HTTPException
+
         from app.routers.htmx.proactive import proactive_send_offer
 
         req = _post_req({"match_ids": "1", "contact_ids": "1"})
@@ -1121,23 +1115,21 @@ class TestDirectSendOffer:
 
     async def test_no_match_ids_raises_400(self, db_session, test_user):
         from fastapi import HTTPException
+
         from app.routers.htmx.proactive import proactive_send_offer
 
         with pytest.raises(HTTPException) as exc_info:
-            await proactive_send_offer(
-                _post_req({"contact_ids": "1"}), user=test_user, db=db_session
-            )
+            await proactive_send_offer(_post_req({"contact_ids": "1"}), user=test_user, db=db_session)
 
         assert exc_info.value.status_code == 400
 
     async def test_no_contact_ids_raises_400(self, db_session, test_user):
         from fastapi import HTTPException
+
         from app.routers.htmx.proactive import proactive_send_offer
 
         with pytest.raises(HTTPException) as exc_info:
-            await proactive_send_offer(
-                _post_req({"match_ids": "1"}), user=test_user, db=db_session
-            )
+            await proactive_send_offer(_post_req({"match_ids": "1"}), user=test_user, db=db_session)
 
         assert exc_info.value.status_code == 400
 
@@ -1167,29 +1159,25 @@ class TestDirectSendLegacy:
         db_session.refresh(match)
         assert match.status == "sent"
 
-    async def test_empty_body_raises_400(
-        self, db_session, test_user, test_requisition, test_offer, test_customer_site
-    ):
+    async def test_empty_body_raises_400(self, db_session, test_user, test_requisition, test_offer, test_customer_site):
         from fastapi import HTTPException
+
         from app.routers.htmx.proactive import proactive_send_legacy
 
         match = _make_match(db_session, test_user, test_requisition, test_offer, test_customer_site)
 
         with pytest.raises(HTTPException) as exc_info:
-            await proactive_send_legacy(
-                _post_req({"body": ""}), match_id=match.id, user=test_user, db=db_session
-            )
+            await proactive_send_legacy(_post_req({"body": ""}), match_id=match.id, user=test_user, db=db_session)
 
         assert exc_info.value.status_code == 400
 
     async def test_unknown_match_raises_404(self, db_session, test_user):
         from fastapi import HTTPException
+
         from app.routers.htmx.proactive import proactive_send_legacy
 
         with pytest.raises(HTTPException) as exc_info:
-            await proactive_send_legacy(
-                _post_req({"body": "Hello!"}), match_id=99999, user=test_user, db=db_session
-            )
+            await proactive_send_legacy(_post_req({"body": "Hello!"}), match_id=99999, user=test_user, db=db_session)
 
         assert exc_info.value.status_code == 404
 
@@ -1215,9 +1203,7 @@ class TestDirectDoNotOffer:
             )
 
         assert resp.status_code == 200
-        dno = db_session.query(ProactiveDoNotOffer).filter_by(
-            mpn="LM317T", company_id=test_company.id
-        ).first()
+        dno = db_session.query(ProactiveDoNotOffer).filter_by(mpn="LM317T", company_id=test_company.id).first()
         assert dno is not None
         assert dno.created_by_id == test_user.id
 
@@ -1255,17 +1241,17 @@ class TestDirectDoNotOffer:
 
     async def test_missing_mpn_raises_400(self, db_session, test_user):
         from fastapi import HTTPException
+
         from app.routers.htmx.proactive import proactive_do_not_offer
 
         with pytest.raises(HTTPException) as exc_info:
-            await proactive_do_not_offer(
-                _post_req({"mpn": "", "company_id": "1"}), user=test_user, db=db_session
-            )
+            await proactive_do_not_offer(_post_req({"mpn": "", "company_id": "1"}), user=test_user, db=db_session)
 
         assert exc_info.value.status_code == 400
 
     async def test_non_integer_company_id_raises_400(self, db_session, test_user):
         from fastapi import HTTPException
+
         from app.routers.htmx.proactive import proactive_do_not_offer
 
         with pytest.raises(HTTPException) as exc_info:
@@ -1277,6 +1263,7 @@ class TestDirectDoNotOffer:
 
     async def test_unauthorized_company_raises_403(self, db_session, test_user, test_company):
         from fastapi import HTTPException
+
         from app.routers.htmx.proactive import proactive_do_not_offer
 
         test_company.account_owner_id = None
@@ -1293,6 +1280,7 @@ class TestDirectDoNotOffer:
 
     async def test_nonexistent_company_raises_403(self, db_session, test_user):
         from fastapi import HTTPException
+
         from app.routers.htmx.proactive import proactive_do_not_offer
 
         with pytest.raises(HTTPException) as exc_info:
