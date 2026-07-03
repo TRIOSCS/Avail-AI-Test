@@ -35,12 +35,15 @@ router = APIRouter(tags=["admin"])
 
 # -- Curated system-settings catalog ---------------------------------------
 #
-# The System settings tab edits exactly these four user-facing keys via typed
-# controls (toggles + a number input). The meta map is the single source of truth
-# for label/help/type, owned in code here. `restart` flags the scheduler-read
-# settings whose change only takes full effect after the next app restart (the DB
-# value is still saved immediately). `email_mining_enabled` resolves per-request,
-# so it has no restart note. `min` bounds the integer control + write validation.
+# The System settings tab edits these user-facing keys via typed controls (bool
+# toggles, an int number input, and string text inputs). The meta map is the single
+# source of truth for label/help/type, owned in code here. `restart` flags the
+# scheduler-read settings whose change only takes full effect after the next app
+# restart (the DB value is still saved immediately). `email_mining_enabled` resolves
+# per-request, so it has no restart note. `min` bounds the integer control + write
+# validation. The three `type: "string"` keys are the prepayment-notification
+# recipients (accounting/AP group inboxes + a Teams incoming-webhook URL) read at
+# notify time by prepayment_notifications; each defaults to empty (channel skipped).
 
 INTERVAL_MIN_MINUTES = 5
 
@@ -69,6 +72,27 @@ SYSTEM_SETTINGS_META: dict[str, dict] = {
         "help": "How often connected inboxes are scanned.",
         "restart": True,
         "min": INTERVAL_MIN_MINUTES,
+    },
+    "accounting_group_email": {
+        "type": "string",
+        "label": "Accounting group email",
+        "help": "Distribution list emailed when a prepayment is requested or approved.",
+        "restart": False,
+        "default": "",
+    },
+    "ap_group_email": {
+        "type": "string",
+        "label": "Accounts-payable (AP) group email",
+        "help": "Distribution list emailed alongside accounting on prepayment events.",
+        "restart": False,
+        "default": "",
+    },
+    "prepayment_teams_webhook": {
+        "type": "string",
+        "label": "Prepayment Teams webhook",
+        "help": "Incoming-webhook URL for the Teams channel card on prepayment events.",
+        "restart": False,
+        "default": "",
     },
 }
 

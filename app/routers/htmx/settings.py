@@ -198,6 +198,7 @@ async def settings_system_tab(
     from ...config import settings as app_settings
     from ...services.admin_service import (
         get_all_config,
+        get_config_value,
         get_effective_flag,
         get_effective_int,
     )
@@ -214,9 +215,11 @@ async def settings_system_tab(
     settings_view = []
     for key, meta in SYSTEM_SETTINGS_META.items():
         if meta["type"] == "bool":
-            value = get_effective_flag(db, key, env_defaults[key])
-        else:
+            value: object = get_effective_flag(db, key, env_defaults[key])
+        elif meta["type"] == "int":
             value = get_effective_int(db, key, env_defaults[key])
+        else:  # string (e.g. prepayment-notification recipients) — DB row or empty default.
+            value = get_config_value(db, key) or meta.get("default", "")
         settings_view.append({"key": key, "value": value, **meta})
 
     # Read-only job-state watermark rows (collapsed disclosure).

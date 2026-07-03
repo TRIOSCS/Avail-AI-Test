@@ -1,7 +1,8 @@
 {#
   settings/system.html — Curated System settings (admin only).
-  Typed controls for the four user-facing feature flags: 3 toggle switches +
-  1 number input (min 5). Each shows a plain-language label + one-line help.
+  Typed controls for the user-facing feature flags: 3 toggle switches, 1 number
+  input (min 5), and text inputs for the prepayment-notification recipients. Each
+  shows a plain-language label + one-line help.
   Effective values come from the Task-10 resolver (DB row wins, else env default).
   Toggles + the interval PUT to /api/admin/config/{key} (hx-swap="none") and the
   shared showToast fires on success. Internal job-state watermark rows are shown
@@ -54,6 +55,28 @@
                         after:bg-white after:border-gray-300 after:border after:rounded-full
                         after:h-5 after:w-5 after:transition-all peer-checked:bg-accent-500"></div>
           </label>
+        </div>
+        {% elif item.type == 'string' %}
+        {# Text control — free-text string (e.g. a group DL email or Teams webhook URL). #}
+        <div>
+          <div class="pr-4 mb-1.5">
+            <p class="text-sm font-medium text-gray-900">{{ item.label }}</p>
+            <p class="text-xs text-gray-600 mt-0.5">{{ item.help }}</p>
+            {% if item.restart %}
+            <p class="text-secondary mt-1">Applies after the next restart.</p>
+            {% endif %}
+          </div>
+          <form class="flex items-center gap-2"
+                hx-put="/api/admin/config/{{ item.key }}"
+                hx-swap="none"
+                hx-ext="json-enc">
+            <input type="text" name="value" value="{{ item.value }}" required
+                   aria-label="{{ item.label }}"
+                   class="input input-sm flex-1 min-w-0">
+            <button type="submit" data-loading-disable
+                    class="px-3 py-1.5 text-xs font-medium text-accent-600 bg-accent-50
+                           border border-accent-200 rounded-lg hover:bg-accent-100 shrink-0">Save</button>
+          </form>
         </div>
         {% else %}
         {# Integer control — number input with a server-enforced minimum. #}

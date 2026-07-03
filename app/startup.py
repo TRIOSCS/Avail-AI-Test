@@ -429,6 +429,10 @@ def _seed_system_config(conn) -> None:
         ("email_mining_enabled", "false", "Enable email mining background job"),
         ("proactive_matching_enabled", "true", "Enable proactive offer matching"),
         ("activity_tracking_enabled", "true", "Enable CRM activity tracking"),
+        # Prepayment-notification recipients — empty by default (channel skipped until set).
+        ("accounting_group_email", "", "Accounting group email for prepayment notifications"),
+        ("ap_group_email", "", "AP group email for prepayment notifications"),
+        ("prepayment_teams_webhook", "", "Teams incoming-webhook URL for prepayment cards"),
     ]
     for key, value, desc in seeds:
         _exec(
