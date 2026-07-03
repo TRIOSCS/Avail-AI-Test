@@ -95,14 +95,17 @@ class TestWorkspacePartial:
         assert "text/html" in r.headers["content-type"]
         assert "Analyze" in r.text
 
-    def test_workspace_has_filter_pills(self, db_session: Session, test_user: User):
-        """Workspace includes All / Open / Resolved / Won't Fix filter pills."""
+    def test_list_has_filter_pills(self, db_session: Session, test_user: User):
+        """Status + kind filter pills live in the list partial (they compose there)."""
         c = _make_client(db_session, test_user)
-        r = c.get("/v2/partials/trouble-tickets/workspace")
+        r = c.get("/v2/partials/trouble-tickets/list")
         assert r.status_code == 200
-        assert "All" in r.text
+        # Status pills
         assert "Open" in r.text
         assert "Resolved" in r.text
+        # Kind pills
+        assert "Bugs" in r.text
+        assert "Features" in r.text
 
     def test_workspace_has_analyze_button(self, db_session: Session, test_user: User):
         """Workspace includes the Analyze button wired to the analyze endpoint."""

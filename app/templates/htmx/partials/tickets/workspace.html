@@ -25,21 +25,8 @@
     </button>
   </div>
 
-  {# Filter pills #}
-  <div class="flex gap-2 mb-4" x-data="{ filter: '' }">
-    {% set filters = [('', 'All'), ('open', 'Open'), ('resolved', 'Resolved'), ('wont_fix', "Won't Fix")] %}
-    {% for val, label in filters %}
-    {# Active filter resolves to the design-system accent (state), inactive stays neutral chrome. #}
-    <button @click="filter = '{{ val }}'"
-            hx-get="/v2/partials/trouble-tickets/list?status={{ val }}"
-            hx-target="#ticket-list"
-            :style="filter === '{{ val }}' ? 'background-color:var(--accent);color:var(--accent-contrast)' : ''"
-            :class="filter === '{{ val }}' ? '' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'"
-            class="px-3 py-1.5 text-xs font-medium rounded-full transition-colors input-focus">
-      {{ label }}
-    </button>
-    {% endfor %}
-  </div>
+  {# Status + kind filter pills live inside the list partial (#ticket-list) so both
+     filters compose and survive each swap — see tickets/list.html. #}
 
   {# Bulk action bar — visible only when rows are selected #}
   <div x-show="selected.length > 0" x-cloak

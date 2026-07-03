@@ -10,6 +10,12 @@
          style="accent-color:var(--accent)"
          aria-label="Select ticket {{ t.ticket_number }}">
   <span class="text-xs font-mono text-gray-400 w-16 shrink-0">{{ t.ticket_number }}</span>
+  {# Kind badge — feature (violet) vs bug (rose). One inbox, both kinds. #}
+  {% if t.ticket_type == 'feature' %}
+  <span class="text-[11px] font-medium px-2 py-0.5 rounded-full shrink-0 bg-violet-100 text-violet-700">Feature</span>
+  {% else %}
+  <span class="text-[11px] font-medium px-2 py-0.5 rounded-full shrink-0 bg-rose-100 text-rose-700">Bug</span>
+  {% endif %}
   <span class="text-sm text-gray-700 flex-1 truncate">{{ t.ai_summary or t.title }}</span>
   <span class="text-xs px-2 py-0.5 rounded-full shrink-0
     {% if t.status == 'submitted' %}bg-yellow-100 text-yellow-700

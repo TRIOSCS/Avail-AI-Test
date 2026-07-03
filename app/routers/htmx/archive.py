@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session, joinedload
 from ...constants import (
     TicketSource,
     TicketStatus,
+    TicketType,
     UserRole,
 )
 from ...database import get_db
@@ -60,13 +61,15 @@ async def trouble_tickets_workspace(request: Request, user: User = Depends(requi
     )
 
 
-def _build_ticket_list_context(db: Session, status: str | None) -> dict:
+def _build_ticket_list_context(db: Session, status: str | None, ticket_type: str | None = None) -> dict:
     """Query + group report_button tickets for the list partial.
 
     Shared by trouble_tickets_list and error_reports.analyze_tickets so both
     render the same grouped view. A logical ``status == "open"`` expands to the
     (submitted, in_progress) set so in-progress tickets stay visible under the
     "Open" pill; any other truthy status is an exact match; falsy means "all".
+    ``ticket_type`` ("bug" | "feature") narrows the one inbox to a single kind;
+    falsy means both kinds.
 
     Called by: trouble_tickets_list, error_reports.analyze_tickets.
     Depends on: TroubleTicket / RootCauseGroup models.
@@ -83,6 +86,9 @@ def _build_ticket_list_context(db: Session, status: str | None) -> dict:
         q = q.filter(TroubleTicket.status.in_([TicketStatus.SUBMITTED, TicketStatus.IN_PROGRESS]))
     elif status:
         q = q.filter(TroubleTicket.status == status)
+    # Only constrain by kind for a recognised value; anything else means "both".
+    if ticket_type in (TicketType.BUG, TicketType.FEATURE):
+        q = q.filter(TroubleTicket.ticket_type == ticket_type)
     q = q.order_by(desc(TroubleTicket.created_at))
     tickets = q.limit(200).all()
     total = len(tickets)
@@ -108,6 +114,7 @@ def _build_ticket_list_context(db: Session, status: str | None) -> dict:
         "grouped": grouped,
         "ungrouped": ungrouped,
         "current_status": status or "",
+        "current_type": ticket_type or "",
     }
 
 
@@ -115,13 +122,15 @@ def _build_ticket_list_context(db: Session, status: str | None) -> dict:
 async def trouble_tickets_list(
     request: Request,
     status: str = "",
+    type: str = "",
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Trouble Tickets list partial — grouped by root cause, filterable by status."""
+    """Trouble Tickets list partial — grouped by root cause, filterable by status +
+    kind."""
     return template_response(
         "htmx/partials/tickets/list.html",
-        {**_base_ctx(request, user, "tickets"), **_build_ticket_list_context(db, status)},
+        {**_base_ctx(request, user, "tickets"), **_build_ticket_list_context(db, status, type)},
     )
 
 

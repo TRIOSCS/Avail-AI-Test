@@ -1,5 +1,35 @@
-{# Trouble Tickets list — swapped into #ticket-list #}
+{# Trouble Tickets list — swapped into #ticket-list. Owns the status + kind filter
+   bar: every pill re-renders here with the live server state and carries BOTH the
+   current status and current kind in its hx-get URL, so the two filters compose
+   without any client-side state (mirrors sightings/table.html). #}
 {% from "htmx/partials/tickets/_icons.html" import chevron_icon -%}
+
+{# ── Filter bar: status (left) + kind (right) ─────────────────────── #}
+<div class="flex items-center gap-2 flex-wrap mb-4">
+  {% set status_pills = [('', 'All'), ('open', 'Open'), ('resolved', 'Resolved'), ('wont_fix', "Won't Fix")] %}
+  {% for val, label in status_pills %}
+  <button hx-get="/v2/partials/trouble-tickets/list?status={{ val }}&type={{ current_type }}"
+          hx-target="#ticket-list" hx-swap="innerHTML"
+          class="px-3 py-1.5 text-xs font-medium rounded-full transition-colors input-focus
+                 {{ 'bg-accent-100 text-accent-700' if current_status == val else 'bg-gray-100 text-gray-600 hover:bg-gray-200' }}">
+    {{ label }}
+  </button>
+  {% endfor %}
+
+  {# Kind filter — one inbox, both kinds. #}
+  <div class="ml-auto flex items-center gap-2">
+    {% set kind_pills = [('', 'All kinds'), ('bug', 'Bugs'), ('feature', 'Features')] %}
+    {% for val, label in kind_pills %}
+    <button hx-get="/v2/partials/trouble-tickets/list?status={{ current_status }}&type={{ val }}"
+            hx-target="#ticket-list" hx-swap="innerHTML"
+            class="px-3 py-1.5 text-xs font-medium rounded-full transition-colors input-focus
+                   {{ 'bg-accent-100 text-accent-700' if current_type == val else 'bg-gray-100 text-gray-600 hover:bg-gray-200' }}">
+      {{ label }}
+    </button>
+    {% endfor %}
+  </div>
+</div>
+
 <div class="text-xs text-gray-400 mb-3">{{ total }} ticket{{ 's' if total != 1 else '' }}</div>
 
 {# Grouped tickets #}
