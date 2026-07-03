@@ -15,10 +15,11 @@ back to the payee snapshot then the card display name (finding #14). The amount 
 to 2 decimals honoring ``Prepayment.currency`` (finding #9).
 
 Notification honesty (finding #8): each notify returns
-``{email_sent, teams_sent, recipients}``; if BOTH channels fail/skip while a group address
-WAS configured (a real send was expected but nothing got out), a durable in-app ActivityLog
-alert is written to the requester + admins so nobody assumes AP was told. The notify
-functions never raise — a failed notice must not break the request/approval.
+``{email_sent, teams_sent, recipients}``; if BOTH channels fail/skip while a channel WAS
+configured — a group DL OR the Teams webhook (a real send was expected but nothing got
+out) — a durable in-app ActivityLog alert is written to the requester + admins so nobody
+assumes AP was told. The notify functions never raise — a failed notice must not break the
+request/approval.
 
 Called by: app.routers.prepayments (request create), app.routers.htmx.buy_plans (approve),
            via run_prepayment_notify_bg.
@@ -157,9 +158,10 @@ async def _notify_inner(db: Session, prepayment_id: int, event: str) -> dict:
             logger.error("Prepayment {} Teams channel failed: {}", prepayment_id, e)
 
     # ── Notification honesty (finding #8) ──
-    # A real send was expected (a group address WAS configured) but nothing got out on
-    # EITHER channel → write a durable in-app alert so nobody assumes AP was told.
-    if recipients and not result["email_sent"] and not result["teams_sent"]:
+    # A real send was expected (a group DL OR the Teams webhook WAS configured) but nothing
+    # got out on EITHER channel → write a durable in-app alert so nobody assumes AP was told.
+    # Keying on the webhook too covers a Teams-only config (no group DLs) whose post fails.
+    if (recipients or webhook) and not result["email_sent"] and not result["teams_sent"]:
         _write_failure_alert(db, prepayment)
 
     return result

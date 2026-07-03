@@ -279,6 +279,42 @@ async def test_all_channels_failed_writes_inapp_alert(db_session: Session):
     assert alert.channel == "system"
 
 
+# ── Teams-webhook-only configured + post fails → in-app alert ─────────────
+
+
+@pytest.mark.asyncio
+async def test_teams_only_failure_writes_inapp_alert(db_session: Session):
+    """Only the Teams webhook is configured (no group DLs).
+
+    If the post fails, nobody was told — the honesty alert must still fire (keys on the
+    webhook being set, not just the group recipients). Blind spot: an ops team on Teams-
+    only would otherwise get silence.
+    """
+    appr = _seed_approver(db_session)
+    pp, _ar = _make_prepayment(db_session, requester=appr)
+    _set_config(db_session, prepayment_teams_webhook=HOOK)  # webhook only, no group emails
+    with (
+        patch.object(pn, "_send_group_email", new=AsyncMock(return_value=True)) as email,
+        patch.object(pn, "post_teams_channel_card", new=AsyncMock(side_effect=RuntimeError("teams down"))) as card,
+    ):
+        result = await pn.notify_prepayment_requested(pp.id, db=db_session)
+
+    assert not email.called  # no group DLs → email channel skipped entirely
+    assert card.called  # Teams was attempted
+    assert result["email_sent"] is False and result["teams_sent"] is False
+    assert result["recipients"] == []  # no group emails configured
+    alert = (
+        db_session.query(ActivityLog)
+        .filter(
+            ActivityLog.user_id == appr.id,
+            ActivityLog.subject.like(f"Prepayment #{pp.id} notification FAILED%"),
+        )
+        .one()
+    )
+    assert "accounting/AP" in alert.subject
+    assert alert.channel == "system"
+
+
 # ── Card content: currency to 2 decimals + beneficiary legal name ─────────
 
 
