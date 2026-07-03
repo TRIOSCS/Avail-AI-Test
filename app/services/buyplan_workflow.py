@@ -538,9 +538,10 @@ def resource_line(
       1. records an immutable POCancellation (vendor-performance fact),
       2. marks the vendor's offer SOLD + the vendor unavailable for that part,
       3. resets the line into the pool (unassigned, no PO/offer, status RESOURCING),
-    then reopens the plan if it had auto-completed (COMPLETED) and refreshes the canceled
-    vendors' cancellation metrics. Returns a payload the route hands to the urgent-alert
-    fan-out.
+    then reopens the plan if it had auto-completed/closed (COMPLETED) and refreshes the
+    canceled vendors' cancellation metrics. Returns a payload the route hands to the
+    urgent-alert fan-out — including ``was_completed`` (True when a COMPLETED plan was
+    reopened here, i.e. a backorder emergency) so the fan-out can force the alert.
 
     Escalation: ``also_line_ids`` re-sources sibling lines on the SAME plan in one action
     (the hybrid scope — default is just ``line_id``).
@@ -642,9 +643,14 @@ def resource_line(
         line.last_nudge_at = None
         line.status = BuyPlanLineStatus.RESOURCING.value
 
-    # A COMPLETED (auto-completed) plan must reopen to ACTIVE so the re-claimed line's PO
-    # flow (confirm_po requires an ACTIVE plan) works again.
-    if plan.status == BuyPlanStatus.COMPLETED.value:
+    # A COMPLETED (auto-completed/closed) plan must reopen to ACTIVE so the re-claimed
+    # line's PO flow (confirm_po requires an ACTIVE plan) works again. ``was_completed``
+    # records that this was a completed-plan BACKORDER (a vendor cancelled AFTER the deal
+    # closed) so the caller can escalate the re-source broadcast to a forced EMERGENCY
+    # alert — the fact must ride the return value because the plan is ACTIVE again by the
+    # time the notification runs.
+    was_completed = plan.status == BuyPlanStatus.COMPLETED.value
+    if was_completed:
         plan.status = BuyPlanStatus.ACTIVE.value
         plan.completed_at = None
         plan.case_report = None
@@ -669,6 +675,7 @@ def resource_line(
         "reason_code": reason_code,
         "reason_note": reason_note,
         "resourced_lines": resourced,
+        "was_completed": was_completed,
     }
 
 

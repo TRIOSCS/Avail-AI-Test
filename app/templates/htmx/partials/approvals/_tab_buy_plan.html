@@ -1,0 +1,67 @@
+{#
+  approvals/_tab_buy_plan.html — Approvals hub "Buy Plan" tab body (approvals AND tracking).
+  A status board for the buy plans (the deals) themselves: one row per plan with its
+  lifecycle STATUS (draft / pending / active / completed / …) so a viewer can track a plan
+  here — with the Approve action inline where a plan is pending THEIR decision (an open
+  BUY_PLAN request on which they hold a PENDING slot). Non-decidable plans render as
+  status-only tracking rows. The SEE-ALL / SEE-MINE toggle (default All) scopes the list to
+  the viewer's own plans (submitted_by). Inline Approve posts the existing approve route with
+  origin=approvals_hub (+ hub_scope) so the handler re-renders THIS body at the SAME scope;
+  Reject-with-reason opens the plan detail.
+  Receives: rows (list[queue.PlanTrackingRow]), scope ('all'|'mine').
+  Called by: htmx/approvals_hub.py render_tab_body (buy-plan) + buy_plans.py approve handler.
+  Depends on: HTMX, Alpine.js, Tailwind; shared status_badge macro; scope_toggle macro.
+#}
+{% from "htmx/partials/shared/_macros.html" import status_badge %}
+{% from "htmx/partials/buy_plans/_macros.html" import scope_toggle %}
+
+<div class="space-y-4">
+  <div class="flex items-center justify-between">
+    <h2 class="h2">Buy Plans <span class="text-sm font-normal text-gray-500">({{ rows | length }})</span></h2>
+    {{ scope_toggle('buy-plan', scope) }}
+  </div>
+
+  {% if rows %}
+  <div class="bg-white rounded-lg border border-line-base shadow-card divide-y divide-line-subtle overflow-hidden">
+    {% for row in rows %}
+    {% set detail_url = '/v2/partials/buy-plans/' ~ row.plan_id %}
+    <div class="grid grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center gap-3 px-4 py-2.5">
+      {# identity: customer + Plan #/SO# (whole cell links to the plan detail) #}
+      <a hx-get="{{ detail_url }}" hx-target="#main-content" hx-push-url="{{ detail_url | replace('/partials', '') }}"
+         class="min-w-0 cursor-pointer group">
+        <div class="text-sm font-semibold text-gray-900 truncate group-hover:text-accent-600">{{ row.customer_name or ('Plan #' ~ row.plan_id) }}</div>
+        <div class="text-tertiary truncate">
+          Plan #{{ row.plan_id }}{% if row.so_number %} · <span class="font-mono">SO {{ row.so_number }}</span>{% endif %}
+        </div>
+      </a>
+      {# lifecycle status badge — the tracking signal (reuses the canonical status_badge) #}
+      <span>{{ status_badge(row.status) }}</span>
+      {# value #}
+      <span class="text-sm font-semibold tabular-nums text-gray-900 text-right w-24">
+        {%- if row.amount is not none -%}${{ '{:,.0f}'.format(row.amount | float) }}{%- else -%}<span class="text-gray-400">—</span>{%- endif -%}
+      </span>
+      {# action rail: inline decide only where the viewer may approve this plan now #}
+      <div class="justify-self-end">
+        {% if row.can_decide %}
+        <form hx-post="{{ detail_url }}/approve" hx-target="#ap-hub-body" hx-swap="innerHTML" hx-push-url="false"
+              class="flex items-center gap-1.5">
+          <input type="hidden" name="origin" value="approvals_hub">
+          <input type="hidden" name="hub_scope" value="{{ scope }}">
+          <button type="submit" name="action" value="approve" data-loading-disable class="btn-primary btn-sm">Approve</button>
+          {# Reject needs a reason — open the detail screen where the reason modal lives. #}
+          <a hx-get="{{ detail_url }}" hx-target="#main-content" hx-push-url="{{ detail_url | replace('/partials', '') }}"
+             class="btn-secondary btn-sm cursor-pointer">Review</a>
+        </form>
+        {% else %}
+        <span class="text-xs font-medium text-accent-600 whitespace-nowrap">View &rarr;</span>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="bg-white rounded-lg border border-line-base shadow-card px-4 py-8 text-center text-sm text-brand-400">
+    {% if scope == 'mine' %}You have no buy plans.{% else %}No buy plans yet.{% endif %}
+  </div>
+  {% endif %}
+</div>

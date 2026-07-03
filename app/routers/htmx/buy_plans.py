@@ -46,20 +46,6 @@ from ._shared import _base_ctx, _is_ops_member
 router = APIRouter(tags=["htmx-views"])
 
 
-@router.get("/v2/buy-plans", response_class=HTMLResponse)
-async def buy_plans_legacy_redirect(request: Request):
-    """302 the legacy Buy Plans URL to the renamed Approvals module (query preserved).
-
-    The hub was renamed Buy Plans → Approvals (SP-1); old bookmarks / pushed lens URLs
-    keep working via this redirect. Detail URLs (/v2/buy-plans/{id}) are unchanged and
-    still served directly by ``v2_page``.
-    """
-    from fastapi.responses import RedirectResponse
-
-    qs = request.url.query
-    return RedirectResponse(f"/v2/approvals?{qs}" if qs else "/v2/approvals", status_code=302)
-
-
 def _can_supervise(user: User, db: Session) -> bool:
     """True when the user may see cross-user (scope=all) deal data.
 
@@ -121,7 +107,6 @@ def _default_lens(user: User, db: Session) -> str:
     return "my_queue"
 
 
-@router.get("/v2/partials/approvals", response_class=HTMLResponse)
 @router.get("/v2/partials/buy-plans", response_class=HTMLResponse)
 async def buy_plans_list_partial(
     request: Request,
@@ -129,11 +114,12 @@ async def buy_plans_list_partial(
     user: User = Depends(require_access(AccessKey.BUY_PLANS)),
     db: Session = Depends(get_db),
 ):
-    """Return the Approvals hub shell (My Queue + Pipeline tab switcher).
+    """Return the Buy Plans hub shell (My Queue + Pipeline tab switcher).
 
     The shell renders the two lens tabs + a lazy body that loads the active tab partial
-    into ``#bp-hub-body``. Row data is fetched by the body, not here.
-    ``/v2/partials/buy-plans`` is kept as a back-compat alias for in-flight htmx.
+    into ``#bp-hub-body``. Row data is fetched by the body, not here. This is the personal
+    "what needs YOU" hub at /v2/buy-plans; the org-wide 3-tab decide console lives
+    separately at /v2/approvals (routers/htmx/approvals_hub.py).
     """
     active_lens = lens if lens in _APPROVALS_TABS else _default_lens(user, db)
 
@@ -153,64 +139,7 @@ async def buy_plans_list_partial(
     return template_response("htmx/partials/buy_plans/hub.html", ctx)
 
 
-@router.get("/v2/partials/approvals/pipeline-archive", response_class=HTMLResponse)
-async def pipeline_archive_partial(
-    request: Request,
-    scope: str = "",
-    offset: int = 0,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Lazy "load older" page of the Pipeline's Done (completed) deals.
-
-    The Pipeline surface renders its Done cards via the shared archive-rows partial; this
-    returns the next page of those cards (newest-completed first) so a "Load older" click
-    appends in place. Scope is role-resolved exactly like the board so no other rep's
-    completed deals leak. MUST be registered BEFORE the one-segment ``{tab}`` catch-all
-    below, or FastAPI routes "pipeline-archive" there as an unknown tab (404).
-    """
-    from ...services.buyplan_hub import completed_archive
-
-    scope = _resolve_deal_scope(scope, _can_see_all_deals(user, db))
-
-    ctx = _base_ctx(request, user, "buy-plans")
-    ctx.update(
-        {
-            "archive": completed_archive(db, user, scope=scope, offset=offset),
-            "scope": scope,
-        }
-    )
-    return template_response("htmx/partials/approvals/_pipeline_archive_rows.html", ctx)
-
-
-@router.get("/v2/partials/approvals/{tab}", response_class=HTMLResponse)
-async def approvals_tab_partial(
-    request: Request,
-    tab: str,
-    scope: str = "",
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Render one Approvals lens body into ``#bp-hub-body``.
-
-    Two lenses survive the Phase F retirement: ``my_queue`` (the role-aware "what needs YOU
-    now" surface) and ``pipeline`` (the 4-stage deal board). ``tab`` arrives dash-cased
-    (e.g. my-queue) and maps to the underscored lens key; any other value 404s.
-
-    ``scope`` applies to the Pipeline board only: it is role-resolved (sales/traders locked
-    to ``mine``), and its All/Mine toggle reloads THIS whole body in place.
-    """
-    lens = tab.replace("-", "_")
-    if lens not in _APPROVALS_TABS:
-        raise HTTPException(404, "Unknown approvals tab")
-
-    if lens == "my_queue":
-        return _render_my_queue_body(request, user, db)
-
-    return _render_pipeline_body(request, user, db, scope)
-
-
-@router.get("/v2/partials/approvals/sales-orders/new", response_class=HTMLResponse)
+@router.get("/v2/partials/buy-plans/sales-orders/new", response_class=HTMLResponse)
 async def sales_order_new(
     request: Request,
     requisition_id: int | None = None,
@@ -219,8 +148,10 @@ async def sales_order_new(
 ):
     """New Sales Order origination surface (requisition picker → offer/sell builder).
 
-    The two-segment path after ``approvals/`` does not collide with the one-segment
-    ``/v2/partials/approvals/{tab}`` converter. With no ``requisition_id`` it lists open
+    Origination is deal CREATION, not a decide action — it lives under the Buy Plans hub
+    prefix (/v2/partials/buy-plans/*), NOT the Approvals decide prefix. The two-segment
+    ``sales-orders/new`` path does not collide with the ``{plan_id:int}`` detail route or
+    the one-segment ``{tab}`` hub-lens converter. With no ``requisition_id`` it lists open
     (OPEN_PIPELINE) requisitions that carry at least one ACTIVE offer, scoped to what the
     user may see. With ``requisition_id`` it loads that requisition's per-requirement
     offer/sell-price form (``get_builder_data`` + ``apply_smart_defaults``), enforcing access
@@ -281,7 +212,7 @@ async def sales_order_new(
     return template_response("htmx/partials/approvals/_sales_order_new.html", ctx)
 
 
-@router.post("/v2/partials/approvals/sales-orders/create", response_class=HTMLResponse)
+@router.post("/v2/partials/buy-plans/sales-orders/create", response_class=HTMLResponse)
 async def sales_order_create(
     request: Request,
     user: User = Depends(require_user),
@@ -362,17 +293,19 @@ async def prepay_request_decide(
     request_id: int,
     action: str = Form("approve"),
     comment: str | None = Form(None),
+    origin: str = Form(""),
+    hub_scope: str = Form("all"),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Decide a prepayment ApprovalRequest from the My Queue inline action (HTML re-
-    render).
+    """Decide a prepayment ApprovalRequest from an inline action (HTML re-render).
 
     The standalone decision route (POST /v2/approvals/requests/{id}/decision) returns JSON;
-    My Queue instead needs the refreshed queue body swapped into ``#bp-hub-body``. This thin
-    sibling resolves the request via the SAME approvals-engine ``decide`` (no duplicated
-    logic), then re-renders the My Queue surface (origin=my_queue parity with the approve /
-    verify-po handlers). Reject requires a non-blank comment (400 otherwise); a caller who
+    the inline callers instead need a refreshed body swapped in place. This thin sibling
+    resolves the request via the SAME approvals-engine ``decide`` (no duplicated logic),
+    then re-renders the caller's surface by ``origin``: ``my_queue`` → the My Queue body
+    (``#bp-hub-body``); ``approvals_hub`` → the Approvals hub Prepayment tab
+    (``#ap-hub-body``). Reject requires a non-blank comment (400 otherwise); a caller who
     holds no PENDING recipient slot is 403 (engine PermissionError); a stale/decided request
     is 400 (engine ValueError).
     """
@@ -389,6 +322,10 @@ async def prepay_request_decide(
     except ValueError as e:
         raise HTTPException(400, str(e))
 
+    if origin == "approvals_hub":
+        from .approvals_hub import render_tab_body
+
+        return render_tab_body(request, user, db, "prepayment", hub_scope)
     return _render_my_queue_body(request, user, db)
 
 
@@ -404,7 +341,15 @@ def _render_my_queue_body(request: Request, user: User, db: Session) -> HTMLResp
     from ...services.buyplan_hub import my_queue, open_avg_margin
 
     ctx = _base_ctx(request, user, "buy-plans")
-    ctx.update({"queue": my_queue(db, user), "avg_margin": open_avg_margin(db), "user": user})
+    ctx.update(
+        {
+            "queue": my_queue(db, user),
+            "avg_margin": open_avg_margin(db),
+            "user": user,
+            # PO-cutter gate for the po_verify row's third (Cancel → re-source) action.
+            "can_resource": _can_resource(user),
+        }
+    )
     return template_response("htmx/partials/approvals/_surface_my_queue.html", ctx)
 
 
@@ -451,14 +396,19 @@ def _render_pipeline_body(request: Request, user: User, db: Session, scope: str 
     return template_response("htmx/partials/approvals/_surface_pipeline.html", ctx)
 
 
-@router.get("/v2/partials/buy-plans/{plan_id}", response_class=HTMLResponse)
+@router.get("/v2/partials/buy-plans/{plan_id:int}", response_class=HTMLResponse)
 async def buy_plan_detail_partial(
     request: Request,
     plan_id: int,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Return buy plan detail as HTML partial."""
+    """Return buy plan detail as HTML partial.
+
+    The ``{plan_id:int}`` path convertor is load-bearing: it makes this route match ONLY
+    integer segments, so the sibling hub-lens route ``/v2/partials/buy-plans/{tab}`` (str)
+    and the literal ``/pipeline-archive`` never shadow a numeric plan id and vice-versa.
+    """
     bp = get_buyplan_for_user(
         db,
         user,
@@ -493,6 +443,68 @@ async def buy_plan_detail_partial(
         }
     )
     return template_response("htmx/partials/buy_plans/detail.html", ctx)
+
+
+# ── Hub lens bodies (registered AFTER the {plan_id:int} detail route so a numeric plan id
+#    is never captured by the {tab} converter; pipeline-archive is a literal and precedes
+#    {tab} so it is not swallowed as an unknown lens). ──────────────────────────────────
+
+
+@router.get("/v2/partials/buy-plans/pipeline-archive", response_class=HTMLResponse)
+async def pipeline_archive_partial(
+    request: Request,
+    scope: str = "",
+    offset: int = 0,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Lazy "load older" page of the Pipeline's Done (completed) deals.
+
+    The Pipeline surface renders its Done cards via the shared archive-rows partial; this
+    returns the next page of those cards (newest-completed first) so a "Load older" click
+    appends in place. Scope is role-resolved exactly like the board so no other rep's
+    completed deals leak. MUST be registered BEFORE the one-segment ``{tab}`` lens route
+    below, or FastAPI routes "pipeline-archive" there as an unknown tab (404).
+    """
+    from ...services.buyplan_hub import completed_archive
+
+    scope = _resolve_deal_scope(scope, _can_see_all_deals(user, db))
+
+    ctx = _base_ctx(request, user, "buy-plans")
+    ctx.update(
+        {
+            "archive": completed_archive(db, user, scope=scope, offset=offset),
+            "scope": scope,
+        }
+    )
+    return template_response("htmx/partials/approvals/_pipeline_archive_rows.html", ctx)
+
+
+@router.get("/v2/partials/buy-plans/{tab}", response_class=HTMLResponse)
+async def buy_plans_tab_partial(
+    request: Request,
+    tab: str,
+    scope: str = "",
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render one Buy Plans hub lens body into ``#bp-hub-body``.
+
+    Two lenses survive the Phase F retirement: ``my_queue`` (the role-aware "what needs YOU
+    now" surface) and ``pipeline`` (the 4-stage deal board). ``tab`` arrives dash-cased
+    (e.g. my-queue) and maps to the underscored lens key; any other value 404s.
+
+    ``scope`` applies to the Pipeline board only: it is role-resolved (sales/traders locked
+    to ``mine``), and its All/Mine toggle reloads THIS whole body in place.
+    """
+    lens = tab.replace("-", "_")
+    if lens not in _APPROVALS_TABS:
+        raise HTTPException(404, "Unknown buy-plans lens")
+
+    if lens == "my_queue":
+        return _render_my_queue_body(request, user, db)
+
+    return _render_pipeline_body(request, user, db, scope)
 
 
 @router.post("/v2/partials/buy-plans/{plan_id}/submit", response_class=HTMLResponse)
@@ -573,6 +585,7 @@ async def buy_plan_approve_partial(
     form = await request.form()
     action = form.get("action", "approve")
     origin = form.get("origin", "")
+    hub_scope = form.get("hub_scope", "all")
     notes = form.get("notes")
 
     open_request = (
@@ -612,6 +625,10 @@ async def buy_plan_approve_partial(
 
     if origin == "my_queue":
         return _render_my_queue_body(request, user, db)
+    if origin == "approvals_hub":
+        from .approvals_hub import render_tab_body
+
+        return render_tab_body(request, user, db, "buy-plan", hub_scope)
 
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
@@ -700,13 +717,19 @@ async def _resource_lines_and_alert(
     user: User,
     db: Session,
 ) -> dict:
-    """Shared fall-down → re-source core for BOTH triggers (vendor-cancel + receiving-
-    reject).
+    """Shared fall-down → re-source core (vendor-cancel, including the completed-plan
+    backorder case).
 
     Pools the target line(s) via the single ``resource_line`` engine, commits, and fans out
-    one URGENT backfill alert per pooled line. Both routes funnel here so the receiving-reject
-    path reuses the same pool/alert as the vendor-cancel path (no parallel queue). Returns the
-    service payload; raises HTTP 400 on a service ValueError (with a server-side log first).
+    one URGENT backfill alert per pooled line. Returns the service payload; raises HTTP 400
+    on a service ValueError (with a server-side log first).
+
+    Backorder emergency: ``resource_line`` reports ``was_completed`` when it had to reopen an
+    already-COMPLETED plan (a vendor cancelled AFTER the deal closed). That flag is threaded
+    into every ``notify_resource_requested`` dispatch so the broadcast forces email + Teams DM
+    to ALL recipients regardless of their re-source-alert preference, with a BACKORDER subject.
+    It MUST be passed (not re-derived): by notification time the plan is already reopened to
+    ACTIVE, so the completed-at-cancel-time fact would be lost.
     """
     from ...services.buyplan_notifications import notify_resource_requested, run_notify_bg
     from ...services.buyplan_workflow import resource_line
@@ -722,9 +745,15 @@ async def _resource_lines_and_alert(
 
     # Broadcast one urgent alert PER pooled line (scope=plan re-sources siblings too, and
     # each pooled line needs its own claim).
+    was_completed = payload.get("was_completed", False)
     for resourced in payload["resourced_lines"]:
         await run_notify_bg(
-            notify_resource_requested, plan_id, line_id=resourced["line_id"], actor_id=user.id, reason=reason_code
+            notify_resource_requested,
+            plan_id,
+            line_id=resourced["line_id"],
+            actor_id=user.id,
+            reason=reason_code,
+            was_completed=was_completed,
         )
     return payload
 
@@ -737,11 +766,16 @@ async def buy_plan_resource_line_partial(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Re-source a line whose vendor PO was cancelled (SP-3 vendor-cancel fall-down).
+    """Re-source a line whose vendor PO was cancelled (vendor-cancel fall-down).
 
     Records the cancellation (vendor performance), marks the offer sold + the vendor
     unavailable, drops the line into the open claim pool, and fires the URGENT backfill
     alert to all other buyers. ``scope=plan`` re-sources the plan's other cut lines too.
+    Also the completed-plan BACKORDER entry point: when the target line sits on an
+    already-COMPLETED plan (a vendor cancelled AFTER the deal closed), ``resource_line``
+    reopens it to ACTIVE and the broadcast escalates to a forced EMERGENCY alert. ``origin``
+    routes the re-render: ``my_queue`` → My Queue body, ``approvals_hub`` → the PO Approval
+    tab body, else the full plan detail.
     """
     # Per-record ownership (non-owner SALES/TRADER → 404) + PO-cutter role gate (403).
     get_buyplan_for_user(db, user, plan_id)
@@ -756,41 +790,17 @@ async def buy_plan_resource_line_partial(
     if not reason_code:
         raise HTTPException(400, "A re-source reason is required")
 
-    await _resource_lines_and_alert(plan_id, line_id, reason_code, reason_note, also_line_ids, user, db)
-
-    return await buy_plan_detail_partial(request, plan_id, user, db)
-
-
-@router.post("/v2/partials/buy-plans/{plan_id}/lines/{line_id}/reject-received", response_class=HTMLResponse)
-async def buy_plan_reject_received_line_partial(
-    request: Request,
-    plan_id: int,
-    line_id: int,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Reject a line at receiving — SP-4 fall-down (wrong / defective / short parts).
-
-    The vendor delivered, but the parts failed receiving. This drops the line into the SAME
-    open re-source pool the vendor-cancel Re-source uses (reusing ``resource_line``), reopens
-    the COMPLETED plan to ACTIVE so the line can be re-claimed/re-cut from another vendor, and
-    fires the URGENT backfill alert. Owner- + buyer-gated exactly like the re-source route.
-    ``scope=plan`` rejects the plan's other received lines too.
-    """
-    # Per-record ownership (non-owner SALES/TRADER → 404) + PO-cutter role gate (403).
-    get_buyplan_for_user(db, user, plan_id)
-    _require_po_cutter(user)
-
-    form = await request.form()
-    reason_code = form.get("reason_code", "").strip()
-    reason_note = (form.get("reason_note") or "").strip() or None
-    scope = form.get("scope", "line")
-    also_line_ids = [int(i) for i in form.getlist("also_line_ids")] if scope == "plan" else []
-
-    if not reason_code:
-        raise HTTPException(400, "A rejection reason is required")
+    origin = form.get("origin", "")
+    hub_scope = form.get("hub_scope", "all")
 
     await _resource_lines_and_alert(plan_id, line_id, reason_code, reason_note, also_line_ids, user, db)
+
+    if origin == "my_queue":
+        return _render_my_queue_body(request, user, db)
+    if origin == "approvals_hub":
+        from .approvals_hub import render_tab_body
+
+        return render_tab_body(request, user, db, "po-approval", hub_scope)
 
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
@@ -841,6 +851,7 @@ async def buy_plan_verify_po_partial(
     form = await request.form()
     action = form.get("action", "approve")
     origin = form.get("origin", "")
+    hub_scope = form.get("hub_scope", "all")
 
     try:
         verify_po(plan_id, line_id, action, user, db, rejection_note=form.get("rejection_note"))
@@ -856,6 +867,10 @@ async def buy_plan_verify_po_partial(
 
     if origin == "my_queue":
         return _render_my_queue_body(request, user, db)
+    if origin == "approvals_hub":
+        from .approvals_hub import render_tab_body
+
+        return render_tab_body(request, user, db, "po-approval", hub_scope)
 
     return await buy_plan_detail_partial(request, plan_id, user, db)
 

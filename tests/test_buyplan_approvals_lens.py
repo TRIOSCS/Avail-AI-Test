@@ -44,19 +44,19 @@ def _seed_pending_buy_plan_approval(db, user):
 
 class TestPinnedApprovalSection:
     def test_full_page_threads_lens_to_lazy_partial(self, nonadmin_client):
-        """A full-page load of /v2/approvals?lens=pipeline threads ?lens= into the lazy
-        partial URL, so a deep link / reload lands on the requested lens instead of the
-        role default.
+        """A full-page load of /v2/buy-plans?lens=pipeline threads ?lens= into the lazy
+        hub-partial URL, so a deep link / reload lands on the requested lens instead of
+        the role default. (Phase 3: the My Queue/Pipeline hub reclaimed /v2/buy-plans.)
 
         (v2_page authenticates via the session cookie, so this needs nonadmin_client.)
         """
-        resp = nonadmin_client.get("/v2/approvals?lens=pipeline")
+        resp = nonadmin_client.get("/v2/buy-plans?lens=pipeline")
         assert resp.status_code == 200
-        assert "/v2/partials/approvals?lens=pipeline" in resp.text
+        assert "/v2/partials/buy-plans?lens=pipeline" in resp.text
 
     def test_full_page_ignores_unknown_lens(self, nonadmin_client):
         """An unknown ?lens= value is dropped (no query string), not echoed verbatim."""
-        resp = nonadmin_client.get("/v2/approvals?lens=bogus")
+        resp = nonadmin_client.get("/v2/buy-plans?lens=bogus")
         assert resp.status_code == 200
         assert "lens=bogus" not in resp.text
 

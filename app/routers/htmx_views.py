@@ -144,6 +144,7 @@ _MODULE_ENTRY_URLS: tuple[tuple[AccessKey, str], ...] = (
 @router.get("/v2/contacts", response_class=HTMLResponse)
 @router.get("/v2/vendor-contacts", response_class=HTMLResponse)
 @router.get("/v2/approvals", response_class=HTMLResponse)
+@router.get("/v2/buy-plans", response_class=HTMLResponse)
 @router.get("/v2/buy-plans/{bp_id:int}", response_class=HTMLResponse)
 @router.get("/v2/resell", response_class=HTMLResponse)
 @router.get("/v2/resell/{list_id:int}", response_class=HTMLResponse)
@@ -257,16 +258,22 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         # first full-page load instead of defaulting to Connectors.
         tab_qs = request.query_params.get("tab", "").strip()
         partial_url = f"/v2/partials/settings?tab={quote(tab_qs)}" if tab_qs else "/v2/partials/settings"
-    elif current_view in ("buy-plans", "approvals"):
-        # Thread ?lens= through so a deep-link / redirect and a reload/bookmark of a pushed
-        # lens URL paint the right lens on first full-page load instead of falling to
-        # _default_lens. Lens keys are the two surviving lenses (My Queue + Pipeline). A
-        # detail URL (/buy-plans/{id}) is overridden by the _DETAIL_VIEWS block below.
+    elif current_view == "approvals":
+        # The Approvals module is now the org-wide 3-tab decide console (Buy Plan / PO
+        # Approval / Prepayment) at /v2/partials/approvals. Thread ?tab= through (customer
+        # deep-link pattern) so a reload/bookmark of a pushed tab URL paints the right tab.
+        tab_qs = request.query_params.get("tab", "").strip()
+        partial_url = f"/v2/partials/approvals?tab={quote(tab_qs)}" if tab_qs else "/v2/partials/approvals"
+    elif current_view == "buy-plans":
+        # The Buy Plans hub (personal My Queue + Pipeline) reclaimed /v2/buy-plans as its
+        # non-redirected home. Thread ?lens= so a reload/bookmark of a pushed lens URL paints
+        # the right lens instead of falling to _default_lens. A detail URL (/buy-plans/{id})
+        # is overridden by the _DETAIL_VIEWS block below.
         lens_qs = request.query_params.get("lens", "").strip()
         partial_url = (
-            f"/v2/partials/approvals?lens={quote(lens_qs)}"
+            f"/v2/partials/buy-plans?lens={quote(lens_qs)}"
             if lens_qs in ("my_queue", "pipeline")
-            else "/v2/partials/approvals"
+            else "/v2/partials/buy-plans"
         )
     else:
         partial_url = f"/v2/partials/{current_view}"

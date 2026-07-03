@@ -119,7 +119,7 @@ def po_approver_client(db_session, test_user):
 def test_create_so_missing_requisition_id(client):
     """POST without requisition_id → 400 (line 307-308)."""
     resp = client.post(
-        "/v2/partials/approvals/sales-orders/create",
+        "/v2/partials/buy-plans/sales-orders/create",
         data={"offer_1": "1"},
     )
     assert resp.status_code == 400
@@ -128,7 +128,7 @@ def test_create_so_missing_requisition_id(client):
 def test_create_so_non_numeric_requisition_id(client):
     """POST with non-numeric requisition_id → 400 (lines 310-312)."""
     resp = client.post(
-        "/v2/partials/approvals/sales-orders/create",
+        "/v2/partials/buy-plans/sales-orders/create",
         data={"requisition_id": "abc", "offer_1": "1"},
     )
     assert resp.status_code == 400
@@ -150,7 +150,7 @@ def test_create_so_duplicate_error(client, test_requisition):
                 new=AsyncMock(return_value=_ok_html()),
             ):
                 resp = client.post(
-                    "/v2/partials/approvals/sales-orders/create",
+                    "/v2/partials/buy-plans/sales-orders/create",
                     data={"requisition_id": str(test_requisition.id), "offer_1": "1"},
                 )
 
@@ -167,7 +167,7 @@ def test_create_so_value_error(client, test_requisition):
     ):
         with patch("app.dependencies.require_requisition_access"):
             resp = client.post(
-                "/v2/partials/approvals/sales-orders/create",
+                "/v2/partials/buy-plans/sales-orders/create",
                 data={"requisition_id": str(test_requisition.id), "offer_1": "1"},
             )
 
@@ -189,7 +189,7 @@ def test_create_so_success(client, test_requisition):
                 new=AsyncMock(return_value=_ok_html()),
             ):
                 resp = client.post(
-                    "/v2/partials/approvals/sales-orders/create",
+                    "/v2/partials/buy-plans/sales-orders/create",
                     data={
                         "requisition_id": str(test_requisition.id),
                         "offer_1": "1",

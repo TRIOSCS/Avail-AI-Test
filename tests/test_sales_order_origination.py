@@ -2,8 +2,8 @@
 
 Covers the two new approvals routes that wire the New-SO button → requisition picker →
 quote-builder offer/sell form → DRAFT BuyPlan detail:
-  - GET  /v2/partials/approvals/sales-orders/new      (requisition picker + builder form)
-  - POST /v2/partials/approvals/sales-orders/create   (create DRAFT SO, render detail)
+  - GET  /v2/partials/buy-plans/sales-orders/new      (requisition picker + builder form)
+  - POST /v2/partials/buy-plans/sales-orders/create   (create DRAFT SO, render detail)
 
 Also covers the duplicate-open-SO path (renders the existing SO's detail with a toast,
 never a 500) and the role-scoping property (a restricted SALES/TRADER role only sees /
@@ -155,7 +155,7 @@ def test_new_sales_order_picker_lists_open_requisitions(nonadmin_client: TestCli
     """The picker (no requisition_id) lists open requisitions that have a selectable
     offer."""
     req, _requirement, _offer = so_setup
-    r = nonadmin_client.get("/v2/partials/approvals/sales-orders/new")
+    r = nonadmin_client.get("/v2/partials/buy-plans/sales-orders/new")
     assert r.status_code == 200
     # Distinctive tokens — the row's builder hx-get fragment AND the requisition name.
     # (A bare ``str(req.id)`` matches Tailwind/SVG digits and would pass on an empty list.)
@@ -179,7 +179,7 @@ def test_new_sales_order_picker_excludes_requisition_without_active_offers(
     no_offer_req, _req, _offer = _seed_so_requisition(
         db_session, owner, label="REQ-SO-NOOFFER", offer_status=OfferStatus.EXPIRED.value
     )
-    r = nonadmin_client.get("/v2/partials/approvals/sales-orders/new")
+    r = nonadmin_client.get("/v2/partials/buy-plans/sales-orders/new")
     assert r.status_code == 200
     # The with-offers req still lists (selective filter, not an empty list)...
     assert "REQ-SO-UI" in r.text
@@ -192,10 +192,10 @@ def test_new_sales_order_picker_renders_offer_form_for_requisition(nonadmin_clie
     """Selecting a requisition (requisition_id set) renders the per-requirement offer +
     sell-price form."""
     req, requirement, offer = so_setup
-    r = nonadmin_client.get(f"/v2/partials/approvals/sales-orders/new?requisition_id={req.id}")
+    r = nonadmin_client.get(f"/v2/partials/buy-plans/sales-orders/new?requisition_id={req.id}")
     assert r.status_code == 200
     # The form posts to the create route and carries this requirement's offer/sell fields.
-    assert "/v2/partials/approvals/sales-orders/create" in r.text
+    assert "/v2/partials/buy-plans/sales-orders/create" in r.text
     assert f"offer_{requirement.id}" in r.text
     assert f"sell_{requirement.id}" in r.text
     assert str(offer.id) in r.text
@@ -207,7 +207,7 @@ def test_builder_labels_say_buy_plan_not_sales_order(nonadmin_client: TestClient
     The buy plan is the object being built; 'Sales Order' was the old misnomer. The
     Acctivate SO# *field* labels (e.g. 'Sales Order #') are kept separately."""
     req, _requirement, _offer = so_setup
-    r = nonadmin_client.get(f"/v2/partials/approvals/sales-orders/new?requisition_id={req.id}")
+    r = nonadmin_client.get(f"/v2/partials/buy-plans/sales-orders/new?requisition_id={req.id}")
     assert r.status_code == 200
     assert "New Buy Plan" in r.text  # builder heading
     assert "Build Buy Plan" in r.text  # primary action
@@ -220,7 +220,7 @@ def test_create_sales_order_returns_draft_detail(nonadmin_client: TestClient, so
     (with the Submit form)."""
     req, requirement, offer = so_setup
     r = nonadmin_client.post(
-        "/v2/partials/approvals/sales-orders/create",
+        "/v2/partials/buy-plans/sales-orders/create",
         data={
             "requisition_id": req.id,
             f"offer_{requirement.id}": offer.id,
@@ -240,10 +240,10 @@ def test_create_duplicate_open_so_returns_existing_with_toast(nonadmin_client: T
         f"offer_{requirement.id}": offer.id,
         f"sell_{requirement.id}": "1.25",
     }
-    first = nonadmin_client.post("/v2/partials/approvals/sales-orders/create", data=payload)
+    first = nonadmin_client.post("/v2/partials/buy-plans/sales-orders/create", data=payload)
     assert first.status_code == 200
 
-    second = nonadmin_client.post("/v2/partials/approvals/sales-orders/create", data=payload)
+    second = nonadmin_client.post("/v2/partials/buy-plans/sales-orders/create", data=payload)
     assert second.status_code == 200
     assert "Submit" in second.text  # the existing SO's detail
     trigger = second.headers.get("HX-Trigger", "")
@@ -259,7 +259,7 @@ def test_create_duplicate_open_so_returns_existing_with_toast(nonadmin_client: T
 def test_picker_excludes_requisition_not_owned_by_restricted_role(restricted_client: TestClient, so_setup):
     """A restricted (SALES) user does NOT see a requisition owned by someone else."""
     req, _requirement, _offer = so_setup  # owned by a buyer, not sales_user
-    r = restricted_client.get("/v2/partials/approvals/sales-orders/new")
+    r = restricted_client.get("/v2/partials/buy-plans/sales-orders/new")
     assert r.status_code == 200
     assert "REQ-SO-UI" not in r.text
     assert f"requisition_id={req.id}" not in r.text
@@ -268,7 +268,7 @@ def test_picker_excludes_requisition_not_owned_by_restricted_role(restricted_cli
 def test_builder_get_404_for_restricted_non_owner(restricted_client: TestClient, so_setup):
     """Builder-mode GET for a not-owned requisition is a 404 for a restricted role."""
     req, _requirement, _offer = so_setup
-    r = restricted_client.get(f"/v2/partials/approvals/sales-orders/new?requisition_id={req.id}")
+    r = restricted_client.get(f"/v2/partials/buy-plans/sales-orders/new?requisition_id={req.id}")
     assert r.status_code == 404
 
 
@@ -276,7 +276,7 @@ def test_create_404_for_restricted_non_owner(restricted_client: TestClient, so_s
     """POST create for a not-owned requisition is a 404 for a restricted role."""
     req, requirement, offer = so_setup
     r = restricted_client.post(
-        "/v2/partials/approvals/sales-orders/create",
+        "/v2/partials/buy-plans/sales-orders/create",
         data={
             "requisition_id": req.id,
             f"offer_{requirement.id}": offer.id,
@@ -292,19 +292,19 @@ def test_restricted_role_can_originate_for_owned_requisition(
     """Sanity: a restricted role DOES see and can originate a SO for a req it owns."""
     owned_req, requirement, offer = _seed_so_requisition(db_session, sales_user, label="REQ-SO-OWNED")
     # Picker includes the owned req.
-    picker = restricted_client.get("/v2/partials/approvals/sales-orders/new")
+    picker = restricted_client.get("/v2/partials/buy-plans/sales-orders/new")
     assert picker.status_code == 200
     assert "REQ-SO-OWNED" in picker.text
     assert f"requisition_id={owned_req.id}" in picker.text
 
     # Builder GET is allowed (200, not 404).
-    builder = restricted_client.get(f"/v2/partials/approvals/sales-orders/new?requisition_id={owned_req.id}")
+    builder = restricted_client.get(f"/v2/partials/buy-plans/sales-orders/new?requisition_id={owned_req.id}")
     assert builder.status_code == 200
     assert f"offer_{requirement.id}" in builder.text
 
     # And create succeeds, rendering the DRAFT detail.
     created = restricted_client.post(
-        "/v2/partials/approvals/sales-orders/create",
+        "/v2/partials/buy-plans/sales-orders/create",
         data={
             "requisition_id": owned_req.id,
             f"offer_{requirement.id}": offer.id,

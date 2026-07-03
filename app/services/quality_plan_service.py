@@ -1,29 +1,24 @@
-"""quality_plan_service.py — Business logic for creating and submitting QualityPlan
+"""quality_plan_service.py — Business logic for creating and reviewing QualityPlan
 records.
 
 Purpose:
   - create_qp: Persist a QualityPlan header in DRAFT status.
   - validate_complete: Return a list of human-readable error strings for any
     Phase-1 required fields that are blank/null. Empty list == ready to submit.
-  - submit: Transition a complete QP to IN_REVIEW and write one ActivityLog event.
-    Raises IncompleteQPError (carrying the missing-field list) if the QP is not yet
-    complete.
+  - validate_section / _validate_sales_section / _validate_purchasing_section: the
+    per-section completeness gate reused by the Mark-Reviewed toggle and the router's
+    inline section-error display.
+  - toggle_section_reviewed: the decision-C lightweight per-section fold — a buyer
+    holding the section review right stamps a section reviewed (locking its form) or
+    clears the stamp (re-opening it). No second approver, instant. Replaced the retired
+    submit-for-approval gate (submit_section / _on_section_approved).
 
 Phase-1 required fields: created_by_id (owner), order_type, buy_plan_id.
 
-QP Phase C2a adds the per-section approval-gate submit/resolve helpers:
-  - submit_section: open a QP_SALES / QP_PURCHASING ApprovalRequest for the QP
-    (the QP is the subject; the gate_type discriminates the section). A missing approver
-    surfaces NoSectionApproverError so the router can show an inline banner, not a 500.
-  - _on_section_approved: the on-resolve hook the engine calls inside decide() (C2a logs
-    an activity; C2b writes the section timestamp).
-
-Called by: app.routers.quality_plans (Task 9+), app.services.approvals.service (decide,
-           lazy import of _on_section_approved).
+Called by: app.routers.quality_plans.
 Depends on: app.models.quality_plan (QualityPlan),
             app.services.activity_service (log_activity),
-            app.services.approvals.service (create_request),
-            app.services.approvals.routing (NoEligibleApproverError),
+            app.dependencies (can_review_qp_sales_section / can_review_qp_purchasing_section),
             app.constants (QualityPlanStatus, QPOrderType, ActivityType, ApprovalGateType).
 """
 
@@ -31,9 +26,10 @@ from datetime import datetime, timezone
 from typing import Any
 
 from loguru import logger
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 
 from ..constants import ActivityType, QualityPlanStatus
+from ..dependencies import can_review_qp_purchasing_section, can_review_qp_sales_section
 from ..models.quality_plan import QualityPlan
 from ..services.activity_service import log_activity
 
@@ -54,21 +50,6 @@ class IncompleteQPError(Exception):
     def __init__(self, missing_fields: list[str]) -> None:
         self.missing_fields = missing_fields
         super().__init__(f"Quality plan is incomplete: {missing_fields}")
-
-
-class NoSectionApproverError(Exception):
-    """Raised by submit_section() when no eligible approver exists for the section gate.
-
-    The router catches this and re-renders the QP detail with an inline "no approver
-    configured" banner — never a 500. Carries the section label for the message.
-
-    Attributes:
-        section: Human-readable section name (e.g. "Sales", "Purchasing").
-    """
-
-    def __init__(self, section: str) -> None:
-        self.section = section
-        super().__init__(f"No approver configured for the {section} section")
 
 
 def create_qp(
@@ -123,59 +104,6 @@ def validate_complete(qp: QualityPlan) -> list[str]:
     if not qp.buy_plan_id:
         errors.append("buy_plan_id is required")
     return errors
-
-
-def submit(
-    db: Session,
-    qp_id: int,
-    user: Any,
-) -> QualityPlan:
-    """Transition a QualityPlan from DRAFT to IN_REVIEW.
-
-    Validates all required Phase-1 fields via validate_complete() first. On success
-    sets status to IN_REVIEW and writes one ActivityLog row (activity_type=APPROVAL_REQUESTED,
-    buy_plan_id linked when present).
-
-    Phase-1 scope note (intentional, not a gap): submit() deliberately does NOT create
-    an Approval Engine gate/ApprovalRequest here. It only transitions draft→in_review and
-    writes the ActivityLog. The only active approval gate in Phase 1 is the Buy-Plan
-    section, surfaced via the existing read-only buy-plan-approval bridge. The engine's
-    QP/buy_plan gate is wired in Phase 1.5 — do not add gate-routing to submit() until then.
-
-    Args:
-        db: SQLAlchemy session (sync, 2.0 style).
-        qp_id: PK of the QualityPlan to submit.
-        user: The authenticated User performing the submission.
-
-    Returns:
-        The updated QualityPlan with status IN_REVIEW.
-
-    Raises:
-        ValueError: If the QualityPlan is not found.
-        IncompleteQPError: If validate_complete() returns a non-empty error list,
-            carrying the list as missing_fields.
-    """
-    qp = db.get(QualityPlan, qp_id)
-    if qp is None:
-        raise ValueError(f"QualityPlan {qp_id} not found")
-
-    errors = validate_complete(qp)
-    if errors:
-        raise IncompleteQPError(errors)
-
-    qp.status = QualityPlanStatus.IN_REVIEW
-
-    log_activity(
-        db,
-        activity_type=ActivityType.APPROVAL_REQUESTED,
-        user_id=user.id if user is not None else None,
-        buy_plan_id=qp.buy_plan_id,
-        description=f"Quality plan #{qp.id} submitted for review",
-    )
-
-    db.flush()
-    logger.info("QualityPlan id={} submitted by user={}", qp.id, user.id if user else None)
-    return qp
 
 
 # Sales-section completeness: QC-required fields a vendor needs to source against.
@@ -247,103 +175,93 @@ def validate_section(qp: QualityPlan, gate_type: str) -> list[str]:
     return []
 
 
-def _on_section_approved(db: Session, qp_id: int, gate_type: str, approved: bool) -> None:
-    """On-resolve hook for a QP section gate (QP_SALES / QP_PURCHASING).
+def _can_review_section(gate_type: str, user: Any) -> bool:
+    """True if *user* holds the review right for the given QP section gate."""
+    if gate_type == "qp_sales":
+        return can_review_qp_sales_section(user)
+    if gate_type == "qp_purchasing":
+        return can_review_qp_purchasing_section(user)
+    return False
 
-    Called by the approval engine inside decide() (lazy import) when a section request
-    resolves. On approval it stamps the QualityPlan's matching section-approved
-    timestamp (sales_section_approved_at / purchasing_section_approved_at) and logs one
-    ActivityLog row; on rejection it clears the stamp (a re-approval can re-set it) and
-    logs the rejection. Same session as decide() — the caller flushes/commits.
+
+def toggle_section_reviewed(db: Session, qp_id: int, gate_type: str, action: str, user: Any) -> QualityPlan:
+    """Mark or unmark a QP section (Sales / Purchasing) as reviewed.
+
+    The decision-C lightweight per-section fold that replaced the retired
+    submit-for-approval gate: a buyer holding the section review right stamps the section
+    reviewed — locking its edit form — or clears the stamp, re-opening it. No second
+    approver, instant.
+
+    action="mark": validate the section is complete (IncompleteQPError otherwise — the
+        SAME completeness gate the old submit enforced), require the matching review
+        right (PermissionError otherwise), then stamp {section}_section_reviewed_at=now()
+        and {section}_section_reviewed_by_id=user.id.
+    action="unmark": require the same review right, then clear both stamps (re-opens the
+        section form).
+
+    Both branches write one ActivityLog (QP_SECTION_REVIEWED) with a mark/unmark verb —
+    replacing _on_section_approved's audit write.
 
     Args:
         db: SQLAlchemy session (sync, 2.0 style).
-        qp_id: PK of the QualityPlan whose section resolved.
-        gate_type: The section gate (ApprovalGateType.QP_SALES / .QP_PURCHASING).
-        approved: True if the section was approved, False if rejected.
+        qp_id: PK of the QualityPlan.
+        gate_type: ApprovalGateType.QP_SALES or .QP_PURCHASING (discriminates the section).
+        action: "mark" or "unmark".
+        user: The authenticated User performing the toggle.
 
     Returns:
-        None. A missing QP (concurrently deleted) is a no-op warning, not an error.
+        The updated QualityPlan (flushed, not committed).
+
+    Raises:
+        ValueError: QP not found, or an unknown action / non-section gate_type.
+        IncompleteQPError: (mark only) the section is missing a required field — carries
+            the field-level error list so the router re-renders with inline errors.
+        PermissionError: *user* lacks the section's review right.
     """
+    if action not in ("mark", "unmark"):
+        raise ValueError(f"action must be 'mark' or 'unmark', got {action!r}")
+
+    gate = str(gate_type)
+    section = _SECTION_LABEL.get(gate)
+    if section is None:
+        raise ValueError(f"gate_type must be a QP section gate, got {gate_type!r}")
+
     qp = db.get(QualityPlan, qp_id)
     if qp is None:
-        logger.warning("_on_section_approved: QualityPlan id={} not found; skipping", qp_id)
-        return
+        raise ValueError(f"QualityPlan {qp_id} not found")
 
-    # Stamp (or clear) the section's approved-at timestamp.
-    stamp = datetime.now(timezone.utc) if approved else None
-    if str(gate_type) == "qp_sales":
-        qp.sales_section_approved_at = stamp
-    elif str(gate_type) == "qp_purchasing":
-        qp.purchasing_section_approved_at = stamp
+    # Both mark and unmark require the section's review right.
+    if not _can_review_section(gate, user):
+        raise PermissionError(f"User {getattr(user, 'id', None)} lacks the {section} section review right")
 
-    section = _SECTION_LABEL.get(str(gate_type), str(gate_type))
-    verb = "approved" if approved else "rejected"
+    if action == "mark":
+        errors = validate_section(qp, gate_type)
+        if errors:
+            raise IncompleteQPError(errors)
+        stamp = datetime.now(timezone.utc)
+        if gate == "qp_sales":
+            qp.sales_section_reviewed_at = stamp
+            qp.sales_section_reviewed_by_id = user.id
+        else:
+            qp.purchasing_section_reviewed_at = stamp
+            qp.purchasing_section_reviewed_by_id = user.id
+        verb = "marked reviewed"
+    else:
+        if gate == "qp_sales":
+            qp.sales_section_reviewed_at = None
+            qp.sales_section_reviewed_by_id = None
+        else:
+            qp.purchasing_section_reviewed_at = None
+            qp.purchasing_section_reviewed_by_id = None
+        verb = "unmarked reviewed"
+
     log_activity(
         db,
-        activity_type=ActivityType.APPROVAL_APPROVED if approved else ActivityType.APPROVAL_REJECTED,
+        activity_type=ActivityType.QP_SECTION_REVIEWED,
+        user_id=user.id if user is not None else None,
         buy_plan_id=qp.buy_plan_id,
         description=f"Quality plan #{qp.id} {section} section {verb}",
     )
     db.flush()
-    logger.info("QualityPlan id={} {} section {}", qp.id, section, verb)
-
-
-def submit_section(db: Session, qp_id: int, gate_type: str, user: Any) -> Any:
-    """Open a section approval request (QP_SALES / QP_PURCHASING) for the QP.
-
-    The QualityPlan is the engine subject (subject_type=QUALITY_PLAN); the gate_type
-    discriminates which section is being submitted. Routes to users holding the matching
-    per-user approval toggle (can_approve_qp_sales / can_approve_qp_purchasing). C2b enforces
-    per-section field completeness first: a blank SO#/PO# or any missing QC-required
-    field raises IncompleteQPError before any gate request is opened.
-
-    Args:
-        db: SQLAlchemy session (sync, 2.0 style).
-        qp_id: PK of the QualityPlan to submit.
-        gate_type: ApprovalGateType.QP_SALES or .QP_PURCHASING.
-        user: The authenticated User submitting the section (requester + owner).
-
-    Returns:
-        The flushed ApprovalRequest (already routed to eligible approvers).
-
-    Raises:
-        ValueError: If the QualityPlan is not found.
-        IncompleteQPError: If the section is missing a required field — carries the
-            field-level error list. The router re-renders with those section_errors and
-            no gate request is opened.
-        NoSectionApproverError: If no eligible approver holds the section toggle — the
-            router surfaces this as an inline banner (NOT a 500). The half-built request
-            is removed by create_request, so no orphan engine state remains.
-    """
-    # Lazy import: approvals.service -> quality_plan_service (decide()'s lazy import of
-    # _on_section_approved), so a top-level import here would be circular. The package
-    # exposes no re-exports — import from the concrete submodules.
-    from .approvals.routing import NoEligibleApproverError
-    from .approvals.service import create_request
-
-    qp = db.get(QualityPlan, qp_id, options=[joinedload(QualityPlan.buy_plan)])
-    if qp is None:
-        raise ValueError(f"QualityPlan {qp_id} not found")
-
-    section_errors = validate_section(qp, gate_type)
-    if section_errors:
-        raise IncompleteQPError(section_errors)
-
-    try:
-        request = create_request(
-            db,
-            gate_type=gate_type,
-            amount=None,
-            subject=qp,
-            requested_by=user,
-            owner=user,
-        )
-    except NoEligibleApproverError as exc:
-        section = _SECTION_LABEL.get(str(gate_type), str(gate_type))
-        logger.warning("QualityPlan id={} {} section submit: no eligible approver", qp_id, section)
-        raise NoSectionApproverError(section) from exc
-
-    db.flush()
-    logger.info("QualityPlan id={} {} section submitted by user={}", qp.id, gate_type, user.id if user else None)
-    return request
+    logger.info("QualityPlan id={} {} section {} by user={}", qp.id, section, verb, getattr(user, "id", None))
+    return qp

@@ -1,21 +1,24 @@
-"""queue.py — read-side view-model builder for the three-tab approvals queue.
+"""queue.py — read-side view-model helpers for a single approval gate's queue.
 
-Purpose: build_queue_view assembles everything the approvals lens body renders, with a
-         constant number of queries (no N+1 regardless of row count):
-           - three tabs segmented by ApprovalRequest.gate_type
-             (sales_orders / purchase_orders / prepayments);
+Purpose: ``pending_rows_for_gate`` / ``resolved_rows_for_gate`` build the rows one
+         gate-type tab renders, with a constant number of queries (no N+1 regardless of
+         row count):
            - a Pending section (REQUESTED, org-wide) + a Recently-resolved section
              (terminal statuses, capped, coalesce-ordered so cancelled rows with a NULL
              resolved_at still sort sanely);
-           - per-tab pill counts that are ORG-WIDE pending totals;
-           - a smart-default tab (the gate with the most items awaiting THIS user; tie or
-             zero → Sales Orders) used only when no explicit tab is requested;
            - per-row can_act (True only when the user is an eligible PENDING recipient —
              mirrors the engine's decide() gate), plus the routed-to approver names so an
              org-wide viewer sees who owns a request they cannot action.
+         ``pending_count_for_gate`` is the org-wide REQUESTED total that drives a tab pill.
 
-Called by: routers/approvals.py (get_queue) and the Buy-Plans hub "approvals" lens body
-           (routers/htmx_views.py).
+         These per-gate helpers are the leaner successor to the retired three-way
+         ``build_queue_view``: the new Approvals hub (routers/htmx/approvals_hub.py) owns
+         one tab per SURVIVING engine gate (Buy Plan = BUY_PLAN, Prepayment = PREPAYMENT)
+         and calls these directly. The PO Approval tab is NOT engine-backed — it reads
+         PENDING_VERIFY buy-plan lines via services/approvals/po_queue.py — so there is no
+         longer a single "three-tab view" object here.
+
+Called by: routers/htmx/approvals_hub.py (Buy Plan + Prepayment tabs).
 Depends on: models.approvals (ApprovalRequest/Step/StepRecipient), models.auth (User),
             models.buy_plan (BuyPlan), models.quality_plan (QualityPlan, Prepayment),
             models.sourcing (Requisition, via BuyPlan), app.constants enums. Reuses the
@@ -25,11 +28,11 @@ Depends on: models.approvals (ApprovalRequest/Step/StepRecipient), models.auth (
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from ...constants import (
@@ -42,21 +45,6 @@ from ...models.approvals import ApprovalRequest, ApprovalStep, ApprovalStepRecip
 from ...models.auth import User
 from ...models.buy_plan import BuyPlan
 from ...models.quality_plan import Prepayment, QualityPlan
-
-# tab key → gate_type. Order is the on-screen left-to-right order and the smart-default
-# tie-break order (leftmost wins).
-TAB_ORDER = ["sales_orders", "purchase_orders", "prepayments"]
-TAB_GATE = {
-    "sales_orders": ApprovalGateType.BUY_PLAN,
-    "purchase_orders": ApprovalGateType.PURCHASE_ORDER,
-    "prepayments": ApprovalGateType.PREPAYMENT,
-}
-TAB_LABEL = {
-    "sales_orders": "Sales Orders",
-    "purchase_orders": "Purchase Orders",
-    "prepayments": "Vendor Prepayments",
-}
-DEFAULT_TAB = "sales_orders"
 
 RESOLVED_STATUSES = (
     ApprovalRequestStatus.APPROVED,
@@ -78,6 +66,8 @@ class RowVM:
     id: int
     gate_type: str
     status: str
+    subject_type: str | None
+    subject_id: int | None
     amount: Decimal | None
     currency: str
     created_at: datetime | None
@@ -92,33 +82,29 @@ class RowVM:
     can_act: bool
 
 
-@dataclass
-class QueueView:
-    """Everything the approvals lens body needs."""
-
-    active_tab: str
-    active_label: str = ""
-    tabs: list[dict] = field(default_factory=list)
-    pending_rows: list[RowVM] = field(default_factory=list)
-    resolved_rows: list[RowVM] = field(default_factory=list)
+def _mine_clause(user: User):
+    """Ownership filter for the SEE-MINE scope: requests the user raised or owns."""
+    return or_(ApprovalRequest.requested_by_id == user.id, ApprovalRequest.owner_id == user.id)
 
 
-def build_queue_view(db: Session, user: User, tab: str | None) -> QueueView:
-    """Assemble the QueueView for *user* on *tab* (smart-default when tab is absent)."""
-    active_tab = tab if tab in TAB_GATE else _smart_default_tab(db, user)
-    gate = TAB_GATE[active_tab]
+def pending_rows_for_gate(db: Session, user: User, gate_type, *, scope: str = "all") -> list[RowVM]:
+    """Pending (REQUESTED, org-wide) rows for one engine gate, fully resolved for Jinja.
 
-    pill_by_gate = _pending_counts_by_gate(db)
-    pending = _pending_rows(db, gate)
-    resolved = _resolved_rows(db, gate)
+    ``can_act`` is True only where *user* is an eligible PENDING recipient (mirrors the
+    engine's ``decide()`` gate); every row also carries the routed-to approver names so an
+    org-wide viewer sees who owns a request they cannot action. Constant query count.
 
+    ``scope="mine"`` narrows to requests *user* raised or owns (SEE-MINE toggle); ``"all"``
+    (default) is the unchanged org-wide queue an approver lands on.
+    """
+    pending = _pending_rows(db, gate_type, mine=(scope == "mine"), user=user)
+    if not pending:
+        return []
     actionable = _actionable_request_ids(db, user)
-    pending_ids = [ar.id for ar in pending]
-    approver_names = _approver_names_by_request(db, pending_ids)
-    requester_names = _requester_names(db, pending + resolved)
-    subjects = _load_subjects(db, pending + resolved)
-
-    pending_vms = [
+    approver_names = _approver_names_by_request(db, [ar.id for ar in pending])
+    requester_names = _requester_names(db, pending)
+    subjects = _load_subjects(db, pending)
+    return [
         _row_vm(
             ar,
             pending=True,
@@ -129,93 +115,166 @@ def build_queue_view(db: Session, user: User, tab: str | None) -> QueueView:
         )
         for ar in pending
     ]
-    resolved_vms = [
+
+
+def resolved_rows_for_gate(db: Session, gate_type, *, scope: str = "all", user: User | None = None) -> list[RowVM]:
+    """Recently-resolved (terminal, capped, coalesce-ordered) rows for one engine gate.
+
+    ``scope="mine"`` (with *user*) narrows to requests the user raised or owns.
+    """
+    resolved = _resolved_rows(db, gate_type, mine=(scope == "mine" and user is not None), user=user)
+    if not resolved:
+        return []
+    requester_names = _requester_names(db, resolved)
+    subjects = _load_subjects(db, resolved)
+    return [
         _row_vm(
             ar,
             pending=False,
-            actionable=actionable,
-            approver_names=approver_names,
+            actionable=set(),
+            approver_names={},
             requester_names=requester_names,
             subjects=subjects,
         )
         for ar in resolved
     ]
 
-    tabs = [{"key": k, "label": TAB_LABEL[k], "count": pill_by_gate.get(TAB_GATE[k], 0)} for k in TAB_ORDER]
-    return QueueView(
-        active_tab=active_tab,
-        active_label=TAB_LABEL[active_tab],
-        tabs=tabs,
-        pending_rows=pending_vms,
-        resolved_rows=resolved_vms,
+
+def pending_count_for_gate(db: Session, gate_type) -> int:
+    """Org-wide REQUESTED count for one gate_type (drives a tab pill).
+
+    Always org-wide, independent of the SEE-MINE tab toggle — the pill is an at-a-glance
+    "how many are open" cue, not the scoped list.
+    """
+    return int(
+        db.execute(
+            select(func.count(ApprovalRequest.id)).where(
+                ApprovalRequest.status == ApprovalRequestStatus.REQUESTED,
+                ApprovalRequest.gate_type == gate_type,
+            )
+        ).scalar_one()
     )
+
+
+# Cap on the Buy Plan tracking list's recent-plans window (pending-approval plans are
+# ALWAYS surfaced regardless of this cap — see buy_plan_tracking_rows).
+PLAN_TRACKING_LIMIT = 50
+
+
+@dataclass
+class PlanTrackingRow:
+    """One buy plan for the Buy Plan tab's approvals+tracking list (no ORM in Jinja).
+
+    ``can_decide`` marks a plan the viewer may approve inline (an open BUY_PLAN request on
+    which they hold a PENDING recipient slot); every other plan renders as a status-only
+    tracking row.
+    """
+
+    plan_id: int
+    status: str
+    customer_name: str | None
+    so_number: str | None
+    amount: Decimal | None
+    can_decide: bool
+
+
+def buy_plan_tracking_rows(db: Session, user: User, *, scope: str = "all") -> list[PlanTrackingRow]:
+    """Buy plans for the Buy Plan tab — approvals AND tracking (lifecycle status), one
+    row per plan.
+
+    The Buy Plan tab is a status board for the deals themselves, not just their open
+    approval-gate rows: it lists buy plans with their lifecycle status (draft / pending /
+    active / completed / …) so a viewer can TRACK a plan here, with the Approve action
+    inline where a plan is pending the viewer's decision.
+
+    ``scope="mine"`` narrows to plans the viewer owns (``submitted_by_id``). Plans the
+    viewer can decide are ALWAYS included (they need action) even if older than the recent
+    window; the rest are the most-recent ``PLAN_TRACKING_LIMIT`` plans. Rows sort
+    decidable-first, then newest.
+    """
+    mine = scope == "mine"
+
+    # Which plans can this viewer decide right now (open BUY_PLAN request + PENDING slot)?
+    actionable = _actionable_request_ids(db, user)
+    decidable_plan_ids: set[int] = set()
+    if actionable:
+        rows = db.execute(
+            select(ApprovalRequest.subject_id).where(
+                ApprovalRequest.gate_type == ApprovalGateType.BUY_PLAN,
+                ApprovalRequest.subject_type == ApprovalSubjectType.BUY_PLAN,
+                ApprovalRequest.status == ApprovalRequestStatus.REQUESTED,
+                ApprovalRequest.id.in_(actionable),
+            )
+        ).all()
+        decidable_plan_ids = {sid for (sid,) in rows if sid}
+
+    def _scoped(sel):
+        return sel.where(BuyPlan.submitted_by_id == user.id) if mine else sel
+
+    plans: dict[int, BuyPlan] = {}
+    # Decidable plans first — always shown, never dropped by the recent-window cap.
+    if decidable_plan_ids:
+        sel = _scoped(
+            select(BuyPlan).options(joinedload(BuyPlan.requisition)).where(BuyPlan.id.in_(decidable_plan_ids))
+        )
+        for p in db.execute(sel).unique().scalars():
+            plans[p.id] = p
+    # Recent plans for tracking (capped, newest-first).
+    recent = _scoped(
+        select(BuyPlan)
+        .options(joinedload(BuyPlan.requisition))
+        .order_by(BuyPlan.created_at.desc(), BuyPlan.id.desc())
+        .limit(PLAN_TRACKING_LIMIT)
+    )
+    for p in db.execute(recent).unique().scalars():
+        plans.setdefault(p.id, p)
+
+    out = [
+        PlanTrackingRow(
+            plan_id=p.id,
+            status=p.status,
+            # requisition_id is NOT NULL, so requisition.customer_name is the light,
+            # N+1-free customer label (deeper quote→site→company chain is not worth the joins
+            # for a tracking list).
+            customer_name=(p.requisition.customer_name if p.requisition else None),
+            so_number=p.sales_order_number,
+            amount=p.total_cost,
+            can_decide=p.id in decidable_plan_ids,
+        )
+        for p in plans.values()
+    ]
+    out.sort(key=lambda r: (not r.can_decide, -r.plan_id))
+    return out
 
 
 # ── Queries ──────────────────────────────────────────────────────────────
 
 
-def _pending_counts_by_gate(db: Session) -> dict[str, int]:
-    """Org-wide REQUESTED count per gate_type (drives the tab pills)."""
-    rows = db.execute(
-        select(ApprovalRequest.gate_type, func.count(ApprovalRequest.id))
-        .where(ApprovalRequest.status == ApprovalRequestStatus.REQUESTED)
-        .group_by(ApprovalRequest.gate_type)
-    ).all()
-    return {gate: count for gate, count in rows}
-
-
-def _awaiting_me_counts(db: Session, user: User) -> dict[str, int]:
-    """REQUESTED requests where *user* holds a PENDING recipient row, grouped by
-    gate."""
-    rows = db.execute(
-        select(ApprovalRequest.gate_type, func.count(func.distinct(ApprovalRequest.id)))
-        .join(ApprovalStep, ApprovalStep.request_id == ApprovalRequest.id)
-        .join(ApprovalStepRecipient, ApprovalStepRecipient.step_id == ApprovalStep.id)
-        .where(
-            ApprovalRequest.status == ApprovalRequestStatus.REQUESTED,
-            ApprovalStepRecipient.user_id == user.id,
-            ApprovalStepRecipient.status == ApprovalRecipientStatus.PENDING,
-        )
-        .group_by(ApprovalRequest.gate_type)
-    ).all()
-    return {gate: count for gate, count in rows}
-
-
-def _smart_default_tab(db: Session, user: User) -> str:
-    """Tab with the most items awaiting *user*; tie or zero → leftmost (Sales
-    Orders)."""
-    counts = _awaiting_me_counts(db, user)
-    best_tab, best_count = DEFAULT_TAB, -1
-    for tab_key in TAB_ORDER:
-        c = counts.get(TAB_GATE[tab_key], 0)
-        if c > best_count:  # strict → leftmost wins on ties
-            best_tab, best_count = tab_key, c
-    return best_tab
-
-
-def _pending_rows(db: Session, gate) -> list[ApprovalRequest]:
-    return list(
-        db.execute(
-            select(ApprovalRequest)
-            .where(ApprovalRequest.status == ApprovalRequestStatus.REQUESTED, ApprovalRequest.gate_type == gate)
-            .order_by(ApprovalRequest.created_at.asc(), ApprovalRequest.id.asc())
-            .limit(PENDING_CAP)
-        ).scalars()
+def _pending_rows(db: Session, gate, *, mine: bool = False, user: User | None = None) -> list[ApprovalRequest]:
+    q = (
+        select(ApprovalRequest)
+        .where(ApprovalRequest.status == ApprovalRequestStatus.REQUESTED, ApprovalRequest.gate_type == gate)
+        .order_by(ApprovalRequest.created_at.asc(), ApprovalRequest.id.asc())
+        .limit(PENDING_CAP)
     )
+    if mine and user is not None:
+        q = q.where(_mine_clause(user))
+    return list(db.execute(q).scalars())
 
 
-def _resolved_rows(db: Session, gate) -> list[ApprovalRequest]:
+def _resolved_rows(db: Session, gate, *, mine: bool = False, user: User | None = None) -> list[ApprovalRequest]:
     # coalesce(resolved_at, updated_at, created_at): cancelled rows never set resolved_at,
     # so a bare resolved_at order would scatter them — portable across PG and SQLite.
     order_key = func.coalesce(ApprovalRequest.resolved_at, ApprovalRequest.updated_at, ApprovalRequest.created_at)
-    return list(
-        db.execute(
-            select(ApprovalRequest)
-            .where(ApprovalRequest.status.in_(RESOLVED_STATUSES), ApprovalRequest.gate_type == gate)
-            .order_by(order_key.desc(), ApprovalRequest.id.desc())
-            .limit(RESOLVED_LIMIT)
-        ).scalars()
+    q = (
+        select(ApprovalRequest)
+        .where(ApprovalRequest.status.in_(RESOLVED_STATUSES), ApprovalRequest.gate_type == gate)
+        .order_by(order_key.desc(), ApprovalRequest.id.desc())
+        .limit(RESOLVED_LIMIT)
     )
+    if mine and user is not None:
+        q = q.where(_mine_clause(user))
+    return list(db.execute(q).scalars())
 
 
 def _actionable_request_ids(db: Session, user: User) -> set[int]:
@@ -348,6 +407,8 @@ def _row_vm(
         id=ar.id,
         gate_type=ar.gate_type,
         status=ar.status,
+        subject_type=ar.subject_type,
+        subject_id=ar.subject_id,
         amount=ar.amount,
         currency=ar.currency or "USD",
         created_at=ar.created_at,

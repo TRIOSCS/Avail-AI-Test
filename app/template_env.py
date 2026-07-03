@@ -362,6 +362,14 @@ templates.env.globals["can_approve_purchase_orders"] = can_approve_purchase_orde
 # POST, so an over-limit line hides the Verify/Reject buttons instead of 403ing.
 templates.env.globals["can_verify_po_line"] = can_verify_po_line
 
+# QP section review rights (Phase 3 decision C): the QP Sales/Purchasing "Mark Reviewed"
+# controls hide using the SAME per-user predicates toggle_section_reviewed enforces on the
+# POST (reusing the can_approve_qp_sales / can_approve_qp_purchasing columns).
+from .dependencies import can_review_qp_purchasing_section, can_review_qp_sales_section  # noqa: E402
+
+templates.env.globals["can_review_qp_sales_section"] = can_review_qp_sales_section
+templates.env.globals["can_review_qp_purchasing_section"] = can_review_qp_purchasing_section
+
 # CRM P5 trust — canonical industry pick-list exposed to the create/edit account
 # forms (single source of truth in app/constants.py; the SAME tuple the inline
 # editor + apply_company_field validate against).

@@ -26,12 +26,13 @@
 {# ── Per-kind maps: risk band, dot/microlabel color, and the filter token ──
    The filter token collapses plan_approve + prepay_approve into one "approve" chip and
    po_verify into "verify" (mirrors the spec's Verify-SO+PO collapse). Rows x-show on it. #}
+{% from "htmx/partials/buy_plans/_macros.html" import resource_form %}
 {% set band_of = {
   'halted': 'risk', 'plan_returned': 'risk', 'flagged': 'risk', 'cut_po_overdue': 'risk',
   'no_approver': 'risk',
   'plan_approve': 'decide', 'prepay_approve': 'decide',
   'po_verify': 'routine', 'claim': 'routine', 'cut_po': 'routine',
-  'receive': 'routine', 'plan_draft': 'routine'
+  'plan_draft': 'routine'
 } %}
 {% set dot_of = {'risk': 'bg-rose-500', 'decide': 'bg-accent-500', 'routine': 'bg-brand-400'} %}
 {% set label_color_of = {'risk': 'text-rose-600', 'decide': 'text-accent-600', 'routine': 'text-brand-500'} %}
@@ -39,7 +40,7 @@
   'halted': 'halted', 'plan_returned': 'returned', 'flagged': 'flagged', 'cut_po_overdue': 'overdue',
   'no_approver': 'halted',
   'plan_approve': 'approve', 'prepay_approve': 'approve', 'po_verify': 'verify',
-  'claim': 'claim', 'cut_po': 'cut_po', 'receive': 'receive', 'plan_draft': 'draft'
+  'claim': 'claim', 'cut_po': 'cut_po', 'plan_draft': 'draft'
 } %}
 
 {# ── One uniform My-Queue row ── #}
@@ -125,12 +126,18 @@
       <a hx-get="{{ detail_url }}" hx-target="#main-content" hx-push-url="{{ push_url }}" class="btn-secondary btn-sm cursor-pointer">Review</a>
     </form>
     {% elif row.kind == 'po_verify' %}
-    <form hx-post="{{ row.action_url }}" hx-target="#bp-hub-body" hx-swap="innerHTML" hx-push-url="false" class="flex items-center gap-1.5">
-      <input type="hidden" name="origin" value="my_queue">
-      <button type="submit" name="action" value="approve" data-loading-disable class="btn-primary btn-sm">Verify</button>
-      <button type="submit" name="action" value="reject" data-loading-disable
-              hx-confirm="Send this PO back to the buyer?" class="btn-danger btn-sm">Reject</button>
-    </form>
+    {# Verify / Reject (send back) inline; plus the third outcome — Cancel → re-source —
+       via the shared macro (PO-cutters only), so a fallen-down cut PO can be pooled straight
+       from the queue. Both re-render the My Queue body in place (origin=my_queue). #}
+    <div class="flex flex-col items-end gap-1">
+      <form hx-post="{{ row.action_url }}" hx-target="#bp-hub-body" hx-swap="innerHTML" hx-push-url="false" class="flex items-center gap-1.5">
+        <input type="hidden" name="origin" value="my_queue">
+        <button type="submit" name="action" value="approve" data-loading-disable class="btn-primary btn-sm">Verify</button>
+        <button type="submit" name="action" value="reject" data-loading-disable
+                hx-confirm="Send this PO back to the buyer?" class="btn-danger btn-sm">Reject</button>
+      </form>
+      {% if can_resource %}{{ resource_form({'id': row.line_id}, {'id': row.plan_id}, [], 'my_queue', '#bp-hub-body') }}{% endif %}
+    </div>
     {% elif row.kind == 'prepay_approve' %}
     {# Prepay decide — one-click Approve; Reject reveals a required-comment textarea (the
        engine refuses a blank reject). Both post the HTML decide sibling that re-renders this
@@ -170,7 +177,7 @@
 {% set chip_order = [
   ('halted', 'Halted'), ('returned', 'Returned'), ('flagged', 'Flagged'), ('overdue', 'Overdue'),
   ('approve', 'Approve'), ('verify', 'Verify'), ('claim', 'Claim'),
-  ('cut_po', 'Cut PO'), ('receive', 'Receive'), ('draft', 'Draft')
+  ('cut_po', 'Cut PO'), ('draft', 'Draft')
 ] %}
 {% set total_value = queue | map(attribute='value') | select | map('float') | sum %}
 {# Kicked-back tally over the queue (cut-PO rows the manager/ops sent back) — surfaced as a

@@ -1,0 +1,96 @@
+{#
+  approvals/_tab_prepayment.html — Approvals hub "Prepayment" tab body.
+  The PREPAYMENT engine gate, org-wide: a Pending section (REQUESTED, decidable inline by an
+  eligible recipient) + a Recently-resolved history section. Inline Approve / Reject post the
+  EXISTING prepay-decide route (POST /v2/partials/approvals/prepay-requests/{id}/decide) with
+  origin=approvals_hub so the handler re-renders THIS body into #ap-hub-body. Reject reveals a
+  required-comment textarea (the engine refuses a blank reject), mirroring My Queue.
+  Receives: pending_rows (list[queue.RowVM]), resolved_rows (list[queue.RowVM]).
+  Called by: htmx/approvals_hub.py render_tab_body (prepayment) + buy_plans.py prepay-decide
+             handler (origin=approvals_hub).
+  Receives also: scope ('all'|'mine') for the SEE-ALL/MINE toggle + decide re-render.
+  Depends on: HTMX, Alpine.js, Tailwind; scope_toggle macro. Jinja consumes ONLY RowVM.
+#}
+{% from "htmx/partials/buy_plans/_macros.html" import scope_toggle %}
+{% macro prepay_pending_row(row, scope) %}
+{% set decide_url = '/v2/partials/approvals/prepay-requests/' ~ row.id ~ '/decide' %}
+<div class="grid grid-cols-[minmax(0,1fr)_auto_auto] items-start gap-3 px-4 py-2.5">
+  <div class="min-w-0 pt-1">
+    <div class="text-sm font-semibold text-gray-900 truncate">{{ row.subject_label }}</div>
+    <div class="text-tertiary truncate">
+      {%- if row.payment_method %}<span class="uppercase">{{ row.payment_method }}</span>{% endif -%}
+      {%- if row.parent_label %} · {{ row.parent_label }}{% endif -%}
+      {%- if not row.can_act %} · <span class="text-brand-500">awaiting {{ row.approver_names }}</span>{% endif -%}
+    </div>
+  </div>
+  <span class="text-sm font-semibold tabular-nums text-gray-900 text-right pt-1">
+    {%- if row.amount is not none -%}${{ '{:,.0f}'.format(row.amount | float) }}{%- else -%}<span class="text-gray-400">—</span>{%- endif -%}
+  </span>
+  <div class="justify-self-end">
+    {% if row.can_act %}
+    <div x-data="{ rejectOpen: false }" class="flex flex-col items-end gap-1.5">
+      <div class="flex items-center gap-1.5">
+        <form hx-post="{{ decide_url }}" hx-target="#ap-hub-body" hx-swap="innerHTML" hx-push-url="false">
+          <input type="hidden" name="origin" value="approvals_hub">
+          <input type="hidden" name="hub_scope" value="{{ scope }}">
+          <input type="hidden" name="action" value="approve">
+          <button type="submit" data-loading-disable class="btn-primary btn-sm">Approve</button>
+        </form>
+        <button type="button" @click="rejectOpen = !rejectOpen" class="btn-danger btn-sm">Reject</button>
+      </div>
+      <form x-show="rejectOpen" x-cloak x-collapse
+            hx-post="{{ decide_url }}" hx-target="#ap-hub-body" hx-swap="innerHTML" hx-push-url="false"
+            class="space-y-1.5">
+        <input type="hidden" name="origin" value="approvals_hub">
+        <input type="hidden" name="hub_scope" value="{{ scope }}">
+        <input type="hidden" name="action" value="reject">
+        <textarea name="comment" rows="2" required placeholder="Why reject this prepayment?"
+                  class="input input-sm w-48"></textarea>
+        <button type="submit" data-loading-disable class="btn-danger btn-sm">Confirm reject</button>
+      </form>
+    </div>
+    {% else %}
+    <span class="text-xs font-medium text-accent-600 whitespace-nowrap pt-1">Review &rarr;</span>
+    {% endif %}
+  </div>
+</div>
+{% endmacro %}
+
+{% macro prepay_resolved_row(row) %}
+{% set pill = {'approved': 'badge-success', 'rejected': 'badge-danger', 'cancelled': 'badge-neutral', 'expired': 'badge-neutral'} %}
+<div class="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 px-4 py-2">
+  <div class="min-w-0">
+    <div class="text-sm text-gray-800 truncate">{{ row.subject_label }}</div>
+    {% if row.resolution_note %}<div class="text-tertiary truncate">{{ row.resolution_note }}</div>{% endif %}
+  </div>
+  <span class="{{ pill.get(row.status, 'badge-neutral') }}">{{ row.status | capitalize }}</span>
+  <span class="text-xs text-gray-400 tabular-nums justify-self-end">{{ row.resolved_at.strftime('%b %d') if row.resolved_at else '' }}</span>
+</div>
+{% endmacro %}
+
+<div class="space-y-6">
+  <div>
+    <div class="flex items-center justify-between mb-2">
+      <h2 class="h2">Pending <span class="text-sm font-normal text-gray-500">({{ pending_rows | length }})</span></h2>
+      {{ scope_toggle('prepayment', scope) }}
+    </div>
+    {% if pending_rows %}
+    <div class="bg-white rounded-lg border border-line-base shadow-card divide-y divide-line-subtle overflow-hidden">
+      {% for row in pending_rows %}{{ prepay_pending_row(row, scope) }}{% endfor %}
+    </div>
+    {% else %}
+    <div class="bg-white rounded-lg border border-line-base shadow-card px-4 py-8 text-center text-sm text-brand-400">
+      No vendor prepayments awaiting approval.
+    </div>
+    {% endif %}
+  </div>
+
+  {% if resolved_rows %}
+  <div>
+    <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2">Recently resolved</h3>
+    <div class="bg-white rounded-lg border border-line-base shadow-card divide-y divide-line-subtle overflow-hidden">
+      {% for row in resolved_rows %}{{ prepay_resolved_row(row) }}{% endfor %}
+    </div>
+  </div>
+  {% endif %}
+</div>

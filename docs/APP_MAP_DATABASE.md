@@ -380,11 +380,13 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 | notes | Text, nullable | |
 | sales_* (17 cols) | String 255 / Text / Integer / Boolean, all nullable | § Sales "Quality Questions" (QP Phase C2b): `sales_condition`, `sales_quantity` (Int), `sales_fw_hw_rev`, `sales_product_commodity`, `sales_testing_required`/`_option`/`_specifics`, `sales_test_location`, `sales_serial_preapproval_required`, `sales_authorized_ship_early`/`_partial`, `sales_routing_prescreening_whs`, `sales_vendor_rating`, `sales_third_party_pkg_ok`, `sales_pkg_requirements`, `sales_bom_matrix_links`, `sales_notes` (Boolean for Y/N). Completeness gate enforces the required subset at submit, not the DB. The canonical SO# now lives on `buy_plans_v3.sales_order_number` (SP-2 migration 164 retired `sales_so_number` from the QP). |
 | purchasing_* (10 cols) | String 255 / Text / Boolean, all nullable | § Purchasing "Quality Questions" (C2b): `purchasing_po_number`, `purchasing_condition`, `purchasing_fw_hw_rev`, `purchasing_product_commodity`, `purchasing_testing_required`/`_option`, `purchasing_routing_prescreening_whs`, `purchasing_packaging`, `purchasing_tpo_ship_complete` (Bool), `purchasing_tpo_notes`. |
-| sales_section_approved_at | UTCDateTime, nullable | Stamped by `_on_section_approved` when the QP_SALES gate approves (cleared on reject). |
-| purchasing_section_approved_at | UTCDateTime, nullable | Stamped when the QP_PURCHASING gate approves. |
+| sales_section_reviewed_at | UTCDateTime, nullable | Phase 3 (migration 177, renamed from `sales_section_approved_at`): stamped by `toggle_section_reviewed(mark)` when the sales section is marked reviewed; cleared on `unmark`. The section is now a lightweight per-section review toggle, not an approval gate. |
+| purchasing_section_reviewed_at | UTCDateTime, nullable | Ditto for the purchasing section (renamed from `purchasing_section_approved_at`). |
+| sales_section_reviewed_by_id | FK -> users (SET NULL), nullable | Phase 3 (177): who marked the sales section reviewed. |
+| purchasing_section_reviewed_by_id | FK -> users (SET NULL), nullable | Phase 3 (177): who marked the purchasing section reviewed. |
 | created_by_id | FK -> users (SET NULL) | |
-| approved_by_id | FK -> users (SET NULL) | |
-| approved_at | UTCDateTime, nullable | |
+
+> Migration 177 also DROPPED the always-NULL top-level `approved_by_id`/`approved_at` columns (never written or rendered by any code path). `QualityPlanStatus.approved`/`rejected` enum values are kept but no longer reachable — `submit()`/`submit_section()` and the QP_SALES/QP_PURCHASING engine gates were retired in the same fold.
 
 > Relationships: `serial_entries` (QpSerialEntry, delete-orphan) and `fru_lookups` (QpFruLookup, delete-orphan). Added by migration 161 (QP Phase C2b).
 

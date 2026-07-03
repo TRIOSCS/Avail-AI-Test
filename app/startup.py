@@ -118,6 +118,7 @@ def run_startup_migrations() -> None:
     _backfill_ticket_defaults()
     _backfill_material_cards()
     _backfill_sweep_cooldown()
+    _complete_reverted_active_plans()
     _seed_admin_user_if_env_set()
     _seed_agent_user()
     _seed_verification_group_from_admin_emails()
@@ -1273,6 +1274,75 @@ def _backfill_sweep_cooldown() -> None:
         )
     except Exception:
         logger.exception("Failed backfilling sweep cooldown on ProspectAccounts")
+        db.rollback()
+    finally:
+        db.close()
+
+
+def _complete_reverted_active_plans() -> None:
+    """Complete ACTIVE buy plans whose every line is already terminal.
+
+    Phase-3 migration 176 reverts every plan parked in the retired ``INBOUND``
+    holding state back to ``ACTIVE``. A plan whose lines were ALL already
+    verified/cancelled (and whose SO is approved) should then actually complete,
+    but generating a correct ``case_report`` needs the real
+    ``check_completion``/``_complete_plan`` Python — not raw SQL in the migration.
+    This runtime sweep closes that gap by feeding each such plan through the
+    canonical completion path.
+
+    Idempotent: ``check_completion`` re-validates and no-ops unless the plan is
+    ACTIVE with all lines terminal and ``so_status == approved``; a plan already
+    completed on a prior boot is no longer ACTIVE, so it is not re-selected. The
+    candidate query pre-filters to keep the sweep O(reverted plans), not O(all
+    ACTIVE plans).
+
+    Called by: run_startup_migrations (after migration 176 lands its data change)
+    Depends on: BuyPlan/BuyPlanLine models, check_completion, SessionLocal
+    """
+    from .constants import BuyPlanLineStatus, BuyPlanStatus, SOVerificationStatus
+    from .models.buy_plan import BuyPlan, BuyPlanLine
+    from .services.buyplan_workflow import check_completion
+
+    terminal = {BuyPlanLineStatus.VERIFIED.value, BuyPlanLineStatus.CANCELLED.value}
+
+    db = SessionLocal()
+    try:
+        # ACTIVE, SO approved, has at least one line, and no line outside the
+        # terminal set — the exact precondition check_completion acts on.
+        non_terminal_exists = (
+            db.query(BuyPlanLine.id)
+            .filter(
+                BuyPlanLine.buy_plan_id == BuyPlan.id,
+                BuyPlanLine.status.notin_(terminal),
+            )
+            .exists()
+        )
+        has_a_line = db.query(BuyPlanLine.id).filter(BuyPlanLine.buy_plan_id == BuyPlan.id).exists()
+        candidates = (
+            db.query(BuyPlan.id)
+            .filter(
+                BuyPlan.status == BuyPlanStatus.ACTIVE.value,
+                BuyPlan.so_status == SOVerificationStatus.APPROVED.value,
+                has_a_line,
+                ~non_terminal_exists,
+            )
+            .all()
+        )
+        if not candidates:
+            return
+        completed = 0
+        for (plan_id,) in candidates:
+            plan = check_completion(plan_id, db)
+            if plan and plan.status == BuyPlanStatus.COMPLETED.value:
+                completed += 1
+        db.commit()
+        if completed:
+            logger.info(
+                "Startup sweep completed {} reverted-ACTIVE buy plan(s) with all-terminal lines",
+                completed,
+            )
+    except Exception:
+        logger.exception("Failed startup completion sweep for reverted-ACTIVE buy plans")
         db.rollback()
     finally:
         db.close()

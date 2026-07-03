@@ -145,6 +145,26 @@ class TestReceivingRejectService:
         # The COMPLETED plan reopens to ACTIVE so the line can be re-claimed/re-cut.
         assert plan.status == BuyPlanStatus.ACTIVE.value
         assert len(payload["resourced_lines"]) == 1
+        # Backorder flag: a COMPLETED plan was reopened → the fan-out must force the alert.
+        assert payload["was_completed"] is True
+
+    def test_active_plan_cancel_is_not_a_backorder(
+        self, db_session: Session, test_user, test_quote, test_requisition, test_vendor_card
+    ):
+        """A vendor-cancel on an ACTIVE (in-flight) plan does NOT set was_completed —
+        the broadcast keeps normal preference gating (contrast with the completed-plan
+        case)."""
+        plan = _make_plan(db_session, test_quote, test_requisition, status=BuyPlanStatus.ACTIVE.value)
+        requirement = test_requisition.requirements[0]
+        offer = _make_offer(db_session, requirement, test_vendor_card)
+        line = _make_received_line(db_session, plan, requirement, offer, test_user)
+
+        payload = resource_line(plan.id, line.id, LineResourceReason.SOLD_ELSEWHERE.value, None, test_user, db_session)
+        db_session.commit()
+        db_session.refresh(plan)
+
+        assert plan.status == BuyPlanStatus.ACTIVE.value
+        assert payload["was_completed"] is False
 
     def test_reject_records_cancellation_fact(
         self, db_session: Session, test_user, test_quote, test_requisition, test_vendor_card
@@ -187,10 +207,12 @@ class TestReceivingRejectService:
         assert mapped in {r.value for r in UnavailabilityReason}
 
 
-# ── Route: reject-received pools + alerts, owner/buyer gated ──────────────
+# ── Route: /resource pools + alerts on a COMPLETED plan, owner/buyer gated ──
+# Phase 3 retired the separate /reject-received route; a receiving-reject / late fall-down is
+# now the same /resource route acting on a COMPLETED plan (it reopens to ACTIVE + re-sources).
 
 
-class TestRejectReceivedRoute:
+class TestBackorderResourceRoute:
     @pytest.mark.asyncio
     async def test_route_pools_line_and_fires_alert(
         self, db_session: Session, test_user, test_quote, test_requisition, test_vendor_card
@@ -209,7 +231,7 @@ class TestRejectReceivedRoute:
             patch("app.services.buyplan_notifications.run_notify_bg", mock_bg),
             patch.object(htmx_buy_plans, "buy_plan_detail_partial", new_callable=AsyncMock, return_value="ok"),
         ):
-            result = await htmx_buy_plans.buy_plan_reject_received_line_partial(
+            result = await htmx_buy_plans.buy_plan_resource_line_partial(
                 req, plan.id, line.id, user=test_user, db=db_session
             )
 
@@ -233,9 +255,7 @@ class TestRejectReceivedRoute:
 
         req = _FakeRequest({"reason_code": "", "scope": "line"})
         with pytest.raises(HTTPException) as exc:
-            await htmx_buy_plans.buy_plan_reject_received_line_partial(
-                req, plan.id, line.id, user=test_user, db=db_session
-            )
+            await htmx_buy_plans.buy_plan_resource_line_partial(req, plan.id, line.id, user=test_user, db=db_session)
         assert exc.value.status_code == 400
 
     @pytest.mark.asyncio
@@ -268,7 +288,7 @@ class TestRejectReceivedRoute:
 
         req = _FakeRequest({"reason_code": "defective"})
         with pytest.raises(HTTPException) as exc:
-            await htmx_buy_plans.buy_plan_reject_received_line_partial(req, plan.id, 1, user=sales_user, db=db_session)
+            await htmx_buy_plans.buy_plan_resource_line_partial(req, plan.id, 1, user=sales_user, db=db_session)
         assert exc.value.status_code == 403
 
     @pytest.mark.asyncio
@@ -283,7 +303,7 @@ class TestRejectReceivedRoute:
 
         req = _FakeRequest({"reason_code": "defective"})
         with pytest.raises(HTTPException) as exc:
-            await htmx_buy_plans.buy_plan_reject_received_line_partial(req, plan.id, 1, user=sales_user, db=db_session)
+            await htmx_buy_plans.buy_plan_resource_line_partial(req, plan.id, 1, user=sales_user, db=db_session)
         assert exc.value.status_code == 404
 
 

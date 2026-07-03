@@ -36,7 +36,7 @@
        Each pill reloads THIS body in place (so the lens stays Pipeline); push-url off (R6). #}
     <div class="ml-auto inline-flex items-center rounded-full bg-brand-100 p-0.5 text-xs">
       {% for s, lbl in [('all', 'All deals'), ('mine', 'Mine')] %}
-      <button hx-get="/v2/partials/approvals/pipeline?scope={{ s }}"
+      <button hx-get="/v2/partials/buy-plans/pipeline?scope={{ s }}"
               hx-target="#bp-hub-body"
               hx-swap="innerHTML"
               hx-push-url="false"

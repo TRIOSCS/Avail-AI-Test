@@ -25,3 +25,85 @@ Usage:
 {% macro modal_cancel_btn() -%}
 <button @click="showModal = false" class="btn btn-secondary">Cancel</button>
 {%- endmacro %}
+
+
+{# ── Re-source (vendor fall-down → open claim pool) form ───────────────
+   The single source of truth for the per-line "Re-source & alert" affordance,
+   rendered identically on the plan-detail line table AND the Approvals hub's PO
+   Approval tab. A cut PO (pending_verify/verified) the vendor fell down on — including
+   the late/backorder case where the plan already auto-completed — posts to the shared
+   ``/lines/{line}/resource`` route, which marks the vendor's offer Sold + unavailable and
+   fires the URGENT backfill alert to ALL buyers (an EMERGENCY backorder alert when the
+   plan was already completed).
+
+   Args:
+     line      — the BuyPlanLine being re-sourced (needs .id).
+     plan      — its BuyPlan (needs .id for the route).
+     other_cut — sibling cut lines eligible for one-click escalation (may be empty; when
+                 empty the "also re-source" checkbox is omitted). Each needs .id and
+                 .requirement.primary_mpn.
+     origin    — re-render origin passed to the route ('' → full plan detail into
+                 #main-content; 'my_queue' → My Queue body; 'approvals_hub' → PO Approval
+                 tab body). Must be paired with the matching *target*.
+     target    — the hx-target the route's re-rendered body swaps into.
+     hub_scope — Approvals-hub SEE-ALL/MINE scope to preserve on the re-render (posted as
+                 hub_scope, distinct from the line/plan escalation ``scope`` field). #}
+{% macro resource_form(line, plan, other_cut=[], origin='', target='#main-content', hub_scope='') -%}
+<div x-data="{ showR: false, escalate: false }" class="mt-1.5">
+  <a @click="showR = !showR" class="text-xs text-rose-500 hover:text-rose-700 font-medium cursor-pointer">Re-source &rarr;</a>
+  <div x-show="showR" x-cloak x-collapse class="mt-2">
+    <form hx-post="/v2/partials/buy-plans/{{ plan.id }}/lines/{{ line.id }}/resource"
+          hx-target="{{ target }}" hx-swap="innerHTML" {% if origin %}hx-push-url="false"{% endif %}
+          hx-confirm="Re-source this line? This marks the vendor's offer Sold + unavailable and alerts ALL buyers to backfill."
+          class="space-y-1.5">
+      {% if origin %}<input type="hidden" name="origin" value="{{ origin }}">{% endif %}
+      {% if hub_scope %}<input type="hidden" name="hub_scope" value="{{ hub_scope }}">{% endif %}
+      <input type="hidden" name="scope" :value="escalate ? 'plan' : 'line'">
+      <select name="reason_code" aria-label="Re-source reason" class="input input-sm w-44">
+        <option value="sold_elsewhere">Vendor sold elsewhere</option>
+        <option value="cannot_deliver">Vendor can't deliver</option>
+        <option value="no_stock">No stock</option>
+        <option value="price_change">Price changed / reneged</option>
+        <option value="other">Other</option>
+      </select>
+      <textarea name="reason_note" rows="2" placeholder="What happened? (optional)"
+                class="input input-sm w-44"></textarea>
+      {% if other_cut %}
+      <label class="flex items-center gap-1.5 text-xs text-gray-600">
+        <input type="checkbox" x-model="escalate"> Also re-source other cut POs on this deal
+      </label>
+      <div x-show="escalate" x-cloak class="pl-4 space-y-0.5">
+        {% for o in other_cut %}
+        <label class="flex items-center gap-1.5 text-secondary">
+          <input type="checkbox" name="also_line_ids" value="{{ o.id }}" checked>
+          <span class="font-mono">{{ o.requirement.primary_mpn if o.requirement else ('line ' ~ o.id) }}</span>
+        </label>
+        {% endfor %}
+      </div>
+      {% endif %}
+      <button type="submit" data-loading-disable class="btn btn-danger btn-sm">
+        Re-source &amp; alert
+      </button>
+    </form>
+  </div>
+</div>
+{%- endmacro %}
+
+
+{# ── Approvals hub SEE-ALL / SEE-MINE segmented toggle ─────────────────
+   The per-tab scope switch. Reloads THIS tab body (#ap-hub-body) at the chosen scope;
+   default "all" (approvers land on the full queue). Active pill = accent-500 (the taste
+   pass's selected-state). Alpine keeps the highlight instant before the swap returns.
+   Args: tab_key — dash-cased tab segment (buy-plan|po-approval|prepayment); scope — the
+   server-resolved active scope. #}
+{% macro scope_toggle(tab_key, scope) -%}
+<div x-data="{ sc: '{{ scope }}' }" class="inline-flex items-center rounded-full bg-brand-100 p-0.5 text-xs font-medium">
+  {% for val, label in [('all', 'All'), ('mine', 'Mine')] %}
+  <button hx-get="/v2/partials/approvals/{{ tab_key }}?scope={{ val }}"
+          hx-target="#ap-hub-body" hx-swap="innerHTML" hx-push-url="false"
+          @click="sc = '{{ val }}'"
+          :class="sc === '{{ val }}' ? 'bg-accent-500 text-white shadow-sm' : 'text-brand-600 hover:text-brand-800'"
+          class="px-3 py-1 rounded-full transition-colors">{{ label }}</button>
+  {% endfor %}
+</div>
+{%- endmacro %}

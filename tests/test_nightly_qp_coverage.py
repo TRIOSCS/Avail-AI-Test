@@ -82,30 +82,30 @@ class TestParseDate:
 
 
 class TestSectionApproved:
-    """_section_approved: checks whether a section already carries an approved stamp."""
+    """_section_approved: checks whether a section already carries a reviewed stamp."""
 
-    def _qp_mock(self, sales_approved=False, purchasing_approved=False):
+    def _qp_mock(self, sales_reviewed=False, purchasing_reviewed=False):
         from unittest.mock import MagicMock
 
         qp = MagicMock(spec=QualityPlan)
-        qp.sales_section_approved_at = datetime.now(timezone.utc) if sales_approved else None
-        qp.purchasing_section_approved_at = datetime.now(timezone.utc) if purchasing_approved else None
+        qp.sales_section_reviewed_at = datetime.now(timezone.utc) if sales_reviewed else None
+        qp.purchasing_section_reviewed_at = datetime.now(timezone.utc) if purchasing_reviewed else None
         return qp
 
-    def test_sales_order_not_approved(self):
-        qp = self._qp_mock(sales_approved=False)
+    def test_sales_order_not_reviewed(self):
+        qp = self._qp_mock(sales_reviewed=False)
         assert _section_approved(qp, "qp_sales") is False
 
-    def test_sales_order_approved(self):
-        qp = self._qp_mock(sales_approved=True)
+    def test_sales_order_reviewed(self):
+        qp = self._qp_mock(sales_reviewed=True)
         assert _section_approved(qp, "qp_sales") is True
 
-    def test_purchase_order_not_approved(self):
-        qp = self._qp_mock(purchasing_approved=False)
+    def test_purchase_order_not_reviewed(self):
+        qp = self._qp_mock(purchasing_reviewed=False)
         assert _section_approved(qp, "qp_purchasing") is False
 
-    def test_purchase_order_approved(self):
-        qp = self._qp_mock(purchasing_approved=True)
+    def test_purchase_order_reviewed(self):
+        qp = self._qp_mock(purchasing_reviewed=True)
         assert _section_approved(qp, "qp_purchasing") is True
 
 
@@ -205,34 +205,31 @@ def _qp_client(db_session: Session):
 
 
 class TestQpRouteErrorPaths:
-    def test_submit_qp_not_found_returns_404(self, _qp_client):
+    def test_review_sales_not_found_returns_404(self, _qp_client):
         client, _user, _qp = _qp_client
-        r = client.post("/v2/qp/999999/submit")
+        r = client.post("/v2/qp/999999/sales/review", data={"action": "mark"})
         assert r.status_code == 404
 
-    def test_submit_sales_not_found_returns_404(self, _qp_client):
+    def test_review_purchasing_not_found_returns_404(self, _qp_client):
         client, _user, _qp = _qp_client
-        r = client.post("/v2/qp/999999/submit-sales")
+        r = client.post("/v2/qp/999999/purchasing/review", data={"action": "mark"})
         assert r.status_code == 404
 
-    def test_submit_purchasing_not_found_returns_404(self, _qp_client):
-        client, _user, _qp = _qp_client
-        r = client.post("/v2/qp/999999/submit-purchasing")
-        assert r.status_code == 404
-
-    def test_submit_qp_incomplete_returns_200_with_errors(self, _qp_client, db_session: Session):
-        """An incomplete QP hits the IncompleteQPError path → 200 (re-render with
-        errors)."""
+    def test_review_sales_incomplete_returns_200_with_errors(self, _qp_client, db_session: Session):
+        """A mark on an incomplete section hits the IncompleteQPError path → 200 (re-
+        render with inline errors, nothing stamped)."""
         client, _user, qp = _qp_client
-        # Blank the canonical Sales Order # (now on the linked BuyPlan) so submit() hits
-        # the IncompleteQPError path → 200 re-render with errors.
+        # Blank the canonical Sales Order # (now on the linked BuyPlan) so the mark hits
+        # the IncompleteQPError path → 200 re-render with errors, no stamp.
         from app.models.buy_plan import BuyPlan
 
         bp = db_session.get(BuyPlan, qp.buy_plan_id)
         bp.sales_order_number = None
         db_session.commit()
-        r = client.post(f"/v2/qp/{qp.id}/submit")
+        r = client.post(f"/v2/qp/{qp.id}/sales/review", data={"action": "mark"})
         assert r.status_code == 200
+        db_session.refresh(qp)
+        assert qp.sales_section_reviewed_at is None
 
     def test_patch_sales_not_found_returns_404(self, _qp_client):
         client, _user, _qp = _qp_client
@@ -260,10 +257,10 @@ class TestQpRouteErrorPaths:
         db_session.refresh(qp)
         assert qp.purchasing_po_number == "PO-NEW-77"
 
-    def test_patch_sales_when_already_approved_is_noop(self, _qp_client, db_session: Session):
-        """PATCH on an approved section must not overwrite data."""
+    def test_patch_sales_when_already_reviewed_is_noop(self, _qp_client, db_session: Session):
+        """PATCH on a reviewed (locked) section must not overwrite data."""
         client, _user, qp = _qp_client
-        qp.sales_section_approved_at = datetime.now(timezone.utc)
+        qp.sales_section_reviewed_at = datetime.now(timezone.utc)
         db_session.commit()
         r = client.patch(f"/v2/qp/{qp.id}/sales", data={"sales_condition": "IGNORED"})
         assert r.status_code == 200

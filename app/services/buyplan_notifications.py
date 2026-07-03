@@ -847,6 +847,7 @@ async def notify_resource_requested(
     line_id: int,
     actor_id: int,
     reason: str = "",
+    was_completed: bool = False,
 ):
     """Broadcast an URGENT re-source alert when a buyer cancels a vendor PO and re-
     sources.
@@ -855,12 +856,21 @@ async def notify_resource_requested(
     (``plan.submitted_by``, fallback the requisition creator). Channel policy:
     - In-app ``ActivityLog`` row + Teams channel card: ALWAYS (delivery floor); the card is
       gated only by webhook presence.
-    - Email + Teams DM: only to recipients whose ``notify_resource_alert_enabled`` is True.
+    - Email + Teams DM: only to recipients whose ``notify_resource_alert_enabled`` is True
+      for a normal in-flight cancel.
+
+    BACKORDER EMERGENCY (``was_completed=True`` \u2014 a vendor cancelled AFTER the plan had
+    completed/closed, so ``resource_line`` reopened it): email + Teams DM go to ALL
+    recipients REGARDLESS of the per-user preference (the preference gate is bypassed), and
+    the subjects are prefixed ``URGENT \u2014 BACKORDER`` so the emergency is unmistakable. The
+    flag MUST be passed by the caller (not re-derived): by the time this runs the plan is
+    already reopened to ACTIVE, so the completed-at-cancel-time fact is otherwise lost.
 
     Failure isolation: the in-app rows are committed BEFORE any Teams call, and each channel
     swallows + logs its own errors, so Teams being down can't lose the in-app record or
     block email. Dispatched fire-and-forget via ``run_notify_bg(notify_resource_requested,
-    plan_id, line_id=..., actor_id=..., reason=...)`` \u2014 re-derives everything from line_id.
+    plan_id, line_id=..., actor_id=..., reason=..., was_completed=...)`` \u2014 re-derives the
+    rest from line_id.
     """
     line = db.get(BuyPlanLine, line_id)
     if not line:
@@ -895,7 +905,8 @@ async def notify_resource_requested(
         return
 
     # \u2500\u2500 In-app rows (ALWAYS, every recipient) \u2014 committed before Teams \u2500\u2500
-    subject = f"URGENT \u2014 Re-source needed: {rc['mpn']} (plan #{plan.id})"
+    urgency = "URGENT \u2014 BACKORDER" if was_completed else "URGENT"
+    subject = f"{urgency} \u2014 Re-source needed: {rc['mpn']} (plan #{plan.id})"
     notes = f"{rc['vendor']} PO cancelled: {rc['reason']} \u2014 {rc['deep_link']}"
     for r in recipients:
         db.add(
@@ -919,16 +930,26 @@ async def notify_resource_requested(
     except Exception as e:
         logger.error("Re-source Teams channel card failed for plan {}: {}", plan.id, e)
 
-    # \u2500\u2500 Email + Teams DM: only to opted-in recipients \u2500\u2500
-    opted_in = [r for r in recipients if getattr(r, "notify_resource_alert_enabled", True)]
+    # \u2500\u2500 Email + Teams DM \u2500\u2500
+    # Normal in-flight cancel: only recipients whose notify_resource_alert_enabled is True
+    # (preference-gated). BACKORDER emergency (was_completed): ALL recipients, preference
+    # BYPASSED (pref_attr=None), with an unmistakable BACKORDER subject.
+    if was_completed:
+        channel_recipients = recipients
+        email_pref: str | None = None
+        email_subject = f"[AVAIL] URGENT \u2014 BACKORDER \u2014 re-source needed: {rc['customer']}"
+    else:
+        channel_recipients = [r for r in recipients if getattr(r, "notify_resource_alert_enabled", True)]
+        email_pref = "notify_resource_alert_enabled"
+        email_subject = f"[AVAIL] URGENT \u2014 Re-source needed: {rc['customer']}"
+
     html_body = _resource_email_html(rc)
-    email_subject = f"[AVAIL] URGENT \u2014 Re-source needed: {rc['customer']}"
     await asyncio.gather(
-        *[_send_email(r, email_subject, html_body, db, pref_attr="notify_resource_alert_enabled") for r in opted_in]
+        *[_send_email(r, email_subject, html_body, db, pref_attr=email_pref) for r in channel_recipients]
     )
 
     dm_text = _resource_dm_text(rc)
-    for r in opted_in:
+    for r in channel_recipients:
         try:
             await _teams_dm(r, dm_text, db)
         except Exception as e:

@@ -9,10 +9,10 @@ Purpose: HTTP surface for approval workflows. Returns JSON; HTMX partials can
          a buy-plan submission surfaces as a native ApprovalRequest (gate_type=buy_plan,
          subject_type=buy_plan). The old read-only buy-plan bridge has been retired.
 
-         The human-facing queue is now FOUR tabs (Buy Plans / Sales Orders / Purchase
-         Orders / Vendor Prepayments) folded into the Buy-Plans hub as its "approvals"
-         lens — rendered by routers/htmx_views.py via services/approvals/queue. The legacy
-         GET /v2/approvals/queue 302-redirects there.
+         The human-facing decide queue is the Approvals hub (3 tabs: Buy Plan / PO Approval
+         / Vendor Prepayment) at /v2/approvals — rendered by routers/htmx/approvals_hub.py
+         via services/approvals/{queue,po_queue}. This module keeps the engine's JSON
+         decide/reassign/cancel/list endpoints only.
 
 Called by: app.main (router registration).
 Depends on: app.services.approvals.service, app.services.approvals.events,
@@ -22,7 +22,7 @@ Depends on: app.services.approvals.service, app.services.approvals.events,
 """
 
 from fastapi import APIRouter, Depends, Form, HTTPException
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
@@ -221,18 +221,6 @@ def list_requests(
     rows = db.execute(q).scalars().all()
     items = [_serialize_request(r) for r in rows]
     return {"items": items, "total": len(items)}
-
-
-@router.get("/v2/approvals/queue")
-def get_queue(current_user: User = Depends(require_user)) -> RedirectResponse:
-    """Retired standalone queue — folded into the Approvals hub stage tabs.
-
-    Each gate's pending queue now renders as a pinned section inside its lifecycle stage
-    tab (services/approvals/queue.build_queue_view per gate). This route 302-redirects
-    any deep link or old bookmark into the hub (which lands on the role-default stage)
-    so nothing 404s; the legacy /v2/buy-plans path itself 302s on to /v2/approvals.
-    """
-    return RedirectResponse(url="/v2/buy-plans?lens=approvals", status_code=302)
 
 
 @router.get("/v2/approvals/requests/{id}")

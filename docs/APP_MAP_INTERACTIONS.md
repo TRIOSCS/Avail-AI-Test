@@ -1456,14 +1456,44 @@ buyplan_workflow.py (state machine)
     |                      active VerificationGroupMember). Haltable from pending/active; sets
     |                      status=halted + so_status=rejected + halted_by/at; resubmittable via reset.
     |  Completion gate:    all lines terminal AND so_status=approved (the fold guarantees the SO gate).
-    |  verify-PO gate:     Phase D moved verify_po off ops membership onto the per-user
-    |                      can_approve_purchase_orders right — the POST route depends on
-    |                      require_buyplan_po_approver (403 otherwise), verify_po re-checks the predicate,
-    |                      and detail hides the controls via the can_approve_purchase_orders Jinja global.
-    |  No-approver stall:  a plan whose open gate has NO configured approver (routing.has_eligible_approver
-    |                      False — otherwise NoEligibleApproverError is only logged) is surfaced, not left
-    |                      invisible: buyplan_workflow.plan_needs_approver_reason drives an amber detail banner,
-    |                      and my_queue emits a "no_approver" kind to the owner (+ admins) so the stall is seen.
+    |                      Phase 3 adds _has_open_po_gate(plan) (any line pending_verify) as an explicit
+    |                      guard inside _complete_plan itself, so BOTH check_completion and the stock-sale
+    |                      job's direct _complete_plan call refuse to complete over an un-verified PO.
+    |  PO sign-off (Ph3):  the per-line verify_po/resource_line trio IS the canonical per-PO decision — the
+    |                      deal-level PURCHASE_ORDER ApprovalRequest gate (opened on approval, $5k-thresholded,
+    |                      approve-only) and its INBOUND/receive_buy_plan scaffolding are RETIRED (migration 176
+    |                      cancels stale gate rows + reverts inbound->active; po_auto_approve_threshold removed).
+    |  verify-PO gate:     verify_po is gated on the per-user can_approve_purchase_orders right AND (Phase 3)
+    |                      enforces the approver's purchase_order_approval_limit against THIS line's amount
+    |                      (_line_amount = unit_cost*qty) — over-limit raises PermissionError (route -> 400),
+    |                      and detail/PO-Approval-tab hide the buttons via the new can_verify_po_line(user,line)
+    |                      Jinja global. Approve AND reject each write a PO_LINE_VERIFIED/PO_LINE_REJECTED
+    |                      ActivityLog (line-scoped, reject logged before the po_number reset).
+    |  No-approver stall:  Phase 3 makes this per-PENDING_VERIFY-line: plan_needs_approver_reason and
+    |                      buyplan_hub._query_stuck_no_approver_plans flag a plan if any cut PO line has no
+    |                      amount-eligible approver (has_eligible_approver(PURCHASE_ORDER, _line_amount)),
+    |                      replacing the old plan-total>=threshold heuristic. Amber banner + my_queue no_approver.
+    |  Approvals console:  Phase 3 splits the old blended "Approvals" page into (a) the Buy Plans hub
+    |                      (My Queue/Pipeline lenses) reclaiming the non-redirected /v2/buy-plans, and (b) a new
+    |                      3-tab console at /v2/approvals (routers/htmx/approvals_hub.py): Buy Plan
+    |                      (approvals + lifecycle-status tracking via buy_plan_tracking_rows), PO Approval
+    |                      (services/approvals/po_queue.build_po_queue_view — pending_verify lines + PO_LINE_*
+    |                      /POCancellation history, NOT ApprovalRequest-backed), Prepayment (PREPAYMENT gate via
+    |                      queue.pending/resolved_rows_for_gate). Every tab has a See-all vs See-mine scope
+    |                      toggle (mine = submitted_by/requested_by == user; default all). queue.build_queue_view
+    |                      /TAB_GATE and the stale approvals.get_queue redirect are removed.
+    |  Backorder (Ph3):    resource_line already reopens a COMPLETED plan (RESOURCEABLE_LINE_STATUSES includes
+    |                      verified); when a cancel fires on a plan that WAS completed, resource_line returns
+    |                      was_completed=True (computed pre-reopen) which is threaded to
+    |                      notify_resource_requested(was_completed=True): email + Teams DM go to ALL recipients
+    |                      IGNORING notify_resource_alert_enabled, subject "URGENT - BACKORDER". Normal in-flight
+    |                      cancels keep the opt-in preference gate. Startup sweep _complete_reverted_active_plans
+    |                      finishes any plan migration 176 reverts to active whose lines are already all-terminal.
+    |  QP fold (Ph3):      Quality-Plan sales/purchasing sections are no longer an approval gate: submit_section/
+    |                      QP_SALES/QP_PURCHASING dispatch retired; quality_plan_service.toggle_section_reviewed
+    |                      (mark|unmark) stamps *_section_reviewed_at/_by_id (migration 177 renamed *_approved_at,
+    |                      dropped dead approved_by_id/at), gated on can_review_qp_sales/purchasing_section,
+    |                      writes QP_SECTION_REVIEWED activity. Routes POST /v2/qp/{id}/{sales,purchasing}/review.
     |  Ops group:          VerificationGroupMember (Settings > Ops Group; seeded from ADMIN_EMAILS) now
     |                      authorizes Halt + was the grandfather basis for can_approve_purchase_orders
     |                      (migration 173). admin/buy_plan_ops.toggle_ops_member guards the toggle: it

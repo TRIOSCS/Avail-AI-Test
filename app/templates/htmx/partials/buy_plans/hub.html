@@ -4,7 +4,7 @@
   non-supervisors) + Pipeline (the 4-stage deal board — the default landing for
   supervisors). The body lazy-loads the active tab partial into #bp-hub-body.
   Receives: lens (str: 'my_queue'|'pipeline'), alert_markers (dict).
-  Called by: htmx/buy_plans.py buy_plans_list_partial (GET /v2/partials/approvals).
+  Called by: htmx/buy_plans.py buy_plans_list_partial (GET /v2/partials/buy-plans).
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette; the per-tab bodies under
               approvals/ (lazy-loaded into #bp-hub-body) — my-queue → _surface_my_queue.html,
               pipeline → _surface_pipeline.html.
@@ -23,10 +23,10 @@
        after the re-rendered hub re-inits x-data with the server lens. Mirrors the
        settings tab_button pattern (partials/settings/_macros.html).
        Active state uses accent-600 (PR0 single-accent rule); inactive chrome stays brand-*. #}
-    <button hx-get="/v2/partials/approvals?lens={{ l }}"
+    <button hx-get="/v2/partials/buy-plans?lens={{ l }}"
             hx-target="#main-content"
             hx-swap="innerHTML"
-            hx-push-url="/v2/approvals?lens={{ l }}"
+            hx-push-url="/v2/buy-plans?lens={{ l }}"
             @click="lens = '{{ l }}'"
             :class="lens === '{{ l }}'
                     ? 'bg-accent-600 text-white shadow-sm'
@@ -40,7 +40,7 @@
        Lives in the hub shell (right-aligned via ml-auto) so it persists across every lens
        switch. Loads the Sales-Order-new requisition picker into the hub body (not a page
        push) — origination starts a DRAFT buy plan from an open requisition's offers. #}
-    <button hx-get="/v2/partials/approvals/sales-orders/new"
+    <button hx-get="/v2/partials/buy-plans/sales-orders/new"
             hx-target="#bp-hub-body"
             hx-swap="innerHTML"
             hx-push-url="false"
@@ -58,7 +58,7 @@
      wipes the whole page (known cards-vanish regression). #}
   {% set lens_path = lens | replace('_', '-') %}
   <div id="bp-hub-body"
-       hx-get="/v2/partials/approvals/{{ lens_path }}"
+       hx-get="/v2/partials/buy-plans/{{ lens_path }}"
        hx-trigger="load"
        hx-target="#bp-hub-body"
        hx-swap="innerHTML">

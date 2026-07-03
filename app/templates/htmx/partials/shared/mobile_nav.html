@@ -30,7 +30,7 @@
        'M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4'),
       ('search', 'Search', '/v2/search', '/v2/partials/search',
        'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z'),
-      ('buy-plans', 'Approvals', '/v2/approvals', '/v2/partials/buy-plans',
+      ('buy-plans', 'Approvals', '/v2/approvals', '/v2/partials/approvals',
        'M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 100 4 2 2 0 000-4z'),
       ('resell', 'Resell', '/v2/resell', '/v2/partials/resell/workspace',
        'M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4'),
@@ -43,10 +43,12 @@
       ('my-day', 'Tasks', '/v2/my-day', '/v2/partials/my-day',
        'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z')
     ] %}
-    {# The Buy Plans hub was renamed to the "Approvals" module (SP-1): the nav item keeps
-       its internal id 'buy-plans' (alert badge + active-nav highlight wiring) but shows
-       the "Approvals" label and points at /v2/approvals. The legacy /v2/buy-plans path
-       302s to it, and urlToNav aliases /v2/approvals → 'buy-plans' (line above). #}
+    {# The "Approvals" nav item (internal id 'buy-plans' — alert badge + active-nav wiring)
+       leads to the org-wide 3-tab decide console at /v2/approvals (/v2/partials/approvals:
+       Buy Plan / PO Approval / Prepayment). The personal My Queue + Pipeline "Buy Plans"
+       hub now lives at its own non-redirected home /v2/buy-plans; urlToNav aliases BOTH
+       /v2/approvals and /v2/buy-plans → 'buy-plans' (line above) so either highlights this
+       item. NOTE: the Buy Plans hub has no dedicated nav slot yet — see follow-up. #}
     {% for id, label, href, partial, icon_path in nav_items %}
     {# Per-user nav gate: hide a section the user lacks access to. `access` is a
        {nav-id: bool} map from _base_ctx; default-show if it's somehow absent. #}

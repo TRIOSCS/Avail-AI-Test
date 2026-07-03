@@ -1,13 +1,17 @@
-"""Route tests for the Approvals module shell.
+"""Route tests for the Buy Plans hub + Approvals hub shells (Phase 3 3-tab split).
 
-Covers the renamed module URL `/v2/approvals`, the 302 back-compat redirect from the
-legacy `/v2/buy-plans` path (preserving the query string), the two-lens hub shell
-(My Queue + Pipeline), the per-role default landing lens (`_default_lens`), and the
-unknown-lens 404 guard.
+Phase 3 split the single "Approvals" surface into two non-overlapping homes:
+  - the personal Buy Plans hub (My Queue + Pipeline) reclaimed /v2/buy-plans as its real,
+    non-redirected home (the legacy /v2/buy-plans→/v2/approvals 302 is retired);
+  - /v2/approvals is now the org-wide 3-tab decide console (Buy Plan / PO Approval /
+    Prepayment) served by routers/htmx/approvals_hub.py.
 
-Depends on: app.routers.htmx.buy_plans (buy_plans_legacy_redirect, _default_lens,
-buy_plans_list_partial, approvals_tab_partial), conftest fixtures (client = buyer via
-require_user override; nonadmin_client = signed-session buyer; manager_user; sales_user).
+Covers both full-page shells + their lazy partials, the per-role default landing lens
+(_default_lens), and the unknown-lens/tab 404 guards.
+
+Depends on: app.routers.htmx.buy_plans (_default_lens, buy_plans_list_partial,
+buy_plans_tab_partial), app.routers.htmx.approvals_hub, conftest fixtures (client = buyer
+via require_user override; nonadmin_client = signed-session buyer; manager_user; sales_user).
 """
 
 from __future__ import annotations
@@ -17,56 +21,77 @@ from sqlalchemy.orm import Session
 
 from app.models.auth import User
 
-# ── Back-compat redirect + page threading ──────────────────────────────────
+# ── Buy Plans hub reclaims /v2/buy-plans (no redirect) ──────────────────────
 
 
-def test_buy_plans_redirects_to_approvals(nonadmin_client: TestClient):
-    """The legacy /v2/buy-plans path 302s to the renamed /v2/approvals module."""
+def test_buy_plans_no_longer_redirects(nonadmin_client: TestClient):
+    """/v2/buy-plans is the hub's real home now — 200, NOT a 302 to /v2/approvals."""
     r = nonadmin_client.get("/v2/buy-plans", follow_redirects=False)
-    assert r.status_code == 302
-    assert r.headers["location"] == "/v2/approvals"
+    assert r.status_code == 200
+    assert "/v2/partials/buy-plans" in r.text
 
 
-def test_buy_plans_redirect_preserves_query(nonadmin_client: TestClient):
-    """A pushed lens URL survives the redirect (no lost deep-link)."""
-    r = nonadmin_client.get("/v2/buy-plans?lens=pipeline", follow_redirects=False)
-    assert r.status_code == 302
-    assert r.headers["location"] == "/v2/approvals?lens=pipeline"
+def test_buy_plans_page_threads_lens(nonadmin_client: TestClient):
+    """A pushed lens URL threads ?lens= into the lazy hub-partial URL on first load."""
+    r = nonadmin_client.get("/v2/buy-plans?lens=pipeline")
+    assert r.status_code == 200
+    assert "/v2/partials/buy-plans?lens=pipeline" in r.text
+
+
+def test_buy_plan_detail_url_not_a_lens(nonadmin_client: TestClient):
+    """Detail URLs stay /v2/buy-plans/{id} and render the shell (int convertor, not a
+    lens)."""
+    r = nonadmin_client.get("/v2/buy-plans/999999", follow_redirects=False)
+    assert r.status_code == 200
+
+
+# ── Approvals hub is the 3-tab decide console ───────────────────────────────
 
 
 def test_approvals_page_lazy_loads_hub_partial(nonadmin_client: TestClient):
-    """/v2/approvals serves the full-page shell that lazy-loads the hub partial from its
-    renamed /v2/partials/approvals URL (the body is fetched client-side by htmx)."""
+    """/v2/approvals serves the full-page shell that lazy-loads the 3-tab hub
+    partial."""
     r = nonadmin_client.get("/v2/approvals")
     assert r.status_code == 200
     assert "/v2/partials/approvals" in r.text
 
 
-def test_approvals_page_threads_lens(nonadmin_client: TestClient):
-    """A pushed lens URL threads ?lens= into the lazy hub-partial URL on first load."""
-    r = nonadmin_client.get("/v2/approvals?lens=pipeline")
+def test_approvals_page_threads_tab(nonadmin_client: TestClient):
+    """A pushed ?tab= URL threads into the lazy hub-partial URL on first load."""
+    r = nonadmin_client.get("/v2/approvals?tab=po-approval")
     assert r.status_code == 200
-    assert "/v2/partials/approvals?lens=pipeline" in r.text
+    assert "/v2/partials/approvals?tab=po-approval" in r.text
 
 
-def test_buy_plan_detail_url_not_redirected(nonadmin_client: TestClient):
-    """Detail URLs stay /v2/buy-plans/{id} (deal-card push-urls unchanged) — they must
-    render the shell, NOT 302 to the module list."""
-    r = nonadmin_client.get("/v2/buy-plans/999999", follow_redirects=False)
-    assert r.status_code == 200
-
-
-# ── Two-lens hub shell ──────────────────────────────────────────────────────
-
-
-def test_shell_renders_stage_tabs(nonadmin_client: TestClient):
-    """The hub shell renders the two lens-tab URLs (My Queue + Pipeline) + the lazy-body
-    landmine guard."""
+def test_approvals_shell_renders_three_tabs(nonadmin_client: TestClient):
+    """The Approvals hub shell renders all three gate-tab URLs + the lazy-body guard."""
     r = nonadmin_client.get("/v2/partials/approvals")
+    assert r.status_code == 200
+    for key in ("buy-plan", "po-approval", "prepayment"):
+        assert f"?tab={key}" in r.text
+    assert 'hx-target="#ap-hub-body"' in r.text
+
+
+def test_approvals_unknown_tab_404s(client: TestClient):
+    """An unknown Approvals hub tab is a 404 (not a silent fallback)."""
+    assert client.get("/v2/partials/approvals/bogus").status_code == 404
+
+
+# ── Buy Plans hub shell (My Queue + Pipeline) ───────────────────────────────
+
+
+def test_buy_plans_shell_renders_lens_tabs(nonadmin_client: TestClient):
+    """The Buy Plans hub shell renders the two lens-tab URLs + the lazy-body guard."""
+    r = nonadmin_client.get("/v2/partials/buy-plans")
     assert r.status_code == 200
     for key in ("my_queue", "pipeline"):
         assert f"?lens={key}" in r.text
     assert 'hx-target="#bp-hub-body"' in r.text
+
+
+def test_buy_plans_unknown_lens_404s(client: TestClient):
+    """An unknown Buy Plans hub lens is a 404 (not a silent fallback)."""
+    assert client.get("/v2/partials/buy-plans/bogus").status_code == 404
 
 
 # ── Per-role default landing lens (_default_lens) ───────────────────────────
@@ -92,12 +117,3 @@ def test_default_lens_sales_is_my_queue(db_session: Session, sales_user: User):
     from app.routers.htmx.buy_plans import _default_lens
 
     assert _default_lens(sales_user, db_session) == "my_queue"
-
-
-# ── Unknown-lens guard ──────────────────────────────────────────────────────
-
-
-def test_unknown_tab_404s(client: TestClient):
-    """An unknown lens tab is a 404 (not a silent fallback)."""
-    r = client.get("/v2/partials/approvals/bogus")
-    assert r.status_code == 404

@@ -1,10 +1,10 @@
 """Route tests for the Approvals hub two-lens shell (My Queue + Pipeline).
 
 Covers:
-- /v2/partials/approvals renders the two-lens switcher (My Queue + Pipeline) + lazy body
+- /v2/partials/buy-plans renders the two-lens switcher (My Queue + Pipeline) + lazy body
   with the explicit hx-target="#bp-hub-body" (guards the cards-vanish landmine) and the
   role-default load.
-- /v2/partials/approvals?lens=pipeline lazy-loads the Pipeline tab body.
+- /v2/partials/buy-plans?lens=pipeline lazy-loads the Pipeline tab body.
 - confirm-po / approve with the default origin return the detail partial.
 - the role-scope predicate + resolver contract (_can_see_all_deals / _resolve_deal_scope).
 - the persistent New Buy Plan origination button, the My Queue prepay-decide inline action,
@@ -96,7 +96,7 @@ def _add_ops(db: Session, user) -> None:
 def test_hub_shell_buyer_defaults_to_my_queue(client: TestClient):
     """Buyer hub: the two lens tabs (My Queue + Pipeline) render, the lazy body carries its
     explicit target, and the buyer's default landing is the My Queue body (Phase B)."""
-    resp = client.get("/v2/partials/approvals")
+    resp = client.get("/v2/partials/buy-plans")
     assert resp.status_code == 200
     body = resp.text
     # Two-lens switcher: My Queue + Pipeline. The retired stage lenses are gone.
@@ -107,7 +107,7 @@ def test_hub_shell_buyer_defaults_to_my_queue(client: TestClient):
     assert 'id="bp-hub-body"' in body
     assert 'hx-target="#bp-hub-body"' in body
     # Buyer default loads the My Queue tab body
-    assert "/v2/partials/approvals/my-queue" in body
+    assert "/v2/partials/buy-plans/my-queue" in body
 
 
 def test_hub_lens_highlight_is_alpine_reactive(client: TestClient):
@@ -117,7 +117,7 @@ def test_hub_lens_highlight_is_alpine_reactive(client: TestClient):
     The shell must carry the lens state in x-data and bind the active pill class to it,
     not bake the highlight into static Jinja (which goes stale on the @click).
     """
-    resp = client.get("/v2/partials/approvals?lens=pipeline")
+    resp = client.get("/v2/partials/buy-plans?lens=pipeline")
     assert resp.status_code == 200
     body = resp.text
     # Alpine holds the lens state, seeded from the server-resolved lens.
@@ -129,9 +129,9 @@ def test_hub_lens_highlight_is_alpine_reactive(client: TestClient):
 
 def test_hub_shell_lens_pipeline_loads_tab_body(client: TestClient):
     """Lens=pipeline lazy-loads the Pipeline tab body (the 4-stage deal board)."""
-    resp = client.get("/v2/partials/approvals?lens=pipeline")
+    resp = client.get("/v2/partials/buy-plans?lens=pipeline")
     assert resp.status_code == 200
-    assert "/v2/partials/approvals/pipeline" in resp.text
+    assert "/v2/partials/buy-plans/pipeline" in resp.text
     assert 'hx-target="#bp-hub-body"' in resp.text
 
 
@@ -139,9 +139,9 @@ def test_hub_shell_sales_defaults_to_my_queue(client: TestClient, sales_user):
     """A sales user with no lens lands on the My Queue surface (every non-supervisor
     does)."""
     with _acting_as(sales_user):
-        resp = client.get("/v2/partials/approvals")
+        resp = client.get("/v2/partials/buy-plans")
     assert resp.status_code == 200
-    assert "/v2/partials/approvals/my-queue" in resp.text
+    assert "/v2/partials/buy-plans/my-queue" in resp.text
 
 
 def test_hub_shell_manager_defaults_to_pipeline(client: TestClient, manager_user):
@@ -151,11 +151,11 @@ def test_hub_shell_manager_defaults_to_pipeline(client: TestClient, manager_user
 
     app.dependency_overrides[require_user] = lambda: manager_user
     try:
-        resp = client.get("/v2/partials/approvals")
+        resp = client.get("/v2/partials/buy-plans")
     finally:
         app.dependency_overrides.pop(require_user, None)
     assert resp.status_code == 200
-    assert "/v2/partials/approvals/pipeline" in resp.text
+    assert "/v2/partials/buy-plans/pipeline" in resp.text
 
 
 # ── confirm-po + approve origin behavior ───────────────────────────────────
@@ -268,11 +268,11 @@ def test_resolve_deal_scope_contract(scope, can_see_all, expected):
 def test_hub_shell_has_new_buy_plan_button(client: TestClient):
     """The hub shell carries a persistent New Buy Plan origination button targeting the
     sales-order-new picker into the hub body (so it survives lens switches)."""
-    resp = client.get("/v2/partials/approvals")
+    resp = client.get("/v2/partials/buy-plans")
     assert resp.status_code == 200
     body = resp.text
     assert "New Buy Plan" in body
-    assert 'hx-get="/v2/partials/approvals/sales-orders/new"' in body
+    assert 'hx-get="/v2/partials/buy-plans/sales-orders/new"' in body
     assert 'hx-target="#bp-hub-body"' in body
 
 
@@ -369,7 +369,7 @@ def test_pipeline_archive_returns_rows(client: TestClient, db_session: Session, 
     )
     db_session.commit()
 
-    resp = client.get("/v2/partials/approvals/pipeline-archive?scope=mine&offset=0")
+    resp = client.get("/v2/partials/buy-plans/pipeline-archive?scope=mine&offset=0")
     assert resp.status_code == 200
     assert f"/v2/partials/buy-plans/{plan.id}" in resp.text
 
@@ -394,11 +394,11 @@ def test_pipeline_archive_next_page_button(client: TestClient, db_session: Sessi
         )
     db_session.commit()
 
-    resp = client.get("/v2/partials/approvals/pipeline-archive?scope=mine&offset=0")
+    resp = client.get("/v2/partials/buy-plans/pipeline-archive?scope=mine&offset=0")
     assert resp.status_code == 200
     body = resp.text
     assert "Load older" in body
-    assert f"/v2/partials/approvals/pipeline-archive?scope=mine&offset={ARCHIVE_PAGE_SIZE}" in body
+    assert f"/v2/partials/buy-plans/pipeline-archive?scope=mine&offset={ARCHIVE_PAGE_SIZE}" in body
 
 
 def test_my_queue_renders_no_approver_row(client: TestClient, db_session, test_user, test_quote, test_requisition):
@@ -411,7 +411,7 @@ def test_my_queue_renders_no_approver_row(client: TestClient, db_session, test_u
         status=BuyPlanStatus.PENDING,
         submitted_by_id=test_user.id,
     )
-    resp = client.get("/v2/partials/approvals/my-queue")
+    resp = client.get("/v2/partials/buy-plans/my-queue")
     assert resp.status_code == 200
     assert "No approver" in resp.text
 

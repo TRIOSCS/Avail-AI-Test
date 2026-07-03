@@ -364,3 +364,80 @@ class TestNotifyResourceRequested:
         mock_email.assert_not_awaited()
         mock_card.assert_not_awaited()
         mock_dm.assert_not_awaited()
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# notify_resource_requested — completed-plan BACKORDER emergency (was_completed)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestBackorderEmergency:
+    """When a vendor cancels AFTER a plan completed/closed, the re-source broadcast becomes
+    a forced EMERGENCY: email + Teams DM go to ALL recipients regardless of their
+    notify_resource_alert_enabled preference, with an unmistakable BACKORDER subject.
+    Normal in-flight cancels keep the preference gating."""
+
+    def _seed(self, db, vendor_card_id):
+        actor = _make_user(db, "actor-bo@trioscs.com", "Actor Buyer", "buyer")
+        recipient = _make_user(db, "in-bo@trioscs.com", "Opted In", "buyer", alert=True)
+        optout = _make_user(db, "out-bo@trioscs.com", "Opted Out", "buyer", alert=False)
+        salesperson = _make_user(db, "sales-bo@trioscs.com", "Sales Person", "sales", alert=False)
+        plan, line = _make_plan_with_line(
+            db, submitter_id=salesperson.id, creator_id=actor.id, vendor_card_id=vendor_card_id
+        )
+        return actor, recipient, optout, salesperson, plan, line
+
+    @pytest.mark.asyncio
+    async def test_backorder_forces_email_dm_to_all_regardless_of_preference(self, db_session, test_vendor_card):
+        from app.services.buyplan_notifications import notify_resource_requested
+
+        actor, recipient, optout, salesperson, plan, line = self._seed(db_session, test_vendor_card.id)
+        p_email, p_card, p_dm = _patch_channels()
+        with p_email as mock_email, p_card, p_dm as mock_dm:
+            await notify_resource_requested(
+                plan,
+                db_session,
+                line_id=line.id,
+                actor_id=actor.id,
+                reason="Vendor reneged post-close",
+                was_completed=True,
+            )
+
+        all_recipients = {recipient.id, optout.id, salesperson.id}
+        # Email + DM reach ALL recipients — the opted-out buyer + salesperson included.
+        assert {c.args[0].id for c in mock_email.await_args_list} == all_recipients
+        assert {c.args[0].id for c in mock_dm.await_args_list} == all_recipients
+        # The preference gate is BYPASSED (pref_attr=None) on every forced email.
+        assert all(c.kwargs.get("pref_attr") is None for c in mock_email.await_args_list)
+        # Subject reads as a backorder emergency.
+        assert all("BACKORDER" in c.args[1] for c in mock_email.await_args_list)
+
+    @pytest.mark.asyncio
+    async def test_backorder_inapp_subject_says_backorder(self, db_session, test_vendor_card):
+        from app.services.buyplan_notifications import notify_resource_requested
+
+        actor, recipient, optout, salesperson, plan, line = self._seed(db_session, test_vendor_card.id)
+        p_email, p_card, p_dm = _patch_channels()
+        with p_email, p_card, p_dm:
+            await notify_resource_requested(
+                plan, db_session, line_id=line.id, actor_id=actor.id, reason="x", was_completed=True
+            )
+
+        acts = db_session.query(ActivityLog).filter_by(buy_plan_id=plan.id).all()
+        assert acts and all("BACKORDER" in a.subject for a in acts)
+
+    @pytest.mark.asyncio
+    async def test_normal_cancel_keeps_preference_gating(self, db_session, test_vendor_card):
+        from app.services.buyplan_notifications import notify_resource_requested
+
+        actor, recipient, optout, salesperson, plan, line = self._seed(db_session, test_vendor_card.id)
+        p_email, p_card, p_dm = _patch_channels()
+        with p_email as mock_email, p_card, p_dm as mock_dm:
+            # was_completed defaults False — in-flight cancel.
+            await notify_resource_requested(plan, db_session, line_id=line.id, actor_id=actor.id, reason="x")
+
+        emailed = {c.args[0].id for c in mock_email.await_args_list}
+        # Only the opted-in buyer — optout AND the opted-out salesperson are excluded.
+        assert emailed == {recipient.id}
+        assert optout.id not in emailed
+        assert all("BACKORDER" not in c.args[1] for c in mock_email.await_args_list)

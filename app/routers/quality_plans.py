@@ -2,18 +2,17 @@
 
 Purpose: Exposes GET /v2/qp/for-buy-plan/{bp_id} (the front door — get-or-create the QP
          for a buy plan and render its native detail), GET /v2/qp/{id} (QP detail
-         partial), POST /v2/qp/{id}/submit (submit-for-review action), the QP Phase C2a
-         section gates POST /v2/qp/{id}/submit-sales + /submit-purchasing (open the
-         QP_SALES / QP_PURCHASING approval gate), and the QP Phase C2b native-section
-         editors: PATCH /v2/qp/{id}/sales + /purchasing (inline field edit → refreshed
-         section partial), serial CRUD (POST/DELETE /v2/qp/{id}/serial[/{entry_id}]),
-         and FRU pin/unpin (POST/DELETE /v2/qp/{id}/fru[/{lookup_id}]). All return the
-         refreshed partial. Thin router: all business logic lives in
-         app.services.quality_plan_service.
+         partial), the QP section-review toggles POST /v2/qp/{id}/sales/review +
+         /purchasing/review (mark|unmark a section reviewed — decision C's lightweight
+         fold), and the QP Phase C2b native-section editors: PATCH /v2/qp/{id}/sales +
+         /purchasing (inline field edit → refreshed section partial), serial CRUD
+         (POST/DELETE /v2/qp/{id}/serial[/{entry_id}]), and FRU pin/unpin (POST/DELETE
+         /v2/qp/{id}/fru[/{lookup_id}]). All return the refreshed partial. Thin router:
+         all business logic lives in app.services.quality_plan_service.
 
 Called by: app.main (router registration).
 Depends on: app.services.quality_plan_service (validate_complete, validate_section,
-            submit, submit_section, IncompleteQPError, NoSectionApproverError),
+            toggle_section_reviewed, create_qp, IncompleteQPError),
             app.models.quality_plan (QualityPlan, QpSerialEntry, QpFruLookup),
             app.models.buy_plan (BuyPlan, BuyPlanLine),
             app.models.approvals (ApprovalRequest), app.models.fru_link (FruLink),
@@ -30,10 +29,10 @@ from fastapi.responses import HTMLResponse, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
-from ..constants import ApprovalGateType, ApprovalRecipientStatus, ApprovalRequestStatus, ApprovalSubjectType
+from ..constants import ApprovalGateType, ApprovalSubjectType
 from ..database import get_db
 from ..dependencies import get_buyplan_for_user, require_requisition_access, require_user
-from ..models.approvals import ApprovalRequest, ApprovalStep, ApprovalStepRecipient
+from ..models.approvals import ApprovalRequest
 from ..models.buy_plan import BuyPlan, BuyPlanLine
 from ..models.crm import CustomerSite
 from ..models.fru_link import FruLink
@@ -41,10 +40,8 @@ from ..models.quality_plan import QpFruLookup, QpSerialEntry, QualityPlan
 from ..models.quotes import Quote
 from ..services.quality_plan_service import (
     IncompleteQPError,
-    NoSectionApproverError,
     create_qp,
-    submit,
-    submit_section,
+    toggle_section_reviewed,
     validate_complete,
     validate_section,
 )
@@ -148,43 +145,19 @@ def _get_gate(db: Session, qp_id: int, gate_type: str) -> ApprovalRequest | None
     ).scalar_one_or_none()
 
 
-def _is_pending_recipient(db: Session, gate: ApprovalRequest | None, user) -> bool:
-    """Return True if *user* is a PENDING recipient on the given open gate request.
-
-    Mirrors the eligibility check in services/approvals/service.py:decide() so the
-    template shows Approve/Reject buttons only when the server would honour a decision.
-    """
-    if gate is None or gate.status != ApprovalRequestStatus.REQUESTED:
-        return False
-    return (
-        db.execute(
-            select(ApprovalStepRecipient)
-            .join(ApprovalStep, ApprovalStepRecipient.step_id == ApprovalStep.id)
-            .where(
-                ApprovalStep.request_id == gate.id,
-                ApprovalStepRecipient.user_id == user.id,
-                ApprovalStepRecipient.status == ApprovalRecipientStatus.PENDING,
-            )
-        ).scalar_one_or_none()
-        is not None
-    )
-
-
 def _qp_detail_response(
     request: Request,
     user,
     db: Session,
     qp: QualityPlan,
-    *,
-    section_error: str | None = None,
 ) -> HTMLResponse:
     """Build and render the QP detail partial.
 
     Loads the linked BuyPlan with its lines (eager), computes completeness errors for
-    inline display, resolves the latest approval-request per section gate (Sales /
-    Purchasing / Buy Plan / Prepayment) for the section chips, and renders
-    qp/detail.html. section_error surfaces an inline "no approver configured" banner
-    (C2a) without a 500.
+    inline display, and renders qp/detail.html. The Sales/Purchasing sections carry
+    their own Mark-Reviewed toggle (decision C — no approval gate); the Buy-Plan and
+    Prepayment approval-request context is still resolved for their read-only status
+    chips.
     """
     bp = (
         db.get(
@@ -203,8 +176,6 @@ def _qp_detail_response(
     )
 
     errors = validate_complete(qp)
-    sales_gate = _get_gate(db, qp.id, ApprovalGateType.QP_SALES)
-    purchasing_gate = _get_gate(db, qp.id, ApprovalGateType.QP_PURCHASING)
 
     ctx = {
         "request": request,
@@ -213,14 +184,9 @@ def _qp_detail_response(
         "bp": bp,
         "bp_lines": (bp.lines or []) if bp else [],
         "errors": errors,
-        "section_error": section_error,
         "sales_errors": validate_section(qp, ApprovalGateType.QP_SALES),
         "purchasing_errors": validate_section(qp, ApprovalGateType.QP_PURCHASING),
         "fru_rows": _fru_rows(db, qp),
-        "sales_gate": sales_gate,
-        "sales_gate_can_act": _is_pending_recipient(db, sales_gate, user),
-        "purchasing_gate": purchasing_gate,
-        "purchasing_gate_can_act": _is_pending_recipient(db, purchasing_gate, user),
         "buy_plan_gate": _get_gate(db, qp.id, ApprovalGateType.BUY_PLAN),
         "prepayment_gate": _get_gate(db, qp.id, ApprovalGateType.PREPAYMENT),
     }
@@ -301,7 +267,6 @@ def qp_for_buy_plan(
         qp.id,
         options=[
             joinedload(QualityPlan.created_by),
-            joinedload(QualityPlan.approved_by),
             joinedload(QualityPlan.buy_plan),
             joinedload(QualityPlan.serial_entries).joinedload(QpSerialEntry.buyer),
             joinedload(QualityPlan.serial_entries).joinedload(QpSerialEntry.submitted_by),
@@ -328,7 +293,6 @@ def qp_detail(
         qp_id,
         options=[
             joinedload(QualityPlan.created_by),
-            joinedload(QualityPlan.approved_by),
             joinedload(QualityPlan.buy_plan),
             joinedload(QualityPlan.serial_entries).joinedload(QpSerialEntry.buyer),
             joinedload(QualityPlan.serial_entries).joinedload(QpSerialEntry.submitted_by),
@@ -342,17 +306,16 @@ def qp_detail(
     return _qp_detail_response(request, user, db, qp)
 
 
-@router.post("/v2/qp/{qp_id}/submit", response_class=HTMLResponse)
-def qp_submit(
-    request: Request,
-    qp_id: int,
-    db: Session = Depends(get_db),
-    user=Depends(require_user),
+def _review_section_response(
+    request: Request, qp_id: int, gate_type: str, action: str, db: Session, user
 ) -> HTMLResponse:
-    """Submit the Quality Plan for review (DRAFT → IN_REVIEW).
+    """Mark|unmark a QP section reviewed and refresh the QP detail.
 
-    On success refreshes the detail partial. On IncompleteQPError returns the detail
-    partial with errors displayed inline (no 500).
+    On IncompleteQPError (a required section field is blank on a mark) nothing is
+    stamped: re-render so the inline section_errors grid shows the missing fields and
+    keeps the Mark-Reviewed button disabled. PermissionError → 403 (no review right); a
+    concurrent delete / bad action (ValueError) → 404. Shared by the sales and purchasing
+    review endpoints.
     """
     qp = db.get(QualityPlan, qp_id)
     if qp is None:
@@ -360,90 +323,56 @@ def qp_submit(
     _require_qp_access(db, user, qp)
 
     try:
-        qp = submit(db, qp_id, user)
+        toggle_section_reviewed(db, qp_id, gate_type, action, user)
         db.commit()
     except IncompleteQPError:
-        # Refresh qp from DB so we render current state with errors
+        # Section incomplete — nothing stamped. Re-render; the server-driven
+        # section_errors grid shows the missing fields and keeps the button disabled.
         db.rollback()
-        qp = db.get(QualityPlan, qp_id)
+    except PermissionError as exc:
+        db.rollback()
+        raise HTTPException(status_code=403, detail="Section review right required") from exc
     except ValueError as exc:
-        # submit() raises ValueError if the QP was concurrently deleted — surface 404
-        # rather than a 500.
         db.rollback()
         raise HTTPException(status_code=404, detail="Quality plan not found") from exc
 
-    # Guard the re-fetch (and the success path): a concurrent delete can leave qp None,
-    # and _qp_detail_response would dereference qp.buy_plan_id → AttributeError 500.
+    qp = db.get(QualityPlan, qp_id)
     if qp is None:
         raise HTTPException(status_code=404, detail="Quality plan not found")
 
     return _qp_detail_response(request, user, db, qp)
 
 
-def _submit_section_response(request: Request, qp_id: int, gate_type: str, db: Session, user) -> HTMLResponse:
-    """Open a section gate (QP_SALES / QP_PURCHASING) and refresh the QP detail.
-
-    On IncompleteQPError (a required section field is blank) the inline section_errors
-    grid blocks submit, so re-render with no gate opened. On NoSectionApproverError
-    surfaces an inline "no approver configured" banner (NOT a 500); on a concurrent
-    delete (ValueError) returns 404. Shared by the sales and purchasing submit
-    endpoints.
-    """
-    qp = db.get(QualityPlan, qp_id)
-    if qp is None:
-        raise HTTPException(status_code=404, detail="Quality plan not found")
-    _require_qp_access(db, user, qp)
-
-    section_error: str | None = None
-    try:
-        submit_section(db, qp_id, gate_type, user)
-        db.commit()
-    except IncompleteQPError:
-        # Section is incomplete — no gate opened. Re-render; the server-driven
-        # section_errors grid shows the missing fields and keeps submit disabled.
-        db.rollback()
-    except NoSectionApproverError as exc:
-        # No eligible approver holds the section toggle. create_request already removed
-        # the half-built request, so commit the (empty) transaction and show the banner.
-        db.commit()
-        section_error = f"No approver configured for the {exc.section} section. An admin must grant the right first."
-    except ValueError as exc:
-        db.rollback()
-        raise HTTPException(status_code=404, detail="Quality plan not found") from exc
-
-    qp = db.get(QualityPlan, qp_id)
-    if qp is None:
-        raise HTTPException(status_code=404, detail="Quality plan not found")
-
-    return _qp_detail_response(request, user, db, qp, section_error=section_error)
-
-
-@router.post("/v2/qp/{qp_id}/submit-sales", response_class=HTMLResponse)
-def qp_submit_sales(
+@router.post("/v2/qp/{qp_id}/sales/review", response_class=HTMLResponse)
+def qp_review_sales(
     request: Request,
     qp_id: int,
+    action: str = Form(...),
     db: Session = Depends(get_db),
     user=Depends(require_user),
 ) -> HTMLResponse:
-    """Submit the QP Sales section for approval (opens the QP_SALES gate).
+    """Mark|unmark the QP Sales section reviewed (decision C lightweight fold).
 
-    Refreshes the detail partial. No eligible approver → inline banner, never a 500.
+    Refreshes the detail partial. No review right → 403; incomplete section → re-render
+    with inline errors, never a 500.
     """
-    return _submit_section_response(request, qp_id, ApprovalGateType.QP_SALES, db, user)
+    return _review_section_response(request, qp_id, ApprovalGateType.QP_SALES, action, db, user)
 
 
-@router.post("/v2/qp/{qp_id}/submit-purchasing", response_class=HTMLResponse)
-def qp_submit_purchasing(
+@router.post("/v2/qp/{qp_id}/purchasing/review", response_class=HTMLResponse)
+def qp_review_purchasing(
     request: Request,
     qp_id: int,
+    action: str = Form(...),
     db: Session = Depends(get_db),
     user=Depends(require_user),
 ) -> HTMLResponse:
-    """Submit the QP Purchasing section for approval (opens the QP_PURCHASING gate).
+    """Mark|unmark the QP Purchasing section reviewed (decision C lightweight fold).
 
-    Refreshes the detail partial. No eligible approver → inline banner, never a 500.
+    Refreshes the detail partial. No review right → 403; incomplete section → re-render
+    with inline errors, never a 500.
     """
-    return _submit_section_response(request, qp_id, ApprovalGateType.QP_PURCHASING, db, user)
+    return _review_section_response(request, qp_id, ApprovalGateType.QP_PURCHASING, action, db, user)
 
 
 # ── C2b: native-section editors ──────────────────────────────────────────────────
@@ -472,10 +401,10 @@ def _load_qp_for_edit(db: Session, qp_id: int, user) -> QualityPlan:
 
 
 def _section_approved(qp: QualityPlan, gate_type: str) -> bool:
-    """True when the given section already carries an approved-at stamp (read-only)."""
+    """True when the given section already carries a reviewed-at stamp (read-only)."""
     if str(gate_type) == "qp_sales":
-        return qp.sales_section_approved_at is not None
-    return qp.purchasing_section_approved_at is not None
+        return qp.sales_section_reviewed_at is not None
+    return qp.purchasing_section_reviewed_at is not None
 
 
 def _render_sales_section(request: Request, db: Session, qp: QualityPlan, user) -> HTMLResponse:
@@ -487,7 +416,6 @@ def _render_sales_section(request: Request, db: Session, qp: QualityPlan, user) 
             "user": user,
             "qp": qp,
             "sales_errors": validate_section(qp, ApprovalGateType.QP_SALES),
-            "sales_gate": _get_gate(db, qp.id, ApprovalGateType.QP_SALES),
         },
     )
 
@@ -501,7 +429,6 @@ def _render_purchasing_section(request: Request, db: Session, qp: QualityPlan, u
             "user": user,
             "qp": qp,
             "purchasing_errors": validate_section(qp, ApprovalGateType.QP_PURCHASING),
-            "purchasing_gate": _get_gate(db, qp.id, ApprovalGateType.QP_PURCHASING),
         },
     )
 

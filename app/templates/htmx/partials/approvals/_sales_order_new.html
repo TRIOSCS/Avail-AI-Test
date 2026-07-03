@@ -9,7 +9,7 @@
   Receives: selected_req (Requisition|None);
             picker_rows (list of {id,name,customer,offer_count}) in picker mode;
             lines (get_builder_data shape) in builder mode.
-  Called by: htmx_views.py sales_order_new (GET /v2/partials/approvals/sales-orders/new),
+  Called by: htmx_views.py sales_order_new (GET /v2/partials/buy-plans/sales-orders/new),
              rendered into #bp-hub-body.
   Depends on: HTMX, Tailwind CSS with brand palette.
 #}
@@ -18,7 +18,7 @@
 <div>
   <div class="flex items-center justify-between mb-4">
     <h2 class="h2">New Buy Plan</h2>
-    <button hx-get="/v2/partials/approvals/my-queue"
+    <button hx-get="/v2/partials/buy-plans/my-queue"
             hx-target="#bp-hub-body"
             hx-swap="innerHTML"
             class="btn btn-secondary btn-sm">
@@ -31,7 +31,7 @@
   {% if picker_rows %}
   <div class="divide-y divide-line-base rounded-lg border border-line-base bg-white">
     {% for row in picker_rows %}
-    <button hx-get="/v2/partials/approvals/sales-orders/new?requisition_id={{ row.id }}"
+    <button hx-get="/v2/partials/buy-plans/sales-orders/new?requisition_id={{ row.id }}"
             hx-target="#bp-hub-body"
             hx-swap="innerHTML"
             class="w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors flex items-center justify-between gap-3">
@@ -61,7 +61,7 @@
       </h2>
       <p class="text-xs text-gray-600">REQ #{{ selected_req.id }}</p>
     </div>
-    <button hx-get="/v2/partials/approvals/sales-orders/new"
+    <button hx-get="/v2/partials/buy-plans/sales-orders/new"
             hx-target="#bp-hub-body"
             hx-swap="innerHTML"
             class="btn btn-secondary btn-sm">
@@ -71,7 +71,7 @@
 
   {% set selectable = lines|selectattr('offers')|list %}
   {% if selectable %}
-  <form hx-post="/v2/partials/approvals/sales-orders/create"
+  <form hx-post="/v2/partials/buy-plans/sales-orders/create"
         hx-target="#main-content"
         hx-swap="innerHTML">
     <input type="hidden" name="requisition_id" value="{{ selected_req.id }}">
@@ -120,7 +120,7 @@
       </table>
     </div>
     <div class="mt-4 flex items-center justify-end gap-2">
-      <button hx-get="/v2/partials/approvals/sales-orders/new"
+      <button hx-get="/v2/partials/buy-plans/sales-orders/new"
               hx-target="#bp-hub-body"
               hx-swap="innerHTML"
               type="button"

@@ -5,7 +5,6 @@ Targets the missing lines in app/routers/approvals.py:
   - post_reassign user-not-found → 404
   - post_cancel ValueError → 400
   - list_requests with status filter
-  - get_queue (HTMX partial render)
   - get_request 404
 
 Called by: pytest
@@ -153,20 +152,6 @@ class TestApprovalsRouterCoverage:
         resp = client.get("/v2/approvals/requests/99999")
         assert resp.status_code == 404
         assert "error" in resp.json()
-
-    def test_get_queue_redirects_to_hub_lens(self, db_session: Session):
-        """GET /v2/approvals/queue 302-redirects to the Buy Plans hub 'approvals' lens.
-
-        The standalone queue was retired — the four-tab queue now renders as a Buy-Plans
-        hub lens body. The old URL stays a valid deep link via the redirect.
-        """
-        user = _make_user(db_session)
-        db_session.commit()
-
-        client = _get_client(db_session, user)
-        resp = client.get("/v2/approvals/queue", follow_redirects=False)
-        assert resp.status_code == 302
-        assert resp.headers["location"] == "/v2/buy-plans?lens=approvals"
 
     def test_serialize_request_all_fields(self, db_session: Session):
         """_serialize_request projects all 11 fields."""

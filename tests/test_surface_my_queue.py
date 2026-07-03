@@ -1,6 +1,6 @@
 """Route + render tests for the My Queue surface (Approvals rework Phase B).
 
-Covers GET /v2/partials/approvals/my-queue → _render_my_queue_body → _surface_my_queue.html:
+Covers GET /v2/partials/buy-plans/my-queue → _render_my_queue_body → _surface_my_queue.html:
 - 200 for a buyer / supervisor / sales fixture, with the correct per-role rows;
 - ONE hero card + the calm header + live-count filter chips;
 - the 3-band risk dot (rose / accent / brand) per kind;
@@ -29,7 +29,7 @@ from app.models.auth import User
 from tests.test_buyplan_hub_supervise import _make_line, _make_plan
 from tests.test_my_queue import _grant
 
-MY_QUEUE_URL = "/v2/partials/approvals/my-queue"
+MY_QUEUE_URL = "/v2/partials/buy-plans/my-queue"
 
 
 @contextmanager

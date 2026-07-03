@@ -1,6 +1,6 @@
 """Route + render tests for the Pipeline surface (Approvals rework Phase C).
 
-Covers GET /v2/partials/approvals/pipeline → _render_pipeline_body → _surface_pipeline.html:
+Covers GET /v2/partials/buy-plans/pipeline → _render_pipeline_body → _surface_pipeline.html:
 - 200 for a buyer fixture, with the empty all-columns state;
 - the three visible stage columns (Build / Approve / Purchase) render the right plans by
   status (DRAFT→Build, PENDING→Approve, ACTIVE→Purchase);
@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 from app.constants import BuyPlanLineStatus, BuyPlanStatus, SOVerificationStatus
 from tests.test_buyplan_hub_board import _make_line, _make_plan
 
-PIPELINE_URL = "/v2/partials/approvals/pipeline"
+PIPELINE_URL = "/v2/partials/buy-plans/pipeline"
 
 
 # ── Empty state ─────────────────────────────────────────────────────────────
@@ -156,8 +156,8 @@ def test_pipeline_scope_toggle_targets_hub_body(client: TestClient):
     resp = client.get(PIPELINE_URL)
     assert resp.status_code == 200
     body = resp.text
-    assert "/v2/partials/approvals/pipeline?scope=all" in body
-    assert "/v2/partials/approvals/pipeline?scope=mine" in body
+    assert "/v2/partials/buy-plans/pipeline?scope=all" in body
+    assert "/v2/partials/buy-plans/pipeline?scope=mine" in body
     assert 'hx-target="#bp-hub-body"' in body
     assert 'hx-push-url="false"' in body
 
@@ -310,5 +310,5 @@ def test_pipeline_done_uses_archive_rows_include(
     resp = client.get(PIPELINE_URL)
     assert resp.status_code == 200
     body = resp.text
-    assert "/v2/partials/approvals/pipeline-archive?scope=" in body
+    assert "/v2/partials/buy-plans/pipeline-archive?scope=" in body
     assert "Load older" in body

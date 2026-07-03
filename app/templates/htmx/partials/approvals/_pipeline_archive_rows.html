@@ -15,7 +15,7 @@
 {% from "htmx/partials/approvals/_pipeline_macros.html" import deal_card %}
 {% for card in archive.deals %}{{ deal_card(card) }}{% endfor %}
 {% if archive.next_offset is not none %}
-<button hx-get="/v2/partials/approvals/pipeline-archive?scope={{ scope }}&offset={{ archive.next_offset }}"
+<button hx-get="/v2/partials/buy-plans/pipeline-archive?scope={{ scope }}&offset={{ archive.next_offset }}"
         hx-target="this"
         hx-swap="outerHTML"
         hx-push-url="false"

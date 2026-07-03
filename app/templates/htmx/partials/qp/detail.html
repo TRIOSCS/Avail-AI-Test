@@ -3,15 +3,15 @@
   Renders the QP header (customer/owner/SO# derived from the linked BuyPlan) plus
   collapsible sections, each an {% include %} of its own partial (C2b):
   Sales, Purchasing, Buy Plan (populated), Serial, FRU Crosswalk.
-  Each section carries a per-section approval-status chip + its own submit/edit forms.
-  The top-level Submit button calls POST /v2/qp/{id}/submit; IncompleteQPError shows inline.
+  Each Sales/Purchasing section carries a review-status chip + its own Mark-Reviewed
+  toggle + inline edit form (decision C — a lightweight per-section fold, no approver gate).
 
   Receives: qp (QualityPlan ORM with serial_entries + fru_lookups eager-loaded),
             bp (BuyPlan ORM), bp_lines (list[BuyPlanLine]), user (User),
-            errors (list[str]), section_error (str|None),
+            errors (list[str]),
             sales_errors / purchasing_errors (list[str]),
             fru_rows (list of {"pin": QpFruLookup, "links": [FruLink]}),
-            sales_gate / purchasing_gate / buy_plan_gate / prepayment_gate (ApprovalRequest|None).
+            buy_plan_gate / prepayment_gate (ApprovalRequest|None).
   Called by: routers/quality_plans.py qp_detail / _qp_detail_response.
   Depends on: HTMX, Alpine.js, Tailwind CSS, shared/_macros.html, the qp/_section_*.html partials.
 #}
@@ -19,22 +19,14 @@
 
 <title hx-swap-oob="true">Quality Plan #{{ qp.id }} — AvailAI</title>
 
-{# ── Section gate-status chip ──────────────────────────────────────────────────
-   Renders the latest ApprovalRequest state for a QP section (Sales / Purchasing).
-   gate is an ApprovalRequest row or None (no submission yet). #}
-{% macro gate_chip(gate) %}
-  {% if gate is none %}
-  <span class="badge bg-slate-50 text-slate-500 border-slate-200">Not submitted</span>
-  {% elif gate.status == 'requested' %}
-  <span class="badge bg-amber-50 text-amber-700 border-amber-200">Pending approval</span>
-  {% elif gate.status == 'approved' %}
-  <span class="badge bg-emerald-50 text-emerald-700 border-emerald-200">Approved</span>
-  {% elif gate.status == 'rejected' %}
-  <span class="badge bg-rose-50 text-rose-700 border-rose-200">Rejected</span>
-  {% elif gate.status == 'cancelled' %}
-  <span class="badge bg-slate-50 text-slate-500 border-slate-200">Cancelled</span>
+{# ── Section review-status chip ────────────────────────────────────────────────
+   Renders whether a QP section (Sales / Purchasing) has been marked reviewed.
+   reviewed_at is the section's reviewed-at timestamp (or None / falsy). #}
+{% macro review_chip(reviewed_at) %}
+  {% if reviewed_at %}
+  <span class="badge bg-emerald-50 text-emerald-700 border-emerald-200">Reviewed</span>
   {% else %}
-  <span class="badge bg-slate-50 text-slate-500 border-slate-200">{{ gate.status|replace('_', ' ')|title }}</span>
+  <span class="badge bg-slate-50 text-slate-500 border-slate-200">Not reviewed</span>
   {% endif %}
 {% endmacro %}
 
@@ -62,20 +54,6 @@
         <h1 class="h1">Quality Plan #{{ qp.id }}</h1>
         {{ status_badge(qp.status, status_map=QP_STATUS) }}
         <span class="chip bg-gray-50 text-gray-600 border-gray-200">{{ qp.order_type|replace('_', ' ')|title }}</span>
-      </div>
-      <div class="flex items-center gap-2">
-        {# Submit button — only shown in draft #}
-        {% if qp.status == 'draft' %}
-        <form hx-post="/v2/qp/{{ qp.id }}/submit"
-              hx-target="#main-content"
-              hx-swap="innerHTML">
-          <button type="submit"
-                  data-loading-disable
-                  class="btn btn-primary btn-sm">
-            Submit for Review
-          </button>
-        </form>
-        {% endif %}
       </div>
     </div>
 
@@ -114,13 +92,6 @@
   </div>
   {% endif %}
 
-  {# ═══ 2b. SECTION SUBMIT ERROR (inline "no approver configured", non-500) ═══ #}
-  {% if section_error %}
-  <div class="mb-4 rounded-lg border border-rose-200 bg-rose-50 p-3">
-    <p class="text-xs font-semibold text-rose-700">{{ section_error }}</p>
-  </div>
-  {% endif %}
-
   {# ═══ 3. COLLAPSIBLE SECTIONS ═══ #}
 
   {# ── Section: Sales (QP_SALES gate) ── #}
@@ -131,26 +102,7 @@
          class="flex w-full cursor-pointer items-center justify-between px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50">
       <div class="flex items-center gap-2">
         <span>Sales</span>
-        {{ gate_chip(sales_gate) }}
-        {# Inline approve/reject — shown only to eligible PENDING recipients. Clicking or
-           keying the buttons must not toggle the section: .stop on both pointer and
-           keyboard events keeps the header's @keydown.enter from also firing. #}
-        {% if sales_gate and sales_gate_can_act %}
-        <div class="inline-flex items-center gap-1.5" @click.stop @keydown.enter.stop @keydown.space.stop>
-          <button type="button"
-                  hx-post="/v2/approvals/requests/{{ sales_gate.id }}/decision"
-                  hx-vals='{"action": "approve"}'
-                  hx-swap="none"
-                  hx-on::after-request="if(event.detail.successful) htmx.ajax('GET', '/v2/qp/{{ qp.id }}', {target:'#main-content', indicator:'#main-content'})"
-                  class="btn btn-primary btn-sm">Approve</button>
-          <button type="button"
-                  hx-post="/v2/approvals/requests/{{ sales_gate.id }}/decision"
-                  hx-vals="js:{action: 'reject', comment: prompt('Reason for rejection?') || ''}"
-                  hx-swap="none"
-                  hx-on::after-request="if(event.detail.successful) htmx.ajax('GET', '/v2/qp/{{ qp.id }}', {target:'#main-content', indicator:'#main-content'})"
-                  class="btn btn-danger btn-sm">Reject</button>
-        </div>
-        {% endif %}
+        {{ review_chip(qp.sales_section_reviewed_at) }}
       </div>
       <svg class="h-4 w-4 text-gray-400 transition-transform" :class="showSales ? 'rotate-180' : ''"
            fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -170,26 +122,7 @@
          class="flex w-full cursor-pointer items-center justify-between px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50">
       <div class="flex items-center gap-2">
         <span>Purchasing</span>
-        {{ gate_chip(purchasing_gate) }}
-        {# Inline approve/reject — shown only to eligible PENDING recipients. Clicking or
-           keying the buttons must not toggle the section: .stop on both pointer and
-           keyboard events keeps the header's @keydown.enter from also firing. #}
-        {% if purchasing_gate and purchasing_gate_can_act %}
-        <div class="inline-flex items-center gap-1.5" @click.stop @keydown.enter.stop @keydown.space.stop>
-          <button type="button"
-                  hx-post="/v2/approvals/requests/{{ purchasing_gate.id }}/decision"
-                  hx-vals='{"action": "approve"}'
-                  hx-swap="none"
-                  hx-on::after-request="if(event.detail.successful) htmx.ajax('GET', '/v2/qp/{{ qp.id }}', {target:'#main-content', indicator:'#main-content'})"
-                  class="btn btn-primary btn-sm">Approve</button>
-          <button type="button"
-                  hx-post="/v2/approvals/requests/{{ purchasing_gate.id }}/decision"
-                  hx-vals="js:{action: 'reject', comment: prompt('Reason for rejection?') || ''}"
-                  hx-swap="none"
-                  hx-on::after-request="if(event.detail.successful) htmx.ajax('GET', '/v2/qp/{{ qp.id }}', {target:'#main-content', indicator:'#main-content'})"
-                  class="btn btn-danger btn-sm">Reject</button>
-        </div>
-        {% endif %}
+        {{ review_chip(qp.purchasing_section_reviewed_at) }}
       </div>
       <svg class="h-4 w-4 text-gray-400 transition-transform" :class="showPurchasing ? 'rotate-180' : ''"
            fill="none" viewBox="0 0 24 24" stroke="currentColor">

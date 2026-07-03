@@ -118,9 +118,9 @@ class TestBuyPlansListPartial:
         "url",
         [
             # No-param → role-derived default lens; explicit lens tabs per the contract.
-            pytest.param("/v2/partials/approvals", id="default_lens"),
-            pytest.param("/v2/partials/approvals?lens=my_queue", id="lens_my_queue"),
-            pytest.param("/v2/partials/approvals?lens=pipeline", id="lens_pipeline"),
+            pytest.param("/v2/partials/buy-plans", id="default_lens"),
+            pytest.param("/v2/partials/buy-plans?lens=my_queue", id="lens_my_queue"),
+            pytest.param("/v2/partials/buy-plans?lens=pipeline", id="lens_pipeline"),
         ],
     )
     def test_list_loads(self, client: TestClient, url: str):

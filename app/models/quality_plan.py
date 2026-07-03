@@ -3,7 +3,8 @@
 Purpose: QualityPlan tracks inspection/QC documentation per buy-plan order. It now
          carries the native Sales and Purchasing "Quality Questions" sections (C2b),
          replacing the Excel QP template field-for-field, plus the per-section
-         approved-at timestamps stamped by the approval engine.
+         reviewed-at/by stamps set by the buyer's lightweight Mark-Reviewed toggle
+         (decision C — a per-section fold, NOT a separate approver gate).
          Prepayment captures upfront payment details (wire/CC/PayPal) that
          may require an approval gate before the PO is issued.
          QpSerialEntry rows track serial-number preapproval per QP (one row per
@@ -95,14 +96,16 @@ class QualityPlan(Base):
     purchasing_tpo_ship_complete = Column(Boolean, nullable=True)  # Will TPO ship complete?
     purchasing_tpo_notes = Column(Text, nullable=True)  # TPO Notes / Shipping Schedule
 
-    # ── Section approved-at timestamps (stamped by _on_section_approved via the engine).
-    sales_section_approved_at = Column(UTCDateTime, nullable=True)
-    purchasing_section_approved_at = Column(UTCDateTime, nullable=True)
+    # ── Section reviewed-at/by stamps (set by the buyer's Mark-Reviewed toggle — a
+    # lightweight per-section fold via toggle_section_reviewed, NOT an approver gate;
+    # decision C). reviewed_by_id records who last marked the section reviewed.
+    sales_section_reviewed_at = Column(UTCDateTime, nullable=True)
+    sales_section_reviewed_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    purchasing_section_reviewed_at = Column(UTCDateTime, nullable=True)
+    purchasing_section_reviewed_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
     # Audit
     created_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    approved_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    approved_at = Column(UTCDateTime, nullable=True)
 
     created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(UTCDateTime, onupdate=lambda: datetime.now(timezone.utc))
@@ -111,7 +114,8 @@ class QualityPlan(Base):
     buy_plan = relationship("BuyPlan", foreign_keys=[buy_plan_id])
     vendor_card = relationship("VendorCard", foreign_keys=[vendor_card_id])
     created_by = relationship("User", foreign_keys=[created_by_id])
-    approved_by = relationship("User", foreign_keys=[approved_by_id])
+    sales_section_reviewed_by = relationship("User", foreign_keys=[sales_section_reviewed_by_id])
+    purchasing_section_reviewed_by = relationship("User", foreign_keys=[purchasing_section_reviewed_by_id])
     serial_entries = relationship(
         "QpSerialEntry",
         back_populates="quality_plan",

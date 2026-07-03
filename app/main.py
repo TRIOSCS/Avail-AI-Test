@@ -702,6 +702,7 @@ from .routers.crm import router as crm_router
 from .routers.documents import router as documents_router
 from .routers.error_reports import router as error_reports_router
 from .routers.events import router as events_router
+from .routers.htmx.approvals_hub import router as htmx_approvals_hub_router
 from .routers.htmx.archive import router as htmx_archive_router
 from .routers.htmx.buy_plans import router as htmx_buy_plans_router
 from .routers.htmx.companies import router as htmx_companies_router
@@ -766,6 +767,7 @@ app.include_router(htmx_requisitions_router)
 app.include_router(htmx_vendors_router)
 app.include_router(htmx_companies_router)
 app.include_router(htmx_buy_plans_router)
+app.include_router(htmx_approvals_hub_router)
 app.include_router(htmx_offers_router)
 app.include_router(htmx_sourcing_router)
 app.include_router(htmx_quotes_router)

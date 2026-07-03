@@ -315,6 +315,30 @@ def require_buyplan_po_approver(request: Request, db: Session = Depends(get_db))
     return user
 
 
+# ── QP section review rights (per-user grants; decision C — reviewer, not approver) ──
+
+
+def can_review_qp_sales_section(user: User | None) -> bool:
+    """True if *user* may mark the QP Sales section reviewed.
+
+    Reuses the existing per-user User.can_approve_qp_sales column (migrations 160/166),
+    reframed from "approver" to "reviewer" semantics under decision C's lightweight
+    fold: marking a section reviewed is an instant per-section toggle, not a routed
+    approval. Shared gate so the template hides the Mark/Unmark-Reviewed controls using
+    the SAME flag toggle_section_reviewed enforces on the POST.
+    """
+    return bool(user is not None and getattr(user, "can_approve_qp_sales", False))
+
+
+def can_review_qp_purchasing_section(user: User | None) -> bool:
+    """True if *user* may mark the QP Purchasing section reviewed.
+
+    Reuses the existing per-user User.can_approve_qp_purchasing column (migrations
+    160/166) with reviewer semantics — parallel to :func:`can_review_qp_sales_section`.
+    """
+    return bool(user is not None and getattr(user, "can_approve_qp_purchasing", False))
+
+
 def require_approval_gatekeeper(
     request: Request,
     db: Session = Depends(get_db),

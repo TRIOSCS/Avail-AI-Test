@@ -4,8 +4,6 @@ Tests:
   1. create_qp returns a QP in DRAFT with created_by_id set.
   2. validate_complete flags a QP missing buy_plan_id (pure in-memory check).
   3. validate_complete passes when all required fields are set.
-  4. submit on an incomplete QP raises IncompleteQPError.
-  5. submit on a complete QP sets IN_REVIEW + writes exactly one ActivityLog.
 
 Called by: pytest (TESTING=1 PYTHONPATH=. python -m pytest tests/test_quality_plan_service.py -q)
 Depends on: app.services.quality_plan_service, conftest (db_session, test_user, test_company)
@@ -17,16 +15,14 @@ constructing an ORM object in memory (without flushing) to simulate the missing 
 
 from datetime import datetime, timezone
 
-import pytest
 from sqlalchemy.orm import Session
 
 from app.constants import QPOrderType, QualityPlanStatus
-from app.models import ActivityLog
 from app.models.buy_plan import BuyPlan
 from app.models.quality_plan import QualityPlan
 from app.models.quotes import Quote
 from app.models.sourcing import Requisition
-from app.services.quality_plan_service import IncompleteQPError, create_qp, submit, validate_complete
+from app.services.quality_plan_service import create_qp, validate_complete
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -114,47 +110,3 @@ def test_validate_complete_passes_when_complete(db_session: Session, test_user, 
     qp.order_type = QPOrderType.NEW
     errors = validate_complete(qp)
     assert errors == []
-
-
-def test_submit_incomplete_raises_error(test_user):
-    """Submit on a QP missing required fields raises IncompleteQPError with the field
-    list.
-
-    Uses a stub QP with a fake id to avoid DB interactions for the validate path. We
-    patch db.get to return the incomplete QP without flushing to DB.
-    """
-    from unittest.mock import MagicMock
-
-    qp = QualityPlan(
-        created_by_id=test_user.id,
-        order_type=QPOrderType.NEW,
-        status=QualityPlanStatus.DRAFT,
-        buy_plan_id=None,  # incomplete
-    )
-    qp.id = 999  # type: ignore[assignment]
-
-    mock_db = MagicMock()
-    mock_db.get.return_value = qp
-
-    with pytest.raises(IncompleteQPError) as exc_info:
-        submit(mock_db, 999, test_user)
-
-    assert exc_info.value.missing_fields, "IncompleteQPError must carry a non-empty missing_fields list"
-    assert any("buy_plan" in f.lower() for f in exc_info.value.missing_fields)
-
-
-def test_submit_complete_sets_in_review_and_writes_one_event(db_session: Session, test_user, test_company):
-    """Submit on a complete QP sets status IN_REVIEW and writes exactly one
-    ActivityLog."""
-    bp = _make_full_buy_plan(db_session, test_user, test_company)
-    qp = create_qp(db_session, owner_id=test_user.id, buy_plan_id=bp.id)
-    qp.order_type = QPOrderType.NEW
-    db_session.commit()
-
-    before_count = db_session.query(ActivityLog).count()
-    result = submit(db_session, qp.id, test_user)
-    db_session.commit()
-
-    assert result.status == QualityPlanStatus.IN_REVIEW
-    after_count = db_session.query(ActivityLog).count()
-    assert after_count == before_count + 1, "Expected exactly one new ActivityLog event"
