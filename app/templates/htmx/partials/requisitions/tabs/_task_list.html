@@ -1,0 +1,20 @@
+{# _task_list.html — body of the requisition Task board list (#task-list inner).
+   Receives: tasks (list of RequisitionTask with assignee loaded), req (Requisition).
+   Called by: requisitions/tabs/tasks.html (initial render) and the create-task
+   endpoint in routers/htmx/requisitions.py (innerHTML swap after add).
+   Depends on: _task_row.html.
+#}
+{% if tasks %}
+  {% for t in tasks %}
+    {% include "htmx/partials/requisitions/tabs/_task_row.html" %}
+  {% endfor %}
+{% else %}
+  <div class="py-6 sm:py-8 text-center">
+    <svg class="mx-auto h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+            d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
+    </svg>
+    <p class="text-sm font-medium text-gray-600 mt-3">No tasks yet.</p>
+    <p class="text-secondary mt-1">Add a task to track work on this requisition.</p>
+  </div>
+{% endif %}

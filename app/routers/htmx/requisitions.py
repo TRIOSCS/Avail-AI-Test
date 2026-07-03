@@ -14,7 +14,7 @@ Depends on: app.models, app.dependencies, app.database, app.search_service,
 
 import html as html_mod
 import json
-from datetime import datetime
+from datetime import date, datetime, timezone
 from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile
@@ -24,7 +24,7 @@ from sqlalchemy import case, exists, or_, select
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from ...constants import RESTRICTED_ROLES, QuoteStatus, RequisitionStatus, SourcingStatus
+from ...constants import RESTRICTED_ROLES, QuoteStatus, RequisitionStatus, SourcingStatus, TaskStatus
 from ...database import get_db
 from ...dependencies import require_requisition_access, require_user
 from ...models import (
@@ -41,6 +41,7 @@ from ...models import (
 )
 from ...services.freeform_parser_service import parse_freeform_rfq
 from ...services.quote_requisitions import quotes_for_requisition
+from ...services.task_service import create_requisition_task, delete_task, update_task
 from ...template_env import template_response
 from ...utils.search_builder import SearchBuilder
 from ...utils.sql_helpers import escape_like
@@ -1102,3 +1103,144 @@ async def requisition_tab(
         ctx["show_all"] = show_all
         ctx["req"] = req
         return template_response("htmx/partials/requisitions/tabs/activity.html", ctx)
+
+
+# ── Requisition Task board mutations ─────────────────────────────────────
+# These back the create/complete/delete buttons on the requisition detail
+# "Tasks" tab (requisitions/tabs/tasks.html). A requisition-board task is a
+# RequisitionTask with requisition_id set and requirement_id NULL. The board is
+# shared per requisition: anyone with access to the requisition may manage any
+# of its tasks (gated by require_requisition_access, unlike the assignee-only
+# part-comms complete). Templates: _task_list.html (create swap) / _task_row.html
+# (complete swap).
+
+
+def _parse_task_due_date(raw: str | None) -> datetime | None:
+    """Parse an HTML ``<input type=date>`` value into an aware UTC datetime.
+
+    Empty → None. A bare date (YYYY-MM-DD) becomes UTC midnight so it binds cleanly to
+    the timestamptz ``due_at`` column — never a raw string, which UTCDateTime would pass
+    through unnormalized (wrong-TZ on PostgreSQL, AttributeError on SQLite). Raises 422 on
+    a malformed non-empty value.
+    """
+    if not raw or not raw.strip():
+        return None
+    d = _parse_date_safe(raw.strip(), date)
+    if d is None:
+        raise HTTPException(422, "Invalid due date")
+    return datetime.combine(d, datetime.min.time()).replace(tzinfo=timezone.utc)
+
+
+def _coerce_task_priority(raw: str | None) -> int:
+    """Map a submitted priority ('1'|'2'|'3') to a valid int, defaulting to 2
+    (medium)."""
+    try:
+        p = int(raw) if raw not in (None, "") else 2
+    except (TypeError, ValueError):
+        return 2
+    return p if p in (1, 2, 3) else 2
+
+
+def _parse_int_or_none(raw: str | None) -> int | None:
+    """Parse an optional integer form field ('' / None → None)."""
+    try:
+        return int(raw) if raw not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
+
+@router.post("/api/requisitions/{req_id}/tasks", response_class=HTMLResponse)
+async def create_requisition_task_endpoint(
+    req_id: int,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Create a task on a requisition's Task board; return the re-rendered list body.
+
+    The board form carries title + type + priority + assignee + due date and swaps the
+    response into #task-list (innerHTML), so we return the full list partial (this also
+    clears the empty state on the first add). Gated by require_requisition_access.
+    """
+    req = get_requisition_or_404(db, req_id)
+    require_requisition_access(db, req_id, user)
+
+    form = await request.form()
+    title = (form.get("title") or "").strip()
+    if not title:
+        raise HTTPException(422, "Title is required")
+
+    create_requisition_task(
+        db,
+        requisition_id=req_id,
+        title=title,
+        task_type=(form.get("task_type") or "general").strip() or "general",
+        priority=_coerce_task_priority(form.get("priority")),
+        assigned_to_id=_parse_int_or_none(form.get("assigned_to_id")),
+        created_by=user.id,
+        due_at=_parse_task_due_date(form.get("due_at")),
+    )
+    logger.info("Requisition task '{}' created on req {} by {}", title, req_id, user.email)
+
+    tasks = (
+        db.query(RequisitionTask)
+        .options(joinedload(RequisitionTask.assignee))
+        .filter(RequisitionTask.requisition_id == req_id)
+        .order_by(RequisitionTask.priority.desc(), RequisitionTask.created_at.desc().nullslast())
+        .all()
+    )
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx["req"] = req
+    ctx["tasks"] = tasks
+    return template_response("htmx/partials/requisitions/tabs/_task_list.html", ctx)
+
+
+@router.post("/api/requisitions/{req_id}/tasks/{task_id}/complete", response_class=HTMLResponse)
+async def complete_requisition_task_endpoint(
+    req_id: int,
+    task_id: int,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Mark a requisition-board task done; return the re-rendered row (outerHTML swap).
+
+    Gated by require_requisition_access and IDOR-checked to the requisition so a task
+    from another requisition can't be completed via a crafted URL.
+    """
+    req = get_requisition_or_404(db, req_id)
+    require_requisition_access(db, req_id, user)
+    task = db.get(RequisitionTask, task_id)
+    if not task or task.requisition_id != req_id:
+        raise HTTPException(404, "Task not found")
+
+    task = update_task(db, task_id, status=TaskStatus.DONE)
+    logger.info("Requisition task {} completed on req {} by {}", task_id, req_id, user.email)
+
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx["req"] = req
+    ctx["t"] = task
+    return template_response("htmx/partials/requisitions/tabs/_task_row.html", ctx)
+
+
+@router.delete("/api/requisitions/{req_id}/tasks/{task_id}", response_class=HTMLResponse)
+async def delete_requisition_task_endpoint(
+    req_id: int,
+    task_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Delete a requisition-board task.
+
+    The button uses hx-swap=delete, so the row is removed client-side and we return an
+    empty 200. Gated by require_requisition_access and IDOR-checked to the requisition.
+    """
+    get_requisition_or_404(db, req_id)
+    require_requisition_access(db, req_id, user)
+    task = db.get(RequisitionTask, task_id)
+    if not task or task.requisition_id != req_id:
+        raise HTTPException(404, "Task not found")
+
+    delete_task(db, task_id)
+    logger.info("Requisition task {} deleted from req {} by {}", task_id, req_id, user.email)
+    return HTMLResponse("")

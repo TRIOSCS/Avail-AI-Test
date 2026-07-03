@@ -2988,6 +2988,26 @@ when `HX-Target == "tasks-results"`). The filter bar carries an EXPLICIT
 `hx-target="#tasks-results"` (never inherits `#main-content`). The standalone
 `GET /v2/partials/tasks` queue endpoint was folded into this route. The My-Day/Tasks nav
 badge is the `TasksActionSource` above.
+
+**Requisition Task board (detail "Tasks" tab).** The requisition detail "Tasks" tab
+(`requisitions/tabs/tasks.html`, rendered by `requisition_tab` in
+`routers/htmx/requisitions.py`) is the richest task-create surface — the only one with
+type + priority + assignee. Its mutations are three HTML-returning routes in the same
+router (previously the tab POSTed to non-existent `/api/requisitions/{id}/tasks*` and every
+button 404'd silently): `POST /api/requisitions/{req_id}/tasks` (create — form carries
+title/task_type/priority/assigned_to_id/due_at, returns the re-rendered `_task_list.html`
+body swapped `innerHTML` into `#task-list`, clearing the empty state), `POST
+/api/requisitions/{req_id}/tasks/{task_id}/complete` (returns the re-rendered `_task_row.html`
+via `outerHTML`), and `DELETE /api/requisitions/{req_id}/tasks/{task_id}` (empty 200;
+`hx-swap=delete` removes the row). A board task is a `RequisitionTask` with `requisition_id`
+set and `requirement_id` NULL, created via `task_service.create_requisition_task` (no 24h
+due-date floor, mirroring the CRM create helpers). The board is **shared per requisition**:
+all three routes gate on `require_requisition_access` (not assignee-only, unlike the
+part-comms complete) and IDOR-check `task.requisition_id == req_id`. Due dates arrive as
+`<input type=date>` strings and are parsed to aware UTC-midnight datetimes before binding
+(never a raw string — `UTCDateTime` passes strings through unnormalized). Row markup is
+factored into `_task_row.html` (one row) and `_task_list.html` (list body) so the endpoints
+can return single-row / list-body fragments.
 Bulk "Assign owner" on the account list now uses a name+role `<select>` (`cdm_list_ctx(include_users=…)`,
 manager/admin only) instead of a raw User-ID box. All clickable `<tr hx-get>` list rows
 are keyboard-accessible (`role=button` + `tabindex=0` + `keyup[Enter]` + `focus:ring-2`).

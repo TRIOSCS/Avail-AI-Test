@@ -75,6 +75,43 @@ def create_task(
     return task
 
 
+def create_requisition_task(
+    db: Session,
+    *,
+    requisition_id: int,
+    title: str,
+    description: str | None = None,
+    task_type: str = "general",
+    priority: int = 2,
+    assigned_to_id: int | None = None,
+    created_by: int | None = None,
+    due_at: datetime | None = None,
+) -> RequisitionTask:
+    """Create a manual task on a requisition's Task board.
+
+    Mirrors create_company_task / create_contact_task (no 24h due-date floor — the board
+    allows near-term due dates, matching the CRM create surfaces). requirement_id stays
+    NULL: these are requisition-level tasks, not part-level ones. Callers must pass an
+    already-parsed aware `due_at` datetime (never a raw date string — see UTCDateTime).
+    """
+    task = RequisitionTask(
+        requisition_id=requisition_id,
+        title=title,
+        description=description,
+        task_type=task_type,
+        priority=priority,
+        assigned_to_id=assigned_to_id,
+        created_by=created_by,
+        source="manual",
+        due_at=due_at,
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    logger.info("Requisition task created: {} (req={}, type={})", task.id, requisition_id, task_type)
+    return task
+
+
 def get_tasks(
     db: Session,
     requisition_id: int,
