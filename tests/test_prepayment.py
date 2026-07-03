@@ -109,6 +109,25 @@ def _make_buy_plan(db: Session, requester: User):
     return bp
 
 
+def _make_po_line(db: Session, buy_plan):
+    """Seed a cut-PO line on *buy_plan* (po_number set, PENDING_VERIFY) so a prepayment
+    request against it passes create_prepayment's line validation."""
+    from app.constants import BuyPlanLineStatus
+    from app.models.buy_plan import BuyPlanLine
+
+    line = BuyPlanLine(
+        buy_plan_id=buy_plan.id,
+        status=BuyPlanLineStatus.PENDING_VERIFY.value,
+        unit_cost=10.0,
+        quantity=10,
+        po_number="PO-PP-1",
+        po_confirmed_at=datetime.now(timezone.utc),
+    )
+    db.add(line)
+    db.flush()
+    return line
+
+
 # ── Service tests ─────────────────────────────────────────────────────────────
 
 
@@ -141,11 +160,13 @@ def test_create_prepayment_400_routes_to_all_three(db_session: Session, test_use
     db_session.commit()
 
     buy_plan = _make_buy_plan(db_session, test_user)
+    line = _make_po_line(db_session, buy_plan)
     db_session.commit()
 
     prepayment, request = create_prepayment(
         db_session,
         buy_plan_id=buy_plan.id,
+        buy_plan_line_id=line.id,
         vendor_card_id=None,
         payment_method=PaymentMethod.WIRE,
         total_incl_fees=Decimal("400.00"),
@@ -211,11 +232,13 @@ def test_create_prepayment_2500_excludes_capped_approver(db_session: Session, te
     db_session.commit()
 
     buy_plan = _make_buy_plan(db_session, test_user)
+    line = _make_po_line(db_session, buy_plan)
     db_session.commit()
 
     _prepayment, request = create_prepayment(
         db_session,
         buy_plan_id=buy_plan.id,
+        buy_plan_line_id=line.id,
         vendor_card_id=None,
         payment_method=PaymentMethod.CC,
         total_incl_fees=Decimal("2500.00"),
