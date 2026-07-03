@@ -94,7 +94,9 @@ class TestDiagnoseSingle:
         r = c.post(f"/api/trouble-tickets/{t.id}/diagnose")
         assert r.status_code == 200
         assert "Submit handler swallows" in r.text
-        assert "Copy fix prompt" in r.text
+        # The fix prompt now rides along as an OOB swap of the shared #ticket-prompt box.
+        assert "Copy prompt" in r.text
+        assert 'id="ticket-prompt"' in r.text and 'hx-swap-oob="true"' in r.text
         assert r.headers.get("HX-Trigger") == "ticketsUpdated"
 
         db_session.refresh(t)

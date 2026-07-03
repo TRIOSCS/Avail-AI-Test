@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
-from ..constants import TicketSource, TicketStatus
+from ..constants import TicketSource, TicketStatus, TicketType
 from ..database import get_db
 from ..dependencies import require_admin, require_user
 from ..models import User
@@ -46,6 +46,7 @@ class ErrorReportCreate(BaseModel):
 class TicketUpdate(BaseModel):
     status: Optional[TicketStatus] = None
     resolution_notes: Optional[str] = Field(None, max_length=5000)
+    admin_notes: Optional[str] = Field(None, max_length=5000)
 
 
 class DiagnoseBulkBody(BaseModel):
@@ -88,18 +89,30 @@ def _save_screenshot(ticket_id: int, b64_data: str) -> str | None:
     return path
 
 
+def _coerce_ticket_type(value: Optional[str]) -> TicketType:
+    """Map an inbound ticket_type string to a TicketType, defaulting to BUG.
+
+    Anything that is not exactly 'feature' (missing, unknown, or the legacy Report-a-
+    Problem path that sends nothing) reads as a bug, so the existing bug-report flow is
+    unchanged.
+    """
+    return TicketType.FEATURE if value == TicketType.FEATURE else TicketType.BUG
+
+
 def _create_ticket(
     db: Session,
     user_id: int,
     message: str,
     current_url: Optional[str] = None,
     context: Optional[dict] = None,
+    ticket_type: TicketType = TicketType.BUG,
 ) -> TroubleTicket:
     """Create and persist a trouble ticket.
 
     Args:
         context: optional dict with keys user_agent, browser_info,
                  console_errors, network_errors, auto_captured_context, current_view.
+        ticket_type: BUG (default, unchanged Report-a-Problem path) or FEATURE.
     """
     ctx = context or {}
     ticket = TroubleTicket(
@@ -107,6 +120,7 @@ def _create_ticket(
         submitted_by=user_id,
         title=message[:120],
         description=message,
+        ticket_type=ticket_type,
         current_page=current_url or None,
         user_agent=ctx.get("user_agent") or None,
         browser_info=ctx.get("browser_info") or None,
@@ -172,11 +186,20 @@ async def _generate_ai_summary(ticket_id: int):
 
 
 @router.get("/api/trouble-tickets/form", response_class=HTMLResponse)
-async def trouble_ticket_form(request: Request, user: User = Depends(require_user)):
-    """Return the trouble report form partial for the modal."""
+async def trouble_ticket_form(
+    request: Request,
+    type: str = Query("bug"),
+    user: User = Depends(require_user),
+):
+    """Return the report form partial for the modal.
+
+    ``type`` selects the kind: 'feature' renders the Request-a-Feature copy, anything
+    else (default) renders the Report-a-Problem copy. Both share the same partial and
+    the same client-side context capture.
+    """
     return template_response(
         "htmx/partials/shared/trouble_report_form.html",
-        {"request": request},
+        {"request": request, "ticket_type": _coerce_ticket_type(type)},
     )
 
 
@@ -190,6 +213,7 @@ async def submit_trouble_ticket(
     """Handle submission from trouble ticket form — accepts JSON or form data."""
     content_type = request.headers.get("content-type", "")
     screenshot_b64 = ua = viewport = error_log = network_log_raw = auto_ctx_raw = None
+    ticket_type_raw: Optional[str] = None
 
     if "application/json" in content_type:
         try:
@@ -207,11 +231,13 @@ async def submit_trouble_ticket(
         error_log = body.get("error_log")
         network_log_raw = body.get("network_log")
         auto_ctx_raw = body.get("auto_captured_context")
+        ticket_type_raw = body.get("ticket_type")
     else:
         # Legacy form-encoded fallback
         form = await request.form()
         description = (form.get("message") or "").strip()
         page_url = form.get("current_url")
+        ticket_type_raw = form.get("ticket_type")
 
     if not description:
         return HTMLResponse(
@@ -256,6 +282,7 @@ async def submit_trouble_ticket(
                 "auto_captured_context": auto_ctx,
                 "current_view": (auto_ctx or {}).get("current_view") if isinstance(auto_ctx, dict) else None,
             },
+            ticket_type=_coerce_ticket_type(ticket_type_raw),
         )
     except Exception:
         db.rollback()
@@ -284,9 +311,10 @@ async def submit_trouble_ticket(
 
     background_tasks.add_task(_generate_ai_summary, ticket.id)
 
+    headline = "Feature request submitted!" if ticket.ticket_type == TicketType.FEATURE else "Report submitted!"
     return HTMLResponse(
         '<div class="p-4 text-center">'
-        '<div class="text-emerald-600 font-medium mb-2">Report submitted!</div>'
+        f'<div class="text-emerald-600 font-medium mb-2">{headline}</div>'
         f'<div class="text-sm text-gray-500 mb-3">Ticket {escape(ticket.ticket_number)}</div>'
         '<button type="button" @click="$dispatch(\'close-modal\')" '
         'class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Close</button>'
@@ -522,6 +550,8 @@ async def update_ticket(
             ticket.resolved_by_id = user.id
     if body.resolution_notes is not None:
         ticket.resolution_notes = body.resolution_notes
+    if body.admin_notes is not None:
+        ticket.admin_notes = body.admin_notes
 
     ticket.updated_at = datetime.now(timezone.utc)
     db.commit()
@@ -557,8 +587,66 @@ async def diagnose_ticket_endpoint(
             "AI diagnosis is unavailable right now. Please try again later.</div>"
         )
 
-    resp = template_response(
+    # Diagnosis swaps #diagnosis-container; the fix prompt it produced rides along as
+    # an out-of-band swap of the shared #ticket-prompt box (single home for the prompt).
+    diagnosis_html = template_response(
         "htmx/partials/tickets/_diagnosis.html",
+        {"request": request, "ticket": ticket},
+    ).body.decode()
+    prompt_html = template_response(
+        "htmx/partials/tickets/_generated_prompt.html",
+        {"request": request, "ticket": ticket, "oob": True},
+    ).body.decode()
+    resp = HTMLResponse(diagnosis_html + prompt_html)
+    resp.headers["HX-Trigger"] = "ticketsUpdated"
+    return resp
+
+
+@router.post("/api/trouble-tickets/{ticket_id}/generate-prompt", response_class=HTMLResponse)
+async def generate_prompt_endpoint(
+    request: Request,
+    ticket_id: int,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Admin: write a kind-aware, notes-aware Claude Code prompt for this ticket.
+
+    Persists any posted ``admin_notes`` first (so the prompt reflects the latest notes
+    even before the notes field is separately saved), then generates and stores the
+    prompt. Returns the #ticket-prompt copy box for an HTMX swap.
+    """
+    from ..services.ticket_prompt_service import generate_ticket_prompt
+    from ..utils.claude_errors import ClaudeError, ClaudeUnavailableError
+
+    ticket = db.get(TroubleTicket, ticket_id)
+    if not ticket:
+        raise HTTPException(404, "Ticket not found")
+
+    # Persist notes riding along on the request (hx-include of the notes textarea).
+    form = await request.form()
+    posted_notes = form.get("admin_notes")
+    if posted_notes is not None:
+        ticket.admin_notes = (posted_notes or "").strip() or None
+        ticket.updated_at = datetime.now(timezone.utc)
+        db.commit()
+
+    try:
+        prompt = await generate_ticket_prompt(db, ticket)
+    except (ClaudeUnavailableError, ClaudeError) as e:
+        logger.warning("Create-prompt failed for ticket {}: {}", ticket.ticket_number, e)
+        return HTMLResponse(
+            '<div class="p-3 text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-lg">'
+            "Prompt generation is unavailable right now. Please try again later.</div>"
+        )
+
+    if not prompt:
+        return HTMLResponse(
+            '<div class="p-3 text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-lg">'
+            "The AI returned no prompt. Please try again.</div>"
+        )
+
+    resp = template_response(
+        "htmx/partials/tickets/_generated_prompt.html",
         {"request": request, "ticket": ticket},
     )
     resp.headers["HX-Trigger"] = "ticketsUpdated"

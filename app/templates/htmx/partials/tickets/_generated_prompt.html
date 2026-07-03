@@ -1,0 +1,30 @@
+{# Generated Claude Code prompt — the single copy-to-clipboard box for
+   ticket.generated_prompt. Produced by EITHER the notes-aware "Create Prompt"
+   button (generate-prompt endpoint) OR the AI Diagnose byproduct; both write the
+   same generated_prompt column and swap this one container, so the prompt lives in
+   exactly one place.
+
+   Included by detail.html (normal swap target) and returned by:
+     - POST /api/trouble-tickets/{id}/generate-prompt  (direct swap into #ticket-prompt)
+     - POST /api/trouble-tickets/{id}/diagnose         (OOB swap; pass oob=True)
+
+   `oob` marks the container for htmx out-of-band replacement. #}
+<div id="ticket-prompt"{% if oob %} hx-swap-oob="true"{% endif %}>
+{% if ticket.generated_prompt %}
+  {% set is_feature = ticket.ticket_type == 'feature' %}
+  <div class="bg-violet-50 border border-violet-200 rounded-lg p-4" x-data="{ copied: false }">
+    <div class="flex items-center justify-between mb-2">
+      <p class="text-xs font-medium text-gray-600">
+        {{ 'Build prompt' if is_feature else 'Fix prompt' }} — paste into a Claude Code session
+      </p>
+      <button type="button"
+              @click="navigator.clipboard.writeText($refs.ttprompt.textContent); copied = true; setTimeout(() => copied = false, 2000)"
+              class="btn btn-primary btn-sm">
+        <span x-show="!copied">Copy prompt</span>
+        <span x-show="copied" x-cloak>Copied!</span>
+      </button>
+    </div>
+    <pre x-ref="ttprompt" class="text-xs text-gray-700 bg-white border border-violet-100 rounded p-3 whitespace-pre-wrap break-words max-h-72 overflow-auto">{{ ticket.generated_prompt }}</pre>
+  </div>
+{% endif %}
+</div>

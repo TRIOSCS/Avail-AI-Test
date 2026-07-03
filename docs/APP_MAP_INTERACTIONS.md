@@ -5596,23 +5596,31 @@ All three endpoints are consumed by the shared `attachmentsPanel` Alpine compone
 analogous routes under `/api/vendor-contacts/{id}/attachments` and
 `/api/vendor-contact-attachments/{id}`.
 
-## Trouble Tickets — Report capture + AI diagnosis (2026-06-24)
+## Trouble Tickets — Unified bug + feature capture + AI Create-Prompt (2026-06-24, kind added 2026-07-03)
 
-User-facing report (any authenticated user) and an admin-only management console with
-AI diagnosis. No DB migration — uses existing `trouble_tickets` columns.
+One ticket system, two kinds (`trouble_tickets.ticket_type` = `TicketType.BUG` |
+`TicketType.FEATURE`): a user-facing report/request (any authenticated user) and an
+admin-only management console with AI diagnosis + a notes-aware "Create Prompt" flow.
+Migration `180_ticket_kind_discriminator` adds `ticket_type` (server_default `'bug'`,
+so existing rows read as bugs). Both kinds share capture, inbox, and review.
 
 ```
 Report capture (frontend, app/static/htmx_app.js):
-  More menu "Report a problem" → window.openTroubleReport()
-    |  double-rAF (menu paints out) → captureTroubleScreenshot()
+  More menu "Report a problem"  → window.openTroubleReport('bug')
+  More menu "Request a feature" → window.openTroubleReport('feature')
+    |  sets window._ttKind; double-rAF (menu paints out) → captureTroubleScreenshot()
     |     lazy import('modern-screenshot') → domToPng(document.body)
     |     viewport-clamped PNG, 2MB downscale ladder (scale 1→0.75→0.5), null on any failure
     |  collectTroubleContext() → {nav_history, current_view (URL-derived), app_build, ...}
-    +→ $dispatch('open-modal', /api/trouble-tickets/form)
-  Capture stores: errorLog (window.onerror + console.error/warn tee), networkLog (htmx:afterRequest)
+    +→ $dispatch('open-modal', /api/trouble-tickets/form[?type=feature])
+  One shared form partial (shared/trouble_report_form.html) — kind-aware copy + accent
+  (rose bug / violet feature), tightened layout (compact collapsible screenshot chip,
+  no large empty box). Capture stores: errorLog (window.onerror + console.error/warn tee),
+  networkLog (htmx:afterRequest).
 
 POST /api/trouble-tickets/submit   (require_user)
-    +→ _create_ticket(): persists description, screenshot (disk), console_errors,
+    +→ _create_ticket(ticket_type=_coerce_ticket_type(body.ticket_type)): default BUG,
+       'feature' → FEATURE; persists description, screenshot (disk), console_errors,
        network_errors, browser_info, auto_captured_context (JSON), current_view
     +→ BackgroundTask _generate_ai_summary (claude_text, fast tier)
     Screenshot storage durability (TT-0002): PNGs land in error_reports.UPLOAD_DIR
@@ -5670,18 +5678,36 @@ viewport + dimmed-ring mask are the `.avatar-crop-stage` / `.avatar-crop-mask` p
 
 Admin console (require_admin):  Settings → Tickets  (tab admin-gated)
   GET  /v2/partials/trouble-tickets/{workspace,list,{id}}   (require_admin)
+       list?status=&type=  → _build_ticket_list_context(db, status, ticket_type):
+       one inbox, both kinds; the status + kind filter pills live INSIDE list.html
+       (each pill carries BOTH current_status and current_type in its hx-get URL, so
+       the two filters compose without client state — mirrors sightings/table.html).
+       _row.html carries a bug/feature badge.
   GET  /api/trouble-tickets/{id}/screenshot                 (require_admin — closes IDOR)
-  POST /api/trouble-tickets/analyze         → claude_structured groups into RootCauseGroup
-  POST /api/trouble-tickets/{id}/diagnose   → ticket_diagnosis_service.diagnose_ticket
-  POST /api/trouble-tickets/diagnose-bulk   → diagnose_tickets_bulk (Semaphore(4), one commit)
-  POST /api/trouble-tickets/bulk-status     → bulk resolve/wont_fix/in_progress
+  POST /api/trouble-tickets/analyze          → claude_structured groups into RootCauseGroup
+  POST /api/trouble-tickets/{id}/diagnose    → ticket_diagnosis_service.diagnose_ticket
+       (bugs only in the UI); returns _diagnosis.html + OOB _generated_prompt.html
+  POST /api/trouble-tickets/{id}/generate-prompt → ticket_prompt_service.generate_ticket_prompt
+       (persists hx-included admin_notes first, then writes generated_prompt)
+  PATCH /api/trouble-tickets/{id}            → status / resolution_notes / admin_notes
+  POST /api/trouble-tickets/diagnose-bulk    → diagnose_tickets_bulk (Semaphore(4), one commit)
+  POST /api/trouble-tickets/bulk-status      → bulk resolve/wont_fix/in_progress
        (all set HX-Trigger "ticketsUpdated"; #ticket-list reloads on it)
 
-ticket_diagnosis_service.diagnose_ticket:
+ticket_diagnosis_service.diagnose_ticket (bug root-cause aid):
   _build_diagnosis_prompt (text-only — claude_client has no vision; console/network truncated)
   → claude_structured_with_usage(schema=DIAGNOSIS_SCHEMA, model_tier="smart")
   → persists diagnosis (JSON), generated_prompt (paste-ready Claude Code prompt),
     diagnosed_at, cost_tokens, cost_usd
+
+ticket_prompt_service.generate_ticket_prompt (the key review flow, both kinds):
+  kind-aware system + user prompt built from captured context + admin_notes
+    - BUG     → fix task (page/route, console/network errors, page_state, screenshot ref, repro)
+    - FEATURE → build task (page/surface, description + why), nudging brainstorm→plan→build
+  → claude_text(model_tier="smart" → settings.anthropic_model; never hardcoded)
+  → persists generated_prompt. Detail.html renders it once in the shared #ticket-prompt
+    copy box (tickets/_generated_prompt.html), fed by BOTH Create Prompt (direct swap)
+    and Diagnose (OOB swap).
 ```
 
 Bulk selection state lives on the workspace Alpine component (`selected` array); row

@@ -12,7 +12,15 @@
   {# Header #}
   <div class="flex items-start justify-between mb-6">
     <div>
-      <h1 class="h1">{{ ticket.ticket_number }}</h1>
+      <div class="flex items-center gap-2">
+        <h1 class="h1">{{ ticket.ticket_number }}</h1>
+        {# Kind badge — feature (violet) vs bug (rose). #}
+        {% if ticket.ticket_type == 'feature' %}
+        <span class="text-[11px] font-medium px-2 py-0.5 rounded-full bg-violet-100 text-violet-700">Feature</span>
+        {% else %}
+        <span class="text-[11px] font-medium px-2 py-0.5 rounded-full bg-rose-100 text-rose-700">Bug</span>
+        {% endif %}
+      </div>
       <p class="text-sm text-gray-600 mt-1">
         Submitted {{ ticket.created_at|fmtdate("%b %d, %Y %H:%M") }}
         {% if ticket.submitter %} by {{ ticket.submitter.name or ticket.submitter.email }}{% endif %}
@@ -65,14 +73,60 @@
   </div>
   {% endif %}
 
-  {# AI Diagnosis — generate root cause + paste-ready fix prompt #}
+  {# Review & Create Prompt — the key admin flow. Michael's notes + a one-click,
+     kind-aware Claude Code prompt built from the ticket's captured context. #}
+  <div class="bg-gray-50 border border-line-base rounded-lg p-4 mb-6">
+    <h3 class="text-sm font-semibold text-gray-800 mb-3">Review &amp; Create Prompt</h3>
+
+    {# Editable notes — saved to admin_notes on blur (mirrors the status dropdown). #}
+    <label for="ticket-admin-notes" class="block text-xs font-medium text-gray-600 mb-1">
+      Your notes {% if ticket.ticket_type == 'feature' %}(intent, constraints, where it should live){% else %}(what to check, suspected cause, constraints){% endif %}
+    </label>
+    <textarea id="ticket-admin-notes" name="admin_notes" rows="3"
+              placeholder="Add context or direction for the prompt..."
+              @blur="fetch('/api/trouble-tickets/' + {{ ticket.id }}, {
+                method: 'PATCH',
+                headers: {'Content-Type': 'application/json', 'X-CSRFToken': (document.cookie.match(/csrftoken=([^;]+)/)?.[1] || '')},
+                body: JSON.stringify({admin_notes: $el.value})
+              }).then(function(r){
+                var t = Alpine.store('toast');
+                if (r.ok) { t.message = 'Notes saved'; t.type = 'success'; } else { t.message = 'Could not save notes'; t.type = 'error'; }
+                t.show = true;
+              }).catch(function(){
+                var t = Alpine.store('toast'); t.message = 'Could not save notes'; t.type = 'error'; t.show = true;
+              })"
+              class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 placeholder-gray-400">{{ ticket.admin_notes or '' }}</textarea>
+
+    <div class="flex items-center gap-3 mt-3 mb-4">
+      <button hx-post="/api/trouble-tickets/{{ ticket.id }}/generate-prompt"
+              hx-include="#ticket-admin-notes"
+              hx-target="#ticket-prompt"
+              hx-swap="outerHTML"
+              hx-indicator="#gp-spinner"
+              class="btn btn-primary gap-2">
+        {{ sparkle_icon("w-4 h-4") }}
+        {{ 'Re-create Prompt' if ticket.generated_prompt else 'Create Prompt' }}
+        <svg id="gp-spinner" class="htmx-indicator animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+        </svg>
+      </button>
+      <span class="text-xs text-gray-400">Builds a ready-to-paste Claude Code prompt from the captured context + your notes.</span>
+    </div>
+
+    {# Single home for the generated prompt (also OOB-updated by Diagnose below). #}
+    {% include "htmx/partials/tickets/_generated_prompt.html" %}
+  </div>
+
+  {# AI Diagnosis (bugs only) — structured root cause / severity / affected areas. #}
+  {% if ticket.ticket_type == 'bug' %}
   <div class="mb-6">
     <div class="flex items-center gap-3 mb-3">
       <button hx-post="/api/trouble-tickets/{{ ticket.id }}/diagnose"
               hx-target="#diagnosis-container"
               hx-swap="outerHTML"
               hx-indicator="#diagnose-spinner"
-              class="btn btn-primary gap-2">
+              class="btn btn-secondary gap-2">
         {{ sparkle_icon("w-4 h-4") }}
         {{ 'Re-diagnose with AI' if ticket.diagnosis else 'Diagnose with AI' }}
         <svg id="diagnose-spinner" class="htmx-indicator animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
@@ -83,6 +137,7 @@
     </div>
     {% include "htmx/partials/tickets/_diagnosis.html" %}
   </div>
+  {% endif %}
 
   {# Screenshot #}
   {% if ticket.screenshot_path or ticket.screenshot_b64 %}
