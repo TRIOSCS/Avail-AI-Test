@@ -163,11 +163,13 @@ fan-out alerts + Paid badge; teardown an approved prepayment → assert void + s
 
 ## Out of Scope (YAGNI)
 
-- `reconciled` state / QuickBooks / bank-statement matching (own program). NOTE: Trio's
-  QuickBooks is the **Desktop edition, hosted in Azure** — a reconciliation integration
-  would go through the QuickBooks **Web Connector / QBXML SDK** (or a hosted-desktop file
-  bridge), NOT the QuickBooks Online REST API (so the session's Intuit *QBO* connector does
-  not apply). Factor this into the reconciliation program's design.
+- `reconciled` state / ERP / bank-statement matching (own program, **round 2**). NOTE:
+  Trio's current QuickBooks is the **Desktop edition hosted in Azure and effectively
+  un-connectable** (no reachable API — the session's Intuit *QBO* connector does not
+  apply). The planned direction is **Microsoft Dynamics 365 as the ERP + finance system**,
+  configured as a **round-2 project once Avail is fully live**. So the reconciliation
+  program should target **Dynamics 365** (Dataverse / Business Central or F&O APIs), NOT
+  QuickBooks — do not invest in a QuickBooks integration.
 - Refund / claw-back tracking after a `paid` wire.
 - Emailing (vs in-app alerting) the buyer/salesperson/managers on paid — they're Avail users;
   in-app alerts suffice (email can be a later toggle).
