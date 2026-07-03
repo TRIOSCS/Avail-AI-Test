@@ -1,10 +1,11 @@
 """test_resell_rollup.py — Best-price rollup across a line's inbound offers.
 
 Covers ``recompute_line_rollup`` / ``withdraw_offer`` (spec §"Offer collection",
-"best-price rollup per line"): best_offer_unit_price = min unit_price across the
-line's ExcessOfferLines whose parent offer is active (open/won), best_offer_id =
-the offer providing that min, offer_count = distinct offers touching the line.
-None prices are ignored; withdrawing an offer recomputes the rollup.
+"best-price rollup per line"). An inbound offer is a broker bidding to BUY the excess, so
+the best bid is the HIGHEST price: best_offer_unit_price = max unit_price across the line's
+ExcessOfferLines whose parent offer is active (open/won), best_offer_id = the offer
+providing that max, offer_count = distinct offers touching the line. None prices are
+ignored; withdrawing an offer recomputes the rollup.
 
 Called by: pytest
 Depends on: app.services.excess_service, app.models.excess, tests.conftest
@@ -78,16 +79,40 @@ def _offer(db, el, user, price):
 # ---------------------------------------------------------------------------
 
 
-def test_rollup_picks_min_price_and_counts_offers(db_session: Session, rollup_fixture):
+def test_rollup_picks_max_price_and_counts_offers(db_session: Session, rollup_fixture):
     el, line, buyer_a, buyer_b = rollup_fixture
 
-    _offer(db_session, el, buyer_a, Decimal("2.00"))
-    cheaper = _offer(db_session, el, buyer_b, Decimal("1.50"))
+    _offer(db_session, el, buyer_a, Decimal("1.50"))
+    highest = _offer(db_session, el, buyer_b, Decimal("2.00"))
 
     db_session.refresh(line)
-    assert line.best_offer_unit_price == Decimal("1.50")
-    assert line.best_offer_id == cheaper.id
+    # Buy-side auction: the HIGHEST bid is the best (most money for the excess).
+    assert line.best_offer_unit_price == Decimal("2.00")
+    assert line.best_offer_id == highest.id
     assert line.offer_count == 2
+
+
+def test_rollup_picks_highest_of_three_and_ignores_null(db_session: Session, rollup_fixture):
+    el, line, buyer_a, buyer_b = rollup_fixture
+    buyer_c = _make_user(db_session, email="c@roll.com", role="buyer")
+    buyer_d = _make_user(db_session, email="d@roll.com", role="buyer")
+
+    _offer(db_session, el, buyer_a, Decimal("1.00"))
+    top = _offer(db_session, el, buyer_b, Decimal("3.50"))
+    _offer(db_session, el, buyer_c, Decimal("2.25"))
+    # A fourth, unpriced bid must be ignored for price selection — and never crash max().
+    submit_offer(
+        db_session,
+        list_id=el.id,
+        user=buyer_d,
+        scope="per_line",
+        lines=[{"mpn_raw": "LM358N", "quantity": 10}],  # no unit_price
+    )
+
+    db_session.refresh(line)
+    assert line.best_offer_unit_price == Decimal("3.50")
+    assert line.best_offer_id == top.id
+    assert line.offer_count == 4  # all four offers touch the line
 
 
 def test_rollup_ignores_null_prices(db_session: Session, rollup_fixture):
@@ -130,19 +155,20 @@ def test_rollup_all_null_leaves_best_price_none(db_session: Session, rollup_fixt
 def test_rollup_recomputes_after_withdraw(db_session: Session, rollup_fixture):
     el, line, buyer_a, buyer_b = rollup_fixture
 
-    higher = _offer(db_session, el, buyer_a, Decimal("2.00"))
-    lower = _offer(db_session, el, buyer_b, Decimal("1.50"))
+    lower = _offer(db_session, el, buyer_a, Decimal("1.50"))
+    higher = _offer(db_session, el, buyer_b, Decimal("2.00"))
 
     db_session.refresh(line)
-    assert line.best_offer_id == lower.id
+    # Best = the highest bid.
+    assert line.best_offer_id == higher.id
     assert line.offer_count == 2
 
-    withdraw_offer(db_session, lower.id)
+    withdraw_offer(db_session, higher.id)
 
     db_session.refresh(line)
-    # The withdrawn (best) offer drops out — next-best wins, count falls.
-    assert line.best_offer_unit_price == Decimal("2.00")
-    assert line.best_offer_id == higher.id
+    # The withdrawn (best) offer drops out — next-best (highest remaining) wins, count falls.
+    assert line.best_offer_unit_price == Decimal("1.50")
+    assert line.best_offer_id == lower.id
     assert line.offer_count == 1
 
 

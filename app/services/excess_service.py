@@ -530,13 +530,14 @@ def submit_offer(
 def recompute_line_rollup(db: Session, excess_line_item_id: int) -> None:
     """Recompute the best-price rollup for one ExcessLineItem from its offers.
 
-    Sets ``best_offer_unit_price`` to the min ``unit_price`` across the line's
-    ExcessOfferLines whose parent offer is in an active state (open/won) and whose
-    ``unit_price`` is not null (None when no priced active offers); ``best_offer_id`` to
-    the ExcessOffer providing that min; ``offer_count`` to the number of DISTINCT offers
-    touching the line (priced or not). Mirrors the spirit of
-    sighting_aggregation.rebuild_vendor_summaries (best = min price) but offer-based and
-    keyed on the line. Idempotent — safe to call after a land or a withdraw.
+    An inbound ExcessOffer is a broker bidding to BUY the excess, so the BEST bid is the
+    HIGHEST ``unit_price`` — the most money for the parts and the correct award target
+    (this is the inverse of the sourcing side, where best = cheapest supply). Sets
+    ``best_offer_unit_price`` to the max ``unit_price`` across the line's ExcessOfferLines
+    whose parent offer is in an active state (open/won) and whose ``unit_price`` is not
+    null (None when no priced active offers); ``best_offer_id`` to the ExcessOffer
+    providing that max; ``offer_count`` to the number of DISTINCT offers touching the line
+    (priced or not). Idempotent — safe to call after a land or a withdraw.
     """
     item = db.get(ExcessLineItem, excess_line_item_id)
     if not item:
@@ -556,7 +557,9 @@ def recompute_line_rollup(db: Session, excess_line_item_id: int) -> None:
 
     priced = [r for r in rows if r.unit_price is not None]
     if priced:
-        best = min(priced, key=lambda r: r.unit_price)
+        # Best buy-side bid = the HIGHEST unit_price. None prices are filtered above so
+        # they never reach max(); ties resolve to the first row in query order.
+        best = max(priced, key=lambda r: r.unit_price)
         item.best_offer_unit_price = best.unit_price
         item.best_offer_id = best.offer_id
     else:
