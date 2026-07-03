@@ -5,6 +5,23 @@ Keep this current as items land or new ones arrive.
 
 ---
 
+## ⭐ PRIORITY ORDER (2026-07-03 — execute top-down; user delegated "do each item by priority")
+
+| P | Item | Why here | Task |
+|---|------|----------|------|
+| **P0** | Deploy the 7 built-but-unshipped commits to staging + verify (sightings hide-closed-deals, API-search Phase 0, requisitions UI) | finish/ship what's already built | #13 ✅ built |
+| **P1** | Sightings — collapsible brand/mfr groups + clean/reset | daily-driver friction on a page you work in constantly; cheap, high value | #14 |
+| **P1** | Sales Hub — nested customer › requisition › lines grouping + collapse | same; **shares ONE reusable collapse/group pattern** with #14 (build once) | #15 |
+| **P2** | Feature-request ticket system + rich context on BOTH ticket types + "Create Prompt" AI action (folds in trouble-ticket form cleanup) | high leverage — makes every future request you file richer + one-click into a CLI prompt | #16, #12 |
+| **P3** | API-search core sprint — Phases 1-4 | the product's core; large multi-phase program (Phase 0 ships in P0), so it runs after the quick wins; deploy+verify each phase | #7 |
+| **P4** | Resell rework → Prospecting rework → Tasks rework | bigger module reworks; each = brainstorm → spec → plan → build | #8, #10, #11 |
+| **P5** | CRM aesthetics / readability pass | polish; larger design sweep | #9 |
+
+Sequencing notes: P1's two items share one collapse/group component. Build all in **Fable**.
+Deploy + verify each shippable increment to staging. User can reorder any time.
+
+---
+
 ## ✅ COMPLETED + DEPLOYED (staging) this session
 
 | # | Item | Where / notes |
@@ -42,6 +59,13 @@ prepayment + API-search reviews (Fable multi-lens audit workflow → action plan
 | **CRM aesthetics / readability** pass | Customers/Contacts/Companies + detail panels: easier to read, more pleasing, important info stands out WITHOUT being noise — clean + effective. Visual hierarchy, signal-vs-noise. (frontend-design; targeted taste sweep) |
 | **Trouble-ticket "Report a Problem" data entry** — cleanup + simplification + optimization | the Report-a-Problem modal (app/templates/htmx/partials/shared/trouble_report_form.html): lots of empty space (big blank auto-screenshot box), tighten/simplify the form |
 | **Sightings page — hide won/lost/archived deals** (quick fix) | The sightings page is for buyers to ACTIVELY source + find offers for OPEN requirements. Won/lost/archived deals (closed requirements) must NOT appear. Filter them out of the sightings query. |
+
+### 🧩 "Workspace grouping & collapse UX" theme (related — do together / shared pattern)
+Buyers/salespeople need to group + collapse/expand + reset their working lists so they can focus on one group at a time. Build ONE reusable collapse/group pattern and apply across:
+| Surface | Ask |
+|---------|-----|
+| **Sightings** — collapsible brand/manufacturer groups + clean/reset | Collapse groups they don't want to work on now, open the ones they do; a "clean & reset" function to reset view/groupings. (grouping already exists in the query — add collapse + reset) |
+| **Sales Hub** — nested grouping customer › requisition › requirement lines | Requirement lines grouped by requisition, requisitions grouped by customer (2-level). Easy expand/collapse (and/or filter) — cleanest, most efficient structure. |
 
 ## 🧑 USER-SIDE (yours, not code — whenever)
 
