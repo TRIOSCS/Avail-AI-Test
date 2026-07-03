@@ -90,6 +90,22 @@ Usage:
 {%- endmacro %}
 
 
+{# ── Request-prepayment trigger button ────────────────────────────────
+   Opens the prepayment request modal (prefilled from the line) into the global
+   #modal-content via the open-modal event. Gate the CALL SITE with
+   can_request_prepayment(user, line) — the macro renders the button unconditionally (same
+   convention as resource_form, which is gated at its call site by can_resource). Args:
+   line — the cut BuyPlanLine (needs .id); plan — its BuyPlan (unused in the URL but kept
+   for a stable, self-documenting (line, plan) signature and parity with resource_form). #}
+{% macro request_prepayment_button(line, plan) -%}
+<button type="button"
+        @click="$dispatch('open-modal', {url: '/v2/partials/prepayments/new?line_id={{ line.id }}'})"
+        class="btn btn-secondary btn-sm">
+  Request prepayment
+</button>
+{%- endmacro %}
+
+
 {# ── Approvals hub SEE-ALL / SEE-MINE segmented toggle ─────────────────
    The per-tab scope switch. Reloads THIS tab body (#ap-hub-body) at the chosen scope;
    default "all" (approvers land on the full queue). Active pill = accent-500 (the taste

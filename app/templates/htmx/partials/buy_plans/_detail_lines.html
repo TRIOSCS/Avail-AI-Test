@@ -9,7 +9,7 @@
   `line_status_pill(line)` macro for the Status cell.
 #}
 {% from "htmx/partials/shared/_macros.html" import status_badge, user_avatar %}
-{% from "htmx/partials/buy_plans/_macros.html" import resource_form %}
+{% from "htmx/partials/buy_plans/_macros.html" import resource_form, request_prepayment_button %}
 
 {# ── Status cell: status badge + optional PO# (extracted verbatim from the inline block) ── #}
 {% macro line_status_pill(line) %}
@@ -160,6 +160,13 @@
               {% if can_resource and line.status in ['pending_verify', 'verified'] and bp.status in ['active', 'completed'] %}
               {% set other_cut = lines|selectattr('status', 'in', ['pending_verify', 'verified'])|rejectattr('id', 'eq', line.id)|list %}
               {{ resource_form(line, bp, other_cut) }}
+              {% endif %}
+
+              {# ── Request prepayment: a cut PO (pending_verify/verified) the owner wants paid
+                   up-front. Gated at the call site by can_request_prepayment (ownership + cut-PO
+                   state — the SAME rule create_prepayment enforces on submit). ── #}
+              {% if can_request_prepayment(user, line) %}
+              <div class="mt-1.5">{{ request_prepayment_button(line, bp) }}</div>
               {% endif %}
 
               {# ── Open pool: a re-sourced line awaiting a claim. Any PO-cutter can grab it. ── #}

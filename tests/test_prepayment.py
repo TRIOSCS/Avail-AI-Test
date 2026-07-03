@@ -275,12 +275,14 @@ def test_post_prepayments_returns_200_with_request_id(db_session: Session, clien
     db_session.commit()
 
     buy_plan = _make_buy_plan(db_session, test_user)
+    line = _make_po_line(db_session, buy_plan)
     db_session.commit()
 
     resp = client.post(
         "/v2/prepayments",
         json={
             "buy_plan_id": buy_plan.id,
+            "buy_plan_line_id": line.id,
             "vendor_card_id": None,
             "payment_method": PaymentMethod.WIRE,
             "total_incl_fees": "500.00",

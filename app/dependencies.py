@@ -301,6 +301,37 @@ def can_verify_po_line(user: User | None, line) -> bool:
     return _line_amount(line) <= limit
 
 
+def can_request_prepayment(user: User | None, line) -> bool:
+    """True if *user* may request a prepayment on THIS PO line.
+
+    Mirrors the gate ``create_prepayment`` enforces so the Request-prepayment button hides
+    exactly where the service would reject the request:
+      - the line must have a cut PO (``po_number`` set) in PENDING_VERIFY / VERIFIED; and
+      - the actor must be able to access the parent buy plan — the SAME rule
+        ``get_buyplan_for_user`` applies (restricted roles must own the parent Requisition;
+        buyer/manager/admin are unrestricted).
+
+    The ownership rule is replicated inline (reading the already-loaded ``line.buy_plan``
+    → ``requisition``) rather than re-querying via ``get_buyplan_for_user`` so this
+    per-row template predicate does no extra DB round-trip — the same shape as
+    :func:`can_verify_po_line`, which is also a pure ``(user, line)`` predicate.
+    """
+    if user is None or line is None:
+        return False
+    from .constants import BuyPlanLineStatus
+
+    if not line.po_number or line.status not in (
+        BuyPlanLineStatus.PENDING_VERIFY.value,
+        BuyPlanLineStatus.VERIFIED.value,
+    ):
+        return False
+    if getattr(user, "role", None) not in RESTRICTED_ROLES:
+        return True
+    plan = getattr(line, "buy_plan", None)
+    req = getattr(plan, "requisition", None) if plan is not None else None
+    return bool(req is not None and req.created_by == user.id)
+
+
 def require_buyplan_po_approver(request: Request, db: Session = Depends(get_db)) -> User:
     """Dependency: 403 unless the current user holds the purchase-order approval right.
 

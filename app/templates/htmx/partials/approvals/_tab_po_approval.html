@@ -13,7 +13,7 @@
              resource handlers (origin=approvals_hub).
   Depends on: HTMX, Alpine.js, Tailwind; resource_form macro; can_verify_po_line Jinja global.
 #}
-{% from "htmx/partials/buy_plans/_macros.html" import resource_form, scope_toggle %}
+{% from "htmx/partials/buy_plans/_macros.html" import resource_form, scope_toggle, request_prepayment_button %}
 
 <div class="space-y-6">
   <div>
@@ -53,6 +53,10 @@
           {% endif %}
           {% if can_resource %}
           {{ resource_form(row.line, row.plan, [], 'approvals_hub', '#ap-hub-body', scope) }}
+          {% endif %}
+          {# Request-prepayment: same ownership + cut-PO gate create_prepayment enforces. #}
+          {% if can_request_prepayment(user, row.line) %}
+          {{ request_prepayment_button(row.line, row.plan) }}
           {% endif %}
         </div>
       </div>

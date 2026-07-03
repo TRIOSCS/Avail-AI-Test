@@ -350,7 +350,12 @@ templates.env.globals["roles"] = _CANONICAL_ROLES
 # Buy-plan approval right exposed as a Jinja2 global so templates hide the approve/reject
 # UI using the SAME predicate the require_buyplan_approver dependency enforces on the POST
 # (single source of truth — the per-user User.can_approve_buy_plans column).
-from .dependencies import can_approve_buy_plans, can_approve_purchase_orders, can_verify_po_line  # noqa: E402
+from .dependencies import (  # noqa: E402
+    can_approve_buy_plans,
+    can_approve_purchase_orders,
+    can_request_prepayment,
+    can_verify_po_line,
+)
 
 templates.env.globals["can_approve_buy_plans"] = can_approve_buy_plans
 # Purchase-order approval right exposed the same way: templates hide the verify-PO UI using
@@ -361,6 +366,10 @@ templates.env.globals["can_approve_purchase_orders"] = can_approve_purchase_orde
 # checked against THIS line's dollar amount — the SAME check verify_po enforces on the
 # POST, so an over-limit line hides the Verify/Reject buttons instead of 403ing.
 templates.env.globals["can_verify_po_line"] = can_verify_po_line
+# Prepayment request predicate: the "Request prepayment" button on a cut PO hides using the
+# SAME ownership + cut-PO rule create_prepayment enforces on the request (a restricted-role
+# non-owner or a line without a live PO gets no button instead of a 404/400 on submit).
+templates.env.globals["can_request_prepayment"] = can_request_prepayment
 
 # QP section review rights (Phase 3 decision C): the QP Sales/Purchasing "Mark Reviewed"
 # controls hide using the SAME per-user predicates toggle_section_reviewed enforces on the
