@@ -16,6 +16,7 @@ Depends on: app.models, app.dependencies, app.database, app.services, ._shared
 import asyncio
 import json
 import os
+import time
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
@@ -620,34 +621,84 @@ async def connector_card_partial(
     return template_response("htmx/partials/settings/_connector_card_partial.html", ctx)
 
 
+# Test-all budgets. Each probe is a real live search — most connectors finish in
+# 15-30s, AI web search up to ~60s. Run them CONCURRENTLY (was: sequential, so >4 live
+# connectors blew the client's 15s htmx timeout → the XHR aborted, every OOB card/summary
+# was discarded, and the server kept burning paid quota). Bound each probe, bound the
+# whole sweep under the button's raised hx-request timeout, and poll for client
+# disconnect so an abandoned sweep stops burning quota.
+_TEST_ALL_PROBE_TIMEOUT_S = 60.0
+_TEST_ALL_OVERALL_BUDGET_S = 90.0
+_TEST_ALL_DISCONNECT_POLL_S = 0.5
+
+
 @router.post("/v2/partials/settings/connectors/test-all", response_class=HTMLResponse)
 async def connectors_test_all(
     request: Request,
     user: User = Depends(require_access(AccessKey.MANAGE_CONNECTORS)),
     db: Session = Depends(get_db),
 ):
-    """Run Test for every credentialed + active source, sequentially (don't hammer
-    provider APIs), and return an OOB bundle of refreshed cards.
+    """Run Test for every testable + active source CONCURRENTLY and return an OOB bundle
+    of refreshed cards.
 
     Gated on MANAGE_CONNECTORS (admins always qualify) — matches the per-source Test
-    endpoint (SET-06). Sources without credentials / inactive are skipped. Per-source
-    failures are tolerated (recorded as Error) and never abort the sweep.
+    endpoint (SET-06). Non-testable / inactive / dead sources are skipped. Each probe is
+    bounded by a per-probe timeout, the whole sweep by an overall budget, and the loop
+    aborts early if the client disconnects — so an abandoned sweep stops burning paid
+    quota. Per-source failures are tolerated (recorded as Error) and never abort the
+    sweep. Network I/O overlaps across probes; status is persisted sequentially on this
+    one session afterward (concurrent commits on a shared session would race).
     """
-    from ..sources import run_source_test
+    from ..sources import _persist_test_result, _probe_source
 
     sources = db.query(ApiSource).order_by(ApiSource.display_name).all()
+    candidates = [
+        src
+        for src in sources
+        if src.name not in _DEAD_CONNECTORS and src.is_active and _enrich_source(src, db)["testable"]
+    ]
 
-    tested: list[dict] = []
-    for src in sources:
-        if src.name in _DEAD_CONNECTORS or not src.is_active:
-            continue
-        enriched = _enrich_source(src, db)
-        if not enriched["testable"]:
-            continue
+    async def _guarded(src):
+        """Probe one source, bounded by the per-probe timeout.
+
+        Never raises (except on outer cancellation, which marks the task cancelled).
+        """
         try:
-            await run_source_test(src, db)
-        except Exception as e:  # defensive — run_source_test already swallows
-            logger.warning("Test-all probe failed for {}: {}", src.name, e)
+            return await asyncio.wait_for(_probe_source(src, db), timeout=_TEST_ALL_PROBE_TIMEOUT_S)
+        except (TimeoutError, asyncio.TimeoutError):
+            ms = int(_TEST_ALL_PROBE_TIMEOUT_S * 1000)
+            return {"results": [], "elapsed_ms": ms, "error": f"Test exceeded {int(_TEST_ALL_PROBE_TIMEOUT_S)}s"}
+
+    tasks = {src.id: asyncio.create_task(_guarded(src)) for src in candidates}
+    pending = set(tasks.values())
+    deadline = time.monotonic() + _TEST_ALL_OVERALL_BUDGET_S
+    while pending:
+        if await request.is_disconnected():
+            break
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        _done, pending = await asyncio.wait(
+            pending,
+            timeout=min(remaining, _TEST_ALL_DISCONNECT_POLL_S),
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+    # Cancel any probes still running (budget hit or client gone) and drain them.
+    for t in pending:
+        t.cancel()
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
+
+    # Persist sequentially on the shared session (no concurrent commits).
+    tested: list[dict] = []
+    for src in candidates:
+        task = tasks[src.id]
+        if task.cancelled() or not task.done():
+            continue
+        outcome = task.result()  # _guarded never raises for a completed task
+        _persist_test_result(
+            src, db, results=outcome["results"], elapsed_ms=outcome["elapsed_ms"], error=outcome["error"]
+        )
         tested.append(_enrich_source(src, db))
 
     failed = sum(1 for s in tested if s["state"] == "error")
