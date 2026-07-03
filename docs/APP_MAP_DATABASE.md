@@ -424,9 +424,11 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 | id | Integer PK | |
 | vendor_card_id | FK -> vendor_cards (SET NULL), nullable | |
 | buy_plan_id | FK -> buy_plans_v3 (CASCADE) | |
+| buy_plan_line_id | FK -> buy_plan_lines (SET NULL), nullable, indexed | Migration 178 — the specific cut PO line prepaid; SET NULL so the record outlives a line delete |
 | total_incl_fees | Numeric 12,2 NOT NULL | Inclusive of all fees |
 | currency | String 10 NOT NULL | server_default USD |
 | payment_method | String 20, nullable | `PaymentMethod`: `cc`\|`paypal`\|`wire` |
+| vendor_name | String 255, nullable | Migration 178 — payee snapshot; `create_prepayment` derives it server-side (line's offer, else vendor card) so the approver/AP always see who is paid even if the line/offer later changes |
 | test_report_sent | Boolean NOT NULL | server_default false |
 | buyer_remarks | Text, nullable | |
 | created_by_id | FK -> users (SET NULL) | |

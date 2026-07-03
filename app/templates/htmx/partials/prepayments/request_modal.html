@@ -2,8 +2,9 @@
   prepayments/request_modal.html — "Request prepayment" modal for a specific cut PO line.
   Loaded into #modal-content by the Request-prepayment button via
   $dispatch('open-modal', {url: '/v2/partials/prepayments/new?line_id={id}'}).
-  Prefilled from the line: vendor (read-only), PO#, amount (unit_cost*qty, editable),
-  payment method, test-report flag, buyer remarks. Posts (form-encoded) to
+  Prefilled from the line: vendor (read-only + a hidden vendor_name fallback), PO#, amount
+  (unit_cost*qty, editable), currency (USD default), payment method, test-report flag,
+  buyer remarks. Posts (form-encoded) to
   /v2/partials/prepayments, which spawns the prepayment + its routed approval and returns a
   success/error toast (no page swap — HX-Reswap:none). The modal closes on any 2xx.
   Receives: line (BuyPlanLine), plan (BuyPlan), vendor_name (str|None), amount (float),
@@ -30,15 +31,29 @@
       <label class='form-label'>Vendor</label>
       <input type='text' value='{{ vendor_name or "—" }}' readonly
              class='w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-gray-50 text-gray-600'>
+      {# Prefilled payee snapshot — a fallback only; create_prepayment derives the
+         authoritative payee server-side from the line's offer / vendor card. #}
+      <input type='hidden' name='vendor_name' value='{{ vendor_name or "" }}'>
     </div>
 
-    <div>
-      <label class='form-label'>Amount (incl. fees) <span class="text-rose-500">*</span></label>
-      <input type='number' name='total_incl_fees' required min='0' step='0.01'
-             value='{{ "%.2f"|format(amount) }}'
-             class='w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-brand-500 focus:border-brand-500'>
-      <p class='mt-1 text-secondary'>Prefilled from the PO line — edit if the wire total differs.</p>
+    <div class='flex gap-2'>
+      <div class='flex-1'>
+        <label class='form-label'>Amount (incl. fees) <span class="text-rose-500">*</span></label>
+        <input type='number' name='total_incl_fees' required min='0' step='0.01'
+               value='{{ "%.2f"|format(amount) }}'
+               class='w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-brand-500 focus:border-brand-500'>
+      </div>
+      <div class='w-28'>
+        <label class='form-label'>Currency</label>
+        <select name='currency'
+                class='w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-brand-500 focus:border-brand-500'>
+          {% for code in ["USD", "EUR", "GBP", "AED"] %}
+          <option value='{{ code }}'>{{ code }}</option>
+          {% endfor %}
+        </select>
+      </div>
     </div>
+    <p class='text-secondary'>Amount prefilled from the PO line — edit if the wire total differs.</p>
 
     <div>
       <label class='form-label'>Payment method</label>

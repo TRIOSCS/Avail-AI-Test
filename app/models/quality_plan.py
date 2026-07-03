@@ -164,6 +164,11 @@ class Prepayment(Base):
     currency = Column(String(10), nullable=False, default="USD")
     payment_method = Column(String(20), nullable=True)  # PaymentMethod
 
+    # Payee snapshot (migration 178): the vendor name captured at request time from the
+    # line's offer (Offer.vendor_name, NOT-NULL) or the vendor card's display_name, so the
+    # approver / AP always see who is being paid even if the line/offer later changes.
+    vendor_name = Column(String(255), nullable=True)
+
     test_report_sent = Column(Boolean, nullable=False, default=False)
     buyer_remarks = Column(Text, nullable=True)
 

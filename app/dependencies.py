@@ -25,7 +25,14 @@ from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from .constants import RESTRICTED_ROLES, ROLE_ACCESS_DEFAULTS, AccessKey, ApprovalRecipientStatus, UserRole
+from .constants import (
+    RESTRICTED_ROLES,
+    ROLE_ACCESS_DEFAULTS,
+    AccessKey,
+    ApprovalRecipientStatus,
+    BuyPlanStatus,
+    UserRole,
+)
 from .database import get_db
 from .models import AccountCollaborator, BuyPlan, Company, CustomerSite, Quote, Requisition, User
 
@@ -301,11 +308,28 @@ def can_verify_po_line(user: User | None, line) -> bool:
     return _line_amount(line) <= limit
 
 
+# Buy-plan header statuses at/after which a NEW prepayment request makes no sense: the
+# three terminal states (a dead plan keeps VERIFIED lines) plus INBOUND (goods already
+# inbound, awaiting receipt). Single source of truth shared by create_prepayment (the
+# service guard) and can_request_prepayment (the button-visibility predicate) so the two
+# never drift.
+PREPAYMENT_BLOCKED_PLAN_STATUSES = frozenset(
+    {
+        BuyPlanStatus.COMPLETED.value,
+        BuyPlanStatus.CANCELLED.value,
+        BuyPlanStatus.HALTED.value,
+        BuyPlanStatus.INBOUND.value,
+    }
+)
+
+
 def can_request_prepayment(user: User | None, line) -> bool:
     """True if *user* may request a prepayment on THIS PO line.
 
     Mirrors the gate ``create_prepayment`` enforces so the Request-prepayment button hides
     exactly where the service would reject the request:
+      - the parent buy plan must not be terminal/inbound (see
+        ``PREPAYMENT_BLOCKED_PLAN_STATUSES``); and
       - the line must have a cut PO (``po_number`` set) in PENDING_VERIFY / VERIFIED; and
       - the actor must be able to access the parent buy plan — the SAME rule
         ``get_buyplan_for_user`` applies (restricted roles must own the parent Requisition;
@@ -320,6 +344,9 @@ def can_request_prepayment(user: User | None, line) -> bool:
         return False
     from .constants import BuyPlanLineStatus
 
+    plan = getattr(line, "buy_plan", None)
+    if plan is not None and getattr(plan, "status", None) in PREPAYMENT_BLOCKED_PLAN_STATUSES:
+        return False
     if not line.po_number or line.status not in (
         BuyPlanLineStatus.PENDING_VERIFY.value,
         BuyPlanLineStatus.VERIFIED.value,
@@ -327,7 +354,6 @@ def can_request_prepayment(user: User | None, line) -> bool:
         return False
     if getattr(user, "role", None) not in RESTRICTED_ROLES:
         return True
-    plan = getattr(line, "buy_plan", None)
     req = getattr(plan, "requisition", None) if plan is not None else None
     return bool(req is not None and req.created_by == user.id)
 

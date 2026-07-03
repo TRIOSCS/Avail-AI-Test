@@ -126,6 +126,8 @@ def test_request_modal_prefills_amount_from_line(client, db_session: Session, te
     assert "20.00" in r.text  # amount (unit_cost 10 * qty 2) prefilled into total_incl_fees
     assert "AcmeVendor" in r.text  # vendor prefilled from line.offer.vendor_card
     assert "PO-2024" in r.text
+    assert "name='currency'" in r.text  # currency select (USD default; finding #9)
+    assert "name='vendor_name'" in r.text  # hidden payee-snapshot fallback (finding #3)
 
 
 # ── HTMX create ──────────────────────────────────────────────────────────

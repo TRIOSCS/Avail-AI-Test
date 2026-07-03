@@ -10,6 +10,8 @@ Purpose: Persists a Prepayment row and immediately spawns a routed
 
 Called by: app.routers.prepayments (POST /v2/prepayments).
 Depends on: app.models.quality_plan (Prepayment), app.models.buy_plan (BuyPlanLine),
+            app.models.vendors (VendorCard), app.dependencies
+            (PREPAYMENT_BLOCKED_PLAN_STATUSES, get_buyplan_for_user),
             app.services.approvals.service (create_request),
             app.constants (ApprovalGateType, ApprovalRequestStatus, ApprovalSubjectType,
             BuyPlanLineStatus, PaymentMethod).
@@ -25,10 +27,11 @@ from ..constants import (
     ApprovalSubjectType,
     BuyPlanLineStatus,
 )
-from ..dependencies import get_buyplan_for_user
+from ..dependencies import PREPAYMENT_BLOCKED_PLAN_STATUSES, get_buyplan_for_user
 from ..models.approvals import ApprovalRequest
 from ..models.buy_plan import BuyPlanLine
 from ..models.quality_plan import Prepayment
+from ..models.vendors import VendorCard
 from ..services.approvals.service import create_request
 
 
@@ -43,6 +46,8 @@ def create_prepayment(
     test_report_sent: bool,
     buyer_remarks: str | None,
     created_by,  # User ORM object
+    vendor_name: str | None = None,
+    currency: str = "USD",
 ) -> tuple[Prepayment, ApprovalRequest]:
     """Persist a Prepayment and spawn a routed prepayment approval request.
 
@@ -57,6 +62,12 @@ def create_prepayment(
         test_report_sent: Whether the vendor already returned the test report.
         buyer_remarks: Free-text notes from the buyer.
         created_by: The authenticated User triggering the prepayment.
+        vendor_name: Client-prefilled payee name — a *fallback only*. The authoritative
+            payee is always derived server-side (the line's offer, else the vendor card);
+            this value is used solely when neither server source resolves, so a
+            client-supplied string can never override the real payee.
+        currency: ISO currency code for the amount (default "USD"). Captured onto the
+            Prepayment and threaded to the approval request so limits/notices are honest.
 
     Returns:
         A (Prepayment, ApprovalRequest) tuple — both flushed, not yet committed.
@@ -66,13 +77,25 @@ def create_prepayment(
             approver exists for the PREPAYMENT gate at this amount.
         HTTPException(404): If *created_by* may not access *buy_plan_id* (restricted
             roles not owning the parent requisition).
-        ValueError: If *buy_plan_line_id* does not belong to *buy_plan_id*, the line has
-            no cut PO (no po_number / not PENDING_VERIFY|VERIFIED), or a prepayment for
-            the line is already awaiting approval (race-safe duplicate-pending guard).
+        ValueError: If *total_incl_fees* <= 0, the parent plan is terminal/inbound,
+            *buy_plan_line_id* does not belong to *buy_plan_id*, the line has no cut PO
+            (no po_number / not PENDING_VERIFY|VERIFIED), or a prepayment for the line is
+            already awaiting approval OR already approved (race-safe double-pay guard).
     """
+    # Amount must be positive: a zero/negative total silently satisfies any approver limit
+    # and routes to the lowest tier (finding #4).
+    if total_incl_fees is None or total_incl_fees <= 0:
+        raise ValueError("Prepayment amount must be greater than zero.")
+
     # Ownership gate (service-layer so the router stays thin): a Prepayment + routed
     # ApprovalRequest must not be attachable to a buy plan the actor can't access.
     plan = get_buyplan_for_user(db, created_by, buy_plan_id)
+
+    # Plan-status gate (finding #5): a dead/inbound plan keeps VERIFIED lines, but a new
+    # prepayment on it makes no sense. Mirrored in dependencies.can_request_prepayment so
+    # the button hides exactly where this rejects.
+    if plan.status in PREPAYMENT_BLOCKED_PLAN_STATUSES:
+        raise ValueError(f"Cannot request a prepayment on a {plan.status} buy plan.")
 
     # Lock the line to serialize concurrent prepayment requests on the same PO (a no-op on
     # SQLite, enforced on PostgreSQL). The lock + the REQUESTED re-check below together are
@@ -86,8 +109,10 @@ def create_prepayment(
     ):
         raise ValueError("This PO is not ready for a prepayment request.")
 
-    # One in-flight prepayment per PO: block a second REQUESTED prepayment on this line.
-    # Enum members (no .value) match the ApprovalRequest comparison convention in
+    # One live prepayment per PO: block a second prepayment that is still REQUESTED *or*
+    # already APPROVED on this line — an approved (about-to-be-wired) prepayment must also
+    # block a duplicate, else the same PO gets paid twice (finding #1). Enum members (no
+    # .value) match the ApprovalRequest comparison convention in
     # services/approvals/queue.py + service.py.
     existing = (
         db.query(ApprovalRequest.id)
@@ -95,20 +120,36 @@ def create_prepayment(
         .filter(
             ApprovalRequest.subject_type == ApprovalSubjectType.PREPAYMENT,
             ApprovalRequest.gate_type == ApprovalGateType.PREPAYMENT,
-            ApprovalRequest.status == ApprovalRequestStatus.REQUESTED,
+            ApprovalRequest.status.in_([ApprovalRequestStatus.REQUESTED, ApprovalRequestStatus.APPROVED]),
             Prepayment.buy_plan_line_id == buy_plan_line_id,
         )
         .first()
     )
     if existing:
-        raise ValueError("A prepayment for this PO is already awaiting approval.")
+        raise ValueError("A prepayment for this PO is already awaiting approval or approved.")
+
+    # Snapshot the payee so the approver / AP always see who is being paid even if the line
+    # or offer later changes (finding #3): prefer authoritative server sources (never let a
+    # client string name the payee over a real source) — the line's offer vendor_name (a
+    # NOT-NULL string), else the passed vendor card's display_name, else the client-
+    # prefilled fallback, else None.
+    payee_name = None
+    if line.offer is not None:
+        payee_name = line.offer.vendor_name
+    elif vendor_card_id is not None:
+        card = db.get(VendorCard, vendor_card_id)
+        payee_name = card.display_name if card is not None else None
+    if payee_name is None:
+        payee_name = vendor_name
 
     prepayment = Prepayment(
         buy_plan_id=plan.id,
         buy_plan_line_id=buy_plan_line_id,
         vendor_card_id=vendor_card_id,
+        vendor_name=payee_name,
         payment_method=payment_method,
         total_incl_fees=total_incl_fees,
+        currency=currency,
         test_report_sent=test_report_sent,
         buyer_remarks=buyer_remarks,
         created_by_id=created_by.id if created_by is not None else None,

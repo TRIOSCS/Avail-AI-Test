@@ -62,6 +62,10 @@ class PrepaymentCreate(BaseModel):
     total_incl_fees: Decimal
     test_report_sent: bool = False
     buyer_remarks: str | None = None
+    # Client-prefilled payee (fallback only — the authoritative payee is snapshotted
+    # server-side in create_prepayment from the line's offer / vendor card).
+    vendor_name: str | None = None
+    currency: str = "USD"
 
 
 @router.post("/v2/prepayments")
@@ -86,6 +90,8 @@ def post_prepayment(
             test_report_sent=body.test_report_sent,
             buyer_remarks=body.buyer_remarks,
             created_by=current_user,
+            vendor_name=body.vendor_name,
+            currency=body.currency,
         )
         db.commit()
     except NoEligibleApproverError as exc:
@@ -162,6 +168,8 @@ def prepayment_request_create(
     total_incl_fees: str = Form(...),
     test_report_sent: str | None = Form(None),
     buyer_remarks: str | None = Form(None),
+    vendor_name: str | None = Form(None),
+    currency: str = Form("USD"),
     db: Session = Depends(get_db),
     current_user=Depends(require_user),
 ):
@@ -189,6 +197,8 @@ def prepayment_request_create(
             test_report_sent=report_sent,
             buyer_remarks=(buyer_remarks or None),
             created_by=current_user,
+            vendor_name=(vendor_name or None),
+            currency=(currency or "USD"),
         )
         db.commit()
     except NoEligibleApproverError as exc:
