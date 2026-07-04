@@ -67,6 +67,40 @@ Usage:
 {%- endmacro %}
 
 
+{# ── Cadence Dot ──────────────────────────────────────────────────── #}
+{# The single source of truth for the CRM cadence status dot. CADENCE_DOT maps
+   the four cadence states to a Tailwind bg color; CADENCE_LABEL to a display
+   label. cadence_dot() renders the dot span (role=img + aria-label + title) at
+   one of three sizes. Replaces the identical color map that was copy-pasted
+   inline across the account list, contacts list, contact rows, account detail,
+   and the vendor list — a future cadence-color tweak is now one-touch.
+   Sizes: md = w-2.5 (default, lists), sm = w-2 (detail chip), xs = w-1.5
+   (dense contact rows).
+   Usage:
+     {% from "htmx/partials/shared/_macros.html" import cadence_dot %}
+     {{ cadence_dot(company.cadence_state) }}
+     {{ cadence_dot(state, size='sm') }}
+#}
+{% set CADENCE_DOT = {
+  'new':       'bg-gray-300',
+  'on_target': 'bg-emerald-400',
+  'due':       'bg-amber-400',
+  'overdue':   'bg-rose-500'
+} %}
+{% set CADENCE_LABEL = {
+  'new':       'New',
+  'on_target': 'On Target',
+  'due':       'Due',
+  'overdue':   'Overdue'
+} %}
+{% macro cadence_dot(state, size='md') -%}
+{%- set _sizes = {'xs': 'w-1.5 h-1.5', 'sm': 'w-2 h-2', 'md': 'w-2.5 h-2.5'} -%}
+{%- set _label = CADENCE_LABEL.get(state, (state or 'new')|replace('_', ' ')|title) -%}
+<span class="inline-block {{ _sizes.get(size, _sizes['md']) }} rounded-full flex-shrink-0 {{ CADENCE_DOT.get(state, 'bg-gray-300') }}"
+      role="img" aria-label="{{ _label }}" title="{{ _label }}"></span>
+{%- endmacro %}
+
+
 {# ── Status Badge ─────────────────────────────────────────────────── #}
 
 {% macro status_badge(value, status_map=None) %}

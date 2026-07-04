@@ -7,6 +7,7 @@
    Bulk actions: POST /v2/partials/customers/bulk/{action} with ids (comma-separated).
 #}
 {% from "htmx/partials/shared/_alert_macros.html" import alert_row_attrs %}
+{% from "htmx/partials/shared/_macros.html" import cadence_dot %}
 
 {# Bulk select + action Alpine component (scoped to the list panel).
    selectedIds: Object used as a Set — keys are company id strings.
@@ -98,8 +99,6 @@
 </div>
 
 {% if companies %}
-{# Cadence dot colors keyed on c.cadence_state (outbound clock + tier target). #}
-{% set dot_colors = {"new": "bg-gray-300", "on_target": "bg-emerald-400", "due": "bg-amber-400", "overdue": "bg-rose-500"} %}
 <div class="divide-y divide-gray-100">
   {% for c in companies %}
   {# ── Account picker row — UNIFIED: every account (single OR multi-site) loads
@@ -126,9 +125,7 @@
          preload="mouseover"
          @click="selectedId = {{ c.id }}"
          @keyup.enter="selectedId = {{ c.id }}">
-      <span class="w-2.5 h-2.5 rounded-full flex-shrink-0 {{ dot_colors.get(c.cadence_state, 'bg-gray-300') }}"
-            role="img" aria-label="{{ c.cadence_state|replace('_', ' ')|title }}"
-            title="{{ c.cadence_state|replace('_', ' ')|title }}"></span>
+      {{ cadence_dot(c.cadence_state) }}
       <div class="flex-1 min-w-0">
         <p class="text-sm font-medium text-gray-900 truncate">{{ c.name }}</p>
         <p class="text-[11px] text-gray-600 truncate">

@@ -5,7 +5,7 @@
    Called by: vendors_list_partial route.
    Depends on: accent palette (post-PR0), timeago filter.
 #}
-{% from "htmx/partials/shared/_macros.html" import badge %}
+{% from "htmx/partials/shared/_macros.html" import badge, cadence_dot %}
 
 <div class="page-fluid" x-data="{ importOpen: false }">
 
@@ -163,9 +163,6 @@
   </div>
   {% endif %}
 
-  {# Cadence dot color map — same keys as customer _account_list.html #}
-  {% set dot_colors = {"new": "bg-gray-300", "on_target": "bg-emerald-400", "due": "bg-amber-400", "overdue": "bg-rose-500"} %}
-
   {# Table view — .table-wrapper + .data-table for consistent density and accent chrome. #}
   {% if view != 'cards' and vendors %}
   <div class="table-wrapper">
@@ -209,10 +206,7 @@
             preload="mouseover">
           {# Cadence dot #}
           <td class="px-2">
-            <span class="w-2.5 h-2.5 rounded-full flex-shrink-0 inline-block {{ dot_colors.get(v.cadence_state, 'bg-gray-300') }}"
-                  role="img"
-                  aria-label="{{ v.cadence_state|replace('_', ' ')|title if v.cadence_state else 'New' }}"
-                  title="{{ v.cadence_state|replace('_', ' ')|title if v.cadence_state else 'New' }}"></span>
+            {{ cadence_dot(v.cadence_state) }}
           </td>
           <td>
             <div>

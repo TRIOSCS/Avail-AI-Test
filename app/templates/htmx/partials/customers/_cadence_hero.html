@@ -5,17 +5,11 @@
 
    Receives: company, cadence_state, next_best_touch
 #}
-{% set badge_colors = {
-  'new': 'bg-gray-100 text-gray-600',
-  'on_target': 'bg-emerald-100 text-emerald-700',
-  'due': 'bg-amber-100 text-amber-700',
-  'overdue': 'bg-rose-100 text-rose-700'
-} %}
+{% from "htmx/partials/shared/_macros.html" import badge, CADENCE_LABEL %}
+{% set _cadence_tone = {'new': 'muted', 'on_target': 'success', 'due': 'warning', 'overdue': 'danger'} %}
 <div id='cadence-hero' class='flex items-center justify-between flex-wrap gap-2 mb-3'>
   <div class='flex items-center gap-2'>
-    <span class='px-2.5 py-1 text-xs font-semibold rounded-full {{ badge_colors.get(cadence_state, "bg-gray-100 text-gray-600") }}'>
-      {{ {'new': 'New', 'on_target': 'On Target', 'due': 'Due', 'overdue': 'Overdue'}.get(cadence_state, cadence_state|title) }}
-    </span>
+    {{ badge(CADENCE_LABEL.get(cadence_state, cadence_state|title), tone=_cadence_tone.get(cadence_state, 'muted')) }}
     {# Tier inline-select — POSTs on change; re-swaps this partial via hx-target='#cadence-hero' #}
     <form hx-post='/v2/partials/customers/{{ company.id }}/tier'
           hx-target='#cadence-hero'

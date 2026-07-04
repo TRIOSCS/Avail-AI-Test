@@ -184,10 +184,11 @@ class TestContactCardDNCBadge:
             params={"tab": "contacts"},
         )
         assert resp.status_code == 200
-        # The red active badge text only renders when do_not_contact=True.
-        # The widget renders as a plain "DNC" button (set-mode) when clear.
-        # bg-red-100 is the badge class; its absence confirms no active badge.
-        assert "bg-red-100" not in resp.text
+        # The active DNC badge (<span class='badge-danger …'>DNC</span>) only
+        # renders when do_not_contact=True; the kebab shows a plain "Set DNC"
+        # button (>Set DNC</button>) when clear, so the badge's >DNC</span>
+        # marker is absent here.
+        assert ">DNC</span>" not in resp.text
 
 
 # ── Server-side outreach enforcement ─────────────────────────────────

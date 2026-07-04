@@ -8,7 +8,7 @@
    Called by: company_detail_partial route in htmx_views.py.
    Depends on: brand palette, partials/shared/enrich_button.html, tabs/contacts_tab.html.
 #}
-{% from "htmx/partials/shared/_macros.html" import account_type_badge, cadence_clocks %}
+{% from "htmx/partials/shared/_macros.html" import account_type_badge, cadence_clocks, cadence_dot, CADENCE_LABEL %}
 
 <title hx-swap-oob="true">{{ company.name }} — Companies — AvailAI</title>
 
@@ -64,8 +64,6 @@
   {# ── Slim account header ─────────────────────────────────────────────────
      One compact card: identity (left) · commercial/cadence chip strip (middle) ·
      actions (right). Account cadence/disposition/clocks collapse below. #}
-  {% set cadence_dot = {'new': 'bg-gray-300', 'on_target': 'bg-emerald-400', 'due': 'bg-amber-400', 'overdue': 'bg-rose-500'} %}
-  {% set cadence_label = {'new': 'New', 'on_target': 'On Target', 'due': 'Due', 'overdue': 'Overdue'} %}
   <div x-data="{ showAcctSettings: false }"
        class="bg-white rounded-xl border border-brand-200 px-4 py-3">
     <div class="flex items-center justify-between gap-x-3 gap-y-1 flex-wrap">
@@ -143,9 +141,8 @@
             </span>
             <span class="text-gray-300">·</span>
             <span class="inline-flex items-center gap-1">
-              <span class="w-2 h-2 rounded-full {{ cadence_dot.get(cadence_state, 'bg-gray-300') }}"
-                    role="img" aria-label="{{ cadence_label.get(cadence_state, cadence_state|title) }}"></span>
-              <span class="font-medium text-gray-700">{{ cadence_label.get(cadence_state, cadence_state|title) }}</span>
+              {{ cadence_dot(cadence_state, size='sm') }}
+              <span class="font-medium text-gray-700">{{ CADENCE_LABEL.get(cadence_state, cadence_state|title) }}</span>
             </span>
             <span class="text-gray-300">·</span>
             <span class="font-medium text-gray-700">{{ contact_count }} contact{{ 's' if contact_count != 1 else '' }} · {{ site_count }} site{{ 's' if site_count != 1 else '' }}</span>

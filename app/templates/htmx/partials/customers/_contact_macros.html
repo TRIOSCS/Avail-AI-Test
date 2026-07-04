@@ -16,6 +16,7 @@
    Clock honesty rule: NULL last_outbound_at means "not yet logged". Render "—"
    — NEVER "never replied".
 #}
+{% from "htmx/partials/shared/_macros.html" import cadence_dot %}
 
 {% macro outreach_btn(label, href, channel, value, company_id, site_id, contact_id, contact_name, icon_path, new_tab=False, copy=False) %}
 {% if copy %}
@@ -63,10 +64,7 @@
    so cadence_state resolves to the Jinja GLOBAL callable — the detail.html ctx
    shadows the name with a string in the included template's local scope. #}
 {% set _state = cadence_state(none, site.last_outbound_at, now_utc) if site else 'new' %}
-{% set _dot = {'new': 'bg-gray-300', 'on_target': 'bg-emerald-400', 'due': 'bg-amber-400', 'overdue': 'bg-rose-500'} %}
-<span class="w-2 h-2 rounded-full flex-shrink-0 {{ _dot.get(_state, 'bg-gray-300') }}"
-      role="img" aria-label="{{ _state|replace('_', ' ')|title }} cadence"
-      title="{{ _state|replace('_', ' ')|title }}"></span>
+{{ cadence_dot(_state, size='sm') }}
 {% endmacro %}
 
 
@@ -307,10 +305,9 @@
     {# Last Contact cell — compact relative time from last_outbound_at + overdue badge #}
     <td>
       {% if out_ts and now_utc %}
-        {% set _dot = {'new': 'bg-gray-300', 'on_target': 'bg-emerald-400', 'due': 'bg-amber-400', 'overdue': 'bg-rose-500'} %}
         <span class="inline-flex items-center gap-1 text-[11px]"
               title="Last outreach {{ out_days }}d ago">
-          <span class="w-1.5 h-1.5 rounded-full flex-shrink-0 {{ _dot.get(cadence, 'bg-gray-300') }}"></span>
+          {{ cadence_dot(cadence, size='xs') }}
           <span class="{% if cadence == 'overdue' %}text-rose-600 font-semibold{% elif cadence == 'due' %}text-amber-600{% else %}text-gray-600{% endif %}">
             {{ out_days }}d ago
           </span>

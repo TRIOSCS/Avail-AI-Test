@@ -1175,7 +1175,7 @@ class TestCompanyDetailCadenceCard:
         """Company with outbound 40 days ago → overdue badge CSS classes present.
 
         Fails until: route computes cadence_state and template renders the
-        overdue badge: bg-rose-100 text-rose-700.
+        overdue badge via badge() tone=danger: bg-rose-50 text-rose-700.
         """
         outbound_40d_ago = datetime.now(timezone.utc) - timedelta(days=40)
         co = self._make_company(db_session, last_outbound_at=outbound_40d_ago)
@@ -1184,7 +1184,7 @@ class TestCompanyDetailCadenceCard:
         assert resp.status_code == 200
 
         html = resp.text
-        assert "bg-rose-100" in html
+        assert "bg-rose-50" in html
         assert "text-rose-700" in html
 
     # ─── outbound clock ─────────────────────────────────────────────────
@@ -2133,12 +2133,12 @@ class TestTierSetter:
         co = self._make_company(db_session, last_outbound_at=outbound_10d_ago, account_owner_id=test_user.id)
         # Before: standard tier → 10d is on_target (target=30)
         resp_before = client.get(f"/v2/partials/customers/{co.id}")
-        assert "bg-emerald-100" in resp_before.text  # on_target
+        assert "bg-emerald-50" in resp_before.text  # on_target (badge tone=success)
 
         # After: set tier=key → target=7d, so 10d → 'due' → amber
         resp = client.post(f"/v2/partials/customers/{co.id}/tier", data={"tier": "key"})
         assert resp.status_code == 200
-        assert "bg-amber-100" in resp.text  # due
+        assert "bg-amber-50" in resp.text  # due (badge tone=warning)
 
     def test_set_tier_invalid_value_returns_400(self, client: TestClient, db_session: Session, test_user: User):
         """POST with invalid tier value returns 400."""

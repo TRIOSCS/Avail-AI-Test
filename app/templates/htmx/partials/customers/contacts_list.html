@@ -9,6 +9,7 @@
                _saved_views.html.
    Power-UX (P4): bulk select + actions (archive/DNC), Saved Views, filtered CSV export.
 #}
+{% from "htmx/partials/shared/_macros.html" import cadence_dot, CADENCE_DOT %}
 <div class="page-fluid">
   <div class="flex items-center justify-between mb-4">
     <div>
@@ -79,15 +80,12 @@
     </div>
   </div>
 
-  {# Cadence dot color map — same keys as customer _account_list / vendor list #}
-  {% set dot_colors = {"new": "bg-gray-300", "on_target": "bg-emerald-400", "due": "bg-amber-400", "overdue": "bg-rose-500"} %}
-
-  {# Cadence-dot legend — swatch colors/labels mirror dot_colors + the cadence filter #}
+  {# Cadence-dot legend — swatch colors mirror CADENCE_DOT + the cadence filter #}
   <div class="flex flex-wrap items-center gap-x-4 gap-y-1 mb-3 text-xs text-gray-600">
-    <span class="inline-flex items-center gap-1.5"><span class="inline-block h-2 w-2 rounded-full {{ dot_colors['new'] }}"></span>New</span>
-    <span class="inline-flex items-center gap-1.5"><span class="inline-block h-2 w-2 rounded-full {{ dot_colors['on_target'] }}"></span>On target</span>
-    <span class="inline-flex items-center gap-1.5"><span class="inline-block h-2 w-2 rounded-full {{ dot_colors['due'] }}"></span>Due soon</span>
-    <span class="inline-flex items-center gap-1.5"><span class="inline-block h-2 w-2 rounded-full {{ dot_colors['overdue'] }}"></span>Overdue</span>
+    <span class="inline-flex items-center gap-1.5"><span class="inline-block h-2 w-2 rounded-full {{ CADENCE_DOT['new'] }}"></span>New</span>
+    <span class="inline-flex items-center gap-1.5"><span class="inline-block h-2 w-2 rounded-full {{ CADENCE_DOT['on_target'] }}"></span>On target</span>
+    <span class="inline-flex items-center gap-1.5"><span class="inline-block h-2 w-2 rounded-full {{ CADENCE_DOT['due'] }}"></span>Due soon</span>
+    <span class="inline-flex items-center gap-1.5"><span class="inline-block h-2 w-2 rounded-full {{ CADENCE_DOT['overdue'] }}"></span>Overdue</span>
   </div>
 
   {# ── Bulk select + actions (mirrors _account_list.html) ──────────────────
@@ -162,10 +160,7 @@
                      aria-label="Select {{ c.full_name or c.email or 'contact' }}">
             </td>
             <td class="compact-cell">
-              <span class="w-2.5 h-2.5 rounded-full flex-shrink-0 inline-block {{ dot_colors.get(c.cadence_state, 'bg-gray-300') }}"
-                    role="img"
-                    aria-label="{{ c.cadence_state|replace('_', ' ')|title if c.cadence_state else 'New' }}"
-                    title="{{ c.cadence_state|replace('_', ' ')|title if c.cadence_state else 'New' }}"></span>
+              {{ cadence_dot(c.cadence_state) }}
             </td>
             <td class="table-cell">
               <p class="text-sm font-semibold text-gray-900">{{ c.full_name or "—" }}</p>
