@@ -211,6 +211,52 @@ class TestVendorTaskComplete:
             f"complete_crm_task wrote {after - before} ActivityLog row(s) — vendor tasks must NOT create fake activity."
         )
 
+    def test_vendor_task_complete_denied_for_stranger(
+        self, db_session: Session, vendor_card: VendorCard, test_user, admin_user
+    ):
+        """M6: a user who is neither creator, assignee, nor admin CANNOT complete a vendor
+        task (previously any authenticated user could — vendor tasks were unowned)."""
+        task = create_vendor_task(
+            db_session,
+            vendor_card_id=vendor_card.id,
+            title="Owned by admin",
+            created_by=admin_user.id,
+            assigned_to_id=admin_user.id,
+        )
+        with pytest.raises(PermissionError):
+            complete_crm_task(db_session, task.id, test_user.id, is_admin=False)
+
+    def test_vendor_task_complete_allowed_for_assignee(
+        self, db_session: Session, vendor_card: VendorCard, test_user, admin_user
+    ):
+        """The assignee may complete a vendor task even if someone else created it."""
+        task = create_vendor_task(
+            db_session,
+            vendor_card_id=vendor_card.id,
+            title="Assigned to me",
+            created_by=admin_user.id,
+            assigned_to_id=test_user.id,
+        )
+        result = complete_crm_task(db_session, task.id, test_user.id, is_admin=False)
+        assert result is not None
+        assert result.status == TaskStatus.DONE
+
+    def test_vendor_task_complete_allowed_for_admin(
+        self, db_session: Session, vendor_card: VendorCard, test_user, admin_user
+    ):
+        """An admin may complete any vendor task (the shared CRM gate honours
+        is_admin)."""
+        task = create_vendor_task(
+            db_session,
+            vendor_card_id=vendor_card.id,
+            title="Admin override",
+            created_by=test_user.id,
+            assigned_to_id=test_user.id,
+        )
+        result = complete_crm_task(db_session, task.id, admin_user.id, is_admin=True)
+        assert result is not None
+        assert result.status == TaskStatus.DONE
+
 
 # ---------------------------------------------------------------------------
 # HTTP endpoint: vendor task routes

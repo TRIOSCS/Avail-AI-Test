@@ -47,6 +47,7 @@
       <div class="flex items-start gap-3 p-3 rounded-lg border border-gray-200 bg-white hover:border-brand-200">
         <button hx-post="/v2/partials/parts/tasks/{{ task.id }}/done"
                 hx-target="#part-detail"
+                hx-include="#done-note-{{ task.id }}"
                 data-loading-disable
                 class="mt-0.5 h-5 w-5 rounded border-2 border-gray-300 hover:border-brand-500 flex-shrink-0 transition-colors"
                 title="Mark done">
@@ -56,6 +57,12 @@
           {% if task.description %}
             <p class="text-xs text-gray-600 mt-0.5">{{ task.description }}</p>
           {% endif %}
+          {# Optional resolution note captured when the checkbox above marks the task done
+             (hx-include pulls this field into that POST). Blank = no note stored. #}
+          <input id="done-note-{{ task.id }}" type="text" name="completion_note"
+                 aria-label="Resolution note (optional)"
+                 placeholder="Add a resolution note (optional)…"
+                 class="mt-1.5 w-full max-w-md px-2 py-1 text-xs border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
           <div class="flex items-center gap-3 mt-1.5 text-secondary flex-wrap">
             {% if task.assignee %}
               <span class="inline-flex items-center gap-1">
@@ -107,6 +114,9 @@
         </button>
         <div class="flex-1 min-w-0">
           <p class="text-sm text-gray-600 line-through">{{ task.title }}</p>
+          {% if task.completion_note %}
+            <p class="text-xs text-gray-500 mt-0.5 italic">“{{ task.completion_note }}”</p>
+          {% endif %}
           <div class="flex items-center gap-2 mt-1 text-secondary">
             {% if task.assignee %}<span>{{ task.assignee.name or task.assignee.email }}</span>{% endif %}
             {% if task.completed_at %}<span>Done {{ task.completed_at|localdate('%m/%d/%y') }}</span>{% endif %}

@@ -219,9 +219,11 @@ Usage:
 #}
 {# ── Task Priority Badge ──────────────────────────────────────────── #}
 {#
-  Purpose:     Renders a priority badge for a task (3=high, 2=normal, 1=low).
-               Normal priority renders nothing (no visual noise).
-  Depends on:  Tailwind CSS.
+  Purpose:     Renders a priority badge for a task (3=high, 2=medium, 1=low).
+               All three tiers render a badge so the My Day "Medium" priority
+               filter has a visible on-row counterpart: High is danger-toned,
+               Medium is a calm neutral pill (visible but low-noise), Low is muted.
+  Depends on:  Tailwind CSS, the badge() primitive above.
   Called-by:   htmx/partials/tasks/_results.html
 #}
 {% macro task_priority_badge(priority) -%}
@@ -229,6 +231,8 @@ Usage:
 {{ badge('High', tone='danger') }}
 {%- elif priority == 1 -%}
 {{ badge('Low', tone='muted') }}
+{%- else -%}
+{{ badge('Medium', tone='neutral') }}
 {%- endif -%}
 {%- endmacro %}
 

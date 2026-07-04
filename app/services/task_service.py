@@ -1,23 +1,29 @@
-"""Task Board service — CRUD, auto-generation, auto-close, AI scoring.
+"""Task Board service — CRUD, auto-generation, auto-close.
 
 Manages requisition tasks through pipeline stages. Generates tasks
 from system events (offers, RFQs, quotes) and auto-closes them when
 the triggering action is completed.
 
-Called by: routers/task.py, services/knowledge_service.py, jobs/
+Called by: routers/htmx/* task endpoints, routers/htmx_views.py (My Day),
+    jobs/task_jobs.py, and service hooks (email_service, buyplan_workflow, resell).
 Depends on: models/task.py, models/auth.py
 """
 
-import json
 from datetime import datetime, timedelta, timezone
 
 from loguru import logger
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.constants import TaskStatus
 from app.models.crm import Company
 from app.models.task import RequisitionTask
+
+# How far back the My Day "Done" filter reaches, and the hard row cap on that query.
+# The completed-task list is otherwise unbounded (a long-tenured user could load
+# thousands of rows into one fragment) — cap it to a recent window plus a LIMIT.
+_DONE_WINDOW_DAYS = 30
+_DONE_LIMIT = 200
 
 
 def _as_utc(dt: datetime | None) -> datetime | None:
@@ -48,10 +54,9 @@ def create_task(
 ) -> RequisitionTask:
     """Create a task on a requisition.
 
-    For manual tasks, assigned_to_id and due_at are required and due_at must be >= 24
-    hours from now (enforced by schema).
+    For manual tasks that pass a due_at, the due date must be >= 24 hours from now.
     """
-    # Belt-and-suspenders 24h check for manual tasks (schema also validates)
+    # Belt-and-suspenders 24h check for manual tasks with an explicit due date.
     if source == "manual" and due_at:
         now = datetime.now(timezone.utc)
         if _as_utc(due_at) < now + timedelta(hours=24):
@@ -112,33 +117,44 @@ def create_requisition_task(
     return task
 
 
-def get_tasks(
-    db: Session,
-    requisition_id: int,
-    *,
-    status: str | None = None,
-    task_type: str | None = None,
-    assigned_to_id: int | None = None,
-) -> list[RequisitionTask]:
-    """Get tasks for a requisition with optional filters."""
-    q = db.query(RequisitionTask).filter(RequisitionTask.requisition_id == requisition_id)
-    if status:
-        q = q.filter(RequisitionTask.status == status)
-    if task_type:
-        q = q.filter(RequisitionTask.task_type == task_type)
-    if assigned_to_id:
-        q = q.filter(RequisitionTask.assigned_to_id == assigned_to_id)
-    return q.order_by(RequisitionTask.priority.desc(), RequisitionTask.created_at).all()
-
-
 def get_my_tasks(
     db: Session,
     user_id: int,
     *,
     status: str | None = None,
 ) -> list[RequisitionTask]:
-    """Get all tasks assigned to a user across all requisitions."""
-    q = db.query(RequisitionTask).filter(RequisitionTask.assigned_to_id == user_id)
+    """Get all tasks assigned to a user across all requisitions (My Day worklist).
+
+    Eager-loads the parent relationships the results template touches per row
+    (company, site_contact, requisition, assignee) so rendering the list is a single
+    query, not one-per-relationship-per-row (N+1).
+
+    When ``status`` is ``done`` the result is BOUNDED — only tasks completed within the
+    last ``_DONE_WINDOW_DAYS`` days, most-recent first, capped at ``_DONE_LIMIT`` rows —
+    so the "Done" filter can't load a long-tenured user's entire completion history into
+    one fragment. Open queries stay ordered soonest-due first (nulls last), then created.
+    """
+    q = (
+        db.query(RequisitionTask)
+        .options(
+            joinedload(RequisitionTask.company),
+            joinedload(RequisitionTask.site_contact),
+            joinedload(RequisitionTask.requisition),
+            joinedload(RequisitionTask.assignee),
+        )
+        .filter(RequisitionTask.assigned_to_id == user_id)
+    )
+    if status == TaskStatus.DONE:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=_DONE_WINDOW_DAYS)
+        return (
+            q.filter(
+                RequisitionTask.status == TaskStatus.DONE,
+                RequisitionTask.completed_at >= cutoff,
+            )
+            .order_by(RequisitionTask.completed_at.desc().nullslast())
+            .limit(_DONE_LIMIT)
+            .all()
+        )
     if status:
         q = q.filter(RequisitionTask.status == status)
     else:
@@ -214,14 +230,6 @@ def update_task(db: Session, task_id: int, **kwargs) -> RequisitionTask | None:
     return task
 
 
-def update_task_status(db: Session, task_id: int, status: str) -> RequisitionTask | None:
-    """Quick status change (drag-drop).
-
-    Returns None if not found.
-    """
-    return update_task(db, task_id, status=status)
-
-
 def complete_task(
     db: Session,
     task_id: int,
@@ -268,20 +276,6 @@ def reopen_task(
     db.refresh(task)
     logger.info("Task {} reopened by user {}", task_id, user_id)
     return task
-
-
-def get_waiting_on_tasks(db: Session, user_id: int) -> list[RequisitionTask]:
-    """Get tasks created by the user but assigned to someone else (not done)."""
-    return (
-        db.query(RequisitionTask)
-        .filter(
-            RequisitionTask.created_by == user_id,
-            RequisitionTask.assigned_to_id != user_id,
-            RequisitionTask.status != TaskStatus.DONE,
-        )
-        .order_by(RequisitionTask.due_at.asc().nullslast(), RequisitionTask.created_at)
-        .all()
-    )
 
 
 def delete_task(db: Session, task_id: int) -> bool:
@@ -437,7 +431,7 @@ def get_open_tasks_for_vendor_card(db: Session, vendor_card_id: int) -> list[Req
 
 
 def _is_crm_task_authorized(db: Session, task: RequisitionTask, user_id: int, is_admin: bool) -> bool:
-    """Return True if user_id is allowed to mutate the given CRM task.
+    """Return True if user_id is allowed to mutate the given CRM/vendor task.
 
     Allowed if any of:
       - user is an admin
@@ -445,17 +439,15 @@ def _is_crm_task_authorized(db: Session, task: RequisitionTask, user_id: int, is
       - user is the creator
       - user is the account_owner of the task's parent company (via company_id directly,
         or via the contact's site → company for contact-scoped tasks)
-      - task is vendor-scoped (any authenticated user may mutate vendor tasks)
+
+    Vendor-scoped tasks have no account-owner concept, so they resolve to the shared
+    creator/assignee/admin gate above (there is no blanket "any authenticated user" pass).
     """
     if is_admin:
         return True
     if task.assigned_to_id == user_id:
         return True
     if task.created_by == user_id:
-        return True
-    # Vendor-scoped tasks: any authenticated user may complete/edit them.
-    # Delete requires admin — callers that enforce admin-only must do so before calling here.
-    if task.vendor_card_id is not None or task.vendor_contact_id is not None:
         return True
     # Check parent company owner
     company_id: int | None = task.company_id
@@ -697,144 +689,6 @@ def auto_create_resell_followup_task(
     return task
 
 
-# ---------------------------------------------------------------------------
-# Task-to-response helper
-# ---------------------------------------------------------------------------
-
-
-def task_to_response(task: RequisitionTask) -> dict:
-    """Convert a RequisitionTask to a response dict with assignee/creator names."""
-    assignee_name = None
-    if task.assignee:
-        assignee_name = task.assignee.name or task.assignee.email
-    creator_name = None
-    if task.creator:
-        creator_name = task.creator.name or task.creator.email
-    requisition_name = None
-    if task.requisition:
-        requisition_name = getattr(task.requisition, "name", None)
-    return {
-        "id": task.id,
-        "requisition_id": task.requisition_id,
-        "requisition_name": requisition_name,
-        "title": task.title,
-        "description": task.description,
-        "task_type": task.task_type,
-        "status": task.status,
-        "priority": task.priority,
-        "ai_priority_score": task.ai_priority_score,
-        "ai_risk_flag": task.ai_risk_flag,
-        "assigned_to_id": task.assigned_to_id,
-        "assignee_name": assignee_name,
-        "created_by": task.created_by,
-        "creator_name": creator_name,
-        "source": task.source,
-        "source_ref": task.source_ref,
-        "completion_note": task.completion_note,
-        "due_at": task.due_at.isoformat() if task.due_at else None,
-        "completed_at": task.completed_at.isoformat() if task.completed_at else None,
-        "created_at": task.created_at.isoformat() if task.created_at else None,
-        "updated_at": task.updated_at.isoformat() if task.updated_at else None,
-    }
-
-
-# ---------------------------------------------------------------------------
-# AI Priority Scoring & Risk Alerts
-# ---------------------------------------------------------------------------
-
-TASK_SCORING_PROMPT = """You are a procurement task priority analyst. Given a list of tasks for electronic component sourcing, score each task's urgency and identify risks.
-
-For each task, return:
-- priority_score: float 0.0-1.0 (1.0 = most urgent)
-- risk_flag: string or null (short risk alert, max 50 chars)
-
-Scoring factors:
-- Due date proximity (overdue = highest)
-- Task type: buying tasks (cut PO) are urgent when plan is active
-- Priority level set by buyer
-- How long the task has been open
-- Tasks from system events (auto-generated) should score slightly lower unless overdue
-
-Return JSON array matching input order:
-[{"priority_score": 0.85, "risk_flag": "Bid due tomorrow"}, ...]
-"""
-
-
-async def score_tasks_with_ai(db: Session, tasks: list[RequisitionTask]) -> None:
-    """Use AI to score task priority and set risk flags.
-
-    Updates DB in place.
-    """
-    if not tasks:
-        return
-
-    from app.utils.claude_client import claude_json
-
-    now = datetime.now(timezone.utc)
-    task_descriptions = []
-    for t in tasks:
-        days_open = (now - t.created_at).days if t.created_at else 0
-        days_until_due = None
-        if t.due_at:
-            days_until_due = (t.due_at - now).days
-        task_descriptions.append(
-            {
-                "id": t.id,
-                "title": t.title,
-                "task_type": t.task_type,
-                "priority": t.priority,
-                "status": t.status,
-                "days_open": days_open,
-                "days_until_due": days_until_due,
-                "source": t.source,
-            }
-        )
-
-    try:
-        prompt = f"Score these procurement tasks:\n{json.dumps(task_descriptions, indent=2)}"
-        result = await claude_json(prompt, system=TASK_SCORING_PROMPT, model_tier="fast", max_tokens=512)
-        if not result or not isinstance(result, list):
-            return
-        for i, score_data in enumerate(result):
-            if i >= len(tasks):
-                break
-            tasks[i].ai_priority_score = score_data.get("priority_score")
-            tasks[i].ai_risk_flag = score_data.get("risk_flag")
-        db.commit()
-        logger.info("AI scored {} tasks", len(tasks))
-    except Exception as e:
-        logger.warning("AI task scoring failed: {}", str(e))
-
-
-def compute_simple_priority(task: RequisitionTask) -> float:
-    """Fallback priority scoring without AI (rule-based)."""
-    now = datetime.now(timezone.utc)
-    score = 0.3  # base
-
-    # Priority boost
-    if task.priority == 3:
-        score += 0.3
-    elif task.priority == 2:
-        score += 0.15
-
-    # Due date urgency
-    if task.due_at:
-        due = _as_utc(task.due_at)
-        days_left = (due - now).total_seconds() / 86400
-        if days_left < 0:
-            score += 0.4  # overdue
-        elif days_left < 1:
-            score += 0.3  # due today
-        elif days_left < 3:
-            score += 0.15
-
-    # Task type boost
-    if task.task_type == "sales":
-        score += 0.05
-
-    return min(score, 1.0)
-
-
 def snooze_task(db: Session, task_id: int) -> RequisitionTask | None:
     """Push a task's due_at forward by one week.
 
@@ -852,20 +706,3 @@ def snooze_task(db: Session, task_id: int) -> RequisitionTask | None:
     db.commit()
     db.refresh(task)
     return task
-
-
-def apply_simple_scoring(db: Session, tasks: list[RequisitionTask]) -> None:
-    """Apply rule-based scoring to tasks (fast, no AI needed)."""
-    now = datetime.now(timezone.utc)
-    for t in tasks:
-        t.ai_priority_score = compute_simple_priority(t)
-        # Simple risk flags — handle naive datetimes from SQLite
-        due = _as_utc(t.due_at)
-        created = _as_utc(t.created_at)
-        if due and due < now:
-            t.ai_risk_flag = "Overdue"
-        elif due and (due - now).days <= 1:
-            t.ai_risk_flag = "Due today"
-        elif created and (now - created).days >= 3 and t.status == TaskStatus.TODO:
-            t.ai_risk_flag = "No activity in 3+ days"
-    db.commit()

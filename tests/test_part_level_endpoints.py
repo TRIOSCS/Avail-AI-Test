@@ -313,6 +313,64 @@ def test_create_part_task_malformed_due_422(client, test_requisition, db_session
     assert resp.status_code == 422
 
 
+# ── Part comms-tab task completion — completion_note capture (M3) ─────
+
+
+def test_mark_part_task_done_stores_completion_note(client, test_requisition, db_session, test_user):
+    """POST /v2/partials/parts/tasks/{id}/done captures the optional completion_note.
+
+    Regression guard for M3: the comms-tab "Mark done" control hx-includes an optional
+    resolution note; the endpoint must persist it (previously completion_note was hard-
+    coded to "" on every completion path, so the model field was write-only dead weight).
+    """
+    from app.models.task import RequisitionTask
+
+    req = _first_requirement(db_session, test_requisition)
+    # Create the task assigned to the completing user (only the assignee may complete).
+    client.post(
+        f"/v2/partials/parts/{req.id}/tasks",
+        data={"title": "Confirm stock", "assigned_to": str(test_user.id)},
+    )
+    task = (
+        db_session.query(RequisitionTask)
+        .filter(RequisitionTask.requirement_id == req.id, RequisitionTask.title == "Confirm stock")
+        .one()
+    )
+    resp = client.post(
+        f"/v2/partials/parts/tasks/{task.id}/done",
+        data={"completion_note": "Vendor confirmed 500 pcs in stock"},
+    )
+    assert resp.status_code == 200
+
+    db_session.expire_all()
+    task = db_session.get(RequisitionTask, task.id)
+    assert task.status == "done"
+    assert task.completion_note == "Vendor confirmed 500 pcs in stock"
+
+
+def test_mark_part_task_done_without_note_ok(client, test_requisition, db_session, test_user):
+    """Completing without a note still works (note stays empty, task completes)."""
+    from app.models.task import RequisitionTask
+
+    req = _first_requirement(db_session, test_requisition)
+    client.post(
+        f"/v2/partials/parts/{req.id}/tasks",
+        data={"title": "No-note task", "assigned_to": str(test_user.id)},
+    )
+    task = (
+        db_session.query(RequisitionTask)
+        .filter(RequisitionTask.requirement_id == req.id, RequisitionTask.title == "No-note task")
+        .one()
+    )
+    resp = client.post(f"/v2/partials/parts/tasks/{task.id}/done")
+    assert resp.status_code == 200
+
+    db_session.expire_all()
+    task = db_session.get(RequisitionTask, task.id)
+    assert task.status == "done"
+    assert task.completion_note == ""
+
+
 # ── Requisition Status Filters ─────────────────────────────────────
 
 

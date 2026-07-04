@@ -1,7 +1,6 @@
 """Tests for app/services/task_service.py — comprehensive coverage.
 
-Covers CRUD, auto-generation, complete/delete, summary, AI scoring helpers,
-and convenience event helpers.
+Covers CRUD, auto-generation, complete/delete, summary, and convenience event helpers.
 
 Called by: pytest
 Depends on: conftest fixtures, app.services.task_service, app.models.task
@@ -12,7 +11,6 @@ import os
 os.environ["TESTING"] = "1"
 
 from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock, patch
 
 import pytest
 from sqlalchemy.orm import Session
@@ -36,6 +34,17 @@ def requisition(db_session: Session, test_user: User) -> Requisition:
     db_session.commit()
     db_session.refresh(req)
     return req
+
+
+def _req_tasks(db: Session, requisition_id: int) -> list[RequisitionTask]:
+    """Fetch all tasks for a requisition (test helper; the old get_tasks was dead
+    code)."""
+    return (
+        db.query(RequisitionTask)
+        .filter(RequisitionTask.requisition_id == requisition_id)
+        .order_by(RequisitionTask.priority.desc(), RequisitionTask.created_at)
+        .all()
+    )
 
 
 class TestCreateTask:
@@ -98,48 +107,9 @@ class TestCreateTask:
         assert task.description == "Important task"
 
 
-class TestGetTasks:
-    def test_get_all_tasks(self, db_session: Session, requisition: Requisition):
-        task_service.create_task(db_session, requisition_id=requisition.id, title="T1", source="system")
-        task_service.create_task(db_session, requisition_id=requisition.id, title="T2", source="system")
-        tasks = task_service.get_tasks(db_session, requisition.id)
-        assert len(tasks) == 2
-
-    def test_filter_by_status(self, db_session: Session, requisition: Requisition):
-        t1 = task_service.create_task(db_session, requisition_id=requisition.id, title="T1", source="system")
-        task_service.update_task_status(db_session, t1.id, TaskStatus.DONE)
-        task_service.create_task(db_session, requisition_id=requisition.id, title="T2", source="system")
-        open_tasks = task_service.get_tasks(db_session, requisition.id, status=TaskStatus.TODO)
-        assert len(open_tasks) == 1
-        assert open_tasks[0].title == "T2"
-
-    def test_filter_by_task_type(self, db_session: Session, requisition: Requisition):
-        task_service.create_task(
-            db_session, requisition_id=requisition.id, title="Sourcing", task_type="sourcing", source="system"
-        )
-        task_service.create_task(
-            db_session, requisition_id=requisition.id, title="Sales", task_type="sales", source="system"
-        )
-        sourcing = task_service.get_tasks(db_session, requisition.id, task_type="sourcing")
-        assert len(sourcing) == 1
-        assert sourcing[0].task_type == "sourcing"
-
-    def test_filter_by_assigned_to_id(self, db_session: Session, requisition: Requisition, test_user: User):
-        task_service.create_task(
-            db_session,
-            requisition_id=requisition.id,
-            title="Assigned",
-            source="system",
-            assigned_to_id=test_user.id,
-        )
-        task_service.create_task(db_session, requisition_id=requisition.id, title="Unassigned", source="system")
-        assigned = task_service.get_tasks(db_session, requisition.id, assigned_to_id=test_user.id)
-        assert len(assigned) == 1
-
-
 class TestGetMyTasks:
     def test_get_my_tasks_excludes_done(self, db_session: Session, requisition: Requisition, test_user: User):
-        t1 = task_service.create_task(
+        task_service.create_task(
             db_session,
             requisition_id=requisition.id,
             title="Open",
@@ -153,21 +123,20 @@ class TestGetMyTasks:
             source="system",
             assigned_to_id=test_user.id,
         )
-        task_service.update_task_status(db_session, t2.id, TaskStatus.DONE)
+        task_service.update_task(db_session, t2.id, status=TaskStatus.DONE)
         tasks = task_service.get_my_tasks(db_session, test_user.id)
         assert len(tasks) == 1
         assert tasks[0].title == "Open"
 
     def test_get_my_tasks_with_status_filter(self, db_session: Session, requisition: Requisition, test_user: User):
-        task_service.create_task(
+        t = task_service.create_task(
             db_session,
             requisition_id=requisition.id,
             title="Done Task",
             source="system",
             assigned_to_id=test_user.id,
         )
-        t = task_service.get_tasks(db_session, requisition.id)[0]
-        task_service.update_task_status(db_session, t.id, TaskStatus.DONE)
+        task_service.update_task(db_session, t.id, status=TaskStatus.DONE)
         tasks = task_service.get_my_tasks(db_session, test_user.id, status=TaskStatus.DONE)
         assert len(tasks) == 1
 
@@ -273,45 +242,6 @@ class TestDeleteTask:
         assert result is False
 
 
-class TestGetWaitingOnTasks:
-    def test_waiting_on(
-        self,
-        db_session: Session,
-        requisition: Requisition,
-        test_user: User,
-        admin_user: User,
-    ):
-        task_service.create_task(
-            db_session,
-            requisition_id=requisition.id,
-            title="Waiting",
-            source="system",
-            assigned_to_id=admin_user.id,
-            created_by=test_user.id,
-        )
-        tasks = task_service.get_waiting_on_tasks(db_session, test_user.id)
-        assert len(tasks) == 1
-
-    def test_waiting_on_excludes_done(
-        self,
-        db_session: Session,
-        requisition: Requisition,
-        test_user: User,
-        admin_user: User,
-    ):
-        t = task_service.create_task(
-            db_session,
-            requisition_id=requisition.id,
-            title="Waiting Done",
-            source="system",
-            assigned_to_id=admin_user.id,
-            created_by=test_user.id,
-        )
-        task_service.update_task_status(db_session, t.id, TaskStatus.DONE)
-        tasks = task_service.get_waiting_on_tasks(db_session, test_user.id)
-        assert len(tasks) == 0
-
-
 class TestAutoCreateTask:
     def test_creates_on_first_call(self, db_session: Session, requisition: Requisition):
         task = task_service.auto_create_task(
@@ -349,7 +279,7 @@ class TestAutoCreateTask:
             task_type="sourcing",
             source_ref="test:2",
         )
-        task_service.update_task_status(db_session, t.id, TaskStatus.DONE)
+        task_service.update_task(db_session, t.id, status=TaskStatus.DONE)
         t2 = task_service.auto_create_task(
             db_session,
             requisition_id=requisition.id,
@@ -381,240 +311,18 @@ class TestAutoCloseTask:
 class TestConvenienceHelpers:
     def test_on_email_offer_parsed(self, db_session: Session, requisition: Requisition):
         task_service.on_email_offer_parsed(db_session, requisition.id, "Arrow", "LM317T", 99)
-        tasks = task_service.get_tasks(db_session, requisition.id)
+        tasks = _req_tasks(db_session, requisition.id)
         assert len(tasks) == 1
         assert "email_offer:99" == tasks[0].source_ref
 
     def test_on_buy_plan_assigned(self, db_session: Session, requisition: Requisition, test_user: User):
         task_service.on_buy_plan_assigned(db_session, requisition.id, test_user.id, "Arrow", "LM317T", 55)
-        tasks = task_service.get_tasks(db_session, requisition.id)
+        tasks = _req_tasks(db_session, requisition.id)
         assert len(tasks) == 1
         assert tasks[0].task_type == "buying"
 
     def test_on_bid_due_soon(self, db_session: Session, requisition: Requisition):
         task_service.on_bid_due_soon(db_session, requisition.id, "2026-12-31", "Test REQ")
-        tasks = task_service.get_tasks(db_session, requisition.id)
+        tasks = _req_tasks(db_session, requisition.id)
         assert len(tasks) == 1
         assert "Bid due" in tasks[0].title
-
-
-class TestTaskToResponse:
-    def test_task_to_response_minimal(self, db_session: Session, requisition: Requisition):
-        task = task_service.create_task(db_session, requisition_id=requisition.id, title="T", source="system")
-        resp = task_service.task_to_response(task)
-        assert resp["id"] == task.id
-        assert resp["title"] == "T"
-        assert resp["assignee_name"] is None
-        assert resp["creator_name"] is None
-
-    def test_task_to_response_with_assignee(self, db_session: Session, requisition: Requisition, test_user: User):
-        task = task_service.create_task(
-            db_session,
-            requisition_id=requisition.id,
-            title="T",
-            source="system",
-            assigned_to_id=test_user.id,
-            created_by=test_user.id,
-        )
-        db_session.refresh(task)
-        resp = task_service.task_to_response(task)
-        assert resp["assigned_to_id"] == test_user.id
-
-    def test_task_to_response_with_due_and_completed(
-        self, db_session: Session, requisition: Requisition, test_user: User
-    ):
-        due = datetime.now(timezone.utc) + timedelta(days=3)
-        task = task_service.create_task(
-            db_session,
-            requisition_id=requisition.id,
-            title="T",
-            source="system",
-            due_at=due,
-            assigned_to_id=test_user.id,
-        )
-        task_service.complete_task(db_session, task.id, test_user.id, "Done")
-        db_session.refresh(task)
-        resp = task_service.task_to_response(task)
-        assert resp["due_at"] is not None
-        assert resp["completed_at"] is not None
-
-
-class TestComputeSimplePriority:
-    def test_high_priority_task(self, db_session: Session, requisition: Requisition):
-        task = task_service.create_task(
-            db_session,
-            requisition_id=requisition.id,
-            title="High",
-            priority=3,
-            source="system",
-        )
-        score = task_service.compute_simple_priority(task)
-        assert score > 0.5
-
-    def test_overdue_task_scores_high(self, db_session: Session, requisition: Requisition):
-        past_due = datetime.now(timezone.utc) - timedelta(days=2)
-        task = task_service.create_task(
-            db_session,
-            requisition_id=requisition.id,
-            title="Overdue",
-            source="system",
-        )
-        task.due_at = past_due
-        db_session.commit()
-        score = task_service.compute_simple_priority(task)
-        assert score >= 0.7
-
-    def test_sales_task_type_boost(self, db_session: Session, requisition: Requisition):
-        task = task_service.create_task(
-            db_session,
-            requisition_id=requisition.id,
-            title="Sales",
-            task_type="sales",
-            source="system",
-        )
-        score = task_service.compute_simple_priority(task)
-        assert score > 0.3
-
-    def test_score_capped_at_one(self, db_session: Session, requisition: Requisition):
-        past_due = datetime.now(timezone.utc) - timedelta(days=5)
-        task = task_service.create_task(
-            db_session,
-            requisition_id=requisition.id,
-            title="Very Overdue",
-            priority=3,
-            task_type="sales",
-            source="system",
-        )
-        task.due_at = past_due
-        db_session.commit()
-        score = task_service.compute_simple_priority(task)
-        assert score == 1.0
-
-    def test_due_today_score(self, db_session: Session, requisition: Requisition):
-        soon = datetime.now(timezone.utc) + timedelta(hours=6)
-        task = task_service.create_task(
-            db_session,
-            requisition_id=requisition.id,
-            title="Due Soon",
-            source="system",
-        )
-        task.due_at = soon
-        db_session.commit()
-        score = task_service.compute_simple_priority(task)
-        assert score >= 0.6
-
-    def test_due_within_3_days(self, db_session: Session, requisition: Requisition):
-        soon = datetime.now(timezone.utc) + timedelta(days=2)
-        task = task_service.create_task(
-            db_session,
-            requisition_id=requisition.id,
-            title="Due 2 Days",
-            source="system",
-        )
-        task.due_at = soon
-        db_session.commit()
-        score = task_service.compute_simple_priority(task)
-        assert score > 0.3
-
-
-def _make_stale(task: RequisitionTask) -> None:
-    """Mark a task as stale: created days ago and still open."""
-    task.created_at = datetime.now(timezone.utc) - timedelta(days=5)
-    task.status = TaskStatus.TODO
-
-
-class TestApplySimpleScoring:
-    def test_applies_to_all_tasks(self, db_session: Session, requisition: Requisition):
-        t1 = task_service.create_task(db_session, requisition_id=requisition.id, title="T1", source="system")
-        t2 = task_service.create_task(
-            db_session, requisition_id=requisition.id, title="T2", priority=3, source="system"
-        )
-        task_service.apply_simple_scoring(db_session, [t1, t2])
-        assert t1.ai_priority_score is not None
-        assert t2.ai_priority_score is not None
-
-    @pytest.mark.parametrize(
-        "mutate, expected_flag",
-        [
-            (lambda t: setattr(t, "due_at", datetime.now(timezone.utc) - timedelta(hours=1)), "Overdue"),
-            (lambda t: setattr(t, "due_at", datetime.now(timezone.utc) + timedelta(hours=6)), "Due today"),
-            (_make_stale, "No activity in 3+ days"),
-        ],
-        ids=["overdue", "due_today", "stale"],
-    )
-    def test_risk_flag(self, db_session: Session, requisition: Requisition, mutate, expected_flag):
-        task = task_service.create_task(db_session, requisition_id=requisition.id, title="T", source="system")
-        mutate(task)
-        db_session.commit()
-        task_service.apply_simple_scoring(db_session, [task])
-        assert task.ai_risk_flag == expected_flag
-
-
-def _make_mock_task(requisition_id: int, user_id: int | None = None) -> MagicMock:
-    """Build a mock RequisitionTask with aware datetimes (bypasses SQLite naive
-    issue)."""
-    t = MagicMock(spec=RequisitionTask)
-    t.id = 9999
-    t.requisition_id = requisition_id
-    t.title = "Mock Task"
-    t.description = None
-    t.task_type = "sourcing"
-    t.status = TaskStatus.TODO
-    t.priority = 2
-    t.ai_priority_score = None
-    t.ai_risk_flag = None
-    t.assigned_to_id = user_id
-    t.created_by = user_id
-    t.source = "system"
-    t.source_ref = None
-    t.completion_note = None
-    t.due_at = None
-    t.completed_at = None
-    t.created_at = datetime.now(timezone.utc)
-    t.updated_at = datetime.now(timezone.utc)
-    t.assignee = None
-    t.creator = None
-    t.requisition = None
-    return t
-
-
-def _returns(value):
-    """Build an async claude_json stub that returns ``value``."""
-
-    async def _stub(*a, **kw):
-        return value
-
-    return _stub
-
-
-def _raises(exc):
-    """Build an async claude_json stub that raises ``exc``."""
-
-    async def _stub(*a, **kw):
-        raise exc
-
-    return _stub
-
-
-class TestScoreTasksWithAI:
-    async def test_score_tasks_empty(self, db_session: Session):
-        # Should return immediately without error
-        await task_service.score_tasks_with_ai(db_session, [])
-
-    @pytest.mark.parametrize(
-        "claude_json, with_due_date",
-        [
-            (_returns([{"priority_score": 0.8, "risk_flag": "Test risk"}]), False),
-            (_raises(RuntimeError("API down")), False),
-            (_returns({"error": "unexpected"}), False),
-            (_returns([{"priority_score": 0.9, "risk_flag": None}]), True),
-        ],
-        ids=["success", "exception", "non_list_response", "with_due_date"],
-    )
-    async def test_score_tasks(self, db_session: Session, requisition: Requisition, claude_json, with_due_date):
-        # Each case must run to completion without raising (exceptions are caught internally).
-        mock_task = _make_mock_task(requisition.id)
-        if with_due_date:
-            mock_task.due_at = datetime.now(timezone.utc) + timedelta(days=2)
-        with patch("app.utils.claude_client.claude_json", new=claude_json):
-            await task_service.score_tasks_with_ai(db_session, [mock_task])

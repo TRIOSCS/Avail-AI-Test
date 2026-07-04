@@ -5,9 +5,9 @@ parent FK must be set (enforced by CHECK ck_task_has_parent).
 
 Tracks sourcing, sales, and general tasks through pipeline stages.
 Auto-generated from system events (offers, RFQs, quotes) and manually
-by buyers. AI priority scoring and risk alerts for task management.
+by buyers.
 
-Called by: services/task_service.py, routers/task.py
+Called by: services/task_service.py, routers/htmx/* task endpoints
 Depends on: models/base.py, models/auth.py, models/sourcing.py, models/vendors.py
 """
 
@@ -16,7 +16,6 @@ from datetime import datetime, timezone
 from sqlalchemy import (
     CheckConstraint,
     Column,
-    Float,
     ForeignKey,
     Index,
     Integer,
@@ -48,10 +47,6 @@ class RequisitionTask(Base):
     status = Column(String(20), nullable=False, default="todo")
     # 1=low, 2=medium, 3=high
     priority = Column(Integer, nullable=False, default=2)
-
-    # AI-computed fields
-    ai_priority_score = Column(Float, nullable=True)  # 0.0-1.0, higher = more urgent
-    ai_risk_flag = Column(String(255), nullable=True)  # risk alert text
 
     # Assignment
     assigned_to_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)

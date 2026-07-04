@@ -10,7 +10,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import pytest
 from pydantic import ValidationError
@@ -46,12 +46,6 @@ from app.schemas.rfq import (
     RfqPrepareVendor,
     RfqVendorGroup,
     VendorResponseStatusUpdate,
-)
-from app.schemas.task import (
-    TaskComplete,
-    TaskCreate,
-    TaskStatusUpdate,
-    TaskUpdate,
 )
 
 # ── Buy Plan Schemas ────────────────────────────────────────────────
@@ -507,95 +501,6 @@ class TestVendorResponseStatusUpdate:
     def test_invalid_status(self):
         with pytest.raises(ValidationError, match="Status must be one of"):
             VendorResponseStatusUpdate(status="approved")
-
-
-# ── Task Schemas ────────────────────────────────────────────────────
-
-
-class TestTaskCreate:
-    def test_valid(self):
-        future = datetime.now(timezone.utc) + timedelta(hours=48)
-        s = TaskCreate(title="Fix bug", assigned_to_id=1, due_at=future)
-        assert s.title == "Fix bug"
-        assert s.description is None
-        assert s.assigned_to_id == 1
-
-    def test_due_at_too_soon(self):
-        soon = datetime.now(timezone.utc) + timedelta(hours=1)
-        with pytest.raises(ValidationError, match="at least 24 hours"):
-            TaskCreate(title="X", assigned_to_id=1, due_at=soon)
-
-    @pytest.mark.parametrize("title", ["", "x" * 256], ids=["min_length", "max_length"])
-    def test_invalid_title_length(self, title):
-        future = datetime.now(timezone.utc) + timedelta(hours=48)
-        with pytest.raises(ValidationError):
-            TaskCreate(title=title, assigned_to_id=1, due_at=future)
-
-    def test_naive_datetime_treated_as_utc(self):
-        future_naive = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=48)
-        s = TaskCreate(title="X", assigned_to_id=1, due_at=future_naive)
-        assert s.due_at == future_naive
-
-    def test_with_description(self):
-        future = datetime.now(timezone.utc) + timedelta(hours=48)
-        s = TaskCreate(title="T", assigned_to_id=1, due_at=future, description="details")
-        assert s.description == "details"
-
-
-class TestTaskUpdate:
-    def test_all_none(self):
-        s = TaskUpdate()
-        assert s.title is None
-        assert s.description is None
-        assert s.assigned_to_id is None
-        assert s.due_at is None
-
-    def test_partial(self):
-        s = TaskUpdate(title="New title")
-        assert s.title == "New title"
-
-    def test_due_at_none_passes(self):
-        s = TaskUpdate(due_at=None)
-        assert s.due_at is None
-
-    def test_due_at_too_soon(self):
-        soon = datetime.now(timezone.utc) + timedelta(hours=1)
-        with pytest.raises(ValidationError, match="at least 24 hours"):
-            TaskUpdate(due_at=soon)
-
-    def test_due_at_valid(self):
-        future = datetime.now(timezone.utc) + timedelta(hours=48)
-        s = TaskUpdate(due_at=future)
-        assert s.due_at == future
-
-    def test_title_min_length(self):
-        with pytest.raises(ValidationError):
-            TaskUpdate(title="")
-
-
-class TestTaskComplete:
-    def test_valid(self):
-        s = TaskComplete(completion_note="Done via email")
-        assert s.completion_note == "Done via email"
-
-    def test_empty_note(self):
-        with pytest.raises(ValidationError):
-            TaskComplete(completion_note="")
-
-
-class TestTaskStatusUpdate:
-    def test_valid_statuses(self):
-        for status in ("todo", "in_progress", "done"):
-            s = TaskStatusUpdate(status=status)
-            assert s.status == status
-
-    def test_strips_and_lowercases(self):
-        s = TaskStatusUpdate(status="  IN_PROGRESS  ")
-        assert s.status == "in_progress"
-
-    def test_invalid_status(self):
-        with pytest.raises(ValidationError, match="Invalid status"):
-            TaskStatusUpdate(status="cancelled")
 
 
 # ── Prospect Pool Schemas ───────────────────────────────────────────

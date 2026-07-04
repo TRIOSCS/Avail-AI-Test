@@ -951,10 +951,13 @@ async def mark_task_done(
 ):
     """Mark a task as done.
 
-    Only the assignee may complete the task.
+    Only the assignee may complete the task. An optional ``completion_note`` form field
+    (a "how was this resolved?" note, submitted from the comms tab) is stored on the task.
     """
+    form = await request.form()
+    completion_note = (form.get("completion_note") or "").strip()
     try:
-        task = task_service.complete_task(db, task_id, user.id)
+        task = task_service.complete_task(db, task_id, user.id, completion_note)
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
 

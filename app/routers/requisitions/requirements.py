@@ -1410,7 +1410,6 @@ async def list_requirement_tasks(
             "assigned_to": user_map.get(t.assigned_to_id, ""),
             "created_by_name": user_map.get(t.created_by, ""),
             "source_ref": t.source_ref,
-            "ai_risk_flag": t.ai_risk_flag,
             "source": t.source,
             "due_date": t.due_at.isoformat() if t.due_at else None,
             "completed_at": t.completed_at.isoformat() if t.completed_at else None,
