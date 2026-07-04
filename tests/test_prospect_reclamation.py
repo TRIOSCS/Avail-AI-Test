@@ -470,6 +470,73 @@ class TestJobAutoSurfaceWithDb:
         db_session.refresh(pa_existing)
         assert pa_existing.company_id == co.id
 
+    async def test_surfaced_prospect_carries_won_quote_history(self, db_session: Session) -> None:
+        """M3: a reactivated past customer with a WON quote surfaces WARM, not ice-cold.
+
+        historical_context is lifted from the same reqs/quotes the job filtered on, and
+        apply_historical_bonus pulls fit/readiness off zero so genuine warm accounts no
+        longer render as fit=0/readiness=0.
+        """
+        from app.models.crm import CustomerSite
+        from app.models.quotes import Quote
+        from app.services import prospect_reclamation as pr
+
+        domain = f"warm-{_uid()}.com"
+        co = _company(db_session, owner_id=None, domain=domain)
+        site = CustomerSite(company_id=co.id, site_name="HQ")
+        db_session.add(site)
+        db_session.flush()
+        req = Requisition(name=f"REQ-{_uid()}", company_id=co.id, status="open", created_at=datetime.now(timezone.utc))
+        db_session.add(req)
+        db_session.flush()
+        q = Quote(
+            requisition_id=req.id,
+            customer_site_id=site.id,
+            quote_number=f"Q-{_uid()}",
+            status="won",
+            result="won",
+            won_revenue=5000,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(q)
+        db_session.commit()
+
+        await pr.job_auto_surface_with_db(db_session)
+
+        pa = db_session.query(ProspectAccount).filter(ProspectAccount.domain == domain).first()
+        assert pa is not None
+        hc = pa.historical_context or {}
+        assert hc.get("bought_before") is True
+        assert hc.get("quoted_before") is True
+        assert hc.get("quote_count") == 1
+        assert hc.get("last_activity")  # ISO date present
+        # No longer ice-cold: the historical bonus lifted fit/readiness off zero.
+        assert pa.fit_score > 0
+        assert pa.readiness_score > 0
+        assert (pa.buyer_ready_score or 0) > 0
+
+    async def test_surfaced_prospect_requisition_only_records_last_activity(self, db_session: Session) -> None:
+        """M3: a req-only past customer records last_activity; quoted/bought stay False."""
+        from app.services import prospect_reclamation as pr
+
+        domain = f"reqonly-{_uid()}.com"
+        co = _company(db_session, owner_id=None, domain=domain)
+        req = Requisition(name=f"REQ-{_uid()}", company_id=co.id, status="open", created_at=datetime.now(timezone.utc))
+        db_session.add(req)
+        db_session.commit()
+
+        await pr.job_auto_surface_with_db(db_session)
+
+        pa = db_session.query(ProspectAccount).filter(ProspectAccount.domain == domain).first()
+        assert pa is not None
+        hc = pa.historical_context or {}
+        assert hc.get("quote_count") == 0
+        assert hc.get("quoted_before") is False
+        assert hc.get("bought_before") is False
+        assert hc.get("last_activity")  # carried from the requisition
+        # last_activity recency drives a readiness bump even with no quotes.
+        assert pa.readiness_score > 0
+
 
 # ── Phase 4: reclaim cooldown ─────────────────────────────────────────────────
 

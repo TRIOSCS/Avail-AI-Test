@@ -19,68 +19,7 @@ from app.models.prospect_account import ProspectAccount
 from app.services.prospect_scoring import (
     ICP_SEGMENTS,
     calculate_fit_score,
-    calculate_readiness_score,
 )
-
-# ── Signal Enrichment ────────────────────────────────────────────────
-
-
-def _store_signal(prospect_id: int, key: str, value: object, db: Session, *, label: str) -> None:
-    """Store one signal under ``key`` in readiness_signals, recalc, and commit.
-
-    Idempotent: re-storing the same key just overwrites it. Preserves an
-    existing ``source`` and defaults it to "backfill" on first write.
-    """
-    prospect = db.get(ProspectAccount, prospect_id)
-    if not prospect:
-        logger.warning("enrich_with_{}: prospect {} not found", key, prospect_id)
-        return
-
-    signals = dict(prospect.readiness_signals or {})
-    signals[key] = value
-    signals["enriched_at"] = datetime.now(timezone.utc).isoformat()
-    signals["source"] = signals.get("source", "backfill")
-    prospect.readiness_signals = signals
-
-    _recalculate_readiness(prospect)
-    prospect.last_enriched_at = datetime.now(timezone.utc)
-    db.commit()
-    logger.info("{} signals stored for prospect {}", label, prospect_id)
-
-
-def enrich_with_intent(prospect_id: int, intent_data: dict, db: Session) -> None:
-    """Store intent topic data in readiness_signals JSONB under 'intent' key.
-
-    Relevant topics: electronic components, integrated circuits, semiconductors,
-    procurement solutions, supply chain management, component sourcing.
-    Recalculates readiness_score after update.
-    """
-    _store_signal(prospect_id, "intent", intent_data, db, label="Intent")
-
-
-def enrich_with_hiring(prospect_id: int, workforce_data: dict, db: Session) -> None:
-    """Store workforce trend data in readiness_signals JSONB under 'hiring' key.
-
-    Looks for procurement/engineering department growth, active hiring.
-    """
-    _store_signal(prospect_id, "hiring", workforce_data, db, label="Hiring")
-
-
-def enrich_with_events(prospect_id: int, events: list[dict], db: Session) -> None:
-    """Store company events in readiness_signals JSONB under 'events' key.
-
-    Event types: new_funding_round, new_product, new_office, M&A.
-    """
-    _store_signal(prospect_id, "events", events, db, label="Event")
-
-
-def _recalculate_readiness(prospect: ProspectAccount) -> None:
-    """Recalculate readiness_score from current readiness_signals."""
-    signals = prospect.readiness_signals or {}
-    prospect_data = {"name": prospect.name}
-    score, _ = calculate_readiness_score(prospect_data, signals)
-    prospect.readiness_score = score
-
 
 # ── Missing Signal Backfill ──────────────────────────────────────────
 

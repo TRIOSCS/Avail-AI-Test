@@ -1035,9 +1035,6 @@ from app.services.prospect_signals import (
     _build_writeup_prompt,
     _compare_sizes,
     _template_fallback_writeup,
-    enrich_with_events,
-    enrich_with_hiring,
-    enrich_with_intent,
     find_similar_customers,
     generate_ai_writeup,
 )
@@ -1058,71 +1055,6 @@ class TestCompareSizes:
     )
     def test_compare_sizes(self, size_a, size_b, expected):
         assert _compare_sizes(size_a, size_b) is expected
-
-
-class TestEnrichWithIntent:
-    def test_stores_intent(self, db_session):
-        prospect = MagicMock()
-        prospect.readiness_signals = {}
-        prospect.name = "Test Co"
-
-        with patch(
-            "app.services.prospect_signals.calculate_readiness_score",
-            return_value=(50, {}),
-        ):
-            db = MagicMock()
-            db.get.return_value = prospect
-            intent_data = {"strength": "strong", "topics": ["semiconductors"]}
-            enrich_with_intent(1, intent_data, db)
-            assert prospect.readiness_signals["intent"] == intent_data
-            db.commit.assert_called_once()
-
-    def test_prospect_not_found(self, db_session):
-        db = MagicMock()
-        db.get.return_value = None
-        enrich_with_intent(999, {}, db)
-        db.commit.assert_not_called()
-
-
-class TestEnrichWithHiring:
-    def test_stores_hiring(self):
-        prospect = MagicMock()
-        prospect.readiness_signals = {}
-        prospect.name = "Test Co"
-
-        with patch("app.services.prospect_signals.calculate_readiness_score", return_value=(40, {})):
-            db = MagicMock()
-            db.get.return_value = prospect
-            enrich_with_hiring(1, {"type": "procurement", "detail": 5}, db)
-            assert prospect.readiness_signals["hiring"]["type"] == "procurement"
-            db.commit.assert_called_once()
-
-    def test_prospect_not_found(self):
-        db = MagicMock()
-        db.get.return_value = None
-        enrich_with_hiring(999, {}, db)
-        db.commit.assert_not_called()
-
-
-class TestEnrichWithEvents:
-    def test_stores_events(self):
-        prospect = MagicMock()
-        prospect.readiness_signals = {}
-        prospect.name = "Test Co"
-
-        with patch("app.services.prospect_signals.calculate_readiness_score", return_value=(30, {})):
-            db = MagicMock()
-            db.get.return_value = prospect
-            events = [{"type": "funding", "date": "2026-01-01", "description": "Series B"}]
-            enrich_with_events(1, events, db)
-            assert prospect.readiness_signals["events"] == events
-            db.commit.assert_called_once()
-
-    def test_prospect_not_found(self):
-        db = MagicMock()
-        db.get.return_value = None
-        enrich_with_events(999, [], db)
-        db.commit.assert_not_called()
 
 
 class TestFindSimilarCustomers:

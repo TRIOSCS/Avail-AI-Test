@@ -20,15 +20,19 @@ from app.models import Company, User
 from app.models.crm import CustomerSite, SiteContact
 from app.models.prospect_account import ProspectAccount
 
-# Max active sites a single owner may hold. Enforced here in the service so every
-# claim entry point (HTMX tab + any future caller) inherits the cap identically.
-SITE_CAP = 200
+# Max active accounts (owned Companies) a single rep may hold — the anti-hoarding cap.
+# Enforced here in the service so every claim entry point (HTMX tab + any future caller)
+# inherits it identically. Claim assigns *company-level* ownership
+# (Company.account_owner_id), so the cap counts that axis. Counting CustomerSite.owner_id
+# was a dead no-op — claim never sets a site owner, so the guard never tripped (audit H9).
+ACCOUNT_CAP = 200
 
 
-def _active_site_count(db: Session, user_id: int) -> int:
+def _active_account_count(db: Session, user_id: int) -> int:
+    """Count the active Companies a rep owns — the axis a claim actually assigns."""
     return (
-        db.query(func.count(CustomerSite.id))
-        .filter(CustomerSite.owner_id == user_id, CustomerSite.is_active.is_(True))
+        db.query(func.count(Company.id))
+        .filter(Company.account_owner_id == user_id, Company.is_active.is_(True))
         .scalar()
         or 0
     )
@@ -96,9 +100,10 @@ def claim_prospect(prospect_id: int, user_id: int, db: Session) -> dict:
             if blocked_until > datetime.now(_tz.utc):
                 raise ValueError("This account is in a 30-day cooldown; ask a manager to reassign it.")
 
-    if _active_site_count(db, user_id) >= SITE_CAP:
+    if _active_account_count(db, user_id) >= ACCOUNT_CAP:
         raise ValueError(
-            f"You hold {SITE_CAP} or more active sites (the cap). Release inactive sites before claiming new ones."
+            f"You own {ACCOUNT_CAP} or more active accounts (the cap). "
+            "Release inactive accounts before claiming new ones."
         )
 
     warning = None

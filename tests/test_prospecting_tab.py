@@ -115,8 +115,8 @@ class TestClaim:
         assert p.claimed_by == test_user.id
         assert p.company_id is not None
 
-    def test_claim_blocked_at_site_cap(self, db_session, test_user, monkeypatch):
-        monkeypatch.setattr("app.services.prospect_claim.SITE_CAP", 0)
+    def test_claim_blocked_at_account_cap(self, db_session, test_user, monkeypatch):
+        monkeypatch.setattr("app.services.prospect_claim.ACCOUNT_CAP", 0)
         from app.services.prospect_claim import claim_prospect
 
         p = make_prospect(db_session, status="suggested")

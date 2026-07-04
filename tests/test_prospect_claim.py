@@ -1,7 +1,7 @@
 """tests/test_prospect_claim.py — Tests for app/services/prospect_claim.py.
 
 Covers all public functions: _split_hq_location, _format_similar_names,
-_active_site_count, claim_prospect, release_prospect, reveal_contacts,
+_active_account_count, claim_prospect, release_prospect, reveal_contacts,
 generate_account_briefing, _template_briefing, check_enrichment_status,
 add_prospect_manually.
 
@@ -21,7 +21,7 @@ from app.models import Company, User
 from app.models.crm import CustomerSite, SiteContact
 from app.models.prospect_account import ProspectAccount
 from app.services.prospect_claim import (
-    _active_site_count,
+    _active_account_count,
     _format_similar_names,
     _split_hq_location,
     _template_briefing,
@@ -86,19 +86,6 @@ def _make_company(
     db.commit()
     db.refresh(co)
     return co
-
-
-def _make_active_site(db: Session, owner_id: int, company_id: int) -> CustomerSite:
-    site = CustomerSite(
-        company_id=company_id,
-        site_name="HQ",
-        is_active=True,
-        owner_id=owner_id,
-    )
-    db.add(site)
-    db.commit()
-    db.refresh(site)
-    return site
 
 
 # ── _split_hq_location ───────────────────────────────────────────────
@@ -169,35 +156,31 @@ class TestFormatSimilarNames:
             _format_similar_names(similar, 5)
 
 
-# ── _active_site_count ───────────────────────────────────────────────
+# ── _active_account_count ────────────────────────────────────────────
+# Regression axis for H9: claim assigns *company-level* ownership
+# (Company.account_owner_id), so the anti-hoarding cap must count owned Companies.
+# The old guard counted CustomerSite.owner_id — an axis claim never sets — so it was a
+# dead no-op that never tripped.
 
 
-class TestActiveSiteCount:
-    def test_no_sites_returns_zero(self, db_session: Session, test_user: User):
-        assert _active_site_count(db_session, test_user.id) == 0
+class TestActiveAccountCount:
+    def test_no_accounts_returns_zero(self, db_session: Session, test_user: User):
+        assert _active_account_count(db_session, test_user.id) == 0
 
-    def test_counts_active_sites(self, db_session: Session, test_user: User):
-        co = _make_company(db_session, domain="site-count-test.com")
-        _make_active_site(db_session, test_user.id, co.id)
-        _make_active_site(db_session, test_user.id, co.id)
-        assert _active_site_count(db_session, test_user.id) == 2
+    def test_counts_active_owned_companies(self, db_session: Session, test_user: User):
+        _make_company(db_session, domain="owned-1.com", owner_id=test_user.id)
+        _make_company(db_session, domain="owned-2.com", owner_id=test_user.id)
+        assert _active_account_count(db_session, test_user.id) == 2
 
-    def test_ignores_inactive_sites(self, db_session: Session, test_user: User):
-        co = _make_company(db_session, domain="inactive-site.com")
-        site = CustomerSite(
-            company_id=co.id,
-            site_name="Inactive",
-            is_active=False,
-            owner_id=test_user.id,
-        )
-        db_session.add(site)
+    def test_ignores_inactive_companies(self, db_session: Session, test_user: User):
+        co = _make_company(db_session, domain="inactive-co.com", owner_id=test_user.id)
+        co.is_active = False
         db_session.commit()
-        assert _active_site_count(db_session, test_user.id) == 0
+        assert _active_account_count(db_session, test_user.id) == 0
 
-    def test_ignores_other_users_sites(self, db_session: Session, test_user: User, admin_user: User):
-        co = _make_company(db_session, domain="other-user-site.com")
-        _make_active_site(db_session, admin_user.id, co.id)
-        assert _active_site_count(db_session, test_user.id) == 0
+    def test_ignores_other_users_companies(self, db_session: Session, test_user: User, admin_user: User):
+        _make_company(db_session, domain="other-owned-co.com", owner_id=admin_user.id)
+        assert _active_account_count(db_session, test_user.id) == 0
 
 
 # ── claim_prospect ───────────────────────────────────────────────────
@@ -297,13 +280,30 @@ class TestClaimProspect:
         with pytest.raises(ValueError, match="Cannot claim prospect with status"):
             claim_prospect(prospect.id, test_user.id, db_session)
 
-    def test_raises_value_error_if_site_cap_hit(self, db_session: Session, test_user: User):
-        co = _make_company(db_session, domain="cap-test-company.com")
-        # Patch SITE_CAP to 0 to simulate the cap being hit
-        with patch("app.services.prospect_claim.SITE_CAP", 0):
+    def test_raises_value_error_if_account_cap_hit(self, db_session: Session, test_user: User):
+        _make_company(db_session, domain="cap-test-company.com")
+        # Patch ACCOUNT_CAP to 0 to simulate the cap being hit
+        with patch("app.services.prospect_claim.ACCOUNT_CAP", 0):
             prospect = _make_prospect(db_session, domain="cap-hit.com")
             with pytest.raises(ValueError, match="cap"):
                 claim_prospect(prospect.id, test_user.id, db_session)
+
+    def test_cap_counts_claimed_accounts(self, db_session: Session, test_user: User):
+        """Regression (H9): the cap must count what claim assigns (owned Companies).
+
+        With ACCOUNT_CAP=1 a first claim succeeds (the rep now owns one Company) and a
+        second is blocked. The old guard counted CustomerSite.owner_id — which claim
+        never sets — so the count stayed 0 and this second claim was NOT blocked.
+        """
+        with patch("app.services.prospect_claim.ACCOUNT_CAP", 1):
+            p1 = _make_prospect(db_session, domain="cap-first.com")
+            with patch("app.cache.decorators.invalidate_prefix"):
+                claim_prospect(p1.id, test_user.id, db_session)
+            assert _active_account_count(db_session, test_user.id) == 1
+
+            p2 = _make_prospect(db_session, domain="cap-second.com")
+            with pytest.raises(ValueError, match="cap"):
+                claim_prospect(p2.id, test_user.id, db_session)
 
     def test_raises_lookup_error_if_user_not_found(self, db_session: Session):
         prospect = _make_prospect(db_session, domain="user-not-found.com")

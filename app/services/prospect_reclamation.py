@@ -263,12 +263,60 @@ async def job_auto_surface_reactivation() -> None:
         db.close()
 
 
+def _build_reactivation_history(company_id: int, db: Session) -> dict:
+    """Derive a prospect's ``historical_context`` from its prior Trio reqs/quotes.
+
+    Reactivation surfaces UNOWNED past-customer Companies that already have a Requisition
+    or a Quote (the same filter job_auto_surface_with_db applies). This lifts that same
+    evidence into ProspectAccount.historical_context so the buyer-ready snapshot
+    (build_priority_snapshot), apply_historical_bonus, and the LLM screener stop treating
+    a genuine warm account as ice-cold (audit M3 — nothing in app/ wrote this field before).
+
+    Fields mirror exactly what those readers consume:
+    - quote_count / quoted_before: quotes issued to any of the company's sites
+    - bought_before: at least one of those quotes was WON (Quote.result == "won")
+    - last_activity: the most recent req/quote timestamp, as an ISO date
+
+    Called by: job_auto_surface_with_db
+    """
+    from ..models.crm import CustomerSite
+    from ..models.quotes import Quote
+    from ..models.sourcing import Requisition
+
+    quotes = (
+        db.query(Quote)
+        .join(CustomerSite, Quote.customer_site_id == CustomerSite.id)
+        .filter(CustomerSite.company_id == company_id)
+        .all()
+    )
+    quote_count = len(quotes)
+    bought_before = any((q.result or "").lower() == "won" for q in quotes)
+
+    req_dates = [
+        row[0]
+        for row in db.query(Requisition.created_at).filter(Requisition.company_id == company_id).all()
+        if row[0] is not None
+    ]
+    quote_dates = [q.created_at for q in quotes if q.created_at is not None]
+    all_dates = req_dates + quote_dates
+    last_activity = max(all_dates).date().isoformat() if all_dates else None
+
+    return {
+        "bought_before": bought_before,
+        "quoted_before": quote_count > 0,
+        "quote_count": quote_count,
+        "last_activity": last_activity,
+        "source": "reactivation",
+    }
+
+
 async def job_auto_surface_with_db(db: Session) -> None:
     """Core auto-surface logic — injectable session for testability.
 
     Criteria: Company.account_owner_id IS NULL AND (has Requisition OR has Quote via
     CustomerSite). Skip if ProspectAccount already linked (company_id set, non-dismissed).
-    Sets discovery_source="reactivation".
+    Sets discovery_source="reactivation" and seeds historical_context + a historical
+    fit/readiness bonus from the company's prior reqs/quotes (M3).
 
     Called by: job_auto_surface_reactivation(), tests
     """
@@ -277,6 +325,7 @@ async def job_auto_surface_with_db(db: Session) -> None:
     from ..models.crm import CustomerSite
     from ..models.quotes import Quote
     from ..models.sourcing import Requisition
+    from .prospect_scoring import apply_historical_bonus
 
     req_subq = exists().where(Requisition.company_id == Company.id)
     quote_subq = exists().where(Quote.customer_site_id == CustomerSite.id).where(CustomerSite.company_id == Company.id)
@@ -329,13 +378,16 @@ async def job_auto_surface_with_db(db: Session) -> None:
             continue
 
         try:
+            history = _build_reactivation_history(co.id, db)
+            fit, readiness = apply_historical_bonus(0, 0, history)
             pa = ProspectAccount(
                 name=co.name,
                 domain=domain,
                 discovery_source="reactivation",
                 status=ProspectAccountStatus.SUGGESTED,
-                fit_score=0,
-                readiness_score=0,
+                fit_score=fit,
+                readiness_score=readiness,
+                historical_context=history,
                 company_id=co.id,
             )
             db.add(pa)
