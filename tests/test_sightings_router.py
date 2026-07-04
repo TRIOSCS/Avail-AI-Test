@@ -174,6 +174,28 @@ class TestSightingsListPartial:
         assert "DEAL-LOST" not in resp.text
         assert "DEAL-CANCELLED" not in resp.text
 
+    def test_null_sourcing_status_still_listed(self, client, db_session):
+        """A requirement whose sourcing_status is NULL is active and still appears.
+
+        ``sourcing_status`` is nullable — ``default='open'`` is a client-side default only
+        (no server_default/NOT NULL), so a row can be NULL. A bare ``notin_(...)`` compiles
+        to ``NULL NOT IN (...)`` → NULL (falsy), which silently dropped such a part from the
+        board (and its facet counts / urgent tiles). NULL must be treated as active.
+        """
+        req = Requisition(name="Null-status RFQ", status="open", customer_name="Acme Corp")
+        db_session.add(req)
+        db_session.flush()
+        r = Requirement(requisition_id=req.id, primary_mpn="NULL-STATUS-PART", target_qty=10)
+        db_session.add(r)
+        db_session.flush()  # client-side default 'open' is applied on INSERT
+        r.sourcing_status = None  # force NULL via UPDATE — bypasses the default
+        db_session.commit()
+        db_session.expire(r)
+        assert r.sourcing_status is None  # precondition: the row is genuinely NULL
+        resp = client.get("/v2/partials/sightings")
+        assert resp.status_code == 200
+        assert "NULL-STATUS-PART" in resp.text
+
 
 class TestSightingsDetailPartial:
     def test_returns_200(self, client, db_session):

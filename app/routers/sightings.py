@@ -99,6 +99,25 @@ _EXCLUDED_SOURCING_STATUSES: Final = (
     SourcingStatus.ARCHIVED,
 )
 
+
+def _active_sourcing_status_clause():
+    """Sourcing-status predicate that keeps a NULL status on the active board.
+
+    ``Requirement.sourcing_status`` is nullable — ``default="open"`` is a CLIENT-side
+    default only (no ``server_default``/NOT NULL), so a row can legitimately be NULL. A
+    bare ``sourcing_status.notin_(_EXCLUDED_SOURCING_STATUSES)`` compiles to ``NULL NOT IN
+    (...)`` which SQL evaluates to NULL (falsy), silently dropping an active NULL-status
+    requirement from the board, its facet counts, the urgent/stale tiles, and the
+    cross-requirement vendor-overlap query. Coalescing NULL to "active" here treats such a
+    part as open (matching the pre-change behavior). Shared by every active-only query so
+    they stay in lockstep.
+    """
+    return or_(
+        Requirement.sourcing_status.is_(None),
+        Requirement.sourcing_status.notin_(_EXCLUDED_SOURCING_STATUSES),
+    )
+
+
 _cache: dict[str, tuple[float, Any]] = {}
 
 
@@ -350,7 +369,7 @@ async def sightings_list(
         db.query(Requirement)
         .join(Requisition, Requirement.requisition_id == Requisition.id)
         .filter(Requisition.status.notin_(_EXCLUDED_REQ_STATUSES))
-        .filter(Requirement.sourcing_status.notin_(_EXCLUDED_SOURCING_STATUSES))
+        .filter(_active_sourcing_status_clause())
         .options(joinedload(Requirement.requisition).joinedload(Requisition.creator))
     )
 
@@ -415,7 +434,7 @@ async def sightings_list(
             db.query(Requirement.sourcing_status, sqlfunc.count())
             .join(Requisition, Requirement.requisition_id == Requisition.id)
             .filter(Requisition.status.notin_(_EXCLUDED_REQ_STATUSES))
-            .filter(Requirement.sourcing_status.notin_(_EXCLUDED_SOURCING_STATUSES))
+            .filter(_active_sourcing_status_clause())
             .group_by(Requirement.sourcing_status)
             .all()
         ),
@@ -476,7 +495,7 @@ async def sightings_list(
         db.query(Requirement.id)
         .join(Requisition, Requirement.requisition_id == Requisition.id)
         .filter(Requisition.status.notin_(_EXCLUDED_REQ_STATUSES))
-        .filter(Requirement.sourcing_status.notin_(_EXCLUDED_SOURCING_STATUSES))
+        .filter(_active_sourcing_status_clause())
     )
 
     # Urgent: priority >= 70 OR need_by_date within 48h
@@ -768,7 +787,7 @@ async def sightings_detail(
         .join(Requirement, VendorSightingSummary.requirement_id == Requirement.id)
         .join(Requisition, Requirement.requisition_id == Requisition.id)
         .filter(Requisition.status.notin_(_EXCLUDED_REQ_STATUSES))
-        .filter(Requirement.sourcing_status.notin_(_EXCLUDED_SOURCING_STATUSES))
+        .filter(_active_sourcing_status_clause())
         .group_by(VendorSightingSummary.vendor_name)
         .having(sqlfunc.count(sqlfunc.distinct(VendorSightingSummary.requirement_id)) > 1)
         .all()

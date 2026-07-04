@@ -7,6 +7,7 @@ oemsecrets, sourcengine, element14.
 All external HTTP calls are mocked — no real API requests.
 """
 
+import asyncio
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -205,6 +206,125 @@ class TestBaseConnector:
         with pytest.raises(RuntimeError, match="always fails"):
             await c.search("LM317")
         _breakers.pop("AlwaysFailConn", None)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  Cross-search OAuth token cache tests (_get_cached_token / _invalidate_token)
+# ═══════════════════════════════════════════════════════════════════════
+#
+# The process-wide bearer cache (keyed by (connector class, client_id)) is what lets a
+# token minted by one search be reused by the next until it expires; the per-key
+# asyncio.Lock collapses a cold-cache mint burst into ONE POST. conftest's autouse
+# `_clear_connector_token_cache` fixture empties `_token_cache` + `_token_locks` around
+# each test, so every test here starts cold. `mint` is always a local async callable — no
+# live HTTP.
+
+
+class TestOAuthTokenCache:
+    @pytest.mark.asyncio
+    async def test_concurrent_cold_cache_mints_once(self):
+        """Single-flight: a cold-cache burst of concurrent calls for one key mints ONCE.
+
+        The per-key lock serializes waiters; the re-check after acquiring it means only the
+        first waiter mints and the rest reuse that bearer.
+        """
+        from app.connectors.sources import _get_cached_token
+
+        key = ("TestConn", "client-burst")
+        mint_calls = 0
+
+        async def _mint():
+            nonlocal mint_calls
+            mint_calls += 1
+            await asyncio.sleep(0.02)  # widen the race window so the burst truly overlaps
+            return f"token-{mint_calls}", 3600
+
+        results = await asyncio.gather(*(_get_cached_token(key, _mint) for _ in range(25)))
+
+        assert mint_calls == 1  # the lock collapsed the burst into a single mint
+        assert set(results) == {"token-1"}  # every waiter got the one minted bearer
+
+    @pytest.mark.asyncio
+    async def test_two_instances_share_cached_token(self):
+        """Two DIFFERENT connector instances with the same (class, client_id) reuse one
+        cached token — the second instance's mint must never run."""
+        from app.connectors.sources import NexarConnector, _get_cached_token
+
+        c1 = NexarConnector(client_id="shared-id", client_secret="secret-1")
+        c2 = NexarConnector(client_id="shared-id", client_secret="secret-2")
+        # The cache key is (class name, client_id) — independent of the instance / secret.
+        assert c1._token_cache_key() == c2._token_cache_key()
+
+        mint_calls = 0
+
+        async def _mint():
+            nonlocal mint_calls
+            mint_calls += 1
+            return "shared-token", 3600
+
+        async def _must_not_mint():
+            raise AssertionError("second instance re-minted instead of reusing the cache")
+
+        first = await _get_cached_token(c1._token_cache_key(), _mint)
+        second = await _get_cached_token(c2._token_cache_key(), _must_not_mint)
+
+        assert first == second == "shared-token"
+        assert mint_calls == 1
+
+    @pytest.mark.asyncio
+    async def test_expired_entry_remints(self):
+        """A cached entry past its expiry (minus safety margin) is re-minted, not
+        served."""
+        from app.connectors.sources import _get_cached_token, _token_cache
+
+        key = ("TestConn", "client-expired")
+        # Seed an already-expired entry: expires_at is in the monotonic past.
+        _token_cache[key] = ("stale-token", time.monotonic() - 1.0)
+
+        async def _mint():
+            return "fresh-token", 3600
+
+        got = await _get_cached_token(key, _mint)
+        assert got == "fresh-token"
+        assert _token_cache[key][0] == "fresh-token"  # cache updated with the new bearer
+
+    @pytest.mark.asyncio
+    async def test_within_safety_margin_remints(self):
+        """An entry inside the safety margin (still 'valid' by raw expiry) re-mints
+        early — the margin protects against a token dying mid-request."""
+        from app.connectors.sources import _get_cached_token, _token_cache
+
+        key = ("TestConn", "client-margin")
+        # expires in 10s but safety_margin defaults to 60s → treated as due for refresh.
+        _token_cache[key] = ("soon-stale", time.monotonic() + 10.0)
+
+        async def _mint():
+            return "refreshed", 3600
+
+        assert await _get_cached_token(key, _mint) == "refreshed"
+
+    @pytest.mark.asyncio
+    async def test_invalidate_token_forces_remint(self):
+        """`_invalidate_token` drops the cached bearer so the next call re-mints (the
+        401 drop-and-retry path)."""
+        from app.connectors.sources import _get_cached_token, _invalidate_token
+
+        key = ("TestConn", "client-invalidate")
+        mint_calls = 0
+
+        async def _mint():
+            nonlocal mint_calls
+            mint_calls += 1
+            return f"token-{mint_calls}", 3600
+
+        assert await _get_cached_token(key, _mint) == "token-1"
+        assert await _get_cached_token(key, _mint) == "token-1"  # reused, no new mint
+        assert mint_calls == 1
+
+        _invalidate_token(key)
+
+        assert await _get_cached_token(key, _mint) == "token-2"  # re-minted after drop
+        assert mint_calls == 2
 
 
 # ═══════════════════════════════════════════════════════════════════════

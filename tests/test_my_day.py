@@ -354,6 +354,26 @@ class TestTasksPageFilters:
         assert overdue.title in resp.text
         assert future.title not in resp.text
 
+    def test_due_upcoming_filter(self, client: TestClient, db_session, test_user, test_company):
+        """A task due strictly in the future shows under due=upcoming (the 'Later'
+        bucket) and is excluded from the mutually-exclusive today and overdue
+        filters."""
+        upcoming = _add_task(
+            db_session,
+            user_id=test_user.id,
+            title="Upcoming task",
+            company=test_company,
+            due_at=datetime.now(timezone.utc) + timedelta(days=5),
+        )
+        resp_upcoming = client.get("/v2/partials/my-day?due=upcoming", headers={"HX-Target": "tasks-results"})
+        assert resp_upcoming.status_code == 200
+        assert upcoming.title in resp_upcoming.text
+        # The same future task must NOT match today or overdue — no contradiction.
+        resp_today = client.get("/v2/partials/my-day?due=today", headers={"HX-Target": "tasks-results"})
+        assert upcoming.title not in resp_today.text
+        resp_overdue = client.get("/v2/partials/my-day?due=overdue", headers={"HX-Target": "tasks-results"})
+        assert upcoming.title not in resp_overdue.text
+
     def test_due_none_filter(self, client: TestClient, db_session, test_user, test_company):
         no_due = _add_task(db_session, user_id=test_user.id, title="No due task", company=test_company)
         with_due = _add_task(
