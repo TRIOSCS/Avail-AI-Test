@@ -23,6 +23,41 @@ from app.services.health_monitor import (
 # ── Helpers ──────────────────────────────────────────────────────────
 
 
+class _ProbeConnector:
+    """Minimal real BaseConnector to exercise the health-probe breaker bypass.
+
+    Defined as a subclass at call time so its class name (and therefore its module-level
+    breaker key) is isolated to these tests.
+    """
+
+    _instance_cls = None
+
+    @classmethod
+    def make(cls, *, fail: bool):
+        from app.connectors.sources import BaseConnector, _breakers
+
+        class _HealthProbeFakeConnector(BaseConnector):
+            source_name = "probe_fake"
+
+            def __init__(self, fail: bool):
+                _breakers.pop("_HealthProbeFakeConnector", None)
+                super().__init__(timeout=1.0, max_retries=0)
+                self._fail = fail
+                self.call_count = 0
+
+            async def _do_search(self, part_number: str) -> list:
+                self.call_count += 1
+                if self._fail:
+                    raise ConnectionError("upstream down")
+                return [{"vendor_name": "ok", "mpn_matched": part_number}]
+
+            def open_breaker(self) -> None:
+                for _ in range(self._breaker.fail_max):
+                    self._breaker.record_failure()
+
+        return _HealthProbeFakeConnector(fail)
+
+
 def _make_source(db: Session, **overrides) -> ApiSource:
     """Create an ApiSource with sensible defaults."""
     defaults = {
@@ -243,6 +278,47 @@ class TestPingSource:
                 result = asyncio.get_event_loop().run_until_complete(ping_source(source, db_session))
 
         assert len(result["error"]) <= 500
+
+
+# ── ping breaker-bypass tests ────────────────────────────────────────
+
+
+class TestPingBreakerBypass:
+    """A search-induced breaker trip must not flip health to a 15-min ERROR exclusion.
+
+    The ping bypasses the open-circuit short-circuit (run_health_probe →
+    BaseConnector.health_probe) and measures genuine upstream health.
+    """
+
+    def test_open_breaker_healthy_upstream_stays_live(self, db_session):
+        """Transient trip + healthy upstream → status stays LIVE and the trip clears."""
+        source = _make_source(db_session, status="live")
+        conn = _ProbeConnector.make(fail=False)
+        conn.open_breaker()  # simulate an in-search breaker trip
+        assert conn._breaker.current_state == "open"
+
+        with patch("app.services.health_monitor._get_connector", return_value=conn):
+            result = asyncio.get_event_loop().run_until_complete(ping_source(source, db_session))
+
+        assert result["success"] is True
+        assert source.status == "live"  # NOT flipped to error by the transient trip
+        assert conn.call_count == 1  # the real upstream was probed
+        assert conn._breaker.current_state == "closed"  # probe cleared the trip
+
+    def test_open_breaker_genuinely_down_flips_error(self, db_session):
+        """A genuinely-down upstream still flips to ERROR (real exclusion preserved)."""
+        source = _make_source(db_session, status="live")
+        conn = _ProbeConnector.make(fail=True)
+        conn.open_breaker()
+        assert conn._breaker.current_state == "open"
+
+        with patch("app.services.health_monitor._get_connector", return_value=conn):
+            with patch("app.services.health_monitor._check_status_transition"):
+                result = asyncio.get_event_loop().run_until_complete(ping_source(source, db_session))
+
+        assert result["success"] is False
+        assert source.status == "error"  # truly-down connector still excluded
+        assert conn.call_count == 1  # the real upstream WAS attempted, not short-circuited
 
 
 # ── deep_test_source tests ───────────────────────────────────────────

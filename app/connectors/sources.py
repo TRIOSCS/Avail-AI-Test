@@ -194,7 +194,22 @@ class BaseConnector(ABC):
         # docs/APP_MAP_INTERACTIONS.md § Connector Failure Contract.
         if self._breaker.current_state == "open":
             raise ConnectorError(f"{self.__class__.__name__} circuit breaker open")
+        return await self.health_probe(part_number)
 
+    async def health_probe(self, part_number: str) -> list[dict]:
+        """Search the real upstream WITHOUT the open-circuit short-circuit.
+
+        The health monitor and the Settings "Test" button are the source of truth for
+        whether an upstream actually works. A circuit breaker that tripped during a user
+        search is a transient, in-process protection (it resets after ``reset_timeout``),
+        so honoring its open state in a health check would let one flaky search flip
+        ``api_sources.status`` to a 15-minute ERROR exclusion. Bypassing it measures
+        GENUINE upstream health: a real response clears the trip (``record_success`` → the
+        source stays LIVE), while a real failure still records against the breaker and lets
+        the caller flip status to ERROR (a truly-down connector stays excluded). Semaphore
+        + retry/breaker bookkeeping are otherwise identical to ``search``. Reach this via
+        the module-level ``run_health_probe`` seam, never directly.
+        """
         # Per-connector concurrency limit — avoids hammering one API
         async with self._semaphore:
             return await self._search_with_retry(part_number)
@@ -272,6 +287,23 @@ class BaseConnector(ABC):
     @abstractmethod
     async def _do_search(self, part_number: str) -> list[dict]:
         pass
+
+
+async def run_health_probe(connector, part_number: str) -> list[dict]:
+    """Probe *connector* for a health check, bypassing the open-circuit short-circuit.
+
+    For ``BaseConnector`` connectors this calls ``health_probe`` so an in-search breaker
+    trip is not mistaken for a genuine upstream failure (which would flip
+    ``api_sources.status`` to a 15-min ERROR exclusion — see ``BaseConnector.health_probe``
+    for the full rationale). Non-``BaseConnector`` test connectors (keyless Test hooks: AI
+    web, email-mining, Teams, Clay, …) have no breaker, so they fall back to plain
+    ``search``. This is the single seam used by both the scheduled health monitor
+    (``health_monitor.ping_source`` / ``deep_test_source``) and the Settings "Test" button
+    (``routers.sources._probe_source``).
+    """
+    if isinstance(connector, BaseConnector):
+        return await connector.health_probe(part_number)
+    return await connector.search(part_number)
 
 
 def _parse_retry_after(response: httpx.Response) -> float:

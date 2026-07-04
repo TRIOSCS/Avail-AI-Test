@@ -28,6 +28,7 @@ from ..connectors.errors import (
     ConnectorQuotaError,
     ConnectorRateLimitError,
 )
+from ..connectors.sources import run_health_probe
 from ..constants import BROWSER_WORKER_SOURCES, ApiSourceStatus
 from ..models.config import ApiSource, ApiUsageLog
 
@@ -218,7 +219,7 @@ async def ping_source(source: ApiSource, db: Session) -> dict:
 
     start = time.time()
     try:
-        await connector.search(DEEP_TEST_MPN)
+        await run_health_probe(connector, DEEP_TEST_MPN)
         elapsed_ms = int((time.time() - start) * 1000)
 
         source.status = ApiSourceStatus.LIVE.value
@@ -287,7 +288,7 @@ async def deep_test_source(source: ApiSource, db: Session) -> dict:
 
     start = time.time()
     try:
-        results = await connector.search(DEEP_TEST_MPN)
+        results = await run_health_probe(connector, DEEP_TEST_MPN)
         elapsed_ms = int((time.time() - start) * 1000)
 
         source.status = ApiSourceStatus.LIVE.value

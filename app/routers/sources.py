@@ -25,6 +25,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from ..config import settings
+from ..connectors.sources import run_health_probe
 from ..constants import AccessKey, ApiSourceStatus
 from ..database import get_db
 from ..dependencies import (
@@ -538,7 +539,10 @@ async def _probe_source(src: ApiSource, db: Session) -> dict:
         connector = _get_connector_for_source(src.name, db)
         if not connector:
             raise ValueError(f"No connector available for {src.name}")
-        results = await connector.search(_TEST_MPN)
+        # Bypass the open-circuit short-circuit so a transient in-search breaker trip
+        # doesn't make Test falsely report ERROR — Test must reflect genuine upstream
+        # health (see connectors.sources.run_health_probe / BaseConnector.health_probe).
+        results = await run_health_probe(connector, _TEST_MPN)
         return {"results": results, "elapsed_ms": int((time.time() - start) * 1000), "error": None}
     except Exception as e:
         return {"results": [], "elapsed_ms": int((time.time() - start) * 1000), "error": str(e)[:500]}

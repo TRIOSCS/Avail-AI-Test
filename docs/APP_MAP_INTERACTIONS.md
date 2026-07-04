@@ -523,6 +523,24 @@ source rejoins user searches automatically. Persistent failures
 (revoked key, exhausted quota) keep flipping back to `'error'` on each
 ping, keeping the source excluded until the operator intervenes.
 
+**Health probes bypass the open circuit breaker (2026-07-04, Phase 2).** The
+health monitor (`ping_source` / `deep_test_source`) and the Settings "Test"
+button (`routers.sources._probe_source`) probe via
+`connectors.sources.run_health_probe`, which for `BaseConnector` connectors calls
+`health_probe` — identical to `search` (semaphore + retry + breaker bookkeeping)
+except it does NOT short-circuit when the breaker is open. Rationale: a breaker
+that tripped during a user search is a *transient* in-process protection (it
+resets after `reset_timeout`). If a health ping honored that open state it would
+fail with a bare "circuit breaker open" and flip `api_sources.status` to a
+15-min ERROR exclusion — turning one flaky search into a 15-minute outage of a
+perfectly healthy source. The probe therefore measures GENUINE upstream health: a
+real 200 clears the trip (`record_success` → source stays `'live'`), while a real
+auth/quota/5xx failure still records against the breaker and flips status to
+`'error'` (a truly-down connector stays excluded, and the operator gets the real
+typed error, not "circuit breaker open"). Keyless test connectors (AI web,
+email-mining, Teams, Clay, …) have no breaker and fall back to plain `search`.
+Tests: `tests/test_circuit_breaker.py`, `tests/test_health_monitor.py`.
+
 **No carve-outs.** All seven connectors (Mouser, BrokerBin, Nexar,
 DigiKey, Element14, OEMSecrets, Sourcengine) follow this contract
 uniformly. The Mouser HTTP-403/429 silent-empty path that existed prior

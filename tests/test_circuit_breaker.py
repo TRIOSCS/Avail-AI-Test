@@ -147,3 +147,74 @@ def test_open_breaker_raises_without_calling():
     with pytest.raises(ConnectorError, match="circuit breaker open"):
         asyncio.run(conn.search("LM317T"))
     assert conn.call_count == 0  # _do_search was never called
+
+
+# ── Health-probe breaker bypass ───────────────────────────────────────
+# A breaker that tripped during a user search is transient; a health/Test probe must
+# measure GENUINE upstream health, not the in-process breaker state — otherwise one
+# flaky search flips api_sources.status to a 15-min ERROR exclusion.
+
+
+def test_health_probe_bypasses_open_breaker_and_clears_it():
+    """health_probe runs the real upstream even with the breaker open; a success clears
+    the transient trip."""
+    conn = _FakeConnector(fail=True)
+    _trip_breaker(conn)
+    assert conn._breaker.current_state == "open"
+
+    # Upstream is actually healthy now — the probe must hit it (bypassing the breaker)
+    # and the success must reset the breaker.
+    conn._fail = False
+    conn.call_count = 0
+    result = asyncio.run(conn.health_probe("LM317T"))
+    assert len(result) == 1
+    assert conn.call_count == 1  # _do_search actually ran (short-circuit bypassed)
+    assert conn._breaker.current_state == "closed"  # transient trip cleared
+
+
+def test_health_probe_still_raises_on_genuine_failure():
+    """A truly-down upstream still fails through health_probe and keeps the breaker open
+    — real error exclusion is preserved."""
+    conn = _FakeConnector(fail=True)
+    _trip_breaker(conn)
+    assert conn._breaker.current_state == "open"
+
+    conn.call_count = 0  # upstream still failing
+    with pytest.raises(ConnectionError):
+        asyncio.run(conn.health_probe("LM317T"))
+    assert conn.call_count == 1  # the real upstream WAS attempted
+    assert conn._breaker.current_state == "open"  # record_failure re-opens
+
+
+def test_run_health_probe_bypasses_breaker_for_baseconnector():
+    """The run_health_probe seam routes BaseConnectors through health_probe (bypass)."""
+    from app.connectors.sources import run_health_probe
+
+    conn = _FakeConnector(fail=True)
+    _trip_breaker(conn)
+    assert conn._breaker.current_state == "open"
+
+    conn._fail = False
+    conn.call_count = 0
+    result = asyncio.run(run_health_probe(conn, "LM317T"))
+    assert len(result) == 1
+    assert conn.call_count == 1
+    assert conn._breaker.current_state == "closed"
+
+
+def test_run_health_probe_falls_back_to_search_for_non_baseconnector():
+    """Keyless test connectors (no breaker) fall back to plain search."""
+    from app.connectors.sources import run_health_probe
+
+    class _Keyless:
+        def __init__(self):
+            self.searched = None
+
+        async def search(self, mpn):
+            self.searched = mpn
+            return [{"vendor_name": "X"}]
+
+    k = _Keyless()
+    result = asyncio.run(run_health_probe(k, "LM317T"))
+    assert k.searched == "LM317T"
+    assert result == [{"vendor_name": "X"}]
