@@ -256,6 +256,47 @@ class TestTasksPageDueTodayConsistency:
         assert earlier.title not in resp_overdue.text
 
 
+class TestTasksPageBusinessTimezone:
+    """#3 — due buckets use the business-local (US/Eastern) calendar day, not the UTC
+    day.
+
+    Frozen at 02:00 UTC on 2026-06-26, which is 22:00 US/Eastern on 2026-06-25. A task
+    due 2026-06-25 is 'due today' for the business day, even though the UTC clock has
+    rolled to the 26th (which the old UTC-day logic would have mislabelled 'Overdue').
+    """
+
+    @freeze_time("2026-06-26 02:00:00")
+    def test_task_due_business_today_not_overdue_near_utc_midnight(
+        self, client: TestClient, db_session, test_user, test_company
+    ):
+        _add_task(
+            db_session,
+            user_id=test_user.id,
+            title="Due June 25 Eastern",
+            company=test_company,
+            due_at=datetime(2026, 6, 25, 0, 0, tzinfo=timezone.utc),
+        )
+        resp = client.get("/v2/partials/my-day", headers={"HX-Target": "tasks-results"})
+        assert resp.status_code == 200
+        assert "Due June 25 Eastern" in resp.text
+        assert "Due today" in resp.text
+        assert "Overdue" not in resp.text
+
+    @freeze_time("2026-06-26 02:00:00")
+    def test_due_today_filter_uses_business_day(self, client: TestClient, db_session, test_user, test_company):
+        task = _add_task(
+            db_session,
+            user_id=test_user.id,
+            title="Eastern today task",
+            company=test_company,
+            due_at=datetime(2026, 6, 25, 0, 0, tzinfo=timezone.utc),
+        )
+        resp_today = client.get("/v2/partials/my-day?due=today", headers={"HX-Target": "tasks-results"})
+        assert task.title in resp_today.text
+        resp_overdue = client.get("/v2/partials/my-day?due=overdue", headers={"HX-Target": "tasks-results"})
+        assert task.title not in resp_overdue.text
+
+
 class TestTasksPageFilters:
     def test_full_load_has_filter_bar(self, client: TestClient):
         resp = client.get("/v2/partials/my-day")

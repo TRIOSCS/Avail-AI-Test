@@ -215,6 +215,17 @@ class TestTaskDueState:
         now = datetime(2026, 6, 25, 18, 0, tzinfo=timezone.utc)
         assert _task_due_state(self._task(datetime(2026, 6, 25, 0, 0)), now) == (False, True)
 
+    def test_business_timezone_governs_today_near_utc_midnight(self):
+        """#3 — near UTC midnight the business day (US/Eastern) still governs.
+
+        At 02:00 UTC it is still the prior evening in Eastern, so a task due that
+        Eastern day is 'due today', not 'overdue' — even though the UTC clock has
+        already rolled to tomorrow.
+        """
+        now = datetime(2026, 6, 26, 2, 0, tzinfo=timezone.utc)  # 2026-06-25 22:00 US/Eastern
+        task = self._task(datetime(2026, 6, 25, 0, 0, tzinfo=timezone.utc))  # due 2026-06-25
+        assert _task_due_state(task, now) == (False, True)
+
 
 # ═══════════════════════════════════════════════════════════════════════
 #  _sanitize_html_filter

@@ -6,6 +6,7 @@ Depends on: Jinja2
 
 from datetime import datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from fastapi.templating import Jinja2Templates
 from starlette.responses import Response
@@ -316,6 +317,15 @@ def _now() -> datetime:
 templates.env.globals["now"] = _now
 
 
+# Business operating timezone for task urgency. The app has no per-user timezone; it runs
+# on US/Eastern — the same zone the background workers hard-code
+# (EASTERN = ZoneInfo("America/New_York")) and the buyplan auto-complete default
+# (config.buyplan_auto_complete_tz). "Today"/"overdue" are judged against the
+# business-local calendar day: near UTC midnight the UTC day rolls over first and would
+# otherwise mislabel a task the user still considers due today.
+_BUSINESS_TZ = ZoneInfo("America/New_York")
+
+
 def _task_due_state(task, now_utc: datetime) -> tuple[bool, bool]:
     """Return (is_overdue, is_due_today) for a task row, coercing naive due_at to UTC.
 
@@ -325,12 +335,17 @@ def _task_due_state(task, now_utc: datetime) -> tuple[bool, bool]:
     two flags are therefore mutually exclusive, so the My Day filter and the results
     grouping — which both consume this one helper — can never disagree. Comparing dates
     (not datetimes) also sidesteps the naive/aware TypeError under SQLite.
+
+    "Today" is the *business-local* day (``_BUSINESS_TZ``): ``now`` is a real instant, so it
+    is converted before taking its date. ``due_at`` is NOT converted — it is a UTC-midnight
+    sentinel for the calendar date the user picked, and shifting it into a western zone
+    would roll it back a day; ``due.date()`` already yields that picked date.
     """
     if task.due_at is None:
         return (False, False)
     due = task.due_at if task.due_at.tzinfo is not None else task.due_at.replace(tzinfo=timezone.utc)
     due_date = due.date()
-    today = now_utc.date()
+    today = now_utc.astimezone(_BUSINESS_TZ).date()
     is_overdue = due_date < today
     is_due_today = due_date == today
     return (is_overdue, is_due_today)
