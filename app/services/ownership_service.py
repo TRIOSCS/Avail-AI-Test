@@ -1,14 +1,19 @@
-"""Customer ownership service — 30-day inactivity rule with open pool.
+"""Customer ownership service — inactivity warnings + open-pool auto-claim.
 
-Nightly sweep checks all owned accounts. If no auto-logged activity
-in the trailing window (30 days standard, 90 days strategic), ownership
-clears and the account drops to the open pool. Day-23 warning alerts
-fire 7 days before expiration.
+The company ownership inactivity threshold is a SINGLE configurable setting,
+``settings.account_sweep_inactivity_days`` (default 90). The SP4 account sweep
+(``prospect_reclamation.job_account_sweep``) is the single park+cooldown+notify
+path that clears an owner and drops the company into the prospect pool at that
+threshold. This nightly sweep is WARNINGS-ONLY: it emails owners of accounts
+approaching that threshold (``WARNING_LEAD_DAYS`` before it) and never clears
+ownership itself — retiring the old clear removes the H5 race where the 12h /
+30-day plain sweep nulled ``account_owner_id`` before SP4 could park + cool down
++ notify.
 
 First new engagement (email or call) auto-claims an open pool account.
 
 Usage:
-    # Nightly cron job
+    # Nightly cron job (warnings only)
     await run_ownership_sweep(db)
 
     # Called automatically from activity_service when activity is logged
@@ -28,22 +33,33 @@ from app.models import ActivityLog, Company, CustomerSite, User
 
 from ..constants import UserRole
 
+# The at-risk warning fires this many days BEFORE the company inactivity threshold
+# (settings.account_sweep_inactivity_days) — i.e. before the SP4 sweep would park it.
+WARNING_LEAD_DAYS = 7
+
 # ═══════════════════════════════════════════════════════════════════════
-#  NIGHTLY SWEEP — clear stale ownership, send warnings
+#  NIGHTLY SWEEP — WARNINGS ONLY (SP4 job_account_sweep does the clearing)
 # ═══════════════════════════════════════════════════════════════════════
 
 
 async def run_ownership_sweep(db: Session) -> dict:
-    """Run the nightly ownership sweep.
+    """Run the nightly ownership sweep — WARNINGS ONLY.
 
-    1. Find accounts in the warning zone (day 23+) → send alerts
-    2. Find accounts past their inactivity limit → clear ownership
+    Emails the owner of every account inside the warning zone
+    (``days_inactive >= account_sweep_inactivity_days - WARNING_LEAD_DAYS``), once
+    per day. It does NOT clear ownership: the SP4 account sweep
+    (``prospect_reclamation.job_account_sweep``) is the single park+cooldown+notify
+    path, and both it and this warning read the ONE threshold
+    ``settings.account_sweep_inactivity_days`` (default 90). Enabling both the
+    ownership-sweep flag and the account-sweep flag therefore no longer double-acts.
 
     Returns summary dict with counts.
     """
     now = datetime.now(timezone.utc)
     warned = 0
-    cleared = 0
+
+    inactivity_limit = settings.account_sweep_inactivity_days
+    warning_day = max(1, inactivity_limit - WARNING_LEAD_DAYS)
 
     # Get all owned companies
     owned = (
@@ -56,40 +72,28 @@ async def run_ownership_sweep(db: Session) -> dict:
     )
 
     for company in owned:
-        inactivity_limit, warning_day = _company_limits(company)
-
         days_inactive = _days_since_activity(company, now)
         if days_inactive is None:
             # No activity ever recorded — use created_at as baseline
             days_inactive = _days_since_created(company.created_at, now)
 
-        # Past limit → clear ownership
-        if days_inactive >= inactivity_limit:
-            _clear_ownership(company, db)
-            cleared += 1
-            logger.info(
-                f"Ownership cleared: '{company.name}' (ID {company.id}) — "
-                f"{days_inactive} days inactive (limit: {inactivity_limit})"
-            )
-            continue
-
-        # In warning zone → send alert (only once per day)
+        # In (or past) the warning zone → send alert once per day. Parking the
+        # account is SP4's job, so this sweep never clears ownership.
         if days_inactive >= warning_day:
             already_warned_today = _was_warned_today(company.id, company.account_owner_id, db)
             if not already_warned_today:
                 await _send_warning_alert(company, days_inactive, inactivity_limit, db)
                 warned += 1
 
-    if cleared or warned:
+    if warned:
         db.commit()
 
     result = {
         "total_owned": len(owned),
         "warned": warned,
-        "cleared": cleared,
         "timestamp": now.isoformat(),
     }
-    logger.info(f"Ownership sweep complete: {result}")
+    logger.info(f"Ownership sweep complete (warnings-only): {result}")
     return result
 
 
@@ -582,13 +586,6 @@ def _days_since_activity(company: Company, now: datetime) -> int | None:
     return _days_since(company.last_activity_at, now)
 
 
-def _clear_ownership(company: Company, db: Session):
-    """Clear ownership on a company, moving it to the open pool."""
-    company.account_owner_id = None
-    company.ownership_cleared_at = datetime.now(timezone.utc)
-    db.flush()
-
-
 def _was_warned_today(company_id: int, owner_id: int, db: Session) -> bool:
     """Check if we already sent a warning alert for this account today.
 
@@ -617,7 +614,7 @@ async def _send_warning_alert(company: Company, days_inactive: int, inactivity_l
     if not owner:
         return
 
-    days_remaining = inactivity_limit - days_inactive
+    days_remaining = max(0, inactivity_limit - days_inactive)
 
     # Log the warning as a system activity (also serves as dedup + dashboard notification)
     warning_record = ActivityLog(

@@ -144,7 +144,12 @@ async def _job_contacts_sync():
 
 @_traced_job
 async def _job_ownership_sweep():
-    """Run customer ownership sweep."""
+    """Run the customer ownership sweep (WARNINGS-ONLY).
+
+    Emails owners of accounts approaching the account_sweep_inactivity_days threshold;
+    the SP4 account sweep (prospect_reclamation.job_account_sweep) is the single path
+    that actually clears an owner and parks the company into the prospect pool.
+    """
     from ..database import SessionLocal
 
     db = SessionLocal()

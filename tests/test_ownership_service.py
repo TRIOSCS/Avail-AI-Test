@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.models import ActivityLog, Company, CustomerSite, User
 
 # ═══════════════════════════════════════════════════════════════════════
-#  HELPERS — _days_since_activity, _clear_ownership, _was_warned_today
+#  HELPERS — _days_since_activity, _was_warned_today
 # ═══════════════════════════════════════════════════════════════════════
 
 
@@ -44,22 +44,6 @@ class TestDaysSinceActivity:
         test_company.last_activity_at = last_activity.replace(tzinfo=None) if naive else last_activity
         result = _days_since_activity(test_company, now)
         assert result == days
-
-
-class TestClearOwnership:
-    """Tests for _clear_ownership()."""
-
-    def test_clears_owner_and_sets_timestamp(self, db_session: Session, test_company: Company, sales_user: User):
-        """Ownership is cleared and timestamp set."""
-        from app.services.ownership_service import _clear_ownership
-
-        test_company.account_owner_id = sales_user.id
-        db_session.flush()
-
-        _clear_ownership(test_company, db_session)
-
-        assert test_company.account_owner_id is None
-        assert test_company.ownership_cleared_at is not None
 
 
 class TestWasWarnedToday:
@@ -130,34 +114,48 @@ class TestSiteDaysSinceActivity:
 
 
 class TestRunOwnershipSweep:
-    """Tests for run_ownership_sweep()."""
+    """Tests for run_ownership_sweep() — WARNINGS ONLY (H5 fix).
+
+    The sweep never clears ownership anymore (SP4 job_account_sweep is the single
+    park+cooldown+notify path) and reads the ONE threshold
+    settings.account_sweep_inactivity_days (default 90), warning WARNING_LEAD_DAYS
+    before it. The result dict no longer carries a "cleared" count.
+    """
 
     @pytest.mark.asyncio
-    async def test_clears_stale_ownership(self, db_session: Session, test_company: Company, sales_user: User):
-        """Company inactive >30 days loses ownership."""
+    async def test_never_clears_ownership_past_threshold(
+        self, db_session: Session, test_company: Company, sales_user: User
+    ):
+        """A company well past the inactivity threshold is warned but NOT cleared."""
         from app.services.ownership_service import run_ownership_sweep
 
         test_company.account_owner_id = sales_user.id
-        test_company.last_activity_at = datetime.now(timezone.utc) - timedelta(days=31)
+        test_company.last_activity_at = datetime.now(timezone.utc) - timedelta(days=200)
         test_company.is_active = True
         db_session.commit()
 
-        with patch("app.services.ownership_service.settings") as mock_settings:
-            mock_settings.customer_inactivity_days = 30
-            mock_settings.strategic_inactivity_days = 90
+        mock_send = AsyncMock()
+        with (
+            patch("app.services.ownership_service.settings") as mock_settings,
+            patch("app.services.ownership_service._send_warning_alert", mock_send),
+        ):
+            mock_settings.account_sweep_inactivity_days = 90
             result = await run_ownership_sweep(db_session)
 
-        assert result["cleared"] == 1
+        assert "cleared" not in result
+        assert result["warned"] == 1
         db_session.refresh(test_company)
-        assert test_company.account_owner_id is None
+        # Ownership is retained — clearing is SP4's job, not this warning sweep's.
+        assert test_company.account_owner_id == sales_user.id
 
     @pytest.mark.asyncio
     async def test_warns_in_warning_zone(self, db_session: Session, test_company: Company, sales_user: User):
-        """Company in warning zone (day 23-29) gets warning."""
+        """Company inside the warning zone (past threshold minus lead) gets a
+        warning."""
         from app.services.ownership_service import run_ownership_sweep
 
         test_company.account_owner_id = sales_user.id
-        test_company.last_activity_at = datetime.now(timezone.utc) - timedelta(days=25)
+        test_company.last_activity_at = datetime.now(timezone.utc) - timedelta(days=85)
         test_company.is_active = True
         db_session.commit()
 
@@ -167,8 +165,7 @@ class TestRunOwnershipSweep:
             patch("app.services.ownership_service.settings") as mock_settings,
             patch("app.services.ownership_service._send_warning_alert", mock_send),
         ):
-            mock_settings.customer_inactivity_days = 30
-            mock_settings.strategic_inactivity_days = 90
+            mock_settings.account_sweep_inactivity_days = 90
             result = await run_ownership_sweep(db_session)
 
         assert result["warned"] == 1
@@ -180,7 +177,7 @@ class TestRunOwnershipSweep:
         from app.services.ownership_service import run_ownership_sweep
 
         test_company.account_owner_id = sales_user.id
-        test_company.last_activity_at = datetime.now(timezone.utc) - timedelta(days=25)
+        test_company.last_activity_at = datetime.now(timezone.utc) - timedelta(days=85)
         test_company.is_active = True
         db_session.flush()
 
@@ -201,81 +198,39 @@ class TestRunOwnershipSweep:
             patch("app.services.ownership_service.settings") as mock_settings,
             patch("app.services.ownership_service._send_warning_alert", mock_send),
         ):
-            mock_settings.customer_inactivity_days = 30
-            mock_settings.strategic_inactivity_days = 90
+            mock_settings.account_sweep_inactivity_days = 90
             result = await run_ownership_sweep(db_session)
 
         assert result["warned"] == 0
         mock_send.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_strategic_accounts_get_90_day_limit(
-        self, db_session: Session, test_company: Company, sales_user: User
-    ):
-        """Strategic accounts use 90-day inactivity limit."""
-        from app.services.ownership_service import run_ownership_sweep
-
-        test_company.account_owner_id = sales_user.id
-        test_company.is_strategic = True
-        test_company.last_activity_at = datetime.now(timezone.utc) - timedelta(days=35)
-        test_company.is_active = True
-        db_session.commit()
-
-        with patch("app.services.ownership_service.settings") as mock_settings:
-            mock_settings.customer_inactivity_days = 30
-            mock_settings.strategic_inactivity_days = 90
-            result = await run_ownership_sweep(db_session)
-
-        # 35 days < 90, should NOT be cleared
-        assert result["cleared"] == 0
-        db_session.refresh(test_company)
-        assert test_company.account_owner_id == sales_user.id
-
-    @pytest.mark.asyncio
     async def test_no_activity_uses_created_at(self, db_session: Session, test_company: Company, sales_user: User):
-        """No activity at all uses created_at as baseline."""
+        """No activity at all uses created_at as the warning baseline (still no
+        clear)."""
         from app.services.ownership_service import run_ownership_sweep
 
         test_company.account_owner_id = sales_user.id
         test_company.last_activity_at = None
-        test_company.created_at = datetime.now(timezone.utc) - timedelta(days=40)
+        test_company.created_at = datetime.now(timezone.utc) - timedelta(days=95)
         test_company.is_active = True
         db_session.commit()
 
-        with patch("app.services.ownership_service.settings") as mock_settings:
-            mock_settings.customer_inactivity_days = 30
-            mock_settings.strategic_inactivity_days = 90
+        mock_send = AsyncMock()
+        with (
+            patch("app.services.ownership_service.settings") as mock_settings,
+            patch("app.services.ownership_service._send_warning_alert", mock_send),
+        ):
+            mock_settings.account_sweep_inactivity_days = 90
             result = await run_ownership_sweep(db_session)
 
-        assert result["cleared"] == 1
+        assert result["warned"] == 1
+        db_session.refresh(test_company)
+        assert test_company.account_owner_id == sales_user.id
 
     @pytest.mark.asyncio
-    async def test_no_activity_no_created_at_forces_clear(self, db_session: Session, sales_user: User):
-        """No activity and no created_at — sweep now skips companies without created_at
-        (behavioral change during CRM redesign)."""
-        from app.services.ownership_service import run_ownership_sweep
-
-        co = Company(
-            name="Ghost Corp",
-            is_active=True,
-            account_owner_id=sales_user.id,
-            last_activity_at=None,
-            created_at=None,
-        )
-        db_session.add(co)
-        db_session.commit()
-
-        with patch("app.services.ownership_service.settings") as mock_settings:
-            mock_settings.customer_inactivity_days = 30
-            mock_settings.strategic_inactivity_days = 90
-            result = await run_ownership_sweep(db_session)
-
-        # Sweep no longer auto-clears companies with no created_at
-        assert result["cleared"] == 0
-
-    @pytest.mark.asyncio
-    async def test_recent_activity_keeps_ownership(self, db_session: Session, test_company: Company, sales_user: User):
-        """Active company within 23 days keeps ownership, no warning."""
+    async def test_recent_activity_no_action(self, db_session: Session, test_company: Company, sales_user: User):
+        """Active company well within the threshold keeps ownership, no warning."""
         from app.services.ownership_service import run_ownership_sweep
 
         test_company.account_owner_id = sales_user.id
@@ -284,12 +239,12 @@ class TestRunOwnershipSweep:
         db_session.commit()
 
         with patch("app.services.ownership_service.settings") as mock_settings:
-            mock_settings.customer_inactivity_days = 30
-            mock_settings.strategic_inactivity_days = 90
+            mock_settings.account_sweep_inactivity_days = 90
             result = await run_ownership_sweep(db_session)
 
-        assert result["cleared"] == 0
         assert result["warned"] == 0
+        db_session.refresh(test_company)
+        assert test_company.account_owner_id == sales_user.id
 
     @pytest.mark.asyncio
     async def test_empty_owned_list(self, db_session: Session):
@@ -297,12 +252,10 @@ class TestRunOwnershipSweep:
         from app.services.ownership_service import run_ownership_sweep
 
         with patch("app.services.ownership_service.settings") as mock_settings:
-            mock_settings.customer_inactivity_days = 30
-            mock_settings.strategic_inactivity_days = 90
+            mock_settings.account_sweep_inactivity_days = 90
             result = await run_ownership_sweep(db_session)
 
         assert result["total_owned"] == 0
-        assert result["cleared"] == 0
         assert result["warned"] == 0
 
 

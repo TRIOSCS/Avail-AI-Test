@@ -229,7 +229,13 @@ class Settings(BaseSettings):
 
     # --- Activity tracking & customer ownership ---
     activity_tracking_enabled: bool = True
+    # When on, the nightly ownership sweep runs in WARNINGS-ONLY mode: it emails owners
+    # of accounts approaching the company inactivity threshold but never clears ownership
+    # (the SP4 account sweep is the single park+cooldown+notify path). See
+    # account_sweep_inactivity_days for the one threshold both read.
     ownership_sweep_enabled: bool = False
+    # Site-level ownership sweep + activity-health dashboards only. Company-ownership
+    # dormancy is governed by the single account_sweep_inactivity_days threshold below.
     customer_inactivity_days: int = 30
     strategic_inactivity_days: int = 90
     customer_warning_days: int = 23
@@ -351,8 +357,11 @@ class Settings(BaseSettings):
     # Nightly sweep: reassigns accounts inactive beyond the threshold from their owner
     # into the prospect pool for redistribution. Default off — enable at go-live.
     account_sweep_enabled: bool = False
-    # Days without any CRM activity (note, RFQ, meeting, email) before an account is
-    # swept from its owner back into the prospect pool.
+    # THE single company-ownership inactivity threshold (default 90). Days without any
+    # CRM activity (note, RFQ, meeting, email) before an account is swept from its owner
+    # back into the prospect pool by SP4 job_account_sweep (the one park+cooldown+notify
+    # path). The warnings-only ownership sweep reads the SAME value and emails the owner
+    # WARNING_LEAD_DAYS before it — so the two never double-act on the same account.
     account_sweep_inactivity_days: int = 90
     # Manager email that receives the nightly sweep digest (blank = no digest sent).
     account_sweep_manager_email: str = ""
