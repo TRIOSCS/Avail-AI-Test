@@ -594,9 +594,10 @@ class TestContactEndpoints:
     def test_log_call_endpoint(self, client, db_session, test_vendor_card, test_vendor_contact):
         resp = client.post(f"/api/vendors/{test_vendor_card.id}/contacts/{test_vendor_contact.id}/log-call")
         assert resp.status_code == 200
-        data = resp.json()
-        assert data["ok"] is True
-        assert "activity_id" in data
+        # The endpoint now returns the refreshed contact row (HTML) + an HX-Trigger
+        # showToast so the click is visibly acknowledged (was a bare-JSON no-op before).
+        assert f"vendor-contact-{test_vendor_contact.id}" in resp.text
+        assert "showToast" in resp.headers.get("HX-Trigger", "")
 
         # Verify ActivityLog created
         al = (
