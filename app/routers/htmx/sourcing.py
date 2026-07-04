@@ -102,39 +102,6 @@ async def v2_lead_detail_page(request: Request, lead_id: int, db: Session = Depe
     return page_response(ctx)
 
 
-@router.get("/v2/partials/sourcing/{requirement_id}/stream")
-async def sourcing_stream(
-    request: Request,
-    requirement_id: int,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """SSE endpoint for sourcing search progress.
-
-    Streams per-source completion events as connectors finish searching.
-    Client connects via hx-ext="sse" sse-connect attribute.
-    Channel: sourcing:{requirement_id}
-    """
-    from sse_starlette.sse import EventSourceResponse
-
-    from ...services.sse_broker import broker
-
-    req = db.query(Requirement).filter(Requirement.id == requirement_id).first()
-    if not req:
-        raise HTTPException(404, "Requirement not found")
-
-    async def event_generator():
-        async for msg in broker.listen(f"sourcing:{requirement_id}"):
-            if await request.is_disconnected():
-                break
-            yield {
-                "event": msg["event"],
-                "data": msg["data"],
-            }
-
-    return EventSourceResponse(event_generator())
-
-
 @router.post("/v2/partials/sourcing/{requirement_id}/search", response_class=HTMLResponse)
 async def sourcing_search_trigger(
     request: Request,
