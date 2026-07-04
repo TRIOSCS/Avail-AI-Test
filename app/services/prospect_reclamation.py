@@ -18,6 +18,7 @@ from ..config import settings
 from ..models.auth import User
 from ..models.crm import Company
 from ..models.prospect_account import ProspectAccount
+from ..utils.timezones import DEFAULT_DISPLAY_TZ, format_localdate
 
 # Phase 4 compliance: a former owner cannot reclaim a freshly-swept account for this many
 # days (managers/admins bypass via reassign). Set on the ProspectAccount at sweep time.
@@ -198,7 +199,9 @@ async def _send_sweep_notification(
         )
         return
 
-    last_active_str = last_activity_at.strftime("%Y-%m-%d") if last_activity_at else "never"
+    last_active_str = (
+        format_localdate(last_activity_at, "%Y-%m-%d", tz=DEFAULT_DISPLAY_TZ) if last_activity_at else "never"
+    )
     body_html = (
         f"<p>The account <strong>{company.name}</strong> has been automatically moved to the "
         f"prospecting pool due to inactivity.</p>"

@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 
 from ..constants import QuoteStatus, RequisitionStatus
 from ..models import CustomerSite, Quote, Requisition, SiteContact, User
+from ..utils.timezones import DEFAULT_DISPLAY_TZ, format_localdate
 from .status_machine import require_valid_transition
 
 
@@ -209,8 +210,8 @@ def _build_quote_email_html(quote: Quote, to_name: str, company_name: str, user:
     validity = quote.validity_days or 7
     now_ts = quote.sent_at or datetime.now(timezone.utc)
     expires = now_ts + timedelta(days=validity)
-    expires_str = expires.strftime("%B %d, %Y")
-    date_str = now_ts.strftime("%B %d, %Y")
+    expires_str = format_localdate(expires, "%B %d, %Y", tz=DEFAULT_DISPLAY_TZ)
+    date_str = format_localdate(now_ts, "%B %d, %Y", tz=DEFAULT_DISPLAY_TZ)
 
     import re as _re
 
