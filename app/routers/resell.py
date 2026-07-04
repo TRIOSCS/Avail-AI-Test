@@ -41,7 +41,7 @@ from ..constants import (
     ExcessOutreachStatus,
 )
 from ..database import get_db
-from ..dependencies import require_access, require_fresh_token, require_user
+from ..dependencies import require_access, require_fresh_token
 from ..file_utils import parse_tabular_file
 from ..models import Company, User, VendorCard, VendorResponse
 from ..models.excess import CustomerBid, ExcessLineItem, ExcessList, ExcessOffer, ExcessOfferLine, ExcessOutreach
@@ -625,7 +625,7 @@ async def resell_assemble_bid(
     request: Request,
     list_id: int,
     selections_json: str = Form(...),
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.RESELL)),
     db: Session = Depends(get_db),
 ):
     """Assemble a bid-back from the selected lines (owner-only), then re-render the tab.
@@ -698,7 +698,7 @@ async def resell_send_bid(
     request: Request,
     list_id: int,
     bid_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.RESELL)),
     db: Session = Depends(get_db),
     token: str = Depends(require_fresh_token),
 ):
@@ -720,7 +720,7 @@ async def resell_accept_bid(
     request: Request,
     list_id: int,
     bid_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.RESELL)),
     db: Session = Depends(get_db),
 ):
     """Record the customer's ACCEPTANCE of a sent bid (owner-only): ``sent→accepted``.
@@ -739,7 +739,7 @@ async def resell_reject_bid(
     request: Request,
     list_id: int,
     bid_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.RESELL)),
     db: Session = Depends(get_db),
 ):
     """Record the customer's REJECTION of a sent bid (owner-only): ``sent→rejected``.
@@ -807,7 +807,7 @@ async def resell_create_list(
     title: str = Form(...),
     company_id: int = Form(...),
     notes: str = Form(""),
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.RESELL)),
     db: Session = Depends(get_db),
 ):
     """Create a new excess list (owner = current user); re-render the My-Lists list."""
@@ -833,7 +833,7 @@ async def resell_add_line(
     condition: str = Form("New"),
     date_code: str = Form(""),
     asking_price: str = Form(""),
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.RESELL)),
     db: Session = Depends(get_db),
 ):
     """Add a single line, resolve its MaterialCard, re-render the Lines tab."""
@@ -870,7 +870,7 @@ async def resell_import_preview(
     request: Request,
     list_id: int,
     file: UploadFile,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.RESELL)),
     db: Session = Depends(get_db),
 ):
     """Parse an uploaded file and render the shared import preview grid."""
@@ -905,7 +905,7 @@ async def resell_import_confirm(
     request: Request,
     list_id: int,
     rows_json: str = Form(...),
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.RESELL)),
     db: Session = Depends(get_db),
 ):
     """Confirm a previewed import, then re-render the Lines tab."""
@@ -930,7 +930,7 @@ async def resell_import_confirm(
 async def resell_publish(
     request: Request,
     list_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.RESELL)),
     db: Session = Depends(get_db),
 ):
     """Publish a list: flip to open + live-mirror every line, then re-render detail."""
@@ -948,7 +948,7 @@ async def resell_publish(
 async def resell_close(
     request: Request,
     list_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.RESELL)),
     db: Session = Depends(get_db),
 ):
     """Close a posted list (owner-only): flip to bid_out + stamp close_at, re-render
@@ -969,7 +969,7 @@ async def resell_submit_offer(
     lead_time_days: str = Form(""),
     terms_text: str = Form(""),
     take_all_total_price: str = Form(""),
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.RESELL)),
     db: Session = Depends(get_db),
 ):
     """Submit an inbound offer (per_line single-entry or take_all) via the service.
@@ -1028,7 +1028,7 @@ async def resell_award_offer(
     request: Request,
     list_id: int,
     offer_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.RESELL)),
     db: Session = Depends(get_db),
 ):
     """Award an inbound offer (owner-only): flip it to ``won``, mark its lines sold,
@@ -1053,7 +1053,7 @@ async def resell_unaward_offer(
     request: Request,
     list_id: int,
     offer_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.RESELL)),
     db: Session = Depends(get_db),
 ):
     """Reverse an award (owner-only): flip the offer back to ``open``, return its lines
@@ -1076,7 +1076,7 @@ async def resell_withdraw_offer(
     request: Request,
     list_id: int,
     offer_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.RESELL)),
     db: Session = Depends(get_db),
 ):
     """Withdraw an inbound offer, then re-render the Offers tab + OOB lines/chips.
@@ -1368,7 +1368,7 @@ async def resell_submit_outreach(
     notes: str = Form(""),
     subject: str = Form(""),
     body: str = Form(""),
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.RESELL)),
     db: Session = Depends(get_db),
     token: str = Depends(require_fresh_token),
 ):
@@ -1487,7 +1487,7 @@ async def resell_outreach_convert_offer(
     lead_time_days: str = Form(""),
     terms_text: str = Form(""),
     notes: str = Form(""),
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.RESELL)),
     db: Session = Depends(get_db),
 ):
     """Convert a buyer's reply into a tracked inbound offer (owner-only), then re-render

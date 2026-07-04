@@ -908,6 +908,63 @@ def test_read_partials_require_resell_access(client, db_session, posted_list):
     assert r_lines.status_code == 403
 
 
+def test_write_routes_require_resell_access(client, db_session, posted_list):
+    """Security: Resell WRITE/POST routes gate on require_access(RESELL), not bare
+    require_user. A user with Resell explicitly revoked can't load the UI — but before
+    this fix could still POST directly to drive every mutation (create list, award, and
+    outbound customer email via the bid-back send).
+
+    The gate must fire AHEAD of the can_post / ownership checks, so the test uses a user
+    who WOULD otherwise pass those (a trader who OWNS the list) — only the feature gate
+    can stop them. ``send_bid_back`` is mocked so that, absent the gate, the send route
+    would return 200 (and email nobody), which the 403 assertion catches."""
+    from unittest.mock import AsyncMock, patch
+
+    from app.dependencies import require_user
+    from app.main import app
+    from app.services import bid_back_service
+
+    # A real login that would pass every downstream check — a trader (can_post) — but with
+    # Resell revoked via an access override.
+    revoked = User(
+        email="revoked@trioscs.com",
+        name="Revoked Trader",
+        role="trader",
+        azure_id="az-revoked",
+        access_overrides={"resell": False},
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(revoked)
+    db_session.commit()
+
+    # Hand the list + a real draft bid to the revoked owner so _require_owner and the bid
+    # lookup would BOTH pass if the gate were absent.
+    posted_list.owner_id = revoked.id
+    db_session.commit()
+    line = _seed_best_price(db_session, posted_list, "77.0000")
+    bid = bid_back_service.build_bid_back(
+        db_session, list_id=posted_list.id, owner=revoked, selections=[{"excess_line_item_id": line.id}]
+    )
+
+    send_mock = AsyncMock()
+    app.dependency_overrides[require_user] = lambda: revoked
+    try:
+        with patch.object(bid_back_service, "send_bid_back", send_mock):
+            r_create = client.post(
+                "/api/resell/lists",
+                data={"title": "Sneaky list", "company_id": str(posted_list.company_id), "notes": ""},
+            )
+            r_send = client.post(f"/api/resell/{posted_list.id}/bid/{bid.id}/send")
+    finally:
+        app.dependency_overrides.pop(require_user, None)
+
+    assert r_create.status_code == 403
+    assert r_send.status_code == 403
+    # The gate blocked the writes before the route body — no list created, no email sent.
+    assert db_session.query(ExcessList).filter_by(title="Sneaky list").count() == 0
+    send_mock.assert_not_awaited()
+
+
 # ── M8: batched stat strip + list cards (no behaviour change, fixed queries) ──
 
 
