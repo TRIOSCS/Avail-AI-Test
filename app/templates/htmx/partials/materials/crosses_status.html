@@ -1,0 +1,39 @@
+{#
+  crosses_status.html — in-progress poller for the Crosses & Substitutes section.
+  Rendered by find_crosses (POST) right after it schedules the background AI lookup, and
+  by material_crosses_status_partial (GET) while the run is still in flight. The section
+  polls its own status route every 3s (hx-target="this" so it swaps into ITSELF, never the
+  whole #main-content); when the background lookup finishes the route returns the refreshed
+  crosses_section.html with HTTP 286, so htmx swaps the results in and stops polling.
+  Receives: card (MaterialCard).
+  Called by: materials.py find_crosses + material_crosses_status_partial.
+#}
+<div id="crosses-section"
+     hx-get="/v2/partials/materials/{{ card.id }}/crosses-status"
+     hx-trigger="every 3s"
+     hx-target="this"
+     hx-swap="outerHTML"
+     class="bg-white border border-brand-200 rounded-lg mb-6">
+  {# ── Header ── #}
+  <div class="px-5 py-3 flex items-center justify-between border-b border-gray-100">
+    <div class="flex items-center gap-2.5">
+      <div class="flex items-center justify-center w-7 h-7 rounded-md bg-brand-50">
+        <svg class="h-4 w-4 text-brand-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5"/>
+        </svg>
+      </div>
+      <h2 class="text-sm font-semibold text-gray-900 tracking-tight">Crosses &amp; Substitutes</h2>
+    </div>
+  </div>
+
+  {# ── Content: in-progress spinner ── #}
+  <div class="px-5 py-3">
+    <div class="flex items-center gap-2 text-sm text-gray-400">
+      <svg class="h-4 w-4 animate-spin flex-shrink-0" fill="none" viewBox="0 0 24 24">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+      </svg>
+      Finding crosses…
+    </div>
+  </div>
+</div>

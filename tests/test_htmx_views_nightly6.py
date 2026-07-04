@@ -198,63 +198,79 @@ def _seed_proactive_match(db: Session, req: Requisition, user: User) -> Proactiv
 
 
 class TestFindCrosses:
-    """Tests for POST /v2/partials/materials/{material_id}/find-crosses."""
+    """Tests for POST /v2/partials/materials/{material_id}/find-crosses.
+
+    The Claude crosses lookup now runs in a background task (it used to block ~30s
+    inline), so the POST returns the "Finding crosses…" polling partial immediately and
+    the crosses-status poller lands the results; these tests assert that async contract.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _clear_crosses_runs(self):
+        """Reset the process-wide in-flight registry around every test (isolation)."""
+        from app.services.material_enrich_runs import crosses_runs
+
+        crosses_runs._state.clear()
+        yield
+        crosses_runs._state.clear()
 
     def test_material_not_found_returns_404(self, client, db_session):
         resp = client.post("/v2/partials/materials/999999/find-crosses")
         assert resp.status_code == 404
 
     def test_cache_hit_skips_ai_call(self, client, db_session):
-        """When cross_references already set and refresh=False, returns template
-        immediately."""
+        """When cross_references already set and refresh=False, returns the loaded
+        section immediately (no background lookup)."""
         existing_crosses = [{"mpn": "LM117", "manufacturer": "TI"}]
         mc = _make_material_card(db_session, crosses=existing_crosses)
 
-        with patch("app.utils.claude_client.claude_json", new_callable=AsyncMock) as mock_ai:
+        with patch("app.routers.htmx.materials._run_card_crosses", new_callable=AsyncMock) as mock_run:
             resp = client.post(f"/v2/partials/materials/{mc.id}/find-crosses")
 
         assert resp.status_code == 200
-        mock_ai.assert_not_called()
+        assert "Finding crosses" not in resp.text
+        mock_run.assert_not_awaited()
 
-    def test_ai_search_success_saves_crosses(self, client, db_session):
-        """AI returns crosses → saved to DB, template returned."""
-        mc = _make_material_card(db_session, crosses=None)
-        ai_result = {"crosses": [{"mpn": "LM317", "manufacturer": "ON Semi"}]}
-
-        with patch("app.utils.claude_client.claude_json", new_callable=AsyncMock) as mock_ai:
-            mock_ai.return_value = ai_result
-            resp = client.post(f"/v2/partials/materials/{mc.id}/find-crosses")
-
-        assert resp.status_code == 200
-        db_session.refresh(mc)
-        assert mc.cross_references is not None
-
-    def test_ai_search_failure_returns_error_template(self, client, db_session):
-        """AI exception → template returned with error message (no 500)."""
+    def test_ai_search_schedules_background_and_returns_polling_partial(self, client, db_session):
+        """Empty card → the POST schedules the background lookup and returns the polling
+        partial immediately (does NOT run the ~30s Claude call inline)."""
         mc = _make_material_card(db_session, crosses=None)
 
-        with patch("app.utils.claude_client.claude_json", new_callable=AsyncMock) as mock_ai:
-            mock_ai.side_effect = Exception("AI unavailable")
+        with patch("app.routers.htmx.materials._run_card_crosses", new_callable=AsyncMock) as mock_run:
             resp = client.post(f"/v2/partials/materials/{mc.id}/find-crosses")
 
         assert resp.status_code == 200
+        assert "Finding crosses" in resp.text
+        assert "crosses-status" in resp.text  # poller is active
+        mock_run.assert_awaited_once()  # heavy lookup scheduled, not inline
+
+    def test_ai_failure_surfaces_via_poller(self, client, db_session):
+        """A blocked background run surfaces the retry/error state through the poller
+        (not the immediate POST response)."""
+        from app.services.material_enrich_runs import crosses_runs
+
+        mc = _make_material_card(db_session, crosses=None)
+        crosses_runs.finish(mc.id, blocked=True)  # worker finished blocked
+
+        resp = client.get(f"/v2/partials/materials/{mc.id}/crosses-status")
+        assert resp.status_code == 286  # stop polling
         assert "failed" in resp.text.lower() or "try again" in resp.text.lower()
 
     def test_refresh_flag_bypasses_cache(self, client, db_session):
-        """Refresh=True forces AI call even when cross_references already set."""
+        """Refresh=True schedules a fresh background lookup even when cross_references
+        is already set."""
         existing_crosses = [{"mpn": "LM117", "manufacturer": "TI"}]
         mc = _make_material_card(db_session, crosses=existing_crosses)
-        ai_result = {"crosses": [{"mpn": "MC7817", "manufacturer": "Motorola"}]}
 
-        with patch("app.utils.claude_client.claude_json", new_callable=AsyncMock) as mock_ai:
-            mock_ai.return_value = ai_result
+        with patch("app.routers.htmx.materials._run_card_crosses", new_callable=AsyncMock) as mock_run:
             resp = client.post(
                 f"/v2/partials/materials/{mc.id}/find-crosses",
                 data={"refresh": "true"},
             )
 
         assert resp.status_code == 200
-        mock_ai.assert_called_once()
+        assert "Finding crosses" in resp.text
+        mock_run.assert_awaited_once()
 
 
 # ── Section 2: Proactive Prepare Page ────────────────────────────────

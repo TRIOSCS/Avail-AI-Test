@@ -1,28 +1,36 @@
-"""material_enrich_runs.py — in-process registry of in-flight material-card enrichment
-runs.
+"""material_enrich_runs.py — in-process registries of in-flight material-card background
+runs (on-demand enrichment AND the AI crosses/substitutes lookup).
 
-Card enrichment is triggered on demand from the material-detail "Enrich" button
-(``routers/htmx/materials.py:enrich_material``), which now schedules the heavy
-authoritative ladder + structured-spec pass (~30s) as a FastAPI background task and
-returns the detail partial immediately. Because a *blocked / no-op* run leaves the
-card's ``enrichment_status`` unchanged (``unenriched`` — indistinguishable from
-"never enriched"), the enrich-status poller cannot tell "still running" from "failed"
-by the status column alone. This registry carries that transient, per-card signal:
+Both actions are triggered on demand from the material-detail panel — the "Enrich"
+button (``routers/htmx/materials.py:enrich_material``) and the "Find Crosses" / "Refresh"
+button (``find_crosses``) — and both now schedule their heavy Claude call (~30s) as a
+FastAPI background task and return a polling partial immediately. Because a *blocked /
+no-op* run leaves the card's persisted state indistinguishable from "never ran"
+(enrichment: ``enrichment_status`` stays ``unenriched``; crosses: ``cross_references``
+stays empty on a legitimate no-results run), the status poller cannot tell "still
+running" from "failed / done" by the column alone. Each registry carries that transient,
+per-card signal:
 
   * ``begin(id)``            — claim a run; ``False`` if one is already in flight
                               (this is the double-enqueue guard).
   * ``finish(id, blocked=)`` — record the terminal outcome for the poller to consume.
   * ``consume_outcome(id)``  — pop the outcome once (``"blocked"`` / ``"done"`` / ``None``).
-  * ``clear(id)``            — drop any entry (used when the status column already went
+  * ``is_running(id)``       — True while a background run is in flight.
+  * ``clear(id)``            — drop any entry (used when the persisted state already went
                               terminal, so the poller no longer needs the signal).
+
+Two independent singletons share the same generic ``_RunRegistry`` class so enrichment
+and crosses never collide on a card id: ``enrich_runs`` (enrichment) and ``crosses_runs``
+(AI crosses lookup).
 
 In-memory + ``threading.Lock``: the app runs a single uvicorn worker and the background
 tasks execute in that same process, so a module-level dict is sufficient. It resets
-cleanly on restart — the only loss is a stale in-flight guard, which the next Enrich
-click clears anyway.
+cleanly on restart — the only loss is a stale in-flight guard, which the next click
+clears anyway.
 
 Called by: routers/htmx/materials.py (enrich_material, material_enrich_status_partial,
-           _run_card_enrichment).
+           _run_card_enrichment, find_crosses, material_crosses_status_partial,
+           _run_card_crosses).
 Depends on: threading (stdlib) only.
 """
 
@@ -35,8 +43,9 @@ BLOCKED = "blocked"
 DONE = "done"
 
 
-class _EnrichRuns:
-    """Thread-safe map of ``material_card_id -> run state`` for on-demand enrichment."""
+class _RunRegistry:
+    """Thread-safe map of ``material_card_id -> run state`` for one kind of on-demand
+    run."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -82,5 +91,7 @@ class _EnrichRuns:
             self._state.pop(card_id, None)
 
 
-# Process-wide singleton — import this, do not instantiate per call.
-enrich_runs = _EnrichRuns()
+# Process-wide singletons — import these, do not instantiate per call. Enrichment and the
+# AI crosses lookup keep separate registries so a run of one never masks the other.
+enrich_runs = _RunRegistry()
+crosses_runs = _RunRegistry()

@@ -1151,39 +1151,37 @@ async def enrich_material(
     return await material_detail_partial(request, material_id, user, db)
 
 
-@router.post("/v2/partials/materials/{material_id}/find-crosses", response_class=HTMLResponse)
-async def find_crosses(
-    request: Request,
-    material_id: int,
-    refresh: bool = Form(False),
-    user: User = Depends(require_access(AccessKey.MATERIALS)),
-    db: Session = Depends(get_db),
-):
-    """On-demand AI search for crosses & substitutes for a single material card.
+async def _run_card_crosses(material_id: int) -> None:
+    """Background worker: run the AI crosses/substitutes lookup for one material card.
 
-    Called by: HTMX button on the material detail Crosses section.
-    Depends on: claude_json for AI lookup, MaterialCard model.
+    Scheduled by ``find_crosses`` so the click never blocks on the ~30s Claude call. Opens
+    its own session (FastAPI has already returned the response and closed the request
+    session by the time this runs), persists the deduplicated crosses onto the card, and
+    records the run's outcome in ``crosses_runs`` so the crosses-status poller can swap in
+    the results (``done``) or show the retry/error state (``blocked``). Because a
+    legitimate no-results run leaves ``cross_references`` empty — indistinguishable from
+    "never ran" by the column alone — the registry outcome is what the poller trusts.
+
+    Must NEVER raise: it is a fire-and-forget task.
     """
+    from ...database import SessionLocal
     from ...models.intelligence import MaterialCard
+    from ...services.material_enrich_runs import crosses_runs
     from ...utils.claude_client import claude_json as ai_json
     from ...utils.normalization import normalize_mpn_key
 
-    mc = db.get(MaterialCard, material_id)
-    if not mc:
-        raise HTTPException(404, "Material not found")
-
-    # Return cached results if available (skip on explicit refresh)
-    if mc.cross_references and not refresh:
-        return template_response(
-            "htmx/partials/materials/crosses_section.html",
-            {"request": request, "card": mc},
-        )
-
-    mpn = mc.display_mpn or mc.normalized_mpn
-    mfg = mc.manufacturer or "unknown"
-    category = mc.category or "electronic component"
-
+    db = SessionLocal()
+    blocked = False
     try:
+        mc = db.get(MaterialCard, material_id)
+        if not mc:
+            blocked = True
+            return
+
+        mpn = mc.display_mpn or mc.normalized_mpn
+        mfg = mc.manufacturer or "unknown"
+        category = mc.category or "electronic component"
+
         import asyncio as _asyncio
 
         result = await _asyncio.wait_for(
@@ -1218,21 +1216,102 @@ async def find_crosses(
 
         mc.cross_references = crosses
         db.commit()
-
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — a background task must not crash the worker
         logger.warning("Cross-reference search failed for material {}: {}", material_id, exc)
         db.rollback()
-        # Return error inside the same section ID so retry works
+        blocked = True
+    finally:
+        db.close()
+        crosses_runs.finish(material_id, blocked=blocked)
+
+
+@router.post("/v2/partials/materials/{material_id}/find-crosses", response_class=HTMLResponse)
+async def find_crosses(
+    request: Request,
+    material_id: int,
+    background_tasks: BackgroundTasks,
+    refresh: bool = Form(False),
+    user: User = Depends(require_access(AccessKey.MATERIALS)),
+    db: Session = Depends(get_db),
+):
+    """Queue the on-demand AI crosses/substitutes lookup and return immediately.
+
+    The Claude call (``asyncio.wait_for`` up to 30s) used to run INLINE before responding,
+    so the Crosses section spun and the page felt frozen. It now runs in a FastAPI
+    background task and this handler returns the "Finding crosses…" polling partial right
+    away; the crosses-status poller swaps in the results (or the retry state) when the task
+    finishes. A cache hit (already-populated ``cross_references`` and no explicit refresh)
+    still returns the loaded section synchronously — no background work needed.
+
+    Called by: HTMX button on the material detail Crosses section.
+    Depends on: _run_card_crosses (background worker), crosses_runs (double-enqueue guard).
+    """
+    from ...models.intelligence import MaterialCard
+    from ...services.material_enrich_runs import crosses_runs
+
+    mc = db.get(MaterialCard, material_id)
+    if not mc:
+        raise HTTPException(404, "Material not found")
+
+    # Cache hit: return the loaded section immediately (skip on explicit refresh).
+    if mc.cross_references and not refresh:
         return template_response(
             "htmx/partials/materials/crosses_section.html",
-            {"request": request, "card": mc, "error": "Cross-reference search failed. Please try again."},
+            {"request": request, "card": mc},
         )
 
-    # Return the updated crosses section
+    # Guard double-enqueue: a lookup already in flight for this card must not stack another.
+    if crosses_runs.begin(material_id):
+        background_tasks.add_task(_run_card_crosses, material_id)
+
+    # Return the polling in-progress state immediately (no inline 30s block).
     return template_response(
-        "htmx/partials/materials/crosses_section.html",
+        "htmx/partials/materials/crosses_status.html",
         {"request": request, "card": mc},
     )
+
+
+@router.get("/v2/partials/materials/{card_id}/crosses-status", response_class=HTMLResponse)
+async def material_crosses_status_partial(
+    request: Request,
+    card_id: int,
+    user: User = Depends(require_access(AccessKey.MATERIALS)),
+    db: Session = Depends(get_db),
+):
+    """Poll the in-flight AI crosses lookup and swap in the result when it lands.
+
+    While the background lookup is running this returns the "Finding crosses…" polling
+    partial (keep polling). On the terminal outcome it returns the refreshed
+    ``crosses_section.html`` (loaded results, empty "none found", or — on a blocked run —
+    the retry/error state) and answers HTTP 286 so htmx swaps the section and STOPS
+    polling. If no run is tracked (e.g. the process restarted mid-run) it stops polling and
+    renders the card's current section rather than spinning forever.
+    """
+    from ...models.intelligence import MaterialCard
+    from ...services import material_enrich_runs
+    from ...services.material_enrich_runs import crosses_runs
+
+    card = db.get(MaterialCard, card_id)
+    if not card or card.deleted_at is not None:
+        # Polling sub-resource: htmx neither swaps nor cancels an `every Ns` poll on a 4xx,
+        # so a 404 would hammer this route forever. 286 stops the poll; empty body clears it.
+        return HTMLResponse("", status_code=286)
+
+    outcome = crosses_runs.consume_outcome(card_id)
+    if outcome is None and crosses_runs.is_running(card_id):
+        # Still running → keep polling.
+        return template_response(
+            "htmx/partials/materials/crosses_status.html",
+            {"request": request, "card": card},
+        )
+
+    # Terminal (done / blocked) or no tracked run → swap in the section and stop polling.
+    ctx = {"request": request, "card": card}
+    if outcome == material_enrich_runs.BLOCKED:
+        ctx["error"] = "Cross-reference search failed. Please try again."
+    response = template_response("htmx/partials/materials/crosses_section.html", ctx)
+    response.status_code = 286  # htmx's stop-polling status — the section still swaps in.
+    return response
 
 
 @router.get("/v2/partials/materials/{material_id}/insights", response_class=HTMLResponse)
