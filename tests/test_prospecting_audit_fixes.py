@@ -187,6 +187,32 @@ class TestM16UnboundedExclusion:
         assert ".limit(5000)" not in src
 
 
+# ── M12 — reclaim/reassign under /v2/partials/prospects must be module-gated ──
+
+
+class TestM12ReclaimReassignGuarded:
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/v2/partials/prospects/9/reclaim",
+            "/v2/partials/prospects/9/reassign",
+            "/v2/partials/prospects/9/reassign-form",
+        ],
+    )
+    def test_prospects_plural_requires_prospecting_key(self, path):
+        from app.access_paths import module_key_for_path
+        from app.constants import AccessKey
+
+        assert module_key_for_path(path) == AccessKey.PROSPECTING  # pre-fix: None
+
+    def test_prospecting_singular_still_guarded(self):
+        # The new plural base must not stop the -ing tab/grid from matching.
+        from app.access_paths import module_key_for_path
+        from app.constants import AccessKey
+
+        assert module_key_for_path("/v2/partials/prospecting/9/claim") == AccessKey.PROSPECTING
+
+
 # ── M18 — a non-string intent topic must not drop the whole page ──────────────
 
 

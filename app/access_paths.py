@@ -37,14 +37,23 @@ from .constants import AccessKey
 #
 # A base is matched when the path EQUALS it or starts with ``base + "/"`` — never a
 # bare string prefix, so "/v2/partials/proactive" can't swallow a sibling such as
-# "/v2/partials/proactivex". Each of these five is the only prefix confirmed
-# module-exclusive (see module docstring); the other module entry-partials
+# "/v2/partials/proactivex". Each of these is a prefix confirmed module-exclusive (see
+# module docstring); the other module entry-partials
 # (parts/sightings/materials/search/buy-plans) are SHARED and intentionally omitted.
+#
+# NOTE the two Prospecting bases: the tab + grid live under ``/v2/partials/prospecting``
+# (with -ing), but the reclaim/reassign admin actions live under ``/v2/partials/prospects``
+# (plural, no -ing). Both are Prospecting-exclusive, so BOTH require the PROSPECTING key
+# (audit M12 — without the plural entry a user with Prospecting revoked could still hit
+# reclaim/reassign). The two are disjoint under the EQUALS-or-``base + "/"`` rule
+# ("/v2/partials/prospecting" does not start with "/v2/partials/prospects/"), so ordering
+# is irrelevant.
 _GUARDED_BASES: tuple[tuple[str, AccessKey], ...] = (
     ("/v2/partials/crm", AccessKey.CRM),
     ("/v2/partials/resell", AccessKey.RESELL),
     ("/v2/partials/proactive", AccessKey.PROACTIVE),
     ("/v2/partials/prospecting", AccessKey.PROSPECTING),
+    ("/v2/partials/prospects", AccessKey.PROSPECTING),
     ("/v2/partials/my-day", AccessKey.MY_DAY),
 )
 
