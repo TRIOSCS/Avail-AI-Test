@@ -39,10 +39,30 @@ def test_control_type_classification():
     assert cs.control_type(_src(name="netcomponents")) == "browser_login"
     assert cs.control_type(_src(name="thebrokersite")) == "browser_login"
     assert cs.control_type(_src(name="azure_oauth")) == "scopes"
-    assert cs.control_type(_src(name="teams_notifications")) == "scopes"
+    # teams_notifications is a webhook/key connector (needs TEAMS_WEBHOOK_URL) — NOT scopes.
+    assert cs.control_type(_src(name="teams_notifications", env_vars=["TEAMS_WEBHOOK_URL"])) == "key"
     assert cs.control_type(_src(name="sam_gov_enrichment", env_vars=[])) == "keyless"
     assert cs.control_type(_src(name="ai_live_web", env_vars=[])) == "keyless"
     assert cs.control_type(_src(name="nexar", env_vars=["NEXAR_CLIENT_ID"])) == "key"
+
+
+def test_email_mining_is_flag_not_key():
+    """email_mining's env var (EMAIL_MINING_ENABLED) is a boolean flag, not a secret —
+    it must classify as keyless (on/off toggle), never 'key' (a masked field that would
+    encrypt a bogus credential)."""
+    src = _src(name="email_mining", env_vars=["EMAIL_MINING_ENABLED"])
+    assert cs.control_type(src) == "keyless"
+    assert cs.is_keyless(src) is True
+
+
+def test_teams_is_keyed_not_keyless():
+    """teams_notifications needs a TEAMS_WEBHOOK_URL field — it must not read as keyless
+    (which would offer no way to enter/rotate the webhook)."""
+    src = _src(name="teams_notifications", env_vars=["TEAMS_WEBHOOK_URL", "TEAMS_TEAM_ID"])
+    assert cs.control_type(src) == "key"
+    assert cs.is_keyless(src) is False
+    # Still lands in the Communications group (by category).
+    assert cs.connector_group(_src(name="teams_notifications", category="platform")) == "communications"
 
 
 def test_group_mapping():

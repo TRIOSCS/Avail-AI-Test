@@ -46,7 +46,16 @@ WORKER_BACKED_SOURCES: dict[str, str] = {
 # needs no settings import; the caller may override via stale_seconds=.
 WORKER_HEARTBEAT_STALE_SECONDS = 15 * 60
 
-_SCOPES = {"azure_oauth", "teams_notifications"}
+# Consented-scopes connectors: authorized via an OAuth grant / Graph scopes, no key or
+# webhook to enter. (teams_notifications is NOT here — it needs a TEAMS_WEBHOOK_URL field,
+# so it classifies as a "key" connector; see control_type.)
+_SCOPES = {"azure_oauth"}
+# Flag connectors: their only declared env var is a boolean feature flag (e.g.
+# EMAIL_MINING_ENABLED), NOT a secret. They must render as an on/off toggle, never a
+# masked key field — typing a value into a key field there would encrypt a bogus
+# credential. Enablement lives in the matching System setting; the card's note points
+# there.
+_FLAG = {"email_mining"}
 _AI = {"anthropic_ai", "ai_live_web"}
 _MANUAL = {"stock_list_import"}
 # Comms providers by name (8x8/VoIP) + by category — voice/email/messaging/auth platform.
@@ -71,6 +80,10 @@ def control_type(source) -> str:
         return "browser_login"
     if name in _SCOPES:
         return "scopes"
+    # Flag connectors classify as keyless (on/off toggle) even though they carry an
+    # env var — that var is a boolean feature flag, not a credential to encrypt.
+    if name in _FLAG:
+        return "keyless"
     if not (source.env_vars or []):
         return "keyless"
     return "key"

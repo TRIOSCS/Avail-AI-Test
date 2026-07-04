@@ -515,6 +515,10 @@ def _enrich_source(source, db) -> dict:
     if ct == "keyless":
         if name == "ai_live_web":
             keyless_note = "No key required — uses your Anthropic key."
+        elif name == "email_mining":
+            # Flag connector: no credential to enter. Enablement lives in the
+            # Email Mining setting on the System tab, not a key field here.
+            keyless_note = "No key required — turn Email Mining on in System settings."
         else:
             keyless_note = "No key required — switch it on to use it."
     else:
