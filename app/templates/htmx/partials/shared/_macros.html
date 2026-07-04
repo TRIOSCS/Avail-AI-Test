@@ -606,7 +606,7 @@ Usage:
     </p>
     {% if entity.last_outbound_at %}
       {% set out_days = ((now_utc - entity.last_outbound_at).days) if now_utc is defined else 0 %}
-      <p class="text-lg font-bold text-gray-900">{{ out_days }}d</p>
+      <p class="text-lg font-bold text-gray-900 tabular-nums">{{ out_days }}d</p>
       <p class="text-xs text-gray-400">{{ entity.last_outbound_at|localdate('%b %d') }}</p>
     {% else %}
       <p class="text-sm font-medium text-gray-400">Never</p>
@@ -619,7 +619,7 @@ Usage:
     </p>
     {% if entity.last_reply_at %}
       {% set reply_days = ((now_utc - entity.last_reply_at).days) if now_utc is defined else 0 %}
-      <p class="text-lg font-bold text-gray-900">{{ reply_days }}d</p>
+      <p class="text-lg font-bold text-gray-900 tabular-nums">{{ reply_days }}d</p>
       <p class="text-xs text-gray-400">{{ entity.last_reply_at|localdate('%b %d') }}</p>
     {% else %}
       <p class="text-sm font-medium text-gray-400">—</p>

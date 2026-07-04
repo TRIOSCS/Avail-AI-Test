@@ -13,7 +13,7 @@
 <div class="page-fluid">
   <div class="flex items-center justify-between mb-4">
     <div>
-      <h2 class="h3">Customer Contacts</h2>
+      <h2 class="h2">Customer Contacts</h2>
       <p class="text-sm text-gray-600 mt-1">{{ total }} contact{{ "s" if total != 1 }} across your accounts</p>
     </div>
     {# x-data="{}" makes the export anchor part of an Alpine scope so @click.prevent runs. #}
@@ -167,7 +167,7 @@
               {% if c.title %}<p class="text-xs text-gray-600">{{ c.title }}</p>{% endif %}
             </td>
             <td class="table-cell text-sm text-gray-700">{{ company.name if company else "—" }}</td>
-            <td class="table-cell text-sm text-gray-600">{{ c.contact_role|replace('_', ' ')|title if c.contact_role else "—" }}</td>
+            <td class="table-cell text-sm">{% if c.contact_role %}<span class="chip">{{ c.contact_role|replace('_', ' ')|title }}</span>{% else %}<span class="text-gray-400">—</span>{% endif %}</td>
             <td class="table-cell text-secondary">{{ c.email or "—" }}</td>
             <td class="table-cell text-secondary">{{ c.phone or "—" }}</td>
             <td class="table-cell text-right text-[11px] tabular-nums {% if c.cadence_state == 'overdue' %}text-rose-600 font-medium{% elif c.cadence_state == 'due' %}text-amber-600{% else %}text-gray-400{% endif %}">
