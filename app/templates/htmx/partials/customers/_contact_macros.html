@@ -238,22 +238,21 @@
         {% endif %}
         <span class='font-medium text-gray-900 truncate'>{{ _cname }}</span>
         {% if contact.contact_role %}
-        <span class='px-1 py-0.5 text-[11px] font-medium rounded flex-shrink-0 {{ role_colors.get(contact.contact_role, "bg-gray-100 text-gray-600") }}'
+        <span class='chip flex-shrink-0 {{ role_colors.get(contact.contact_role, "bg-gray-100 text-gray-600") }}'
               title='{{ contact.contact_role }}'>
           {{ role_labels.get(contact.contact_role, contact.contact_role|replace('_', ' ')|title) }}
         </span>
         {% endif %}
         {% if contact.do_not_contact %}
-        <span class='px-1 py-0.5 text-[11px] font-semibold rounded bg-red-100 text-red-700 border border-red-200 flex-shrink-0'>DNC</span>
+        <span class='badge-danger flex-shrink-0'>DNC</span>
         {% endif %}
         {% if contact.is_archived %}
-        <span class='px-1 py-0.5 text-[11px] font-semibold rounded bg-gray-200 text-gray-600 flex-shrink-0'>Archived</span>
+        <span class='badge bg-gray-100 text-gray-600 border-gray-200 flex-shrink-0'>Archived</span>
         {% endif %}
         {# CRM P5 trust — completeness pill (only when incomplete; mirrors the role/DNC pills). #}
         {% set _compl = crm_completeness(contact) %}
         {% if _compl.pct < 100 %}
-        <span class='px-1 py-0.5 text-[11px] font-medium rounded flex-shrink-0
-                     {% if _compl.pct >= 50 %}bg-amber-100 text-amber-700{% else %}bg-rose-100 text-rose-700{% endif %}'
+        <span class='flex-shrink-0 {% if _compl.pct >= 50 %}badge-warning{% else %}badge-danger{% endif %}'
               title='Profile {{ _compl.pct }}% complete{% if _compl.missing %} — missing: {{ _compl.missing|join(", ") }}{% endif %}'>
           {{ _compl.pct }}%
         </span>

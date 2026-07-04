@@ -3,7 +3,7 @@
    Called by: company_tab route (tab == "quotes").
    Depends on: Alpine.js (status filter), HTMX (row deep-link), brand palette.
 #}
-{% from "htmx/partials/shared/_macros.html" import quote_status_badge %}
+{% from "htmx/partials/shared/_macros.html" import quote_status_badge, badge %}
 <div x-data="{ status: 'all' }">
   {% if quotes %}
   <div class="flex items-center gap-2 mb-4">
@@ -45,13 +45,7 @@
           <td class="px-4 py-2.5 text-sm text-gray-900 font-medium text-right">{{ "${:,.2f}".format(q.subtotal) if q.subtotal else "—" }}</td>
           <td class="px-4 py-2.5 text-sm text-right">
             {% if q.total_margin_pct is not none %}
-              {% if q.total_margin_pct >= 30 %}
-                <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-emerald-50 text-emerald-700">{{ "%.1f%%"|format(q.total_margin_pct) }}</span>
-              {% elif q.total_margin_pct >= 15 %}
-                <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-amber-50 text-amber-700">{{ "%.1f%%"|format(q.total_margin_pct) }}</span>
-              {% else %}
-                <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-rose-50 text-rose-700">{{ "%.1f%%"|format(q.total_margin_pct) }}</span>
-              {% endif %}
+              {{ badge("%.1f%%"|format(q.total_margin_pct), tone='success' if q.total_margin_pct >= 30 else 'warning' if q.total_margin_pct >= 15 else 'danger') }}
             {% else %}
               <span class="text-gray-600">—</span>
             {% endif %}

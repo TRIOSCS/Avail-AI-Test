@@ -17,9 +17,9 @@
       <div>
         <span class="text-sm font-medium {% if s.do_not_contact %}text-gray-600 line-through{% else %}text-gray-900{% endif %}">{{ s.site_name }}</span>
         {% if s.do_not_contact %}
-        <span class="ml-2 px-1.5 py-0.5 text-xs font-medium rounded bg-rose-100 text-rose-600 uppercase">DNC</span>
+        <span class="badge-mini ml-2 bg-rose-100 text-rose-600">DNC</span>
         {% elif s.site_type %}
-        <span class="ml-2 px-1.5 py-0.5 text-xs font-medium rounded bg-brand-50 text-brand-600 uppercase">{{ s.site_type }}</span>
+        <span class="badge-mini ml-2 bg-brand-50 text-brand-600">{{ s.site_type }}</span>
         {% endif %}
       </div>
     </div>

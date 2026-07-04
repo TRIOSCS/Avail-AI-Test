@@ -133,8 +133,8 @@
         <p class="text-sm font-medium text-gray-900 truncate">{{ c.name }}</p>
         <p class="text-[11px] text-gray-600 truncate">
           {{ c.account_type or "—" }}{% if c.account_owner %} &middot; {{ c.account_owner.name }}{% endif %}
-          {% if c.tier %}<span class="ml-1 px-1 py-0.5 rounded text-xs bg-gray-100 text-gray-600">{{ c.tier }}</span>{% endif %}
-          {% if (c.site_count or 0) > 1 %}<span class="ml-1 px-1 py-0.5 rounded text-xs bg-gray-100 text-gray-600">{{ c.site_count }} sites</span>{% endif %}
+          {% if c.tier %}<span class="chip ml-1 bg-gray-100 text-gray-600">{{ c.tier }}</span>{% endif %}
+          {% if (c.site_count or 0) > 1 %}<span class="chip ml-1 bg-gray-100 text-gray-600">{{ c.site_count }} sites</span>{% endif %}
         </p>
       </div>
       <div class="flex-shrink-0 text-right">
