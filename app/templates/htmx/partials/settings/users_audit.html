@@ -48,7 +48,7 @@
         <tbody class="divide-y divide-gray-100">
           {% for row in audit_rows %}
           <tr class="hover:bg-accent-50/50 transition-colors">
-            <td class="table-cell text-xs text-gray-600 whitespace-nowrap">{{ row.when | fmtdate }}</td>
+            <td class="table-cell text-xs text-gray-600 whitespace-nowrap">{{ row.when | localtime('%b %d, %H:%M') }}</td>
             <td class="table-cell text-sm text-gray-900">
               {{ row.actor.name or row.actor.email if row.actor else 'system' }}
             </td>

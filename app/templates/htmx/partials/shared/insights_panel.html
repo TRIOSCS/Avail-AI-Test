@@ -39,7 +39,7 @@
         <div class="flex-1 min-w-0">
           <p class="text-sm text-gray-700">{{ entry.content }}</p>
           {% if entry.expires_at %}
-          <p class="text-xs text-gray-400 mt-1">Expires {{ entry.expires_at.strftime('%b %d, %Y') }}</p>
+          <p class="text-xs text-gray-400 mt-1">Expires {{ entry.expires_at|localdate('%b %d, %Y') }}</p>
           {% endif %}
         </div>
       </div>
