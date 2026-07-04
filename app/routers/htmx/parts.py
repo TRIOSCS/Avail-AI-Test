@@ -46,6 +46,7 @@ from ...models import (
 from ...models.vendor_sighting_summary import VendorSightingSummary
 from ...services import task_service
 from ...services.activity_service import log_activity as _log_activity
+from ...services.requirement_status import transition_requirement
 from ...services.sighting_aggregation import get_vendor_tier_map
 from ...template_env import template_response
 from ...utils.search_builder import SearchBuilder
@@ -1085,6 +1086,57 @@ async def bulk_archive(
     logger.info("Bulk archive by {}: {} parts, {} requisitions", user.email, len(requirement_ids), len(requisition_ids))
 
     return await parts_list_partial(request=request, user=user, db=db)
+
+
+@router.post("/v2/partials/parts/bulk-outcome", response_class=HTMLResponse)
+async def bulk_outcome(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Mark selected part-lines Won or Lost with one shared, required reason.
+
+    Body: {"requirement_ids": [int], "outcome": "won"|"lost", "reason": str}.
+
+    Per-part replacement for the removed bulk Archive: each selected Requirement is
+    transitioned to SourcingStatus.WON/LOST via the sourcing state machine and stamped
+    with the shared reason. Ids that are missing or not in a legal source state are
+    logged and skipped (never 500 the whole batch). Commits once.
+    """
+    body = await request.json()
+    requirement_ids = body.get("requirement_ids", [])
+    outcome = body.get("outcome")
+    reason = (body.get("reason") or "").strip()
+
+    if outcome not in (SourcingStatus.WON, SourcingStatus.LOST):
+        raise HTTPException(400, "Outcome must be 'won' or 'lost'")
+    if not reason:
+        raise HTTPException(400, "A reason is required to mark a part Won or Lost")
+
+    # Ownership guard — mirrors bulk_archive (no-op for buyer/manager/admin; 404 for a
+    # restricted non-owner).
+    parts = db.query(Requirement).filter(Requirement.id.in_(requirement_ids)).all() if requirement_ids else []
+    for part in parts:
+        require_requisition_access(db, part.requisition_id, user, label="Requirement")
+
+    changed = 0
+    for part in parts:
+        try:
+            if transition_requirement(part, outcome, db, actor=user):
+                part.outcome_reason = reason
+                changed += 1
+        except ValueError as e:
+            logger.debug("Skipping part {} outcome={}: {}", part.id, outcome, e)
+
+    db.commit()
+    logger.info("Bulk outcome by {}: {} part(s) marked {}", user.email, changed, outcome)
+
+    response = await parts_list_partial(request=request, user=user, db=db)
+    label = "Won" if outcome == SourcingStatus.WON else "Lost"
+    response.headers["HX-Trigger"] = json.dumps(
+        {"showToast": {"message": f"{changed} part(s) marked {label}", "type": "success"}}
+    )
+    return response
 
 
 @router.post("/v2/partials/parts/bulk-unarchive", response_class=HTMLResponse)

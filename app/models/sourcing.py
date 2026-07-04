@@ -154,6 +154,11 @@ class Requirement(Base):
     need_by_date = Column(Date)  # When customer needs the parts
     sale_notes = Column(Text)
     sourcing_status = Column(String(20), default="open")  # open | sourcing | offered | quoted | won | lost
+    # Required Won/Lost close reason (migration 185). Nullable at the DB level —
+    # the app enforces it only on a per-part transition to WON or LOST (see
+    # routers/htmx/parts.bulk_outcome), so non-closed parts stay valid. Mirrors
+    # the requisition-level Requisition.outcome_reason at :66.
+    outcome_reason = Column(Text)
     priority_score = Column(Float, nullable=True)  # AI-computed 0-100 for sort order
     assigned_buyer_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))

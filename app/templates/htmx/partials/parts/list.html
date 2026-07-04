@@ -73,10 +73,38 @@
       Unarchive
     </button>
     {% else %}
-    <button type="button" @click="bulkArchive()"
-            class="px-2 py-0.5 text-[11px] font-semibold bg-gray-500 text-white rounded hover:bg-gray-600">
-      Archive
-    </button>
+    {# Mark Won / Mark Lost — each opens a shared required-reason popover; ONE reason
+       applies to all selected lines. Mirrors the requisitions/req_row.html outcome
+       popover; Confirm posts imperatively (see confirmOutcome) to dodge the
+       static-vs-reactive hx-post capture bug documented there. #}
+    <div class="relative flex items-center gap-2">
+      <button type="button" @click="openOutcome('won')"
+              class="px-2 py-0.5 text-[11px] font-semibold bg-emerald-500 text-white rounded hover:bg-emerald-600">
+        Mark Won
+      </button>
+      <button type="button" @click="openOutcome('lost')"
+              class="px-2 py-0.5 text-[11px] font-semibold bg-rose-500 text-white rounded hover:bg-rose-600">
+        Mark Lost
+      </button>
+      <div x-show="outcomePrompt" x-cloak x-transition
+           @keydown.escape.stop="outcomePrompt = null"
+           class="absolute left-0 top-full mt-1 w-64 bg-white border border-line-base rounded-lg shadow-float z-50 p-3">
+        <p class="text-xs font-semibold text-gray-700 mb-1">
+          <span x-text="outcomePrompt === 'won' ? 'Why won?' : 'Why lost?'"></span>
+          <span class="text-rose-500">*</span>
+        </p>
+        <textarea x-model="outcomeReason" rows="2" aria-label="Outcome reason"
+                  class="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-accent-500"
+                  placeholder="Reason (required)"></textarea>
+        <div class="mt-2 flex justify-end gap-2">
+          <button type="button" class="px-2 py-1 text-xs text-gray-500 hover:text-gray-700"
+                  @click="outcomePrompt = null">Cancel</button>
+          <button type="button" :disabled="!outcomeReason.trim()"
+                  class="px-2 py-1 text-xs font-semibold bg-accent-500 text-white rounded hover:bg-accent-600 disabled:opacity-50"
+                  @click="confirmOutcome()">Confirm</button>
+        </div>
+      </div>
+    </div>
     {% endif %}
     <button type="button" @click="clearSelection()"
             class="px-2 py-0.5 text-[11px] font-semibold text-gray-500 hover:text-gray-700">
@@ -278,6 +306,8 @@
   function partsListSelection() {
     return {
       selectedIds: [],
+      outcomePrompt: null,
+      outcomeReason: '',
       get allSelected() {
         var rows = {{ requirements|length }};
         return rows > 0 && this.selectedIds.length === rows;
@@ -310,9 +340,17 @@
           t.show = true;
         });
       },
-      bulkArchive: function() {
-        if (!confirm('Archive ' + this.selectedIds.length + ' selected part(s)?')) return;
-        this._postJson('/v2/partials/parts/bulk-archive', {requirement_ids: this.selectedIds.slice(), requisition_ids: []});
+      openOutcome: function(o) {
+        this.outcomeReason = '';
+        this.outcomePrompt = o;
+      },
+      confirmOutcome: function() {
+        var reason = this.outcomeReason.trim();
+        if (!reason) return;
+        var ids = this.selectedIds.slice();
+        var outcome = this.outcomePrompt;
+        this.outcomePrompt = null;
+        this._postJson('/v2/partials/parts/bulk-outcome', {requirement_ids: ids, outcome: outcome, reason: reason});
       },
       bulkUnarchive: function() {
         if (!confirm('Unarchive ' + this.selectedIds.length + ' selected items?')) return;
