@@ -1,65 +1,88 @@
 """test_connector_status.py — Tests for app/connector_status.py.
 
-Covers uncovered line 35: when all connectors are disabled.
+log_connector_status now reports readiness from DB-first credential resolution +
+api_sources.status health (was: raw settings.* env-var presence only). Readiness means
+"credentials resolve (DB row wins over env) AND not disabled" — what the app runs on.
 """
 
-from unittest.mock import patch
+import os
 
-# Every credential attribute log_connector_status() inspects, defaulted to empty
-# (disabled). Individual tests override only the credentials they want set.
-_ALL_CREDENTIALS = (
-    "nexar_client_id",
-    "nexar_client_secret",
-    "brokerbin_api_key",
-    "brokerbin_api_secret",
-    "ebay_client_id",
-    "ebay_client_secret",
-    "digikey_client_id",
-    "digikey_client_secret",
-    "mouser_api_key",
-    "oemsecrets_api_key",
-    "sourcengine_api_key",
-    "element14_api_key",
-    "anthropic_api_key",
-    "azure_client_id",
-    "azure_client_secret",
-    "azure_tenant_id",
-)
+os.environ["TESTING"] = "1"
+
+from sqlalchemy.orm import Session
+
+from app.connector_status import log_connector_status
+from app.constants import ApiSourceStatus
+from app.models import ApiSource
+from tests.conftest import engine  # noqa: F401 — ensures SQLite engine is used
 
 
-def _configure_settings(mock_settings, **overrides):
-    """Set all credentials to empty (disabled), then apply the given overrides."""
-    for name in _ALL_CREDENTIALS:
-        setattr(mock_settings, name, overrides.get(name, ""))
+def _mk(db, name, *, env_vars=None, status="pending", credentials=None):
+    src = ApiSource(
+        name=name,
+        display_name=name.replace("_", " ").title(),
+        category="api",
+        source_type="api",
+        status=status,
+        env_vars=env_vars if env_vars is not None else [],
+        credentials=credentials or {},
+        total_searches=0,
+        total_results=0,
+        avg_response_ms=0,
+    )
+    db.add(src)
+    db.commit()
+    db.refresh(src)
+    return src
 
 
 class TestLogConnectorStatus:
-    def test_all_disabled_returns_dict(self):
-        """When no credentials are set, all connectors are disabled (line 35)."""
-        from app.connector_status import log_connector_status
-
-        with patch("app.connector_status.settings") as mock_settings:
-            _configure_settings(mock_settings)
-
-            result = log_connector_status()
-
+    def test_returns_dict_of_display_name_to_ready(self, db_session: Session):
+        _mk(db_session, "mouser", env_vars=["MOUSER_API_KEY"], status="live", credentials={})
+        result = log_connector_status(db_session)
         assert isinstance(result, dict)
-        assert all(v is False for v in result.values())
+        assert set(result.keys()) == {"Mouser"}
 
-    def test_some_enabled(self):
-        """When some credentials are set, those connectors are enabled."""
-        from app.connector_status import log_connector_status
+    def test_missing_credentials_not_ready(self, db_session: Session, monkeypatch):
+        monkeypatch.delenv("MOUSER_API_KEY", raising=False)
+        _mk(db_session, "mouser", env_vars=["MOUSER_API_KEY"], status="pending")
+        result = log_connector_status(db_session)
+        assert result["Mouser"] is False
 
-        with patch("app.connector_status.settings") as mock_settings:
-            _configure_settings(
-                mock_settings,
-                nexar_client_id="id",
-                nexar_client_secret="secret",
-                mouser_api_key="key",
-            )
-
-            result = log_connector_status()
-
-        assert result["Nexar (Octopart)"] is True
+    def test_db_credential_resolves_ready_even_without_env(self, db_session: Session, monkeypatch):
+        """A key saved ONLY in the DB row reads as ready — the old env-only check missed
+        this and mislabeled it disabled."""
+        monkeypatch.delenv("MOUSER_API_KEY", raising=False)
+        _mk(db_session, "mouser", env_vars=["MOUSER_API_KEY"], status="live", credentials={"MOUSER_API_KEY": "enc"})
+        result = log_connector_status(db_session)
         assert result["Mouser"] is True
-        assert result["BrokerBin"] is False
+
+    def test_env_credential_resolves_ready(self, db_session: Session, monkeypatch):
+        monkeypatch.setenv("MOUSER_API_KEY", "k")
+        _mk(db_session, "mouser", env_vars=["MOUSER_API_KEY"], status="live")
+        result = log_connector_status(db_session)
+        assert result["Mouser"] is True
+
+    def test_keyless_source_is_ready(self, db_session: Session):
+        """A keyless source (no env vars — worker/flag/scopes) counts as configured."""
+        _mk(db_session, "ai_live_web", env_vars=[], status="pending")
+        result = log_connector_status(db_session)
+        assert result["Ai Live Web"] is True
+
+    def test_disabled_source_not_ready(self, db_session: Session, monkeypatch):
+        monkeypatch.setenv("MOUSER_API_KEY", "k")
+        _mk(db_session, "mouser", env_vars=["MOUSER_API_KEY"], status=ApiSourceStatus.DISABLED.value)
+        result = log_connector_status(db_session)
+        assert result["Mouser"] is False
+
+    def test_erroring_source_still_configured(self, db_session: Session, monkeypatch):
+        """An erroring source with credentials is still 'configured' (error is a health
+        state, not a config state) — it counts toward readiness but is logged as
+        erroring."""
+        monkeypatch.setenv("MOUSER_API_KEY", "k")
+        _mk(db_session, "mouser", env_vars=["MOUSER_API_KEY"], status=ApiSourceStatus.ERROR.value)
+        result = log_connector_status(db_session)
+        assert result["Mouser"] is True
+
+    def test_empty_db_returns_empty(self, db_session: Session):
+        assert log_connector_status(db_session) == {}

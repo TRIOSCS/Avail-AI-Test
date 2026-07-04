@@ -1056,41 +1056,55 @@ class TestResponseAnalytics:
 
 
 class TestConnectorStatus:
-    """Tests for app.connector_status."""
+    """Tests for app.connector_status (DB-first + health; see
+    test_connector_status.py)."""
 
-    def test_log_connector_status_returns_dict(self):
+    @staticmethod
+    def _seed(db):
+        from app.models import ApiSource
+
+        for name, disp, env in (
+            ("nexar", "Nexar (Octopart)", ["NEXAR_CLIENT_ID"]),
+            ("brokerbin", "BrokerBin", ["BROKERBIN_API_KEY"]),
+        ):
+            db.add(
+                ApiSource(
+                    name=name,
+                    display_name=disp,
+                    category="api",
+                    source_type="api",
+                    status="pending",
+                    env_vars=env,
+                )
+            )
+        db.commit()
+
+    def test_log_connector_status_returns_dict(self, db_session: Session):
         from app.connector_status import log_connector_status
 
-        result = log_connector_status()
+        self._seed(db_session)
+        result = log_connector_status(db_session)
         assert isinstance(result, dict)
         assert "Nexar (Octopart)" in result
         assert "BrokerBin" in result
 
-    def test_log_connector_status_values_are_bools(self):
+    def test_log_connector_status_values_are_bools(self, db_session: Session):
         from app.connector_status import log_connector_status
 
-        result = log_connector_status()
+        self._seed(db_session)
+        result = log_connector_status(db_session)
+        assert result  # non-empty
         for key, val in result.items():
             assert isinstance(val, bool), f"{key} should be bool, got {type(val)}"
 
-    def test_connector_status_all_keys(self):
-        """All expected connectors present."""
+    def test_connector_status_keys_are_db_display_names(self, db_session: Session):
+        """Keys come from the DB rows' display_names (DB-first), not a fixed settings.*
+        set."""
         from app.connector_status import log_connector_status
 
-        result = log_connector_status()
-        expected = {
-            "Nexar (Octopart)",
-            "BrokerBin",
-            "eBay",
-            "DigiKey",
-            "Mouser",
-            "OEMSecrets",
-            "Sourcengine",
-            "Element14",
-            "Anthropic AI",
-            "Azure OAuth",
-        }
-        assert set(result.keys()) == expected
+        self._seed(db_session)
+        result = log_connector_status(db_session)
+        assert set(result.keys()) == {"Nexar (Octopart)", "BrokerBin"}
 
 
 # ═══════════════════════════════════════════════════════════════════════
