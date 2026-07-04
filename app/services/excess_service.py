@@ -825,11 +825,16 @@ def unaward_offer(db: Session, offer_id: int, owner: User) -> ExcessOffer:
 
     recompute_buyer_score_on_win(db, offer)
 
+    # Step the list status back off ``awarded`` BEFORE re-mirroring so the mirror re-sync
+    # sees the reverted posting status (M5): a list stepping back to ``collecting``
+    # re-advertises its now-live lines, while one stepping back to ``bid_out`` (a window
+    # that had already closed) stays retired — a closed posting never re-advertises.
+    if excess_list.status == ExcessListStatus.AWARDED:
+        excess_list.status = ExcessListStatus.BID_OUT if excess_list.close_at else ExcessListStatus.COLLECTING
+
     from . import excess_mirror
 
     excess_mirror.sync_list_mirror(db, excess_list)
-    if excess_list.status == ExcessListStatus.AWARDED:
-        excess_list.status = ExcessListStatus.BID_OUT if excess_list.close_at else ExcessListStatus.COLLECTING
 
     _safe_commit(db, entity="excess offer unaward")
     db.refresh(offer)
@@ -839,6 +844,12 @@ def unaward_offer(db: Session, offer_id: int, owner: User) -> ExcessOffer:
     return offer
 
 
+# List statuses a manual close may act on: an actively-posted window. A draft was never
+# published (nothing to close), and a bid_out/awarded/closed/expired list is already
+# resolved — re-closing it is a no-op the endpoint should reject (M5).
+_CLOSEABLE_LIST_STATUSES = (ExcessListStatus.OPEN, ExcessListStatus.COLLECTING)
+
+
 def close_list(db: Session, list_id: int, owner: User) -> ExcessList:
     """Close a posted list — owner-only — flip status to ``bid_out`` + stamp
     ``close_at``.
@@ -846,18 +857,71 @@ def close_list(db: Session, list_id: int, owner: User) -> ExcessList:
     The posting-window counterpart to ``excess_mirror.publish_list`` (which stamps
     ``open_at``): once the trader has assembled and sent the bid back, closing the list
     flips it to ``bid_out`` and records ``close_at`` (Chunk E). Guards: the list must
-    exist (404) and *owner* must own it (403). Commits. Returns the refreshed list.
+    exist (404), *owner* must own it (403), and the list must be actively posted
+    (``open``/``collecting``) — a draft or an already-resolved list is 409 (M5). Closing
+    RETIRES the Sighting mirror (``sync_list_mirror`` on a now-closed posting drops every
+    line's live-supply row) so a sold-through / withdrawn posting stops advertising.
+    Commits. Returns the refreshed list.
     """
     excess_list = get_excess_list(db, list_id)
     if excess_list.owner_id != owner.id:
         raise HTTPException(403, "Only the list owner can close it")
+    if excess_list.status not in {s.value for s in _CLOSEABLE_LIST_STATUSES}:
+        raise HTTPException(409, "Only an open or collecting list can be closed")
 
     excess_list.status = ExcessListStatus.BID_OUT
     excess_list.close_at = datetime.now(timezone.utc)
+    db.flush()
+
+    # Retire the live-mirror: a closed posting window must stop advertising its supply
+    # (lazy import breaks the excess_mirror ↔ excess_service cycle).
+    from . import excess_mirror
+
+    excess_mirror.sync_list_mirror(db, excess_list)
+
     _safe_commit(db, entity="excess list close")
     db.refresh(excess_list)
-    logger.info("Closed ExcessList id={} (status=bid_out) by owner={}", list_id, owner.id)
+    logger.info("Closed ExcessList id={} (status=bid_out, mirror retired) by owner={}", list_id, owner.id)
     return excess_list
+
+
+# List statuses that are still "in flight" (the posting window has not resolved) and so
+# are eligible for auto-expiry once past ``close_at`` (M5 nightly job).
+_UNRESOLVED_LIST_STATUSES = (ExcessListStatus.OPEN, ExcessListStatus.COLLECTING)
+
+
+def expire_overdue_lists(db: Session, *, now: datetime | None = None) -> int:
+    """Flip every unresolved list past its ``close_at`` to ``expired`` — the nightly
+    backstop.
+
+    An ``open``/``collecting`` list whose ``close_at`` deadline has passed without being
+    awarded or closed is stale: it auto-expires so it stops advertising supply and drops
+    out of the offerable ("Open to Me") lens. For each expired list the Sighting mirror is
+    retired (``sync_list_mirror`` on the now-closed posting). Idempotent — a list already
+    ``expired``/``awarded``/``bid_out`` is skipped. Commits once. Returns the count
+    expired.
+    """
+    from . import excess_mirror
+
+    now = now or datetime.now(timezone.utc)
+    overdue = (
+        db.query(ExcessList)
+        .filter(
+            ExcessList.status.in_([s.value for s in _UNRESOLVED_LIST_STATUSES]),
+            ExcessList.close_at.isnot(None),
+            ExcessList.close_at < now,
+        )
+        .all()
+    )
+    for excess_list in overdue:
+        excess_list.status = ExcessListStatus.EXPIRED
+        db.flush()
+        excess_mirror.sync_list_mirror(db, excess_list)
+
+    if overdue:
+        _safe_commit(db, entity="excess list expiry")
+    logger.info("Expired {} overdue excess list(s) past close_at", len(overdue))
+    return len(overdue)
 
 
 # ---------------------------------------------------------------------------

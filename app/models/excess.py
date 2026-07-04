@@ -252,12 +252,20 @@ class CustomerBid(Base):
     owner_id = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
     status = Column(String(20), default="draft")  # draft, sent, accepted, rejected
     revision = Column(Integer, nullable=False, default=1, server_default="1")
+    # Lifecycle stamps (M4): sent_at when the clean PDF is emailed to the seller;
+    # responded_at / responded_by_id record WHO (the trader) logged the seller's
+    # accept/reject and WHEN. Re-assembling a non-terminal bid bumps ``revision`` and
+    # clears these (a new revision is a fresh draft — the superseded stamps are dropped).
+    sent_at = Column(UTCDateTime, nullable=True)
+    responded_at = Column(UTCDateTime, nullable=True)
+    responded_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     notes = Column(Text, nullable=True)
     created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc), server_default=func.now())
     updated_at = Column(UTCDateTime, onupdate=lambda: datetime.now(timezone.utc), server_default=func.now())
 
     excess_list = relationship("ExcessList", back_populates="customer_bids")
     owner = relationship("User", foreign_keys=[owner_id])
+    responded_by = relationship("User", foreign_keys=[responded_by_id])
     lines = relationship("CustomerBidLine", back_populates="customer_bid", cascade="all, delete-orphan")
 
     # --- Validators ---

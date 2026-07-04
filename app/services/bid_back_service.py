@@ -18,6 +18,7 @@ Depends on: models.excess (CustomerBid/Line, ExcessList, ExcessLineItem), consta
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from fastapi import HTTPException
@@ -26,7 +27,7 @@ from sqlalchemy.orm import Session
 
 from ..constants import CustomerBidStatus
 from ..models import User
-from ..models.excess import CustomerBid, CustomerBidLine, ExcessLineItem
+from ..models.excess import CustomerBid, CustomerBidLine, ExcessLineItem, ExcessList
 
 
 def build_bid_back(
@@ -45,6 +46,12 @@ def build_bid_back(
     price. The selected-offer ids are recorded for internal audit only — they are never
     exported. The line quantity defaults to the posted line's quantity.
 
+    Re-assemble semantics (M4): the list keeps ONE CustomerBid row across revisions.
+    When a bid already exists, re-assembling BUMPS ``revision`` on the SAME row and
+    replaces its lines (preserving the audit chain) instead of orphaning a fresh draft.
+    A new revision resets the row to ``draft`` and clears the prior send/response
+    stamps — they belonged to the superseded revision.
+
     Guards (raise HTTPException, never silent): the list must exist (404); *owner* must
     own the list (403 — assembling a bid back is the owner's privilege); and every
     selected line must belong to *list_id* (404 — never price a foreign line). Returns
@@ -62,14 +69,27 @@ def build_bid_back(
         it.id: it for it in db.query(ExcessLineItem).filter_by(excess_list_id=list_id).all()
     }
 
-    bid = CustomerBid(
-        excess_list_id=list_id,
-        owner_id=owner.id,
-        status=CustomerBidStatus.DRAFT,
-        notes=None,
-    )
-    db.add(bid)
-    db.flush()  # need bid.id before attaching lines
+    # One bid per list: re-assemble bumps ``revision`` on the same row (audit chain
+    # preserved) instead of leaving a pile of orphan drafts.
+    bid = db.query(CustomerBid).filter(CustomerBid.excess_list_id == list_id).order_by(CustomerBid.id.desc()).first()
+    if bid is None:
+        bid = CustomerBid(
+            excess_list_id=list_id,
+            owner_id=owner.id,
+            status=CustomerBidStatus.DRAFT,
+            notes=None,
+        )
+        db.add(bid)
+        db.flush()  # need bid.id before attaching lines
+    else:
+        bid.revision = (bid.revision or 1) + 1
+        bid.status = CustomerBidStatus.DRAFT
+        bid.sent_at = None
+        bid.responded_at = None
+        bid.responded_by_id = None
+        for existing_line in list(bid.lines):
+            db.delete(existing_line)
+        db.flush()  # clear the prior revision's lines before attaching the new ones
 
     for sel in selections or []:
         line_item_id = sel.get("excess_line_item_id")
@@ -95,12 +115,238 @@ def build_bid_back(
     db.commit()
     db.refresh(bid)
     logger.info(
-        "Assembled CustomerBid id={} on list={} by owner={} ({} lines)",
+        "Assembled CustomerBid id={} rev={} on list={} by owner={} ({} lines)",
         bid.id,
+        bid.revision,
         list_id,
         owner.id,
         len(bid.lines),
     )
+    return bid
+
+
+# ---------------------------------------------------------------------------
+# Lifecycle transitions: draft -> sent -> accepted/rejected (M4)
+# ---------------------------------------------------------------------------
+
+
+def _bid_number(bid: CustomerBid) -> str:
+    """The customer-facing bid number (matches ``bid_back_export_context``)."""
+    return f"BID-{bid.id}"
+
+
+def _guard_bid_for_owner(db: Session, *, list_id: int, bid_id: int, owner: User) -> tuple[ExcessList, CustomerBid]:
+    """Load a bid + its list, enforcing owner-only + belongs-to-list (raise, never
+    silent).
+
+    404 when the list or bid is missing, or the bid belongs to another list (existence
+    not revealed across lists); 403 when *owner* does not own the list. Shared by every
+    lifecycle transition so send / accept / reject enforce one guard.
+    """
+    from .excess_service import get_excess_list
+
+    excess_list = get_excess_list(db, list_id)
+    if excess_list.owner_id != owner.id:
+        raise HTTPException(403, "Only the list owner can act on the bid back")
+    bid = db.get(CustomerBid, bid_id)
+    if bid is None or bid.excess_list_id != list_id:
+        raise HTTPException(404, f"Bid {bid_id} not found on list {list_id}")
+    return excess_list, bid
+
+
+def _site_contact(site) -> tuple[str | None, str | None]:
+    """(name, email) for a CustomerSite — its own contact, else its primary SiteContact.
+
+    Prefers the site-level ``contact_email`` (one per site); falls back to the primary
+    active SiteContact (or the first contactable one). Skips ``do_not_contact`` contacts.
+    Returns ``(None, None)`` when nothing is reachable.
+    """
+    if site is None:
+        return None, None
+    if site.contact_email:
+        return site.contact_name, site.contact_email
+    contacts = [c for c in site.site_contacts if c.email and not c.do_not_contact]
+    primary = next((c for c in contacts if c.is_primary), None) or (contacts[0] if contacts else None)
+    if primary:
+        return primary.full_name, primary.email
+    return None, None
+
+
+def resolve_seller_contact(db: Session, excess_list: ExcessList) -> tuple[str | None, str | None]:
+    """Resolve the seller's send contact ``(name, email)`` for a bid back.
+
+    The bid back goes to the CUSTOMER (the stock holder Trio is buying from), so the
+    recipient is the seller's own contact — NOT anonymized (identity hiding shields the
+    seller from OFFERERS, never from the seller themselves). Resolution order: the list's
+    own ``customer_site`` (its contact / primary SiteContact), then any active site on the
+    seller company (primary-first). Returns ``(None, None)`` when no email is on file — the
+    caller must refuse to send rather than email nobody.
+    """
+    from ..models.crm import CustomerSite
+
+    site = excess_list.customer_site
+    if site is None and excess_list.customer_site_id:
+        site = db.get(CustomerSite, excess_list.customer_site_id)
+    name, email = _site_contact(site)
+    if email:
+        return name, email
+
+    for candidate in (
+        db.query(CustomerSite)
+        .filter(CustomerSite.company_id == excess_list.company_id, CustomerSite.is_active.is_(True))
+        .order_by(CustomerSite.id)
+        .all()
+    ):
+        name, email = _site_contact(candidate)
+        if email:
+            return name, email
+    return None, None
+
+
+def _default_bid_email(bid: CustomerBid, contact_name: str | None) -> tuple[str, str]:
+    """Default cover-note subject + body for the bid-back send (identity-safe to the
+    seller)."""
+    greeting = f"Hi {contact_name}," if contact_name else "Hello,"
+    number = _bid_number(bid)
+    subject = f"Our offer for your excess inventory — {number}"
+    body = (
+        f"{greeting}\n\n"
+        "Thank you for sharing your excess inventory with us. Please find our offer "
+        f"attached ({number}, revision {bid.revision or 1}). The attached PDF lists each "
+        "part, quantity, condition, and our unit price.\n\n"
+        "We look forward to your response.\n\n"
+        "Best regards,\n"
+        "Trio Supply Chain Solutions"
+    )
+    return subject, body
+
+
+async def _bid_pdf_attachment(db: Session, bid: CustomerBid):
+    """Render the clean bid-back PDF and wrap it as a Graph sendMail attachment.
+
+    Runs the (sync, CPU-bound) WeasyPrint render in a thread executor — the same pattern
+    the download endpoint uses — so it never blocks the event loop.
+    """
+    import asyncio
+    import base64
+
+    from .document_service import generate_bid_report_pdf
+    from .rfq_attachments import RfqAttachment
+
+    loop = asyncio.get_running_loop()
+    pdf_bytes = await loop.run_in_executor(None, generate_bid_report_pdf, bid.id, db)
+    return RfqAttachment(
+        name=f"bid-{bid.id}.pdf",
+        content_type="application/pdf",
+        content_bytes_b64=base64.b64encode(pdf_bytes).decode("ascii"),
+    )
+
+
+async def send_bid_back(
+    db: Session,
+    *,
+    list_id: int,
+    bid_id: int,
+    owner: User,
+    token: str,
+    subject: str | None = None,
+    body: str | None = None,
+) -> CustomerBid:
+    """Email the clean bid-back PDF to the seller and flip the bid ``draft -> sent``.
+
+    Owner-only (via :func:`_guard_bid_for_owner`). Guards: the bid must be a ``draft``
+    (409 otherwise — a sent/decided bid is not re-sendable; re-assemble first to bump the
+    revision) and carry at least one line (409). The seller contact email must resolve
+    (422 otherwise — never email nobody). Reuses ``email_service.send_batch_rfq`` in its
+    no-requisition mode (DNC-at-send / save-to-sent / retry for free) with the clean PDF
+    as the sole attachment; the PDF is the whitelisted bid_back_export_context, so no
+    broker / trader / source identity crosses into it. Only on a confirmed ``sent`` result
+    does the status flip and ``sent_at`` stamp — a failed send raises 502 and leaves the
+    bid a draft. Commits. Returns the refreshed bid.
+    """
+    excess_list, bid = _guard_bid_for_owner(db, list_id=list_id, bid_id=bid_id, owner=owner)
+    if bid.status != CustomerBidStatus.DRAFT:
+        raise HTTPException(409, "Only a draft bid can be sent — re-assemble to revise a sent bid")
+    if not bid.lines:
+        raise HTTPException(409, "Add at least one line before sending the bid")
+
+    contact_name, contact_email = resolve_seller_contact(db, excess_list)
+    if not contact_email:
+        raise HTTPException(422, "No customer contact email on file to send this bid to")
+
+    attachment = await _bid_pdf_attachment(db, bid)
+    if not subject or not body:
+        default_subject, default_body = _default_bid_email(bid, contact_name)
+        subject = subject or default_subject
+        body = body or default_body
+
+    from app import email_service
+
+    results = await email_service.send_batch_rfq(
+        token=token,
+        db=db,
+        user_id=owner.id,
+        requisition_id=None,
+        vendor_groups=[
+            {
+                "vendor_name": contact_name or "Customer",
+                "vendor_email": contact_email,
+                "parts": [],
+                "subject": subject,
+                "body": body,
+            }
+        ],
+        attachments=[attachment],
+    )
+    result = next(
+        (r for r in results if (r.get("vendor_email") or "").lower() == contact_email.lower()),
+        results[0] if results else {},
+    )
+    if result.get("status") != "sent":
+        reason = result.get("error") or result.get("status") or "unknown error"
+        raise HTTPException(502, f"Bid email could not be sent ({reason})")
+
+    bid.status = CustomerBidStatus.SENT
+    bid.sent_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(bid)
+    logger.info(
+        "Sent CustomerBid id={} rev={} to <{}> on list={} by owner={}",
+        bid.id,
+        bid.revision,
+        contact_email,
+        list_id,
+        owner.id,
+    )
+    return bid
+
+
+def record_bid_response(
+    db: Session,
+    *,
+    list_id: int,
+    bid_id: int,
+    owner: User,
+    accepted: bool,
+) -> CustomerBid:
+    """Record the seller's answer on a sent bid — ``sent -> accepted`` or ``sent ->
+    rejected``.
+
+    Owner-only (the trader logs the seller's verbal/written reply — the seller is not a
+    User). Guards: the bid must be ``sent`` (409 otherwise — you cannot accept a draft or
+    re-decide a terminal bid). Stamps ``responded_at`` + ``responded_by_id`` (who/when).
+    Commits. Returns the refreshed bid.
+    """
+    _excess_list, bid = _guard_bid_for_owner(db, list_id=list_id, bid_id=bid_id, owner=owner)
+    if bid.status != CustomerBidStatus.SENT:
+        raise HTTPException(409, "Only a sent bid can be accepted or rejected")
+
+    bid.status = CustomerBidStatus.ACCEPTED if accepted else CustomerBidStatus.REJECTED
+    bid.responded_at = datetime.now(timezone.utc)
+    bid.responded_by_id = owner.id
+    db.commit()
+    db.refresh(bid)
+    logger.info("Recorded CustomerBid id={} response={} by owner={}", bid.id, bid.status, owner.id)
     return bid
 
 

@@ -1952,8 +1952,26 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     +-- POST /api/resell/{id}/offers/{offer_id}/unaward (owner-only; excess_service.unaward_offer:
     |     the EXPLICIT inverse — never a silent auto-swap to a new winner. 409 if the offer
     |     is not won; reverts offer→open + lines→available, recomputes rollups + buyer score
-    |     (full-history recompute self-heals wins), re-mirrors the lines, and steps the list
-    |     back off awarded → bid_out (close_at set) else collecting. Same _award_response OOB)
+    |     (full-history recompute self-heals wins), steps the list back off awarded → bid_out
+    |     (close_at set) else collecting FIRST, THEN re-mirrors (so a reverted-to-bid_out closed
+    |     posting stays retired — M5). Same _award_response OOB)
+    +-- GET  /v2/partials/resell/{id}/build-bid          (owner-only Build-Bid tab: each line's
+    |     best-offer planning price + editable "our offer"; once assembled, the clean
+    |     bid_back_export_context summary + Download-PDF + the lifecycle action bar. Context
+    |     carries the resolved seller contact so Send shows/gates on the recipient email)
+    +-- POST /api/resell/{id}/bid                        (owner-only; bid_back_service.build_bid_back:
+    |     assemble / RE-ASSEMBLE — bumps CustomerBid.revision on the SAME row [audit chain, no
+    |     orphan draft] + replaces its lines + resets to a fresh draft; re-renders the tab — M4)
+    +-- GET  /api/resell/{id}/bid/{bid_id}/pdf           (owner-only clean bid PDF, whitelist only)
+    +-- POST /api/resell/{id}/bid/{bid_id}/send          (owner-only; bid_back_service.send_bid_back:
+    |     resolve_seller_contact → email the clean PDF via send_batch_rfq [no requisition,
+    |     PDF as the sole attachment] → draft→sent + stamp sent_at ONLY on a confirmed send;
+    |     409 non-draft/no-lines, 422 no contact email, 502 failed send. require_fresh_token — M4)
+    +-- POST /api/resell/{id}/bid/{bid_id}/accept|reject (owner-only; bid_back_service.record_bid_response:
+    |     the trader logs the seller's answer sent→accepted/rejected + responded_at/by; 409 unless sent — M4)
+    +-- POST /api/resell/{id}/close                      (owner-only; excess_service.close_list:
+    |     GUARDED to open/collecting [409 otherwise] → bid_out + close_at + RETIRES the Sighting
+    |     mirror [sync_list_mirror on a now-closed posting] — M5)
     +-- POST /api/resell/{id}/outreach                  (owner-only; channel=email →
     |     resell_outreach_service.submit_outreach_email [RFQ send engine], else
     |     submit_outreach [manual log]; re-renders the Outreach tracker)
@@ -1977,6 +1995,30 @@ per-message savepoint, logging one excess-scoped inbound `activity_log`. The tra
 opens the reply viewer, which reuses the `VendorResponse` rows the poll already writes (no
 new reply-content table) and offers a manual "Convert to offer" — offer auto-detection from
 the AI parse is a deliberately deferred Phase-2 decision.
+
+**Bid-back lifecycle (M4).** The `CustomerBid` runs `draft → sent → accepted/rejected`
+on ONE row per list. `build_bid_back` re-assemble BUMPS `revision` on that row (audit chain
+preserved) and resets it to a fresh draft instead of orphaning a new draft each time.
+`send_bid_back` resolves the seller's send contact (`resolve_seller_contact`: the list's
+`customer_site` → an active company site → a primary `SiteContact`), renders the clean
+whitelisted PDF, and emails it via `email_service.send_batch_rfq` in no-requisition mode
+(the PDF is the sole attachment; DNC-at-send / save-to-sent for free) — flipping `draft→sent`
++ stamping `sent_at` ONLY on a confirmed send (422 when no contact email, 502 on a failed
+send, so the bid never falsely reads "sent"). `record_bid_response` lets the trader log the
+seller's answer (`sent→accepted/rejected`, stamping `responded_at`/`responded_by_id` — who/when;
+the seller is not a User). Migration **183** adds `customer_bids.sent_at` / `responded_at` /
+`responded_by_id` (the `status`+`revision` columns pre-existed).
+
+**List close/expire lifecycle + posting-closed mirror gate (M5).** `close_list` is guarded
+to `open`/`collecting` (409 for a draft or an already-resolved list). The Sighting live-mirror
+is now POSTING-aware: `sync_list_mirror` retires a line when it is individually inactive OR
+when the LIST's status is posting-closed (`bid_out`/`awarded`/`closed`/`expired`) — so closing
+(or expiring, or awarding a late offer on) a list retires its WHOLE mirror; publishing +
+collecting are unchanged (draft/open/collecting fall through to the per-line active check).
+The nightly `app/jobs/resell_jobs.py::_job_expire_resell_lists` (02:15) →
+`excess_service.expire_overdue_lists` flips past-`close_at` unresolved (open/collecting) lists
+to `expired` and retires their mirror; the left-list stage filter now offers the `closed` /
+`expired` stages (the status badges already rendered them).
 
 Adaptive-detail rule (spec "density scales to line count, placement follows offer scope"):
 `shape='single'` (1 line → one `.card`, no table chrome) vs `'table'` (≥2 → `compact-table`);

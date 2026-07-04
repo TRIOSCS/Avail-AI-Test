@@ -20,7 +20,7 @@
   {# ── Filters + search ─────────────────────────────────────────── #}
   <div class="px-3 py-2.5 border-b border-line-base bg-gray-50 flex-shrink-0 space-y-2">
     <div class="flex flex-wrap gap-1.5">
-      {% set stages = [('', 'All'), ('open', 'Open'), ('collecting', 'Collecting'), ('bid_out', 'Bid out'), ('awarded', 'Awarded')] %}
+      {% set stages = [('', 'All'), ('open', 'Open'), ('collecting', 'Collecting'), ('bid_out', 'Bid out'), ('awarded', 'Awarded'), ('closed', 'Closed'), ('expired', 'Expired')] %}
       {% for value, label in stages %}
         {{ filter_pill(label, value, stage, {
           'hx-get': '/v2/partials/resell/lists?lens=' ~ lens ~ '&stage=' ~ value,

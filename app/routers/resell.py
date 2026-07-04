@@ -586,6 +586,9 @@ def _build_bid_context(request: Request, db: Session, el: ExcessList, user: User
     items = db.query(ExcessLineItem).filter_by(excess_list_id=el.id).order_by(ExcessLineItem.id).all()
     bid = _latest_bid(db, el.id)
     summary = bid_back_service.bid_back_export_context(bid) if bid else None
+    # Resolve the seller's send contact so the Send button can show WHERE the bid goes
+    # (or disable + warn when no email is on file — never silently email nobody).
+    recipient_name, recipient_email = bid_back_service.resolve_seller_contact(db, el)
     return {
         "request": request,
         "user": user,
@@ -594,6 +597,8 @@ def _build_bid_context(request: Request, db: Session, el: ExcessList, user: User
         "line_count": len(items),
         "bid": bid,
         "summary": summary,
+        "recipient_name": recipient_name,
+        "recipient_email": recipient_email,
     }
 
 
@@ -686,6 +691,66 @@ async def resell_bid_pdf(
         media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename=bid-{bid_id}.pdf"},
     )
+
+
+@router.post("/api/resell/{list_id}/bid/{bid_id}/send", response_class=HTMLResponse)
+async def resell_send_bid(
+    request: Request,
+    list_id: int,
+    bid_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+    token: str = Depends(require_fresh_token),
+):
+    """Email the clean bid-back PDF to the customer (owner-only): flip ``draft→sent``.
+
+    Delegates to :func:`bid_back_service.send_bid_back`, which resolves the seller
+    contact, renders the whitelisted PDF, sends via the RFQ engine (no requisition), and
+    stamps ``sent_at`` only on a confirmed send. Re-renders the Build-Bid tab with a
+    toast. A missing contact email surfaces as a 422 the toast reports.
+    """
+    await bid_back_service.send_bid_back(db, list_id=list_id, bid_id=bid_id, owner=user, token=token)
+    el = excess_service.get_excess_list(db, list_id)
+    resp = template_response("htmx/partials/resell/_build_bid.html", _build_bid_context(request, db, el, user))
+    return _toast(resp, "Bid sent to the customer")
+
+
+@router.post("/api/resell/{list_id}/bid/{bid_id}/accept", response_class=HTMLResponse)
+async def resell_accept_bid(
+    request: Request,
+    list_id: int,
+    bid_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Record the customer's ACCEPTANCE of a sent bid (owner-only): ``sent→accepted``.
+
+    Owner logs the seller's answer (the seller is not a User). Re-renders the Build-Bid
+    tab with a toast. The service 409s if the bid is not ``sent`` (can't accept a draft).
+    """
+    bid_back_service.record_bid_response(db, list_id=list_id, bid_id=bid_id, owner=user, accepted=True)
+    el = excess_service.get_excess_list(db, list_id)
+    resp = template_response("htmx/partials/resell/_build_bid.html", _build_bid_context(request, db, el, user))
+    return _toast(resp, "Bid marked accepted")
+
+
+@router.post("/api/resell/{list_id}/bid/{bid_id}/reject", response_class=HTMLResponse)
+async def resell_reject_bid(
+    request: Request,
+    list_id: int,
+    bid_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Record the customer's REJECTION of a sent bid (owner-only): ``sent→rejected``.
+
+    Owner logs the seller's answer. Re-renders the Build-Bid tab with a toast. The service
+    409s if the bid is not ``sent``.
+    """
+    bid_back_service.record_bid_response(db, list_id=list_id, bid_id=bid_id, owner=user, accepted=False)
+    el = excess_service.get_excess_list(db, list_id)
+    resp = template_response("htmx/partials/resell/_build_bid.html", _build_bid_context(request, db, el, user))
+    return _toast(resp, "Bid marked rejected")
 
 
 # ── Modal forms ──────────────────────────────────────────────────────

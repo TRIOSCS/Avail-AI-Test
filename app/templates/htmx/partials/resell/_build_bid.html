@@ -104,11 +104,21 @@
 
   {# ── Assembled-bid summary (clean export preview) ─────────────── #}
   {% if bid and summary %}
+  {# CustomerBid status pill palette — reuses the resell status colours (no new tokens). #}
+  {% set bid_pill = {
+    'draft': 'bg-slate-50 text-slate-600 border-slate-200',
+    'sent': 'bg-sky-50 text-sky-700 border-sky-200',
+    'accepted': 'bg-emerald-50 text-emerald-700 border-emerald-300',
+    'rejected': 'bg-rose-50 text-rose-700 border-rose-200'
+  } %}
   <div class="card">
     <div class="flex items-start justify-between gap-3">
       <div>
-        <p class="text-base font-semibold text-gray-900">{{ summary.bid_number }}</p>
-        <p class="text-secondary mt-0.5">{{ summary.line_count }} line{{ 's' if summary.line_count != 1 }} · rev {{ summary.revision }} · {{ summary.status }}</p>
+        <p class="text-base font-semibold text-gray-900 flex items-center gap-2">
+          {{ summary.bid_number }}
+          <span class="px-2 py-0.5 text-xs rounded-full font-medium border {{ bid_pill.get(bid.status, 'bg-slate-50 text-slate-600 border-slate-200') }}">{{ bid.status }}</span>
+        </p>
+        <p class="text-secondary mt-0.5">{{ summary.line_count }} line{{ 's' if summary.line_count != 1 }} · rev {{ summary.revision }}</p>
       </div>
       <a href="/api/resell/{{ el.id }}/bid/{{ bid.id }}/pdf"
          class="btn-secondary btn-sm">
@@ -152,6 +162,47 @@
     <div class="mt-3 text-right text-sm">
       <span class="uppercase tracking-wide text-secondary mr-2">Total bid</span>
       <span class="font-semibold text-gray-900 tabular-nums">${{ "{:,.2f}".format(summary.subtotal) }}</span>
+    </div>
+
+    {# ── Lifecycle: send → accept/reject ─────────────────────────── #}
+    <div class="mt-4 pt-3 border-t border-brand-200 flex flex-wrap items-center gap-3">
+      {% if bid.status == 'draft' %}
+        {% if recipient_email %}
+        <button hx-post="/api/resell/{{ el.id }}/bid/{{ bid.id }}/send"
+                hx-target="#tab-build-{{ el.id }}" hx-swap="innerHTML"
+                hx-confirm="Email this bid to {{ recipient_name or recipient_email }}?"
+                data-loading-disable class="btn btn-primary btn-sm">
+          <svg class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+          Send bid
+        </button>
+        <span class="text-secondary">Emails the PDF to <span class="font-medium text-gray-700">{{ recipient_name or recipient_email }}</span></span>
+        {% else %}
+        <button disabled class="btn btn-primary btn-sm opacity-50 cursor-not-allowed">Send bid</button>
+        <span class="text-amber-600">No customer contact email on file — add one on the account to send.</span>
+        {% endif %}
+      {% elif bid.status == 'sent' %}
+        <span class="text-secondary">
+          Sent{% if bid.sent_at %} {{ bid.sent_at.strftime('%b %d, %Y') }}{% endif %} — awaiting the customer's answer
+        </span>
+        <div class="flex items-center gap-2 ml-auto">
+          <button hx-post="/api/resell/{{ el.id }}/bid/{{ bid.id }}/accept"
+                  hx-target="#tab-build-{{ el.id }}" hx-swap="innerHTML"
+                  data-loading-disable class="btn btn-sm bg-emerald-600 text-white hover:bg-emerald-700">
+            <svg class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+            Mark accepted
+          </button>
+          <button hx-post="/api/resell/{{ el.id }}/bid/{{ bid.id }}/reject"
+                  hx-target="#tab-build-{{ el.id }}" hx-swap="innerHTML"
+                  data-loading-disable class="btn-secondary btn-sm">
+            Mark rejected
+          </button>
+        </div>
+      {% elif bid.status in ['accepted', 'rejected'] %}
+        <span class="text-secondary">
+          Customer {{ bid.status }}{% if bid.responded_at %} on {{ bid.responded_at.strftime('%b %d, %Y') }}{% endif %}{% if bid.responded_by %} · logged by {{ bid.responded_by.name }}{% endif %}.
+          Re-assemble above to revise as a new revision.
+        </span>
+      {% endif %}
     </div>
   </div>
   {% endif %}

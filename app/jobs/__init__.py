@@ -22,6 +22,7 @@ def register_all_jobs(scheduler, settings):
     from .offers_jobs import register_offers_jobs
     from .prospecting_jobs import register_prospecting_jobs, register_sweep_jobs
     from .quality_jobs import register_quality_jobs
+    from .resell_jobs import register_resell_jobs
     from .tagging_jobs import register_tagging_jobs
     from .task_jobs import register_task_jobs
     from .teams_call_jobs import register_teams_call_jobs
@@ -39,6 +40,7 @@ def register_all_jobs(scheduler, settings):
         register_offers_jobs(scheduler, settings, db)
         register_prospecting_jobs(scheduler, settings)
         register_sweep_jobs(scheduler, settings)
+        register_resell_jobs(scheduler, settings)
         register_tagging_jobs(scheduler, settings)
         register_maintenance_jobs(scheduler, settings)
         register_health_jobs(scheduler, settings)

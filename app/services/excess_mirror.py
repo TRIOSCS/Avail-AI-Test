@@ -60,6 +60,20 @@ _VIRTUAL_REQ_NAME_PREFIX = "Customer Excess (list "
 # withdrawn) is retired so the matcher stops seeing dead supply.
 _ACTIVE_LINE_STATUSES = frozenset({ExcessLineItemStatus.AVAILABLE, ExcessLineItemStatus.BIDDING})
 
+# List statuses where the posting window has CLOSED — the deal is out, done, or the
+# window lapsed (M5). No line of such a list advertises as live supply regardless of its
+# own status, so a re-sync (close_list, the nightly expiry job, or awarding a late offer)
+# retires the WHOLE mirror. The pre-close statuses (draft/open/collecting) fall back to
+# the per-line active check, so publishing + collecting behave exactly as before.
+_POSTING_CLOSED_STATUSES = frozenset(
+    {
+        ExcessListStatus.BID_OUT,
+        ExcessListStatus.AWARDED,
+        ExcessListStatus.CLOSED,
+        ExcessListStatus.EXPIRED,
+    }
+)
+
 
 def _virtual_req_name(excess_list: ExcessList) -> str:
     """Deterministic, queryable name for *excess_list*'s virtual requisition."""
@@ -238,22 +252,32 @@ def _line_is_active(line: ExcessLineItem) -> bool:
     return line.status in _ACTIVE_LINE_STATUSES and (line.quantity or 0) > 0
 
 
+def _posting_is_closed(excess_list: ExcessList) -> bool:
+    """True when the list's posting window has closed (bid_out / awarded / closed /
+    expired)."""
+    return excess_list.status in _POSTING_CLOSED_STATUSES
+
+
 def sync_list_mirror(db: Session, excess_list: ExcessList) -> dict:
     """Own the dual-write for a WHOLE list: mirror active lines, retire inactive ones.
 
     This is the single method callers use so the line table and the Sighting table never
     drift. Ensures the virtual requirement, then for every line of *excess_list*:
-    mirrors it when active (AVAILABLE/BIDDING, qty>0), otherwise retires its mirror
-    (awarded / withdrawn / qty→0). Flushes; does NOT commit (the caller / publish_list
-    commits). Returns ``{"mirrored": int, "retired": int}``.
+    mirrors it when the posting is still open AND the line is active (AVAILABLE/BIDDING,
+    qty>0), otherwise retires its mirror. A line is retired when it is individually
+    inactive (awarded / withdrawn / qty→0) OR when the LIST's posting window has closed
+    (bid_out / awarded / closed / expired) — a closed posting stops advertising ALL its
+    supply as live, no matter the per-line status (M5). Flushes; does NOT commit (the
+    caller / publish_list commits). Returns ``{"mirrored": int, "retired": int}``.
     """
     ensure_virtual_requirement(db, excess_list)
     lines = db.query(ExcessLineItem).filter_by(excess_list_id=excess_list.id).all()
 
+    posting_closed = _posting_is_closed(excess_list)
     mirrored = 0
     retired = 0
     for line in lines:
-        if _line_is_active(line):
+        if not posting_closed and _line_is_active(line):
             if mirror_line(db, line) is not None:
                 mirrored += 1
         else:
