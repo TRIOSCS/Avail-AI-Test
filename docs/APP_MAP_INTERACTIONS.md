@@ -664,6 +664,39 @@ heartbeat read + enrich in `htmx_views._enrich_source` /
 (`worker_detail` macro). Tests: `tests/test_connector_service.py` (pure
 verdict/state) and `tests/test_connectors_settings.py` (rendered badges).
 
+**Connectors-page classification + credential safety (2026-07-04, Phase 3).** Five
+Settings-tool hardening rules on top of the worker-aware status above.
+(1) **Flag connectors.** `connector_service._FLAG` (`email_mining`) classifies as
+`keyless` even though it declares an env var — that var (`EMAIL_MINING_ENABLED`) is a
+boolean feature flag, not a secret, so the card renders an on/off toggle + a note pointing
+to the System-tab setting, never a masked key field (typing there would have encrypted a
+bogus credential). Classification is name-based, so it holds on existing DBs regardless of
+the seeded `env_vars`.
+(2) **Webhook connectors.** `teams_notifications` is NOT in `_SCOPES` — it needs a
+`TEAMS_WEBHOOK_URL` field, so it classifies as `key` and its card exposes an
+enter/rotate field (was: "No key required", no field). `azure_oauth` remains the lone
+`_SCOPES` (consented-Graph) connector.
+(3) **Full masking.** `htmx_views._build_connector_field(..., mask_fully=True)` renders
+dots-only (no `plaintext[-4:]` tail) for `browser_login` control types — the TBF/ICS
+worker account passwords are reused human passwords, so even a 4-char tail in the DOM is a
+leak. Keyed API sources keep the last-4 identifier (`credential_service.mask_value` is
+unchanged).
+(4) **Last-checked + Test feedback.** The per-source Test persists `last_success` and
+emits an `HX-Trigger showToast` (status + count + elapsed, phase-0); the card now also
+renders "Last checked `<timeago>`" from `last_success` on non-worker cards.
+(5) **Paid-quota guard.** Test spends real provider quota; Test-all previously bypassed
+the per-source `5/min` cap entirely, so it now runs under a per-user `3/min`
+(`_TEST_ALL_MAX_PER_MIN` via `rate_limit.check_rate_limit`, friendly error toast on
+exceed) with a cost note beside the button + `title` tooltips on both Test buttons;
+`data-loading-disable` debounces in-flight.
+Separately, the startup **`connector_status.log_connector_status`** now reports readiness
+from DB-first credential resolution + `api_sources.status` health (was: raw `settings.*`
+env-var presence, which diverged from what searches actually resolve). Logic in
+`app/services/connector_service.py` + `app/routers/htmx/settings.py` +
+`app/connector_status.py`; rendering in `settings/_connector_macros.html` /
+`connectors.html`. Tests: `tests/test_connector_service.py`, `tests/test_connector_status.py`,
+`tests/test_connectors_settings.py`.
+
 **HTML structure-hash drift alert (2026-07-04, Phase 2).** Each browser worker
 fingerprints the results HTML it parses via
 `search_worker_base.monitoring.check_html_structure_hash` and warns (Loguru + Sentry)
