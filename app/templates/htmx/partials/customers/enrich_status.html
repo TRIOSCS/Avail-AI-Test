@@ -1,0 +1,25 @@
+{# enrich_status.html — "Enriching…" in-progress panel for the account (Company) detail.
+
+   Returned by enrichment.enrich_company (HTMX path) into #enrich-results-{id}, then polls
+   its own status route every 2s while the background waterfall runs. When the run finishes
+   the status route replaces this element (outerHTML) with the _enrich_result.html panel and
+   answers HTTP 286 to STOP polling; a blocked run additionally fires the "couldn't complete"
+   toast. hx-target is set explicitly to "this" so the poll swaps the panel — never the whole
+   page under <main id="main-content" hx-target="this">.
+
+   Receives: company (Company).
+   Called by: enrichment.enrich_company + enrichment.enrich_company_status. #}
+<div hx-get="/api/enrich/company/{{ company.id }}/status"
+     hx-trigger="every 2s"
+     hx-target="this"
+     hx-swap="outerHTML"
+     class="mt-3 rounded-xl border border-brand-200 bg-white p-4 shadow-card">
+  <div class="flex items-center gap-2 text-sm font-medium text-brand-600">
+    <svg class="h-4 w-4 animate-spin flex-shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+    </svg>
+    <span class="truncate">Enriching {{ company.name }}… finding firmographics &amp; contacts.</span>
+  </div>
+  <p class="mt-1 text-xs text-gray-400">This can take up to a minute — you can keep working; results appear here automatically.</p>
+</div>

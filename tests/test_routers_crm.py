@@ -1116,126 +1116,30 @@ class TestEnrichment:
         "app.routers.crm.enrichment.get_credential_cached",
         side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None,
     )
+    @patch("app.routers.crm.enrichment._run_company_enrichment", new_callable=AsyncMock)
     @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
-    @patch("app.enrichment_service.apply_enrichment_to_company")
-    @patch("app.enrichment_service.find_suggested_contacts_with_errors", new_callable=AsyncMock)
-    def test_enrich_company_hx_returns_html(
-        self, mock_find, mock_apply, mock_enrich, mock_cred, client, db_session, test_company, test_user
+    def test_enrich_company_hx_returns_enriching_panel(
+        self, mock_enrich, mock_runner, mock_cred, client, db_session, test_company, test_user
     ):
-        """HTMX request renders an HTML result panel (not raw JSON) with firmographics +
-        contacts."""
+        """HTMX request returns the polling "Enriching…" panel immediately (async) — it
+        does NOT run the provider waterfall inline and does NOT return raw JSON.
+
+        The full firmographics + contacts panel (and its XSS-safety, graceful-
+        degradation and no-updates variants) is rendered by the enrich-status poller;
+        that behavior is covered end-to-end in tests/test_account_enrich_async.py.
+        """
         test_company.domain = "acme.com"
-        test_company.legal_name = "Acme Electronics Inc"
         test_company.account_owner_id = test_user.id  # owner passes can_manage_account gate
         db_session.commit()
-        mock_enrich.return_value = {"industry": "Electronics", "legal_name": "Acme Electronics Inc"}
-        mock_apply.return_value = ["industry"]
-        mock_find.return_value = (
-            [
-                {
-                    "full_name": "Jane Buyer",
-                    "title": "Procurement Mgr",
-                    "email": "jane@acme.com",
-                    "source": "hunter",
-                    "verified": True,
-                }
-            ],
-            [],
-        )
 
         resp = client.post(f"/api/enrich/company/{test_company.id}", headers={"HX-Request": "true"})
         assert resp.status_code == 200
         assert "text/html" in resp.headers.get("content-type", "")
         assert not resp.text.lstrip().startswith("{")  # not raw JSON
-        # Firmographics rendered from the stored record
-        assert "Acme Electronics Inc" in resp.text
-        assert "Electronic Components" in resp.text
-        # Newly-updated field gets an "Updated" pill
-        assert "Updated" in resp.text
-        # Discovered contact surfaced with an Add form flagged from_enrich
-        assert "Jane Buyer" in resp.text
-        assert "suggested-contacts/add" in resp.text
-        assert "from_enrich" in resp.text
-
-    @patch(
-        "app.routers.crm.enrichment.get_credential_cached",
-        side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None,
-    )
-    @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
-    @patch("app.enrichment_service.apply_enrichment_to_company")
-    @patch("app.enrichment_service.find_suggested_contacts_with_errors", new_callable=AsyncMock)
-    def test_enrich_company_hx_website_javascript_uri_not_an_href(
-        self, mock_find, mock_apply, mock_enrich, mock_cred, client, db_session, test_company, test_user
-    ):
-        """A stored javascript:/data: website must never be emitted as a clickable href.
-
-        Guards against XSS: HTML-escaping the text doesn't neutralize a dangerous URL
-        scheme in an href, so the link must be scheme-validated (safe_url).
-        """
-        test_company.domain = "acme.com"
-        test_company.website = "javascript://%0aalert(document.cookie)"
-        test_company.account_owner_id = test_user.id  # owner passes can_manage_account gate
-        db_session.commit()
-        mock_enrich.return_value = {}
-        mock_apply.return_value = []
-        mock_find.return_value = ([], [])
-
-        resp = client.post(f"/api/enrich/company/{test_company.id}", headers={"HX-Request": "true"})
-        assert resp.status_code == 200
-        body = resp.text.lower()
-        # The dangerous scheme must not appear as the target of any href (single/double-quoted).
-        assert "href='javascript:" not in body
-        assert 'href="javascript:' not in body
-        assert "href='data:" not in body
-        assert 'href="data:' not in body
-
-    @patch(
-        "app.routers.crm.enrichment.get_credential_cached",
-        side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None,
-    )
-    @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
-    @patch("app.enrichment_service.apply_enrichment_to_company")
-    @patch("app.enrichment_service.find_suggested_contacts_with_errors", new_callable=AsyncMock)
-    def test_enrich_company_hx_graceful_degradation(
-        self, mock_find, mock_apply, mock_enrich, mock_cred, client, db_session, test_company, test_user
-    ):
-        """Contact discovery failure still renders firmographics; shows an amber
-        'couldn't reach' banner."""
-        test_company.domain = "acme.com"
-        test_company.account_owner_id = test_user.id  # owner passes can_manage_account gate
-        db_session.commit()
-        mock_enrich.return_value = {"industry": "Electronics"}
-        mock_apply.return_value = ["industry"]
-        mock_find.side_effect = RuntimeError("clay down")
-
-        resp = client.post(f"/api/enrich/company/{test_company.id}", headers={"HX-Request": "true"})
-        assert resp.status_code == 200
-        assert "Electronic Components" in resp.text  # firmographics still render
-        assert "Couldn" in resp.text  # amber "Couldn't reach" banner
-
-    @patch(
-        "app.routers.crm.enrichment.get_credential_cached",
-        side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None,
-    )
-    @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
-    @patch("app.enrichment_service.apply_enrichment_to_company")
-    @patch("app.enrichment_service.find_suggested_contacts_with_errors", new_callable=AsyncMock)
-    def test_enrich_company_hx_no_updates_shows_current(
-        self, mock_find, mock_apply, mock_enrich, mock_cred, client, db_session, test_company, test_user
-    ):
-        """Already-enriched company (empty updated_fields) shows 'Already up to date',
-        not raw JSON."""
-        test_company.domain = "acme.com"
-        test_company.account_owner_id = test_user.id  # owner passes can_manage_account gate
-        db_session.commit()
-        mock_enrich.return_value = {"industry": "Electronics"}
-        mock_apply.return_value = []  # nothing changed — the user's real scenario
-        mock_find.return_value = ([], [])
-
-        resp = client.post(f"/api/enrich/company/{test_company.id}", headers={"HX-Request": "true"})
-        assert resp.status_code == 200
-        assert "Already up to date" in resp.text
-        assert not resp.text.lstrip().startswith("{")
+        assert "Enriching" in resp.text  # in-progress panel
+        assert "every 2s" in resp.text  # poller active
+        assert f"/api/enrich/company/{test_company.id}/status" in resp.text
+        mock_enrich.assert_not_called()  # scheduled on a background task, not awaited inline
 
     @patch(
         "app.routers.crm.enrichment.get_credential_cached",
