@@ -54,6 +54,11 @@ _PROSPECT_DEFAULT_STATUSES = ("suggested", "claimed")
 # died mid-job) so the enrich flow self-heals instead of wedging forever.
 _ENRICH_STALE_SECONDS = 180
 
+# Max rows rendered in the collapsed "screened out / low fit" bucket (audit M5) — the
+# bucket is only informational, so cap the DOM rather than dump the whole (only-grows)
+# screened-out set. The honest total is still shown in the header.
+_SCREENED_OUT_CAP = 50
+
 
 def _enrich_is_stale(started_iso) -> bool:
     """True when a 'running' enrich job started longer than _ENRICH_STALE_SECONDS
@@ -298,13 +303,17 @@ async def prospecting_list_partial(
     total_pages = max(1, (total + per_page - 1) // per_page)
     offset = (page - 1) * per_page
 
+    screened_out_total = 0
     if sort == "ai_match_desc":
         from ...config import settings as _settings
 
         if _settings.ai_screen_enabled:
             # AI-screen on: the screened-out split is a JSONB verdict predicate we keep in
-            # Python (portable across PG/SQLite). The pool is already filtered to the
-            # active status/search; the bucket is capped before render (see list.html).
+            # Python (portable across PG/SQLite — this module deliberately runs no JSONB SQL
+            # queries). The main grid is sorted + paginated below; the screened-out bucket
+            # is sorted best-first and CAPPED at _SCREENED_OUT_CAP so it never renders the
+            # whole (only-grows) bucket unpaginated (audit M5). screened_out_total keeps the
+            # header count honest.
             rows = base.all()
             screened_out_rows = [
                 p for p in rows if (p.enrichment_data or {}).get("ai_screen", {}).get("verdict") == "screened_out"
@@ -318,6 +327,9 @@ async def prospecting_list_partial(
                     (p.name or "").lower(),
                 )
             )
+            screened_out_total = len(screened_out_rows)
+            screened_out_rows.sort(key=lambda p: (-(p.trio_match_score or 0), (p.name or "").lower()))
+            screened_out_rows = screened_out_rows[:_SCREENED_OUT_CAP]
             total = len(rows)
             total_pages = max(1, (total + per_page - 1) // per_page)
             prospects = rows[offset : offset + per_page]
@@ -394,6 +406,7 @@ async def prospecting_list_partial(
             "status_counts": status_counts,
             "all_total": all_total,
             "screened_out_prospects": screened_out_rows if sort == "ai_match_desc" else [],
+            "screened_out_total": screened_out_total if sort == "ai_match_desc" else 0,
             "ai_screen_enabled": _list_settings.ai_screen_enabled,
         }
     )

@@ -315,6 +315,53 @@ class TestM13ManualAddRace:
         assert out["prospect_id"] == existing.id
 
 
+# ── M5 — the screened-out bucket is capped, with an honest total ──────────────
+
+
+class TestM5ScreenedOutBucketCap:
+    def test_bucket_capped_total_honest(self, client, db_session, monkeypatch):
+        from app.routers.htmx import prospecting as router
+
+        monkeypatch.setattr("app.config.settings.ai_screen_enabled", True)
+
+        n_screened = router._SCREENED_OUT_CAP + 5
+        for i in range(n_screened):
+            db_session.add(
+                ProspectAccount(
+                    name=f"SO{i}",
+                    domain=f"so-{i}-m5.com",
+                    status="suggested",
+                    discovery_source="manual",
+                    enrichment_data={"ai_screen": {"verdict": "screened_out"}},
+                )
+            )
+        db_session.add(
+            ProspectAccount(
+                name="Passer",
+                domain="pass-m5.com",
+                status="suggested",
+                discovery_source="manual",
+                enrichment_data={"ai_screen": {"verdict": "pass"}},
+            )
+        )
+        db_session.commit()
+
+        captured: dict = {}
+
+        def _capture(template, ctx, *a, **k):
+            captured["ctx"] = ctx
+            return HTMLResponse("<html/>")
+
+        monkeypatch.setattr(router, "template_response", _capture)
+        resp = client.get("/v2/partials/prospecting?sort=ai_match_desc")
+        assert resp.status_code == 200
+
+        ctx = captured["ctx"]
+        # Pre-fix: no screened_out_total key + the bucket rendered all rows uncapped.
+        assert ctx["screened_out_total"] == n_screened
+        assert len(ctx["screened_out_prospects"]) == router._SCREENED_OUT_CAP
+
+
 # ── M9 — similar-customer matching loads owned companies once, not per prospect ─
 
 

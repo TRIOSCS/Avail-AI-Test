@@ -175,12 +175,14 @@
      * sort=ai_match_desc (so it's always co-located with the AI-ranked grid)
      * ai_screen_enabled=True (feature is active)
      * screened_out_prospects is non-empty
+     The header count is the TRUE total (screened_out_total); the rendered rows are capped
+     server-side (audit M5), so we note "showing first N" when the bucket was truncated.
      Each row has a "Claim anyway" button that reuses the EXISTING /claim endpoint. #}
   {% if screened_out_prospects and ai_screen_enabled %}
   <div x-data='{ open: false }' class="mt-8 border border-amber-200 rounded-lg bg-amber-50">
     <button @click="open = !open"
             class="w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-amber-800 hover:bg-amber-100 rounded-lg transition-colors">
-      <span>Screened out / low fit ({{ screened_out_prospects|length }})</span>
+      <span>Screened out / low fit ({{ screened_out_total or (screened_out_prospects|length) }}){% if (screened_out_total or 0) > (screened_out_prospects|length) %} · showing first {{ screened_out_prospects|length }}{% endif %}</span>
       <svg class="w-4 h-4 transition-transform" :class="open ? 'rotate-180' : ''"
            fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
