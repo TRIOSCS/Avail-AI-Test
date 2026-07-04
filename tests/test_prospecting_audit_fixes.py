@@ -8,9 +8,11 @@ docs/superpowers/specs/2026-07-03-prospecting-audit.md.
 Depends on: conftest db_session fixture; external paid APIs are always mocked.
 """
 
+import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi.responses import HTMLResponse
 
 from app.models.discovery_batch import DiscoveryBatch
 from app.models.prospect_account import ProspectAccount
@@ -18,6 +20,21 @@ from app.schemas.prospect_account import ProspectAccountCreate
 from app.services.enrichment_credit_guard import ProviderQuotaError
 
 EXPL = "app.services.prospect_discovery_explorium"
+
+
+def _prospect(db, **kw) -> ProspectAccount:
+    defaults = dict(
+        name=f"P-{uuid.uuid4().hex[:6]}",
+        domain=f"p-{uuid.uuid4().hex[:6]}.com",
+        status="suggested",
+        discovery_source="manual",
+    )
+    defaults.update(kw)
+    p = ProspectAccount(**defaults)
+    db.add(p)
+    db.commit()
+    db.refresh(p)
+    return p
 
 
 def _batch(db, **kw) -> DiscoveryBatch:
@@ -185,6 +202,117 @@ class TestM16UnboundedExclusion:
 
         src = inspect.getsource(mod.mine_unknown_domains)
         assert ".limit(5000)" not in src
+
+
+# ── M1 — claim's domain-collision warning must reach the toast ────────────────
+
+
+class TestM1ClaimWarningSurfaced:
+    def test_domain_collision_warning_in_toast(self, client, db_session):
+        p = _prospect(db_session)
+        with (
+            patch(
+                "app.services.prospect_claim.claim_prospect",
+                return_value={
+                    "prospect_id": p.id,
+                    "warning": "Linked to existing company 'Other Co' (same domain)",
+                },
+            ),
+            patch("app.services.prospect_claim.trigger_deep_enrichment_bg", return_value=MagicMock()),
+            patch("app.utils.async_helpers.safe_background_task", new_callable=AsyncMock),
+            patch("app.routers.htmx.prospecting.template_response", return_value=HTMLResponse("<html/>")),
+        ):
+            resp = client.post(f"/v2/partials/prospecting/{p.id}/claim")
+        assert resp.status_code == 200
+        trigger = resp.headers.get("HX-Trigger", "")
+        # Pre-fix: the router discarded the return value and toasted a flat "Claimed X".
+        assert "same domain" in trigger
+        assert "warning" in trigger
+
+    def test_plain_claim_still_success(self, client, db_session):
+        p = _prospect(db_session)
+        with (
+            patch("app.services.prospect_claim.claim_prospect", return_value={"prospect_id": p.id}),
+            patch("app.services.prospect_claim.trigger_deep_enrichment_bg", return_value=MagicMock()),
+            patch("app.utils.async_helpers.safe_background_task", new_callable=AsyncMock),
+            patch("app.routers.htmx.prospecting.template_response", return_value=HTMLResponse("<html/>")),
+        ):
+            resp = client.post(f"/v2/partials/prospecting/{p.id}/claim")
+        assert "success" in resp.headers.get("HX-Trigger", "")
+
+
+# ── M17 — dismiss is a service (thin router) + captures a reason ──────────────
+
+
+class TestM17DismissService:
+    def test_dismiss_sets_status_and_reason(self, db_session, test_user):
+        from app.constants import ProspectAccountStatus
+        from app.services.prospect_claim import dismiss_prospect
+
+        p = _prospect(db_session)
+        out = dismiss_prospect(p.id, user_id=test_user.id, db=db_session, reason="not_a_fit")
+        db_session.refresh(p)
+        assert out["status"] == "dismissed"
+        assert p.status == ProspectAccountStatus.DISMISSED
+        assert p.dismiss_reason == "not_a_fit"
+        assert p.dismissed_by == test_user.id
+
+    def test_dismiss_rejects_non_suggested(self, db_session, test_user):
+        from app.services.prospect_claim import dismiss_prospect
+
+        p = _prospect(db_session, status="claimed")
+        with pytest.raises(ValueError):
+            dismiss_prospect(p.id, test_user.id, db_session)
+
+    def test_dismiss_button_has_confirm(self):
+        from pathlib import Path
+
+        for tmpl in ("_card.html", "detail.html"):
+            html = Path(f"app/templates/htmx/partials/prospecting/{tmpl}").read_text()
+            assert "/dismiss" in html and "hx-confirm" in html
+
+
+# ── M7 — enrich locks the row before the read-check-write ─────────────────────
+
+
+class TestM7EnrichRowLock:
+    def test_enrich_endpoint_locks_row(self):
+        import inspect
+
+        from app.routers.htmx import prospecting as router
+
+        src = inspect.getsource(router.enrich_prospect_htmx)
+        # Pre-fix used db.get(...) with no lock; two clicks could both spawn a job.
+        assert "with_for_update()" in src
+
+
+# ── M13 — manual add adopts the winner on a duplicate-domain race ─────────────
+
+
+class TestM13ManualAddRace:
+    def test_adopts_existing_on_integrity_race(self, db_session, monkeypatch):
+        from sqlalchemy.orm import Query
+
+        from app.services import prospect_claim
+
+        existing = _prospect(db_session, domain="race-m13.com", name="Race")
+
+        real_first = Query.first
+        calls = {"n": 0}
+
+        def fake_first(self):
+            # Hide the row from ONLY the pre-insert dedup check to force the TOCTOU race;
+            # the post-IntegrityError adopt lookup (call 2) sees the real row.
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return None
+            return real_first(self)
+
+        monkeypatch.setattr(Query, "first", fake_first)
+        out = prospect_claim.add_prospect_manually("race-m13.com", user_id=1, db=db_session)
+        # Pre-fix: db.commit() raised IntegrityError to the caller (500).
+        assert out["is_new"] is False
+        assert out["prospect_id"] == existing.id
 
 
 # ── M12 — reclaim/reassign under /v2/partials/prospects must be module-gated ──

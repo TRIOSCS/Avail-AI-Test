@@ -161,6 +161,7 @@
             hx-target="#prospect-{{ prospect.id }}"
             hx-swap="outerHTML"
             hx-vals='{"flt_status": "{{ status|default('') }}"}'
+            hx-confirm="Dismiss {{ prospect.name }}? It leaves the suggested pool."
             data-loading-disable
             class="btn-secondary btn-sm flex-1">
       Dismiss

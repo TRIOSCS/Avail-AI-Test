@@ -76,6 +76,7 @@
         {% endif %}
         <button hx-post="/v2/partials/prospecting/{{ prospect.id }}/dismiss"
                 hx-target="#main-content"
+                hx-confirm="Dismiss {{ prospect.name }}? It leaves the suggested pool."
                 data-loading-disable
                 class="btn-secondary btn-sm">
           Dismiss

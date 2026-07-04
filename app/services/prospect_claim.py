@@ -242,6 +242,45 @@ def release_prospect(prospect_id: int, user_id: int, db: Session, *, is_admin: b
     }
 
 
+def dismiss_prospect(prospect_id: int, user_id: int, db: Session, *, reason: str = "other") -> dict:
+    """Dismiss a SUGGESTED prospect out of the pool.
+
+    The transition the dismiss button used to inline in the router (audit M17 — "keep
+    routers thin"): status -> DISMISSED, stamp who/when, and record the ``reason`` (defaults
+    to ``"other"``; the field is ``String(255)`` so it is trimmed). Claimed prospects use
+    Release instead — only a SUGGESTED prospect can be dismissed. Row is locked for update
+    so a concurrent claim/dismiss can't race the status.
+
+    Returns: {prospect_id, company_name, status}
+    Raises: LookupError if missing, ValueError if not SUGGESTED.
+    """
+    prospect = db.query(ProspectAccount).filter(ProspectAccount.id == prospect_id).with_for_update().first()
+    if not prospect:
+        raise LookupError("Prospect not found")
+
+    if prospect.status != ProspectAccountStatus.SUGGESTED:
+        raise ValueError("Only suggested prospects can be dismissed.")
+
+    prospect.status = ProspectAccountStatus.DISMISSED
+    prospect.dismissed_by = user_id
+    prospect.dismissed_at = datetime.now(timezone.utc)
+    prospect.dismiss_reason = (reason or "other").strip()[:255]
+    db.commit()
+
+    logger.info(
+        "Prospect {} ({}) dismissed by user {} (reason={})",
+        prospect.name,
+        prospect.id,
+        user_id,
+        prospect.dismiss_reason,
+    )
+    return {
+        "prospect_id": prospect.id,
+        "company_name": prospect.name,
+        "status": "dismissed",
+    }
+
+
 # ── Convert to opportunity ───────────────────────────────────────────
 
 
@@ -688,7 +727,26 @@ def add_prospect_manually(domain: str, user_id: int, db: Session) -> dict:
         readiness_score=0,
         enrichment_data={"submitted_by": user_id},
     )
-    db.add(prospect)
+    # The first()-check above is a TOCTOU window: a concurrent add of the same domain can
+    # slip between it and the insert. ProspectAccount.domain is UNIQUE, so insert inside a
+    # SAVEPOINT and adopt the winner's row on IntegrityError instead of 500ing (audit M13 —
+    # same race-safe pattern as send_company_to_prospecting).
+    try:
+        with db.begin_nested():
+            db.add(prospect)
+            db.flush()
+    except IntegrityError:
+        dup = db.query(ProspectAccount).filter(ProspectAccount.domain == domain).first()
+        if dup:
+            logger.info("Manual prospect add race: adopted existing {} ({})", dup.name, domain)
+            return {
+                "prospect_id": dup.id,
+                "name": dup.name,
+                "domain": dup.domain,
+                "status": dup.status,
+                "is_new": False,
+            }
+        raise
     db.commit()
     db.refresh(prospect)
 

@@ -500,8 +500,9 @@ async def claim_prospect_htmx(
     from ...utils.async_helpers import safe_background_task
 
     error = None
+    result = None
     try:
-        claim_prospect(prospect_id, user.id, db)
+        result = claim_prospect(prospect_id, user.id, db)
     except LookupError:
         raise HTTPException(404, "Prospect not found")
     except ValueError as e:
@@ -519,14 +520,26 @@ async def claim_prospect_htmx(
     if not prospect:
         raise HTTPException(404, "Prospect not found")
 
+    # Surface the domain-collision warning (audit M1): on a domain collision claim_prospect
+    # links the prospect to a DIFFERENT existing company and returns a `warning`. Without
+    # this the user only saw a flat "Claimed X" and never learned their claim merged into
+    # another account.
+    warning = result.get("warning") if result else None
+    if warning:
+        message, kind = f"Claimed {prospect.name} — {warning}", "warning"
+    elif error:
+        message, kind = error, "error"
+    else:
+        message, kind = f"Claimed {prospect.name}", "success"
+
     form = await request.form()
     return _prospect_action_response(
         request,
         user,
         db,
         prospect,
-        message=error or f"Claimed {prospect.name}",
-        kind="error" if error else "success",
+        message=message,
+        kind=kind,
         flt_status=form.get("flt_status", ""),
     )
 
@@ -542,22 +555,21 @@ async def dismiss_prospect_htmx(
 
     Returns the refreshed detail or card per the call site.
     """
-    prospect = db.get(ProspectAccount, prospect_id)
-    if not prospect:
-        raise HTTPException(404, "Prospect not found")
+    from ...services.prospect_claim import dismiss_prospect
 
     form = await request.form()
     flt_status = form.get("flt_status", "")
     error = None
-    if prospect.status != ProspectAccountStatus.SUGGESTED:
-        error = "Only suggested prospects can be dismissed."
-    else:
-        reason = (form.get("reason") or "other").strip()[:255]  # dismiss_reason is String(255)
-        prospect.status = ProspectAccountStatus.DISMISSED
-        prospect.dismissed_by = user.id
-        prospect.dismissed_at = datetime.now(timezone.utc)
-        prospect.dismiss_reason = reason
-        db.commit()
+    try:
+        dismiss_prospect(prospect_id, user.id, db, reason=form.get("reason") or "other")
+    except LookupError:
+        raise HTTPException(404, "Prospect not found")
+    except ValueError as e:
+        error = str(e)
+
+    prospect = db.get(ProspectAccount, prospect_id)
+    if not prospect:
+        raise HTTPException(404, "Prospect not found")
 
     return _prospect_action_response(
         request,
@@ -622,7 +634,10 @@ async def enrich_prospect_htmx(
     The SAM.gov/news/warm-intro work runs off the request path (run_enrichment_job via
     safe_background_task); the detail page polls /enrich-status until it lands.
     """
-    prospect = db.get(ProspectAccount, prospect_id)
+    # Lock the row for the read-check-write on enrich_status (audit M7): without it two
+    # near-simultaneous Enrich clicks both see "not running" and both spawn a background
+    # job. FOR UPDATE serializes them so only the first flips to running + spawns.
+    prospect = db.query(ProspectAccount).filter(ProspectAccount.id == prospect_id).with_for_update().first()
     if not prospect:
         raise HTTPException(404, "Prospect not found")
 
