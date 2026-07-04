@@ -11,10 +11,10 @@ Depends on: app.constants, app.models, app.routers.admin.users (lazy)
 
 import json
 import os
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
-from fastapi import Request
+from fastapi import HTTPException, Request
 from loguru import logger
 from sqlalchemy.orm import Session
 from starlette.responses import Response
@@ -109,6 +109,23 @@ def _parse_date_safe(val, date_cls):
         return date_cls.fromisoformat(val)
     except (ValueError, TypeError):
         return None
+
+
+def _parse_task_due_date(raw: str | None) -> datetime | None:
+    """Parse an HTML ``<input type=date>`` value into an aware UTC datetime.
+
+    Empty → None. A bare date (YYYY-MM-DD) becomes UTC midnight so it binds cleanly to
+    the timestamptz ``due_at`` column — never a raw string, which ``UTCDateTime`` passes
+    through unnormalized (wrong-TZ instant on PostgreSQL, ``AttributeError`` on SQLite).
+    Raises 422 on a malformed non-empty value. Shared by the task create/edit endpoints
+    (part comms tab, requisition Tasks tab) so every write path normalizes identically.
+    """
+    if not raw or not raw.strip():
+        return None
+    d = _parse_date_safe(raw.strip(), date)
+    if d is None:
+        raise HTTPException(422, "Invalid due date")
+    return datetime.combine(d, datetime.min.time()).replace(tzinfo=timezone.utc)
 
 
 _DASH = "\u2014"  # em-dash for template fallbacks

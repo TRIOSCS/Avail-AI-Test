@@ -250,6 +250,69 @@ def test_requirement_tasks_404(client):
     assert resp.status_code == 404
 
 
+# ── Part comms-tab task create (HTMX) — due-date binding (H1) ─────────
+
+
+def test_create_part_task_stores_aware_due_datetime(client, test_requisition, db_session):
+    """POST /v2/partials/parts/{id}/tasks parses the <input type=date> string into a
+    real aware UTC datetime before it binds to the timestamptz due_at column.
+
+    Regression guard for H1: previously the bare 'YYYY-MM-DD' string was bound straight
+    through UTCDateTime (unnormalized instant on PostgreSQL, AttributeError on read under
+    SQLite). If the string-bind ever returns, due_at is a str and these assertions fail
+    loudly.
+    """
+    from app.models.task import RequisitionTask
+
+    req = _first_requirement(db_session, test_requisition)
+    resp = client.post(
+        f"/v2/partials/parts/{req.id}/tasks",
+        data={"title": "Chase datasheet", "due_date": "2026-07-10"},
+    )
+    assert resp.status_code == 200
+
+    db_session.expire_all()  # force a DB round-trip through UTCDateTime.process_result_value
+    task = (
+        db_session.query(RequisitionTask)
+        .filter(RequisitionTask.requirement_id == req.id, RequisitionTask.title == "Chase datasheet")
+        .one()
+    )
+    assert isinstance(task.due_at, datetime)  # NOT a raw string
+    assert task.due_at.tzinfo is not None  # aware
+    assert task.due_at.utcoffset() == timedelta(0)  # normalized to UTC
+    assert task.due_at.date().isoformat() == "2026-07-10"
+
+
+def test_create_part_task_empty_due_is_none(client, test_requisition, db_session):
+    """An empty due_date stores NULL, not an empty string."""
+    from app.models.task import RequisitionTask
+
+    req = _first_requirement(db_session, test_requisition)
+    resp = client.post(
+        f"/v2/partials/parts/{req.id}/tasks",
+        data={"title": "No due part task", "due_date": ""},
+    )
+    assert resp.status_code == 200
+
+    db_session.expire_all()
+    task = (
+        db_session.query(RequisitionTask)
+        .filter(RequisitionTask.requirement_id == req.id, RequisitionTask.title == "No due part task")
+        .one()
+    )
+    assert task.due_at is None
+
+
+def test_create_part_task_malformed_due_422(client, test_requisition, db_session):
+    """A malformed due_date is rejected with 422 rather than silently mis-stored."""
+    req = _first_requirement(db_session, test_requisition)
+    resp = client.post(
+        f"/v2/partials/parts/{req.id}/tasks",
+        data={"title": "Bad due part task", "due_date": "not-a-date"},
+    )
+    assert resp.status_code == 422
+
+
 # ── Requisition Status Filters ─────────────────────────────────────
 
 

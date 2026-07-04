@@ -49,7 +49,7 @@ from ...services.activity_service import log_activity as _log_activity
 from ...services.sighting_aggregation import get_vendor_tier_map
 from ...template_env import template_response
 from ...utils.search_builder import SearchBuilder
-from ._shared import _base_ctx, _safe_int
+from ._shared import _base_ctx, _parse_task_due_date, _safe_int
 
 router = APIRouter(tags=["htmx-views"])
 
@@ -930,7 +930,7 @@ async def create_part_task(
         description=(form.get("notes") or "").strip() or None,
         assigned_to_id=_safe_int(form.get("assigned_to")),
         created_by=user.id,
-        due_at=form.get("due_date") or None,
+        due_at=_parse_task_due_date(form.get("due_date")),
         status=TaskStatus.TODO,
         source="manual",
     )
