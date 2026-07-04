@@ -16,6 +16,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy.orm import Session
 
+from app.constants import ExcessListStatus, ExcessOfferStatus
 from app.models import Company, User
 from app.models.excess import ExcessLineItem, ExcessList
 from app.services.excess_service import (
@@ -182,6 +183,53 @@ def test_rollup_zero_when_last_offer_withdrawn(db_session: Session, rollup_fixtu
     assert line.offer_count == 0
     assert line.best_offer_unit_price is None
     assert line.best_offer_id is None
+
+
+def test_rollup_includes_late_offer(db_session: Session, rollup_fixture):
+    """A LATE offer (landed after the window closed) still drives the line rollup.
+
+    A late bid is counted in the stat strip (unactioned = open/late), shown in the
+    Offers tab, and awardable — so the rollup (offer_count / best_offer_id /
+    best_offer_unit_price) must include it too. Otherwise the line card reads 0-covered
+    while the strip says there's an offer to review, and the late bid can never be
+    marked "Best".
+    """
+    el, line, buyer_a, _ = rollup_fixture
+    # Close the posting window so the next inbound offer lands LATE (not OPEN).
+    el.status = ExcessListStatus.BID_OUT
+    db_session.commit()
+
+    late = _offer(db_session, el, buyer_a, Decimal("2.00"))
+    db_session.refresh(late)
+    assert late.status == ExcessOfferStatus.LATE
+
+    db_session.refresh(line)
+    assert line.offer_count == 1
+    assert line.best_offer_unit_price == Decimal("2.00")
+    assert line.best_offer_id == late.id
+
+
+def test_rollup_higher_late_beats_lower_open(db_session: Session, rollup_fixture):
+    """A higher LATE bid beats a lower OPEN bid for "Best" — LATE and OPEN rank
+    together.
+
+    The owner must not be steered to a lower on-time bid when a higher late bid exists;
+    both live states feed the same best-price selection.
+    """
+    el, line, buyer_a, buyer_b = rollup_fixture
+    # An on-time (open) lower bid first.
+    _offer(db_session, el, buyer_a, Decimal("1.50"))
+    # Close the window, then a higher LATE bid.
+    el.status = ExcessListStatus.BID_OUT
+    db_session.commit()
+    higher_late = _offer(db_session, el, buyer_b, Decimal("2.75"))
+    db_session.refresh(higher_late)
+    assert higher_late.status == ExcessOfferStatus.LATE
+
+    db_session.refresh(line)
+    assert line.offer_count == 2
+    assert line.best_offer_unit_price == Decimal("2.75")
+    assert line.best_offer_id == higher_late.id
 
 
 def test_recompute_missing_line_is_noop(db_session: Session):

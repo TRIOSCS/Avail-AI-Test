@@ -414,8 +414,13 @@ def confirm_import(db: Session, list_id: int, validated_rows: list[dict]) -> dic
 # nullable, and unmatched/ambiguous rows are QUEUED (kept with mpn_raw), never dropped
 # (spec §"Offer collection").
 
-# Offer statuses whose lines count toward a line's best-price rollup (active states).
-_ROLLUP_OFFER_STATUSES = (ExcessOfferStatus.OPEN, ExcessOfferStatus.WON)
+# Offer statuses whose lines count toward a line's best-price rollup (live states). LATE
+# is included: a late bid (landed after the window closed) is still counted in the stat
+# strip (open/late), shown in the Offers tab, awardable, and treated as a live competitor
+# by _close_competing_offers — so the rollup (offer_count / best_offer_id /
+# best_offer_unit_price) must include it too, else the line reads 0-covered while the strip
+# says there's an offer to review, and a higher late bid is never marked "Best".
+_ROLLUP_OFFER_STATUSES = (ExcessOfferStatus.OPEN, ExcessOfferStatus.WON, ExcessOfferStatus.LATE)
 
 # List statuses that mean the posting window is over: an inbound offer landing now is
 # accepted but flagged ``late`` and queued for review — never dropped (spec §Resolved-for
