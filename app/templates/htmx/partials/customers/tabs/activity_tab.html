@@ -46,13 +46,9 @@
 
   {# ── Empty state ───────────────────────────────────────────────── #}
   {% if not has_any_activity %}
-  <div class='p-8 text-center'>
-    <svg class='mx-auto h-10 w-10 text-gray-300 mb-3' fill='none' viewBox='0 0 24 24' stroke='currentColor'>
-      <path stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z'/>
-    </svg>
-    <p class='text-sm text-gray-600'>No activity recorded for this company yet.</p>
-    <p class='text-secondary mt-1'>Activity will appear here as you log calls, emails, notes, and meetings.</p>
-  </div>
+  {% with message="No activity recorded for this company yet.", description="Activity will appear here as you log calls, emails, notes, and meetings." %}
+  {% include "htmx/partials/shared/empty_state.html" %}
+  {% endwith %}
   {% endif %}
 
   {# ── Type sections ─────────────────────────────────────────────── #}

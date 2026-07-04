@@ -554,25 +554,16 @@ Usage:
     {{ cadence_hero(vendor, cadence_state, next_best_touch, now_utc) }}
 #}
 {% macro cadence_hero(entity, cadence_state, next_best_touch, now_utc) %}
-{%- set badge_colors = {
-  "new":       "bg-gray-50 text-gray-600 border-gray-200",
-  "on_target": "bg-emerald-50 text-emerald-700 border-emerald-200",
-  "due":       "bg-amber-50 text-amber-700 border-amber-200",
-  "overdue":   "bg-rose-50 text-rose-700 border-rose-200"
-} -%}
-{%- set badge_labels = {
-  "new":       "New",
-  "on_target": "On Target",
-  "due":       "Due",
-  "overdue":   "Overdue"
-} -%}
+{# Cadence state → badge, routed through the shared badge() primitive + CADENCE_LABEL
+   (one source of truth) rather than a private color/label map. `new` maps to the
+   `neutral` tone (bg-gray-50) — the vendor hero's historical shade — so the pill stays
+   byte-equivalent to the inline map this replaced. #}
+{%- set _cadence_tone = {'new': 'neutral', 'on_target': 'success', 'due': 'warning', 'overdue': 'danger'} -%}
 <div class="card">
   {# Hero row: cadence badge + next-best-touch #}
   <div class="flex items-center justify-between flex-wrap gap-2 mb-3">
     <div class="flex items-center gap-2">
-      <span class="badge {{ badge_colors.get(cadence_state, 'bg-gray-50 text-gray-600 border-gray-200') }}">
-        {{ badge_labels.get(cadence_state, cadence_state|title) }}
-      </span>
+      {{ badge(CADENCE_LABEL.get(cadence_state, cadence_state|title), tone=_cadence_tone.get(cadence_state, 'neutral')) }}
     </div>
     <span class="text-xs text-gray-600 italic">{{ next_best_touch }}</span>
   </div>

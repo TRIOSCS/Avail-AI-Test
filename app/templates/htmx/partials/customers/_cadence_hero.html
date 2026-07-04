@@ -16,7 +16,7 @@
           hx-swap='outerHTML'>
       <select name='tier'
               onchange='this.form.requestSubmit()'
-              class='text-xs text-gray-600 font-medium bg-transparent border border-gray-200 rounded px-1.5 py-0.5 hover:border-brand-300 input-focus cursor-pointer'>
+              class='input input-sm w-auto cursor-pointer'>
         <option value='' {% if not company.tier %}selected{% endif %}>— tier —</option>
         <option value='key' {% if company.tier == 'key' %}selected{% endif %}>Key</option>
         <option value='core' {% if company.tier == 'core' %}selected{% endif %}>Core</option>

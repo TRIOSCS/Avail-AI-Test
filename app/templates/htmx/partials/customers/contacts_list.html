@@ -205,10 +205,9 @@
   {% endif %}
 
   {% else %}
-  <div class="bg-white rounded-lg shadow border border-gray-200 p-6 sm:p-8 text-center">
-    <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m6-1.13a4 4 0 10-4-4 4 4 0 004 4z"/></svg>
-    <p class="mt-2 text-sm text-gray-600">No contacts found</p>
-  </div>
+  {% with message="No contacts found" %}
+  {% include "htmx/partials/shared/empty_state.html" %}
+  {% endwith %}
   {% endif %}
 
   </div>{# /bulk-select Alpine scope #}

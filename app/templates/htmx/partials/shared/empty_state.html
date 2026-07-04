@@ -5,6 +5,7 @@
   Depends on: HTMX (optional, for action_url), Alpine.js (optional, for action_alpine_click)
   Context vars:
     message (str)
+    description (str, optional) — a quieter secondary line under the message
     action_url (str, optional) — renders an hx-get anchor
     action_alpine_click (str, optional) — renders an Alpine @click button instead of hx-get anchor
     action_label (str, optional)
@@ -15,6 +16,7 @@
           d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/>
   </svg>
   <p class="text-base font-medium text-gray-600">{{ message|default("No items found.") }}</p>
+  {% if description %}<p class="text-secondary mt-1">{{ description }}</p>{% endif %}
   {% if action_alpine_click %}
   <button type='button'
           @click='{{ action_alpine_click }}'
