@@ -135,9 +135,18 @@ async def job_account_sweep_with_db(db: Session) -> None:
 def _sweep_notification_recipients(owner: User, db: Session) -> list[str]:
     """Resolve the deduped recipient list for a sweep notification.
 
-    Includes the rep (former owner), every ACTIVE user with role MANAGER or ADMIN, and
-    the configured settings.account_sweep_manager_email. Order is preserved with the rep
-    first; comparison is case-insensitive so the same address is never sent twice.
+    Always includes the rep (former owner) first and the configured
+    settings.account_sweep_manager_email. For the manager tier the routing is per-rep:
+
+    - If the rep has a specific manager set (owner.reports_to_id) and that manager is an
+      ACTIVE user, ONLY that manager is alerted (targeted routing — the other supervisors
+      are not notified).
+    - Otherwise (no manager set, or the set manager is missing/inactive), fall back to
+      every ACTIVE user with role MANAGER or ADMIN — the original all-supervisors
+      behavior, preserved so nothing regresses.
+
+    Order is preserved with the rep first; comparison is case-insensitive so the same
+    address is never sent twice.
 
     Called by: _send_sweep_notification
     """
@@ -157,16 +166,22 @@ def _sweep_notification_recipients(owner: User, db: Session) -> list[str]:
 
     _add(owner.email)
 
-    supervisors = (
-        db.query(User)
-        .filter(
-            User.role.in_([UserRole.MANAGER, UserRole.ADMIN]),
-            User.is_active.is_(True),
+    manager = owner.manager if owner.reports_to_id else None
+    if manager is not None and manager.is_active:
+        # Per-rep routing: alert only this rep's designated manager.
+        _add(manager.email)
+    else:
+        # Fallback: no (active) manager set — alert every active supervisor.
+        supervisors = (
+            db.query(User)
+            .filter(
+                User.role.in_([UserRole.MANAGER, UserRole.ADMIN]),
+                User.is_active.is_(True),
+            )
+            .all()
         )
-        .all()
-    )
-    for sup in supervisors:
-        _add(sup.email)
+        for sup in supervisors:
+            _add(sup.email)
 
     _add(settings.account_sweep_manager_email)
     return recipients
@@ -179,10 +194,12 @@ async def _send_sweep_notification(
     prospect_id: int,
     db: Session,
 ) -> None:
-    """Send a Graph /me/sendMail loss-notification to the rep and every supervisor.
+    """Send a Graph /me/sendMail loss-notification to the rep and their manager(s).
 
-    Recipients: the former owner, all active MANAGER/ADMIN users, and the configured
-    settings.account_sweep_manager_email (deduped via _sweep_notification_recipients).
+    Recipients: the former owner, the manager tier (the rep's specific manager when
+    owner.reports_to_id is set + active, else all active MANAGER/ADMIN users), and the
+    configured settings.account_sweep_manager_email (deduped via
+    _sweep_notification_recipients).
     Sends one message per recipient so a single bad address can't suppress the rest —
     each send is wrapped in try/except so one failure never breaks the sweep. Uses the
     OWNER's token (get_valid_token); on a missing token: log a warning and return.

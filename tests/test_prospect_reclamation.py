@@ -1028,3 +1028,78 @@ class TestPolicyCodeDefaults:
         from app.config import Settings
 
         assert Settings.model_fields["account_sweep_reclaim_cooldown_days"].default == 30
+
+
+# ── Per-rep manager routing (User.reports_to_id) ──────────────────────────────
+
+
+class TestPerRepManagerRouting:
+    """_sweep_notification_recipients targets the rep's specific manager when set, and
+    falls back to every active MANAGER/ADMIN when unset (all deduped, rep always
+    first)."""
+
+    def test_specific_manager_only_when_set(self, db_session: Session, monkeypatch) -> None:
+        """reports_to_id set + active => ONLY that manager (not the other
+        supervisors)."""
+        from app.services import prospect_reclamation as pr
+
+        monkeypatch.setattr(pr.settings, "account_sweep_manager_email", "")
+        specific = _user(db_session, email="specific-mgr@trio.com", role="manager")
+        _user(db_session, email="other-mgr@trio.com", role="manager")
+        _user(db_session, email="some-admin@trio.com", role="admin")
+        owner = _user(db_session, email="rep-routed@trio.com")
+        owner.reports_to_id = specific.id
+        db_session.commit()
+
+        recips = {r.lower() for r in pr._sweep_notification_recipients(owner, db_session)}
+        assert "rep-routed@trio.com" in recips  # the rep is always notified
+        assert "specific-mgr@trio.com" in recips  # their designated manager
+        assert "other-mgr@trio.com" not in recips  # other supervisors are NOT fanned out
+        assert "some-admin@trio.com" not in recips
+
+    def test_all_managers_when_unset(self, db_session: Session, monkeypatch) -> None:
+        """No manager set => fall back to every active MANAGER/ADMIN (unchanged)."""
+        from app.services import prospect_reclamation as pr
+
+        monkeypatch.setattr(pr.settings, "account_sweep_manager_email", "")
+        _user(db_session, email="mgr1@trio.com", role="manager")
+        _user(db_session, email="mgr2@trio.com", role="admin")
+        _user(db_session, email="ghost@trio.com", role="manager", is_active=False)
+        owner = _user(db_session, email="rep-unrouted@trio.com")  # reports_to_id is None
+        db_session.commit()
+
+        recips = {r.lower() for r in pr._sweep_notification_recipients(owner, db_session)}
+        assert "rep-unrouted@trio.com" in recips
+        assert "mgr1@trio.com" in recips
+        assert "mgr2@trio.com" in recips
+        assert "ghost@trio.com" not in recips  # inactive supervisors never alerted
+
+    def test_inactive_specific_manager_falls_back_to_all(self, db_session: Session, monkeypatch) -> None:
+        """reports_to_id set but that manager is inactive => all-managers fallback."""
+        from app.services import prospect_reclamation as pr
+
+        monkeypatch.setattr(pr.settings, "account_sweep_manager_email", "")
+        dead_mgr = _user(db_session, email="dead-mgr@trio.com", role="manager", is_active=False)
+        _user(db_session, email="live-mgr@trio.com", role="manager")
+        owner = _user(db_session, email="rep-dead-mgr@trio.com")
+        owner.reports_to_id = dead_mgr.id
+        db_session.commit()
+
+        recips = {r.lower() for r in pr._sweep_notification_recipients(owner, db_session)}
+        assert "rep-dead-mgr@trio.com" in recips
+        assert "dead-mgr@trio.com" not in recips  # inactive designated manager skipped
+        assert "live-mgr@trio.com" in recips  # fallback fan-out preserved
+
+    def test_configured_manager_email_always_included(self, db_session: Session, monkeypatch) -> None:
+        """The configured account_sweep_manager_email is added regardless of routing."""
+        from app.services import prospect_reclamation as pr
+
+        monkeypatch.setattr(pr.settings, "account_sweep_manager_email", "config@trio.com")
+        specific = _user(db_session, email="mgr-set@trio.com", role="manager")
+        owner = _user(db_session, email="rep-cfg@trio.com")
+        owner.reports_to_id = specific.id
+        db_session.commit()
+
+        recips = {r.lower() for r in pr._sweep_notification_recipients(owner, db_session)}
+        assert "config@trio.com" in recips
+        assert "mgr-set@trio.com" in recips

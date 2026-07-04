@@ -5,6 +5,7 @@ Routes (all admin-only via Depends(require_admin); the agent service account is
 blocked by require_admin and additionally excluded/uneditable here):
 - POST /api/admin/users/invite                    — create a new interactive user
 - POST /api/admin/users/{user_id}/role            — change a user's role
+- POST /api/admin/users/{user_id}/manager         — set/clear a user's manager (reports_to)
 - POST /api/admin/users/{user_id}/active          — activate / deactivate a user
 - GET  /api/admin/users/{user_id}/access-panel    — render the per-user Access editor
 - POST /api/admin/users/{user_id}/access          — grant/revoke/reset one access key
@@ -145,11 +146,13 @@ def users_context(db: Session) -> dict:
     """Build {rows, roles, active_admin_count} for the Users settings partial.
 
     rows: every real user (excluding the agent service account), ordered by
-    name/email, each as {user, status, last_login_at, can_approve_buy_plans,
-    can_approve_prepayments, prepayment_approval_limit, can_approve_qp_sales,
-    can_approve_qp_purchasing, can_approve_purchase_orders,
-    purchase_order_approval_limit}. Shared by the GET tab
-    (htmx_views.settings_users_tab) and the mutation POSTs below.
+    name/email, each as {user, status, last_login_at, reports_to_id,
+    can_approve_buy_plans, can_approve_prepayments, prepayment_approval_limit,
+    can_approve_qp_sales, can_approve_qp_purchasing, can_approve_purchase_orders,
+    purchase_order_approval_limit}. Also returns manager_options — the active
+    MANAGER/ADMIN users assignable as a rep's manager (the per-row Manager <select>
+    excludes self). Shared by the GET tab (htmx_views.settings_users_tab) and the
+    mutation POSTs below.
     """
     users = db.query(User).filter(User.email != _AGENT_EMAIL).order_by(User.name.is_(None), User.name, User.email).all()
     rows = [
@@ -157,6 +160,7 @@ def users_context(db: Session) -> dict:
             "user": u,
             "status": _user_status(u),
             "last_login_at": u.last_login_at,
+            "reports_to_id": u.reports_to_id,
             "can_approve_buy_plans": u.can_approve_buy_plans,
             "can_approve_prepayments": u.can_approve_prepayments,
             "prepayment_approval_limit": u.prepayment_approval_limit,
@@ -167,7 +171,13 @@ def users_context(db: Session) -> dict:
         }
         for u in users
     ]
-    return {"rows": rows, "roles": _ASSIGNABLE_ROLES, "active_admin_count": _active_admin_count(db)}
+    manager_options = [u for u in users if u.is_active and u.role in (UserRole.MANAGER, UserRole.ADMIN)]
+    return {
+        "rows": rows,
+        "roles": _ASSIGNABLE_ROLES,
+        "manager_options": manager_options,
+        "active_admin_count": _active_admin_count(db),
+    }
 
 
 def _render(db: Session, request: Request, *, error: str | None = None, status_code: int = 200):
@@ -275,6 +285,62 @@ async def change_user_role(
     )
     db.commit()
     logger.info("User {} role {} -> {} by {}", target.email, old_role, valid_role, admin.email)
+    return _render(db, request)
+
+
+@router.post("/api/admin/users/{user_id}/manager", response_class=HTMLResponse)
+async def set_user_manager(
+    request: Request,
+    user_id: int,
+    reports_to_id: str = Form(""),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Set or clear a user's manager (User.reports_to_id); returns the refreshed Users
+    partial.
+
+    reports_to_id="" (or "none") clears the manager. Otherwise it must be the id of an
+    active MANAGER/ADMIN user other than the target itself (and never the agent service
+    account). The manager routes account-park alerts to that specific supervisor;
+    clearing it restores the all-managers fallback. Admin-only (require_admin); each
+    change writes a MANAGER_CHANGE audit row. A no-op (state unchanged) re-renders
+    without auditing, mirroring change_user_role.
+    """
+    target = _editable_target(db, user_id)
+
+    raw = (reports_to_id or "").strip().lower()
+    if raw in {"", "none"}:
+        new_manager_id: int | None = None
+    else:
+        try:
+            new_manager_id = int(reports_to_id)
+        except ValueError:
+            return _render(db, request, error="Choose a valid manager.", status_code=400)
+        if new_manager_id == target.id:
+            return _render(db, request, error="A user can't be their own manager.", status_code=400)
+        manager = db.get(User, new_manager_id)
+        if (
+            manager is None
+            or manager.email == _AGENT_EMAIL
+            or not manager.is_active
+            or manager.role not in (UserRole.MANAGER, UserRole.ADMIN)
+        ):
+            return _render(db, request, error="Manager must be an active manager or admin.", status_code=400)
+
+    old_manager_id = target.reports_to_id
+    if old_manager_id == new_manager_id:
+        return _render(db, request)  # no-op, nothing to audit
+
+    target.reports_to_id = new_manager_id
+    record_user_audit(
+        db,
+        actor_id=admin.id,
+        target_user_id=target.id,
+        action=UserAuditAction.MANAGER_CHANGE,
+        detail={"from": old_manager_id, "to": new_manager_id},
+    )
+    db.commit()
+    logger.info("User {} manager {} -> {} by {}", target.email, old_manager_id, new_manager_id, admin.email)
     return _render(db, request)
 
 

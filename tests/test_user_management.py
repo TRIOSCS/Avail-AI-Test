@@ -207,6 +207,89 @@ class TestChangeRole:
         assert admin_user.role == UserRole.ADMIN
 
 
+# ── Set manager (reports_to) ─────────────────────────────────────────
+
+
+class TestSetManager:
+    def test_admin_can_set_manager(self, admin_client, db_session, test_user):
+        mgr = _make_user(db_session, email="boss@trioscs.com", role="manager")
+        r = admin_client.post(f"/api/admin/users/{test_user.id}/manager", data={"reports_to_id": str(mgr.id)})
+        assert r.status_code == 200
+        db_session.refresh(test_user)
+        assert test_user.reports_to_id == mgr.id
+        rows = _audit_rows(db_session, UserAuditAction.MANAGER_CHANGE)
+        assert len(rows) == 1
+        assert rows[0].detail["from"] is None
+        assert rows[0].detail["to"] == mgr.id
+
+    def test_admin_can_set_admin_as_manager(self, admin_client, db_session, test_user, admin_user):
+        r = admin_client.post(f"/api/admin/users/{test_user.id}/manager", data={"reports_to_id": str(admin_user.id)})
+        assert r.status_code == 200
+        db_session.refresh(test_user)
+        assert test_user.reports_to_id == admin_user.id
+
+    def test_admin_can_clear_manager(self, admin_client, db_session, test_user):
+        mgr = _make_user(db_session, email="boss2@trioscs.com", role="manager")
+        test_user.reports_to_id = mgr.id
+        db_session.commit()
+        r = admin_client.post(f"/api/admin/users/{test_user.id}/manager", data={"reports_to_id": ""})
+        assert r.status_code == 200
+        db_session.refresh(test_user)
+        assert test_user.reports_to_id is None
+        rows = _audit_rows(db_session, UserAuditAction.MANAGER_CHANGE)
+        assert rows[-1].detail["from"] == mgr.id
+        assert rows[-1].detail["to"] is None
+
+    def test_rejects_self_as_manager(self, admin_client, db_session, test_user):
+        r = admin_client.post(f"/api/admin/users/{test_user.id}/manager", data={"reports_to_id": str(test_user.id)})
+        assert r.status_code == 400
+        db_session.refresh(test_user)
+        assert test_user.reports_to_id is None
+
+    def test_rejects_non_supervisor_manager(self, admin_client, db_session, test_user):
+        buyer = _make_user(db_session, email="plain-buyer@trioscs.com", role="buyer")
+        r = admin_client.post(f"/api/admin/users/{test_user.id}/manager", data={"reports_to_id": str(buyer.id)})
+        assert r.status_code == 400
+        db_session.refresh(test_user)
+        assert test_user.reports_to_id is None
+
+    def test_rejects_inactive_manager(self, admin_client, db_session, test_user):
+        dead = _make_user(db_session, email="dead-boss@trioscs.com", role="manager", is_active=False)
+        r = admin_client.post(f"/api/admin/users/{test_user.id}/manager", data={"reports_to_id": str(dead.id)})
+        assert r.status_code == 400
+        db_session.refresh(test_user)
+        assert test_user.reports_to_id is None
+
+    def test_no_op_when_unchanged_does_not_audit(self, admin_client, db_session, test_user):
+        mgr = _make_user(db_session, email="boss3@trioscs.com", role="manager")
+        test_user.reports_to_id = mgr.id
+        db_session.commit()
+        r = admin_client.post(f"/api/admin/users/{test_user.id}/manager", data={"reports_to_id": str(mgr.id)})
+        assert r.status_code == 200
+        assert _audit_rows(db_session, UserAuditAction.MANAGER_CHANGE) == []
+
+    def test_manager_404_for_missing_user(self, admin_client):
+        r = admin_client.post("/api/admin/users/999999/manager", data={"reports_to_id": ""})
+        assert r.status_code == 404
+
+    def test_manager_options_and_row_reports_to_in_context(self, db_session, admin_user, test_user):
+        from app.routers.admin.users import users_context
+
+        mgr = _make_user(db_session, email="boss4@trioscs.com", role="manager")
+        _make_user(db_session, email="inactive-boss@trioscs.com", role="manager", is_active=False)
+        test_user.reports_to_id = mgr.id
+        db_session.commit()
+
+        ctx = users_context(db_session)
+        opt_emails = {u.email for u in ctx["manager_options"]}
+        assert mgr.email in opt_emails  # active manager offered
+        assert admin_user.email in opt_emails  # active admin offered
+        assert "inactive-boss@trioscs.com" not in opt_emails  # inactive excluded
+        assert test_user.email not in opt_emails  # a plain buyer is not a manager option
+        row = next(r for r in ctx["rows"] if r["user"].id == test_user.id)
+        assert row["reports_to_id"] == mgr.id
+
+
 # ── Activate / deactivate ────────────────────────────────────────────
 
 
@@ -279,6 +362,9 @@ class TestAdminOnly:
                 == 403
             )
             assert client.post(f"/api/admin/users/{test_user.id}/role", data={"role": "manager"}).status_code == 403
+            assert (
+                client.post(f"/api/admin/users/{test_user.id}/manager", data={"reports_to_id": ""}).status_code == 403
+            )
             assert (
                 client.post(f"/api/admin/users/{test_user.id}/active", data={"is_active": "false"}).status_code == 403
             )

@@ -40,6 +40,16 @@ class User(Base):
     access_overrides = Column(JSON, default=dict)
     invited_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
+    # Per-rep manager / supervisor. When set, account-park alerts (and future manager-
+    # routed notifications) target THIS user's specific manager instead of fanning out to
+    # every MANAGER/ADMIN; when NULL the all-managers fallback is preserved. Self-
+    # referential FK to users.id with ondelete=SET NULL (a manager's deletion detaches
+    # their reports, never cascades). Distinct from invited_by_id (the other users.id
+    # self-FK), so the `manager` relationship below pins foreign_keys explicitly. Set via
+    # the admin Users tab (app/routers/admin/users.py); read by
+    # services.prospect_reclamation._sweep_notification_recipients.
+    reports_to_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
     # Mailbox settings (from Graph /me/mailboxSettings). NOTE: `timezone` holds the Graph
     # mailbox zone (Windows format, e.g. "Pacific Standard Time") used for RFQ send-window
     # scheduling — it is NOT a valid IANA name. For rendering timestamps in the viewer's
@@ -100,6 +110,10 @@ class User(Base):
     requisitions = relationship("Requisition", back_populates="creator", foreign_keys="[Requisition.created_by]")
     contacts = relationship("Contact", back_populates="user")
     strategic_vendors = relationship("StrategicVendor", back_populates="user")
+
+    # Self-referential manager link (uses reports_to_id, NOT invited_by_id). remote_side
+    # marks the parent (manager) row; foreign_keys disambiguates the two users.id self-FKs.
+    manager = relationship("User", remote_side=[id], foreign_keys=[reports_to_id])
 
     @validates("email")
     def _validate_email(self, _key, value):
