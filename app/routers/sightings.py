@@ -12,6 +12,8 @@ Depends on: models (Requirement, Requisition, Sighting, VendorSightingSummary,
 """
 
 import asyncio
+import csv
+import io
 import json
 import re
 import time
@@ -22,7 +24,7 @@ from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from loguru import logger
 from pydantic import ValidationError
 from sqlalchemy import and_, or_
@@ -357,20 +359,22 @@ async def sightings_workspace(
     return template_response("htmx/partials/sightings/list.html", ctx)
 
 
-@router.get("/v2/partials/sightings", response_class=HTMLResponse)
-async def sightings_list(
-    request: Request,
-    db: Session = Depends(get_db),
-    user: User = Depends(require_user),
-    filters: SightingsListParams = Depends(),
-):
-    """Return the sightings table partial with filters and pagination."""
+def build_board_requirement_query(db: Session, user: User, filters: SightingsListParams):
+    """Build the filtered Requirement query shared by the sightings board list and CSV
+    export.
+
+    Applies the identical active-board scoping (open requisitions, non-terminal sourcing
+    status) plus EVERY board filter — status, urgent, stale, sales_person, assigned,
+    search, manufacturer — and the restricted-role ownership boundary. It adds NO
+    ordering, pagination, or eager-load options, so each caller layers those on. This is
+    the single source of truth for "what the board matches" so the export never diverges
+    from the list.
+    """
     query = (
         db.query(Requirement)
         .join(Requisition, Requirement.requisition_id == Requisition.id)
         .filter(Requisition.status.notin_(_EXCLUDED_REQ_STATUSES))
         .filter(_active_sourcing_status_clause())
-        .options(joinedload(Requirement.requisition).joinedload(Requisition.creator))
     )
 
     # Ownership boundary: restricted roles (SALES/TRADER) see only their own requisitions'
@@ -379,9 +383,6 @@ async def sightings_list(
     if user.role in RESTRICTED_ROLES:
         query = query.filter(Requisition.created_by == user.id)
 
-    # Thresholds shared by the dashboard-strip quick filters below AND the counter/
-    # heatmap computations further down — compute once so a filtered list matches its
-    # counter exactly. UTC-aware to line up with UTCDateTime columns.
     stale_threshold = datetime.now(timezone.utc) - timedelta(days=settings.sighting_stale_days)
     deadline_48h = date.today() + timedelta(days=2)
 
@@ -416,6 +417,27 @@ async def sightings_list(
     if filters.manufacturer:
         safe_mfr = escape_like(filters.manufacturer)
         query = query.filter(Requirement.manufacturer.ilike(f"%{safe_mfr}%", escape="\\"))
+    return query
+
+
+@router.get("/v2/partials/sightings", response_class=HTMLResponse)
+async def sightings_list(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+    filters: SightingsListParams = Depends(),
+):
+    """Return the sightings table partial with filters and pagination."""
+    # Board filters live in the shared builder so the CSV export applies the EXACT same
+    # predicates — the download can never drift from what the board shows.
+    query = build_board_requirement_query(db, user, filters).options(
+        joinedload(Requirement.requisition).joinedload(Requisition.creator)
+    )
+
+    # Thresholds reused below by the dashboard-strip counters + heatmap (the builder applies
+    # its own copies to the query). UTC-aware to line up with UTCDateTime columns.
+    stale_threshold = datetime.now(timezone.utc) - timedelta(days=settings.sighting_stale_days)
+    deadline_48h = date.today() + timedelta(days=2)
 
     total = query.count()
 
@@ -614,6 +636,120 @@ async def sightings_list(
         "manufacturer": filters.manufacturer,
     }
     return template_response("htmx/partials/sightings/table.html", ctx)
+
+
+# CSV export column order — the REAL electronic-component sighting fields (vendor stock of a
+# part), not the generic species/location columns. Header row written first, then one row per
+# matching sighting.
+_EXPORT_COLUMNS: Final = [
+    "Requirement ID",
+    "Customer",
+    "Requirement MPN",
+    "Sighting MPN",
+    "Manufacturer",
+    "Vendor",
+    "Source",
+    "Qty Available",
+    "Unit Price",
+    "Currency",
+    "Condition",
+    "MOQ",
+    "Lead Time (Days)",
+    "Score",
+    "Evidence Tier",
+    "Seen Date",
+]
+
+_FORMULA_PREFIXES: Final = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _safe_cell(value: object) -> str:
+    """Stringify a CSV cell, defusing spreadsheet formula injection.
+
+    ``None`` → empty string; a leading formula char (=, +, -, @, tab, CR) gets a single-quote
+    prefix so Excel/Sheets treat the cell as text (matches the CRM export guard).
+    """
+    s = "" if value is None else str(value)
+    return "'" + s if s[:1] in _FORMULA_PREFIXES else s
+
+
+def _fmt_seen_date(dt: datetime | None) -> str:
+    """Readable minute-precision timestamp for CSV (empty string when missing)."""
+    return dt.strftime("%Y-%m-%d %H:%M") if dt else ""
+
+
+def _sighting_export_rows(db: Session, user: User, filters: SightingsListParams):
+    """Stream CSV text: a header row, then one row per Sighting on a board-matching
+    requirement.
+
+    Reuses build_board_requirement_query so the exported set is exactly the board's filtered
+    requirements expanded to their underlying vendor sightings — with NO pagination. Writes
+    through a reused StringIO buffer so memory stays flat regardless of row count.
+    """
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+
+    def _flush() -> str:
+        out = buf.getvalue()
+        buf.seek(0)
+        buf.truncate(0)
+        return out
+
+    writer.writerow(_EXPORT_COLUMNS)
+    yield _flush()
+
+    matching_req_ids = build_board_requirement_query(db, user, filters).with_entities(Requirement.id).subquery()
+    rows = (
+        db.query(Sighting)
+        .filter(Sighting.requirement_id.in_(matching_req_ids.select()))
+        .options(joinedload(Sighting.requirement).joinedload(Requirement.requisition))
+        .order_by(Sighting.requirement_id, Sighting.score.desc().nullslast())
+        .yield_per(500)
+    )
+    for s in rows:
+        req = s.requirement
+        requisition = req.requisition if req else None
+        writer.writerow(
+            _safe_cell(c)
+            for c in (
+                s.requirement_id,
+                requisition.customer_name if requisition else None,
+                req.primary_mpn if req else None,
+                s.mpn_matched,
+                s.manufacturer,
+                s.vendor_name,
+                s.source_type,
+                s.qty_available,
+                s.unit_price,
+                s.currency,
+                s.condition,
+                s.moq,
+                s.lead_time_days,
+                s.score,
+                s.evidence_tier,
+                _fmt_seen_date(s.source_searched_at or s.created_at),
+            )
+        )
+        yield _flush()
+
+
+@router.get("/v2/sightings/export")
+async def sightings_export(
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+    filters: SightingsListParams = Depends(),
+):
+    """Stream every board-matching Sighting as a CSV download (attachment, no
+    pagination).
+
+    Same auth (require_user) and same filters as the board list route — the export mirrors
+    the board's active view (status/urgent/stale/search/manufacturer/assignment/ownership).
+    """
+    return StreamingResponse(
+        _sighting_export_rows(db, user, filters),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="sightings_export.csv"'},
+    )
 
 
 @router.get("/v2/partials/sightings/{requirement_id}/detail", response_class=HTMLResponse)

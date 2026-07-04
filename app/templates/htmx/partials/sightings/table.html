@@ -100,6 +100,18 @@
           title="Clear search, filters &amp; grouping, expand all groups, and clear selection">
     Clean &amp; reset
   </button>
+  {# Export CSV — a REAL browser download, not an htmx request: hx-boost="false" opts this
+     anchor out of the app's global nav-boost so it does a plain GET that streams the file as
+     an attachment (never swapping into #main-content). :href binds the LIVE filter state so
+     the CSV mirrors exactly what the buyer has filtered to; the static href is the pre-Alpine
+     fallback. No literal double-quote inside the :href expression (Alpine quoting rule). #}
+  <a hx-boost="false"
+     href="/v2/sightings/export"
+     :href="'/v2/sightings/export?' + new URLSearchParams({status: sStatus, q: sQ, manufacturer: sManufacturer, group_by: sGroupBy}).toString()"
+     class="btn btn-sm btn-secondary whitespace-nowrap"
+     title="Download all matching sightings as a CSV file">
+    Export CSV
+  </a>
 </div>
 {# Caption when grouped by manufacturer to guide buyer toward cross-req basket assembly #}
 {% if group_by == 'manufacturer' %}
