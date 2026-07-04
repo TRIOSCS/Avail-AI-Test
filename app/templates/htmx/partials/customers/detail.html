@@ -119,43 +119,57 @@
               <span class="font-medium text-gray-700">{{ company.child_companies|length }} child account{{ 's' if company.child_companies|length != 1 else '' }}</span>
             {% endif %}
           </div>
+          {# Secondary meta line — receded context (Owner / Helpers / Terms / cadence /
+             counts). Demoted out of the old dot-run so the decision figures own the header;
+             these are context, not headline. #}
+          <div class="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 mt-0.5 text-secondary">
+            <span>Owner:
+              {% if company.account_owner %}<span class="font-medium text-gray-700">{{ company.account_owner.name }}</span>{% else %}<span class="text-gray-400">Unassigned</span>{% endif %}
+            </span>
+            {# Phase 3: Collaborators chip list (helper access; add/remove only for manager/owner) #}
+            {% if collaborators or can_manage_team %}
+            <span class="text-gray-300">·</span>
+            <span class="inline-flex items-center gap-1">Helpers:
+              {% include 'htmx/partials/customers/_collaborators.html' %}
+            </span>
+            {% endif %}
+            <span class="text-gray-300">·</span>
+            <span>Terms:
+              {% with obj=company, field='credit_terms', entity='company',
+                      meta={'label': 'Credit Terms', 'kind': 'text'},
+                      edit_url='/v2/partials/customers/' ~ company.id ~ '/field/edit/credit_terms' %}
+                {% include 'htmx/partials/customers/_field_display.html' %}
+              {% endwith %}
+            </span>
+            <span class="text-gray-300">·</span>
+            <span class="inline-flex items-center gap-1">
+              <span class="w-2 h-2 rounded-full {{ cadence_dot.get(cadence_state, 'bg-gray-300') }}"
+                    role="img" aria-label="{{ cadence_label.get(cadence_state, cadence_state|title) }}"></span>
+              <span class="font-medium text-gray-700">{{ cadence_label.get(cadence_state, cadence_state|title) }}</span>
+            </span>
+            <span class="text-gray-300">·</span>
+            <span class="font-medium text-gray-700">{{ contact_count }} contact{{ 's' if contact_count != 1 else '' }} · {{ site_count }} site{{ 's' if site_count != 1 else '' }}</span>
+          </div>
         </div>
       </div>
 
-      {# MIDDLE: commercial + cadence chip strip (·-separated, wraps) #}
-      <div class="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-gray-600 min-w-0">
-        <span>Owner:
-          {% if company.account_owner %}<span class="font-medium text-gray-700">{{ company.account_owner.name }}</span>{% else %}<span class="text-gray-400">Unassigned</span>{% endif %}
-        </span>
-        {# Phase 3: Collaborators chip list (helper access; add/remove only for manager/owner) #}
-        {% if collaborators or can_manage_team %}
-        <span class="text-gray-300">·</span>
-        <span class="inline-flex items-center gap-1 text-gray-600">Helpers:
-          {% include 'htmx/partials/customers/_collaborators.html' %}
-        </span>
-        {% endif %}
-        <span class="text-gray-300">·</span>
-        <span>Terms:
-          {% with obj=company, field='credit_terms', entity='company',
-                  meta={'label': 'Credit Terms', 'kind': 'text'},
-                  edit_url='/v2/partials/customers/' ~ company.id ~ '/field/edit/credit_terms' %}
-            {% include 'htmx/partials/customers/_field_display.html' %}
-          {% endwith %}
-        </span>
-        <span class="text-gray-300">·</span>
-        <span class="inline-flex items-center gap-1">
-          <span class="w-2 h-2 rounded-full {{ cadence_dot.get(cadence_state, 'bg-gray-300') }}"
-                role="img" aria-label="{{ cadence_label.get(cadence_state, cadence_state|title) }}"></span>
-          <span class="font-medium text-gray-700">{{ cadence_label.get(cadence_state, cadence_state|title) }}</span>
-        </span>
-        <span class="text-gray-300">·</span>
-        <span>Win <span class="figure-accent font-semibold">{% if win_rate is not none %}{{ win_rate }}%{% else %}—{% endif %}</span></span>
-        <span class="text-gray-300">·</span>
-        <span>Rev 90d <span class="figure-accent font-semibold">{% if revenue_90d %}${{ "{:,.0f}".format(revenue_90d) }}{% else %}—{% endif %}</span></span>
-        <span class="text-gray-300">·</span>
-        <span>Last req <span class="font-semibold text-gray-900">{% if last_req_date %}{{ last_req_date[:10] }}{% else %}—{% endif %}</span></span>
-        <span class="text-gray-300">·</span>
-        <span class="font-medium text-gray-700">{{ contact_count }} contact{{ 's' if contact_count != 1 else '' }} · {{ site_count }} site{{ 's' if site_count != 1 else '' }}</span>
+      {# MIDDLE: decision stat cluster — Win / Rev 90d / Last req as label/value pairs.
+         One numeric language (.h4 label over .figure-accent value, tabular-nums built in)
+         so the figures that drive a call read first; a single left divider replaces the
+         old dot-run. #}
+      <div class="flex items-center gap-x-5 border-l border-line-subtle pl-4 min-w-0">
+        <div class="flex flex-col leading-tight">
+          <span class="h4">Win</span>
+          <span class="figure-accent text-sm font-semibold">{% if win_rate is not none %}{{ win_rate }}%{% else %}—{% endif %}</span>
+        </div>
+        <div class="flex flex-col leading-tight">
+          <span class="h4">Rev 90d</span>
+          <span class="figure-accent text-sm font-semibold">{% if revenue_90d %}${{ "{:,.0f}".format(revenue_90d) }}{% else %}—{% endif %}</span>
+        </div>
+        <div class="flex flex-col leading-tight">
+          <span class="h4">Last req</span>
+          <span class="figure-accent text-sm font-semibold">{% if last_req_date %}{{ last_req_date[:10] }}{% else %}—{% endif %}</span>
+        </div>
       </div>
 
       {# RIGHT: type badge + enrich + Add Contact + kebab #}
