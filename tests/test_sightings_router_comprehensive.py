@@ -335,13 +335,14 @@ class TestSightingsDetailBranches:
 
 class TestSightingsRefreshBranches:
     def test_refresh_with_search_failure(self, client, db_session):
-        """Refresh falls back gracefully when search_requirement fails."""
+        """Refresh returns the immediate "Searching…" panel; the (async) search's
+        failure can no longer break the request."""
         _, r, _ = _seed(db_session)
         with patch("app.search_service.search_requirement", new_callable=AsyncMock) as mock_search:
             mock_search.side_effect = Exception("Search API down")
             resp = client.post(f"/v2/partials/sightings/{r.id}/refresh")
             assert resp.status_code == 200
-            assert "HX-Trigger" in resp.headers
+            assert "Searching suppliers" in resp.text
 
     def test_refresh_publishes_sse(self, client, db_session):
         """Refresh publishes SSE event."""
@@ -379,7 +380,7 @@ class TestSightingsRefreshBranches:
             assert resp.status_code == 200
             # Toast fires via HX-Trigger:showToast (empty body for the non-table caller).
             trigger = resp.headers.get("HX-Trigger", "")
-            assert "1 failed" in trigger or "failed" in trigger.lower()
+            assert "Searching 2 requirements" in trigger
 
 
 # ═══════════════════════════════════════════════════════════════════════════

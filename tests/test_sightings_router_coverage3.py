@@ -96,7 +96,7 @@ def two_items(db_session: Session, test_user: User):
 
 class TestBatchRefreshCoverage:
     def test_batch_refresh_success_path(self, client: TestClient, req_item):
-        """Lines 651-666, 679-693: success count > 0, level='success'."""
+        """A valid requirement is scheduled and the immediate toast acknowledges it."""
         _, item = req_item
         with patch("app.search_service.search_requirement", new=AsyncMock()):
             resp = client.post(
@@ -105,10 +105,10 @@ class TestBatchRefreshCoverage:
                 headers={"HX-Request": "true"},
             )
         assert resp.status_code == 200
-        assert "1/1" in resp.headers.get("HX-Trigger", "")
+        assert "Searching 1 requirement" in resp.headers.get("HX-Trigger", "")
 
-    def test_batch_refresh_id_not_found_increments_failed(self, client: TestClient):
-        """Lines 657-659: req_obj is None → failed += 1."""
+    def test_batch_refresh_id_not_found_is_dropped(self, client: TestClient):
+        """A non-existent requirement is dropped — nothing to search."""
         with patch("app.search_service.search_requirement", new=AsyncMock()):
             resp = client.post(
                 "/v2/partials/sightings/batch-refresh",
@@ -116,12 +116,12 @@ class TestBatchRefreshCoverage:
                 headers={"HX-Request": "true"},
             )
         assert resp.status_code == 200
-        assert "failed" in resp.headers.get("HX-Trigger", "").lower()
+        assert "no requirements to search" in resp.headers.get("HX-Trigger", "").lower()
 
     def test_batch_refresh_mixed_failed_and_skipped(self, client: TestClient, two_items, db_session: Session):
-        """Lines 683-688: failed > 0 → level='warning', skipped text appended."""
+        """Both requirements are scheduled (per-MPN cooldown is enforced in the
+        background search now, not pre-filtered here)."""
         _, items = two_items
-        # Rate-limit first item
         items[0].last_searched_at = datetime.now(timezone.utc) - timedelta(seconds=5)
         db_session.commit()
         with patch(
@@ -134,9 +134,7 @@ class TestBatchRefreshCoverage:
                 headers={"HX-Request": "true"},
             )
         assert resp.status_code == 200
-        # Either failed or skipped text must appear in the HX-Trigger toast message.
-        trigger = resp.headers.get("HX-Trigger", "")
-        assert "failed" in trigger.lower() or "skipped" in trigger.lower()
+        assert "Searching 2 requirements" in resp.headers.get("HX-Trigger", "")
 
     def test_batch_refresh_too_many(self, client: TestClient):
         """Line 642-643: exceeds MAX_BATCH_SIZE."""
@@ -156,9 +154,9 @@ class TestBatchRefreshCoverage:
                 data={"requirement_ids": json.dumps({"key": "value"})},
                 headers={"HX-Request": "true"},
             )
-        # non-list parsed → requirement_ids = [] → 0 searched
+        # non-list parsed → requirement_ids = [] → nothing to search
         assert resp.status_code == 200
-        assert "0/0" in resp.headers.get("HX-Trigger", "")
+        assert "no requirements to search" in resp.headers.get("HX-Trigger", "").lower()
 
 
 # ── batch-assign ─────────────────────────────────────────────────────────────

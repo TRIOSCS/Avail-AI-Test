@@ -22,7 +22,7 @@ from decimal import Decimal
 from typing import Any, Final, Literal, NamedTuple, TypedDict
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from loguru import logger
@@ -85,6 +85,9 @@ from ..vendor_utils import normalize_vendor_name
 router = APIRouter(tags=["sightings"])
 
 MAX_BATCH_SIZE: Final[int] = 50
+# Cap on concurrent background search_requirement() fan-outs so a bulk refresh of up to
+# MAX_BATCH_SIZE requirements does not stampede the supplier APIs all at once.
+_SEARCH_FANOUT_LIMIT: Final[int] = 5
 # Requisitions in these statuses are excluded from sightings (no active sourcing).
 # WON/LOST/CANCELLED are terminal deals — the sightings board is for buyers to ACTIVELY
 # source OPEN work, so closed deals never appear.
@@ -428,6 +431,23 @@ async def sightings_list(
     filters: SightingsListParams = Depends(),
 ):
     """Return the sightings table partial with filters and pagination."""
+    return await _render_sightings_table(request, db, user, filters)
+
+
+async def _render_sightings_table(
+    request: Request,
+    db: Session,
+    user: User,
+    filters: SightingsListParams,
+    searching_req_ids: frozenset[int] | set[int] = frozenset(),
+) -> HTMLResponse:
+    """Build and render the sightings board table partial.
+
+    Shared by the GET list route and the POST batch-refresh handler. batch-refresh passes
+    ``searching_req_ids`` — the requirements whose background sourcing search it just
+    scheduled — so their Coverage cell renders an immediate "Searching…" badge while the
+    fan-out runs off the request thread.
+    """
     # Board filters live in the shared builder so the CSV export applies the EXACT same
     # predicates — the download can never drift from what the board shows.
     query = build_board_requirement_query(db, user, filters).options(
@@ -634,6 +654,7 @@ async def sightings_list(
         "link_map": link_map,
         "user": user,
         "manufacturer": filters.manufacturer,
+        "searching_req_ids": searching_req_ids,
     }
     return template_response("htmx/partials/sightings/table.html", ctx)
 
@@ -986,82 +1007,104 @@ async def sightings_detail(
     return resp
 
 
+async def _run_search_and_publish(
+    requirement_ids: list[int],
+    user_id: int,
+    source: str = "user",
+) -> None:
+    """Background job: run ``search_requirement`` for each requirement (bounded
+    concurrency) then publish a ``sighting-updated`` SSE per requirement.
+
+    Runs AFTER the HTTP response is sent (FastAPI ``BackgroundTasks``), so the POST that
+    scheduled it already returned an immediate "Searching…" state and the board never froze
+    on the multi-supplier + AI fan-out. When each search finishes, the SSE publish tells the
+    board's EventSource listener to pull the fresh detail panel in.
+
+    Uses its own DB session per requirement (the request session is closed once the response
+    is sent) and caps concurrency at ``_SEARCH_FANOUT_LIMIT`` so a bulk refresh of up to
+    ``MAX_BATCH_SIZE`` requirements does not stampede the supplier APIs. Publishes even when
+    the search fails or the requirement vanished, so the board always clears "Searching…".
+    """
+    from ..database import SessionLocal
+    from ..search_service import search_requirement
+
+    sem = asyncio.Semaphore(_SEARCH_FANOUT_LIMIT)
+
+    async def _one(rid: int) -> None:
+        async with sem:
+            db = SessionLocal()
+            try:
+                req = db.get(Requirement, rid)
+                if req is not None:
+                    await search_requirement(req, db)
+            except Exception:
+                logger.warning("Background search refresh failed for requirement {}", rid, exc_info=True)
+            finally:
+                db.close()
+        # Announce completion regardless of outcome. source="sse" is suppressed inside the
+        # helper (never reached — the SSE render path schedules no background job).
+        await _publish_if_user_source(source, user_id, rid)
+
+    await asyncio.gather(*(_one(rid) for rid in requirement_ids), return_exceptions=True)
+
+
 @router.post("/v2/partials/sightings/{requirement_id}/refresh", response_class=HTMLResponse)
 async def sightings_refresh(
     request: Request,
     requirement_id: int,
+    background_tasks: BackgroundTasks,
     source: Literal["user", "sse"] = Query(default="user"),
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
 ):
-    """Re-run sourcing pipeline for a requirement, gated by 48h per-MPN cooldown.
+    """Kick off a background sourcing refresh and immediately return a "Searching…"
+    panel.
 
-    Returns the rendered detail panel + HX-Trigger toast describing per-MPN result.
+    ``search_requirement`` (multi-supplier + AI web search) is slow, so a user click
+    schedules it as a FastAPI background job and the POST returns at once — the board never
+    freezes. When the search completes the job publishes a ``sighting-updated`` SSE; the
+    board's EventSource listener then POSTs ``/refresh?source=sse``, which re-renders the
+    fresh detail panel (the search already ran, so the sse path only renders — it schedules
+    nothing and publishes nothing, breaking the self-trigger loop per docs/htmx-conventions).
     """
-    from ..search_service import search_requirement
-
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
         raise HTTPException(status_code=404, detail="Requirement not found")
     require_requisition_access(db, requirement.requisition_id, user)
 
-    is_sse = source == "sse"
-    refresh_failed = False
-    mpn_results: dict[str, str] = {}
-    try:
-        result = await search_requirement(requirement, db)
-        mpn_results = result.get("mpn_results", {})
-    except Exception:
-        logger.warning("Search refresh failed for requirement {}", requirement_id, exc_info=True)
-        refresh_failed = True
+    if source == "sse":
+        # SSE-triggered render: the background search already committed via its own write
+        # session; drop the caller session cache and paint the fresh detail panel.
+        db.expire(requirement)
+        return await sightings_detail(request, requirement_id, db, user)
 
-    # Force a fresh read; search_requirement uses a separate write session.
-    db.expire(requirement)
-
-    await _publish_if_user_source(source, user.id, requirement_id)
-
-    response = await sightings_detail(request, requirement_id, db, user)
-
-    if not is_sse:
-        toast_msg = _build_mpn_toast(mpn_results, refresh_failed)
-        toast_type = (
-            "warning" if refresh_failed else ("info" if all(v == "cached" for v in mpn_results.values()) else "success")
-        )
-        if toast_msg:
-            response.headers["HX-Trigger"] = json.dumps({"showToast": {"message": toast_msg, "type": toast_type}})
-    return response
-
-
-def _build_mpn_toast(mpn_results: dict[str, str], refresh_failed: bool) -> str:
-    """Build the per-MPN toast message from search_requirement's result map."""
-    if refresh_failed:
-        return "Search refresh failed - showing cached results"
-    if not mpn_results:
-        return ""
-    searched = sum(1 for v in mpn_results.values() if v == "searched")
-    cached = sum(1 for v in mpn_results.values() if v == "cached")
-    if searched and cached:
-        return f"Searched {searched} MPN{'s' if searched != 1 else ''}, {cached} cached"
-    if searched:
-        return f"Searched {searched} MPN{'s' if searched != 1 else ''}"
-    return "All MPNs searched within 48h - showing cached"
+    # User click: run the slow search off the request thread, acknowledge immediately.
+    background_tasks.add_task(_run_search_and_publish, [requirement_id], user.id)
+    resp = template_response(
+        "htmx/partials/sightings/searching_panel.html",
+        {"request": request, "requirement": requirement},
+    )
+    resp.headers["X-Rendered-Req-Id"] = str(requirement_id)
+    return resp
 
 
 @router.post("/v2/partials/sightings/batch-refresh", response_class=HTMLResponse)
 async def sightings_batch_refresh(
     request: Request,
+    background_tasks: BackgroundTasks,
     source: Literal["user", "sse"] = Query(default="user"),
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
 ):
-    """Refresh sightings for multiple requirements.
+    """Schedule a background sourcing refresh for many requirements; return immediately.
 
-    Per-MPN 48h cooldown is enforced inside search_requirement
-    (MaterialCard.last_searched_at). source="sse" suppresses the OOB toast and
-    broker.publish to prevent self-trigger loops.
+    The selected requirements' searches run off the request thread (bounded concurrency, so
+    up to ``MAX_BATCH_SIZE`` reqs do not stampede the supplier APIs). Each completed search
+    publishes a ``sighting-updated`` SSE. The immediate response re-renders the board table
+    with the scheduled rows flagged "Searching…" so the click is acknowledged without waiting
+    for the fan-out. The per-MPN 48h cooldown is still enforced inside search_requirement.
+    ``source="sse"`` is inert (no schedule, no publish) to honour the self-trigger gate.
     """
-    from ..search_service import search_requirement
-
     form = await request.form()
     req_ids_raw = form.get("requirement_ids", "[]")
     try:
@@ -1074,64 +1117,33 @@ async def sightings_batch_refresh(
     if len(requirement_ids) > MAX_BATCH_SIZE:
         raise HTTPException(status_code=400, detail=f"Maximum {MAX_BATCH_SIZE} requirements per batch")
 
-    # Batch-fetch all requirements in one query
-    reqs_by_id = {}
+    # Resolve + access-check the requirements that exist. Missing IDs are simply dropped
+    # (nothing to search); caller order is preserved.
+    valid_ids: list[int] = []
     if requirement_ids:
-        reqs = db.query(Requirement).filter(Requirement.id.in_([int(rid) for rid in requirement_ids])).all()
+        int_ids = [int(rid) for rid in requirement_ids]
+        reqs = db.query(Requirement).filter(Requirement.id.in_(int_ids)).all()
+        reqs_by_id = {r.id: r for r in reqs}
         for r in reqs:
             require_requisition_access(db, r.requisition_id, user, label="Requirement")
-        reqs_by_id = {r.id: r for r in reqs}
+        valid_ids = [rid for rid in int_ids if rid in reqs_by_id]
 
-    success = 0
-    failed = 0
+    is_sse = source == "sse"
+    # Schedule the slow fan-out off the request thread. Skip on the SSE path so an
+    # SSE-triggered call can never re-publish and loop.
+    if valid_ids and not is_sse:
+        background_tasks.add_task(_run_search_and_publish, valid_ids, user.id, source)
 
-    # Build the list of requirements that exist. The 48h per-MPN cooldown
-    # is enforced inside search_requirement (MaterialCard.last_searched_at)
-    # so we no longer pre-filter by requirement-level last_searched_at.
-    to_search: list[tuple[int, Requirement]] = []
-    for rid in requirement_ids:
-        req_obj = reqs_by_id.get(int(rid))
-        if not req_obj:
-            failed += 1
-            continue
-        to_search.append((int(rid), req_obj))
-
-    # Fan out. search_requirement() uses its own write session for the
-    # sightings / material-card / last_searched_at writes (commit
-    # 55093bf1); the caller's db is still touched by _fetch_fresh for
-    # ApiSource stats, which tolerates occasional concurrent-session
-    # errors via rollback. Same concurrency model as the existing
-    # caller in routers/requisitions/requirements.py. return_exceptions
-    # ensures one failing search does not cancel the rest.
-    if to_search:
-        results = await asyncio.gather(
-            *(search_requirement(req_obj, db) for _, req_obj in to_search),
-            return_exceptions=True,
-        )
-        for (rid, _), outcome in zip(to_search, results):
-            if isinstance(outcome, Exception):
-                logger.warning("Batch refresh failed for requirement {}", rid, exc_info=outcome)
-                failed += 1
-            else:
-                success += 1
-
-    # Notify all connected clients that these requirements changed
-    for rid in requirement_ids:
-        await _publish_if_user_source(source, user.id, int(rid))
-
-    total = success + failed
-    msg = f"Searched {success}/{total} requirements."
-    if failed:
-        msg += f" {failed} failed."
-    level = "warning" if failed else "success"
-    if _toast_suppressed_for_sse(source):
+    if is_sse:
         return HTMLResponse("")
 
-    # Re-render the sightings table for the split-panel caller so refreshed coverage /
-    # status is visible immediately (the old code returned only an OOB toast whose
-    # #toast-trigger anchor does not exist, which both dropped the toast AND emptied the
-    # table). The requisition parts-tab caller posts hx-swap="none" and only needs the
-    # toast, which fires via the HX-Trigger bridge (htmx_app.js) regardless of swap mode.
+    searching_set = set(valid_ids)
+    n = len(searching_set)
+    msg = f"Searching {n} requirement{'s' if n != 1 else ''}…" if n else "No requirements to search."
+
+    # Re-render the sightings table for the split-panel caller so the scheduled rows show
+    # their "Searching…" badge immediately. The requisition parts-tab caller posts
+    # hx-swap="none" and only needs the toast, which fires via the HX-Trigger bridge.
     hx_target = request.headers.get("HX-Target", "")
     if hx_target == "sightings-table":
 
@@ -1139,19 +1151,16 @@ async def sightings_batch_refresh(
             val = form.get(key, "")
             return val if isinstance(val, str) else ""
 
-        # search_requirement() commits via a separate write session, so drop the caller
-        # session's identity-map cache before re-querying for fresh coverage/status.
-        db.expire_all()
         filters = SightingsListParams(
             status=_fs("status"),
             q=_fs("q"),
             group_by=_fs("group_by"),
             manufacturer=_fs("manufacturer"),
         )
-        resp: HTMLResponse = await sightings_list(request, db=db, user=user, filters=filters)
+        resp: HTMLResponse = await _render_sightings_table(request, db, user, filters, searching_req_ids=searching_set)
     else:
         resp = HTMLResponse("")
-    return _with_toast(resp, msg, level)
+    return _with_toast(resp, msg, "info")
 
 
 @router.post("/v2/partials/sightings/batch-assign", response_class=HTMLResponse)

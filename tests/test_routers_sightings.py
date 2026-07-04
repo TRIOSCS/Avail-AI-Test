@@ -1,11 +1,11 @@
 """test_routers_sightings.py — Tests for sightings refresh structural fix.
 
 Covers the click-to-refresh structural fix:
-- source="sse" suppresses broker.publish to prevent self-trigger loops
-- source="user" (default) publishes broker event and emits per-MPN toast
+- source="sse" is the SSE render path: no search scheduled, no broker.publish
+- source="user" (default) schedules the search as a background job and returns the
+  immediate "Searching…" panel; the background job publishes the sighting-updated SSE
 - X-Rendered-Req-Id header echoed on detail and refresh responses
-- Per-MPN cooldown (48h, MaterialCard-level) replaces the prior 5-min
-  per-requirement cooldown
+- Per-MPN cooldown (48h, MaterialCard-level) still enforced inside search_requirement
 
 Called by: pytest
 Depends on: app/routers/sightings.py, conftest.py fixtures
@@ -15,9 +15,9 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -144,13 +144,11 @@ class TestSightingsRefreshSourceValidation:
 
 
 class TestSightingsRefreshFailureToast:
-    """Refresh-failure toast must surface for user clicks but never for SSE."""
+    """The search now runs in the background, so a connector failure never surfaces a
+    synchronous toast on the immediate refresh response — for user clicks OR for SSE."""
 
     def test_sightings_refresh_sse_suppresses_failure_toast(self, client: TestClient, req_with_item: tuple):
-        """search_requirement raises + ?source=sse → 200, no HX-Trigger.
-
-        Background-fired SSE refreshes must not surface user-targeted warning toasts.
-        """
+        """?source=sse → 200, no failure toast (the SSE render path never searches)."""
         _, item = req_with_item
         boom = AsyncMock(side_effect=RuntimeError("connector down"))
         with patch("app.search_service.search_requirement", new=boom):
@@ -163,9 +161,12 @@ class TestSightingsRefreshFailureToast:
         assert resp.status_code == 200
         assert "HX-Trigger" not in resp.headers
 
-    def test_sightings_refresh_user_emits_failure_toast(self, client: TestClient, req_with_item: tuple):
-        """search_requirement raises + no source param → 200, HX-Trigger contains
-        'Search refresh failed'."""
+    def test_sightings_refresh_user_returns_searching_without_failure_toast(
+        self, client: TestClient, req_with_item: tuple
+    ):
+        """A user click returns the immediate "Searching…" panel; because the search is
+        scheduled in the background, a connector failure can no longer emit a
+        synchronous 'Search refresh failed' toast."""
         _, item = req_with_item
         boom = AsyncMock(side_effect=RuntimeError("connector down"))
         with patch("app.search_service.search_requirement", new=boom):
@@ -176,8 +177,8 @@ class TestSightingsRefreshFailureToast:
                     headers={"HX-Request": "true"},
                 )
         assert resp.status_code == 200
-        assert "HX-Trigger" in resp.headers
-        assert "Search refresh failed" in resp.headers["HX-Trigger"]
+        assert "Searching suppliers" in resp.text
+        assert "Search refresh failed" not in resp.headers.get("HX-Trigger", "")
 
 
 class TestSightingsClickPendingCounter:
@@ -249,28 +250,30 @@ class TestSightingsDetailDoesNotSearch:
         assert resp.headers.get("X-Rendered-Req-Id") == str(item.id)
         mock_search.assert_not_called()
 
-    def test_sightings_refresh_does_call_search_requirement(self, client: TestClient, req_with_item: tuple):
-        """POST /refresh DOES call search_requirement (contract counter-test to
-        /detail).
+    def test_sightings_refresh_schedules_background_search(
+        self, client: TestClient, req_with_item: tuple, test_user: User
+    ):
+        """POST /refresh SCHEDULES the search as a background job (contract counter-test
+        to /detail, which never searches).
 
-        Pins the asymmetry the frontend relies on: /detail is fast cached read,
-        /refresh runs the pipeline. Together they form the click-to-refresh
-        pattern in selectReq().
+        The search is not awaited inline; the immediate response is the "Searching…"
+        panel, and the SSE stream swaps results in later.
         """
         _, item = req_with_item
-        with patch(
-            "app.search_service.search_requirement",
-            new=AsyncMock(return_value={"sightings": [], "source_stats": [], "mpn_results": {}}),
-        ) as mock_search:
-            with patch("app.routers.sightings.broker") as mock_broker:
-                mock_broker.publish = AsyncMock()
-                resp = client.post(
-                    f"/v2/partials/sightings/{item.id}/refresh?source=user",
-                    headers={"HX-Request": "true"},
-                )
+        scheduled = MagicMock()
+        real_search = AsyncMock(return_value={"sightings": [], "source_stats": [], "mpn_results": {}})
+        with (
+            patch("app.routers.sightings._run_search_and_publish", new=scheduled),
+            patch("app.search_service.search_requirement", new=real_search),
+        ):
+            resp = client.post(
+                f"/v2/partials/sightings/{item.id}/refresh?source=user",
+                headers={"HX-Request": "true"},
+            )
         assert resp.status_code == 200
         assert resp.headers.get("X-Rendered-Req-Id") == str(item.id)
-        mock_search.assert_called_once()
+        scheduled.assert_called_once_with([item.id], test_user.id)
+        real_search.assert_not_called()
 
 
 class TestSightingsListTemplateSelectReqShape:
@@ -389,104 +392,11 @@ class TestCrossMpnSightingVisibility:
         assert "digikey" in resp.text.lower()
 
 
-class TestRefreshPerMpnToast:
-    """Per-MPN toast on /refresh describes how many MPNs were searched vs cached.
-
-    Replaces the prior 5-minute per-requirement cooldown toast. The 48h
-    per-MPN cooldown lives in `search_requirement` via
-    MaterialCard.last_searched_at; this endpoint just surfaces the result.
-    """
-
-    def test_toast_describes_searched_and_cached_mpns(
-        self, client: TestClient, db_session: Session, test_user: User, monkeypatch
-    ):
-        from app.config import settings
-        from app.models import MaterialCard, Requirement, Requisition
-        from app.utils.normalization import normalize_mpn_key
-
-        # Defensive pin: this test mocks _fetch_fresh to return ([], []) and
-        # asserts on the resulting toast. If the resolver flag default ever
-        # flips, the resolver block would call _fetch_fresh on an empty/no AVL
-        # and the counts in the toast could shift.
-        monkeypatch.setattr(settings, "spec_resolver_enabled", False)
-        now = datetime.now(timezone.utc)
-        r = Requisition(
-            name="R",
-            customer_name="C",
-            status="open",
-            created_by=test_user.id,
-            created_at=now,
-        )
-        db_session.add(r)
-        db_session.flush()
-        item = Requirement(
-            requisition_id=r.id,
-            primary_mpn="ALPHA",
-            substitutes=[{"mpn": "BETA"}],
-            created_at=now,
-        )
-        db_session.add(item)
-        # ALPHA cached (12h ago), BETA stale (no card → searched)
-        db_session.add(
-            MaterialCard(
-                display_mpn="ALPHA",
-                normalized_mpn=normalize_mpn_key("ALPHA"),
-                last_searched_at=now - timedelta(hours=12),
-            )
-        )
-        db_session.commit()
-
-        with (
-            patch("app.search_service._fetch_fresh", new=AsyncMock(return_value=([], []))),
-            patch("app.search_service.enqueue_for_ics_search"),
-            patch("app.search_service.enqueue_for_nc_search"),
-        ):
-            resp = client.post(f"/v2/partials/sightings/{item.id}/refresh")
-
-        assert resp.status_code == 200
-        # HX-Trigger header carries a showToast with both counts
-        hx = resp.headers.get("HX-Trigger", "")
-        assert '"showToast"' in hx
-        assert "1 cached" in hx
-        assert ("1 search" in hx) or ("Searched 1" in hx)
-
-    def test_all_cached_returns_no_search_toast(self, client: TestClient, db_session: Session, test_user: User):
-        from app.models import MaterialCard, Requirement, Requisition
-        from app.utils.normalization import normalize_mpn_key
-
-        now = datetime.now(timezone.utc)
-        r = Requisition(
-            name="R",
-            customer_name="C",
-            status="open",
-            created_by=test_user.id,
-            created_at=now,
-        )
-        db_session.add(r)
-        db_session.flush()
-        item = Requirement(
-            requisition_id=r.id,
-            primary_mpn="ONLY",
-            created_at=now,
-        )
-        db_session.add(item)
-        db_session.add(
-            MaterialCard(
-                display_mpn="ONLY",
-                normalized_mpn=normalize_mpn_key("ONLY"),
-                last_searched_at=now - timedelta(hours=1),
-            )
-        )
-        db_session.commit()
-
-        with patch("app.search_service._fetch_fresh", new=AsyncMock(return_value=([], []))) as fetch_mock:
-            resp = client.post(f"/v2/partials/sightings/{item.id}/refresh")
-
-        assert resp.status_code == 200
-        # _fetch_fresh NOT called because all MPNs cached
-        fetch_mock.assert_not_called()
-        hx = resp.headers.get("HX-Trigger", "")
-        assert ("All MPNs" in hx) or ("cached" in hx)
+# NOTE: the per-MPN "searched vs cached" toast (formerly TestRefreshPerMpnToast) was
+# removed when /refresh became non-blocking — the search now runs in a background job, so
+# the immediate response cannot know the per-MPN counts. The 48h per-MPN cooldown still
+# lives in search_requirement (MaterialCard.last_searched_at); the async contract is
+# covered by tests/test_sightings_refresh_async.py.
 
 
 class TestPreviewInlineEmailFix:

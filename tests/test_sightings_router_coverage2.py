@@ -88,9 +88,10 @@ class TestSightingsRefresh:
                 f"/v2/partials/sightings/{item.id}/refresh",
                 headers={"HX-Request": "true"},
             )
+        # Search runs in the background now: the immediate response is the "Searching…"
+        # panel and a failing search can no longer surface a synchronous warning toast.
         assert resp.status_code == 200
-        assert "HX-Trigger" in resp.headers
-        assert "warning" in resp.headers["HX-Trigger"]
+        assert "Searching suppliers" in resp.text
 
 
 # ── sightings_list filters ────────────────────────────────────────────────
@@ -375,7 +376,8 @@ class TestBatchRefreshAdditional:
                 headers={"HX-Request": "true"},
             )
         assert resp.status_code == 200
-        assert "failed" in resp.headers.get("HX-Trigger", "").lower()
+        # Search failure is async now; the immediate toast just acknowledges the click.
+        assert "Searching" in resp.headers.get("HX-Trigger", "")
 
     def test_batch_refresh_invalid_json(self, client: TestClient):
         resp = client.post(

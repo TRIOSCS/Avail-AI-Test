@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from fastapi import HTTPException
+from fastapi import BackgroundTasks, HTTPException
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 
@@ -64,7 +64,8 @@ def _make_requirement(db: Session, req: Requisition, mpn: str = "LM317T", status
 
 
 async def test_batch_refresh_success(db_session: Session, test_user: User, test_requisition: Requisition):
-    """Covers lines 687-746: successful batch refresh with one requirement."""
+    """Batch refresh schedules the search and returns an immediate "Searching…"
+    toast."""
     from app.routers.sightings import sightings_batch_refresh
 
     req_item = _make_requirement(db_session, test_requisition)
@@ -84,13 +85,14 @@ async def test_batch_refresh_success(db_session: Session, test_user: User, test_
 
         resp = await sightings_batch_refresh(
             request=mock_req,
+            background_tasks=BackgroundTasks(),
             db=db_session,
             user=test_user,
         )
 
     assert resp.status_code == 200
     # Toast fires via HX-Trigger:showToast; body is empty for the non-table caller.
-    assert "Searched" in resp.headers.get("HX-Trigger", "")
+    assert "Searching" in resp.headers.get("HX-Trigger", "")
 
 
 async def test_batch_refresh_empty_ids(db_session: Session, test_user: User):
@@ -107,6 +109,7 @@ async def test_batch_refresh_empty_ids(db_session: Session, test_user: User):
         mock_broker.publish = AsyncMock()
         resp = await sightings_batch_refresh(
             request=mock_req,
+            background_tasks=BackgroundTasks(),
             db=db_session,
             user=test_user,
         )
@@ -115,7 +118,7 @@ async def test_batch_refresh_empty_ids(db_session: Session, test_user: User):
 
 
 async def test_batch_refresh_id_not_found(db_session: Session, test_user: User):
-    """Covers line 711: requirement ID not found → failed += 1."""
+    """A non-existent requirement ID is dropped: nothing to search."""
     from app.routers.sightings import sightings_batch_refresh
 
     mock_req = _make_form_request(
@@ -128,16 +131,18 @@ async def test_batch_refresh_id_not_found(db_session: Session, test_user: User):
         mock_broker.publish = AsyncMock()
         resp = await sightings_batch_refresh(
             request=mock_req,
+            background_tasks=BackgroundTasks(),
             db=db_session,
             user=test_user,
         )
 
     assert resp.status_code == 200
-    assert "failed" in resp.headers.get("HX-Trigger", "").lower()
+    assert "no requirements to search" in resp.headers.get("HX-Trigger", "").lower()
 
 
 async def test_batch_refresh_search_raises(db_session: Session, test_user: User, test_requisition: Requisition):
-    """Covers lines 720-722: search_requirement raises → failed += 1."""
+    """Search now runs in the background, so a search failure never affects the
+    immediate (200 + "Searching…") response."""
     from app.routers.sightings import sightings_batch_refresh
 
     req_item = _make_requirement(db_session, test_requisition)
@@ -157,6 +162,7 @@ async def test_batch_refresh_search_raises(db_session: Session, test_user: User,
 
         resp = await sightings_batch_refresh(
             request=mock_req,
+            background_tasks=BackgroundTasks(),
             db=db_session,
             user=test_user,
         )
@@ -165,7 +171,9 @@ async def test_batch_refresh_search_raises(db_session: Session, test_user: User,
 
 
 async def test_batch_refresh_skipped_all_fresh(db_session: Session, test_user: User, test_requisition: Requisition):
-    """Covers line 741 (level=info): all requirements within cooldown → skipped."""
+    """The per-MPN cooldown is enforced inside the background search now, so the
+    endpoint still schedules recently-searched requirements and returns the "Searching…"
+    toast."""
     from app.routers.sightings import sightings_batch_refresh
 
     req_item = Requirement(
@@ -191,13 +199,14 @@ async def test_batch_refresh_skipped_all_fresh(db_session: Session, test_user: U
         mock_broker.publish = AsyncMock()
         resp = await sightings_batch_refresh(
             request=mock_req,
+            background_tasks=BackgroundTasks(),
             db=db_session,
             user=test_user,
         )
 
     assert resp.status_code == 200
     trigger = resp.headers.get("HX-Trigger", "")
-    assert "skipped" in trigger.lower() or "Searched" in trigger
+    assert "Searching" in trigger
 
 
 # ── batch-assign (lines 749-782) ─────────────────────────────────────────────
@@ -931,6 +940,7 @@ async def test_batch_refresh_invalid_json_raises_400(db_session: Session, test_u
         with pytest.raises(HTTPException) as exc:
             await sightings_batch_refresh(
                 request=mock_req,
+                background_tasks=BackgroundTasks(),
                 db=db_session,
                 user=test_user,
             )
@@ -949,6 +959,7 @@ async def test_batch_refresh_non_list_json_resets_to_empty(db_session: Session, 
         mock_broker.publish = AsyncMock()
         resp = await sightings_batch_refresh(
             request=mock_req,
+            background_tasks=BackgroundTasks(),
             db=db_session,
             user=test_user,
         )
@@ -970,6 +981,7 @@ async def test_batch_refresh_exceeds_max_batch_size_raises_400(db_session: Sessi
         with pytest.raises(HTTPException) as exc:
             await sightings_batch_refresh(
                 request=mock_req,
+                background_tasks=BackgroundTasks(),
                 db=db_session,
                 user=test_user,
             )

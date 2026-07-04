@@ -103,6 +103,9 @@ def test_htmx_ajax_calls_have_indicator():
 _REQ_ID_HEADERED_SIGHTINGS_PARTIALS = (
     "htmx/partials/sightings/detail.html",
     "htmx/partials/sightings/activity_section.html",
+    # Immediate "Searching…" ack swapped into #sightings-detail by sightings_refresh —
+    # needs the correlation header so the client beforeSwap guard drops it for the wrong row.
+    "htmx/partials/sightings/searching_panel.html",
 )
 
 

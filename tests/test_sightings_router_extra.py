@@ -76,7 +76,7 @@ class TestBatchRefresh:
             )
         assert resp.status_code == 200
         trigger = resp.headers.get("HX-Trigger", "")
-        assert "Searched" in trigger or "Refreshed" in trigger
+        assert "Searching" in trigger
 
     def test_batch_refresh_nonexistent_ids(self, client: TestClient):
         with patch("app.search_service.search_requirement", new=AsyncMock()):
@@ -87,7 +87,7 @@ class TestBatchRefresh:
             )
         assert resp.status_code == 200
         trigger = resp.headers.get("HX-Trigger", "")
-        assert "failed" in trigger.lower() or "0/" in trigger
+        assert "no requirements to search" in trigger.lower()
 
 
 class TestBatchAssign:

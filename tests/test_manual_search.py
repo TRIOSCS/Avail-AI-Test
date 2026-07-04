@@ -141,14 +141,14 @@ def _seed_requirement(db_session, mpn="RATE-001", last_searched_at=None):
 
 class TestBatchEdgeCases:
     def test_empty_batch(self, client, db_session):
-        """Empty batch should return 200 with zero counts."""
+        """Empty batch returns 200 with nothing to search."""
         resp = client.post(
             "/v2/partials/sightings/batch-refresh",
             data={"requirement_ids": "[]"},
         )
         assert resp.status_code == 200
         # Toast fires via HX-Trigger:showToast (empty body for the non-table caller).
-        assert "0/0" in resp.headers.get("HX-Trigger", "")
+        assert "no requirements to search" in resp.headers.get("HX-Trigger", "").lower()
 
     def test_malformed_json_returns_400(self, client, db_session):
         """Invalid JSON in requirement_ids should return 400."""

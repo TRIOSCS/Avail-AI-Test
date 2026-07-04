@@ -8,14 +8,13 @@ Called by: pytest
 Depends on: app/routers/sightings.py, tests/conftest.py
 """
 
-import asyncio
 import json
 import os
 
 os.environ["TESTING"] = "1"
 
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from sqlalchemy.orm import Session
 
@@ -88,14 +87,14 @@ def test_batch_refresh_too_many_items(client):
 
 
 def test_batch_refresh_nonexistent_requirement(client, db_session):
-    """Batch-refresh with a non-existent requirement ID counts as failed."""
+    """Batch-refresh with a non-existent requirement ID drops it — nothing to search."""
     with patch("app.search_service.search_requirement", new_callable=AsyncMock):
         resp = client.post(
             "/v2/partials/sightings/batch-refresh",
             data={"requirement_ids": "[99999]"},
         )
     assert resp.status_code == 200
-    assert "1" in resp.headers.get("HX-Trigger", "")  # "1 failed" in the showToast message
+    assert "no requirements to search" in resp.headers.get("HX-Trigger", "").lower()
 
 
 def test_batch_refresh_valid_requirement(client, db_session, test_user):
@@ -116,38 +115,21 @@ def test_batch_refresh_valid_requirement(client, db_session, test_user):
     assert resp.status_code == 200
 
 
-def test_batch_refresh_runs_searches_in_parallel(client, db_session, test_user):
-    """Batch-refresh must run search_requirement calls concurrently.
-
-    A serial loop awaits each search before starting the next, so peak concurrency is 1.
-    With ``asyncio.gather`` all three are in flight at once, so peak concurrency is 3. We
-    assert that directly via a peak-in-flight counter — deterministic regardless of runner
-    speed (the old wall-clock threshold flaked on loaded CI runners where parallel work
-    still exceeded the serial-floor time budget).
-    """
+def test_batch_refresh_schedules_one_background_job_for_all_ids(client, db_session, test_user):
+    """Batch-refresh no longer runs the fan-out inline — it schedules a single
+    background job carrying every selected requirement id (bounded concurrency lives in
+    that job; see test_sightings_refresh_async.TestBackgroundJob.test_fanout_concurrency
+    _is_bounded)."""
     _, req1 = _make_req_and_requirement(db_session, test_user.id)
     _, req2 = _make_req_and_requirement(db_session, test_user.id)
     _, req3 = _make_req_and_requirement(db_session, test_user.id)
     db_session.commit()
 
-    inflight = 0
-    peak_inflight = 0
-
-    async def slow_search(req_obj, db):
-        nonlocal inflight, peak_inflight
-        inflight += 1
-        peak_inflight = max(peak_inflight, inflight)
-        try:
-            # A short sleep widens the overlap window so all gathered coroutines are
-            # genuinely in flight together; the assertion is on concurrency, not timing.
-            await asyncio.sleep(0.05)
-            return None
-        finally:
-            inflight -= 1
-
-    with patch(
-        "app.search_service.search_requirement",
-        side_effect=slow_search,
+    scheduled = MagicMock()
+    real_search = AsyncMock()
+    with (
+        patch("app.routers.sightings._run_search_and_publish", new=scheduled),
+        patch("app.search_service.search_requirement", new=real_search),
     ):
         resp = client.post(
             "/v2/partials/sightings/batch-refresh",
@@ -155,8 +137,11 @@ def test_batch_refresh_runs_searches_in_parallel(client, db_session, test_user):
         )
 
     assert resp.status_code == 200
-    # Serial execution would peak at 1 concurrent search; gather peaks at all 3.
-    assert peak_inflight == 3, f"batch-refresh still serial: peak {peak_inflight} concurrent search(es), expected 3"
+    scheduled.assert_called_once()
+    assert set(scheduled.call_args[0][0]) == {req1.id, req2.id, req3.id}
+    assert scheduled.call_args[0][1] == test_user.id
+    # Not awaited inline in the request handler.
+    real_search.assert_not_called()
 
 
 def test_batch_refresh_rerenders_table_for_split_panel(client, db_session, test_user):
@@ -178,7 +163,7 @@ def test_batch_refresh_rerenders_table_for_split_panel(client, db_session, test_
     assert "RERENDER-MPN" in resp.text
     assert "sightingSelection" in resp.text  # the table partial re-rendered
     # Toast still fires via the header bridge.
-    assert "Searched" in resp.headers.get("HX-Trigger", "")
+    assert "Searching" in resp.headers.get("HX-Trigger", "")
 
 
 def test_batch_refresh_non_table_caller_gets_empty_body(client, db_session, test_user):
@@ -196,7 +181,7 @@ def test_batch_refresh_non_table_caller_gets_empty_body(client, db_session, test
 
     assert resp.status_code == 200
     assert resp.text == ""  # empty body — nothing to swap
-    assert "Searched" in resp.headers.get("HX-Trigger", "")
+    assert "Searching" in resp.headers.get("HX-Trigger", "")
 
 
 # ── batch-assign ──────────────────────────────────────────────────

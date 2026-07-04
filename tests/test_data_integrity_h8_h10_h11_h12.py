@@ -95,8 +95,10 @@ class TestH10RefreshWarning:
         db_session.commit()
         return r
 
-    def test_refresh_failure_sets_hx_trigger(self, client, db_session):
-        """When search_requirement raises, response should have HX-Trigger header."""
+    def test_refresh_returns_searching_panel(self, client, db_session):
+        """A user click returns the immediate "Searching…" panel; the search now runs in
+        a background job, so a connector failure can no longer surface a synchronous
+        toast."""
         r = self._make_requirement(db_session, "TEST-001")
 
         with (
@@ -107,9 +109,8 @@ class TestH10RefreshWarning:
             resp = client.post(f"/v2/partials/sightings/{r.id}/refresh")
 
         assert resp.status_code == 200
-        hx_trigger = resp.headers.get("hx-trigger", "")
-        assert "showToast" in hx_trigger
-        assert "Search refresh failed" in hx_trigger
+        assert "Searching suppliers" in resp.text
+        assert "Search refresh failed" not in resp.headers.get("hx-trigger", "")
 
     def test_successful_refresh_no_warning(self, client, db_session):
         """When search_requirement succeeds, no warning in HX-Trigger."""

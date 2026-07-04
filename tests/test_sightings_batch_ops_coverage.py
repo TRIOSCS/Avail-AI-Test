@@ -148,9 +148,10 @@ def test_batch_refresh_all_skipped_returns_info_level(client, db_session, test_u
         )
 
     assert resp.status_code == 200
-    # All skipped — toast (HX-Trigger header) should contain the searched-count message.
+    # The search is scheduled in the background (cooldown enforced there); the immediate
+    # toast just acknowledges the click.
     trigger = resp.headers.get("HX-Trigger", "")
-    assert "skipped" in trigger.lower() or "already fresh" in trigger.lower() or "Searched" in trigger
+    assert "Searching" in trigger
 
 
 def test_batch_refresh_success_path_level_success(client, db_session, test_user):
@@ -172,8 +173,9 @@ def test_batch_refresh_success_path_level_success(client, db_session, test_user)
     assert resp.status_code == 200
 
 
-def test_batch_refresh_exception_in_search_counts_as_failed(client, db_session, test_user):
-    """Exception from search_requirement increments failed counter (lines 720-722)."""
+def test_batch_refresh_exception_in_search_is_async(client, db_session, test_user):
+    """A search failure runs in the background now, so it never affects the immediate
+    (200 + "Searching…") response."""
     _, requirement = _make_req_and_requirement(db_session, test_user.id, mpn="ERRPN")
     db_session.commit()
 
@@ -189,8 +191,7 @@ def test_batch_refresh_exception_in_search_counts_as_failed(client, db_session, 
             )
 
     assert resp.status_code == 200
-    # failed path → warning level toast (HX-Trigger header)
-    assert "1" in resp.headers.get("HX-Trigger", "")  # "1 failed" mentioned
+    assert "Searching" in resp.headers.get("HX-Trigger", "")
 
 
 def test_batch_refresh_broker_publish_called(client, db_session, test_user):
@@ -214,8 +215,8 @@ def test_batch_refresh_broker_publish_called(client, db_session, test_user):
     assert mock_broker.publish.await_count == 2
 
 
-def test_batch_refresh_nonexistent_id_increments_failed(client, db_session):
-    """Non-existent requirement ID increments failed counter (lines 711-712)."""
+def test_batch_refresh_nonexistent_id_is_dropped(client, db_session):
+    """A non-existent requirement ID is dropped — nothing to search."""
     with _patched_broker():
         resp = client.post(
             "/v2/partials/sightings/batch-refresh",
@@ -223,7 +224,7 @@ def test_batch_refresh_nonexistent_id_increments_failed(client, db_session):
         )
 
     assert resp.status_code == 200
-    assert "1" in resp.headers.get("HX-Trigger", "")
+    assert "no requirements to search" in resp.headers.get("HX-Trigger", "").lower()
 
 
 # ── batch-assign: buyer name lookup (lines 769-782) ──────────────────

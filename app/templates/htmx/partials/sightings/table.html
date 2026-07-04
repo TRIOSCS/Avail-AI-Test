@@ -163,6 +163,7 @@
       {% macro render_row(r, collapse_key=None) %}
       {% set is_hot = r.id in heatmap_req_ids %}
       {% set is_stale = r.id in stale_req_ids %}
+      {% set is_searching = r.id in searching_req_ids %}
       {% set cov_qty = coverage_map.get(r.id, 0) %}
       {% set cov_pct = ((cov_qty / r.target_qty * 100) if r.target_qty and r.target_qty > 0 else 0)|int %}
       {% set cov_pct = [cov_pct, 100]|min %}
@@ -197,6 +198,18 @@
             :class="refreshing ? 'opacity-60' : ''">
           <div class="relative flex items-center gap-1">
             <span title="{{ cov_pct }}% coverage ({{ cov_qty }} / {{ r.target_qty or '?' }})">{{ m.coverage_meter(cov_qty, r.target_qty) }}</span>
+            {% if is_searching %}
+            {# Background search scheduled for this row (per-row icon or bulk Refresh). The
+               slow fan-out runs off the request thread; this badge acknowledges the click.
+               Coverage refreshes on the next table render / when its detail panel updates. #}
+            <span class="inline-flex items-center gap-1 text-[11px] text-amber-600 font-medium"
+                  title="Search in progress — results update automatically">
+              <svg class="h-3 w-3 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+              </svg>
+              Searching…
+            </span>
+            {% else %}
             <span class="text-[10px] text-gray-400 w-7 text-right">{{ cov_pct }}%</span>
             <button class="ml-0.5 text-gray-300 hover:text-amber-500 transition-colors"
                     title="Search this requirement"
@@ -205,12 +218,13 @@
                     hx-swap="innerHTML"
                     hx-indicator="#sightings-detail-skeleton"
                     data-loading-disable
-                    @click.stop="refreshing = true"
+                    @click.stop="selectedReqId = {{ r.id }}; $store.sightingSelection.selectedReqId = {{ r.id }}; refreshing = true"
                     hx-on::after-request="refreshing = false">
               <svg class="h-3 w-3" :class="refreshing ? 'animate-spin' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
               </svg>
             </button>
+            {% endif %}
           </div>
         </td>
         <td>

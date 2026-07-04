@@ -114,7 +114,7 @@ class TestBatchRefreshAsync:
             )
         assert resp.status_code == 200
         trigger = resp.headers.get("HX-Trigger", "")
-        assert "Searched" in trigger or "0/" in trigger
+        assert "no requirements to search" in trigger.lower()
 
     async def test_batch_refresh_invalid_format(self, client):
         resp = client.post(
@@ -149,9 +149,9 @@ class TestBatchRefreshAsync:
                 data={"requirement_ids": json.dumps([r.id])},
             )
         assert resp.status_code == 200
-        # Failed count should be in the toast message (HX-Trigger header).
+        # Search now runs in the background, so the immediate toast just acknowledges it.
         trigger = resp.headers.get("HX-Trigger", "")
-        assert "1/" in trigger or "failed" in trigger.lower()
+        assert "Searching" in trigger
 
 
 # ── preview-inquiry ───────────────────────────────────────────────────

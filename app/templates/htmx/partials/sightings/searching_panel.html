@@ -1,0 +1,22 @@
+{# searching_panel.html — immediate "Searching…" acknowledgment for the sightings
+   detail panel.
+
+   Swapped into #sightings-detail when a user clicks the per-row Coverage refresh icon
+   (table.html) or the detail-panel Search button (m.search_button). The slow
+   multi-supplier + AI search runs as a FastAPI background job, so this panel returns
+   instantly instead of freezing the board. When the search completes the job publishes a
+   `sighting-updated` SSE and the board's EventSource listener pulls the fresh detail panel
+   in via /refresh?source=sse.
+
+   Called by: sightings_refresh (app/routers/sightings.py, source=user)
+   Depends on: nothing (self-contained; carries X-Rendered-Req-Id via the router). #}
+<div class="flex flex-col items-center justify-center h-full gap-3 py-16 px-6 text-center"
+     data-searching-req-id="{{ requirement.id }}">
+  <svg class="h-8 w-8 animate-spin text-accent-500" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+    <path class="opacity-75" fill="currentColor"
+          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+  </svg>
+  <p class="text-sm font-medium text-gray-700">Searching suppliers for {{ requirement.primary_mpn }}…</p>
+  <p class="text-xs text-gray-500">Results appear here automatically when the search completes.</p>
+</div>
