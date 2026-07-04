@@ -53,7 +53,7 @@
           <td class="px-4 py-2.5">
             {{ quote_status_badge(q.status) }}
           </td>
-          <td class="px-4 py-2.5 text-sm text-gray-600">{{ q.created_at.strftime('%b %d, %Y') if q.created_at else "—" }}</td>
+          <td class="px-4 py-2.5 text-sm text-gray-600">{{ q.created_at|localdate('%b %d, %Y') if q.created_at else "—" }}</td>
         </tr>
         {% endfor %}
       </tbody>

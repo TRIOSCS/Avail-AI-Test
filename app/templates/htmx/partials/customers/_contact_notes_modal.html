@@ -46,7 +46,7 @@
     <div class="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
       <p class="text-xs text-gray-700 whitespace-pre-line break-words">{{ n.notes }}</p>
       <p class="mt-1 text-[11px] text-gray-400">
-        {{ (n.created_at.strftime('%b %-d, %Y %-I:%M %p') if n.created_at else '—') }}
+        {{ (n.created_at|localtime('%b %-d, %Y %-I:%M %p') if n.created_at else '—') }}
         {% if n.user %}· {{ n.user.name or n.user.email }}{% endif %}
       </p>
     </div>

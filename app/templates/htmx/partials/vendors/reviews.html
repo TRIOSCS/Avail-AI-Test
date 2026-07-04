@@ -45,7 +45,7 @@
           </span>
           <span class="text-xs text-gray-600">{{ r.user.name if r.user else 'Unknown' }}</span>
           {% if r.created_at %}
-          <span class="text-xs text-gray-400">{{ r.created_at.strftime('%b %d, %Y') }}</span>
+          <span class="text-xs text-gray-400">{{ r.created_at|localdate('%b %d, %Y') }}</span>
           {% endif %}
         </div>
         {% if r.comment %}
