@@ -167,7 +167,7 @@
   </div>
   {% elif prospect.status == 'dismissed' %}
   <div class="mt-3 pt-3 border-t border-line-subtle">
-    <span class="text-secondary">Dismissed {{ prospect.dismissed_at.strftime('%b %d') if prospect.dismissed_at else '' }}</span>
+    <span class="text-secondary">Dismissed {{ prospect.dismissed_at|localdate('%b %d') if prospect.dismissed_at else '' }}</span>
   </div>
   {% endif %}
 </div>

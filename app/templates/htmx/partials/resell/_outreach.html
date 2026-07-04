@@ -64,7 +64,7 @@
           </td>
           <td class="capitalize text-gray-600">{{ row.channel }}</td>
           <td class="text-gray-500">{{ row.submitted_by_user.name if row.submitted_by_user else '—' }}</td>
-          <td class="text-gray-500 text-xs">{{ (row.sent_at or row.created_at).strftime('%b %d, %H:%M') if (row.sent_at or row.created_at) else '—' }}</td>
+          <td class="text-gray-500 text-xs">{{ (row.sent_at or row.created_at)|localtime('%b %d, %H:%M') if (row.sent_at or row.created_at) else '—' }}</td>
           <td>
             <div class="flex items-center gap-2">
               {{ status_badge(row.status, status_map={

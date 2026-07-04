@@ -99,7 +99,7 @@
             <div class="mt-0.5 flex items-center gap-3 text-secondary flex-wrap">
               {% if b.last_bid is not none %}<span>last bid ${{ "{:,.4f}".format(b.last_bid|float) }}</span>{% endif %}
               {% if b.win_rate is not none %}<span>{{ (b.win_rate * 100)|round|int }}% win</span>{% endif %}
-              {% if b.last_offered_at %}<span>offered {{ b.last_offered_at.strftime('%b %d') }}</span>
+              {% if b.last_offered_at %}<span>offered {{ b.last_offered_at|localdate('%b %d') }}</span>
               {% else %}<span>never offered</span>{% endif %}
             </div>
             {# Advisory overlap flag — a TEAMMATE already offered this buyer. Never blocks;
@@ -108,7 +108,7 @@
             <p class="mt-1 inline-flex items-center gap-1 text-[11px] text-amber-600">
               <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01M5.07 19h13.86a2 2 0 001.74-3L13.74 4a2 2 0 00-3.48 0L3.33 16a2 2 0 001.74 3z"/></svg>
               {{ row.overlap.by_user_name or 'A teammate' }} already offered this buyer
-              {% if row.overlap.when %} on {{ row.overlap.when.strftime('%b %d') }}{% endif %}
+              {% if row.overlap.when %} on {{ row.overlap.when|localdate('%b %d') }}{% endif %}
             </p>
             {% endif %}
           </div>
