@@ -559,6 +559,21 @@ change the retry/breaker/health semantics:
   `asyncio.to_thread` so a slow/unreachable Redis can't block the single
   loop and stall every in-flight request. The helpers stay best-effort.
 
+**Infra resilience (2026-07-04, Phase 2).**
+
+- **Redis lazy-client re-probe + downgrade metric.** Both Redis-backed cache
+  clients — `search_service._get_search_redis` (search-result cache) and
+  `cache.intel_cache._get_redis` (intel cache + `@cached_endpoint` +
+  `rate_limit.check_rate_limit`) — used to init lazily and *stick*: the first
+  failed connect disabled Redis for the whole process lifetime, silently, with
+  no recovery. Both now delegate to `cache.redis_probe.RedisProbe`, which
+  re-probes the real Redis at most once per `REPROBE_INTERVAL_S` (30s) while
+  degraded and recovers transparently when it returns. The degraded state is
+  observable: Prometheus `redis_degraded{subsystem}` (1/0) +
+  `redis_downgrade_total{subsystem}` (healthy→degraded transitions), plus a
+  WARNING on downgrade / INFO on recovery. `get()` is best-effort and never
+  raises, so it is safe on the request hot path. Tests: `tests/test_redis_probe.py`.
+
 **Test enforcement** lives in `tests/test_connectors.py`,
 `tests/test_connector_rate_limits.py`,
 `tests/test_sourcengine_connector.py`, `tests/test_connector_errors.py`,

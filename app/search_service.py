@@ -19,6 +19,7 @@ import redis
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from .cache.redis_probe import RedisProbe
 from .connectors.ai_live_web import AIWebSearchConnector
 from .connectors.digikey import DigiKeyConnector
 from .connectors.ebay import EbayConnector
@@ -98,38 +99,43 @@ def _median(values: list[float]) -> float | None:
 
 _SEARCH_CACHE_TTL = 900  # 15 minutes
 _SEARCH_CACHE_PREFIX = "search:"
-_search_redis = None
-_search_redis_attempted = False
+
+
+def _connect_search_redis():
+    """Open a live search-cache Redis client.
+
+    Returns ``None`` under TESTING (probe stays permanently off); raises on a transient
+    connect failure so ``RedisProbe`` re-probes and recovers when Redis returns.
+    """
+    if os.environ.get("TESTING"):
+        return None
+
+    import redis
+
+    from .config import settings
+
+    client = redis.from_url(
+        settings.redis_url,
+        decode_responses=True,
+        socket_connect_timeout=2,
+        socket_timeout=1,
+        retry_on_timeout=True,
+    )
+    client.ping()
+    return client
+
+
+_search_redis_probe = RedisProbe("search_cache", _connect_search_redis)
 
 
 def _get_search_redis():
-    """Lazy-init Redis for search caching.
+    """Lazy-init Redis for search caching, re-probing after an outage.
 
-    Returns client or None.
+    Returns a live client or ``None`` (caching disabled). Unlike the old sticky init, a
+    Redis outage self-heals: the probe periodically retries the real Redis and recovers
+    transparently once it returns, and the degraded state is exported as a metric.
     """
-    global _search_redis, _search_redis_attempted
-    if _search_redis_attempted:
-        return _search_redis
-    _search_redis_attempted = True
-    if os.environ.get("TESTING"):
-        return None
-    try:
-        import redis
-
-        from .config import settings
-
-        _search_redis = redis.from_url(
-            settings.redis_url,
-            decode_responses=True,
-            socket_connect_timeout=2,
-            socket_timeout=1,
-            retry_on_timeout=True,
-        )
-        _search_redis.ping()
-    except Exception as e:
-        logger.warning("Search Redis unavailable, caching disabled: {}", e)
-        _search_redis = None
-    return _search_redis
+    return _search_redis_probe.get()
 
 
 def _search_cache_key(pns: list[str], connector_names: list[str]) -> str:

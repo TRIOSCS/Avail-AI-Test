@@ -57,6 +57,23 @@ REQUEST_INFLIGHT = Gauge(
     ["method"],
 )
 
+# Redis-backed subsystems (search-result cache, intel cache) fall back to a degraded
+# path when Redis is unreachable. These make the degraded state observable so it can be
+# alerted on (previously a failed connect disabled Redis silently for the process
+# lifetime). REDIS_DEGRADED is the "is it degraded right now" signal (1/0);
+# REDIS_DOWNGRADE_TOTAL counts distinct healthy→degraded transitions (outage events).
+REDIS_DEGRADED = Gauge(
+    "redis_degraded",
+    "1 if a Redis-backed subsystem is currently serving its degraded fallback path.",
+    ["subsystem"],
+)
+
+REDIS_DOWNGRADE_TOTAL = Counter(
+    "redis_downgrade_total",
+    "Count of healthy->degraded transitions for a Redis-backed subsystem.",
+    ["subsystem"],
+)
+
 # Paths excluded from collection entirely. Each entry is either a fixed path
 # (browser/health/observability noise) or a prefix; collectively they keep the
 # counter free of high-volume, low-signal traffic.

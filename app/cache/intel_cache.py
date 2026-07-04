@@ -14,12 +14,10 @@ from typing import cast
 from loguru import logger
 from sqlalchemy import CursorResult, text
 
+from app.cache.redis_probe import RedisProbe
 from app.database import SessionLocal
 from app.utils import json_helpers as json
 
-# Lazy-initialized Redis client
-_redis_client = None
-_redis_init_attempted = False
 _REDIS_PREFIX = "intel:"
 
 
@@ -33,44 +31,47 @@ def _ttl_seconds(ttl_days: float) -> int:
     return int(ttl_days * 86400)
 
 
-def _get_redis():
-    """Lazy-init Redis connection.
+def _connect_intel_redis():
+    """Open a live intel-cache Redis client.
 
-    Returns client or None if unavailable.
+    Returns ``None`` to mean "intentionally disabled" (TESTING or a non-Redis cache
+    backend — the probe then stops retrying); raises on a transient connect failure so
+    ``RedisProbe`` re-probes and recovers when Redis returns.
     """
-    global _redis_client, _redis_init_attempted
-
-    if _redis_init_attempted:
-        return _redis_client
-
-    _redis_init_attempted = True
-
     if os.environ.get("TESTING"):
         return None
 
-    try:
-        from app.config import settings
+    from app.config import settings
 
-        if settings.cache_backend == "postgres":
-            logger.info("Cache backend set to postgres — skipping Redis")
-            return None
+    if settings.cache_backend == "postgres":
+        logger.info("Cache backend set to postgres — skipping Redis")
+        return None
 
-        import redis
+    import redis
 
-        _redis_client = redis.from_url(
-            settings.redis_url,
-            decode_responses=True,
-            socket_connect_timeout=3,
-            socket_timeout=2,
-            retry_on_timeout=True,
-        )
-        _redis_client.ping()
-        logger.info("Redis cache connected: {}", settings.redis_url)
-    except Exception as e:
-        logger.warning("Redis unavailable, falling back to PostgreSQL cache: {}", e)
-        _redis_client = None
+    client = redis.from_url(
+        settings.redis_url,
+        decode_responses=True,
+        socket_connect_timeout=3,
+        socket_timeout=2,
+        retry_on_timeout=True,
+    )
+    client.ping()
+    logger.info("Redis cache connected: {}", settings.redis_url)
+    return client
 
-    return _redis_client
+
+_redis_probe = RedisProbe("intel_cache", _connect_intel_redis)
+
+
+def _get_redis():
+    """Lazy-init Redis connection, re-probing after an outage.
+
+    Returns a live client, or ``None`` when Redis is unavailable (callers fall back to
+    PostgreSQL). Unlike the old sticky init, a Redis outage self-heals: the probe retries
+    the real Redis periodically and recovers transparently once it returns.
+    """
+    return _redis_probe.get()
 
 
 def get_cached(cache_key: str) -> dict | None:
