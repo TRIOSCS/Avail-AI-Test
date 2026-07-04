@@ -653,6 +653,9 @@ async def connector_card_partial(
 _TEST_ALL_PROBE_TIMEOUT_S = 60.0
 _TEST_ALL_OVERALL_BUDGET_S = 90.0
 _TEST_ALL_DISCONNECT_POLL_S = 0.5
+# Per-user Test-all cap. A sweep probes every connector at once (far heavier than a single
+# 5/min per-source Test), so it gets a tighter per-minute budget to protect paid quota.
+_TEST_ALL_MAX_PER_MIN = 3
 
 
 @router.post("/v2/partials/settings/connectors/test-all", response_class=HTMLResponse)
@@ -672,7 +675,20 @@ async def connectors_test_all(
     sweep. Network I/O overlaps across probes; status is persisted sequentially on this
     one session afterward (concurrent commits on a shared session would race).
     """
+    from ...rate_limit import check_rate_limit
     from ..sources import _persist_test_result, _probe_source
+
+    # Cost guard: a sweep fires a live probe at every connector, spending real paid quota.
+    # The per-source Test is capped at 5/min (slowapi); Test-all previously had NO cap, so
+    # it bypassed that entirely. Cap it per-user (a sweep is far heavier than one probe).
+    if not check_rate_limit(user.id, "connectors_test_all", limit=_TEST_ALL_MAX_PER_MIN, window_seconds=60):
+        resp = HTMLResponse("")
+        settings_toast(
+            resp,
+            "Test-all is rate-limited — wait a minute before retrying (each run spends live API quota).",
+            kind="error",
+        )
+        return resp
 
     sources = db.query(ApiSource).order_by(ApiSource.display_name).all()
     candidates = [

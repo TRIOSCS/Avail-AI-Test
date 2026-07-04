@@ -35,6 +35,12 @@ def _make_admin_client(db_session, admin_user):
     app.dependency_overrides[require_admin] = lambda: admin_user
     app.dependency_overrides[require_settings_access] = lambda: admin_user
 
+    # Clean the per-user Test-all rate-limit counter so it can't leak across tests (the
+    # in-memory fallback counter is keyed by user id + minute-window).
+    from app.rate_limit import reset_rate_limit_state
+
+    reset_rate_limit_state()
+
     try:
         client = TestClient(app)
         yield client
@@ -791,3 +797,82 @@ def test_clay_controls_admin_only_for_non_admin_holder(connector_manager_client,
     assert "An admin manages this connection." in html
     assert "/auth/clay/disconnect" not in html, "non-admin holder must not get the Clay disconnect control"
     assert "/auth/clay/connect" not in html, "non-admin holder must not get the Clay connect link"
+
+
+# ── Phase 3: per-test timestamp, full masking, Test-all cost guard ─────
+
+
+def test_last_checked_timestamp_renders_for_tested_source(admin_client, db_session):
+    """A source with a persisted last_success renders 'Last checked …' on its card (item
+    1: the macro previously discarded last_success, so a re-test was zero-feedback)."""
+    from datetime import datetime, timezone
+
+    from app.models import ApiSource as AS
+
+    src = db_session.query(AS).filter_by(name="lusha_enrichment").first()
+    src.last_success = datetime.now(timezone.utc)
+    db_session.commit()
+
+    html = admin_client.get(f"/v2/partials/settings/connector-card/{src.id}", follow_redirects=False).text
+    assert "Last checked" in html, "Expected 'Last checked' relative-time line for a tested source"
+
+
+def test_last_checked_hidden_for_worker_backed_source(admin_client, db_session):
+    """Worker-backed cards show their heartbeat/last-search line, not the API-probe
+    'Last checked' — so it must be suppressed even when last_success is set."""
+    from datetime import datetime, timezone
+
+    from app.models import ApiSource as AS
+
+    src = db_session.query(AS).filter_by(name="icsource").first()
+    src.last_success = datetime.now(timezone.utc)
+    db_session.commit()
+
+    html = admin_client.get(f"/v2/partials/settings/connector-card/{src.id}", follow_redirects=False).text
+    assert "Last checked" not in html, "Worker-backed card must not show the API-probe 'Last checked' line"
+
+
+def test_browser_login_credential_is_fully_masked(admin_client, db_session):
+    """browser_login account passwords (TBF/ICS) must be fully masked — no last-4 tail
+    in the DOM (item 4).
+
+    A keyed API source still shows the last-4 tail (identifier, not a reused human
+    password).
+    """
+    from app.routers.htmx.settings import _enrich_source
+    from app.services.credential_service import encrypt_value
+
+    ics = db_session.query(ApiSource).filter_by(name="icsource").first()
+    ics.credentials = {"ICS_PASSWORD": encrypt_value("hunter2-secret-9876")}
+    lusha = db_session.query(ApiSource).filter_by(name="lusha_enrichment").first()
+    lusha.credentials = {"LUSHA_API_KEY": encrypt_value("sk-live-abcd1234")}
+    db_session.commit()
+
+    ics_masked = _enrich_source(ics, db_session)["creds"]["ICS_PASSWORD"]["masked"]
+    assert ics_masked == "••••••••", f"browser_login must be dots-only, got {ics_masked!r}"
+    assert "9876" not in ics_masked
+
+    lusha_masked = _enrich_source(lusha, db_session)["creds"]["LUSHA_API_KEY"]["masked"]
+    assert lusha_masked.endswith("1234"), f"keyed source keeps a last-4 identifier, got {lusha_masked!r}"
+
+
+def test_test_all_cost_note_present(admin_client):
+    """The connectors tab surfaces a cost note near Test-all (item 6)."""
+    html = admin_client.get("/v2/partials/settings/connectors").text
+    assert "uses a little provider quota" in html.lower() or "paid quota" in html.lower()
+
+
+def test_test_all_is_rate_limited(admin_client):
+    """Test-all is capped per user (item 6: it previously bypassed the per-source 5/min
+    limit entirely).
+
+    The 4th run within a minute is rejected with an error toast.
+    """
+    # limit is 3/min; the admin_client fixture reset the counter at setup.
+    for _ in range(3):
+        r = admin_client.post("/v2/partials/settings/connectors/test-all")
+        assert r.status_code == 200
+
+    r4 = admin_client.post("/v2/partials/settings/connectors/test-all")
+    assert r4.status_code == 200
+    assert "rate-limited" in r4.headers.get("HX-Trigger", ""), "4th Test-all in a minute must be rate-limited"

@@ -187,7 +187,8 @@ hx-on::after-request='if(event.detail.successful){htmx.ajax("GET","/v2/partials/
         <div class="w-8 h-4 bg-gray-200 rounded-full peer peer-focus-visible:ring-2 peer-focus-visible:ring-accent-400 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-accent-600 relative"></div>
       </label>
 
-      {# Test button #}
+      {# Test button. data-loading-disable debounces it (disabled in-flight); the server
+         also rate-limits to 5/min. title flags that a Test spends real provider quota. #}
       {% if s.testable %}
       <button class="btn-md inline-flex items-center gap-1.5"
               type="button"
@@ -195,6 +196,7 @@ hx-on::after-request='if(event.detail.successful){htmx.ajax("GET","/v2/partials/
               hx-target="#connector-card-{{ s.id }}"
               hx-swap="none"
               data-loading-disable
+              title="Runs a live search — uses a small amount of this provider's quota."
               {{ _refresh_attr(s) }}>
         {{ _spinner() }}
         <span>Test</span>

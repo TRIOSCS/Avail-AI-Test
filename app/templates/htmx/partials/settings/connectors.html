@@ -32,19 +32,23 @@
       </span>
     </div>
     <div class="flex flex-col items-end gap-1 flex-shrink-0">
+      {# data-loading-disable debounces the button (disabled while a sweep is in flight);
+         the server also rate-limits Test-all to protect paid quota. #}
       <button class="btn-md inline-flex items-center gap-1.5"
               type="button"
               hx-post="/v2/partials/settings/connectors/test-all"
               hx-target="#connectors-root"
               hx-swap="none"
               hx-request='"timeout":120000'
-              data-loading-disable>
+              data-loading-disable
+              title="Runs a live search on every connector — uses a small amount of each provider's paid quota.">
         <svg class="w-3.5 h-3.5 animate-spin motion-reduce:hidden" data-loading viewBox="0 0 24 24" fill="none" aria-hidden="true">
           <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
           <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
         </svg>
         <span>Test all</span>
       </button>
+      <p class="text-secondary">Each test runs a live search and uses a little provider quota.</p>
       {# Test-all aggregate result — OOB-swapped here after the sweep so it's visible
          even when the cards that changed are far down a long page. #}
       <div id="test-all-summary" class="text-secondary" aria-live="polite"></div>
