@@ -592,6 +592,41 @@ change the retry/breaker/health semantics:
   WARNING on downgrade / INFO on recovery. `get()` is best-effort and never
   raises, so it is safe on the request hot path. Tests: `tests/test_redis_probe.py`.
 
+**Connector polish (2026-07-04, Phase 4 — schedule tier).** Lower-priority
+robustness items that do not change the retry/breaker/health semantics above:
+
+- **eBay explicit 429.** `ebay.py::_do_search` special-cased 401 and 404 but let a
+  429 fall through to the generic `raise_for_status` path. It now handles 429
+  explicitly like DigiKey (its OAuth-client-credentials sibling): honor Retry-After
+  (capped at 30s by `_parse_retry_after`, the Phase-1 cap) with one inline retry,
+  then raise the typed `ConnectorRateLimitError` on a persistent 429. eBay now
+  conforms to the 429→`ConnectorRateLimitError` row of the contract above.
+- **Nexar empty-REST → GraphQL fall-through.** `NexarConnector._do_search` tried the
+  Octopart REST v4 path first and returned its result whenever it was `not None` —
+  so a 200 REST response with ZERO seller rows (`[]`) short-circuited the richer
+  GraphQL seller path. Only a NON-EMPTY REST result now wins outright; an empty (or
+  None) REST result falls through to GraphQL, which may surface rows the REST key's
+  plan/coverage misses. FLAG: a live Nexar search is required to confirm the GraphQL
+  path returns rows when REST is empty.
+- **Sourcengine response-shape drift guard.** `SourcengineConnector._parse` is a
+  best-guess adapter (offers/results/data envelope) never validated against the live
+  shape. It now logs a WARNING (never a silent `[]`) when a 200 body is not a JSON
+  object or carries none of the recognized offer keys — surfacing drift instead of
+  masquerading as "no matches". FLAG: the connector's `SEARCH_URL` (`/v1/search`) no
+  longer matches the documented endpoint (`/app/api/search/parts/searchpart`); a live
+  call must confirm the real endpoint + shape before this source is trusted.
+- **`@cached_endpoint` async-target guard.** `cache/decorators.py` selects an async
+  wrapper via `asyncio.iscoroutinefunction` so async endpoints are awaited and cached
+  correctly (the old sync-only wrapper returned an unawaited coroutine on a miss and a
+  bare value on a hit, and never cached). Streaming targets (`StreamingResponse` /
+  async generators) are awaited then passed through uncached by the dict/list gate.
+  All current callers are sync and keep identical behavior.
+- **Rate-limiter xdist reset.** A central autouse conftest fixture
+  (`_reset_rate_limiter_state`) resets both `rate_limit._fallback_counts` (the
+  per-window outreach fallback counter) and the slowapi `limiter` storage before AND
+  after each test, killing an intermittent cross-test state leak that flaked the
+  parallel (xdist) suite. Mirrors `_clear_connector_token_cache` / `_reset_ai_gate_state`.
+
 **Test enforcement** lives in `tests/test_connectors.py`,
 `tests/test_connector_rate_limits.py`,
 `tests/test_sourcengine_connector.py`, `tests/test_connector_errors.py`,
