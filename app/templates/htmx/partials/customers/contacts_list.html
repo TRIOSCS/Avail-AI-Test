@@ -33,7 +33,7 @@
   </div>
 
   {# Filter bar #}
-  <div class="bg-white rounded-lg shadow border border-gray-200 p-4 mb-6">
+  <div class="card mb-6">
     <form id="contacts-filters" class="flex flex-wrap gap-3 items-end"
           hx-get="/v2/partials/contacts"
           hx-target="#main-content"
@@ -44,19 +44,19 @@
                placeholder="Search name or email..."
                class="input w-full text-sm">
       </div>
-      <select name="company_id" aria-label="Filter by company" class="px-2 py-1.5 text-sm border border-gray-200 rounded-lg bg-white">
+      <select name="company_id" aria-label="Filter by company" class="input w-auto">
         <option value="0">All companies</option>
         {% for c in companies %}
         <option value="{{ c.id }}" {{ "selected" if company_id == c.id }}>{{ c.name }}</option>
         {% endfor %}
       </select>
-      <select name="contact_role" aria-label="Filter by role" class="px-2 py-1.5 text-sm border border-gray-200 rounded-lg bg-white">
+      <select name="contact_role" aria-label="Filter by role" class="input w-auto">
         <option value="">All roles</option>
         {% for r in contact_roles %}
         <option value="{{ r }}" {{ "selected" if contact_role == r }}>{{ r|replace('_', ' ')|title }}</option>
         {% endfor %}
       </select>
-      <select name="cadence_state" aria-label="Filter by cadence" class="px-2 py-1.5 text-sm border border-gray-200 rounded-lg bg-white">
+      <select name="cadence_state" aria-label="Filter by cadence" class="input w-auto">
         <option value="">All cadence</option>
         <option value="overdue" {{ "selected" if cadence_state == "overdue" }}>Overdue</option>
         <option value="due" {{ "selected" if cadence_state == "due" }}>Due soon</option>
@@ -122,8 +122,7 @@
   </div>
 
   {% if contacts %}
-  <div class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
-    <div class="overflow-x-auto">
+  <div class="table-wrapper">
       <table class="min-w-full divide-y divide-gray-200">
         <thead class="bg-gray-50">
           <tr>
@@ -169,21 +168,20 @@
                     title="{{ c.cadence_state|replace('_', ' ')|title if c.cadence_state else 'New' }}"></span>
             </td>
             <td class="table-cell">
-              <p class="text-sm font-medium text-brand-600">{{ c.full_name or "—" }}</p>
+              <p class="text-sm font-semibold text-gray-900">{{ c.full_name or "—" }}</p>
               {% if c.title %}<p class="text-xs text-gray-600">{{ c.title }}</p>{% endif %}
             </td>
-            <td class="table-cell text-sm text-gray-600">{{ company.name if company else "—" }}</td>
+            <td class="table-cell text-sm text-gray-700">{{ company.name if company else "—" }}</td>
             <td class="table-cell text-sm text-gray-600">{{ c.contact_role|replace('_', ' ')|title if c.contact_role else "—" }}</td>
-            <td class="table-cell text-sm text-gray-600">{{ c.email or "—" }}</td>
-            <td class="table-cell text-sm text-gray-600">{{ c.phone or "—" }}</td>
-            <td class="table-cell text-right text-[11px] {% if c.cadence_state == 'overdue' %}text-rose-600 font-medium{% elif c.cadence_state == 'due' %}text-amber-600{% else %}text-gray-400{% endif %}">
+            <td class="table-cell text-secondary">{{ c.email or "—" }}</td>
+            <td class="table-cell text-secondary">{{ c.phone or "—" }}</td>
+            <td class="table-cell text-right text-[11px] tabular-nums {% if c.cadence_state == 'overdue' %}text-rose-600 font-medium{% elif c.cadence_state == 'due' %}text-amber-600{% else %}text-gray-400{% endif %}">
               {{ c.last_outbound_at|timeago if c.last_outbound_at else "never" }}
             </td>
           </tr>
           {% endfor %}
         </tbody>
       </table>
-    </div>
   </div>
 
   {# Pagination #}
