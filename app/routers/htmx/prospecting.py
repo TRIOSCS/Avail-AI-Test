@@ -264,6 +264,7 @@ async def prospecting_list_partial(
     q: str = "",
     status: str = "",
     sort: str = "ai_match_desc",
+    scope: str = "all",
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     user: User = Depends(require_access(AccessKey.PROSPECTING)),
@@ -275,7 +276,13 @@ async def prospecting_list_partial(
     DESC then readiness_score DESC; buyer_ready_desc ranks by the composite buyer-ready
     score from build_priority_snapshot; fit_desc and recent_desc sort in SQL.
     Dismissed prospects are hidden unless filtered for.
+
+    ``scope`` ("all" | "mine") scopes the grid AND the pill counts to the current user's
+    own claimed prospects (``claimed_by == user.id``), mirroring the Approvals See-All /
+    See-Mine toggle. Defaults to "all".
     """
+    scope = "mine" if scope == "mine" else "all"
+
     base = db.query(ProspectAccount)
     if status:
         base = base.filter(ProspectAccount.status == status)
@@ -284,6 +291,8 @@ async def prospecting_list_partial(
     if q.strip():
         sb = SearchBuilder(q.strip())
         base = base.filter(sb.ilike_filter(ProspectAccount.name, ProspectAccount.domain))
+    if scope == "mine":
+        base = base.filter(ProspectAccount.claimed_by == user.id)
 
     total = base.count()
     total_pages = max(1, (total + per_page - 1) // per_page)
@@ -292,25 +301,40 @@ async def prospecting_list_partial(
     if sort == "ai_match_desc":
         from ...config import settings as _settings
 
-        rows = base.all()
         if _settings.ai_screen_enabled:
+            # AI-screen on: the screened-out split is a JSONB verdict predicate we keep in
+            # Python (portable across PG/SQLite). The pool is already filtered to the
+            # active status/search; the bucket is capped before render (see list.html).
+            rows = base.all()
             screened_out_rows = [
                 p for p in rows if (p.enrichment_data or {}).get("ai_screen", {}).get("verdict") == "screened_out"
             ]
             rows = [p for p in rows if (p.enrichment_data or {}).get("ai_screen", {}).get("verdict") != "screened_out"]
-        else:
-            screened_out_rows = []
-        rows.sort(
-            key=lambda p: (
-                -(p.trio_match_score or 0),
-                -(p.opportunity_score or 0),
-                -(p.readiness_score or 0),
-                (p.name or "").lower(),
+            rows.sort(
+                key=lambda p: (
+                    -(p.trio_match_score or 0),
+                    -(p.opportunity_score or 0),
+                    -(p.readiness_score or 0),
+                    (p.name or "").lower(),
+                )
             )
-        )
-        total = len(rows)
-        total_pages = max(1, (total + per_page - 1) // per_page)
-        prospects = rows[offset : offset + per_page]
+            total = len(rows)
+            total_pages = max(1, (total + per_page - 1) // per_page)
+            prospects = rows[offset : offset + per_page]
+        else:
+            # AI-screen off (default): trio_match/opportunity/readiness are all persisted
+            # indexed columns, so rank + paginate in SQL instead of hydrating the whole
+            # (only-grows) pool into memory each request. coalesce(.,0) keeps NULLs sorted
+            # deterministically and the ordering dialect-portable. total/total_pages stay
+            # the SQL base.count() computed above (no screened-out split to subtract).
+            screened_out_rows = []
+            base = base.order_by(
+                sqlfunc.coalesce(ProspectAccount.trio_match_score, 0).desc(),
+                sqlfunc.coalesce(ProspectAccount.opportunity_score, 0).desc(),
+                sqlfunc.coalesce(ProspectAccount.readiness_score, 0).desc(),
+                sqlfunc.lower(ProspectAccount.name),
+            )
+            prospects = base.offset(offset).limit(per_page).all()
     elif sort == "buyer_ready_desc":
         screened_out_rows = []
         # Rank by the persisted buyer_ready_score cache (kept in lockstep with
@@ -345,6 +369,8 @@ async def prospecting_list_partial(
     if q.strip():
         sb = SearchBuilder(q.strip())
         count_q = count_q.filter(sb.ilike_filter(ProspectAccount.name, ProspectAccount.domain))
+    if scope == "mine":
+        count_q = count_q.filter(ProspectAccount.claimed_by == user.id)
     status_counts = dict(count_q.group_by(ProspectAccount.status).all())
     all_total = sum(status_counts.get(s, 0) for s in _PROSPECT_DEFAULT_STATUSES)
 
@@ -360,6 +386,7 @@ async def prospecting_list_partial(
             "q": q,
             "status": status,
             "sort": sort,
+            "scope": scope,
             "page": page,
             "per_page": per_page,
             "total": total,

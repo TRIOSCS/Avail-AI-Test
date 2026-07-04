@@ -1,7 +1,7 @@
 """Tests for small service modules with 0% coverage.
 
 Covers: health_service, teams_notifications, mailbox_intelligence,
-prospect_contacts, customer_analysis_service, customer_enrichment_batch,
+customer_analysis_service, customer_enrichment_batch,
 calendar_intelligence, customer_enrichment_service.
 
 Called by: pytest
@@ -17,13 +17,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
-from app.services.prospect_contacts import (
-    _is_new_hire,
-    _is_personal_email,
-    classify_contact_seniority,
-    mask_email,
-)
 
 
 def _patch_graph_client(*, pages_return=None, pages_side_effect=None):
@@ -371,90 +364,6 @@ class TestMailboxIntelligence:
 
         user = SimpleNamespace(working_hours_start=start, working_hours_end=end)
         assert is_within_working_hours(user, hour) is expected
-
-
-# ── Prospect Contacts ───────────────────────────────────────────────────
-
-
-class TestProspectContacts:
-    """Tests for app/services/prospect_contacts.py."""
-
-    @pytest.mark.parametrize(
-        "title, expected",
-        [
-            ("VP of Sales", "decision_maker"),
-            ("Director of Engineering", "decision_maker"),
-            ("Chief Technology Officer", "decision_maker"),
-            ("CEO", "decision_maker"),
-            ("Head of Procurement", "decision_maker"),
-            ("SVP Operations", "decision_maker"),
-            ("EVP Sales", "decision_maker"),
-            ("Senior Engineer", "influencer"),
-            ("Project Manager", "influencer"),
-            ("Team Lead", "influencer"),
-            ("Commodity Manager", "influencer"),
-            ("Principal Architect", "influencer"),
-            ("Buyer", "executor"),
-            ("Purchasing Agent", "executor"),
-            ("Procurement Coordinator", "executor"),
-            ("Supply Chain Analyst", "executor"),
-            ("Planning Specialist", "executor"),
-            ("Planner", "executor"),
-            ("Assistant Buyer", "executor"),
-            ("Receptionist", "other"),
-            ("", "other"),
-            (None, "other"),
-        ],
-    )
-    def test_classify_contact_seniority(self, db_session, title, expected):
-        assert classify_contact_seniority(title) == expected
-
-    @pytest.mark.parametrize(
-        "email, expected",
-        [
-            ("john.smith@company.com", "j***@comp..."),
-            ("a@b.co", "a***@b.co"),
-            ("", ""),
-            (None, ""),
-            ("invalid", ""),
-        ],
-    )
-    def test_mask_email(self, db_session, email, expected):
-        assert mask_email(email) == expected
-
-    @pytest.mark.parametrize(
-        "email, expected",
-        [
-            ("user@gmail.com", True),
-            ("user@yahoo.com", True),
-            ("user@hotmail.com", True),
-            ("user@protonmail.com", True),
-            ("user@company.com", False),
-            ("", False),
-            (None, False),
-            ("no-at-sign", False),
-        ],
-    )
-    def test_is_personal_email(self, db_session, email, expected):
-        assert _is_personal_email(email) is expected
-
-    def test_is_new_hire_recent(self, db_session):
-        recent = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
-        assert _is_new_hire(recent) is True
-
-    def test_is_new_hire_old(self, db_session):
-        old = (datetime.now(timezone.utc) - timedelta(days=365)).isoformat()
-        assert _is_new_hire(old) is False
-
-    def test_is_new_hire_none(self, db_session):
-        assert _is_new_hire(None) is False
-
-    def test_is_new_hire_bad_format(self, db_session):
-        assert _is_new_hire("not-a-date") is False
-
-    def test_is_new_hire_z_suffix(self, db_session):
-        recent = (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
-        assert _is_new_hire(recent) is True
 
 
 # ── Customer Analysis Service ───────────────────────────────────────────

@@ -16,6 +16,7 @@ os.environ["TESTING"] = "1"
 os.environ["RATE_LIMIT_ENABLED"] = "false"
 
 import asyncio
+from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -182,189 +183,242 @@ class TestIdempotentEnrichment:
 # ── Missing Signal Backfill ──────────────────────────────────────────
 
 
+# Firmographics as returned by the verified connector (explorium.enrich_company shape).
+_FIRMO = {
+    "source": "explorium",
+    "legal_name": "Email Mined Corp",
+    "domain": "emailmined.com",
+    "website": "https://emailmined.com",
+    "industry": "Electronics Manufacturing",
+    "employee_size": "1001-5000",
+    "hq_city": "Austin",
+    "hq_state": "TX",
+    "hq_country": "US",
+    "linkedin_url": "https://linkedin.com/company/emc",
+    "naics": "334412",
+    "ticker": None,
+    "revenue_range": "$100M-$500M",
+}
+
+
+@contextmanager
+def _explorium_patched(enrich_result, *, enabled=True, circuit=False, api_key="test-key"):
+    """Patch the verified Explorium firmographic-backfill dependencies.
+
+    ``enrich_result`` is the dict/None ``explorium.enrich_company`` should return, OR an
+    exception instance to raise from it. Yields the enrich_company mock for assertions.
+    """
+    with (
+        patch("app.config.settings.explorium_enrichment_enabled", enabled),
+        patch("app.services.enrichment_credit_guard.circuit_open", return_value=circuit),
+        patch("app.services.credential_service.get_credential_cached", return_value=api_key),
+        patch("app.connectors.explorium.enrich_company", new_callable=AsyncMock) as mock_enrich,
+    ):
+        if isinstance(enrich_result, BaseException):
+            mock_enrich.side_effect = enrich_result
+        else:
+            mock_enrich.return_value = enrich_result
+        yield mock_enrich
+
+
 class TestEnrichMissingSignals:
-    def test_explorium_prospect_skips_backfill(self, db_session):
-        """Explorium-discovered prospects already have signals — should skip."""
+    def test_firmographics_complete_skips_backfill(self, db_session):
+        """A prospect with industry + size + region already set skips the paid call."""
         from app.services.prospect_signals import enrich_missing_signals
 
-        p = _make_prospect(
-            db_session,
-            discovery_source="explorium",
-            readiness_signals={
-                "intent": {"strength": "strong"},
-                "hiring": {"type": "procurement"},
-                "events": [{"type": "funding"}],
-            },
-        )
+        p = _make_prospect(db_session)  # defaults set industry, size, and region
 
-        result = _run(enrich_missing_signals(p.id, db_session))
+        with _explorium_patched(_FIRMO) as mock_enrich:
+            result = _run(enrich_missing_signals(p.id, db_session))
+
         assert result is False
+        mock_enrich.assert_not_called()
 
-    @patch("app.http_client.http")
-    def test_email_mined_prospect_gets_backfill(self, mock_http, db_session):
-        """Email-mined prospects without signals should get Explorium enrichment."""
+    def test_email_mined_prospect_gets_firmographic_backfill(self, db_session):
+        """Email-mined prospects missing firmographics get an Explorium backfill."""
         from app.services.prospect_signals import enrich_missing_signals
 
         p = _make_prospect(
             db_session,
             domain="emailmined.com",
             discovery_source="email_mining",
-            readiness_signals={},
+            industry=None,
+            naics_code=None,
+            employee_count_range=None,
+            revenue_range=None,
+            region=None,
+            hq_location=None,
+            website=None,
+            fit_score=0,
+            fit_reasoning=None,
+            last_enriched_at=None,
         )
 
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            "businesses": [
-                {
-                    "business_intent_topics": ["electronic components", "semiconductors", "procurement solutions"],
-                    "workforce_trends": {"procurement": 3},
-                    "recent_events": [{"type": "new_funding_round", "date": "2026-01", "description": "Raised $10M"}],
-                }
-            ]
-        }
-        mock_http.post = AsyncMock(return_value=mock_resp)
+        with _explorium_patched(_FIRMO) as mock_enrich:
+            result = _run(enrich_missing_signals(p.id, db_session))
 
-        with patch(
-            "app.services.prospect_discovery_explorium._get_api_key",
-            return_value="test-key",
-        ):
+        assert result is True
+        mock_enrich.assert_awaited_once()
+        db_session.refresh(p)
+        assert p.industry == "Electronics Manufacturing"
+        assert p.employee_count_range == "1001-5000"
+        assert p.naics_code == "334412"
+        assert p.revenue_range == "$100M-$500M"
+        assert p.website == "https://emailmined.com"
+        assert p.hq_location == "Austin, TX, US"
+        assert p.region == "US"
+        # Fit score recomputed from the newly-populated firmographics.
+        assert p.fit_score > 0
+        assert p.fit_reasoning
+        assert p.last_enriched_at is not None
+
+    def test_backfill_only_fills_missing_fields(self, db_session):
+        """Fields already set on the prospect are preserved; only blanks are filled."""
+        from app.services.prospect_signals import enrich_missing_signals
+
+        p = _make_prospect(
+            db_session,
+            domain="partial.com",
+            discovery_source="email_mining",
+            industry="Existing Industry",
+            employee_count_range=None,
+            naics_code=None,
+            region=None,
+            hq_location=None,
+            website=None,
+        )
+
+        with _explorium_patched(_FIRMO):
             result = _run(enrich_missing_signals(p.id, db_session))
 
         assert result is True
         db_session.refresh(p)
-        assert p.readiness_signals["intent"]["strength"] == "strong"
-        assert p.readiness_signals["hiring"]["type"] == "procurement"
-        assert len(p.readiness_signals["events"]) == 1
-        assert p.readiness_signals["source"] == "backfill"
+        assert p.industry == "Existing Industry"  # preserved
+        assert p.employee_count_range == "1001-5000"  # backfilled
+        assert p.region == "US"  # backfilled
 
-    @patch("app.http_client.http")
-    def test_backfill_api_failure_returns_false(self, mock_http, db_session):
-        from app.services.prospect_signals import enrich_missing_signals
-
-        p = _make_prospect(
-            db_session,
-            domain="failcorp.com",
-            discovery_source="email_mining",
-            readiness_signals={},
-        )
-
-        mock_resp = MagicMock()
-        mock_resp.status_code = 500
-        mock_resp.text = "Internal Server Error"
-        mock_http.post = AsyncMock(return_value=mock_resp)
-
-        with patch(
-            "app.services.prospect_discovery_explorium._get_api_key",
-            return_value="test-key",
-        ):
-            result = _run(enrich_missing_signals(p.id, db_session))
-
-        assert result is False
-
-    def test_backfill_no_api_key_returns_false(self, db_session):
-        from app.services.prospect_signals import enrich_missing_signals
-
-        p = _make_prospect(
-            db_session,
-            discovery_source="email_mining",
-            readiness_signals={},
-        )
-
-        with patch(
-            "app.services.prospect_discovery_explorium._get_api_key",
-            return_value="",
-        ):
-            result = _run(enrich_missing_signals(p.id, db_session))
-
-        assert result is False
-
-    def test_backfill_nonexistent_prospect(self, db_session):
-        from app.services.prospect_signals import enrich_missing_signals
-
-        result = _run(enrich_missing_signals(99999, db_session))
-        assert result is False
-
-    @patch("app.http_client.http")
-    def test_backfill_no_results(self, mock_http, db_session):
-        from app.services.prospect_signals import enrich_missing_signals
-
-        p = _make_prospect(
-            db_session,
-            domain="nodatacorp.com",
-            discovery_source="email_mining",
-            readiness_signals={},
-        )
-
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {"businesses": []}
-        mock_http.post = AsyncMock(return_value=mock_resp)
-
-        with patch(
-            "app.services.prospect_discovery_explorium._get_api_key",
-            return_value="test-key",
-        ):
-            result = _run(enrich_missing_signals(p.id, db_session))
-
-        assert result is False
-
-    def test_prospect_with_intent_but_no_events_gets_backfill(self, db_session):
-        """Prospect with partial signals should still get backfill for missing ones."""
-        from app.services.prospect_signals import enrich_missing_signals
-
-        p = _make_prospect(
-            db_session,
-            domain="partialcorp.com",
-            discovery_source="email_mining",
-            readiness_signals={"intent": {"strength": "weak"}},
-        )
-
-        # Has intent but not hiring or events — should attempt backfill
-        # But no API key, so returns False
-        with patch(
-            "app.services.prospect_discovery_explorium._get_api_key",
-            return_value="",
-        ):
-            result = _run(enrich_missing_signals(p.id, db_session))
-
-        assert result is False
-
-    @patch("app.http_client.http")
-    def test_backfill_exception_returns_false(self, mock_http, db_session):
-        from app.services.prospect_signals import enrich_missing_signals
-
-        p = _make_prospect(
-            db_session,
-            domain="exception.com",
-            discovery_source="email_mining",
-            readiness_signals={},
-        )
-
-        mock_http.post = AsyncMock(side_effect=Exception("Connection timeout"))
-
-        with patch(
-            "app.services.prospect_discovery_explorium._get_api_key",
-            return_value="test-key",
-        ):
-            result = _run(enrich_missing_signals(p.id, db_session))
-
-        assert result is False
-
-    def test_backfill_no_domain(self, db_session):
+    def test_no_domain_returns_false(self, db_session):
         from app.services.prospect_signals import enrich_missing_signals
 
         p = _make_prospect(
             db_session,
             domain="",
-            discovery_source="email_mining",
-            readiness_signals={},
+            industry=None,
+            employee_count_range=None,
+            region=None,
         )
 
-        with patch(
-            "app.services.prospect_discovery_explorium._get_api_key",
-            return_value="test-key",
+        with _explorium_patched(_FIRMO) as mock_enrich:
+            result = _run(enrich_missing_signals(p.id, db_session))
+
+        assert result is False
+        mock_enrich.assert_not_called()
+
+    def test_nonexistent_prospect_returns_false(self, db_session):
+        from app.services.prospect_signals import enrich_missing_signals
+
+        result = _run(enrich_missing_signals(999, db_session))
+        assert result is False
+
+    def test_missing_credential_returns_false(self, db_session):
+        from app.services.prospect_signals import enrich_missing_signals
+
+        p = _make_prospect(
+            db_session,
+            domain="nocred.com",
+            industry=None,
+            employee_count_range=None,
+            region=None,
+        )
+
+        with _explorium_patched(_FIRMO, api_key="") as mock_enrich:
+            result = _run(enrich_missing_signals(p.id, db_session))
+
+        assert result is False
+        mock_enrich.assert_not_called()
+
+    def test_gate_disabled_returns_false(self, db_session):
+        from app.services.prospect_signals import enrich_missing_signals
+
+        p = _make_prospect(
+            db_session,
+            domain="disabled.com",
+            industry=None,
+            employee_count_range=None,
+            region=None,
+        )
+
+        with _explorium_patched(_FIRMO, enabled=False) as mock_enrich:
+            result = _run(enrich_missing_signals(p.id, db_session))
+
+        assert result is False
+        mock_enrich.assert_not_called()
+
+    def test_quota_error_trips_circuit_returns_false(self, db_session):
+        from app.services import enrichment_credit_guard as cg
+        from app.services.prospect_signals import enrich_missing_signals
+
+        p = _make_prospect(
+            db_session,
+            domain="quota.com",
+            industry=None,
+            employee_count_range=None,
+            region=None,
+        )
+
+        with (
+            _explorium_patched(cg.ProviderQuotaError("429")),
+            patch("app.services.enrichment_credit_guard.trip_circuit") as mock_trip,
         ):
+            result = _run(enrich_missing_signals(p.id, db_session))
+
+        assert result is False
+        mock_trip.assert_called_once()
+
+    def test_enrich_company_none_returns_false(self, db_session):
+        from app.services.prospect_signals import enrich_missing_signals
+
+        p = _make_prospect(
+            db_session,
+            domain="nodata.com",
+            industry=None,
+            employee_count_range=None,
+            region=None,
+        )
+
+        with _explorium_patched(None):
+            result = _run(enrich_missing_signals(p.id, db_session))
+
+        assert result is False
+
+    def test_enrich_company_empty_dict_returns_false(self, db_session):
+        from app.services.prospect_signals import enrich_missing_signals
+
+        p = _make_prospect(
+            db_session,
+            domain="emptydict.com",
+            industry=None,
+            employee_count_range=None,
+            region=None,
+        )
+
+        with _explorium_patched({}):
+            result = _run(enrich_missing_signals(p.id, db_session))
+
+        assert result is False
+
+    def test_generic_exception_returns_false(self, db_session):
+        from app.services.prospect_signals import enrich_missing_signals
+
+        p = _make_prospect(
+            db_session,
+            domain="boom.com",
+            industry=None,
+            employee_count_range=None,
+            region=None,
+        )
+
+        with _explorium_patched(RuntimeError("connection reset")):
             result = _run(enrich_missing_signals(p.id, db_session))
 
         assert result is False
@@ -911,92 +965,50 @@ class TestRecalculateReadiness:
         assert score_after_events >= score_after_intent
 
 
-# ── Coverage: enrich_missing_signals lines 214-216, 230-231 ─────────
+# ── Coverage: firmographic backfill edge cases ──────────────────────
 
 
-class TestEnrichMissingSignalsHiringAndEvents:
-    @patch("app.http_client.http")
-    def test_engineering_hiring_path(self, mock_http, db_session):
-        """Lines 214-216: hiring 'engineering' type when no procurement growth."""
+class TestEnrichMissingSignalsFirmographicEdges:
+    def test_hq_location_from_country_only(self, db_session):
+        """Only hq_country present → hq_location is just the country."""
         from app.services.prospect_signals import enrich_missing_signals
 
         p = _make_prospect(
             db_session,
-            domain="enghire.com",
-            discovery_source="email_mining",
-            readiness_signals={},
+            domain="countryonly.com",
+            industry=None,
+            employee_count_range=None,
+            region=None,
+            hq_location=None,
         )
 
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            "businesses": [
-                {
-                    "business_intent_topics": ["electronic components"],
-                    "workforce_trends": {
-                        "procurement": None,
-                        "engineering": "12% growth",
-                    },
-                    "recent_events": [],
-                }
-            ]
-        }
-        mock_http.post = AsyncMock(return_value=mock_resp)
-
-        with patch(
-            "app.services.prospect_discovery_explorium._get_api_key",
-            return_value="test-key",
-        ):
+        firmo = {**_FIRMO, "hq_city": None, "hq_state": None, "hq_country": "US"}
+        with _explorium_patched(firmo):
             result = _run(enrich_missing_signals(p.id, db_session))
 
         assert result is True
         db_session.refresh(p)
-        assert p.readiness_signals["hiring"]["type"] == "engineering"
-        assert p.readiness_signals["hiring"]["detail"] == "12% growth"
+        assert p.hq_location == "US"
 
-    @patch("app.http_client.http")
-    def test_string_event_parsing(self, mock_http, db_session):
-        """Lines 230-231: when events contain plain strings instead of dicts."""
+    def test_existing_region_not_overwritten(self, db_session):
+        """A region already set is preserved even when the connector returns another."""
         from app.services.prospect_signals import enrich_missing_signals
 
         p = _make_prospect(
             db_session,
-            domain="strevents.com",
-            discovery_source="email_mining",
-            readiness_signals={},
+            domain="hasregion.com",
+            industry=None,
+            employee_count_range=None,
+            region="EU",
         )
 
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            "businesses": [
-                {
-                    "business_intent_topics": ["semiconductors"],
-                    "recent_events": [
-                        "Acquired new subsidiary",
-                        {"type": "funding", "date": "2026-01", "description": "Series C"},
-                    ],
-                }
-            ]
-        }
-        mock_http.post = AsyncMock(return_value=mock_resp)
-
-        with patch(
-            "app.services.prospect_discovery_explorium._get_api_key",
-            return_value="test-key",
-        ):
+        # _FIRMO carries hq_country "US", but the prospect's existing EU region must win.
+        with _explorium_patched(_FIRMO):
             result = _run(enrich_missing_signals(p.id, db_session))
 
         assert result is True
         db_session.refresh(p)
-        events = p.readiness_signals["events"]
-        # First event is a string parsed into {"type": str, "date": None, "description": str}
-        str_event = events[0]
-        assert str_event["type"] == "Acquired new subsidiary"
-        assert str_event["date"] is None
-        assert str_event["description"] == "Acquired new subsidiary"
-        # Second event is a normal dict
-        assert events[1]["type"] == "funding"
+        assert p.region == "EU"
 
 
 # ── Coverage: find_similar_customers line 348, _to_bracket_index ────

@@ -1377,6 +1377,25 @@ class TestGenerateAiWriteup:
 
 
 class TestEnrichMissingSignals:
+    @staticmethod
+    def _prospect(**overrides):
+        """A MagicMock prospect with empty firmographics (backfill proceeds)."""
+        prospect = MagicMock()
+        prospect.id = 1
+        prospect.name = "Test Co"
+        prospect.domain = "test.com"
+        prospect.industry = None
+        prospect.employee_count_range = None
+        prospect.region = None
+        prospect.naics_code = None
+        prospect.revenue_range = None
+        prospect.website = None
+        prospect.hq_location = None
+        prospect.last_enriched_at = None
+        for key, value in overrides.items():
+            setattr(prospect, key, value)
+        return prospect
+
     @pytest.mark.asyncio
     async def test_prospect_not_found(self):
         from app.services.prospect_signals import enrich_missing_signals
@@ -1387,121 +1406,170 @@ class TestEnrichMissingSignals:
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_already_has_signals(self):
+    async def test_firmographics_complete_skips(self):
         from app.services.prospect_signals import enrich_missing_signals
 
-        prospect = MagicMock()
-        prospect.readiness_signals = {
-            "intent": {"strength": "strong"},
-            "hiring": {"type": "procurement"},
-        }
+        prospect = self._prospect(industry="Electronics", employee_count_range="1001-5000", region="US")
+        db = MagicMock()
+        db.get.return_value = prospect
+
+        with patch("app.connectors.explorium.enrich_company", new_callable=AsyncMock) as mock_enrich:
+            result = await enrich_missing_signals(1, db)
+
+        assert result is False
+        mock_enrich.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_no_domain(self):
+        from app.services.prospect_signals import enrich_missing_signals
+
+        prospect = self._prospect(domain="")
         db = MagicMock()
         db.get.return_value = prospect
         result = await enrich_missing_signals(1, db)
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_no_api_key(self):
+    async def test_no_credential(self):
         from app.services.prospect_signals import enrich_missing_signals
 
-        prospect = MagicMock()
-        prospect.readiness_signals = {}
-        prospect.domain = "test.com"
+        prospect = self._prospect()
         db = MagicMock()
         db.get.return_value = prospect
 
-        with patch("app.services.prospect_discovery_explorium._get_api_key", return_value=""):
-            # Need to patch the lazy import
-            with patch.dict("sys.modules", {}):
-                result = await enrich_missing_signals(1, db)
-                assert result is False
-
-    @pytest.mark.asyncio
-    async def test_no_domain(self):
-        from app.services.prospect_signals import enrich_missing_signals
-
-        prospect = MagicMock()
-        prospect.readiness_signals = {}
-        prospect.domain = ""
-        db = MagicMock()
-        db.get.return_value = prospect
-
-        with patch("app.services.prospect_discovery_explorium._get_api_key", return_value="key"):
+        with (
+            patch("app.config.settings.explorium_enrichment_enabled", True),
+            patch("app.services.enrichment_credit_guard.circuit_open", return_value=False),
+            patch("app.services.credential_service.get_credential_cached", return_value=""),
+            patch("app.connectors.explorium.enrich_company", new_callable=AsyncMock) as mock_enrich,
+        ):
             result = await enrich_missing_signals(1, db)
-            assert result is False
+
+        assert result is False
+        mock_enrich.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_successful_backfill(self):
         from app.services.prospect_signals import enrich_missing_signals
 
-        prospect = MagicMock()
-        prospect.readiness_signals = {}
-        prospect.domain = "test.com"
-        prospect.name = "Test Co"
-        prospect.id = 1
+        prospect = self._prospect()
         db = MagicMock()
         db.get.return_value = prospect
 
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            "businesses": [
-                {
-                    "business_intent_topics": ["electronic components", "semiconductor sourcing", "circuit boards"],
-                    "workforce_trends": {"procurement": 5},
-                    "recent_events": [{"type": "funding", "date": "2026-01-01", "description": "Series B"}],
-                }
-            ]
+        firmo = {
+            "source": "explorium",
+            "legal_name": "Test Co",
+            "industry": "Electronics Manufacturing",
+            "employee_size": "1001-5000",
+            "hq_city": "Austin",
+            "hq_state": "TX",
+            "hq_country": "US",
+            "naics": "334412",
+            "revenue_range": "$100M-$500M",
+            "website": "https://test.com",
         }
 
         with (
-            patch("app.services.prospect_discovery_explorium._get_api_key", return_value="key"),
-            patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp),
-            patch("app.services.prospect_signals.calculate_readiness_score", return_value=(60, {})),
+            patch("app.config.settings.explorium_enrichment_enabled", True),
+            patch("app.services.enrichment_credit_guard.circuit_open", return_value=False),
+            patch("app.services.credential_service.get_credential_cached", return_value="key"),
+            patch("app.connectors.explorium.enrich_company", new_callable=AsyncMock, return_value=firmo),
+            patch("app.services.prospect_signals.calculate_fit_score", return_value=(72, "Good fit")),
         ):
             result = await enrich_missing_signals(1, db)
-            assert result is True
-            db.commit.assert_called()
+
+        assert result is True
+        assert prospect.industry == "Electronics Manufacturing"
+        assert prospect.employee_count_range == "1001-5000"
+        assert prospect.hq_location == "Austin, TX, US"
+        assert prospect.region == "US"
+        assert prospect.fit_score == 72
+        db.commit.assert_called()
 
     @pytest.mark.asyncio
-    async def test_api_failure(self):
+    async def test_enrich_company_returns_none(self):
         from app.services.prospect_signals import enrich_missing_signals
 
-        prospect = MagicMock()
-        prospect.readiness_signals = {}
-        prospect.domain = "test.com"
-        prospect.id = 1
+        prospect = self._prospect()
         db = MagicMock()
         db.get.return_value = prospect
 
-        mock_resp = MagicMock()
-        mock_resp.status_code = 500
-        mock_resp.text = "Server Error"
-
         with (
-            patch("app.services.prospect_discovery_explorium._get_api_key", return_value="key"),
-            patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp),
+            patch("app.config.settings.explorium_enrichment_enabled", True),
+            patch("app.services.enrichment_credit_guard.circuit_open", return_value=False),
+            patch("app.services.credential_service.get_credential_cached", return_value="key"),
+            patch("app.connectors.explorium.enrich_company", new_callable=AsyncMock, return_value=None),
         ):
             result = await enrich_missing_signals(1, db)
-            assert result is False
+
+        assert result is False
+        db.commit.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_enrich_company_returns_empty_dict(self):
+        from app.services.prospect_signals import enrich_missing_signals
+
+        prospect = self._prospect()
+        db = MagicMock()
+        db.get.return_value = prospect
+
+        with (
+            patch("app.config.settings.explorium_enrichment_enabled", True),
+            patch("app.services.enrichment_credit_guard.circuit_open", return_value=False),
+            patch("app.services.credential_service.get_credential_cached", return_value="key"),
+            patch("app.connectors.explorium.enrich_company", new_callable=AsyncMock, return_value={}),
+        ):
+            result = await enrich_missing_signals(1, db)
+
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_quota_error_trips_circuit(self):
+        from app.services import enrichment_credit_guard as cg
+        from app.services.prospect_signals import enrich_missing_signals
+
+        prospect = self._prospect()
+        db = MagicMock()
+        db.get.return_value = prospect
+
+        with (
+            patch("app.config.settings.explorium_enrichment_enabled", True),
+            patch("app.services.enrichment_credit_guard.circuit_open", return_value=False),
+            patch("app.services.credential_service.get_credential_cached", return_value="key"),
+            patch(
+                "app.connectors.explorium.enrich_company",
+                new_callable=AsyncMock,
+                side_effect=cg.ProviderQuotaError("429"),
+            ),
+            patch("app.services.enrichment_credit_guard.trip_circuit") as mock_trip,
+        ):
+            result = await enrich_missing_signals(1, db)
+
+        assert result is False
+        mock_trip.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_exception_handling(self):
         from app.services.prospect_signals import enrich_missing_signals
 
-        prospect = MagicMock()
-        prospect.readiness_signals = {}
-        prospect.domain = "test.com"
-        prospect.id = 1
+        prospect = self._prospect()
         db = MagicMock()
         db.get.return_value = prospect
 
         with (
-            patch("app.services.prospect_discovery_explorium._get_api_key", return_value="key"),
-            patch("app.http_client.http.post", new_callable=AsyncMock, side_effect=Exception("Network error")),
+            patch("app.config.settings.explorium_enrichment_enabled", True),
+            patch("app.services.enrichment_credit_guard.circuit_open", return_value=False),
+            patch("app.services.credential_service.get_credential_cached", return_value="key"),
+            patch(
+                "app.connectors.explorium.enrich_company",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("Network error"),
+            ),
         ):
             result = await enrich_missing_signals(1, db)
-            assert result is False
+
+        assert result is False
+        db.commit.assert_not_called()
 
 
 # ═══════════════════════════════════════════════════════════════════════

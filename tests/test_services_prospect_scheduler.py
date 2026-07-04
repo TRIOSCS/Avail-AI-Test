@@ -229,6 +229,19 @@ class TestDiscoveryRotation:
     def test_rotation_has_6_slots(self):
         assert len(DISCOVERY_ROTATION) == 6
 
+    def test_rotation_slices_map_to_real_explorium_keys(self):
+        """H6: every rotation slot's segment_keys/regions must resolve to real
+        SEGMENT_SEARCH_PARAMS / REGIONS keys, else run_explorium_discovery_batch would
+        drop them and scan nothing (or the wrong cells)."""
+        from app.services.prospect_discovery_explorium import REGIONS, SEGMENT_SEARCH_PARAMS
+
+        for slot in DISCOVERY_ROTATION:
+            assert slot["segment_keys"], f"{slot['segment']} has no segment_keys"
+            for sk in slot["segment_keys"]:
+                assert sk in SEGMENT_SEARCH_PARAMS, f"{sk} not a real segment key"
+            for rk in slot["regions"]:
+                assert rk in REGIONS, f"{rk} not a real region key"
+
 
 # ── Kill Switch ─────────────────────────────────────────────────────
 
@@ -410,14 +423,31 @@ class TestResurfaceLogic:
                     "readiness_signals": {"intent": {"strength": "strong"}},
                     "last_enriched_at": datetime.now(timezone.utc) - timedelta(days=45),
                 },
-                "dismissed",
-                id="does_not_resurface_old_enrichment",
+                "suggested",
+                id="resurfaces_regardless_of_enrichment_age",
+            ),
+            pytest.param(
+                {
+                    "name": "ExpiredNeverEnriched",
+                    "domain": "expired-never.com",
+                    "status": "expired",
+                    "readiness_score": 55,
+                    "readiness_signals": {"intent": {"strength": "strong"}},
+                    "last_enriched_at": None,
+                },
+                "suggested",
+                id="resurfaces_expired_even_without_enrichment_timestamp",
             ),
         ],
     )
     async def test_resurface_status(self, db_session, overrides, expected_status):
-        """Expired/dismissed prospects resurface only with fresh signals AND readiness
-        >= 40; low readiness, no signals, or stale enrichment do not."""
+        """Expired/dismissed prospects resurface on fresh signals AND readiness >= 40;
+        low readiness or no signals do not.
+
+        Enrichment age is NOT a gate (H4) — a strong- signal row resurfaces even if it
+        was never re-enriched (its last_enriched_at is stale or NULL), because nothing
+        re-enriches non-SUGGESTED rows.
+        """
         p = _make_prospect(db_session, **overrides)
         with patch("app.database.SessionLocal", return_value=db_session), patch.object(db_session, "close"):
             await job_expire_and_resurface()
@@ -782,7 +812,7 @@ class TestSchedulerCoverageGaps:
             patch("app.database.SessionLocal") as mock_sl,
             patch(
                 "app.services.prospect_scheduler.get_next_discovery_slice",
-                return_value={"segment": "Test", "regions": ["US"]},
+                return_value={"segment": "Test", "segment_keys": ["aerospace_defense"], "regions": ["US"]},
             ),
         ):
             mock_db = MagicMock()

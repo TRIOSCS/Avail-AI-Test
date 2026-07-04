@@ -1,7 +1,8 @@
 """Phase 4 — Signal gap-fill, similar customer matching, and AI writeups.
 
 Enriches prospect accounts with:
-- Missing intent/hiring/event signals (backfill for email-mined prospects)
+- Missing firmographics (industry/size/HQ/NAICS/revenue) via the verified Explorium
+  connector — backfill for email-mined and manually-added prospects
 - Similar existing Trio customers (industry/size/region matching)
 - AI-generated sales writeups (Claude Haiku with template fallback)
 
@@ -17,6 +18,7 @@ from app.models.crm import Company
 from app.models.prospect_account import ProspectAccount
 from app.services.prospect_scoring import (
     ICP_SEGMENTS,
+    calculate_fit_score,
     calculate_readiness_score,
 )
 
@@ -84,160 +86,105 @@ def _recalculate_readiness(prospect: ProspectAccount) -> None:
 
 
 async def enrich_missing_signals(prospect_id: int, db: Session) -> bool:
-    """Check if prospect has signal data; if not, call Explorium to backfill.
+    """Backfill a prospect's missing firmographics via the verified Explorium connector.
 
-    Primarily serves email-mined and manually-added prospects. Explorium-discovered
-    prospects will already have signals and be skipped.
+    Primarily serves email-mined and manually-added prospects that lack firmographic
+    detail (industry / employee size / HQ / NAICS / revenue). Calls Explorium's real
+    ``match → firmographics/enrich`` pipeline (``explorium.enrich_company``) and fills ONLY
+    the fields that are currently empty, then recomputes the ICP fit score.
 
-    Returns True if new signals were added, False if already complete.
+    Explorium returns firmographics only — NOT intent/hiring/events — so this is a
+    firmographic backfill, not a readiness-signal backfill. Self-gating: returns False when
+    Explorium is disabled, its circuit is open, or the credential is missing. Skips the paid
+    call entirely when the prospect has no domain or its firmographics are already complete.
+
+    Returns True if any field was backfilled, False otherwise.
     """
     prospect = db.get(ProspectAccount, prospect_id)
     if not prospect:
         logger.warning("enrich_missing_signals: prospect {} not found", prospect_id)
         return False
 
-    signals = prospect.readiness_signals or {}
-
-    # Check if signals are already populated (Explorium-discovered prospects)
-    has_intent = bool(signals.get("intent"))
-    has_hiring = bool(signals.get("hiring"))
-    has_events = bool(signals.get("events"))
-
-    if has_intent and (has_hiring or has_events):
-        logger.debug("Prospect {} already has signals, skipping backfill", prospect_id)
+    if not prospect.domain:
         return False
 
-    # Lazy import to avoid circular dependency
-    from app.http_client import http
-    from app.services.prospect_discovery_explorium import (
-        EXPLORIUM_BASE,
-        SHARED_INTENT_TOPICS,
-        _get_api_key,
-    )
+    # Firmographics already complete — skip the paid call.
+    if prospect.industry and prospect.employee_count_range and prospect.region:
+        return False
 
-    api_key = _get_api_key()
+    # Lazy imports to avoid circular dependencies.
+    from app.config import settings
+    from app.connectors import explorium
+    from app.services import enrichment_credit_guard as cg
+    from app.services.credential_service import get_credential_cached
+    from app.services.prospect_discovery_explorium import _detect_region
+
+    if not settings.explorium_enrichment_enabled or cg.circuit_open("explorium"):
+        return False
+
+    api_key = get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY")
     if not api_key:
-        logger.warning("Explorium API key not configured — skipping signal backfill")
-        return False
-
-    domain = prospect.domain
-    if not domain:
+        logger.warning("Explorium credential not configured — skipping firmographic backfill")
         return False
 
     try:
-        resp = await http.post(
-            f"{EXPLORIUM_BASE}/v1/businesses/search",
-            json={
-                "domain": domain,
-                "business_intent_topics": SHARED_INTENT_TOPICS,
-                "limit": 1,
-            },
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {api_key}",
-            },
-            timeout=30,
-        )
-
-        if resp.status_code != 200:
-            logger.warning(
-                "Explorium signal backfill failed for {}: {} {}",
-                domain,
-                resp.status_code,
-                resp.text[:200],
-            )
-            return False
-
-        data = resp.json()
-        businesses = data.get("businesses", data.get("results", []))
-        if not businesses:
-            logger.debug("No Explorium data for domain {}", domain)
-            return False
-
-        raw = businesses[0] if isinstance(businesses, list) else {}
-
-        new_signals = dict(signals)
-        added = False
-
-        # Intent
-        if not has_intent:
-            intent_topics = raw.get("business_intent_topics") or raw.get("intent_topics") or []
-            if isinstance(intent_topics, list) and intent_topics:
-                component_topics = [
-                    t
-                    for t in intent_topics
-                    if any(
-                        kw in t.lower()
-                        for kw in [
-                            "electronic",
-                            "component",
-                            "semiconductor",
-                            "circuit",
-                            "procurement",
-                            "sourcing",
-                        ]
-                    )
-                ]
-                if len(component_topics) >= 3:
-                    strength = "strong"
-                elif component_topics:
-                    strength = "moderate"
-                else:
-                    strength = "weak"
-                new_signals["intent"] = {
-                    "strength": strength,
-                    "topics": intent_topics,
-                    "component_topics": component_topics,
-                }
-                added = True
-
-        # Hiring
-        if not has_hiring:
-            workforce = raw.get("workforce_trends") or raw.get("department_growth") or {}
-            if isinstance(workforce, dict):
-                procurement_growth = workforce.get("procurement") or workforce.get("purchasing")
-                engineering_growth = workforce.get("engineering") or workforce.get("r_and_d")
-                if procurement_growth:
-                    new_signals["hiring"] = {"type": "procurement", "detail": procurement_growth}
-                    added = True
-                elif engineering_growth:
-                    new_signals["hiring"] = {"type": "engineering", "detail": engineering_growth}
-                    added = True
-
-        # Events
-        if not has_events:
-            events_raw = raw.get("recent_events") or raw.get("events") or []
-            if isinstance(events_raw, list) and events_raw:
-                parsed_events = []
-                for ev in events_raw:
-                    if isinstance(ev, dict):
-                        parsed_events.append(
-                            {
-                                "type": ev.get("type") or ev.get("event_type", "unknown"),
-                                "date": ev.get("date") or ev.get("event_date"),
-                                "description": ev.get("description") or ev.get("title"),
-                            }
-                        )
-                    elif isinstance(ev, str):
-                        parsed_events.append({"type": ev, "date": None, "description": ev})
-                if parsed_events:
-                    new_signals["events"] = parsed_events
-                    added = True
-
-        if added:
-            new_signals["enriched_at"] = datetime.now(timezone.utc).isoformat()
-            new_signals["source"] = "backfill"
-            prospect.readiness_signals = new_signals
-            _recalculate_readiness(prospect)
-            prospect.last_enriched_at = datetime.now(timezone.utc)
-            db.commit()
-            logger.info("Backfilled signals for prospect {} ({})", prospect_id, domain)
-
-        return added
-
-    except Exception as e:
-        logger.error("Signal backfill error for prospect {}: {}", prospect_id, e)
+        company = await explorium.enrich_company(prospect.domain, prospect.name or "", api_key)
+    except cg.ProviderQuotaError:
+        cg.trip_circuit("explorium", settings.explorium_cooldown_minutes)
         return False
+    except Exception as e:
+        logger.error("Firmographic backfill error for prospect {}: {}", prospect_id, e)
+        return False
+
+    if not company:
+        return False
+
+    added = False
+
+    if not prospect.industry and company.get("industry"):
+        prospect.industry = company["industry"]
+        added = True
+    if not prospect.employee_count_range and company.get("employee_size"):
+        prospect.employee_count_range = company["employee_size"]
+        added = True
+    if not prospect.naics_code and company.get("naics"):
+        prospect.naics_code = company["naics"]
+        added = True
+    if not prospect.revenue_range and company.get("revenue_range"):
+        prospect.revenue_range = company["revenue_range"]
+        added = True
+    if not prospect.website and company.get("website"):
+        prospect.website = company["website"]
+        added = True
+
+    if not prospect.hq_location:
+        hq_location = ", ".join(
+            part for part in (company.get("hq_city"), company.get("hq_state"), company.get("hq_country")) if part
+        )
+        if hq_location:
+            prospect.hq_location = hq_location
+            added = True
+
+    if not prospect.region:
+        region = _detect_region({"hq_country": company.get("hq_country")})
+        if region:
+            prospect.region = region
+            added = True
+
+    if added:
+        prospect_data = {
+            "name": prospect.name,
+            "industry": prospect.industry,
+            "naics_code": prospect.naics_code,
+            "employee_count_range": prospect.employee_count_range,
+            "region": prospect.region,
+        }
+        prospect.fit_score, prospect.fit_reasoning = calculate_fit_score(prospect_data)
+        prospect.last_enriched_at = datetime.now(timezone.utc)
+        db.commit()
+        logger.info("Backfilled firmographics for prospect {} ({})", prospect_id, prospect.domain)
+
+    return added
 
 
 # ── Similar Customer Matching ────────────────────────────────────────

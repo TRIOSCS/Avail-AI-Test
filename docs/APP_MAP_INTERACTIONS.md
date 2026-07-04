@@ -3266,8 +3266,16 @@ scheduler. Contact discovery degrades gracefully: a provider failure renders an 
   - `app/services/prospect_discovery_explorium.py` (prospecting discovery) routes through
     `explorium.discover_businesses()` and normalizes each business into a scoring-ready
     dict. It previously hit an unverified `/v1/businesses/search` bulk route — now retired.
-    (Note: `app/services/prospect_signals.py` signal-backfill still calls the old
-    `/v1/businesses/search` with a `Bearer` header — a separate follow-up.)
+    `run_explorium_discovery_batch(batch_id, existing_domains, segment_keys, region_keys)`
+    scans only the monthly rotation slice's segment×region cells (not all 12), so discovery
+    spends ~1/6 the credits (H6).
+  - `app/services/prospect_signals.py::enrich_missing_signals` is now a **verified
+    firmographic backfill** — it calls `explorium.enrich_company` (real
+    `match → firmographics/enrich` pipeline, `api_key` header, `ProviderQuotaError`/circuit
+    guard) and fills only the prospect's empty firmographic fields, then recomputes fit. The
+    old dead `/v1/businesses/search` + `Bearer` call is removed (H7). Explorium exposes no
+    intent/hiring/events-by-domain route, so this backfills firmographics, not readiness
+    signals.
 - `app/connectors/clay_mcp.py` — backend MCP client (JSON-RPC 2.0 over HTTPS to
   `https://api.clay.com/v3/mcp`). Clay speaks **MCP Streamable HTTP**: every
   `tools/call` requires a session, so the connector first runs the handshake

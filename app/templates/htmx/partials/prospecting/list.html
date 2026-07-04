@@ -57,8 +57,9 @@
 
   {# Search + Filter + Sort bar #}
   <div id="prospect-filters" class="space-y-2 mb-4">
-    {# status carrier so search/sort requests preserve the active filter #}
+    {# status + scope carriers so search/sort requests preserve the active filter + scope #}
     <input type="hidden" name="status" value="{{ status }}">
+    <input type="hidden" name="scope" value="{{ scope }}">
 
     {# Search bar #}
     <div>
@@ -68,18 +69,19 @@
              hx-trigger="keyup changed delay:300ms"
              hx-target="#main-content"
              hx-push-url="true"
-             hx-include="[name='sort'], [name='status']">
+             hx-include="[name='sort'], [name='status'], [name='scope']">
     </div>
 
     {# Filter pills + sort #}
     <div class="flex flex-wrap items-center gap-2">
       {% set pill_counts = {'': all_total, 'suggested': status_counts.get('suggested', 0),
-                            'claimed': status_counts.get('claimed', 0), 'dismissed': status_counts.get('dismissed', 0)} %}
-      {% for val, label in [('', 'All'), ('suggested', 'Suggested'), ('claimed', 'Claimed'), ('dismissed', 'Dismissed')] %}
+                            'claimed': status_counts.get('claimed', 0), 'dismissed': status_counts.get('dismissed', 0),
+                            'expired': status_counts.get('expired', 0)} %}
+      {% for val, label in [('', 'All'), ('suggested', 'Suggested'), ('claimed', 'Claimed'), ('dismissed', 'Dismissed'), ('expired', 'Expired')] %}
       <button class="px-3 py-1.5 text-sm font-medium rounded-full transition-colors
                      {% if status == val %}bg-accent-500 text-white shadow-sm{% else %}bg-accent-100 text-accent-600 hover:bg-accent-200{% endif %}"
               aria-pressed="{{ 'true' if status == val else 'false' }}"
-              hx-get="/v2/partials/prospecting?status={{ val|urlencode }}&sort={{ sort|urlencode }}&q={{ q|urlencode }}"
+              hx-get="/v2/partials/prospecting?status={{ val|urlencode }}&sort={{ sort|urlencode }}&q={{ q|urlencode }}&scope={{ scope|urlencode }}"
               hx-target="#main-content"
               hx-push-url="true">
         {{ label }}
@@ -87,14 +89,27 @@
       </button>
       {% endfor %}
 
-      <div class="ml-auto">
+      <div class="ml-auto flex items-center gap-2">
+        {# See-All / See-Mine scope toggle — scopes grid + pill counts to my own claims. #}
+        <div class="inline-flex rounded-lg border border-line-base overflow-hidden" role="group" aria-label="Scope">
+          {% for s, lbl in [('all', 'All'), ('mine', 'Mine')] %}
+          <button class="px-3 py-1.5 text-sm font-medium transition-colors
+                         {% if scope == s %}bg-accent-500 text-white{% else %}bg-white text-accent-600 hover:bg-accent-100{% endif %}"
+                  aria-pressed="{{ 'true' if scope == s else 'false' }}"
+                  hx-get="/v2/partials/prospecting?scope={{ s|urlencode }}&status={{ status|urlencode }}&sort={{ sort|urlencode }}&q={{ q|urlencode }}"
+                  hx-target="#main-content"
+                  hx-push-url="true">
+            {{ lbl }}
+          </button>
+          {% endfor %}
+        </div>
         <select name="sort"
                 class="input input-sm"
                 hx-get="/v2/partials/prospecting"
                 hx-trigger="change"
                 hx-target="#main-content"
                 hx-push-url="true"
-                hx-include="[name='q'], [name='status']">
+                hx-include="[name='q'], [name='status'], [name='scope']">
           <option value="ai_match_desc" {% if sort == 'ai_match_desc' %}selected{% endif %}>AI match (best first)</option>
           <option value="buyer_ready_desc" {% if sort == 'buyer_ready_desc' %}selected{% endif %}>Most buyer-ready</option>
           <option value="fit_desc" {% if sort == 'fit_desc' %}selected{% endif %}>Best fit</option>
@@ -130,7 +145,7 @@
   {% if total_pages > 1 %}
   <div class="mt-6 flex items-center justify-center gap-2">
     {% if page > 1 %}
-    <a hx-get="/v2/partials/prospecting?page={{ page - 1 }}&status={{ status|urlencode }}&sort={{ sort|urlencode }}&q={{ q|urlencode }}"
+    <a hx-get="/v2/partials/prospecting?page={{ page - 1 }}&status={{ status|urlencode }}&sort={{ sort|urlencode }}&q={{ q|urlencode }}&scope={{ scope|urlencode }}"
        hx-target="#main-content"
        hx-push-url="true"
        class="btn-secondary btn-sm cursor-pointer">
@@ -143,7 +158,7 @@
     <span class="px-3 py-1.5 text-sm text-gray-600">Page {{ page }} of {{ total_pages }}</span>
 
     {% if page < total_pages %}
-    <a hx-get="/v2/partials/prospecting?page={{ page + 1 }}&status={{ status|urlencode }}&sort={{ sort|urlencode }}&q={{ q|urlencode }}"
+    <a hx-get="/v2/partials/prospecting?page={{ page + 1 }}&status={{ status|urlencode }}&sort={{ sort|urlencode }}&q={{ q|urlencode }}&scope={{ scope|urlencode }}"
        hx-target="#main-content"
        hx-push-url="true"
        class="btn-secondary btn-sm cursor-pointer">

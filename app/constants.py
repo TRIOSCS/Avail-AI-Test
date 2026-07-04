@@ -578,6 +578,7 @@ class ProspectAccountStatus(StrEnum):
     CLAIMED = "claimed"
     DISMISSED = "dismissed"
     CONVERTED = "converted"
+    EXPIRED = "expired"
 
 
 class CompanyDisposition(StrEnum):

@@ -72,34 +72,46 @@ def _persist_discovery_results(db: Session, batch: DiscoveryBatch, results: list
 
 # ── Discovery Slice Rotation ─────────────────────────────────────────
 
+# Each slice carries the human-readable ``segment`` label (stamped on the DiscoveryBatch
+# for audit/rotation matching), the ``segment_keys`` that map onto
+# prospect_discovery_explorium.SEGMENT_SEARCH_PARAMS, and the ``regions`` that map onto
+# prospect_discovery_explorium.REGIONS. ``run_explorium_discovery_batch`` is handed
+# ``segment_keys`` + ``regions`` so it scans ONLY this slice's segment×region cells (not
+# all 12) — the rotation is honored and monthly credits drop to ~1/6 of a full scan.
 DISCOVERY_ROTATION = [
     {
         "segment": "Aerospace & Defense",
+        "segment_keys": ["aerospace_defense"],
         "regions": ["US"],
         "intent_keywords": ["aerospace components", "military electronics", "avionics"],
     },
     {
         "segment": "Aerospace & Defense",
+        "segment_keys": ["aerospace_defense"],
         "regions": ["EU", "Asia"],
         "intent_keywords": ["aerospace components", "military electronics", "avionics"],
     },
     {
         "segment": "Service Supply Chain",
+        "segment_keys": ["service_supply_chain"],
         "regions": ["US"],
         "intent_keywords": ["MRO electronics", "aftermarket components", "service parts"],
     },
     {
         "segment": "Service Supply Chain",
+        "segment_keys": ["service_supply_chain"],
         "regions": ["EU", "Asia"],
         "intent_keywords": ["MRO electronics", "aftermarket components", "service parts"],
     },
     {
         "segment": "EMS / Electronics Mfg",
+        "segment_keys": ["ems_electronics"],
         "regions": ["US", "EU", "Asia"],
         "intent_keywords": ["PCB assembly", "contract manufacturing", "electronic components"],
     },
     {
         "segment": "Automotive + catch-all",
+        "segment_keys": ["automotive"],
         "regions": ["US", "EU", "Asia"],
         "intent_keywords": ["automotive electronics", "EV components", "ADAS semiconductors"],
     },
@@ -174,7 +186,14 @@ async def job_discover_prospects() -> dict:
             from app.services.prospect_discovery_explorium import run_explorium_discovery_batch
 
             existing_domains = {d[0] for d in db.query(ProspectAccount.domain).limit(10000).all() if d[0]}
-            results = await run_explorium_discovery_batch(batch_id, existing_domains)
+            # Honor the rotation slice — scan ONLY this slice's segment×region cells so
+            # discovery spends ~1/6 the credits instead of scanning all 12 every run.
+            results = await run_explorium_discovery_batch(
+                batch_id,
+                existing_domains,
+                segment_keys=slice_info.get("segment_keys"),
+                region_keys=slice_info.get("regions"),
+            )
             explorium_count = _persist_discovery_results(db, batch, results)
             db.commit()
         except Exception as e:
@@ -404,18 +423,23 @@ async def job_expire_and_resurface() -> dict:
             if _has_strong_intent(p.readiness_signals or {}):
                 continue
 
-            p.status = "expired"
+            p.status = ProspectAccountStatus.EXPIRED
             expired_count += 1
 
         db.commit()
 
-        # RESURFACE: dismissed/expired with new signals
+        # RESURFACE: dismissed/expired rows that now carry strong buying signals.
+        # Reachability fix (H4): the old ``last_enriched_at > now-30d`` gate could never
+        # be satisfied for expired rows — nothing re-enriches non-SUGGESTED rows, so their
+        # last_enriched_at never refreshes and every expired row was stuck forever. We now
+        # judge resurface off the row's CURRENT signal content + readiness (bounded in SQL
+        # by readiness_score >= 40, the same floor the per-row check enforces) instead of a
+        # structurally-dead recency gate.
         resurface_candidates = (
             db.query(ProspectAccount)
             .filter(
-                ProspectAccount.status.in_(["dismissed", "expired"]),
-                ProspectAccount.last_enriched_at.isnot(None),
-                ProspectAccount.last_enriched_at > now - timedelta(days=30),
+                ProspectAccount.status.in_([ProspectAccountStatus.DISMISSED, ProspectAccountStatus.EXPIRED]),
+                ProspectAccount.readiness_score >= 40,
             )
             .all()
         )

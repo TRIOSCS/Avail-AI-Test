@@ -374,13 +374,24 @@ def _detect_region(raw: dict) -> str | None:
 
 
 async def run_explorium_discovery_batch(
-    batch_id: str, existing_domains: set[str] | None = None
+    batch_id: str,
+    existing_domains: set[str] | None = None,
+    segment_keys: list[str] | None = None,
+    region_keys: list[str] | None = None,
 ) -> list[ProspectAccountCreate]:
-    """Run discovery across all ICP segments x regions.
+    """Run discovery across the requested ICP segments x regions.
 
     Args:
         batch_id: human-readable batch identifier
         existing_domains: domains already in prospect_accounts + owned companies (for dedup)
+        segment_keys: SEGMENT_SEARCH_PARAMS keys to scan (the monthly rotation slice);
+            ``None`` scans every segment. Unknown keys are dropped.
+        region_keys: REGIONS keys to scan; ``None`` scans every region. Unknown keys are
+            dropped.
+
+    Honoring the slice is what keeps monthly credit spend to ~1/6 of a full 12-cell scan:
+    the scheduler hands in one rotation slot's segment/region set rather than letting the
+    batch loop every SEGMENT_SEARCH_PARAMS x REGIONS cell unconditionally.
 
     Returns list of ProspectAccountCreate schemas ready for DB insert.
     """
@@ -388,14 +399,20 @@ async def run_explorium_discovery_batch(
         logger.warning("Explorium API key not configured — batch {} skipped", batch_id)
         return []
 
+    # Resolve the slice: default to the full matrix, else keep only valid keys (an unknown
+    # key would otherwise silently scan nothing / mis-scan).
+    segs = [s for s in (segment_keys or SEGMENT_SEARCH_PARAMS) if s in SEGMENT_SEARCH_PARAMS]
+    regs = [r for r in (region_keys or REGIONS) if r in REGIONS]
+    logger.info("Explorium batch {}: scanning segments={} regions={}", batch_id, segs, regs)
+
     known_domains = existing_domains or set()
     seen_domains: set[str] = set()
     prospects: list[ProspectAccountCreate] = []
     total_raw = 0
     credits_est = 0
 
-    for seg_key in SEGMENT_SEARCH_PARAMS:
-        for region_key in REGIONS:
+    for seg_key in segs:
+        for region_key in regs:
             results = await discover_companies_with_signals(seg_key, region_key)
             total_raw += len(results)
             credits_est += len(results)  # ~1 credit per result

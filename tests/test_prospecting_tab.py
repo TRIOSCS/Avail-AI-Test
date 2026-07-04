@@ -208,6 +208,56 @@ class TestListBehavior:
         resp = client.get("/v2/partials/prospecting?status=claimed")
         assert 'name="status" value="claimed"' in resp.text
 
+    def test_expired_filter_pill_surfaces_expired(self, client, db_session):
+        # H4: expired rows are hidden from the default view but reachable via a filter pill.
+        make_prospect(db_session, name="ExpiredCo", status="expired")
+        default = client.get("/v2/partials/prospecting")
+        assert "ExpiredCo" not in default.text  # not in the default suggested+claimed view
+        assert "status=expired" in default.text  # Expired pill is rendered
+        filtered = client.get("/v2/partials/prospecting?status=expired")
+        assert "ExpiredCo" in filtered.text
+
+    def test_default_ai_match_sort_ranks_by_trio_then_readiness(self, client, db_session):
+        # M5: the default ai_match_desc sort (ai_screen off) ranks in SQL by
+        # trio_match_score first — high-trio outranks a high-readiness low-trio row.
+        make_prospect(db_session, name="AlphaTrio", trio_match_score=90, readiness_score=5)
+        make_prospect(db_session, name="BravoReady", trio_match_score=5, readiness_score=90)
+        resp = client.get("/v2/partials/prospecting")  # default sort=ai_match_desc
+        assert resp.status_code == 200
+        body = resp.text
+        assert body.index("AlphaTrio") < body.index("BravoReady")
+
+    def test_default_ai_match_sort_paginates(self, client, db_session):
+        # M5: the SQL path honors per_page (page 1 of 1) without hydrating the whole pool.
+        for i in range(3):
+            make_prospect(db_session, name=f"PageCo{i}", trio_match_score=50 - i)
+        resp = client.get("/v2/partials/prospecting?per_page=2")
+        assert resp.status_code == 200
+        # 3 rows, 2 per page → pagination control appears.
+        assert "Page 1 of 2" in resp.text
+
+    # ── M2: per-user scope (See-All / See-Mine) ──────────────────────────
+    def test_scope_mine_filters_to_own_claims(self, client, db_session, test_user, manager_user):
+        make_prospect(db_session, name="MyClaim", status="claimed", claimed_by=test_user.id)
+        make_prospect(db_session, name="TheirClaim", status="claimed", claimed_by=manager_user.id)
+        resp = client.get("/v2/partials/prospecting?status=claimed&scope=mine")
+        assert resp.status_code == 200
+        assert "MyClaim" in resp.text
+        assert "TheirClaim" not in resp.text
+
+    def test_scope_all_shows_every_claim(self, client, db_session, test_user, manager_user):
+        make_prospect(db_session, name="MyClaim2", status="claimed", claimed_by=test_user.id)
+        make_prospect(db_session, name="TheirClaim2", status="claimed", claimed_by=manager_user.id)
+        resp = client.get("/v2/partials/prospecting?status=claimed&scope=all")
+        assert "MyClaim2" in resp.text
+        assert "TheirClaim2" in resp.text
+
+    def test_scope_toggle_and_carrier_rendered(self, client, db_session):
+        resp = client.get("/v2/partials/prospecting?scope=mine")
+        # Hidden carrier preserves scope across search/sort; toggle button is present.
+        assert 'name="scope" value="mine"' in resp.text
+        assert "scope=all" in resp.text and "scope=mine" in resp.text
+
 
 # ── Detail: surfaced buyer-intelligence ───────────────────────────────────
 

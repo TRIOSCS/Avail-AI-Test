@@ -315,6 +315,67 @@ class TestExploriumBatch:
         assert results[0].domain == "raytheon-sensors.com"
         assert results[0].discovery_source == "explorium"
 
+    @pytest.mark.asyncio
+    async def test_honors_rotation_slice(self):
+        """H6: given a slice, scan ONLY that segment×region cell — not all 12."""
+        from app.services.prospect_discovery_explorium import run_explorium_discovery_batch
+
+        with (
+            patch("app.services.prospect_discovery_explorium._get_api_key", return_value="key"),
+            patch(
+                "app.services.prospect_discovery_explorium.discover_companies_with_signals",
+                new_callable=AsyncMock,
+                return_value=[],
+            ) as mock_discover,
+            patch("asyncio.sleep", new_callable=AsyncMock),
+        ):
+            await run_explorium_discovery_batch(
+                "slice-batch", set(), segment_keys=["aerospace_defense"], region_keys=["US"]
+            )
+
+        # Exactly one cell scanned — the slice — not the full 4×3 matrix.
+        mock_discover.assert_awaited_once_with("aerospace_defense", "US")
+
+    @pytest.mark.asyncio
+    async def test_none_slice_scans_full_matrix(self):
+        """H6: omitting the slice preserves the old behavior — scan every cell (4×3=12)."""
+        from app.services.prospect_discovery_explorium import (
+            REGIONS,
+            SEGMENT_SEARCH_PARAMS,
+            run_explorium_discovery_batch,
+        )
+
+        with (
+            patch("app.services.prospect_discovery_explorium._get_api_key", return_value="key"),
+            patch(
+                "app.services.prospect_discovery_explorium.discover_companies_with_signals",
+                new_callable=AsyncMock,
+                return_value=[],
+            ) as mock_discover,
+            patch("asyncio.sleep", new_callable=AsyncMock),
+        ):
+            await run_explorium_discovery_batch("full-batch", set())
+
+        assert mock_discover.await_count == len(SEGMENT_SEARCH_PARAMS) * len(REGIONS)
+
+    @pytest.mark.asyncio
+    async def test_unknown_slice_keys_dropped(self):
+        """H6: an unknown segment/region key is filtered out rather than mis-scanned."""
+        from app.services.prospect_discovery_explorium import run_explorium_discovery_batch
+
+        with (
+            patch("app.services.prospect_discovery_explorium._get_api_key", return_value="key"),
+            patch(
+                "app.services.prospect_discovery_explorium.discover_companies_with_signals",
+                new_callable=AsyncMock,
+                return_value=[],
+            ) as mock_discover,
+            patch("asyncio.sleep", new_callable=AsyncMock),
+        ):
+            await run_explorium_discovery_batch("bad-batch", set(), segment_keys=["nope"], region_keys=["US"])
+
+        mock_discover.assert_not_awaited()
+
 
 # ── Email Mining Tests ───────────────────────────────────────────────
 
