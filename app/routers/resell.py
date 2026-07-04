@@ -302,12 +302,18 @@ async def resell_workspace(
     request: Request,
     lens: str = Query("mine"),
     stage: str = Query(""),
+    needs: str = Query(""),
     q: str = Query(""),
     user: User = Depends(require_access(AccessKey.RESELL)),
     db: Session = Depends(get_db),
 ):
     """Split-panel Resell workspace shell: lens pills + stat strip + lists."""
     lens = lens if lens in ("mine", "open") else "mine"
+    needs = needs if needs in ("offers", "take_all") else ""
+    # The active triage token drives the single-highlight ring. The offer-based cards
+    # (offers/take_all) live in the ``needs`` dimension; the status cards in ``stage`` —
+    # so the token is ``needs`` when set, else the ``stage`` value (never both at once).
+    active_filter = needs or stage
     return template_response(
         "htmx/partials/resell/workspace.html",
         {
@@ -315,6 +321,8 @@ async def resell_workspace(
             "user": user,
             "lens": lens,
             "stage": stage,
+            "needs": needs,
+            "active_filter": active_filter,
             "q": q,
             "stats": _stat_strip(db, user),
             "can_post": excess_service.can_post(user),
@@ -330,17 +338,25 @@ async def resell_lists(
     request: Request,
     lens: str = Query("mine"),
     stage: str = Query(""),
+    needs: str = Query(""),
     q: str = Query(""),
     user: User = Depends(require_access(AccessKey.RESELL)),
     db: Session = Depends(get_db),
 ):
-    """Left list partial — opportunity rows, lens + stage filters + search.
+    """Left list partial — opportunity rows, lens + stage/needs filters + search.
 
     ``lens=mine`` → lists this user owns (seller identity visible).
     ``lens=open`` → posted lists owned by OTHERS that this user may offer on
     (customer-anonymized — pure whitelist, never the seller).
+
+    ``stage`` filters on list STATUS (open/collecting/…). ``needs`` is the offer-based
+    triage dimension the status filter can't express: ``needs=offers`` → lists with ≥1
+    live, unactioned offer; ``needs=take_all`` → lists with a live whole-list offer. These
+    back the "Offers to review" / "Take-all" stat cards (their counts come from offers, not
+    a list status), so they need their own filter rather than a status value.
     """
     lens = lens if lens in ("mine", "open") else "mine"
+    needs = needs if needs in ("offers", "take_all") else ""
     # Eager-load company so the per-card seller-name render (mine lens) doesn't lazy-load
     # one company per list (M8: kill the N+1s in the left list).
     query = db.query(ExcessList).options(joinedload(ExcessList.company))
@@ -358,6 +374,15 @@ async def resell_lists(
 
     if stage:
         query = query.filter(ExcessList.status == stage)
+    if needs:
+        # Lists carrying a live, unactioned offer (take_all = its whole-list slice) — the
+        # same offer population the triage stat cards count (_stat_strip).
+        offer_lists = db.query(ExcessOffer.excess_list_id).filter(
+            ExcessOffer.status.in_([s.value for s in _UNACTIONED_OFFER_STATUSES])
+        )
+        if needs == "take_all":
+            offer_lists = offer_lists.filter(ExcessOffer.scope == ExcessOfferScope.TAKE_ALL)
+        query = query.filter(ExcessList.id.in_(offer_lists))
     if q:
         query = query.filter(ExcessList.title.ilike(f"%{escape_like(q)}%", escape="\\"))
 
@@ -371,6 +396,7 @@ async def resell_lists(
             "user": user,
             "lens": lens,
             "stage": stage,
+            "needs": needs,
             "q": q,
             "cards": cards,
             "can_post": excess_service.can_post(user),

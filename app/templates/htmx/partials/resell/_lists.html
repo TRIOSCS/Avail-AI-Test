@@ -4,7 +4,8 @@
   onto EXISTING status_badge keys (open→sky, collecting→sourcing, bid_out→quoted,
   awarded→won, draft→muted) — no new colors (spec §"Design consistency").
   Receives: cards [{list, display_title, customer_name, coverage_filled,
-            coverage_total, offer_count, hours_until}], lens, stage, q, can_post, user.
+            coverage_total, offer_count, hours_until}], lens, stage, needs, q,
+            can_post, user.
   Called by: resell.resell_lists.
 #}
 {% from "htmx/partials/shared/_macros.html" import status_badge, coverage_meter, time_text, filter_pill %}
@@ -31,7 +32,7 @@
     </div>
     <input type="search" name="q" value="{{ q }}" placeholder="Search lists…"
            aria-label="Search resell lists"
-           hx-get="/v2/partials/resell/lists?lens={{ lens }}&stage={{ stage }}"
+           hx-get="/v2/partials/resell/lists?lens={{ lens }}{% if stage %}&stage={{ stage }}{% endif %}{% if needs %}&needs={{ needs }}{% endif %}"
            hx-target="#resell-list-body"
            hx-swap="innerHTML"
            hx-trigger="input changed delay:300ms, search"
@@ -94,7 +95,7 @@
         </svg>
         {% if lens == 'open' %}
           No postings are open to you right now.
-        {% elif stage or q %}
+        {% elif stage or needs or q %}
           No lists match this filter.
         {% else %}
           <p>You haven't posted any excess lists yet.</p>

@@ -4,7 +4,8 @@
   to Me) + a stat-card triage strip (each card filters the list). Built entirely
   from shared components — splitPanel(), stat_card, filter_pill — so it reads
   native (spec §"The management page").
-  Receives: lens ('mine'|'open'), stage, q, stats (dict), user, can_post.
+  Receives: lens ('mine'|'open'), stage, needs ('offers'|'take_all'|''),
+            active_filter (the active triage token), q, stats (dict), user, can_post.
   Called by: resell.resell_workspace.
   Depends on: shared/_macros.html, partials/resell/_lists.html, splitPanel JS.
 #}
@@ -12,7 +13,7 @@
 <title hx-swap-oob="true">Resell — AvailAI</title>
 
 <div class="page-fluid flex flex-col h-[calc(100vh-7.5rem)]"
-     x-data="{ lens: '{{ lens }}', stage: '{{ stage }}' }">
+     x-data="{ lens: '{{ lens }}', filter: '{{ active_filter }}' }">
 
   {# ── Header: lens switch + new-list ─────────────────────────────── #}
   <div class="flex items-center justify-between gap-3 mb-4 flex-shrink-0">
@@ -23,7 +24,7 @@
       <button hx-get="/v2/partials/resell/lists?lens={{ l }}"
               hx-target="#resell-list-body"
               hx-swap="innerHTML"
-              @click="lens = '{{ l }}'; stage = ''"
+              @click="lens = '{{ l }}'; filter = ''"
               :class="lens === '{{ l }}'
                       ? 'bg-accent-500 text-white shadow-sm'
                       : 'bg-accent-100 text-accent-600 hover:bg-accent-200'"
@@ -46,25 +47,32 @@
   </div>
 
   {# ── Triage strip ───────────────────────────────────────────────
-     Each card is a one-click stage filter into the list — the team glance
+     Each card is a one-click filter into the list — the team glance
      (spec §"Aggregate & triage"). Hidden under the offerer lens (those are
-     other people's deals — no owner counters). #}
+     other people's deals — no owner counters).
+
+     Two filter dimensions: the status cards (open/bid_out/awarded) filter on list
+     STATUS; the offer-based cards (offers/take_all) filter on the `needs` dimension —
+     their counts come from live OFFERS, not a list status, so a `stage` value can't
+     express them. Each card carries a UNIQUE `token`, so the active-ring highlights
+     exactly one (the old empty `stage=''` on both offer cards double-lit them and reset
+     the list to "All"). #}
   <div x-show="lens === 'mine'" x-cloak
        class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-4 flex-shrink-0">
     {% set glance = [
-      ('open', 'Open', stats.open, 'Posted, awaiting offers'),
-      ('', 'Offers to review', stats.offers_to_review, 'New, unactioned'),
-      ('', 'Take-all', stats.take_all, 'Whole-list offers'),
-      ('bid_out', 'Bids out', stats.bids_out, 'Sent to the customer'),
-      ('awarded', 'Awarded', stats.awarded, 'Closed deals')
+      ('open', 'stage=open', 'Open', stats.open, 'Posted, awaiting offers'),
+      ('offers', 'needs=offers', 'Offers to review', stats.offers_to_review, 'New, unactioned'),
+      ('take_all', 'needs=take_all', 'Take-all', stats.take_all, 'Whole-list offers'),
+      ('bid_out', 'stage=bid_out', 'Bids out', stats.bids_out, 'Sent to the customer'),
+      ('awarded', 'stage=awarded', 'Awarded', stats.awarded, 'Closed deals')
     ] %}
-    {% for stage_key, label, value, sub in glance %}
+    {% for token, query, label, value, sub in glance %}
     <button type="button"
-            hx-get="/v2/partials/resell/lists?lens=mine&stage={{ stage_key }}"
+            hx-get="/v2/partials/resell/lists?lens=mine&{{ query }}"
             hx-target="#resell-list-body"
             hx-swap="innerHTML"
-            @click="stage = '{{ stage_key }}'"
-            :class="stage === '{{ stage_key }}' ? 'ring-2 ring-accent-400' : ''"
+            @click="filter = '{{ token }}'"
+            :class="filter === '{{ token }}' ? 'ring-2 ring-accent-400' : ''"
             class="text-left rounded-xl transition-shadow hover:shadow-card">
       {{ stat_card(label, value, sub) }}
     </button>
@@ -84,7 +92,7 @@
          :style="'width:' + leftWidth + '%'"
          id="split-left-resell">
       <div id="resell-list-body"
-           hx-get="/v2/partials/resell/lists?lens={{ lens }}&stage={{ stage }}{% if q %}&q={{ q }}{% endif %}"
+           hx-get="/v2/partials/resell/lists?lens={{ lens }}{% if stage %}&stage={{ stage }}{% endif %}{% if needs %}&needs={{ needs }}{% endif %}{% if q %}&q={{ q }}{% endif %}"
            hx-trigger="load"
            hx-target="#resell-list-body"
            hx-swap="innerHTML">

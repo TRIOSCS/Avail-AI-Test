@@ -1050,3 +1050,137 @@ def test_list_cards_empty_input():
     from app.routers.resell import _list_cards
 
     assert _list_cards(None, [], can_see_customer=True) == []
+
+
+# ── Triage cards: offers-to-review / take-all now filter (dead-control fix) ──
+
+
+def _add_offer(db_session, el, submitter, scope, status):
+    """Attach a single ExcessOffer to a list (helper for the needs-filter tests)."""
+    from app.models.excess import ExcessOffer
+
+    offer = ExcessOffer(
+        excess_list_id=el.id,
+        submitted_by=submitter.id,
+        scope=scope,
+        status=status,
+    )
+    db_session.add(offer)
+    db_session.commit()
+    return offer
+
+
+@pytest.fixture()
+def bare_list(db_session: Session, trader_user: User, test_company: Company) -> ExcessList:
+    """A second COLLECTING list owned by the trader with NO offers — the negative
+    case."""
+    el = ExcessList(
+        title="Quiet surplus",
+        company_id=test_company.id,
+        owner_id=trader_user.id,
+        status=ExcessListStatus.COLLECTING,
+        total_line_items=0,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(el)
+    db_session.commit()
+    db_session.refresh(el)
+    return el
+
+
+def test_lists_needs_offers_returns_only_lists_with_unactioned_offers(
+    client, db_session, trader_user, posted_list, bare_list, test_user
+):
+    """Needs=offers → only lists carrying a live, unactioned offer (the "Offers to
+    review" card).
+
+    posted_list gets an OPEN offer; bare_list has none, so it must drop out.
+    """
+    from app.constants import ExcessOfferStatus
+    from app.dependencies import require_user
+    from app.main import app
+
+    _add_offer(db_session, posted_list, test_user, ExcessOfferScope.PER_LINE, ExcessOfferStatus.OPEN)
+
+    app.dependency_overrides[require_user] = lambda: trader_user  # owner → mine lens
+    try:
+        resp = client.get("/v2/partials/resell/lists?lens=mine&needs=offers")
+        assert resp.status_code == 200
+        body = resp.text
+        assert posted_list.title in body  # has an unactioned offer
+        assert bare_list.title not in body  # no offers → excluded (not reset to "All")
+    finally:
+        app.dependency_overrides.pop(require_user, None)
+
+
+def test_lists_needs_take_all_returns_only_take_all_offer_lists(
+    client, db_session, trader_user, posted_list, bare_list, test_user
+):
+    """needs=take_all → only lists with a live whole-list offer (the "Take-all" card).
+
+    posted_list carries only a PER_LINE offer; bare_list carries a TAKE_ALL offer — so
+    take_all returns bare_list and NOT posted_list, while needs=offers returns both.
+    """
+    from app.constants import ExcessOfferStatus
+    from app.dependencies import require_user
+    from app.main import app
+
+    _add_offer(db_session, posted_list, test_user, ExcessOfferScope.PER_LINE, ExcessOfferStatus.OPEN)
+    _add_offer(db_session, bare_list, test_user, ExcessOfferScope.TAKE_ALL, ExcessOfferStatus.OPEN)
+
+    app.dependency_overrides[require_user] = lambda: trader_user
+    try:
+        take_all_body = client.get("/v2/partials/resell/lists?lens=mine&needs=take_all").text
+        assert bare_list.title in take_all_body  # has a take_all offer
+        assert posted_list.title not in take_all_body  # only a per_line offer → excluded
+
+        offers_body = client.get("/v2/partials/resell/lists?lens=mine&needs=offers").text
+        assert posted_list.title in offers_body  # any unactioned offer counts
+        assert bare_list.title in offers_body
+    finally:
+        app.dependency_overrides.pop(require_user, None)
+
+
+def test_lists_needs_take_all_ignores_actioned_offers(client, db_session, trader_user, posted_list, test_user):
+    """A WON (actioned) take_all offer must NOT keep its list in the take_all filter —
+    the card counts only live, unactioned bids, so the filter must match that."""
+    from app.constants import ExcessOfferStatus
+    from app.dependencies import require_user
+    from app.main import app
+
+    _add_offer(db_session, posted_list, test_user, ExcessOfferScope.TAKE_ALL, ExcessOfferStatus.WON)
+
+    app.dependency_overrides[require_user] = lambda: trader_user
+    try:
+        body = client.get("/v2/partials/resell/lists?lens=mine&needs=take_all").text
+        assert posted_list.title not in body  # the only offer is actioned → excluded
+    finally:
+        app.dependency_overrides.pop(require_user, None)
+
+
+def test_workspace_triage_cards_carry_real_filters_no_double_highlight(client, trader_user):
+    """The two offer-based triage cards carry REAL filters (not the old stage='' that
+    reset the list to All), and each card highlights on its own UNIQUE token — so the
+    active-ring never double-lights when nothing status-based is selected."""
+    from app.dependencies import require_user
+    from app.main import app
+
+    app.dependency_overrides[require_user] = lambda: trader_user
+    try:
+        body = client.get("/v2/partials/resell/workspace").text
+    finally:
+        app.dependency_overrides.pop(require_user, None)
+
+    assert body.count("split-resell")  # sanity: the shell rendered
+
+    # The offer-based cards now carry a real, honored filter — not an empty stage.
+    assert "needs=offers" in body
+    assert "needs=take_all" in body
+    # No triage card posts an empty stage value (the dead-control bug rendered `&stage="`).
+    assert '&stage="' not in body
+
+    # Each card's ring keys off a UNIQUE token, so exactly one can be active at a time.
+    for token in ("open", "offers", "take_all", "bid_out", "awarded"):
+        assert f"filter === '{token}'" in body
+    # The Alpine state tracks a single `filter` token (not the old `stage`).
+    assert "filter: ''" in body or "filter: '" in body
