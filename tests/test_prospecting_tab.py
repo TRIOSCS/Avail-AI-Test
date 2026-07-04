@@ -464,6 +464,113 @@ class TestEnrichStatus:
         assert "failed" in resp.text.lower()
 
 
+class TestEnrichStaleEscapeHatch:
+    """H2 — a 'running' status left by a crashed worker must NOT wedge enrichment.
+
+    The stale-guard was only wired into the poll route; the detail context (Enrich-button
+    disable) and the enrich trigger (double-trigger guard) checked the raw flag, so a
+    dead-worker 'running' disabled Enrich forever and Retry just looped. All three now
+    route through the shared _enrich_in_progress predicate: stale 'running' = re-enrichable
+    everywhere; fresh 'running' = still protected.
+    """
+
+    @staticmethod
+    def _stale_iso():
+        from datetime import timedelta
+
+        return (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+
+    @staticmethod
+    def _fresh_iso():
+        return datetime.now(timezone.utc).isoformat()
+
+    @staticmethod
+    def _enrich_button_disabled(html: str) -> bool:
+        """True iff the detail's Enrich button carries a standalone `disabled` attribute
+        (not the always-present `disabled:opacity-50` class)."""
+        import re
+
+        m = re.search(r'<button[^>]*?/enrich"[^>]*?>', html)
+        assert m, "Enrich button not found in detail HTML"
+        return bool(re.search(r"\sdisabled[\s>]", m.group(0)))
+
+    # ── the shared guard itself ──
+    def test_in_progress_predicate(self):
+        from app.routers.htmx.prospecting import _enrich_in_progress
+
+        assert _enrich_in_progress({"enrich_status": "running", "enrich_started_at": self._fresh_iso()}) is True
+        assert _enrich_in_progress({"enrich_status": "running"}) is True  # no timestamp → treat as fresh
+        assert _enrich_in_progress({"enrich_status": "running", "enrich_started_at": self._stale_iso()}) is False
+        assert _enrich_in_progress({"enrich_status": "done"}) is False
+        assert _enrich_in_progress({}) is False
+        assert _enrich_in_progress(None) is False
+
+    # ── detail context: button re-enabled when stale, still disabled when fresh ──
+    def test_detail_stale_running_reenables_enrich_button(self, client, db_session):
+        p = make_prospect(
+            db_session,
+            status="suggested",
+            enrichment_data={"enrich_status": "running", "enrich_started_at": self._stale_iso()},
+        )
+        resp = client.get(f"/v2/partials/prospecting/{p.id}")
+        assert resp.status_code == 200
+        assert self._enrich_button_disabled(resp.text) is False  # re-enrichable, not wedged
+        assert "every 2s" not in resp.text  # stale poller not resumed
+
+    def test_detail_fresh_running_keeps_enrich_button_disabled(self, client, db_session):
+        p = make_prospect(
+            db_session,
+            status="suggested",
+            enrichment_data={"enrich_status": "running", "enrich_started_at": self._fresh_iso()},
+        )
+        resp = client.get(f"/v2/partials/prospecting/{p.id}")
+        assert resp.status_code == 200
+        assert self._enrich_button_disabled(resp.text) is True  # genuine in-flight job protected
+        assert "every 2s" in resp.text  # poller resumed
+
+    # ── enrich trigger: stale respawns a fresh job, fresh does not ──
+    def test_enrich_trigger_respawns_on_stale_running(self, client, db_session):
+        p = make_prospect(
+            db_session,
+            enrichment_data={"enrich_status": "running", "enrich_started_at": self._stale_iso()},
+        )
+        with (
+            patch("app.services.prospect_free_enrichment.run_enrichment_job") as job,
+            patch("app.utils.async_helpers.safe_background_task", new_callable=AsyncMock) as sbt,
+        ):
+            resp = client.post(f"/v2/partials/prospecting/{p.id}/enrich")
+        assert resp.status_code == 200
+        assert "enrich-status" in resp.text
+        job.assert_called_once_with(p.id)  # crashed-worker job restarted
+        sbt.assert_called_once()
+        db_session.refresh(p)
+        ed = p.enrichment_data or {}
+        assert ed.get("enrich_status") == "running"
+        assert not _stale_started(ed.get("enrich_started_at"))  # timestamp refreshed to now
+
+    def test_enrich_trigger_does_not_respawn_fresh_running(self, client, db_session):
+        started = self._fresh_iso()
+        p = make_prospect(
+            db_session,
+            enrichment_data={"enrich_status": "running", "enrich_started_at": started},
+        )
+        with (
+            patch("app.services.prospect_free_enrichment.run_enrichment_job") as job,
+            patch("app.utils.async_helpers.safe_background_task", new_callable=AsyncMock),
+        ):
+            resp = client.post(f"/v2/partials/prospecting/{p.id}/enrich")
+        assert resp.status_code == 200
+        job.assert_not_called()  # genuine in-flight job not double-triggered
+        db_session.refresh(p)
+        assert (p.enrichment_data or {}).get("enrich_started_at") == started  # untouched
+
+
+def _stale_started(started_iso) -> bool:
+    from app.routers.htmx.prospecting import _enrich_is_stale
+
+    return _enrich_is_stale(started_iso)
+
+
 # ── Phase 2: live grid consistency (OOB card removal + stats refresh) ─────
 
 

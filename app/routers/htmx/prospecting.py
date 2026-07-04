@@ -51,7 +51,7 @@ router = APIRouter(tags=["htmx-views"])
 _PROSPECT_DEFAULT_STATUSES = ("suggested", "claimed")
 
 # A background enrichment 'running' longer than this is treated as failed (its worker
-# died mid-job) so the detail poller self-heals and stops instead of looping forever.
+# died mid-job) so the enrich flow self-heals instead of wedging forever.
 _ENRICH_STALE_SECONDS = 180
 
 
@@ -67,6 +67,22 @@ def _enrich_is_stale(started_iso) -> bool:
     if started.tzinfo is None:
         started = started.replace(tzinfo=timezone.utc)
     return (datetime.now(timezone.utc) - started).total_seconds() > _ENRICH_STALE_SECONDS
+
+
+def _enrich_in_progress(enrichment_data) -> bool:
+    """True only when a background enrichment is *genuinely* still running.
+
+    The single source of truth for "is this prospect currently enriching?" — shared by
+    the detail context (button disable), the enrich trigger (double-trigger guard), and
+    the status poller (stop-polling). Returns True when ``enrich_status == 'running'``
+    AND the job started within ``_ENRICH_STALE_SECONDS``; a ``'running'`` flag left
+    behind by a crashed/OOM-killed worker is stale, returns False, and so is treated as
+    re-enrichable everywhere (button re-enabled, trigger restarts, poller surfaces the
+    failure) instead of wedging forever. A fresh in-flight job returns True and stays
+    protected from a duplicate spawn.
+    """
+    ed = enrichment_data or {}
+    return ed.get("enrich_status") == "running" and not _enrich_is_stale(ed.get("enrich_started_at"))
 
 
 def _prospect_toast(response, message: str, kind: str = "success") -> None:
@@ -168,8 +184,9 @@ def _prospect_detail_ctx(request: Request, user: User, prospect) -> dict:
     ctx["contact_stats"] = contacts_summary(prospect.contacts_preview)
     ctx["similar_customers"] = prospect.similar_customers or []
     ctx["reclaim_ui"] = _reclaim_ui_flags(user, prospect)
-    # Resume the enrich poller if a background enrichment is in flight.
-    ctx["enrich_state"] = "running" if (prospect.enrichment_data or {}).get("enrich_status") == "running" else None
+    # Resume the enrich poller only if a background enrichment is genuinely in flight; a
+    # stale 'running' (crashed worker) leaves enrich_state None so the button re-enables.
+    ctx["enrich_state"] = "running" if _enrich_in_progress(prospect.enrichment_data) else None
     return ctx
 
 
@@ -583,7 +600,9 @@ async def enrich_prospect_htmx(
         raise HTTPException(404, "Prospect not found")
 
     ed = dict(prospect.enrichment_data or {})
-    if ed.get("enrich_status") != "running":
+    # Start a fresh job unless one is genuinely in flight — a stale 'running' left by a
+    # crashed worker is restartable (otherwise Enrich/Retry would loop forever).
+    if not _enrich_in_progress(ed):
         from ...services.prospect_free_enrichment import run_enrichment_job
         from ...utils.async_helpers import safe_background_task
 
@@ -618,8 +637,8 @@ async def enrich_status_partial(
 
     ed = prospect.enrichment_data or {}
     state = ed.get("enrich_status") or "done"
-    if state == "running" and _enrich_is_stale(ed.get("enrich_started_at")):
-        state = "error"  # worker died mid-job — stop the poll
+    if state == "running" and not _enrich_in_progress(ed):
+        state = "error"  # worker died mid-job (stale) — stop the poll
     resp = template_response(
         "htmx/partials/prospecting/enrich_status.html",
         {"request": request, "prospect": prospect, "enrich_state": state},
