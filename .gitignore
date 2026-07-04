@@ -24,6 +24,7 @@ node_modules/
 # Dev/test artifacts
 .playwright-mcp/
 .coverage
+.coverage.*
 coverage.xml
 coverage.json
 *.cover
