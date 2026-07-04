@@ -19,7 +19,7 @@
       <td class="compact-cell text-right">{{ c.purchase_count or 0 }}</td>
       <td class="compact-cell text-right">{{ "{:,}".format(c.total_quantity) if c.total_quantity else '-' }}</td>
       <td class="compact-cell text-right">{% if c.avg_unit_price %}<span class="text-emerald-700 font-medium">${{ "%.4f"|format(c.avg_unit_price) }}</span>{% else %}<span class="text-gray-400">-</span>{% endif %}</td>
-      <td class="compact-cell">{{ c.last_purchased_at.strftime('%Y-%m-%d') if c.last_purchased_at else '-' }}</td>
+      <td class="compact-cell">{{ c.last_purchased_at|localdate('%Y-%m-%d') if c.last_purchased_at else '-' }}</td>
       <td class="compact-cell">{{ c.source or '-' }}</td>
     </tr>
     {% else %}

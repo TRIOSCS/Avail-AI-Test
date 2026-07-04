@@ -47,7 +47,7 @@
       <div class="text-right space-y-1.5 ml-6 flex-shrink-0">
         <p class="text-sm text-gray-600">Searches: <span class="figure-accent">{{ card.search_count or 0 }}</span></p>
         {% if card.last_searched_at %}
-        <p class="text-secondary">Last: {{ card.last_searched_at.strftime('%b %d, %Y') }}</p>
+        <p class="text-secondary">Last: {{ card.last_searched_at|localdate('%b %d, %Y') }}</p>
         {% endif %}
         {# Enrichment-status badge — polls itself while the card is queued (HTTP 286
            stops the poll once the worker lands a terminal status). #}
