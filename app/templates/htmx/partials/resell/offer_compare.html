@@ -35,12 +35,20 @@
   {%- elif item.status == 'awarded' -%}
   <span class="text-secondary whitespace-nowrap">Not selected</span>
   {%- elif offer.status in ['open', 'late'] -%}
-  <button hx-post="/api/resell/{{ el.id }}/offers/{{ offer.id }}/award"
-          hx-target="#tab-offers-{{ el.id }}" hx-swap="innerHTML"
-          hx-confirm="Award {{ _broker_label(offer) }} for {{ item.part_number }}? This marks the line sold."
-          @htmx:after-request.camel="if(event.detail.successful) $dispatch('close-modal')"
-          data-loading-disable
-          class="btn-primary btn-sm">Award</button>
+  <div class="inline-flex items-center gap-1.5 whitespace-nowrap">
+    <button hx-post="/api/resell/{{ el.id }}/offers/{{ offer.id }}/award"
+            hx-target="#tab-offers-{{ el.id }}" hx-swap="innerHTML"
+            hx-confirm="Award {{ _broker_label(offer) }} for {{ item.part_number }}? This marks the line sold."
+            @htmx:after-request.camel="if(event.detail.successful) $dispatch('close-modal')"
+            data-loading-disable
+            class="btn-primary btn-sm">Award</button>
+    <button hx-post="/api/resell/{{ el.id }}/offers/{{ offer.id }}/withdraw"
+            hx-target="#tab-offers-{{ el.id }}" hx-swap="innerHTML"
+            hx-confirm="Withdraw this offer? It drops out of the running."
+            @htmx:after-request.camel="if(event.detail.successful) $dispatch('close-modal')"
+            data-loading-disable
+            class="btn-ghost btn-sm text-gray-500 hover:text-gray-700">Withdraw</button>
+  </div>
   {%- else -%}
   <span class="text-xs text-gray-400">—</span>
   {%- endif -%}

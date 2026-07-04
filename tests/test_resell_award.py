@@ -404,7 +404,9 @@ class TestAwardOfferService:
         assert exc.value.status_code == 409
         assert "already awarded" in exc.value.detail
         db_session.refresh(second)
-        assert second.status == ExcessOfferStatus.OPEN
+        # Awarding ``first`` closed the competing ``second`` as ``lost`` (M1); the
+        # re-award attempt still 409s on the already-sold line and never re-opens it.
+        assert second.status == ExcessOfferStatus.LOST
 
     def test_award_retires_sighting_mirror(
         self, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, owner: User, broker: User
@@ -676,3 +678,289 @@ class TestAwardRoute:
         assert resp.status_code == 403
         db_session.refresh(offer)
         assert offer.status == ExcessOfferStatus.WON
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  award closes competing offers (M1: the ``lost`` state)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def _multi_line_offer(
+    db: Session, *, excess_list: ExcessList, submitter: User, lines: list[ExcessLineItem], unit_price: Decimal
+) -> ExcessOffer:
+    """An OPEN per-line offer bidding on several matched lines at once."""
+    offer = ExcessOffer(
+        excess_list_id=excess_list.id,
+        submitted_by=submitter.id,
+        scope="per_line",
+        status=ExcessOfferStatus.OPEN,
+    )
+    db.add(offer)
+    db.flush()
+    for li in lines:
+        db.add(
+            ExcessOfferLine(
+                offer_id=offer.id,
+                excess_line_item_id=li.id,
+                mpn_raw=li.part_number,
+                quantity=li.quantity,
+                unit_price=unit_price,
+                match_status=OfferLineMatchStatus.MATCHED,
+            )
+        )
+    db.flush()
+    return offer
+
+
+class TestAwardClosesCompetingOffers:
+    def test_award_marks_competing_offer_lost(
+        self, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, owner: User, broker: User
+    ):
+        """Awarding one offer on a line closes the other open offers on it as ``lost`` —
+        losing bids stop lingering ``open``."""
+        winner = _open_offer(
+            db_session, excess_list=excess_list, submitter=broker, line=cap_line, buyer=None, unit_price=Decimal("0.90")
+        )
+        loser = _open_offer(
+            db_session, excess_list=excess_list, submitter=broker, line=cap_line, buyer=None, unit_price=Decimal("0.80")
+        )
+        db_session.commit()
+
+        excess_service.award_offer(db_session, winner.id, owner)
+
+        db_session.refresh(loser)
+        assert loser.status == ExcessOfferStatus.LOST
+
+    def test_lost_bid_drops_from_line_rollup(
+        self, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, owner: User, broker: User
+    ):
+        """A HIGHER losing bid owns the rollup before award; once it is marked ``lost``
+        it stops owning ``best_offer_id`` (the rollup counts only open/won)."""
+        winner = _open_offer(
+            db_session, excess_list=excess_list, submitter=broker, line=cap_line, buyer=None, unit_price=Decimal("0.90")
+        )
+        higher_loser = _open_offer(
+            db_session, excess_list=excess_list, submitter=broker, line=cap_line, buyer=None, unit_price=Decimal("1.50")
+        )
+        db_session.commit()
+        # _open_offer builds rows directly (no rollup hook) — compute it once to establish
+        # the pre-award state: the highest bid owns the line.
+        excess_service.recompute_line_rollup(db_session, cap_line.id)
+        db_session.commit()
+        db_session.refresh(cap_line)
+        assert cap_line.best_offer_id == higher_loser.id  # highest bid owns it pre-award
+
+        excess_service.award_offer(db_session, winner.id, owner)
+
+        db_session.refresh(higher_loser)
+        db_session.refresh(cap_line)
+        assert higher_loser.status == ExcessOfferStatus.LOST
+        assert cap_line.best_offer_id == winner.id  # the lost bid no longer owns the rollup
+
+    def test_competitor_on_still_open_line_stays_open(
+        self, db_session: Session, excess_list: ExcessList, owner: User, broker: User
+    ):
+        """A per-line offer that also bids on an UN-awarded line is not closed — it can
+        still win that line."""
+        a = _line(db_session, excess_list, "COMP-A")
+        b = _line(db_session, excess_list, "COMP-B")
+        competitor = _multi_line_offer(
+            db_session, excess_list=excess_list, submitter=broker, lines=[a, b], unit_price=Decimal("0.50")
+        )
+        winner = _open_offer(
+            db_session, excess_list=excess_list, submitter=broker, line=a, buyer=None, unit_price=Decimal("0.90")
+        )
+        db_session.commit()
+
+        excess_service.award_offer(db_session, winner.id, owner)
+
+        db_session.refresh(competitor)
+        assert competitor.status == ExcessOfferStatus.OPEN  # line b is still winnable
+
+    def test_take_all_award_closes_every_other_open_offer(
+        self, db_session: Session, excess_list: ExcessList, owner: User, broker: User
+    ):
+        """A take_all win takes the whole list — every other open offer (per-line and
+        take_all) is closed ``lost``."""
+        a = _line(db_session, excess_list, "TAKEALL-CLOSE-A")
+        _line(db_session, excess_list, "TAKEALL-CLOSE-B")
+        per_line = _open_offer(
+            db_session, excess_list=excess_list, submitter=broker, line=a, buyer=None, unit_price=Decimal("0.50")
+        )
+        other_take_all = _take_all_offer(db_session, excess_list=excess_list, submitter=broker, buyer=None)
+        winner = _take_all_offer(db_session, excess_list=excess_list, submitter=broker, buyer=None)
+        db_session.commit()
+
+        excess_service.award_offer(db_session, winner.id, owner)
+
+        db_session.refresh(per_line)
+        db_session.refresh(other_take_all)
+        assert per_line.status == ExcessOfferStatus.LOST
+        assert other_take_all.status == ExcessOfferStatus.LOST
+
+    def test_per_line_award_leaves_take_all_competitor_open(
+        self, db_session: Session, excess_list: ExcessList, owner: User, broker: User
+    ):
+        """A per-line award of one line does NOT close a take_all competitor — it is
+        blocked but revivable (unaward re-opens the path)."""
+        a = _line(db_session, excess_list, "TAKEALL-KEEP-A")
+        _line(db_session, excess_list, "TAKEALL-KEEP-B")
+        take_all = _take_all_offer(db_session, excess_list=excess_list, submitter=broker, buyer=None)
+        winner = _open_offer(
+            db_session, excess_list=excess_list, submitter=broker, line=a, buyer=None, unit_price=Decimal("0.90")
+        )
+        db_session.commit()
+
+        excess_service.award_offer(db_session, winner.id, owner)
+
+        db_session.refresh(take_all)
+        assert take_all.status == ExcessOfferStatus.OPEN
+
+    def test_unaward_reopens_lost_competitor(
+        self, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, owner: User, broker: User
+    ):
+        """Reversing an award revives the offers it had closed and hands the rollup back
+        to the (higher) revived bid."""
+        winner = _open_offer(
+            db_session, excess_list=excess_list, submitter=broker, line=cap_line, buyer=None, unit_price=Decimal("0.90")
+        )
+        loser = _open_offer(
+            db_session, excess_list=excess_list, submitter=broker, line=cap_line, buyer=None, unit_price=Decimal("1.50")
+        )
+        db_session.commit()
+        excess_service.award_offer(db_session, winner.id, owner)
+        db_session.refresh(loser)
+        assert loser.status == ExcessOfferStatus.LOST
+
+        excess_service.unaward_offer(db_session, winner.id, owner)
+
+        db_session.refresh(loser)
+        db_session.refresh(cap_line)
+        assert loser.status == ExcessOfferStatus.OPEN
+        assert cap_line.best_offer_id == loser.id  # revived higher bid owns the rollup again
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  POST withdraw endpoint (M2)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestWithdrawRoute:
+    def _offer(self, db, excess_list, cap_line, broker):
+        offer = _open_offer(
+            db, excess_list=excess_list, submitter=broker, line=cap_line, buyer=None, unit_price=Decimal("0.80")
+        )
+        db.commit()
+        return offer
+
+    def test_owner_withdraws_open_offer(
+        self, client, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, owner: User, broker: User
+    ):
+        from app.dependencies import require_user
+        from app.main import app
+
+        offer = self._offer(db_session, excess_list, cap_line, broker)
+        app.dependency_overrides[require_user] = lambda: owner
+        try:
+            resp = client.post(f"/api/resell/{excess_list.id}/offers/{offer.id}/withdraw")
+        finally:
+            app.dependency_overrides.pop(require_user, None)
+
+        assert resp.status_code == 200
+        db_session.refresh(offer)
+        assert offer.status == ExcessOfferStatus.WITHDRAWN
+
+    def test_submitter_withdraws_own_offer(
+        self, client, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, owner: User, broker: User
+    ):
+        """The offerer (submitted_by) may retract their own bid."""
+        from app.dependencies import require_user
+        from app.main import app
+
+        offer = self._offer(db_session, excess_list, cap_line, broker)
+        app.dependency_overrides[require_user] = lambda: broker
+        try:
+            resp = client.post(f"/api/resell/{excess_list.id}/offers/{offer.id}/withdraw")
+        finally:
+            app.dependency_overrides.pop(require_user, None)
+
+        assert resp.status_code == 200
+        db_session.refresh(offer)
+        assert offer.status == ExcessOfferStatus.WITHDRAWN
+
+    def test_non_owner_non_submitter_forbidden(
+        self, client, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, broker: User
+    ):
+        """The default client user is neither the owner nor the submitter → 403; the
+        offer stays open."""
+        offer = self._offer(db_session, excess_list, cap_line, broker)
+        resp = client.post(f"/api/resell/{excess_list.id}/offers/{offer.id}/withdraw")
+        assert resp.status_code == 403
+        db_session.refresh(offer)
+        assert offer.status == ExcessOfferStatus.OPEN
+
+    def test_withdraw_won_offer_409(
+        self, client, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, owner: User, broker: User
+    ):
+        """A won offer cannot be withdrawn (unaward it first) — 409, stays won."""
+        from app.dependencies import require_user
+        from app.main import app
+
+        offer = self._offer(db_session, excess_list, cap_line, broker)
+        excess_service.award_offer(db_session, offer.id, owner)
+        app.dependency_overrides[require_user] = lambda: owner
+        try:
+            resp = client.post(f"/api/resell/{excess_list.id}/offers/{offer.id}/withdraw")
+        finally:
+            app.dependency_overrides.pop(require_user, None)
+
+        assert resp.status_code == 409
+        db_session.refresh(offer)
+        assert offer.status == ExcessOfferStatus.WON
+
+    def test_withdraw_missing_offer_404(self, client, db_session: Session, excess_list: ExcessList, owner: User):
+        from app.dependencies import require_user
+        from app.main import app
+
+        app.dependency_overrides[require_user] = lambda: owner
+        try:
+            resp = client.post(f"/api/resell/{excess_list.id}/offers/999999/withdraw")
+        finally:
+            app.dependency_overrides.pop(require_user, None)
+        assert resp.status_code == 404
+
+    def test_offers_tab_shows_withdraw_button_for_open_offer(
+        self, client, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, owner: User, broker: User
+    ):
+        from app.dependencies import require_user
+        from app.main import app
+
+        excess_list.status = ExcessListStatus.COLLECTING
+        offer = self._offer(db_session, excess_list, cap_line, broker)
+        app.dependency_overrides[require_user] = lambda: owner
+        try:
+            resp = client.get(f"/v2/partials/resell/{excess_list.id}/offers")
+        finally:
+            app.dependency_overrides.pop(require_user, None)
+
+        assert resp.status_code == 200
+        assert f"/offers/{offer.id}/withdraw" in resp.text
+
+    def test_withdrawn_offer_drops_from_offers_tab(
+        self, client, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, owner: User, broker: User
+    ):
+        """Once withdrawn, the offer no longer renders in the re-rendered Offers tab."""
+        from app.dependencies import require_user
+        from app.main import app
+
+        excess_list.status = ExcessListStatus.COLLECTING
+        offer = self._offer(db_session, excess_list, cap_line, broker)
+        app.dependency_overrides[require_user] = lambda: owner
+        try:
+            resp = client.post(f"/api/resell/{excess_list.id}/offers/{offer.id}/withdraw")
+        finally:
+            app.dependency_overrides.pop(require_user, None)
+
+        assert resp.status_code == 200
+        assert f"/offers/{offer.id}/award" not in resp.text
+        assert f"/offers/{offer.id}/withdraw" not in resp.text

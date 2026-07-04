@@ -28,8 +28,8 @@ from decimal import Decimal, InvalidOperation
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, Response
-from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy import case, func
+from sqlalchemy.orm import Session, joinedload
 
 from ..constants import (
     AccessKey,
@@ -71,6 +71,19 @@ _POSTED_STATUSES = (
 )
 # Offer statuses that count as a live, unactioned offer (triage glance).
 _UNACTIONED_OFFER_STATUSES = (ExcessOfferStatus.OPEN, ExcessOfferStatus.LATE)
+# Offer statuses shown in the owner's Offers tab: the live bids (open/late), the winner
+# (won), and the decided-competitor context (lost, rendered "Not selected"). A WITHDRAWN
+# (or dead EXPIRED) offer is retracted and drops out of the tab entirely.
+_VISIBLE_OFFER_STATUSES = (
+    ExcessOfferStatus.OPEN,
+    ExcessOfferStatus.LATE,
+    ExcessOfferStatus.WON,
+    ExcessOfferStatus.LOST,
+)
+# Offer statuses a withdraw may act on: an inbound bid still in play. A won offer must be
+# unawarded first (withdrawing it would strand its awarded lines); a lost/withdrawn offer
+# is already closed.
+_WITHDRAWABLE_OFFER_STATUSES = (ExcessOfferStatus.OPEN, ExcessOfferStatus.LATE)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -111,40 +124,69 @@ def _display_title(el: ExcessList, *, can_see_customer: bool) -> str:
     the submit-offer modal) gets a neutral, id-derived label instead. Traders name
     lists after the customer ("Acme Corp — surplus FPGAs"), so the raw title is the
     one field the ``customer_name`` anonymization doesn't sanitize — gate it the
-    same way (same predicate that nulls the seller name in ``_list_card``).
+    same way (same predicate that nulls the seller name in ``_list_cards``).
     """
     if can_see_customer:
         return el.title
     return f"Excess listing #{el.id}"
 
 
-def _list_card(db: Session, el: ExcessList, *, can_see_customer: bool) -> dict:
-    """Project one ExcessList into the left-list row context.
+def _list_cards(db: Session, lists: list[ExcessList], *, can_see_customer: bool) -> list[dict]:
+    """Project many ExcessLists into left-list rows in a FIXED number of queries.
 
-    ``can_see_customer`` gates the seller name (False for the offerer-facing
-    "Open to Me" lens — pure whitelist, never leak the customer). The same gate
-    swaps the free-text ``title`` for a neutral label (``_display_title``).
+    Was one line-items ``.all()`` PLUS one filtered offer-count query PER list (~2N
+    queries for N lists, re-run on every filter keystroke) — SQLite-masked, bit on live
+    PG. Now: one grouped coverage query (total + offered-line count per list) and one
+    grouped unactioned-offer-count query, keyed by ``excess_list_id``. ``can_see_customer``
+    gates the seller name (False for the offerer-facing "Open to Me" lens — pure whitelist,
+    never leak the customer); the same gate swaps the free-text ``title`` for a neutral
+    label (``_display_title``). Company is eager-loaded by the caller's query.
     """
-    items = db.query(ExcessLineItem).filter_by(excess_list_id=el.id).all()
-    covered, total = _offer_coverage(items)
-    offer_count = (
-        db.query(func.count(ExcessOffer.id))
-        .filter(
-            ExcessOffer.excess_list_id == el.id,
-            ExcessOffer.status.in_([s.value for s in _UNACTIONED_OFFER_STATUSES]),
+    ids = [el.id for el in lists]
+    if not ids:
+        return []
+
+    coverage: dict[int, tuple[int, int]] = {
+        lid: (int(covered or 0), int(total or 0))
+        for lid, total, covered in (
+            db.query(
+                ExcessLineItem.excess_list_id,
+                func.count(ExcessLineItem.id),
+                func.sum(case((ExcessLineItem.offer_count > 0, 1), else_=0)),
+            )
+            .filter(ExcessLineItem.excess_list_id.in_(ids))
+            .group_by(ExcessLineItem.excess_list_id)
+            .all()
         )
-        .scalar()
-        or 0
-    )
-    return {
-        "list": el,
-        "display_title": _display_title(el, can_see_customer=can_see_customer),
-        "customer_name": (el.company.name if (can_see_customer and el.company) else None),
-        "coverage_filled": covered,
-        "coverage_total": total,
-        "offer_count": offer_count,
-        "hours_until": _hours_until(getattr(el, "close_at", None)),
     }
+    offer_counts: dict[int, int] = {
+        lid: int(n or 0)
+        for lid, n in (
+            db.query(ExcessOffer.excess_list_id, func.count(ExcessOffer.id))
+            .filter(
+                ExcessOffer.excess_list_id.in_(ids),
+                ExcessOffer.status.in_([s.value for s in _UNACTIONED_OFFER_STATUSES]),
+            )
+            .group_by(ExcessOffer.excess_list_id)
+            .all()
+        )
+    }
+
+    cards = []
+    for el in lists:
+        covered, total = coverage.get(el.id, (0, 0))
+        cards.append(
+            {
+                "list": el,
+                "display_title": _display_title(el, can_see_customer=can_see_customer),
+                "customer_name": (el.company.name if (can_see_customer and el.company) else None),
+                "coverage_filled": covered,
+                "coverage_total": total,
+                "offer_count": offer_counts.get(el.id, 0),
+                "hours_until": _hours_until(getattr(el, "close_at", None)),
+            }
+        )
+    return cards
 
 
 def _stat_strip(db: Session, user: User) -> dict:
@@ -156,55 +198,36 @@ def _stat_strip(db: Session, user: User) -> dict:
     """
     owned = db.query(ExcessList.id).filter(ExcessList.owner_id == user.id).subquery()
 
-    open_count = (
-        db.query(func.count(ExcessList.id))
-        .filter(ExcessList.owner_id == user.id, ExcessList.status == ExcessListStatus.OPEN)
-        .scalar()
-        or 0
-    )
-    collecting_count = (
-        db.query(func.count(ExcessList.id))
-        .filter(ExcessList.owner_id == user.id, ExcessList.status == ExcessListStatus.COLLECTING)
-        .scalar()
-        or 0
-    )
-    bid_out_count = (
-        db.query(func.count(ExcessList.id))
-        .filter(ExcessList.owner_id == user.id, ExcessList.status == ExcessListStatus.BID_OUT)
-        .scalar()
-        or 0
-    )
-    awarded_count = (
-        db.query(func.count(ExcessList.id))
-        .filter(ExcessList.owner_id == user.id, ExcessList.status == ExcessListStatus.AWARDED)
-        .scalar()
-        or 0
-    )
-    offers_to_review = (
-        db.query(func.count(ExcessOffer.id))
-        .filter(
-            ExcessOffer.excess_list_id.in_(owned.select()),
-            ExcessOffer.status.in_([s.value for s in _UNACTIONED_OFFER_STATUSES]),
+    # One GROUP BY status for the four list-status counts (was four separate COUNTs).
+    status_counts = {
+        status: int(n or 0)
+        for status, n in (
+            db.query(ExcessList.status, func.count(ExcessList.id))
+            .filter(ExcessList.owner_id == user.id)
+            .group_by(ExcessList.status)
+            .all()
         )
-        .scalar()
-        or 0
-    )
-    take_all = (
-        db.query(func.count(ExcessOffer.id))
-        .filter(
-            ExcessOffer.excess_list_id.in_(owned.select()),
-            ExcessOffer.scope == ExcessOfferScope.TAKE_ALL,
-            ExcessOffer.status.in_([s.value for s in _UNACTIONED_OFFER_STATUSES]),
+    }
+    # One GROUP BY scope for the unactioned-offer counts (was two separate COUNTs):
+    # offers-to-review is the sum, take-all its take_all slice.
+    offers_by_scope = {
+        scope: int(n or 0)
+        for scope, n in (
+            db.query(ExcessOffer.scope, func.count(ExcessOffer.id))
+            .filter(
+                ExcessOffer.excess_list_id.in_(owned.select()),
+                ExcessOffer.status.in_([s.value for s in _UNACTIONED_OFFER_STATUSES]),
+            )
+            .group_by(ExcessOffer.scope)
+            .all()
         )
-        .scalar()
-        or 0
-    )
+    }
     return {
-        "open": open_count + collecting_count,
-        "offers_to_review": offers_to_review,
-        "take_all": take_all,
-        "bids_out": bid_out_count,
-        "awarded": awarded_count,
+        "open": status_counts.get(ExcessListStatus.OPEN, 0) + status_counts.get(ExcessListStatus.COLLECTING, 0),
+        "offers_to_review": sum(offers_by_scope.values()),
+        "take_all": offers_by_scope.get(ExcessOfferScope.TAKE_ALL, 0),
+        "bids_out": status_counts.get(ExcessListStatus.BID_OUT, 0),
+        "awarded": status_counts.get(ExcessListStatus.AWARDED, 0),
     }
 
 
@@ -308,7 +331,7 @@ async def resell_lists(
     lens: str = Query("mine"),
     stage: str = Query(""),
     q: str = Query(""),
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.RESELL)),
     db: Session = Depends(get_db),
 ):
     """Left list partial — opportunity rows, lens + stage filters + search.
@@ -318,7 +341,9 @@ async def resell_lists(
     (customer-anonymized — pure whitelist, never the seller).
     """
     lens = lens if lens in ("mine", "open") else "mine"
-    query = db.query(ExcessList)
+    # Eager-load company so the per-card seller-name render (mine lens) doesn't lazy-load
+    # one company per list (M8: kill the N+1s in the left list).
+    query = db.query(ExcessList).options(joinedload(ExcessList.company))
 
     if lens == "open":
         # Offerer-facing: posted lists owned by someone else (anonymized).
@@ -337,7 +362,7 @@ async def resell_lists(
         query = query.filter(ExcessList.title.ilike(f"%{escape_like(q)}%", escape="\\"))
 
     lists = query.order_by(ExcessList.updated_at.desc().nullslast(), ExcessList.id.desc()).all()
-    cards = [_list_card(db, el, can_see_customer=can_see_customer) for el in lists]
+    cards = _list_cards(db, lists, can_see_customer=can_see_customer)
 
     return template_response(
         "htmx/partials/resell/_lists.html",
@@ -361,7 +386,7 @@ async def resell_lists(
 @router.get("/v2/partials/resell/create-form", response_class=HTMLResponse)
 async def resell_create_form(
     request: Request,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.RESELL)),
     db: Session = Depends(get_db),
 ):
     """Render the new-list modal (only for users who can post)."""
@@ -378,7 +403,7 @@ async def resell_create_form(
 async def resell_detail(
     request: Request,
     list_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.RESELL)),
     db: Session = Depends(get_db),
 ):
     """Right detail partial — slim header, breadcrumb, chips, lazy tabs."""
@@ -390,7 +415,7 @@ async def resell_detail(
 async def resell_lines(
     request: Request,
     list_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.RESELL)),
     db: Session = Depends(get_db),
 ):
     """Lazy Lines tab body — adaptive: 1 line → card, ≥2 → compact table."""
@@ -434,6 +459,7 @@ def _offers_context(request: Request, db: Session, el: ExcessList, user: User) -
         .filter(
             ExcessOffer.excess_list_id == el.id,
             ExcessOffer.scope == ExcessOfferScope.TAKE_ALL,
+            ExcessOffer.status.in_([s.value for s in _VISIBLE_OFFER_STATUSES]),
         )
         .order_by(ExcessOffer.created_at.desc())
         .all()
@@ -448,6 +474,7 @@ def _offers_context(request: Request, db: Session, el: ExcessList, user: User) -
         .filter(
             ExcessOffer.excess_list_id == el.id,
             ExcessOffer.scope == ExcessOfferScope.PER_LINE,
+            ExcessOffer.status.in_([s.value for s in _VISIBLE_OFFER_STATUSES]),
         )
         .all()
     )
@@ -484,7 +511,7 @@ def _award_response_context(request: Request, db: Session, el: ExcessList, user:
 async def resell_offers(
     request: Request,
     list_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.RESELL)),
     db: Session = Depends(get_db),
 ):
     """Lazy Offers tab body — per-line offer stacks + pinned take-all banner."""
@@ -497,7 +524,7 @@ async def resell_line_offer_compare(
     request: Request,
     list_id: int,
     line_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.RESELL)),
     db: Session = Depends(get_db),
 ):
     """Per-line offer comparison table (best highlighted + price-spread bar).
@@ -516,8 +543,9 @@ async def resell_line_offer_compare(
         raise HTTPException(404, f"Line item {line_id} not found in list {list_id}")
 
     rows = []
+    visible = {s.value for s in _VISIBLE_OFFER_STATUSES}
     for offer in el.offers:
-        if offer.scope != ExcessOfferScope.PER_LINE:
+        if offer.scope != ExcessOfferScope.PER_LINE or offer.status not in visible:
             continue
         for line in offer.lines:
             if line.excess_line_item_id == line_id:
@@ -573,7 +601,7 @@ def _build_bid_context(request: Request, db: Session, el: ExcessList, user: User
 async def resell_build_bid(
     request: Request,
     list_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.RESELL)),
     db: Session = Depends(get_db),
 ):
     """Lazy Build-Bid tab body — owner-only bid-back builder.
@@ -628,7 +656,7 @@ async def resell_assemble_bid(
 async def resell_bid_pdf(
     list_id: int,
     bid_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.RESELL)),
     db: Session = Depends(get_db),
 ):
     """Download the clean bid-back PDF (owner-only).
@@ -667,7 +695,7 @@ async def resell_bid_pdf(
 async def resell_add_line_form(
     request: Request,
     list_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.RESELL)),
     db: Session = Depends(get_db),
 ):
     """Render the add-line modal (draft lists only)."""
@@ -685,7 +713,7 @@ async def resell_add_line_form(
 async def resell_offer_form(
     request: Request,
     list_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.RESELL)),
     db: Session = Depends(get_db),
 ):
     """Render the submit-offer modal (per-line / take-all scope toggle)."""
@@ -978,6 +1006,39 @@ async def resell_unaward_offer(
     return _toast(resp, "Award reversed")
 
 
+@router.post("/api/resell/{list_id}/offers/{offer_id}/withdraw", response_class=HTMLResponse)
+async def resell_withdraw_offer(
+    request: Request,
+    list_id: int,
+    offer_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Withdraw an inbound offer, then re-render the Offers tab + OOB lines/chips.
+
+    Authorized for the offer's SUBMITTER (a buyer retracting their own bid) OR the list
+    OWNER (clearing a stale / erroneous offer). Only an open/late offer may be withdrawn —
+    a won offer is 409 (unaward it first), and a lost/withdrawn one is already closed. The
+    service (``withdraw_offer``) flips the status to ``withdrawn`` and recomputes every
+    touched line's rollup; the withdrawn offer then drops out of the Offers tab.
+    """
+    offer = db.get(ExcessOffer, offer_id)
+    if offer is None or offer.excess_list_id != list_id:
+        raise HTTPException(404, f"Offer {offer_id} not found on list {list_id}")
+    el = excess_service.get_excess_list(db, list_id)
+    if user.id != offer.submitted_by and user.id != el.owner_id:
+        raise HTTPException(403, "You can only withdraw your own offer")
+    if offer.status not in {s.value for s in _WITHDRAWABLE_OFFER_STATUSES}:
+        raise HTTPException(409, "Only an open offer can be withdrawn — unaward a won offer first")
+
+    excess_service.withdraw_offer(db, offer_id)
+    el = excess_service.get_excess_list(db, list_id)
+    resp = template_response(
+        "htmx/partials/resell/_award_response.html", _award_response_context(request, db, el, user)
+    )
+    return _toast(resp, "Offer withdrawn")
+
+
 # ── Outreach: offer-to-buyers panel + tracker + don't-forget strip ───
 #
 # The trader→buyer half of Resell (the inverse of sourcing's RFQ). Offering excess OUT
@@ -1009,16 +1070,14 @@ def _suggestion_rows(db: Session, el: ExcessList, owner: User, line_ids: list[in
         excess_list_id=el.id if not line_ids else None,
         line_item_ids=line_ids or None,
     )
-    rows: list[dict] = []
-    for rb in ranked:
-        overlap = buyer_affinity_service.overlap_warning(
-            db,
-            excess_list_id=el.id,
-            target_vendor_card_id=rb.vendor_card_id,
-            owner_id=owner.id,
-        )
-        rows.append({"buyer": rb, "overlap": overlap})
-    return rows
+    # Batch the advisory overlap flag for every ranked buyer (M8: was one query per buyer).
+    overlaps = buyer_affinity_service.overlap_warnings_for(
+        db,
+        excess_list_id=el.id,
+        target_vendor_card_ids=[rb.vendor_card_id for rb in ranked],
+        owner_id=owner.id,
+    )
+    return [{"buyer": rb, "overlap": overlaps.get(rb.vendor_card_id)} for rb in ranked]
 
 
 def _no_contact_buyers(db: Session, el: ExcessList, suggested_ids: set[int]) -> list[dict]:
@@ -1155,7 +1214,7 @@ async def resell_offer_buyers_form(
     list_id: int,
     line_ids: str = Query(""),
     preselect_vendor_card_id: str = Query(""),
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.RESELL)),
     db: Session = Depends(get_db),
 ):
     """Render the offer-to-buyers panel (owner-only): ranked suggestions + manual add +
@@ -1181,7 +1240,7 @@ async def resell_offer_buyers_form(
 async def resell_outreach_tracker(
     request: Request,
     list_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.RESELL)),
     db: Session = Depends(get_db),
 ):
     """Lazy Outreach tab body — the unified tracker (owner-only).
@@ -1199,7 +1258,7 @@ async def resell_outreach_tracker(
 async def resell_not_yet_strip(
     request: Request,
     list_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.RESELL)),
     db: Session = Depends(get_db),
 ):
     """The "usually offered, not yet this round" nudge strip (owner-only).
@@ -1327,7 +1386,7 @@ async def resell_outreach_reply(
     request: Request,
     list_id: int,
     outreach_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.RESELL)),
     db: Session = Depends(get_db),
 ):
     """Reply viewer for one buyer×list outreach (owner-only): the reply thread + a

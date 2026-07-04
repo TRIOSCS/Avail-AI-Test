@@ -443,6 +443,57 @@ class TestOverlapWarning:
         )
         assert warn is None
 
+    def test_batched_matches_per_buyer(
+        self, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, trader: User, teammate: User
+    ):
+        """M8: overlap_warnings_for (batched) returns exactly what overlap_warning returns
+        per buyer — a teammate touch surfaces identically; a same-owner-only touch is
+        absent (the caller maps a miss to None)."""
+        flagged = _reachable_card(db_session, "Batch Flagged")
+        quiet = _reachable_card(db_session, "Batch Quiet")
+        db_session.add_all(
+            [
+                ExcessOutreach(
+                    excess_list_id=excess_list.id,
+                    excess_line_item_id=cap_line.id,
+                    target_vendor_card_id=flagged.id,
+                    submitted_by=teammate.id,  # teammate → overlap
+                    channel="email",
+                    status=ExcessOutreachStatus.SENT,
+                    sent_at=datetime.now(timezone.utc) - timedelta(days=2),
+                ),
+                ExcessOutreach(
+                    excess_list_id=excess_list.id,
+                    target_vendor_card_id=quiet.id,
+                    submitted_by=trader.id,  # same owner → not overlap
+                    channel="phone",
+                    status=ExcessOutreachStatus.SENT,
+                    sent_at=datetime.now(timezone.utc),
+                ),
+            ]
+        )
+        db_session.commit()
+
+        batched = svc.overlap_warnings_for(
+            db_session,
+            excess_list_id=excess_list.id,
+            target_vendor_card_ids=[flagged.id, quiet.id],
+            owner_id=trader.id,
+        )
+        assert quiet.id not in batched  # same-owner-only → no warning (matches per-buyer)
+        per_buyer = svc.overlap_warning(
+            db_session, excess_list_id=excess_list.id, target_vendor_card_id=flagged.id, owner_id=trader.id
+        )
+        assert batched[flagged.id] == per_buyer
+
+    def test_batched_empty_ids_returns_empty(self, db_session: Session, excess_list: ExcessList, trader: User):
+        assert (
+            svc.overlap_warnings_for(
+                db_session, excess_list_id=excess_list.id, target_vendor_card_ids=[], owner_id=trader.id
+            )
+            == {}
+        )
+
 
 # ═══════════════════════════════════════════════════════════════════════
 #  not_yet_offered_strip

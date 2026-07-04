@@ -37,11 +37,18 @@
   {%- elif item.status == 'awarded' -%}
   <span class="text-secondary whitespace-nowrap">Not selected</span>
   {%- elif offer.status in ['open', 'late'] -%}
-  <button hx-post="/api/resell/{{ el.id }}/offers/{{ offer.id }}/award"
-          hx-target="#tab-offers-{{ el.id }}" hx-swap="innerHTML"
-          hx-confirm="Award {{ _broker_label(offer, is_owner) }} for {{ item.part_number }}? This marks the line sold."
-          data-loading-disable
-          class="btn-primary btn-sm">Award</button>
+  <div class="inline-flex items-center gap-1.5 whitespace-nowrap">
+    <button hx-post="/api/resell/{{ el.id }}/offers/{{ offer.id }}/award"
+            hx-target="#tab-offers-{{ el.id }}" hx-swap="innerHTML"
+            hx-confirm="Award {{ _broker_label(offer, is_owner) }} for {{ item.part_number }}? This marks the line sold."
+            data-loading-disable
+            class="btn-primary btn-sm">Award</button>
+    <button hx-post="/api/resell/{{ el.id }}/offers/{{ offer.id }}/withdraw"
+            hx-target="#tab-offers-{{ el.id }}" hx-swap="innerHTML"
+            hx-confirm="Withdraw this offer? It drops out of the running."
+            data-loading-disable
+            class="btn-ghost btn-sm text-gray-500 hover:text-gray-700">Withdraw</button>
+  </div>
   {%- else -%}
   <span class="text-xs text-gray-400">—</span>
   {%- endif -%}
@@ -98,6 +105,11 @@
               hx-confirm="Award the whole list to {{ _broker_label(offer, is_owner) }}? All {{ active_line_count }} line{{ 's' if active_line_count != 1 }} are marked sold."
               data-loading-disable
               class="btn-primary btn-sm">Award all {{ active_line_count }}</button>
+      <button hx-post="/api/resell/{{ el.id }}/offers/{{ offer.id }}/withdraw"
+              hx-target="#tab-offers-{{ el.id }}" hx-swap="innerHTML"
+              hx-confirm="Withdraw this take-all offer? It drops out of the running."
+              data-loading-disable
+              class="btn-ghost btn-sm text-gray-500 hover:text-gray-700">Withdraw</button>
       {% else %}
       <span class="text-xs text-gray-400">—</span>
       {% endif %}

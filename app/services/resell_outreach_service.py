@@ -628,12 +628,17 @@ def _link_inbound_offer(
     """
     excess_list = db.get(ExcessList, outreach.excess_list_id)
 
+    # An inbound reply landing after the posting window closed is flagged ``late`` (never
+    # dropped) — same rule as the User-driven submit_offer path.
+    from .excess_service import offer_status_for_list
+
+    status = offer_status_for_list(excess_list.status) if excess_list is not None else ExcessOfferStatus.OPEN
     offer = ExcessOffer(
         excess_list_id=outreach.excess_list_id,
         submitted_by=outreach.submitted_by,
         offerer_vendor_card_id=outreach.target_vendor_card_id,
         scope=ExcessOfferScope.PER_LINE,
-        status=ExcessOfferStatus.OPEN,
+        status=status,
         notes=notes,
     )
     db.add(offer)

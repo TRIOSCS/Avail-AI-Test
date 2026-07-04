@@ -417,6 +417,29 @@ def confirm_import(db: Session, list_id: int, validated_rows: list[dict]) -> dic
 # Offer statuses whose lines count toward a line's best-price rollup (active states).
 _ROLLUP_OFFER_STATUSES = (ExcessOfferStatus.OPEN, ExcessOfferStatus.WON)
 
+# List statuses that mean the posting window is over: an inbound offer landing now is
+# accepted but flagged ``late`` and queued for review — never dropped (spec §Resolved-for
+# -v1 #3, constants.ExcessOfferStatus.LATE). On {open, collecting, draft} the offer is
+# on-time (``open``).
+_CLOSED_LIST_STATUSES = (
+    ExcessListStatus.BID_OUT,
+    ExcessListStatus.AWARDED,
+    ExcessListStatus.CLOSED,
+    ExcessListStatus.EXPIRED,
+)
+
+
+def offer_status_for_list(list_status: str) -> ExcessOfferStatus:
+    """The status a NEW inbound offer takes given the list's status at submit time.
+
+    ``late`` when the posting window has already closed (bid_out/awarded/closed/expired) —
+    the offer is still accepted and queued for review, never dropped — else ``open``.
+    Shared by :func:`submit_offer` and the inbound-email path
+    (``resell_outreach_service._link_inbound_offer``) so both entry points flag lateness
+    identically.
+    """
+    return ExcessOfferStatus.LATE if list_status in _CLOSED_LIST_STATUSES else ExcessOfferStatus.OPEN
+
 
 def submit_offer(
     db: Session,
@@ -462,7 +485,7 @@ def submit_offer(
         scope=scope_value,
         notes=notes,
         valid_until=valid_until,
-        status=ExcessOfferStatus.OPEN,
+        status=offer_status_for_list(excess_list.status),
         take_all_total_price=take_all_total_price if scope_value == ExcessOfferScope.TAKE_ALL else None,
     )
     db.add(offer)
@@ -635,6 +658,68 @@ def _apply_award_list_status(excess_list: ExcessList) -> None:
         excess_list.status = ExcessListStatus.AWARDED
 
 
+def _close_competing_offers(excess_list: ExcessList, winner: ExcessOffer) -> set[int]:
+    """Mark every still-open/late offer that can no longer win a line ``lost`` (M1).
+
+    Called right after *winner* is awarded (its lines already flipped to ``awarded``).
+    ``lost`` was a defined-but-never-assigned state, so losing bids lingered ``open`` —
+    kept counting in the review glance (open/late) and could still own a line's
+    ``best_offer_id`` (the rollup counts open/won). An offer is closed when it can no
+    longer win ANY line:
+
+    * ``take_all`` competitor → closed only when *winner* is itself a ``take_all`` (the
+      whole list is gone); a per-line award leaves it OPEN (blocked, revivable on unaward).
+    * ``per_line`` competitor → closed when it has matched lines and NONE of them is still
+      winnable (all decided — awarded or withdrawn). An offer still bidding on an
+      un-decided line stays OPEN; an all-unmatched queue offer (no matched line) is left
+      alone for manual resolution.
+
+    Returns the line-item ids the newly-lost offers touched, so the caller recomputes
+    those rollups (a losing bid that owned ``best_offer_id`` must be recomputed away).
+    """
+    winner_takes_all = winner.scope == ExcessOfferScope.TAKE_ALL
+    touched: set[int] = set()
+    for other in excess_list.offers:
+        if other.id == winner.id or other.status not in (ExcessOfferStatus.OPEN, ExcessOfferStatus.LATE):
+            continue
+        if other.scope == ExcessOfferScope.TAKE_ALL:
+            should_close = winner_takes_all
+        else:
+            matched = [ln.excess_line_item for ln in other.lines if ln.excess_line_item is not None]
+            should_close = bool(matched) and not any(li.status not in _DECIDED_LINE_STATUSES for li in matched)
+        if should_close:
+            other.status = ExcessOfferStatus.LOST
+            touched.update(ln.excess_line_item_id for ln in other.lines if ln.excess_line_item_id is not None)
+    return touched
+
+
+def _reopen_competing_offers(excess_list: ExcessList, unawarded: ExcessOffer) -> set[int]:
+    """Inverse of :func:`_close_competing_offers` — revive the ``lost`` closures an
+    award made.
+
+    After *unawarded* is reversed (its lines flipped back to ``available``), re-open every
+    ``lost`` offer that once again has a line it could win: a ``per_line`` offer with any
+    matched line no longer decided, or a ``take_all`` offer once NO line is awarded.
+    ``lost`` is only ever set by :func:`_close_competing_offers`, so every ``lost`` offer
+    here was closed by an award and is safe to revive. Returns the touched line ids for
+    rollup recompute.
+    """
+    any_awarded = any(li.status == ExcessLineItemStatus.AWARDED for li in excess_list.line_items)
+    touched: set[int] = set()
+    for other in excess_list.offers:
+        if other.id == unawarded.id or other.status != ExcessOfferStatus.LOST:
+            continue
+        if other.scope == ExcessOfferScope.TAKE_ALL:
+            reopen = not any_awarded
+        else:
+            matched = [ln.excess_line_item for ln in other.lines if ln.excess_line_item is not None]
+            reopen = any(li.status not in _DECIDED_LINE_STATUSES for li in matched)
+        if reopen:
+            other.status = ExcessOfferStatus.OPEN
+            touched.update(ln.excess_line_item_id for ln in other.lines if ln.excess_line_item_id is not None)
+    return touched
+
+
 def award_offer(db: Session, offer_id: int, owner: User) -> ExcessOffer:
     """Award an inbound offer — the single chokepoint where an ExcessOffer becomes
     ``won``.
@@ -675,8 +760,13 @@ def award_offer(db: Session, offer_id: int, owner: User) -> ExcessOffer:
         it.status = ExcessLineItemStatus.AWARDED
     db.flush()
 
-    for it in affected:
-        recompute_line_rollup(db, it.id)
+    # Close every other open/late offer that can no longer win a line (M1: mark them
+    # ``lost`` so losing bids stop counting in review and stop owning the rollup).
+    closed_line_ids = _close_competing_offers(excess_list, offer)
+    db.flush()
+
+    for line_id in {it.id for it in affected} | closed_line_ids:
+        recompute_line_rollup(db, line_id)
 
     # Recompute the winning buyer's scorecard before the commit — this path owns the
     # transaction (the hook returns None / no-ops for an offer with no canonical buyer).
@@ -725,8 +815,13 @@ def unaward_offer(db: Session, offer_id: int, owner: User) -> ExcessOffer:
         it.status = ExcessLineItemStatus.AVAILABLE
     db.flush()
 
-    for it in affected:
-        recompute_line_rollup(db, it.id)
+    # Revive the competing offers this award had closed (M1 inverse) now that its lines
+    # are back in the pool.
+    reopened_line_ids = _reopen_competing_offers(excess_list, offer)
+    db.flush()
+
+    for line_id in {it.id for it in affected} | reopened_line_ids:
+        recompute_line_rollup(db, line_id)
 
     recompute_buyer_score_on_win(db, offer)
 

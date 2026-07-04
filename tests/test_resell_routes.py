@@ -869,3 +869,127 @@ def test_detail_action_buttons_target_self_not_workspace_shell(client, db_sessio
     assert "data-resell-detail-root" in body
     assert "#split-right-resell" not in body
     assert "closest [data-resell-detail-root]" in body
+
+
+# ── M7: read partials gated by require_access(RESELL) ─────────────────
+
+
+def test_read_partials_require_resell_access(client, db_session, posted_list):
+    """M7: the list/detail read partials use require_access(RESELL), not bare
+    require_user — a logged-in user WITHOUT Resell access can no longer enumerate posted
+    lists or open the detail. Was: any authenticated user could hit them."""
+    from app.dependencies import require_user
+    from app.main import app
+
+    # A real login, but Resell explicitly revoked via an access override.
+    no_access = User(
+        email="noresell@trioscs.com",
+        name="No Resell",
+        role="buyer",
+        azure_id="az-noresell",
+        access_overrides={"resell": False},
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(no_access)
+    db_session.commit()
+
+    app.dependency_overrides[require_user] = lambda: no_access
+    try:
+        r_workspace = client.get("/v2/partials/resell/workspace")
+        r_lists = client.get("/v2/partials/resell/lists?lens=open")
+        r_detail = client.get(f"/v2/partials/resell/{posted_list.id}")
+        r_lines = client.get(f"/v2/partials/resell/{posted_list.id}/lines")
+    finally:
+        app.dependency_overrides.pop(require_user, None)
+
+    assert r_workspace.status_code == 403
+    assert r_lists.status_code == 403
+    assert r_detail.status_code == 403
+    assert r_lines.status_code == 403
+
+
+# ── M8: batched stat strip + list cards (no behaviour change, fixed queries) ──
+
+
+def test_stat_strip_aggregation(db_session, trader_user, test_company):
+    """M8: _stat_strip folds the six per-status counts into two grouped queries — the
+    numbers it returns are unchanged."""
+    from app.constants import ExcessOfferScope, ExcessOfferStatus
+    from app.models.excess import ExcessOffer
+    from app.routers.resell import _stat_strip
+
+    def _mk(status):
+        el = ExcessList(title=f"S-{status}", company_id=test_company.id, owner_id=trader_user.id, status=status)
+        db_session.add(el)
+        db_session.flush()
+        return el
+
+    _mk(ExcessListStatus.OPEN)
+    collecting = _mk(ExcessListStatus.COLLECTING)
+    _mk(ExcessListStatus.BID_OUT)
+    _mk(ExcessListStatus.AWARDED)
+    # Two unactioned offers on an owned list: one take_all, one per_line.
+    for scope in (ExcessOfferScope.TAKE_ALL, ExcessOfferScope.PER_LINE):
+        db_session.add(
+            ExcessOffer(
+                excess_list_id=collecting.id,
+                submitted_by=trader_user.id,
+                scope=scope,
+                status=ExcessOfferStatus.OPEN,
+            )
+        )
+    db_session.commit()
+
+    stats = _stat_strip(db_session, trader_user)
+    assert stats["open"] == 2  # open + collecting
+    assert stats["bids_out"] == 1
+    assert stats["awarded"] == 1
+    assert stats["offers_to_review"] == 2
+    assert stats["take_all"] == 1
+
+
+def test_list_cards_batched_coverage_and_offer_count(db_session, trader_user, test_company):
+    """M8: _list_cards computes per-list coverage + unactioned offer count in a fixed
+    number of grouped queries; the per-card numbers match the old per-list logic."""
+    from app.constants import ExcessOfferScope, ExcessOfferStatus
+    from app.models.excess import ExcessOffer, ExcessOfferLine
+    from app.routers.resell import _list_cards
+
+    el = ExcessList(
+        title="Cards", company_id=test_company.id, owner_id=trader_user.id, status=ExcessListStatus.COLLECTING
+    )
+    db_session.add(el)
+    db_session.flush()
+    line_a = ExcessLineItem(excess_list_id=el.id, part_number="A1", quantity=10, offer_count=1)
+    line_b = ExcessLineItem(excess_list_id=el.id, part_number="B2", quantity=10, offer_count=0)
+    db_session.add_all([line_a, line_b])
+    db_session.flush()
+    offer = ExcessOffer(
+        excess_list_id=el.id,
+        submitted_by=trader_user.id,
+        scope=ExcessOfferScope.PER_LINE,
+        status=ExcessOfferStatus.OPEN,
+    )
+    db_session.add(offer)
+    db_session.flush()
+    db_session.add(
+        ExcessOfferLine(
+            offer_id=offer.id, excess_line_item_id=line_a.id, mpn_raw="A1", quantity=10, match_status="matched"
+        )
+    )
+    db_session.commit()
+
+    cards = _list_cards(db_session, [el], can_see_customer=True)
+    assert len(cards) == 1
+    card = cards[0]
+    assert card["coverage_total"] == 2
+    assert card["coverage_filled"] == 1  # only line_a has offer_count > 0
+    assert card["offer_count"] == 1  # one unactioned (open) offer
+    assert card["customer_name"] == test_company.name
+
+
+def test_list_cards_empty_input():
+    """No lists → no cards, no queries."""
+    from app.routers.resell import _list_cards
+
+    assert _list_cards(None, [], can_see_customer=True) == []

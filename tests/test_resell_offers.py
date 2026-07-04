@@ -21,6 +21,7 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from app.constants import ExcessListStatus, ExcessOfferStatus
 from app.models import Company, MaterialCard, User
 from app.models.excess import ExcessLineItem, ExcessList, ExcessOfferLine
 from app.services.excess_service import (
@@ -301,3 +302,39 @@ def test_collecting_list_stays_collecting_on_subsequent_offer(db_session: Sessio
     submit_offer(db_session, list_id=el.id, user=offerer2, scope="take_all")
     db_session.refresh(el)
     assert el.status == ExcessListStatus.COLLECTING
+
+
+# ---------------------------------------------------------------------------
+# Late-offer flagging (M3): an offer landing after the posting window closed
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("closed_status", [ExcessListStatus.BID_OUT, ExcessListStatus.AWARDED])
+def test_offer_on_closed_list_is_flagged_late(db_session: Session, closed_status):
+    """An inbound offer on a bid_out/awarded list is accepted but flagged ``late``
+    (queued for review, never dropped) instead of a plain on-time ``open``."""
+    company = _make_company(db_session, name=f"SellerCo-Late-{closed_status}")
+    owner = _make_user(db_session, email=f"owner-late-{closed_status}@test.com", role="sales")
+    offerer = _make_user(db_session, email=f"buyer-late-{closed_status}@test.com", role="buyer")
+    el = _make_list_with_lines(db_session, owner, company, ["LM358N"])
+    el.status = closed_status
+    db_session.commit()
+
+    offer = submit_offer(db_session, list_id=el.id, user=offerer, scope="take_all")
+
+    assert offer.status == ExcessOfferStatus.LATE
+
+
+@pytest.mark.parametrize("open_status", [ExcessListStatus.OPEN, ExcessListStatus.COLLECTING])
+def test_offer_on_open_list_is_on_time(db_session: Session, open_status):
+    """An offer while the window is still open (open/collecting) lands ``open``."""
+    company = _make_company(db_session, name=f"SellerCo-OnTime-{open_status}")
+    owner = _make_user(db_session, email=f"owner-ontime-{open_status}@test.com", role="sales")
+    offerer = _make_user(db_session, email=f"buyer-ontime-{open_status}@test.com", role="buyer")
+    el = _make_list_with_lines(db_session, owner, company, ["LM358N"])
+    el.status = open_status
+    db_session.commit()
+
+    offer = submit_offer(db_session, list_id=el.id, user=offerer, scope="take_all")
+
+    assert offer.status == ExcessOfferStatus.OPEN

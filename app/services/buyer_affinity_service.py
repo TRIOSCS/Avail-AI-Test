@@ -526,6 +526,67 @@ def overlap_warning(
     }
 
 
+def overlap_warnings_for(
+    db: Session,
+    *,
+    excess_list_id: int,
+    target_vendor_card_ids: list[int],
+    owner_id: int,
+    within_days: int = _DEFAULT_OVERLAP_DAYS,
+) -> dict[int, dict]:
+    """Batched :func:`overlap_warning` for many buyers at once (kills the offer-panel
+    N+1).
+
+    ``_suggestion_rows`` used to call :func:`overlap_warning` once per ranked buyer — two
+    queries each (the ExcessOutreach scan + the teammate-name ``db.get``) — up to ~40 for a
+    full panel, SQLite-masked. This does the same work in exactly TWO queries: one
+    ExcessOutreach scan across every target card, one batched teammate-name lookup.
+
+    Returns ``{vendor_card_id: {by_user_id, by_user_name, when, line_item_ids}}`` for the
+    buyers with a recent teammate overlap; a buyer with none is simply absent (the caller
+    maps a miss to ``None``). Same predicate/shape as the per-buyer function: a teammate's
+    (``submitted_by != owner_id``) ExcessOutreach on this list to the buyer whose
+    ``sent_at`` (else ``created_at``) is within ``within_days``; the most-recent touch wins;
+    ``line_item_ids`` unions the overlapping touches.
+    """
+    if not target_vendor_card_ids:
+        return {}
+    cutoff = datetime.now(timezone.utc) - timedelta(days=within_days)
+    touches = (
+        db.query(ExcessOutreach)
+        .filter(
+            ExcessOutreach.excess_list_id == excess_list_id,
+            ExcessOutreach.target_vendor_card_id.in_(list(target_vendor_card_ids)),
+            ExcessOutreach.submitted_by != owner_id,
+        )
+        .all()
+    )
+    by_card: dict[int, list] = {}
+    for t in touches:
+        stamp = t.sent_at or t.created_at
+        # Skip a row with no usable timestamp (advisory — must never blow up the panel).
+        if stamp is None or _aware(stamp) < cutoff:
+            continue
+        by_card.setdefault(t.target_vendor_card_id, []).append(t)
+    if not by_card:
+        return {}
+
+    submitter_ids = {t.submitted_by for touches_ in by_card.values() for t in touches_}
+    names = dict(db.query(User.id, User.name).filter(User.id.in_(list(submitter_ids))).all())
+
+    result: dict[int, dict] = {}
+    for card_id, touches_ in by_card.items():
+        touches_.sort(key=lambda t: _aware(t.sent_at or t.created_at), reverse=True)
+        latest = touches_[0]
+        result[card_id] = {
+            "by_user_id": latest.submitted_by,
+            "by_user_name": names.get(latest.submitted_by),
+            "when": _aware(latest.sent_at or latest.created_at),
+            "line_item_ids": sorted({t.excess_line_item_id for t in touches_ if t.excess_line_item_id is not None}),
+        }
+    return result
+
+
 # ═══════════════════════════════════════════════════════════════════════
 #  DON'T-FORGET NUDGE STRIP
 # ═══════════════════════════════════════════════════════════════════════
