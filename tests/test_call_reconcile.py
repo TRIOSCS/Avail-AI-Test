@@ -326,14 +326,9 @@ class TestTokenCaching:
         _token_cache["expires_at"] = time.time() + 7200  # 2h TTL
 
         mock_post = AsyncMock()
-        with patch("app.services.eight_by_eight_service.httpx.AsyncClient") as mock_client_cls:
-            mock_client = MagicMock()
-            mock_client.post = mock_post
-            cm = MagicMock()
-            cm.__aenter__ = AsyncMock(return_value=mock_client)
-            cm.__aexit__ = AsyncMock(return_value=False)
-            mock_client_cls.return_value = cm
-
+        mock_http = MagicMock()
+        mock_http.post = mock_post
+        with patch("app.services.eight_by_eight_service.http", mock_http):
             result = await get_access_token(FAKE_SETTINGS)
 
         assert result == "valid-tok"
@@ -350,14 +345,9 @@ class TestTokenCaching:
         mock_resp.status_code = 200
         mock_resp.json.return_value = {"access_token": "fresh-tok", "expires_in": 3600}
 
-        with patch("app.services.eight_by_eight_service.httpx.AsyncClient") as mock_client_cls:
-            mock_client = MagicMock()
-            mock_client.post = AsyncMock(return_value=mock_resp)
-            cm = MagicMock()
-            cm.__aenter__ = AsyncMock(return_value=mock_client)
-            cm.__aexit__ = AsyncMock(return_value=False)
-            mock_client_cls.return_value = cm
-
+        mock_http = MagicMock()
+        mock_http.post = AsyncMock(return_value=mock_resp)
+        with patch("app.services.eight_by_eight_service.http", mock_http):
             result = await get_access_token(FAKE_SETTINGS)
 
         assert result == "fresh-tok"
@@ -373,14 +363,9 @@ class TestTokenCaching:
         mock_resp.json.return_value = {"access_token": "ttl-tok", "expires_in": 1800}
 
         t_before = time.time()
-        with patch("app.services.eight_by_eight_service.httpx.AsyncClient") as mock_client_cls:
-            mock_client = MagicMock()
-            mock_client.post = AsyncMock(return_value=mock_resp)
-            cm = MagicMock()
-            cm.__aenter__ = AsyncMock(return_value=mock_client)
-            cm.__aexit__ = AsyncMock(return_value=False)
-            mock_client_cls.return_value = cm
-
+        mock_http = MagicMock()
+        mock_http.post = AsyncMock(return_value=mock_resp)
+        with patch("app.services.eight_by_eight_service.http", mock_http):
             await get_access_token(FAKE_SETTINGS)
 
         # expires_at should be approximately t_before + 1800
