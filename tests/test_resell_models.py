@@ -108,7 +108,6 @@ class TestTradingConstants:
             "open",
             "won",
             "lost",
-            "expired",
             "withdrawn",
             "late",
         }

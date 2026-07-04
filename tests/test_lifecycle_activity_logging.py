@@ -170,7 +170,9 @@ def test_reopen_task_does_not_log_task_reopened(db_session, test_requisition, te
     )
     db_session.commit()
 
-    rows = _activity_rows(db_session, test_requisition.id, ActivityType.TASK_REOPENED)
+    # "task_reopened" is a deliberately-unused activity type (removed from ActivityType);
+    # assert by the raw string that reopening writes no such row.
+    rows = _activity_rows(db_session, test_requisition.id, "task_reopened")
     assert len(rows) == 0, "task reopen must not produce an ActivityLog row (no-fake-logging)"
 
 

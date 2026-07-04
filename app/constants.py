@@ -76,8 +76,6 @@ class AttributionStatus(StrEnum):
     """Attribution lifecycle for Offer records."""
 
     ACTIVE = "active"
-    EXPIRED = "expired"
-    CONVERTED = "converted"
 
 
 class OfferCondition(StrEnum):
@@ -175,7 +173,6 @@ class ExcessOfferStatus(StrEnum):
     OPEN = "open"
     WON = "won"
     LOST = "lost"
-    EXPIRED = "expired"
     WITHDRAWN = "withdrawn"
     LATE = "late"
 
@@ -550,18 +547,14 @@ class AIFlagSeverity(StrEnum):
 
 
 class RiskFlagType(StrEnum):
-    """Types of risk flags that can be raised on a deal."""
+    """Types of risk flags that can be raised on a deal.
 
-    PRICE_INCREASE = "price_increase"
-    LEAD_TIME_RISK = "lead_time_risk"
-    VENDOR_RELIABILITY = "vendor_reliability"
-    QTY_SHORTFALL = "qty_shortfall"
-    GEO_RISK = "geo_risk"
+    Only ``STALE_OFFER`` is live: it is the ``type`` key written into the
+    ``BuyPlan.ai_flags`` JSON by ``buyplan_builder`` (as the string ``"stale_offer"``).
+    The other classifications were never wired to any writer/reader and were removed.
+    """
+
     STALE_OFFER = "stale_offer"
-    MARGIN_BELOW_THRESHOLD = "margin_below_threshold"
-    SINGLE_SOURCE = "single_source"
-    COUNTERFEIT_RISK = "counterfeit_risk"
-    OTHER = "other"
 
 
 class RiskFlagSeverity(StrEnum):
@@ -700,7 +693,6 @@ class ActivityType(StrEnum):
     SIGHTING_ADDED = "sighting_added"
     SALES_NOTE = "sales_note"
     TASK_COMPLETED = "task_completed"
-    TASK_REOPENED = "task_reopened"
     ASSIGNMENT_CHANGED = "assignment_changed"
     STRATEGIC_VENDOR_EXPIRING = "strategic_expiring"  # 18 chars — fits String(20)
     # Communication / manual-entry types
