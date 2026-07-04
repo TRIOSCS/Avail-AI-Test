@@ -57,11 +57,10 @@ def _estimate_qty_with_ai(qty_values: list[int | None]) -> dict:
         return {"qty": max(non_null), "approximate": True}
 
     try:
-        import anthropic
-
+        from app.http_client import get_anthropic_client
         from app.utils.claude_client import MODELS
 
-        client = anthropic.Anthropic(api_key=api_key)
+        client = get_anthropic_client(api_key)
         prompt = (
             f"Given these quantity listings from the same vendor for the same part: {non_null}. "
             f"Some may be duplicate stock listed on different platforms. "

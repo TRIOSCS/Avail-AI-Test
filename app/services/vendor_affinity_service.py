@@ -205,11 +205,10 @@ def find_affinity_vendors_l3(mpn: str, manufacturer: str | None, db: Session) ->
 def _classify_mpn(mpn: str, manufacturer: str | None, api_key: str) -> str | None:
     """Call Claude Haiku to classify an MPN into a broad sourcing category."""
     try:
-        import anthropic
-
+        from app.http_client import get_anthropic_client
         from app.utils.claude_client import MODELS
 
-        client = anthropic.Anthropic(api_key=api_key)
+        client = get_anthropic_client(api_key)
         mfr_hint = f" from {manufacturer}" if manufacturer else ""
         message = client.messages.create(
             model=MODELS["fast"],

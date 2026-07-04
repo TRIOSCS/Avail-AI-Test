@@ -21,11 +21,13 @@ UNTIL = datetime(2026, 3, 2, tzinfo=timezone.utc)
 
 
 def _mock_async_client(*, get=None, post=None):
-    """Build a patch target replacing httpx.AsyncClient.
+    """Build a mock replacing the shared ``http`` client.
 
     `get`/`post` may be a mock, a single response, an iterable of responses
-    (side_effect), or an exception. Returns a MagicMock suitable as the
-    return_value of a patch on `app.services.eight_by_eight_service.httpx.AsyncClient`.
+    (side_effect), or an exception. Returns a MagicMock with async `.get`/`.post`,
+    suitable as the `new` of a patch on `app.services.eight_by_eight_service.http`.
+    The service now uses the shared pooled client directly (no `async with`), so the
+    mock is the client itself — ``._client`` aliases it for the existing assertions.
     """
     client = MagicMock()
 
@@ -45,13 +47,8 @@ def _mock_async_client(*, get=None, post=None):
 
     client.get = _async_method(get)
     client.post = _async_method(post)
-
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=client)
-    cm.__aexit__ = AsyncMock(return_value=False)
-    factory = MagicMock(return_value=cm)
-    factory._client = client  # expose for assertions
-    return factory
+    client._client = client  # expose for assertions (back-compat with CM-era tests)
+    return client
 
 
 class TestGetAccessToken:
@@ -61,7 +58,7 @@ class TestGetAccessToken:
         mock_resp.json.return_value = {"access_token": "tok-abc123"}
         factory = _mock_async_client(post=mock_resp)
 
-        with patch("app.services.eight_by_eight_service.httpx.AsyncClient", factory):
+        with patch("app.services.eight_by_eight_service.http", factory):
             token = await get_access_token(FAKE_SETTINGS)
         assert token == "tok-abc123"
         factory._client.post.assert_awaited_once()
@@ -72,7 +69,7 @@ class TestGetAccessToken:
         mock_resp.text = "Unauthorized"
         factory = _mock_async_client(post=mock_resp)
 
-        with patch("app.services.eight_by_eight_service.httpx.AsyncClient", factory):
+        with patch("app.services.eight_by_eight_service.http", factory):
             with pytest.raises(ValueError, match="HTTP 401"):
                 await get_access_token(FAKE_SETTINGS)
 
@@ -84,7 +81,7 @@ class TestGetCdrs:
         mock_resp.text = "Internal Server Error"
         factory = _mock_async_client(get=mock_resp)
 
-        with patch("app.services.eight_by_eight_service.httpx.AsyncClient", factory):
+        with patch("app.services.eight_by_eight_service.http", factory):
             result = await get_cdrs("token", FAKE_SETTINGS, SINCE, UNTIL)
         assert result == []
 
@@ -100,7 +97,7 @@ class TestGetCdrs:
         }
         factory = _mock_async_client(get=mock_resp)
 
-        with patch("app.services.eight_by_eight_service.httpx.AsyncClient", factory):
+        with patch("app.services.eight_by_eight_service.http", factory):
             result = await get_cdrs("token", FAKE_SETTINGS, SINCE, UNTIL)
         assert len(result) == 2
 
@@ -119,7 +116,7 @@ class TestGetCdrs:
         }
         factory = _mock_async_client(get=[page1, page2])
 
-        with patch("app.services.eight_by_eight_service.httpx.AsyncClient", factory):
+        with patch("app.services.eight_by_eight_service.http", factory):
             result = await get_cdrs("token", FAKE_SETTINGS, SINCE, UNTIL)
         assert len(result) == 3
         assert factory._client.get.await_count == 2

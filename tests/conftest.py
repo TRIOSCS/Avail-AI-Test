@@ -160,6 +160,22 @@ def _clear_8x8_token_cache():
 
 
 @pytest.fixture(autouse=True)
+def _clear_anthropic_client_cache():
+    """Clear the shared Anthropic SDK client cache before and after each test.
+
+    ``get_anthropic_client`` caches one client per API key process-wide (O6 pooling).
+    Tests that patch ``anthropic.Anthropic`` and assert construction happens rely on an
+    empty cache; clearing around each test keeps that isolation (mirrors
+    ``_clear_connector_token_cache``).
+    """
+    from app.http_client import _anthropic_clients
+
+    _anthropic_clients.clear()
+    yield
+    _anthropic_clients.clear()
+
+
+@pytest.fixture(autouse=True)
 def _clear_connector_token_cache():
     """Clear the cross-search OAuth token cache + per-key locks before and after each
     test.

@@ -12,6 +12,8 @@ Usage:
     resp = await http_redirect.get(url)
 """
 
+from typing import Any
+
 import httpx
 from loguru import logger
 
@@ -32,6 +34,34 @@ http_redirect = httpx.AsyncClient(
     limits=_LIMITS,
     follow_redirects=True,
 )
+
+
+# ── Shared synchronous Anthropic SDK client (pooled, reused) ─────────
+#
+# The synchronous services (sighting_aggregation, vendor_affinity) call Claude from
+# thread-pool / sync search-fanout contexts where the async claude_client can't be
+# awaited. Building a fresh ``anthropic.Anthropic()`` per call spins up (and never
+# closes) a new httpx connection pool every time; caching one client per API key reuses
+# that pool across calls. Model selection stays with the caller (claude_client.MODELS) —
+# this getter only owns client construction + reuse.
+_anthropic_clients: dict[str, Any] = {}
+
+
+def get_anthropic_client(api_key: str) -> Any:
+    """Return a cached, reused synchronous ``anthropic.Anthropic`` client for
+    ``api_key``.
+
+    One client per distinct key is built lazily and reused across calls, so repeated
+    calls share the SDK's internal httpx connection pool instead of re-creating it.
+    Construction failures are not cached (the exception propagates to the caller).
+    """
+    client = _anthropic_clients.get(api_key)
+    if client is None:
+        import anthropic
+
+        client = anthropic.Anthropic(api_key=api_key)
+        _anthropic_clients[api_key] = client
+    return client
 
 
 async def close_clients():

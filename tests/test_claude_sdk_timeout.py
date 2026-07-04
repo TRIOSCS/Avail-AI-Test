@@ -62,3 +62,39 @@ def test_classify_mpn_passes_bounded_timeout():
     kwargs = client.messages.create.call_args.kwargs
     assert "timeout" in kwargs, "messages.create must pass an explicit timeout"
     assert 0 < kwargs["timeout"] <= BOUNDED_TIMEOUT_MAX
+
+
+# ── O6: the synchronous Anthropic client is pooled/reused, not rebuilt per call ──
+
+
+def test_get_anthropic_client_reuses_one_client_per_key():
+    """The shared getter builds one Anthropic client per distinct key and reuses it."""
+    from app.http_client import _anthropic_clients, get_anthropic_client
+
+    _anthropic_clients.clear()
+    with patch("anthropic.Anthropic", side_effect=lambda api_key: MagicMock(name=api_key)) as cls:
+        c1 = get_anthropic_client("sk-a")
+        c2 = get_anthropic_client("sk-a")
+        c3 = get_anthropic_client("sk-b")
+
+    assert c1 is c2, "same key must reuse the cached client, not re-instantiate"
+    assert c3 is not c1, "a different key gets its own client"
+    assert cls.call_count == 2, "one construction per distinct key (sk-a, sk-b), not per call"
+
+
+def test_estimate_qty_reuses_anthropic_client_across_calls():
+    """Repeated qty-estimation calls reuse one Anthropic client (its httpx pool is not
+    rebuilt every call — O6)."""
+    from app.services.sighting_aggregation import _estimate_qty_with_ai
+
+    _module, client = _make_mock_anthropic("350")
+
+    with (
+        patch("app.services.credential_service.get_credential_cached", return_value="sk-reuse"),
+        patch("anthropic.Anthropic", return_value=client) as cls,
+    ):
+        _estimate_qty_with_ai([100, 200, 300])
+        _estimate_qty_with_ai([400, 500, 600])
+
+    assert cls.call_count == 1, "Anthropic client must be built once and reused, not per call"
+    assert client.messages.create.call_count == 2, "both estimations run through the one reused client"

@@ -20,6 +20,8 @@ from datetime import datetime, timezone
 import httpx
 from loguru import logger
 
+from app.http_client import http
+
 BASE_URL = "https://api.8x8.com/analytics/work/v1"
 
 # Module-level OAuth token cache.
@@ -59,7 +61,8 @@ async def get_access_token(settings) -> str:
     on auth failure or missing token. Caches the token in _token_cache until 60s before
     expiry so successive polls within the TTL never re-auth.
 
-    Async — uses httpx.AsyncClient so it never blocks the event loop.
+    Async — uses the shared pooled http client so it never blocks the event loop and
+    reuses connections across calls.
     """
     # Return cached token if still valid (60s safety buffer)
     if _token_cache.get("token") and time.time() < _token_cache.get("expires_at", 0) - 60:
@@ -76,8 +79,7 @@ async def get_access_token(settings) -> str:
     }
 
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(url, headers=headers, data=data)
+        resp = await http.post(url, headers=headers, data=data, timeout=15)
     except httpx.HTTPError as e:
         logger.error(f"8x8 auth request failed: {e}")
         raise ValueError(f"8x8 auth request failed: {e}") from e
@@ -110,7 +112,8 @@ async def get_cdrs(token: str, settings, since: datetime, until: datetime) -> li
     GET /v1/cdr with pbxId=allpbxes, isCallRecord=true, time window, and timezone.
     Paginates via scrollId. Returns empty list on any error — never crashes.
 
-    Async — uses httpx.AsyncClient so it never blocks the event loop.
+    Async — uses the shared pooled http client so it never blocks the event loop and
+    reuses connections across calls.
     """
     url = f"{BASE_URL}/cdr"
     headers = {
@@ -129,31 +132,30 @@ async def get_cdrs(token: str, settings, since: datetime, until: datetime) -> li
     all_records = []
     scroll_id = None
 
-    async with httpx.AsyncClient(timeout=30) as client:
-        while True:
-            if scroll_id:
-                params["scrollId"] = scroll_id
+    while True:
+        if scroll_id:
+            params["scrollId"] = scroll_id
 
-            try:
-                resp = await client.get(url, headers=headers, params=params)
-            except httpx.HTTPError as e:
-                logger.error(f"8x8 CDR fetch failed: {e}")
-                return all_records
+        try:
+            resp = await http.get(url, headers=headers, params=params, timeout=30)
+        except httpx.HTTPError as e:
+            logger.error(f"8x8 CDR fetch failed: {e}")
+            return all_records
 
-            if resp.status_code != 200:
-                logger.error(f"8x8 CDR fetch error: HTTP {resp.status_code} — {resp.text[:200]}")
-                return all_records
+        if resp.status_code != 200:
+            logger.error(f"8x8 CDR fetch error: HTTP {resp.status_code} — {resp.text[:200]}")
+            return all_records
 
-            body = resp.json()
-            records = body.get("data", [])
-            all_records.extend(records)
+        body = resp.json()
+        records = body.get("data", [])
+        all_records.extend(records)
 
-            # Check for more pages
-            meta = body.get("meta", {})
-            new_scroll = meta.get("scrollId")
-            if not new_scroll or not records or len(all_records) >= meta.get("totalRecordCount", 0):
-                break
-            scroll_id = new_scroll
+        # Check for more pages
+        meta = body.get("meta", {})
+        new_scroll = meta.get("scrollId")
+        if not new_scroll or not records or len(all_records) >= meta.get("totalRecordCount", 0):
+            break
+        scroll_id = new_scroll
 
     logger.info(f"8x8 CDR fetch: {len(all_records)} call records")
     return all_records
