@@ -85,7 +85,7 @@ def _base_ctx(request: Request, user: User, current_view: str = "") -> dict:
         # The user's stored IANA display timezone (or "" when unset) — the base layout
         # renders it onto <body data-user-tz> so the client only posts the browser zone
         # when it actually differs (see syncDisplayTimezone in htmx_app.js).
-        "user_display_tz": (user.display_timezone or "") if user else "",
+        "user_display_tz": (getattr(user, "display_timezone", "") or "") if user else "",
     }
 
 
