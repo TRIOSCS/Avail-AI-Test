@@ -163,6 +163,11 @@ hx-on::after-request='if(event.detail.successful){htmx.ajax("GET","/v2/partials/
         {% if s.description %}
         <p class="text-secondary truncate">{{ s.description }}</p>
         {% endif %}
+        {# Last-tested time — persisted last_success (set by the Test probe). Hidden for
+           worker-backed cards, which show their own heartbeat/last-search line instead. #}
+        {% if s.last_success and not s.worker %}
+        <p class="text-xs text-slate-400">Last checked {{ s.last_success|timeago }}</p>
+        {% endif %}
       </div>
     </div>
 
