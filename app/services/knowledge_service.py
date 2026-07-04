@@ -11,15 +11,13 @@ Depends on: models/knowledge.py, utils/claude_client.py
 from datetime import datetime, timedelta, timezone
 
 from loguru import logger
-from sqlalchemy import or_
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 
 from app.constants import RequisitionStatus
 from app.models.knowledge import KnowledgeEntry
 
 # Expiry defaults (days)
 EXPIRY_PRICE_FACT = 90
-EXPIRY_LEAD_TIME_FACT = 180
 EXPIRY_AI_INSIGHT = 30
 
 
@@ -74,157 +72,6 @@ def create_entry(
     db.refresh(entry)
     logger.info("Knowledge entry created: id={} type={} source={}", entry.id, entry_type, source)
     return entry
-
-
-def get_entries(
-    db: Session,
-    *,
-    requisition_id: int | None = None,
-    company_id: int | None = None,
-    vendor_card_id: int | None = None,
-    mpn: str | None = None,
-    entry_type: str | None = None,
-    include_expired: bool = True,
-    limit: int = 100,
-    offset: int = 0,
-) -> list[KnowledgeEntry]:
-    """Query knowledge entries with flexible filters."""
-    q = db.query(KnowledgeEntry)
-    if requisition_id is not None:
-        q = q.filter(KnowledgeEntry.requisition_id == requisition_id)
-    if company_id is not None:
-        q = q.filter(KnowledgeEntry.company_id == company_id)
-    if vendor_card_id is not None:
-        q = q.filter(KnowledgeEntry.vendor_card_id == vendor_card_id)
-    if mpn is not None:
-        q = q.filter(KnowledgeEntry.mpn == mpn)
-    if entry_type is not None:
-        q = q.filter(KnowledgeEntry.entry_type == entry_type)
-    if not include_expired:
-        now = datetime.now(timezone.utc)
-        q = q.filter(or_(KnowledgeEntry.expires_at.is_(None), KnowledgeEntry.expires_at > now))
-    # Exclude answers from top-level listing (they appear nested under questions)
-    q = q.filter(KnowledgeEntry.parent_id.is_(None))
-    q = q.options(joinedload(KnowledgeEntry.answers), joinedload(KnowledgeEntry.creator))
-    q = q.order_by(KnowledgeEntry.created_at.desc())
-    return q.offset(offset).limit(limit).all()
-
-
-def get_entry(db: Session, entry_id: int) -> KnowledgeEntry | None:
-    """Get a single entry with answers loaded."""
-    return (
-        db.query(KnowledgeEntry)
-        .options(joinedload(KnowledgeEntry.answers), joinedload(KnowledgeEntry.creator))
-        .filter(KnowledgeEntry.id == entry_id)
-        .first()
-    )
-
-
-def update_entry(db: Session, entry_id: int, user_id: int, **kwargs) -> KnowledgeEntry | None:
-    """Update an entry.
-
-    Only the creator may update — enforced (the docstring claimed it but the check was
-    never wired, a latent IDOR if exposed via a router). A non-creator (or a user acting
-    on a system entry whose created_by is None) raises PermissionError.
-    """
-    entry = db.get(KnowledgeEntry, entry_id)
-    if not entry:
-        return None
-    if entry.created_by != user_id:
-        raise PermissionError(f"User {user_id} may not update knowledge entry {entry_id} (creator: {entry.created_by})")
-    for key, value in kwargs.items():
-        if value is not None and hasattr(entry, key):
-            setattr(entry, key, value)
-    db.commit()
-    db.refresh(entry)
-    return entry
-
-
-def delete_entry(db: Session, entry_id: int, user_id: int) -> bool:
-    """Delete an entry.
-
-    Only the creator may delete (enforced — latent IDOR otherwise). Returns True if
-    deleted; raises PermissionError for a non-creator.
-    """
-    entry = db.get(KnowledgeEntry, entry_id)
-    if not entry:
-        return False
-    if entry.created_by != user_id:
-        raise PermissionError(f"User {user_id} may not delete knowledge entry {entry_id} (creator: {entry.created_by})")
-    db.delete(entry)
-    db.commit()
-    logger.info("Knowledge entry deleted: id={} by user={}", entry_id, user_id)
-    return True
-
-
-def post_question(
-    db: Session,
-    *,
-    user_id: int,
-    content: str,
-    assigned_to_ids: list[int],
-    mpn: str | None = None,
-    vendor_card_id: int | None = None,
-    company_id: int | None = None,
-    requisition_id: int | None = None,
-    requirement_id: int | None = None,
-) -> KnowledgeEntry:
-    """Post a Q&A question and notify assigned buyers."""
-
-    entry = create_entry(
-        db,
-        user_id=user_id,
-        entry_type="question",
-        content=content,
-        source="manual",
-        assigned_to_ids=assigned_to_ids,
-        mpn=mpn,
-        vendor_card_id=vendor_card_id,
-        company_id=company_id,
-        requisition_id=requisition_id,
-        requirement_id=requirement_id,
-    )
-    return entry
-
-
-def post_answer(
-    db: Session,
-    *,
-    user_id: int,
-    question_id: int,
-    content: str,
-    answered_via: str = "web",
-) -> KnowledgeEntry | None:
-    """Answer a question.
-
-    Marks question resolved and notifies asker.
-    """
-    question = db.get(KnowledgeEntry, question_id)
-    if not question or question.entry_type != "question":
-        return None
-
-    answer = create_entry(
-        db,
-        user_id=user_id,
-        entry_type="answer",
-        content=content,
-        source="manual",
-        parent_id=question_id,
-        mpn=question.mpn,
-        vendor_card_id=question.vendor_card_id,
-        company_id=question.company_id,
-        requisition_id=question.requisition_id,
-        requirement_id=question.requirement_id,
-    )
-
-    # Track answer source
-    answer.answered_via = answered_via
-
-    # Mark question as resolved
-    question.is_resolved = True
-    db.commit()
-
-    return answer
 
 
 # ---------------------------------------------------------------------------
@@ -355,54 +202,6 @@ def capture_offer_fact(db: Session, *, offer, user_id: int | None = None) -> Kno
         logger.warning("Failed to persist offer fact: {}", e)
         return None
     return entry
-
-
-def capture_rfq_response_fact(
-    db: Session, *, parsed: dict, vendor_name: str, requisition_id: int | None = None
-) -> list[KnowledgeEntry]:
-    """Auto-capture facts from a parsed RFQ vendor response.
-
-    Called from: app/services/response_parser.py or app/email_service.py
-    """
-    entries = []
-    try:
-        parts = parsed.get("parts", [])
-        for part in parts:
-            mpn = part.get("mpn", "")
-            status = part.get("status", "")
-            price = part.get("unit_price")
-            qty = part.get("qty_available")
-            lead = part.get("lead_time_weeks") or part.get("lead_time")
-
-            content_parts = ["Vendor response from {}: {}".format(vendor_name, mpn)]
-            if status:
-                content_parts.append("status={}".format(status))
-            if price:
-                content_parts.append("${}".format(price))
-            if qty:
-                content_parts.append("qty {} available".format(qty))
-            if lead:
-                content_parts.append("lead time {}".format(lead))
-
-            content = ", ".join(content_parts)
-
-            # Price facts expire in 90 days, lead time facts in 180
-            expiry_days = EXPIRY_PRICE_FACT if price else EXPIRY_LEAD_TIME_FACT
-            entry = create_entry(
-                db,
-                user_id=None,  # system
-                entry_type="fact",
-                content=content,
-                source="email_parsed",
-                confidence=parsed.get("confidence", 0.8),
-                expires_at=datetime.now(timezone.utc) + timedelta(days=expiry_days),
-                mpn=mpn or None,
-                requisition_id=requisition_id,
-            )
-            entries.append(entry)
-    except Exception as e:
-        logger.warning("Failed to capture RFQ response facts: {}", e)
-    return entries
 
 
 # ---------------------------------------------------------------------------
@@ -1120,20 +919,6 @@ async def generate_company_insights(db: Session, company_id: int) -> list[Knowle
 # ---------------------------------------------------------------------------
 # Entity-scoped cached insight getters
 # ---------------------------------------------------------------------------
-
-
-def get_cached_mpn_insights(db: Session, mpn: str) -> list[KnowledgeEntry]:
-    """Return pre-computed AI insights for an MPN (not tied to a requisition)."""
-    return (
-        db.query(KnowledgeEntry)
-        .filter(
-            KnowledgeEntry.mpn == mpn,
-            KnowledgeEntry.entry_type == "ai_insight",
-            KnowledgeEntry.requisition_id.is_(None),
-        )
-        .order_by(KnowledgeEntry.created_at.desc())
-        .all()
-    )
 
 
 def get_cached_vendor_insights(db: Session, vendor_card_id: int) -> list[KnowledgeEntry]:

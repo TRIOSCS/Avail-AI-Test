@@ -5,19 +5,16 @@ Depends on: app.services.forecast_service, app.models (Requisition, Requirement,
             Quote, Company, User)
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import pytest
 from sqlalchemy.orm import Session
 
-from app.models import Company, Quote, Requirement, Requisition, User
+from app.models import Requirement, Requisition, User
 from app.services.forecast_service import (
     OPEN_STATUSES,
     STAGE_WIN_PROBABILITY,
     bulk_deal_values,
-    conversion_funnel,
-    pipeline_by_account,
-    pipeline_by_owner,
     pipeline_summary,
     stage_probability,
 )
@@ -142,58 +139,3 @@ class TestPipelineSummary:
         _req(db_session, test_user.id, status="rfqs_sent", value=200000, claimed_by_id=other.id)
         mine = pipeline_summary(db_session, owner_id=test_user.id)
         assert mine["open_value"] == 100000.0
-
-
-class TestPipelineByAccount:
-    def test_groups_and_ranks_by_weighted(self, db_session: Session, test_user: User):
-        acme = Company(name="Acme Corp", is_active=True)
-        globex = Company(name="Globex", is_active=True)
-        db_session.add_all([acme, globex])
-        db_session.flush()
-        _req(db_session, test_user.id, status="quoted", value=100000, company_id=acme.id)  # w=75000
-        _req(db_session, test_user.id, status="rfqs_sent", value=100000, company_id=globex.id)  # w=25000
-        rows = pipeline_by_account(db_session)
-        assert [r["company_name"] for r in rows] == ["Acme Corp", "Globex"]
-        assert rows[0]["weighted_value"] == 75000.0
-
-    def test_skips_reqs_without_company(self, db_session: Session, test_user: User):
-        _req(db_session, test_user.id, status="rfqs_sent", value=100000, company_id=None)
-        assert pipeline_by_account(db_session) == []
-
-
-class TestPipelineByOwner:
-    def test_unassigned_bucket(self, db_session: Session, test_user: User):
-        _req(db_session, test_user.id, status="rfqs_sent", value=100000, claimed_by_id=None)
-        rows = pipeline_by_owner(db_session)
-        assert len(rows) == 1
-        assert rows[0]["owner_id"] is None
-        assert rows[0]["owner_name"] == "Unassigned"
-        assert rows[0]["weighted_value"] == 25000.0
-
-    def test_named_owner_and_won_value(self, db_session: Session, test_user: User):
-        _req(db_session, test_user.id, status="won", value=50000, claimed_by_id=test_user.id)
-        rows = pipeline_by_owner(db_session)
-        owner = next(r for r in rows if r["owner_id"] == test_user.id)
-        assert owner["owner_name"] == (test_user.name or test_user.email)
-        assert owner["won_value"] == 50000.0
-
-
-class TestConversionFunnel:
-    def test_status_progression(self, db_session: Session, test_user: User):
-        _req(db_session, test_user.id, status="draft")
-        _req(db_session, test_user.id, status="rfqs_sent")
-        won = _req(db_session, test_user.id, status="won")
-        db_session.add(Quote(requisition_id=won.id, quote_number="Q-FUNNEL-1", status="won"))
-        db_session.flush()
-        funnel = conversion_funnel(db_session)
-        assert funnel["opportunities"] == 3
-        assert funnel["sourcing"] == 2  # rfqs_sent + won (past entry; not draft)
-        assert funnel["quoted"] == 1  # the won req (status won) / has a quote
-        assert funnel["won"] == 1
-        assert funnel["window_days"] == 90
-
-    def test_excludes_old_requisitions(self, db_session: Session, test_user: User):
-        old = datetime.now(timezone.utc) - timedelta(days=200)
-        _req(db_session, test_user.id, status="rfqs_sent", created_at=old)
-        funnel = conversion_funnel(db_session, days=90)
-        assert funnel["opportunities"] == 0

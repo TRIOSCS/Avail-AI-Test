@@ -356,46 +356,6 @@ class TestAiFindCompanyBranches:
 # ═══════════════════════════════════════════════════════════════════════
 
 
-class TestAiFindContactsExceptionPath:
-    @pytest.mark.parametrize(
-        "error",
-        [
-            httpx.ConnectError("Connection error"),
-            TypeError("bad type"),
-        ],
-        ids=["httpx_error", "type_error"],
-    )
-    async def test_websearch_raises_returns_empty_list(self, error):
-        """Exception during AI contacts lookup returns empty list (lines 441-443)."""
-        from app.enrichment_service import _ai_find_contacts
-
-        with (
-            patch(
-                "app.enrichment_service.get_credential_cached",
-                return_value="fake-anthropic-key",
-            ),
-            patch(
-                "app.enrichment_service.enrich_contacts_websearch",
-                side_effect=error,
-            ),
-        ):
-            result = await _ai_find_contacts("example.com")
-
-        assert result == []
-
-    async def test_no_api_key_returns_empty_list(self):
-        """Missing API key returns empty list without calling provider."""
-        from app.enrichment_service import _ai_find_contacts
-
-        with patch(
-            "app.enrichment_service.get_credential_cached",
-            return_value="",
-        ):
-            result = await _ai_find_contacts("example.com", "Corp")
-
-        assert result == []
-
-
 # ═══════════════════════════════════════════════════════════════════════
 #  enrich_entity — apollo branch (lines 511-513)
 # ═══════════════════════════════════════════════════════════════════════
@@ -1003,61 +963,6 @@ class TestAiFindCompanySuccessPath:
         assert result["source"] == "ai"
         assert result["legal_name"] == "Example Corp"
         assert result["domain"] == "example.com"
-
-
-class TestAiFindContactsSuccessPath:
-    async def test_successful_response_returns_contacts(self):
-        """enrich_contacts_websearch returns contacts => list returned (line 427)."""
-        from app.enrichment_service import _ai_find_contacts
-
-        with (
-            patch(
-                "app.enrichment_service.get_credential_cached",
-                return_value="fake-anthropic-key",
-            ),
-            patch(
-                "app.enrichment_service.enrich_contacts_websearch",
-                new_callable=AsyncMock,
-                return_value=[
-                    {
-                        "full_name": "Jane Smith",
-                        "title": "Procurement Manager",
-                        "email": "jane@example.com",
-                        "phone": "555-1234",
-                        "linkedin_url": "https://linkedin.com/in/jane",
-                    }
-                ],
-            ),
-        ):
-            result = await _ai_find_contacts("example.com", "Example Corp", "procurement")
-
-        assert len(result) == 1
-        assert result[0]["source"] == "ai"
-        assert result[0]["full_name"] == "Jane Smith"
-        assert result[0]["company"] == "Example Corp"
-
-    async def test_contacts_missing_full_name_filtered_out(self):
-        """Contacts without full_name are filtered from results."""
-        from app.enrichment_service import _ai_find_contacts
-
-        with (
-            patch(
-                "app.enrichment_service.get_credential_cached",
-                return_value="fake-anthropic-key",
-            ),
-            patch(
-                "app.enrichment_service.enrich_contacts_websearch",
-                new_callable=AsyncMock,
-                return_value=[
-                    {"full_name": "Jane Smith", "title": "Buyer", "email": "jane@example.com"},
-                    {"full_name": None, "title": "Unknown", "email": "unknown@example.com"},
-                ],
-            ),
-        ):
-            result = await _ai_find_contacts("example.com")
-
-        assert len(result) == 1
-        assert result[0]["full_name"] == "Jane Smith"
 
 
 class TestEnrichEntityCacheHit:

@@ -13,7 +13,6 @@ from typing import Optional
 import httpx
 from loguru import logger
 
-from .services.ai_service import enrich_contacts_websearch
 from .services.credential_service import get_credential_cached
 from .utils.claude_client import claude_json, claude_text
 
@@ -349,41 +348,6 @@ async def _ai_find_company(domain: str, name: str = "") -> Optional[dict]:
     except (httpx.HTTPError, KeyError, ValueError, TypeError) as e:
         logger.error("AI company lookup error: {}", e)
         return None
-
-
-async def _ai_find_contacts(domain: str, name: str = "", title_filter: str = "") -> list[dict]:
-    """Find contacts at a company using Claude + web search.
-
-    Delegates to ai_service.enrich_contacts_websearch() and normalizes the output to
-    match the enrichment service contact shape.
-    """
-    if not get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY"):
-        return []
-    try:
-        title_keywords = [title_filter] if title_filter else None
-        raw = await enrich_contacts_websearch(
-            company_name=name or domain,
-            domain=domain,
-            title_keywords=title_keywords,
-            limit=5,
-        )
-        return [
-            {
-                "source": "ai",
-                "full_name": c.get("full_name"),
-                "title": c.get("title"),
-                "email": c.get("email"),
-                "phone": c.get("phone"),
-                "linkedin_url": c.get("linkedin_url"),
-                "location": None,
-                "company": name or domain,
-            }
-            for c in raw
-            if c.get("full_name")
-        ]
-    except (httpx.HTTPError, KeyError, ValueError, TypeError) as e:
-        logger.error("AI contacts lookup error: {}", e)
-        return []
 
 
 # ── Unified Enrichment ──────────────────────────────────────────────────

@@ -298,11 +298,6 @@ def get_my_tasks_summary(db: Session, user_id: int) -> dict:
     }
 
 
-def get_task(db: Session, task_id: int) -> RequisitionTask | None:
-    """Get a single task by ID."""
-    return db.query(RequisitionTask).filter(RequisitionTask.id == task_id).first()
-
-
 def update_task(db: Session, task_id: int, **kwargs) -> RequisitionTask | None:
     """Update task fields.
 
@@ -656,18 +651,6 @@ def auto_create_task(
         source_ref=source_ref,
         due_at=due_at,
     )
-
-
-def auto_close_task(db: Session, requisition_id: int, source_ref: str) -> RequisitionTask | None:
-    """Auto-close a system task by source_ref when the triggering action completes."""
-    task = _find_open_task_by_ref(db, requisition_id, source_ref)
-    if task:
-        task.status = TaskStatus.DONE
-        task.completed_at = datetime.now(timezone.utc)
-        db.commit()
-        db.refresh(task)
-        logger.info("Auto-closed task {} (ref={})", task.id, source_ref)
-    return task
 
 
 # ---------------------------------------------------------------------------

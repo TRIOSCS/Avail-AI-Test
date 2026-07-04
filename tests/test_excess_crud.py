@@ -16,12 +16,9 @@ from app.models.excess import ExcessLineItem, ExcessList
 from app.services.excess_service import (
     confirm_import,
     create_excess_list,
-    delete_excess_list,
     get_excess_list,
     import_line_items,
-    list_excess_lists,
     preview_import,
-    update_excess_list,
 )
 from tests.conftest import engine
 
@@ -153,90 +150,14 @@ class TestGetExcessList:
 # ---------------------------------------------------------------------------
 
 
-class TestListExcessLists:
-    def test_returns_paginated(self, db_session: Session):
-        company = _make_company(db_session)
-        user = _make_user(db_session)
-
-        for i in range(3):
-            _make_excess_list(db_session, company, user, title=f"List {i}")
-
-        result = list_excess_lists(db_session, limit=2, offset=0)
-
-        assert result["total"] == 3
-        assert len(result["items"]) == 2
-        assert result["limit"] == 2
-        assert result["offset"] == 0
-
-    def test_search_filter(self, db_session: Session):
-        company = _make_company(db_session)
-        user = _make_user(db_session)
-
-        _make_excess_list(db_session, company, user, title="Alpha Batch")
-        _make_excess_list(db_session, company, user, title="Beta Batch")
-        _make_excess_list(db_session, company, user, title="Gamma Set")
-
-        result = list_excess_lists(db_session, q="batch")
-        assert result["total"] == 2
-
-    def test_status_filter(self, db_session: Session):
-        company = _make_company(db_session)
-        user = _make_user(db_session)
-
-        el = _make_excess_list(db_session, company, user, title="Active One")
-        update_excess_list(db_session, el.id, status="active")
-        _make_excess_list(db_session, company, user, title="Draft One")
-
-        result = list_excess_lists(db_session, status="active")
-        assert result["total"] == 1
-        assert result["items"][0].title == "Active One"
-
-
 # ---------------------------------------------------------------------------
 # TestUpdateExcessList
 # ---------------------------------------------------------------------------
 
 
-class TestUpdateExcessList:
-    def test_updates_title(self, db_session: Session):
-        _, _, el = _setup_list(db_session)
-
-        updated = update_excess_list(db_session, el.id, title="New Title")
-        assert updated.title == "New Title"
-
-    def test_not_found_raises_404(self, db_session: Session):
-        with pytest.raises(HTTPException) as exc_info:
-            update_excess_list(db_session, 99999, title="Nope")
-        assert exc_info.value.status_code == 404
-
-    def test_ignores_none_values(self, db_session: Session):
-        _, _, el = _setup_list(db_session, title="Original")
-
-        updated = update_excess_list(db_session, el.id, title=None, notes="Added")
-        assert updated.title == "Original"
-        assert updated.notes == "Added"
-
-
 # ---------------------------------------------------------------------------
 # TestDeleteExcessList
 # ---------------------------------------------------------------------------
-
-
-class TestDeleteExcessList:
-    def test_hard_deletes(self, db_session: Session):
-        _, _, el = _setup_list(db_session)
-        list_id = el.id
-
-        delete_excess_list(db_session, list_id)
-
-        with pytest.raises(HTTPException) as exc_info:
-            get_excess_list(db_session, list_id)
-        assert exc_info.value.status_code == 404
-
-    def test_delete_not_found_raises_404(self, db_session: Session):
-        with pytest.raises(HTTPException) as exc_info:
-            delete_excess_list(db_session, 99999)
-        assert exc_info.value.status_code == 404
 
 
 # ---------------------------------------------------------------------------

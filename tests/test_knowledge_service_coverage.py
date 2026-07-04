@@ -77,188 +77,6 @@ class TestCreateEntry:
         assert entry.assigned_to_ids == [test_user.id]
 
 
-class TestGetEntries:
-    def test_get_all_entries(self, db_session: Session, test_user: User, requisition: Requisition):
-        knowledge_service.create_entry(
-            db_session, user_id=test_user.id, entry_type="note", content="N1", requisition_id=requisition.id
-        )
-        knowledge_service.create_entry(
-            db_session, user_id=test_user.id, entry_type="note", content="N2", requisition_id=requisition.id
-        )
-        entries = knowledge_service.get_entries(db_session, requisition_id=requisition.id)
-        assert len(entries) == 2
-
-    def test_filter_by_entry_type(self, db_session: Session, test_user: User, requisition: Requisition):
-        knowledge_service.create_entry(
-            db_session, user_id=test_user.id, entry_type="note", content="N", requisition_id=requisition.id
-        )
-        knowledge_service.create_entry(
-            db_session, user_id=test_user.id, entry_type="fact", content="F", requisition_id=requisition.id
-        )
-        notes = knowledge_service.get_entries(db_session, entry_type="note", requisition_id=requisition.id)
-        assert len(notes) == 1
-        assert notes[0].entry_type == "note"
-
-    def test_filter_by_mpn(self, db_session: Session, test_user: User):
-        knowledge_service.create_entry(db_session, user_id=test_user.id, entry_type="fact", content="F1", mpn="LM317T")
-        knowledge_service.create_entry(db_session, user_id=test_user.id, entry_type="fact", content="F2", mpn="STM32")
-        entries = knowledge_service.get_entries(db_session, mpn="LM317T")
-        assert len(entries) == 1
-
-    def test_exclude_expired(self, db_session: Session, test_user: User, requisition: Requisition):
-        past = datetime.now(timezone.utc) - timedelta(days=1)
-        future = datetime.now(timezone.utc) + timedelta(days=10)
-        knowledge_service.create_entry(
-            db_session,
-            user_id=test_user.id,
-            entry_type="fact",
-            content="Expired",
-            expires_at=past,
-            requisition_id=requisition.id,
-        )
-        knowledge_service.create_entry(
-            db_session,
-            user_id=test_user.id,
-            entry_type="fact",
-            content="Active",
-            expires_at=future,
-            requisition_id=requisition.id,
-        )
-        active = knowledge_service.get_entries(db_session, include_expired=False, requisition_id=requisition.id)
-        assert len(active) == 1
-        assert active[0].content == "Active"
-
-    def test_exclude_answers_from_listing(self, db_session: Session, test_user: User, requisition: Requisition):
-        q = knowledge_service.create_entry(
-            db_session,
-            user_id=test_user.id,
-            entry_type="question",
-            content="What's the lead time?",
-            requisition_id=requisition.id,
-        )
-        knowledge_service.create_entry(
-            db_session,
-            user_id=test_user.id,
-            entry_type="answer",
-            content="2 weeks",
-            parent_id=q.id,
-            requisition_id=requisition.id,
-        )
-        # get_entries excludes entries with parent_id set
-        entries = knowledge_service.get_entries(db_session, requisition_id=requisition.id)
-        assert all(e.parent_id is None for e in entries)
-
-    def test_filter_by_vendor_card_id(self, db_session: Session, test_user: User, test_vendor_card):
-        knowledge_service.create_entry(
-            db_session,
-            user_id=test_user.id,
-            entry_type="note",
-            content="Vendor note",
-            vendor_card_id=test_vendor_card.id,
-        )
-        entries = knowledge_service.get_entries(db_session, vendor_card_id=test_vendor_card.id)
-        assert len(entries) == 1
-
-    def test_filter_by_company_id(self, db_session: Session, test_user: User, test_company: Company):
-        knowledge_service.create_entry(
-            db_session, user_id=test_user.id, entry_type="note", content="Co note", company_id=test_company.id
-        )
-        entries = knowledge_service.get_entries(db_session, company_id=test_company.id)
-        assert len(entries) == 1
-
-    def test_pagination(self, db_session: Session, test_user: User, requisition: Requisition):
-        for i in range(5):
-            knowledge_service.create_entry(
-                db_session, user_id=test_user.id, entry_type="note", content=f"N{i}", requisition_id=requisition.id
-            )
-        page1 = knowledge_service.get_entries(db_session, requisition_id=requisition.id, limit=2, offset=0)
-        page2 = knowledge_service.get_entries(db_session, requisition_id=requisition.id, limit=2, offset=2)
-        assert len(page1) == 2
-        assert len(page2) == 2
-        assert page1[0].id != page2[0].id
-
-
-class TestGetEntry:
-    def test_get_existing(self, db_session: Session, test_user: User):
-        entry = knowledge_service.create_entry(db_session, user_id=test_user.id, entry_type="note", content="Test")
-        fetched = knowledge_service.get_entry(db_session, entry.id)
-        assert fetched is not None
-        assert fetched.id == entry.id
-
-    def test_get_nonexistent(self, db_session: Session):
-        result = knowledge_service.get_entry(db_session, 99999)
-        assert result is None
-
-
-class TestUpdateEntry:
-    def test_update_content(self, db_session: Session, test_user: User):
-        entry = knowledge_service.create_entry(db_session, user_id=test_user.id, entry_type="note", content="Old")
-        updated = knowledge_service.update_entry(db_session, entry.id, test_user.id, content="New content")
-        assert updated.content == "New content"
-
-    def test_update_nonexistent_returns_none(self, db_session: Session, test_user: User):
-        result = knowledge_service.update_entry(db_session, 99999, test_user.id, content="X")
-        assert result is None
-
-
-class TestDeleteEntry:
-    def test_delete_existing(self, db_session: Session, test_user: User):
-        entry = knowledge_service.create_entry(db_session, user_id=test_user.id, entry_type="note", content="Delete me")
-        result = knowledge_service.delete_entry(db_session, entry.id, test_user.id)
-        assert result is True
-
-    def test_delete_nonexistent(self, db_session: Session, test_user: User):
-        result = knowledge_service.delete_entry(db_session, 99999, test_user.id)
-        assert result is False
-
-
-class TestPostQuestion:
-    def test_post_question_creates_entry(self, db_session: Session, test_user: User, requisition: Requisition):
-        q = knowledge_service.post_question(
-            db_session,
-            user_id=test_user.id,
-            content="What is the lead time for LM317T?",
-            assigned_to_ids=[test_user.id],
-            requisition_id=requisition.id,
-            mpn="LM317T",
-        )
-        assert q.entry_type == "question"
-        assert q.assigned_to_ids == [test_user.id]
-        assert q.mpn == "LM317T"
-
-
-class TestPostAnswer:
-    def test_post_answer_resolves_question(self, db_session: Session, test_user: User):
-        q = knowledge_service.create_entry(db_session, user_id=test_user.id, entry_type="question", content="Q?")
-        answer = knowledge_service.post_answer(
-            db_session, user_id=test_user.id, question_id=q.id, content="Answer here"
-        )
-        assert answer is not None
-        assert answer.entry_type == "answer"
-        assert answer.parent_id == q.id
-        # Question should be resolved
-        db_session.refresh(q)
-        assert q.is_resolved is True
-
-    def test_post_answer_to_non_question_returns_none(self, db_session: Session, test_user: User):
-        fact = knowledge_service.create_entry(db_session, user_id=test_user.id, entry_type="fact", content="Fact")
-        result = knowledge_service.post_answer(
-            db_session, user_id=test_user.id, question_id=fact.id, content="Not applicable"
-        )
-        assert result is None
-
-    def test_post_answer_to_nonexistent_question(self, db_session: Session, test_user: User):
-        result = knowledge_service.post_answer(db_session, user_id=test_user.id, question_id=99999, content="X")
-        assert result is None
-
-    def test_post_answer_custom_via(self, db_session: Session, test_user: User):
-        q = knowledge_service.create_entry(db_session, user_id=test_user.id, entry_type="question", content="Q?")
-        answer = knowledge_service.post_answer(
-            db_session, user_id=test_user.id, question_id=q.id, content="Answer", answered_via="email"
-        )
-        assert answer.answered_via == "email"
-
-
 class TestCaptureQuoteFact:
     def test_captures_line_items(self, db_session: Session, test_user: User, requisition: Requisition):
         mock_quote = MagicMock()
@@ -358,32 +176,6 @@ class TestCaptureOfferFact:
 
         surviving = db_session.query(KnowledgeEntry).filter(KnowledgeEntry.mpn == "LM317T-DURABLE").all()
         assert len(surviving) == 1
-
-
-class TestCaptureRfqResponseFact:
-    def test_captures_parts_with_price(self, db_session: Session, requisition: Requisition):
-        parsed = {
-            "confidence": 0.9,
-            "parts": [{"mpn": "LM317T", "status": "in stock", "unit_price": 0.50, "qty_available": 1000}],
-        }
-        entries = knowledge_service.capture_rfq_response_fact(
-            db_session, parsed=parsed, vendor_name="Arrow", requisition_id=requisition.id
-        )
-        assert len(entries) == 1
-        assert "LM317T" in entries[0].content
-
-    def test_captures_lead_time_only(self, db_session: Session, requisition: Requisition):
-        parsed = {
-            "parts": [{"mpn": "STM32", "lead_time": "4 weeks"}],
-        }
-        entries = knowledge_service.capture_rfq_response_fact(
-            db_session, parsed=parsed, vendor_name="Digi-Key", requisition_id=requisition.id
-        )
-        assert len(entries) == 1
-
-    def test_handles_empty_parts(self, db_session: Session):
-        entries = knowledge_service.capture_rfq_response_fact(db_session, parsed={"parts": []}, vendor_name="Arrow")
-        assert entries == []
 
 
 class TestIsExpired:
@@ -723,21 +515,6 @@ class TestBuildCompanyContext:
 
 
 class TestGetCachedEntityInsights:
-    def test_get_cached_mpn_insights_empty(self, db_session: Session):
-        insights = knowledge_service.get_cached_mpn_insights(db_session, "LM317T")
-        assert insights == []
-
-    def test_get_cached_mpn_insights_returns_mpn_insights(self, db_session: Session, test_user: User):
-        insight = knowledge_service.create_entry(
-            db_session,
-            user_id=test_user.id,
-            entry_type="ai_insight",
-            content="MPN insight",
-            mpn="LM317T",
-        )
-        insights = knowledge_service.get_cached_mpn_insights(db_session, "LM317T")
-        assert len(insights) >= 1
-
     def test_get_cached_vendor_insights_empty(self, db_session: Session, test_vendor_card):
         insights = knowledge_service.get_cached_vendor_insights(db_session, test_vendor_card.id)
         assert insights == []
@@ -883,28 +660,6 @@ class TestGeneratePipelineInsights:
 
 class TestKnowledgeEntryAuthzAndSavepoint:
     """Update/delete enforce creator-only; capture_quote_fact is savepoint-isolated."""
-
-    def test_update_entry_non_creator_raises(self, db_session, test_user):
-        import pytest
-
-        from app.services import knowledge_service
-
-        entry = knowledge_service.create_entry(db_session, user_id=test_user.id, entry_type="note", content="mine")
-        with pytest.raises(PermissionError):
-            knowledge_service.update_entry(db_session, entry.id, user_id=test_user.id + 999, content="hacked")
-        # creator can still update
-        updated = knowledge_service.update_entry(db_session, entry.id, user_id=test_user.id, content="ok")
-        assert updated is not None and updated.content == "ok"
-
-    def test_delete_entry_non_creator_raises(self, db_session, test_user):
-        import pytest
-
-        from app.services import knowledge_service
-
-        entry = knowledge_service.create_entry(db_session, user_id=test_user.id, entry_type="note", content="mine")
-        with pytest.raises(PermissionError):
-            knowledge_service.delete_entry(db_session, entry.id, user_id=test_user.id + 999)
-        assert knowledge_service.delete_entry(db_session, entry.id, user_id=test_user.id) is True
 
     def test_capture_quote_fact_failure_is_savepoint_isolated(self, db_session, test_user):
         """A create failure inside capture_quote_fact rolls back only its savepoint and

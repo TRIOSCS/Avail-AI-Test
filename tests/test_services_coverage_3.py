@@ -2048,38 +2048,6 @@ class TestEnrichmentServiceProviders:
             assert result["source"] == "ai"
             assert result["legal_name"] == "Acme Corp"
 
-    @pytest.mark.asyncio
-    async def test_ai_find_contacts_no_key(self):
-        from app.enrichment_service import _ai_find_contacts
-
-        with patch("app.enrichment_service.get_credential_cached", return_value=None):
-            result = await _ai_find_contacts("acme.com")
-            assert result == []
-
-    @pytest.mark.asyncio
-    async def test_ai_find_contacts_success(self):
-        from app.enrichment_service import _ai_find_contacts
-
-        with (
-            patch("app.enrichment_service.get_credential_cached", return_value="fake-key"),
-            patch(
-                "app.enrichment_service.enrich_contacts_websearch",
-                new_callable=AsyncMock,
-                return_value=[
-                    {
-                        "full_name": "Jane Smith",
-                        "title": "Sales Manager",
-                        "email": "jane@acme.com",
-                        "phone": None,
-                        "linkedin_url": None,
-                    },
-                ],
-            ),
-        ):
-            result = await _ai_find_contacts("acme.com", "Acme", "sales")
-            assert len(result) == 1
-            assert result[0]["source"] == "ai"
-
 
 class TestSignalEnrichmentBatch:
     @pytest.mark.asyncio

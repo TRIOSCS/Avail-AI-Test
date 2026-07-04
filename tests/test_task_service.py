@@ -21,14 +21,12 @@ from app.constants import TaskStatus
 from app.models.sourcing import Requisition
 from app.models.task import RequisitionTask
 from app.services.task_service import (
-    auto_close_task,
     auto_create_task,
     complete_task,
     create_task,
     delete_task,
     get_my_tasks,
     get_my_tasks_summary,
-    get_task,
     on_buy_plan_assigned,
     on_email_offer_parsed,
     on_offer_received,
@@ -214,17 +212,6 @@ class TestGetMyTasksSummary:
         assert summary == {"assigned_to_me": 0, "waiting_on": 0, "overdue": 0}
 
 
-class TestGetTask:
-    def test_returns_task(self, db_session: Session, test_requisition):
-        t = create_task(db_session, requisition_id=test_requisition.id, title="T", source="system")
-        found = get_task(db_session, t.id)
-        assert found is not None
-        assert found.id == t.id
-
-    def test_returns_none_for_missing(self, db_session: Session):
-        assert get_task(db_session, 99999) is None
-
-
 class TestUpdateTask:
     def test_updates_fields(self, db_session: Session, test_requisition):
         t = create_task(db_session, requisition_id=test_requisition.id, title="Old", source="system")
@@ -269,11 +256,6 @@ class TestCompleteTask:
 
 
 class TestDeleteTask:
-    def test_deletes_task(self, db_session: Session, test_requisition):
-        t = create_task(db_session, requisition_id=test_requisition.id, title="T", source="system")
-        assert delete_task(db_session, t.id) is True
-        assert get_task(db_session, t.id) is None
-
     def test_returns_false_for_missing(self, db_session: Session):
         assert delete_task(db_session, 99999) is False
 
@@ -388,24 +370,6 @@ class TestAutoTaskDefaultAssignee:
         )
         assert task is not None
         assert task.assigned_to_id == sales_user.id
-
-
-class TestAutoCloseTask:
-    def test_closes_task(self, db_session: Session, test_requisition):
-        auto_create_task(
-            db_session,
-            requisition_id=test_requisition.id,
-            title="Task to close",
-            task_type="sourcing",
-            source_ref="rfq:10",
-        )
-        closed = auto_close_task(db_session, test_requisition.id, "rfq:10")
-        assert closed is not None
-        assert closed.status == TaskStatus.DONE
-
-    def test_returns_none_when_no_match(self, db_session: Session, test_requisition):
-        result = auto_close_task(db_session, test_requisition.id, "nonexistent:99")
-        assert result is None
 
 
 class TestConvenienceHelpers:

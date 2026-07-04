@@ -290,24 +290,6 @@ class TestAutoCreateTask:
         assert t2 is not None
 
 
-class TestAutoCloseTask:
-    def test_closes_open_task(self, db_session: Session, requisition: Requisition):
-        task_service.auto_create_task(
-            db_session,
-            requisition_id=requisition.id,
-            title="Auto",
-            task_type="sourcing",
-            source_ref="close:1",
-        )
-        closed = task_service.auto_close_task(db_session, requisition.id, "close:1")
-        assert closed is not None
-        assert closed.status == TaskStatus.DONE
-
-    def test_auto_close_no_match_returns_none(self, db_session: Session, requisition: Requisition):
-        result = task_service.auto_close_task(db_session, requisition.id, "nonexistent:99")
-        assert result is None
-
-
 class TestConvenienceHelpers:
     def test_on_email_offer_parsed(self, db_session: Session, requisition: Requisition):
         task_service.on_email_offer_parsed(db_session, requisition.id, "Arrow", "LM317T", 99)

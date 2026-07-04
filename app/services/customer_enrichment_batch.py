@@ -1,103 +1,16 @@
-"""Customer Enrichment Batch — automated batch enrichment for customer accounts.
+"""Customer email re-verification job.
 
-Runs as a scheduled job to enrich customer accounts that are stale or missing
-contacts. Prioritizes assigned accounts over unassigned.
+The batch customer-enrichment sweep (run_customer_enrichment_batch) and its
+credit-gate helper (can_use_credits) were removed as dead code — nothing in the
+scheduler or routers called them after the Apollo/Hunter/Lusha providers were
+retired. Only the email re-verification stub remains.
 
-Called by: scheduler.py (quarterly sweep), enrichment router (manual trigger).
-Depends on: customer_enrichment_service.py, credit_manager.py, credit_manager.py.
+Called by: app/jobs/email_jobs.py (run_email_reverification).
+Depends on: loguru, sqlalchemy.
 """
-
-import asyncio
-from datetime import datetime, timezone
 
 from loguru import logger
 from sqlalchemy.orm import Session
-
-from ..config import settings
-from ..models.enrichment import EnrichmentJob
-from .customer_enrichment_service import enrich_customer_account, get_enrichment_gaps
-
-
-# credit_manager was removed (dead code). Stub can_use_credits to always allow.
-def can_use_credits(_db, _provider: str) -> bool:  # noqa: ARG001
-    return True
-
-
-async def run_customer_enrichment_batch(
-    db: Session,
-    user_id: int | None = None,
-    max_accounts: int = 50,
-    assigned_only: bool = False,
-) -> dict:
-    """Run batch enrichment for customer accounts needing contacts.
-
-    Processes accounts in priority order: assigned first, then unassigned.
-    Stops early if credit budgets are exhausted.
-    """
-    if not settings.customer_enrichment_enabled:
-        return {"status": "disabled", "processed": 0}
-
-    gaps = get_enrichment_gaps(db, limit=max_accounts)
-    if assigned_only:
-        gaps = [g for g in gaps if g.get("account_owner_id")]
-
-    if not gaps:
-        return {"status": "no_gaps", "processed": 0}
-
-    job = EnrichmentJob(
-        job_type="customer_enrichment_batch",
-        status="running",
-        total_items=len(gaps),
-        started_by_id=user_id,
-        started_at=datetime.now(timezone.utc),
-    )
-    db.add(job)
-    db.flush()
-
-    processed = 0
-    enriched = 0
-    errors = []
-
-    for gap in gaps:
-        # Stop early if all credit budgets are exhausted
-        if not any(can_use_credits(db, p) for p in ["explorium"]):
-            logger.info("All credit budgets exhausted — stopping batch early at {}/{}", processed, len(gaps))
-            break
-
-        processed += 1
-        try:
-            result = await enrich_customer_account(gap["company_id"], db, force=False)
-            if result.get("ok") and result.get("contacts_added", 0) > 0:
-                enriched += 1
-            db.flush()
-        except Exception as e:
-            errors.append(f"Company {gap['company_id']}: {str(e)[:100]}")
-            logger.warning("Batch enrichment error for company {}: {}", gap["company_id"], e)
-
-        # Small delay between accounts to avoid rate limiting
-        await asyncio.sleep(0.5)
-
-    job.processed_items = processed
-    job.enriched_items = enriched
-    job.error_count = len(errors)
-    job.error_log = errors[:20]
-    job.status = "completed"
-    job.completed_at = datetime.now(timezone.utc)
-    db.flush()
-
-    logger.info(
-        "Customer enrichment batch complete: {} processed, {} enriched, {} errors",
-        processed,
-        enriched,
-        len(errors),
-    )
-    return {
-        "status": "completed",
-        "job_id": job.id,
-        "processed": processed,
-        "enriched": enriched,
-        "errors": len(errors),
-    }
 
 
 async def run_email_reverification(db: Session, _max_contacts: int = 200) -> dict:

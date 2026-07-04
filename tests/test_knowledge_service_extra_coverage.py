@@ -173,56 +173,6 @@ class TestCaptureOfferFactException:
 # ══════════════════════════════════════════════════════════════════════
 
 
-class TestCaptureRfqResponseFactLeadTimeWeeks:
-    def test_uses_lead_time_weeks_field(self, db_session: Session, requisition: Requisition, test_user):
-        """lead_time_weeks is used when lead_time not present."""
-        parsed = {
-            "parts": [{"mpn": "LM317T", "lead_time_weeks": 8}],
-        }
-        # Patch create_entry to use test_user.id instead of system user 0
-        original = knowledge_service.create_entry
-
-        def patched_create_entry(db, user_id=0, **kwargs):
-            return original(db, user_id=test_user.id, **kwargs)
-
-        with patch.object(knowledge_service, "create_entry", side_effect=patched_create_entry):
-            entries = knowledge_service.capture_rfq_response_fact(
-                db_session, parsed=parsed, vendor_name="Digi-Key", requisition_id=requisition.id
-            )
-        assert len(entries) == 1
-        assert "8" in entries[0].content
-
-    def test_multiple_parts_captured(self, db_session: Session, requisition: Requisition, test_user):
-        """All parts in the response are captured as separate entries."""
-        parsed = {
-            "confidence": 0.9,
-            "parts": [
-                {"mpn": "LM317T", "unit_price": 0.50, "qty_available": 1000},
-                {"mpn": "BC547", "unit_price": 0.03, "qty_available": 5000},
-            ],
-        }
-        original = knowledge_service.create_entry
-
-        def patched_create_entry(db, user_id=0, **kwargs):
-            return original(db, user_id=test_user.id, **kwargs)
-
-        with patch.object(knowledge_service, "create_entry", side_effect=patched_create_entry):
-            entries = knowledge_service.capture_rfq_response_fact(
-                db_session, parsed=parsed, vendor_name="Arrow", requisition_id=requisition.id
-            )
-        assert len(entries) == 2
-
-    def test_exception_path_returns_empty_list(self, db_session: Session):
-        """Exception during processing returns empty list (not crash)."""
-        with patch.object(knowledge_service, "create_entry", side_effect=Exception("DB fail")):
-            entries = knowledge_service.capture_rfq_response_fact(
-                db_session,
-                parsed={"parts": [{"mpn": "X", "unit_price": 1.0}]},
-                vendor_name="V",
-            )
-        assert entries == []
-
-
 # ══════════════════════════════════════════════════════════════════════
 #  build_context — MPN entries from other reqs, vendor entries, company entries
 # ══════════════════════════════════════════════════════════════════════
@@ -674,41 +624,6 @@ class TestGenerateMpnInsightsClaudeError:
         with patch("app.utils.claude_client.claude_structured", new=claude_stub):
             result = await knowledge_service.generate_mpn_insights(db_session, "LM317T")
         assert result == []
-
-    async def test_replaces_old_mpn_insights(self, db_session: Session, test_user: User):
-        """Old MPN insights are replaced when new ones are generated."""
-        knowledge_service.create_entry(
-            db_session,
-            user_id=test_user.id,
-            entry_type="ai_insight",
-            content="Old MPN insight",
-            mpn="LM317T",
-        )
-        entry = knowledge_service.create_entry(
-            db_session,
-            user_id=test_user.id,
-            entry_type="fact",
-            content="LM317T at $0.50",
-            mpn="LM317T",
-        )
-        entry.created_at = datetime.now(timezone.utc)
-        db_session.commit()
-
-        mock_result = {"insights": [{"content": "New MPN insight", "confidence": 0.85, "based_on_expired": False}]}
-
-        async def _mock(*a, **kw):
-            return mock_result
-
-        with (
-            patch("app.utils.claude_client.claude_structured", new=_mock),
-            patch.object(knowledge_service, "create_entry", side_effect=_make_create_entry_with_user(test_user.id)),
-        ):
-            result = await knowledge_service.generate_mpn_insights(db_session, "LM317T")
-
-        assert len(result) == 1
-        cached = knowledge_service.get_cached_mpn_insights(db_session, "LM317T")
-        assert len(cached) == 1
-        assert cached[0].content == "New MPN insight"
 
 
 class TestGenerateVendorInsightsClaudeError:

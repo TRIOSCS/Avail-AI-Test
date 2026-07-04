@@ -23,10 +23,7 @@ from app.services.excess_service import (
     _parse_price,
     _parse_quantity,
     _safe_commit,
-    backfill_normalized_part_numbers,
     create_excess_list,
-    get_excess_stats,
-    submit_offer,
 )
 from tests.conftest import engine
 
@@ -209,74 +206,6 @@ class TestSafeCommit:
 # ---------------------------------------------------------------------------
 
 
-class TestGetExcessStats:
-    def test_empty_db(self, db_session: Session):
-        stats = get_excess_stats(db_session)
-        assert stats["total_lists"] == 0
-        assert stats["total_line_items"] == 0
-        assert stats["open_offers"] == 0
-        assert stats["total_offers"] == 0
-        assert stats["matched_items"] == 0
-        assert stats["awarded_items"] == 0
-
-    def test_with_data(self, db_session: Session):
-        company = _make_company(db_session)
-        owner = _make_user(db_session)
-        offerer = _make_user(db_session, email="broker@test.com")
-        el = _make_excess_list(db_session, company, owner)
-        item = _make_line_item(db_session, el)
-
-        # An inbound broker offer (an OPEN ExcessOffer with a matched line) — the
-        # Resell replacement for the old per-line bid.
-        submit_offer(
-            db_session,
-            list_id=el.id,
-            user=offerer,
-            scope="per_line",
-            lines=[{"mpn_raw": item.part_number, "quantity": 50, "unit_price": 1.0}],
-        )
-
-        stats = get_excess_stats(db_session)
-        assert stats["total_lists"] == 1
-        assert stats["total_line_items"] == 1
-        assert stats["open_offers"] == 1
-        assert stats["total_offers"] == 1
-        # offer_count rollup made the line "matched" (has >=1 offer).
-        assert stats["matched_items"] == 1
-        assert stats["awarded_items"] == 0
-
-    def test_awarded_items(self, db_session: Session):
-        company = _make_company(db_session)
-        user = _make_user(db_session)
-        el = _make_excess_list(db_session, company, user)
-        item = _make_line_item(db_session, el)
-        item.status = "awarded"
-        db_session.commit()
-
-        stats = get_excess_stats(db_session)
-        assert stats["awarded_items"] == 1
-
-
 # ---------------------------------------------------------------------------
 # backfill_normalized_part_numbers
 # ---------------------------------------------------------------------------
-
-
-class TestBackfillNormalizedPartNumbers:
-    def test_backfills_missing(self, db_session: Session):
-        company = _make_company(db_session)
-        user = _make_user(db_session)
-        el = _make_excess_list(db_session, company, user)
-        item = _make_line_item(db_session, el, part_number="LM-317T")
-        item.normalized_part_number = None
-        db_session.commit()
-
-        count = backfill_normalized_part_numbers(db_session)
-        assert count == 1
-
-        db_session.refresh(item)
-        assert item.normalized_part_number is not None
-
-    def test_no_items_to_backfill(self, db_session: Session):
-        count = backfill_normalized_part_numbers(db_session)
-        assert count == 0

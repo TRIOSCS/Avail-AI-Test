@@ -2,27 +2,24 @@
 
 The Requisition IS the opportunity (locked CRM decision — no separate deal
 object). Forecast = sum(deal_value * stage win-probability) over open
-requisitions. Account- and owner-level rollups plus an
-interactions -> RFQs -> quotes -> orders conversion funnel.
+requisitions.
 
 Forecast dollars reuse _resolve_deal_value so they reconcile with what the
 requisition list shows per row.
 
 Called by: app/routers/htmx_views.py parts_workspace_partial (the Sales Hub /
            parts workspace) — pipeline_summary feeds the pipeline chip there.
-Depends on: app.models (Requisition, Requirement, Quote, Company, User)
+Depends on: app.models (Requisition, Requirement)
 """
 
 from __future__ import annotations
-
-from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import case
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
 
 from app.constants import RequisitionStatus
-from app.models import Company, Quote, Requirement, Requisition, User
+from app.models import Requirement, Requisition
 
 
 def _resolve_deal_value(
@@ -194,118 +191,4 @@ def pipeline_summary(db: Session, *, owner_id: int | None = None) -> dict:
         "lost_count": lost_count,
         "win_rate": win_rate,
         "by_stage": [by_stage_acc[s] for s in _OPEN_ORDER],
-    }
-
-
-def pipeline_by_account(db: Session, *, limit: int = 10) -> list[dict]:
-    """Top accounts by weighted open pipeline.
-
-    Requisitions with no company_id are skipped (they have no account to roll up under).
-    Sorted by weighted_value desc, capped at limit.
-    """
-    open_reqs = (
-        db.query(Requisition).filter(Requisition.status.in_(OPEN_STATUSES), Requisition.company_id.isnot(None)).all()
-    )
-    deal_values = bulk_deal_values(db, [r.id for r in open_reqs])
-    by_company: dict[int, dict] = {}
-    for r in open_reqs:
-        val = deal_values.get(r.id, 0.0)
-        acc = by_company.setdefault(
-            r.company_id,
-            {"company_id": r.company_id, "company_name": "", "open_count": 0, "open_value": 0.0, "weighted_value": 0.0},
-        )
-        acc["open_count"] += 1
-        acc["open_value"] += val
-        acc["weighted_value"] += val * stage_probability(r.status)
-
-    if by_company:
-        names = dict(db.query(Company.id, Company.name).filter(Company.id.in_(list(by_company.keys()))).all())
-        for cid, acc in by_company.items():
-            acc["company_name"] = names.get(cid) or f"Account #{cid}"
-
-    ranked = sorted(by_company.values(), key=lambda a: a["weighted_value"], reverse=True)
-    return ranked[:limit]
-
-
-def pipeline_by_owner(db: Session) -> list[dict]:
-    """Owner leaderboard by weighted open pipeline.
-
-    Owner = claimed_by_id; requisitions with no claimer roll up under a single
-    "Unassigned" bucket (owner_id=None). Sorted by weighted_value desc.
-    """
-    open_reqs = db.query(Requisition).filter(Requisition.status.in_(OPEN_STATUSES)).all()
-    open_values = bulk_deal_values(db, [r.id for r in open_reqs])
-    won_reqs = db.query(Requisition).filter(Requisition.status == RequisitionStatus.WON).all()
-    won_values = bulk_deal_values(db, [r.id for r in won_reqs])
-
-    by_owner: dict[int | None, dict] = {}
-
-    def _bucket(owner_id: int | None) -> dict:
-        return by_owner.setdefault(
-            owner_id,
-            {
-                "owner_id": owner_id,
-                "owner_name": "Unassigned",
-                "open_count": 0,
-                "open_value": 0.0,
-                "weighted_value": 0.0,
-                "won_value": 0.0,
-            },
-        )
-
-    for r in open_reqs:
-        val = open_values.get(r.id, 0.0)
-        acc = _bucket(r.claimed_by_id)
-        acc["open_count"] += 1
-        acc["open_value"] += val
-        acc["weighted_value"] += val * stage_probability(r.status)
-    for r in won_reqs:
-        _bucket(r.claimed_by_id)["won_value"] += won_values.get(r.id, 0.0)
-
-    real_ids = [oid for oid in by_owner if oid is not None]
-    if real_ids:
-        owner_names = {
-            uid: (name or email)
-            for uid, name, email in db.query(User.id, User.name, User.email).filter(User.id.in_(real_ids)).all()
-        }
-        for oid in real_ids:
-            by_owner[oid]["owner_name"] = owner_names.get(oid) or f"User #{oid}"
-
-    return sorted(by_owner.values(), key=lambda a: a["weighted_value"], reverse=True)
-
-
-def conversion_funnel(db: Session, *, days: int = 90) -> dict:
-    """Interactions -> RFQs -> quotes -> orders funnel over a recent window.
-
-    Counts requisitions created within `days`:
-      - opportunities: all reqs created in window
-      - sourcing:      progressed past entry (status not in {draft, open}; OPEN is
-                       the entry stage so it does not yet count as "reached sourcing+")
-      - quoted:        has >=1 Quote OR status in {quoted, won}
-      - won:           status == won
-    Each later stage is a subset of the prior, so the funnel is monotonic.
-    """
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-    reqs = db.query(Requisition).filter(Requisition.created_at >= cutoff).all()
-    req_ids = [r.id for r in reqs]
-
-    quoted_req_ids: set[int] = set()
-    if req_ids:
-        quoted_req_ids = {
-            rid for (rid,) in db.query(Quote.requisition_id).filter(Quote.requisition_id.in_(req_ids)).distinct().all()
-        }
-
-    opportunities = len(reqs)
-    sourcing = sum(1 for r in reqs if r.status not in (RequisitionStatus.DRAFT, RequisitionStatus.OPEN))
-    quoted = sum(
-        1 for r in reqs if r.id in quoted_req_ids or r.status in (RequisitionStatus.QUOTED, RequisitionStatus.WON)
-    )
-    won = sum(1 for r in reqs if r.status == RequisitionStatus.WON)
-
-    return {
-        "window_days": days,
-        "opportunities": opportunities,
-        "sourcing": sourcing,
-        "quoted": quoted,
-        "won": won,
     }

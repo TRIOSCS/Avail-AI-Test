@@ -14,7 +14,6 @@ from decimal import Decimal, InvalidOperation
 
 from fastapi import HTTPException
 from loguru import logger
-from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -30,7 +29,6 @@ from ..constants import (
 from ..models import ActivityLog, Company, User
 from ..models.excess import ExcessLineItem, ExcessList, ExcessOffer, ExcessOfferLine
 from ..utils.normalization import normalize_mpn_key
-from ..utils.sql_helpers import escape_like
 from .buyer_affinity_service import recompute_buyer_score_on_win
 
 # ---------------------------------------------------------------------------
@@ -229,53 +227,6 @@ def get_excess_list(db: Session, list_id: int) -> ExcessList:
     if not excess_list:
         raise HTTPException(404, f"ExcessList {list_id} not found")
     return excess_list
-
-
-def list_excess_lists(
-    db: Session,
-    *,
-    q: str = "",
-    status: str | None = None,
-    limit: int = 50,
-    offset: int = 0,
-) -> dict:
-    """List excess lists with search, status filter, and pagination.
-
-    Returns {items, total, limit, offset}.
-    """
-    query = db.query(ExcessList)
-
-    if q:
-        query = query.filter(ExcessList.title.ilike(f"%{escape_like(q)}%", escape="\\"))
-    if status:
-        query = query.filter(ExcessList.status == status)
-
-    total = query.count()
-    items = query.order_by(ExcessList.id.desc()).offset(offset).limit(limit).all()
-
-    return {"items": items, "total": total, "limit": limit, "offset": offset}
-
-
-def update_excess_list(db: Session, list_id: int, **kwargs) -> ExcessList:
-    """Update an excess list — only sets non-None values."""
-    excess_list = get_excess_list(db, list_id)
-
-    for key, value in kwargs.items():
-        if value is not None and hasattr(excess_list, key):
-            setattr(excess_list, key, value)
-
-    _safe_commit(db, entity="excess list")
-    db.refresh(excess_list)
-    logger.info("Updated ExcessList id={} fields={}", list_id, list(kwargs.keys()))
-    return excess_list
-
-
-def delete_excess_list(db: Session, list_id: int) -> None:
-    """Hard-delete an excess list (cascades to line items)."""
-    excess_list = get_excess_list(db, list_id)
-    db.delete(excess_list)
-    _safe_commit(db, entity="excess list")
-    logger.info("Deleted ExcessList id={}", list_id)
 
 
 # ---------------------------------------------------------------------------
@@ -1036,52 +987,6 @@ def expire_overdue_lists(db: Session, *, now: datetime | None = None) -> int:
 # ---------------------------------------------------------------------------
 
 
-def get_excess_stats(db: Session) -> dict:
-    """Compute aggregate stats for the Resell workspace (offer counts, not bid counts).
-
-    Returns {total_lists, total_line_items, open_offers, matched_items, total_offers,
-    awarded_items}.
-    """
-    total_lists = db.query(func.count(ExcessList.id)).scalar() or 0
-    total_line_items = db.query(func.count(ExcessLineItem.id)).scalar() or 0
-    open_offers = (
-        db.query(func.count(ExcessOffer.id)).filter(ExcessOffer.status == ExcessOfferStatus.OPEN).scalar() or 0
-    )
-    total_offers = db.query(func.count(ExcessOffer.id)).scalar() or 0
-    matched_items = db.query(func.count(ExcessLineItem.id)).filter(ExcessLineItem.offer_count > 0).scalar() or 0
-    awarded_items = (
-        db.query(func.count(ExcessLineItem.id)).filter(ExcessLineItem.status == ExcessLineItemStatus.AWARDED).scalar()
-        or 0
-    )
-
-    return {
-        "total_lists": total_lists,
-        "total_line_items": total_line_items,
-        "open_offers": open_offers,
-        "matched_items": matched_items,
-        "total_offers": total_offers,
-        "awarded_items": awarded_items,
-    }
-
-
 # ---------------------------------------------------------------------------
 # Phase 4: Normalization backfill
 # ---------------------------------------------------------------------------
-
-
-def backfill_normalized_part_numbers(db: Session) -> int:
-    """Backfill normalized_part_number for existing line items that lack it.
-
-    Returns count of items updated.
-    """
-    items = db.query(ExcessLineItem).filter(ExcessLineItem.normalized_part_number.is_(None)).all()
-    updated = 0
-    for item in items:
-        norm = normalize_mpn_key(item.part_number)
-        if norm:
-            item.normalized_part_number = norm
-            updated += 1
-    if updated > 0:
-        _safe_commit(db, entity="normalization backfill")
-    logger.info("Backfilled normalized_part_number for {} excess line items", updated)
-    return updated
