@@ -56,8 +56,13 @@ from ..utils.search_builder import SearchBuilder
 from ..utils.sql_helpers import escape_like
 from ._lookup_helpers import get_requisition_or_404
 from .auth import _password_login_enabled
-from .htmx._shared import _base_ctx, _safe_int, _vite_assets
-from .htmx.requisitions import _best_quote_status, requisition_tab, requisitions_list_partial
+from .htmx._shared import _base_ctx, _parse_task_due_date, _safe_int, _vite_assets
+from .htmx.requisitions import (
+    _best_quote_status,
+    _coerce_task_priority,
+    requisition_tab,
+    requisitions_list_partial,
+)
 from .htmx.settings import _run_inbox_scan_now
 
 router = APIRouter(tags=["htmx-views"])
@@ -1856,6 +1861,55 @@ async def import_vendor_stock_list(
 # ── My Day ──────────────────────────────────────────────────────────────
 
 
+def _my_day_filtered_tasks(db, user_id, *, status, priority, due, now):
+    """Return the user's My-Day tasks after applying the status / priority / due
+    filters.
+
+    ``status`` flows through get_my_tasks (query-level; defaults to open, excludes done).
+    ``priority`` (int 1-3) and ``due`` are applied here since the helper supports neither.
+    The due predicate reuses the SAME ``task_due_state`` the results template groups by, so
+    the filter and the on-screen "Overdue"/"Due soon" headings can never contradict each
+    other (a task due earlier today filters as "today" AND renders under "Due soon"). Due
+    dates are calendar-day, so "upcoming" is a strictly future day — neither overdue nor
+    today — matching the template's "Later" group. Shared by the Tasks-page read route and
+    its create / snooze / reopen mutations so every render stays consistent.
+    """
+    from ..services.task_service import get_my_tasks as _get_my_tasks
+
+    tasks = _get_my_tasks(db, user_id, status=status or None)
+    if priority in ("1", "2", "3"):
+        want = int(priority)
+        tasks = [t for t in tasks if t.priority == want]
+    if due == "overdue":
+        tasks = [t for t in tasks if _task_due_state(t, now)[0]]
+    elif due == "today":
+        tasks = [t for t in tasks if _task_due_state(t, now)[1]]
+    elif due == "upcoming":
+        tasks = [t for t in tasks if t.due_at is not None and _task_due_state(t, now) == (False, False)]
+    elif due == "none":
+        tasks = [t for t in tasks if t.due_at is None]
+    return tasks
+
+
+def _my_day_results_response(request, user, db, *, status="", priority="", due=""):
+    """Render the results-only Tasks fragment (tasks/_results.html) for the given
+    filters.
+
+    Used by the create / snooze / reopen mutations to re-render #tasks-results in place
+    so the changed task re-buckets (snooze) or leaves the Done view (reopen)
+    immediately.
+    """
+    now = datetime.now(timezone.utc)
+    tasks = _my_day_filtered_tasks(db, user.id, status=status, priority=priority, due=due, now=now)
+    ctx = _base_ctx(request, user, "my-day")
+    ctx["tasks"] = tasks
+    ctx["now_utc"] = now
+    ctx["filter_status"] = status
+    ctx["filter_priority"] = priority
+    ctx["filter_due"] = due
+    return template_response("htmx/partials/tasks/_results.html", ctx)
+
+
 @router.get("/v2/partials/my-day", response_class=HTMLResponse)
 async def my_day_partial(
     request: Request,
@@ -1867,45 +1921,20 @@ async def my_day_partial(
     (Formerly "My Day", which also carried a follow-up-accounts call-down section;
     that account cadence now lives in CRM, so this page is tasks-only.)
 
-    Reuses task_service.get_my_tasks (which supports the ``status`` filter and excludes
-    done by default); ``priority`` and ``due`` are applied here since the helper does not
-    support them. The template groups the rows by urgency (Overdue → Due soon → Later →
-    No due date). The filter bar's hx-get carries an EXPLICIT hx-target on the inner
-    results container (so it never inherits #main-content and replaces the whole page).
+    Reuses task_service.get_my_tasks + _my_day_filtered_tasks (status/priority/due). The
+    template groups the rows by urgency (Overdue → Due soon → Later → No due date). The
+    filter bar's hx-get carries an EXPLICIT hx-target on the inner results container (so it
+    never inherits #main-content and replaces the whole page).
 
     Called by: /v2/my-day full-page shell and nav hx-get, plus the filter-bar selects.
-    Depends on: task_service.get_my_tasks.
+    Depends on: _my_day_filtered_tasks → task_service.get_my_tasks.
     """
-    from ..services.task_service import get_my_tasks as _get_my_tasks
-
     now = datetime.now(timezone.utc)
     status = request.query_params.get("status", "").strip()
     priority = request.query_params.get("priority", "").strip()
     due = request.query_params.get("due", "").strip()
 
-    # status flows through the helper (it filters at the query level + defaults to open).
-    # get_my_tasks already orders due_at-asc (nulls last), then created_at — soonest first.
-    tasks = _get_my_tasks(db, user.id, status=status or None)
-
-    # priority is an int 1-3 (3=high, 2=med, 1=low) — applied here (helper has no filter).
-    if priority in ("1", "2", "3"):
-        want = int(priority)
-        tasks = [t for t in tasks if t.priority == want]
-
-    # due bucket — helper has no due filter, so apply it here. Reuse the SAME
-    # task_due_state predicate the results template groups by, so the filter and the
-    # on-screen "Overdue"/"Due soon" headings can never contradict each other (a task due
-    # earlier today filters as "today" AND renders under "Due soon", not "Overdue").
-    # Due dates are calendar-day, so "upcoming" means a strictly future day — neither
-    # overdue nor today — matching the template's "Later" group.
-    if due == "overdue":
-        tasks = [t for t in tasks if _task_due_state(t, now)[0]]
-    elif due == "today":
-        tasks = [t for t in tasks if _task_due_state(t, now)[1]]
-    elif due == "upcoming":
-        tasks = [t for t in tasks if t.due_at is not None and _task_due_state(t, now) == (False, False)]
-    elif due == "none":
-        tasks = [t for t in tasks if t.due_at is None]
+    tasks = _my_day_filtered_tasks(db, user.id, status=status, priority=priority, due=due, now=now)
 
     ctx = _base_ctx(request, user, "my-day")
     ctx["tasks"] = tasks
@@ -1918,3 +1947,109 @@ async def my_day_partial(
     if request.headers.get("HX-Target") == "tasks-results":
         return template_response("htmx/partials/tasks/_results.html", ctx)
     return template_response("htmx/partials/tasks/list.html", ctx)
+
+
+@router.post("/v2/partials/my-day/tasks", response_class=HTMLResponse)
+async def create_my_day_task(
+    request: Request,
+    user: User = Depends(require_access(AccessKey.MY_DAY)),
+    db: Session = Depends(get_db),
+):
+    """Create a personal/standalone task from the Tasks page, assigned to the creator.
+
+    Standalone tasks have no natural business parent, but ck_task_has_parent still
+    requires one, so task_service.create_personal_task hangs the task off the user's
+    hidden "Personal" requisition (see that service). Title required; optional due date
+    (parsed to aware-UTC midnight via the shared _parse_task_due_date) and priority
+    (default medium). Re-renders the results list (default open filter) so the new task
+    appears immediately.
+    """
+    from ..services.task_service import create_personal_task
+
+    form = await request.form()
+    title = (form.get("title") or "").strip()
+    if not title:
+        raise HTTPException(422, "Title is required")
+    create_personal_task(
+        db,
+        user_id=user.id,
+        title=title,
+        priority=_coerce_task_priority(form.get("task_priority")),
+        due_at=_parse_task_due_date(form.get("due_at")),
+    )
+    logger.info("Personal task '{}' created from My Day by {}", title, user.email)
+    return _my_day_results_response(request, user, db)
+
+
+@router.post("/v2/partials/my-day/tasks/{task_id}/snooze", response_class=HTMLResponse)
+async def snooze_my_day_task(
+    task_id: int,
+    request: Request,
+    days: int = Query(1),
+    user: User = Depends(require_access(AccessKey.MY_DAY)),
+    db: Session = Depends(get_db),
+):
+    """Snooze one of my tasks forward by ``days`` (quick options 1 / 3 / 7). Re-renders
+    the filtered results so the task re-buckets in place.
+
+    Authz mirrors the CRM/vendor Snooze gate (task_service._is_crm_task_authorized):
+    assignee, creator, parent account owner, or admin. A personal / requisition-scoped
+    task has no parent company, so that resolves to assignee-or-creator-or-admin — a
+    non-owner cannot snooze someone else's task.
+    """
+    from ..models.task import RequisitionTask
+    from ..services.task_service import _is_crm_task_authorized, snooze_task
+
+    task = db.get(RequisitionTask, task_id)
+    if not task:
+        raise HTTPException(404, "Task not found")
+    if not _is_crm_task_authorized(db, task, user.id, is_admin=(user.role == UserRole.ADMIN)):
+        raise HTTPException(403, "You are not allowed to snooze this task")
+    snooze_task(db, task_id, days=days if days in (1, 3, 7) else 1)
+    logger.info("Task {} snoozed +{}d from My Day by {}", task_id, days, user.email)
+    form = await request.form()
+    return _my_day_results_response(
+        request,
+        user,
+        db,
+        status=(form.get("status") or "").strip(),
+        priority=(form.get("priority") or "").strip(),
+        due=(form.get("due") or "").strip(),
+    )
+
+
+@router.post("/v2/partials/my-day/tasks/{task_id}/reopen", response_class=HTMLResponse)
+async def reopen_my_day_task(
+    task_id: int,
+    request: Request,
+    user: User = Depends(require_access(AccessKey.MY_DAY)),
+    db: Session = Depends(get_db),
+):
+    """Reopen one of my done tasks (status → todo, clears completed_at). Re-renders the
+    filtered results so the task leaves the Done view.
+
+    Authz mirrors the Snooze gate (task_service._is_crm_task_authorized): assignee,
+    creator, parent account owner, or admin — a non-owner cannot reopen someone else's
+    task. Reuses update_task, which clears completed_at on any non-done status
+    transition.
+    """
+    from ..constants import TaskStatus
+    from ..models.task import RequisitionTask
+    from ..services.task_service import _is_crm_task_authorized, update_task
+
+    task = db.get(RequisitionTask, task_id)
+    if not task:
+        raise HTTPException(404, "Task not found")
+    if not _is_crm_task_authorized(db, task, user.id, is_admin=(user.role == UserRole.ADMIN)):
+        raise HTTPException(403, "You are not allowed to reopen this task")
+    update_task(db, task_id, status=TaskStatus.TODO)
+    logger.info("Task {} reopened from My Day by {}", task_id, user.email)
+    form = await request.form()
+    return _my_day_results_response(
+        request,
+        user,
+        db,
+        status=(form.get("status") or "").strip(),
+        priority=(form.get("priority") or "").strip(),
+        due=(form.get("due") or "").strip(),
+    )

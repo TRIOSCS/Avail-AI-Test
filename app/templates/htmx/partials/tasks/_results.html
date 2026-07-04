@@ -9,7 +9,9 @@
               directly when the filter bar requests a results-only swap
               (HX-Target == "tasks-results").
    Depends on: task_due_state global, task_priority_badge macro, the existing complete
-               route (/v2/partials/tasks/{id}/complete).
+               route (/v2/partials/tasks/{id}/complete), and the My-Day snooze / reopen
+               routes (/v2/partials/my-day/tasks/{id}/snooze|reopen). Row actions branch on
+               status: open rows get complete + a Snooze quick-menu; done rows get Reopen.
 #}
 {% from "htmx/partials/shared/_macros.html" import task_priority_badge %}
 
@@ -30,35 +32,43 @@
 {% set _due_state = task_due_state(t, now_utc) %}
 {% set is_overdue = _due_state[0] %}
 {% set is_due_today = _due_state[1] %}
-{% set task_rail = 'border-l-4 border-l-rose-400' if is_overdue else ('border-l-4 border-l-amber-300' if is_due_today else '') %}
+{% set is_done = t.status == 'done' %}
+{% set task_rail = 'border-l-4 border-l-rose-400' if (is_overdue and not is_done) else ('border-l-4 border-l-amber-300' if (is_due_today and not is_done) else '') %}
 <li id="my-day-task-{{ t.id }}"
     class="flex items-start gap-3 rounded-lg border border-line-base {{ task_rail }} bg-white px-4 py-3">
 
-  {# Complete checkbox — posts to the EXISTING complete route with from_my_day=true
-     so it returns an empty fragment, removing this row via outerHTML swap. #}
-  <form hx-post="/v2/partials/tasks/{{ t.id }}/complete?from_my_day=true"
-        hx-target="#my-day-task-{{ t.id }}"
-        hx-swap="outerHTML"
-        class="flex-shrink-0 pt-0.5">
-    <button type="submit"
-            class="w-4 h-4 rounded border border-gray-300 hover:border-accent-400 input-focus"
-            title="Mark done"
-            aria-label="Complete: {{ t.title }}"></button>
-  </form>
+  {% if is_done %}
+    {# Completed marker — no toggle; use Reopen (right) to undo. #}
+    <span class="mt-0.5 flex-shrink-0 w-4 h-4 rounded bg-emerald-500" title="Completed" aria-hidden="true"></span>
+  {% else %}
+    {# Complete checkbox — posts to the EXISTING complete route with from_my_day=true
+       so it returns an empty fragment, removing this row via outerHTML swap. #}
+    <form hx-post="/v2/partials/tasks/{{ t.id }}/complete?from_my_day=true"
+          hx-target="#my-day-task-{{ t.id }}"
+          hx-swap="outerHTML"
+          class="flex-shrink-0 pt-0.5">
+      <button type="submit"
+              class="w-4 h-4 rounded border border-gray-300 hover:border-accent-400 input-focus"
+              title="Mark done"
+              aria-label="Complete: {{ t.title }}"></button>
+    </form>
+  {% endif %}
 
   <div class="min-w-0 flex-1">
     <div class="flex items-center flex-wrap gap-1.5">
-      <span class="text-sm font-medium text-gray-900">{{ t.title }}</span>
+      <span class="text-sm font-medium {{ 'text-gray-400 line-through' if is_done else 'text-gray-900' }}">{{ t.title }}</span>
       {{ task_priority_badge(t.priority) }}
       {# Due date with overdue/due-today/future badge #}
       {% if t.due_at %}
-        <span class="text-xs {% if is_overdue %}text-rose-600 font-semibold{% elif is_due_today %}text-amber-600 font-semibold{% else %}text-gray-600{% endif %}">
-          {% if is_overdue %}&middot; Overdue ({{ t.due_at.strftime('%b %-d') }}){% elif is_due_today %}&middot; Due today{% else %}&middot; due {{ t.due_at.strftime('%b %-d') }}{% endif %}
+        <span class="text-xs {% if is_done %}text-gray-400{% elif is_overdue %}text-rose-600 font-semibold{% elif is_due_today %}text-amber-600 font-semibold{% else %}text-gray-600{% endif %}">
+          {% if is_done %}&middot; done{% elif is_overdue %}&middot; Overdue ({{ t.due_at.strftime('%b %-d') }}){% elif is_due_today %}&middot; Due today{% else %}&middot; due {{ t.due_at.strftime('%b %-d') }}{% endif %}
         </span>
       {% endif %}
     </div>
 
-    {# Linked entity #}
+    {# Linked entity — hidden for scratch/personal requisitions (they're excluded from every
+       requisition list, so linking to one from the Tasks page would be inconsistent). #}
+    {% if t.company or t.site_contact or (t.requisition and not t.requisition.is_scratch) %}
     <div class="mt-0.5 flex flex-wrap gap-x-2 text-xs text-gray-600">
       {% if t.company %}
         <a href="/v2/customers/{{ t.company.id }}"
@@ -68,7 +78,7 @@
            class="text-accent-600 hover:text-accent-700">{{ t.company.name }}</a>
       {% elif t.site_contact %}
         <span>{{ t.site_contact.full_name }}</span>
-      {% elif t.requisition %}
+      {% elif t.requisition and not t.requisition.is_scratch %}
         <a href="/v2/requisitions/{{ t.requisition.id }}"
            hx-get="/v2/partials/requisitions/{{ t.requisition.id }}"
            hx-target="#main-content"
@@ -76,6 +86,42 @@
            class="text-accent-600 hover:text-accent-700">{{ t.requisition.name or ('REQ-' ~ t.requisition.id) }}</a>
       {% endif %}
     </div>
+    {% endif %}
+  </div>
+
+  {# ── Row actions (right) ─────────────────────────────────────────────
+     Done → Reopen (status→todo, clears completed_at). Open → Snooze quick-menu
+     (+1d / +3d / +1w). Both re-render the whole #tasks-results so the task re-buckets
+     (snooze) or leaves the Done view (reopen); hx-include carries the active filter values,
+     scoped to #tasks-filter-bar so the New-task form's fields can't leak in. @click /
+     @click.outside are single Alpine expressions. #}
+  <div class="flex-shrink-0 flex items-center gap-1">
+    {% if is_done %}
+      <button type="button"
+              hx-post="/v2/partials/my-day/tasks/{{ t.id }}/reopen"
+              hx-target="#tasks-results" hx-swap="innerHTML"
+              hx-include="#tasks-filter-bar select"
+              class="text-xs text-accent-600 hover:text-accent-700 px-1.5 py-0.5 rounded"
+              title="Reopen this task">Reopen</button>
+    {% else %}
+      <div x-data="{ open: false }" class="relative">
+        <button type="button" @click="open = !open"
+                class="text-xs text-gray-500 hover:text-accent-600 px-1.5 py-0.5 rounded"
+                title="Snooze this task" :aria-expanded="open">Snooze</button>
+        <div x-show="open" x-cloak @click.outside="open = false" x-transition
+             class="absolute right-0 mt-1 w-28 bg-white border border-line-base rounded-md shadow-float py-1 z-20">
+          <button type="button" hx-post="/v2/partials/my-day/tasks/{{ t.id }}/snooze?days=1"
+                  hx-target="#tasks-results" hx-swap="innerHTML" hx-include="#tasks-filter-bar select"
+                  class="block w-full text-left px-3 py-1 text-xs text-gray-700 hover:bg-gray-50">+1 day</button>
+          <button type="button" hx-post="/v2/partials/my-day/tasks/{{ t.id }}/snooze?days=3"
+                  hx-target="#tasks-results" hx-swap="innerHTML" hx-include="#tasks-filter-bar select"
+                  class="block w-full text-left px-3 py-1 text-xs text-gray-700 hover:bg-gray-50">+3 days</button>
+          <button type="button" hx-post="/v2/partials/my-day/tasks/{{ t.id }}/snooze?days=7"
+                  hx-target="#tasks-results" hx-swap="innerHTML" hx-include="#tasks-filter-bar select"
+                  class="block w-full text-left px-3 py-1 text-xs text-gray-700 hover:bg-gray-50">+1 week</button>
+        </div>
+      </div>
+    {% endif %}
   </div>
 </li>
 {%- endmacro %}

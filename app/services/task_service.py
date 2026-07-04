@@ -117,6 +117,88 @@ def create_requisition_task(
     return task
 
 
+# ---------------------------------------------------------------------------
+# Personal / standalone tasks (Tasks-page "New task" affordance)
+# ---------------------------------------------------------------------------
+
+# A personal to-do created from the Tasks page has no natural business parent, but
+# ``ck_task_has_parent`` requires at least one, so personal tasks hang off a per-user
+# hidden "scratch" requisition — the established codebase pattern (see
+# services/quick_source_service.py) for giving a parentless work item a home. is_scratch
+# reqs are excluded from every requisition list, picker, and global search, so this parent
+# never pollutes a real customer / vendor / requisition surface.
+_PERSONAL_REQ_NAME = "Personal"
+
+
+def get_or_create_personal_requisition(db: Session, user_id: int):
+    """Return the user's hidden "Personal" requisition, creating it once on first use.
+
+    Idempotent per user (reuses the most-recent match). A benign duplicate on a
+    concurrent first create is harmless — both rows are hidden (is_scratch) and equally
+    reusable.
+    """
+    from app.models.sourcing import Requisition
+
+    req = (
+        db.query(Requisition)
+        .filter(
+            Requisition.created_by == user_id,
+            Requisition.is_scratch.is_(True),
+            Requisition.name == _PERSONAL_REQ_NAME,
+        )
+        .order_by(Requisition.id.desc())
+        .first()
+    )
+    if req is not None:
+        return req
+    req = Requisition(
+        name=_PERSONAL_REQ_NAME,
+        status="open",
+        is_scratch=True,
+        created_by=user_id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(req)
+    db.commit()
+    db.refresh(req)
+    logger.info("Personal requisition created for user {} (req={})", user_id, req.id)
+    return req
+
+
+def create_personal_task(
+    db: Session,
+    *,
+    user_id: int,
+    title: str,
+    priority: int = 2,
+    due_at: datetime | None = None,
+) -> RequisitionTask:
+    """Create a standalone/personal to-do from the Tasks page, assigned to the creator.
+
+    Hangs the task off the creator's hidden "Personal" requisition
+    (``get_or_create_personal_requisition``) so ``ck_task_has_parent`` is satisfied without
+    a real business parent. task_type="general", source="manual", status="todo". Callers
+    must pass an already-parsed aware ``due_at`` datetime (never a raw date string).
+    """
+    req = get_or_create_personal_requisition(db, user_id)
+    task = RequisitionTask(
+        requisition_id=req.id,
+        title=title,
+        task_type="general",
+        status=TaskStatus.TODO,
+        priority=priority,
+        assigned_to_id=user_id,
+        created_by=user_id,
+        source="manual",
+        due_at=due_at,
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    logger.info("Personal task created: {} (user={}, req={})", task.id, user_id, req.id)
+    return task
+
+
 def get_my_tasks(
     db: Session,
     user_id: int,
@@ -718,20 +800,31 @@ def auto_create_resell_followup_task(
     return task
 
 
-def snooze_task(db: Session, task_id: int) -> RequisitionTask | None:
-    """Push a task's due_at forward by one week.
+def snooze_task(db: Session, task_id: int, *, days: int | None = None) -> RequisitionTask | None:
+    """Push a task's due_at forward.
 
-    If the task has no due_at, sets it to tomorrow (midnight UTC). Returns the updated
-    task, or None if not found.
+    Default (``days=None``): +1 week if the task already has a due date, else tomorrow at
+    midnight UTC — the delta the CRM/vendor Snooze action relies on. When ``days`` is given
+    (the Tasks-page quick options +1d / +3d / +1w), advance an existing due_at by exactly
+    that many days, or, for an undated task, set it that many days out at midnight UTC.
+    Returns the updated task, or None if not found.
     """
     task = db.get(RequisitionTask, task_id)
     if not task:
         return None
-    if task.due_at:
-        task.due_at = task.due_at + timedelta(weeks=1)
+    if days is None:
+        if task.due_at:
+            task.due_at = task.due_at + timedelta(weeks=1)
+        else:
+            task.due_at = (datetime.now(timezone.utc) + timedelta(days=1)).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
+    elif task.due_at:
+        task.due_at = task.due_at + timedelta(days=days)
     else:
-        tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-        task.due_at = tomorrow
+        task.due_at = (datetime.now(timezone.utc) + timedelta(days=days)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
     db.commit()
     db.refresh(task)
     return task
