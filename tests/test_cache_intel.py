@@ -44,9 +44,8 @@ def _rowcount_result(rowcount: int) -> MagicMock:
 
 class TestGetRedis:
     def setup_method(self):
-        """Reset lazy-init state before each test."""
-        cache_mod._redis_client = None
-        cache_mod._redis_init_attempted = False
+        """Reset the probe's lazy state before each test."""
+        cache_mod._redis_probe.reset()
 
     def test_testing_env_returns_none(self):
         # TESTING=1 is set in conftest.py
@@ -54,10 +53,11 @@ class TestGetRedis:
         assert result is None
 
     def test_caches_result_on_second_call(self):
-        _get_redis()
-        cache_mod._redis_init_attempted = True
+        assert _get_redis() is None
+        # Under TESTING the probe self-disables after the first call, so the second
+        # call short-circuits to None without re-probing.
         result = _get_redis()
-        assert result is None  # Same cached None
+        assert result is None
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -228,14 +228,12 @@ class TestCleanupExpired:
 
 class TestGetRedisNonTesting:
     def setup_method(self):
-        """Reset lazy-init state before each test."""
-        cache_mod._redis_client = None
-        cache_mod._redis_init_attempted = False
+        """Reset the probe's lazy state before each test."""
+        cache_mod._redis_probe.reset()
 
     def teardown_method(self):
-        """Reset after each test and restore TESTING env."""
-        cache_mod._redis_client = None
-        cache_mod._redis_init_attempted = False
+        """Reset the probe after each test and restore TESTING env."""
+        cache_mod._redis_probe.reset()
         os.environ["TESTING"] = "1"
 
     @patch.dict(os.environ, {"TESTING": ""})

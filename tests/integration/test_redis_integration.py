@@ -141,8 +141,8 @@ def test_search_service_get_redis_connects(monkeypatch):
 
     monkeypatch.delenv("TESTING", raising=False)
     monkeypatch.setattr(settings, "redis_url", REDIS_URL, raising=False)
-    monkeypatch.setattr(search_service, "_search_redis", None, raising=False)
-    monkeypatch.setattr(search_service, "_search_redis_attempted", False, raising=False)
+    # Reset the probe's lazy state so it reconnects with our settings.
+    search_service._search_redis_probe.reset()
 
     client = search_service._get_search_redis()
     assert client is not None, "search_service could not connect to Redis"
@@ -162,9 +162,8 @@ def test_intel_cache_get_redis_connects(monkeypatch):
     monkeypatch.delenv("TESTING", raising=False)
     monkeypatch.setattr(settings, "cache_backend", "redis", raising=False)
     monkeypatch.setattr(settings, "redis_url", REDIS_URL, raising=False)
-    # Reset the lazy-init module globals so it reconnects with our settings.
-    monkeypatch.setattr(intel_cache, "_redis_init_attempted", False, raising=False)
-    monkeypatch.setattr(intel_cache, "_redis_client", None, raising=False)
+    # Reset the probe's lazy state so it reconnects with our settings.
+    intel_cache._redis_probe.reset()
 
     client = intel_cache._get_redis()
     assert client is not None, "intel_cache could not connect to Redis"
