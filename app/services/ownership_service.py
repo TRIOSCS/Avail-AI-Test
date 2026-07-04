@@ -1,7 +1,7 @@
 """Customer ownership service — inactivity warnings + open-pool auto-claim.
 
 The company ownership inactivity threshold is a SINGLE configurable setting,
-``settings.account_sweep_inactivity_days`` (default 90). The SP4 account sweep
+``settings.account_sweep_inactivity_days`` (default 45). The SP4 account sweep
 (``prospect_reclamation.job_account_sweep``) is the single park+cooldown+notify
 path that clears an owner and drops the company into the prospect pool at that
 threshold. This nightly sweep is WARNINGS-ONLY: it emails owners of accounts
@@ -50,7 +50,7 @@ async def run_ownership_sweep(db: Session) -> dict:
     per day. It does NOT clear ownership: the SP4 account sweep
     (``prospect_reclamation.job_account_sweep``) is the single park+cooldown+notify
     path, and both it and this warning read the ONE threshold
-    ``settings.account_sweep_inactivity_days`` (default 90). Enabling both the
+    ``settings.account_sweep_inactivity_days`` (default 45). Enabling both the
     ownership-sweep flag and the account-sweep flag therefore no longer double-acts.
 
     Returns summary dict with counts.

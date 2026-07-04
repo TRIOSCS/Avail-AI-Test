@@ -22,7 +22,10 @@ from ..utils.timezones import DEFAULT_DISPLAY_TZ, format_localdate
 
 # Phase 4 compliance: a former owner cannot reclaim a freshly-swept account for this many
 # days (managers/admins bypass via reassign). Set on the ProspectAccount at sweep time.
-RECLAIM_COOLDOWN_DAYS = 30
+# The DEFAULT (30) lives in app/config.py as settings.account_sweep_reclaim_cooldown_days;
+# this module constant materializes it for the sweep stamp, the notification copy, and the
+# startup cooldown backfill (app/startup.py).
+RECLAIM_COOLDOWN_DAYS = settings.account_sweep_reclaim_cooldown_days
 
 # ── Internal DB-injectable sweep (testable) ───────────────────────────────────
 

@@ -118,7 +118,7 @@ class TestRunOwnershipSweep:
 
     The sweep never clears ownership anymore (SP4 job_account_sweep is the single
     park+cooldown+notify path) and reads the ONE threshold
-    settings.account_sweep_inactivity_days (default 90), warning WARNING_LEAD_DAYS
+    settings.account_sweep_inactivity_days (default 45), warning WARNING_LEAD_DAYS
     before it. The result dict no longer carries a "cleared" count.
     """
 

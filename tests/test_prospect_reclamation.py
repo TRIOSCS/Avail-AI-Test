@@ -5,6 +5,14 @@ job_account_sweep_with_db sweep logic, _send_sweep_notification,
 job_auto_surface_reactivation wrapper, job_auto_surface_with_db surface logic,
 and Phase 4 compliance: reclaim cooldown enforcement, manager reassign, and the
 rep + manager sweep notification fan-out.
+
+Policy (auto-park spec): a 45-day inactivity trigger measured across ALL of a
+company's sites (a recent contact at ANY site keeps the account active); on park
+BOTH the owner and every manager/admin are alerted; a 30-day post-park cooldown
+blocks only the FORMER owner (other reps may claim normally); a manager/admin may
+reassign it back early, overriding the cooldown. These behaviours are exercised by
+TestAnySiteInactivityTrigger, TestParkAlertsOwnerAndManager,
+TestCooldownPoolAvailability, and TestPolicyCodeDefaults below.
 """
 
 import os
@@ -758,3 +766,198 @@ class TestSweepNotificationManagerFanout:
             await pr._send_sweep_notification(owner, co, None, 1, db_session)
 
         assert calls["n"] >= 2
+
+
+# ── Policy helpers: real sites + activity rows ────────────────────────────────
+
+
+def _site(db: Session, company_id: int, name: str | None = None):
+    from app.models.crm import CustomerSite
+
+    s = CustomerSite(company_id=company_id, site_name=name or f"Site-{_uid()}")
+    db.add(s)
+    db.flush()
+    return s
+
+
+def _activity(db: Session, *, company_id: int, site_id: int, days_ago: int):
+    """Insert a real non-note ActivityLog row (so get_last_activity_at reads it).
+
+    Every site-scoped activity carries the parent company_id — the mechanism by which
+    get_last_activity_at (MAX over company_id) aggregates across ALL of a company's
+    sites.
+    """
+    from datetime import timedelta
+
+    from app.constants import ActivityType, Channel
+    from app.models.intelligence import ActivityLog
+
+    a = ActivityLog(
+        activity_type=ActivityType.CALL_LOGGED,
+        channel=Channel.MANUAL,
+        company_id=company_id,
+        customer_site_id=site_id,
+        created_at=datetime.now(timezone.utc) - timedelta(days=days_ago),
+    )
+    db.add(a)
+    db.flush()
+    return a
+
+
+# ── Policy 1: 45-day trigger measured across ALL sites ────────────────────────
+
+
+class TestAnySiteInactivityTrigger:
+    """Inactivity is the MOST RECENT activity across ALL of a company's sites."""
+
+    async def test_recent_contact_at_one_site_keeps_account_active(self, db_session: Session, monkeypatch) -> None:
+        """Stale contact at site A + fresh contact (< 45d) at site B => NOT swept."""
+        from app.services import prospect_reclamation as pr
+
+        monkeypatch.setattr(pr.settings, "account_sweep_inactivity_days", 45)
+        owner = _user(db_session)
+        co = _company(db_session, owner_id=owner.id)
+        site_a = _site(db_session, co.id)
+        site_b = _site(db_session, co.id)
+        _activity(db_session, company_id=co.id, site_id=site_a.id, days_ago=90)  # stale site
+        _activity(db_session, company_id=co.id, site_id=site_b.id, days_ago=10)  # fresh site
+        db_session.commit()
+
+        mock_send = MagicMock()
+        with (
+            patch("app.services.prospect_claim.send_company_to_prospecting", mock_send),
+            patch.object(pr, "_send_sweep_notification", AsyncMock()) as mock_notify,
+        ):
+            await pr.job_account_sweep_with_db(db_session)
+
+        # A contact at ANY site inside 45d keeps the whole account active.
+        mock_send.assert_not_called()
+        mock_notify.assert_not_called()
+        db_session.refresh(co)
+        assert co.account_owner_id == owner.id
+
+    async def test_all_sites_stale_beyond_45d_sweeps_account(self, db_session: Session, monkeypatch) -> None:
+        """Every site's most recent contact is older than 45d => swept."""
+        from app.services import prospect_reclamation as pr
+
+        monkeypatch.setattr(pr.settings, "account_sweep_inactivity_days", 45)
+        owner = _user(db_session)
+        co = _company(db_session, owner_id=owner.id)
+        site_a = _site(db_session, co.id)
+        site_b = _site(db_session, co.id)
+        _activity(db_session, company_id=co.id, site_id=site_a.id, days_ago=60)
+        _activity(db_session, company_id=co.id, site_id=site_b.id, days_ago=50)
+        pa = _prospect(db_session)
+        db_session.commit()
+
+        with (
+            patch(
+                "app.services.prospect_claim.send_company_to_prospecting",
+                return_value={"prospect_id": pa.id},
+            ) as mock_send,
+            patch.object(pr, "_send_sweep_notification", AsyncMock()),
+        ):
+            await pr.job_account_sweep_with_db(db_session)
+
+        mock_send.assert_called_once()
+        db_session.refresh(pa)
+        assert pa.swept_at is not None
+
+
+# ── Policy 2: park alerts BOTH the owner AND their manager ─────────────────────
+
+
+class TestParkAlertsOwnerAndManager:
+    """A real park (through the sweep) emails both the owner and the manager."""
+
+    async def test_park_notifies_owner_and_manager(self, db_session: Session, monkeypatch) -> None:
+        from app.services import prospect_reclamation as pr
+
+        monkeypatch.setattr(pr.settings, "account_sweep_inactivity_days", 0)
+        monkeypatch.setattr(pr.settings, "account_sweep_manager_email", "")
+        owner = _user(db_session, email="rep-park@trio.com")
+        _user(db_session, email="manager-park@trio.com", role="manager")
+        _company(db_session, owner_id=owner.id)
+        pa = _prospect(db_session)
+        db_session.commit()
+
+        mock_gc = MagicMock()
+        mock_gc.post_json = AsyncMock()
+        with (
+            patch("app.services.activity_service.get_last_activity_at", return_value=None),
+            patch(
+                "app.services.prospect_claim.send_company_to_prospecting",
+                return_value={"prospect_id": pa.id},
+            ),
+            patch("app.utils.token_manager.get_valid_token", AsyncMock(return_value="TOKEN")),
+            patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+        ):
+            await pr.job_account_sweep_with_db(db_session)
+
+        sent_to = {
+            r["emailAddress"]["address"]
+            for call in mock_gc.post_json.call_args_list
+            for r in call[0][1]["message"]["toRecipients"]
+        }
+        assert "rep-park@trio.com" in sent_to  # the salesperson (former owner)
+        assert "manager-park@trio.com" in sent_to  # their manager
+
+
+# ── Policy 3: cooldown keeps the account claimable by OTHER reps ───────────────
+
+
+class TestCooldownPoolAvailability:
+    """During the 30-day cooldown only the FORMER owner is blocked; other reps may claim
+    the parked account normally from the pool."""
+
+    def test_other_rep_can_claim_during_cooldown(self, db_session: Session) -> None:
+        from datetime import timedelta
+
+        from app.services.prospect_claim import claim_prospect
+
+        owner = _user(db_session, role="sales")
+        other = _user(db_session, role="sales")
+        co = _company(db_session, owner_id=None)
+        future = datetime.now(timezone.utc) + timedelta(days=15)
+        pa = _prospect(db_session, company_id=co.id, swept_from_owner_id=owner.id, reclaim_blocked_until=future)
+        db_session.commit()
+
+        result = claim_prospect(pa.id, other.id, db_session)
+        assert result["status"] == "claimed"
+        db_session.refresh(co)
+        assert co.account_owner_id == other.id
+
+    def test_former_owner_blocked_from_claiming_during_cooldown(self, db_session: Session) -> None:
+        from datetime import timedelta
+
+        from app.services.prospect_claim import claim_prospect
+
+        owner = _user(db_session, role="sales")
+        co = _company(db_session, owner_id=None)
+        future = datetime.now(timezone.utc) + timedelta(days=15)
+        pa = _prospect(db_session, company_id=co.id, swept_from_owner_id=owner.id, reclaim_blocked_until=future)
+        db_session.commit()
+
+        with pytest.raises(ValueError, match="cooldown"):
+            claim_prospect(pa.id, owner.id, db_session)
+
+        db_session.refresh(co)
+        assert co.account_owner_id is None  # stays open in the pool
+
+
+# ── Policy config: the numbers are code defaults in app/config.py ─────────────
+
+
+class TestPolicyCodeDefaults:
+    """Env-independent: assert the class-level defaults (not the loaded settings, which
+    an env var could override) so the 45/30 policy numbers live in code."""
+
+    def test_inactivity_default_is_45(self) -> None:
+        from app.config import Settings
+
+        assert Settings.model_fields["account_sweep_inactivity_days"].default == 45
+
+    def test_cooldown_default_is_30(self) -> None:
+        from app.config import Settings
+
+        assert Settings.model_fields["account_sweep_reclaim_cooldown_days"].default == 30

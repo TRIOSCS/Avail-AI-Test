@@ -357,12 +357,20 @@ class Settings(BaseSettings):
     # Nightly sweep: reassigns accounts inactive beyond the threshold from their owner
     # into the prospect pool for redistribution. Default off — enable at go-live.
     account_sweep_enabled: bool = False
-    # THE single company-ownership inactivity threshold (default 90). Days without any
-    # CRM activity (note, RFQ, meeting, email) before an account is swept from its owner
-    # back into the prospect pool by SP4 job_account_sweep (the one park+cooldown+notify
-    # path). The warnings-only ownership sweep reads the SAME value and emails the owner
+    # THE single company-ownership inactivity threshold (default 45). Days without any
+    # CRM activity (note, RFQ, meeting, email) at ANY of the company's sites before the
+    # account is swept from its owner back into the prospect pool by SP4 job_account_sweep
+    # (the one park+cooldown+notify path). Inactivity is measured across ALL sites: the
+    # sweep reads get_last_activity_at (MAX activity over the parent company_id, which every
+    # site activity carries), so a contact at ANY site keeps the whole account active. The
+    # warnings-only ownership sweep reads the SAME value and emails the owner
     # WARNING_LEAD_DAYS before it — so the two never double-act on the same account.
-    account_sweep_inactivity_days: int = 90
+    account_sweep_inactivity_days: int = 45
+    # Post-park cooldown (default 30 days): the former owner cannot reclaim/claim a
+    # freshly-swept account until swept_at + this many days passes (it stays in the pool
+    # for OTHER reps to claim normally; after the cooldown it is open to anyone). Only a
+    # manager/admin may put it back early, via reassign_account (which overrides the block).
+    account_sweep_reclaim_cooldown_days: int = 30
     # Manager email that receives the nightly sweep digest (blank = no digest sent).
     account_sweep_manager_email: str = ""
     # Auto-surface previously swept accounts that have become active again (new RFQ,
