@@ -84,8 +84,8 @@ def po_approver_client(db_session, test_user):
 def test_verify_po_value_error_returns_400(po_approver_client, buy_plan):
     """verify_po raises ValueError → 400 (lines 911-912).
 
-    The existing test_buy_plans_router_gaps.py covers the success and my_queue paths
-    but not the ValueError branch. This test closes that gap.
+    The existing test_buy_plans_router_gaps.py covers the success and my_queue paths but
+    not the ValueError branch. This test closes that gap.
     """
     with patch(
         "app.services.buyplan_workflow.verify_po",
@@ -99,7 +99,8 @@ def test_verify_po_value_error_returns_400(po_approver_client, buy_plan):
 
 
 def test_verify_po_permission_error_returns_400(po_approver_client, buy_plan):
-    """verify_po raises PermissionError → 400 (line 911: except (ValueError, PermissionError)).
+    """verify_po raises PermissionError → 400 (line 911: except (ValueError,
+    PermissionError)).
 
     Both exceptions share the same handler on line 911.
     """

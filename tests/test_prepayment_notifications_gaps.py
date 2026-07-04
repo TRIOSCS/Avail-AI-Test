@@ -1,4 +1,5 @@
-"""test_prepayment_notifications_gaps.py — Coverage gap tests for prepayment_notifications.
+"""test_prepayment_notifications_gaps.py — Coverage gap tests for
+prepayment_notifications.
 
 Covers lines not reached by the main test file:
   - run_prepayment_notify_bg._run inner function (vanished prepayment, success, exception)
@@ -67,7 +68,8 @@ def _make_user(
 
 
 def _make_stub_prepayment(db: Session, *, created_by_id: int | None = None) -> Prepayment:
-    """Minimal Prepayment graph for _write_failure_alert and _notify_paid_inner tests."""
+    """Minimal Prepayment graph for _write_failure_alert and _notify_paid_inner
+    tests."""
     creator_id = created_by_id or 0
     req = Requisition(
         name=f"REQ-{uuid.uuid4().hex[:6]}",
@@ -132,13 +134,15 @@ def _make_stub_prepayment(db: Session, *, created_by_id: int | None = None) -> P
 
 
 async def _run_immediately(coro, *, task_name, suppress_in_testing=False):
-    """Helper: actually execute the coroutine passed to safe_background_task."""
+    """Helper: actually execute the coroutine passed to
+    safe_background_task."""
     await coro
 
 
 @pytest.mark.asyncio
 async def test_run_bg_skips_when_prepayment_vanished():
-    """_run logs a warning and returns without calling coro_fn when prepayment is gone."""
+    """_run logs a warning and returns without calling coro_fn when prepayment is
+    gone."""
     coro_fn = AsyncMock()
     mock_db = MagicMock()
     mock_db.get.return_value = None  # prepayment no longer exists
@@ -225,7 +229,8 @@ async def test_send_group_email_empty_recipients():
 
 @pytest.mark.asyncio
 async def test_send_group_email_no_admin_with_access_token():
-    """_send_group_email returns False when no admin in settings.admin_emails has a token."""
+    """_send_group_email returns False when no admin in settings.admin_emails has a
+    token."""
     admin = MagicMock()
     admin.access_token = None  # no live token
 
@@ -289,7 +294,8 @@ async def test_send_group_email_sends_to_all_recipients():
 
 @pytest.mark.asyncio
 async def test_send_group_email_partial_recipient_failure_returns_true():
-    """_send_group_email returns True when at least one send succeeds despite one failure."""
+    """_send_group_email returns True when at least one send succeeds despite one
+    failure."""
     admin = MagicMock()
     admin.access_token = "tok-live"
 
@@ -373,13 +379,15 @@ def test_write_failure_alert_exception_triggers_rollback():
 
 
 def test_notify_paid_inner_prepayment_not_found(db_session: Session):
-    """_notify_paid_inner returns empty alerted list when prepayment ID doesn't exist."""
+    """_notify_paid_inner returns empty alerted list when prepayment ID doesn't
+    exist."""
     result = _notify_paid_inner(db_session, 99999)
     assert result == {"alerted": []}
 
 
 def test_notify_paid_inner_no_recipients_returns_empty():
-    """_notify_paid_inner skips commit and returns empty when no user_ids are resolved."""
+    """_notify_paid_inner skips commit and returns empty when no user_ids are
+    resolved."""
     pp = MagicMock()
     pp.id = 55
     pp.created_by_id = None  # no buyer
