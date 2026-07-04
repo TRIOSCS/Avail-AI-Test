@@ -5,11 +5,11 @@
 #}
 
 <div class="flex flex-col h-full"
-     x-data="{ ...partsListSelection(), pStatus: '{{ status }}', pSort: '{{ sort }}', pDir: '{{ dir }}', pArchived: {{ 'true' if include_archived else 'false' }},
-       _fp(extra) { return JSON.stringify({status: this.pStatus, sort: this.pSort, dir: this.pDir, include_archived: this.pArchived || undefined, ...extra}); },
+     x-data="{ ...partsListSelection(), pStatus: '{{ status }}', pSort: '{{ sort }}', pDir: '{{ dir }}', pArchived: {{ 'true' if include_archived else 'false' }}, pOffset: {{ offset }}, pQ: '',
+       _fp(extra) { return JSON.stringify({q: this.pQ || undefined, status: this.pStatus, sort: this.pSort, dir: this.pDir, include_archived: this.pArchived || undefined, ...extra}); },
        get filterVals() { return this._fp(); } }"
-     @part-updated.window="htmx.ajax('GET', '/v2/partials/parts' + window.location.search, {target: '#parts-list', swap: 'innerHTML'})"
-     @part-archived.window="htmx.ajax('GET', '/v2/partials/parts' + window.location.search, {target: '#parts-list', swap: 'innerHTML'})">
+     @part-updated.window="_reload()"
+     @part-archived.window="_reload()">
 
   {# ── Filter bar + top scrollbar ──────────────────────────── #}
   <div class="panel-header flex-wrap gap-y-1">
@@ -33,7 +33,7 @@
           <svg class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
             <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
           </svg>
-          <input aria-label="Search parts" type="text" name="q" value="{{ q }}" placeholder="MPN, customer, req..."
+          <input aria-label="Search parts" type="text" name="q" value="{{ q }}" x-init="pQ = $el.value" @input="pQ = $event.target.value" placeholder="MPN, customer, req..."
                  hx-get="/v2/partials/parts"
                  hx-target="#parts-list"
                  hx-swap="morph:innerHTML"
@@ -327,6 +327,19 @@
         }
       },
       clearSelection: function() { this.selectedIds = []; },
+      _reload: function() {
+        // Re-fetch the list after an inline edit / archive. Builds the query
+        // from the Alpine filter state (the single _fp() source of truth,
+        // including the search term pQ) and carries the current page (pOffset)
+        // so the edit does NOT reset search/status/sort/page. Never reads the
+        // always-empty URL query string (no control pushes it).
+        htmx.ajax('GET', '/v2/partials/parts', {
+          target: '#parts-list',
+          swap: 'innerHTML',
+          indicator: '#parts-list',
+          values: JSON.parse(this._fp({offset: this.pOffset})),
+        });
+      },
       _postJson: function(url, data) {
         htmx.ajax('POST', url, {
           target: '#parts-list',
