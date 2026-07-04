@@ -19,6 +19,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..constants import (
+    ActivityType,
     ExcessLineItemStatus,
     ExcessListStatus,
     ExcessOfferScope,
@@ -26,7 +27,7 @@ from ..constants import (
     OfferLineMatchStatus,
     UserRole,
 )
-from ..models import Company, User
+from ..models import ActivityLog, Company, User
 from ..models.excess import ExcessLineItem, ExcessList, ExcessOffer, ExcessOfferLine
 from ..utils.normalization import normalize_mpn_key
 from ..utils.sql_helpers import escape_like
@@ -374,24 +375,38 @@ def preview_import(rows: list[dict]) -> dict:
     }
 
 
-def confirm_import(db: Session, list_id: int, validated_rows: list[dict]) -> dict:
-    """Import pre-validated rows into an excess list.
+def confirm_import(db: Session, list_id: int, rows: list[dict]) -> dict:
+    """Import client-submitted rows into an excess list — RE-VALIDATED server-side (L3).
 
-    Returns {imported: int}.
+    The preview grid round-trips its rows back through a hidden form field, so *rows* is
+    client-controlled and MUST NOT be trusted: a hand-crafted POST could otherwise inject
+    part numbers / prices / conditions that never passed preview validation. Every row is
+    re-run through :func:`_parse_import_row` (the SAME parser the preview uses) before
+    insert — a row that fails server-side (blank part number, non-positive/invalid
+    quantity) is rejected and skipped, never inserted — and only the parser's canonical,
+    normalized fields are persisted (the round-tripped values are re-derived, not trusted).
+
+    Returns {imported, skipped}.
     """
     excess_list = get_excess_list(db, list_id)
     imported = 0
-    for row in validated_rows:
-        pn = row["part_number"]
+    skipped = 0
+    for raw in rows:
+        fields, reason = _parse_import_row(raw)
+        if fields is None:
+            skipped += 1
+            logger.warning("confirm_import rejected a row on ExcessList id={}: {}", list_id, reason)
+            continue
+        pn = fields["part_number"]
         item = ExcessLineItem(
             excess_list_id=list_id,
             part_number=pn,
             normalized_part_number=normalize_mpn_key(pn) or None,
-            manufacturer=row.get("manufacturer"),
-            quantity=row["quantity"],
-            date_code=row.get("date_code"),
-            condition=row.get("condition", "New"),
-            asking_price=row.get("asking_price"),
+            manufacturer=fields["manufacturer"],
+            quantity=fields["quantity"],
+            date_code=fields["date_code"],
+            condition=fields["condition"],
+            asking_price=fields["asking_price"],
         )
         db.add(item)
         _resolve_line_material_card(db, item)
@@ -399,8 +414,8 @@ def confirm_import(db: Session, list_id: int, validated_rows: list[dict]) -> dic
     if imported > 0:
         excess_list.total_line_items = (excess_list.total_line_items or 0) + imported
         _safe_commit(db, entity="excess line items")
-    logger.info("Confirmed import of {} items into ExcessList id={}", imported, list_id)
-    return {"imported": imported}
+    logger.info("Confirmed import of {} items into ExcessList id={} (skipped={})", imported, list_id, skipped)
+    return {"imported": imported, "skipped": skipped}
 
 
 # ---------------------------------------------------------------------------
@@ -444,6 +459,58 @@ def offer_status_for_list(list_status: str) -> ExcessOfferStatus:
     identically.
     """
     return ExcessOfferStatus.LATE if list_status in _CLOSED_LIST_STATUSES else ExcessOfferStatus.OPEN
+
+
+def notify_owner_of_offer(
+    db: Session,
+    *,
+    excess_list: ExcessList,
+    activity_type: str,
+    buyer_ref: str,
+    buyer_label: str,
+    vendor_card_id: int | None = None,
+) -> None:
+    """Emit a deduplicated in-app notification to the list owner on a new inbound offer
+    / buyer reply (M6).
+
+    The point of a time-boxed posting window is to act on offers promptly, but the flow
+    never told the owner one arrived — they had to reload the workspace. This writes one
+    ``channel="system"`` ActivityLog targeting ``excess_list.owner_id`` (the app's shared
+    in-app-notification primitive — same shape as ``crm/offers._upsert_notification`` and
+    ``buyplan_notifications``). Deduplicated per (list, buyer): a stable ``external_id``
+    token encodes the buyer, so a multi-line bid — or a second reply from the same buyer —
+    REFRESHES the existing row instead of stacking a new one. A distinct buyer on the same
+    list gets its own row. Does NOT commit — the caller owns the transaction boundary.
+    """
+    token = f"resell-offer:{excess_list.id}:{buyer_ref}"
+    subject = f"New offer from {buyer_label} on {excess_list.title}"[:500]
+    existing = (
+        db.query(ActivityLog)
+        .filter(
+            ActivityLog.user_id == excess_list.owner_id,
+            ActivityLog.activity_type == activity_type,
+            ActivityLog.excess_list_id == excess_list.id,
+            ActivityLog.external_id == token,
+            ActivityLog.dismissed_at.is_(None),
+        )
+        .first()
+    )
+    if existing is not None:
+        existing.subject = subject
+        existing.created_at = datetime.now(timezone.utc)
+        return
+    db.add(
+        ActivityLog(
+            user_id=excess_list.owner_id,
+            activity_type=activity_type,
+            channel="system",
+            excess_list_id=excess_list.id,
+            vendor_card_id=vendor_card_id,
+            external_id=token,
+            contact_name=buyer_label[:255],
+            subject=subject,
+        )
+    )
 
 
 def submit_offer(
@@ -541,6 +608,16 @@ def submit_offer(
     # Any first offer on an OPEN list signals active collection — flip to COLLECTING.
     if excess_list.status == ExcessListStatus.OPEN:
         excess_list.status = ExcessListStatus.COLLECTING
+
+    # M6: notify the owner an inbound offer arrived (deduped per (list, buyer)).
+    notify_owner_of_offer(
+        db,
+        excess_list=excess_list,
+        activity_type=ActivityType.NEW_OFFER,
+        buyer_ref=f"user-{user.id}",
+        buyer_label=user.name or user.email,
+        vendor_card_id=offer.offerer_vendor_card_id,
+    )
 
     _safe_commit(db, entity="excess offer")
     db.refresh(offer)
@@ -725,6 +802,27 @@ def _reopen_competing_offers(excess_list: ExcessList, unawarded: ExcessOffer) ->
     return touched
 
 
+def _lock_list_for_award(db: Session, offer: ExcessOffer, excess_list_id: int) -> None:
+    """Take row-level locks that serialize concurrent award/unaward of one list (M9).
+
+    Award reads each line's status, checks "already awarded", then writes — with no lock,
+    two concurrent awards touching an overlapping line can both pass the guard before
+    either commits and double-award it (double-firing the buyer-score / mirror hooks).
+    Mirroring ``claim_prospect``'s ``with_for_update`` pattern, this locks the list row
+    and every one of its line items up front: a second concurrent award BLOCKS here until
+    the first commits, then sees the awarded line status and fails the already-awarded
+    guard (or the idempotency check) instead of racing it. ``populate_existing`` refreshes
+    any identity-mapped line so the guard reads freshly-committed state, and ``db.refresh``
+    does the same for the offer (so a concurrent flip of THIS offer is seen as idempotent).
+    ``with_for_update`` is a no-op on SQLite (tests) and enforced on PostgreSQL (prod).
+    """
+    db.query(ExcessList).filter(ExcessList.id == excess_list_id).with_for_update().first()
+    db.query(ExcessLineItem).filter(
+        ExcessLineItem.excess_list_id == excess_list_id
+    ).with_for_update().populate_existing().all()
+    db.refresh(offer)
+
+
 def award_offer(db: Session, offer_id: int, owner: User) -> ExcessOffer:
     """Award an inbound offer — the single chokepoint where an ExcessOffer becomes
     ``won``.
@@ -746,6 +844,8 @@ def award_offer(db: Session, offer_id: int, owner: User) -> ExcessOffer:
     excess_list = get_excess_list(db, offer.excess_list_id)
     if excess_list.owner_id != owner.id:
         raise HTTPException(403, "Only the list owner can award an offer")
+
+    _lock_list_for_award(db, offer, excess_list.id)
 
     if offer.status == ExcessOfferStatus.WON:
         return offer  # idempotent — a double-award is a no-op, not a second flip
@@ -810,6 +910,8 @@ def unaward_offer(db: Session, offer_id: int, owner: User) -> ExcessOffer:
     excess_list = get_excess_list(db, offer.excess_list_id)
     if excess_list.owner_id != owner.id:
         raise HTTPException(403, "Only the list owner can reverse an award")
+
+    _lock_list_for_award(db, offer, excess_list.id)
 
     if offer.status != ExcessOfferStatus.WON:
         raise HTTPException(409, "This offer is not awarded — nothing to reverse")

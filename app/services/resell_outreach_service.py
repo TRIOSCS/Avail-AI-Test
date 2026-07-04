@@ -683,10 +683,29 @@ def _link_inbound_offer(
 
     db.flush()
     # Recompute the best-price rollup for every line this offer touched (reuse).
-    from .excess_service import recompute_line_rollup
+    from .excess_service import notify_owner_of_offer, recompute_line_rollup
 
     for line_item_id in affected:
         recompute_line_rollup(db, line_item_id)
+
+    # M6: notify the list owner a buyer reply carrying a bid landed (deduped per
+    # (list, buyer)). The buyer here is the canonical VendorCard, not a User.
+    if excess_list is not None:
+        card = db.get(VendorCard, outreach.target_vendor_card_id) if outreach.target_vendor_card_id else None
+        buyer_ref = (
+            f"card-{outreach.target_vendor_card_id}"
+            if outreach.target_vendor_card_id
+            else f"user-{outreach.submitted_by}"
+        )
+        buyer_label = (card.display_name if card else None) or "a buyer"
+        notify_owner_of_offer(
+            db,
+            excess_list=excess_list,
+            activity_type=ActivityType.BID_RECEIVED,
+            buyer_ref=buyer_ref,
+            buyer_label=buyer_label,
+            vendor_card_id=outreach.target_vendor_card_id,
+        )
 
     logger.info(
         "Linked inbound ExcessOffer id={} (buyer card={}) from outreach id={} ({} matched lines)",

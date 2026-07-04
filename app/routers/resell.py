@@ -843,6 +843,11 @@ async def resell_add_line(
         raise HTTPException(409, "Posted lists are locked; revise as a new version")
     if not excess_service.can_post(user):
         raise HTTPException(403, "You do not have permission to post excess lists")
+    # L2: a non-positive quantity would reach the ExcessLineItem @validates("quantity")
+    # ValueError and surface as an unhandled 500 — validate the bound here and return a
+    # clear 400 instead.
+    if quantity <= 0:
+        raise HTTPException(400, "Quantity must be a positive whole number")
     from ..utils.normalization import normalize_mpn_key
 
     item = ExcessLineItem(
@@ -989,8 +994,10 @@ async def resell_submit_offer(
     lines = None
     if scope == ExcessOfferScope.PER_LINE:
         qty = _to_int(quantity)
-        if not mpn_raw.strip() or qty is None:
-            raise HTTPException(400, "Per-line offer needs a part number and quantity")
+        # L2: reject a non-positive quantity here (400) — otherwise it reaches the
+        # ExcessOfferLine @validates("quantity") ValueError as an unhandled 500.
+        if not mpn_raw.strip() or qty is None or qty <= 0:
+            raise HTTPException(400, "Per-line offer needs a part number and a positive quantity")
         lines = [
             {
                 "mpn_raw": mpn_raw.strip(),
