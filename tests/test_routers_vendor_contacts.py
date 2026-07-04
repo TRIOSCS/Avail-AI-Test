@@ -7,6 +7,7 @@ Called by: pytest
 Depends on: routers/vendor_contacts.py, utils/vendor_helpers.py
 """
 
+import json
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock
 
@@ -705,3 +706,51 @@ def test_add_email_replaces_existing_email(client, db_session, monkeypatch):
     assert resp2.status_code == 200
     data = resp2.json()
     assert data["emails"].count("sales@casevendor.com") == 1
+
+
+# ── UX audit dead-control fixes ──────────────────────────────────────────
+
+
+def test_vendor_list_controls_dispatch_input_event(client, db_session):
+    """The vendor-list filter controls (sort / hide-blacklisted / show-archived / cards-
+    vs-table) must re-fire the search input via its real ``input`` trigger.
+
+    Previously they dispatched ``'changed'``, which the ``q`` input never listens for
+    (``hx-trigger="input delay:300ms"``), so no request fired and the controls were
+    silently dead. Assert the fixed event is dispatched and the dead one is gone.
+    """
+    resp = client.get("/v2/partials/vendors")
+    assert resp.status_code == 200
+    html = resp.text
+    assert "htmx.trigger(document.querySelector('#vendor-filters [name=q]'), 'input')" in html
+    assert "'changed')" not in html
+
+
+def test_log_call_returns_refreshed_row_and_toast(client, db_session, test_vendor_card, test_vendor_contact):
+    """Log Call re-renders the contact row (interaction count ticks up) and emits an
+    ``HX-Trigger: showToast`` so the click is visibly acknowledged (was ``hx-swap=none``
+    against bare JSON → zero feedback)."""
+    before = test_vendor_contact.interaction_count or 0
+
+    resp = client.post(f"/api/vendors/{test_vendor_card.id}/contacts/{test_vendor_contact.id}/log-call")
+    assert resp.status_code == 200
+
+    # Success toast drives on-screen feedback.
+    trigger = resp.headers.get("HX-Trigger")
+    assert trigger is not None
+    payload = json.loads(trigger)
+    assert payload["showToast"]["type"] == "success"
+    assert payload["showToast"]["message"]
+
+    # Body is the refreshed row (targets #vendor-contact-<id> with outerHTML swap).
+    assert f'id="vendor-contact-{test_vendor_contact.id}"' in resp.text
+
+    # Interaction count actually incremented, so the re-rendered row shows the new value.
+    db_session.refresh(test_vendor_contact)
+    assert test_vendor_contact.interaction_count == before + 1
+
+
+def test_log_call_missing_contact_404(client, db_session, test_vendor_card):
+    """Log Call on an unknown contact returns 404."""
+    resp = client.post(f"/api/vendors/{test_vendor_card.id}/contacts/999999/log-call")
+    assert resp.status_code == 404

@@ -43,7 +43,8 @@
       </button>
       {% endif %}
       <button hx-post="/api/vendors/{{ vendor.id }}/contacts/{{ c.id }}/log-call"
-              hx-swap="none"
+              hx-target="#vendor-contact-{{ c.id }}"
+              hx-swap="outerHTML"
               data-loading-disable
               class="text-xs text-emerald-600 hover:text-emerald-700 font-medium opacity-0 group-hover:opacity-100"
               @click.stop>

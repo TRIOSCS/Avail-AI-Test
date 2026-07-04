@@ -8,9 +8,10 @@ Called by: main.py (router mount)
 Depends on: models, dependencies, vendor_helpers, cache, credential_service
 """
 
+import json
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from loguru import logger
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -23,6 +24,7 @@ from ..models import Contact, User, VendorCard, VendorContact, VendorResponse
 from ..schemas.responses import VendorEmailMetricsResponse
 from ..schemas.vendors import VendorContactCreate, VendorContactLookup, VendorContactUpdate, VendorEmailAdd
 from ..services.credential_service import get_credential_cached
+from ..template_env import template_response
 from ..utils.async_helpers import safe_background_task
 from ..utils.phone_utils import format_phone_e164
 from ..utils.vendor_helpers import (
@@ -314,17 +316,25 @@ async def get_contact_summary(
 
 @router.post("/api/vendors/{card_id}/contacts/{contact_id}/log-call")
 async def log_contact_call(
+    request: Request,
     card_id: int,
     contact_id: int,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Log a click-to-call event for a specific vendor contact."""
+    """Log a click-to-call event for a vendor contact and return the refreshed row.
+
+    Re-renders the contact row so the interaction count visibly ticks up, and attaches
+    an ``HX-Trigger: showToast`` header so the click is explicitly acknowledged. The
+    button previously used ``hx-swap="none"`` against a bare-JSON response, so the user
+    got zero on-screen feedback (no toast, no count change).
+    """
     from ..models import ActivityLog
 
     vc = db.query(VendorContact).filter_by(id=contact_id, vendor_card_id=card_id).first()
     if not vc:
         raise HTTPException(404, "Contact not found")
+    card = db.get(VendorCard, card_id)
 
     now = datetime.now(timezone.utc)
     activity = ActivityLog(
@@ -351,7 +361,14 @@ async def log_contact_call(
     vc.last_seen_at = now
 
     db.commit()
-    return {"ok": True, "activity_id": activity.id}
+    db.refresh(vc)
+
+    resp = template_response(
+        "htmx/partials/vendors/tabs/contact_row.html",
+        {"request": request, "c": vc, "vendor": card},
+    )
+    resp.headers["HX-Trigger"] = json.dumps({"showToast": {"message": "Call logged", "type": "success"}})
+    return resp
 
 
 @router.post("/api/vendors/{card_id}/contacts")

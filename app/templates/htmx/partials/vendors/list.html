@@ -120,7 +120,7 @@
       <input type="hidden" name="view" :value="view">
       <div class="flex items-center gap-2">
         <select name="sort_select" aria-label="Sort vendors"
-                onchange="document.querySelector('#vendor-filters [name=sort]').value = this.value; htmx.trigger(document.querySelector('#vendor-filters [name=q]'), 'changed')"
+                onchange="document.querySelector('#vendor-filters [name=sort]').value = this.value; htmx.trigger(document.querySelector('#vendor-filters [name=q]'), 'input')"
                 class="input input-sm">
           <option value="sighting_count" {{ 'selected' if sort == 'sighting_count' }}>Most Sightings</option>
           <option value="display_name" {{ 'selected' if sort == 'display_name' }}>Name A–Z</option>
@@ -131,7 +131,7 @@
           <input type="hidden" name="hide_blacklisted" :value="hideBlacklisted">
           <label class="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
             <input type="checkbox" x-model="hideBlacklisted"
-                   @change="htmx.trigger(document.querySelector('#vendor-filters [name=q]'), 'changed')"
+                   @change="htmx.trigger(document.querySelector('#vendor-filters [name=q]'), 'input')"
                    class="h-4 w-4 rounded border-gray-200 input-focus text-accent-500">
             Hide blacklisted
           </label>
@@ -140,13 +140,13 @@
           <input type="hidden" name="include_archived" :value="includeArchived">
           <label class="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
             <input type="checkbox" x-model="includeArchived"
-                   @change="htmx.trigger(document.querySelector('#vendor-filters [name=q]'), 'changed')"
+                   @change="htmx.trigger(document.querySelector('#vendor-filters [name=q]'), 'input')"
                    class="h-4 w-4 rounded border-gray-200 input-focus text-accent-500">
             Show archived
           </label>
         </div>
         <button type="button"
-                @click="view = view === 'cards' ? 'table' : 'cards'; $nextTick(() => htmx.trigger(document.querySelector('#vendor-filters [name=q]'), 'changed'))"
+                @click="view = view === 'cards' ? 'table' : 'cards'; $nextTick(() => htmx.trigger(document.querySelector('#vendor-filters [name=q]'), 'input'))"
                 class="btn btn-secondary btn-sm"
                 x-text="view === 'cards' ? 'Table' : 'Cards'">
         </button>
