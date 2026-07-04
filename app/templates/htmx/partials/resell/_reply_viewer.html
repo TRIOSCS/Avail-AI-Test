@@ -7,7 +7,7 @@
   matcher as an emailed bid and advances the outreach to "bid".
   Receives: list (ExcessList), outreach (ExcessOutreach), replies (VendorResponse[]), user.
   Called by: resell.resell_outreach_reply.
-  Depends on: sanitize_html + fmtdate filters; POSTs resell.resell_outreach_convert_offer.
+  Depends on: sanitize_html + localtime filters; POSTs resell.resell_outreach_convert_offer.
 #}
 {% set el = list %}
 {% set buyer = outreach.target_vendor_card.display_name if outreach.target_vendor_card else 'this buyer' %}
@@ -40,7 +40,7 @@
             {% if vr.vendor_email %}<span class="text-secondary ml-1">&lt;{{ vr.vendor_email }}&gt;</span>{% endif %}
           </div>
         </div>
-        <span class="text-secondary">{{ vr.received_at | fmtdate }}</span>
+        <span class="text-secondary">{{ vr.received_at | localtime('%b %d, %H:%M') }}</span>
       </div>
       {% if vr.subject %}<p class="text-xs font-medium text-gray-600 mb-1.5">{{ vr.subject }}</p>{% endif %}
       <div class="text-sm text-gray-700 prose prose-sm max-w-none">
