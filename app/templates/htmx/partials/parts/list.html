@@ -331,6 +331,7 @@
         htmx.ajax('POST', url, {
           target: '#parts-list',
           swap: 'innerHTML',
+          indicator: '#parts-list',
           headers: {'Content-Type': 'application/json'},
           values: data
         }).catch(function() {
