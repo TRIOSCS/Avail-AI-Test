@@ -511,6 +511,28 @@ def _find_open_task_by_ref(db: Session, requisition_id: int, source_ref: str) ->
     )
 
 
+def _default_auto_assignee(db: Session, requisition_id: int) -> int | None:
+    """Resolve the default assignee for a system-generated task from its requisition.
+
+    Auto-tasks created with no explicit assignee used to be left unassigned, so they never
+    surfaced on anyone's My Day (which filters ``assigned_to_id == user.id``) — the
+    auto-generation machinery fed a void (audit finding L1). Default them to the
+    requisition's claiming buyer if one has picked it up, else the requisition creator:
+    ``coalesce(claimed_by_id, created_by)``. (The requisition's buyer-claim field is
+    ``claimed_by_id`` — "which buyer picked up this requisition for sourcing"; the
+    requisition has no ``assigned_buyer_id`` column, so the claim field is the source.)
+
+    Returns ``None`` only when the requisition row can't be resolved (e.g. it was deleted),
+    leaving the task unassigned as before — there is no other context to fall back to.
+    """
+    from app.models.sourcing import Requisition
+
+    req = db.get(Requisition, requisition_id)
+    if req is None:
+        return None
+    return req.claimed_by_id or req.created_by
+
+
 def auto_create_task(
     db: Session,
     *,
@@ -522,10 +544,17 @@ def auto_create_task(
     assigned_to_id: int | None = None,
     due_at: datetime | None = None,
 ) -> RequisitionTask | None:
-    """Create a system-generated task, skipping if a matching source_ref already
-    exists."""
+    """Create a system-generated task, skipping if a matching source_ref already exists.
+
+    When no ``assigned_to_id`` is provided, the task defaults to the requisition's claiming
+    buyer, else its creator (``coalesce(claimed_by_id, created_by)`` via
+    ``_default_auto_assignee``) so it lands on that user's My Day. An explicitly-passed
+    ``assigned_to_id`` is never overridden.
+    """
     if _find_open_task_by_ref(db, requisition_id, source_ref):
         return None  # Don't create duplicates
+    if assigned_to_id is None:
+        assigned_to_id = _default_auto_assignee(db, requisition_id)
     return create_task(
         db,
         requisition_id=requisition_id,

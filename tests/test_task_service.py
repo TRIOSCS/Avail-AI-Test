@@ -18,6 +18,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.constants import TaskStatus
+from app.models.sourcing import Requisition
 from app.models.task import RequisitionTask
 from app.services.task_service import (
     auto_close_task,
@@ -323,6 +324,70 @@ class TestAutoCreateTask:
             source_ref="offer:99",
         )
         assert new_task is not None
+
+
+class TestAutoTaskDefaultAssignee:
+    """Auto-created tasks default their assignee to coalesce(claimed_by_id, created_by)
+    of the linked requisition, so they surface on someone's My Day (which filters
+    ``assigned_to_id == user.id``) instead of being created unassigned/invisible (spec
+    L1).
+
+    The requisition's buyer-claim field is ``claimed_by_id`` ("which buyer picked up this
+    requisition for sourcing"); the requisition has no ``assigned_buyer_id`` column.
+    """
+
+    def _make_req(self, db: Session, *, created_by: int, claimed_by_id: int | None = None) -> Requisition:
+        req = Requisition(
+            name="REQ-AUTO-ASSIGN",
+            status="open",
+            created_by=created_by,
+            claimed_by_id=claimed_by_id,
+            created_at=datetime.now(timezone.utc),
+        )
+        db.add(req)
+        db.commit()
+        db.refresh(req)
+        return req
+
+    def test_defaults_to_claiming_buyer(self, db_session: Session, test_user, sales_user):
+        # Requisition claimed by a buyer (sales_user) and created by someone else (test_user).
+        req = self._make_req(db_session, created_by=test_user.id, claimed_by_id=sales_user.id)
+        task = auto_create_task(
+            db_session,
+            requisition_id=req.id,
+            title="Auto",
+            task_type="sourcing",
+            source_ref="offer:buyer",
+        )
+        assert task is not None
+        assert task.assigned_to_id == sales_user.id
+
+    def test_defaults_to_creator_when_no_buyer(self, db_session: Session, test_user):
+        # No claiming buyer → falls back to the requisition creator.
+        req = self._make_req(db_session, created_by=test_user.id)
+        task = auto_create_task(
+            db_session,
+            requisition_id=req.id,
+            title="Auto",
+            task_type="sourcing",
+            source_ref="offer:creator",
+        )
+        assert task is not None
+        assert task.assigned_to_id == test_user.id
+
+    def test_explicit_assignee_is_respected(self, db_session: Session, test_user, sales_user):
+        # An explicitly-passed assignee is never overridden by the coalesce default.
+        req = self._make_req(db_session, created_by=test_user.id, claimed_by_id=test_user.id)
+        task = auto_create_task(
+            db_session,
+            requisition_id=req.id,
+            title="Auto",
+            task_type="sourcing",
+            source_ref="offer:explicit",
+            assigned_to_id=sales_user.id,
+        )
+        assert task is not None
+        assert task.assigned_to_id == sales_user.id
 
 
 class TestAutoCloseTask:
