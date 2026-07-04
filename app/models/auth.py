@@ -40,10 +40,19 @@ class User(Base):
     access_overrides = Column(JSON, default=dict)
     invited_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
-    # Mailbox settings (from Graph /me/mailboxSettings)
+    # Mailbox settings (from Graph /me/mailboxSettings). NOTE: `timezone` holds the Graph
+    # mailbox zone (Windows format, e.g. "Pacific Standard Time") used for RFQ send-window
+    # scheduling — it is NOT a valid IANA name. For rendering timestamps in the viewer's
+    # zone use `display_timezone` (below), never this column.
     timezone = Column(String(100))
     working_hours_start = Column(String(10))  # e.g. "08:00"
     working_hours_end = Column(String(10))  # e.g. "17:00"
+
+    # Per-user DISPLAY timezone — an IANA zone name (e.g. "America/New_York", "Asia/Tokyo")
+    # used to render stored-UTC timestamps in this viewer's own timezone. Auto-detected
+    # from the browser (Intl.DateTimeFormat().resolvedOptions().timeZone) and overridable
+    # in the profile page. NULL → fall back to app.utils.timezones.DEFAULT_DISPLAY_TZ.
+    display_timezone = Column(String(64), nullable=True)
 
     # 8x8 Work Analytics
     eight_by_eight_extension = Column(String(20))

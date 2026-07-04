@@ -78,6 +78,12 @@ def require_user(request: Request, db: Session = Depends(get_db)) -> User:
     if not getattr(user, "is_active", True):
         request.session.clear()
         raise HTTPException(403, "Account deactivated — contact admin")
+    # Publish this viewer's display timezone for the request so the |localtime/|localdate
+    # filters and _task_due_state render in their own zone. AuditUserMiddleware owns the
+    # reset (it set the baseline token), so this only overrides the value.
+    from .request_context import current_user_display_tz_var
+
+    current_user_display_tz_var.set(getattr(user, "display_timezone", None))
     return user
 
 

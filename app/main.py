@@ -279,14 +279,19 @@ class AuditUserMiddleware:
 
     async def __call__(self, scope, receive, send):  # noqa: ANN001
         if scope["type"] == "http":
-            from .request_context import current_user_id_var
+            from .request_context import current_user_display_tz_var, current_user_id_var
 
             uid = (scope.get("session") or {}).get("user_id")
             token = current_user_id_var.set(uid)
+            # Establish a per-request baseline + reset for the display-tz contextvar so a
+            # keep-alive connection can't leak one request's viewer zone into the next.
+            # require_user overrides the value once it has loaded the user.
+            tz_token = current_user_display_tz_var.set(None)
             try:
                 await self._app(scope, receive, send)
             finally:
                 current_user_id_var.reset(token)
+                current_user_display_tz_var.reset(tz_token)
         else:
             await self._app(scope, receive, send)
 

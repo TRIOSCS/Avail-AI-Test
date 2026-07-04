@@ -6,7 +6,6 @@ Depends on: Jinja2
 
 from datetime import datetime, timezone
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from fastapi.templating import Jinja2Templates
 from starlette.responses import Response
@@ -141,6 +140,40 @@ def _fmtdate_filter(value, fmt: str = "%b %d, %H:%M", default: str = "\u2014") -
 
 
 templates.env.filters["fmtdate"] = _fmtdate_filter
+
+
+def _localtime_filter(value, fmt: str = "%b %d, %Y %H:%M", default: str = "—") -> str:
+    """Render a stored-UTC datetime in the CURRENT viewer's timezone.
+
+    The viewer's zone comes from the per-request contextvar (set from the user's
+    ``display_timezone``), falling back to the business default when unknown. Storage
+    stays UTC — this is display-only. Naive datetimes are treated as UTC. Strings /
+    None fall through to ``default`` unchanged (mirrors ``_fmtdate_filter``).
+    """
+    from .utils.timezones import format_localtime
+
+    if value is None or isinstance(value, str):
+        return value if isinstance(value, str) else default
+    return format_localtime(value, fmt, default=default)
+
+
+templates.env.filters["localtime"] = _localtime_filter
+
+
+def _localdate_filter(value, fmt: str = "%b %d, %Y", default: str = "—") -> str:
+    """Render a stored-UTC datetime as a DATE in the current viewer's timezone.
+
+    Companion to ``|localtime`` for date-only displays (e.g. "Member since"). Same
+    contextvar-driven zone + UTC-fallback semantics.
+    """
+    from .utils.timezones import format_localdate
+
+    if value is None or isinstance(value, str):
+        return value if isinstance(value, str) else default
+    return format_localdate(value, fmt, default=default)
+
+
+templates.env.filters["localdate"] = _localdate_filter
 
 
 def _pricefmt_filter(value, default: str = "—") -> str:
@@ -317,15 +350,6 @@ def _now() -> datetime:
 templates.env.globals["now"] = _now
 
 
-# Business operating timezone for task urgency. The app has no per-user timezone; it runs
-# on US/Eastern — the same zone the background workers hard-code
-# (EASTERN = ZoneInfo("America/New_York")) and the buyplan auto-complete default
-# (config.buyplan_auto_complete_tz). "Today"/"overdue" are judged against the
-# business-local calendar day: near UTC midnight the UTC day rolls over first and would
-# otherwise mislabel a task the user still considers due today.
-_BUSINESS_TZ = ZoneInfo("America/New_York")
-
-
 def _task_due_state(task, now_utc: datetime) -> tuple[bool, bool]:
     """Return (is_overdue, is_due_today) for a task row, coercing naive due_at to UTC.
 
@@ -336,16 +360,21 @@ def _task_due_state(task, now_utc: datetime) -> tuple[bool, bool]:
     grouping — which both consume this one helper — can never disagree. Comparing dates
     (not datetimes) also sidesteps the naive/aware TypeError under SQLite.
 
-    "Today" is the *business-local* day (``_BUSINESS_TZ``): ``now`` is a real instant, so it
-    is converted before taking its date. ``due_at`` is NOT converted — it is a UTC-midnight
-    sentinel for the calendar date the user picked, and shifting it into a western zone
-    would roll it back a day; ``due.date()`` already yields that picked date.
+    "Today" is the CURRENT VIEWER's local day (``current_display_zoneinfo()`` — their
+    ``display_timezone``, falling back to the business default when unknown): ``now`` is a
+    real instant, so it is converted before taking its date. A buyer in Asia/Tokyo near UTC
+    midnight therefore sees a task due on THEIR calendar day as "today", not "overdue".
+    ``due_at`` is NOT converted — it is a UTC-midnight sentinel for the calendar date the
+    user picked, and shifting it into another zone would roll it off by a day; ``due.date()``
+    already yields that picked date.
     """
+    from .utils.timezones import current_display_zoneinfo
+
     if task.due_at is None:
         return (False, False)
     due = task.due_at if task.due_at.tzinfo is not None else task.due_at.replace(tzinfo=timezone.utc)
     due_date = due.date()
-    today = now_utc.astimezone(_BUSINESS_TZ).date()
+    today = now_utc.astimezone(current_display_zoneinfo()).date()
     is_overdue = due_date < today
     is_due_today = due_date == today
     return (is_overdue, is_due_today)
