@@ -1,12 +1,14 @@
 """EBay Browse API connector — searches electronic components on eBay."""
 
+import asyncio
 import base64
 
 from loguru import logger
 
 from ..http_client import http
 from ..utils import safe_float, safe_int
-from .sources import BaseConnector, _get_cached_token, _invalidate_token
+from .errors import ConnectorRateLimitError
+from .sources import BaseConnector, _get_cached_token, _invalidate_token, _parse_retry_after
 
 
 class EbayConnector(BaseConnector):
@@ -76,6 +78,19 @@ class EbayConnector(BaseConnector):
             _invalidate_token(self._token_cache_key())
             token = await self._get_token()
             r = await http.get(self.SEARCH_URL, headers=headers(token), params=params, timeout=self.timeout)
+
+        # 429 — rate limited; honor Retry-After (capped at 30s by _parse_retry_after,
+        # the Phase-1 cap) with one inline retry, then surface a typed error. Mirrors
+        # DigiKeyConnector — eBay's OAuth-client-credentials sibling — so a 429 is handled
+        # EXPLICITLY here (typed ConnectorRateLimitError) rather than lumped into the
+        # generic raise_for_status path.
+        if r.status_code == 429:
+            retry_after = _parse_retry_after(r)
+            logger.warning(f"eBay: 429 rate limited for {part_number}, waiting {retry_after:.1f}s")
+            await asyncio.sleep(retry_after)
+            r = await http.get(self.SEARCH_URL, headers=headers(token), params=params, timeout=self.timeout)
+            if r.status_code == 429:
+                raise ConnectorRateLimitError(f"eBay rate limited (persistent 429): {r.text[:200]}")
 
         if r.status_code == 404:
             return []

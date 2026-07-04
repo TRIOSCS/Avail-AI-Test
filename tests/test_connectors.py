@@ -530,6 +530,41 @@ class TestEbayConnector:
             result = await c._do_search("NONEXIST")
             assert result == []
 
+    @pytest.mark.asyncio
+    async def test_do_search_persistent_429_raises_rate_limit_error(self):
+        """A persistent 429 surfaces a typed ConnectorRateLimitError (Retry-After
+        honored with one inline retry) — not lumped into a generic error (Phase-4
+        audit)."""
+        c = self._make_connector()
+        resp_429 = _mock_response(429, text="Too Many Requests", headers={"Retry-After": "0"})
+
+        with (
+            patch("app.connectors.ebay.http") as mock_http,
+            patch("app.connectors.ebay.asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
+        ):
+            mock_http.get = AsyncMock(side_effect=[resp_429, resp_429])
+            with pytest.raises(ConnectorRateLimitError, match="eBay rate limited"):
+                await c._do_search("LM317T")
+        # Honored Retry-After before the single inline retry.
+        mock_sleep.assert_awaited_once()
+        assert mock_http.get.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_do_search_429_then_recovers(self):
+        """A 429 that clears on the inline retry returns parsed results (no error)."""
+        c = self._make_connector()
+        resp_429 = _mock_response(429, text="Too Many Requests", headers={"Retry-After": "0"})
+        resp_ok = _mock_response(200, {"itemSummaries": []})
+
+        with (
+            patch("app.connectors.ebay.http") as mock_http,
+            patch("app.connectors.ebay.asyncio.sleep", new_callable=AsyncMock),
+        ):
+            mock_http.get = AsyncMock(side_effect=[resp_429, resp_ok])
+            result = await c._do_search("LM317T")
+        assert result == []
+        assert mock_http.get.await_count == 2
+
 
 # ═══════════════════════════════════════════════════════════════════════
 #  Mouser Connector tests
