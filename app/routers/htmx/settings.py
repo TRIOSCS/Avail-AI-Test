@@ -370,10 +370,12 @@ async def update_display_timezone(
 
     user.display_timezone = tz
     db.commit()
-    # Reflect immediately for any rendering later in THIS request (contextvar was set from
-    # the pre-commit value by require_user).
-    from ...request_context import current_user_display_tz_var
+    # Invalidate the TTL cache so AuditUserMiddleware re-reads the new zone on the NEXT
+    # request, and reflect it immediately for any rendering later in THIS request (the
+    # middleware set the contextvar from the pre-change value at request start).
+    from ...request_context import current_user_display_tz_var, invalidate_display_tz
 
+    invalidate_display_tz(user.id)
     current_user_display_tz_var.set(tz)
     logger.info("Display timezone updated", user_id=user.id, timezone=tz)
     response = HTMLResponse(status_code=200)

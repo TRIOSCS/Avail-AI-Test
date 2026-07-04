@@ -279,14 +279,18 @@ class AuditUserMiddleware:
 
     async def __call__(self, scope, receive, send):  # noqa: ANN001
         if scope["type"] == "http":
-            from .request_context import current_user_display_tz_var, current_user_id_var
+            from .request_context import current_user_display_tz_var, current_user_id_var, resolve_display_tz
 
             uid = (scope.get("session") or {}).get("user_id")
             token = current_user_id_var.set(uid)
-            # Establish a per-request baseline + reset for the display-tz contextvar so a
-            # keep-alive connection can't leak one request's viewer zone into the next.
-            # require_user overrides the value once it has loaded the user.
-            tz_token = current_user_display_tz_var.set(None)
+            # Resolve + set the viewer's display timezone HERE, in the async event-loop
+            # context, so it propagates to both async endpoints AND the threadpool that
+            # runs sync dependencies/endpoints + template renders. (A sync dependency like
+            # require_user cannot set it — its .set() lands in a discarded thread-context
+            # copy.) resolve_display_tz is TTL-cached (no per-request query) and best-effort
+            # (None on miss/error → business default). The finally-reset below keeps a
+            # keep-alive connection from leaking one request's zone into the next.
+            tz_token = current_user_display_tz_var.set(resolve_display_tz(uid))
             try:
                 await self._app(scope, receive, send)
             finally:
