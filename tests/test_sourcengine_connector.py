@@ -219,6 +219,36 @@ class TestSourcengineParseEdgeCases:
         result = connector._parse(data, "LM317T")
         assert len(result) == 1
 
+    def test_parse_non_dict_response_returns_empty(self):
+        """A top-level non-object 200 body (e.g. a JSON array) returns [] instead of
+        crashing on ``data.get`` — a shape-drift guard (Phase-4 audit)."""
+        connector = self._make_connector()
+        assert connector._parse([{"supplier": {"name": "Arrow"}}], "LM317T") == []
+        assert connector._parse("unexpected", "LM317T") == []
+
+    def test_parse_unrecognized_envelope_warns(self):
+        """A 200 object with none of the recognized offer keys logs a drift WARNING and
+        returns [] (never masquerades as a silent 'no matches')."""
+        import app.connectors.sourcengine as sg_mod
+
+        connector = self._make_connector()
+        with patch.object(sg_mod.logger, "warning") as mock_warn:
+            result = connector._parse({"unexpected_key": [1, 2, 3]}, "LM317T")
+        assert result == []
+        mock_warn.assert_called_once()
+        assert "may have drifted" in mock_warn.call_args.args[0]
+
+    def test_parse_recognized_empty_envelope_no_warn(self):
+        """A recognized-but-empty envelope (``{"offers": []}``) is a legitimate empty
+        result and must NOT trigger the drift warning."""
+        import app.connectors.sourcengine as sg_mod
+
+        connector = self._make_connector()
+        with patch.object(sg_mod.logger, "warning") as mock_warn:
+            result = connector._parse({"offers": []}, "LM317T")
+        assert result == []
+        mock_warn.assert_not_called()
+
     def test_manufacturer_as_dict(self):
         """Manufacturer field as dict → extracts name key."""
         connector = self._make_connector()

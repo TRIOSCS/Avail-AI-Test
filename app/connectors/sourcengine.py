@@ -53,8 +53,37 @@ class SourcengineConnector(BaseConnector):
 
         return self._parse(data, part_number)
 
+    # Recognized top-level envelope keys that hold the offer list. Kept as a constant
+    # so the drift guard below and the extraction stay in lock-step.
+    _OFFER_KEYS = ("offers", "results", "data")
+
     def _parse(self, data: dict, pn: str) -> list[dict]:
-        # Sourcengine response format — adapt to actual schema
+        # Defensive guard: a shape drift must surface LOUDLY, never masquerade as an
+        # empty "no matches" result. Two drift signals are logged (WARNING) rather than
+        # silently swallowed:
+        #   1. The 200 body is not a JSON object at all (e.g. a top-level array) — that
+        #      would also crash the ``data.get`` calls below, so bail out cleanly.
+        #   2. The body IS an object but carries NONE of the recognized offer keys
+        #      (offers/results/data) — the envelope has changed.
+        # FLAG (Phase-4 audit): the connector's SEARCH_URL (/v1/search) no longer matches
+        # the currently-documented endpoint (/app/api/search/parts/searchpart); a LIVE
+        # Sourcengine call is required to confirm the real endpoint + response shape.
+        if not isinstance(data, dict):
+            logger.warning(
+                "Sourcengine: 200 response for {} was not a JSON object ({}) — response shape may have drifted",
+                pn,
+                type(data).__name__,
+            )
+            return []
+        if data and not any(k in data for k in self._OFFER_KEYS):
+            logger.warning(
+                "Sourcengine: 200 response for {} had none of the recognized offer keys "
+                "{} — response shape may have drifted (keys={})",
+                pn,
+                self._OFFER_KEYS,
+                list(data.keys())[:10],
+            )
+
         offers = data.get("offers", data.get("results", data.get("data", [])))
         if not isinstance(offers, list):
             offers = []
