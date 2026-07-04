@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
+from freezegun import freeze_time
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -410,6 +411,35 @@ class TestVendorTaskPriorityAssignee:
             .one()
         )
         assert task.priority == 3
+
+
+class TestVendorTaskDueBucketing:
+    """L5/H3: the vendor task list buckets due dates through the shared task_due_state
+    helper, not in-template `due_at <= now_utc` math.
+
+    Frozen at 18:00 UTC (14:00 US/Eastern, same calendar day) with a task due at
+    midnight today. The old logic (`t.due_at <= now_utc`) flagged it Overdue; the helper
+    renders it 'Due today' (a task due earlier today is due-today, never overdue).
+    """
+
+    @freeze_time("2026-06-25 18:00:00")
+    def test_due_midnight_today_renders_due_today_not_overdue(
+        self, client, db_session: Session, vendor_card: VendorCard, test_user
+    ):
+        now = datetime.now(timezone.utc)
+        create_vendor_task(
+            db_session,
+            vendor_card_id=vendor_card.id,
+            title="Midnight-today vendor task",
+            created_by=test_user.id,
+            assigned_to_id=test_user.id,
+            due_at=now.replace(hour=0, minute=0, second=0, microsecond=0),
+        )
+        resp = client.get(f"/v2/partials/vendors/{vendor_card.id}/tasks")
+        assert resp.status_code == 200
+        assert "Midnight-today vendor task" in resp.text
+        assert "Due today" in resp.text
+        assert "Overdue" not in resp.text
 
 
 class TestVendorTaskEditForm:

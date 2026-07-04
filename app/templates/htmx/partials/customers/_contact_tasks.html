@@ -21,7 +21,7 @@
         <span class="text-gray-800 flex-1">{{ t.title }}{% if t.due_at %}
           <span class="{% if is_overdue %}text-rose-600 font-semibold{% elif is_due_today %}text-amber-600 font-semibold{% else %}text-gray-400{% endif %}">
             &middot;
-            {% if is_overdue %}Overdue ({{ t.due_at.strftime('%b %-d') }}){% elif is_due_today %}Due today{% else %}{{ t.due_at.strftime('%b %-d') }}{% endif %}
+            {% if is_overdue %}Overdue ({{ t.due_at|fmtdate('%b %-d') }}){% elif is_due_today %}Due today{% else %}{{ t.due_at|fmtdate('%b %-d') }}{% endif %}
           </span>
           {% endif %}</span>
         <div class="flex items-center gap-1 flex-shrink-0">

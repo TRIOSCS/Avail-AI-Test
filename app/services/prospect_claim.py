@@ -332,7 +332,9 @@ def mark_prospect_converted(prospect_id: int, user_id: int, db: Session) -> bool
     return True
 
 
-def send_company_to_prospecting(company_id: int, user_id: int, db: Session, *, is_admin: bool = False) -> dict:
+def send_company_to_prospecting(
+    company_id: int, user_id: int, db: Session, *, is_admin: bool = False, swept: dict | None = None
+) -> dict:
     """Send an owned Company back to the prospecting pool.
 
     Disposition counterpart of release_prospect, but keyed off the Company (not a
@@ -344,6 +346,14 @@ def send_company_to_prospecting(company_id: int, user_id: int, db: Session, *, i
 
     Perms: owner-or-admin. An admin may force-clear another owner's account
     (mirrors release_prospect's is_admin override).
+
+    ``swept`` (SP4 sweep only): when supplied, the pool row is stamped with the park
+    provenance — ``discovery_source="auto_sweep"`` plus ``swept_from_owner_id`` / ``swept_at``
+    / ``reclaim_blocked_until`` — inside the SAME transaction as the ownership-clear (audit
+    M10). Previously the sweep committed the park, then committed the swept stamp separately;
+    a crash between the two left the account unowned-and-pooled but with no cooldown, so the
+    former owner could instantly re-claim it. Expected keys:
+    ``{"from_owner_id", "at", "reclaim_blocked_until"}``.
 
     Returns: {company_id, company_name, prospect_id|None, pooled: bool}
     Raises: LookupError if the company is missing; ValueError on permission.
@@ -360,11 +370,12 @@ def send_company_to_prospecting(company_id: int, user_id: int, db: Session, *, i
         company.ownership_cleared_at = datetime.now(timezone.utc)
 
         prospect_id: int | None = None
+        pool_prospect: ProspectAccount | None = None
         domain = (company.domain or "").strip().lower()
         if domain:
             existing = db.query(ProspectAccount).filter(ProspectAccount.domain == domain).first()
             if existing:
-                prospect_id = existing.id
+                pool_prospect = existing
             else:
                 # ProspectAccount.domain is UNIQUE NOT NULL. Insert inside a SAVEPOINT
                 # so a concurrent send claiming the same domain rolls back ONLY the
@@ -372,7 +383,7 @@ def send_company_to_prospecting(company_id: int, user_id: int, db: Session, *, i
                 # row the other writer created instead of bubbling a 500.
                 try:
                     with db.begin_nested():
-                        prospect = ProspectAccount(
+                        pool_prospect = ProspectAccount(
                             name=company.name,
                             domain=domain,
                             discovery_source="sent_back",
@@ -382,12 +393,20 @@ def send_company_to_prospecting(company_id: int, user_id: int, db: Session, *, i
                             company_id=company.id,
                             enrichment_data={"sent_back_by": user_id},
                         )
-                        db.add(prospect)
+                        db.add(pool_prospect)
                         db.flush()
-                    prospect_id = prospect.id
                 except IntegrityError:
-                    dup = db.query(ProspectAccount).filter(ProspectAccount.domain == domain).first()
-                    prospect_id = dup.id if dup else None
+                    pool_prospect = db.query(ProspectAccount).filter(ProspectAccount.domain == domain).first()
+
+            # Stamp SP4 park provenance in THIS transaction (audit M10) so a parked account
+            # always carries its cooldown — never lands as a plain re-claimable prospect.
+            if swept and pool_prospect is not None:
+                pool_prospect.swept_from_owner_id = swept.get("from_owner_id")
+                pool_prospect.swept_at = swept.get("at")
+                pool_prospect.reclaim_blocked_until = swept.get("reclaim_blocked_until")
+                pool_prospect.discovery_source = "auto_sweep"
+
+            prospect_id = pool_prospect.id if pool_prospect else None
 
         db.commit()
     except Exception:

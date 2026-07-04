@@ -90,6 +90,26 @@ def _prospect(
     return pa
 
 
+def _swept_stamping_send(pa: ProspectAccount):
+    """side_effect mirroring send_company_to_prospecting's swept-stamping (audit M10).
+
+    The park now stamps swept provenance INSIDE send_company_to_prospecting (single
+    transaction) rather than in a second commit in the sweep loop, so a mock must apply the
+    ``swept`` kwarg the sweep passes in to reproduce the real end state.
+    """
+
+    def _fake(company_id, user_id, db, *, is_admin=False, swept=None):
+        if swept:
+            pa.swept_from_owner_id = swept["from_owner_id"]
+            pa.swept_at = swept["at"]
+            pa.reclaim_blocked_until = swept["reclaim_blocked_until"]
+            pa.discovery_source = "auto_sweep"
+            db.commit()
+        return {"prospect_id": pa.id}
+
+    return _fake
+
+
 # ── reclaim_prospect_account ──────────────────────────────────────────────────
 
 
@@ -304,7 +324,7 @@ class TestJobAccountSweepWithDb:
             patch("app.services.activity_service.get_last_activity_at", return_value=None),
             patch(
                 "app.services.prospect_claim.send_company_to_prospecting",
-                return_value={"prospect_id": pa.id},
+                side_effect=_swept_stamping_send(pa),
             ),
             patch.object(pr, "_send_sweep_notification", AsyncMock()),
         ):
@@ -651,7 +671,7 @@ class TestSweepSetsCooldown:
             patch("app.services.activity_service.get_last_activity_at", return_value=None),
             patch(
                 "app.services.prospect_claim.send_company_to_prospecting",
-                return_value={"prospect_id": pa.id},
+                side_effect=_swept_stamping_send(pa),
             ),
             patch.object(pr, "_send_sweep_notification", AsyncMock()),
         ):
@@ -920,7 +940,7 @@ class TestAnySiteInactivityTrigger:
         with (
             patch(
                 "app.services.prospect_claim.send_company_to_prospecting",
-                return_value={"prospect_id": pa.id},
+                side_effect=_swept_stamping_send(pa),
             ) as mock_send,
             patch.object(pr, "_send_sweep_notification", AsyncMock()),
         ):

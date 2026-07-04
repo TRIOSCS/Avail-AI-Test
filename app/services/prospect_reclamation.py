@@ -103,18 +103,23 @@ async def job_account_sweep_with_db(db: Session) -> None:
             continue
 
         try:
-            result = send_company_to_prospecting(co.id, owner_id, db, is_admin=True)
+            # Park + swept-provenance stamp in ONE transaction (audit M10): pass the swept
+            # fields into send_company_to_prospecting so a crash can't leave the account
+            # pooled-but-cooldown-less (instantly re-claimable, no notification).
+            result = send_company_to_prospecting(
+                co.id,
+                owner_id,
+                db,
+                is_admin=True,
+                swept={
+                    "from_owner_id": owner_id,
+                    "at": now,
+                    "reclaim_blocked_until": now + timedelta(days=RECLAIM_COOLDOWN_DAYS),
+                },
+            )
             prospect_id = result.get("prospect_id")
 
             if prospect_id:
-                pa = db.get(ProspectAccount, prospect_id)
-                if pa:
-                    pa.swept_from_owner_id = owner_id
-                    pa.swept_at = now
-                    pa.reclaim_blocked_until = now + timedelta(days=RECLAIM_COOLDOWN_DAYS)
-                    pa.discovery_source = "auto_sweep"
-                    db.commit()
-
                 await _send_sweep_notification(
                     owner=owner,
                     company=co,

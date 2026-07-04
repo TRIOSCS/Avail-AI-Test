@@ -17,8 +17,12 @@
   {% if vendor_tasks %}
     <ul class="space-y-1">
       {% for t in vendor_tasks %}
-      {% set is_overdue = t.due_at is not none and t.due_at <= now_utc %}
-      {% set is_due_today = t.due_at is not none and not is_overdue and t.due_at.date() == now_utc.date() %}
+      {# Overdue/due-today via the shared task_due_state helper (per-user tz, calendar-day
+         based) — NOT in-template `due_at <= now_utc` math, which flagged a task due earlier
+         today as Overdue and bucketed on the UTC day. #}
+      {% set _due_state = task_due_state(t, now_utc) %}
+      {% set is_overdue = _due_state[0] %}
+      {% set is_due_today = _due_state[1] %}
       <li class="flex items-start gap-2 text-xs">
         <form hx-post="/v2/partials/tasks/{{ t.id }}/complete"
               hx-target="#vendor-tasks-{{ vendor_id }}"
@@ -33,7 +37,7 @@
           {% if t.due_at %}
             <span class="ml-1 {% if is_overdue %}text-rose-600 font-semibold{% elif is_due_today %}text-amber-600 font-semibold{% else %}text-gray-400{% endif %}">
               &middot;
-              {% if is_overdue %}Overdue ({{ t.due_at.strftime('%b %-d') }}){% elif is_due_today %}Due today{% else %}Due {{ t.due_at.strftime('%b %-d') }}{% endif %}
+              {% if is_overdue %}Overdue ({{ t.due_at|fmtdate('%b %-d') }}){% elif is_due_today %}Due today{% else %}Due {{ t.due_at|fmtdate('%b %-d') }}{% endif %}
             </span>
           {% endif %}
         </div>

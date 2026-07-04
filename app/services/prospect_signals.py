@@ -164,7 +164,31 @@ REGION_COUNTRIES = {
 }
 
 
-def find_similar_customers(prospect: ProspectAccount, db: Session) -> list[dict]:
+def _load_owned_companies(db: Session) -> list:
+    """Fetch the owned-company rows find_similar_customers matches against.
+
+    Selects only the five columns the matcher reads (name/domain/industry/employee_size/
+    hq_country) as lightweight ``Row``s — immune to the expire-on-commit that would
+    otherwise re-SELECT full ORM objects each loop iteration. Load ONCE per batch and hand
+    to find_similar_customers to kill the O(P×C) N+1 (audit M9).
+    """
+    return (
+        db.query(
+            Company.name,
+            Company.domain,
+            Company.industry,
+            Company.employee_size,
+            Company.hq_country,
+        )
+        .filter(
+            Company.account_owner_id.isnot(None),
+            Company.is_active.is_(True),
+        )
+        .all()
+    )
+
+
+def find_similar_customers(prospect: ProspectAccount, db: Session, owned_companies: list | None = None) -> list[dict]:
     """Compare prospect against existing owned Company records.
 
     Matching logic:
@@ -174,16 +198,13 @@ def find_similar_customers(prospect: ProspectAccount, db: Session) -> list[dict]
 
     Returns top 3 most similar existing Trio customers.
     Stores results in prospect.similar_customers JSONB.
+
+    ``owned_companies`` lets the monthly batch pre-load the owned-company set ONCE and reuse
+    it across every prospect (audit M9 — otherwise each prospect re-scans all owned
+    companies, an O(P×C) full-table sweep). ``None`` self-loads (standalone callers).
     """
-    # Get owned companies (have an account_owner_id)
-    companies = (
-        db.query(Company)
-        .filter(
-            Company.account_owner_id.isnot(None),
-            Company.is_active.is_(True),
-        )
-        .all()
-    )
+    # Owned companies (have an account_owner_id) — reuse the caller's set or load our own.
+    companies = owned_companies if owned_companies is not None else _load_owned_companies(db)
 
     if not companies:
         logger.debug("No owned companies to match against")
@@ -538,11 +559,14 @@ async def run_signal_enrichment_batch(min_fit_score: int = 40) -> dict:
             .all()
         )
 
+        # Load the owned-company set ONCE for the whole loop (audit M9) instead of
+        # re-scanning it per prospect.
+        owned_companies = _load_owned_companies(db)
         for prospect in prospects_needing_similar:
             if prospect.similar_customers:
                 continue
             try:
-                find_similar_customers(prospect, db)
+                find_similar_customers(prospect, db, owned_companies=owned_companies)
                 summary["similar_computed"] += 1
             except Exception as e:
                 logger.error("Similar customer error for {}: {}", prospect.id, e)

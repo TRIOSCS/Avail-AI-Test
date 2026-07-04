@@ -315,6 +315,106 @@ class TestM13ManualAddRace:
         assert out["prospect_id"] == existing.id
 
 
+# ── M9 — similar-customer matching loads owned companies once, not per prospect ─
+
+
+class TestM9SimilarCustomersNoNPlus1:
+    def test_matches_from_preloaded_rows(self, db_session, test_user):
+        from app.models import Company
+        from app.services.prospect_signals import _load_owned_companies, find_similar_customers
+
+        db_session.add(
+            Company(
+                name="Aero Systems",
+                domain="aero-m9.com",
+                industry="Aerospace Manufacturing",
+                employee_size="201-500",
+                hq_country="US",
+                is_active=True,
+                account_owner_id=test_user.id,
+            )
+        )
+        db_session.commit()
+
+        prospect = _prospect(
+            db_session,
+            industry="Aerospace Components",
+            employee_count_range="201-500",
+            region="US",
+        )
+        owned = _load_owned_companies(db_session)  # lightweight Rows
+        matches = find_similar_customers(prospect, db_session, owned_companies=owned)
+        # Row attribute access (name/industry/employee_size/hq_country) must work.
+        assert any(m["name"] == "Aero Systems" for m in matches)
+
+    @pytest.mark.asyncio
+    async def test_batch_loads_owned_companies_once(self, db_session):
+        from app.services import prospect_signals
+
+        _prospect(db_session, domain="a-m9.com", fit_score=80)
+        _prospect(db_session, domain="b-m9.com", fit_score=80)
+
+        with (
+            patch("app.database.SessionLocal", return_value=db_session),
+            patch.object(db_session, "close"),
+            patch.object(prospect_signals, "_load_owned_companies", return_value=[]) as mock_load,
+            patch.object(prospect_signals, "find_similar_customers") as mock_find,
+            patch.object(prospect_signals, "enrich_missing_signals", new_callable=AsyncMock, return_value=False),
+            patch.object(prospect_signals, "generate_ai_writeup", new_callable=AsyncMock, return_value="w"),
+        ):
+            await prospect_signals.run_signal_enrichment_batch(min_fit_score=40)
+
+        # Loaded exactly once for the whole loop (pre-fix: once per prospect inside
+        # find_similar_customers).
+        assert mock_load.call_count == 1
+        # And handed to the matcher as owned_companies (not re-scanned).
+        assert all("owned_companies" in c.kwargs for c in mock_find.call_args_list)
+
+
+# ── M10 — SP4 park stamps swept provenance in the SAME transaction ────────────
+
+
+class TestM10ParkSingleTransaction:
+    def test_send_to_prospecting_stamps_swept(self, db_session, test_user):
+        from datetime import datetime, timedelta, timezone
+
+        from app.models import Company
+        from app.services.prospect_claim import send_company_to_prospecting
+
+        co = Company(name="Dormant Co", domain="dormant-m10.com", is_active=True, account_owner_id=test_user.id)
+        db_session.add(co)
+        db_session.commit()
+
+        now = datetime.now(timezone.utc)
+        result = send_company_to_prospecting(
+            co.id,
+            test_user.id,
+            db_session,
+            is_admin=True,
+            swept={"from_owner_id": test_user.id, "at": now, "reclaim_blocked_until": now + timedelta(days=30)},
+        )
+        pa = db_session.get(ProspectAccount, result["prospect_id"])
+        # All four fields set in one commit — pre-fix: send_company_to_prospecting took no
+        # swept arg (TypeError); the sweep stamped them in a SECOND commit.
+        assert pa.discovery_source == "auto_sweep"
+        assert pa.swept_from_owner_id == test_user.id
+        assert pa.swept_at is not None
+        assert pa.reclaim_blocked_until is not None
+
+    def test_send_to_prospecting_without_swept_is_sent_back(self, db_session, test_user):
+        from app.models import Company
+        from app.services.prospect_claim import send_company_to_prospecting
+
+        co = Company(name="Manual Send", domain="manual-m10.com", is_active=True, account_owner_id=test_user.id)
+        db_session.add(co)
+        db_session.commit()
+
+        result = send_company_to_prospecting(co.id, test_user.id, db_session, is_admin=True)
+        pa = db_session.get(ProspectAccount, result["prospect_id"])
+        assert pa.discovery_source == "sent_back"
+        assert pa.swept_at is None
+
+
 # ── M12 — reclaim/reassign under /v2/partials/prospects must be module-gated ──
 
 
