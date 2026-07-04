@@ -72,7 +72,7 @@
             {% if task.creator %}
               <span>by {{ task.creator.name or task.creator.email }}</span>
             {% endif %}
-            <span>{{ task.created_at.strftime('%m/%d/%y') if task.created_at else '' }}</span>
+            <span>{{ task.created_at|localdate('%m/%d/%y') if task.created_at else '' }}</span>
           </div>
         </div>
         {% if task.priority >= 3 %}
@@ -109,7 +109,7 @@
           <p class="text-sm text-gray-600 line-through">{{ task.title }}</p>
           <div class="flex items-center gap-2 mt-1 text-secondary">
             {% if task.assignee %}<span>{{ task.assignee.name or task.assignee.email }}</span>{% endif %}
-            {% if task.completed_at %}<span>Done {{ task.completed_at.strftime('%m/%d/%y') }}</span>{% endif %}
+            {% if task.completed_at %}<span>Done {{ task.completed_at|localdate('%m/%d/%y') }}</span>{% endif %}
           </div>
         </div>
       </div>

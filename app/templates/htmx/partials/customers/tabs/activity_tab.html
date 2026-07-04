@@ -94,7 +94,7 @@
             <p class='text-[11px] font-semibold text-gray-400 uppercase tracking-wider mt-4 mb-1 first:mt-1'>
               {%- if day_delta == 0 %}Today
               {%- elif day_delta == 1 %}Yesterday
-              {%- else %}{{ ts.strftime('%b %d, %Y') }}{% endif -%}
+              {%- else %}{{ ts|localdate('%b %d, %Y') }}{% endif -%}
             </p>
           {% endif %}
           {{ activity_row(a) }}
@@ -128,7 +128,7 @@
             <p class='text-[11px] font-semibold text-gray-400 uppercase tracking-wider mt-4 mb-1 first:mt-1'>
               {%- if day_delta == 0 %}Today
               {%- elif day_delta == 1 %}Yesterday
-              {%- else %}{{ ts.strftime('%b %d, %Y') }}{% endif -%}
+              {%- else %}{{ ts|localdate('%b %d, %Y') }}{% endif -%}
             </p>
           {% endif %}
           {%- if item is mapping and item._is_rfq -%}
@@ -163,7 +163,7 @@
                   Req #{{ rfq_req.id }}
                 </a>
                 {% endif %}
-                <span class='text-[11px] text-gray-400 whitespace-nowrap'>{{ ts.strftime('%b %d') if ts else "" }}</span>
+                <span class='text-[11px] text-gray-400 whitespace-nowrap'>{{ ts|localdate('%b %d') if ts else "" }}</span>
               </div>
             </div>
           {%- else -%}
