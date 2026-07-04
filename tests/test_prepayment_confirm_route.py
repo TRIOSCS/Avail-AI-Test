@@ -193,7 +193,16 @@ def test_confirm_route_has_no_auth_dependency():
     from app.main import app
 
     auth_deps = {require_user, require_admin, require_buyer}
-    confirm_routes = [r for r in app.routes if getattr(r, "path", "") == "/p/confirm/{token}"]
+
+    def _all_api_routes(router):
+        """Yield all APIRoute objects, recursing into _IncludedRouter wrappers."""
+        for r in router.routes:
+            if hasattr(r, "original_router"):
+                yield from _all_api_routes(r.original_router)
+            elif hasattr(r, "path"):
+                yield r
+
+    confirm_routes = [r for r in _all_api_routes(app.router) if getattr(r, "path", "") == "/p/confirm/{token}"]
     assert confirm_routes, "confirm route not registered"
     for route in confirm_routes:
         dep_calls = {d.call for d in route.dependant.dependencies}
