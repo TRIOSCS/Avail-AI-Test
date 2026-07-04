@@ -360,3 +360,30 @@ class TestRequisitionActivityTabTimeline:
         assert "Today" in body
         # The legacy two-section layout is gone.
         assert "RFQ History" not in body
+
+    def test_date_group_header_uses_viewer_local_day(self, client, db_session, test_requisition, test_user):
+        """The date-group header buckets/labels on the VIEWER's local calendar day, not
+        the UTC day.
+
+        2020-01-02 02:00 UTC is 2020-01-01 21:00 in the business-default zone
+        (America/New_York, EST), so the header must read 'Jan 01, 2020' — the local day
+        — never 'Jan 02, 2020' (the UTC day it would show if grouping ignored the viewer
+        tz).
+        """
+        db_session.add(
+            ActivityLog(
+                user_id=test_user.id,
+                activity_type="note",
+                channel="manual",
+                requisition_id=test_requisition.id,
+                notes="Old note near the UTC midnight boundary",
+                occurred_at=datetime(2020, 1, 2, 2, 0, tzinfo=timezone.utc),
+            )
+        )
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/requisitions/{test_requisition.id}/tab/activity")
+        assert resp.status_code == 200
+        body = resp.text
+        assert "Jan 01, 2020" in body
+        assert "Jan 02, 2020" not in body

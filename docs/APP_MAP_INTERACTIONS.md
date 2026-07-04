@@ -3074,9 +3074,20 @@ Foundation mechanism (migration 181 adds `users.display_timezone`, an IANA name)
    near UTC midnight sees a task due on THEIR calendar day as "today". Distinct from
    `users.timezone` (the Graph mailbox Windows-format zone for RFQ scheduling).
 
+   `template_env.py` also exposes `|localday` — the DATE-object companion to `|localdate`
+   (convert to the viewer's zone, then `.date()`). The activity/timeline day-group headers
+   ("Today"/"Yesterday"/date bucket) in the customer, vendor, and requisition Activity tabs
+   (`partials/{customers,vendors}/tabs/activity_tab.html`,
+   `partials/requisitions/tabs/activity.html`) bucket on `now()|localday` / `ts|localday`
+   instead of the raw UTC `.date()`, so a non-Eastern viewer's rows land under the header
+   that matches their own calendar day (and their already-localized rendered timestamp) at
+   the midnight boundary — the requisition header also switched from raw `.strftime` to
+   `|localdate` so its label matches the local bucket.
+
    NOTE: this is the mechanism + a couple of proof wirings (`|localdate` on the profile
-   "Member since", `|localtime` on the offers review-queue `created_at`). The app-wide
-   sweep of every `.strftime(...)` timestamp render is a deliberate follow-up.
+   "Member since", `|localtime` on the offers review-queue `created_at`, `|localday` on the
+   Activity-tab day grouping). The app-wide sweep of every `.strftime(...)` timestamp render
+   is a deliberate follow-up.
 
 ### CRM P5 trust — field-history, completeness, phone-normalize, industry pick-list
 

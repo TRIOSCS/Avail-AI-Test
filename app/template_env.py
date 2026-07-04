@@ -176,6 +176,30 @@ def _localdate_filter(value, fmt: str = "%b %d, %Y", default: str = "—") -> st
 templates.env.filters["localdate"] = _localdate_filter
 
 
+def _localday_filter(value):
+    """Return the calendar DATE of a stored-UTC datetime in the CURRENT viewer's
+    timezone.
+
+    Companion to ``|localtime``/``|localdate`` used for DAY-BUCKETING the activity/timeline
+    feeds (the "Today"/"Yesterday"/date group headers). Taking ``.date()`` on the raw UTC
+    datetime buckets a row on the UTC calendar day, so a viewer east or west of UTC can see
+    a row fall under the wrong header at the midnight boundary — while its own rendered
+    timestamp (already localized) sits in the next/prior day. This converts to the viewer's
+    zone FIRST (the SAME contextvar the filters use), then takes ``.date()``, so the group
+    header matches the row. Returns a ``date`` (comparable + subtractable for the day-delta),
+    or ``None`` for ``None``/strings (the caller's ``if ts and ...`` guard skips those).
+    """
+    from .utils.timezones import to_display_tz
+
+    if value is None or isinstance(value, str):
+        return None
+    local = to_display_tz(value)
+    return local.date() if local is not None else None
+
+
+templates.env.filters["localday"] = _localday_filter
+
+
 def _pricefmt_filter(value, default: str = "—") -> str:
     """Format a price: up to 4 decimals with trailing zeros stripped.
 

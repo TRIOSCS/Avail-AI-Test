@@ -107,17 +107,18 @@
 
     {% if activities %}
     <div class="px-4 py-2">
-      {% set today = now().date() %}
+      {% set today = now()|localday %}
       {% set ns = namespace(day=None) %}
       {% for a in activities %}
         {% set ts = a.occurred_at or a.created_at %}
-        {% if ts and ts.date() != ns.day %}
-          {% set ns.day = ts.date() %}
-          {% set day_delta = (today - ts.date()).days %}
+        {% set ts_day = ts|localday %}
+        {% if ts and ts_day != ns.day %}
+          {% set ns.day = ts_day %}
+          {% set day_delta = (today - ts_day).days %}
           <p class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mt-4 mb-1 first:mt-1">
             {% if day_delta == 0 %}Today
             {% elif day_delta == 1 %}Yesterday
-            {% else %}{{ ts.strftime('%b %d, %Y') }}{% endif %}
+            {% else %}{{ ts|localdate('%b %d, %Y') }}{% endif %}
           </p>
         {% endif %}
         {{ activity_row(a) }}

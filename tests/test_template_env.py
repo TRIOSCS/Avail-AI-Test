@@ -7,20 +7,33 @@ Called by: pytest
 Depends on: app/template_env.py, conftest.py
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
 
+from app.request_context import current_user_display_tz_var
 from app.template_env import (
     _elapsed_seconds,
     _fmtdate_filter,
+    _localday_filter,
     _sanitize_html_filter,
     _task_due_state,
     _timeago_filter,
     _timesince_filter,
     template_response,
 )
+
+
+@pytest.fixture()
+def _reset_tz_contextvar():
+    """Snapshot + restore the display-tz contextvar around a test (no cross-test
+    leak)."""
+    token = current_user_display_tz_var.set(None)
+    try:
+        yield
+    finally:
+        current_user_display_tz_var.reset(token)
 
 
 class TestTemplateResponse:
@@ -225,6 +238,97 @@ class TestTaskDueState:
         now = datetime(2026, 6, 26, 2, 0, tzinfo=timezone.utc)  # 2026-06-25 22:00 US/Eastern
         task = self._task(datetime(2026, 6, 25, 0, 0, tzinfo=timezone.utc))  # due 2026-06-25
         assert _task_due_state(task, now) == (False, True)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  _localday_filter — viewer-local day bucketing key
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestLocalDayFilter:
+    """|localday returns the datetime's calendar DATE in the CURRENT viewer's zone, so
+    the activity-feed day-group headers ("Today"/"Yesterday"/date) bucket on the
+    viewer's local day rather than the UTC calendar day."""
+
+    # 23:30 UTC Jul 4 → Eastern (UTC-4 summer) still Jul 4 19:30; Tokyo (UTC+9) Jul 5 08:30.
+    UTC_DT = datetime(2026, 7, 4, 23, 30, tzinfo=timezone.utc)
+
+    def test_registered_as_filter(self):
+        from app.template_env import templates
+
+        assert "localday" in templates.env.filters
+
+    def test_none_and_strings_return_none(self):
+        assert _localday_filter(None) is None
+        assert _localday_filter("already a string") is None
+
+    def test_returns_date_object(self, _reset_tz_contextvar):
+        current_user_display_tz_var.set("America/New_York")
+        assert _localday_filter(self.UTC_DT) == date(2026, 7, 4)
+
+    def test_same_instant_buckets_differently_per_zone(self, _reset_tz_contextvar):
+        """The core fix: one UTC instant near midnight → different local day per viewer."""
+        current_user_display_tz_var.set("America/New_York")
+        eastern_day = _localday_filter(self.UTC_DT)
+        current_user_display_tz_var.set("Asia/Tokyo")
+        tokyo_day = _localday_filter(self.UTC_DT)
+        assert eastern_day == date(2026, 7, 4)
+        assert tokyo_day == date(2026, 7, 5)
+        assert eastern_day != tokyo_day
+
+    def test_naive_datetime_treated_as_utc(self, _reset_tz_contextvar):
+        current_user_display_tz_var.set("Asia/Tokyo")
+        assert _localday_filter(datetime(2026, 7, 4, 23, 30)) == date(2026, 7, 5)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  Activity-feed day bucketing — the real |localday + |localdate grouping block
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestActivityDayBucketing:
+    """Reproduces the exact day-group block from the activity/timeline templates (now|localday
+    + ts|localday + ts|localdate) through the real registered filters, proving the header a
+    viewer sees for a given instant follows THEIR local day — Tokyo and the business-default
+    (Eastern) viewer disagree at the UTC midnight boundary for the same instant."""
+
+    # Mirrors the bucketing block in the activity templates verbatim (now passed in for a
+    # deterministic "today"; the templates use the now() global, same mechanism).
+    TEMPLATE = (
+        "{%- set today = now|localday -%}"
+        "{%- set ts_day = ts|localday -%}"
+        "{%- set day_delta = (today - ts_day).days -%}"
+        "{%- if day_delta == 0 %}Today"
+        "{%- elif day_delta == 1 %}Yesterday"
+        "{%- else %}{{ ts|localdate('%b %d, %Y') }}{% endif -%}"
+    )
+
+    def _render(self, now_dt, ts_dt):
+        from app.template_env import templates
+
+        return templates.env.from_string(self.TEMPLATE).render(now=now_dt, ts=ts_dt)
+
+    # now = Jul 5 12:00 UTC (a stable "today" for both zones); ts = Jul 4 23:30 UTC.
+    NOW = datetime(2026, 7, 5, 12, 0, tzinfo=timezone.utc)
+    TS_NEAR_MIDNIGHT = datetime(2026, 7, 4, 23, 30, tzinfo=timezone.utc)
+
+    def test_boundary_instant_is_yesterday_for_eastern(self, _reset_tz_contextvar):
+        # Eastern: ts → Jul 4 19:30 (yesterday relative to Jul 5).
+        current_user_display_tz_var.set("America/New_York")
+        assert self._render(self.NOW, self.TS_NEAR_MIDNIGHT) == "Yesterday"
+
+    def test_boundary_instant_is_today_for_tokyo(self, _reset_tz_contextvar):
+        # Same instant, Tokyo: ts → Jul 5 08:30 (today) — a different header from Eastern.
+        current_user_display_tz_var.set("Asia/Tokyo")
+        assert self._render(self.NOW, self.TS_NEAR_MIDNIGHT) == "Today"
+
+    def test_date_header_reflects_viewer_local_day(self, _reset_tz_contextvar):
+        # Far-past instant → the date branch; header date differs by viewer zone.
+        far_now = datetime(2026, 7, 20, 12, 0, tzinfo=timezone.utc)
+        current_user_display_tz_var.set("America/New_York")
+        assert self._render(far_now, self.TS_NEAR_MIDNIGHT) == "Jul 04, 2026"
+        current_user_display_tz_var.set("Asia/Tokyo")
+        assert self._render(far_now, self.TS_NEAR_MIDNIGHT) == "Jul 05, 2026"
 
 
 # ═══════════════════════════════════════════════════════════════════════
