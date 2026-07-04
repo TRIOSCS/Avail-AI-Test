@@ -383,6 +383,35 @@ document.body.addEventListener('htmx:configRequest', (evt) => {
     }
 });
 
+// ── Per-user display timezone auto-detect ───────────────────
+// Once per page load, read the browser's IANA zone and, ONLY if it differs from the
+// zone already stored on the user (rendered onto <body data-user-tz>), post it so
+// timestamps render in the viewer's own timezone. The endpoint no-ops when unchanged;
+// this guard avoids a POST on every navigation. Fire-and-forget: the response body is
+// ignored (so the endpoint's HX-Trigger toast, which the profile <select> shows, stays
+// silent here).
+function syncDisplayTimezone() {
+    let browserTz = '';
+    try {
+        browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+    } catch (_) { /* Intl unavailable — skip */ }
+    if (!browserTz) return;
+    const storedTz = document.body.dataset.userTz || '';
+    if (browserTz === storedTz) return;
+    const headers = { 'Content-Type': 'application/x-www-form-urlencoded' };
+    const csrf = csrfToken();
+    if (csrf) headers['x-csrftoken'] = csrf;
+    fetch('/v2/profile/timezone', {
+        method: 'POST',
+        headers: headers,
+        body: 'timezone=' + encodeURIComponent(browserTz),
+    }).then((resp) => {
+        // Reflect locally so a second navigation in this session doesn't re-post.
+        if (resp.ok) document.body.dataset.userTz = browserTz;
+    }).catch(() => { /* fire-and-forget — a failed detect just retries next load */ });
+}
+document.addEventListener('DOMContentLoaded', syncDisplayTimezone);
+
 // ── Click-to-contact outreach logger (CDM contact panel) ────
 // Any element with [data-outreach-log] (tel:/mailto:/Teams/WeChat links in
 // customer contact panels) fires a fire-and-forget POST to

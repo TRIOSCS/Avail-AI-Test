@@ -3002,6 +3002,40 @@ Invariants:
 - Company detail template (`htmx/partials/customers/detail.html`) renders
   "Created by {name} · Updated by {name}" inside the collapsible account-settings panel.
 
+### Per-user display timezone (UTC storage → viewer-zone render)
+
+Timestamps store UTC (`UTCDateTime`, unchanged); each viewer sees them in their own zone.
+Foundation mechanism (migration 181 adds `users.display_timezone`, an IANA name):
+
+1. **Auto-detect** — the base layout renders the stored zone onto `<body data-user-tz>`.
+   `syncDisplayTimezone()` (`app/static/htmx_app.js`, on `DOMContentLoaded`) reads
+   `Intl.DateTimeFormat().resolvedOptions().timeZone` and, only when it differs from the
+   data attribute, fire-and-forget `fetch`es `POST /v2/profile/timezone` (form-encoded,
+   x-csrftoken). The endpoint (`app/routers/htmx/settings.py`, `require_user`) validates the
+   IANA name (`app.utils.timezones.is_valid_timezone` — rejects Windows/junk), stores it
+   **only when unset or changed** (repeat visits are a no-op), and toasts via HX-Trigger
+   (shown by the profile `<select>`; the `fetch` ignores it). The Profile-tab `<select>`
+   (grouped `<optgroup>` from `grouped_timezones()`) posts the SAME endpoint for a manual override.
+
+2. **Per-request contextvar** — `app/request_context.py` adds
+   `current_user_display_tz_var: ContextVar[str | None]`. `AuditUserMiddleware` establishes a
+   baseline (`None`) + `finally` reset (no keep-alive cross-request leak); `require_user`
+   overrides it with the loaded user's `display_timezone`. Mirrors the `current_user_id_var`
+   pattern above.
+
+3. **Display layer** — `app/utils/timezones.py` (`DEFAULT_DISPLAY_TZ = "America/New_York"`,
+   the fallback for unknown/NULL/invalid): `format_localtime` / `format_localdate` /
+   `to_display_tz` convert a UTC datetime into the current viewer's zone (or an explicit zone
+   arg for server-side use like emails). `template_env.py` exposes them as the `|localtime`
+   and `|localdate` Jinja filters, and `_task_due_state` now judges "today"/"overdue" by
+   `current_display_zoneinfo()` (was a hardcoded `America/New_York`) — a buyer in Asia/Tokyo
+   near UTC midnight sees a task due on THEIR calendar day as "today". Distinct from
+   `users.timezone` (the Graph mailbox Windows-format zone for RFQ scheduling).
+
+   NOTE: this is the mechanism + a couple of proof wirings (`|localdate` on the profile
+   "Member since", `|localtime` on the offers review-queue `created_at`). The app-wide
+   sweep of every `.strftime(...)` timestamp render is a deliberate follow-up.
+
 ### CRM P5 trust — field-history, completeness, phone-normalize, industry pick-list
 
 These extend the audit trail above (migration 169 + reuse of existing primitives):

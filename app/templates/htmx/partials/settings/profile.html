@@ -79,7 +79,9 @@
       {% if profile_user.created_at %}
       <div>
         <label class="block text-sm font-medium text-gray-600 mb-1.5">Member Since</label>
-        <p class="text-sm text-gray-800">{{ profile_user.created_at.strftime('%B %d, %Y') }}</p>
+        {# Rendered in the viewer's own timezone via |localdate (proof of the per-user tz
+           display layer) — a UTC instant shown as the local calendar date. #}
+        <p class="text-sm text-gray-800">{{ profile_user.created_at|localdate('%B %d, %Y') }}</p>
       </div>
       {% endif %}
 
@@ -98,6 +100,37 @@
         </div>
       </form>
     </div>
+  </div>
+
+  {# Timezone card — the manual override for the per-user display timezone. The base
+     layout auto-detects the browser zone on load and posts it to the SAME endpoint; this
+     select lets a user pin a different zone. On change it hx-posts the IANA name (HTMX
+     adds the x-csrftoken header globally); hx-swap="none" + the endpoint's showToast keep
+     it inline. All stored timestamps render in this zone via |localtime / |localdate. #}
+  <div class="bg-white border border-line-base rounded-lg p-4 mb-6">
+    <h3 class="text-sm font-semibold text-gray-900 mb-1">Timezone</h3>
+    <p class="text-xs text-gray-600 mb-3">
+      Dates and times across the app show in this timezone. We detect it from your browser
+      automatically — change it here if you'd like a different one.
+    </p>
+    <select name="timezone"
+            hx-post="/v2/profile/timezone"
+            hx-trigger="change"
+            hx-swap="none"
+            class="input input-sm w-full max-w-sm"
+            aria-label="Display timezone">
+      {% for region, zones in tz_groups %}
+      <optgroup label="{{ region }}">
+        {% for zone in zones %}
+        <option value="{{ zone }}"
+                {% if zone == (profile_user.display_timezone or default_display_tz) %}selected{% endif %}>{{ zone }}</option>
+        {% endfor %}
+      </optgroup>
+      {% endfor %}
+    </select>
+    {% if not profile_user.display_timezone %}
+    <p class="text-xs text-gray-400 mt-2">Showing the business default ({{ default_display_tz }}) until your browser zone is detected.</p>
+    {% endif %}
   </div>
 
   {# Profile photo uploader with pan/zoom face-centering. Picking a file opens a

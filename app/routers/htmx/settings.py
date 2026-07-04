@@ -241,10 +241,13 @@ async def settings_profile_tab(
 ):
     """User profile tab."""
     from ...services.activity_service import get_inbox_sync_status
+    from ...utils.timezones import DEFAULT_DISPLAY_TZ, grouped_timezones
 
     ctx = _base_ctx(request, user, "settings")
     ctx["profile_user"] = user
     ctx["inbox_status"] = get_inbox_sync_status(db, user)
+    ctx["tz_groups"] = grouped_timezones()
+    ctx["default_display_tz"] = DEFAULT_DISPLAY_TZ
     return template_response("htmx/partials/settings/profile.html", ctx)
 
 
@@ -330,6 +333,51 @@ async def update_user_profile(
     logger.info("Profile updated", user_id=user.id)
     response = HTMLResponse(status_code=200)
     settings_toast(response, "Profile updated.")
+    return response
+
+
+@router.post("/v2/profile/timezone", response_class=HTMLResponse)
+async def update_display_timezone(
+    request: Request,
+    timezone: str = Form(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Set the current user's display timezone (an IANA zone name).
+
+    Written from BOTH the base-layout auto-detect (a background ``fetch`` of the browser's
+    ``Intl`` zone, once per session when it differs from the stored value) AND the profile
+    ``<select>`` override (an HTMX post). Validates the value is a real IANA zone; stores it
+    only when unset or changed (so the auto-detect is a cheap no-op on repeat visits). The
+    success HX-Trigger toast is consumed by the HTMX select; the fetch auto-detect ignores
+    the response body, so it stays silent.
+    """
+    from fastapi.responses import JSONResponse
+
+    from ...utils.timezones import is_valid_timezone
+
+    tz = timezone.strip()
+    if not is_valid_timezone(tz):
+        req_id = getattr(request.state, "request_id", "unknown")
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Not a valid timezone.", "status_code": 400, "request_id": req_id},
+        )
+
+    if user.display_timezone == tz:
+        # Unset-vs-changed guard: no write, no toast — the common auto-detect repeat case.
+        return HTMLResponse(status_code=200)
+
+    user.display_timezone = tz
+    db.commit()
+    # Reflect immediately for any rendering later in THIS request (contextvar was set from
+    # the pre-commit value by require_user).
+    from ...request_context import current_user_display_tz_var
+
+    current_user_display_tz_var.set(tz)
+    logger.info("Display timezone updated", user_id=user.id, timezone=tz)
+    response = HTMLResponse(status_code=200)
+    settings_toast(response, "Timezone updated.")
     return response
 
 

@@ -72,7 +72,8 @@
               REQ-{{ "%03d"|format(o.requisition_id) }}
             </a>
             {% if o.created_at %}
-            <span>{{ o.created_at.strftime('%b %d, %H:%M') }}</span>
+            {# Rendered in the viewer's timezone via |localtime (per-user tz display layer). #}
+            <span>{{ o.created_at|localtime('%b %d, %H:%M') }}</span>
             {% endif %}
           </div>
           {% endif %}

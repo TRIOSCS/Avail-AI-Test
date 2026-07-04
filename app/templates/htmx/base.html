@@ -35,6 +35,7 @@
 </head>
 <body class="h-full"
       hx-ext="alpine-morph, preload, response-targets, loading-states, head-support, class-tools, multi-swap, remove-me, restored"
+      data-user-tz="{{ user_display_tz|default('') }}"
       x-data="{ currentView: '{{ current_view|default("requisitions") }}' }">
   {% block body %}
 

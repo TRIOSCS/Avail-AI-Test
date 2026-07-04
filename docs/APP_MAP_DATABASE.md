@@ -33,7 +33,8 @@
 | token_expires_at | DateTime | |
 | m365_connected | Boolean | Graph API health |
 | commodity_tags | JSON | User specialties |
-| timezone | String 100 | |
+| timezone | String 100 | **Graph mailbox zone** (Windows format, e.g. "Pacific Standard Time") from `/me/mailboxSettings`, used for RFQ send-window scheduling. NOT a valid IANA name — do not use it for timestamp display; use `display_timezone` instead. |
+| display_timezone | String 64, nullable | Migration 181. **Per-user DISPLAY timezone** — an IANA zone name (e.g. `America/New_York`, `Asia/Tokyo`) used to render stored-UTC timestamps in this viewer's own zone. Auto-detected from the browser (`Intl.DateTimeFormat().resolvedOptions().timeZone`) and posted to `POST /v2/profile/timezone` on page load when it differs from the stored value; also settable via the Profile-tab `<select>`. NULL ⇒ fall back to `app.utils.timezones.DEFAULT_DISPLAY_TZ` (`America/New_York`). Read per-request into the `current_user_display_tz_var` contextvar by `require_user`; consumed by the `\|localtime` / `\|localdate` Jinja filters and `template_env._task_due_state`. |
 | eight_by_eight_extension | String 20 | Phone system |
 | eight_by_eight_enabled | Boolean | default False |
 | notify_buyplan_email_enabled | Boolean NOT NULL | default True; Profile-tab toggle — suppress buy-plan email notifications (migration 151) |
