@@ -51,7 +51,7 @@ from ..models import (
 from ..scoring import classify_lead, explain_lead, score_unified
 from ..services.sighting_ingest import sighting_from_row
 from ..services.vendor_unavailability import apply_to_fresh_sightings
-from ..template_env import page_response, template_response, templates
+from ..template_env import _task_due_state, page_response, template_response, templates
 from ..utils.search_builder import SearchBuilder
 from ..utils.sql_helpers import escape_like
 from ._lookup_helpers import get_requisition_or_404
@@ -1892,13 +1892,18 @@ async def my_day_partial(
         want = int(priority)
         tasks = [t for t in tasks if t.priority == want]
 
-    # due bucket — helper has no due filter, so apply it here against now.
+    # due bucket — helper has no due filter, so apply it here. Reuse the SAME
+    # task_due_state predicate the results template groups by, so the filter and the
+    # on-screen "Overdue"/"Due soon" headings can never contradict each other (a task due
+    # earlier today filters as "today" AND renders under "Due soon", not "Overdue").
+    # Due dates are calendar-day, so "upcoming" means a strictly future day — neither
+    # overdue nor today — matching the template's "Later" group.
     if due == "overdue":
-        tasks = [t for t in tasks if t.due_at is not None and t.due_at < now]
+        tasks = [t for t in tasks if _task_due_state(t, now)[0]]
     elif due == "today":
-        tasks = [t for t in tasks if t.due_at is not None and t.due_at.date() == now.date()]
+        tasks = [t for t in tasks if _task_due_state(t, now)[1]]
     elif due == "upcoming":
-        tasks = [t for t in tasks if t.due_at is not None and t.due_at >= now]
+        tasks = [t for t in tasks if t.due_at is not None and _task_due_state(t, now) == (False, False)]
     elif due == "none":
         tasks = [t for t in tasks if t.due_at is None]
 

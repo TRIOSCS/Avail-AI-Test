@@ -8,6 +8,7 @@ Depends on: app/template_env.py, conftest.py
 """
 
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 
@@ -15,6 +16,7 @@ from app.template_env import (
     _elapsed_seconds,
     _fmtdate_filter,
     _sanitize_html_filter,
+    _task_due_state,
     _timeago_filter,
     _timesince_filter,
     template_response,
@@ -174,6 +176,44 @@ class TestFmtdateFilter:
 
     def test_non_datetime_returns_default(self):
         assert _fmtdate_filter(12345) == "\u2014"
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  _task_due_state — urgency bucketing (calendar-day, mutually exclusive)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestTaskDueState:
+    """(is_overdue, is_due_today) is judged by *calendar day*, so a task due earlier
+    today is 'due today', never 'overdue' (#4), and the two flags never both fire — the
+    My Day filter and the results grouping consume this one helper and so can't
+    disagree."""
+
+    @staticmethod
+    def _task(due_at):
+        return SimpleNamespace(due_at=due_at)
+
+    def test_none_due_is_neither(self):
+        assert _task_due_state(self._task(None), datetime.now(timezone.utc)) == (False, False)
+
+    def test_earlier_today_is_due_today_not_overdue(self):
+        """The core #4 regression: due at 00:00 with the clock already at 18:00 is still
+        'due today', not 'overdue'."""
+        now = datetime(2026, 6, 25, 18, 0, tzinfo=timezone.utc)
+        assert _task_due_state(self._task(datetime(2026, 6, 25, 0, 0, tzinfo=timezone.utc)), now) == (False, True)
+
+    def test_prior_day_is_overdue(self):
+        now = datetime(2026, 6, 25, 6, 0, tzinfo=timezone.utc)
+        assert _task_due_state(self._task(datetime(2026, 6, 24, 0, 0, tzinfo=timezone.utc)), now) == (True, False)
+
+    def test_future_day_is_neither(self):
+        now = datetime(2026, 6, 25, 6, 0, tzinfo=timezone.utc)
+        assert _task_due_state(self._task(datetime(2026, 6, 27, 0, 0, tzinfo=timezone.utc)), now) == (False, False)
+
+    def test_naive_due_at_coerced_to_utc(self):
+        """A naive due_at (legacy row / SQLite) is treated as UTC — no TypeError."""
+        now = datetime(2026, 6, 25, 18, 0, tzinfo=timezone.utc)
+        assert _task_due_state(self._task(datetime(2026, 6, 25, 0, 0)), now) == (False, True)
 
 
 # ═══════════════════════════════════════════════════════════════════════

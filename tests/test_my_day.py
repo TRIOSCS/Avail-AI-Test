@@ -209,6 +209,53 @@ class TestTasksPageGrouping:
         assert "No due date" in resp.text
 
 
+class TestTasksPageDueTodayConsistency:
+    """#4 — the 'Due today' filter and the results grouping agree.
+
+    A task due earlier *today* renders under the 'Due soon' heading (labelled 'Due
+    today'), never 'Overdue', and matches ``due=today`` (not ``due=overdue``). Frozen at
+    18:00 UTC (14:00 US/Eastern) so the UTC and business-local calendar day coincide —
+    this isolates the filter/grouping consistency from the display-timezone behaviour.
+    Requests target the results-only fragment (no filter bar) so the string 'Overdue' can
+    only originate from a group heading, not the filter <option>.
+    """
+
+    @freeze_time("2026-06-25 18:00:00")
+    def test_due_earlier_today_renders_under_due_soon(self, client: TestClient, db_session, test_user, test_company):
+        now = datetime.now(timezone.utc)
+        _add_task(
+            db_session,
+            user_id=test_user.id,
+            title="Due earlier today",
+            company=test_company,
+            due_at=now.replace(
+                hour=0, minute=0, second=0, microsecond=0
+            ),  # midnight today — already "past" by the clock
+        )
+        resp = client.get("/v2/partials/my-day", headers={"HX-Target": "tasks-results"})
+        assert resp.status_code == 200
+        assert "Due earlier today" in resp.text
+        assert "Due soon" in resp.text
+        assert "Due today" in resp.text
+        assert "Overdue" not in resp.text
+
+    @freeze_time("2026-06-25 18:00:00")
+    def test_due_today_filter_includes_earlier_today(self, client: TestClient, db_session, test_user, test_company):
+        now = datetime.now(timezone.utc)
+        earlier = _add_task(
+            db_session,
+            user_id=test_user.id,
+            title="Nine AM task",
+            company=test_company,
+            due_at=now.replace(hour=9, minute=0, second=0, microsecond=0),
+        )
+        resp_today = client.get("/v2/partials/my-day?due=today", headers={"HX-Target": "tasks-results"})
+        assert earlier.title in resp_today.text
+        # The same task must NOT be caught by the overdue filter — no contradiction.
+        resp_overdue = client.get("/v2/partials/my-day?due=overdue", headers={"HX-Target": "tasks-results"})
+        assert earlier.title not in resp_overdue.text
+
+
 class TestTasksPageFilters:
     def test_full_load_has_filter_bar(self, client: TestClient):
         resp = client.get("/v2/partials/my-day")

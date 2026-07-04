@@ -319,14 +319,20 @@ templates.env.globals["now"] = _now
 def _task_due_state(task, now_utc: datetime) -> tuple[bool, bool]:
     """Return (is_overdue, is_due_today) for a task row, coercing naive due_at to UTC.
 
-    Centralises the comparison so templates never do datetime arithmetic directly, which
-    would TypeError under SQLite when due_at is naive and now_utc is aware.
+    Task due dates are calendar dates (an ``<input type=date>`` stored at UTC midnight), so
+    urgency is judged by *calendar day*, not by clock instant: a task due earlier today is
+    still "due today", never "overdue". Overdue means the due date fell on a prior day. The
+    two flags are therefore mutually exclusive, so the My Day filter and the results
+    grouping — which both consume this one helper — can never disagree. Comparing dates
+    (not datetimes) also sidesteps the naive/aware TypeError under SQLite.
     """
     if task.due_at is None:
         return (False, False)
     due = task.due_at if task.due_at.tzinfo is not None else task.due_at.replace(tzinfo=timezone.utc)
-    is_overdue = due <= now_utc
-    is_due_today = not is_overdue and due.date() == now_utc.date()
+    due_date = due.date()
+    today = now_utc.date()
+    is_overdue = due_date < today
+    is_due_today = due_date == today
     return (is_overdue, is_due_today)
 
 
