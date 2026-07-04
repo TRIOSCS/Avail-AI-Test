@@ -183,7 +183,7 @@
   <div x-data class="flex gap-2">
     <button @click="$store.shortlist && $store.shortlist.toggle({
         vendor_name: '{{ s.vendor_name|replace("'", "\\'") }}',
-        mpn_matched: '{{ (s.mpn_matched or s.mpn or "")|replace("'", "\\'") }}',
+        mpn: '{{ (s.mpn_matched or s.mpn or "")|replace("'", "\\'") }}',
         unit_price: {{ s.unit_price or 'null' }},
         qty_available: {{ s.qty_available or 'null' }},
         vendor_key: '{{ s.vendor_key|default("")|replace("'", "\\'") }}'

@@ -22,7 +22,18 @@
       {% endfor %}
     </div>
     {% else %}
-    <p class="text-sm text-gray-600">No requisitions found. Create one first.</p>
+    <div class="text-center py-6">
+      <p class="text-sm text-gray-600">No requisitions yet.</p>
+      {# Launch the existing create-requisition flow in the shared global modal (same
+         @open-modal dispatch used by Requisitions › New Requisition and the prospect
+         "Create Requisition" button) — replaces this picker's content with the form. #}
+      <button type="button"
+              @click="$dispatch('open-modal', {url: '/v2/partials/requisitions/create-form'})"
+              class="mt-3 inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-brand-600 text-white text-sm font-medium hover:bg-brand-700">
+        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+        New requisition
+      </button>
+    </div>
     {% endif %}
 
     <div id="modal-result" class="mt-3"></div>

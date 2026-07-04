@@ -39,6 +39,11 @@
   {% endfor %}
 </div>
 
+{# Sticky shortlist action bar — the cached rows share the same Alpine $store.shortlist as
+   the live SSE rows, so ticking a cached row must surface the same Create-RFQ / Add-to-
+   requisition bar that results_shell.html renders on a fresh search. #}
+{% include "htmx/partials/search/shortlist_bar.html" %}
+
 {% else %}
 {# ── CACHE MISS — auto-fire the existing SSE search flow (banner above survives the swap). ── #}
 <div hx-post="/v2/partials/search/run"
