@@ -1857,6 +1857,65 @@ class TestNexarConnector:
         assert results == []
 
     @pytest.mark.asyncio
+    async def test_do_search_empty_rest_falls_through_to_graphql(self):
+        """A REST v4 result of ``[]`` (200 but zero rows) must NOT short-circuit.
+
+        _do_search falls through to the GraphQL seller path, which may surface rows the
+        REST key's plan/coverage misses. Regression for the Nexar empty-REST short-
+        circuit (Phase-4 audit item).
+        """
+        c = self._make_connector()
+        graphql_resp = {
+            "data": {
+                "supSearchMpn": {
+                    "results": [
+                        {
+                            "part": {
+                                "mpn": "LM317T",
+                                "manufacturer": {"name": "TI"},
+                                "sellers": [
+                                    {
+                                        "company": {"name": "Arrow", "homepageUrl": "https://arrow.com"},
+                                        "isAuthorized": True,
+                                        "offers": [
+                                            {
+                                                "inventoryLevel": 500,
+                                                "sku": "ARW-317",
+                                                "clickUrl": "https://arrow.com/lm317t",
+                                                "prices": [{"price": 0.60, "currency": "USD", "quantity": 1}],
+                                            }
+                                        ],
+                                    }
+                                ],
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+        with (
+            patch.object(c, "_rest_search", new_callable=AsyncMock, return_value=[]),
+            patch.object(c, "_run_query", new_callable=AsyncMock, return_value=graphql_resp) as mock_query,
+        ):
+            results = await c._do_search("LM317T")
+        mock_query.assert_awaited_once()  # GraphQL WAS consulted despite the empty REST result
+        assert len(results) == 1
+        assert results[0]["vendor_name"] == "Arrow"
+
+    @pytest.mark.asyncio
+    async def test_do_search_nonempty_rest_short_circuits_graphql(self):
+        """A non-empty REST v4 result wins outright — GraphQL is never queried."""
+        c = self._make_connector()
+        rest_rows = [{"vendor_name": "Mouser", "source_type": "octopart"}]
+        with (
+            patch.object(c, "_rest_search", new_callable=AsyncMock, return_value=rest_rows),
+            patch.object(c, "_run_query", new_callable=AsyncMock) as mock_query,
+        ):
+            results = await c._do_search("LM317T")
+        assert results == rest_rows
+        mock_query.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_do_search_aggregate_query_success(self):
         """_do_search falls back to aggregate query when sellers not authorized."""
         c = self._make_connector()

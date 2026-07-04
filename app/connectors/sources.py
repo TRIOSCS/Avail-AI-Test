@@ -554,10 +554,16 @@ class NexarConnector(BaseConnector):
         if not self.client_id and not self.octopart_api_key:
             return []
 
-        # Path 1: Try REST v4 /parts/search first (if API key configured)
-        # — uses a different auth path that may bypass GraphQL role restrictions
+        # Path 1: Try REST v4 /parts/search first (if an Octopart REST key is set) —
+        # it uses a different auth path that may bypass GraphQL role restrictions.
+        # A non-empty REST result wins outright. An EMPTY REST result (``[]`` — a 200
+        # with zero seller rows) is NOT trusted as final: the REST key's plan/coverage
+        # can legitimately return nothing where the GraphQL seller path still has rows,
+        # so we fall through to GraphQL below instead of short-circuiting on the empty
+        # REST response. (``_rest_search`` returns None when the key is unset or the
+        # call fails — same fall-through.)
         rest_results = await self._rest_search(part_number)
-        if rest_results is not None:
+        if rest_results:
             return rest_results
 
         if not self.client_id:
